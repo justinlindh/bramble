@@ -273,3 +273,39 @@ target_include_directories(test_integration PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
+
+# Key backup tests
+add_executable(test_key_backup
+    test_key_backup.c
+    unity/unity.c
+)
+target_include_directories(test_key_backup PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
+target_link_libraries(test_key_backup ssl crypto)
+
+# Dummy traffic tests
+add_executable(test_dummy_traffic
+    test_dummy_traffic.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_dummy_traffic PRIVATE
+    stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+
+# Beacon routes tests
+add_executable(test_beacon_routes
+    test_beacon_routes.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_beacon_routes PRIVATE
+    stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
