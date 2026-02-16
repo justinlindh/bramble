@@ -248,3 +248,28 @@ add_executable(test_json_rpc
 target_include_directories(test_json_rpc PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
+
+# Crypto test vectors (NIST/RFC)
+add_executable(test_crypto_vectors
+    test_crypto_vectors.c
+    unity/unity.c
+)
+target_include_directories(test_crypto_vectors PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_crypto_vectors ssl crypto)
+
+# Integration test (3-node routing)
+add_executable(test_integration
+    test_integration.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_integration PRIVATE
+    stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
