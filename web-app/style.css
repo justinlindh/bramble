@@ -1,0 +1,290 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #1c2a4a;
+    --border: #0f3460;
+    --text: #e0e0e0;
+    --text-dim: #8892a4;
+    --primary: #4a9eff;
+    --success: #4caf50;
+    --danger: #e74c3c;
+    --warning: #ff9800;
+    --accent: #7c4dff;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 768px;
+    margin: 0 auto;
+}
+
+/* Top bar */
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.topbar h1 { font-size: 1.2rem; }
+.connection { display: flex; align-items: center; gap: 0.5rem; }
+.connection select {
+    padding: 0.25rem 0.4rem;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+}
+.dot.connected { background: var(--success); }
+.dot.disconnected { background: var(--danger); }
+
+/* Buttons */
+.btn {
+    padding: 0.4rem 1rem;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn.primary { background: var(--primary); color: #fff; }
+.btn.success { background: var(--success); color: #fff; }
+.btn.danger  { background: var(--danger); color: #fff; }
+.btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+
+/* Pages */
+main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+}
+.page { display: none; }
+.page.active { display: block; }
+
+/* Tab bar */
+.tabbar {
+    display: flex;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.tab {
+    flex: 1;
+    padding: 0.6rem 0;
+    background: var(--surface);
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.tab.active { color: var(--primary); background: var(--bg); }
+
+/* Chat page */
+.chat-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.chat-tab {
+    padding: 0.3rem 0.8rem;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.chat-tab.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.message-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    min-height: 200px;
+}
+
+.msg {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    max-width: 85%;
+    font-size: 0.9rem;
+}
+.msg.incoming { background: var(--surface2); align-self: flex-start; }
+.msg.outgoing { background: var(--border); align-self: flex-end; }
+.msg-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-top: 0.25rem;
+}
+.msg-status { cursor: default; }
+
+.compose {
+    display: flex;
+    gap: 0.5rem;
+    position: sticky;
+    bottom: 0;
+}
+.compose input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.compose button { flex-shrink: 0; }
+
+/* Nodes page */
+.node-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.node-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem;
+    cursor: pointer;
+}
+.node-card:hover { border-color: var(--primary); }
+.node-header { display: flex; justify-content: space-between; align-items: center; }
+.node-addr { font-family: monospace; font-weight: 600; }
+.node-rssi { font-size: 0.8rem; color: var(--text-dim); }
+.node-detail { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem; }
+.node-route {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    display: none;
+}
+.node-card.expanded .node-route { display: block; }
+
+/* Config page */
+.config-section {
+    margin-bottom: 1.5rem;
+}
+.config-section h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border);
+}
+.config-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.4rem 0;
+}
+.config-row label { font-size: 0.85rem; color: var(--text-dim); }
+.config-row input, .config-row select {
+    padding: 0.3rem 0.5rem;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    width: 140px;
+    text-align: right;
+}
+.config-row .mono {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--text);
+}
+
+.channel-list { margin-top: 0.5rem; }
+.channel-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.35rem 0;
+    font-size: 0.85rem;
+}
+.channel-item button {
+    background: none;
+    border: none;
+    color: var(--danger);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+/* Stats page */
+.stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+.stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem;
+    text-align: center;
+}
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+.stat-label {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.15rem;
+}
+.airtime-bar {
+    margin-top: 1rem;
+}
+.airtime-bar h3 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+.tier {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.8rem;
+}
+.tier-label { width: 70px; color: var(--text-dim); }
+.tier-track {
+    flex: 1;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.tier-fill { height: 100%; border-radius: 3px; }
+.tier-fill.critical { background: var(--danger); }
+.tier-fill.normal   { background: var(--primary); }
+.tier-fill.bulk     { background: var(--success); }
+.tier-pct { width: 36px; text-align: right; color: var(--text-dim); }
+
+/* Empty state */
+.empty {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 3rem 1rem;
+    font-size: 0.9rem;
+}
+
+@media (max-width: 480px) {
+    .topbar h1 { font-size: 1rem; }
+    .stat-grid { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+}
