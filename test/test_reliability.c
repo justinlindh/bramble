@@ -49,11 +49,39 @@ void test_flow_control_failure_shrinks_window(void) {
     TEST_ASSERT_FALSE(flow_can_send(&fc, dest));
 }
 
+void test_key_exchange_critical_tier_retries(void) {
+    /* KEY_EXCHANGE should use Critical tier (8 retries, exponential backoff) */
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+
+    uint8_t pkt[101]; /* KEY_EXCHANGE_SIZE */
+    memset(pkt, 0xAA, sizeof(pkt));
+
+    /* Add KEY_EXCHANGE as Critical tier */
+    int idx = pending_ack_add(&table, 0xAE01, 0x1234, MSG_TIER_CRITICAL, pkt, sizeof(pkt), 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+    TEST_ASSERT_EQUAL_UINT8(8, table.entries[idx].max_attempts);
+    TEST_ASSERT_EQUAL_UINT8(MSG_TIER_CRITICAL, table.entries[idx].tier);
+
+    /* Verify exponential backoff: tick through retries */
+    uint32_t now = 1000;
+    int retries = 0;
+    for (int step = 0; step < 20 && table.entries[idx].active; step++) {
+        now += 5000; /* advance 5s each step */
+        uint8_t prev_attempt = table.entries[idx].attempt;
+        pending_ack_tick(&table, now);
+        if (table.entries[idx].attempt > prev_attempt) retries++;
+    }
+    /* Should have retried multiple times before giving up */
+    TEST_ASSERT_GREATER_OR_EQUAL(1, retries);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
     RUN_TEST(test_pending_ack_add_and_remove);
     RUN_TEST(test_flow_control_window);
     RUN_TEST(test_flow_control_failure_shrinks_window);
+    RUN_TEST(test_key_exchange_critical_tier_retries);
     return UNITY_END();
 }

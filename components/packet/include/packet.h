@@ -38,11 +38,11 @@
 /* Sizes */
 #define HEADER_SIZE              12
 #define ACK_SIZE                 22
-#define RREQ_SIZE                26
-#define RREP_SIZE                30
+#define RREQ_SIZE                30
+#define RREP_SIZE                34
 #define RERR_SIZE                24
 #define BEACON_SIZE              36
-#define KEY_EXCHANGE_SIZE        69
+#define KEY_EXCHANGE_SIZE        101
 #define DELIVERY_RECEIPT_MIN_SIZE 22
 #define DELIVERY_RECEIPT_MAX_SIZE 54
 #define CONGESTION_SIZE          20
@@ -75,6 +75,7 @@ typedef struct {
     uint8_t  hop_count;
     uint8_t  metric;
     uint32_t prev_hop;
+    uint32_t rreq_salt;
 } bramble_rreq_t;
 
 typedef struct {
@@ -84,7 +85,7 @@ typedef struct {
     uint32_t next_hop;
     uint8_t  hop_count;
     uint8_t  route_metric;
-    uint8_t  auth_hmac[4];
+    uint8_t  auth_hmac[8];
 } bramble_rrep_t;
 
 typedef struct {
@@ -112,6 +113,7 @@ typedef struct {
     bramble_header_t header;
     uint32_t src_addr;
     uint8_t  ephemeral_pubkey[32];
+    uint8_t  long_term_pubkey[32];
     uint8_t  key_id;
     uint8_t  ke_type;
     uint8_t  auth_tag[16];

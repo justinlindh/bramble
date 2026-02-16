@@ -89,6 +89,7 @@ void test_rreq_roundtrip(void) {
         .header = make_header(PKT_TYPE_RREQ),
         .query_id = 0x99887766, .encrypted_source = 0x55443322,
         .hop_count = 3, .metric = 42, .prev_hop = 0xFEDCBA98,
+        .rreq_salt = 0xABCD1234,
     };
     uint8_t buf[RREQ_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rreq_serialize(&p, buf, sizeof(buf)));
@@ -99,6 +100,7 @@ void test_rreq_roundtrip(void) {
     TEST_ASSERT_EQUAL(p.hop_count, out.hop_count);
     TEST_ASSERT_EQUAL(p.metric, out.metric);
     TEST_ASSERT_EQUAL_HEX32(p.prev_hop, out.prev_hop);
+    TEST_ASSERT_EQUAL_HEX32(p.rreq_salt, out.rreq_salt);
 }
 
 /* ---- RREP ---- */
@@ -107,7 +109,7 @@ void test_rrep_roundtrip(void) {
         .header = make_header(PKT_TYPE_RREP),
         .query_id = 0xAAAAAAAA, .src_addr = 0xBBBBBBBB,
         .next_hop = 0xCCCCCCCC, .hop_count = 5, .route_metric = 100,
-        .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF},
+        .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE},
     };
     uint8_t buf[RREP_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rrep_serialize(&p, buf, sizeof(buf)));
@@ -118,7 +120,7 @@ void test_rrep_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.next_hop, out.next_hop);
     TEST_ASSERT_EQUAL(p.hop_count, out.hop_count);
     TEST_ASSERT_EQUAL(p.route_metric, out.route_metric);
-    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, 4);
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, 8);
 }
 
 /* ---- RERR ---- */
@@ -192,6 +194,7 @@ void test_key_exchange_roundtrip(void) {
         .src_addr = 0x44556677, .key_id = 0xAB, .ke_type = 0x01,
     };
     for (int i = 0; i < 32; i++) p.ephemeral_pubkey[i] = (uint8_t)i;
+    for (int i = 0; i < 32; i++) p.long_term_pubkey[i] = (uint8_t)(0x80 + i);
     for (int i = 0; i < 16; i++) p.auth_tag[i] = (uint8_t)(0xF0 + i);
     uint8_t buf[KEY_EXCHANGE_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_key_exchange_serialize(&p, buf, sizeof(buf)));
@@ -199,6 +202,7 @@ void test_key_exchange_roundtrip(void) {
     TEST_ASSERT_EQUAL(ESP_OK, bramble_key_exchange_deserialize(&out, buf, sizeof(buf)));
     TEST_ASSERT_EQUAL_HEX32(p.src_addr, out.src_addr);
     TEST_ASSERT_EQUAL_MEMORY(p.ephemeral_pubkey, out.ephemeral_pubkey, 32);
+    TEST_ASSERT_EQUAL_MEMORY(p.long_term_pubkey, out.long_term_pubkey, 32);
     TEST_ASSERT_EQUAL(p.key_id, out.key_id);
     TEST_ASSERT_EQUAL(p.ke_type, out.ke_type);
     TEST_ASSERT_EQUAL_MEMORY(p.auth_tag, out.auth_tag, 16);

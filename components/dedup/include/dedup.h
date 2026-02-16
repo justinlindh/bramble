@@ -2,7 +2,7 @@
 #define BRAMBLE_DEDUP_H
 #include <stdint.h>
 #include <stdbool.h>
-#define DEDUP_MAX_ENTRIES 128
+#define DEDUP_MAX_ENTRIES 256
 #define DEDUP_EXPIRY_MS   60000
 typedef struct { uint32_t packet_id; uint32_t timestamp_ms; } dedup_entry_t;
 typedef struct { dedup_entry_t entries[DEDUP_MAX_ENTRIES]; int count; } dedup_buffer_t;

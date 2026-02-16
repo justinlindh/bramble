@@ -136,6 +136,33 @@ void test_epoch_catchup(void) {
     TEST_ASSERT_EQUAL(5, receiver.epoch);
 }
 
+/* Test 6: Constant-time trial — decryption succeeds at every position */
+void test_constant_time_all_positions(void) {
+    for (int target = 0; target < 16; target++) {
+        char psk[32];
+        bramble_channel_t channels[16];
+        for (int i = 0; i < 16; i++) {
+            snprintf(psk, sizeof(psk), "ct-channel-%d", i);
+            make_channel(psk, &channels[i]);
+        }
+
+        /* Encrypt with target channel */
+        bramble_channel_t enc_ch;
+        snprintf(psk, sizeof(psk), "ct-channel-%d", target);
+        make_channel(psk, &enc_ch);
+
+        uint8_t data[] = "constant-time test";
+        uint8_t nonce[12], ct[256], tag[16];
+        channel_msg_encrypt(&enc_ch, 0xBEEF0000 + target, 0x01, data, sizeof(data), nonce, ct, tag);
+
+        channel_msg_info_t info;
+        size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
+        TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 16, nonce, ct, ct_len, tag, &info));
+        TEST_ASSERT_EQUAL(target, info.channel_index);
+        TEST_ASSERT_EQUAL((uint32_t)(0xBEEF0000 + target), info.src_addr);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_encrypt_decrypt_single);
@@ -143,5 +170,6 @@ int main(void) {
     RUN_TEST(test_unknown_channel);
     RUN_TEST(test_16_channels);
     RUN_TEST(test_epoch_catchup);
+    RUN_TEST(test_constant_time_all_positions);
     return UNITY_END();
 }

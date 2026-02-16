@@ -4,6 +4,7 @@
 
 void anti_replay_init(anti_replay_cache_t *cache) {
     memset(cache, 0, sizeof(*cache));
+    cache->nonce_counter = 0;
 }
 
 bool anti_replay_check(anti_replay_cache_t *cache, uint32_t packet_id,
@@ -57,4 +58,16 @@ void anti_replay_purge(anti_replay_cache_t *cache, uint32_t now_ms) {
         }
     }
     cache->count = write;
+}
+
+uint32_t anti_replay_get_nonce_counter(const anti_replay_cache_t *cache) {
+    return cache->nonce_counter;
+}
+
+void anti_replay_set_nonce_counter(anti_replay_cache_t *cache, uint32_t value) {
+    cache->nonce_counter = value;
+}
+
+uint32_t anti_replay_next_nonce(anti_replay_cache_t *cache) {
+    return cache->nonce_counter++;
 }
