@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bramble Web Flasher</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🌿 Bramble Web Flasher</h1>
+        <p class="subtitle">Flash Bramble firmware to your ESP32-S3 device</p>
+
+        <div class="board-select">
+            <label>Board:</label>
+            <select id="board-select">
+                <option value="heltec-v3">Heltec WiFi LoRa 32 V3</option>
+                <option value="t-beam">LILYGO T-Beam Supreme</option>
+            </select>
+        </div>
+
+        <div class="actions">
+            <button id="connect-btn" class="btn primary">Connect Device</button>
+            <button id="flash-btn" class="btn success" disabled>Flash Firmware</button>
+        </div>
+
+        <div class="progress-section" hidden>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <p class="progress-text" id="progress-text">Ready</p>
+        </div>
+
+        <div class="log-section">
+            <h3>Log</h3>
+            <pre id="log-output"></pre>
+        </div>
+
+        <div class="info">
+            <p>Requires Chrome/Edge with Web Serial API support.</p>
+            <p>Hold BOOT button while connecting if device isn't detected.</p>
+        </div>
+    </div>
+    <script src="flasher.js"></script>
+</body>
+</html>
