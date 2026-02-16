@@ -1,1 +1,0 @@
-/usr/bin/cc -fsanitize=address -Wl,--dependency-file=CMakeFiles/test_dedup.dir/link.d CMakeFiles/test_dedup.dir/test_dedup.c.o CMakeFiles/test_dedup.dir/unity/unity.c.o -o test_dedup

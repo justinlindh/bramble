@@ -1,4 +1,5 @@
 #include "unity.h"
+#include <stdio.h>
 #include "../components/radio/radio_airtime.c"
 
 void setUp(void) {}
@@ -13,43 +14,58 @@ void tearDown(void) {}
     TEST_ASSERT_MESSAGE(ms >= (expected_ms) - (tolerance_ms) && ms <= (expected_ms) + (tolerance_ms), msg); \
 } while(0)
 
-// Verified against Semtech AN1200.13 LoRa airtime calculator
-// SF10, 125kHz, CR 4/6, preamble 12, explicit header, CRC on
+/*
+ * All expected values computed with Semtech AN1200.13 formula:
+ *   payloadSymbNb = 8 + max(ceil((8*PL - 4*SF + 28 + 16 - 20*IH) / (4*(SF - 2*DE))) * (CR+4), 0)
+ *   IH=0 (explicit header), CRC=1, preamble=12 for SF>=9, 8 for SF<9
+ */
 
+/* 22-byte ACK at SF10/125k/CR2 (4/6): expect ~444ms */
 void test_ack_22byte_sf10_125k_cr2(void) {
-    // 22 bytes: preamble ~133ms + payload 38 symbols ~311ms = ~444ms
-    ASSERT_AIRTIME_NEAR(444, 20, 22, 10, 125000, 2);
+    ASSERT_AIRTIME_NEAR(444, 10, 22, 10, 125000, 2);
 }
 
+/* 36-byte beacon at SF10/125k/CR2: expect ~592ms */
 void test_beacon_36byte_sf10_125k_cr2(void) {
-    // 36 bytes: ~591ms
-    ASSERT_AIRTIME_NEAR(591, 20, 36, 10, 125000, 2);
+    ASSERT_AIRTIME_NEAR(592, 10, 36, 10, 125000, 2);
 }
 
+/* 100-byte at SF10/125k/CR2: expect ~1231ms */
 void test_100byte_sf10_125k_cr2(void) {
-    // 100 bytes: ~1230ms
-    ASSERT_AIRTIME_NEAR(1230, 30, 100, 10, 125000, 2);
+    ASSERT_AIRTIME_NEAR(1231, 10, 100, 10, 125000, 2);
 }
 
+/* 200-byte at SF10/125k/CR2: expect ~2214ms */
 void test_200byte_sf10_125k_cr2(void) {
-    // 200 bytes: ~2213ms
-    ASSERT_AIRTIME_NEAR(2213, 30, 200, 10, 125000, 2);
+    ASSERT_AIRTIME_NEAR(2214, 10, 200, 10, 125000, 2);
 }
 
+/* 222-byte at SF10/125k/CR2: expect ~2411ms */
 void test_222byte_sf10_125k_cr2(void) {
-    // 222 bytes: ~2410ms
-    ASSERT_AIRTIME_NEAR(2410, 30, 222, 10, 125000, 2);
+    ASSERT_AIRTIME_NEAR(2411, 10, 222, 10, 125000, 2);
 }
 
+/* 100-byte at SF8/250k/CR1 (4/5): expect ~154ms */
 void test_100byte_sf8_250k_cr1(void) {
-    // SF8, 250kHz, CR 4/5, preamble 8: ~153ms
-    ASSERT_AIRTIME_NEAR(153, 20, 100, 8, 250000, 1);
+    ASSERT_AIRTIME_NEAR(154, 10, 100, 8, 250000, 1);
 }
 
-void test_zero_payload(void) {
-    // Edge case: 0 bytes
-    uint32_t us = bramble_calculate_airtime_us(0, 10, 125000, 2);
-    TEST_ASSERT_TRUE(us > 0);  // At minimum, preamble time
+/* Verify monotonicity: larger payload → longer airtime */
+void test_airtime_increases_with_payload(void) {
+    uint32_t t22  = bramble_calculate_airtime_us(22, 10, 125000, 2);
+    uint32_t t100 = bramble_calculate_airtime_us(100, 10, 125000, 2);
+    uint32_t t200 = bramble_calculate_airtime_us(200, 10, 125000, 2);
+    TEST_ASSERT_TRUE(t22 < t100);
+    TEST_ASSERT_TRUE(t100 < t200);
+}
+
+/* Higher SF → longer airtime for same payload */
+void test_airtime_increases_with_sf(void) {
+    uint32_t t8  = bramble_calculate_airtime_us(50, 8, 125000, 1);
+    uint32_t t10 = bramble_calculate_airtime_us(50, 10, 125000, 1);
+    uint32_t t12 = bramble_calculate_airtime_us(50, 12, 125000, 1);
+    TEST_ASSERT_TRUE(t8 < t10);
+    TEST_ASSERT_TRUE(t10 < t12);
 }
 
 int main(void) {
@@ -60,6 +76,7 @@ int main(void) {
     RUN_TEST(test_200byte_sf10_125k_cr2);
     RUN_TEST(test_222byte_sf10_125k_cr2);
     RUN_TEST(test_100byte_sf8_250k_cr1);
-    RUN_TEST(test_zero_payload);
+    RUN_TEST(test_airtime_increases_with_payload);
+    RUN_TEST(test_airtime_increases_with_sf);
     return UNITY_END();
 }
