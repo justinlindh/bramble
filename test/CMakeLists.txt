@@ -113,3 +113,13 @@ add_executable(test_routing
 target_include_directories(test_routing PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
 )
+
+# Reliability tests
+add_executable(test_reliability
+    test_reliability.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_reliability PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
+)
