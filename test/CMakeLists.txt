@@ -141,3 +141,30 @@ add_executable(test_tx_queue
 target_include_directories(test_tx_queue PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
+
+# Timesync tests
+add_executable(test_timesync
+    test_timesync.c
+    unity/unity.c
+)
+target_include_directories(test_timesync PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/include
+)
+
+# Anti-replay tests
+add_executable(test_anti_replay
+    test_anti_replay.c
+    unity/unity.c
+)
+target_include_directories(test_anti_replay PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/include
+)
+
+# Security tests
+add_executable(test_security
+    test_security.c
+    unity/unity.c
+)
+target_include_directories(test_security PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+)
