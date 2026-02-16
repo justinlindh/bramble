@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/justin/.openclaw/workspace/bramble/test/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

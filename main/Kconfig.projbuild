@@ -1,0 +1,36 @@
+menu "Bramble Configuration"
+
+    choice BRAMBLE_BOARD
+        prompt "Board selection"
+        default BRAMBLE_BOARD_HELTEC_V3
+
+        config BRAMBLE_BOARD_HELTEC_V3
+            bool "Heltec WiFi LoRa 32 V3 (SX1262)"
+
+        config BRAMBLE_BOARD_TTGO_LORA32
+            bool "TTGO LoRa32 (SX1276)"
+
+        config BRAMBLE_BOARD_CUSTOM
+            bool "Custom board"
+    endchoice
+
+    config BRAMBLE_TX_POWER
+        int "TX power (dBm)"
+        default 17
+        range 2 22
+
+    choice BRAMBLE_RADIO_PROFILE
+        prompt "Radio profile"
+        default BRAMBLE_PROFILE_LONG_RANGE
+
+        config BRAMBLE_PROFILE_LONG_RANGE
+            bool "Long range (SF10, 125kHz)"
+
+        config BRAMBLE_PROFILE_BALANCED
+            bool "Balanced (SF8, 250kHz)"
+
+        config BRAMBLE_PROFILE_FAST
+            bool "Fast (SF7, 500kHz)"
+    endchoice
+
+endmenu
