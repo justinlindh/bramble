@@ -93,3 +93,23 @@ target_include_directories(test_rreq_privacy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_link_libraries(test_rreq_privacy ssl crypto)
+
+# Neighbor table tests
+add_executable(test_neighbor
+    test_neighbor.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_neighbor PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+
+# Routing table tests
+add_executable(test_routing
+    test_routing.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_routing PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
