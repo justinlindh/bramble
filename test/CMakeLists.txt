@@ -202,6 +202,26 @@ target_include_directories(test_channel_flood PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
 )
 
+# Fragment tests
+add_executable(test_fragment
+    test_fragment.c
+    unity/unity.c
+)
+target_include_directories(test_fragment PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/fragment/include
+)
+
+# Channel message tests
+add_executable(test_channel_msg
+    test_channel_msg.c
+    unity/unity.c
+)
+target_include_directories(test_channel_msg PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+)
+target_link_libraries(test_channel_msg ssl crypto)
+
 # Security tests
 add_executable(test_security
     test_security.c
