@@ -1,0 +1,69 @@
+CMake Deprecation Warning at /home/justin/esp-idf/components/mbedtls/mbedtls/CMakeLists.txt:21 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+Traceback (most recent call last):
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 362, in <module>
+    main()
+    ~~~~^^
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 331, in main
+    target = ParttoolTarget(**target_args)
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 95, in __init__
+    partition_table = gen.PartitionTable.from_csv(f.read())
+  File "/home/justin/esp-idf/components/partition_table/gen_esp32part.py", line 220, in from_csv
+    raise InputError('CSV Error at line %d: Partitions overlap. Partition sets offset 0x%x. Previous partition ends 0x%x'
+                     % (e.line_no, e.offset, last_end))
+gen_esp32part.InputError: CSV Error at line 4: Partitions overlap. Partition sets offset 0x10000. Previous partition ends 0x11000
+Traceback (most recent call last):
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 362, in <module>
+    main()
+    ~~~~^^
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 331, in main
+    target = ParttoolTarget(**target_args)
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 95, in __init__
+    partition_table = gen.PartitionTable.from_csv(f.read())
+  File "/home/justin/esp-idf/components/partition_table/gen_esp32part.py", line 220, in from_csv
+    raise InputError('CSV Error at line %d: Partitions overlap. Partition sets offset 0x%x. Previous partition ends 0x%x'
+                     % (e.line_no, e.offset, last_end))
+gen_esp32part.InputError: CSV Error at line 4: Partitions overlap. Partition sets offset 0x10000. Previous partition ends 0x11000
+Traceback (most recent call last):
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 362, in <module>
+    main()
+    ~~~~^^
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 331, in main
+    target = ParttoolTarget(**target_args)
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 95, in __init__
+    partition_table = gen.PartitionTable.from_csv(f.read())
+  File "/home/justin/esp-idf/components/partition_table/gen_esp32part.py", line 220, in from_csv
+    raise InputError('CSV Error at line %d: Partitions overlap. Partition sets offset 0x%x. Previous partition ends 0x%x'
+                     % (e.line_no, e.offset, last_end))
+gen_esp32part.InputError: CSV Error at line 4: Partitions overlap. Partition sets offset 0x10000. Previous partition ends 0x11000
+Traceback (most recent call last):
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 362, in <module>
+    main()
+    ~~~~^^
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 331, in main
+    target = ParttoolTarget(**target_args)
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 95, in __init__
+    partition_table = gen.PartitionTable.from_csv(f.read())
+  File "/home/justin/esp-idf/components/partition_table/gen_esp32part.py", line 220, in from_csv
+    raise InputError('CSV Error at line %d: Partitions overlap. Partition sets offset 0x%x. Previous partition ends 0x%x'
+                     % (e.line_no, e.offset, last_end))
+gen_esp32part.InputError: CSV Error at line 4: Partitions overlap. Partition sets offset 0x10000. Previous partition ends 0x11000
+Traceback (most recent call last):
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 362, in <module>
+    main()
+    ~~~~^^
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 331, in main
+    target = ParttoolTarget(**target_args)
+  File "/home/justin/esp-idf/components/partition_table/parttool.py", line 95, in __init__
+    partition_table = gen.PartitionTable.from_csv(f.read())
+  File "/home/justin/esp-idf/components/partition_table/gen_esp32part.py", line 220, in from_csv
+    raise InputError('CSV Error at line %d: Partitions overlap. Partition sets offset 0x%x. Previous partition ends 0x%x'
+                     % (e.line_no, e.offset, last_end))
+gen_esp32part.InputError: CSV Error at line 4: Partitions overlap. Partition sets offset 0x10000. Previous partition ends 0x11000

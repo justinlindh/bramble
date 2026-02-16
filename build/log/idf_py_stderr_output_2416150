@@ -1,0 +1,5 @@
+CSV Error at line 4: Partitions overlap. Partition sets offset 0x10000. Previous partition ends 0x11000
+make[2]: *** [esp-idf/partition_table/CMakeFiles/partition_table_bin.dir/build.make:75: partition_table/partition-table.bin] Error 2
+make[1]: *** [CMakeFiles/Makefile2:4116: esp-idf/partition_table/CMakeFiles/partition_table_bin.dir/all] Error 2
+make[1]: *** Waiting for unfinished jobs....
+make: *** [Makefile:136: all] Error 2

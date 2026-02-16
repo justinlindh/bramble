@@ -1,0 +1,1 @@
+/usr/bin/cc -fsanitize=address -Wl,--dependency-file=CMakeFiles/test_radio_airtime.dir/link.d CMakeFiles/test_radio_airtime.dir/test_radio_airtime.c.o CMakeFiles/test_radio_airtime.dir/unity/unity.c.o -o test_radio_airtime  -lm

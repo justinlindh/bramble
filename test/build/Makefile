@@ -129,6 +129,32 @@ test_packet/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_packet.dir/build.make CMakeFiles/test_packet.dir/build
 .PHONY : test_packet/fast
 
+#=============================================================================
+# Target rules for targets named test_dedup
+
+# Build rule for target.
+test_dedup: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_dedup
+.PHONY : test_dedup
+
+# fast build rule for target.
+test_dedup/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/build
+.PHONY : test_dedup/fast
+
+#=============================================================================
+# Target rules for targets named test_radio_airtime
+
+# Build rule for target.
+test_radio_airtime: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_radio_airtime
+.PHONY : test_radio_airtime
+
+# fast build rule for target.
+test_radio_airtime/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/build
+.PHONY : test_radio_airtime/fast
+
 stubs/esp_stubs.o: stubs/esp_stubs.c.o
 .PHONY : stubs/esp_stubs.o
 
@@ -152,6 +178,30 @@ stubs/esp_stubs.s: stubs/esp_stubs.c.s
 stubs/esp_stubs.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_packet.dir/build.make CMakeFiles/test_packet.dir/stubs/esp_stubs.c.s
 .PHONY : stubs/esp_stubs.c.s
+
+test_dedup.o: test_dedup.c.o
+.PHONY : test_dedup.o
+
+# target to build an object file
+test_dedup.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/test_dedup.c.o
+.PHONY : test_dedup.c.o
+
+test_dedup.i: test_dedup.c.i
+.PHONY : test_dedup.i
+
+# target to preprocess a source file
+test_dedup.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/test_dedup.c.i
+.PHONY : test_dedup.c.i
+
+test_dedup.s: test_dedup.c.s
+.PHONY : test_dedup.s
+
+# target to generate assembly for a file
+test_dedup.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/test_dedup.c.s
+.PHONY : test_dedup.c.s
 
 test_packet.o: test_packet.c.o
 .PHONY : test_packet.o
@@ -177,12 +227,38 @@ test_packet.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_packet.dir/build.make CMakeFiles/test_packet.dir/test_packet.c.s
 .PHONY : test_packet.c.s
 
+test_radio_airtime.o: test_radio_airtime.c.o
+.PHONY : test_radio_airtime.o
+
+# target to build an object file
+test_radio_airtime.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/test_radio_airtime.c.o
+.PHONY : test_radio_airtime.c.o
+
+test_radio_airtime.i: test_radio_airtime.c.i
+.PHONY : test_radio_airtime.i
+
+# target to preprocess a source file
+test_radio_airtime.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/test_radio_airtime.c.i
+.PHONY : test_radio_airtime.c.i
+
+test_radio_airtime.s: test_radio_airtime.c.s
+.PHONY : test_radio_airtime.s
+
+# target to generate assembly for a file
+test_radio_airtime.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/test_radio_airtime.c.s
+.PHONY : test_radio_airtime.c.s
+
 unity/unity.o: unity/unity.c.o
 .PHONY : unity/unity.o
 
 # target to build an object file
 unity/unity.c.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_packet.dir/build.make CMakeFiles/test_packet.dir/unity/unity.c.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/unity/unity.c.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/unity/unity.c.o
 .PHONY : unity/unity.c.o
 
 unity/unity.i: unity/unity.c.i
@@ -191,6 +267,8 @@ unity/unity.i: unity/unity.c.i
 # target to preprocess a source file
 unity/unity.c.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_packet.dir/build.make CMakeFiles/test_packet.dir/unity/unity.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/unity/unity.c.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/unity/unity.c.i
 .PHONY : unity/unity.c.i
 
 unity/unity.s: unity/unity.c.s
@@ -199,6 +277,8 @@ unity/unity.s: unity/unity.c.s
 # target to generate assembly for a file
 unity/unity.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_packet.dir/build.make CMakeFiles/test_packet.dir/unity/unity.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_dedup.dir/build.make CMakeFiles/test_dedup.dir/unity/unity.c.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_radio_airtime.dir/build.make CMakeFiles/test_radio_airtime.dir/unity/unity.c.s
 .PHONY : unity/unity.c.s
 
 # Help Target
@@ -209,13 +289,21 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... test_dedup"
 	@echo "... test_packet"
+	@echo "... test_radio_airtime"
 	@echo "... stubs/esp_stubs.o"
 	@echo "... stubs/esp_stubs.i"
 	@echo "... stubs/esp_stubs.s"
+	@echo "... test_dedup.o"
+	@echo "... test_dedup.i"
+	@echo "... test_dedup.s"
 	@echo "... test_packet.o"
 	@echo "... test_packet.i"
 	@echo "... test_packet.s"
+	@echo "... test_radio_airtime.o"
+	@echo "... test_radio_airtime.i"
+	@echo "... test_radio_airtime.s"
 	@echo "... unity/unity.o"
 	@echo "... unity/unity.i"
 	@echo "... unity/unity.s"
