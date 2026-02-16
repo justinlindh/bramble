@@ -123,3 +123,21 @@ add_executable(test_reliability
 target_include_directories(test_reliability PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
 )
+
+# Airtime budget tests
+add_executable(test_airtime_budget
+    test_airtime_budget.c
+    unity/unity.c
+)
+target_include_directories(test_airtime_budget PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+
+# TX queue tests
+add_executable(test_tx_queue
+    test_tx_queue.c
+    unity/unity.c
+)
+target_include_directories(test_tx_queue PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
