@@ -48,26 +48,38 @@ int channel_msg_decrypt(bramble_channel_t *channels, int num_channels,
     uint8_t pt[2048];
     if (ct_len > sizeof(pt)) return -1;
 
-    for (int i = 0; i < num_channels && i < MAX_CHANNELS; i++) {
+    /* Constant-time trial decryption: always try ALL channels to prevent
+       timing side-channels. Store first successful result. */
+    int found_index = -1;
+    channel_msg_info_t found_info;
+    memset(&found_info, 0, sizeof(found_info));
+
+    /* We need to save/restore channel states for epoch catch-up,
+       so track which channel was successfully caught up */
+    int catchup_index = -1;
+    uint8_t catchup_key[BRAMBLE_KEY_SIZE];
+    uint16_t catchup_epoch = 0;
+
+    int limit = num_channels < MAX_CHANNELS ? num_channels : MAX_CHANNELS;
+
+    for (int i = 0; i < limit; i++) {
         /* Try with current key */
         if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, pt) == 0) {
-            goto success;
-success:
-            info_out->channel_id = pt[0];
-            info_out->epoch = (uint16_t)(pt[1] | (pt[2] << 8));
-            info_out->app_type = pt[3];
-            info_out->src_addr = (uint32_t)(pt[4] | (pt[5] << 8) | (pt[6] << 16) | (pt[7] << 24));
-            info_out->data = ciphertext + CHANNEL_MSG_OVERHEAD; /* caller must re-decrypt to use; point to ct offset for length calc */
-            info_out->data_len = ct_len - CHANNEL_MSG_OVERHEAD;
-            info_out->channel_index = i;
-            /* Note: data pointer is into the plaintext which is on stack — 
-               for real usage we'd need a buffer. For now, store data_len and 
-               caller knows the offset. We'll copy into a provided buffer in production. */
-            return 0;
+            if (found_index < 0) {
+                found_index = i;
+                found_info.channel_id = pt[0];
+                found_info.epoch = (uint16_t)(pt[1] | (pt[2] << 8));
+                found_info.app_type = pt[3];
+                found_info.src_addr = (uint32_t)(pt[4] | (pt[5] << 8) | (pt[6] << 16) | (pt[7] << 24));
+                found_info.data = ciphertext + CHANNEL_MSG_OVERHEAD;
+                found_info.data_len = ct_len - CHANNEL_MSG_OVERHEAD;
+                found_info.channel_index = i;
+            }
+            /* Do NOT break — continue trying all channels for constant time */
+            continue;
         }
 
         /* Epoch catch-up: try advancing up to 256 times */
-        /* Save current state to restore if catch-up fails */
         uint8_t saved_key[BRAMBLE_KEY_SIZE];
         uint16_t saved_epoch = channels[i].epoch;
         memcpy(saved_key, channels[i].key, BRAMBLE_KEY_SIZE);
@@ -81,22 +93,34 @@ success:
             }
         }
 
-        if (caught_up) {
-            /* Keep advanced state */
-            info_out->channel_id = pt[0];
-            info_out->epoch = (uint16_t)(pt[1] | (pt[2] << 8));
-            info_out->app_type = pt[3];
-            info_out->src_addr = (uint32_t)(pt[4] | (pt[5] << 8) | (pt[6] << 16) | (pt[7] << 24));
-            info_out->data_len = ct_len - CHANNEL_MSG_OVERHEAD;
-            info_out->data = NULL; /* stack plaintext — see note above */
-            info_out->channel_index = i;
-            return 0;
+        if (caught_up && found_index < 0) {
+            found_index = i;
+            found_info.channel_id = pt[0];
+            found_info.epoch = (uint16_t)(pt[1] | (pt[2] << 8));
+            found_info.app_type = pt[3];
+            found_info.src_addr = (uint32_t)(pt[4] | (pt[5] << 8) | (pt[6] << 16) | (pt[7] << 24));
+            found_info.data_len = ct_len - CHANNEL_MSG_OVERHEAD;
+            found_info.data = NULL;
+            found_info.channel_index = i;
+            /* Save the caught-up state to apply later */
+            catchup_index = i;
+            memcpy(catchup_key, channels[i].key, BRAMBLE_KEY_SIZE);
+            catchup_epoch = channels[i].epoch;
         }
 
-        /* Restore original key state */
+        /* Restore original key state (we'll re-apply catchup for the winner after the loop) */
         memcpy(channels[i].key, saved_key, BRAMBLE_KEY_SIZE);
         channels[i].epoch = saved_epoch;
     }
 
-    return -1;
+    if (found_index < 0) return -1;
+
+    /* Apply the caught-up epoch state for the matching channel if needed */
+    if (catchup_index >= 0 && catchup_index == found_index) {
+        memcpy(channels[catchup_index].key, catchup_key, BRAMBLE_KEY_SIZE);
+        channels[catchup_index].epoch = catchup_epoch;
+    }
+
+    *info_out = found_info;
+    return 0;
 }

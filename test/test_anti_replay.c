@@ -37,11 +37,31 @@ void test_purge_removes_old(void) {
     TEST_ASSERT_EQUAL_UINT32(3, cache.entries[0].packet_id);
 }
 
+void test_nonce_counter_persistence(void) {
+    anti_replay_cache_t cache;
+    anti_replay_init(&cache);
+    TEST_ASSERT_EQUAL_UINT32(0, anti_replay_get_nonce_counter(&cache));
+
+    /* Simulate boot with persisted counter + safety margin */
+    anti_replay_set_nonce_counter(&cache, 1000);
+    TEST_ASSERT_EQUAL_UINT32(1000, anti_replay_get_nonce_counter(&cache));
+
+    /* Subsequent nonces start from 1000+ */
+    uint32_t n1 = anti_replay_next_nonce(&cache);
+    uint32_t n2 = anti_replay_next_nonce(&cache);
+    uint32_t n3 = anti_replay_next_nonce(&cache);
+    TEST_ASSERT_EQUAL_UINT32(1000, n1);
+    TEST_ASSERT_EQUAL_UINT32(1001, n2);
+    TEST_ASSERT_EQUAL_UINT32(1002, n3);
+    TEST_ASSERT_EQUAL_UINT32(1003, anti_replay_get_nonce_counter(&cache));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_fresh_packet_accepted);
     RUN_TEST(test_duplicate_rejected);
     RUN_TEST(test_expired_packet_rejected);
     RUN_TEST(test_purge_removes_old);
+    RUN_TEST(test_nonce_counter_persistence);
     return UNITY_END();
 }

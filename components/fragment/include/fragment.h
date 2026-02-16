@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 #define FRAG_MAX_PLAINTEXT       154
-#define FRAG_MAX_FRAGMENTS       8
+#define FRAG_MAX_FRAGMENTS       4
 #define FRAG_MAX_REASSEMBLIES    4
 #define FRAG_REASSEMBLY_TIMEOUT_MS 30000
 #define FRAG_HEADER_SIZE         4

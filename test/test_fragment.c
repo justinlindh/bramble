@@ -23,8 +23,8 @@ void test_split_small(void) {
 void test_split_500(void) {
     uint8_t data[500];
     for (int i = 0; i < 500; i++) data[i] = (uint8_t)(i & 0xFF);
-    fragment_t frags[8];
-    int n = fragment_split(data, 500, 42, frags, 8);
+    fragment_t frags[4];
+    int n = fragment_split(data, 500, 42, frags, 4);
     /* ceil(500/154) = 4 */
     TEST_ASSERT_EQUAL(4, n);
     for (int i = 0; i < 4; i++) {
@@ -36,25 +36,25 @@ void test_split_500(void) {
     TEST_ASSERT_EQUAL(FRAG_HEADER_SIZE + 38, frags[3].len);
 }
 
-/* Test 3: Split 1232B → 8 fragments (max) */
+/* Test 3: Split 616B → 4 fragments (max) */
 void test_split_max(void) {
-    uint8_t data[1232];
+    uint8_t data[616];
     memset(data, 0xCC, sizeof(data));
-    fragment_t frags[8];
-    int n = fragment_split(data, 1232, 99, frags, 8);
-    TEST_ASSERT_EQUAL(8, n);
-    for (int i = 0; i < 8; i++) {
+    fragment_t frags[4];
+    int n = fragment_split(data, 616, 99, frags, 4);
+    TEST_ASSERT_EQUAL(4, n);
+    for (int i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL(i, frags[i].data[0]);
-        TEST_ASSERT_EQUAL(8, frags[i].data[1]);
+        TEST_ASSERT_EQUAL(4, frags[i].data[1]);
     }
 }
 
-/* Test 4: Reject >1232B */
+/* Test 4: Reject >616B */
 void test_split_too_large(void) {
-    uint8_t data[1233];
+    uint8_t data[617];
     memset(data, 0, sizeof(data));
-    fragment_t frags[8];
-    int n = fragment_split(data, 1233, 1, frags, 8);
+    fragment_t frags[4];
+    int n = fragment_split(data, 617, 1, frags, 4);
     TEST_ASSERT_EQUAL(-1, n);
 }
 
@@ -65,8 +65,8 @@ void test_reassembly_in_order(void) {
 
     uint8_t orig[300];
     for (int i = 0; i < 300; i++) orig[i] = (uint8_t)(i & 0xFF);
-    fragment_t frags[8];
-    int n = fragment_split(orig, 300, 0x5678, frags, 8);
+    fragment_t frags[4];
+    int n = fragment_split(orig, 300, 0x5678, frags, 4);
     TEST_ASSERT_EQUAL(2, n);
 
     for (int i = 0; i < n; i++) {
@@ -83,7 +83,7 @@ void test_reassembly_in_order(void) {
         else TEST_ASSERT_EQUAL(1, rc);
     }
 
-    uint8_t out[1232];
+    uint8_t out[616];
     int len = reassembly_collect(&ctx, 0x5678, out, sizeof(out));
     TEST_ASSERT_EQUAL(300, len);
     TEST_ASSERT_EQUAL_MEMORY(orig, out, 300);
@@ -96,8 +96,8 @@ void test_reassembly_out_of_order(void) {
 
     uint8_t orig[400];
     for (int i = 0; i < 400; i++) orig[i] = (uint8_t)i;
-    fragment_t frags[8];
-    int n = fragment_split(orig, 400, 100, frags, 8);
+    fragment_t frags[4];
+    int n = fragment_split(orig, 400, 100, frags, 4);
     TEST_ASSERT_EQUAL(3, n);
 
     /* Add in reverse order */
@@ -117,7 +117,7 @@ void test_reassembly_out_of_order(void) {
         else TEST_ASSERT_EQUAL(1, rc);
     }
 
-    uint8_t out[1232];
+    uint8_t out[616];
     int len = reassembly_collect(&ctx, 100, out, sizeof(out));
     TEST_ASSERT_EQUAL(400, len);
     TEST_ASSERT_EQUAL_MEMORY(orig, out, 400);
@@ -188,6 +188,21 @@ void test_reassembly_concurrent(void) {
     TEST_ASSERT_EQUAL(20, len);
 }
 
+/* Test 10: Reject messages exceeding 616 bytes (4 * 154) */
+void test_reject_over_616(void) {
+    uint8_t data[617];
+    memset(data, 0xDD, sizeof(data));
+    fragment_t frags[4];
+    int n = fragment_split(data, 617, 200, frags, 4);
+    TEST_ASSERT_EQUAL(-1, n);
+
+    /* 616 should succeed */
+    uint8_t data_ok[616];
+    memset(data_ok, 0xEE, sizeof(data_ok));
+    n = fragment_split(data_ok, 616, 201, frags, 4);
+    TEST_ASSERT_EQUAL(4, n);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_split_small);
@@ -199,5 +214,6 @@ int main(void) {
     RUN_TEST(test_reassembly_duplicate);
     RUN_TEST(test_reassembly_timeout);
     RUN_TEST(test_reassembly_concurrent);
+    RUN_TEST(test_reject_over_616);
     return UNITY_END();
 }

@@ -77,6 +77,7 @@ esp_err_t bramble_rreq_serialize(const bramble_rreq_t *p, uint8_t *buf, size_t l
     buf[B + 8] = p->hop_count;
     buf[B + 9] = p->metric;
     put_be32(buf + B + 10, p->prev_hop);
+    put_be32(buf + B + 14, p->rreq_salt);
     return ESP_OK;
 }
 esp_err_t bramble_rreq_deserialize(bramble_rreq_t *p, const uint8_t *buf, size_t len) {
@@ -88,6 +89,7 @@ esp_err_t bramble_rreq_deserialize(bramble_rreq_t *p, const uint8_t *buf, size_t
     p->hop_count        = buf[B + 8];
     p->metric           = buf[B + 9];
     p->prev_hop         = get_be32(buf + B + 10);
+    p->rreq_salt        = get_be32(buf + B + 14);
     return ESP_OK;
 }
 
@@ -101,7 +103,7 @@ esp_err_t bramble_rrep_serialize(const bramble_rrep_t *p, uint8_t *buf, size_t l
     put_be32(buf + B + 8, p->next_hop);
     buf[B + 12] = p->hop_count;
     buf[B + 13] = p->route_metric;
-    memcpy(buf + B + 14, p->auth_hmac, 4);
+    memcpy(buf + B + 14, p->auth_hmac, 8);
     return ESP_OK;
 }
 esp_err_t bramble_rrep_deserialize(bramble_rrep_t *p, const uint8_t *buf, size_t len) {
@@ -113,7 +115,7 @@ esp_err_t bramble_rrep_deserialize(bramble_rrep_t *p, const uint8_t *buf, size_t
     p->next_hop     = get_be32(buf + B + 8);
     p->hop_count    = buf[B + 12];
     p->route_metric = buf[B + 13];
-    memcpy(p->auth_hmac, buf + B + 14, 4);
+    memcpy(p->auth_hmac, buf + B + 14, 8);
     return ESP_OK;
 }
 
@@ -178,9 +180,10 @@ esp_err_t bramble_key_exchange_serialize(const bramble_key_exchange_t *p, uint8_
     if (r != ESP_OK) return r;
     put_be32(buf + B, p->src_addr);
     memcpy(buf + B + 4, p->ephemeral_pubkey, 32);
-    buf[B + 36] = p->key_id;
-    buf[B + 37] = p->ke_type;
-    memcpy(buf + B + 38, p->auth_tag, 16);
+    memcpy(buf + B + 36, p->long_term_pubkey, 32);
+    buf[B + 68] = p->key_id;
+    buf[B + 69] = p->ke_type;
+    memcpy(buf + B + 70, p->auth_tag, 16);
     return ESP_OK;
 }
 esp_err_t bramble_key_exchange_deserialize(bramble_key_exchange_t *p, const uint8_t *buf, size_t len) {
@@ -189,9 +192,10 @@ esp_err_t bramble_key_exchange_deserialize(bramble_key_exchange_t *p, const uint
     if (r != ESP_OK) return r;
     p->src_addr = get_be32(buf + B);
     memcpy(p->ephemeral_pubkey, buf + B + 4, 32);
-    p->key_id  = buf[B + 36];
-    p->ke_type = buf[B + 37];
-    memcpy(p->auth_tag, buf + B + 38, 16);
+    memcpy(p->long_term_pubkey, buf + B + 36, 32);
+    p->key_id  = buf[B + 68];
+    p->ke_type = buf[B + 69];
+    memcpy(p->auth_tag, buf + B + 70, 16);
     return ESP_OK;
 }
 
