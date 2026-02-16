@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bramble</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="topbar">
+            <h1>🌿 Bramble</h1>
+            <div class="connection">
+                <select id="transport-select">
+                    <option value="serial">USB Serial</option>
+                    <option value="ble">Bluetooth</option>
+                </select>
+                <button id="connect-btn" class="btn btn-sm primary">Connect</button>
+                <span id="status-dot" class="dot disconnected"></span>
+            </div>
+        </header>
+
+        <main id="page-container">
+            <div id="page-chat" class="page active"></div>
+            <div id="page-nodes" class="page"></div>
+            <div id="page-config" class="page"></div>
+            <div id="page-stats" class="page"></div>
+        </main>
+
+        <nav class="tabbar">
+            <button class="tab active" data-page="chat">💬 Chat</button>
+            <button class="tab" data-page="nodes">📡 Nodes</button>
+            <button class="tab" data-page="config">⚙️ Config</button>
+            <button class="tab" data-page="stats">📊 Stats</button>
+        </nav>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
