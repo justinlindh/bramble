@@ -230,3 +230,21 @@ add_executable(test_security
 target_include_directories(test_security PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
 )
+
+# UI state machine + formatter tests
+add_executable(test_ui
+    test_ui.c
+    unity/unity.c
+)
+target_include_directories(test_ui PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+)
+
+# JSON-RPC parser tests
+add_executable(test_json_rpc
+    test_json_rpc.c
+    unity/unity.c
+)
+target_include_directories(test_json_rpc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
