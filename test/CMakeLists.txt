@@ -160,6 +160,48 @@ target_include_directories(test_anti_replay PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/include
 )
 
+# Beacon tests
+add_executable(test_beacon
+    test_beacon.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_beacon PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_beacon ssl crypto)
+
+# Discovery tests
+add_executable(test_discovery
+    test_discovery.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_discovery PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+
+# Forwarding tests
+add_executable(test_forwarding
+    test_forwarding.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_forwarding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+
+# Channel flood tests
+add_executable(test_channel_flood
+    test_channel_flood.c
+    unity/unity.c
+)
+target_include_directories(test_channel_flood PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+)
+
 # Security tests
 add_executable(test_security
     test_security.c
