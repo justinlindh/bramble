@@ -9,35 +9,57 @@ Network simulator for Bramble that runs actual C component code against a virtua
 cd simulator
 docker compose up --build
 ```
-Open http://localhost:3000
+Open http://localhost:3003
 
 ### Local Development
 ```bash
-# Build C engine
-cd engine && make && cd ..
+# Build Go+C server
+cd gosim && go build -o bramble-gosim . && cd ..
 
-# Install & build UI
+# Build UI
 cd ui && npm install && npm run build && cd ..
 
-# Install & run server
-cd server && npm install && npx tsx relay.ts
+# Run
+./gosim/bramble-gosim --ui ui/dist --scenarios scenarios
 ```
 Open http://localhost:3000
 
+### Headless Mode
+```bash
+./gosim/bramble-gosim --headless --scenario scenarios/ideal-10-node.json
+# Or use the script:
+./scripts/run-scenario.sh scenarios/ideal-10-node.json
+```
+
 ## Architecture
 
-- **C Engine** (`engine/`) — Event-driven simulator with Bramble components included at compile time
-- **Node.js Server** (`server/`) — WebSocket relay spawning C binary, serves static UI
-- **React UI** (`ui/`) — SVG mesh canvas + metrics dashboard + event log
+Two-tier: **Go+C server** → **React UI**
+
+- **Go Server** (`gosim/`) — Simulation engine embedding Bramble C code via cgo, WebSocket hub, HTTP server with REST API and static file serving
+- **React UI** (`ui/`) — SVG mesh canvas, metrics dashboard, event log, playback controls, scenario loader
+
+The Go server includes all Bramble C components at compile time (same pattern as `test/test_integration.c`). No modifications to Bramble source code.
 
 ## Scenarios
 
-Place JSON files in `scenarios/`. Format:
+Place JSON files in `scenarios/`. Supports:
 - **Deterministic:** Scripted events at specific timestamps
-- **Stochastic:** Seeded random chaos events (not yet implemented)
+- **Stochastic:** Seeded PRNG chaos events (reproducible)
+- **Anomaly detection:** Black hole, partition, route loop, excessive RREQ
 
-See `scenarios/` for examples.
+See `scenarios/` for examples. Upload custom scenarios via the UI or `POST /api/scenarios/upload`.
 
-## Design
+## Interactive Controls
 
-See `docs/plans/2026-02-16-simulator-design.md` for full specification.
+Via WebSocket (`ws://host:port/ws`):
+- Load/start/restart scenarios
+- Play/pause with speed control (0.5×–100×)
+- Add/remove nodes dynamically (full protocol participation)
+- Inject messages between arbitrary nodes
+- Create interference zones
+
+## Design Docs
+
+- Architecture: `docs/plans/2026-02-16-simulator-design.md`
+- Go server design: `docs/plans/2026-02-17-go-simulation-server-design.md`
+- Anomaly detection: `docs/bramble-anomaly-detection.md`
