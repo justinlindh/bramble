@@ -1,0 +1,16 @@
+{
+  "name": "Bramble",
+  "short_name": "Bramble",
+  "description": "Bramble LoRa mesh companion app",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#238636",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

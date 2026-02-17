@@ -1,0 +1,5 @@
+services:
+  bramble-webapp:
+    build: .
+    ports:
+      - "3004:80"

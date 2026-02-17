@@ -1,0 +1,185 @@
+// ─── Identity ──────────────────────────────────────────────────────────
+
+export interface NodeIdentity {
+  address: number;          // 32-bit node address
+  pubkeyHash: number;       // 32-bit hash of public key
+  name: string;             // Short name, max 8 chars
+  pubkeyB64: string;        // Base64-encoded public key (display only)
+}
+
+// ─── Radio ─────────────────────────────────────────────────────────────
+
+export interface RadioConfig {
+  txPowerDbm: number;       // 2-20
+  sf: 7 | 8 | 9 | 10 | 11 | 12;
+  bwKhz: 125 | 250 | 500;
+  cr: 5 | 6 | 7 | 8;       // coding rate denominator (4/5 = 5, etc.)
+  freqMhz: number;          // e.g. 915.0
+}
+
+// ─── Channels ──────────────────────────────────────────────────────────
+
+export interface Channel {
+  index: number;
+  name: string;
+  hasPsk: boolean;          // don't send PSK over the wire back to app
+  epoch: number;            // key rotation epoch
+  isDefault: boolean;
+}
+
+// ─── Neighbors & Routes ────────────────────────────────────────────────
+
+export interface Neighbor {
+  addr: number;
+  rssi: number;
+  snr: number;
+  deliveryRate: number;     // 0-255, 255 = 100%
+  lastHeardMs: number;      // milliseconds ago
+  isMailbox: boolean;
+  airtimeRemaining: number; // 0-100 %
+}
+
+export interface Route {
+  dest: number;
+  nextHop: number;
+  hopCount: number;
+  metric: number;
+  state: 'active' | 'stale' | 'broken' | 'discovering';
+  lastUsedMs: number;
+}
+
+// ─── Messages ──────────────────────────────────────────────────────────
+
+export type MessageTier = 'broadcast' | 'normal' | 'critical';
+export type MessageDirection = 'outgoing' | 'incoming';
+
+export type DeliveryStatus =
+  | 'queued'      // in app, not yet sent to node
+  | 'sending'     // RPC call in flight
+  | 'sent'        // node accepted (packet_id returned)
+  | 'delivered'   // delivery receipt received (ACK from dest)
+  | 'failed'      // all retries exhausted
+  | 'timeout';    // no receipt within UI timeout
+
+export interface RelayHop {
+  addr: number;
+  rssi: number;
+}
+
+export interface Message {
+  id: string;               // UUID (client-generated for outgoing, server msg_id for incoming)
+  packetId?: number;        // firmware packet_id, set on 'sent' status
+  direction: MessageDirection;
+  from: number;             // node address (0 = self)
+  to: number;               // destination addr, 0xFFFFFFFF = broadcast
+  channelIndex?: number;    // set for channel messages, undefined for DM
+  text: string;
+  timestampMs: number;      // client local time (outgoing) or decoded from packet (incoming)
+  tier: MessageTier;
+  status: DeliveryStatus;
+  relayPath?: RelayHop[];   // populated from delivery receipt for Critical messages
+}
+
+// ─── Conversations ─────────────────────────────────────────────────────
+
+export interface Conversation {
+  /** 'dm:0x{addr}' or 'ch:{index}' */
+  id: string;
+  label: string;
+  peerAddr?: number;        // set for DMs
+  channelIndex?: number;    // set for channel convos
+  lastMessage?: string;
+  lastMessageTime?: number;
+  unreadCount: number;
+}
+
+// ─── Airtime ───────────────────────────────────────────────────────────
+
+export interface AirtimeTier {
+  name: 'critical' | 'normal' | 'broadcast';
+  remainingMs: number;
+  maxMs: number;
+  usedPct: number;          // 0-100
+  refillAtMs: number;       // epoch ms
+}
+
+export interface AirtimeStatus {
+  tiers: [AirtimeTier, AirtimeTier, AirtimeTier]; // critical, normal, broadcast
+}
+
+// ─── Status ────────────────────────────────────────────────────────────
+
+export interface NodeStatus {
+  uptimeSec: number;
+  freeHeapBytes: number;
+  fwVersion: string;
+  txCount: number;
+  rxCount: number;
+  droppedCount: number;
+  neighborCount: number;
+  routeCount: number;
+  airtimeUsedMs: number;    // total since boot
+}
+
+// ─── Config (full) ─────────────────────────────────────────────────────
+
+export interface BrambleConfig {
+  identity: NodeIdentity;
+  radio: RadioConfig;
+  channels: Channel[];
+}
+
+// ─── RPC types ─────────────────────────────────────────────────────────
+
+export interface SendParams {
+  dest: number;             // 0xFFFFFFFF for broadcast, 0xFFFFFFFE for default channel
+  text: string;
+  tier?: MessageTier;
+  channelIndex?: number;    // set for channel messages
+}
+
+export interface IncomingMessage {
+  from: number;
+  to: number;
+  text: string;
+  tier: MessageTier;
+  channelIndex?: number;
+  timestamp: number;        // node epoch seconds
+  msgId: string;
+}
+
+export interface AckNotification {
+  packetId: number;
+  status: 'delivered' | 'failed';
+  relayPath?: RelayHop[];
+}
+
+// ─── Transport abstraction ─────────────────────────────────────────────
+
+export interface Transport {
+  readonly connected: boolean;
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  sendRPC<T = unknown>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T>;
+  onNotification(cb: (method: string, params: unknown) => void): void;
+}
+
+export type TransportType = 'serial' | 'ble';
+
+// ─── App state ─────────────────────────────────────────────────────────
+
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface AppState {
+  connectionState: ConnectionState;
+  connectionError?: string;
+  transport: Transport | null;
+  config: BrambleConfig | null;
+  status: NodeStatus | null;
+  airtime: AirtimeStatus | null;
+  neighbors: Neighbor[];
+  routes: Route[];
+  messages: Message[];
+  conversations: Map<string, Conversation>;
+  activeConversationId: string;
+}
