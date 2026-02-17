@@ -1,14 +1,28 @@
-import React, { useMemo } from 'react';
-import type { SimNode } from '../types';
+import React, { useMemo, useEffect, useRef, useState } from 'react';
+import type { SimNode, SimEvent, PacketAnimation } from '../types';
 
 interface MeshCanvasProps {
   nodes: Map<string, SimNode>;
   radioRange?: number;
+  events?: SimEvent[];
 }
 
 const PADDING = 60;
 const NODE_RADIUS = 18;
 const GRID_SIZE = 50;
+
+// Packet type colors + glow
+const PKT_COLORS: Record<string, { fill: string; glow: string }> = {
+  RREQ:   { fill: '#58a6ff', glow: '#1f6feb' },
+  RREP:   { fill: '#3fb950', glow: '#238636' },
+  DATA:   { fill: '#f0883e', glow: '#bd561d' },
+  RERR:   { fill: '#f85149', glow: '#b91c1c' },
+  BEACON: { fill: '#8b949e', glow: '#484f58' },
+};
+
+function pktColor(pkt_type: string) {
+  return PKT_COLORS[pkt_type] ?? PKT_COLORS.DATA;
+}
 
 function computeViewBox(nodes: SimNode[], width: number, height: number) {
   if (nodes.length === 0) {
@@ -41,8 +55,77 @@ function toScreen(x: number, y: number, transform: { scale?: number; scaleX?: nu
   return { sx: x * sx + transform.offsetX, sy: y * sy + transform.offsetY };
 }
 
-export function MeshCanvas({ nodes, radioRange = 150 }: MeshCanvasProps) {
+// Resolve the screen position of an addr string like "0x02000003" to a node
+function resolveAddrToNode(addr: string, nodes: Map<string, SimNode>): SimNode | null {
+  // Try direct node id match first
+  if (nodes.has(addr)) return nodes.get(addr)!;
+  // Try matching by addr hex (nodes don't store addr in our state, so skip for now)
+  return null;
+}
+
+export function MeshCanvas({ nodes, radioRange = 150, events = [] }: MeshCanvasProps) {
   const nodeList = useMemo(() => Array.from(nodes.values()), [nodes]);
+
+  // Build recent packet animations from events
+  const [recentPackets, setRecentPackets] = useState<PacketAnimation[]>([]);
+  const packetCounterRef = useRef(0);
+
+  // Expire stale animations when events list changes
+  useEffect(() => {
+    const now = Date.now();
+    setRecentPackets(prev => {
+      const alive = prev.filter(p => now - p.createdAt < p.durationMs);
+      return alive;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
+  // Listen for new packet_sent events
+  const lastEventId = useRef(0);
+  useEffect(() => {
+    const newEvents = events.filter(e => e.type === 'packet_sent' && e.id > lastEventId.current);
+    if (newEvents.length === 0) return;
+    lastEventId.current = Math.max(...newEvents.map(e => e.id));
+
+    const now = Date.now();
+    const newAnims: PacketAnimation[] = newEvents.map(e => {
+      packetCounterRef.current++;
+      const fromNode = (e.details.node ?? e.details.from) as string | undefined;
+      const toAddr   = (e.details.dest ?? e.details.dest_addr) as string | undefined;
+      const pktType  = (e.details.pkt_type as string) ?? 'DATA';
+      return {
+        id: packetCounterRef.current,
+        from: fromNode ?? '',
+        to: toAddr ?? '',
+        pkt_type: pktType,
+        createdAt: now,
+        durationMs: 500,
+      };
+    }).filter(a => a.from && a.to);
+
+    if (newAnims.length > 0) {
+      setRecentPackets(prev => [...prev, ...newAnims].slice(-80));
+    }
+  }, [events]);
+
+  // Animation frame ticker to keep dots moving
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let animId: number;
+    function frame() {
+      setTick(t => t + 1);
+      const now = Date.now();
+      setRecentPackets(prev => {
+        const alive = prev.filter(p => now - p.createdAt < p.durationMs);
+        return alive.length === prev.length ? prev : alive;
+      });
+      animId = requestAnimationFrame(frame);
+    }
+    animId = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  void tick; // used to trigger re-render
 
   // Determine if nodes are in radio range of each other
   const links = useMemo(() => {
@@ -61,13 +144,12 @@ export function MeshCanvas({ nodes, radioRange = 150 }: MeshCanvasProps) {
     return result;
   }, [nodeList, radioRange]);
 
-  // Use a ResizeObserver-friendly approach: use a fixed internal coordinate system
   const W = 800;
   const H = 500;
 
   const transform = useMemo(() => computeViewBox(nodeList, W, H), [nodeList]);
 
-  // Grid lines in data space — we draw in screen space
+  // Grid lines
   const gridLines: React.ReactNode[] = [];
   if (nodeList.length > 0) {
     const xs = nodeList.map(n => n.x);
@@ -94,6 +176,60 @@ export function MeshCanvas({ nodes, radioRange = 150 }: MeshCanvasProps) {
     }
   }
 
+  // Render packet animation dots
+  const now = Date.now();
+  const packetDots = recentPackets.flatMap(anim => {
+    const elapsed = now - anim.createdAt;
+    const t = Math.min(elapsed / anim.durationMs, 1);
+
+    // Find source node
+    const srcNode = nodes.get(anim.from);
+    if (!srcNode) return [];
+
+    // Find dest node by id or resolve address
+    let dstNode = nodes.get(anim.to) ?? resolveAddrToNode(anim.to, nodes);
+
+    // If dest not found by node id, try to find by matching node addresses
+    // The dest might be a hex address string like "0x02000003"
+    if (!dstNode && anim.to.startsWith('0x')) {
+      // Can't resolve without addr in node state; skip
+      return [];
+    }
+
+    if (!dstNode) return [];
+    if (!dstNode.active) return [];
+
+    const { sx: x1, sy: y1 } = toScreen(srcNode.x, srcNode.y, transform);
+    const { sx: x2, sy: y2 } = toScreen(dstNode.x, dstNode.y, transform);
+
+    const cx = x1 + (x2 - x1) * t;
+    const cy = y1 + (y2 - y1) * t;
+    const opacity = 1 - t * 0.3;
+
+    const { fill, glow } = pktColor(anim.pkt_type);
+
+    return [
+      <g key={anim.id} opacity={opacity}>
+        {/* Glow */}
+        <circle cx={cx} cy={cy} r={8} fill={glow} opacity={0.35} />
+        {/* Dot */}
+        <circle cx={cx} cy={cy} r={4.5} fill={fill} />
+        {/* Label */}
+        <text
+          x={cx}
+          y={cy - 9}
+          textAnchor="middle"
+          fontSize="7"
+          fontFamily="monospace"
+          fill={fill}
+          opacity={0.85}
+        >
+          {anim.pkt_type}
+        </text>
+      </g>
+    ];
+  });
+
   return (
     <div style={{
       width: '100%',
@@ -110,6 +246,17 @@ export function MeshCanvas({ nodes, radioRange = 150 }: MeshCanvasProps) {
         preserveAspectRatio="xMidYMid meet"
         style={{ display: 'block' }}
       >
+        {/* SVG filter for glow */}
+        <defs>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
         {/* Background */}
         <rect width={W} height={H} fill="#0d1117" />
 
@@ -132,6 +279,9 @@ export function MeshCanvas({ nodes, radioRange = 150 }: MeshCanvasProps) {
           );
         })}
 
+        {/* Packet animation dots (below nodes so nodes render on top) */}
+        {packetDots}
+
         {/* Nodes */}
         {nodeList.map(node => {
           const { sx, sy } = toScreen(node.x, node.y, transform);
@@ -142,7 +292,7 @@ export function MeshCanvas({ nodes, radioRange = 150 }: MeshCanvasProps) {
 
           return (
             <g key={node.id}>
-              {/* Radio range circle (subtle) */}
+              {/* Radio range circle */}
               {active && radioRange > 0 && (() => {
                 const scale = 'scale' in transform && transform.scale !== undefined ? transform.scale : 1;
                 return (
