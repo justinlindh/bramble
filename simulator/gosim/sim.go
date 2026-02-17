@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -565,9 +566,26 @@ func (s *Sim) cmdAddNode(cmd Command) {
 	s.nextAddr++
 	addr := s.nextAddr
 
-	idx := nodeArrayAdd(&s.nodes, cmd.NodeID, uint32(addr), cmd.X, cmd.Y)
+	// Auto-generate node ID if not provided
+	nodeID := cmd.NodeID
+	if nodeID == "" {
+		nodeID = fmt.Sprintf("N%d", addr)
+	}
+
+	// Auto-place near a random existing node if no position given
+	x, y := cmd.X, cmd.Y
+	if x == 0 && y == 0 && s.nodes.count > 0 {
+		pick := int(C.pcg32_random(&s.rng)) % int(s.nodes.count)
+		ref := C.node_array_get(&s.nodes, C.int(pick))
+		offset := float32(50 + int(C.pcg32_random(&s.rng))%50)
+		angle := float32(C.pcg32_random(&s.rng)) / float32(0xFFFFFFFF) * 6.283185
+		x = float32(ref.x) + offset*float32(math.Cos(float64(angle)))
+		y = float32(ref.y) + offset*float32(math.Sin(float64(angle)))
+	}
+
+	idx := nodeArrayAdd(&s.nodes, nodeID, uint32(addr), x, y)
 	if idx < 0 {
-		log.Printf("failed to add node %s", cmd.NodeID)
+		log.Printf("failed to add node %s", nodeID)
 		return
 	}
 	node := C.node_array_get(&s.nodes, C.int(idx))
@@ -575,15 +593,15 @@ func (s *Sim) cmdAddNode(cmd Command) {
 	anomalyInit(&s.anomaly[idx])
 
 	// Schedule tick
-	cid := C.CString(cmd.NodeID)
+	cid := C.CString(nodeID)
 	tick := C.bridge_make_tick_event(C.uint64_t(s.simTime+100000), cid, 0)
 	C.free(unsafe.Pointer(cid))
 	eventQueuePush(&s.events, &tick)
 
 	s.emitJSON(map[string]interface{}{
 		"type": "node_joined", "timestamp_us": s.simTime,
-		"node": cmd.NodeID, "addr": fmt.Sprintf("0x%08X", addr),
-		"x": cmd.X, "y": cmd.Y,
+		"node": nodeID, "addr": fmt.Sprintf("0x%08X", addr),
+		"x": x, "y": y,
 	})
 }
 
