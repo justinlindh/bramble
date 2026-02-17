@@ -126,7 +126,7 @@ wss.on('connection', (ws: WebSocket) => {
       }
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'sim_ended', code, signal }));
-        ws.close();
+        // Keep connection open so UI shows "Completed" instead of "Disconnected"
       }
       sim = null;
     });

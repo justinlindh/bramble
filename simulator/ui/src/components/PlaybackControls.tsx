@@ -60,12 +60,12 @@ export function PlaybackControls({ running, connected, currentTime }: PlaybackCo
           width: '8px',
           height: '8px',
           borderRadius: '50%',
-          background: !connected ? '#6e7681' : running ? '#3fb950' : '#f85149',
-          boxShadow: !connected ? 'none' : running ? '0 0 6px #3fb950' : '0 0 6px #f85149',
+          background: !connected ? '#6e7681' : running ? '#3fb950' : '#58a6ff',
+          boxShadow: !connected ? 'none' : running ? '0 0 6px #3fb950' : '0 0 6px #58a6ff',
           transition: 'background 0.3s, box-shadow 0.3s',
         }} />
         <span style={{ fontSize: '12px', color: '#8b949e' }}>
-          {!connected ? 'Disconnected' : running ? 'Running' : 'Stopped'}
+          {!connected ? 'Disconnected' : running ? 'Running' : 'Completed'}
         </span>
       </div>
     </header>
