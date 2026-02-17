@@ -1,0 +1,17 @@
+{
+  "name": "test-2-node",
+  "mode": "deterministic",
+  "duration_ms": 10000,
+  "nodes": [
+    {"id": "A", "x": 0, "y": 0},
+    {"id": "B", "x": 100, "y": 0}
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {"at_ms": 1000, "type": "move_node", "node": "B", "x": 200, "y": 0}
+  ]
+}
