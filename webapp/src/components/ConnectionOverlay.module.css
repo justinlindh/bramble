@@ -129,3 +129,27 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
+
+.mockDivider {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+.mockBtn {
+  width: 100%;
+  border-color: var(--accent-green, #3fb950);
+  color: var(--accent-green, #3fb950);
+}
+
+.mockBtn:hover:not(:disabled) {
+  border-color: var(--accent-green, #3fb950);
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--text);
+}
+
+.mockBtn.active {
+  border-color: var(--accent-green, #3fb950);
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--text);
+}
