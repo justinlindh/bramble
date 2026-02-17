@@ -1,0 +1,109 @@
+{
+  "name": "Public Channel Broadcast",
+  "description": "6-node mesh testing broadcast delivery on the default public channel. Node A sends public channel messages that should reach all nodes within 3 hops. Includes a rapid-fire burst to exercise rate limiting.",
+  "seed": 1001,
+  "duration_ms": 90000,
+  "radio": {
+    "range": 150,
+    "loss_pct": 3,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    { "id": "A", "x": 0,   "y": 0   },
+    { "id": "B", "x": 100, "y": 0   },
+    { "id": "C", "x": 200, "y": 0   },
+    { "id": "D", "x": 50,  "y": 87  },
+    { "id": "E", "x": 150, "y": 87  },
+    { "id": "F", "x": 100, "y": 174 }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 8000,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "hello mesh"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 20000,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "broadcast 2"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 30000,
+      "src": "C",
+      "dest": "*",
+      "channel": "public",
+      "payload": "reply from C"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45000,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "rate-limit burst 1"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45200,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "rate-limit burst 2"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45400,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "rate-limit burst 3"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45600,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "rate-limit burst 4"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45800,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "rate-limit burst 5"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 46000,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "rate-limit burst 6"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 60000,
+      "src": "F",
+      "dest": "*",
+      "channel": "public",
+      "payload": "deep mesh broadcast"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 75000,
+      "src": "A",
+      "dest": "*",
+      "channel": "public",
+      "payload": "post-rate-limit broadcast"
+    }
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "name": "Location Sharing",
+  "description": "4 nodes test position-update broadcasting between contacts. Nodes move over time and periodically share their GPS coordinates. Verifies that all contacts receive timely location updates across the mesh.",
+  "seed": 1004,
+  "duration_ms": 90000,
+  "radio": {
+    "range": 300,
+    "loss_pct": 2,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    { "id": "A", "x": 0,   "y": 0   },
+    { "id": "B", "x": 200, "y": 0   },
+    { "id": "C", "x": 200, "y": 200 },
+    { "id": "D", "x": 0,   "y": 200 }
+  ],
+  "events": [
+    {
+      "type": "send_location",
+      "at_ms": 5000,
+      "src": "A",
+      "lat": 37.7749,
+      "lon": -122.4194,
+      "alt_m": 10
+    },
+    {
+      "type": "send_location",
+      "at_ms": 8000,
+      "src": "B",
+      "lat": 37.7751,
+      "lon": -122.4180,
+      "alt_m": 15
+    },
+    {
+      "type": "node_move",
+      "at_ms": 15000,
+      "node": "A",
+      "x": 50,
+      "y": 50
+    },
+    {
+      "type": "send_location",
+      "at_ms": 16000,
+      "src": "A",
+      "lat": 37.7753,
+      "lon": -122.4190,
+      "alt_m": 12
+    },
+    {
+      "type": "node_move",
+      "at_ms": 25000,
+      "node": "C",
+      "x": 150,
+      "y": 150
+    },
+    {
+      "type": "send_location",
+      "at_ms": 26000,
+      "src": "C",
+      "lat": 37.7745,
+      "lon": -122.4175,
+      "alt_m": 8
+    },
+    {
+      "type": "send_message",
+      "at_ms": 30000,
+      "src": "B",
+      "dest": "A",
+      "payload": "got your location update"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 40000,
+      "node": "D",
+      "x": 100,
+      "y": 250
+    },
+    {
+      "type": "send_location",
+      "at_ms": 41000,
+      "src": "D",
+      "lat": 37.7740,
+      "lon": -122.4200,
+      "alt_m": 5
+    },
+    {
+      "type": "send_location",
+      "at_ms": 55000,
+      "src": "A",
+      "lat": 37.7756,
+      "lon": -122.4185,
+      "alt_m": 14
+    },
+    {
+      "type": "node_move",
+      "at_ms": 60000,
+      "node": "B",
+      "x": 250,
+      "y": 50
+    },
+    {
+      "type": "send_location",
+      "at_ms": 61000,
+      "src": "B",
+      "lat": 37.7760,
+      "lon": -122.4170,
+      "alt_m": 20
+    },
+    {
+      "type": "send_message",
+      "at_ms": 70000,
+      "src": "C",
+      "dest": "D",
+      "payload": "your location received"
+    },
+    {
+      "type": "send_location",
+      "at_ms": 80000,
+      "src": "A",
+      "lat": 37.7758,
+      "lon": -122.4183,
+      "alt_m": 13
+    }
+  ]
+}

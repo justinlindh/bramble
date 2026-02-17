@@ -1,0 +1,96 @@
+{
+  "name": "Group DM Fan-out",
+  "description": "6 nodes with 4 members in a private group (A, B, C, D). Tests that group messages are fanned out to all members via the mesh. Non-members E and F should not receive group messages.",
+  "seed": 1005,
+  "duration_ms": 90000,
+  "radio": {
+    "range": 150,
+    "loss_pct": 3,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    { "id": "A", "x": 0,   "y": 0   },
+    { "id": "B", "x": 120, "y": 0   },
+    { "id": "C", "x": 60,  "y": 104 },
+    { "id": "D", "x": 240, "y": 0   },
+    { "id": "E", "x": 240, "y": 120 },
+    { "id": "F", "x": 360, "y": 0   }
+  ],
+  "groups": [
+    {
+      "id": "group-alpha",
+      "name": "Alpha Team",
+      "members": ["A", "B", "C", "D"]
+    }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 8000,
+      "src": "A",
+      "dest": "B",
+      "payload": "direct non-group message"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 15000,
+      "src": "A",
+      "dest": "group-alpha",
+      "group_id": "group-alpha",
+      "channel": "group",
+      "payload": "hello group!"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 25000,
+      "src": "B",
+      "dest": "group-alpha",
+      "group_id": "group-alpha",
+      "channel": "group",
+      "payload": "hey from B"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 35000,
+      "src": "C",
+      "dest": "group-alpha",
+      "group_id": "group-alpha",
+      "channel": "group",
+      "payload": "C checking in"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45000,
+      "src": "D",
+      "dest": "group-alpha",
+      "group_id": "group-alpha",
+      "channel": "group",
+      "payload": "D here"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 55000,
+      "src": "E",
+      "dest": "F",
+      "payload": "non-member side channel"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 65000,
+      "src": "A",
+      "dest": "group-alpha",
+      "group_id": "group-alpha",
+      "channel": "group",
+      "payload": "group update 2"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 75000,
+      "src": "B",
+      "dest": "group-alpha",
+      "group_id": "group-alpha",
+      "channel": "group",
+      "payload": "roger that"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "name": "Emergency Beacon",
+  "description": "8 nodes spread across a 600x400 area. Node D activates an emergency beacon that all nodes must receive and rebroadcast. Tests beacon propagation, 30-second repeat interval, and multi-hop relay.",
+  "seed": 1003,
+  "duration_ms": 120000,
+  "radio": {
+    "range": 200,
+    "loss_pct": 4,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    { "id": "A", "x": 0,   "y": 0   },
+    { "id": "B", "x": 200, "y": 0   },
+    { "id": "C", "x": 400, "y": 0   },
+    { "id": "D", "x": 300, "y": 200 },
+    { "id": "E", "x": 100, "y": 200 },
+    { "id": "F", "x": 500, "y": 200 },
+    { "id": "G", "x": 200, "y": 380 },
+    { "id": "H", "x": 400, "y": 380 }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 5000,
+      "src": "A",
+      "dest": "D",
+      "payload": "routine check-in"
+    },
+    {
+      "type": "activate_beacon",
+      "at_ms": 10000,
+      "node": "D",
+      "beacon_type": "emergency",
+      "beacon_interval_ms": 30000,
+      "message": "SOS - node D emergency"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 40000,
+      "src": "A",
+      "dest": "D",
+      "payload": "beacon received - responding"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 42000,
+      "src": "C",
+      "dest": "D",
+      "payload": "beacon received - responding"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 44000,
+      "src": "H",
+      "dest": "D",
+      "payload": "beacon received - responding"
+    },
+    {
+      "type": "activate_beacon",
+      "at_ms": 70000,
+      "node": "D",
+      "beacon_type": "emergency",
+      "beacon_interval_ms": 30000,
+      "message": "SOS - still active"
+    },
+    {
+      "type": "deactivate_beacon",
+      "at_ms": 100000,
+      "node": "D"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 110000,
+      "src": "D",
+      "dest": "*",
+      "channel": "public",
+      "payload": "all clear - beacon deactivated"
+    }
+  ]
+}
