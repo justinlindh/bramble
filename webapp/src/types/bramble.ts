@@ -119,6 +119,7 @@ export interface NodeStatus {
   neighborCount: number;
   routeCount: number;
   airtimeUsedMs: number;    // total since boot
+  position?: Position;      // current GPS position if available
 }
 
 // ─── Location ──────────────────────────────────────────────────────────

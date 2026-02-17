@@ -343,9 +343,11 @@ export async function removeLocationContact(addr: number): Promise<void> {
   await loadConfig();
 }
 
-export async function shareLocationOnce(addr: number): Promise<void> {
+export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.shareLocationOnce', { addr });
+  const params: Record<string, unknown> = { addr };
+  if (tier !== undefined) params.tier = tier;
+  await client.rpc('bramble.shareLocationOnce', params);
 }
 
 function handleLocationUpdate(params: unknown): void {
@@ -360,17 +362,6 @@ function handleLocationUpdate(params: unknown): void {
   } else {
     store.setPeerLocations([...existing, update]);
   }
-}
-
-export async function loadPeerLocations(): Promise<void> {
-  if (!client) return;
-  const result = await client.rpc<{ locations: import('../types/bramble').PeerLocation[] }>('bramble.getPeerLocations');
-  useStore.getState().setPeerLocations(result.locations ?? []);
-}
-
-export async function shareLocationOnce(dest: number, tier: import('../types/bramble').LocationTier): Promise<void> {
-  if (!client) return;
-  await client.rpc('bramble.shareLocationOnce', { dest, tier });
 }
 
 export function getClient(): BrambleClient | null {
