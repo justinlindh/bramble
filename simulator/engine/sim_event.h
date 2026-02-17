@@ -17,12 +17,14 @@ typedef enum {
     EVT_INTERFERENCE_END,
     EVT_GENERATE_MESSAGE,
     EVT_METRICS_TICK,
+    EVT_TICK_NODE,          /* per-node periodic tick */
 } event_type_t;
 
 /* Packet event data */
 typedef struct {
     uint32_t src_addr;
     uint32_t dest_addr;
+    int8_t   rssi;          /* RSSI at receiver */
     uint8_t  data[256];
     uint16_t len;
 } packet_event_data_t;
@@ -43,15 +45,22 @@ typedef struct {
     float radius;
 } interference_event_data_t;
 
+/* Per-node tick event data */
+typedef struct {
+    char     node_id[16];
+    uint32_t tick_seq;      /* monotonically increasing per-node */
+} tick_event_data_t;
+
 /* Event structure */
 typedef struct {
     uint64_t timestamp_us;
     event_type_t type;
     union {
-        packet_event_data_t packet;
-        node_event_data_t node;
+        packet_event_data_t   packet;
+        node_event_data_t     node;
         interference_event_data_t interference;
-        uint32_t timer_id;
+        tick_event_data_t     tick;
+        uint32_t              timer_id;
     } data;
 } sim_event_t;
 
