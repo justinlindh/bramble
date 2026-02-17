@@ -3,7 +3,8 @@ import { IdentitySection } from './IdentitySection';
 import { RadioForm } from './RadioForm';
 import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
-import { IconIdentity, IconRadio, IconNodes, IconPeers } from '../../components/Icons';
+import { LocationSection } from './LocationSection';
+import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation } from '../../components/Icons';
 import styles from './Config.module.css';
 
 export function Config() {
@@ -43,6 +44,12 @@ export function Config() {
       <section className={styles.section}>
         <h2><IconPeers size={18} /> Peers</h2>
         <PeerManager neighbors={neighbors} routes={routes} />
+      </section>
+
+      {/* ── Location ── */}
+      <section className={styles.section}>
+        <h2><IconLocation size={18} /> Location</h2>
+        <LocationSection location={config.location} neighbors={neighbors} />
       </section>
     </div>
   );

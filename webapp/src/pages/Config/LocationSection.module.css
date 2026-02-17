@@ -1,0 +1,276 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.label {
+  color: var(--text-muted);
+  min-width: 110px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text);
+}
+
+.dim {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.toggle input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+/* ── Warning dialog ── */
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: color-mix(in srgb, var(--warning, #d29922) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning, #d29922) 35%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.warning p {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.warningActions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* ── Buttons ── */
+
+.btnConfirm {
+  padding: 0.3rem 0.7rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btnConfirm:hover {
+  opacity: 0.85;
+}
+
+.btnCancel {
+  padding: 0.3rem 0.7rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnCancel:hover {
+  background: var(--surface);
+}
+
+.btnSmall {
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnSmall:hover {
+  background: var(--surface);
+  border-color: var(--text-muted);
+}
+
+/* ── Sharing summary ── */
+
+.shareActive {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.shareNone {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+/* ── Contacts ── */
+
+.contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.contactsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+
+.contactRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.tierSelect {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.tierOff {
+  color: var(--text-muted);
+}
+
+.tierPresence {
+  color: var(--text-muted);
+}
+
+.tierCoarse {
+  color: var(--warning, #d29922);
+}
+
+.tierFull {
+  color: var(--danger, #d73a49);
+}
+
+.removeBtn {
+  margin-left: auto;
+  padding: 0.15rem 0.4rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.removeBtn:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ── Add form ── */
+
+.addForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.addForm select {
+  width: fit-content;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.addrInput {
+  width: 120px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.quickAdd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.quickAddBtn {
+  padding: 0.2rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.quickAddBtn:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+  margin: 0;
+}
