@@ -22,7 +22,7 @@ static uint64_t g_sim_time_us = 0;
 static metrics_state_t g_metrics;
 
 /* Per-node anomaly trackers (indexed by position in g_nodes.nodes[]) */
-static route_flap_tracker_t g_flap_tracker[MAX_NODES];
+static node_anomaly_tracker_t g_anomaly[MAX_NODES];
 
 /* Per-message latency tracking */
 #define MAX_MSG_TRACK 256
@@ -74,9 +74,14 @@ static void handle_beacon_received(sim_node_t *rx, const uint8_t *buf, uint16_t 
                          beacon.src_addr, beacon.src_addr, 1);
 
         int node_idx = (int)(rx - g_nodes.nodes);
-        anomaly_check_route_flap(&g_flap_tracker[node_idx],
+        anomaly_check_route_flap(&g_anomaly[node_idx].flap,
                                   beacon.src_addr, beacon.src_addr,
                                   now_us, stdout, rx->id);
+    }
+    /* Record beacon receive for black-hole tracking */
+    {
+        int node_idx = (int)(rx - g_nodes.nodes);
+        anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
     }
 }
 
@@ -119,8 +124,22 @@ static void handle_rreq_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
         pkt.pkt_type     = PKT_TYPE_RREQ;
         rx->packets_forwarded++;
 
+        /* Track excessive RREQ retransmissions */
+        {
+            int node_idx = (int)(rx - g_nodes.nodes);
+            anomaly_check_rreq_retx(&g_anomaly[node_idx].rreq_retx,
+                                     rreq.header.dest_addr, now_us,
+                                     stdout, rx->id);
+            anomaly_record_fwd(&g_anomaly[node_idx].blackhole, now_us);
+        }
+
         sim_radio_broadcast(rx, &pkt, &g_nodes, &g_radio, &g_rng,
                             &g_events, &g_metrics, now_us);
+    }
+    /* Always count RREQ receive for black-hole tracking */
+    {
+        int node_idx = (int)(rx - g_nodes.nodes);
+        anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
     }
 }
 
@@ -144,9 +163,10 @@ static void handle_rrep_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
                      rrep.src_addr, pkt_src_addr, rrep.hop_count);
 
     int node_idx = (int)(rx - g_nodes.nodes);
-    anomaly_check_route_flap(&g_flap_tracker[node_idx],
+    anomaly_check_route_flap(&g_anomaly[node_idx].flap,
                               rrep.src_addr, pkt_src_addr,
                               now_us, stdout, rx->id);
+    anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
 
     /* Are we the original RREQ sender? */
     pending_discovery_t *pd =
@@ -195,6 +215,15 @@ static void handle_data_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
     bramble_header_t hdr;
     if (bramble_header_deserialize(&hdr, buf, len) != ESP_OK) return;
 
+    int node_idx = (int)(rx - g_nodes.nodes);
+
+    /* Track DATA receive for black-hole detection */
+    anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
+
+    /* Route-loop detection: check if this node already forwarded this packet */
+    anomaly_check_loop(&g_anomaly[node_idx].loop,
+                       hdr.packet_id, now_us, stdout, rx->id);
+
     if (hdr.dest_addr == rx->addr) {
         /* Final destination — record delivery */
         for (int i = 0; i < MAX_MSG_TRACK; i++) {
@@ -211,6 +240,8 @@ static void handle_data_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
             ",\"node\":\"%s\",\"packet_id\":\"0x%08X\"}\n",
             (unsigned long long)now_us, rx->id, hdr.packet_id);
         fflush(stdout);
+        /* Delivery counts as a forward for black-hole tracking */
+        anomaly_record_fwd(&g_anomaly[node_idx].blackhole, now_us);
         return;
     }
 
@@ -253,6 +284,9 @@ static void handle_data_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
     pkt.pkt_type     = PKT_TYPE_DATA;
     rx->packets_forwarded++;
 
+    /* Count forwarded data for black-hole tracking */
+    anomaly_record_fwd(&g_anomaly[node_idx].blackhole, now_us);
+
     sim_radio_broadcast(rx, &pkt, &g_nodes, &g_radio, &g_rng,
                         &g_events, &g_metrics, now_us);
 }
@@ -276,6 +310,9 @@ static void handle_event(sim_event_t *event) {
             if (node) {
                 node_deactivate(node);
                 emit_node_left(stdout, event->timestamp_us, node->id);
+                /* Check for mesh partition after topology change */
+                anomaly_check_partition(&g_nodes, g_radio.range,
+                                        event->timestamp_us, stdout);
             }
             break;
         }
@@ -317,6 +354,15 @@ static void handle_event(sim_event_t *event) {
             emit_metrics(stdout, event->timestamp_us, active,
                          g_metrics.total_packets, g_metrics.delivered_packets,
                          g_metrics.dropped_packets, metrics_avg_latency_ms(&g_metrics));
+
+            /* Check black-hole anomaly on each active node at every metrics tick */
+            for (int i = 0; i < g_nodes.count; i++) {
+                if (g_nodes.nodes[i].active) {
+                    anomaly_check_blackhole(&g_anomaly[i].blackhole,
+                                            event->timestamp_us,
+                                            stdout, g_nodes.nodes[i].id);
+                }
+            }
             break;
         }
 
@@ -507,7 +553,7 @@ int main(int argc, char **argv) {
     metrics_init(&g_metrics);
     memset(g_msg_track, 0, sizeof(g_msg_track));
     for (int i = 0; i < MAX_NODES; i++) {
-        anomaly_init(&g_flap_tracker[i]);
+        anomaly_init(&g_anomaly[i]);
     }
 
     /* Load scenario */
