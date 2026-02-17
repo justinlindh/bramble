@@ -70,6 +70,8 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ nodeId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const [dragPos, setDragPos] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  const [overTrash, setOverTrash] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
 
   // Build recent packet animations from events
   const [recentPackets, setRecentPackets] = useState<PacketAnimation[]>([]);
@@ -187,6 +189,28 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     return null;
   }, [nodeList, transform]);
 
+  // Trash zone (bottom-right corner of SVG viewBox)
+  const TRASH_X = W - 50;
+  const TRASH_Y = H - 50;
+  const TRASH_R = 30;
+
+  const isOverTrashZone = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return false;
+    const rect = svg.getBoundingClientRect();
+    const svgX = (clientX - rect.left) / rect.width * W;
+    const svgY = (clientY - rect.top) / rect.height * H;
+    const dx = svgX - TRASH_X;
+    const dy = svgY - TRASH_Y;
+    return dx * dx + dy * dy <= TRASH_R * TRASH_R;
+  }, []);
+
+  const removeNode = useCallback((nodeId: string) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'remove_node', node_id: nodeId }));
+    }
+  }, [ws]);
+
   // Drag handlers (mouse)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const nodeId = hitTestNode(e.clientX, e.clientY);
@@ -206,12 +230,15 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     const newX = dragRef.current.origX + (sim.x - startSim.x);
     const newY = dragRef.current.origY + (sim.y - startSim.y);
     setDragPos({ nodeId: dragRef.current.nodeId, x: newX, y: newY });
-  }, [clientToSim]);
+    setOverTrash(isOverTrashZone(e.clientX, e.clientY));
+  }, [clientToSim, isOverTrashZone]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e?: React.MouseEvent) => {
     if (!dragRef.current || !dragPos) return;
-    // Send move_node command
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    const trash = e ? isOverTrashZone(e.clientX, e.clientY) : overTrash;
+    if (trash) {
+      removeNode(dragRef.current.nodeId);
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'move_node',
         node_id: dragRef.current.nodeId,
@@ -221,7 +248,8 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     }
     dragRef.current = null;
     setDragPos(null);
-  }, [dragPos, ws]);
+    setOverTrash(false);
+  }, [dragPos, ws, overTrash, isOverTrashZone, removeNode]);
 
   // Touch handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -245,11 +273,20 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     const newX = dragRef.current.origX + (sim.x - startSim.x);
     const newY = dragRef.current.origY + (sim.y - startSim.y);
     setDragPos({ nodeId: dragRef.current.nodeId, x: newX, y: newY });
-  }, [clientToSim]);
+    setOverTrash(isOverTrashZone(touch.clientX, touch.clientY));
+  }, [clientToSim, isOverTrashZone]);
 
-  const handleTouchEnd = useCallback(() => {
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!dragRef.current || !dragPos) return;
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    // Use last known overTrash state (changedTouches has final position)
+    let trash = overTrash;
+    if (e.changedTouches.length > 0) {
+      const touch = e.changedTouches[0];
+      trash = isOverTrashZone(touch.clientX, touch.clientY);
+    }
+    if (trash) {
+      removeNode(dragRef.current.nodeId);
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'move_node',
         node_id: dragRef.current.nodeId,
@@ -259,7 +296,8 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     }
     dragRef.current = null;
     setDragPos(null);
-  }, [dragPos, ws]);
+    setOverTrash(false);
+  }, [dragPos, ws, overTrash, isOverTrashZone, removeNode]);
 
   // Grid lines
   const gridLines: React.ReactNode[] = [];
@@ -365,7 +403,20 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchEnd}
+        onTouchCancel={() => { dragRef.current = null; setDragPos(null); setOverTrash(false); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const nodeId = hitTestNode(e.clientX, e.clientY);
+          if (nodeId) {
+            const svg = svgRef.current;
+            if (!svg) return;
+            const rect = svg.getBoundingClientRect();
+            setContextMenu({ nodeId, x: e.clientX - rect.left, y: e.clientY - rect.top });
+          } else {
+            setContextMenu(null);
+          }
+        }}
+        onClick={() => setContextMenu(null)}
       >
         {/* SVG filter for glow */}
         <defs>
@@ -481,6 +532,34 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
           );
         })}
 
+        {/* Trash zone — visible only while dragging */}
+        {dragPos && (
+          <g>
+            <circle
+              cx={TRASH_X} cy={TRASH_Y} r={TRASH_R}
+              fill={overTrash ? 'rgba(248,81,73,0.3)' : 'rgba(110,118,129,0.15)'}
+              stroke={overTrash ? '#f85149' : '#6e7681'}
+              strokeWidth={overTrash ? 2 : 1}
+              strokeDasharray={overTrash ? undefined : '4 3'}
+            />
+            <text
+              x={TRASH_X} y={TRASH_Y - 2}
+              textAnchor="middle" dominantBaseline="central"
+              fontSize={overTrash ? '18' : '16'} fill={overTrash ? '#f85149' : '#6e7681'}
+            >
+              🗑
+            </text>
+            {overTrash && (
+              <text
+                x={TRASH_X} y={TRASH_Y + 18}
+                textAnchor="middle" fontSize="8" fill="#f85149" fontFamily="monospace"
+              >
+                Drop to delete
+              </text>
+            )}
+          </g>
+        )}
+
         {/* Empty state */}
         {nodeList.length === 0 && (
           <text
@@ -495,6 +574,55 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
           </text>
         )}
       </svg>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'absolute',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            background: '#161b22',
+            border: '1px solid #30363d',
+            borderRadius: '6px',
+            padding: '4px 0',
+            zIndex: 100,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            minWidth: '120px',
+          }}
+        >
+          <div
+            style={{
+              padding: '6px 12px',
+              fontSize: '12px',
+              color: '#8b949e',
+              fontFamily: 'monospace',
+              borderBottom: '1px solid #21262d',
+            }}
+          >
+            {contextMenu.nodeId}
+          </div>
+          <button
+            onClick={() => { removeNode(contextMenu.nodeId); setContextMenu(null); }}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '6px 12px',
+              background: 'none',
+              border: 'none',
+              color: '#f85149',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#21262d')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+          >
+            🗑 Delete Node
+          </button>
+        </div>
+      )}
     </div>
   );
 }
