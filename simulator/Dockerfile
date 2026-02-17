@@ -27,4 +27,5 @@ COPY simulator/scenarios/ ./scenarios/
 
 EXPOSE 3000
 WORKDIR /app/server
+ENV NODE_OPTIONS="--max-old-space-size=512"
 CMD ["npx", "tsx", "relay.ts"]
