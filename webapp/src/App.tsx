@@ -4,18 +4,20 @@ import { disconnect } from './store/actions';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { IconChat, IconNodes, IconConfig, IconStats } from './components/Icons';
+import { IconChat, IconNodes, IconConfig, IconStats, IconMap } from './components/Icons';
 import { Chat } from './pages/Chat/Chat';
 import { Nodes } from './pages/Nodes/Nodes';
 import { Config } from './pages/Config/Config';
 import { Stats } from './pages/Stats/Stats';
+import { Map } from './pages/Map/Map';
 import styles from './styles/App.module.css';
 
-type Tab = 'chat' | 'nodes' | 'config' | 'stats';
+type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
 
 const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
   { id: 'chat',   icon: <IconChat size={18} />,   label: 'Chat'   },
   { id: 'nodes',  icon: <IconNodes size={18} />,  label: 'Nodes'  },
+  { id: 'map',    icon: <IconMap size={18} />,    label: 'Map'    },
   { id: 'config', icon: <IconConfig size={18} />, label: 'Config' },
   { id: 'stats',  icon: <IconStats size={18} />,  label: 'Stats'  },
 ];
@@ -25,6 +27,7 @@ function TabContent({ activeTab }: { activeTab: Tab }) {
     <ErrorBoundary>
       {activeTab === 'chat'   && <Chat />}
       {activeTab === 'nodes'  && <Nodes />}
+      {activeTab === 'map'    && <Map />}
       {activeTab === 'config' && <Config />}
       {activeTab === 'stats'  && <Stats />}
     </ErrorBoundary>
