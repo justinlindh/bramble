@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -91,7 +92,8 @@ type Sim struct {
 	cmdCh       chan Command
 	stopCh      chan struct{}
 	broadcast   func([]byte)
-	scenarioDir string
+	scenarioDir  string
+	lastScenario string
 	headless    bool
 }
 
@@ -186,7 +188,7 @@ func (s *Sim) handleCommand(cmd Command) {
 	defer s.mu.Unlock()
 
 	switch cmd.Type {
-	case "load":
+	case "load", "start":
 		s.cmdLoad(cmd)
 	case "play":
 		s.cmdPlay()
@@ -419,9 +421,14 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 // --- Command handlers ---
 
 func (s *Sim) cmdLoad(cmd Command) {
-	scenarioPath := cmd.Scenario
-	if scenarioPath == "" {
-		scenarioPath = s.scenarioDir
+	scenarioName := cmd.Scenario
+	if scenarioName == "" {
+		scenarioName = "10-node-grid"
+	}
+	// Resolve scenario path: if it's just a name, look in scenarioDir
+	scenarioPath := scenarioName
+	if !strings.Contains(scenarioName, "/") {
+		scenarioPath = fmt.Sprintf("%s/%s.json", s.scenarioDir, scenarioName)
 	}
 
 	// Reset C state
@@ -484,6 +491,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ready"})
 
+	s.lastScenario = scenarioPath
 	log.Printf("loaded scenario: %s (%d nodes, duration %d us)", scenarioPath, count, s.duration)
 }
 
@@ -515,7 +523,7 @@ func (s *Sim) cmdPause() {
 }
 
 func (s *Sim) cmdRestart() {
-	s.cmdLoad(Command{Scenario: s.scenarioDir})
+	s.cmdLoad(Command{Scenario: s.lastScenario})
 }
 
 func (s *Sim) cmdSpeed(cmd Command) {
