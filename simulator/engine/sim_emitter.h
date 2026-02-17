@@ -26,7 +26,7 @@ void emit_packet_sent_typed(FILE *out, uint64_t timestamp_us,
     uint16_t size, uint8_t pkt_type);
 
 void emit_packet_received_typed(FILE *out, uint64_t timestamp_us,
-    const char *node_id, uint32_t src_addr, int8_t rssi,
+    const char *node_id, uint32_t src_addr, int8_t rssi, int8_t snr,
     uint16_t size, uint8_t pkt_type);
 
 #endif /* SIM_EMITTER_H */

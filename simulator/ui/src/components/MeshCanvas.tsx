@@ -1,5 +1,5 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
-import type { SimNode, SimEvent, PacketAnimation, DeliveryPathAnimation, LinkActivity, BrokenLink } from '../types';
+import type { SimNode, SimEvent, PacketAnimation, DeliveryPathAnimation, LinkActivity, BrokenLink, LinkQuality } from '../types';
 
 interface MeshCanvasProps {
   nodes: Map<string, SimNode>;
@@ -9,6 +9,7 @@ interface MeshCanvasProps {
   deliveryPaths?: DeliveryPathAnimation[];
   linkActivity?: Map<string, LinkActivity>;
   brokenLinks?: Map<string, BrokenLink>;
+  linkQuality?: Map<string, LinkQuality>;
   selectedNodeId?: string | null;
   onNodeClick?: (nodeId: string) => void;
 }
@@ -18,6 +19,26 @@ const NODE_RADIUS = 18;
 const GRID_SIZE = 50;
 const RECENT_TRAFFIC_MS = 5000; // links active in last 5s are "recent"
 const BROKEN_LINK_FADE_MS = 10000;
+
+// RSSI color scale for link visualization
+// Strong (> -70 dBm): bright green
+// Good (-70 to -85 dBm): yellow-green
+// Fair (-85 to -100 dBm): orange
+// Weak (< -100 dBm): red
+function rssiToColor(rssi: number): string {
+  if (rssi > -70) return '#00ff88';      // bright green — strong
+  if (rssi > -85) return '#c8e838';      // yellow-green — good
+  if (rssi > -100) return '#f0883e';     // orange — fair
+  return '#f85149';                       // red — weak
+}
+
+// Line width: thicker = stronger signal. Range 1.0–4.5
+function rssiToWidth(rssi: number): number {
+  // Map [-110, -40] → [1.0, 4.5]
+  const clamped = Math.max(-110, Math.min(-40, rssi));
+  const norm = (clamped - (-110)) / ((-40) - (-110)); // 0 to 1
+  return 1.0 + norm * 3.5;
+}
 
 // Packet type colors + glow
 const PKT_COLORS: Record<string, { fill: string; glow: string }> = {
@@ -78,9 +99,10 @@ function resolveAddrToNode(addr: string, nodes: Map<string, SimNode>): SimNode |
 
 export function MeshCanvas({
   nodes, radioRange = 150, events = [], ws,
-  deliveryPaths = [], linkActivity, brokenLinks,
+  deliveryPaths = [], linkActivity, brokenLinks, linkQuality,
   selectedNodeId, onNodeClick,
 }: MeshCanvasProps) {
+  const [showRssiLabels, setShowRssiLabels] = useState(false);
   const nodeList = useMemo(() => Array.from(nodes.values()), [nodes]);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ nodeId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -468,7 +490,7 @@ export function MeshCanvas({
     return elements;
   });
 
-  // Get link quality info
+  // Get link quality info — RSSI-aware
   const getLinkStyle = useCallback((fromId: string, toId: string, inRange: boolean) => {
     const key = makeLinkKey(fromId, toId);
 
@@ -483,29 +505,62 @@ export function MeshCanvas({
         strokeDasharray: '6 4',
         opacity: fadeOpacity * 0.8,
         packetCount: 0,
+        rssi: null as number | null,
+        snr: null as number | null,
       };
     }
 
-    // Check traffic
     const activity = linkActivity?.get(key);
-    if (activity && (now - activity.lastActiveAt < RECENT_TRAFFIC_MS)) {
+    const lq = linkQuality?.get(key);
+    const hasRecentTraffic = activity && (now - activity.lastActiveAt < RECENT_TRAFFIC_MS);
+
+    // If we have RSSI data, use it to color and size the link
+    if (lq && hasRecentTraffic) {
+      return {
+        stroke: rssiToColor(lq.rssi),
+        strokeWidth: rssiToWidth(lq.rssi),
+        strokeDasharray: undefined as string | undefined,
+        opacity: 0.9,
+        packetCount: activity.packetCount,
+        rssi: lq.rssi,
+        snr: lq.snr,
+      };
+    }
+
+    // Active traffic but no RSSI yet
+    if (hasRecentTraffic) {
       return {
         stroke: '#3fb950',
         strokeWidth: 2.5,
         strokeDasharray: undefined as string | undefined,
         opacity: 0.9,
-        packetCount: activity.packetCount,
+        packetCount: activity!.packetCount,
+        rssi: null as number | null,
+        snr: null as number | null,
       };
     }
 
-    // In range but no recent traffic
+    // In range but no recent traffic — show faint RSSI-colored line if we have data
     if (inRange) {
+      if (lq) {
+        return {
+          stroke: rssiToColor(lq.rssi),
+          strokeWidth: Math.max(1.0, rssiToWidth(lq.rssi) * 0.5),
+          strokeDasharray: undefined as string | undefined,
+          opacity: 0.25,
+          packetCount: activity?.packetCount ?? 0,
+          rssi: lq.rssi,
+          snr: lq.snr,
+        };
+      }
       return {
         stroke: '#238636',
         strokeWidth: 1.5,
         strokeDasharray: undefined as string | undefined,
         opacity: 0.4,
         packetCount: activity?.packetCount ?? 0,
+        rssi: null as number | null,
+        snr: null as number | null,
       };
     }
 
@@ -516,8 +571,10 @@ export function MeshCanvas({
       strokeDasharray: '4 3',
       opacity: 0.3,
       packetCount: 0,
+      rssi: null as number | null,
+      snr: null as number | null,
     };
-  }, [linkActivity, brokenLinks, now]);
+  }, [linkActivity, brokenLinks, linkQuality, now]);
 
   return (
     <div style={{
@@ -584,13 +641,14 @@ export function MeshCanvas({
 
         {gridLines}
 
-        {/* Link lines with quality indicators */}
+        {/* Link lines with RSSI-quality indicators */}
         {links.map(({ from, to, inRange }, i) => {
           const { sx: x1, sy: y1 } = toScreen(from.x, from.y, transform);
           const { sx: x2, sy: y2 } = toScreen(to.x, to.y, transform);
           const style = getLinkStyle(from.id, to.id, inRange);
           const mx = (x1 + x2) / 2;
           const my = (y1 + y2) / 2;
+          const isRecentlyActive = inRange && (now - (linkActivity?.get(makeLinkKey(from.id, to.id))?.lastActiveAt ?? 0) < RECENT_TRAFFIC_MS);
 
           return (
             <g key={i}>
@@ -601,8 +659,21 @@ export function MeshCanvas({
                 strokeDasharray={style.strokeDasharray}
                 opacity={style.opacity}
               />
-              {/* Packet count label on active links */}
-              {style.packetCount > 0 && inRange && (now - (linkActivity?.get(makeLinkKey(from.id, to.id))?.lastActiveAt ?? 0) < RECENT_TRAFFIC_MS) && (
+              {/* RSSI label at link midpoint (toggle-able) */}
+              {showRssiLabels && style.rssi !== null && inRange && (
+                <text
+                  x={mx} y={my - 5}
+                  textAnchor="middle"
+                  fontSize="8"
+                  fontFamily="monospace"
+                  fill={style.stroke}
+                  opacity={0.85}
+                >
+                  {Math.round(style.rssi)}
+                </text>
+              )}
+              {/* Packet count label on active links (when RSSI labels are off) */}
+              {!showRssiLabels && style.packetCount > 0 && isRecentlyActive && (
                 <text
                   x={mx} y={my - 4}
                   textAnchor="middle"
@@ -739,6 +810,58 @@ export function MeshCanvas({
           </text>
         )}
       </svg>
+
+      {/* RSSI toggle button */}
+      <button
+        onClick={() => setShowRssiLabels(v => !v)}
+        title="Toggle RSSI labels on links"
+        style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          background: showRssiLabels ? '#1f6feb' : '#21262d',
+          border: `1px solid ${showRssiLabels ? '#58a6ff' : '#30363d'}`,
+          borderRadius: '4px',
+          color: showRssiLabels ? '#e6edf3' : '#8b949e',
+          fontSize: '10px',
+          fontFamily: 'monospace',
+          padding: '3px 7px',
+          cursor: 'pointer',
+        }}
+      >
+        dBm {showRssiLabels ? '●' : '○'}
+      </button>
+
+      {/* RSSI legend */}
+      <div style={{
+        position: 'absolute',
+        bottom: 8,
+        left: 8,
+        background: 'rgba(13,17,23,0.85)',
+        border: '1px solid #21262d',
+        borderRadius: '5px',
+        padding: '5px 8px',
+        fontFamily: 'monospace',
+        fontSize: '9px',
+        color: '#8b949e',
+        pointerEvents: 'none',
+      }}>
+        <div style={{ marginBottom: '3px', color: '#6e7681', fontWeight: 600, letterSpacing: '0.05em' }}>
+          RSSI
+        </div>
+        {[
+          { label: '&gt; −70', color: '#00ff88', desc: 'Strong' },
+          { label: '−85', color: '#c8e838', desc: 'Good' },
+          { label: '−100', color: '#f0883e', desc: 'Fair' },
+          { label: '&lt; −100', color: '#f85149', desc: 'Weak' },
+        ].map(({ label, color, desc }) => (
+          <div key={desc} style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+            <div style={{ width: 22, height: 3, background: color, borderRadius: 2, flexShrink: 0 }} />
+            <span style={{ color: '#8b949e' }}>{desc}</span>
+            <span style={{ color: '#484f58', marginLeft: 'auto' }} dangerouslySetInnerHTML={{ __html: label }} />
+          </div>
+        ))}
+      </div>
 
       {/* Right-click context menu */}
       {contextMenu && (

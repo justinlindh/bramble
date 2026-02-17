@@ -1,13 +1,21 @@
-import type { SimNode, NodeStats } from '../types';
+import type { SimNode, NodeStats, NeighborRSSI } from '../types';
 
 interface NodeHealthCardProps {
   node: SimNode | null;
   stats: NodeStats | null;
   neighborCount: number;
   onClose: () => void;
+  neighborRssi?: NeighborRSSI[];  // pre-computed per-neighbor RSSI from linkQuality
 }
 
-export function NodeHealthCard({ node, stats, neighborCount, onClose }: NodeHealthCardProps) {
+function rssiLabel(rssi: number): { text: string; color: string } {
+  if (rssi > -70) return { text: 'Strong', color: '#00ff88' };
+  if (rssi > -85) return { text: 'Good',   color: '#c8e838' };
+  if (rssi > -100) return { text: 'Fair',  color: '#f0883e' };
+  return { text: 'Weak', color: '#f85149' };
+}
+
+export function NodeHealthCard({ node, stats, neighborCount, onClose, neighborRssi }: NodeHealthCardProps) {
   if (!node) return null;
 
   const s = stats ?? {
@@ -93,6 +101,36 @@ export function NodeHealthCard({ node, stats, neighborCount, onClose }: NodeHeal
       </div>
       <Row label="Originated" value={String(s.messagesOriginated)} color="#f0883e" />
       <Row label="Delivered" value={String(s.messagesDelivered)} color="#3fb950" />
+
+      {/* Neighbor Signal Strengths */}
+      {neighborRssi && neighborRssi.length > 0 && (
+        <>
+          <div style={{ borderTop: '1px solid #21262d', margin: '8px 0' }} />
+          <div style={{ fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>
+            Neighbor Signal
+          </div>
+          {neighborRssi.map(n => {
+            const { text, color } = rssiLabel(n.rssi);
+            return (
+              <div key={n.nodeId} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', alignItems: 'center' }}>
+                <span style={{ color: '#8b949e', fontFamily: 'monospace' }}>{n.nodeId}</span>
+                <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <span style={{ color: '#484f58', fontSize: '10px' }}>SNR {Math.round(n.snr)} dB</span>
+                  <span style={{ color, fontWeight: 600, fontSize: '11px' }}>
+                    {Math.round(n.rssi)} dBm
+                  </span>
+                  <span style={{
+                    fontSize: '9px', color, background: `${color}22`,
+                    padding: '1px 4px', borderRadius: '3px',
+                  }}>
+                    {text}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }

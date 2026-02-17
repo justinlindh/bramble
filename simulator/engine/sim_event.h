@@ -24,7 +24,8 @@ typedef enum {
 typedef struct {
     uint32_t src_addr;
     uint32_t dest_addr;
-    int8_t   rssi;          /* RSSI at receiver */
+    int8_t   rssi;          /* RSSI at receiver (dBm) */
+    int8_t   snr;           /* SNR at receiver (dB, typical LoRa range 0-50) */
     uint8_t  data[256];
     uint16_t len;
 } packet_event_data_t;

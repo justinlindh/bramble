@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useCallback } from 'react';
 import type {
   SimState, SimAction, SimNode, Metrics, RawSimEvent, PacketAnimation,
-  NodeStats, DeliveryPathAnimation, DeliveryRecord, BrokenLink,
+  NodeStats, DeliveryPathAnimation, DeliveryRecord, BrokenLink, LinkQuality,
 } from '../types';
 
 const MAX_EVENTS = 100;
@@ -23,6 +23,8 @@ function getOrCreateNodeStats(map: Map<string, NodeStats>, nodeId: string): Node
   return s;
 }
 
+const RSSI_EMA_ALPHA = 0.3; // exponential moving average smoothing factor
+
 const initialState: SimState = {
   connected: false,
   running: false,
@@ -43,6 +45,7 @@ const initialState: SimState = {
   linkActivity: new Map(),
   brokenLinks: new Map(),
   selectedNodeId: null,
+  linkQuality: new Map(),
 };
 
 function simReducer(state: SimState, action: SimAction): SimState {
@@ -260,6 +263,27 @@ function simReducer(state: SimState, action: SimAction): SimState {
       return { ...state, brokenLinks: alive };
     }
 
+    case 'TRACK_LINK_RSSI': {
+      const linkQuality = new Map(state.linkQuality);
+      const key = makeLinkKey(action.from, action.to);
+      const existing = linkQuality.get(key);
+      const newRssi = existing
+        ? existing.rssi * (1 - RSSI_EMA_ALPHA) + action.rssi * RSSI_EMA_ALPHA
+        : action.rssi;
+      const newSnr = existing
+        ? existing.snr * (1 - RSSI_EMA_ALPHA) + action.snr * RSSI_EMA_ALPHA
+        : action.snr;
+      const lq: LinkQuality = {
+        key,
+        rssi: newRssi,
+        snr: newSnr,
+        sampleCount: (existing?.sampleCount ?? 0) + 1,
+        lastUpdatedAt: Date.now(),
+      };
+      linkQuality.set(key, lq);
+      return { ...state, linkQuality };
+    }
+
     default:
       return state;
   }
@@ -403,12 +427,25 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
     }
     case 'packet_received': {
       const node = raw.node as string | undefined;
-      const fromAddr = (raw.from ?? raw.from_addr) as string | undefined;
+      // The C engine uses "src" field; also support legacy "from"/"from_addr"
+      const fromAddr = (raw.src ?? raw.from ?? raw.from_addr) as string | undefined;
+      const rssi = raw.rssi as number | undefined;
+      const snr = raw.snr as number | undefined;
       if (node && fromAddr) {
         actions.push({ type: 'TRACK_PACKET_RECEIVED', node, from: fromAddr });
         const fromId = resolveAddrToId(fromAddr, nodes);
         if (fromId) {
           actions.push({ type: 'TRACK_LINK_ACTIVITY', from: node, to: fromId });
+          // Track RSSI/SNR for link quality visualization
+          if (rssi !== undefined) {
+            actions.push({
+              type: 'TRACK_LINK_RSSI',
+              from: node,
+              to: fromId,
+              rssi,
+              snr: snr ?? 0,
+            });
+          }
         }
       }
       break;
