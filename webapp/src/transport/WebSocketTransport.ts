@@ -8,13 +8,21 @@ interface Pending {
 
 function resolveWsUrl(): string {
   if (typeof location === 'undefined') return 'ws://localhost:3005';
-  const { hostname, protocol } = location;
+  const { hostname, protocol, port } = location;
+  const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
+
+  // When served via Caddy (HTTPS), WebSocket is proxied through /ws path
+  if (protocol === 'https:') {
+    return `${wsProtocol}//${hostname}:${port || '443'}/ws`;
+  }
+
+  // Local dev: direct connection to mock-node
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return 'ws://localhost:3005';
   }
-  // When deployed, mock node is expected on same host, port 3005
-  const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${wsProtocol}//${hostname}:3005`;
+
+  // LAN HTTP: direct to mock-node port
+  return `ws://${hostname}:3005`;
 }
 
 export class WebSocketTransport implements Transport {
