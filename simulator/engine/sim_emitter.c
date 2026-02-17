@@ -36,9 +36,9 @@ void emit_node_moved(FILE *out, uint64_t timestamp_us, const char *node_id, floa
     fflush(out);
 }
 
-void emit_node_joined(FILE *out, uint64_t timestamp_us, const char *node_id, uint32_t addr) {
-    fprintf(out, "{\"type\":\"node_joined\",\"timestamp_us\":%llu,\"node\":\"%s\",\"addr\":\"0x%08X\"}\n",
-            (unsigned long long)timestamp_us, node_id, addr);
+void emit_node_joined(FILE *out, uint64_t timestamp_us, const char *node_id, uint32_t addr, float x, float y) {
+    fprintf(out, "{\"type\":\"node_joined\",\"timestamp_us\":%llu,\"node\":\"%s\",\"addr\":\"0x%08X\",\"x\":%.2f,\"y\":%.2f}\n",
+            (unsigned long long)timestamp_us, node_id, addr, x, y);
     fflush(out);
 }
 

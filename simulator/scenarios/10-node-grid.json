@@ -21,7 +21,7 @@
   },
   "events": [
     {"at_ms": 10000, "type": "kill_node", "node": "E"},
-    {"at_ms": 20000, "type": "interference", "center_x": 100, "center_y": 100, "radius": 80, "duration_ms": 5000},
+    {"at_ms": 20000, "type": "interference", "x": 100, "y": 100, "radius": 80, "duration_ms": 5000},
     {"at_ms": 30000, "type": "move_node", "node": "J", "x": 100, "y": 150}
   ]
 }

@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIST = path.resolve(__dirname, '../ui/dist');
 const ENGINE_BIN = path.resolve(__dirname, '../engine/bramble-sim');
 const SCENARIOS_DIR = path.resolve(__dirname, '../scenarios');
-const DEFAULT_SCENARIO = path.resolve(SCENARIOS_DIR, 'test-2-node.json');
+const DEFAULT_SCENARIO = path.resolve(SCENARIOS_DIR, '10-node-grid.json');
 const PORT = 3000;
 
 // MIME types for static file serving
