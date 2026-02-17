@@ -1,31 +1,27 @@
-# Stage 1: Build C simulator
-FROM debian:bookworm-slim AS builder-c
-RUN apt-get update && apt-get install -y gcc make && rm -rf /var/lib/apt/lists/*
-WORKDIR /build
-COPY components/ ./components/
-COPY test/stubs/ ./test/stubs/
-COPY simulator/engine/ ./simulator/engine/
-RUN cd simulator/engine && make clean && make
-
-# Stage 2: Build React UI
-FROM node:22-slim AS builder-ui
-WORKDIR /build
-COPY simulator/ui/package*.json ./
+# Stage 1: Build React UI
+FROM node:22-slim AS ui-build
+WORKDIR /app/simulator/ui
+COPY simulator/ui/package*.json .
 RUN npm ci
-COPY simulator/ui/ ./
+COPY simulator/ui/ .
 RUN npm run build
 
-# Stage 3: Runtime
-FROM node:22-slim
+# Stage 2: Build Go server (with embedded C via cgo)
+FROM golang:1.25-bookworm AS go-build
+RUN apt-get update && apt-get install -y gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY simulator/server/package*.json ./server/
-RUN cd server && npm ci --production
-COPY simulator/server/ ./server/
-COPY --from=builder-c /build/simulator/engine/bramble-sim ./engine/bramble-sim
-COPY --from=builder-ui /build/dist ./ui/dist
-COPY simulator/scenarios/ ./scenarios/
+COPY components/ components/
+COPY test/stubs/ test/stubs/
+COPY simulator/engine/ simulator/engine/
+COPY simulator/gosim/ simulator/gosim/
+WORKDIR /app/simulator/gosim
+RUN CGO_ENABLED=1 go build -o /bramble-gosim .
 
+# Stage 3: Runtime (minimal)
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=go-build /bramble-gosim /usr/local/bin/bramble-gosim
+COPY --from=ui-build /app/simulator/ui/dist /ui
+COPY simulator/scenarios /scenarios
 EXPOSE 3000
-WORKDIR /app/server
-ENV NODE_OPTIONS="--max-old-space-size=512"
-CMD ["npx", "tsx", "relay.ts"]
+CMD ["bramble-gosim", "--ui", "/ui", "--scenarios", "/scenarios"]
