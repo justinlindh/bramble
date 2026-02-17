@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
+#include "../../components/reliability/include/reliability.h"
+#include "../../components/dedup/include/dedup.h"
 
 #define MAX_NODES 256
 #define NODE_ID_LEN 16
@@ -48,6 +50,13 @@ typedef struct {
     reverse_route_table_t reverse_routes;
     rreq_dedup_t rreq_dedup;
     pending_discovery_table_t pending_discoveries;
+
+    /* Reliability state */
+    pending_ack_table_t pending_acks;
+    flow_control_t flow_control;
+
+    /* Dedup state */
+    dedup_buffer_t dedup;
 
     /* Per-node tick state */
     uint32_t tick_seq;

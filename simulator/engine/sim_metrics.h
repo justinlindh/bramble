@@ -10,6 +10,9 @@ typedef struct {
     uint64_t dropped_packets;
     uint64_t total_latency_us;
     uint64_t latency_count;
+    uint64_t messages_retried;          /* ACK retransmissions triggered */
+    uint64_t messages_delivered_retry;  /* delivered after ≥1 retransmit */
+    uint64_t dedup_dropped;            /* packets dropped as duplicates */
     int active_nodes;
 } metrics_state_t;
 

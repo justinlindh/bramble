@@ -107,17 +107,28 @@ void bridge_msg_track_init(msg_tracker_t *track, int count) {
 }
 
 int bridge_msg_track_add(msg_tracker_t *track, int count,
-                          uint32_t packet_id, uint32_t dest_addr, uint64_t sent_us) {
+                          uint32_t packet_id, uint32_t src_addr, uint32_t dest_addr, uint64_t sent_us) {
     for (int i = 0; i < count; i++) {
         if (!track[i].active) {
             track[i].active = true;
             track[i].packet_id = packet_id;
+            track[i].src_addr = src_addr;
             track[i].dest_addr = dest_addr;
             track[i].sent_us = sent_us;
+            track[i].attempt = 1;
             return i;
         }
     }
     return -1;
+}
+
+uint32_t bridge_msg_track_find_src(msg_tracker_t *track, int count, uint32_t packet_id) {
+    for (int i = 0; i < count; i++) {
+        if (track[i].active && track[i].packet_id == packet_id) {
+            return track[i].src_addr;
+        }
+    }
+    return 0;
 }
 
 bool bridge_msg_track_complete(msg_tracker_t *track, int count,
@@ -265,6 +276,74 @@ static void _handle_rerr(sim_node_t *rx, const uint8_t *buf, uint16_t len,
     emit_link_broken(stdout, now_us, rx->id, rerr.broken_next_hop);
 }
 
+static void _handle_delivery_receipt(sim_node_t *rx, const uint8_t *buf, uint16_t len,
+                                      uint64_t now_us, uint32_t now_ms,
+                                      node_array_t *nodes, radio_config_t *radio,
+                                      pcg32_state_t *rng, event_queue_t *events,
+                                      metrics_state_t *metrics, node_anomaly_tracker_t *anomaly,
+                                      msg_tracker_t *msg_track, int msg_track_count) {
+    bramble_delivery_receipt_t receipt;
+    if (bramble_delivery_receipt_deserialize(&receipt, buf, len) != ESP_OK) return;
+
+    if (receipt.header.dest_addr == rx->addr) {
+        /* This receipt is for us — the original sender */
+        bool was_tracked = bridge_msg_track_complete(msg_track, msg_track_count,
+                                                      receipt.orig_packet_id, now_us, metrics);
+        if (was_tracked) {
+            /* Check if this was a retried message */
+            pending_ack_t *pa = NULL;
+            for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+                if (rx->pending_acks.entries[i].active &&
+                    rx->pending_acks.entries[i].packet_id == receipt.orig_packet_id) {
+                    pa = &rx->pending_acks.entries[i];
+                    break;
+                }
+            }
+            if (pa && pa->attempt > 1) {
+                metrics->messages_delivered_retry++;
+            }
+            pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
+            flow_on_ack(&rx->flow_control, receipt.src_addr);
+        }
+
+        /* Emit delivered with path */
+        fprintf(stdout,
+            "{\"type\":\"message_delivered\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"packet_id\":\"0x%08X\""
+            ",\"from\":\"0x%08X\",\"hops\":%d,\"path\":[",
+            (unsigned long long)now_us, rx->id, receipt.orig_packet_id,
+            receipt.src_addr, receipt.hop_count);
+        for (int i = 0; i < receipt.hop_count && i < DELIVERY_RECEIPT_MAX_HOPS; i++) {
+            if (i > 0) fprintf(stdout, ",");
+            fprintf(stdout, "\"0x%08X\"", receipt.relay_path[i]);
+        }
+        fprintf(stdout, "]}\n");
+        fflush(stdout);
+        return;
+    }
+
+    /* Forward the receipt toward its destination */
+    uint8_t hop_limit = receipt.header.hop_limit;
+    forward_result_t fwd_res =
+        forward_data(&rx->routes, receipt.header.dest_addr, &hop_limit, now_ms);
+    if (!fwd_res.should_send) return;
+
+    uint8_t fwd_buf[256];
+    memcpy(fwd_buf, buf, len);
+    fwd_buf[3] = hop_limit; /* update hop_limit */
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    memcpy(pkt.data, fwd_buf, len);
+    pkt.len = len;
+    pkt.is_broadcast = false;
+    pkt.dest_addr = fwd_res.next_hop;
+    pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
+    rx->packets_forwarded++;
+
+    sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+}
+
 static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
                            uint64_t now_us, uint32_t now_ms,
                            node_array_t *nodes, radio_config_t *radio,
@@ -281,14 +360,56 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
                        hdr.packet_id, now_us, stdout, rx->id);
 
     if (hdr.dest_addr == rx->addr) {
+        /* Message reached destination — send delivery receipt back to source */
+        uint32_t orig_sender = bridge_msg_track_find_src(msg_track, msg_track_count,
+                                                          hdr.packet_id);
+
+        /* Record delivery immediately (don't wait for receipt to arrive at source) */
         bridge_msg_track_complete(msg_track, msg_track_count,
                                    hdr.packet_id, now_us, metrics);
+
+        anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
+
+        if (orig_sender != 0) {
+            /* Build and send delivery receipt */
+            bramble_delivery_receipt_t receipt;
+            memset(&receipt, 0, sizeof(receipt));
+            receipt.header.version = BRAMBLE_VERSION;
+            receipt.header.type = PKT_TYPE_DELIVERY_RECEIPT;
+            receipt.header.flags = 0;
+            receipt.header.hop_limit = 32;
+            receipt.header.dest_addr = orig_sender;
+            receipt.header.packet_id = pcg32_random(rng);
+            receipt.src_addr = rx->addr;
+            receipt.orig_packet_id = hdr.packet_id;
+            receipt.hop_count = 0; /* TODO: accumulate relay path in forwarding */
+
+            uint8_t receipt_buf[DELIVERY_RECEIPT_MAX_SIZE];
+            if (bramble_delivery_receipt_serialize(&receipt, receipt_buf, sizeof(receipt_buf)) == ESP_OK) {
+                /* Route receipt back to sender */
+                uint8_t rcpt_hop = 32;
+                forward_result_t fwd_res =
+                    forward_data(&rx->routes, orig_sender, &rcpt_hop, now_ms);
+                if (fwd_res.should_send) {
+                    outbound_packet_t pkt;
+                    memset(&pkt, 0, sizeof(pkt));
+                    memcpy(pkt.data, receipt_buf, DELIVERY_RECEIPT_MIN_SIZE);
+                    pkt.len = DELIVERY_RECEIPT_MIN_SIZE;
+                    pkt.is_broadcast = false;
+                    pkt.dest_addr = fwd_res.next_hop;
+                    pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
+
+                    sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+                }
+            }
+        }
+
+        /* Emit delivered event (receipt will update with path info when it arrives at source) */
         fprintf(stdout,
             "{\"type\":\"message_delivered\",\"timestamp_us\":%llu"
             ",\"node\":\"%s\",\"packet_id\":\"0x%08X\"}\n",
             (unsigned long long)now_us, rx->id, hdr.packet_id);
         fflush(stdout);
-        anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
         return;
     }
 
@@ -356,6 +477,18 @@ void bridge_handle_receive_packet(
     bramble_header_t hdr;
     if (bramble_header_deserialize(&hdr, buf, len) != ESP_OK) return;
 
+    /* Dedup check — only for broadcast packets (RREQ flood prevention).
+     * Unicast packets (DATA, RREP, DELIVERY_RECEIPT) are forwarded hop-by-hop
+     * with the same packet_id, so dedup would incorrectly drop them at relays. */
+    if (hdr.type == PKT_TYPE_RREQ) {
+        /* RREQs have their own rreq_dedup in _handle_rreq, but we also
+         * check the general dedup to catch other broadcast floods */
+        if (dedup_check_and_add(&rx->dedup, hdr.packet_id, now_ms)) {
+            metrics->dedup_dropped++;
+            return; /* duplicate */
+        }
+    }
+
     emit_packet_received_typed(stdout, event->timestamp_us, rx->id,
                                event->data.packet.src_addr,
                                rssi, len, hdr.type);
@@ -382,6 +515,11 @@ void bridge_handle_receive_packet(
             _handle_data(rx, buf, len, event->timestamp_us, now_ms,
                          nodes, radio, rng, events, metrics, anomaly,
                          msg_track, msg_track_count);
+            break;
+        case PKT_TYPE_DELIVERY_RECEIPT:
+            _handle_delivery_receipt(rx, buf, len, event->timestamp_us, now_ms,
+                                     nodes, radio, rng, events, metrics, anomaly,
+                                     msg_track, msg_track_count);
             break;
         default:
             break;
@@ -497,7 +635,7 @@ void bridge_handle_generate_message(
     bramble_header_serialize(&hdr, data_buf, HEADER_SIZE);
 
     bridge_msg_track_add(msg_track, msg_track_count,
-                          hdr.packet_id, dest_addr, event->timestamp_us);
+                          hdr.packet_id, src->addr, dest_addr, event->timestamp_us);
 
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
