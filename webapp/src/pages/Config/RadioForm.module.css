@@ -1,0 +1,100 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.fieldLabel {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  min-width: 150px;
+  flex-shrink: 0;
+}
+
+.input {
+  width: 120px;
+}
+
+.select {
+  width: 120px;
+}
+
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 160px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--accent-blue);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.slider:focus {
+  outline: 2px solid var(--accent-blue);
+}
+
+.sliderValue {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text);
+  min-width: 50px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.saveBtn {
+  padding: 0.4rem 1rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saveBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.savedMsg {
+  font-size: 0.8rem;
+  color: #3fb950;
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--danger);
+  flex: 1;
+}

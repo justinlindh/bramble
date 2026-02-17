@@ -1,0 +1,138 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.channelRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.idx {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  color: var(--text-muted);
+  min-width: 30px;
+}
+
+.chName {
+  flex: 1;
+  font-weight: 500;
+}
+
+.badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.badgeDefault {
+  background: #238636aa;
+  color: #3fb950;
+  border: 1px solid #238636;
+}
+
+.badgePsk {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.epoch {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.rowActions {
+  display: flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.setDefaultBtn {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.setDefaultBtn:hover {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+
+.removeBtn {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.removeBtn:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.addForm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.addInput {
+  width: 130px;
+}
+
+.pskInput {
+  width: 140px;
+}
+
+.addBtn {
+  padding: 0.35rem 0.75rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.addBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.addBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--danger);
+  width: 100%;
+}
