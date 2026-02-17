@@ -61,6 +61,9 @@ void node_activate(sim_node_t *node) {
     reverse_route_init(&node->reverse_routes);
     rreq_dedup_init(&node->rreq_dedup);
     discovery_init(&node->pending_discoveries);
+    pending_ack_init(&node->pending_acks);
+    flow_init(&node->flow_control);
+    dedup_init(&node->dedup);
     node->packets_forwarded = 0;
 }
 
@@ -152,4 +155,10 @@ void node_tick(sim_node_t *node, uint64_t now_us, node_tick_result_t *result) {
             }
         }
     }
+
+    /* 5. Pending ACK tick — retransmit or expire */
+    pending_ack_tick(&node->pending_acks, now_ms);
+
+    /* 6. Dedup purge */
+    dedup_purge(&node->dedup, now_ms);
 }

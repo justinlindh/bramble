@@ -43,14 +43,16 @@ sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index);
 
 typedef struct {
     uint32_t packet_id;
+    uint32_t src_addr;
     uint32_t dest_addr;
     uint64_t sent_us;
+    uint8_t  attempt;      /* retransmission count */
     bool     active;
 } msg_tracker_t;
 
 void bridge_msg_track_init(msg_tracker_t *track, int count);
 int  bridge_msg_track_add(msg_tracker_t *track, int count,
-                           uint32_t packet_id, uint32_t dest_addr, uint64_t sent_us);
+                           uint32_t packet_id, uint32_t src_addr, uint32_t dest_addr, uint64_t sent_us);
 bool bridge_msg_track_complete(msg_tracker_t *track, int count,
                                 uint32_t packet_id, uint64_t now_us,
                                 metrics_state_t *metrics);

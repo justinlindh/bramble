@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include
+#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include
 #cgo LDFLAGS: -lm
 #include <stdlib.h>
 #include "bridge.h"
