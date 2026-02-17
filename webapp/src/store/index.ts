@@ -31,6 +31,8 @@ interface Actions {
   addMessage: (msg: Message) => void;
   updateMessageStatus: (id: string, status: DeliveryStatus, relayPath?: RelayHop[]) => void;
   setActiveConversation: (id: string) => void;
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -46,6 +48,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   messages: [],
   conversations: new Map(),
   activeConversationId: 'broadcast',
+  activeTab: 'chat',
 
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
@@ -110,6 +113,8 @@ export const useStore = create<AppState & Actions>((set) => ({
           : m
       ),
     })),
+
+  setActiveTab: (tab: string) => set({ activeTab: tab }),
 
   setActiveConversation: (id: string) =>
     set(state => {

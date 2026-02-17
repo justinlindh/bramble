@@ -183,4 +183,5 @@ export interface AppState {
   messages: Message[];
   conversations: Map<string, Conversation>;
   activeConversationId: string;
+  activeTab: string;
 }

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useStore } from './store/index';
 import { disconnect } from './store/actions';
@@ -33,7 +32,8 @@ function TabContent({ activeTab }: { activeTab: Tab }) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('chat');
+  const activeTab = useStore(s => s.activeTab) as Tab;
+  const setActiveTab = useStore(s => s.setActiveTab);
   const connectionState = useStore(s => s.connectionState);
   const isConnected = connectionState === 'connected';
 
