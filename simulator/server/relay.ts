@@ -36,16 +36,18 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boole
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
     const ext = path.extname(filePath);
     const mime = MIME[ext] ?? 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': mime });
-    fs.createReadStream(filePath).pipe(res);
+    const content = fs.readFileSync(filePath);
+    res.writeHead(200, { 'Content-Type': mime, 'Content-Length': content.length });
+    res.end(content);
     return true;
   }
 
   // SPA fallback: serve index.html for any unmatched route
   const indexPath = path.join(UI_DIST, 'index.html');
   if (fs.existsSync(indexPath)) {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    fs.createReadStream(indexPath).pipe(res);
+    const content = fs.readFileSync(indexPath);
+    res.writeHead(200, { 'Content-Type': 'text/html', 'Content-Length': content.length });
+    res.end(content);
     return true;
   }
 
