@@ -1,7 +1,7 @@
 {
   "name": "ideal-massive",
   "mode": "deterministic",
-  "duration_ms": 975000,
+  "duration_ms": 948000,
   "nodes": [
     {
       "id": "N0",
@@ -761,385 +761,385 @@
   },
   "events": [
     {
-      "at_ms": 35000,
+      "at_ms": 8000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 45000,
+      "at_ms": 18000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 55000,
+      "at_ms": 28000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 65000,
+      "at_ms": 38000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 75000,
+      "at_ms": 48000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 85000,
+      "at_ms": 58000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 95000,
+      "at_ms": 68000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 105000,
+      "at_ms": 78000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 145000,
+      "at_ms": 118000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 155000,
+      "at_ms": 128000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 165000,
+      "at_ms": 138000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 175000,
+      "at_ms": 148000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 185000,
+      "at_ms": 158000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 195000,
+      "at_ms": 168000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 205000,
+      "at_ms": 178000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 215000,
+      "at_ms": 188000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 255000,
+      "at_ms": 228000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 265000,
+      "at_ms": 238000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 275000,
+      "at_ms": 248000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 285000,
+      "at_ms": 258000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 295000,
+      "at_ms": 268000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 305000,
+      "at_ms": 278000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 315000,
+      "at_ms": 288000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 325000,
+      "at_ms": 298000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 365000,
+      "at_ms": 338000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 375000,
+      "at_ms": 348000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 385000,
+      "at_ms": 358000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 395000,
+      "at_ms": 368000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 405000,
+      "at_ms": 378000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 415000,
+      "at_ms": 388000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 425000,
+      "at_ms": 398000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 435000,
+      "at_ms": 408000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 475000,
+      "at_ms": 448000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 485000,
+      "at_ms": 458000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 495000,
+      "at_ms": 468000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 505000,
+      "at_ms": 478000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 515000,
+      "at_ms": 488000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 525000,
+      "at_ms": 498000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 535000,
+      "at_ms": 508000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 545000,
+      "at_ms": 518000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 585000,
+      "at_ms": 558000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 595000,
+      "at_ms": 568000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 605000,
+      "at_ms": 578000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 615000,
+      "at_ms": 588000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 625000,
+      "at_ms": 598000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 635000,
+      "at_ms": 608000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 645000,
+      "at_ms": 618000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 655000,
+      "at_ms": 628000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 695000,
+      "at_ms": 668000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 705000,
+      "at_ms": 678000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 715000,
+      "at_ms": 688000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 725000,
+      "at_ms": 698000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 735000,
+      "at_ms": 708000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 745000,
+      "at_ms": 718000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 755000,
+      "at_ms": 728000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 765000,
+      "at_ms": 738000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"
     },
     {
-      "at_ms": 805000,
+      "at_ms": 778000,
       "type": "send_message",
       "src": "N0",
       "dest": "N149"
     },
     {
-      "at_ms": 815000,
+      "at_ms": 788000,
       "type": "send_message",
       "src": "N14",
       "dest": "N135"
     },
     {
-      "at_ms": 825000,
+      "at_ms": 798000,
       "type": "send_message",
       "src": "N135",
       "dest": "N14"
     },
     {
-      "at_ms": 835000,
+      "at_ms": 808000,
       "type": "send_message",
       "src": "N149",
       "dest": "N0"
     },
     {
-      "at_ms": 845000,
+      "at_ms": 818000,
       "type": "send_message",
       "src": "N7",
       "dest": "N142"
     },
     {
-      "at_ms": 855000,
+      "at_ms": 828000,
       "type": "send_message",
       "src": "N142",
       "dest": "N7"
     },
     {
-      "at_ms": 865000,
+      "at_ms": 838000,
       "type": "send_message",
       "src": "N75",
       "dest": "N89"
     },
     {
-      "at_ms": 875000,
+      "at_ms": 848000,
       "type": "send_message",
       "src": "N89",
       "dest": "N75"

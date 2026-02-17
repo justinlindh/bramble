@@ -47,13 +47,13 @@ export function EventLog({ events }: EventLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new events arrive
+  // Auto-scroll to bottom when new events arrive (container only, not viewport)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 60;
     if (isNearBottom) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      container.scrollTop = container.scrollHeight;
     }
   }, [events]);
 
