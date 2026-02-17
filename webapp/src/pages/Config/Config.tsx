@@ -4,13 +4,20 @@ import { RadioForm } from './RadioForm';
 import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
 import { LocationSection } from './LocationSection';
-import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation } from '../../components/Icons';
+import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning } from '../../components/Icons';
+import { messageDb } from '../../store/messageDb';
 import styles from './Config.module.css';
 
 export function Config() {
   const config = useStore((s) => s.config);
   const neighbors = useStore((s) => s.neighbors);
   const routes = useStore((s) => s.routes);
+
+  const handleClearHistory = async () => {
+    if (!window.confirm('Clear all cached messages from this browser? This cannot be undone.')) return;
+    await messageDb.clearAll();
+    useStore.setState({ messages: [], conversations: new Map() });
+  };
 
   if (!config) {
     return (
@@ -50,6 +57,13 @@ export function Config() {
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
         <LocationSection location={config.location} neighbors={neighbors} />
+      </section>
+
+      {/* ── Data ── */}
+      <section className={styles.section}>
+        <h2><IconWarning size={18} /> Data</h2>
+        <button onClick={handleClearHistory}>Clear Message History</button>
+        <p className={styles.hint}>Removes all cached messages from this browser. Does not affect the node.</p>
       </section>
     </div>
   );
