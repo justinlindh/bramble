@@ -125,6 +125,48 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
         </div>
       )}
 
+      {/* ── Options row (tier, location, counter) ── */}
+      <div className={styles.controls}>
+        {!isBroadcastConv && (
+          <div className={styles.tierSelector} role="group" aria-label="Message priority">
+            {TIER_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                className={[
+                  styles.tierBtn,
+                  tier === opt.value ? styles.tierActive : '',
+                  opt.value === 'critical' && tier === opt.value ? styles.tierCriticalActive : '',
+                ].join(' ')}
+                onClick={() => setTier(opt.value)}
+                disabled={!isConnected}
+                title={opt.title}
+                aria-pressed={tier === opt.value}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {isBroadcastConv && (
+          <span className={styles.broadcastTag} title="Messages here go to all nodes in range">
+            <IconBroadcast size={14} /> Broadcast
+          </span>
+        )}
+
+        {!isBroadcastConv && gpsEnabled && (
+          <ShareLocationToggle value={locAttach} onChange={setLocAttach} />
+        )}
+
+        {bytes > 0 && (
+          <div className={`${styles.counter} ${pkt.cls}`}>
+            <span>{bytes}/{MAX_BYTES}</span>
+            {pkt.label && <span className={styles.packetLabel}>{pkt.label}</span>}
+          </div>
+        )}
+      </div>
+
+      {/* ── Input row (textarea + send button) ── */}
       <div className={styles.row}>
         <textarea
           ref={inputRef}
@@ -138,57 +180,16 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
           aria-label="Message input"
         />
 
-        {bytes > 0 && (
-          <div className={`${styles.counter} ${pkt.cls}`}>
-            <span>{bytes}/{MAX_BYTES}</span>
-            {pkt.label && <span className={styles.packetLabel}>{pkt.label}</span>}
-          </div>
-        )}
-
-        <div className={styles.controls}>
-          {/* Tier selector — hidden for broadcast conv (fixed to broadcast tier) */}
-          {!isBroadcastConv && (
-            <div className={styles.tierSelector} role="group" aria-label="Message priority">
-              {TIER_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  className={[
-                    styles.tierBtn,
-                    tier === opt.value ? styles.tierActive : '',
-                    opt.value === 'critical' && tier === opt.value ? styles.tierCriticalActive : '',
-                  ].join(' ')}
-                  onClick={() => setTier(opt.value)}
-                  disabled={!isConnected}
-                  title={opt.title}
-                  aria-pressed={tier === opt.value}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {isBroadcastConv && (
-            <span className={styles.broadcastTag} title="Messages here go to all nodes in range">
-              <IconBroadcast size={14} /> Broadcast
-            </span>
-          )}
-
-          {!isBroadcastConv && gpsEnabled && (
-            <ShareLocationToggle value={locAttach} onChange={setLocAttach} />
-          )}
-
-          <button
-            className={styles.sendBtn}
-            onClick={handleSend}
-            onMouseDown={(e) => e.preventDefault()}
-            disabled={!canSend}
-            aria-label="Send message"
-            title="Send (Enter)"
-          >
-            {sending ? '…' : <IconSend size={16} />}
-          </button>
-        </div>
+        <button
+          className={styles.sendBtn}
+          onClick={handleSend}
+          onMouseDown={(e) => e.preventDefault()}
+          disabled={!canSend}
+          aria-label="Send message"
+          title="Send (Enter)"
+        >
+          {sending ? '…' : <IconSend size={16} />}
+        </button>
       </div>
     </div>
   );

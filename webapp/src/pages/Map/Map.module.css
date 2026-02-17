@@ -50,3 +50,41 @@
 .dotBlue { background: #4a90d9; }
 .dotGreen { background: #4caf50; }
 .dotYellow { background: #ffc107; }
+
+.routeToggle {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid var(--border, #333);
+  background: var(--surface-2, #222);
+  color: var(--text-muted, #888);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.routeToggle:hover {
+  background: var(--surface, #2a2a3e);
+  color: var(--text, #eee);
+}
+
+.routeToggleActive {
+  background: #3fb95022;
+  border-color: #3fb950;
+  color: #3fb950;
+}
+
+/* Leaflet tooltip override for route details */
+:global(.leaflet-tooltip).routeTooltip {
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #eee;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  border-radius: 4px;
+  padding: 4px 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}

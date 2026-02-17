@@ -313,6 +313,12 @@ export function openDM(addr: number): void {
   store.setActiveTab('chat');
 }
 
+export function showOnMap(addr: number): void {
+  const store = useStore.getState();
+  store.setMapFocusAddr(addr);
+  store.setActiveTab('map');
+}
+
 // ─── Probe / Network Reach ────────────────────────────────────────────────
 
 export async function sendProbe(): Promise<void> {

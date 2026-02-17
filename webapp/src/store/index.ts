@@ -38,6 +38,7 @@ interface Actions {
   setProbeResult: (r: ProbeResult | null) => void;
   setProbeCollecting: (c: boolean) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
+  setMapFocusAddr: (addr: number | null) => void;
   loadCachedMessages: (msgs: Message[]) => void;
 }
 
@@ -58,6 +59,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   probeResult: null,
   probeCollecting: false,
   peerLocations: [],
+  mapFocusAddr: null,
 
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
@@ -131,6 +133,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   setProbeCollecting: (c) => set({ probeCollecting: c }),
 
   setPeerLocations: (locs) => set({ peerLocations: locs }),
+  setMapFocusAddr: (addr) => set({ mapFocusAddr: addr }),
 
   loadCachedMessages: (msgs: Message[]) =>
     set(state => {
