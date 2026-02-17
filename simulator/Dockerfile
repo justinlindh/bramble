@@ -8,7 +8,7 @@ RUN npm run build
 
 # Stage 2: Build Go server (with embedded C via cgo)
 FROM golang:1.25-bookworm AS go-build
-RUN apt-get update && apt-get install -y gcc libc6-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y gcc libc6-dev libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY components/ components/
 COPY test/stubs/ test/stubs/
@@ -19,7 +19,7 @@ RUN CGO_ENABLED=1 go build -o /bramble-gosim .
 
 # Stage 3: Runtime (minimal)
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 COPY --from=go-build /bramble-gosim /usr/local/bin/bramble-gosim
 COPY --from=ui-build /app/simulator/ui/dist /ui
 COPY simulator/scenarios /scenarios

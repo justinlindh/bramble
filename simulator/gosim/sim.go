@@ -111,6 +111,9 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		headless:    headless,
 	}
 
+	// Initialize bridge-level state
+	C.bridge_init()
+
 	// Create pipe to capture C stdout output
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -298,6 +301,9 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 			&s.nodes, &s.radio, &s.rng, &s.events, &s.metrics, C.uint64_t(ts))
 	}
 
+	// Check for retransmissions (Phase 1)
+	C.bridge_handle_retransmit(node, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics, C.uint64_t(ts))
+
 	// Reschedule next tick (1 second later)
 	nextTick := C.bridge_make_tick_event(C.uint64_t(ts+1000000), &tickData.node_id[0], tickData.tick_seq+1)
 	eventQueuePush(&s.events, &nextTick)
@@ -408,6 +414,13 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 		"retried":            uint64(s.metrics.messages_retried),
 		"delivered_on_retry": uint64(s.metrics.messages_delivered_retry),
 		"dedup_dropped":      uint64(s.metrics.dedup_dropped),
+		"airtime_deferred":   uint64(s.metrics.airtime_deferred),
+		"fragments_sent":     uint64(s.metrics.fragments_sent),
+		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
+		"reassembly_timeout": uint64(s.metrics.reassembly_timeout),
+		"crypto_encrypted":   uint64(s.metrics.crypto_encrypted),
+		"crypto_decrypted":   uint64(s.metrics.crypto_decrypted),
+		"crypto_auth_failed": uint64(s.metrics.crypto_auth_failed),
 		"avg_latency_ms": metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":  metricsDeliveryRate(&s.metrics),
 	})
@@ -679,6 +692,13 @@ func (s *Sim) complete() {
 		"retried":            uint64(s.metrics.messages_retried),
 		"delivered_on_retry": uint64(s.metrics.messages_delivered_retry),
 		"dedup_dropped":      uint64(s.metrics.dedup_dropped),
+		"airtime_deferred":   uint64(s.metrics.airtime_deferred),
+		"fragments_sent":     uint64(s.metrics.fragments_sent),
+		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
+		"reassembly_timeout": uint64(s.metrics.reassembly_timeout),
+		"crypto_encrypted":   uint64(s.metrics.crypto_encrypted),
+		"crypto_decrypted":   uint64(s.metrics.crypto_decrypted),
+		"crypto_auth_failed": uint64(s.metrics.crypto_auth_failed),
 		"avg_latency_ms": metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":  metricsDeliveryRate(&s.metrics),
 	})

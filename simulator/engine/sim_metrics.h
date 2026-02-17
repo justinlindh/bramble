@@ -13,6 +13,13 @@ typedef struct {
     uint64_t messages_retried;          /* ACK retransmissions triggered */
     uint64_t messages_delivered_retry;  /* delivered after ≥1 retransmit */
     uint64_t dedup_dropped;            /* packets dropped as duplicates */
+    uint64_t airtime_deferred;         /* packets deferred due to airtime budget */
+    uint64_t fragments_sent;           /* fragment packets sent */
+    uint64_t fragments_reassembled;    /* messages fully reassembled */
+    uint64_t reassembly_timeout;       /* reassemblies that timed out */
+    uint64_t crypto_encrypted;         /* packets encrypted */
+    uint64_t crypto_decrypted;         /* packets decrypted */
+    uint64_t crypto_auth_failed;       /* packets with auth failure */
     int active_nodes;
 } metrics_state_t;
 

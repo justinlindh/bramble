@@ -89,4 +89,23 @@ void bridge_handle_generate_message(
     msg_tracker_t *msg_track,
     int msg_track_count);
 
+/*
+ * bridge_handle_retransmit:
+ *   Checks pending_acks for entries needing retransmission and re-broadcasts.
+ */
+void bridge_handle_retransmit(
+    sim_node_t *node,
+    node_array_t *nodes,
+    radio_config_t *radio,
+    pcg32_state_t *rng,
+    event_queue_t *events,
+    metrics_state_t *metrics,
+    uint64_t now_us);
+
+/*
+ * bridge_init:
+ *   Initialize bridge-level state (relay path tracker, etc.)
+ */
+void bridge_init(void);
+
 #endif /* BRIDGE_H */

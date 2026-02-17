@@ -7,6 +7,9 @@
 #include "../../components/routing/include/discovery.h"
 #include "../../components/reliability/include/reliability.h"
 #include "../../components/dedup/include/dedup.h"
+#include "../../components/airtime/include/airtime_budget.h"
+#include "../../components/fragment/include/fragment.h"
+#include "../../components/crypto/include/crypto.h"
 
 #define MAX_NODES 256
 #define NODE_ID_LEN 16
@@ -57,6 +60,16 @@ typedef struct {
 
     /* Dedup state */
     dedup_buffer_t dedup;
+
+    /* Airtime budget */
+    airtime_budget_t airtime;
+
+    /* Fragment reassembly */
+    reassembly_ctx_t reassembly;
+
+    /* Crypto identity */
+    bramble_identity_t identity;
+    uint32_t crypto_counter;  /* nonce counter for encryption */
 
     /* Per-node tick state */
     uint32_t tick_seq;

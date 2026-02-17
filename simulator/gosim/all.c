@@ -24,3 +24,6 @@
 #include "../../components/packet/packet.c"
 #include "../../components/reliability/reliability.c"
 #include "../../components/dedup/dedup.c"
+#include "../../components/airtime/airtime_budget.c"
+#include "../../components/fragment/fragment.c"
+#include "../../components/crypto/crypto_host.c"
