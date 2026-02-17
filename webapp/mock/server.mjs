@@ -506,7 +506,7 @@ function scheduleIncoming() {
         'Mesh stable. 4 neighbors visible.',
       ];
       const text = texts[Math.floor(Math.random() * texts.length)];
-      const tiers = ['normal', 'normal', 'normal', 'broadcast', 'critical'];
+      const tiers = ['normal', 'normal', 'normal', 'normal', 'critical'];
       const tier = tiers[Math.floor(Math.random() * tiers.length)];
       const msgId = `mock-${++msgIdCounter}-${Date.now()}`;
 

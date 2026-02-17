@@ -65,7 +65,7 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
         {message.tier === 'critical' && (
           <span className={styles.tierTag} title="Critical priority"><IconCritical size={14} /></span>
         )}
-        {message.tier === 'broadcast' && (
+        {message.to === 0xFFFFFFFF && (
           <span className={styles.tierTag} title="Broadcast"><IconBroadcast size={14} /></span>
         )}
       </div>
