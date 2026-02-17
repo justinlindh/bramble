@@ -33,7 +33,7 @@ export default function App() {
 
       <main className="app-main">
         <div className="app-canvas">
-          <MeshCanvas nodes={state.nodes} radioRange={150} events={state.events} />
+          <MeshCanvas nodes={state.nodes} radioRange={150} events={state.events} ws={ws.current} />
         </div>
         <aside className="app-sidebar">
           <MetricsDashboard metrics={state.metrics} />
