@@ -31,6 +31,7 @@
 #define PKT_TYPE_MAILBOX_QUERY    0x0E
 #define PKT_TYPE_EMERGENCY        0x0F
 #define PKT_TYPE_EMERGENCY_CANCEL 0x10
+#define PKT_TYPE_CODED            0x11  /* Network-coded packet */
 
 #define BEACON_FLAG_MAILBOX       0x01  /* Node willing to store messages */
 
