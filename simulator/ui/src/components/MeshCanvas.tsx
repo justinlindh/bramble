@@ -1,10 +1,11 @@
-import React, { useMemo, useEffect, useRef, useState } from 'react';
+import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import type { SimNode, SimEvent, PacketAnimation } from '../types';
 
 interface MeshCanvasProps {
   nodes: Map<string, SimNode>;
   radioRange?: number;
   events?: SimEvent[];
+  ws?: WebSocket | null;
 }
 
 const PADDING = 60;
@@ -64,8 +65,11 @@ function resolveAddrToNode(addr: string, nodes: Map<string, SimNode>): SimNode |
   return null;
 }
 
-export function MeshCanvas({ nodes, radioRange = 150, events = [] }: MeshCanvasProps) {
+export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCanvasProps) {
   const nodeList = useMemo(() => Array.from(nodes.values()), [nodes]);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dragRef = useRef<{ nodeId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const [dragPos, setDragPos] = useState<{ nodeId: string; x: number; y: number } | null>(null);
 
   // Build recent packet animations from events
   const [recentPackets, setRecentPackets] = useState<PacketAnimation[]>([]);
@@ -149,6 +153,113 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [] }: MeshCanvasP
   const H = 500;
 
   const transform = useMemo(() => computeViewBox(nodeList, W, H), [nodeList]);
+
+  // Convert a client (mouse/touch) position to sim coordinates
+  const clientToSim = useCallback((clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const rect = svg.getBoundingClientRect();
+    // Map client coords to SVG viewBox coords
+    const svgX = (clientX - rect.left) / rect.width * W;
+    const svgY = (clientY - rect.top) / rect.height * H;
+    // Invert the transform: screenPos = simPos * scale + offset
+    const scale = 'scale' in transform && transform.scale !== undefined ? transform.scale : 1;
+    const simX = (svgX - transform.offsetX) / scale;
+    const simY = (svgY - transform.offsetY) / scale;
+    return { x: simX, y: simY };
+  }, [transform]);
+
+  // Find which node is at a screen position (within NODE_RADIUS)
+  const hitTestNode = useCallback((clientX: number, clientY: number): string | null => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const svgX = (clientX - rect.left) / rect.width * W;
+    const svgY = (clientY - rect.top) / rect.height * H;
+    for (const node of nodeList) {
+      const { sx, sy } = toScreen(node.x, node.y, transform);
+      const dx = svgX - sx;
+      const dy = svgY - sy;
+      if (dx * dx + dy * dy <= (NODE_RADIUS + 8) * (NODE_RADIUS + 8)) {
+        return node.id;
+      }
+    }
+    return null;
+  }, [nodeList, transform]);
+
+  // Drag handlers (mouse)
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    const nodeId = hitTestNode(e.clientX, e.clientY);
+    if (!nodeId) return;
+    e.preventDefault();
+    const node = nodes.get(nodeId);
+    if (!node) return;
+    dragRef.current = { nodeId, startX: e.clientX, startY: e.clientY, origX: node.x, origY: node.y };
+    setDragPos({ nodeId, x: node.x, y: node.y });
+  }, [hitTestNode, clientToSim, nodes]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragRef.current) return;
+    e.preventDefault();
+    const sim = clientToSim(e.clientX, e.clientY);
+    const startSim = clientToSim(dragRef.current.startX, dragRef.current.startY);
+    const newX = dragRef.current.origX + (sim.x - startSim.x);
+    const newY = dragRef.current.origY + (sim.y - startSim.y);
+    setDragPos({ nodeId: dragRef.current.nodeId, x: newX, y: newY });
+  }, [clientToSim]);
+
+  const handleMouseUp = useCallback(() => {
+    if (!dragRef.current || !dragPos) return;
+    // Send move_node command
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'move_node',
+        node_id: dragRef.current.nodeId,
+        x: Math.round(dragPos.x * 10) / 10,
+        y: Math.round(dragPos.y * 10) / 10,
+      }));
+    }
+    dragRef.current = null;
+    setDragPos(null);
+  }, [dragPos, ws]);
+
+  // Touch handlers
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const nodeId = hitTestNode(touch.clientX, touch.clientY);
+    if (!nodeId) return;
+    e.preventDefault();
+    const node = nodes.get(nodeId);
+    if (!node) return;
+    dragRef.current = { nodeId, startX: touch.clientX, startY: touch.clientY, origX: node.x, origY: node.y };
+    setDragPos({ nodeId, x: node.x, y: node.y });
+  }, [hitTestNode, nodes]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!dragRef.current || e.touches.length !== 1) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const sim = clientToSim(touch.clientX, touch.clientY);
+    const startSim = clientToSim(dragRef.current.startX, dragRef.current.startY);
+    const newX = dragRef.current.origX + (sim.x - startSim.x);
+    const newY = dragRef.current.origY + (sim.y - startSim.y);
+    setDragPos({ nodeId: dragRef.current.nodeId, x: newX, y: newY });
+  }, [clientToSim]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (!dragRef.current || !dragPos) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'move_node',
+        node_id: dragRef.current.nodeId,
+        x: Math.round(dragPos.x * 10) / 10,
+        y: Math.round(dragPos.y * 10) / 10,
+      }));
+    }
+    dragRef.current = null;
+    setDragPos(null);
+  }, [dragPos, ws]);
 
   // Grid lines
   const gridLines: React.ReactNode[] = [];
@@ -241,11 +352,20 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [] }: MeshCanvasP
       borderRadius: '4px',
     }}>
       <svg
+        ref={svgRef}
         width="100%"
         height="100%"
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
-        style={{ display: 'block' }}
+        style={{ display: 'block', cursor: dragRef.current ? 'grabbing' : 'default', touchAction: 'none' }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
       >
         {/* SVG filter for glow */}
         <defs>
@@ -285,10 +405,13 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [] }: MeshCanvasP
 
         {/* Nodes */}
         {nodeList.map(node => {
-          const { sx, sy } = toScreen(node.x, node.y, transform);
+          const isDragging = dragPos && dragPos.nodeId === node.id;
+          const nx = isDragging ? dragPos.x : node.x;
+          const ny = isDragging ? dragPos.y : node.y;
+          const { sx, sy } = toScreen(nx, ny, transform);
           const active = node.active;
-          const fill = active ? '#238636' : '#21262d';
-          const stroke = active ? '#3fb950' : '#30363d';
+          const fill = isDragging ? '#1f6feb' : (active ? '#238636' : '#21262d');
+          const stroke = isDragging ? '#58a6ff' : (active ? '#3fb950' : '#30363d');
           const textColor = active ? '#e6edf3' : '#6e7681';
 
           return (
@@ -315,7 +438,8 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [] }: MeshCanvasP
                 r={NODE_RADIUS}
                 fill={fill}
                 stroke={stroke}
-                strokeWidth="2"
+                strokeWidth={isDragging ? 3 : 2}
+                style={{ cursor: 'grab' }}
               />
 
               {/* Pulse ring for active nodes */}
