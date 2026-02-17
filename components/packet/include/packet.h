@@ -25,6 +25,12 @@
 #define PKT_TYPE_CONGESTION       0x08
 #define PKT_TYPE_TIME_SYNC        0x09
 #define PKT_TYPE_DATA             0x0A
+#define PKT_TYPE_STORE_REQUEST    0x0B
+#define PKT_TYPE_STORE_ACK        0x0C
+#define PKT_TYPE_MAILBOX_DELIVERY 0x0D
+#define PKT_TYPE_MAILBOX_QUERY    0x0E
+
+#define BEACON_FLAG_MAILBOX       0x01  /* Node willing to store messages */
 
 /* Flag bits */
 #define FLAG_TIER_SHIFT    6
