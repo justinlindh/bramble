@@ -67,10 +67,10 @@ void emit_link_broken(FILE *out, uint64_t timestamp_us, const char *node_id, uin
     fflush(out);
 }
 
-void emit_metrics(FILE *out, uint64_t timestamp_us, int active_nodes, uint64_t total_packets, uint64_t delivered, uint64_t dropped, double avg_latency_ms) {
-    fprintf(out, "{\"type\":\"metrics\",\"timestamp_us\":%llu,\"active_nodes\":%d,\"total_packets\":%llu,\"delivered\":%llu,\"dropped\":%llu,\"avg_latency_ms\":%.3f}\n",
-            (unsigned long long)timestamp_us, active_nodes, (unsigned long long)total_packets, 
-            (unsigned long long)delivered, (unsigned long long)dropped, avg_latency_ms);
+void emit_metrics(FILE *out, uint64_t timestamp_us, int active_nodes, uint64_t total_packets, uint64_t messages_sent, uint64_t delivered, uint64_t dropped, double avg_latency_ms) {
+    fprintf(out, "{\"type\":\"metrics\",\"timestamp_us\":%llu,\"active_nodes\":%d,\"total_packets\":%llu,\"messages_sent\":%llu,\"delivered\":%llu,\"dropped\":%llu,\"avg_latency_ms\":%.3f}\n",
+            (unsigned long long)timestamp_us, active_nodes, (unsigned long long)total_packets,
+            (unsigned long long)messages_sent, (unsigned long long)delivered, (unsigned long long)dropped, avg_latency_ms);
     fflush(out);
 }
 

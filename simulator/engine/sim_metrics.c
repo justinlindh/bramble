@@ -9,6 +9,10 @@ void metrics_record_packet_sent(metrics_state_t *metrics) {
     metrics->total_packets++;
 }
 
+void metrics_record_message_sent(metrics_state_t *metrics) {
+    metrics->messages_sent++;
+}
+
 void metrics_record_packet_delivered(metrics_state_t *metrics, uint64_t latency_us) {
     metrics->delivered_packets++;
     metrics->total_latency_us += latency_us;

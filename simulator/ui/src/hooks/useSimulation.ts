@@ -153,16 +153,18 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
     }
     case 'metrics': {
       const totalPackets = (raw.total_packets as number) ?? 0;
+      const messagesSent = (raw.messages_sent as number) ?? 0;
       const delivered = (raw.delivered as number) ?? 0;
       const dropped = (raw.dropped as number) ?? 0;
       const metrics: Metrics = {
         timestamp_us,
         activeNodes: (raw.active_nodes as number) ?? 0,
         totalPackets,
+        messagesSent,
         delivered,
         dropped,
         avgLatencyMs: (raw.avg_latency_ms as number) ?? 0,
-        deliveryRate: totalPackets > 0 ? (delivered / totalPackets) * 100 : 0,
+        deliveryRate: messagesSent > 0 ? (delivered / messagesSent) * 100 : 0,
       };
       actions.push({ type: 'UPDATE_METRICS', metrics });
       break;
