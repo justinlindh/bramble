@@ -1,4 +1,3 @@
-import React from 'react';
 import type { Metrics } from '../types';
 
 interface MetricsDashboardProps {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { SimEvent } from '../types';
 
 interface EventLogProps {
@@ -113,7 +113,6 @@ export function EventLog({ events }: EventLogProps) {
                   gap: '8px',
                   alignItems: 'baseline',
                   borderLeft: `2px solid transparent`,
-                  ':hover': { background: '#161b22' },
                 }}
               >
                 <span style={{ color: '#6e7681', minWidth: '60px', flexShrink: 0 }}>

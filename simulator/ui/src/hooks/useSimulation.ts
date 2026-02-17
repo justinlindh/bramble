@@ -147,7 +147,7 @@ export function useSimulation() {
     console.log(`[useSimulation] Connecting to ${wsUrl}`);
 
     let ws: WebSocket;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
     function connect() {
       ws = new WebSocket(wsUrl);
