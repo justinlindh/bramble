@@ -22,7 +22,8 @@
   flex: 1;
 }
 
-.app-main {
+/* Main body: canvas + sidebar */
+.app-body {
   flex: 1;
   display: flex;
   overflow: hidden;
@@ -37,16 +38,65 @@
 }
 
 .app-sidebar {
-  width: 300px;
+  width: 280px;
   flex-shrink: 0;
   overflow-y: auto;
+  border-left: 1px solid #21262d;
+  background: #0d1117;
+}
+
+/* Bottom panel: tabs + content */
+.app-bottom {
+  flex-shrink: 0;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #21262d;
+  background: #0d1117;
+}
+
+.app-bottom-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 14px;
+  background: #161b22;
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
+}
+
+.app-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #6e7681;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.app-tab:hover {
+  color: #8b949e;
+}
+
+.app-tab-active {
+  color: #e6edf3;
+  border-bottom-color: #58a6ff;
+}
+
+.app-bottom-content {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 
 /* Mobile layout */
 @media (max-width: 768px) {
   .app {
-    /* Use min-height so the page is taller than viewport,
-       allowing Android Chrome to auto-hide its URL bar on scroll */
     height: auto;
     min-height: 100vh;
     min-height: 100dvh;
@@ -57,7 +107,6 @@
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    /* Sticky within the page scroll — works because .app doesn't have overflow:hidden on mobile */
     position: sticky;
     top: 0;
   }
@@ -66,7 +115,7 @@
     width: 100%;
   }
 
-  .app-main {
+  .app-body {
     flex-direction: column;
     flex: none;
     overflow: visible;
@@ -82,5 +131,12 @@
     width: 100%;
     flex-shrink: 0;
     overflow-y: visible;
+    border-left: none;
+    border-top: 1px solid #21262d;
+  }
+
+  .app-bottom {
+    height: auto;
+    min-height: 200px;
   }
 }

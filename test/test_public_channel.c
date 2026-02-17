@@ -79,7 +79,6 @@ void test_public_channel_encrypt_decrypt(void) {
                                               nonce, ct, tag));
 
     channel_msg_info_t info;
-    uint8_t pt[256];
     /* Need a fresh channel set for decrypt (same key) */
     bramble_channel_t dec_channels[MAX_CHANNELS];
     int dec_num = 0;

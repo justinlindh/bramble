@@ -309,3 +309,76 @@ target_include_directories(test_beacon_routes PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
 )
+
+# Mailbox tests (includes .c directly)
+add_executable(test_mailbox
+    test_mailbox.c
+    unity/unity.c
+)
+target_include_directories(test_mailbox PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
+)
+
+# Emergency beacon tests (custom test harness, links .c)
+add_executable(test_emergency
+    test_emergency.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emergency/emergency.c
+)
+target_include_directories(test_emergency PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emergency/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+
+# Location sharing tests
+add_executable(test_location
+    test_location.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+)
+target_include_directories(test_location PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+target_link_libraries(test_location m)
+
+# Group DM tests (custom test harness)
+add_executable(test_group
+    test_group.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/group/group.c
+)
+target_include_directories(test_group PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/group/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+
+# Network coding tests (custom test harness)
+add_executable(test_coding
+    test_coding.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/coding/coding.c
+)
+target_include_directories(test_coding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/coding/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+
+# Adaptive routing metric tests
+add_executable(test_route_metric
+    test_route_metric.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/route_metric.c
+)
+target_include_directories(test_route_metric PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+
+# Public channel tests (includes .c directly, needs OpenSSL)
+add_executable(test_public_channel
+    test_public_channel.c
+    unity/unity.c
+)
+target_include_directories(test_public_channel PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+)
+target_link_libraries(test_public_channel ssl crypto)

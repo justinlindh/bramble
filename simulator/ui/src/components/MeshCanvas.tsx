@@ -1,16 +1,23 @@
 import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
-import type { SimNode, SimEvent, PacketAnimation } from '../types';
+import type { SimNode, SimEvent, PacketAnimation, DeliveryPathAnimation, LinkActivity, BrokenLink } from '../types';
 
 interface MeshCanvasProps {
   nodes: Map<string, SimNode>;
   radioRange?: number;
   events?: SimEvent[];
   ws?: WebSocket | null;
+  deliveryPaths?: DeliveryPathAnimation[];
+  linkActivity?: Map<string, LinkActivity>;
+  brokenLinks?: Map<string, BrokenLink>;
+  selectedNodeId?: string | null;
+  onNodeClick?: (nodeId: string) => void;
 }
 
 const PADDING = 60;
 const NODE_RADIUS = 18;
 const GRID_SIZE = 50;
+const RECENT_TRAFFIC_MS = 5000; // links active in last 5s are "recent"
+const BROKEN_LINK_FADE_MS = 10000;
 
 // Packet type colors + glow
 const PKT_COLORS: Record<string, { fill: string; glow: string }> = {
@@ -23,6 +30,10 @@ const PKT_COLORS: Record<string, { fill: string; glow: string }> = {
 
 function pktColor(pkt_type: string) {
   return PKT_COLORS[pkt_type] ?? PKT_COLORS.DATA;
+}
+
+function makeLinkKey(a: string, b: string): string {
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
 }
 
 function computeViewBox(nodes: SimNode[], width: number, height: number) {
@@ -65,29 +76,31 @@ function resolveAddrToNode(addr: string, nodes: Map<string, SimNode>): SimNode |
   return null;
 }
 
-export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCanvasProps) {
+export function MeshCanvas({
+  nodes, radioRange = 150, events = [], ws,
+  deliveryPaths = [], linkActivity, brokenLinks,
+  selectedNodeId, onNodeClick,
+}: MeshCanvasProps) {
   const nodeList = useMemo(() => Array.from(nodes.values()), [nodes]);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ nodeId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const [dragPos, setDragPos] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const [overTrash, setOverTrash] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  const dragStartTime = useRef(0);
 
   // Build recent packet animations from events
   const [recentPackets, setRecentPackets] = useState<PacketAnimation[]>([]);
   const packetCounterRef = useRef(0);
 
-  // Expire stale animations when events list changes
   useEffect(() => {
     const now = Date.now();
     setRecentPackets(prev => {
       const alive = prev.filter(p => now - p.createdAt < p.durationMs);
       return alive;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
-  // Listen for new packet_sent events
   const lastEventId = useRef(0);
   useEffect(() => {
     const newEvents = events.filter(e => e.type === 'packet_sent' && e.id > lastEventId.current);
@@ -115,7 +128,7 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     }
   }, [events]);
 
-  // Animation frame ticker to keep dots moving
+  // Animation frame ticker
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let animId: number;
@@ -132,9 +145,9 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     return () => cancelAnimationFrame(animId);
   }, []);
 
-  void tick; // used to trigger re-render
+  void tick;
 
-  // Determine if nodes are in radio range of each other
+  // Links between nodes
   const links = useMemo(() => {
     const activeNodes = nodeList.filter(n => n.active);
     const result: Array<{ from: SimNode; to: SimNode; inRange: boolean }> = [];
@@ -156,22 +169,18 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
 
   const transform = useMemo(() => computeViewBox(nodeList, W, H), [nodeList]);
 
-  // Convert a client (mouse/touch) position to sim coordinates
   const clientToSim = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
-    // Map client coords to SVG viewBox coords
     const svgX = (clientX - rect.left) / rect.width * W;
     const svgY = (clientY - rect.top) / rect.height * H;
-    // Invert the transform: screenPos = simPos * scale + offset
     const scale = 'scale' in transform && transform.scale !== undefined ? transform.scale : 1;
     const simX = (svgX - transform.offsetX) / scale;
     const simY = (svgY - transform.offsetY) / scale;
     return { x: simX, y: simY };
   }, [transform]);
 
-  // Find which node is at a screen position (within NODE_RADIUS)
   const hitTestNode = useCallback((clientX: number, clientY: number): string | null => {
     const svg = svgRef.current;
     if (!svg) return null;
@@ -189,7 +198,6 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     return null;
   }, [nodeList, transform]);
 
-  // Trash zone (bottom-right corner of SVG viewBox)
   const TRASH_X = W - 50;
   const TRASH_Y = H - 50;
   const TRASH_R = 30;
@@ -211,7 +219,6 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     }
   }, [ws]);
 
-  // Drag handlers (mouse)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const nodeId = hitTestNode(e.clientX, e.clientY);
     if (!nodeId) return;
@@ -219,8 +226,9 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     const node = nodes.get(nodeId);
     if (!node) return;
     dragRef.current = { nodeId, startX: e.clientX, startY: e.clientY, origX: node.x, origY: node.y };
+    dragStartTime.current = Date.now();
     setDragPos({ nodeId, x: node.x, y: node.y });
-  }, [hitTestNode, clientToSim, nodes]);
+  }, [hitTestNode, nodes]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragRef.current) return;
@@ -235,6 +243,20 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
 
   const handleMouseUp = useCallback((e?: React.MouseEvent) => {
     if (!dragRef.current || !dragPos) return;
+    const elapsed = Date.now() - dragStartTime.current;
+    const dx = e ? e.clientX - dragRef.current.startX : 0;
+    const dy = e ? e.clientY - dragRef.current.startY : 0;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // If short click with minimal movement, treat as click (select node)
+    if (elapsed < 200 && dist < 5) {
+      onNodeClick?.(dragRef.current.nodeId);
+      dragRef.current = null;
+      setDragPos(null);
+      setOverTrash(false);
+      return;
+    }
+
     const trash = e ? isOverTrashZone(e.clientX, e.clientY) : overTrash;
     if (trash) {
       removeNode(dragRef.current.nodeId);
@@ -249,7 +271,7 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     dragRef.current = null;
     setDragPos(null);
     setOverTrash(false);
-  }, [dragPos, ws, overTrash, isOverTrashZone, removeNode]);
+  }, [dragPos, ws, overTrash, isOverTrashZone, removeNode, onNodeClick]);
 
   // Touch handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -261,6 +283,7 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     const node = nodes.get(nodeId);
     if (!node) return;
     dragRef.current = { nodeId, startX: touch.clientX, startY: touch.clientY, origX: node.x, origY: node.y };
+    dragStartTime.current = Date.now();
     setDragPos({ nodeId, x: node.x, y: node.y });
   }, [hitTestNode, nodes]);
 
@@ -278,7 +301,6 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (!dragRef.current || !dragPos) return;
-    // Use last known overTrash state (changedTouches has final position)
     let trash = overTrash;
     if (e.changedTouches.length > 0) {
       const touch = e.changedTouches[0];
@@ -332,20 +354,11 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
     const elapsed = now - anim.createdAt;
     const t = Math.min(elapsed / anim.durationMs, 1);
 
-    // Find source node
     const srcNode = nodes.get(anim.from);
     if (!srcNode) return [];
 
-    // Find dest node by id or resolve address
     let dstNode = nodes.get(anim.to) ?? resolveAddrToNode(anim.to, nodes);
-
-    // If dest not found by node id, try to find by matching node addresses
-    // The dest might be a hex address string like "0x02000003"
-    if (!dstNode && anim.to.startsWith('0x')) {
-      // Can't resolve without addr in node state; skip
-      return [];
-    }
-
+    if (!dstNode && anim.to.startsWith('0x')) return [];
     if (!dstNode) return [];
     if (!dstNode.active) return [];
 
@@ -360,25 +373,151 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
 
     return [
       <g key={anim.id} opacity={opacity}>
-        {/* Glow */}
         <circle cx={cx} cy={cy} r={8} fill={glow} opacity={0.35} />
-        {/* Dot */}
         <circle cx={cx} cy={cy} r={4.5} fill={fill} />
-        {/* Label */}
-        <text
-          x={cx}
-          y={cy - 9}
-          textAnchor="middle"
-          fontSize="7"
-          fontFamily="monospace"
-          fill={fill}
-          opacity={0.85}
-        >
+        <text x={cx} y={cy - 9} textAnchor="middle" fontSize="7" fontFamily="monospace" fill={fill} opacity={0.85}>
           {anim.pkt_type}
         </text>
       </g>
     ];
   });
+
+  // Render delivery path animations (green traces)
+  const deliveryPathElements = deliveryPaths.flatMap(dp => {
+    const elapsed = now - dp.createdAt;
+    const totalDuration = dp.durationMs;
+    if (elapsed >= totalDuration) return [];
+
+    const hops = dp.path.length - 1;
+    if (hops < 1) return [];
+
+    const elements: React.ReactNode[] = [];
+    const traceProgress = Math.min(elapsed / (totalDuration * 0.4), 1); // First 40% = trace animation
+    const fadeProgress = elapsed > totalDuration * 0.7 ? (elapsed - totalDuration * 0.7) / (totalDuration * 0.3) : 0;
+    const opacity = 1 - fadeProgress;
+
+    // Draw path segments
+    const activeHops = Math.floor(traceProgress * hops) + 1;
+    for (let i = 0; i < Math.min(activeHops, hops); i++) {
+      const fromId = dp.path[i];
+      const toId = dp.path[i + 1];
+      const fromNode = nodes.get(fromId) ?? resolveAddrToNode(fromId, nodes);
+      const toNode = nodes.get(toId) ?? resolveAddrToNode(toId, nodes);
+      if (!fromNode || !toNode) continue;
+
+      const { sx: x1, sy: y1 } = toScreen(fromNode.x, fromNode.y, transform);
+      const { sx: x2, sy: y2 } = toScreen(toNode.x, toNode.y, transform);
+
+      // Glow line
+      elements.push(
+        <line key={`dp-glow-${dp.id}-${i}`}
+          x1={x1} y1={y1} x2={x2} y2={y2}
+          stroke="#3fb950" strokeWidth={5} opacity={opacity * 0.3}
+          filter="url(#glow)"
+        />
+      );
+      // Main line
+      elements.push(
+        <line key={`dp-line-${dp.id}-${i}`}
+          x1={x1} y1={y1} x2={x2} y2={y2}
+          stroke="#3fb950" strokeWidth={2.5} opacity={opacity * 0.8}
+        />
+      );
+    }
+
+    // Green particle at the leading edge
+    if (traceProgress < 1) {
+      const currentHop = Math.min(Math.floor(traceProgress * hops), hops - 1);
+      const hopProgress = (traceProgress * hops) - currentHop;
+      const fromId = dp.path[currentHop];
+      const toId = dp.path[currentHop + 1];
+      const fromNode = nodes.get(fromId) ?? resolveAddrToNode(fromId, nodes);
+      const toNode = nodes.get(toId) ?? resolveAddrToNode(toId, nodes);
+      if (fromNode && toNode) {
+        const { sx: x1, sy: y1 } = toScreen(fromNode.x, fromNode.y, transform);
+        const { sx: x2, sy: y2 } = toScreen(toNode.x, toNode.y, transform);
+        const px = x1 + (x2 - x1) * hopProgress;
+        const py = y1 + (y2 - y1) * hopProgress;
+        elements.push(
+          <g key={`dp-particle-${dp.id}`} opacity={opacity}>
+            <circle cx={px} cy={py} r={10} fill="#238636" opacity={0.4} />
+            <circle cx={px} cy={py} r={5} fill="#3fb950" />
+          </g>
+        );
+      }
+    }
+
+    // Checkmark at destination when trace completes
+    if (traceProgress >= 1) {
+      const destId = dp.path[dp.path.length - 1];
+      const destNode = nodes.get(destId) ?? resolveAddrToNode(destId, nodes);
+      if (destNode) {
+        const { sx, sy } = toScreen(destNode.x, destNode.y, transform);
+        elements.push(
+          <text key={`dp-check-${dp.id}`}
+            x={sx + NODE_RADIUS + 4} y={sy - NODE_RADIUS - 2}
+            fontSize="14" fill="#3fb950" opacity={opacity}
+            fontWeight="bold"
+          >
+            ✓
+          </text>
+        );
+      }
+    }
+
+    return elements;
+  });
+
+  // Get link quality info
+  const getLinkStyle = useCallback((fromId: string, toId: string, inRange: boolean) => {
+    const key = makeLinkKey(fromId, toId);
+
+    // Check if broken
+    const broken = brokenLinks?.get(key);
+    if (broken) {
+      const elapsed = now - broken.brokenAt;
+      const fadeOpacity = Math.max(0, 1 - elapsed / BROKEN_LINK_FADE_MS);
+      return {
+        stroke: '#f85149',
+        strokeWidth: 2,
+        strokeDasharray: '6 4',
+        opacity: fadeOpacity * 0.8,
+        packetCount: 0,
+      };
+    }
+
+    // Check traffic
+    const activity = linkActivity?.get(key);
+    if (activity && (now - activity.lastActiveAt < RECENT_TRAFFIC_MS)) {
+      return {
+        stroke: '#3fb950',
+        strokeWidth: 2.5,
+        strokeDasharray: undefined as string | undefined,
+        opacity: 0.9,
+        packetCount: activity.packetCount,
+      };
+    }
+
+    // In range but no recent traffic
+    if (inRange) {
+      return {
+        stroke: '#238636',
+        strokeWidth: 1.5,
+        strokeDasharray: undefined as string | undefined,
+        opacity: 0.4,
+        packetCount: activity?.packetCount ?? 0,
+      };
+    }
+
+    // Out of range
+    return {
+      stroke: '#21262d',
+      strokeWidth: 1,
+      strokeDasharray: '4 3',
+      opacity: 0.3,
+      packetCount: 0,
+    };
+  }, [linkActivity, brokenLinks, now]);
 
   return (
     <div style={{
@@ -416,9 +555,14 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
             setContextMenu(null);
           }
         }}
-        onClick={() => setContextMenu(null)}
+        onClick={(e) => {
+          setContextMenu(null);
+          // Click on empty space deselects
+          if (!hitTestNode(e.clientX, e.clientY) && !dragRef.current) {
+            onNodeClick?.('' /* empty = deselect, handled in parent */);
+          }
+        }}
       >
-        {/* SVG filter for glow */}
         <defs>
           <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="2.5" result="blur" />
@@ -427,47 +571,73 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
+          <filter id="greenGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
-        {/* Background */}
         <rect width={W} height={H} fill="#0d1117" />
 
-        {/* Grid */}
         {gridLines}
 
-        {/* Link lines */}
+        {/* Link lines with quality indicators */}
         {links.map(({ from, to, inRange }, i) => {
           const { sx: x1, sy: y1 } = toScreen(from.x, from.y, transform);
           const { sx: x2, sy: y2 } = toScreen(to.x, to.y, transform);
+          const style = getLinkStyle(from.id, to.id, inRange);
+          const mx = (x1 + x2) / 2;
+          const my = (y1 + y2) / 2;
+
           return (
-            <line
-              key={i}
-              x1={x1} y1={y1} x2={x2} y2={y2}
-              stroke={inRange ? '#238636' : '#21262d'}
-              strokeWidth={inRange ? 1.5 : 1}
-              strokeDasharray={inRange ? undefined : '4 3'}
-              opacity={inRange ? 0.7 : 0.3}
-            />
+            <g key={i}>
+              <line
+                x1={x1} y1={y1} x2={x2} y2={y2}
+                stroke={style.stroke}
+                strokeWidth={style.strokeWidth}
+                strokeDasharray={style.strokeDasharray}
+                opacity={style.opacity}
+              />
+              {/* Packet count label on active links */}
+              {style.packetCount > 0 && inRange && (now - (linkActivity?.get(makeLinkKey(from.id, to.id))?.lastActiveAt ?? 0) < RECENT_TRAFFIC_MS) && (
+                <text
+                  x={mx} y={my - 4}
+                  textAnchor="middle"
+                  fontSize="8"
+                  fontFamily="monospace"
+                  fill="#3fb950"
+                  opacity={0.7}
+                >
+                  {style.packetCount}
+                </text>
+              )}
+            </g>
           );
         })}
 
-        {/* Packet animation dots (below nodes so nodes render on top) */}
+        {/* Delivery path traces */}
+        {deliveryPathElements}
+
+        {/* Packet animation dots */}
         {packetDots}
 
         {/* Nodes */}
         {nodeList.map(node => {
           const isDragging = dragPos && dragPos.nodeId === node.id;
+          const isSelected = selectedNodeId === node.id;
           const nx = isDragging ? dragPos.x : node.x;
           const ny = isDragging ? dragPos.y : node.y;
           const { sx, sy } = toScreen(nx, ny, transform);
           const active = node.active;
-          const fill = isDragging ? '#1f6feb' : (active ? '#238636' : '#21262d');
-          const stroke = isDragging ? '#58a6ff' : (active ? '#3fb950' : '#30363d');
+          const fill = isDragging ? '#1f6feb' : isSelected ? '#1f6feb' : (active ? '#238636' : '#21262d');
+          const stroke = isDragging ? '#58a6ff' : isSelected ? '#58a6ff' : (active ? '#3fb950' : '#30363d');
           const textColor = active ? '#e6edf3' : '#6e7681';
 
           return (
             <g key={node.id}>
-              {/* Radio range circle */}
               {active && radioRange > 0 && (() => {
                 const scale = 'scale' in transform && transform.scale !== undefined ? transform.scale : 1;
                 return (
@@ -483,29 +653,26 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
                 );
               })()}
 
-              {/* Node circle */}
               <circle
                 cx={sx} cy={sy}
                 r={NODE_RADIUS}
                 fill={fill}
                 stroke={stroke}
-                strokeWidth={isDragging ? 3 : 2}
+                strokeWidth={isDragging || isSelected ? 3 : 2}
                 style={{ cursor: 'grab' }}
               />
 
-              {/* Pulse ring for active nodes */}
               {active && (
                 <circle
                   cx={sx} cy={sy}
                   r={NODE_RADIUS + 4}
                   fill="none"
-                  stroke="#3fb950"
-                  strokeWidth="1"
-                  opacity="0.3"
+                  stroke={isSelected ? '#58a6ff' : '#3fb950'}
+                  strokeWidth={isSelected ? 2 : 1}
+                  opacity={isSelected ? 0.6 : 0.3}
                 />
               )}
 
-              {/* ID label */}
               <text
                 x={sx} y={sy}
                 textAnchor="middle"
@@ -518,7 +685,6 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
                 {node.id}
               </text>
 
-              {/* Position label below */}
               <text
                 x={sx} y={sy + NODE_RADIUS + 12}
                 textAnchor="middle"
@@ -532,7 +698,7 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
           );
         })}
 
-        {/* Trash zone — visible only while dragging */}
+        {/* Trash zone */}
         {dragPos && (
           <g>
             <circle
@@ -560,7 +726,6 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
           </g>
         )}
 
-        {/* Empty state */}
         {nodeList.length === 0 && (
           <text
             x={W / 2} y={H / 2}
@@ -602,6 +767,25 @@ export function MeshCanvas({ nodes, radioRange = 150, events = [], ws }: MeshCan
           >
             {contextMenu.nodeId}
           </div>
+          <button
+            onClick={() => { onNodeClick?.(contextMenu.nodeId); setContextMenu(null); }}
+            style={{
+              display: 'block',
+              width: '100%',
+              padding: '6px 12px',
+              background: 'none',
+              border: 'none',
+              color: '#58a6ff',
+              fontSize: '12px',
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#21262d')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+          >
+            📋 Inspect Node
+          </button>
           <button
             onClick={() => { removeNode(contextMenu.nodeId); setContextMenu(null); }}
             style={{
