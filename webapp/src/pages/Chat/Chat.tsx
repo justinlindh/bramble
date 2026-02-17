@@ -88,19 +88,14 @@ export function Chat() {
 
   return (
     <div className={styles.chat}>
-      {/* Sidebar: conversation list */}
       <ConversationList
         conversations={conversations}
         activeId={activeConversationId}
         onSelect={setActiveConversation}
       />
-
-      {/* Main pane: header + messages + compose */}
       <div className={styles.pane}>
         <ChatHeader conversationId={activeConversationId} />
-
         <MessageList conversationId={activeConversationId} />
-
         <ComposeBar conversationId={activeConversationId} />
       </div>
     </div>
