@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { Neighbor } from '../../types/bramble';
+import type { Neighbor, PeerLocation } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
-import { IconClock, IconMailbox, IconEnvelope } from '../../components/Icons';
+import { IconClock, IconMailbox, IconEnvelope, IconLocation } from '../../components/Icons';
 import styles from './NeighborCard.module.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,10 +43,16 @@ function rssiBarPct(rssi: number): number {
 
 interface NeighborCardProps {
   neighbor: Neighbor;
+  peerLocation?: PeerLocation;
   onOpenDM?: (addr: number) => void;
 }
 
-export function NeighborCard({ neighbor, onOpenDM }: NeighborCardProps) {
+/** Check if a peer location is still fresh (not older than 30 minutes) */
+function isLocationFresh(loc: PeerLocation): boolean {
+  return Date.now() - loc.lastUpdatedMs < 30 * 60 * 1000;
+}
+
+export function NeighborCard({ neighbor, peerLocation, onOpenDM }: NeighborCardProps) {
   const [expanded, setExpanded] = useState(false);
   const health = neighborHealth(neighbor);
   const pdr = pdrPercent(neighbor.deliveryRate);
@@ -85,6 +91,11 @@ export function NeighborCard({ neighbor, onOpenDM }: NeighborCardProps) {
         {neighbor.isMailbox && (
           <span className={styles.badgeMailbox} title="This node stores messages for offline destinations and delivers them when they come back in range"><IconMailbox size={13} /> Mailbox</span>
         )}
+        {peerLocation && isLocationFresh(peerLocation) && (
+          <span className={styles.badgeLocation} title={`Location: ${peerLocation.tier}`}>
+            <IconLocation size={13} /> {peerLocation.tier === 'full' ? 'Exact' : peerLocation.tier === 'coarse' ? 'Zone' : 'Present'}
+          </span>
+        )}
       </div>
 
       {/* ── Expanded detail ── */}
@@ -98,6 +109,18 @@ export function NeighborCard({ neighbor, onOpenDM }: NeighborCardProps) {
             <span>Full address:</span>
             <AddressLabel addr={neighbor.addr} />
           </div>
+          {peerLocation && isLocationFresh(peerLocation) && peerLocation.position && peerLocation.tier === 'full' && (
+            <div className={styles.detailRow}>
+              <span>Coordinates:</span>
+              <strong>{peerLocation.position.lat.toFixed(6)}, {peerLocation.position.lon.toFixed(6)}</strong>
+            </div>
+          )}
+          {peerLocation && isLocationFresh(peerLocation) && peerLocation.gridSquare && (
+            <div className={styles.detailRow}>
+              <span>Grid square:</span>
+              <strong>{peerLocation.gridSquare}</strong>
+            </div>
+          )}
           {onOpenDM && (
             <button
               className={styles.dmBtn}

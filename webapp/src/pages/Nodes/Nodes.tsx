@@ -1,5 +1,5 @@
 import { useStore } from '../../store/index';
-import { loadNeighbors, loadRoutes, openDM } from '../../store/actions';
+import { loadNeighbors, loadRoutes, loadPeerLocations, openDM } from '../../store/actions';
 import { usePoll } from '../../hooks/usePoll';
 import { NeighborCard } from './NeighborCard';
 import { RouteTable } from './RouteTable';
@@ -9,11 +9,13 @@ import styles from './Nodes.module.css';
 export function Nodes() {
   const neighbors = useStore((s) => s.neighbors);
   const routes = useStore((s) => s.routes);
+  const peerLocations = useStore((s) => s.peerLocations);
   const connected = useStore((s) => s.connectionState === 'connected');
 
-  // Auto-refresh: neighbors every 5s, routes every 10s
+  // Auto-refresh: neighbors every 5s, routes every 10s, peer locations every 10s
   usePoll(loadNeighbors, 5000);
   usePoll(loadRoutes, 10000);
+  usePoll(loadPeerLocations, 10000);
 
   return (
     <div className={styles.nodes}>
@@ -35,7 +37,7 @@ export function Nodes() {
       ) : (
         <div className={styles.cardGrid}>
           {neighbors.map((n) => (
-            <NeighborCard key={n.addr} neighbor={n} onOpenDM={openDM} />
+            <NeighborCard key={n.addr} neighbor={n} peerLocation={peerLocations.find(l => l.addr === n.addr)} onOpenDM={openDM} />
           ))}
         </div>
       )}
