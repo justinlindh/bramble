@@ -48,7 +48,10 @@ export default function App() {
     <div className={styles.app}>
       {/* Topbar */}
       <header className={styles.topbar}>
-        <span className={styles.brand}>🌿 Bramble</span>
+        <span className={styles.brand}>
+          <img src="/bramble-logo.png" alt="" className={styles.brandLogo} />
+          Bramble
+        </span>
 
         <span className={styles.statusArea}>
           <StatusDot state={connectionState} />

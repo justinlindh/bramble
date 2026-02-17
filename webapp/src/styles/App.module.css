@@ -23,6 +23,14 @@
   font-weight: 700;
   flex: 1;
   color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.brandLogo {
+  height: 1.5rem;
+  width: auto;
 }
 
 .statusArea {
