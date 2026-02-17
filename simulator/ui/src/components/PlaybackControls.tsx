@@ -26,7 +26,7 @@ function sendCmd(ws: WebSocket | null, msg: object) {
 }
 
 export function PlaybackControls({ running, connected, ready, currentTime, ws }: PlaybackControlsProps) {
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(true);
   const [speed, setSpeed] = useState(1);
 
   function handlePlayPause() {

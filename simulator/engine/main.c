@@ -464,6 +464,8 @@ static void handle_event(sim_event_t *event) {
                     bramble_rreq_t rreq =
                         rreq_build_originator(src->addr, dest_addr,
                                               query_id, src->addr);
+                    /* Simulator override: increase hop limit for large meshes */
+                    rreq.header.hop_limit = 32;
 
                     outbound_packet_t pkt;
                     memset(&pkt, 0, sizeof(pkt));
@@ -485,7 +487,7 @@ static void handle_event(sim_event_t *event) {
             }
 
             /* Route exists — build and send DATA packet */
-            uint8_t hop_limit = 8;
+            uint8_t hop_limit = 32;  /* Simulator override for large meshes */
             forward_result_t fwd_res =
                 forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
             if (!fwd_res.should_send) break;
