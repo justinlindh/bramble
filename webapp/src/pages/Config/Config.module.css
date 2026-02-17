@@ -60,3 +60,9 @@
   padding: 2rem;
   text-align: center;
 }
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}

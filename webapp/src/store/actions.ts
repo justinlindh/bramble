@@ -1,5 +1,6 @@
 import { useStore } from './index';
 import { createTransport, BrambleClient } from '../transport';
+import { messageDb } from './messageDb';
 import type {
   TransportType,
   BrambleConfig,
@@ -18,6 +19,20 @@ import type {
 } from '../types/bramble';
 
 let client: BrambleClient | null = null;
+
+// ─── Message persistence ─────────────────────────────────────────────────
+
+export async function initMessageStore(): Promise<void> {
+  try {
+    await messageDb.open();
+    const cached = await messageDb.getMessages();
+    if (cached.length > 0) {
+      useStore.getState().loadCachedMessages(cached);
+    }
+  } catch {
+    // IndexedDB unavailable (e.g. private browsing) — continue without persistence
+  }
+}
 
 // crypto.randomUUID() requires secure context (HTTPS/localhost).
 // Fallback for plain HTTP access over LAN.
@@ -168,6 +183,7 @@ export async function sendMessage(
   };
 
   store.addMessage(msg);
+  messageDb.saveMessage(msg).catch(() => {});
 
   try {
     const result = await client.rpc<{ packetId: number }>('bramble.sendMessage', {
@@ -177,11 +193,13 @@ export async function sendMessage(
       ...(channelIndex !== undefined ? { channelIndex } : {}),
     });
     store.updateMessageStatus(msg.id, 'sent');
+    messageDb.updateMessageStatus(msg.id, 'sent').catch(() => {});
     if (result?.packetId !== undefined) {
       packetIdToMsgId.set(result.packetId, msg.id);
     }
   } catch (e) {
     store.updateMessageStatus(msg.id, 'failed');
+    messageDb.updateMessageStatus(msg.id, 'failed').catch(() => {});
     throw e;
   }
 }
@@ -197,27 +215,27 @@ function handleAck(params: unknown): void {
   const msgId = packetIdToMsgId.get(packetId);
   if (msgId) {
     packetIdToMsgId.delete(packetId);
-    useStore.getState().updateMessageStatus(
-      msgId,
-      status === 'delivered' ? 'delivered' : 'failed',
-      relayPath
-    );
+    const newStatus = status === 'delivered' ? 'delivered' : 'failed';
+    useStore.getState().updateMessageStatus(msgId, newStatus, relayPath);
+    messageDb.updateMessageStatus(msgId, newStatus, relayPath).catch(() => {});
   }
 }
 
 function handleIncomingMessage(params: unknown): void {
   const p = params as IncomingMessage;
-  useStore.getState().addMessage({
+  const msg = {
     id: p.msgId,
-    direction: 'incoming',
+    direction: 'incoming' as const,
     from: p.from,
     to: p.to,
     text: p.text,
     tier: p.tier,
     channelIndex: p.channelIndex,
     timestampMs: Date.now(),
-    status: 'delivered',
-  });
+    status: 'delivered' as const,
+  };
+  useStore.getState().addMessage(msg);
+  messageDb.saveMessage(msg).catch(() => {});
 }
 
 async function refreshNeighbors(): Promise<void> {

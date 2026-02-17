@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { useStore } from './store/index';
-import { disconnect } from './store/actions';
+import { disconnect, initMessageStore } from './store/actions';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -39,6 +39,10 @@ export default function App() {
   const setActiveTab = useStore(s => s.setActiveTab);
   const connectionState = useStore(s => s.connectionState);
   const isConnected = connectionState === 'connected';
+
+  useEffect(() => {
+    initMessageStore();
+  }, []);
 
   // Show the connection overlay whenever we're not in a live connected state
   const showOverlay = connectionState !== 'connected';

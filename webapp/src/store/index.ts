@@ -38,6 +38,7 @@ interface Actions {
   setProbeResult: (r: ProbeResult | null) => void;
   setProbeCollecting: (c: boolean) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
+  loadCachedMessages: (msgs: Message[]) => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -76,6 +77,8 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   addMessage: (msg: Message) =>
     set(state => {
+      // Deduplicate by id
+      if (state.messages.some(m => m.id === msg.id)) return state;
       // Cap message history at 500
       const msgs = [...state.messages, msg].slice(-500);
 
@@ -128,6 +131,40 @@ export const useStore = create<AppState & Actions>((set) => ({
   setProbeCollecting: (c) => set({ probeCollecting: c }),
 
   setPeerLocations: (locs) => set({ peerLocations: locs }),
+
+  loadCachedMessages: (msgs: Message[]) =>
+    set(state => {
+      // Rebuild conversations from cached messages
+      const convs = new Map(state.conversations);
+      for (const msg of msgs) {
+        const isBroadcast = msg.to === 0xffffffff;
+        const convId =
+          msg.channelIndex !== undefined
+            ? `ch:${msg.channelIndex}`
+            : isBroadcast
+            ? 'broadcast'
+            : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
+        const prev = convs.get(convId);
+        const shouldUpdate = !prev || !prev.lastMessageTime || msg.timestampMs > prev.lastMessageTime;
+        if (shouldUpdate) {
+          convs.set(convId, {
+            id: convId,
+            label: prev?.label ?? formatAddr(convId),
+            peerAddr:
+              msg.channelIndex !== undefined || isBroadcast
+                ? undefined
+                : msg.direction === 'outgoing'
+                ? msg.to
+                : msg.from,
+            channelIndex: msg.channelIndex,
+            lastMessage: msg.text.slice(0, 60),
+            lastMessageTime: msg.timestampMs,
+            unreadCount: prev?.unreadCount ?? 0,
+          });
+        }
+      }
+      return { messages: msgs.slice(-500), conversations: convs };
+    }),
 
   setActiveConversation: (id: string) =>
     set(state => {
