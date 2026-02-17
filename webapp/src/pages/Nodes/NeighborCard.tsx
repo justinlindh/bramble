@@ -83,7 +83,7 @@ export function NeighborCard({ neighbor, onOpenDM }: NeighborCardProps) {
         <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr} dB</span>
         <span title="Last heard"><IconClock size={13} /> {formatAgo(neighbor.lastHeardMs)}</span>
         {neighbor.isMailbox && (
-          <span className={styles.badgeMailbox}><IconMailbox size={13} /> Mailbox</span>
+          <span className={styles.badgeMailbox} title="This node stores messages for offline destinations and delivers them when they come back in range"><IconMailbox size={13} /> Mailbox</span>
         )}
       </div>
 
