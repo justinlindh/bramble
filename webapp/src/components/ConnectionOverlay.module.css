@@ -148,6 +148,12 @@
   color: var(--text);
 }
 
+.unsupportedBtn {
+  opacity: 0.4;
+  cursor: not-allowed !important;
+  text-decoration: line-through;
+}
+
 .mockBtn.active {
   border-color: var(--accent-green, #3fb950);
   background: rgba(63, 185, 80, 0.1);

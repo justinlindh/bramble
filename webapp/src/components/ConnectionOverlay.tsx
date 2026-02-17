@@ -54,32 +54,23 @@ export function ConnectionOverlay() {
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
 
-        {!hasSerial && !hasBluetooth && (
-          <div className={styles.unsupported}>
-            <p><IconWarning size={16} /> Your browser does not support Web Serial or Web Bluetooth.</p>
-            <p className={styles.hint}>
-              Use Chrome or Edge 120+ on desktop, or Chrome on Android for BLE.
-            </p>
-          </div>
-        )}
-
         <div className={styles.transportSelect}>
-          {hasSerial && (
-            <button
-              className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''}`}
-              onClick={() => setTransportType('serial')}
-            >
-              <IconUsb size={16} /> USB / Serial
-            </button>
-          )}
-          {hasBluetooth && (
-            <button
-              className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''}`}
-              onClick={() => setTransportType('ble')}
-            >
-              <IconBluetooth size={16} /> Bluetooth
-            </button>
-          )}
+          <button
+            className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''} ${!hasSerial ? styles.unsupportedBtn : ''}`}
+            onClick={() => hasSerial && setTransportType('serial')}
+            disabled={!hasSerial}
+            title={hasSerial ? 'Connect via USB cable' : 'Web Serial not supported in this browser. Use Chrome or Edge 120+.'}
+          >
+            <IconUsb size={16} /> USB / Serial
+          </button>
+          <button
+            className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''} ${!hasBluetooth ? styles.unsupportedBtn : ''}`}
+            onClick={() => hasBluetooth && setTransportType('ble')}
+            disabled={!hasBluetooth}
+            title={hasBluetooth ? 'Connect via Bluetooth Low Energy' : 'Web Bluetooth not supported in this browser. Use Chrome on Android, or enable Experimental Web Platform features in chrome://flags.'}
+          >
+            <IconBluetooth size={16} /> Bluetooth
+          </button>
           <button
             className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''}`}
             onClick={() => setTransportType('wifi')}
