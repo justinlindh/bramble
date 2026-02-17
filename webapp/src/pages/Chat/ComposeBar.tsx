@@ -136,6 +136,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
           <button
             className={styles.sendBtn}
             onClick={handleSend}
+            onMouseDown={(e) => e.preventDefault()}
             disabled={!canSend}
             aria-label="Send message"
             title="Send (Enter)"
