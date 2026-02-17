@@ -405,6 +405,23 @@ void bridge_handle_generate_message(
     uint32_t dest_addr = event->data.node.addr;
     uint32_t now_ms = (uint32_t)(event->timestamp_us / 1000);
 
+    /* Retry limit: y field counts retry attempts (x is unused for generate_message).
+     * After MAX_MSG_RETRIES attempts (~30s at 1.5s intervals), drop the message. */
+    #define MAX_MSG_RETRIES 20
+    int retry_count = (int)event->data.node.y;
+
+    if (retry_count >= MAX_MSG_RETRIES) {
+        metrics_record_packet_dropped(metrics);
+        fprintf(stdout,
+            "{\"type\":\"message_dropped\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"reason\":\"retry_timeout\""
+            ",\"retries\":%d}\n",
+            (unsigned long long)event->timestamp_us,
+            src->id, dest_addr, retry_count);
+        fflush(stdout);
+        return;
+    }
+
     route_entry_t *route = route_lookup(&src->routes, dest_addr);
 
     if (!route || route->state == ROUTE_BROKEN ||
@@ -456,6 +473,7 @@ void bridge_handle_generate_message(
 
         sim_event_t retry = *event;
         retry.timestamp_us += 1500000ULL;
+        retry.data.node.y = (float)(retry_count + 1);
         event_queue_push(events, &retry);
         return;
     }

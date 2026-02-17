@@ -658,12 +658,21 @@ func (s *Sim) cmdInterference(cmd Command) {
 func (s *Sim) complete() {
 	s.state = StateCompleted
 
+	sent := uint64(s.metrics.messages_sent)
+	delivered := uint64(s.metrics.delivered_packets)
+	dropped := uint64(s.metrics.dropped_packets)
+	undelivered := uint64(0)
+	if sent > delivered {
+		undelivered = sent - delivered
+	}
+
 	s.emitJSON(map[string]interface{}{
-		"type":          "final_metrics",
-		"total_packets": uint64(s.metrics.total_packets),
-		"messages_sent": uint64(s.metrics.messages_sent),
-		"delivered":     uint64(s.metrics.delivered_packets),
-		"dropped":       uint64(s.metrics.dropped_packets),
+		"type":           "final_metrics",
+		"total_packets":  uint64(s.metrics.total_packets),
+		"messages_sent":  sent,
+		"delivered":      delivered,
+		"dropped":        dropped,
+		"undelivered":    undelivered,
 		"avg_latency_ms": metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":  metricsDeliveryRate(&s.metrics),
 	})
@@ -754,6 +763,27 @@ func RunHeadless(scenarioPath string) error {
 	var evt C.sim_event_t
 	for eventQueuePop(&sim.events, &evt) {
 		ts := getEventTimestamp(&evt)
+		if sim.duration > 0 && ts > sim.duration {
+			// Count remaining generate_message events as dropped
+			if evt._type == C.EVT_GENERATE_MESSAGE {
+				C.metrics_record_packet_dropped(&sim.metrics)
+				sim.emitJSON(map[string]interface{}{
+					"type": "message_dropped", "timestamp_us": sim.duration,
+					"reason": "sim_ended",
+				})
+			}
+			// Drain remaining events past duration
+			for eventQueuePop(&sim.events, &evt) {
+				if evt._type == C.EVT_GENERATE_MESSAGE {
+					C.metrics_record_packet_dropped(&sim.metrics)
+					sim.emitJSON(map[string]interface{}{
+						"type": "message_dropped", "timestamp_us": sim.duration,
+						"reason": "sim_ended",
+					})
+				}
+			}
+			break
+		}
 		sim.simTime = ts
 		setSimTime(ts)
 		sim.dispatchEvent(&evt)
