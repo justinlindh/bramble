@@ -284,7 +284,8 @@ wss.on('connection', (ws: WebSocket) => {
 
     sim = spawn(ENGINE_BIN, [scenarioPath], { stdio: ['ignore', 'pipe', 'pipe'] });
 
-    // Buffer all events from C engine stdout
+    // Buffer events from C engine stdout (filtering low-value noise)
+    const SKIP_PACKET_TYPES = new Set(['BEACON', 'RREQ']);
     let lineBuffer = '';
     sim.stdout?.on('data', (chunk: Buffer) => {
       lineBuffer += chunk.toString();
@@ -294,15 +295,24 @@ wss.on('connection', (ws: WebSocket) => {
         const trimmed = line.trim();
         if (trimmed.startsWith('{')) {
           try {
-            const parsed = JSON.parse(trimmed) as { type: string; timestamp_us?: number };
+            const parsed = JSON.parse(trimmed) as { type: string; timestamp_us?: number; pkt_type?: string };
             const ts = typeof parsed.timestamp_us === 'number' ? parsed.timestamp_us : 0;
 
             // sim_reset is sent immediately (not buffered)
             if (parsed.type === 'sim_reset') {
               if (ws.readyState === WebSocket.OPEN) ws.send(trimmed);
-            } else {
-              eventBuffer.push({ raw: trimmed, timestamp_us: ts });
+              return;
             }
+
+            // Skip individual packet_sent/received for beacons and RREQs
+            // (they dominate output — 30 nodes × 8 neighbors × beacons = massive)
+            // Keep: RREP, DATA, RERR packet events + all other event types
+            if ((parsed.type === 'packet_sent' || parsed.type === 'packet_received') &&
+                parsed.pkt_type && SKIP_PACKET_TYPES.has(parsed.pkt_type)) {
+              return;
+            }
+
+            eventBuffer.push({ raw: trimmed, timestamp_us: ts });
           } catch {
             // Ignore malformed lines
           }
