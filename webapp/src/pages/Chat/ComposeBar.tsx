@@ -82,17 +82,17 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
       setText(trimmed);
     } finally {
       setSending(false);
-      inputRef.current?.focus();
+      // Double rAF to ensure React re-render (re-enabling textarea) has flushed
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => inputRef.current?.focus())
+      );
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend().then(() => {
-        // Re-focus after React re-render settles
-        requestAnimationFrame(() => inputRef.current?.focus());
-      });
+      handleSend();
     }
   };
 
