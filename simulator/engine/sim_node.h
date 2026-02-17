@@ -6,7 +6,7 @@
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
 
-#define MAX_NODES 64
+#define MAX_NODES 256
 #define NODE_ID_LEN 16
 
 /* Tick intervals (microseconds) */
