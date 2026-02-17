@@ -16,7 +16,9 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   const [dmAddr, setDmAddr] = useState('');
   const [dmError, setDmError] = useState('');
 
-  // Separate out channels and DMs (exclude dm:4294967295 — that's our broadcast ID in the map)
+  // Separate out channels and DMs
+  // Broadcasts are filed under 'broadcast' in the map, never as 'dm:0xFFFFFFFF'
+  const broadcastUnread = conversations.get('broadcast')?.unreadCount ?? 0;
   const channels = [...conversations.values()].filter(c => c.id.startsWith('ch:'));
   const dms = [...conversations.values()].filter(
     c => c.id.startsWith('dm:') && parseInt(c.id.slice(3), 10) !== BROADCAST_ADDR
@@ -45,6 +47,9 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
       >
         <span className={styles.icon}>📢</span>
         <span className={styles.label}>Broadcast</span>
+        {broadcastUnread > 0 && (
+          <span className={styles.badge}>{broadcastUnread}</span>
+        )}
       </button>
 
       {/* ── Channels ─────────────────────────────── */}

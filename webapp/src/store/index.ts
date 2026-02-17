@@ -14,6 +14,7 @@ import type {
 } from '../types/bramble';
 
 function formatAddr(id: string): string {
+  if (id === 'broadcast') return '📢 Broadcast';
   if (id.startsWith('ch:')) return `#ch-${id.slice(3)}`;
   if (id.startsWith('dm:')) return `0x${Number(id.slice(3)).toString(16).toUpperCase()}`;
   return id;
@@ -68,9 +69,14 @@ export const useStore = create<AppState & Actions>((set) => ({
       const msgs = [...state.messages, msg].slice(-500);
 
       // Determine conversation ID
+      // Broadcasts (to === 0xFFFFFFFF) always file under 'broadcast', not a DM,
+      // to avoid double-showing them in both the broadcast view and sender's DM.
+      const isBroadcast = msg.to === 0xffffffff;
       const convId =
         msg.channelIndex !== undefined
           ? `ch:${msg.channelIndex}`
+          : isBroadcast
+          ? 'broadcast'
           : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
 
       // Update conversation summary
@@ -80,7 +86,7 @@ export const useStore = create<AppState & Actions>((set) => ({
         id: convId,
         label: prev?.label ?? formatAddr(convId),
         peerAddr:
-          msg.channelIndex !== undefined
+          msg.channelIndex !== undefined || isBroadcast
             ? undefined
             : msg.direction === 'outgoing'
             ? msg.to

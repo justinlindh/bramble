@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { NodeIdentity } from '../../types/bramble';
 import { saveNodeName } from '../../store/actions';
 import styles from './IdentitySection.module.css';
@@ -9,6 +9,11 @@ interface IdentitySectionProps {
 
 export function IdentitySection({ identity }: IdentitySectionProps) {
   const [name, setName] = useState(identity.name);
+
+  // Sync local name state when identity prop changes (e.g. after node truncates to 8 chars)
+  useEffect(() => {
+    setName(identity.name);
+  }, [identity.name]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');

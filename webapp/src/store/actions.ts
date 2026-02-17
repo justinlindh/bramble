@@ -45,6 +45,9 @@ export async function connect(type: TransportType): Promise<void> {
       loadMessages(),
     ]);
   } catch (e) {
+    // Clean up any partially-initialised client so we start fresh on retry
+    client?.clearSubscriptions();
+    client = null;
     store.setConnectionState('error', (e as Error).message);
   }
 }

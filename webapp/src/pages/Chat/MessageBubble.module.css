@@ -36,7 +36,7 @@
 /* ── Sender label ───────────────────────────────────────────────── */
 .sender {
   font-size: 0.75rem;
-  color: var(--critical);
+  color: var(--accent-blue);
   margin-bottom: 2px;
   font-weight: 600;
 }
