@@ -15,6 +15,56 @@
 #include "../engine/sim_anomaly.h"
 #include "../engine/sim_emitter.h"
 
+/* ─── New component headers (Phase 6) ──────────────────────────────────── */
+#include "../../components/mailbox/include/mailbox.h"
+#include "../../components/emergency/include/emergency.h"
+#include "../../components/location/include/location.h"
+#include "../../components/group/include/group.h"
+#include "../../components/coding/include/coding.h"
+#include "../../components/routing/include/route_metric.h"
+/* public_channel.h includes channel_key.h which includes crypto.h (via -I) */
+#include "../../components/channel/include/channel_key.h"
+#include "../../components/channel/include/public_channel.h"
+
+/* ─── Extended per-node state (new components) ──────────────────────────── */
+typedef struct {
+    mailbox_t           mailbox;    /* store-and-forward for offline destinations */
+    emergency_manager_t emergency;  /* emergency beacon state machine */
+    location_manager_t  location;   /* position sharing manager */
+    group_manager_t     group;      /* group messaging manager */
+    coding_engine_t     coding;     /* XOR network coding at relay */
+    bool                initialized;
+    /* Adaptive route metric state */
+    uint8_t  route_delivery_rate;   /* EMA delivery rate 0-255 */
+    uint16_t route_avg_latency_ms;  /* EMA round-trip latency */
+    uint32_t last_metric_switch_ms; /* cooldown for hysteresis */
+} bridge_node_ext_t;
+
+/* ─── Extended bridge-level metrics ────────────────────────────────────── */
+typedef struct {
+    uint64_t mailbox_stored;        /* DATA packets stored for offline dest */
+    uint64_t mailbox_delivered;     /* stored packets delivered on node rejoin */
+    uint64_t mailbox_expired;       /* mailbox entries expired (24h TTL) */
+    uint64_t coding_opportunities;  /* relay nodes that found coding opportunity */
+    uint64_t coding_encoded;        /* packets XOR-encoded and sent */
+    uint64_t emergency_beacons_rx;  /* emergency beacons received/recorded */
+    uint64_t location_updates;      /* location position updates processed */
+    uint64_t channel_rate_limited;  /* public channel TX rate-limited drops */
+} bridge_ext_metrics_t;
+
+/* Accessor functions */
+bridge_node_ext_t    *bridge_node_ext_get(int node_idx);
+bridge_ext_metrics_t *bridge_ext_metrics_get(void);
+void                  bridge_node_ext_init_all(void);
+
+/*
+ * bridge_handle_node_join_ext:
+ *   Called after a node joins the simulation to initialize its extended state
+ *   (set simulated position, assign simulated group membership, etc.)
+ */
+void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y,
+                                  uint64_t now_us);
+
 /* ─── Global simulation time ───────────────────────────────────────────── */
 extern uint64_t g_bridge_sim_time_us;
 void bridge_set_sim_time(uint64_t us);

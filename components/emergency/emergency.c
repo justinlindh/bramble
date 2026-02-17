@@ -2,27 +2,27 @@
 #include <string.h>
 
 /* Little-endian helpers */
-static void put_u32(uint8_t *buf, uint32_t v) {
+static void emg_put_u32(uint8_t *buf, uint32_t v) {
     buf[0] = (uint8_t)(v);
     buf[1] = (uint8_t)(v >> 8);
     buf[2] = (uint8_t)(v >> 16);
     buf[3] = (uint8_t)(v >> 24);
 }
 
-static uint32_t get_u32(const uint8_t *buf) {
+static uint32_t emg_get_u32(const uint8_t *buf) {
     return (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
            ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
 }
 
-static void put_i32(uint8_t *buf, int32_t v) { put_u32(buf, (uint32_t)v); }
-static int32_t get_i32(const uint8_t *buf) { return (int32_t)get_u32(buf); }
+static void emg_put_i32(uint8_t *buf, int32_t v) { emg_put_u32(buf, (uint32_t)v); }
+static int32_t emg_get_i32(const uint8_t *buf) { return (int32_t)emg_get_u32(buf); }
 
-static void put_i16(uint8_t *buf, int16_t v) {
+static void emg_put_i16(uint8_t *buf, int16_t v) {
     buf[0] = (uint8_t)(v);
     buf[1] = (uint8_t)(v >> 8);
 }
 
-static int16_t get_i16(const uint8_t *buf) {
+static int16_t emg_get_i16(const uint8_t *buf) {
     return (int16_t)((uint16_t)buf[0] | ((uint16_t)buf[1] << 8));
 }
 
@@ -116,10 +116,10 @@ int emergency_beacon_serialize(const emergency_beacon_t *beacon, uint8_t *buf, s
     size_t needed = EMERGENCY_BEACON_MIN_SIZE + beacon->msg_len;
     if (buf_len < needed) return -1;
 
-    put_u32(buf + 0, beacon->src_addr);
-    put_i32(buf + 4, beacon->latitude_e7);
-    put_i32(buf + 8, beacon->longitude_e7);
-    put_i16(buf + 12, beacon->altitude_m);
+    emg_put_u32(buf + 0, beacon->src_addr);
+    emg_put_i32(buf + 4, beacon->latitude_e7);
+    emg_put_i32(buf + 8, beacon->longitude_e7);
+    emg_put_i16(buf + 12, beacon->altitude_m);
     buf[14] = beacon->battery_pct;
     buf[15] = beacon->msg_len;
     buf[16] = 0;  /* reserved */
@@ -135,10 +135,10 @@ int emergency_beacon_deserialize(const uint8_t *buf, size_t len, emergency_beaco
     if (len < EMERGENCY_BEACON_MIN_SIZE) return -1;
 
     memset(beacon, 0, sizeof(*beacon));
-    beacon->src_addr = get_u32(buf + 0);
-    beacon->latitude_e7 = get_i32(buf + 4);
-    beacon->longitude_e7 = get_i32(buf + 8);
-    beacon->altitude_m = get_i16(buf + 12);
+    beacon->src_addr = emg_get_u32(buf + 0);
+    beacon->latitude_e7 = emg_get_i32(buf + 4);
+    beacon->longitude_e7 = emg_get_i32(buf + 8);
+    beacon->altitude_m = emg_get_i16(buf + 12);
     beacon->battery_pct = buf[14];
     beacon->msg_len = buf[15];
 
@@ -155,8 +155,8 @@ int emergency_beacon_deserialize(const uint8_t *buf, size_t len, emergency_beaco
 int emergency_cancel_serialize(const emergency_cancel_t *cancel, uint8_t *buf, size_t buf_len) {
     if (buf_len < EMERGENCY_CANCEL_SIZE) return -1;
 
-    put_u32(buf + 0, cancel->src_addr);
-    put_u32(buf + 4, cancel->cancel_timestamp);
+    emg_put_u32(buf + 0, cancel->src_addr);
+    emg_put_u32(buf + 4, cancel->cancel_timestamp);
     memcpy(buf + 8, cancel->auth_tag, 4);
 
     return EMERGENCY_CANCEL_SIZE;
@@ -165,8 +165,8 @@ int emergency_cancel_serialize(const emergency_cancel_t *cancel, uint8_t *buf, s
 int emergency_cancel_deserialize(const uint8_t *buf, size_t len, emergency_cancel_t *cancel) {
     if (len < EMERGENCY_CANCEL_SIZE) return -1;
 
-    cancel->src_addr = get_u32(buf + 0);
-    cancel->cancel_timestamp = get_u32(buf + 4);
+    cancel->src_addr = emg_get_u32(buf + 0);
+    cancel->cancel_timestamp = emg_get_u32(buf + 4);
     memcpy(cancel->auth_tag, buf + 8, 4);
 
     return 0;

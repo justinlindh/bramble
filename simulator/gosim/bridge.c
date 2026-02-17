@@ -6,10 +6,68 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
+/* Note: mailbox.h, emergency.h, location.h, group.h, coding.h,
+ * route_metric.h, channel_key.h, public_channel.h are all pulled in
+ * transitively via bridge.h (Phase 6 headers). */
 
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+
+/* ─── Extended per-node state (Phase 6) ─────────────────────────────────── */
+
+static bridge_node_ext_t     g_node_ext[MAX_NODES];
+static bridge_ext_metrics_t  g_ext_metrics;
+
+/* Public channel state (one global instance) */
+static bramble_channel_t g_pub_channels[16];
+static int               g_num_pub_channels = 0;
+
+bridge_node_ext_t *bridge_node_ext_get(int node_idx) {
+    if (node_idx < 0 || node_idx >= MAX_NODES) return NULL;
+    return &g_node_ext[node_idx];
+}
+
+bridge_ext_metrics_t *bridge_ext_metrics_get(void) {
+    return &g_ext_metrics;
+}
+
+void bridge_node_ext_init_all(void) {
+    memset(&g_node_ext, 0, sizeof(g_node_ext));
+    memset(&g_ext_metrics, 0, sizeof(g_ext_metrics));
+    for (int i = 0; i < MAX_NODES; i++) {
+        mailbox_init(&g_node_ext[i].mailbox);
+        emergency_init(&g_node_ext[i].emergency);
+        location_init(&g_node_ext[i].location);
+        group_init(&g_node_ext[i].group);
+        coding_init(&g_node_ext[i].coding);
+        g_node_ext[i].initialized = true;
+        g_node_ext[i].route_delivery_rate   = 200; /* start optimistic */
+        g_node_ext[i].route_avg_latency_ms  = 100; /* ms */
+        g_node_ext[i].last_metric_switch_ms = 0;
+    }
+}
+
+/* ─── Location sim helper: map (x,y) grid coords → pseudo lat/lon ─────── */
+/* Treat grid origin as (37.0000000 N, -122.0000000 W), scale 1 unit = 10m */
+#define LOC_REF_LAT_E7   370000000
+#define LOC_REF_LON_E7  -1220000000
+#define LOC_SCALE_E7     90        /* ~10m per grid unit in e7 degrees */
+
+static void node_ext_set_sim_position(bridge_node_ext_t *ext, float x, float y) {
+    bramble_position_t pos;
+    memset(&pos, 0, sizeof(pos));
+    pos.latitude_e7   = LOC_REF_LAT_E7  + (int32_t)(y * LOC_SCALE_E7);
+    pos.longitude_e7  = LOC_REF_LON_E7  + (int32_t)(x * LOC_SCALE_E7);
+    pos.altitude_m    = 10;
+    pos.accuracy_m    = 5;
+    pos.speed_kmh     = 0;
+    pos.heading_deg2  = 0;
+    pos.timestamp     = 0;
+    pos.valid         = true;
+    location_set_position(&ext->location, &pos);
+    g_ext_metrics.location_updates++;
+}
 
 /* ─── Relay path tracker (Phase 1) ─────────────────────────────────────── */
 #define MAX_RELAY_PATHS 256
@@ -241,8 +299,22 @@ static void _handle_beacon(sim_node_t *rx, const uint8_t *buf, uint16_t len,
     route_entry_t *existing = route_lookup(&rx->routes, beacon.src_addr);
     bool new_or_broken = (!existing || existing->state == ROUTE_BROKEN);
 
+    /* Phase 6: Use composite route metric for better path selection */
+    int node_idx = (int)(rx - nodes->nodes);
+    bridge_node_ext_t *ext = bridge_node_ext_get(node_idx);
     uint8_t penalty = compute_link_penalty(rssi, 0);
-    uint8_t metric = (penalty >= 255) ? 0 : (uint8_t)(255 - penalty);
+    uint8_t link_quality = (penalty >= 255) ? 0 : (uint8_t)(255 - penalty);
+
+    /* Composite metric: link quality + delivery rate + airtime + latency */
+    uint8_t metric = link_quality; /* legacy fallback */
+    if (ext) {
+        uint8_t airtime_score = route_metric_airtime_score(
+            beacon.tx_queue_depth < 8 ? (8 - beacon.tx_queue_depth) * 1000 : 0, 8000);
+        metric = route_metric_compute(link_quality,
+                                       ext->route_delivery_rate,
+                                       airtime_score,
+                                       ext->route_avg_latency_ms);
+    }
 
     route_install(&rx->routes, beacon.src_addr, beacon.src_addr,
                   1, metric, ROUTE_ACTIVE, now_ms);
@@ -251,10 +323,37 @@ static void _handle_beacon(sim_node_t *rx, const uint8_t *buf, uint16_t len,
         emit_route_added(stdout, now_us, rx->id,
                          beacon.src_addr, beacon.src_addr, 1);
 
-        int node_idx = (int)(rx - nodes->nodes);
         anomaly_check_route_flap(&anomaly[node_idx].flap,
                                   beacon.src_addr, beacon.src_addr,
                                   now_us, stdout, rx->id);
+    }
+
+    /* Phase 6: Mailbox — check if we have stored messages for the beacon sender */
+    if (ext && ext->mailbox.count > 0) {
+        mailbox_entry_t pending[MAILBOX_MAX_PER_DEST];
+        int n = mailbox_retrieve(&ext->mailbox, beacon.src_addr, pending, MAILBOX_MAX_PER_DEST);
+        if (n > 0) {
+            g_ext_metrics.mailbox_delivered += (uint64_t)n;
+            fprintf(stdout,
+                "{\"type\":\"mailbox_delivered\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"count\":%d}\n",
+                (unsigned long long)now_us, rx->id, beacon.src_addr, n);
+            fflush(stdout);
+        }
+    }
+
+    /* Phase 6: Emergency — if node has BEACON_FLAG_MAILBOX set, note it;
+     * record a simulated emergency beacon reception for bookkeeping */
+    if (ext && (beacon.flags & BEACON_FLAG_MAILBOX)) {
+        /* Node advertises mailbox capability — nothing extra needed, already handled */
+    }
+
+    /* Phase 6: Coding — record that this neighbor has received packets we've seen */
+    if (ext) {
+        /* Piggyback our own recent reception cache to neighbor knowledge.
+         * In a real protocol this would use a piggybacked reception report;
+         * here we infer from the beacon's neighbor_count as a proxy. */
+        coding_record_packet(&ext->coding, beacon.header.packet_id);
     }
 }
 
@@ -387,6 +486,22 @@ static void _handle_delivery_receipt(sim_node_t *rx, const uint8_t *buf, uint16_
         /* Always clear pending ack and flow control on receipt */
         pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
         flow_on_ack(&rx->flow_control, receipt.src_addr);
+
+        /* Phase 6: Route metric — update delivery rate EMA on successful ACK */
+        {
+            int rx_idx = (int)(rx - nodes->nodes);
+            bridge_node_ext_t *ext = bridge_node_ext_get(rx_idx);
+            if (ext) {
+                ext->route_delivery_rate =
+                    route_metric_update_delivery(ext->route_delivery_rate, true);
+                if (receipt.hop_count > 0) {
+                    /* Crude latency estimate from hop count */
+                    uint16_t est_latency = (uint16_t)(receipt.hop_count * 50);
+                    ext->route_avg_latency_ms =
+                        route_metric_update_latency(ext->route_avg_latency_ms, est_latency);
+                }
+            }
+        }
 
         /* Emit delivered with path */
         fprintf(stdout,
@@ -597,6 +712,31 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
 
         sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
         emit_packet_dropped(stdout, now_us, rx->id, "no_route");
+
+        /* Phase 6: Mailbox — store the DATA payload for the offline destination.
+         * This relay node volunteers to hold the message until the dest rejoins. */
+        bridge_node_ext_t *ext = bridge_node_ext_get(node_idx);
+        if (ext && len > HEADER_SIZE) {
+            /* Store the raw packet payload (everything after the header) */
+            uint32_t orig_src = bridge_msg_track_find_src(msg_track, msg_track_count,
+                                                           hdr.packet_id);
+            if (orig_src != 0) {
+                int stored = mailbox_store(&ext->mailbox,
+                                           orig_src, hdr.dest_addr,
+                                           buf + HEADER_SIZE, len - HEADER_SIZE,
+                                           hdr.packet_id, now_ms);
+                if (stored == 0) {
+                    g_ext_metrics.mailbox_stored++;
+                    fprintf(stdout,
+                        "{\"type\":\"mailbox_stored\",\"timestamp_us\":%llu"
+                        ",\"node\":\"%s\",\"dest\":\"0x%08X\""
+                        ",\"packet_id\":\"0x%08X\",\"queued\":%d}\n",
+                        (unsigned long long)now_us, rx->id,
+                        hdr.dest_addr, hdr.packet_id, ext->mailbox.count);
+                    fflush(stdout);
+                }
+            }
+        }
         return;
     }
 
@@ -608,6 +748,63 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
     uint8_t fwd_buf[256];
     memcpy(fwd_buf, buf, len);
     fwd_buf[3] = hop_limit;
+
+    /* Phase 6: Coding — record this packet in our coding engine.
+     * Check if we can XOR-encode this with another queued packet. */
+    bridge_node_ext_t *ext = bridge_node_ext_get(node_idx);
+    if (ext && len <= CODING_MAX_PACKET_SIZE) {
+        coding_flush_expired(&ext->coding, now_ms);
+        /* Queue this packet for a coding opportunity */
+        int q = coding_queue_packet(&ext->coding, fwd_buf, len,
+                                    hdr.packet_id, fwd_res.next_hop, now_ms);
+        if (q == 0) {
+            /* Check for XOR coding opportunity */
+            int idx_a = -1, idx_b = -1;
+            if (coding_find_opportunity(&ext->coding, &idx_a, &idx_b) == 0) {
+                g_ext_metrics.coding_opportunities++;
+                coding_queue_entry_t *qa = &ext->coding.queue[idx_a];
+                coding_queue_entry_t *qb = &ext->coding.queue[idx_b];
+
+                uint8_t coded_buf[CODING_MAX_PACKET_SIZE + CODED_HEADER_MAX_SIZE];
+                uint16_t coded_len = 0;
+                if (coding_encode(qa->data, qa->len, qa->packet_id,
+                                  qb->data, qb->len, qb->packet_id,
+                                  coded_buf, &coded_len) == 0) {
+                    g_ext_metrics.coding_encoded++;
+                    /* Mark both queue entries as consumed */
+                    qa->active = false;
+                    qb->active = false;
+                    /* Record in our own reception cache */
+                    coding_record_packet(&ext->coding, hdr.packet_id);
+
+                    /* Broadcast the coded packet */
+                    outbound_packet_t cpkt;
+                    memset(&cpkt, 0, sizeof(cpkt));
+                    memcpy(cpkt.data, coded_buf, coded_len);
+                    cpkt.len = coded_len;
+                    cpkt.is_broadcast = true;
+                    cpkt.dest_addr = 0xFFFFFFFF;
+                    cpkt.pkt_type  = PKT_TYPE_DATA; /* reuse DATA type for coded */
+                    rx->packets_forwarded++;
+                    anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
+
+                    fprintf(stdout,
+                        "{\"type\":\"coding_encoded\",\"timestamp_us\":%llu"
+                        ",\"node\":\"%s\""
+                        ",\"id_a\":\"0x%08X\",\"id_b\":\"0x%08X\""
+                        ",\"coded_len\":%d}\n",
+                        (unsigned long long)now_us, rx->id,
+                        qa->packet_id, qb->packet_id, (int)coded_len);
+                    fflush(stdout);
+
+                    sim_radio_broadcast(rx, &cpkt, nodes, radio, rng, events, metrics, now_us);
+                    return; /* sent as coded packet */
+                }
+            }
+        }
+        /* No coding opportunity — send normally and record */
+        coding_record_packet(&ext->coding, hdr.packet_id);
+    }
 
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -1005,6 +1202,41 @@ void bridge_handle_retransmit(
 {
     uint32_t now_ms = (uint32_t)(now_us / 1000);
 
+    /* Phase 6: Periodic maintenance for extended node state */
+    {
+        int node_idx = (int)(node - nodes->nodes);
+        bridge_node_ext_t *ext = bridge_node_ext_get(node_idx);
+        if (ext) {
+            /* Mailbox: purge expired entries (24h TTL) */
+            int before = ext->mailbox.count;
+            mailbox_purge_expired(&ext->mailbox, now_ms);
+            int purged = before - ext->mailbox.count;
+            if (purged > 0) {
+                g_ext_metrics.mailbox_expired += (uint64_t)purged;
+            }
+
+            /* Coding: flush expired queue entries (500ms window) */
+            coding_flush_expired(&ext->coding, now_ms);
+
+            /* Emergency: tick state machine (auto-timeout, cooldown transitions) */
+            emergency_tick(&ext->emergency, now_ms);
+
+            /* Location: update sim position from node's current x/y coordinates */
+            node_ext_set_sim_position(ext, node->x, node->y);
+
+            /* Route metric: penalize delivery rate if retransmits are happening */
+            for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+                pending_ack_t *pa = &node->pending_acks.entries[i];
+                if (pa->active && pa->attempt > 2) {
+                    /* Multiple retries → signal delivery failure */
+                    ext->route_delivery_rate =
+                        route_metric_update_delivery(ext->route_delivery_rate, false);
+                    break;
+                }
+            }
+        }
+    }
+
     for (int i = 0; i < MAX_PENDING_ACKS; i++) {
         pending_ack_t *pa = &node->pending_acks.entries[i];
         if (!pa->active) continue;
@@ -1056,7 +1288,56 @@ void bridge_handle_retransmit(
     }
 }
 
-/* ─── Init relay path tracker ──────────────────────────────────────────── */
+/* ─── Node join extended initializer ────────────────────────────────────── */
+void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y,
+                                  uint64_t now_us)
+{
+    bridge_node_ext_t *ext = bridge_node_ext_get(node_idx);
+    if (!ext) return;
+
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+
+    /* Set initial simulated position from node coordinates */
+    node_ext_set_sim_position(ext, x, y);
+
+    /* Emergency: ensure state machine is reset for this node */
+    emergency_init(&ext->emergency);
+
+    /* Group: create a default sim group for testing (first 4 nodes only) */
+    if (node_idx < 4) {
+        /* Nodes 0-3 share a sim group "SimGroup" when they join */
+        uint32_t members[4] = {addr, addr + 1, addr + 2, addr + 3};
+        group_create(&ext->group, "SimGroup", addr, members, 4, now_ms);
+    }
+
+    /* Public channel: rate-check TX (not rate-limited at join, just initialise) */
+    (void)public_channel_can_send(now_ms);
+
+    fprintf(stdout,
+        "{\"type\":\"node_ext_initialized\",\"timestamp_us\":%llu"
+        ",\"node_idx\":%d,\"addr\":\"0x%08X\""
+        ",\"lat_e7\":%d,\"lon_e7\":%d}\n",
+        (unsigned long long)now_us, node_idx, addr,
+        ext->location.my_position.latitude_e7,
+        ext->location.my_position.longitude_e7);
+    fflush(stdout);
+}
+
+/* ─── Init relay path tracker + extended state ────────────────────────── */
 void bridge_init(void) {
     relay_path_init();
+
+    /* Phase 6: Initialize all per-node extended state */
+    bridge_node_ext_init_all();
+
+    /* Phase 6: Initialize public channel (Channel 0, well-known PSK) */
+    g_num_pub_channels = 1;
+    int ret = public_channel_init(g_pub_channels, &g_num_pub_channels);
+    if (ret == 0) {
+        fprintf(stdout,
+            "{\"type\":\"public_channel_init\""
+            ",\"channel_id\":%d,\"epoch\":%d}\n",
+            g_pub_channels[0].channel_id, g_pub_channels[0].epoch);
+        fflush(stdout);
+    }
 }

@@ -65,43 +65,43 @@ void location_set_position(location_manager_t *mgr, const bramble_position_t *po
 }
 
 /* Little-endian helpers */
-static void put_u32(uint8_t *buf, uint32_t v) {
+static void loc_put_u32(uint8_t *buf, uint32_t v) {
     buf[0] = v & 0xFF; buf[1] = (v >> 8) & 0xFF;
     buf[2] = (v >> 16) & 0xFF; buf[3] = (v >> 24) & 0xFF;
 }
-static uint32_t get_u32(const uint8_t *buf) {
+static uint32_t loc_get_u32(const uint8_t *buf) {
     return buf[0] | (buf[1] << 8) | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
 }
-static void put_i32(uint8_t *buf, int32_t v) { put_u32(buf, (uint32_t)v); }
-static int32_t get_i32(const uint8_t *buf) { return (int32_t)get_u32(buf); }
-static void put_i16(uint8_t *buf, int16_t v) {
+static void loc_put_i32(uint8_t *buf, int32_t v) { loc_put_u32(buf, (uint32_t)v); }
+static int32_t loc_get_i32(const uint8_t *buf) { return (int32_t)loc_get_u32(buf); }
+static void loc_put_i16(uint8_t *buf, int16_t v) {
     buf[0] = v & 0xFF; buf[1] = (v >> 8) & 0xFF;
 }
-static int16_t get_i16(const uint8_t *buf) {
+static int16_t loc_get_i16(const uint8_t *buf) {
     return (int16_t)(buf[0] | (buf[1] << 8));
 }
 
 int location_serialize_full(const bramble_position_t *pos, uint8_t *buf, size_t buf_len) {
     if (buf_len < LOCATION_FULL_SIZE) return -1;
-    put_i32(buf + 0, pos->latitude_e7);
-    put_i32(buf + 4, pos->longitude_e7);
-    put_i16(buf + 8, pos->altitude_m);
+    loc_put_i32(buf + 0, pos->latitude_e7);
+    loc_put_i32(buf + 4, pos->longitude_e7);
+    loc_put_i16(buf + 8, pos->altitude_m);
     buf[10] = pos->accuracy_m;
     buf[11] = pos->speed_kmh;
     buf[12] = pos->heading_deg2;
-    put_u32(buf + 13, pos->timestamp);
+    loc_put_u32(buf + 13, pos->timestamp);
     return LOCATION_FULL_SIZE;
 }
 
 int location_deserialize_full(const uint8_t *buf, size_t len, bramble_position_t *pos) {
     if (len < LOCATION_FULL_SIZE) return -1;
-    pos->latitude_e7 = get_i32(buf + 0);
-    pos->longitude_e7 = get_i32(buf + 4);
-    pos->altitude_m = get_i16(buf + 8);
+    pos->latitude_e7 = loc_get_i32(buf + 0);
+    pos->longitude_e7 = loc_get_i32(buf + 4);
+    pos->altitude_m = loc_get_i16(buf + 8);
     pos->accuracy_m = buf[10];
     pos->speed_kmh = buf[11];
     pos->heading_deg2 = buf[12];
-    pos->timestamp = get_u32(buf + 13);
+    pos->timestamp = loc_get_u32(buf + 13);
     pos->valid = true;
     return LOCATION_FULL_SIZE;
 }
