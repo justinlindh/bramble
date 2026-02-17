@@ -4,22 +4,16 @@ import { MetricsDashboard } from './components/MetricsDashboard';
 import { EventLog } from './components/EventLog';
 import { ScenarioLoader } from './components/ScenarioLoader';
 import { useSimulation } from './hooks/useSimulation';
+import './App.css';
 
 export default function App() {
   const { state } = useSimulation();
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh',
-      width: '100vw',
-      overflow: 'hidden',
-      background: '#0d1117',
-    }}>
+    <div className="app">
       {/* Top: header with playback controls + scenario loader */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', paddingRight: '16px', background: '#161b22', borderBottom: '1px solid #30363d', flexShrink: 0 }}>
-        <div style={{ flex: 1 }}>
+      <header className="app-header">
+        <div className="app-header-controls">
           <PlaybackControls
             running={state.running}
             connected={state.connected}
@@ -27,18 +21,17 @@ export default function App() {
           />
         </div>
         <ScenarioLoader />
-      </div>
+      </header>
 
       {/* Middle: canvas + metrics sidebar */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        overflow: 'hidden',
-        minHeight: 0,
-      }}>
-        <MeshCanvas nodes={state.nodes} radioRange={150} />
-        <MetricsDashboard metrics={state.metrics} />
-      </div>
+      <main className="app-main">
+        <div className="app-canvas">
+          <MeshCanvas nodes={state.nodes} radioRange={150} />
+        </div>
+        <aside className="app-sidebar">
+          <MetricsDashboard metrics={state.metrics} />
+        </aside>
+      </main>
 
       {/* Bottom: event log */}
       <EventLog events={state.events} />
