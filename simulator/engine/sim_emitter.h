@@ -18,4 +18,15 @@ void emit_link_broken(FILE *out, uint64_t timestamp_us, const char *node_id, uin
 void emit_metrics(FILE *out, uint64_t timestamp_us, int active_nodes, uint64_t total_packets, uint64_t delivered, uint64_t dropped, double avg_latency_ms);
 void emit_anomaly(FILE *out, uint64_t timestamp_us, const char *type, const char *node_id, uint32_t dest_addr, const char *details);
 
+/*
+ * Typed variants — include pkt_type string ("BEACON","RREQ","RREP","RERR","DATA").
+ */
+void emit_packet_sent_typed(FILE *out, uint64_t timestamp_us,
+    const char *node_id, uint32_t src_addr, uint32_t dest_addr,
+    uint16_t size, uint8_t pkt_type);
+
+void emit_packet_received_typed(FILE *out, uint64_t timestamp_us,
+    const char *node_id, uint32_t src_addr, int8_t rssi,
+    uint16_t size, uint8_t pkt_type);
+
 #endif /* SIM_EMITTER_H */

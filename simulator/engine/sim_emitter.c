@@ -1,4 +1,17 @@
 #include "sim_emitter.h"
+#include "../../components/packet/include/packet.h"
+
+/* Map PKT_TYPE_* constants to human-readable strings */
+static const char *pkt_type_name(uint8_t t) {
+    switch (t) {
+        case PKT_TYPE_RREQ:   return "RREQ";
+        case PKT_TYPE_RREP:   return "RREP";
+        case PKT_TYPE_RERR:   return "RERR";
+        case PKT_TYPE_BEACON: return "BEACON";
+        case PKT_TYPE_DATA:   return "DATA";
+        default:              return "UNKNOWN";
+    }
+}
 
 void emit_packet_sent(FILE *out, uint64_t timestamp_us, const char *node_id, uint32_t dest_addr, uint16_t size) {
     fprintf(out, "{\"type\":\"packet_sent\",\"timestamp_us\":%llu,\"node\":\"%s\",\"dest_addr\":\"0x%08X\",\"size\":%u}\n",
@@ -64,5 +77,31 @@ void emit_metrics(FILE *out, uint64_t timestamp_us, int active_nodes, uint64_t t
 void emit_anomaly(FILE *out, uint64_t timestamp_us, const char *type, const char *node_id, uint32_t dest_addr, const char *details) {
     fprintf(out, "{\"type\":\"anomaly\",\"timestamp_us\":%llu,\"anomaly_type\":\"%s\",\"node\":\"%s\",\"dest_addr\":\"0x%08X\",\"details\":\"%s\"}\n",
             (unsigned long long)timestamp_us, type, node_id, dest_addr, details);
+    fflush(out);
+}
+
+void emit_packet_sent_typed(FILE *out, uint64_t timestamp_us,
+    const char *node_id, uint32_t src_addr, uint32_t dest_addr,
+    uint16_t size, uint8_t pkt_type)
+{
+    fprintf(out,
+        "{\"type\":\"packet_sent\",\"timestamp_us\":%llu"
+        ",\"node\":\"%s\",\"src\":\"0x%08X\",\"dest\":\"0x%08X\""
+        ",\"pkt_type\":\"%s\",\"size\":%u}\n",
+        (unsigned long long)timestamp_us, node_id,
+        src_addr, dest_addr, pkt_type_name(pkt_type), size);
+    fflush(out);
+}
+
+void emit_packet_received_typed(FILE *out, uint64_t timestamp_us,
+    const char *node_id, uint32_t src_addr, int8_t rssi,
+    uint16_t size, uint8_t pkt_type)
+{
+    fprintf(out,
+        "{\"type\":\"packet_received\",\"timestamp_us\":%llu"
+        ",\"node\":\"%s\",\"src\":\"0x%08X\""
+        ",\"pkt_type\":\"%s\",\"rssi\":%d,\"size\":%u}\n",
+        (unsigned long long)timestamp_us, node_id,
+        src_addr, pkt_type_name(pkt_type), (int)rssi, size);
     fflush(out);
 }
