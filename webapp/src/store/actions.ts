@@ -257,6 +257,12 @@ export async function setDefaultChannel(index: number): Promise<void> {
   await loadConfig();
 }
 
+export function openDM(addr: number): void {
+  const store = useStore.getState();
+  store.setActiveConversation(`dm:${addr}`);
+  store.setActiveTab('chat');
+}
+
 export function getClient(): BrambleClient | null {
   return client;
 }

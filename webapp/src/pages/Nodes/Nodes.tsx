@@ -1,5 +1,5 @@
 import { useStore } from '../../store/index';
-import { loadNeighbors, loadRoutes } from '../../store/actions';
+import { loadNeighbors, loadRoutes, openDM } from '../../store/actions';
 import { usePoll } from '../../hooks/usePoll';
 import { NeighborCard } from './NeighborCard';
 import { RouteTable } from './RouteTable';
@@ -35,7 +35,7 @@ export function Nodes() {
       ) : (
         <div className={styles.cardGrid}>
           {neighbors.map((n) => (
-            <NeighborCard key={n.addr} neighbor={n} />
+            <NeighborCard key={n.addr} neighbor={n} onOpenDM={openDM} />
           ))}
         </div>
       )}
