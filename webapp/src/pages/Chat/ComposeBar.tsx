@@ -4,6 +4,7 @@ import type { MessageTier } from '../../types/bramble';
 import { sendMessage } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
+import { ShareLocationButton } from './ShareLocationButton';
 import styles from './ComposeBar.module.css';
 
 const MAX_BYTES = 800;
@@ -54,6 +55,9 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isConnected = useStore(s => s.connectionState === 'connected');
+
+  // Parse conversation to get dest
+  const { dest } = parseConversation(conversationId);
 
   // For broadcast conversation, force tier to 'broadcast'
   const isBroadcastConv = conversationId === 'broadcast';
@@ -161,6 +165,8 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
               <IconBroadcast size={14} /> Broadcast
             </span>
           )}
+
+          {!isBroadcastConv && <ShareLocationButton dest={dest} />}
 
           <button
             className={styles.sendBtn}
