@@ -70,7 +70,10 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      handleSend().then(() => {
+        // Re-focus after React re-render settles
+        requestAnimationFrame(() => inputRef.current?.focus());
+      });
     }
   };
 
