@@ -3,10 +3,92 @@
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
 #include "../../components/routing/include/forwarding.h"
+#include "../../components/airtime/include/airtime_budget.h"
+#include "../../components/fragment/include/fragment.h"
+#include "../../components/crypto/include/crypto.h"
 
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+
+/* ─── Relay path tracker (Phase 1) ─────────────────────────────────────── */
+#define MAX_RELAY_PATHS 256
+#define MAX_RELAY_HOPS  16
+
+typedef struct {
+    uint32_t packet_id;
+    uint32_t hops[MAX_RELAY_HOPS];
+    uint8_t  hop_count;
+    bool     active;
+} relay_path_entry_t;
+
+static relay_path_entry_t g_relay_paths[MAX_RELAY_PATHS];
+
+static void relay_path_init(void) {
+    memset(g_relay_paths, 0, sizeof(g_relay_paths));
+}
+
+static void relay_path_add_hop(uint32_t packet_id, uint32_t relay_addr) {
+    /* Find existing entry */
+    for (int i = 0; i < MAX_RELAY_PATHS; i++) {
+        if (g_relay_paths[i].active && g_relay_paths[i].packet_id == packet_id) {
+            if (g_relay_paths[i].hop_count < MAX_RELAY_HOPS) {
+                g_relay_paths[i].hops[g_relay_paths[i].hop_count++] = relay_addr;
+            }
+            return;
+        }
+    }
+    /* Create new entry */
+    for (int i = 0; i < MAX_RELAY_PATHS; i++) {
+        if (!g_relay_paths[i].active) {
+            g_relay_paths[i].active = true;
+            g_relay_paths[i].packet_id = packet_id;
+            g_relay_paths[i].hop_count = 1;
+            g_relay_paths[i].hops[0] = relay_addr;
+            return;
+        }
+    }
+}
+
+static relay_path_entry_t *relay_path_get(uint32_t packet_id) {
+    for (int i = 0; i < MAX_RELAY_PATHS; i++) {
+        if (g_relay_paths[i].active && g_relay_paths[i].packet_id == packet_id) {
+            return &g_relay_paths[i];
+        }
+    }
+    return NULL;
+}
+
+static void relay_path_remove(uint32_t packet_id) {
+    for (int i = 0; i < MAX_RELAY_PATHS; i++) {
+        if (g_relay_paths[i].active && g_relay_paths[i].packet_id == packet_id) {
+            g_relay_paths[i].active = false;
+            return;
+        }
+    }
+}
+
+/* ─── Crypto helpers (Phase 5) ─────────────────────────────────────────── */
+
+/* Derive a shared symmetric key for a node pair from their addresses */
+static void derive_pair_key(uint32_t addr_a, uint32_t addr_b, uint8_t *key_out) {
+    uint32_t lo = (addr_a < addr_b) ? addr_a : addr_b;
+    uint32_t hi = (addr_a < addr_b) ? addr_b : addr_a;
+    uint8_t material[8 + 11]; /* two addresses + "bramble-sim" */
+    material[0] = (lo >> 24) & 0xFF;
+    material[1] = (lo >> 16) & 0xFF;
+    material[2] = (lo >> 8) & 0xFF;
+    material[3] = lo & 0xFF;
+    material[4] = (hi >> 24) & 0xFF;
+    material[5] = (hi >> 16) & 0xFF;
+    material[6] = (hi >> 8) & 0xFF;
+    material[7] = hi & 0xFF;
+    memcpy(material + 8, "bramble-sim", 11);
+    crypto_sha256(material, sizeof(material), key_out);
+}
+
+/* Airtime estimate: ~50ms per typical packet */
+#define AIRTIME_ESTIMATE_MS 50
 
 /* ─── Global simulation time ───────────────────────────────────────────── */
 uint64_t g_bridge_sim_time_us = 0;
@@ -287,24 +369,24 @@ static void _handle_delivery_receipt(sim_node_t *rx, const uint8_t *buf, uint16_
 
     if (receipt.header.dest_addr == rx->addr) {
         /* This receipt is for us — the original sender */
-        bool was_tracked = bridge_msg_track_complete(msg_track, msg_track_count,
-                                                      receipt.orig_packet_id, now_us, metrics);
-        if (was_tracked) {
-            /* Check if this was a retried message */
-            pending_ack_t *pa = NULL;
-            for (int i = 0; i < MAX_PENDING_ACKS; i++) {
-                if (rx->pending_acks.entries[i].active &&
-                    rx->pending_acks.entries[i].packet_id == receipt.orig_packet_id) {
-                    pa = &rx->pending_acks.entries[i];
-                    break;
-                }
+        bridge_msg_track_complete(msg_track, msg_track_count,
+                                  receipt.orig_packet_id, now_us, metrics);
+
+        /* Check if this was a retried message */
+        pending_ack_t *pa = NULL;
+        for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+            if (rx->pending_acks.entries[i].active &&
+                rx->pending_acks.entries[i].packet_id == receipt.orig_packet_id) {
+                pa = &rx->pending_acks.entries[i];
+                break;
             }
-            if (pa && pa->attempt > 1) {
-                metrics->messages_delivered_retry++;
-            }
-            pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
-            flow_on_ack(&rx->flow_control, receipt.src_addr);
         }
+        if (pa && pa->attempt > 1) {
+            metrics->messages_delivered_retry++;
+        }
+        /* Always clear pending ack and flow control on receipt */
+        pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
+        flow_on_ack(&rx->flow_control, receipt.src_addr);
 
         /* Emit delivered with path */
         fprintf(stdout,
@@ -364,6 +446,78 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
         uint32_t orig_sender = bridge_msg_track_find_src(msg_track, msg_track_count,
                                                           hdr.packet_id);
 
+        /* Crypto: decrypt payload if present (Phase 5) */
+        uint8_t decrypted_payload[256];
+        uint16_t payload_len = (len > HEADER_SIZE) ? (len - HEADER_SIZE) : 0;
+        bool crypto_ok = true;
+        if (payload_len > (BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE) && orig_sender != 0) {
+            const uint8_t *enc_data = buf + HEADER_SIZE;
+            const uint8_t *nonce = enc_data;
+            const uint8_t *tag = enc_data + BRAMBLE_NONCE_SIZE;
+            const uint8_t *ct = enc_data + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE;
+            size_t ct_len = payload_len - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+
+            uint8_t key[BRAMBLE_KEY_SIZE];
+            derive_pair_key(orig_sender, rx->addr, key);
+            if (crypto_aes256gcm_decrypt(key, nonce, ct, ct_len, NULL, 0, tag, decrypted_payload) == 0) {
+                metrics->crypto_decrypted++;
+            } else {
+                metrics->crypto_auth_failed++;
+                crypto_ok = false;
+            }
+        }
+
+        if (!crypto_ok) {
+            emit_packet_dropped(stdout, now_us, rx->id, "crypto_auth_fail");
+            return;
+        }
+
+        /* Fragment reassembly (Phase 4): check if payload has frag header */
+        if (payload_len > (BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + FRAG_HEADER_SIZE)) {
+            /* Decrypted payload may contain fragment */
+            size_t pt_len = payload_len - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+            frag_header_t fhdr;
+            fhdr.frag_index = decrypted_payload[0];
+            fhdr.frag_total = decrypted_payload[1];
+            fhdr.message_id = (uint16_t)(decrypted_payload[2] | (decrypted_payload[3] << 8));
+
+            if (fhdr.frag_total > 1 && fhdr.frag_total <= FRAG_MAX_FRAGMENTS) {
+                /* This is a fragment */
+                int result = reassembly_add(&rx->reassembly, &fhdr,
+                    decrypted_payload + FRAG_HEADER_SIZE, pt_len - FRAG_HEADER_SIZE, now_ms);
+                if (result < 1) {
+                    /* Not yet complete or error */
+                    return;
+                }
+                /* Complete! Collect reassembled message */
+                uint8_t reassembled[1024];
+                int rlen = reassembly_collect(&rx->reassembly, fhdr.message_id,
+                    reassembled, sizeof(reassembled));
+                if (rlen > 0) {
+                    metrics->fragments_reassembled++;
+                }
+                /* Fall through to delivery */
+            }
+        } else if (payload_len > FRAG_HEADER_SIZE && payload_len <= HEADER_SIZE + FRAG_HEADER_SIZE + FRAG_MAX_PLAINTEXT &&
+                   !(payload_len > (BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE))) {
+            /* Unencrypted fragment check */
+            const uint8_t *pl = buf + HEADER_SIZE;
+            frag_header_t fhdr;
+            fhdr.frag_index = pl[0];
+            fhdr.frag_total = pl[1];
+            fhdr.message_id = (uint16_t)(pl[2] | (pl[3] << 8));
+
+            if (fhdr.frag_total > 1 && fhdr.frag_total <= FRAG_MAX_FRAGMENTS) {
+                int result = reassembly_add(&rx->reassembly, &fhdr,
+                    pl + FRAG_HEADER_SIZE, payload_len - FRAG_HEADER_SIZE, now_ms);
+                if (result < 1) return;
+                uint8_t reassembled[1024];
+                int rlen = reassembly_collect(&rx->reassembly, fhdr.message_id,
+                    reassembled, sizeof(reassembled));
+                if (rlen > 0) metrics->fragments_reassembled++;
+            }
+        }
+
         /* Record delivery immediately (don't wait for receipt to arrive at source) */
         bridge_msg_track_complete(msg_track, msg_track_count,
                                    hdr.packet_id, now_us, metrics);
@@ -371,7 +525,9 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
         anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
 
         if (orig_sender != 0) {
-            /* Build and send delivery receipt */
+            /* Build and send delivery receipt with relay path */
+            relay_path_entry_t *rp = relay_path_get(hdr.packet_id);
+
             bramble_delivery_receipt_t receipt;
             memset(&receipt, 0, sizeof(receipt));
             receipt.header.version = BRAMBLE_VERSION;
@@ -382,9 +538,20 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
             receipt.header.packet_id = pcg32_random(rng);
             receipt.src_addr = rx->addr;
             receipt.orig_packet_id = hdr.packet_id;
-            receipt.hop_count = 0; /* TODO: accumulate relay path in forwarding */
+
+            /* Populate relay path from tracker */
+            if (rp) {
+                receipt.hop_count = rp->hop_count;
+                for (int i = 0; i < rp->hop_count && i < DELIVERY_RECEIPT_MAX_HOPS; i++) {
+                    receipt.relay_path[i] = rp->hops[i];
+                }
+                relay_path_remove(hdr.packet_id);
+            } else {
+                receipt.hop_count = 0;
+            }
 
             uint8_t receipt_buf[DELIVERY_RECEIPT_MAX_SIZE];
+            uint16_t receipt_len = DELIVERY_RECEIPT_MIN_SIZE + receipt.hop_count * 4;
             if (bramble_delivery_receipt_serialize(&receipt, receipt_buf, sizeof(receipt_buf)) == ESP_OK) {
                 /* Route receipt back to sender */
                 uint8_t rcpt_hop = 32;
@@ -393,8 +560,8 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
                 if (fwd_res.should_send) {
                     outbound_packet_t pkt;
                     memset(&pkt, 0, sizeof(pkt));
-                    memcpy(pkt.data, receipt_buf, DELIVERY_RECEIPT_MIN_SIZE);
-                    pkt.len = DELIVERY_RECEIPT_MIN_SIZE;
+                    memcpy(pkt.data, receipt_buf, receipt_len);
+                    pkt.len = receipt_len;
                     pkt.is_broadcast = false;
                     pkt.dest_addr = fwd_res.next_hop;
                     pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
@@ -434,6 +601,9 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
     }
 
     if (!fwd_res.should_send) return;
+
+    /* Track relay path (Phase 1) */
+    relay_path_add_hop(hdr.packet_id, rx->addr);
 
     uint8_t fwd_buf[256];
     memcpy(fwd_buf, buf, len);
@@ -617,10 +787,24 @@ void bridge_handle_generate_message(
     }
 
     /* Route exists — build and send DATA packet */
+
+    /* Flow control check (Phase 1) */
+    if (!flow_can_send(&src->flow_control, dest_addr)) {
+        /* Window full — reschedule */
+        sim_event_t retry = *event;
+        retry.timestamp_us += 500000ULL; /* retry in 500ms */
+        event_queue_push(events, &retry);
+        return;
+    }
+
     uint8_t hop_limit = 32;
     forward_result_t fwd_res =
         forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
     if (!fwd_res.should_send) return;
+
+    /* Determine payload size from x field (Phase 4: 0 = header-only, >0 = with payload) */
+    int payload_size = (int)event->data.node.x;
+    if (payload_size < 0) payload_size = 0;
 
     bramble_header_t hdr;
     memset(&hdr, 0, sizeof(hdr));
@@ -631,20 +815,170 @@ void bridge_handle_generate_message(
     hdr.dest_addr = dest_addr;
     hdr.packet_id = pcg32_random(rng);
 
-    uint8_t data_buf[HEADER_SIZE];
+    /* Build payload */
+    uint8_t payload_buf[1024];
+    for (int i = 0; i < payload_size && i < (int)sizeof(payload_buf); i++) {
+        payload_buf[i] = (uint8_t)(pcg32_random(rng) & 0xFF);
+    }
+    if (payload_size > (int)sizeof(payload_buf)) payload_size = (int)sizeof(payload_buf);
+
+    /* Check if fragmentation needed (Phase 4) */
+    if (payload_size > FRAG_MAX_PLAINTEXT) {
+        /* Fragment the payload */
+        fragment_t frags[FRAG_MAX_FRAGMENTS];
+        uint16_t msg_id = (uint16_t)(hdr.packet_id & 0xFFFF);
+        int num_frags = fragment_split(payload_buf, (size_t)payload_size, msg_id, frags, FRAG_MAX_FRAGMENTS);
+        if (num_frags <= 0) return;
+
+        bridge_msg_track_add(msg_track, msg_track_count,
+                              hdr.packet_id, src->addr, dest_addr, event->timestamp_us);
+
+        /* Pre-generate fragment packet_ids and track them all */
+        uint32_t frag_pids[FRAG_MAX_FRAGMENTS];
+        frag_pids[0] = hdr.packet_id;
+        for (int fi = 1; fi < num_frags; fi++) {
+            frag_pids[fi] = pcg32_random(rng);
+            bridge_msg_track_add(msg_track, msg_track_count,
+                                  frag_pids[fi], src->addr, dest_addr, event->timestamp_us);
+        }
+
+        for (int fi = 0; fi < num_frags; fi++) {
+            bramble_header_t fhdr = hdr;
+            fhdr.packet_id = frag_pids[fi];
+
+            uint8_t data_buf[256];
+            bramble_header_serialize(&fhdr, data_buf, HEADER_SIZE);
+
+            /* Encrypt fragment payload (Phase 5) */
+            uint8_t *frag_payload = frags[fi].data;
+            size_t frag_len = frags[fi].len;
+            uint8_t enc_buf[256];
+            size_t enc_offset = HEADER_SIZE;
+
+            uint8_t key[BRAMBLE_KEY_SIZE];
+            derive_pair_key(src->addr, dest_addr, key);
+            uint8_t nonce[BRAMBLE_NONCE_SIZE];
+            crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+            memcpy(enc_buf, data_buf, HEADER_SIZE);
+            memcpy(enc_buf + enc_offset, nonce, BRAMBLE_NONCE_SIZE);
+            enc_offset += BRAMBLE_NONCE_SIZE;
+            uint8_t tag[BRAMBLE_TAG_SIZE];
+            if (crypto_aes256gcm_encrypt(key, nonce, frag_payload, frag_len,
+                                          NULL, 0, enc_buf + enc_offset + BRAMBLE_TAG_SIZE, tag) == 0) {
+                memcpy(enc_buf + enc_offset, tag, BRAMBLE_TAG_SIZE);
+                enc_offset += BRAMBLE_TAG_SIZE + frag_len;
+                metrics->crypto_encrypted++;
+            } else {
+                /* Fallback: send unencrypted */
+                memcpy(enc_buf + HEADER_SIZE, frag_payload, frag_len);
+                enc_offset = HEADER_SIZE + frag_len;
+            }
+
+            /* Airtime check (Phase 3) */
+            if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS)) {
+                metrics->airtime_deferred++;
+                fprintf(stdout,
+                    "{\"type\":\"airtime_exceeded\",\"timestamp_us\":%llu,\"node\":\"%s\"}\n",
+                    (unsigned long long)event->timestamp_us, src->id);
+                fflush(stdout);
+                continue;
+            }
+
+            outbound_packet_t pkt;
+            memset(&pkt, 0, sizeof(pkt));
+            memcpy(pkt.data, enc_buf, enc_offset);
+            pkt.len = (uint16_t)enc_offset;
+            pkt.is_broadcast = false;
+            pkt.dest_addr = fwd_res.next_hop;
+            pkt.pkt_type = PKT_TYPE_DATA;
+
+            airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS);
+            sim_radio_broadcast(src, &pkt, nodes, radio, rng,
+                                events, metrics, event->timestamp_us);
+            metrics->fragments_sent++;
+        }
+
+        /* Add to pending acks and flow control */
+        pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr,
+                        MSG_TIER_NORMAL, payload_buf, (uint16_t)payload_size, now_ms);
+        flow_on_send(&src->flow_control, dest_addr);
+
+        src->packets_originated++;
+        metrics_record_message_sent(metrics);
+        fprintf(stdout,
+            "{\"type\":\"message_sent\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"packet_id\":\"0x%08X\""
+            ",\"fragments\":%d}\n",
+            (unsigned long long)event->timestamp_us,
+            src->id, dest_addr, hdr.packet_id, num_frags);
+        fflush(stdout);
+        return;
+    }
+
+    /* Non-fragmented path */
+    uint8_t data_buf[256];
     bramble_header_serialize(&hdr, data_buf, HEADER_SIZE);
+    uint16_t total_len = HEADER_SIZE;
+
+    if (payload_size > 0) {
+        /* Encrypt payload (Phase 5) */
+        uint8_t key[BRAMBLE_KEY_SIZE];
+        derive_pair_key(src->addr, dest_addr, key);
+        uint8_t nonce[BRAMBLE_NONCE_SIZE];
+        crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+
+        memcpy(data_buf + total_len, nonce, BRAMBLE_NONCE_SIZE);
+        total_len += BRAMBLE_NONCE_SIZE;
+
+        uint8_t tag[BRAMBLE_TAG_SIZE];
+        uint8_t ciphertext[256];
+        if (crypto_aes256gcm_encrypt(key, nonce, payload_buf, (size_t)payload_size,
+                                      NULL, 0, ciphertext, tag) == 0) {
+            memcpy(data_buf + total_len, tag, BRAMBLE_TAG_SIZE);
+            total_len += BRAMBLE_TAG_SIZE;
+            memcpy(data_buf + total_len, ciphertext, (size_t)payload_size);
+            total_len += (uint16_t)payload_size;
+            metrics->crypto_encrypted++;
+        } else {
+            /* Fallback: send unencrypted */
+            total_len = HEADER_SIZE;
+            memcpy(data_buf + total_len, payload_buf, (size_t)payload_size);
+            total_len += (uint16_t)payload_size;
+        }
+    }
+
+    /* Airtime check (Phase 3) */
+    if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS)) {
+        metrics->airtime_deferred++;
+        fprintf(stdout,
+            "{\"type\":\"airtime_exceeded\",\"timestamp_us\":%llu,\"node\":\"%s\"}\n",
+            (unsigned long long)event->timestamp_us, src->id);
+        fflush(stdout);
+        /* Reschedule after refill */
+        sim_event_t retry = *event;
+        retry.timestamp_us += 1000000ULL;
+        retry.data.node.y = (float)(retry_count + 1);
+        event_queue_push(events, &retry);
+        return;
+    }
 
     bridge_msg_track_add(msg_track, msg_track_count,
                           hdr.packet_id, src->addr, dest_addr, event->timestamp_us);
 
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
-    memcpy(pkt.data, data_buf, HEADER_SIZE);
-    pkt.len = HEADER_SIZE;
+    memcpy(pkt.data, data_buf, total_len);
+    pkt.len = total_len;
     pkt.is_broadcast = false;
     pkt.dest_addr = fwd_res.next_hop;
     pkt.pkt_type = PKT_TYPE_DATA;
     src->packets_originated++;
+
+    /* Pending ACK + flow control (Phase 1) */
+    pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr,
+                    MSG_TIER_NORMAL, pkt.data, pkt.len, now_ms);
+    flow_on_send(&src->flow_control, dest_addr);
+    airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS);
 
     sim_radio_broadcast(src, &pkt, nodes, radio, rng,
                         events, metrics, event->timestamp_us);
@@ -656,4 +990,73 @@ void bridge_handle_generate_message(
         (unsigned long long)event->timestamp_us,
         src->id, dest_addr, hdr.packet_id);
     fflush(stdout);
+}
+
+/* ─── Retransmission handler (Phase 1) ─────────────────────────────────── */
+
+void bridge_handle_retransmit(
+    sim_node_t *node,
+    node_array_t *nodes,
+    radio_config_t *radio,
+    pcg32_state_t *rng,
+    event_queue_t *events,
+    metrics_state_t *metrics,
+    uint64_t now_us)
+{
+    uint32_t now_ms = (uint32_t)(now_us / 1000);
+
+    for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+        pending_ack_t *pa = &node->pending_acks.entries[i];
+        if (!pa->active) continue;
+        if (pa->attempt == 0) continue; /* not yet due for retry */
+        if (pa->next_retry_ms > now_ms) continue;
+
+        /* This entry needs retransmission */
+        if (pa->attempt >= pa->max_attempts) {
+            /* Exhausted retries — remove and count as failed */
+            flow_on_failure(&node->flow_control, pa->dest_addr);
+            pa->active = false;
+            continue;
+        }
+
+        /* Retransmit */
+        uint8_t hop_limit = 32;
+        forward_result_t fwd_res =
+            forward_data(&node->routes, pa->dest_addr, &hop_limit, now_ms);
+        if (!fwd_res.should_send) continue;
+
+        /* Airtime check */
+        if (!airtime_budget_can_transmit(&node->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS)) {
+            metrics->airtime_deferred++;
+            continue;
+        }
+
+        outbound_packet_t pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        memcpy(pkt.data, pa->packet_data, pa->packet_len);
+        pkt.data[3] = hop_limit; /* update hop_limit */
+        pkt.len = pa->packet_len;
+        pkt.is_broadcast = false;
+        pkt.dest_addr = fwd_res.next_hop;
+        pkt.pkt_type = PKT_TYPE_DATA;
+
+        airtime_budget_debit(&node->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS);
+        sim_radio_broadcast(node, &pkt, nodes, radio, rng, events, metrics, now_us);
+        metrics->messages_retried++;
+
+        /* Schedule next retry */
+        pa->next_retry_ms = now_ms + tier_base_delay_ms(pa->tier) * (1 << pa->attempt);
+        pa->attempt++;
+
+        fprintf(stdout,
+            "{\"type\":\"message_retransmit\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"packet_id\":\"0x%08X\",\"attempt\":%d}\n",
+            (unsigned long long)now_us, node->id, pa->packet_id, pa->attempt);
+        fflush(stdout);
+    }
+}
+
+/* ─── Init relay path tracker ──────────────────────────────────────────── */
+void bridge_init(void) {
+    relay_path_init();
 }

@@ -105,6 +105,12 @@ static bool load_events(cJSON *events_json, event_queue_t *queue, node_array_t *
             strncpy(event.data.node.node_id, src->valuestring, NODE_ID_LEN - 1);
             event.data.node.addr = dest_node->addr;
 
+            /* payload_size stored in x field (Phase 4: fragmentation) */
+            cJSON *ps = cJSON_GetObjectItem(evt_json, "payload_size");
+            if (cJSON_IsNumber(ps)) {
+                event.data.node.x = (float)ps->valuedouble;
+            }
+
         } else if (strcmp(type, "move_node") == 0) {
             event.type = EVT_NODE_MOVE;
             cJSON *node_id = cJSON_GetObjectItem(evt_json, "node");

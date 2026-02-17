@@ -64,6 +64,16 @@ void node_activate(sim_node_t *node) {
     pending_ack_init(&node->pending_acks);
     flow_init(&node->flow_control);
     dedup_init(&node->dedup);
+    airtime_budget_init(&node->airtime, 0);
+    reassembly_init(&node->reassembly);
+    /* Crypto: generate identity but keep sim-defined address */
+    {
+        uint32_t saved_addr = node->addr;
+        crypto_generate_identity(&node->identity);
+        node->identity.address = saved_addr;
+        node->identity.pubkey_hash = saved_addr; /* sim simplification */
+    }
+    node->crypto_counter = 0;
     node->packets_forwarded = 0;
 }
 
@@ -161,4 +171,10 @@ void node_tick(sim_node_t *node, uint64_t now_us, node_tick_result_t *result) {
 
     /* 6. Dedup purge */
     dedup_purge(&node->dedup, now_ms);
+
+    /* 7. Airtime budget refill */
+    airtime_budget_refill(&node->airtime, now_ms);
+
+    /* 8. Fragment reassembly purge */
+    reassembly_purge(&node->reassembly, now_ms);
 }
