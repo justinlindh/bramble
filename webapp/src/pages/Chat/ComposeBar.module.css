@@ -33,21 +33,21 @@
 /* ── Main row ─────────────────────────────────── */
 .row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: flex-end;
 }
 
-/* ── Textarea ─────────────────────────────────── */
+/* ── Textarea (Signal-style auto-expanding pill) ── */
 .input {
   flex: 1;
-  min-height: 36px;
-  max-height: 120px;
+  min-height: 20px;
+  max-height: 160px;
   resize: none;
   overflow-y: auto;
-  line-height: 1.4;
-  padding: 8px 10px;
+  line-height: 1.35;
+  padding: 8px 14px;
   font-size: 0.95rem;
-  border-radius: var(--radius-sm);
+  border-radius: 20px;
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -56,8 +56,8 @@
 }
 
 .input:focus {
-  outline: 2px solid var(--accent-blue);
-  outline-offset: 1px;
+  border-color: var(--accent-blue);
+  outline: none;
 }
 
 .input:disabled {
@@ -128,9 +128,9 @@
   background: var(--accent-blue);
   color: #fff;
   border: none;
-  border-radius: var(--radius-sm);
-  width: 38px;
-  height: 38px;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
   font-size: 1rem;
   display: flex;
   align-items: center;
