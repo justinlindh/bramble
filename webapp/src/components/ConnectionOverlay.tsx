@@ -2,27 +2,50 @@ import { useState } from 'react';
 import { connect } from '../store/actions';
 import { useStore } from '../store/index';
 import type { TransportType } from '../types/bramble';
-import { IconUsb, IconBluetooth, IconMonitor, IconWarning } from './Icons';
+import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
 import styles from './ConnectionOverlay.module.css';
+
+const WIFI_IP_KEY = 'bramble_wifi_ip';
+
+function loadSavedIp(): string {
+  try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
+}
+
+function saveIp(ip: string) {
+  try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
+}
 
 export function ConnectionOverlay() {
   const [transportType, setTransportType] = useState<TransportType>('serial');
+  const [wifiIp, setWifiIp] = useState(loadSavedIp);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
 
   const isConnecting = connectionState === 'connecting';
 
   const handleConnect = () => {
-    connect(transportType);
+    if (transportType === 'wifi') {
+      const ip = wifiIp.trim();
+      if (!ip) return;
+      saveIp(ip);
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const url = ip.includes('://') ? ip : `${proto}://${ip}/ws`;
+      connect(transportType, { url });
+    } else {
+      connect(transportType);
+    }
   };
 
   // Check browser support
   const hasSerial = 'serial' in navigator;
   const hasBluetooth = 'bluetooth' in navigator;
-  const hasAnyHardwareSupport = hasSerial || hasBluetooth;
 
-  // Always show mock option — useful for development and demos
-  const showMock = true;
+  const hints: Record<TransportType, string> = {
+    serial: 'Connect your Bramble node via USB cable, then click Connect.',
+    ble: 'Enable Bluetooth on your device, then click Connect to scan.',
+    websocket: 'Connects to the local mock node for development and demos.',
+    wifi: 'Enter the IP address of your Bramble node. The node must be on the same network (Station mode) or you must be connected to its hotspot (AP mode).',
+  };
 
   return (
     <div className={styles.overlay}>
@@ -31,7 +54,7 @@ export function ConnectionOverlay() {
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
 
-        {!hasAnyHardwareSupport && (
+        {!hasSerial && !hasBluetooth && (
           <div className={styles.unsupported}>
             <p><IconWarning size={16} /> Your browser does not support Web Serial or Web Bluetooth.</p>
             <p className={styles.hint}>
@@ -40,39 +63,55 @@ export function ConnectionOverlay() {
           </div>
         )}
 
-        {hasAnyHardwareSupport && (
-          <>
-            <div className={styles.transportSelect}>
-              <button
-                className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''}`}
-                onClick={() => setTransportType('serial')}
-                disabled={!hasSerial}
-              >
-                <IconUsb size={16} /> USB / Serial
-              </button>
-              <button
-                className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''}`}
-                onClick={() => setTransportType('ble')}
-                disabled={!hasBluetooth}
-              >
-                <IconBluetooth size={16} /> Bluetooth
-              </button>
-            </div>
-          </>
-        )}
-
-        {showMock && (
-          <>
-            {hasAnyHardwareSupport && (
-              <div className={styles.mockDivider}>— or —</div>
-            )}
+        <div className={styles.transportSelect}>
+          {hasSerial && (
             <button
-              className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
-              onClick={() => setTransportType('websocket')}
+              className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''}`}
+              onClick={() => setTransportType('serial')}
             >
-              <IconMonitor size={16} /> Mock Node (WebSocket)
+              <IconUsb size={16} /> USB / Serial
             </button>
-          </>
+          )}
+          {hasBluetooth && (
+            <button
+              className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''}`}
+              onClick={() => setTransportType('ble')}
+            >
+              <IconBluetooth size={16} /> Bluetooth
+            </button>
+          )}
+          <button
+            className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''}`}
+            onClick={() => setTransportType('wifi')}
+          >
+            <IconWifi size={16} /> WiFi
+          </button>
+        </div>
+
+        <div className={styles.mockDivider}>— or —</div>
+        <button
+          className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
+          onClick={() => setTransportType('websocket')}
+        >
+          <IconMonitor size={16} /> Mock Node (WebSocket)
+        </button>
+
+        {/* WiFi IP input */}
+        {transportType === 'wifi' && (
+          <div className={styles.wifiInput}>
+            <label className={styles.wifiLabel}>Node IP address</label>
+            <input
+              type="text"
+              className={styles.wifiField}
+              value={wifiIp}
+              onChange={e => setWifiIp(e.target.value)}
+              placeholder="192.168.4.1"
+              onKeyDown={e => e.key === 'Enter' && handleConnect()}
+            />
+            <span className={styles.wifiHint}>
+              AP mode: 192.168.4.1 · Station mode: check your router
+            </span>
+          </div>
         )}
 
         {connectionError && (
@@ -84,7 +123,7 @@ export function ConnectionOverlay() {
         <button
           className={styles.connectBtn}
           onClick={handleConnect}
-          disabled={isConnecting}
+          disabled={isConnecting || (transportType === 'wifi' && !wifiIp.trim())}
         >
           {isConnecting ? (
             <span className={styles.spinner}>Connecting…</span>
@@ -93,13 +132,7 @@ export function ConnectionOverlay() {
           )}
         </button>
 
-        <p className={styles.hint}>
-          {transportType === 'serial'
-            ? 'Connect your Bramble node via USB cable, then click Connect.'
-            : transportType === 'ble'
-            ? 'Enable Bluetooth on your device, then click Connect to scan.'
-            : 'Connects to the local mock node server at ws://localhost:3005.'}
-        </p>
+        <p className={styles.hint}>{hints[transportType]}</p>
       </div>
     </div>
   );

@@ -33,11 +33,11 @@ function uuid(): string {
 
 // ─── Connection ─────────────────────────────────────────────────────────
 
-export async function connect(type: TransportType): Promise<void> {
+export async function connect(type: TransportType, options?: { url?: string }): Promise<void> {
   const store = useStore.getState();
   store.setConnectionState('connecting');
   try {
-    const transport = createTransport(type);
+    const transport = createTransport(type, options);
     await transport.connect();
     client = new BrambleClient(transport);
     store.setConnectionState('connected');

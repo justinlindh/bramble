@@ -7,9 +7,10 @@ export { SerialTransport } from './SerialTransport';
 export { BLETransport } from './BLETransport';
 export { WebSocketTransport } from './WebSocketTransport';
 
-export function createTransport(type: TransportType): Transport {
+export function createTransport(type: TransportType, options?: { url?: string }): Transport {
   if (type === 'ble') return new BLETransport();
   if (type === 'websocket') return new WebSocketTransport();
+  if (type === 'wifi') return new WebSocketTransport(options?.url);
   return new SerialTransport();
 }
 
