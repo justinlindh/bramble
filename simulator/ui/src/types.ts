@@ -80,4 +80,5 @@ export type SimAction =
   | { type: 'EXPIRE_PACKETS'; now: number }
   | { type: 'SIM_ENDED' }
   | { type: 'SIM_READY' }
+  | { type: 'PLAYBACK_STARTED' }
   | { type: 'RESET' };
