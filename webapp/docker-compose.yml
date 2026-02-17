@@ -1,8 +1,8 @@
 services:
   bramble-webapp:
     build: .
-    ports:
-      - "3004:80"
+    expose:
+      - "80"
 
   mock-node:
     image: node:22-alpine
@@ -10,5 +10,24 @@ services:
     volumes:
       - ./mock:/app
     command: sh -c "npm install && node server.mjs"
+    expose:
+      - "3005"
     ports:
       - "3005:3005"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "3004:80"
+      - "3443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bramble-webapp
+      - mock-node
+
+volumes:
+  caddy_data:
+  caddy_config:

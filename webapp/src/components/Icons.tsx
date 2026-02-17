@@ -77,9 +77,11 @@ export function IconStats({ size = 16, className }: IconProps) {
 export function IconBroadcast({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>
-      <path d="M3 11v2" />
-      <path d="M3 11l7-7 2 2 7-7v18l-7-7-2 2-7-7z" />
-      <path d="M17 9a5 5 0 0 1 0 6" />
+      <circle cx="12" cy="12" r="2" />
+      <path d="M16.24 7.76a6 6 0 0 1 0 8.49" />
+      <path d="M7.76 16.24a6 6 0 0 1 0-8.49" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+      <path d="M4.93 19.07a10 10 0 0 1 0-14.14" />
     </Svg>
   );
 }

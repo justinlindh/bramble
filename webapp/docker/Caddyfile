@@ -1,0 +1,24 @@
+{
+	auto_https disable_redirects
+	local_certs
+}
+
+https:// {
+	tls internal {
+		on_demand
+	}
+
+	@websocket {
+		path /ws
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+
+	reverse_proxy @websocket mock-node:3005
+
+	reverse_proxy bramble-webapp:80
+}
+
+http:// {
+	redir https://{host}:3443{uri} permanent
+}
