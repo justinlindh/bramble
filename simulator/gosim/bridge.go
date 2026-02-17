@@ -22,14 +22,22 @@ func loadScenario(path string, nodes *C.node_array_t, radio *C.radio_config_t,
 	cpath := C.CString(path)
 	defer C.free(unsafe.Pointer(cpath))
 
-	var scenario C.scenario_t
+	// Allocate scenario_t in C heap to avoid cgo pointer-to-pointer restrictions.
+	// The scenario_t contains pointers to the Sim's C state (nodes, radio, events, rng)
+	// which live inside a Go-heap-allocated Sim struct. cgo disallows passing
+	// a Go pointer containing other Go pointers to C, but a C-allocated struct
+	// containing those same pointers is fine.
+	scenario := (*C.scenario_t)(C.calloc(1, C.sizeof_scenario_t))
+	defer C.free(unsafe.Pointer(scenario))
+
 	scenario.nodes = nodes
 	scenario.radio = radio
 	scenario.events = events
 	scenario.rng = rng
 
-	ok := C.scenario_load_file(cpath, &scenario)
-	return scenario, ok == C.bool(true)
+	ok := C.scenario_load_file(cpath, scenario)
+	result := *scenario // copy back to stack
+	return result, ok == C.bool(true)
 }
 
 // --- Node operations ---
