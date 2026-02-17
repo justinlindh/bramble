@@ -29,8 +29,12 @@
 #define PKT_TYPE_STORE_ACK        0x0C
 #define PKT_TYPE_MAILBOX_DELIVERY 0x0D
 #define PKT_TYPE_MAILBOX_QUERY    0x0E
+#define PKT_TYPE_EMERGENCY        0x0F
+#define PKT_TYPE_EMERGENCY_CANCEL 0x10
 
 #define BEACON_FLAG_MAILBOX       0x01  /* Node willing to store messages */
+
+#define HEADER_FLAG_EMERGENCY     0x04  /* Emergency relay priority */
 
 /* Flag bits */
 #define FLAG_TIER_SHIFT    6
