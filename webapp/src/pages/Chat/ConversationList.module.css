@@ -1,0 +1,189 @@
+.sidebar {
+  width: 200px;
+  min-width: 160px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 6px;
+  overflow-y: auto;
+}
+
+/* ── Group header ─────────────────────────────── */
+.groupHeader {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 8px 6px 2px;
+  margin: 0;
+}
+
+.dmHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 2px;
+}
+
+.dmHeader .groupHeader {
+  flex: 1;
+}
+
+/* ── Nav items ────────────────────────────────── */
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+  width: 100%;
+}
+
+.item:hover {
+  background: var(--surface-2);
+}
+
+.item.active {
+  background: color-mix(in srgb, var(--accent-blue) 20%, transparent);
+  color: #fff;
+}
+
+.icon {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Unread badge ─────────────────────────────── */
+.badge {
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Add DM button ────────────────────────────── */
+.addBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 5px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.addBtn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* ── Empty DM hint ────────────────────────────── */
+.dmEmpty {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  font-style: italic;
+}
+
+/* ── New DM Dialog ────────────────────────────── */
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialogTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dialogDesc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.dialogInput {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+.dialogError {
+  font-size: 0.78rem;
+  color: var(--danger);
+  margin: 0;
+}
+
+.dialogBtns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialogOpen {
+  background: var(--accent-blue);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.dialogOpen:hover {
+  filter: brightness(1.1);
+}
+
+.dialogCancel {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dialogCancel:hover {
+  background: var(--surface-2);
+}

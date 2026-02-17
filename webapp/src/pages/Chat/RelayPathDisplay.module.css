@@ -1,0 +1,54 @@
+.path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--critical) 10%, transparent);
+  border-left: 2px solid var(--critical);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.pathLabel {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--critical);
+  margin-right: 4px;
+}
+
+.hopWrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.arrow {
+  color: var(--text-muted);
+  margin: 0 2px;
+  cursor: default;
+}
+
+.hop {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.hopSelf {
+  color: var(--accent-blue);
+  font-size: 0.72rem;
+}
+
+.hopDest {
+  color: var(--critical);
+  font-size: 0.72rem;
+}
+
+.rssi {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
