@@ -128,6 +128,7 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
     case 'node_joined': {
       const node: SimNode = {
         id: raw.node as string,
+        addr: raw.addr as string | undefined,
         x: (raw.x as number) ?? 0,
         y: (raw.y as number) ?? 0,
         active: true,
