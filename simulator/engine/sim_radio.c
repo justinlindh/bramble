@@ -1,4 +1,5 @@
 #include "sim_radio.h"
+#include "sim_emitter.h"
 #include <math.h>
 #include <string.h>
 
@@ -89,4 +90,69 @@ bool radio_in_interference(const radio_config_t *config, const sim_node_t *node)
             return true;
     }
     return false;
+}
+
+/*
+ * sim_radio_broadcast — transmit pkt from tx_node.
+ *
+ * For each other active node in range, schedules an EVT_RECEIVE_PACKET
+ * event with propagation delay.  Out-of-range or loss-dropped nodes get
+ * a packet_dropped event.  Emits one packet_sent event for the transmitter.
+ */
+void sim_radio_broadcast(
+    sim_node_t *tx_node,
+    const outbound_packet_t *pkt,
+    node_array_t *nodes,
+    radio_config_t *radio,
+    pcg32_state_t *rng,
+    event_queue_t *events,
+    metrics_state_t *metrics,
+    uint64_t now_us)
+{
+    /* Emit packet_sent for visualization */
+    emit_packet_sent_typed(stdout, now_us, tx_node->id,
+                           tx_node->addr, pkt->dest_addr,
+                           pkt->len, pkt->pkt_type);
+    metrics_record_packet_sent(metrics);
+    tx_node->packets_sent++;
+
+    /* Deliver to all nodes in range */
+    for (int i = 0; i < nodes->count; i++) {
+        sim_node_t *rx = &nodes->nodes[i];
+        if (rx == tx_node || !rx->active) continue;
+
+        /* For unicast, skip nodes that are not the target */
+        if (!pkt->is_broadcast && pkt->dest_addr != rx->addr) continue;
+
+        if (!radio_can_receive(radio, tx_node, rx, rng)) {
+            /* Only emit drop for unicast targets and in-range nodes
+             * (for broadcast we silently skip out-of-range neighbors) */
+            float dist = radio_distance(tx_node, rx);
+            if (!pkt->is_broadcast && pkt->dest_addr == rx->addr) {
+                emit_packet_dropped(stdout, now_us, rx->id, "radio_loss");
+                metrics_record_packet_dropped(metrics);
+            } else if (pkt->is_broadcast && dist <= radio->range) {
+                /* In-range but dropped due to loss_pct or interference */
+                metrics_record_packet_dropped(metrics);
+            }
+            continue;
+        }
+
+        float dist     = radio_distance(tx_node, rx);
+        uint64_t delay = radio_propagation_delay_us(radio, dist);
+        int8_t rssi    = radio_compute_rssi(radio, dist);
+
+        /* Schedule EVT_RECEIVE_PACKET for this node */
+        sim_event_t recv_evt;
+        memset(&recv_evt, 0, sizeof(recv_evt));
+        recv_evt.type                    = EVT_RECEIVE_PACKET;
+        recv_evt.timestamp_us            = now_us + delay;
+        recv_evt.data.packet.src_addr    = tx_node->addr;
+        recv_evt.data.packet.dest_addr   = rx->addr;
+        recv_evt.data.packet.rssi        = rssi;
+        recv_evt.data.packet.len         = pkt->len;
+        memcpy(recv_evt.data.packet.data, pkt->data, pkt->len);
+
+        event_queue_push(events, &recv_evt);
+    }
 }

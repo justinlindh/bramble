@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include "sim_node.h"
 #include "sim_random.h"
+#include "sim_event.h"
+#include "sim_metrics.h"
 
 #define MAX_INTERFERENCE_ZONES 16
 
@@ -31,5 +33,21 @@ uint64_t radio_propagation_delay_us(const radio_config_t *config, float distance
 int radio_add_interference_zone(radio_config_t *config, float center_x, float center_y, float radius);
 void radio_clear_interference_zone(radio_config_t *config, int index);
 bool radio_in_interference(const radio_config_t *config, const sim_node_t *node);
+
+/*
+ * sim_radio_broadcast — transmit a packet from tx_node to all reachable nodes.
+ * Schedules EVT_RECEIVE_PACKET events with propagation delay.
+ * Emits packet_sent + packet_dropped events.
+ */
+void sim_radio_broadcast(
+    sim_node_t *tx_node,
+    const outbound_packet_t *pkt,
+    node_array_t *nodes,
+    radio_config_t *radio,
+    pcg32_state_t *rng,
+    event_queue_t *events,
+    metrics_state_t *metrics,
+    uint64_t now_us
+);
 
 #endif /* SIM_RADIO_H */
