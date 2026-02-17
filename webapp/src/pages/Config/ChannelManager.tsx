@@ -5,10 +5,61 @@ import {
   removeChannel,
   setDefaultChannel,
 } from '../../store/actions';
+import { QRShareModal } from '../../components/QRShareModal';
+import { QRScanModal } from '../../components/QRScanModal';
+import type { ScanResult } from '../../components/QRScanModal';
+import { encodeChannelShare } from '../../utils/channelShare';
 import styles from './ChannelManager.module.css';
 
 interface ChannelManagerProps {
   channels: Channel[];
+}
+
+// Shown when user clicks Share on a PSK-protected channel
+function PskPromptModal({
+  channelName,
+  onConfirm,
+  onClose,
+}: {
+  channelName: string;
+  onConfirm: (psk: string) => void;
+  onClose: () => void;
+}) {
+  const [psk, setPsk] = useState('');
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onConfirm(psk.trim());
+  };
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+  return (
+    <div className={styles.backdrop} onClick={handleBackdropClick} role="dialog" aria-modal>
+      <div className={styles.promptModal}>
+        <button className={styles.promptClose} onClick={onClose} aria-label="Close">✕</button>
+        <h3 className={styles.promptTitle}>Share "{channelName}"</h3>
+        <p className={styles.promptDesc}>
+          This channel has a PSK. Enter it to include in the share QR so others
+          can join. Leave blank to share without the key.
+        </p>
+        <form className={styles.promptForm} onSubmit={handleSubmit}>
+          <input
+            type="password"
+            className={styles.promptInput}
+            placeholder="PSK (leave blank to omit)"
+            value={psk}
+            onChange={(e) => setPsk(e.target.value)}
+            autoFocus
+            autoComplete="off"
+            aria-label="Channel PSK for sharing"
+          />
+          <button type="submit" className={styles.promptBtn}>
+            Generate QR
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 export function ChannelManager({ channels }: ChannelManagerProps) {
@@ -17,6 +68,19 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
 
+  // Share state
+  const [shareChannel, setShareChannel] = useState<Channel | null>(null);
+  const [shareString, setShareString] = useState('');
+  const [showShare, setShowShare] = useState(false);
+
+  // PSK prompt (when sharing a channel that has a PSK)
+  const [pskPromptChannel, setPskPromptChannel] = useState<Channel | null>(null);
+
+  // Import / scan state
+  const [showScan, setShowScan] = useState(false);
+  const [importSuccess, setImportSuccess] = useState('');
+
+  // ── Add channel ──────────────────────────────────────────────────────────
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newName.trim();
@@ -34,6 +98,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
     }
   };
 
+  // ── Remove channel ────────────────────────────────────────────────────────
   const handleRemove = async (index: number, name: string) => {
     if (!confirm(`Remove channel "${name}"?`)) return;
     setError('');
@@ -44,10 +109,49 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
     }
   };
 
+  // ── Set default ───────────────────────────────────────────────────────────
   const handleSetDefault = async (index: number) => {
     setError('');
     try {
       await setDefaultChannel(index);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // ── Share channel ─────────────────────────────────────────────────────────
+  const handleShare = (ch: Channel) => {
+    if (ch.hasPsk) {
+      // Ask the user to re-enter the PSK (server doesn't send it back)
+      setPskPromptChannel(ch);
+    } else {
+      setShareChannel(ch);
+      setShareString(encodeChannelShare(ch.name));
+      setShowShare(true);
+    }
+  };
+
+  const handlePskConfirm = (psk: string) => {
+    if (!pskPromptChannel) return;
+    setPskPromptChannel(null);
+    setShareChannel(pskPromptChannel);
+    setShareString(encodeChannelShare(pskPromptChannel.name, psk || undefined));
+    setShowShare(true);
+  };
+
+  // ── Import from QR / string ───────────────────────────────────────────────
+  const handleScanResult = async (result: ScanResult) => {
+    setShowScan(false);
+    if (result.kind !== 'channel') {
+      setError('Scanned a node share, not a channel share.');
+      return;
+    }
+    const { name, psk } = result.data;
+    setError('');
+    try {
+      await addChannel(name, psk || undefined);
+      setImportSuccess(`Channel "${name}" added!`);
+      setTimeout(() => setImportSuccess(''), 3000);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -80,6 +184,14 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
               epoch {ch.epoch}
             </span>
             <div className={styles.rowActions}>
+              {/* Share button */}
+              <button
+                className={styles.shareBtn}
+                onClick={() => handleShare(ch)}
+                title={`Share channel "${ch.name}" as QR code`}
+              >
+                ⬆ Share
+              </button>
               {!ch.isDefault && (
                 <button
                   className={styles.setDefaultBtn}
@@ -127,10 +239,51 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
           type="submit"
           disabled={adding || !newName.trim()}
         >
-          {adding ? 'Adding…' : '+ Add Channel'}
+          {adding ? 'Adding…' : '+ Add'}
+        </button>
+        {/* Import from QR / string */}
+        <button
+          type="button"
+          className={styles.importBtn}
+          onClick={() => { setError(''); setImportSuccess(''); setShowScan(true); }}
+          title="Import channel from QR code or share string"
+        >
+          ⬇ Import
         </button>
         {error && <span className={styles.error}>{error}</span>}
+        {importSuccess && <span className={styles.success}>{importSuccess}</span>}
       </form>
+
+      {/* ── PSK prompt modal ── */}
+      {pskPromptChannel && (
+        <PskPromptModal
+          channelName={pskPromptChannel.name}
+          onConfirm={handlePskConfirm}
+          onClose={() => setPskPromptChannel(null)}
+        />
+      )}
+
+      {/* ── QR share modal ── */}
+      {showShare && shareChannel && (
+        <QRShareModal
+          title={`Share channel "${shareChannel.name}"`}
+          shareString={shareString}
+          description={
+            shareChannel.hasPsk
+              ? 'Anyone with this QR or string can join the channel — includes the PSK if you provided it.'
+              : 'Anyone with this QR or string can join this public channel.'
+          }
+          onClose={() => { setShowShare(false); setShareChannel(null); }}
+        />
+      )}
+
+      {/* ── QR scan / import modal ── */}
+      {showScan && (
+        <QRScanModal
+          onResult={handleScanResult}
+          onClose={() => setShowScan(false)}
+        />
+      )}
     </div>
   );
 }
