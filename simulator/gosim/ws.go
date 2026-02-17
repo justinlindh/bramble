@@ -107,8 +107,8 @@ func (h *Hub) readPump(c *Client) {
 		}
 
 		// Auto-load default scenario if sim is idle
-		if h.sim.State() == StateIdle && cmd.Type != "load" {
-			h.sim.Send(Command{Type: "load"})
+		if h.sim.State() == StateIdle && cmd.Type != "load" && cmd.Type != "start" {
+			h.sim.Send(Command{Type: "load", Scenario: "10-node-grid"})
 		}
 
 		h.sim.Send(cmd)
