@@ -1,0 +1,45 @@
+{
+  "name": "stress-test-20-nodes",
+  "mode": "stochastic",
+  "seed": 42,
+  "duration_ms": 300000,
+  "nodes": {
+    "count": 10,
+    "area": [
+      600,
+      600
+    ]
+  },
+  "radio": {
+    "range": 150,
+    "loss_pct_range": [
+      3,
+      12
+    ]
+  },
+  "chaos": {
+    "node_churn": {
+      "join_rate_per_min": 1.5,
+      "leave_rate_per_min": 1
+    },
+    "movement": {
+      "speed_max": 8,
+      "pattern": "random_walk"
+    },
+    "interference": {
+      "frequency_per_min": 2,
+      "radius_range": [
+        40,
+        120
+      ],
+      "duration_range_ms": [
+        3000,
+        15000
+      ]
+    }
+  },
+  "traffic": {
+    "messages_per_min": 10,
+    "random_pairs": true
+  }
+}

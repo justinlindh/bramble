@@ -1,0 +1,176 @@
+{
+  "name": "3-node-linear",
+  "mode": "deterministic",
+  "duration_ms": 573000,
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 2,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {
+      "at_ms": 8000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 33000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "A"
+    },
+    {
+      "at_ms": 63000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "B"
+    },
+    {
+      "at_ms": 93000,
+      "type": "move_node",
+      "node": "B",
+      "x": 100,
+      "y": 80
+    },
+    {
+      "at_ms": 98000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 123000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "A"
+    },
+    {
+      "at_ms": 153000,
+      "type": "move_node",
+      "node": "B",
+      "x": 250,
+      "y": 0
+    },
+    {
+      "at_ms": 158000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 183000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "A"
+    },
+    {
+      "at_ms": 213000,
+      "type": "move_node",
+      "node": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "at_ms": 223000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 243000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "B"
+    },
+    {
+      "at_ms": 273000,
+      "type": "interference",
+      "x": 100,
+      "y": 0,
+      "radius": 60,
+      "duration_ms": 30000
+    },
+    {
+      "at_ms": 283000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 313000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 333000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "A"
+    },
+    {
+      "at_ms": 363000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 393000,
+      "type": "kill_node",
+      "node": "B"
+    },
+    {
+      "at_ms": 398000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 453000,
+      "type": "node_join",
+      "node": "B"
+    },
+    {
+      "at_ms": 463000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "at_ms": 493000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "A"
+    },
+    {
+      "at_ms": 523000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "B"
+    },
+    {
+      "at_ms": 553000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "C"
+    }
+  ]
+}
