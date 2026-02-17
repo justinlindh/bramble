@@ -31,4 +31,7 @@ int crypto_sha256(const uint8_t *data, size_t data_len, uint8_t *hash);
 void crypto_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t *nonce);
 int crypto_random(uint8_t *buf, size_t len);
 
+/* Default public channel PSK — well-known, not secret */
+#define BRAMBLE_PUBLIC_CHANNEL_PSK "bramble-default"
+
 #endif
