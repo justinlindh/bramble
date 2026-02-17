@@ -32,6 +32,8 @@
 .app-canvas {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
 }
 
 .app-sidebar {
@@ -79,5 +81,6 @@
   .app-sidebar {
     width: 100%;
     flex-shrink: 0;
+    overflow-y: visible;
   }
 }

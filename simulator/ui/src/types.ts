@@ -61,4 +61,5 @@ export type SimAction =
   | { type: 'REMOVE_NODE'; id: string; timestamp_us: number }
   | { type: 'UPDATE_METRICS'; metrics: Metrics }
   | { type: 'ADD_EVENT'; event: Omit<SimEvent, 'id'> }
-  | { type: 'SIM_ENDED' };
+  | { type: 'SIM_ENDED' }
+  | { type: 'RESET' };
