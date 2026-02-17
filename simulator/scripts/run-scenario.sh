@@ -96,10 +96,10 @@ run_scenario() {
     # Show route and anomaly events
     echo ""
     echo "  Route events:"
-    echo "$output" | grep '"type":"route_' | wc -l | xargs -I{} echo "    {} route changes"
+    echo "$output" | grep '"type":"route_' | wc -l | xargs -I{} echo "    {} route changes" || echo "    0 route changes"
     echo "  Anomalies:"
     local anomalies
-    anomalies=$(echo "$output" | grep '"type":"anomaly"' | wc -l)
+    anomalies=$(echo "$output" | grep -c '"type":"anomaly"' || true)
     if [ "$anomalies" -gt 0 ]; then
       echo "    $anomalies anomalies detected"
       echo "$output" | grep '"type":"anomaly"' | docker exec -i "$CONTAINER" node -e "

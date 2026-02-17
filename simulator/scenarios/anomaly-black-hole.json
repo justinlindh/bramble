@@ -1,0 +1,124 @@
+{
+  "name": "anomaly-black-hole",
+  "description": "Black hole: Node C relays between A-B and D-E in a line. After routes establish, C is killed and immediately re-joined (clearing its route table). Rapid DATA sent through C \u2014 it receives but can't forward (no routes). Should trigger black_hole on C.",
+  "mode": "deterministic",
+  "duration_ms": 240000,
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 300,
+      "y": 0
+    },
+    {
+      "id": "E",
+      "x": 400,
+      "y": 0
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {
+      "at_ms": 35000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 45000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 60000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 60500,
+      "type": "node_join",
+      "x": 200,
+      "y": 0,
+      "node": "C"
+    },
+    {
+      "at_ms": 65000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 67000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 69000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 71000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 73000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 75000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 77000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 79000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 81000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 83000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    }
+  ]
+}
