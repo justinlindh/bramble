@@ -90,7 +90,11 @@ run_scenario() {
 
   # Extract final metrics line (last JSON with type=metrics)
   local final_metrics
-  final_metrics=$(echo "$output" | grep '"type":"metrics"' | tail -1)
+  final_metrics=$(echo "$output" | grep '"type":"final_metrics"' | tail -1)
+  if [ -z "$final_metrics" ]; then
+    # Fallback to periodic metrics if final_metrics not found
+    final_metrics=$(echo "$output" | grep '"type":"metrics"' | tail -1)
+  fi
 
   if [ -z "$final_metrics" ]; then
     echo "ERROR: No metrics output for $name"
@@ -116,8 +120,11 @@ result = {
     'dropped': m.get('dropped', 0),
     'total_packets': m.get('total_packets', 0),
     'avg_latency_ms': m.get('avg_latency_ms', 0),
-    'active_nodes': m.get('active_nodes', 0),
-    'duration_s': round(m.get('timestamp_us', 0) / 1e6, 2),
+    'active_nodes': m.get('active_nodes', '?'),
+    'duration_s': round(m.get('timestamp_us', 0) / 1e6, 2) if m.get('timestamp_us') else '?',
+    'airtime_deferred': m.get('airtime_deferred', 0),
+    'fragments_sent': m.get('fragments_sent', 0),
+    'crypto_encrypted': m.get('crypto_encrypted', 0),
     'overhead_ratio': overhead
 }
 print(json.dumps(result))
@@ -143,6 +150,12 @@ print('  Dropped:       ' + str(m['dropped']))
 print('  Avg latency:   ' + str(round(m['avg_latency_ms'], 1)) + ' ms')
 print('  Total packets: ' + str(m['total_packets']))
 print('  Overhead:      ' + str(m['overhead_ratio']) + 'x (packets per message)')
+if m.get('airtime_deferred', 0) > 0:
+    print('  Airtime defer: ' + str(m['airtime_deferred']))
+if m.get('fragments_sent', 0) > 0:
+    print('  Fragments:     ' + str(m['fragments_sent']))
+if m.get('crypto_encrypted', 0) > 0:
+    print('  Encrypted:     ' + str(m['crypto_encrypted']))
 "
   fi
 
