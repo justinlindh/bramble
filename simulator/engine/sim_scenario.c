@@ -3,6 +3,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+
+/* ── Helpers ──────────────────────────────────────────────────────────── */
+
+/*
+ * Sample an exponentially-distributed interval for a Poisson process.
+ * rate_per_min: average events per minute (must be > 0).
+ * Returns interval in microseconds.
+ */
+static uint64_t poisson_interval_us(pcg32_state_t *rng, float rate_per_min) {
+    if (rate_per_min <= 0.0f) return UINT64_MAX;
+    float rate_per_us = rate_per_min / 60000000.0f;
+    float u = pcg32_float(rng);
+    if (u < 1e-9f) u = 1e-9f;   /* Guard against log(0) */
+    float interval = -logf(u) / rate_per_us;
+    return (uint64_t)interval;
+}
+
+/* ── Deterministic helpers (reused from original) ─────────────────────── */
 
 static bool load_nodes(cJSON *nodes_json, node_array_t *nodes) {
     if (!cJSON_IsArray(nodes_json))
@@ -132,7 +151,7 @@ static bool load_events(cJSON *events_json, event_queue_t *queue, node_array_t *
                 sim_event_t end_evt = {0};
                 end_evt.timestamp_us = timestamp_us + duration;
                 end_evt.type = EVT_INTERFERENCE_END;
-                end_evt.data.interference.zone_index = -1;  /* Will be set when zone is created */
+                end_evt.data.interference.zone_index = -1;
                 event_queue_push(queue, &end_evt);
             }
             continue;  /* Don't push 'event' below */
@@ -156,6 +175,283 @@ static bool load_events(cJSON *events_json, event_queue_t *queue, node_array_t *
     return true;
 }
 
+/* ── Stochastic scenario loader ───────────────────────────────────────── */
+
+static bool load_stochastic(cJSON *root, scenario_t *scenario) {
+    /* Parse optional node block — may be {count, area} not an array */
+    cJSON *nodes_cfg   = cJSON_GetObjectItem(root, "nodes");
+    cJSON *radio_json  = cJSON_GetObjectItem(root, "radio");
+    cJSON *chaos_cfg   = cJSON_GetObjectItem(root, "chaos");
+    cJSON *traffic_cfg = cJSON_GetObjectItem(root, "traffic");
+
+    /* ── Node count & area ─────────────────────────────────────────────── */
+    int   node_count = 10;
+    float area_w     = 300.0f;
+    float area_h     = 300.0f;
+
+    if (nodes_cfg) {
+        if (cJSON_IsObject(nodes_cfg)) {
+            cJSON *cnt  = cJSON_GetObjectItem(nodes_cfg, "count");
+            cJSON *area = cJSON_GetObjectItem(nodes_cfg, "area");
+            if (cnt && cJSON_IsNumber(cnt))
+                node_count = (int)cnt->valuedouble;
+            if (area && cJSON_IsArray(area)) {
+                cJSON *aw = cJSON_GetArrayItem(area, 0);
+                cJSON *ah = cJSON_GetArrayItem(area, 1);
+                if (aw && cJSON_IsNumber(aw)) area_w = (float)aw->valuedouble;
+                if (ah && cJSON_IsNumber(ah)) area_h = (float)ah->valuedouble;
+            }
+        }
+    }
+    if (node_count > MAX_NODES) node_count = MAX_NODES;
+
+    /* ── Radio config ──────────────────────────────────────────────────── */
+    radio_config_init(scenario->radio);
+    if (radio_json && cJSON_IsObject(radio_json)) {
+        cJSON *range      = cJSON_GetObjectItem(radio_json, "range");
+        cJSON *loss_range = cJSON_GetObjectItem(radio_json, "loss_pct_range");
+
+        if (range && cJSON_IsNumber(range))
+            scenario->radio->range = (float)range->valuedouble;
+
+        if (loss_range && cJSON_IsArray(loss_range)) {
+            cJSON *lo = cJSON_GetArrayItem(loss_range, 0);
+            cJSON *hi = cJSON_GetArrayItem(loss_range, 1);
+            float lo_v = lo && cJSON_IsNumber(lo) ? (float)lo->valuedouble : 2.0f;
+            float hi_v = hi && cJSON_IsNumber(hi) ? (float)hi->valuedouble : 15.0f;
+            /* Use mid-range as fixed loss_pct; future work: per-link stochastic */
+            scenario->radio->loss_pct = (lo_v + hi_v) / 2.0f;
+        }
+    }
+
+    /* ── Seed the RNG ──────────────────────────────────────────────────── */
+    pcg32_seed(scenario->rng, scenario->metadata.seed);
+
+    /* ── Generate nodes at random positions ───────────────────────────── */
+    uint32_t addr = 0x02000000;  /* Different base from deterministic */
+    for (int i = 0; i < node_count; i++) {
+        char id[NODE_ID_LEN];
+        snprintf(id, sizeof(id), "N%d", i);
+        float x = pcg32_float(scenario->rng) * area_w;
+        float y = pcg32_float(scenario->rng) * area_h;
+        if (node_array_add(scenario->nodes, id, addr++, x, y) < 0) {
+            fprintf(stderr, "Warning: node array full at %d nodes\n", i);
+            break;
+        }
+    }
+
+    uint64_t dur = scenario->metadata.duration_us;
+
+    /* ── Chaos: node churn ─────────────────────────────────────────────── */
+    float leave_rate  = 0.0f;
+    float join_rate   = 0.0f;
+    float speed_max   = 0.0f;
+    float ifreq       = 0.0f;
+    float iradius_min = 30.0f, iradius_max = 100.0f;
+    float idur_min_us = 1000000.0f, idur_max_us = 5000000.0f;
+
+    if (chaos_cfg && cJSON_IsObject(chaos_cfg)) {
+        cJSON *churn = cJSON_GetObjectItem(chaos_cfg, "node_churn");
+        cJSON *move  = cJSON_GetObjectItem(chaos_cfg, "movement");
+        cJSON *iface = cJSON_GetObjectItem(chaos_cfg, "interference");
+
+        if (churn && cJSON_IsObject(churn)) {
+            cJSON *lr = cJSON_GetObjectItem(churn, "leave_rate_per_min");
+            cJSON *jr = cJSON_GetObjectItem(churn, "join_rate_per_min");
+            if (lr && cJSON_IsNumber(lr)) leave_rate = (float)lr->valuedouble;
+            if (jr && cJSON_IsNumber(jr)) join_rate  = (float)jr->valuedouble;
+        }
+        if (move && cJSON_IsObject(move)) {
+            cJSON *sm = cJSON_GetObjectItem(move, "speed_max");
+            if (sm && cJSON_IsNumber(sm)) speed_max = (float)sm->valuedouble;
+        }
+        if (iface && cJSON_IsObject(iface)) {
+            cJSON *freq = cJSON_GetObjectItem(iface, "frequency_per_min");
+            cJSON *rr   = cJSON_GetObjectItem(iface, "radius_range");
+            cJSON *dr   = cJSON_GetObjectItem(iface, "duration_range_ms");
+            if (freq && cJSON_IsNumber(freq)) ifreq = (float)freq->valuedouble;
+            if (rr && cJSON_IsArray(rr)) {
+                cJSON *a = cJSON_GetArrayItem(rr, 0);
+                cJSON *b = cJSON_GetArrayItem(rr, 1);
+                if (a && cJSON_IsNumber(a)) iradius_min = (float)a->valuedouble;
+                if (b && cJSON_IsNumber(b)) iradius_max = (float)b->valuedouble;
+            }
+            if (dr && cJSON_IsArray(dr)) {
+                cJSON *a = cJSON_GetArrayItem(dr, 0);
+                cJSON *b = cJSON_GetArrayItem(dr, 1);
+                if (a && cJSON_IsNumber(a)) idur_min_us = (float)a->valuedouble * 1000.0f;
+                if (b && cJSON_IsNumber(b)) idur_max_us = (float)b->valuedouble * 1000.0f;
+            }
+        }
+    }
+
+    /* Track which nodes have left (to allow rejoins) */
+    bool node_left[MAX_NODES] = {false};
+
+    /* Schedule leave events */
+    if (leave_rate > 0.0f) {
+        uint64_t t = poisson_interval_us(scenario->rng, leave_rate);
+        while (t < dur) {
+            /* Pick a random active node */
+            int active_count = 0;
+            int active_idx[MAX_NODES];
+            for (int i = 0; i < scenario->nodes->count; i++) {
+                if (!node_left[i]) active_idx[active_count++] = i;
+            }
+            if (active_count > 1) {  /* Keep at least 1 active */
+                int pick = (int)pcg32_range(scenario->rng, 0, (uint32_t)active_count);
+                int idx  = active_idx[pick];
+                node_left[idx] = true;
+
+                sim_event_t evt = {0};
+                evt.timestamp_us = t;
+                evt.type = EVT_NODE_LEAVE;
+                strncpy(evt.data.node.node_id,
+                        scenario->nodes->nodes[idx].id, NODE_ID_LEN - 1);
+                event_queue_push(scenario->events, &evt);
+            }
+            t += poisson_interval_us(scenario->rng, leave_rate);
+        }
+    }
+
+    /* Schedule join events for departed nodes */
+    if (join_rate > 0.0f) {
+        uint64_t t = poisson_interval_us(scenario->rng, join_rate);
+        while (t < dur) {
+            /* Pick a random departed node */
+            int gone_count = 0;
+            int gone_idx[MAX_NODES];
+            for (int i = 0; i < scenario->nodes->count; i++) {
+                if (node_left[i]) gone_idx[gone_count++] = i;
+            }
+            if (gone_count > 0) {
+                int pick = (int)pcg32_range(scenario->rng, 0, (uint32_t)gone_count);
+                int idx  = gone_idx[pick];
+                node_left[idx] = false;
+
+                sim_event_t evt = {0};
+                evt.timestamp_us = t;
+                evt.type = EVT_NODE_JOIN;
+                strncpy(evt.data.node.node_id,
+                        scenario->nodes->nodes[idx].id, NODE_ID_LEN - 1);
+                event_queue_push(scenario->events, &evt);
+            }
+            t += poisson_interval_us(scenario->rng, join_rate);
+        }
+    }
+
+    /* ── Chaos: random walk movement ──────────────────────────────────── */
+    if (speed_max > 0.0f) {
+        /*
+         * Each node moves every 5 seconds on average.
+         * Displacement = speed_max * 5 s (a single-step random walk).
+         */
+        float move_rate = (float)scenario->nodes->count * 12.0f; /* ~12 moves/min per node */
+        uint64_t t = poisson_interval_us(scenario->rng, move_rate);
+        while (t < dur) {
+            int idx = (int)pcg32_range(scenario->rng, 0,
+                                       (uint32_t)scenario->nodes->count);
+            sim_node_t *node = &scenario->nodes->nodes[idx];
+
+            float dx = (pcg32_float(scenario->rng) * 2.0f - 1.0f) * speed_max * 5.0f;
+            float dy = (pcg32_float(scenario->rng) * 2.0f - 1.0f) * speed_max * 5.0f;
+            float nx = node->x + dx;
+            float ny = node->y + dy;
+            /* Clamp to area */
+            if (nx < 0.0f) nx = 0.0f;
+            if (ny < 0.0f) ny = 0.0f;
+            if (nx > area_w) nx = area_w;
+            if (ny > area_h) ny = area_h;
+
+            sim_event_t evt = {0};
+            evt.timestamp_us = t;
+            evt.type = EVT_NODE_MOVE;
+            strncpy(evt.data.node.node_id, node->id, NODE_ID_LEN - 1);
+            evt.data.node.x = nx;
+            evt.data.node.y = ny;
+            event_queue_push(scenario->events, &evt);
+
+            /* Update node's stored position so subsequent moves are relative */
+            node->x = nx;
+            node->y = ny;
+
+            t += poisson_interval_us(scenario->rng, move_rate);
+        }
+    }
+
+    /* ── Chaos: interference zones ─────────────────────────────────────── */
+    if (ifreq > 0.0f) {
+        uint64_t t = poisson_interval_us(scenario->rng, ifreq);
+        while (t < dur) {
+            float cx = pcg32_float(scenario->rng) * area_w;
+            float cy = pcg32_float(scenario->rng) * area_h;
+            float r  = iradius_min +
+                       pcg32_float(scenario->rng) * (iradius_max - iradius_min);
+            float d  = idur_min_us +
+                       pcg32_float(scenario->rng) * (idur_max_us - idur_min_us);
+
+            sim_event_t start = {0};
+            start.timestamp_us = t;
+            start.type = EVT_INTERFERENCE_START;
+            start.data.interference.center_x = cx;
+            start.data.interference.center_y = cy;
+            start.data.interference.radius   = r;
+            event_queue_push(scenario->events, &start);
+
+            sim_event_t end = {0};
+            end.timestamp_us = t + (uint64_t)d;
+            end.type = EVT_INTERFERENCE_END;
+            end.data.interference.zone_index = -1;
+            event_queue_push(scenario->events, &end);
+
+            t += poisson_interval_us(scenario->rng, ifreq);
+        }
+    }
+
+    /* ── Traffic: random message pairs ────────────────────────────────── */
+    float msg_rate = 5.0f;
+    bool  random_pairs = true;
+
+    if (traffic_cfg && cJSON_IsObject(traffic_cfg)) {
+        cJSON *mr = cJSON_GetObjectItem(traffic_cfg, "messages_per_min");
+        cJSON *rp = cJSON_GetObjectItem(traffic_cfg, "random_pairs");
+        if (mr && cJSON_IsNumber(mr))  msg_rate = (float)mr->valuedouble;
+        if (rp && cJSON_IsBool(rp))    random_pairs = cJSON_IsTrue(rp);
+    }
+
+    if (msg_rate > 0.0f && scenario->nodes->count >= 2) {
+        uint64_t t = poisson_interval_us(scenario->rng, msg_rate);
+        while (t < dur) {
+            int src_idx, dst_idx;
+            if (random_pairs) {
+                src_idx = (int)pcg32_range(scenario->rng, 0,
+                                           (uint32_t)scenario->nodes->count);
+                do {
+                    dst_idx = (int)pcg32_range(scenario->rng, 0,
+                                               (uint32_t)scenario->nodes->count);
+                } while (dst_idx == src_idx);
+            } else {
+                src_idx = 0;
+                dst_idx = 1;
+            }
+
+            sim_event_t evt = {0};
+            evt.timestamp_us = t;
+            evt.type = EVT_GENERATE_MESSAGE;
+            strncpy(evt.data.node.node_id,
+                    scenario->nodes->nodes[src_idx].id, NODE_ID_LEN - 1);
+            evt.data.node.addr = scenario->nodes->nodes[dst_idx].addr;
+            event_queue_push(scenario->events, &evt);
+
+            t += poisson_interval_us(scenario->rng, msg_rate);
+        }
+    }
+
+    return true;
+}
+
+/* ── Public API ───────────────────────────────────────────────────────── */
+
 bool scenario_load_file(const char *path, scenario_t *scenario) {
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -167,12 +463,12 @@ bool scenario_load_file(const char *path, scenario_t *scenario) {
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    char *data = malloc(size + 1);
+    char *data = malloc((size_t)size + 1);
     if (!data) {
         fclose(f);
         return false;
     }
-    fread(data, 1, size, f);
+    fread(data, 1, (size_t)size, f);
     data[size] = '\0';
     fclose(f);
 
@@ -184,54 +480,61 @@ bool scenario_load_file(const char *path, scenario_t *scenario) {
         return false;
     }
 
-    /* Load metadata */
-    cJSON *name_json = cJSON_GetObjectItem(root, "name");
-    cJSON *mode_json = cJSON_GetObjectItem(root, "mode");
+    /* ── Metadata ──────────────────────────────────────────────────────── */
+    cJSON *name_json   = cJSON_GetObjectItem(root, "name");
+    cJSON *mode_json   = cJSON_GetObjectItem(root, "mode");
     cJSON *duration_ms = cJSON_GetObjectItem(root, "duration_ms");
-    cJSON *seed_json = cJSON_GetObjectItem(root, "seed");
+    cJSON *seed_json   = cJSON_GetObjectItem(root, "seed");
 
     if (name_json && cJSON_IsString(name_json))
-        strncpy(scenario->metadata.name, name_json->valuestring, sizeof(scenario->metadata.name) - 1);
+        strncpy(scenario->metadata.name, name_json->valuestring,
+                sizeof(scenario->metadata.name) - 1);
     else
-        strncpy(scenario->metadata.name, "unnamed", sizeof(scenario->metadata.name) - 1);
+        strncpy(scenario->metadata.name, "unnamed",
+                sizeof(scenario->metadata.name) - 1);
 
-    scenario->metadata.deterministic = true;
-    if (mode_json && cJSON_IsString(mode_json)) {
-        if (strcmp(mode_json->valuestring, "stochastic") == 0) {
-            fprintf(stderr, "Warning: stochastic mode not yet implemented, using deterministic\n");
-            scenario->metadata.deterministic = false;
+    scenario->metadata.duration_us = duration_ms && cJSON_IsNumber(duration_ms)
+        ? (uint64_t)(duration_ms->valuedouble * 1000.0)
+        : 10000000ULL;
+
+    scenario->metadata.seed = seed_json && cJSON_IsNumber(seed_json)
+        ? (uint64_t)seed_json->valuedouble
+        : 42ULL;
+
+    bool stochastic = false;
+    if (mode_json && cJSON_IsString(mode_json))
+        stochastic = (strcmp(mode_json->valuestring, "stochastic") == 0);
+
+    scenario->metadata.deterministic = !stochastic;
+
+    /* ── Route to correct loader ───────────────────────────────────────── */
+    bool ok;
+    if (stochastic) {
+        ok = load_stochastic(root, scenario);
+    } else {
+        /* Deterministic path */
+        cJSON *nodes_json = cJSON_GetObjectItem(root, "nodes");
+        ok = load_nodes(nodes_json, scenario->nodes);
+        if (ok) {
+            cJSON *radio_json = cJSON_GetObjectItem(root, "radio");
+            ok = load_radio(radio_json, scenario->radio);
+        }
+        if (ok) {
+            cJSON *events_json = cJSON_GetObjectItem(root, "events");
+            ok = load_events(events_json, scenario->events,
+                             scenario->nodes, scenario->radio);
         }
     }
 
-    scenario->metadata.duration_us = duration_ms && cJSON_IsNumber(duration_ms) ? 
-        (uint64_t)(duration_ms->valuedouble * 1000.0) : 10000000;
-
-    scenario->metadata.seed = seed_json && cJSON_IsNumber(seed_json) ? 
-        (uint64_t)seed_json->valuedouble : 42;
-
-    /* Load nodes */
-    cJSON *nodes_json = cJSON_GetObjectItem(root, "nodes");
-    if (!load_nodes(nodes_json, scenario->nodes)) {
+    if (!ok) {
         cJSON_Delete(root);
         return false;
     }
 
-    /* Load radio config */
-    cJSON *radio_json = cJSON_GetObjectItem(root, "radio");
-    if (!load_radio(radio_json, scenario->radio)) {
-        cJSON_Delete(root);
-        return false;
-    }
-
-    /* Load scripted events */
-    cJSON *events_json = cJSON_GetObjectItem(root, "events");
-    if (!load_events(events_json, scenario->events, scenario->nodes, scenario->radio)) {
-        cJSON_Delete(root);
-        return false;
-    }
-
-    /* Schedule periodic metrics ticks every 5 seconds */
-    for (uint64_t t = 5000000; t < scenario->metadata.duration_us; t += 5000000) {
+    /* ── Periodic metrics ticks (both modes) ───────────────────────────── */
+    for (uint64_t t = 5000000ULL;
+         t < scenario->metadata.duration_us;
+         t += 5000000ULL) {
         sim_event_t tick = {0};
         tick.timestamp_us = t;
         tick.type = EVT_METRICS_TICK;
