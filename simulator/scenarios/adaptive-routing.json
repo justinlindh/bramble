@@ -1,0 +1,114 @@
+{
+  "name": "Adaptive Routing",
+  "description": "8 nodes with heterogeneous link quality. Some paths have high packet loss, forcing the routing layer to discover and converge on better-metric paths. Tests route re-evaluation as traffic reveals link quality.",
+  "seed": 1006,
+  "duration_ms": 120000,
+  "radio": {
+    "range": 180,
+    "loss_pct": 5,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    { "id": "A", "x": 0,   "y": 0   },
+    { "id": "B", "x": 150, "y": 0,   "link_loss_pct": 30 },
+    { "id": "C", "x": 300, "y": 0   },
+    { "id": "D", "x": 0,   "y": 160 },
+    { "id": "E", "x": 150, "y": 160, "link_loss_pct": 5  },
+    { "id": "F", "x": 300, "y": 160, "link_loss_pct": 35 },
+    { "id": "G", "x": 75,  "y": 320 },
+    { "id": "H", "x": 225, "y": 320 }
+  ],
+  "links": [
+    { "a": "A", "b": "B", "loss_pct": 30 },
+    { "a": "A", "b": "D", "loss_pct": 5  },
+    { "a": "B", "b": "C", "loss_pct": 25 },
+    { "a": "B", "b": "E", "loss_pct": 28 },
+    { "a": "C", "b": "F", "loss_pct": 35 },
+    { "a": "D", "b": "E", "loss_pct": 4  },
+    { "a": "D", "b": "G", "loss_pct": 6  },
+    { "a": "E", "b": "F", "loss_pct": 5  },
+    { "a": "E", "b": "H", "loss_pct": 7  },
+    { "a": "F", "b": "C", "loss_pct": 35 },
+    { "a": "G", "b": "H", "loss_pct": 4  },
+    { "a": "H", "b": "F", "loss_pct": 8  }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 8000,
+      "src": "A",
+      "dest": "C",
+      "payload": "probe to C via high-loss path"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 15000,
+      "src": "A",
+      "dest": "C",
+      "payload": "probe 2"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 22000,
+      "src": "A",
+      "dest": "C",
+      "payload": "probe 3 - routing should adapt"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 35000,
+      "src": "A",
+      "dest": "F",
+      "payload": "route to F"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45000,
+      "src": "G",
+      "dest": "C",
+      "payload": "G to C via good path"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 55000,
+      "src": "C",
+      "dest": "A",
+      "payload": "C to A reply"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 65000,
+      "src": "A",
+      "dest": "H",
+      "payload": "A to H"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 75000,
+      "src": "H",
+      "dest": "A",
+      "payload": "H to A via low-loss path"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 85000,
+      "src": "A",
+      "dest": "C",
+      "payload": "final probe - expect best metric path"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 95000,
+      "src": "D",
+      "dest": "F",
+      "payload": "D to F"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 105000,
+      "src": "F",
+      "dest": "D",
+      "payload": "F to D reply"
+    }
+  ]
+}
