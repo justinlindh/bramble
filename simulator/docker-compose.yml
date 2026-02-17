@@ -2,7 +2,7 @@ services:
   bramble-sim:
     build:
       context: ..
-      dockerfile: simulator/Dockerfile.go
+      dockerfile: simulator/Dockerfile
     ports:
       - "3003:3000"
     volumes:
