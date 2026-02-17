@@ -306,8 +306,8 @@ static bool load_stochastic(cJSON *root, scenario_t *scenario) {
                 sim_event_t evt = {0};
                 evt.timestamp_us = t;
                 evt.type = EVT_NODE_LEAVE;
-                strncpy(evt.data.node.node_id,
-                        scenario->nodes->nodes[idx].id, NODE_ID_LEN - 1);
+                snprintf(evt.data.node.node_id, NODE_ID_LEN, "%s",
+                         scenario->nodes->nodes[idx].id);
                 event_queue_push(scenario->events, &evt);
             }
             t += poisson_interval_us(scenario->rng, leave_rate);
@@ -332,8 +332,8 @@ static bool load_stochastic(cJSON *root, scenario_t *scenario) {
                 sim_event_t evt = {0};
                 evt.timestamp_us = t;
                 evt.type = EVT_NODE_JOIN;
-                strncpy(evt.data.node.node_id,
-                        scenario->nodes->nodes[idx].id, NODE_ID_LEN - 1);
+                snprintf(evt.data.node.node_id, NODE_ID_LEN, "%s",
+                         scenario->nodes->nodes[idx].id);
                 event_queue_push(scenario->events, &evt);
             }
             t += poisson_interval_us(scenario->rng, join_rate);
@@ -366,7 +366,7 @@ static bool load_stochastic(cJSON *root, scenario_t *scenario) {
             sim_event_t evt = {0};
             evt.timestamp_us = t;
             evt.type = EVT_NODE_MOVE;
-            strncpy(evt.data.node.node_id, node->id, NODE_ID_LEN - 1);
+            snprintf(evt.data.node.node_id, NODE_ID_LEN, "%s", node->id);
             evt.data.node.x = nx;
             evt.data.node.y = ny;
             event_queue_push(scenario->events, &evt);
@@ -438,8 +438,8 @@ static bool load_stochastic(cJSON *root, scenario_t *scenario) {
             sim_event_t evt = {0};
             evt.timestamp_us = t;
             evt.type = EVT_GENERATE_MESSAGE;
-            strncpy(evt.data.node.node_id,
-                    scenario->nodes->nodes[src_idx].id, NODE_ID_LEN - 1);
+            snprintf(evt.data.node.node_id, NODE_ID_LEN, "%s",
+                     scenario->nodes->nodes[src_idx].id);
             evt.data.node.addr = scenario->nodes->nodes[dst_idx].addr;
             event_queue_push(scenario->events, &evt);
 
