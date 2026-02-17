@@ -12,6 +12,7 @@ import type {
   DeliveryStatus,
   Transport,
   ProbeResult,
+  PeerLocation,
 } from '../types/bramble';
 
 function formatAddr(id: string): string {
@@ -36,6 +37,7 @@ interface Actions {
   setActiveTab: (tab: string) => void;
   setProbeResult: (r: ProbeResult | null) => void;
   setProbeCollecting: (c: boolean) => void;
+  setPeerLocations: (locs: PeerLocation[]) => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -54,6 +56,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   activeTab: 'chat',
   probeResult: null,
   probeCollecting: false,
+  peerLocations: [],
 
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
@@ -123,6 +126,8 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setProbeResult: (r) => set({ probeResult: r }),
   setProbeCollecting: (c) => set({ probeCollecting: c }),
+
+  setPeerLocations: (locs) => set({ peerLocations: locs }),
 
   setActiveConversation: (id: string) =>
     set(state => {
