@@ -30,6 +30,22 @@ export interface SimLink {
   quality: number; // 0-1
 }
 
+// Per-link RSSI/SNR quality tracking (rolling average)
+export interface LinkQuality {
+  key: string;           // "nodeA-nodeB" sorted
+  rssi: number;          // rolling average RSSI in dBm (e.g. -75)
+  snr: number;           // rolling average SNR in dB (e.g. 45)
+  sampleCount: number;
+  lastUpdatedAt: number; // Date.now() ms
+}
+
+// Per-neighbor RSSI info for NodeHealthCard display
+export interface NeighborRSSI {
+  nodeId: string;
+  rssi: number;
+  snr: number;
+}
+
 // Metrics snapshot
 export interface Metrics {
   timestamp_us: number;
@@ -125,6 +141,8 @@ export interface SimState {
   linkActivity: Map<string, LinkActivity>;
   brokenLinks: Map<string, BrokenLink>;
   selectedNodeId: string | null;
+  // RSSI/SNR per-link quality tracking
+  linkQuality: Map<string, LinkQuality>;
 }
 
 // Actions for the reducer
@@ -152,4 +170,5 @@ export type SimAction =
   | { type: 'TRACK_MESSAGE_SENT'; from: string }
   | { type: 'TRACK_MESSAGE_DELIVERED'; to: string }
   | { type: 'SELECT_NODE'; nodeId: string | null }
-  | { type: 'EXPIRE_BROKEN_LINKS'; now: number };
+  | { type: 'EXPIRE_BROKEN_LINKS'; now: number }
+  | { type: 'TRACK_LINK_RSSI'; from: string; to: string; rssi: number; snr: number };

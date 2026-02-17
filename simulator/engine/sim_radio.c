@@ -142,6 +142,16 @@ void sim_radio_broadcast(
         uint64_t delay = radio_propagation_delay_us(radio, dist);
         int8_t rssi    = radio_compute_rssi(radio, dist);
 
+        /* SNR = RSSI - noise_floor; noise_floor = -120 dBm (typical LoRa) */
+        #define NOISE_FLOOR_DBM (-120)
+        int snr_raw = (int)rssi - NOISE_FLOOR_DBM;
+        /* Add ±2 dB random jitter for realism */
+        float jitter = (pcg32_float(rng) - 0.5f) * 4.0f; /* -2.0 to +2.0 */
+        int snr_jittered = snr_raw + (int)jitter;
+        if (snr_jittered < 0) snr_jittered = 0;
+        if (snr_jittered > 127) snr_jittered = 127;
+        int8_t snr = (int8_t)snr_jittered;
+
         /* Schedule EVT_RECEIVE_PACKET for this node */
         sim_event_t recv_evt;
         memset(&recv_evt, 0, sizeof(recv_evt));
@@ -150,6 +160,7 @@ void sim_radio_broadcast(
         recv_evt.data.packet.src_addr    = tx_node->addr;
         recv_evt.data.packet.dest_addr   = rx->addr;
         recv_evt.data.packet.rssi        = rssi;
+        recv_evt.data.packet.snr         = snr;
         recv_evt.data.packet.len         = pkt->len;
         memcpy(recv_evt.data.packet.data, pkt->data, pkt->len);
 

@@ -333,6 +333,10 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	nodeActivate(node)
 	anomalyInit(&s.anomaly[idx])
 
+	// Phase 6: Initialize extended node state (mailbox, emergency, location, etc.)
+	C.bridge_handle_node_join_ext(C.int(idx), C.uint32_t(nd.addr),
+		nd.x, nd.y, C.uint64_t(ts))
+
 	// Schedule first tick
 	cid := C.CString(nodeID)
 	tick := C.bridge_make_tick_event(C.uint64_t(ts+100000), cid, 0)

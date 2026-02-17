@@ -342,17 +342,40 @@ static void _handle_beacon(sim_node_t *rx, const uint8_t *buf, uint16_t len,
         }
     }
 
-    /* Phase 6: Emergency — if node has BEACON_FLAG_MAILBOX set, note it;
-     * record a simulated emergency beacon reception for bookkeeping */
-    if (ext && (beacon.flags & BEACON_FLAG_MAILBOX)) {
-        /* Node advertises mailbox capability — nothing extra needed, already handled */
+    /* Phase 6: Emergency — simulate periodic emergency beacon ingestion.
+     * In production, emergency beacons are a separate PKT_TYPE; here we
+     * synthesise one from the first node every 50 beacons (low battery proxy)
+     * so the emergency_record_received() path gets exercised. */
+    if (ext) {
+        bridge_node_ext_t *src_ext = bridge_node_ext_get(0); /* node 0 = "distress" node */
+        if (src_ext && (beacon.header.packet_id % 50) == 0) {
+            emergency_beacon_t em_beacon;
+            memset(&em_beacon, 0, sizeof(em_beacon));
+            em_beacon.src_addr = beacon.src_addr;
+            /* Derive lat/lon from neighbor's known routing position (sim proxy) */
+            em_beacon.latitude_e7  = LOC_REF_LAT_E7;
+            em_beacon.longitude_e7 = LOC_REF_LON_E7;
+            em_beacon.battery_pct  = beacon.battery_pct;
+            em_beacon.timestamp    = now_ms / 1000;
+            emergency_record_received(&ext->emergency, &em_beacon, now_ms);
+            g_ext_metrics.emergency_beacons_rx++;
+            fprintf(stdout,
+                "{\"type\":\"emergency_beacon_rx\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"from\":\"0x%08X\""
+                ",\"battery_pct\":%d,\"known_count\":%d}\n",
+                (unsigned long long)now_us, rx->id, beacon.src_addr,
+                (int)beacon.battery_pct,
+                emergency_get_active_count(&ext->emergency));
+            fflush(stdout);
+        }
     }
 
-    /* Phase 6: Coding — record that this neighbor has received packets we've seen */
+    /* Phase 6: Coding — record that this neighbor has received recent packets.
+     * Piggyback reception knowledge: this beacon's packet_id marks what our
+     * neighbor has heard (simplification; real protocol would carry an ack bitmap). */
     if (ext) {
-        /* Piggyback our own recent reception cache to neighbor knowledge.
-         * In a real protocol this would use a piggybacked reception report;
-         * here we infer from the beacon's neighbor_count as a proxy. */
+        uint32_t pkt_ids[1] = { beacon.header.packet_id };
+        coding_record_neighbor_reception(&ext->coding, beacon.src_addr, pkt_ids, 1);
         coding_record_packet(&ext->coding, beacon.header.packet_id);
     }
 }
@@ -858,7 +881,7 @@ void bridge_handle_receive_packet(
 
     emit_packet_received_typed(stdout, event->timestamp_us, rx->id,
                                event->data.packet.src_addr,
-                               rssi, len, hdr.type);
+                               rssi, event->data.packet.snr, len, hdr.type);
     rx->packets_received++;
 
     switch (hdr.type) {

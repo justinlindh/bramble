@@ -7,6 +7,7 @@ import { PathHistory } from './components/PathHistory';
 import { NodeHealthCard } from './components/NodeHealthCard';
 import { ScenarioLoader } from './components/ScenarioLoader';
 import { useSimulation } from './hooks/useSimulation';
+import type { NeighborRSSI } from './types';
 import './App.css';
 
 export default function App() {
@@ -44,6 +45,27 @@ export default function App() {
     return count;
   }, [selectedNode, state.nodes]);
 
+  // Compute per-neighbor RSSI list for the selected node
+  const neighborRssi = useMemo((): NeighborRSSI[] => {
+    if (!selectedNode) return [];
+    const result: NeighborRSSI[] = [];
+    for (const [key, lq] of state.linkQuality) {
+      const parts = key.split('-');
+      if (parts.length !== 2) continue;
+      const [a, b] = parts;
+      let neighborId: string | null = null;
+      if (a === selectedNode.id) neighborId = b;
+      else if (b === selectedNode.id) neighborId = a;
+      if (!neighborId) continue;
+      const neighbor = state.nodes.get(neighborId);
+      if (!neighbor || !neighbor.active) continue;
+      result.push({ nodeId: neighborId, rssi: lq.rssi, snr: lq.snr });
+    }
+    // Sort by RSSI descending (strongest first)
+    result.sort((a, b) => b.rssi - a.rssi);
+    return result;
+  }, [selectedNode, state.linkQuality, state.nodes]);
+
   return (
     <div className="app">
       {/* Top bar */}
@@ -72,6 +94,7 @@ export default function App() {
             deliveryPaths={state.deliveryPaths}
             linkActivity={state.linkActivity}
             brokenLinks={state.brokenLinks}
+            linkQuality={state.linkQuality}
             selectedNodeId={state.selectedNodeId}
             onNodeClick={handleNodeClick}
           />
@@ -87,6 +110,7 @@ export default function App() {
                 stats={selectedNodeStats}
                 neighborCount={neighborCount}
                 onClose={() => selectNode(null)}
+                neighborRssi={neighborRssi}
               />
             </div>
           )}

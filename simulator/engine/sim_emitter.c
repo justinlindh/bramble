@@ -94,14 +94,14 @@ void emit_packet_sent_typed(FILE *out, uint64_t timestamp_us,
 }
 
 void emit_packet_received_typed(FILE *out, uint64_t timestamp_us,
-    const char *node_id, uint32_t src_addr, int8_t rssi,
+    const char *node_id, uint32_t src_addr, int8_t rssi, int8_t snr,
     uint16_t size, uint8_t pkt_type)
 {
     fprintf(out,
         "{\"type\":\"packet_received\",\"timestamp_us\":%llu"
         ",\"node\":\"%s\",\"src\":\"0x%08X\""
-        ",\"pkt_type\":\"%s\",\"rssi\":%d,\"size\":%u}\n",
+        ",\"pkt_type\":\"%s\",\"rssi\":%d,\"snr\":%d,\"size\":%u}\n",
         (unsigned long long)timestamp_us, node_id,
-        src_addr, pkt_type_name(pkt_type), (int)rssi, size);
+        src_addr, pkt_type_name(pkt_type), (int)rssi, (int)snr, size);
     fflush(out);
 }
