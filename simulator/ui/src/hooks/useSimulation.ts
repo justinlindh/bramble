@@ -33,6 +33,9 @@ function simReducer(state: SimState, action: SimAction): SimState {
     case 'SIM_READY':
       return { ...state, running: false, ready: true };
 
+    case 'PLAYBACK_STARTED':
+      return state.running ? state : { ...state, running: true, ready: false };
+
     case 'RESET':
       return { ...initialState, connected: true };
 
@@ -121,6 +124,12 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
     type: 'ADD_EVENT',
     event: { type, timestamp_us, details: rest },
   });
+
+  // Detect playback start (first real sim event after ready state)
+  const setupTypes = new Set(['sim_reset', 'sim_ready', 'node_joined', 'config']);
+  if (timestamp_us > 0 && !setupTypes.has(type)) {
+    actions.push({ type: 'PLAYBACK_STARTED' });
+  }
 
   // State machine updates
   switch (type) {
