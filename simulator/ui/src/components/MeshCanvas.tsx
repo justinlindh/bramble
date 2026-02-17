@@ -55,11 +55,12 @@ function toScreen(x: number, y: number, transform: { scale?: number; scaleX?: nu
   return { sx: x * sx + transform.offsetX, sy: y * sy + transform.offsetY };
 }
 
-// Resolve the screen position of an addr string like "0x02000003" to a node
+// Resolve a hex address like "0x01000008" to a node
 function resolveAddrToNode(addr: string, nodes: Map<string, SimNode>): SimNode | null {
-  // Try direct node id match first
   if (nodes.has(addr)) return nodes.get(addr)!;
-  // Try matching by addr hex (nodes don't store addr in our state, so skip for now)
+  for (const node of nodes.values()) {
+    if (node.addr === addr) return node;
+  }
   return null;
 }
 

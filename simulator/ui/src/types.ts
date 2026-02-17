@@ -16,6 +16,7 @@ export interface SimEvent {
 // Node state
 export interface SimNode {
   id: string;
+  addr?: string;    // hex address from engine, e.g. "0x01000000"
   x: number;
   y: number;
   active: boolean;
