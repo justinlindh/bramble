@@ -56,6 +56,7 @@ export interface PacketAnimation {
 export interface SimState {
   connected: boolean;
   running: boolean;
+  ready: boolean;  // sim loaded and paused, waiting for play
   currentTime: number; // microseconds
   nodes: Map<string, SimNode>;
   links: SimLink[];
@@ -78,4 +79,5 @@ export type SimAction =
   | { type: 'ADD_PACKET_ANIM'; from: string; to: string; pkt_type: string }
   | { type: 'EXPIRE_PACKETS'; now: number }
   | { type: 'SIM_ENDED' }
+  | { type: 'SIM_READY' }
   | { type: 'RESET' };
