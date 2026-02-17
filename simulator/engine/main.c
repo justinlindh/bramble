@@ -56,7 +56,7 @@ static void handle_event(sim_event_t *event) {
             sim_node_t *node = node_array_find_by_id(&g_nodes, event->data.node.node_id);
             if (node) {
                 node_activate(node);
-                emit_node_joined(stdout, event->timestamp_us, node->id, node->addr);
+                emit_node_joined(stdout, event->timestamp_us, node->id, node->addr, node->x, node->y);
             }
             break;
         }
@@ -141,6 +141,18 @@ int main(int argc, char **argv) {
     fprintf(stderr, "  Mode: %s\n", scenario.metadata.deterministic ? "deterministic" : "stochastic");
     fprintf(stderr, "  Seed: %llu\n", (unsigned long long)scenario.metadata.seed);
     fprintf(stderr, "\nStarting simulation...\n\n");
+
+    /* Emit initial node positions */
+    for (int i = 0; i < g_nodes.count; i++) {
+        sim_node_t *node = &g_nodes.nodes[i];
+        if (node->active) {
+            emit_node_joined(stdout, 0, node->id, node->addr, node->x, node->y);
+        }
+    }
+
+    /* Emit initial radio config for UI */
+    fprintf(stdout, "{\"type\":\"config\",\"timestamp_us\":0,\"radio_range\":%.2f}\n", g_radio.range);
+    fflush(stdout);
 
     /* Main event loop */
     sim_event_t event;

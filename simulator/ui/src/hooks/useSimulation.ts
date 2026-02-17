@@ -80,7 +80,8 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
   const actions: SimAction[] = [];
 
   // Always add to event log
-  const { type, timestamp_us, ...rest } = raw;
+  const { type, timestamp_us: rawTs, ...rest } = raw;
+  const timestamp_us = typeof rawTs === 'number' ? rawTs : 0;
   actions.push({
     type: 'ADD_EVENT',
     event: { type, timestamp_us, details: rest },
