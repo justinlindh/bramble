@@ -398,6 +398,63 @@ wss.on('connection', (ws: WebSocket) => {
         restartPlayback();
         return;
       }
+      if (msg.type === 'add_node') {
+        // Inject a new node near a random existing node
+        // Parse existing nodes from the event buffer
+        const existingNodes: Array<{ id: string; x: number; y: number; addr: string }> = [];
+        for (const evt of eventBuffer) {
+          try {
+            const e = JSON.parse(evt.raw);
+            if (e.type === 'node_joined') {
+              existingNodes.push({ id: e.node, x: e.x, y: e.y, addr: e.addr });
+            } else if (e.type === 'node_left') {
+              const idx = existingNodes.findIndex(n => n.id === e.node);
+              if (idx >= 0) existingNodes.splice(idx, 1);
+            }
+          } catch {}
+        }
+
+        if (existingNodes.length === 0) return;
+
+        // Pick a random existing node and place new node nearby
+        const anchor = existingNodes[Math.floor(Math.random() * existingNodes.length)];
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 60 + Math.random() * 80; // 60-140 units away
+        const nx = Math.round((anchor.x + Math.cos(angle) * dist) * 100) / 100;
+        const ny = Math.round((anchor.y + Math.sin(angle) * dist) * 100) / 100;
+
+        // Generate unique ID and address
+        const nodeNum = existingNodes.length;
+        const newId = `X${nodeNum}`;
+        const newAddr = `0x02${nodeNum.toString(16).padStart(6, '0')}`;
+
+        // Get current sim time
+        let currentSimTime = 0;
+        if (playbackIndex > 0 && playbackIndex <= eventBuffer.length) {
+          currentSimTime = eventBuffer[Math.min(playbackIndex, eventBuffer.length - 1)].timestamp_us;
+        }
+
+        const joinEvent = JSON.stringify({
+          type: 'node_joined',
+          timestamp_us: currentSimTime,
+          node: newId,
+          addr: newAddr,
+          x: nx,
+          y: ny,
+        });
+
+        // Add to buffer so future add_node calls see this node
+        eventBuffer.push({ raw: joinEvent, timestamp_us: currentSimTime });
+
+        // Send immediately to client
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(joinEvent);
+        }
+
+        console.log(`[relay] Added node ${newId} at (${nx}, ${ny}) near ${anchor.id}`);
+        return;
+      }
+
       if (msg.type === 'speed' && typeof msg.value === 'number') {
         const newSpeed = Math.max(0.1, Math.min(200, msg.value));
         if (playing) {

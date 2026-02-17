@@ -114,6 +114,16 @@ export function PlaybackControls({ running, connected, ready, currentTime, ws }:
           ⟲
         </button>
 
+        {/* Add Node */}
+        <button
+          onClick={() => sendCmd(ws, { type: 'add_node' })}
+          disabled={!isActive}
+          title="Add a node near a random existing node"
+          style={{ ...btnBase, fontSize: '11px', padding: '3px 8px', background: '#1a7f37', borderColor: '#2ea043' }}
+        >
+          + Node
+        </button>
+
         {/* Speed buttons */}
         <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
           {SPEEDS.map(s => (
