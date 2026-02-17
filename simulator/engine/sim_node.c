@@ -1,5 +1,7 @@
 #include "sim_node.h"
 #include "../../components/packet/include/packet.h"
+#include "../../components/routing/include/routing.h"
+#include "../../components/routing/include/discovery.h"
 #include <string.h>
 
 void node_array_init(node_array_t *array) {
@@ -53,6 +55,13 @@ sim_node_t *node_array_get(node_array_t *array, int index) {
 
 void node_activate(sim_node_t *node) {
     node->active = true;
+    /* Clear routing state — simulates fresh boot */
+    route_init(&node->routes);
+    neighbor_init(&node->neighbors);
+    reverse_route_init(&node->reverse_routes);
+    rreq_dedup_init(&node->rreq_dedup);
+    discovery_init(&node->pending_discoveries);
+    node->packets_forwarded = 0;
 }
 
 void node_deactivate(sim_node_t *node) {

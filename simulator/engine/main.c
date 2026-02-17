@@ -78,11 +78,6 @@ static void handle_beacon_received(sim_node_t *rx, const uint8_t *buf, uint16_t 
                                   beacon.src_addr, beacon.src_addr,
                                   now_us, stdout, rx->id);
     }
-    /* Record beacon receive for black-hole tracking */
-    {
-        int node_idx = (int)(rx - g_nodes.nodes);
-        anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
-    }
 }
 
 static void handle_rreq_received(sim_node_t *rx, const uint8_t *buf, uint16_t len,
@@ -130,16 +125,10 @@ static void handle_rreq_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
             anomaly_check_rreq_retx(&g_anomaly[node_idx].rreq_retx,
                                      rreq.header.dest_addr, now_us,
                                      stdout, rx->id);
-            anomaly_record_fwd(&g_anomaly[node_idx].blackhole, now_us);
         }
 
         sim_radio_broadcast(rx, &pkt, &g_nodes, &g_radio, &g_rng,
                             &g_events, &g_metrics, now_us);
-    }
-    /* Always count RREQ receive for black-hole tracking */
-    {
-        int node_idx = (int)(rx - g_nodes.nodes);
-        anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
     }
 }
 
@@ -166,8 +155,6 @@ static void handle_rrep_received(sim_node_t *rx, const uint8_t *buf, uint16_t le
     anomaly_check_route_flap(&g_anomaly[node_idx].flap,
                               rrep.src_addr, pkt_src_addr,
                               now_us, stdout, rx->id);
-    anomaly_record_rx(&g_anomaly[node_idx].blackhole, now_us);
-
     /* Are we the original RREQ sender? */
     pending_discovery_t *pd =
         discovery_lookup_by_query(&rx->pending_discoveries, rrep.query_id);
@@ -453,18 +440,35 @@ static void handle_event(sim_event_t *event) {
 
             if (!route || route->state == ROUTE_BROKEN ||
                           route->state == ROUTE_DISCOVERING) {
-                /* Start route discovery if not already pending */
+                /* Start route discovery if not already pending, or retry if stale */
                 pending_discovery_t *pd =
                     discovery_lookup(&src->pending_discoveries, dest_addr);
+                if (pd && (now_ms - pd->timestamp > 5000)) {
+                    /* Discovery stale (>5s) — remove and retry */
+                    discovery_remove(&src->pending_discoveries, dest_addr);
+                    pd = NULL;
+                }
+                bool should_send_rreq = false;
                 if (!pd) {
+                    /* New discovery */
                     uint32_t query_id = pcg32_random(&g_rng);
                     discovery_start(&src->pending_discoveries,
                                     dest_addr, query_id, now_ms);
+                    should_send_rreq = true;
+                } else if (pd->attempts < MAX_RREQ_ATTEMPTS &&
+                           (now_ms - pd->timestamp) > 1000) {
+                    /* Retry: re-send RREQ with new query_id (like real firmware) */
+                    pd->attempts++;
+                    pd->query_id = pcg32_random(&g_rng);
+                    pd->timestamp = now_ms;
+                    should_send_rreq = true;
+                }
 
+                if (should_send_rreq) {
+                    pd = discovery_lookup(&src->pending_discoveries, dest_addr);
                     bramble_rreq_t rreq =
                         rreq_build_originator(src->addr, dest_addr,
-                                              query_id, src->addr);
-                    /* Simulator override: increase hop limit for large meshes */
+                                              pd->query_id, src->addr);
                     rreq.header.hop_limit = 32;
 
                     outbound_packet_t pkt;
@@ -477,11 +481,19 @@ static void handle_event(sim_event_t *event) {
 
                     sim_radio_broadcast(src, &pkt, &g_nodes, &g_radio, &g_rng,
                                         &g_events, &g_metrics, event->timestamp_us);
+
+                    /* Track RREQ origination for excessive retransmission */
+                    {
+                        int src_idx = (int)(src - g_nodes.nodes);
+                        anomaly_check_rreq_retx(&g_anomaly[src_idx].rreq_retx,
+                                                 dest_addr, event->timestamp_us,
+                                                 stdout, src->id);
+                    }
                 }
 
-                /* Reschedule message generation after discovery window (200 ms) */
+                /* Reschedule message generation after discovery window */
                 sim_event_t retry = *event;
-                retry.timestamp_us += 200000ULL;  /* 200 ms */
+                retry.timestamp_us += 1500000ULL;  /* 1.5s retry interval */
                 event_queue_push(&g_events, &retry);
                 break;
             }
