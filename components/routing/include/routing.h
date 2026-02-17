@@ -17,6 +17,12 @@ typedef struct {
     uint16_t tx_count;
     uint16_t tx_success;
     bool     suspicious;
+    /* Adaptive routing metrics (added for composite route scoring) */
+    uint16_t packets_sent;      /* total packets sent to this neighbor */
+    uint16_t packets_acked;     /* ACKs received from this neighbor */
+    uint8_t  delivery_rate;     /* EMA delivery rate 0-255 (255 = 100%) */
+    uint8_t  airtime_remaining; /* last reported airtime % (from beacon) */
+    uint16_t avg_latency_ms;    /* EMA round-trip latency */
 } neighbor_entry_t;
 
 typedef struct {
