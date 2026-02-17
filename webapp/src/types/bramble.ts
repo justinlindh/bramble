@@ -121,6 +121,45 @@ export interface NodeStatus {
   airtimeUsedMs: number;    // total since boot
 }
 
+// ─── Location ──────────────────────────────────────────────────────────
+
+export interface Position {
+  lat: number;              // degrees
+  lon: number;              // degrees
+  alt: number;              // meters
+  accuracy: number;         // meters
+  speed: number;            // km/h
+  heading: number;          // degrees 0-359
+  timestampMs: number;      // epoch ms
+}
+
+export type LocationTier = 'off' | 'full' | 'coarse' | 'presence';
+
+export interface LocationContact {
+  addr: number;             // peer node address
+  tier: LocationTier;
+  intervalSec: number;      // update interval seconds
+  distanceTriggerM: number; // distance trigger meters
+}
+
+export interface PeerLocation {
+  addr: number;
+  name: string;
+  tier: LocationTier;
+  position: Position | null;    // null for presence-only
+  gridSquare?: string;          // set for coarse tier
+  online: boolean;
+  lastUpdatedMs: number;
+}
+
+export interface LocationConfig {
+  enabled: boolean;
+  contacts: LocationContact[];
+  defaultIntervalSec: number;
+  defaultDistanceTriggerM: number;
+  stationaryBackoff: number;
+}
+
 // ─── Config (full) ─────────────────────────────────────────────────────
 
 export interface BrambleConfig {
@@ -128,6 +167,7 @@ export interface BrambleConfig {
   radio: RadioConfig;
   channels: Channel[];
   mailboxEnabled: boolean;
+  location: LocationConfig;
 }
 
 // ─── RPC types ─────────────────────────────────────────────────────────
@@ -206,4 +246,5 @@ export interface AppState {
   activeTab: string;
   probeResult: ProbeResult | null;
   probeCollecting: boolean;
+  peerLocations: PeerLocation[];
 }
