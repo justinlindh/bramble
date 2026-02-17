@@ -2,6 +2,9 @@
  * Bramble Mock Node — WebSocket JSON-RPC 2.0 server
  * Single-file development server. Port 3005.
  *
+ * Simulates a realistic 5-node mesh in the Henderson/Inspirada area of NV.
+ * "Our" node (HomeBase) sits in Inspirada. Peers are spread across Henderson.
+ *
  * Implements the same JSON-RPC wire protocol as the real firmware:
  *   Request:      { jsonrpc: "2.0", id: N, method: "bramble.X", params: {...} }
  *   Response:     { jsonrpc: "2.0", id: N, result: {...} }
@@ -11,42 +14,101 @@
 import { WebSocketServer } from 'ws';
 
 const PORT = 3005;
-const MOCK_ADDR = 0x1B3C4D5E;
-const MOCK_NAME = 'MockNode';
+
+// ─── Node identities ─────────────────────────────────────────────────────────
+// Our node — Justin's house in Inspirada, Henderson NV
+const SELF_ADDR  = 0x4A555354;  // "JUST"
+const SELF_NAME  = 'HomeBase';
+const SELF_POS   = { lat: 36.0043, lon: -115.0267, alt: 789, accuracy: 3 };
+
+// Peer nodes — realistic Henderson locations
+const PEERS = {
+  0xAABBCC01: {
+    name: 'Hilltop',    // Heltec on McCullough Hills ridge, great LOS
+    pos: { lat: 36.0105, lon: -115.0320, alt: 856, accuracy: 5 },
+    locTier: 'full',
+  },
+  0xAABBCC02: {
+    name: 'TrailHead',  // Node at Sloan Canyon trailhead parking
+    pos: { lat: 35.9860, lon: -115.0440, alt: 732, accuracy: 12 },
+    locTier: 'full',
+  },
+  0xAABBCC03: {
+    name: 'WaterSt',    // Downtown Henderson, Water Street District
+    pos: null,
+    gridSquare: 'DM26la',  // coarse — downtown Henderson area (~36.04, -115.04)
+    locTier: 'coarse',
+  },
+  0xAABBCC04: {
+    name: 'Anthem',     // Anthem neighborhood, ~8km north
+    pos: { lat: 36.0580, lon: -115.0490, alt: 615, accuracy: 8 },
+    locTier: 'full',
+  },
+  0xAABBCC05: {
+    name: 'Ranger',     // Mobile node, presence only
+    pos: null,
+    locTier: 'presence',
+  },
+};
+
+const PEER_ADDRS = Object.keys(PEERS).map(Number);
+
 const BOOT_TIME = Date.now();
 
 // ─── Mutable state ──────────────────────────────────────────────────────────
 
-let txCount = 12;
-let rxCount = 87;
-let droppedCount = 1;
-let airtimeUsedMs = 4320;
+let txCount = 47;
+let rxCount = 312;
+let droppedCount = 3;
+let airtimeUsedMs = 18720;
 let packetIdCounter = 1000;
 let msgIdCounter = 1;
 
+// Neighbors — direct radio contacts (not all peers are direct neighbors)
 const neighbors = [
-  { addr: 0xAABBCCDD, rssi: -72,  snr: 8.5,  deliveryRate: 240, lastHeardMs: 3200,  isMailbox: false, airtimeRemaining: 85 },
-  { addr: 0x11223344, rssi: -89,  snr: 4.2,  deliveryRate: 180, lastHeardMs: 12800, isMailbox: true,  airtimeRemaining: 62 },
-  { addr: 0xDEADBEEF, rssi: -63,  snr: 11.0, deliveryRate: 255, lastHeardMs: 800,   isMailbox: false, airtimeRemaining: 91 },
-  { addr: 0xFEEDFACE, rssi: -104, snr: 1.8,  deliveryRate: 120, lastHeardMs: 45000, isMailbox: false, airtimeRemaining: 30 },
+  {
+    addr: 0xAABBCC01, // Hilltop — strong direct link (1.8km LOS)
+    rssi: -68, snr: 9.5, deliveryRate: 245,
+    lastHeardMs: 1200, isMailbox: true, airtimeRemaining: 88,
+  },
+  {
+    addr: 0xAABBCC02, // TrailHead — moderate link (3.5km, some obstruction)
+    rssi: -87, snr: 4.8, deliveryRate: 195,
+    lastHeardMs: 8400, isMailbox: false, airtimeRemaining: 72,
+  },
+  {
+    addr: 0xAABBCC03, // WaterSt — weak link (5km through buildings)
+    rssi: -102, snr: 2.1, deliveryRate: 130,
+    lastHeardMs: 34000, isMailbox: false, airtimeRemaining: 45,
+  },
+  {
+    addr: 0xAABBCC05, // Ranger — mobile, marginal link
+    rssi: -109, snr: 0.8, deliveryRate: 85,
+    lastHeardMs: 62000, isMailbox: false, airtimeRemaining: 31,
+  },
 ];
 
+// Routes — includes both direct and multi-hop
 const routes = [
-  { dest: 0xAABBCCDD, nextHop: 0xAABBCCDD, hopCount: 1, metric: 72,  state: 'active',      lastUsedMs: 2000  },
-  { dest: 0x11223344, nextHop: 0xAABBCCDD, hopCount: 2, metric: 161, state: 'active',      lastUsedMs: 15000 },
-  { dest: 0xDEADBEEF, nextHop: 0xDEADBEEF, hopCount: 1, metric: 63,  state: 'active',      lastUsedMs: 1200  },
-  { dest: 0xFEEDFACE, nextHop: 0xDEADBEEF, hopCount: 3, metric: 230, state: 'stale',       lastUsedMs: 90000 },
-  { dest: 0xCAFEBABE, nextHop: 0xAABBCCDD, hopCount: 4, metric: 255, state: 'discovering', lastUsedMs: 0     },
+  { dest: 0xAABBCC01, nextHop: 0xAABBCC01, hopCount: 1, metric: 68,  state: 'active',      lastUsedMs: 1500  },
+  { dest: 0xAABBCC02, nextHop: 0xAABBCC02, hopCount: 1, metric: 112, state: 'active',      lastUsedMs: 9000  },
+  { dest: 0xAABBCC03, nextHop: 0xAABBCC03, hopCount: 1, metric: 185, state: 'stale',       lastUsedMs: 45000 },
+  { dest: 0xAABBCC04, nextHop: 0xAABBCC01, hopCount: 2, metric: 142, state: 'active',      lastUsedMs: 5200  },  // via Hilltop
+  { dest: 0xAABBCC05, nextHop: 0xAABBCC05, hopCount: 1, metric: 210, state: 'active',      lastUsedMs: 62000 },
+  { dest: 0xBEEF0001, nextHop: 0xAABBCC01, hopCount: 3, metric: 240, state: 'discovering', lastUsedMs: 0     },  // unknown far node
 ];
 
 const channels = [
-  { index: 0, name: 'general',  hasPsk: false, epoch: 1, isDefault: true  },
-  { index: 1, name: 'ops',      hasPsk: true,  epoch: 3, isDefault: false },
+  { index: 0, name: 'Bramble Common', hasPsk: false, epoch: 1, isDefault: true  },
+  { index: 1, name: 'Henderson SAR',  hasPsk: true,  epoch: 5, isDefault: false },
+  { index: 2, name: 'Family',         hasPsk: true,  epoch: 2, isDefault: false },
 ];
 
 const locationContacts = [
-  { addr: 0xAABBCCDD, tier: 'full', intervalSec: 300, distanceTriggerM: 100 },
-  { addr: 0xDEADBEEF, tier: 'coarse', intervalSec: 600, distanceTriggerM: 500 },
+  { addr: 0xAABBCC01, tier: 'full',   intervalSec: 300, distanceTriggerM: 100 },
+  { addr: 0xAABBCC02, tier: 'full',   intervalSec: 600, distanceTriggerM: 200 },
+  { addr: 0xAABBCC03, tier: 'coarse', intervalSec: 900, distanceTriggerM: 500 },
+  { addr: 0xAABBCC04, tier: 'full',   intervalSec: 300, distanceTriggerM: 100 },
 ];
 
 const locationConfig = {
@@ -57,65 +119,39 @@ const locationConfig = {
   stationaryBackoff: 4,
 };
 
-// Henderson NV area coordinates
-const peerLocations = [
-  {
-    addr: 0xAABBCCDD,
-    name: 'Alpha',
-    tier: 'full',
-    position: {
-      lat: 36.0395,
-      lon: -114.9817,
-      alt: 569,
-      accuracy: 5,
-      speed: 12,
-      heading: 225,
-      timestampMs: Date.now() - 45000,
-    },
-    online: true,
-    lastUpdatedMs: Date.now() - 45000,
-  },
-  {
-    addr: 0x11223344,
-    name: 'Bravo',
-    tier: 'coarse',
-    position: null,
-    gridSquare: 'DM26',
-    online: true,
-    lastUpdatedMs: Date.now() - 120000,
-  },
-  {
-    addr: 0xDEADBEEF,
-    name: 'Charlie',
-    tier: 'full',
-    position: {
-      lat: 36.0725,
-      lon: -115.0182,
-      alt: 612,
-      accuracy: 8,
-      speed: 0,
-      heading: 0,
-      timestampMs: Date.now() - 300000,
-    },
-    online: true,
-    lastUpdatedMs: Date.now() - 300000,
-  },
-  {
-    addr: 0xFEEDFACE,
-    name: 'Delta',
-    tier: 'presence',
-    position: null,
-    online: false,
-    lastUpdatedMs: Date.now() - 3600000,
-  },
-];
+// Build peer location array from PEERS data
+function buildPeerLocations() {
+  return PEER_ADDRS.map(addr => {
+    const p = PEERS[addr];
+    const isExact = p.locTier === 'full' && p.pos;
+    const isCoarse = p.locTier === 'coarse';
+    const isOnline = addr !== 0xAABBCC05 || Math.random() > 0.3; // Ranger sometimes offline
+    return {
+      addr,
+      name: p.name,
+      tier: p.locTier,
+      position: isExact ? {
+        lat: p.pos.lat + (Math.random() - 0.5) * 0.0003,
+        lon: p.pos.lon + (Math.random() - 0.5) * 0.0003,
+        alt: p.pos.alt,
+        accuracy: p.pos.accuracy,
+        speed: addr === 0xAABBCC05 ? 3 + Math.random() * 8 : Math.random() * 2,
+        heading: Math.floor(Math.random() * 360),
+        timestampMs: Date.now() - Math.floor(Math.random() * 60000),
+      } : null,
+      gridSquare: isCoarse ? p.gridSquare : undefined,
+      online: isOnline,
+      lastUpdatedMs: Date.now() - Math.floor(Math.random() * 120000),
+    };
+  });
+}
 
 const config = {
   identity: {
-    address: MOCK_ADDR,
+    address: SELF_ADDR,
     pubkeyHash: 0x3A7F2B8C,
-    name: MOCK_NAME,
-    pubkeyB64: 'mock+pubkey+base64+placeholder==',
+    name: SELF_NAME,
+    pubkeyB64: 'bW9jay1wdWJrZXktaG9tZWJhc2UtZXhhbXBsZQ==',
   },
   radio: {
     txPowerDbm: 17,
@@ -136,9 +172,7 @@ const clients = new Set();
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
   for (const ws of clients) {
-    if (ws.readyState === 1 /* OPEN */) {
-      ws.send(msg);
-    }
+    if (ws.readyState === 1) ws.send(msg);
   }
 }
 
@@ -154,7 +188,7 @@ const handlers = {
     return {
       uptimeSec,
       freeHeapBytes: 187432 - Math.floor(uptimeSec * 0.5) % 20000,
-      fwVersion: '0.4.2-mock',
+      fwVersion: '0.4.2-dev',
       txCount,
       rxCount,
       droppedCount,
@@ -162,13 +196,13 @@ const handlers = {
       routeCount: routes.filter(r => r.state === 'active').length,
       airtimeUsedMs,
       position: {
-        lat: 36.0544,
-        lon: -115.0523,
-        alt: 590,
-        accuracy: 3,
+        lat: SELF_POS.lat + (Math.random() - 0.5) * 0.00005,
+        lon: SELF_POS.lon + (Math.random() - 0.5) * 0.00005,
+        alt: SELF_POS.alt,
+        accuracy: SELF_POS.accuracy,
         speed: 0,
         heading: 0,
-        timestampMs: Date.now() - 5000,
+        timestampMs: Date.now() - 2000,
       },
     };
   },
@@ -187,27 +221,9 @@ const handlers = {
     const now = Date.now();
     return {
       tiers: [
-        {
-          name: 'critical',
-          remainingMs: 8500,
-          maxMs: 10000,
-          usedPct: 15,
-          refillAtMs: now + 55000,
-        },
-        {
-          name: 'normal',
-          remainingMs: 32000,
-          maxMs: 60000,
-          usedPct: 47,
-          refillAtMs: now + 120000,
-        },
-        {
-          name: 'broadcast',
-          remainingMs: 4200,
-          maxMs: 30000,
-          usedPct: 86,
-          refillAtMs: now + 300000,
-        },
+        { name: 'critical',  remainingMs: 9200,  maxMs: 10000, usedPct: 8,  refillAtMs: now + 55000  },
+        { name: 'normal',    remainingMs: 41000, maxMs: 60000, usedPct: 32, refillAtMs: now + 120000 },
+        { name: 'broadcast', remainingMs: 22500, maxMs: 30000, usedPct: 25, refillAtMs: now + 300000 },
       ],
     };
   },
@@ -222,9 +238,7 @@ const handlers = {
   },
 
   'bramble.getRoutes'(_params) {
-    return {
-      routes: routes.map(r => ({ ...r })),
-    };
+    return { routes: routes.map(r => ({ ...r })) };
   },
 
   'bramble.getMessages'(_params) {
@@ -237,19 +251,33 @@ const handlers = {
     airtimeUsedMs += 350 + Math.floor(Math.random() * 200);
 
     const dest = params?.dest ?? 0xFFFFFFFF;
-    const delayMs = 1000 + Math.floor(Math.random() * 2000);
+    const delayMs = 800 + Math.floor(Math.random() * 2500);
 
-    // Simulate delivery after 1-3s
+    // Simulate delivery
     setTimeout(() => {
-      const relayPath = dest !== 0xFFFFFFFF ? [
-        { addr: 0xDEADBEEF, rssi: -68 },
-        { addr: 0xAABBCCDD, rssi: -79 },
-      ] : [];
+      // Build realistic relay path based on routes
+      let relayPath = [];
+      if (dest !== 0xFFFFFFFF) {
+        const route = routes.find(r => r.dest === dest);
+        if (route && route.hopCount > 1) {
+          // Multi-hop: show intermediate relayers
+          relayPath.push({ addr: route.nextHop, rssi: -70 - Math.floor(Math.random() * 20) });
+          if (route.hopCount > 2) {
+            relayPath.push({ addr: dest, rssi: -80 - Math.floor(Math.random() * 15) });
+          }
+        }
+      }
+
+      // 95% delivery for active routes, 40% for stale
+      const route = routes.find(r => r.dest === dest);
+      const success = !route || route.state === 'active'
+        ? Math.random() < 0.95
+        : route.state === 'stale' ? Math.random() < 0.4 : false;
 
       notify('bramble.onAck', {
         packetId,
-        status: 'delivered',
-        relayPath,
+        status: success ? 'delivered' : 'failed',
+        relayPath: success ? relayPath : [],
       });
     }, delayMs);
 
@@ -257,16 +285,12 @@ const handlers = {
   },
 
   'bramble.setRadio'(params) {
-    if (params) {
-      Object.assign(config.radio, params);
-    }
+    if (params) Object.assign(config.radio, params);
     return { ok: true };
   },
 
   'bramble.setNodeName'(params) {
-    if (params?.name) {
-      config.identity.name = String(params.name).slice(0, 8);
-    }
+    if (params?.name) config.identity.name = String(params.name).slice(0, 8);
     return { ok: true };
   },
 
@@ -294,54 +318,51 @@ const handlers = {
     return { ok: true };
   },
 
+  'bramble.setDefaultChannel'(params) {
+    const idx = params?.index;
+    for (const ch of channels) ch.isDefault = ch.index === idx;
+    return { ok: true };
+  },
+
   'bramble.sendProbe'(_params) {
     const probeId = 0xa000 + Math.floor(Math.random() * 0xfff);
     const ackWindow = 30;
 
-    // Simulate 4-6 ACKs over 10-20s
-    const ackCount = 4 + Math.floor(Math.random() * 3);
-    const mockAddrs = [0xAABBCCDD, 0x11223344, 0xDEADBEEF, 0xFEEDFACE, 0xCAFEBABE, 0xBEEF1234];
-    for (let i = 0; i < ackCount; i++) {
-      const delay = 2000 + Math.floor(Math.random() * 18000);
-      const hopCount = 1 + Math.floor(Math.random() * 3);
-      const rssi = -72 - Math.floor(Math.random() * 33);
-      const snr = -1 + Math.random() * 10;
-      const relayPath = [];
-      for (let h = 0; h < hopCount - 1; h++) {
-        relayPath.push(mockAddrs[Math.floor(Math.random() * mockAddrs.length)]);
-      }
+    // Simulate realistic probe responses from known peers
+    const responders = [
+      { addr: 0xAABBCC01, hopCount: 1, baseRssi: -68,  baseSNR: 9.5  },
+      { addr: 0xAABBCC02, hopCount: 1, baseRssi: -87,  baseSNR: 4.8  },
+      { addr: 0xAABBCC04, hopCount: 2, baseRssi: -92,  baseSNR: 3.2, relay: [0xAABBCC01] },
+      { addr: 0xAABBCC03, hopCount: 1, baseRssi: -102, baseSNR: 2.1  },
+      { addr: 0xAABBCC05, hopCount: 1, baseRssi: -109, baseSNR: 0.8  },
+    ];
+
+    for (let i = 0; i < responders.length; i++) {
+      const r = responders[i];
+      // Closer/stronger nodes respond faster
+      const delay = 1500 + i * 2500 + Math.floor(Math.random() * 3000);
+      // Ranger (CC05) only responds 60% of the time
+      if (r.addr === 0xAABBCC05 && Math.random() > 0.6) continue;
+
       setTimeout(() => {
         notify('probe.ack', {
-          responderAddr: mockAddrs[i % mockAddrs.length],
-          hopCount,
-          rssi,
-          snr: Math.round(snr * 10) / 10,
-          pathLen: hopCount,
-          relayPath,
+          responderAddr: r.addr,
+          hopCount: r.hopCount,
+          rssi: r.baseRssi + Math.floor((Math.random() - 0.5) * 8),
+          snr: Math.round((r.baseSNR + (Math.random() - 0.5) * 1.5) * 10) / 10,
+          pathLen: r.hopCount,
+          relayPath: r.relay ?? [],
           receivedAt: Date.now(),
         });
       }, delay);
     }
 
-    // Send probe.complete after ackWindow
-    setTimeout(() => {
-      notify('probe.complete', { probeId });
-    }, ackWindow * 1000);
-
+    setTimeout(() => notify('probe.complete', { probeId }), ackWindow * 1000);
     return { probeId, ackWindow };
   },
 
   'bramble.getPeerLocations'(_params) {
-    // Drift positions slightly for realism
-    for (const pl of peerLocations) {
-      if (pl.position) {
-        pl.position.lat += (Math.random() - 0.5) * 0.0002;
-        pl.position.lon += (Math.random() - 0.5) * 0.0002;
-        pl.position.timestampMs = Date.now() - Math.floor(Math.random() * 60000);
-      }
-      pl.lastUpdatedMs = Date.now() - Math.floor(Math.random() * 60000);
-    }
-    return { peerLocations: peerLocations.map(p => ({ ...p, position: p.position ? { ...p.position } : null })) };
+    return { peerLocations: buildPeerLocations() };
   },
 
   'bramble.setLocationConfig'(params) {
@@ -377,34 +398,21 @@ const handlers = {
   },
 
   'bramble.shareLocationOnce'(params) {
-    const addr = params?.addr;
-    // Simulate sending a one-time location update after a short delay
     setTimeout(() => {
       notify('location.update', {
-        addr,
-        name: 'MockNode',
+        addr: params?.addr,
+        name: SELF_NAME,
         tier: 'full',
         position: {
-          lat: 36.0395 + (Math.random() - 0.5) * 0.001,
-          lon: -114.9817 + (Math.random() - 0.5) * 0.001,
-          alt: 569,
-          accuracy: 5,
-          speed: 0,
-          heading: 0,
-          timestampMs: Date.now(),
+          lat: SELF_POS.lat + (Math.random() - 0.5) * 0.0002,
+          lon: SELF_POS.lon + (Math.random() - 0.5) * 0.0002,
+          alt: SELF_POS.alt, accuracy: SELF_POS.accuracy,
+          speed: 0, heading: 0, timestampMs: Date.now(),
         },
         online: true,
         lastUpdatedMs: Date.now(),
       });
     }, 500);
-    return { ok: true };
-  },
-
-  'bramble.setDefaultChannel'(params) {
-    const idx = params?.index;
-    for (const ch of channels) {
-      ch.isDefault = ch.index === idx;
-    }
     return { ok: true };
   },
 };
@@ -415,7 +423,8 @@ const wss = new WebSocketServer({ port: PORT });
 
 wss.on('listening', () => {
   console.log(`[mock-node] WebSocket server listening on ws://0.0.0.0:${PORT}`);
-  console.log(`[mock-node] Mock address: 0x${MOCK_ADDR.toString(16).toUpperCase()}, name: ${MOCK_NAME}`);
+  console.log(`[mock-node] Self: 0x${SELF_ADDR.toString(16).toUpperCase()} "${SELF_NAME}" @ Inspirada, Henderson NV`);
+  console.log(`[mock-node] Peers: ${PEER_ADDRS.map(a => PEERS[a].name).join(', ')}`);
 });
 
 wss.on('connection', (ws, req) => {
@@ -425,12 +434,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', (data) => {
     let msg;
-    try {
-      msg = JSON.parse(data.toString());
-    } catch {
-      console.warn('[mock-node] Received invalid JSON, ignoring');
-      return;
-    }
+    try { msg = JSON.parse(data.toString()); } catch { return; }
 
     const { id, method, params } = msg;
     console.log(`[mock-node] RPC → ${method} (id=${id})`);
@@ -439,8 +443,7 @@ wss.on('connection', (ws, req) => {
     if (!handler) {
       if (id !== undefined) {
         ws.send(JSON.stringify({
-          jsonrpc: '2.0',
-          id,
+          jsonrpc: '2.0', id,
           error: { code: -32601, message: `Method not found: ${method}` },
         }));
       }
@@ -449,80 +452,69 @@ wss.on('connection', (ws, req) => {
 
     try {
       const result = handler(params ?? {});
-      if (id !== undefined) {
-        ws.send(JSON.stringify({ jsonrpc: '2.0', id, result }));
-      }
+      if (id !== undefined) ws.send(JSON.stringify({ jsonrpc: '2.0', id, result }));
     } catch (err) {
       console.error(`[mock-node] Handler error for ${method}:`, err);
       if (id !== undefined) {
         ws.send(JSON.stringify({
-          jsonrpc: '2.0',
-          id,
+          jsonrpc: '2.0', id,
           error: { code: -32603, message: String(err.message ?? err) },
         }));
       }
     }
   });
 
-  ws.on('close', () => {
-    console.log(`[mock-node] Client disconnected`);
-    clients.delete(ws);
-  });
-
-  ws.on('error', (err) => {
-    console.error(`[mock-node] WebSocket error:`, err.message);
-  });
+  ws.on('close', () => { clients.delete(ws); });
+  ws.on('error', (err) => console.error(`[mock-node] WS error:`, err.message));
 });
 
-// ─── Periodic notifications ───────────────────────────────────────────────────
+// ─── Periodic simulation ─────────────────────────────────────────────────────
 
-// Counters tick up realistically every second
+// Counters tick realistically
 setInterval(() => {
   if (Math.random() < 0.3) rxCount++;
-  if (Math.random() < 0.05) droppedCount++;
-  airtimeUsedMs += Math.floor(Math.random() * 50);
+  if (Math.random() < 0.02) droppedCount++;
+  airtimeUsedMs += Math.floor(Math.random() * 40);
 }, 1000);
 
-// Neighbor RSSI drift every 15s
+// Neighbor RSSI drift every 15s (realistic fading)
 setInterval(() => {
   for (const n of neighbors) {
-    n.rssi += Math.floor((Math.random() - 0.5) * 6);
+    n.rssi += Math.floor((Math.random() - 0.5) * 4);
     n.rssi = Math.max(-120, Math.min(-55, n.rssi));
-    n.snr += (Math.random() - 0.5) * 1.0;
-    n.snr = Math.max(0, Math.min(14, n.snr));
+    n.snr += (Math.random() - 0.5) * 0.8;
+    n.snr = Math.max(-2, Math.min(14, n.snr));
+    // Delivery rate drifts slowly
+    n.deliveryRate += Math.floor((Math.random() - 0.5) * 8);
+    n.deliveryRate = Math.max(50, Math.min(255, n.deliveryRate));
     n.lastHeardMs = 500 + Math.floor(Math.random() * 3000);
   }
-  if (clients.size > 0) {
-    console.log('[mock-node] → bramble.onNeighborChange');
-    notify('bramble.onNeighborChange', {});
-  }
+  if (clients.size > 0) notify('bramble.onNeighborChange', {});
 }, 15000);
 
-// Random incoming messages every 10-30s
+// Simulate incoming messages from mesh — realistic traffic
+const MESH_CHATTER = [
+  { from: 0xAABBCC01, texts: ['Hilltop node checking in. Strong signal today.', 'Wind picking up on the ridge, antenna holding.', 'Relayed 3 packets this hour.'] },
+  { from: 0xAABBCC02, texts: ['TrailHead here. Hikers passing through.', 'Solar panel at 14.2V, all good.', 'Forwarded a message to Anthem via Hilltop.'] },
+  { from: 0xAABBCC03, texts: ['WaterSt reporting. Downtown is noisy on 915.', 'Switching to SF10 for better range.', 'Anyone seeing interference today?'] },
+  { from: 0xAABBCC04, texts: ['Anthem node online. 2 hops to HomeBase confirmed.', 'Battery swap complete, back on air.', 'Can someone relay to TrailHead? Lost direct path.'] },
+  { from: 0xAABBCC05, texts: ['Ranger mobile, heading south on 95.', 'Signal fading, might lose you.', 'Back in range. RSSI improved.'] },
+];
+
 function scheduleIncoming() {
-  const delayMs = 10000 + Math.floor(Math.random() * 20000);
+  const delayMs = 12000 + Math.floor(Math.random() * 25000);
   setTimeout(() => {
     if (clients.size > 0) {
-      const sender = neighbors[Math.floor(Math.random() * neighbors.length)];
-      const texts = [
-        'Anyone copy? Testing mesh range.',
-        'Node 3 reporting in. All green.',
-        'RSSI looking good on my end.',
-        'Can someone relay to sector 4?',
-        'Battery at 67%. Will monitor.',
-        'Route to base confirmed, 3 hops.',
-        'Interference on 915, switching SF.',
-        'Mesh stable. 4 neighbors visible.',
-      ];
-      const text = texts[Math.floor(Math.random() * texts.length)];
-      const tiers = ['normal', 'normal', 'normal', 'normal', 'critical'];
-      const tier = tiers[Math.floor(Math.random() * tiers.length)];
+      const source = MESH_CHATTER[Math.floor(Math.random() * MESH_CHATTER.length)];
+      const text = source.texts[Math.floor(Math.random() * source.texts.length)];
+      const tier = Math.random() < 0.15 ? 'critical' : 'normal';
       const msgId = `mock-${++msgIdCounter}-${Date.now()}`;
+      const name = PEERS[source.from]?.name ?? '???';
 
-      console.log(`[mock-node] → bramble.onMessage from 0x${sender.addr.toString(16).toUpperCase()}`);
+      console.log(`[mock-node] → incoming from ${name} (0x${source.from.toString(16).toUpperCase()})`);
       notify('bramble.onMessage', {
-        from: sender.addr,
-        to: MOCK_ADDR,
+        from: source.from,
+        to: SELF_ADDR,
         text,
         tier,
         timestamp: Math.floor(Date.now() / 1000),
@@ -535,3 +527,21 @@ function scheduleIncoming() {
 }
 
 scheduleIncoming();
+
+// Periodic location updates from mobile node (Ranger)
+setInterval(() => {
+  if (clients.size === 0) return;
+  // Ranger moves slowly
+  const ranger = PEERS[0xAABBCC05];
+  if (!ranger._lat) { ranger._lat = 36.02; ranger._lon = -115.04; }
+  ranger._lat += (Math.random() - 0.5) * 0.002;
+  ranger._lon += (Math.random() - 0.5) * 0.002;
+  notify('location.update', {
+    addr: 0xAABBCC05,
+    name: 'Ranger',
+    tier: 'presence',  // Ranger only shares presence
+    position: null,
+    online: Math.random() > 0.2,
+    lastUpdatedMs: Date.now(),
+  });
+}, 45000);
