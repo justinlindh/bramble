@@ -23,7 +23,7 @@ export function ConnectionOverlay() {
   return (
     <div className={styles.overlay}>
       <div className={styles.card}>
-        <div className={styles.logo}>🌿</div>
+        <img src="/bramble-logo.png" alt="Bramble" className={styles.logoImg} />
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
 
