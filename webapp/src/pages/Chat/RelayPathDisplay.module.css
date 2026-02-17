@@ -1,54 +1,83 @@
-.path {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px;
+.container {
   margin-top: 6px;
-  padding: 4px 8px;
-  background: color-mix(in srgb, var(--critical) 10%, transparent);
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--critical) 8%, transparent);
   border-left: 2px solid var(--critical);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  font-size: 0.72rem;
-  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
-.pathLabel {
-  font-size: 0.68rem;
+.header {
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--critical);
-  margin-right: 4px;
+  margin-bottom: 6px;
+  font-weight: 600;
 }
 
-.hopWrap {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 2px;
+.hops {
+  display: flex;
+  flex-direction: column;
 }
 
-.arrow {
-  color: var(--text-muted);
-  margin: 0 2px;
-  cursor: default;
+.hopRow {
+  display: flex;
+  flex-direction: column;
 }
 
-.hop {
-  color: var(--text-muted);
-  font-size: 0.72rem;
+.connector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 5px;
+  height: 20px;
 }
 
-.hopSelf {
-  color: var(--accent-blue);
-  font-size: 0.72rem;
-}
-
-.hopDest {
-  color: var(--critical);
-  font-size: 0.72rem;
+.line {
+  width: 1px;
+  height: 100%;
+  background: var(--text-muted);
+  opacity: 0.4;
 }
 
 .rssi {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono, monospace);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.rssi.strong { color: var(--accent); }
+.rssi.good { color: var(--accent-blue); }
+.rssi.weak { color: var(--warning, #d29922); }
+.rssi.marginal { color: var(--danger); }
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.self .dot { background: var(--accent-blue); }
+.dest .dot { background: var(--critical); }
+
+.addr {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+
+.label {
+  font-size: 0.7rem;
   color: var(--text-muted);
-  opacity: 0.75;
 }
