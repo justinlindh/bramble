@@ -20,9 +20,8 @@ export function ConnectionOverlay() {
   const hasBluetooth = 'bluetooth' in navigator;
   const hasAnyHardwareSupport = hasSerial || hasBluetooth;
 
-  // Show WebSocket mock when in dev mode or when no hardware APIs available
-  const isDev = import.meta.env.DEV;
-  const showMock = isDev || !hasAnyHardwareSupport;
+  // Always show mock option — useful for development and demos
+  const showMock = true;
 
   return (
     <div className={styles.overlay}>
@@ -31,7 +30,7 @@ export function ConnectionOverlay() {
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
 
-        {!hasAnyHardwareSupport && !isDev && (
+        {!hasAnyHardwareSupport && (
           <div className={styles.unsupported}>
             <p>⚠️ Your browser does not support Web Serial or Web Bluetooth.</p>
             <p className={styles.hint}>
