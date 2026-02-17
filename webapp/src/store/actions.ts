@@ -11,6 +11,10 @@ import type {
   RelayHop,
   MessageTier,
   ProbeResponse,
+  PeerLocation,
+  LocationConfig,
+  LocationContact,
+  LocationTier,
 } from '../types/bramble';
 
 let client: BrambleClient | null = null;
@@ -49,6 +53,7 @@ export async function connect(type: TransportType): Promise<void> {
     client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
     client.subscribe('probe.ack', (params) => handleProbeAck(params));
     client.subscribe('probe.complete', (params) => handleProbeComplete(params));
+    client.subscribe('location.update', (params) => handleLocationUpdate(params));
 
     // Initial data load
     await Promise.all([
@@ -58,6 +63,7 @@ export async function connect(type: TransportType): Promise<void> {
       loadNeighbors(),
       loadRoutes(),
       loadMessages(),
+      loadPeerLocations(),
     ]);
   } catch (e) {
     // Clean up any partially-initialised client so we start fresh on retry
@@ -301,6 +307,59 @@ function handleProbeComplete(params: unknown): void {
   if (!prev || prev.probeId !== probeId) return;
   store.setProbeResult({ ...prev, complete: true });
   store.setProbeCollecting(false);
+}
+
+// ─── Location ─────────────────────────────────────────────────────────────
+
+export async function loadPeerLocations(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<{ peerLocations: PeerLocation[] }>('bramble.getPeerLocations');
+  useStore.getState().setPeerLocations(result.peerLocations ?? []);
+}
+
+export async function setLocationConfig(config: Partial<LocationConfig>): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
+  await loadConfig();
+}
+
+export async function setLocationContact(
+  addr: number,
+  tier: LocationTier,
+  intervalSec?: number,
+  distanceTriggerM?: number
+): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  const params: Record<string, unknown> = { addr, tier };
+  if (intervalSec !== undefined) params.intervalSec = intervalSec;
+  if (distanceTriggerM !== undefined) params.distanceTriggerM = distanceTriggerM;
+  await client.rpc('bramble.setLocationContact', params);
+  await loadConfig();
+}
+
+export async function removeLocationContact(addr: number): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.removeLocationContact', { addr });
+  await loadConfig();
+}
+
+export async function shareLocationOnce(addr: number): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.shareLocationOnce', { addr });
+}
+
+function handleLocationUpdate(params: unknown): void {
+  const update = params as PeerLocation;
+  const store = useStore.getState();
+  const existing = store.peerLocations;
+  const idx = existing.findIndex(p => p.addr === update.addr);
+  if (idx >= 0) {
+    const updated = [...existing];
+    updated[idx] = update;
+    store.setPeerLocations(updated);
+  } else {
+    store.setPeerLocations([...existing, update]);
+  }
 }
 
 export function getClient(): BrambleClient | null {
