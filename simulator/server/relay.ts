@@ -177,7 +177,7 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`[relay] Listening on http://localhost:${PORT}`);
   console.log(`[relay] Serving UI from ${UI_DIST}`);
   console.log(`[relay] Engine: ${ENGINE_BIN}`);
