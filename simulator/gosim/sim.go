@@ -410,18 +410,10 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	for i := 0; i < count; i++ {
 		node := C.node_array_get(&s.nodes, C.int(i))
 		if node != nil && bool(node.active) {
-			nid := C.GoString(&node.id[0])
-			_ = nid
 			C.anomaly_check_blackhole(&s.anomaly[i].blackhole, C.uint64_t(ts), C.stdout, &node.id[0])
 		}
 	}
-
-	// Reschedule metrics tick (every 5 seconds)
-	var nextMetrics C.sim_event_t
-	C.memset(unsafe.Pointer(&nextMetrics), 0, C.sizeof_sim_event_t)
-	nextMetrics._type = C.EVT_METRICS_TICK
-	nextMetrics.timestamp_us = C.uint64_t(ts + 5000000)
-	eventQueuePush(&s.events, &nextMetrics)
+	// Note: metrics ticks are pre-scheduled by scenario_load_file — no rescheduling needed
 }
 
 // --- Command handlers ---
@@ -448,6 +440,8 @@ func (s *Sim) cmdLoad(cmd Command) {
 		return
 	}
 
+	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
+	C.pcg32_seed(&s.rng, scenario.metadata.seed)
 	s.duration = uint64(scenario.metadata.duration_us)
 	s.simTime = 0
 	s.speed = 1.0
@@ -467,8 +461,8 @@ func (s *Sim) cmdLoad(cmd Command) {
 		nodeActivate(node)
 		anomalyInit(&s.anomaly[i])
 
-		// Schedule initial tick
-		tick := C.bridge_make_tick_event(C.uint64_t(100000), &node.id[0], 0)
+		// Schedule initial tick (staggered by 100ms per node)
+		tick := C.bridge_make_tick_event(C.uint64_t(uint64(i)*100000), &node.id[0], 0)
 		eventQueuePush(&s.events, &tick)
 
 		s.emitJSON(map[string]interface{}{
@@ -480,11 +474,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	}
 
 	// Schedule first metrics tick
-	var metricsTick C.sim_event_t
-	C.memset(unsafe.Pointer(&metricsTick), 0, C.sizeof_sim_event_t)
-	metricsTick._type = C.EVT_METRICS_TICK
-	metricsTick.timestamp_us = C.uint64_t(5000000)
-	eventQueuePush(&s.events, &metricsTick)
+	// Note: metrics ticks are pre-scheduled by scenario_load_file — no manual scheduling needed
 
 	// Broadcast config + sim_ready
 	s.emitJSON(map[string]interface{}{

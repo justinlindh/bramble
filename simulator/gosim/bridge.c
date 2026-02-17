@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* ─── Global simulation time ───────────────────────────────────────────── */
 uint64_t g_bridge_sim_time_us = 0;
