@@ -27,3 +27,13 @@
 #include "../../components/airtime/airtime_budget.c"
 #include "../../components/fragment/fragment.c"
 #include "../../components/crypto/crypto_host.c"
+
+/* New components (Phase 6) */
+#include "../../components/mailbox/mailbox.c"
+#include "../../components/emergency/emergency.c"
+#include "../../components/location/location.c"
+#include "../../components/group/group.c"
+#include "../../components/coding/coding.c"
+#include "../../components/routing/route_metric.c"
+#include "../../components/channel/channel_key.c"
+#include "../../components/channel/public_channel.c"
