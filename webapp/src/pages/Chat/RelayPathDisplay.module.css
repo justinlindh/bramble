@@ -1,83 +1,39 @@
-.container {
-  margin-top: 6px;
-  padding: 8px 10px;
-  background: color-mix(in srgb, var(--critical) 8%, transparent);
-  border-left: 2px solid var(--critical);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  font-size: 0.8rem;
-}
-
-.header {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--critical);
-  margin-bottom: 6px;
-  font-weight: 600;
-}
-
-.hops {
-  display: flex;
-  flex-direction: column;
-}
-
-.hopRow {
-  display: flex;
-  flex-direction: column;
-}
-
-.connector {
+.path {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding-left: 5px;
-  height: 20px;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-left: 2px solid var(--text-muted);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.78rem;
 }
 
-.line {
-  width: 1px;
-  height: 100%;
-  background: var(--text-muted);
-  opacity: 0.4;
+.pathLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  margin-right: 2px;
+}
+
+.arrow {
+  color: var(--text-muted);
+}
+
+.hop {
+  font-family: var(--font-mono, monospace);
+  color: var(--text);
+  font-size: 0.78rem;
 }
 
 .rssi {
-  font-size: 0.7rem;
   font-family: var(--font-mono, monospace);
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--surface-2);
-}
-
-.rssi.strong { color: var(--accent); }
-.rssi.good { color: var(--accent-blue); }
-.rssi.weak { color: var(--warning, #d29922); }
-.rssi.marginal { color: var(--danger); }
-
-.node {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.self .dot { background: var(--accent-blue); }
-.dest .dot { background: var(--critical); }
-
-.addr {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.8rem;
-  color: var(--text);
-}
-
-.label {
   font-size: 0.7rem;
   color: var(--text-muted);
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
 }
