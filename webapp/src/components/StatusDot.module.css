@@ -1,0 +1,29 @@
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.disconnected {
+  background: var(--text-muted);
+}
+
+.connecting {
+  background: var(--warning);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.connected {
+  background: var(--accent);
+}
+
+.error {
+  background: var(--danger);
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}

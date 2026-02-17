@@ -1,0 +1,115 @@
+import { create } from 'zustand';
+import type {
+  AppState,
+  Message,
+  Neighbor,
+  Route,
+  BrambleConfig,
+  NodeStatus,
+  AirtimeStatus,
+  ConnectionState,
+  RelayHop,
+  DeliveryStatus,
+  Transport,
+} from '../types/bramble';
+
+function formatAddr(id: string): string {
+  if (id.startsWith('ch:')) return `#ch-${id.slice(3)}`;
+  if (id.startsWith('dm:')) return `0x${Number(id.slice(3)).toString(16).toUpperCase()}`;
+  return id;
+}
+
+interface Actions {
+  setConnectionState: (s: ConnectionState, err?: string) => void;
+  setTransport: (t: Transport | null) => void;
+  setConfig: (c: BrambleConfig) => void;
+  setStatus: (s: NodeStatus) => void;
+  setAirtime: (a: AirtimeStatus) => void;
+  setNeighbors: (n: Neighbor[]) => void;
+  setRoutes: (r: Route[]) => void;
+  addMessage: (msg: Message) => void;
+  updateMessageStatus: (id: string, status: DeliveryStatus, relayPath?: RelayHop[]) => void;
+  setActiveConversation: (id: string) => void;
+}
+
+export const useStore = create<AppState & Actions>((set) => ({
+  // ─── Initial state ───────────────────────────────────────────────────
+  connectionState: 'disconnected',
+  connectionError: undefined,
+  transport: null,
+  config: null,
+  status: null,
+  airtime: null,
+  neighbors: [],
+  routes: [],
+  messages: [],
+  conversations: new Map(),
+  activeConversationId: 'broadcast',
+
+  // ─── Actions ─────────────────────────────────────────────────────────
+  setConnectionState: (s, err?) =>
+    set({ connectionState: s, connectionError: err }),
+
+  setTransport: (t) => set({ transport: t }),
+
+  setConfig: (c) => set({ config: c }),
+
+  setStatus: (s) => set({ status: s }),
+
+  setAirtime: (a) => set({ airtime: a }),
+
+  setNeighbors: (n) => set({ neighbors: n }),
+
+  setRoutes: (r) => set({ routes: r }),
+
+  addMessage: (msg: Message) =>
+    set(state => {
+      // Cap message history at 500
+      const msgs = [...state.messages, msg].slice(-500);
+
+      // Determine conversation ID
+      const convId =
+        msg.channelIndex !== undefined
+          ? `ch:${msg.channelIndex}`
+          : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
+
+      // Update conversation summary
+      const convs = new Map(state.conversations);
+      const prev = convs.get(convId);
+      convs.set(convId, {
+        id: convId,
+        label: prev?.label ?? formatAddr(convId),
+        peerAddr:
+          msg.channelIndex !== undefined
+            ? undefined
+            : msg.direction === 'outgoing'
+            ? msg.to
+            : msg.from,
+        channelIndex: msg.channelIndex,
+        lastMessage: msg.text.slice(0, 60),
+        lastMessageTime: msg.timestampMs,
+        unreadCount:
+          (prev?.unreadCount ?? 0) +
+          (msg.direction === 'incoming' ? 1 : 0),
+      });
+
+      return { messages: msgs, conversations: convs };
+    }),
+
+  updateMessageStatus: (id: string, status: DeliveryStatus, relayPath?: RelayHop[]) =>
+    set(state => ({
+      messages: state.messages.map(m =>
+        m.id === id
+          ? { ...m, status, relayPath: relayPath ?? m.relayPath }
+          : m
+      ),
+    })),
+
+  setActiveConversation: (id: string) =>
+    set(state => {
+      const convs = new Map(state.conversations);
+      const conv = convs.get(id);
+      if (conv) convs.set(id, { ...conv, unreadCount: 0 });
+      return { activeConversationId: id, conversations: convs };
+    }),
+}));

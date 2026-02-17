@@ -1,0 +1,241 @@
+import { useStore } from './index';
+import { createTransport, BrambleClient } from '../transport';
+import type {
+  TransportType,
+  BrambleConfig,
+  NodeStatus,
+  AirtimeStatus,
+  Neighbor,
+  Route,
+  IncomingMessage,
+  RelayHop,
+  MessageTier,
+} from '../types/bramble';
+
+let client: BrambleClient | null = null;
+
+// ─── Connection ─────────────────────────────────────────────────────────
+
+export async function connect(type: TransportType): Promise<void> {
+  const store = useStore.getState();
+  store.setConnectionState('connecting');
+  try {
+    const transport = createTransport(type);
+    await transport.connect();
+    client = new BrambleClient(transport);
+    store.setConnectionState('connected');
+    store.setTransport(transport);
+
+    // Subscribe to push events
+    client.subscribe('bramble.onMessage', (params) =>
+      handleIncomingMessage(params)
+    );
+    client.subscribe('bramble.onAck', (params) => handleAck(params));
+    client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
+    client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
+    client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
+
+    // Initial data load
+    await Promise.all([
+      loadConfig(),
+      loadStatus(),
+      loadAirtime(),
+      loadNeighbors(),
+      loadRoutes(),
+      loadMessages(),
+    ]);
+  } catch (e) {
+    store.setConnectionState('error', (e as Error).message);
+  }
+}
+
+export async function disconnect(): Promise<void> {
+  try {
+    await client?.rpc('bramble.disconnect');
+  } catch {
+    // Ignore — node may not have this method, or already disconnected
+  }
+  client?.clearSubscriptions();
+  await client?.disconnect();
+  client = null;
+  useStore.getState().setConnectionState('disconnected');
+  useStore.getState().setTransport(null);
+}
+
+// ─── Data loading ────────────────────────────────────────────────────────
+
+export async function loadConfig(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<BrambleConfig>('bramble.getConfig');
+  useStore.getState().setConfig(result);
+}
+
+export async function loadStatus(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<NodeStatus>('bramble.getStatus');
+  useStore.getState().setStatus(result);
+}
+
+export async function loadAirtime(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<AirtimeStatus>('bramble.getAirtime');
+  useStore.getState().setAirtime(result);
+}
+
+export async function loadNeighbors(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<{ neighbors: Neighbor[] }>('bramble.getNeighbors');
+  useStore.getState().setNeighbors(result.neighbors ?? []);
+}
+
+export async function loadRoutes(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<{ routes: Route[] }>('bramble.getRoutes');
+  useStore.getState().setRoutes(result.routes ?? []);
+}
+
+export async function loadMessages(sinceId?: number): Promise<void> {
+  if (!client) return;
+  const params: Record<string, unknown> = { limit: 100 };
+  if (sinceId !== undefined) params.since_id = sinceId;
+  const result = await client.rpc<{ messages: IncomingMessage[] }>(
+    'bramble.getMessages',
+    params
+  );
+  const store = useStore.getState();
+  for (const m of result.messages ?? []) {
+    store.addMessage({
+      id: m.msgId,
+      direction: 'incoming',
+      from: m.from,
+      to: m.to,
+      text: m.text,
+      tier: m.tier,
+      channelIndex: m.channelIndex,
+      timestampMs: m.timestamp * 1000,
+      status: 'delivered',
+    });
+  }
+}
+
+// ─── Messaging ────────────────────────────────────────────────────────────
+
+const packetIdToMsgId = new Map<number, string>();
+
+export async function sendMessage(
+  dest: number,
+  text: string,
+  tier: MessageTier = 'normal',
+  channelIndex?: number
+): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  const store = useStore.getState();
+
+  const msg = {
+    id: crypto.randomUUID(),
+    direction: 'outgoing' as const,
+    from: 0,
+    to: dest,
+    text,
+    tier,
+    channelIndex,
+    timestampMs: Date.now(),
+    status: 'sending' as const,
+  };
+
+  store.addMessage(msg);
+
+  try {
+    const result = await client.rpc<{ packetId: number }>('bramble.sendMessage', {
+      dest,
+      text,
+      tier,
+      ...(channelIndex !== undefined ? { channelIndex } : {}),
+    });
+    store.updateMessageStatus(msg.id, 'sent');
+    if (result?.packetId !== undefined) {
+      packetIdToMsgId.set(result.packetId, msg.id);
+    }
+  } catch (e) {
+    store.updateMessageStatus(msg.id, 'failed');
+    throw e;
+  }
+}
+
+// ─── Notification handlers ────────────────────────────────────────────────
+
+function handleAck(params: unknown): void {
+  const { packetId, status, relayPath } = params as {
+    packetId: number;
+    status: string;
+    relayPath?: RelayHop[];
+  };
+  const msgId = packetIdToMsgId.get(packetId);
+  if (msgId) {
+    packetIdToMsgId.delete(packetId);
+    useStore.getState().updateMessageStatus(
+      msgId,
+      status === 'delivered' ? 'delivered' : 'failed',
+      relayPath
+    );
+  }
+}
+
+function handleIncomingMessage(params: unknown): void {
+  const p = params as IncomingMessage;
+  useStore.getState().addMessage({
+    id: p.msgId,
+    direction: 'incoming',
+    from: p.from,
+    to: p.to,
+    text: p.text,
+    tier: p.tier,
+    channelIndex: p.channelIndex,
+    timestampMs: Date.now(),
+    status: 'delivered',
+  });
+}
+
+async function refreshNeighbors(): Promise<void> {
+  await loadNeighbors();
+}
+
+// ─── Config mutations ────────────────────────────────────────────────────
+
+export async function saveRadio(radio: import('../types/bramble').RadioConfig): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setRadio', radio as unknown as Record<string, unknown>);
+  await loadConfig();
+}
+
+export async function saveNodeName(name: string): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setNodeName', { name });
+  await loadConfig();
+}
+
+export async function addChannel(name: string, psk?: string): Promise<number> {
+  if (!client) throw new Error('Not connected');
+  const result = await client.rpc<{ index: number }>('bramble.addChannel', {
+    name,
+    ...(psk ? { psk } : {}),
+  });
+  await loadConfig();
+  return result.index;
+}
+
+export async function removeChannel(index: number): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.removeChannel', { index });
+  await loadConfig();
+}
+
+export async function setDefaultChannel(index: number): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setDefaultChannel', { index });
+  await loadConfig();
+}
+
+export function getClient(): BrambleClient | null {
+  return client;
+}

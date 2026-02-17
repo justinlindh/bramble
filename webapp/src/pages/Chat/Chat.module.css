@@ -1,0 +1,11 @@
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.placeholder {
+  color: var(--text-muted);
+  padding: 2rem;
+  text-align: center;
+}

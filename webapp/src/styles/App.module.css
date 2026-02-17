@@ -1,0 +1,155 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* ─── Topbar ─────────────────────────────────────────────── */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.brand {
+  font-size: 1.1rem;
+  font-weight: 700;
+  flex: 1;
+  color: var(--accent);
+}
+
+.statusArea {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.statusLabel {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.disconnectBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.disconnectBtn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ─── Body (sidebar + content) ───────────────────────────── */
+
+.body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ─── Sidebar (desktop only) ─────────────────────────────── */
+
+.sidebar {
+  display: none; /* hidden on mobile */
+}
+
+/* ─── Content area ───────────────────────────────────────── */
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ─── Tab styles (shared) ────────────────────────────────── */
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  padding: 0.5rem 0.25rem;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.active {
+  color: var(--accent);
+}
+
+.tabIcon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+/* ─── Mobile tabbar ──────────────────────────────────────── */
+
+.tabbar {
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tabbar .tab {
+  flex: 1;
+}
+
+/* ─── Desktop layout (≥640px) ────────────────────────────── */
+
+@media (min-width: 640px) {
+  .tabbar {
+    display: none; /* hide mobile tabbar */
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 160px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 0.75rem 0.5rem;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .sidebar .tab {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    width: 100%;
+  }
+
+  .sidebar .tabIcon {
+    font-size: 1.1rem;
+  }
+
+  .sidebar .tab.active {
+    background: rgba(35, 134, 54, 0.1);
+  }
+}

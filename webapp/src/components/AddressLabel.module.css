@@ -1,0 +1,26 @@
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+.copy {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75em;
+  padding: 0 0.2rem;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.copy:hover {
+  opacity: 1;
+  color: var(--text);
+}
