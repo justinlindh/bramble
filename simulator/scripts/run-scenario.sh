@@ -7,11 +7,17 @@
 #   ./run-scenario.sh ideal-massive --json
 #   ./run-scenario.sh all              # run all scenarios
 #   ./run-scenario.sh ../scenarios/custom.json
+#
+# Works both locally (if bramble-gosim is on PATH or built nearby)
+# and via Docker (falls back to container execution).
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SIMULATOR_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCENARIO_DIR="$SIMULATOR_DIR/scenarios"
 CONTAINER="simulator-bramble-sim-1"
-SCENARIO_DIR="/app/scenarios"
+
 JSON_MODE=false
 VERBOSE=false
 SCENARIOS=()
@@ -24,26 +30,63 @@ for arg in "$@"; do
   esac
 done
 
+# Detect execution mode: local binary or Docker container
+GOSIM_BIN=""
+USE_DOCKER=false
+
+if command -v bramble-gosim &>/dev/null; then
+  GOSIM_BIN="bramble-gosim"
+elif [ -x "$SIMULATOR_DIR/gosim/bramble-gosim" ]; then
+  GOSIM_BIN="$SIMULATOR_DIR/gosim/bramble-gosim"
+elif docker exec "$CONTAINER" true &>/dev/null; then
+  USE_DOCKER=true
+  SCENARIO_DIR="/scenarios"
+else
+  echo "ERROR: bramble-gosim not found locally and Docker container '$CONTAINER' is not running."
+  echo "Either build locally (cd simulator/gosim && go build) or start Docker (docker compose up -d)."
+  exit 1
+fi
+
+run_cmd() {
+  if $USE_DOCKER; then
+    docker exec "$CONTAINER" "$@"
+  else
+    "$@"
+  fi
+}
+
 if [ ${#SCENARIOS[@]} -eq 0 ]; then
   echo "Usage: $0 <scenario|all> [--json] [--verbose]"
   echo ""
   echo "Available scenarios:"
-  docker exec "$CONTAINER" ls "$SCENARIO_DIR" 2>/dev/null | sed 's/\.json$//' | sed 's/^/  /'
+  if $USE_DOCKER; then
+    docker exec "$CONTAINER" ls "$SCENARIO_DIR" 2>/dev/null | sed 's/\.json$//' | sed 's/^/  /'
+  else
+    ls "$SCENARIO_DIR" 2>/dev/null | sed 's/\.json$//' | sed 's/^/  /'
+  fi
   exit 1
 fi
 
 # Expand "all"
 if [ "${SCENARIOS[0]}" = "all" ]; then
-  SCENARIOS=($(docker exec "$CONTAINER" ls "$SCENARIO_DIR" 2>/dev/null | sed 's/\.json$//'))
+  if $USE_DOCKER; then
+    SCENARIOS=($(docker exec "$CONTAINER" ls "$SCENARIO_DIR" 2>/dev/null | sed 's/\.json$//'))
+  else
+    SCENARIOS=($(ls "$SCENARIO_DIR" 2>/dev/null | sed 's/\.json$//'))
+  fi
 fi
 
 run_scenario() {
   local name="$1"
   local path="$SCENARIO_DIR/$name.json"
 
-  # Capture all output
+  # Run headless simulation
   local output
-  output=$(docker exec "$CONTAINER" timeout 300 /app/engine/bramble-sim "$path" 2>&1)
+  if $USE_DOCKER; then
+    output=$(docker exec "$CONTAINER" timeout 300 bramble-gosim --headless --scenario "$path" 2>&1)
+  else
+    output=$(timeout 300 $GOSIM_BIN --headless --scenario "$path" 2>&1)
+  fi
 
   # Extract final metrics line (last JSON with type=metrics)
   local final_metrics
@@ -51,63 +94,67 @@ run_scenario() {
 
   if [ -z "$final_metrics" ]; then
     echo "ERROR: No metrics output for $name"
+    if $VERBOSE; then
+      echo "  Raw output:"
+      echo "$output" | head -20 | sed 's/^/    /'
+    fi
     return 1
   fi
 
-  # Parse with node (available in container)
+  # Parse metrics with lightweight tools (no node dependency)
   local stats
-  stats=$(echo "$final_metrics" | docker exec -i "$CONTAINER" node -e "
-    const fs = require('fs');
-    const m = JSON.parse(fs.readFileSync('/dev/stdin','utf8'));
-    const rate = m.messages_sent > 0 ? (m.delivered / m.messages_sent * 100).toFixed(1) : '0.0';
-    const result = {
-      scenario: '$name',
-      messages_sent: m.messages_sent,
-      delivered: m.delivered,
-      delivery_pct: parseFloat(rate),
-      dropped: m.dropped,
-      total_packets: m.total_packets,
-      avg_latency_ms: m.avg_latency_ms,
-      active_nodes: m.active_nodes,
-      duration_s: m.timestamp_us / 1e6,
-      overhead_ratio: m.messages_sent > 0 ? parseFloat((m.total_packets / m.messages_sent).toFixed(1)) : 0
-    };
-    console.log(JSON.stringify(result));
-  ")
+  stats=$(echo "$final_metrics" | python3 -c "
+import sys, json
+m = json.load(sys.stdin)
+rate = (m.get('delivered',0) / m['messages_sent'] * 100) if m.get('messages_sent',0) > 0 else 0.0
+overhead = round(m.get('total_packets',0) / m['messages_sent'], 1) if m.get('messages_sent',0) > 0 else 0
+result = {
+    'scenario': '$name',
+    'messages_sent': m.get('messages_sent', 0),
+    'delivered': m.get('delivered', 0),
+    'delivery_pct': round(rate, 1),
+    'dropped': m.get('dropped', 0),
+    'total_packets': m.get('total_packets', 0),
+    'avg_latency_ms': m.get('avg_latency_ms', 0),
+    'active_nodes': m.get('active_nodes', 0),
+    'duration_s': round(m.get('timestamp_us', 0) / 1e6, 2),
+    'overhead_ratio': overhead
+}
+print(json.dumps(result))
+" 2>/dev/null)
+
+  if [ -z "$stats" ]; then
+    echo "ERROR: Failed to parse metrics for $name"
+    return 1
+  fi
 
   if $JSON_MODE; then
     echo "$stats"
   else
-    echo "$stats" | docker exec -i "$CONTAINER" node -e "
-      const m = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      console.log('━'.repeat(50));
-      console.log('  Scenario:      ' + m.scenario);
-      console.log('  Nodes:         ' + m.active_nodes);
-      console.log('  Duration:      ' + m.duration_s + 's');
-      console.log('  Messages:      ' + m.delivered + '/' + m.messages_sent + ' delivered (' + m.delivery_pct + '%)');
-      console.log('  Dropped:       ' + m.dropped);
-      console.log('  Avg latency:   ' + m.avg_latency_ms.toFixed(1) + ' ms');
-      console.log('  Total packets: ' + m.total_packets);
-      console.log('  Overhead:      ' + m.overhead_ratio + 'x (packets per message)');
-    "
+    echo "$stats" | python3 -c "
+import sys, json
+m = json.load(sys.stdin)
+print('━' * 50)
+print('  Scenario:      ' + m['scenario'])
+print('  Nodes:         ' + str(m['active_nodes']))
+print('  Duration:      ' + str(m['duration_s']) + 's')
+print('  Messages:      ' + str(m['delivered']) + '/' + str(m['messages_sent']) + ' delivered (' + str(m['delivery_pct']) + '%)')
+print('  Dropped:       ' + str(m['dropped']))
+print('  Avg latency:   ' + str(round(m['avg_latency_ms'], 1)) + ' ms')
+print('  Total packets: ' + str(m['total_packets']))
+print('  Overhead:      ' + str(m['overhead_ratio']) + 'x (packets per message)')
+"
   fi
 
   if $VERBOSE; then
-    # Show route and anomaly events
     echo ""
     echo "  Route events:"
-    echo "$output" | grep '"type":"route_' | wc -l | xargs -I{} echo "    {} route changes" || echo "    0 route changes"
+    echo "$output" | grep -c '"type":"route_' | xargs -I{} echo "    {} route changes" || echo "    0 route changes"
     echo "  Anomalies:"
     local anomalies
     anomalies=$(echo "$output" | grep -c '"type":"anomaly"' || true)
     if [ "$anomalies" -gt 0 ]; then
       echo "    $anomalies anomalies detected"
-      echo "$output" | grep '"type":"anomaly"' | docker exec -i "$CONTAINER" node -e "
-        const lines = require('fs').readFileSync('/dev/stdin','utf8').trim().split('\n');
-        const counts = {};
-        lines.forEach(l => { const a = JSON.parse(l); counts[a.anomaly_type] = (counts[a.anomaly_type]||0)+1; });
-        Object.entries(counts).forEach(([k,v]) => console.log('      ' + k + ': ' + v));
-      "
     else
       echo "    none"
     fi
