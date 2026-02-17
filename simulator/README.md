@@ -51,12 +51,16 @@ See `scenarios/` for examples. Upload custom scenarios via the UI or `POST /api/
 
 ## Interactive Controls
 
-Via WebSocket (`ws://host:port/ws`):
+Via the UI or WebSocket (`ws://host:port/ws`):
 - Load/start/restart scenarios
 - Play/pause with speed control (0.5×–100×)
-- Add/remove nodes dynamically (full protocol participation)
+- **Add nodes** — "+ Node" button, placed near random existing node
+- **Move nodes** — drag with mouse or touch
+- **Delete nodes** — right-click context menu, or drag to trash zone (bottom-right)
 - Inject messages between arbitrary nodes
 - Create interference zones
+
+All added/moved nodes are full protocol participants (beaconing, routing, forwarding).
 
 ## Design Docs
 
