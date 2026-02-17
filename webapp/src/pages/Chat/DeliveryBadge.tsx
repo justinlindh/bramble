@@ -7,25 +7,20 @@ interface DeliveryBadgeProps {
 }
 
 const STATUS_META: Record<DeliveryStatus, { icon: string; label: string; cls: string }> = {
-  queued:    { icon: '●',  label: 'Queued',               cls: 'muted'    },
-  sending:   { icon: '●',  label: 'Sending…',             cls: 'sending'  },
-  sent:      { icon: '✓',  label: 'Sent to node',         cls: 'muted'    },
-  delivered: { icon: '✓✓', label: 'Delivered',            cls: 'delivered' },
-  failed:    { icon: '✗',  label: 'Failed – no delivery', cls: 'failed'   },
-  timeout:   { icon: '!',  label: 'No receipt (timeout)', cls: 'timeout'  },
+  queued:    { icon: '●', label: 'Queued',               cls: 'pending'   },
+  sending:   { icon: '●', label: 'Sending…',             cls: 'sending'   },
+  sent:      { icon: '●', label: 'Sent to next hop',     cls: 'pending'   },
+  delivered: { icon: '●', label: 'Delivered',             cls: 'delivered' },
+  failed:    { icon: '●', label: 'Failed – not delivered', cls: 'failed'  },
+  timeout:   { icon: '●', label: 'No receipt (timeout)',  cls: 'warning'  },
 };
 
 export function DeliveryBadge({ status, tier }: DeliveryBadgeProps) {
   const meta = STATUS_META[status];
-  const isCritical = tier === 'critical';
 
   return (
     <span
-      className={[
-        styles.badge,
-        styles[meta.cls],
-        isCritical && status === 'delivered' ? styles.critical : '',
-      ].join(' ')}
+      className={`${styles.badge} ${styles[meta.cls]}`}
       title={meta.label}
       aria-label={meta.label}
     >

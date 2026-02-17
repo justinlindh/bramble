@@ -1,10 +1,26 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { MessageTier } from '../../types/bramble';
 import { sendMessage } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
 import styles from './ComposeBar.module.css';
+
+const MAX_BYTES = 800;
+const SINGLE_PACKET = 200;
+
+function byteLength(str: string): number {
+  return new TextEncoder().encode(str).length;
+}
+
+function packetInfo(bytes: number): { count: number; cls: string; label: string } {
+  if (bytes === 0) return { count: 0, cls: '', label: '' };
+  if (bytes <= SINGLE_PACKET) return { count: 1, cls: styles.counterOk, label: '' };
+  const count = Math.ceil(bytes / SINGLE_PACKET);
+  if (count <= 2) return { count, cls: styles.counterWarn, label: `${count} packets` };
+  if (count <= 4) return { count, cls: styles.counterHigh, label: `${count} packets` };
+  return { count, cls: styles.counterOver, label: 'too long' };
+}
 
 interface ComposeBarProps {
   conversationId: string;
@@ -43,7 +59,10 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const isBroadcastConv = conversationId === 'broadcast';
   const effectiveTier: MessageTier = isBroadcastConv ? 'broadcast' : tier;
 
-  const canSend = isConnected && text.trim().length > 0 && !sending;
+  const bytes = useMemo(() => byteLength(text), [text]);
+  const pkt = packetInfo(bytes);
+  const overLimit = bytes > MAX_BYTES;
+  const canSend = isConnected && text.trim().length > 0 && !sending && !overLimit;
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -106,6 +125,13 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
           rows={1}
           aria-label="Message input"
         />
+
+        {bytes > 0 && (
+          <div className={`${styles.counter} ${pkt.cls}`}>
+            <span>{bytes}/{MAX_BYTES}</span>
+            {pkt.label && <span className={styles.packetLabel}>{pkt.label}</span>}
+          </div>
+        )}
 
         <div className={styles.controls}>
           {/* Tier selector — hidden for broadcast conv (fixed to broadcast tier) */}
