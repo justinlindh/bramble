@@ -121,6 +121,22 @@ int channel_msg_decrypt(bramble_channel_t *channels, int num_channels,
         channels[catchup_index].epoch = catchup_epoch;
     }
 
+    /* Re-decrypt the winning channel to recover plaintext data.
+       The constant-time loop above may have overwritten pt with later attempts.
+       We need to decrypt one more time to get the actual plaintext. */
+    if (found_info.data != NULL) {
+        /* Normal (non-catchup) case: re-decrypt with the channel's current key */
+        if (try_decrypt(channels[found_index].key, nonce, ciphertext, ct_len, tag, pt) == 0) {
+            /* Copy plaintext data portion into ciphertext buffer so caller can read it.
+               The caller owns the ciphertext buffer and expects info.data to be valid. */
+            if (ct_len > CHANNEL_MSG_OVERHEAD) {
+                memcpy((uint8_t *)ciphertext + CHANNEL_MSG_OVERHEAD,
+                       pt + CHANNEL_MSG_OVERHEAD,
+                       ct_len - CHANNEL_MSG_OVERHEAD);
+            }
+        }
+    }
+
     *info_out = found_info;
     return 0;
 }
