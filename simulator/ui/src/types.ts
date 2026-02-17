@@ -35,10 +35,11 @@ export interface Metrics {
   timestamp_us: number;
   activeNodes: number;
   totalPackets: number;
+  messagesSent: number;
   delivered: number;
   dropped: number;
   avgLatencyMs: number;
-  deliveryRate: number; // 0-100
+  deliveryRate: number; // 0-100 (messages delivered / messages sent)
 }
 
 // Animated packet dot

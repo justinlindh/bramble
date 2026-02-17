@@ -352,7 +352,8 @@ static void handle_event(sim_event_t *event) {
             }
             metrics_update_active_nodes(&g_metrics, active);
             emit_metrics(stdout, event->timestamp_us, active,
-                         g_metrics.total_packets, g_metrics.delivered_packets,
+                         g_metrics.total_packets, g_metrics.messages_sent,
+                         g_metrics.delivered_packets,
                          g_metrics.dropped_packets, metrics_avg_latency_ms(&g_metrics));
 
             /* Check black-hole anomaly on each active node at every metrics tick */
@@ -524,6 +525,7 @@ static void handle_event(sim_event_t *event) {
             sim_radio_broadcast(src, &pkt, &g_nodes, &g_radio, &g_rng,
                                 &g_events, &g_metrics, event->timestamp_us);
 
+            metrics_record_message_sent(&g_metrics);
             fprintf(stdout,
                 "{\"type\":\"message_sent\",\"timestamp_us\":%llu"
                 ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"packet_id\":\"0x%08X\"}\n",
@@ -627,7 +629,8 @@ int main(int argc, char **argv) {
             if (g_nodes.nodes[i].active) active++;
         }
         emit_metrics(stdout, g_sim_time_us, active,
-                     g_metrics.total_packets, g_metrics.delivered_packets,
+                     g_metrics.total_packets, g_metrics.messages_sent,
+                     g_metrics.delivered_packets,
                      g_metrics.dropped_packets, metrics_avg_latency_ms(&g_metrics));
         fflush(stdout);
     }

@@ -75,9 +75,9 @@ export function MetricsDashboard({ metrics }: MetricsDashboardProps) {
       ) : (
         <>
           <MetricCard
-            label="Delivery Rate"
+            label="Message Delivery"
             value={`${metrics.deliveryRate.toFixed(1)}%`}
-            subValue={`${metrics.delivered} of ${metrics.totalPackets} packets`}
+            subValue={`${metrics.delivered} of ${metrics.messagesSent} messages`}
             color="#3fb950"
             icon="✅"
           />
