@@ -1,0 +1,173 @@
+{
+  "name": "Reliability ACK Retry",
+  "description": "Tests message delivery with intermittent link failures to exercise ACK retransmission",
+  "seed": 42,
+  "duration_ms": 120000,
+  "radio": {
+    "range": 150,
+    "loss_pct": 5,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 300,
+      "y": 0
+    },
+    {
+      "id": "E",
+      "x": 400,
+      "y": 0
+    },
+    {
+      "id": "F",
+      "x": 100,
+      "y": 100
+    },
+    {
+      "id": "G",
+      "x": 200,
+      "y": 100
+    },
+    {
+      "id": "H",
+      "x": 300,
+      "y": 100
+    }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 8000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 10000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 12000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 15000,
+      "node": "C",
+      "x": 200,
+      "y": 300
+    },
+    {
+      "type": "send_message",
+      "at_ms": 18000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 20000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 22000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 24000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 35000,
+      "node": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 50000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 55000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 60000,
+      "node": "B",
+      "x": 100,
+      "y": 300
+    },
+    {
+      "type": "send_message",
+      "at_ms": 65000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 70000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 80000,
+      "node": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "type": "send_message",
+      "at_ms": 90000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 95000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 100000,
+      "src": "A",
+      "dest": "E"
+    }
+  ]
+}

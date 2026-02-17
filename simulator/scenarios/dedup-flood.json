@@ -1,0 +1,127 @@
+{
+  "name": "Dedup Flood Test",
+  "description": "Dense 8-node mesh where all nodes are within range. Tests duplicate detection during RREQ floods",
+  "seed": 42,
+  "duration_ms": 60000,
+  "radio": {
+    "range": 500,
+    "loss_pct": 2,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 50,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 0,
+      "y": 50
+    },
+    {
+      "id": "E",
+      "x": 50,
+      "y": 50
+    },
+    {
+      "id": "F",
+      "x": 100,
+      "y": 50
+    },
+    {
+      "id": "G",
+      "x": 0,
+      "y": 100
+    },
+    {
+      "id": "H",
+      "x": 50,
+      "y": 100
+    }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 8000,
+      "src": "A",
+      "dest": "H"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 10000,
+      "src": "B",
+      "dest": "G"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 12000,
+      "src": "C",
+      "dest": "D"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 14000,
+      "src": "D",
+      "dest": "F"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 16000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 18000,
+      "src": "F",
+      "dest": "B"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 20000,
+      "src": "G",
+      "dest": "C"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 22000,
+      "src": "H",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 30000,
+      "src": "A",
+      "dest": "H"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 35000,
+      "src": "H",
+      "dest": "A"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 40000,
+      "src": "C",
+      "dest": "G"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 45000,
+      "src": "G",
+      "dest": "F"
+    }
+  ]
+}
