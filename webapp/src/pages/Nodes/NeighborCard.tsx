@@ -45,6 +45,7 @@ interface NeighborCardProps {
   neighbor: Neighbor;
   peerLocation?: PeerLocation;
   onOpenDM?: (addr: number) => void;
+  onShowOnMap?: (addr: number) => void;
 }
 
 /** Check if a peer location is still fresh (not older than 30 minutes) */
@@ -52,7 +53,7 @@ function isLocationFresh(loc: PeerLocation): boolean {
   return Date.now() - loc.lastUpdatedMs < 30 * 60 * 1000;
 }
 
-export function NeighborCard({ neighbor, peerLocation, onOpenDM }: NeighborCardProps) {
+export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: NeighborCardProps) {
   const [expanded, setExpanded] = useState(false);
   const health = neighborHealth(neighbor);
   const pdr = pdrPercent(neighbor.deliveryRate);
@@ -92,9 +93,13 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM }: NeighborCardP
           <span className={styles.badgeMailbox} title="This node stores messages for offline destinations and delivers them when they come back in range"><IconMailbox size={13} /> Mailbox</span>
         )}
         {peerLocation && isLocationFresh(peerLocation) && (
-          <span className={styles.badgeLocation} title={`Location: ${peerLocation.tier}`}>
+          <button
+            className={styles.badgeLocation}
+            title="Show on map"
+            onClick={(e) => { e.stopPropagation(); onShowOnMap?.(neighbor.addr); }}
+          >
             <IconLocation size={13} /> {peerLocation.tier === 'full' ? 'Exact' : peerLocation.tier === 'coarse' ? 'Zone' : 'Present'}
-          </span>
+          </button>
         )}
       </div>
 

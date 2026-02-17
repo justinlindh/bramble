@@ -91,6 +91,17 @@
   border: 1px solid #3fb950;
   border-radius: 4px;
   color: #3fb950;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: inherit;
+  transition: background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.badgeLocation:hover {
+  background: #3fb95044;
 }
 
 .badgeMailbox {

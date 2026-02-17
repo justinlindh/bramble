@@ -248,4 +248,5 @@ export interface AppState {
   probeResult: ProbeResult | null;
   probeCollecting: boolean;
   peerLocations: PeerLocation[];
+  mapFocusAddr: number | null;
 }
