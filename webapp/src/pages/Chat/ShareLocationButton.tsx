@@ -1,70 +1,34 @@
-import { useState, useRef, useEffect } from 'react';
 import { IconLocation } from '../../components/Icons';
-import { shareLocationOnce } from '../../store/actions';
-import type { LocationTier } from '../../types/bramble';
 import styles from './ShareLocationButton.module.css';
 
-interface ShareLocationButtonProps {
-  dest: number;
+export type LocationAttach = 'off' | 'zone' | 'exact';
+
+interface ShareLocationToggleProps {
+  value: LocationAttach;
+  onChange: (v: LocationAttach) => void;
 }
 
-export function ShareLocationButton({ dest }: ShareLocationButtonProps) {
-  const [open, setOpen] = useState(false);
-  const [sending, setSending] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+const OPTIONS: { value: LocationAttach; label: string; title: string }[] = [
+  { value: 'off',   label: 'Off',   title: 'No location attached' },
+  { value: 'zone',  label: 'Zone',  title: 'Attach approximate location (~1km area)' },
+  { value: 'exact', label: 'Exact', title: 'Attach precise GPS coordinates' },
+];
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  const handleShare = async (tier: LocationTier) => {
-    setSending(true);
-    setOpen(false);
-    try {
-      await shareLocationOnce(dest, tier);
-    } finally {
-      setSending(false);
-    }
-  };
-
+export function ShareLocationToggle({ value, onChange }: ShareLocationToggleProps) {
   return (
-    <div className={styles.wrapper} ref={wrapperRef}>
-      <button
-        className={styles.trigger}
-        onClick={() => setOpen((v) => !v)}
-        disabled={sending}
-        title="Share location"
-        aria-label="Share location"
-      >
-        <IconLocation size={16} />
-      </button>
-
-      {open && (
-        <div className={styles.dropdown}>
-          <button
-            className={styles.option}
-            onClick={() => handleShare('coarse')}
-            disabled={sending}
-          >
-            📍 Zone (~1 km)
-          </button>
-          <button
-            className={styles.option}
-            onClick={() => handleShare('full')}
-            disabled={sending}
-          >
-            🎯 Exact position
-          </button>
-        </div>
-      )}
+    <div className={styles.toggle} role="group" aria-label="Attach location">
+      <IconLocation size={14} />
+      {OPTIONS.map(opt => (
+        <button
+          key={opt.value}
+          className={`${styles.option} ${value === opt.value ? styles.active : ''} ${opt.value === 'exact' && value === 'exact' ? styles.exactActive : ''}`}
+          onClick={() => onChange(opt.value)}
+          title={opt.title}
+          aria-pressed={value === opt.value}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
