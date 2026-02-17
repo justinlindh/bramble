@@ -40,20 +40,24 @@
   overflow-y: auto;
 }
 
-/* Mobile: fixed header, scrollable body */
+/* Mobile layout */
 @media (max-width: 768px) {
   .app {
-    height: 100vh;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    /* Use min-height so the page is taller than viewport,
+       allowing Android Chrome to auto-hide its URL bar on scroll */
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
   }
 
   .app-header {
     flex-direction: column;
     gap: 8px;
-    padding: 8px 12px;
-    flex-shrink: 0;
+    padding: 12px;
+    /* Sticky within the page scroll — works because .app doesn't have overflow:hidden on mobile */
+    position: sticky;
+    top: 0;
   }
 
   .app-header-controls {
@@ -62,9 +66,8 @@
 
   .app-main {
     flex-direction: column;
-    flex: 1;
-    overflow-y: auto;
-    min-height: 0;
+    flex: none;
+    overflow: visible;
   }
 
   .app-canvas {
