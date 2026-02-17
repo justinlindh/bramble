@@ -10,7 +10,7 @@ const UI_DIST = path.resolve(__dirname, '../ui/dist');
 const ENGINE_BIN = path.resolve(__dirname, '../engine/bramble-sim');
 const SCENARIOS_DIR = path.resolve(__dirname, '../scenarios');
 const DEFAULT_SCENARIO = path.resolve(SCENARIOS_DIR, '10-node-grid.json');
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 // MIME types for static file serving
 const MIME: Record<string, string> = {
