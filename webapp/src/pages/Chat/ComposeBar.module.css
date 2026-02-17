@@ -53,6 +53,13 @@
   color: var(--text);
   font-family: inherit;
   transition: border-color 0.15s;
+  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;  /* IE/Edge */
+}
+
+.input::-webkit-resizer,
+.input::-webkit-scrollbar {
+  display: none;
 }
 
 .input:focus {
