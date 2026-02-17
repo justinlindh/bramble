@@ -62,7 +62,7 @@ export function Config() {
       {/* ── Data ── */}
       <section className={styles.section}>
         <h2><IconWarning size={18} /> Data</h2>
-        <button onClick={handleClearHistory}>Clear Message History</button>
+        <button className={styles.dangerBtn} onClick={handleClearHistory}>Clear Message History</button>
         <p className={styles.hint}>Removes all cached messages from this browser. Does not affect the node.</p>
       </section>
     </div>
