@@ -84,6 +84,15 @@
   color: var(--text-muted);
 }
 
+.badgeLocation {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  background: #3fb95022;
+  border: 1px solid #3fb950;
+  border-radius: 4px;
+  color: #3fb950;
+}
+
 .badgeMailbox {
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;

@@ -362,6 +362,17 @@ function handleLocationUpdate(params: unknown): void {
   }
 }
 
+export async function loadPeerLocations(): Promise<void> {
+  if (!client) return;
+  const result = await client.rpc<{ locations: import('../types/bramble').PeerLocation[] }>('bramble.getPeerLocations');
+  useStore.getState().setPeerLocations(result.locations ?? []);
+}
+
+export async function shareLocationOnce(dest: number, tier: import('../types/bramble').LocationTier): Promise<void> {
+  if (!client) return;
+  await client.rpc('bramble.shareLocationOnce', { dest, tier });
+}
+
 export function getClient(): BrambleClient | null {
   return client;
 }
