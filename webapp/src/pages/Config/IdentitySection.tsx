@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { NodeIdentity } from '../../types/bramble';
-import { saveNodeName } from '../../store/actions';
+import { saveNodeName, setMailbox } from '../../store/actions';
+import { useStore } from '../../store/index';
 import styles from './IdentitySection.module.css';
 
 interface IdentitySectionProps {
@@ -56,6 +57,8 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     }
   };
 
+  const mailboxEnabled = useStore(s => s.config?.mailboxEnabled ?? false);
+
   const addrHex = `0x${identity.address.toString(16).toUpperCase().padStart(8, '0')}`;
   const pubkeyHashHex = `0x${identity.pubkeyHash.toString(16).toUpperCase().padStart(8, '0')}`;
 
@@ -97,6 +100,25 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
           {saved && <span className={styles.savedMsg}>✓ Saved</span>}
           {error && <span className={styles.error}>{error}</span>}
         </form>
+      </div>
+
+      {/* Mailbox toggle */}
+      <div className={styles.row}>
+        <span className={styles.label}>Mailbox</span>
+        <label className={styles.toggle} title="When enabled, this node stores messages for offline destinations and delivers them when they come back in range">
+          <input
+            type="checkbox"
+            checked={mailboxEnabled}
+            onChange={async (e) => {
+              try {
+                await setMailbox(e.target.checked);
+              } catch (err) {
+                setError((err as Error).message);
+              }
+            }}
+          />
+          <span>{mailboxEnabled ? 'Enabled' : 'Disabled'}</span>
+        </label>
       </div>
 
       {/* Export */}

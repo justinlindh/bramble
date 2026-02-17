@@ -127,6 +127,7 @@ export interface BrambleConfig {
   identity: NodeIdentity;
   radio: RadioConfig;
   channels: Channel[];
+  mailboxEnabled: boolean;
 }
 
 // ─── RPC types ─────────────────────────────────────────────────────────
