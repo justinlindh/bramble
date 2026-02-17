@@ -18,6 +18,8 @@ export function useConversation(id: string): {
       }
       if (id.startsWith('dm:')) {
         const peerAddr = parseInt(id.slice(3), 10);
+        // Exclude broadcast packets — they are always filed under 'broadcast'
+        if (m.to === 0xffffffff) return false;
         return (
           (m.direction === 'outgoing' && m.to === peerAddr) ||
           (m.direction === 'incoming' && m.from === peerAddr)

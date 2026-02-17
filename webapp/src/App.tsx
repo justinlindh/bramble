@@ -35,13 +35,14 @@ export default function App() {
   const connectionState = useStore(s => s.connectionState);
   const isConnected = connectionState === 'connected';
 
-  const showOverlay = connectionState === 'disconnected' || connectionState === 'connecting';
+  // Show the connection overlay whenever we're not in a live connected state
+  const showOverlay = connectionState !== 'connected';
 
   const handleConnectionToggle = () => {
     if (isConnected) {
       disconnect();
     }
-    // Connecting is triggered from the overlay
+    // Connecting / error recovery is triggered from the overlay
   };
 
   return (

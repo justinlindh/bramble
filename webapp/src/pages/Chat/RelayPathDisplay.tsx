@@ -6,10 +6,9 @@ import styles from './RelayPathDisplay.module.css';
 interface RelayPathDisplayProps {
   path: RelayHop[];   // ordered: [relay1, relay2, …, dest]
   myAddr: number;
-  destAddr: number;
 }
 
-export function RelayPathDisplay({ path, myAddr, destAddr }: RelayPathDisplayProps) {
+export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
   // Build hop list: [me, ...relay hops from path (excluding final dest), dest]
   // path already ends at dest, with rssi = signal at each hop receiver
   const hops: Array<{ addr: number; rssi?: number }> = [

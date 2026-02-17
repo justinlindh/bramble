@@ -50,7 +50,6 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
         <RelayPathDisplay
           path={message.relayPath!}
           myAddr={myAddr}
-          destAddr={message.to}
         />
       )}
 
