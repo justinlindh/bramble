@@ -5,5 +5,3 @@ services:
       dockerfile: simulator/Dockerfile
     ports:
       - "3003:3000"
-    volumes:
-      - ./scenarios:/scenarios:ro
