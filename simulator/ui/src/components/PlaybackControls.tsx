@@ -163,7 +163,7 @@ export function PlaybackControls({ running, connected, ready, currentTime, ws }:
           transition: 'background 0.3s, box-shadow 0.3s',
         }} />
         <span style={{ fontSize: '12px', color: '#8b949e' }}>
-          {!connected ? 'Disconnected' : running ? 'Running' : ready ? 'Ready — press ▶' : 'Completed'}
+          {!connected ? 'Disconnected' : running ? 'Running' : ready ? 'Ready' : 'Completed'}
         </span>
       </div>
     </header>

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SimEvent } from '../types';
 
 interface EventLogProps {
@@ -44,8 +44,8 @@ function formatDetails(details: Record<string, unknown>): string {
 }
 
 export function EventLog({ events }: EventLogProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   // Auto-scroll to bottom when new events arrive (container only, not viewport)
   useEffect(() => {
@@ -104,15 +104,19 @@ export function EventLog({ events }: EventLogProps) {
             const color = getColor(event.type);
             const ts = formatTimestamp(event.timestamp_us);
             const details = formatDetails(event.details);
+            const isExpanded = expandedId === event.id;
             return (
               <div
                 key={event.id}
+                onClick={() => setExpandedId(isExpanded ? null : event.id)}
                 style={{
                   padding: '1px 14px',
                   display: 'flex',
                   gap: '8px',
-                  alignItems: 'baseline',
+                  alignItems: isExpanded ? 'flex-start' : 'baseline',
                   borderLeft: `2px solid transparent`,
+                  cursor: 'pointer',
+                  background: isExpanded ? '#161b22' : 'transparent',
                 }}
               >
                 <span style={{ color: '#6e7681', minWidth: '60px', flexShrink: 0 }}>
@@ -121,14 +125,21 @@ export function EventLog({ events }: EventLogProps) {
                 <span style={{ color, fontWeight: 600, minWidth: '100px', flexShrink: 0 }}>
                   {event.type}
                 </span>
-                <span style={{ color: '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    color: '#8b949e',
+                    overflow: isExpanded ? 'visible' : 'hidden',
+                    textOverflow: isExpanded ? 'unset' : 'ellipsis',
+                    whiteSpace: isExpanded ? 'pre-wrap' : 'nowrap',
+                    wordBreak: isExpanded ? 'break-all' : 'normal',
+                  }}
+                >
                   {details}
                 </span>
               </div>
             );
           })
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   );
