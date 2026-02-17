@@ -1,0 +1,94 @@
+{
+  "name": "anomaly-partition",
+  "description": "Mesh partition: Two clusters connected only through node C. Killing C splits the mesh. Should trigger mesh_partition anomaly.",
+  "mode": "deterministic",
+  "duration_ms": 273000,
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 300,
+      "y": 0
+    },
+    {
+      "id": "E",
+      "x": 400,
+      "y": 0
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {
+      "at_ms": 8000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 18000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 33000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 43000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 53000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 63000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 123000,
+      "type": "node_join",
+      "x": 200,
+      "y": 0,
+      "node": "C"
+    },
+    {
+      "at_ms": 158000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 168000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    }
+  ]
+}

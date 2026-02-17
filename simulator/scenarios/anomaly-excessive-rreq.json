@@ -1,0 +1,111 @@
+{
+  "name": "anomaly-excessive-rreq",
+  "description": "Excessive RREQ: Node D is killed before any routes to it exist, then A repeatedly sends messages to D at >5s intervals. Each attempt starts a fresh RREQ discovery that fails. 6+ originations in 10s on forwarding nodes should trigger excessive_rreq.",
+  "mode": "deterministic",
+  "duration_ms": 153000,
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 300,
+      "y": 0
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {
+      "at_ms": 1000,
+      "type": "kill_node",
+      "node": "D"
+    },
+    {
+      "at_ms": 8000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 14000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 20000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 26000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 32000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 38000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 44000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 50000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 56000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 62000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "at_ms": 103000,
+      "type": "node_join",
+      "node": "D"
+    },
+    {
+      "at_ms": 138000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "D"
+    }
+  ]
+}

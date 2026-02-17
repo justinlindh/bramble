@@ -1,0 +1,200 @@
+{
+  "name": "anomaly-route-loop",
+  "description": "Route loop detection test. Bramble's RREP routing prevents loops under normal conditions \u2014 this scenario uses rapid topology changes to attempt creating stale cross-routes. Loops in practice require packet corruption, race conditions, or implementation bugs. The detector serves as a safety net measuring how often hop_limit saves us. NOTE: This scenario may show 0 loops \u2014 that validates the routing design. The detector itself is verified via unit test.",
+  "mode": "deterministic",
+  "duration_ms": 273000,
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 100
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 100
+    },
+    {
+      "id": "D",
+      "x": 100,
+      "y": 200
+    },
+    {
+      "id": "E",
+      "x": 300,
+      "y": 100
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {
+      "at_ms": 8000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 13000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 18000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "D"
+    },
+    {
+      "at_ms": 23000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "B"
+    },
+    {
+      "at_ms": 33000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 33100,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 33200,
+      "type": "send_message",
+      "src": "B",
+      "dest": "E"
+    },
+    {
+      "at_ms": 33300,
+      "type": "send_message",
+      "src": "D",
+      "dest": "E"
+    },
+    {
+      "at_ms": 34000,
+      "type": "node_join",
+      "node": "C"
+    },
+    {
+      "at_ms": 34100,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 34200,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 36000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 36100,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 36200,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 37000,
+      "type": "node_join",
+      "node": "C"
+    },
+    {
+      "at_ms": 37100,
+      "type": "send_message",
+      "src": "B",
+      "dest": "D"
+    },
+    {
+      "at_ms": 37200,
+      "type": "send_message",
+      "src": "D",
+      "dest": "B"
+    },
+    {
+      "at_ms": 39000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 39100,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 40000,
+      "type": "node_join",
+      "node": "C"
+    },
+    {
+      "at_ms": 40100,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 41000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 41100,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 42000,
+      "type": "node_join",
+      "node": "C"
+    },
+    {
+      "at_ms": 73000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 83000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 93000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "D"
+    },
+    {
+      "at_ms": 103000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "B"
+    }
+  ]
+}
