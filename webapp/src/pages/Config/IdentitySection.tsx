@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import type { NodeIdentity } from '../../types/bramble';
 import { saveNodeName, setMailbox } from '../../store/actions';
 import { useStore } from '../../store/index';
+import { QRShareModal } from '../../components/QRShareModal';
+import { encodeNodeShare } from '../../utils/channelShare';
 import styles from './IdentitySection.module.css';
 
 interface IdentitySectionProps {
@@ -18,6 +20,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [showNodeShare, setShowNodeShare] = useState(false);
 
   const handleSaveName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +66,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
   const pubkeyHashHex = `0x${identity.pubkeyHash.toString(16).toUpperCase().padStart(8, '0')}`;
 
   return (
+    <>
     <div className={styles.section}>
       {/* Address */}
       <div className={styles.row}>
@@ -124,10 +128,30 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
       {/* Export */}
       <div className={styles.row}>
         <span className={styles.label} />
-        <button className={styles.exportBtn} onClick={handleExport}>
-          🔑 Export Key Backup
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button className={styles.exportBtn} onClick={handleExport}>
+            🔑 Export Key Backup
+          </button>
+          <button
+            className={styles.exportBtn}
+            onClick={() => setShowNodeShare(true)}
+            title="Share your node identity as a QR code so others can save your public key"
+          >
+            📡 Share Node
+          </button>
+        </div>
       </div>
     </div>
+
+    {/* ── Node identity share modal ── */}
+    {showNodeShare && (
+      <QRShareModal
+        title={`Share node "${identity.name || addrHex}"`}
+        shareString={encodeNodeShare(identity.name, identity.address, identity.pubkeyB64)}
+        description="Share this QR so others can save your public key and verify your identity. Does not expose private keys."
+        onClose={() => setShowNodeShare(false)}
+      />
+    )}
+  </>
   );
 }
