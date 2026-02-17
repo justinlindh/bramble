@@ -15,21 +15,23 @@ export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
   if (path.length === 0) return null;
 
   const hops = [{ addr: myAddr, rssi: 0 }, ...path];
+  const lastIndex = hops.length - 1;
 
   return (
     <div className={styles.path} title="Critical message relay path">
       <span className={styles.pathLabel}>VIA</span>
-      {hops.map((hop, i) => (
-        <React.Fragment key={`${hop.addr}-${i}`}>
-          {i > 0 && <span className={styles.arrow}>→</span>}
-          <span className={styles.hop}>
-            {shortAddr(hop.addr)}
-          </span>
-          {hop.rssi !== 0 && (
-            <span className={styles.rssi}>{hop.rssi}</span>
-          )}
-        </React.Fragment>
-      ))}
+      {hops.map((hop, i) => {
+        const cls = i === 0 ? styles.hopSelf : i === lastIndex ? styles.hopDest : styles.hop;
+        return (
+          <React.Fragment key={`${hop.addr}-${i}`}>
+            {i > 0 && <span className={styles.arrow}>→</span>}
+            <span className={cls}>{shortAddr(hop.addr)}</span>
+            {hop.rssi !== 0 && (
+              <span className={styles.rssi}>{hop.rssi}</span>
+            )}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }

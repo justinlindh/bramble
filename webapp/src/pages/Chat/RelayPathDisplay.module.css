@@ -5,35 +5,49 @@
   gap: 4px;
   margin-top: 6px;
   padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border-left: 2px solid var(--text-muted);
+  background: rgba(0, 0, 0, 0.25);
+  border-left: 2px solid rgba(255, 255, 255, 0.5);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   font-size: 0.78rem;
 }
 
 .pathLabel {
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--text);
+  color: #fff;
   margin-right: 2px;
 }
 
 .arrow {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.hopSelf {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  color: #a8f0a8;
+  font-weight: 600;
 }
 
 .hop {
   font-family: var(--font-mono, monospace);
-  color: var(--text);
   font-size: 0.78rem;
+  color: #ffe08a;
+}
+
+.hopDest {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  color: #ff9ebd;
+  font-weight: 600;
 }
 
 .rssi {
   font-family: var(--font-mono, monospace);
-  font-size: 0.7rem;
-  color: var(--text-muted);
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.7);
   padding: 0 4px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 3px;
 }
