@@ -1,0 +1,109 @@
+.wrapper {
+  overflow-x: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table th {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+}
+
+.table th:hover {
+  color: var(--text);
+}
+
+.sortIcon {
+  display: inline-block;
+  margin-left: 0.25rem;
+  opacity: 0.6;
+  font-size: 0.7rem;
+}
+
+.table td {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tr:hover td {
+  background: var(--surface-2);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+}
+
+/* State badges */
+.stateBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.stateActive {
+  background: #238636aa;
+  color: #3fb950;
+  border: 1px solid #238636;
+}
+
+.stateStale {
+  background: #e3b34122;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}
+
+.stateBroken {
+  background: #da363322;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.stateDiscovering {
+  background: #1f6feb22;
+  color: var(--accent-blue);
+  border: 1px solid var(--accent-blue);
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.emptyRow td {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1.5rem;
+}

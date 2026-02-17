@@ -1,0 +1,127 @@
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card:hover {
+  background: var(--surface-2);
+}
+
+/* Health color coding — left accent border */
+.good {
+  border-left: 3px solid #3fb950;
+}
+
+.fair {
+  border-left: 3px solid var(--warning);
+}
+
+.poor {
+  border-left: 3px solid var(--danger);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.rssi {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.rssiBar {
+  height: 6px;
+  width: 80px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.rssiBarFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.rssiBarFill.barGood {
+  background: #3fb950;
+}
+.rssiBarFill.barFair {
+  background: var(--warning);
+}
+.rssiBarFill.barPoor {
+  background: var(--danger);
+}
+
+.badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.badgeMailbox {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  background: #1f6feb22;
+  border: 1px solid var(--accent-blue);
+  border-radius: 4px;
+  color: var(--accent-blue);
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.detailRow {
+  display: flex;
+  gap: 0.5rem;
+  color: var(--text-muted);
+}
+
+.dmBtn {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.dmBtn:hover {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}

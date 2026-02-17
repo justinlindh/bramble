@@ -1,0 +1,94 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.label {
+  color: var(--text-muted);
+  min-width: 110px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text);
+}
+
+.nameForm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.nameInput {
+  width: 180px;
+}
+
+.saveBtn {
+  padding: 0.35rem 0.75rem;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.saveBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.saveBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.savedMsg {
+  font-size: 0.8rem;
+  color: #3fb950;
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.exportBtn {
+  padding: 0.35rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.exportBtn:hover {
+  background: var(--surface);
+  border-color: var(--text-muted);
+}
+
+.pubkeyHash {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}

@@ -1,8 +1,14 @@
 import { useStore } from '../../store/index';
+import { IdentitySection } from './IdentitySection';
+import { RadioForm } from './RadioForm';
+import { ChannelManager } from './ChannelManager';
+import { PeerManager } from './PeerManager';
 import styles from './Config.module.css';
 
 export function Config() {
-  const config = useStore(s => s.config);
+  const config = useStore((s) => s.config);
+  const neighbors = useStore((s) => s.neighbors);
+  const routes = useStore((s) => s.routes);
 
   if (!config) {
     return (
@@ -14,48 +20,28 @@ export function Config() {
 
   return (
     <div className={styles.config}>
+      {/* ── Node Identity ── */}
       <section className={styles.section}>
-        <h2>Identity</h2>
-        <div className={styles.row}>
-          <span className={styles.label}>Address</span>
-          <span className={styles.mono}>0x{config.identity.address.toString(16).toUpperCase().padStart(8, '0')}</span>
-        </div>
-        <div className={styles.row}>
-          <span className={styles.label}>Name</span>
-          <span>{config.identity.name}</span>
-        </div>
+        <h2>🪪 Identity</h2>
+        <IdentitySection identity={config.identity} />
       </section>
 
+      {/* ── Radio Settings ── */}
       <section className={styles.section}>
-        <h2>Radio</h2>
-        <div className={styles.row}>
-          <span className={styles.label}>TX Power</span>
-          <span>{config.radio.txPowerDbm} dBm</span>
-        </div>
-        <div className={styles.row}>
-          <span className={styles.label}>Spreading Factor</span>
-          <span>SF{config.radio.sf}</span>
-        </div>
-        <div className={styles.row}>
-          <span className={styles.label}>Bandwidth</span>
-          <span>{config.radio.bwKhz} kHz</span>
-        </div>
-        <div className={styles.row}>
-          <span className={styles.label}>Frequency</span>
-          <span>{config.radio.freqMhz} MHz</span>
-        </div>
+        <h2>📻 Radio Settings</h2>
+        <RadioForm radio={config.radio} />
       </section>
 
+      {/* ── Channel Manager ── */}
       <section className={styles.section}>
-        <h2>Channels ({config.channels.length})</h2>
-        {config.channels.map(ch => (
-          <div key={ch.index} className={styles.row}>
-            <span className={styles.mono}>#{ch.index}</span>
-            <span>{ch.name}</span>
-            {ch.isDefault && <span className={styles.badge}>default</span>}
-            {ch.hasPsk && <span className={styles.badge}>🔒</span>}
-          </div>
-        ))}
+        <h2>📡 Channels ({config.channels.length})</h2>
+        <ChannelManager channels={config.channels} />
+      </section>
+
+      {/* ── Peer Manager ── */}
+      <section className={styles.section}>
+        <h2>👥 Peers</h2>
+        <PeerManager neighbors={neighbors} routes={routes} />
       </section>
     </div>
   );
