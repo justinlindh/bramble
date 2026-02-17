@@ -161,6 +161,15 @@ const handlers = {
       neighborCount: neighbors.length,
       routeCount: routes.filter(r => r.state === 'active').length,
       airtimeUsedMs,
+      position: {
+        lat: 36.0544,
+        lon: -115.0523,
+        alt: 590,
+        accuracy: 3,
+        speed: 0,
+        heading: 0,
+        timestampMs: Date.now() - 5000,
+      },
     };
   },
 
