@@ -84,3 +84,22 @@ In real deployments, packet corruption, RF interference causing partial packet r
 - **Route loop:** 5s TTL on seen packet_ids prevents stale detections. Only DATA packets are tracked.
 
 Verified: ideal-10-node (10 nodes, 49 messages) and ideal-massive (150 nodes, 64 messages) both produce **zero anomalies**.
+
+## Message Retry and Drop Behavior
+
+When a node tries to send a message but has no route to the destination (or the route is broken/discovering), the simulator:
+
+1. **Initiates route discovery** — sends an RREQ flood (up to `MAX_RREQ_ATTEMPTS=3` per discovery round)
+2. **Reschedules the message** — retries every 1.5 seconds
+3. **Gives up after 20 retries** (~30 seconds) — emits a `message_dropped` event with `reason: "retry_timeout"` and increments the dropped counter
+
+If a route exists but the DATA packet is lost in transit (e.g., swallowed by a black hole node), the message is counted as "sent" but never "delivered." The simulation tracks this as `undelivered` in final metrics:
+
+- **`messages_sent`** — total messages that produced a DATA packet
+- **`delivered`** — messages confirmed received at the destination
+- **`undelivered`** — `messages_sent - delivered` (route existed but delivery failed)
+- **`dropped`** — messages that could never find a route and timed out
+
+Messages pending retry when the simulation ends are also counted as dropped.
+
+**Note:** The simulator does not currently implement end-to-end acknowledgment. In the real firmware, the reliability layer (3-tier: fire-and-forget, acknowledged, reliable) would detect undelivered messages and retry at the application layer. The simulator's `undelivered` count represents the worst case for fire-and-forget mode.
