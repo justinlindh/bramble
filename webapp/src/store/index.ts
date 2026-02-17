@@ -11,6 +11,7 @@ import type {
   RelayHop,
   DeliveryStatus,
   Transport,
+  ProbeResult,
 } from '../types/bramble';
 
 function formatAddr(id: string): string {
@@ -33,6 +34,8 @@ interface Actions {
   setActiveConversation: (id: string) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  setProbeResult: (r: ProbeResult | null) => void;
+  setProbeCollecting: (c: boolean) => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -49,6 +52,8 @@ export const useStore = create<AppState & Actions>((set) => ({
   conversations: new Map(),
   activeConversationId: 'broadcast',
   activeTab: 'chat',
+  probeResult: null,
+  probeCollecting: false,
 
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
@@ -115,6 +120,9 @@ export const useStore = create<AppState & Actions>((set) => ({
     })),
 
   setActiveTab: (tab: string) => set({ activeTab: tab }),
+
+  setProbeResult: (r) => set({ probeResult: r }),
+  setProbeCollecting: (c) => set({ probeCollecting: c }),
 
   setActiveConversation: (id: string) =>
     set(state => {

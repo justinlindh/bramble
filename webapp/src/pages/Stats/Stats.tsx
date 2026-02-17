@@ -4,6 +4,7 @@ import { loadStatus, loadAirtime } from '../../store/actions';
 import { AirtimeCard } from './AirtimeCard';
 import { CounterGrid } from './CounterGrid';
 import { SystemInfo } from './SystemInfo';
+import { NetworkReach } from './NetworkReach';
 import styles from './Stats.module.css';
 
 const REFRESH_INTERVAL_MS = 5_000;
@@ -88,6 +89,9 @@ export function Stats() {
 
       {/* System info: uptime, heap, firmware, address, pubkey */}
       {config && <SystemInfo status={status} config={config} />}
+
+      {/* Network Reach probe */}
+      <NetworkReach />
     </div>
   );
 }
