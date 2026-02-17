@@ -18,16 +18,20 @@ export function ConnectionOverlay() {
   // Check browser support
   const hasSerial = 'serial' in navigator;
   const hasBluetooth = 'bluetooth' in navigator;
-  const hasAnySupport = hasSerial || hasBluetooth;
+  const hasAnyHardwareSupport = hasSerial || hasBluetooth;
+
+  // Show WebSocket mock when in dev mode or when no hardware APIs available
+  const isDev = import.meta.env.DEV;
+  const showMock = isDev || !hasAnyHardwareSupport;
 
   return (
     <div className={styles.overlay}>
       <div className={styles.card}>
-        <img src="/bramble-logo.png" alt="Bramble" className={styles.logoImg} />
+        <div className={styles.logo}>🌿</div>
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
 
-        {!hasAnySupport && (
+        {!hasAnyHardwareSupport && !isDev && (
           <div className={styles.unsupported}>
             <p>⚠️ Your browser does not support Web Serial or Web Bluetooth.</p>
             <p className={styles.hint}>
@@ -36,7 +40,7 @@ export function ConnectionOverlay() {
           </div>
         )}
 
-        {hasAnySupport && (
+        {hasAnyHardwareSupport && (
           <>
             <div className={styles.transportSelect}>
               <button
@@ -54,32 +58,48 @@ export function ConnectionOverlay() {
                 📡 Bluetooth
               </button>
             </div>
-
-            {connectionError && (
-              <div className={styles.error}>
-                <span>⚠️ {connectionError}</span>
-              </div>
-            )}
-
-            <button
-              className={styles.connectBtn}
-              onClick={handleConnect}
-              disabled={isConnecting}
-            >
-              {isConnecting ? (
-                <span className={styles.spinner}>Connecting…</span>
-              ) : (
-                'Connect'
-              )}
-            </button>
-
-            <p className={styles.hint}>
-              {transportType === 'serial'
-                ? 'Connect your Bramble node via USB cable, then click Connect.'
-                : 'Enable Bluetooth on your device, then click Connect to scan.'}
-            </p>
           </>
         )}
+
+        {showMock && (
+          <>
+            {hasAnyHardwareSupport && (
+              <div className={styles.mockDivider}>— or —</div>
+            )}
+            <button
+              className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
+              onClick={() => setTransportType('websocket')}
+            >
+              🖥️ Mock Node (WebSocket)
+            </button>
+          </>
+        )}
+
+        {connectionError && (
+          <div className={styles.error}>
+            <span>⚠️ {connectionError}</span>
+          </div>
+        )}
+
+        <button
+          className={styles.connectBtn}
+          onClick={handleConnect}
+          disabled={isConnecting}
+        >
+          {isConnecting ? (
+            <span className={styles.spinner}>Connecting…</span>
+          ) : (
+            'Connect'
+          )}
+        </button>
+
+        <p className={styles.hint}>
+          {transportType === 'serial'
+            ? 'Connect your Bramble node via USB cable, then click Connect.'
+            : transportType === 'ble'
+            ? 'Enable Bluetooth on your device, then click Connect to scan.'
+            : 'Connects to the local mock node server at ws://localhost:3005.'}
+        </p>
       </div>
     </div>
   );

@@ -1,0 +1,13 @@
+{
+  "name": "bramble-mock-node",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "WebSocket mock node server for Bramble webapp development",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

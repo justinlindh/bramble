@@ -1,12 +1,16 @@
 import { SerialTransport } from './SerialTransport';
 import { BLETransport } from './BLETransport';
+import { WebSocketTransport } from './WebSocketTransport';
 import type { Transport, TransportType } from '../types/bramble';
 
 export { SerialTransport } from './SerialTransport';
 export { BLETransport } from './BLETransport';
+export { WebSocketTransport } from './WebSocketTransport';
 
 export function createTransport(type: TransportType): Transport {
-  return type === 'ble' ? new BLETransport() : new SerialTransport();
+  if (type === 'ble') return new BLETransport();
+  if (type === 'websocket') return new WebSocketTransport();
+  return new SerialTransport();
 }
 
 // Convenience wrapper: handles notifications, multi-subscriber fan-out

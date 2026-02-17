@@ -3,3 +3,12 @@ services:
     build: .
     ports:
       - "3004:80"
+
+  mock-node:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./mock:/app
+    command: sh -c "npm install && node server.mjs"
+    ports:
+      - "3005:3005"
