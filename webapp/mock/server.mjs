@@ -44,6 +44,72 @@ const channels = [
   { index: 1, name: 'ops',      hasPsk: true,  epoch: 3, isDefault: false },
 ];
 
+const locationContacts = [
+  { addr: 0xAABBCCDD, tier: 'full', intervalSec: 300, distanceTriggerM: 100 },
+  { addr: 0xDEADBEEF, tier: 'coarse', intervalSec: 600, distanceTriggerM: 500 },
+];
+
+const locationConfig = {
+  enabled: true,
+  contacts: locationContacts,
+  defaultIntervalSec: 300,
+  defaultDistanceTriggerM: 100,
+  stationaryBackoff: 4,
+};
+
+// Henderson NV area coordinates
+const peerLocations = [
+  {
+    addr: 0xAABBCCDD,
+    name: 'Alpha',
+    tier: 'full',
+    position: {
+      lat: 36.0395,
+      lon: -114.9817,
+      alt: 569,
+      accuracy: 5,
+      speed: 12,
+      heading: 225,
+      timestampMs: Date.now() - 45000,
+    },
+    online: true,
+    lastUpdatedMs: Date.now() - 45000,
+  },
+  {
+    addr: 0x11223344,
+    name: 'Bravo',
+    tier: 'coarse',
+    position: null,
+    gridSquare: 'DM26',
+    online: true,
+    lastUpdatedMs: Date.now() - 120000,
+  },
+  {
+    addr: 0xDEADBEEF,
+    name: 'Charlie',
+    tier: 'full',
+    position: {
+      lat: 36.0725,
+      lon: -115.0182,
+      alt: 612,
+      accuracy: 8,
+      speed: 0,
+      heading: 0,
+      timestampMs: Date.now() - 300000,
+    },
+    online: true,
+    lastUpdatedMs: Date.now() - 300000,
+  },
+  {
+    addr: 0xFEEDFACE,
+    name: 'Delta',
+    tier: 'presence',
+    position: null,
+    online: false,
+    lastUpdatedMs: Date.now() - 3600000,
+  },
+];
+
 const config = {
   identity: {
     address: MOCK_ADDR,
@@ -60,6 +126,7 @@ const config = {
   },
   channels,
   mailboxEnabled: false,
+  location: locationConfig,
 };
 
 // ─── Active clients ─────────────────────────────────────────────────────────
@@ -103,6 +170,7 @@ const handlers = {
       radio: { ...config.radio },
       channels: channels.map(c => ({ ...c })),
       mailboxEnabled: config.mailboxEnabled,
+      location: { ...locationConfig, contacts: locationContacts.map(c => ({ ...c })) },
     };
   },
 
@@ -252,6 +320,75 @@ const handlers = {
     }, ackWindow * 1000);
 
     return { probeId, ackWindow };
+  },
+
+  'bramble.getPeerLocations'(_params) {
+    // Drift positions slightly for realism
+    for (const pl of peerLocations) {
+      if (pl.position) {
+        pl.position.lat += (Math.random() - 0.5) * 0.0002;
+        pl.position.lon += (Math.random() - 0.5) * 0.0002;
+        pl.position.timestampMs = Date.now() - Math.floor(Math.random() * 60000);
+      }
+      pl.lastUpdatedMs = Date.now() - Math.floor(Math.random() * 60000);
+    }
+    return { peerLocations: peerLocations.map(p => ({ ...p, position: p.position ? { ...p.position } : null })) };
+  },
+
+  'bramble.setLocationConfig'(params) {
+    if (params?.enabled !== undefined) locationConfig.enabled = params.enabled;
+    if (params?.defaultIntervalSec !== undefined) locationConfig.defaultIntervalSec = params.defaultIntervalSec;
+    if (params?.defaultDistanceTriggerM !== undefined) locationConfig.defaultDistanceTriggerM = params.defaultDistanceTriggerM;
+    if (params?.stationaryBackoff !== undefined) locationConfig.stationaryBackoff = params.stationaryBackoff;
+    return { ok: true };
+  },
+
+  'bramble.setLocationContact'(params) {
+    const { addr, tier, intervalSec, distanceTriggerM } = params ?? {};
+    const existing = locationContacts.find(c => c.addr === addr);
+    if (existing) {
+      if (tier !== undefined) existing.tier = tier;
+      if (intervalSec !== undefined) existing.intervalSec = intervalSec;
+      if (distanceTriggerM !== undefined) existing.distanceTriggerM = distanceTriggerM;
+    } else {
+      locationContacts.push({
+        addr,
+        tier: tier ?? 'full',
+        intervalSec: intervalSec ?? locationConfig.defaultIntervalSec,
+        distanceTriggerM: distanceTriggerM ?? locationConfig.defaultDistanceTriggerM,
+      });
+    }
+    return { ok: true };
+  },
+
+  'bramble.removeLocationContact'(params) {
+    const idx = locationContacts.findIndex(c => c.addr === params?.addr);
+    if (idx !== -1) locationContacts.splice(idx, 1);
+    return { ok: true };
+  },
+
+  'bramble.shareLocationOnce'(params) {
+    const addr = params?.addr;
+    // Simulate sending a one-time location update after a short delay
+    setTimeout(() => {
+      notify('location.update', {
+        addr,
+        name: 'MockNode',
+        tier: 'full',
+        position: {
+          lat: 36.0395 + (Math.random() - 0.5) * 0.001,
+          lon: -114.9817 + (Math.random() - 0.5) * 0.001,
+          alt: 569,
+          accuracy: 5,
+          speed: 0,
+          heading: 0,
+          timestampMs: Date.now(),
+        },
+        online: true,
+        lastUpdatedMs: Date.now(),
+      });
+    }, 500);
+    return { ok: true };
   },
 
   'bramble.setDefaultChannel'(params) {
