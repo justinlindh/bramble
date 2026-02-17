@@ -275,6 +275,38 @@ export function IconProbe({ size = 16, className }: IconProps) {
   );
 }
 
+/** 📍 Location pin */
+export function IconLocation({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </Svg>
+  );
+}
+
+/** 📍🚫 Location off / disabled */
+export function IconLocationOff({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" opacity="0.4" />
+      <circle cx="12" cy="10" r="3" opacity="0.4" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </Svg>
+  );
+}
+
+/** 🗺️ Map */
+export function IconMap({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+      <line x1="8" y1="2" x2="8" y2="18" />
+      <line x1="16" y1="6" x2="16" y2="22" />
+    </Svg>
+  );
+}
+
 /** ⚠️ Warning / alert triangle */
 export function IconWarning({ size = 16, className }: IconProps) {
   return (
@@ -282,6 +314,16 @@ export function IconWarning({ size = 16, className }: IconProps) {
       <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
       <line x1="12" y1="9" x2="12" y2="13" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </Svg>
+  );
+}
+
+/** 📍 Location pin */
+export function IconLocation({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+      <circle cx="12" cy="10" r="3" />
     </Svg>
   );
 }
