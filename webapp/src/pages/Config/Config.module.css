@@ -66,3 +66,24 @@
   font-size: 0.8rem;
   margin-top: 0.5rem;
 }
+
+.dangerBtn {
+  padding: 0.4rem 0.85rem;
+  background: var(--surface-2);
+  border: 1px solid var(--danger, #d73a49);
+  border-radius: var(--radius-sm);
+  color: var(--danger, #d73a49);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.dangerBtn:hover {
+  background: rgba(215, 58, 73, 0.15);
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.35rem;
+}
