@@ -10,8 +10,9 @@ export default function App() {
   const { state, ws } = useSimulation();
 
   function handleLoadScenario(scenario: string) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'start', scenario }));
+    const sock = ws.current;
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      sock.send(JSON.stringify({ type: 'start', scenario }));
     }
   }
 
@@ -23,6 +24,7 @@ export default function App() {
             running={state.running}
             connected={state.connected}
             currentTime={state.currentTime}
+            ws={ws.current}
           />
         </div>
         <ScenarioLoader onLoad={handleLoadScenario} />
@@ -30,7 +32,7 @@ export default function App() {
 
       <main className="app-main">
         <div className="app-canvas">
-          <MeshCanvas nodes={state.nodes} radioRange={150} />
+          <MeshCanvas nodes={state.nodes} radioRange={150} events={state.events} />
         </div>
         <aside className="app-sidebar">
           <MetricsDashboard metrics={state.metrics} />
