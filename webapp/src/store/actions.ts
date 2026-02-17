@@ -10,6 +10,7 @@ import type {
   IncomingMessage,
   RelayHop,
   MessageTier,
+  ProbeResponse,
 } from '../types/bramble';
 
 let client: BrambleClient | null = null;
@@ -46,6 +47,8 @@ export async function connect(type: TransportType): Promise<void> {
     client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
     client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
     client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
+    client.subscribe('probe.ack', (params) => handleProbeAck(params));
+    client.subscribe('probe.complete', (params) => handleProbeComplete(params));
 
     // Initial data load
     await Promise.all([
@@ -261,6 +264,43 @@ export function openDM(addr: number): void {
   const store = useStore.getState();
   store.setActiveConversation(`dm:${addr}`);
   store.setActiveTab('chat');
+}
+
+// ─── Probe / Network Reach ────────────────────────────────────────────────
+
+export async function sendProbe(): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  const store = useStore.getState();
+
+  const result = await client.rpc<{ probeId: number; ackWindow: number }>('bramble.sendProbe');
+  store.setProbeResult({
+    probeId: result.probeId,
+    sentAt: Date.now(),
+    ackWindow: result.ackWindow,
+    responses: [],
+    complete: false,
+  });
+  store.setProbeCollecting(true);
+}
+
+function handleProbeAck(params: unknown): void {
+  const ack = params as ProbeResponse;
+  const store = useStore.getState();
+  const prev = store.probeResult;
+  if (!prev || prev.complete) return;
+  store.setProbeResult({
+    ...prev,
+    responses: [...prev.responses, { ...ack, receivedAt: Date.now() }],
+  });
+}
+
+function handleProbeComplete(params: unknown): void {
+  const { probeId } = params as { probeId: number };
+  const store = useStore.getState();
+  const prev = store.probeResult;
+  if (!prev || prev.probeId !== probeId) return;
+  store.setProbeResult({ ...prev, complete: true });
+  store.setProbeCollecting(false);
 }
 
 export function getClient(): BrambleClient | null {

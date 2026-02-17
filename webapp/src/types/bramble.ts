@@ -155,6 +155,26 @@ export interface AckNotification {
   relayPath?: RelayHop[];
 }
 
+// ─── Probe / Network Reach ─────────────────────────────────────────────
+
+export interface ProbeResponse {
+  responderAddr: number;
+  hopCount: number;
+  rssi: number;
+  snr: number;
+  pathLen: number;
+  relayPath: number[];
+  receivedAt: number;
+}
+
+export interface ProbeResult {
+  probeId: number;
+  sentAt: number;
+  ackWindow: number;
+  responses: ProbeResponse[];
+  complete: boolean;
+}
+
 // ─── Transport abstraction ─────────────────────────────────────────────
 
 export interface Transport {
@@ -184,4 +204,6 @@ export interface AppState {
   conversations: Map<string, Conversation>;
   activeConversationId: string;
   activeTab: string;
+  probeResult: ProbeResult | null;
+  probeCollecting: boolean;
 }

@@ -263,6 +263,18 @@ export function IconEnvelope({ size = 16, className }: IconProps) {
   );
 }
 
+/** 📡 Probe / radar — concentric arcs with center dot */
+export function IconProbe({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <circle cx="12" cy="18" r="2" />
+      <path d="M8 14a5.66 5.66 0 0 1 8 0" />
+      <path d="M5 11a9.9 9.9 0 0 1 14 0" />
+      <path d="M2 8a14.14 14.14 0 0 1 20 0" />
+    </Svg>
+  );
+}
+
 /** ⚠️ Warning / alert triangle */
 export function IconWarning({ size = 16, className }: IconProps) {
   return (

@@ -217,6 +217,43 @@ const handlers = {
     return { ok: true };
   },
 
+  'bramble.sendProbe'(_params) {
+    const probeId = 0xa000 + Math.floor(Math.random() * 0xfff);
+    const ackWindow = 30;
+
+    // Simulate 4-6 ACKs over 10-20s
+    const ackCount = 4 + Math.floor(Math.random() * 3);
+    const mockAddrs = [0xAABBCCDD, 0x11223344, 0xDEADBEEF, 0xFEEDFACE, 0xCAFEBABE, 0xBEEF1234];
+    for (let i = 0; i < ackCount; i++) {
+      const delay = 2000 + Math.floor(Math.random() * 18000);
+      const hopCount = 1 + Math.floor(Math.random() * 3);
+      const rssi = -72 - Math.floor(Math.random() * 33);
+      const snr = -1 + Math.random() * 10;
+      const relayPath = [];
+      for (let h = 0; h < hopCount - 1; h++) {
+        relayPath.push(mockAddrs[Math.floor(Math.random() * mockAddrs.length)]);
+      }
+      setTimeout(() => {
+        notify('probe.ack', {
+          responderAddr: mockAddrs[i % mockAddrs.length],
+          hopCount,
+          rssi,
+          snr: Math.round(snr * 10) / 10,
+          pathLen: hopCount,
+          relayPath,
+          receivedAt: Date.now(),
+        });
+      }, delay);
+    }
+
+    // Send probe.complete after ackWindow
+    setTimeout(() => {
+      notify('probe.complete', { probeId });
+    }, ackWindow * 1000);
+
+    return { probeId, ackWindow };
+  },
+
   'bramble.setDefaultChannel'(params) {
     const idx = params?.index;
     for (const ch of channels) {
