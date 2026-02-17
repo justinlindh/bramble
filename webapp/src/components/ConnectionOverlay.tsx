@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { connect } from '../store/actions';
 import { useStore } from '../store/index';
 import type { TransportType } from '../types/bramble';
+import { IconUsb, IconBluetooth, IconMonitor, IconWarning } from './Icons';
 import styles from './ConnectionOverlay.module.css';
 
 export function ConnectionOverlay() {
@@ -32,7 +33,7 @@ export function ConnectionOverlay() {
 
         {!hasAnyHardwareSupport && (
           <div className={styles.unsupported}>
-            <p>⚠️ Your browser does not support Web Serial or Web Bluetooth.</p>
+            <p><IconWarning size={16} /> Your browser does not support Web Serial or Web Bluetooth.</p>
             <p className={styles.hint}>
               Use Chrome or Edge 120+ on desktop, or Chrome on Android for BLE.
             </p>
@@ -47,14 +48,14 @@ export function ConnectionOverlay() {
                 onClick={() => setTransportType('serial')}
                 disabled={!hasSerial}
               >
-                🔌 USB / Serial
+                <IconUsb size={16} /> USB / Serial
               </button>
               <button
                 className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''}`}
                 onClick={() => setTransportType('ble')}
                 disabled={!hasBluetooth}
               >
-                📡 Bluetooth
+                <IconBluetooth size={16} /> Bluetooth
               </button>
             </div>
           </>
@@ -69,14 +70,14 @@ export function ConnectionOverlay() {
               className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
               onClick={() => setTransportType('websocket')}
             >
-              🖥️ Mock Node (WebSocket)
+              <IconMonitor size={16} /> Mock Node (WebSocket)
             </button>
           </>
         )}
 
         {connectionError && (
           <div className={styles.error}>
-            <span>⚠️ {connectionError}</span>
+            <span><IconWarning size={14} /> {connectionError}</span>
           </div>
         )}
 

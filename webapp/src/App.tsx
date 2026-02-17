@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useStore } from './store/index';
 import { disconnect } from './store/actions';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { IconChat, IconNodes, IconConfig, IconStats } from './components/Icons';
 import { Chat } from './pages/Chat/Chat';
 import { Nodes } from './pages/Nodes/Nodes';
 import { Config } from './pages/Config/Config';
@@ -12,11 +14,11 @@ import styles from './styles/App.module.css';
 
 type Tab = 'chat' | 'nodes' | 'config' | 'stats';
 
-const TABS: { id: Tab; icon: string; label: string }[] = [
-  { id: 'chat',   icon: '💬', label: 'Chat'   },
-  { id: 'nodes',  icon: '📡', label: 'Nodes'  },
-  { id: 'config', icon: '⚙️',  label: 'Config' },
-  { id: 'stats',  icon: '📊', label: 'Stats'  },
+const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
+  { id: 'chat',   icon: <IconChat size={18} />,   label: 'Chat'   },
+  { id: 'nodes',  icon: <IconNodes size={18} />,  label: 'Nodes'  },
+  { id: 'config', icon: <IconConfig size={18} />, label: 'Config' },
+  { id: 'stats',  icon: <IconStats size={18} />,  label: 'Stats'  },
 ];
 
 function TabContent({ activeTab }: { activeTab: Tab }) {

@@ -3,6 +3,7 @@ import { loadNeighbors, loadRoutes } from '../../store/actions';
 import { usePoll } from '../../hooks/usePoll';
 import { NeighborCard } from './NeighborCard';
 import { RouteTable } from './RouteTable';
+import { IconNodes, IconRoutes } from '../../components/Icons';
 import styles from './Nodes.module.css';
 
 export function Nodes() {
@@ -18,7 +19,7 @@ export function Nodes() {
     <div className={styles.nodes}>
       {/* ── Neighbor cards ── */}
       <header className={styles.sectionHeader}>
-        <h2>📡 Neighbors</h2>
+        <h2><IconNodes size={18} /> Neighbors</h2>
         <span className={styles.count}>{neighbors.length}</span>
         {!connected && (
           <span className={styles.offlinePill}>offline</span>
@@ -41,7 +42,7 @@ export function Nodes() {
 
       {/* ── Route table ── */}
       <header className={styles.sectionHeader} style={{ marginTop: '1rem' }}>
-        <h2>🗺 Routes</h2>
+        <h2><IconRoutes size={18} /> Routes</h2>
         <span className={styles.count}>{routes.length}</span>
       </header>
 

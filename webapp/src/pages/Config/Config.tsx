@@ -3,6 +3,7 @@ import { IdentitySection } from './IdentitySection';
 import { RadioForm } from './RadioForm';
 import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
+import { IconIdentity, IconRadio, IconNodes, IconPeers } from '../../components/Icons';
 import styles from './Config.module.css';
 
 export function Config() {
@@ -22,25 +23,25 @@ export function Config() {
     <div className={styles.config}>
       {/* ── Node Identity ── */}
       <section className={styles.section}>
-        <h2>🪪 Identity</h2>
+        <h2><IconIdentity size={18} /> Identity</h2>
         <IdentitySection identity={config.identity} />
       </section>
 
       {/* ── Radio Settings ── */}
       <section className={styles.section}>
-        <h2>📻 Radio Settings</h2>
+        <h2><IconRadio size={18} /> Radio Settings</h2>
         <RadioForm radio={config.radio} />
       </section>
 
       {/* ── Channel Manager ── */}
       <section className={styles.section}>
-        <h2>📡 Channels ({config.channels.length})</h2>
+        <h2><IconNodes size={18} /> Channels ({config.channels.length})</h2>
         <ChannelManager channels={config.channels} />
       </section>
 
       {/* ── Peer Manager ── */}
       <section className={styles.section}>
-        <h2>👥 Peers</h2>
+        <h2><IconPeers size={18} /> Peers</h2>
         <PeerManager neighbors={neighbors} routes={routes} />
       </section>
     </div>

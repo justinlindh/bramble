@@ -2,6 +2,7 @@ import type { Message } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
 import { DeliveryBadge } from './DeliveryBadge';
 import { RelayPathDisplay } from './RelayPathDisplay';
+import { IconCritical, IconBroadcast } from '../../components/Icons';
 import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
@@ -62,10 +63,10 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
           <DeliveryBadge status={message.status} tier={message.tier} />
         )}
         {message.tier === 'critical' && (
-          <span className={styles.tierTag} title="Critical priority">🔴</span>
+          <span className={styles.tierTag} title="Critical priority"><IconCritical size={14} /></span>
         )}
         {message.tier === 'broadcast' && (
-          <span className={styles.tierTag} title="Broadcast">📢</span>
+          <span className={styles.tierTag} title="Broadcast"><IconBroadcast size={14} /></span>
         )}
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Conversation } from '../../types/bramble';
+import { IconBroadcast, IconHash, IconUser, IconPlus } from '../../components/Icons';
 import styles from './ConversationList.module.css';
 
 interface ConversationListProps {
@@ -45,7 +46,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
         className={`${styles.item} ${activeId === 'broadcast' ? styles.active : ''}`}
         onClick={() => onSelect('broadcast')}
       >
-        <span className={styles.icon}>📢</span>
+        <span className={styles.icon}><IconBroadcast size={16} /></span>
         <span className={styles.label}>Broadcast</span>
         {broadcastUnread > 0 && (
           <span className={styles.badge}>{broadcastUnread}</span>
@@ -62,7 +63,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
           className={`${styles.item} ${activeId === conv.id ? styles.active : ''}`}
           onClick={() => onSelect(conv.id)}
         >
-          <span className={styles.icon}>#</span>
+          <span className={styles.icon}><IconHash size={16} /></span>
           <span className={styles.label}>{conv.label}</span>
           {conv.unreadCount > 0 && (
             <span className={styles.badge}>{conv.unreadCount}</span>
@@ -79,7 +80,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
           title="Open new DM"
           aria-label="New direct message"
         >
-          +
+          <IconPlus size={16} />
         </button>
       </div>
 
@@ -89,7 +90,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
           className={`${styles.item} ${activeId === conv.id ? styles.active : ''}`}
           onClick={() => onSelect(conv.id)}
         >
-          <span className={styles.icon}>👤</span>
+          <span className={styles.icon}><IconUser size={16} /></span>
           <span className={styles.label}>{conv.label}</span>
           {conv.unreadCount > 0 && (
             <span className={styles.badge}>{conv.unreadCount}</span>

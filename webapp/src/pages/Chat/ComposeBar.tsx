@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import type { MessageTier } from '../../types/bramble';
 import { sendMessage } from '../../store/actions';
 import { useStore } from '../../store/index';
+import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
 import styles from './ComposeBar.module.css';
 
 interface ComposeBarProps {
@@ -24,9 +26,9 @@ function parseConversation(convId: string): { dest: number; channelIndex?: numbe
   return { dest: 0xffffffff };
 }
 
-const TIER_OPTIONS: Array<{ value: MessageTier; label: string; title: string }> = [
+const TIER_OPTIONS: Array<{ value: MessageTier; label: ReactNode; title: string }> = [
   { value: 'normal',   label: 'Normal',   title: 'Standard delivery'                        },
-  { value: 'critical', label: '🔴 Critical', title: 'Reliable delivery with relay path tracking' },
+  { value: 'critical', label: <><IconCritical size={12} /> Critical</>, title: 'Reliable delivery with relay path tracking' },
 ];
 
 export function ComposeBar({ conversationId }: ComposeBarProps) {
@@ -127,7 +129,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
 
           {isBroadcastConv && (
             <span className={styles.broadcastTag} title="Messages here go to all nodes in range">
-              📢 Broadcast
+              <IconBroadcast size={14} /> Broadcast
             </span>
           )}
 
@@ -138,7 +140,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
             aria-label="Send message"
             title="Send (Enter)"
           >
-            {sending ? '…' : '➤'}
+            {sending ? '…' : <IconSend size={16} />}
           </button>
         </div>
       </div>

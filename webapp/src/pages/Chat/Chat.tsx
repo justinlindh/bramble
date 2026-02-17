@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useStore } from '../../store/index';
 import { useConversation, useMyAddress } from '../../store/selectors';
+import { IconChat, IconBroadcast } from '../../components/Icons';
 import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
@@ -18,7 +20,7 @@ function EmptyMessages({ convId }: { convId: string }) {
 
   return (
     <div className={styles.emptyPane}>
-      <span className={styles.emptyIcon}>💬</span>
+      <span className={styles.emptyIcon}><IconChat size={32} /></span>
       <p className={styles.emptyHint}>{hint}</p>
     </div>
   );
@@ -56,11 +58,11 @@ function ChatHeader({ conversationId }: { conversationId: string }) {
   const conversations = useStore(s => s.conversations);
   const conv = conversations.get(conversationId);
 
-  let title = conv?.label ?? conversationId;
+  let title: ReactNode = conv?.label ?? conversationId;
   let subtitle = '';
 
   if (conversationId === 'broadcast') {
-    title = '📢 Broadcast';
+    title = <><IconBroadcast size={16} /> Broadcast</>;
     subtitle = 'All nodes in range';
   } else if (conversationId.startsWith('ch:')) {
     subtitle = `Channel ${conversationId.slice(3)}`;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { NodeStatus } from '../../types/bramble';
+import { IconPackets } from '../../components/Icons';
 import styles from './CounterGrid.module.css';
 
 interface CounterDelta {
@@ -26,7 +27,7 @@ export function CounterGrid({ status }: { status: NodeStatus }) {
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.heading}>📦 Packet Counters</h2>
+      <h2 className={styles.heading}><IconPackets size={18} /> Packet Counters</h2>
       <div className={styles.grid}>
         <CounterCell
           label="Sent"

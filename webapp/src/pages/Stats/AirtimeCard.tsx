@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AirtimeStatus, AirtimeTier } from '../../types/bramble';
+import { IconClock } from '../../components/Icons';
 import styles from './AirtimeCard.module.css';
 
 function formatMs(ms: number): string {
@@ -32,7 +33,7 @@ export function AirtimeCard({ airtime }: { airtime: AirtimeStatus }) {
 
   return (
     <section className={styles.card}>
-      <h2 className={styles.heading}>⏱ Airtime Budget</h2>
+      <h2 className={styles.heading}><IconClock size={18} /> Airtime Budget</h2>
       {sorted.map(tier => {
         const remainPct =
           tier.maxMs > 0
