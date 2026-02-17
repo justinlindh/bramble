@@ -1,4 +1,3 @@
-import React from 'react';
 import { PlaybackControls } from './components/PlaybackControls';
 import { MeshCanvas } from './components/MeshCanvas';
 import { MetricsDashboard } from './components/MetricsDashboard';
