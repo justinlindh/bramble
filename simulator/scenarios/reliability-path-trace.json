@@ -1,0 +1,102 @@
+{
+  "name": "Reliability Path Trace",
+  "description": "Linear 5-node chain to verify delivery receipts contain correct relay path",
+  "seed": 42,
+  "duration_ms": 90000,
+  "radio": {
+    "range": 120,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "nodes": [
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 300,
+      "y": 0
+    },
+    {
+      "id": "E",
+      "x": 400,
+      "y": 0
+    }
+  ],
+  "events": [
+    {
+      "type": "send_message",
+      "at_ms": 10000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 15000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 20000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 30000,
+      "src": "A",
+      "dest": "D"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 35000,
+      "src": "A",
+      "dest": "C"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 45000,
+      "node": "C",
+      "x": 200,
+      "y": 300
+    },
+    {
+      "type": "send_message",
+      "at_ms": 50000,
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "type": "send_message",
+      "at_ms": 55000,
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "type": "node_move",
+      "at_ms": 70000,
+      "node": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "type": "send_message",
+      "at_ms": 75000,
+      "src": "A",
+      "dest": "E"
+    }
+  ]
+}
