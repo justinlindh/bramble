@@ -59,6 +59,7 @@ const config = {
     freqMhz: 915.0,
   },
   channels,
+  mailboxEnabled: false,
 };
 
 // ─── Active clients ─────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ const handlers = {
       identity: { ...config.identity },
       radio: { ...config.radio },
       channels: channels.map(c => ({ ...c })),
+      mailboxEnabled: config.mailboxEnabled,
     };
   },
 
@@ -207,6 +209,11 @@ const handlers = {
     const idx = params?.index;
     const pos = channels.findIndex(c => c.index === idx);
     if (pos !== -1) channels.splice(pos, 1);
+    return { ok: true };
+  },
+
+  'bramble.setMailbox'(params) {
+    config.mailboxEnabled = !!(params?.enabled);
     return { ok: true };
   },
 

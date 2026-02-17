@@ -245,6 +245,12 @@ export async function removeChannel(index: number): Promise<void> {
   await loadConfig();
 }
 
+export async function setMailbox(enabled: boolean): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setMailbox', { enabled });
+  await loadConfig();
+}
+
 export async function setDefaultChannel(index: number): Promise<void> {
   if (!client) throw new Error('Not connected');
   await client.rpc('bramble.setDefaultChannel', { index });
