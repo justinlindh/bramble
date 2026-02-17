@@ -18,6 +18,29 @@ import type {
   LocationTier,
 } from '../types/bramble';
 
+// Map technical error messages to human-friendly text
+const ERROR_MAP: Array<[RegExp, string]> = [
+  [/cancelled.*requestDevice/i, 'Bluetooth pairing was cancelled.'],
+  [/cancelled.*requestPort/i, 'Serial port selection was cancelled.'],
+  [/user cancel/i, 'Connection was cancelled.'],
+  [/no compatible device/i, 'No Bramble device found nearby.'],
+  [/NetworkError/i, 'Could not reach the node. Check the IP address and that it\'s on the same network.'],
+  [/WebSocket.*failed/i, 'Could not connect. Check the IP address and that the node is powered on.'],
+  [/GATT.*disconnect/i, 'Bluetooth connection was lost.'],
+  [/SecurityError/i, 'Browser blocked the connection. Try using HTTPS or localhost.'],
+  [/AbortError/i, 'Connection timed out.'],
+  [/NotFoundError/i, 'No device found. Make sure your node is powered on and in range.'],
+  [/already.*connect/i, 'Already connected to a device.'],
+];
+
+function friendlyError(raw: string): string {
+  for (const [pattern, friendly] of ERROR_MAP) {
+    if (pattern.test(raw)) return friendly;
+  }
+  if (raw.length > 100) return 'Connection failed. Please try again.';
+  return raw;
+}
+
 let client: BrambleClient | null = null;
 
 // ─── Message persistence ─────────────────────────────────────────────────
@@ -84,7 +107,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     // Clean up any partially-initialised client so we start fresh on retry
     client?.clearSubscriptions();
     client = null;
-    store.setConnectionState('error', (e as Error).message);
+    store.setConnectionState('error', friendlyError((e as Error).message));
   }
 }
 
