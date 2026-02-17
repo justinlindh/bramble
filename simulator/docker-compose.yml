@@ -4,6 +4,6 @@ services:
       context: ..
       dockerfile: simulator/Dockerfile
     ports:
-      - "3000:3000"
+      - "3003:3000"
     volumes:
       - ./scenarios:/app/scenarios:ro

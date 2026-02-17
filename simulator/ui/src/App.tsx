@@ -7,11 +7,16 @@ import { useSimulation } from './hooks/useSimulation';
 import './App.css';
 
 export default function App() {
-  const { state } = useSimulation();
+  const { state, ws } = useSimulation();
+
+  function handleLoadScenario(scenario: string) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'start', scenario }));
+    }
+  }
 
   return (
     <div className="app">
-      {/* Top: header with playback controls + scenario loader */}
       <header className="app-header">
         <div className="app-header-controls">
           <PlaybackControls
@@ -20,21 +25,18 @@ export default function App() {
             currentTime={state.currentTime}
           />
         </div>
-        <ScenarioLoader />
+        <ScenarioLoader onLoad={handleLoadScenario} />
       </header>
 
-      {/* Middle: canvas + metrics sidebar */}
       <main className="app-main">
         <div className="app-canvas">
           <MeshCanvas nodes={state.nodes} radioRange={150} />
         </div>
         <aside className="app-sidebar">
           <MetricsDashboard metrics={state.metrics} />
+          <EventLog events={state.events} />
         </aside>
       </main>
-
-      {/* Bottom: event log */}
-      <EventLog events={state.events} />
     </div>
   );
 }

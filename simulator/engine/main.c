@@ -574,6 +574,18 @@ int main(int argc, char **argv) {
         handle_event(&event);
     }
 
+    /* Emit final metrics to stdout so the UI gets the final counts */
+    {
+        int active = 0;
+        for (int i = 0; i < g_nodes.count; i++) {
+            if (g_nodes.nodes[i].active) active++;
+        }
+        emit_metrics(stdout, g_sim_time_us, active,
+                     g_metrics.total_packets, g_metrics.delivered_packets,
+                     g_metrics.dropped_packets, metrics_avg_latency_ms(&g_metrics));
+        fflush(stdout);
+    }
+
     fprintf(stderr, "\nSimulation complete.\n");
     fprintf(stderr, "Final metrics:\n");
     fprintf(stderr, "  Total packets: %llu\n",

@@ -25,6 +25,9 @@ function simReducer(state: SimState, action: SimAction): SimState {
     case 'SIM_ENDED':
       return { ...state, running: false };
 
+    case 'RESET':
+      return { ...initialState, connected: true };
+
     case 'ADD_NODE': {
       const nodes = new Map(state.nodes);
       nodes.set(action.node.id, action.node);
@@ -89,6 +92,11 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
 
   // State machine updates
   switch (type) {
+    case 'sim_reset': {
+      // Server signals a new sim is starting — reset all state
+      actions.unshift({ type: 'RESET' });
+      break;
+    }
     case 'node_joined': {
       const node: SimNode = {
         id: raw.node as string,

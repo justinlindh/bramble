@@ -85,14 +85,19 @@ wss.on('connection', (ws: WebSocket) => {
   console.log('[relay] Client connected');
 
   let sim: ChildProcess | null = null;
-  let started = false;
 
   function startSimulator(scenarioPath: string) {
-    if (started) {
-      console.warn('[relay] Simulator already started, ignoring');
-      return;
+    // Kill any running simulation first
+    if (sim) {
+      console.log('[relay] Killing previous simulator');
+      sim.kill('SIGTERM');
+      sim = null;
     }
-    started = true;
+
+    // Tell UI to reset state before new sim events arrive
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'sim_reset', timestamp_us: 0 }));
+    }
     console.log(`[relay] Spawning simulator: ${ENGINE_BIN} ${scenarioPath}`);
 
     sim = spawn(ENGINE_BIN, [scenarioPath], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -154,8 +159,10 @@ wss.on('connection', (ws: WebSocket) => {
   });
 
   // Auto-start with default scenario if client doesn't send a start message within 500ms
+  let autoStartFired = false;
   const autoStart = setTimeout(() => {
-    if (!started) {
+    if (!sim) {
+      autoStartFired = true;
       startSimulator(DEFAULT_SCENARIO);
     }
   }, 500);
