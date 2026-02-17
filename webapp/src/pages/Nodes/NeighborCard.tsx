@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Neighbor } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
+import { IconClock, IconMailbox, IconEnvelope } from '../../components/Icons';
 import styles from './NeighborCard.module.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,9 +81,9 @@ export function NeighborCard({ neighbor, onOpenDM }: NeighborCardProps) {
       <div className={styles.row}>
         <span title="Packet Delivery Rate">PDR: {pdr}%</span>
         <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr} dB</span>
-        <span title="Last heard">⏱ {formatAgo(neighbor.lastHeardMs)}</span>
+        <span title="Last heard"><IconClock size={13} /> {formatAgo(neighbor.lastHeardMs)}</span>
         {neighbor.isMailbox && (
-          <span className={styles.badgeMailbox}>📬 Mailbox</span>
+          <span className={styles.badgeMailbox}><IconMailbox size={13} /> Mailbox</span>
         )}
       </div>
 
@@ -102,7 +103,7 @@ export function NeighborCard({ neighbor, onOpenDM }: NeighborCardProps) {
               className={styles.dmBtn}
               onClick={() => onOpenDM(neighbor.addr)}
             >
-              📨 Send DM
+              <IconEnvelope size={14} /> Send DM
             </button>
           )}
         </div>
