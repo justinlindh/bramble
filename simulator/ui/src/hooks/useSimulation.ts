@@ -8,6 +8,7 @@ const PACKET_ANIM_DURATION_MS = 500;
 const initialState: SimState = {
   connected: false,
   running: false,
+  ready: false,
   currentTime: 0,
   nodes: new Map(),
   links: [],
@@ -27,7 +28,10 @@ function simReducer(state: SimState, action: SimAction): SimState {
       return { ...state, connected: false, running: false };
 
     case 'SIM_ENDED':
-      return { ...state, running: false };
+      return { ...state, running: false, ready: false };
+
+    case 'SIM_READY':
+      return { ...state, running: false, ready: true };
 
     case 'RESET':
       return { ...initialState, connected: true };
@@ -121,8 +125,11 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
   // State machine updates
   switch (type) {
     case 'sim_reset': {
-      // Server signals a new sim is starting — reset all state
       actions.unshift({ type: 'RESET' });
+      break;
+    }
+    case 'sim_ready': {
+      actions.push({ type: 'SIM_READY' });
       break;
     }
     case 'node_joined': {

@@ -3,6 +3,7 @@ import { useState } from 'react';
 interface PlaybackControlsProps {
   running: boolean;
   connected: boolean;
+  ready: boolean;
   currentTime: number; // microseconds
   ws: WebSocket | null;
 }
@@ -24,7 +25,7 @@ function sendCmd(ws: WebSocket | null, msg: object) {
   }
 }
 
-export function PlaybackControls({ running, connected, currentTime, ws }: PlaybackControlsProps) {
+export function PlaybackControls({ running, connected, ready, currentTime, ws }: PlaybackControlsProps) {
   const [paused, setPaused] = useState(false);
   const [speed, setSpeed] = useState(1);
 
@@ -155,12 +156,12 @@ export function PlaybackControls({ running, connected, currentTime, ws }: Playba
           width: '8px',
           height: '8px',
           borderRadius: '50%',
-          background: !connected ? '#6e7681' : running ? '#3fb950' : '#58a6ff',
-          boxShadow: !connected ? 'none' : running ? '0 0 6px #3fb950' : '0 0 6px #58a6ff',
+          background: !connected ? '#6e7681' : running ? '#3fb950' : ready ? '#f0883e' : '#58a6ff',
+          boxShadow: !connected ? 'none' : running ? '0 0 6px #3fb950' : ready ? '0 0 6px #f0883e' : '0 0 6px #58a6ff',
           transition: 'background 0.3s, box-shadow 0.3s',
         }} />
         <span style={{ fontSize: '12px', color: '#8b949e' }}>
-          {!connected ? 'Disconnected' : running ? 'Running' : 'Completed'}
+          {!connected ? 'Disconnected' : running ? 'Running' : ready ? 'Ready — press ▶' : 'Completed'}
         </span>
       </div>
     </header>

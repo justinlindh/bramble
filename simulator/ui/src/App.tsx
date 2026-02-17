@@ -23,6 +23,7 @@ export default function App() {
           <PlaybackControls
             running={state.running}
             connected={state.connected}
+            ready={state.ready}
             currentTime={state.currentTime}
             ws={ws.current}
           />

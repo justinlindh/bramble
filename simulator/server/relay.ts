@@ -327,9 +327,26 @@ wss.on('connection', (ws: WebSocket) => {
 
       sim = null;
 
-      // Auto-play when sim finishes loading
-      console.log(`[relay] Buffered ${eventBuffer.length} events — starting playback`);
-      startPlayback(0);
+      // Ready to play — wait for user to press play
+      console.log(`[relay] Buffered ${eventBuffer.length} events — ready (paused)`);
+      playbackIndex = 0;
+      if (eventBuffer.length > 0) {
+        simTimeAtStart = eventBuffer[0].timestamp_us;
+      }
+      // Send initial events (sim_reset + node_joined + config) so the UI shows the topology
+      for (let i = 0; i < eventBuffer.length; i++) {
+        const evt = JSON.parse(eventBuffer[i].raw);
+        if (evt.type === 'node_joined' || evt.type === 'config' || evt.type === 'sim_reset') {
+          if (ws.readyState === WebSocket.OPEN) ws.send(eventBuffer[i].raw);
+        } else {
+          playbackIndex = i;
+          break;
+        }
+      }
+      // Notify UI that sim is loaded but paused
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'sim_ready', total_events: eventBuffer.length, timestamp_us: 0 }));
+      }
 
       // Append sim_ended at the end of the buffer
       const endMsg = JSON.stringify({ type: 'sim_ended', code, signal, timestamp_us: 
