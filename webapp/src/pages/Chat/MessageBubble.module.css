@@ -1,0 +1,67 @@
+.bubble {
+  max-width: 72%;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ── Outgoing (right-aligned) ───────────────────────────────────── */
+.outgoing {
+  align-self: flex-end;
+  background: var(--accent-blue);
+  color: #fff;
+  border-bottom-right-radius: 2px;
+}
+
+.outgoing .time  { color: rgba(255,255,255,0.7); }
+
+/* ── Incoming (left-aligned) ────────────────────────────────────── */
+.incoming {
+  align-self: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 2px;
+}
+
+.incoming .time  { color: var(--text-muted); }
+
+/* ── Critical border accent ─────────────────────────────────────── */
+.tierCritical {
+  border-left: 3px solid var(--critical);
+}
+
+/* ── Sender label ───────────────────────────────────────────────── */
+.sender {
+  font-size: 0.75rem;
+  color: var(--critical);
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+/* ── Text ───────────────────────────────────────────────────────── */
+.text {
+  font-size: 0.95rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+/* ── Meta row ───────────────────────────────────────────────────── */
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  justify-content: flex-end;
+}
+
+.time {
+  font-size: 0.72rem;
+}
+
+.tierTag {
+  font-size: 0.72rem;
+  opacity: 0.85;
+}

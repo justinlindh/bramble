@@ -1,0 +1,150 @@
+.compose {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Error banner ─────────────────────────────── */
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.errorDismiss {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 4px;
+}
+
+/* ── Main row ─────────────────────────────────── */
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+/* ── Textarea ─────────────────────────────────── */
+.input {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.4;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 1px;
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Controls column ──────────────────────────── */
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-end;
+}
+
+/* ── Tier selector ────────────────────────────── */
+.tierSelector {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.tierBtn {
+  background: var(--surface-2);
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  white-space: nowrap;
+}
+
+.tierBtn + .tierBtn {
+  border-left: 1px solid var(--border);
+}
+
+.tierBtn:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tierBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tierActive {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+.tierCriticalActive {
+  background: var(--critical) !important;
+  color: #fff;
+}
+
+/* ── Broadcast label ──────────────────────────── */
+.broadcastTag {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Send button ──────────────────────────────── */
+.sendBtn {
+  background: var(--accent-blue);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  width: 38px;
+  height: 38px;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: filter 0.1s;
+}
+
+.sendBtn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.sendBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
