@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { MessageTier } from '../../types/bramble';
-import { sendMessage } from '../../store/actions';
+import { sendMessage, shareLocationOnce } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
-import { ShareLocationButton } from './ShareLocationButton';
+import { ShareLocationToggle } from './ShareLocationButton';
+import type { LocationAttach } from './ShareLocationButton';
 import styles from './ComposeBar.module.css';
 
 const MAX_BYTES = 800;
@@ -51,10 +52,12 @@ const TIER_OPTIONS: Array<{ value: MessageTier; label: ReactNode; title: string 
 export function ComposeBar({ conversationId }: ComposeBarProps) {
   const [text, setText] = useState('');
   const [tier, setTier] = useState<MessageTier>('normal');
+  const [locAttach, setLocAttach] = useState<LocationAttach>('off');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isConnected = useStore(s => s.connectionState === 'connected');
+  const gpsEnabled = useStore(s => s.config?.location?.enabled ?? false);
 
   // Parse conversation to get dest
   const { dest } = parseConversation(conversationId);
@@ -80,6 +83,11 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
 
     try {
       await sendMessage(dest, trimmed, effectiveTier, channelIndex);
+      // Attach location if enabled (fire-and-forget)
+      if (locAttach !== 'off' && dest !== 0xFFFFFFFF) {
+        const locTier = locAttach === 'exact' ? 'full' : 'coarse';
+        shareLocationOnce(dest, locTier as import('../../types/bramble').LocationTier).catch(() => {});
+      }
     } catch (e) {
       setError((e as Error).message ?? 'Send failed');
       // restore text so user can retry
@@ -166,7 +174,9 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
             </span>
           )}
 
-          {!isBroadcastConv && <ShareLocationButton dest={dest} />}
+          {!isBroadcastConv && gpsEnabled && (
+            <ShareLocationToggle value={locAttach} onChange={setLocAttach} />
+          )}
 
           <button
             className={styles.sendBtn}
