@@ -58,12 +58,13 @@ interface ThProps {
   current: SortKey;
   dir: SortDir;
   onSort: (k: SortKey) => void;
+  title?: string;
 }
 
-function Th({ label, sortKey, current, dir, onSort }: ThProps) {
+function Th({ label, sortKey, current, dir, onSort, title }: ThProps) {
   const active = current === sortKey;
   return (
-    <th onClick={() => onSort(sortKey)}>
+    <th onClick={() => onSort(sortKey)} title={title}>
       {label}
       <span className={styles.sortIcon}>
         {active ? (dir === 'asc' ? '▲' : '▼') : '⇅'}
@@ -101,7 +102,7 @@ export function RouteTable({ routes }: RouteTableProps) {
             <Th label="Destination" sortKey="dest" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="Next Hop"    sortKey="nextHop" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="Hops"        sortKey="hopCount" current={sortKey} dir={sortDir} onSort={handleSort} />
-            <Th label="Metric"      sortKey="metric" current={sortKey} dir={sortDir} onSort={handleSort} />
+            <Th label="Metric" title="Route quality score (0–255, lower is better). Combines delivery rate, airtime usage, and latency."      sortKey="metric" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="State"       sortKey="state" current={sortKey} dir={sortDir} onSort={handleSort} />
             <Th label="Age"         sortKey="lastUsedMs" current={sortKey} dir={sortDir} onSort={handleSort} />
           </tr>
