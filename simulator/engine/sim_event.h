@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_EVENT_QUEUE 10000
+#define MAX_EVENT_QUEUE 100000
 
 typedef enum {
     EVT_SEND_PACKET = 0,
