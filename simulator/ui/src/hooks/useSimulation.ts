@@ -1,7 +1,9 @@
 import { useEffect, useReducer, useRef } from 'react';
-import type { SimState, SimAction, SimNode, Metrics, RawSimEvent } from '../types';
+import type { SimState, SimAction, SimNode, Metrics, RawSimEvent, PacketAnimation } from '../types';
 
 const MAX_EVENTS = 100;
+
+const PACKET_ANIM_DURATION_MS = 500;
 
 const initialState: SimState = {
   connected: false,
@@ -12,6 +14,8 @@ const initialState: SimState = {
   metrics: null,
   events: [],
   eventCounter: 0,
+  recentPackets: [],
+  packetCounter: 0,
 };
 
 function simReducer(state: SimState, action: SimAction): SimState {
@@ -72,6 +76,30 @@ function simReducer(state: SimState, action: SimAction): SimState {
         eventCounter: id,
         currentTime: Math.max(state.currentTime, action.event.timestamp_us),
       };
+    }
+
+    case 'ADD_PACKET_ANIM': {
+      const id = state.packetCounter + 1;
+      const anim: PacketAnimation = {
+        id,
+        from: action.from,
+        to: action.to,
+        pkt_type: action.pkt_type,
+        createdAt: Date.now(),
+        durationMs: PACKET_ANIM_DURATION_MS,
+      };
+      return {
+        ...state,
+        packetCounter: id,
+        recentPackets: [...state.recentPackets, anim],
+      };
+    }
+
+    case 'EXPIRE_PACKETS': {
+      const alive = state.recentPackets.filter(
+        p => action.now - p.createdAt < p.durationMs
+      );
+      return { ...state, recentPackets: alive };
     }
 
     default:
@@ -142,6 +170,21 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
       actions.push({ type: 'SIM_ENDED' });
       break;
     }
+    case 'packet_sent': {
+      // Emit a packet animation between the sending node and destination
+      const fromNode = raw.node as string | undefined;
+      const destAddr = (raw.dest ?? raw.dest_addr) as string | undefined;
+      const pktType  = (raw.pkt_type as string) ?? 'DATA';
+      if (fromNode && destAddr) {
+        actions.push({
+          type: 'ADD_PACKET_ANIM',
+          from: fromNode,
+          to: destAddr,
+          pkt_type: pktType,
+        });
+      }
+      break;
+    }
   }
 
   return actions;
@@ -150,6 +193,14 @@ function parseEvent(raw: RawSimEvent): SimAction[] {
 export function useSimulation() {
   const [state, dispatch] = useReducer(simReducer, initialState);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Periodically expire old packet animations
+  useEffect(() => {
+    const id = setInterval(() => {
+      dispatch({ type: 'EXPIRE_PACKETS', now: Date.now() });
+    }, 100);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const wsUrl = `ws://${window.location.host}`;
@@ -199,5 +250,5 @@ export function useSimulation() {
     };
   }, []);
 
-  return { state, ws: wsRef.current };
+  return { state, ws: wsRef };
 }

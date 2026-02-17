@@ -40,6 +40,16 @@ export interface Metrics {
   deliveryRate: number; // 0-100
 }
 
+// Animated packet dot
+export interface PacketAnimation {
+  id: number;
+  from: string;      // node id
+  to: string;        // node id (or dest addr string for non-node targets)
+  pkt_type: string;  // RREQ | RREP | RERR | DATA | BEACON
+  createdAt: number; // Date.now() ms
+  durationMs: number;
+}
+
 // Overall simulation state
 export interface SimState {
   connected: boolean;
@@ -50,6 +60,8 @@ export interface SimState {
   metrics: Metrics | null;
   events: SimEvent[];
   eventCounter: number;
+  recentPackets: PacketAnimation[];
+  packetCounter: number;
 }
 
 // Actions for the reducer
@@ -61,5 +73,7 @@ export type SimAction =
   | { type: 'REMOVE_NODE'; id: string; timestamp_us: number }
   | { type: 'UPDATE_METRICS'; metrics: Metrics }
   | { type: 'ADD_EVENT'; event: Omit<SimEvent, 'id'> }
+  | { type: 'ADD_PACKET_ANIM'; from: string; to: string; pkt_type: string }
+  | { type: 'EXPIRE_PACKETS'; now: number }
   | { type: 'SIM_ENDED' }
   | { type: 'RESET' };
