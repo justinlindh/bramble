@@ -93,7 +93,7 @@ func main() {
 		var files []string
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
-				files = append(files, e.Name())
+				files = append(files, strings.TrimSuffix(e.Name(), ".json"))
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
