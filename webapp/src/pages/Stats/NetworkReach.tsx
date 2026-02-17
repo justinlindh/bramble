@@ -29,10 +29,10 @@ function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
       <thead>
         <tr>
           <th>Node</th>
-          <th>Hops</th>
-          <th>RSSI</th>
-          <th>SNR</th>
-          <th>Path</th>
+          <th title="Number of relay nodes between you and this node. 1 = direct neighbor.">Hops</th>
+          <th title="Received Signal Strength (dBm). Closer to 0 is stronger. Above −90 is good, below −110 is weak.">RSSI</th>
+          <th title="Signal-to-Noise Ratio (dB). Higher is better. Above 0 means signal is stronger than noise.">SNR</th>
+          <th title="The chain of relay nodes this probe passed through to reach the destination.">Path</th>
         </tr>
       </thead>
       <tbody>
