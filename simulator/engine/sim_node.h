@@ -10,7 +10,7 @@
 #define NODE_ID_LEN 16
 
 /* Tick intervals (microseconds) */
-#define NODE_BEACON_INTERVAL_US     30000000ULL   /* 30 s */
+#define NODE_BEACON_INTERVAL_US     5000000ULL    /* 5 s — faster than real firmware for sim responsiveness */
 #define NODE_NEIGHBOR_PURGE_US      60000000ULL   /* 60 s */
 #define NODE_ROUTE_MAINT_US         60000000ULL   /* 60 s */
 #define NODE_DISCOVERY_CHECK_US      5000000ULL   /*  5 s */

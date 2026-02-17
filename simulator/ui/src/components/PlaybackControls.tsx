@@ -69,29 +69,31 @@ export function PlaybackControls({ running, connected, ready, currentTime, ws }:
     <header style={{
       background: '#161b22',
       borderBottom: '1px solid #30363d',
-      padding: '0 20px',
-      height: '52px',
+      padding: '6px 12px',
+      minHeight: '44px',
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: '12px',
       flexShrink: 0,
+      flexWrap: 'wrap',
+      overflow: 'hidden',
     }}>
       {/* Title */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
           <circle cx="12" cy="12" r="10" stroke="#58a6ff" strokeWidth="1.5" />
           <circle cx="12" cy="12" r="6"  stroke="#58a6ff" strokeWidth="1.5" strokeDasharray="3 2" />
           <circle cx="12" cy="12" r="2"  fill="#58a6ff" />
           <circle cx="5"  cy="12" r="1.5" fill="#3fb950" />
           <circle cx="19" cy="12" r="1.5" fill="#3fb950" />
         </svg>
-        <span style={{ fontSize: '15px', fontWeight: 600, color: '#e6edf3', letterSpacing: '0.02em' }}>
+        <span style={{ fontSize: '14px', fontWeight: 600, color: '#e6edf3', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
           Bramble Mesh Simulator
         </span>
       </div>
 
-      {/* Center: playback controls + sim time */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      {/* Playback controls + sim time */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
         {/* Play/Pause */}
         <button
           onClick={handlePlayPause}
@@ -150,8 +152,8 @@ export function PlaybackControls({ running, connected, ready, currentTime, ws }:
         </div>
       </div>
 
-      {/* Right: status indicator */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Status indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
         <div style={{
           width: '8px',
           height: '8px',

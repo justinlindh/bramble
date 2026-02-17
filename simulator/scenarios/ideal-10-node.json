@@ -1,18 +1,58 @@
 {
   "name": "ideal-10-node",
   "mode": "deterministic",
-  "duration_ms": 600000,
+  "duration_ms": 573000,
   "nodes": [
-    {"id": "A", "x": 0, "y": 0},
-    {"id": "B", "x": 100, "y": 0},
-    {"id": "C", "x": 200, "y": 0},
-    {"id": "D", "x": 0, "y": 100},
-    {"id": "E", "x": 100, "y": 100},
-    {"id": "F", "x": 200, "y": 100},
-    {"id": "G", "x": 0, "y": 200},
-    {"id": "H", "x": 100, "y": 200},
-    {"id": "I", "x": 200, "y": 200},
-    {"id": "J", "x": 100, "y": 300}
+    {
+      "id": "A",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "B",
+      "x": 100,
+      "y": 0
+    },
+    {
+      "id": "C",
+      "x": 200,
+      "y": 0
+    },
+    {
+      "id": "D",
+      "x": 0,
+      "y": 100
+    },
+    {
+      "id": "E",
+      "x": 100,
+      "y": 100
+    },
+    {
+      "id": "F",
+      "x": 200,
+      "y": 100
+    },
+    {
+      "id": "G",
+      "x": 0,
+      "y": 200
+    },
+    {
+      "id": "H",
+      "x": 100,
+      "y": 200
+    },
+    {
+      "id": "I",
+      "x": 200,
+      "y": 200
+    },
+    {
+      "id": "J",
+      "x": 100,
+      "y": 300
+    }
   ],
   "radio": {
     "range": 150,
@@ -20,58 +60,299 @@
     "propagation_speed_ms_per_unit": 0.1
   },
   "events": [
-    {"at_ms": 35000, "type": "send_message", "src": "A", "dest": "I"},
-    {"at_ms": 45000, "type": "send_message", "src": "I", "dest": "A"},
-    {"at_ms": 55000, "type": "send_message", "src": "G", "dest": "C"},
-    {"at_ms": 65000, "type": "send_message", "src": "C", "dest": "G"},
-    {"at_ms": 75000, "type": "send_message", "src": "J", "dest": "A"},
-    {"at_ms": 85000, "type": "send_message", "src": "A", "dest": "J"},
-    {"at_ms": 95000, "type": "send_message", "src": "D", "dest": "F"},
-    {"at_ms": 105000, "type": "send_message", "src": "F", "dest": "D"},
-    {"at_ms": 115000, "type": "send_message", "src": "B", "dest": "H"},
-    {"at_ms": 125000, "type": "send_message", "src": "H", "dest": "B"},
-
-    {"at_ms": 150000, "type": "send_message", "src": "A", "dest": "I"},
-    {"at_ms": 160000, "type": "send_message", "src": "G", "dest": "F"},
-    {"at_ms": 170000, "type": "send_message", "src": "J", "dest": "C"},
-    {"at_ms": 180000, "type": "send_message", "src": "D", "dest": "I"},
-    {"at_ms": 190000, "type": "send_message", "src": "B", "dest": "G"},
-    {"at_ms": 200000, "type": "send_message", "src": "E", "dest": "J"},
-    {"at_ms": 210000, "type": "send_message", "src": "C", "dest": "D"},
-    {"at_ms": 220000, "type": "send_message", "src": "I", "dest": "A"},
-    {"at_ms": 230000, "type": "send_message", "src": "F", "dest": "G"},
-    {"at_ms": 240000, "type": "send_message", "src": "H", "dest": "C"},
-
-    {"at_ms": 270000, "type": "send_message", "src": "A", "dest": "J"},
-    {"at_ms": 280000, "type": "send_message", "src": "J", "dest": "I"},
-    {"at_ms": 290000, "type": "send_message", "src": "G", "dest": "C"},
-    {"at_ms": 300000, "type": "send_message", "src": "C", "dest": "J"},
-    {"at_ms": 310000, "type": "send_message", "src": "D", "dest": "F"},
-    {"at_ms": 320000, "type": "send_message", "src": "F", "dest": "A"},
-    {"at_ms": 330000, "type": "send_message", "src": "B", "dest": "I"},
-    {"at_ms": 340000, "type": "send_message", "src": "I", "dest": "D"},
-    {"at_ms": 350000, "type": "send_message", "src": "H", "dest": "A"},
-    {"at_ms": 360000, "type": "send_message", "src": "E", "dest": "G"},
-
-    {"at_ms": 390000, "type": "send_message", "src": "A", "dest": "I"},
-    {"at_ms": 400000, "type": "send_message", "src": "I", "dest": "A"},
-    {"at_ms": 410000, "type": "send_message", "src": "G", "dest": "F"},
-    {"at_ms": 420000, "type": "send_message", "src": "F", "dest": "G"},
-    {"at_ms": 430000, "type": "send_message", "src": "J", "dest": "B"},
-    {"at_ms": 440000, "type": "send_message", "src": "B", "dest": "J"},
-    {"at_ms": 450000, "type": "send_message", "src": "D", "dest": "C"},
-    {"at_ms": 460000, "type": "send_message", "src": "C", "dest": "D"},
-    {"at_ms": 470000, "type": "send_message", "src": "H", "dest": "F"},
-    {"at_ms": 480000, "type": "send_message", "src": "E", "dest": "A"},
-
-    {"at_ms": 510000, "type": "send_message", "src": "A", "dest": "J"},
-    {"at_ms": 520000, "type": "send_message", "src": "G", "dest": "C"},
-    {"at_ms": 530000, "type": "send_message", "src": "D", "dest": "I"},
-    {"at_ms": 540000, "type": "send_message", "src": "J", "dest": "F"},
-    {"at_ms": 550000, "type": "send_message", "src": "B", "dest": "G"},
-    {"at_ms": 560000, "type": "send_message", "src": "I", "dest": "D"},
-    {"at_ms": 570000, "type": "send_message", "src": "C", "dest": "J"},
-    {"at_ms": 580000, "type": "send_message", "src": "H", "dest": "A"},
-    {"at_ms": 590000, "type": "send_message", "src": "F", "dest": "G"}
+    {
+      "at_ms": 8000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "I"
+    },
+    {
+      "at_ms": 18000,
+      "type": "send_message",
+      "src": "I",
+      "dest": "A"
+    },
+    {
+      "at_ms": 28000,
+      "type": "send_message",
+      "src": "G",
+      "dest": "C"
+    },
+    {
+      "at_ms": 38000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "G"
+    },
+    {
+      "at_ms": 48000,
+      "type": "send_message",
+      "src": "J",
+      "dest": "A"
+    },
+    {
+      "at_ms": 58000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "J"
+    },
+    {
+      "at_ms": 68000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "F"
+    },
+    {
+      "at_ms": 78000,
+      "type": "send_message",
+      "src": "F",
+      "dest": "D"
+    },
+    {
+      "at_ms": 88000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "H"
+    },
+    {
+      "at_ms": 98000,
+      "type": "send_message",
+      "src": "H",
+      "dest": "B"
+    },
+    {
+      "at_ms": 123000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "I"
+    },
+    {
+      "at_ms": 133000,
+      "type": "send_message",
+      "src": "G",
+      "dest": "F"
+    },
+    {
+      "at_ms": 143000,
+      "type": "send_message",
+      "src": "J",
+      "dest": "C"
+    },
+    {
+      "at_ms": 153000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "I"
+    },
+    {
+      "at_ms": 163000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "G"
+    },
+    {
+      "at_ms": 173000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "J"
+    },
+    {
+      "at_ms": 183000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "D"
+    },
+    {
+      "at_ms": 193000,
+      "type": "send_message",
+      "src": "I",
+      "dest": "A"
+    },
+    {
+      "at_ms": 203000,
+      "type": "send_message",
+      "src": "F",
+      "dest": "G"
+    },
+    {
+      "at_ms": 213000,
+      "type": "send_message",
+      "src": "H",
+      "dest": "C"
+    },
+    {
+      "at_ms": 243000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "J"
+    },
+    {
+      "at_ms": 253000,
+      "type": "send_message",
+      "src": "J",
+      "dest": "I"
+    },
+    {
+      "at_ms": 263000,
+      "type": "send_message",
+      "src": "G",
+      "dest": "C"
+    },
+    {
+      "at_ms": 273000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "J"
+    },
+    {
+      "at_ms": 283000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "F"
+    },
+    {
+      "at_ms": 293000,
+      "type": "send_message",
+      "src": "F",
+      "dest": "A"
+    },
+    {
+      "at_ms": 303000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "I"
+    },
+    {
+      "at_ms": 313000,
+      "type": "send_message",
+      "src": "I",
+      "dest": "D"
+    },
+    {
+      "at_ms": 323000,
+      "type": "send_message",
+      "src": "H",
+      "dest": "A"
+    },
+    {
+      "at_ms": 333000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "G"
+    },
+    {
+      "at_ms": 363000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "I"
+    },
+    {
+      "at_ms": 373000,
+      "type": "send_message",
+      "src": "I",
+      "dest": "A"
+    },
+    {
+      "at_ms": 383000,
+      "type": "send_message",
+      "src": "G",
+      "dest": "F"
+    },
+    {
+      "at_ms": 393000,
+      "type": "send_message",
+      "src": "F",
+      "dest": "G"
+    },
+    {
+      "at_ms": 403000,
+      "type": "send_message",
+      "src": "J",
+      "dest": "B"
+    },
+    {
+      "at_ms": 413000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "J"
+    },
+    {
+      "at_ms": 423000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "C"
+    },
+    {
+      "at_ms": 433000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "D"
+    },
+    {
+      "at_ms": 443000,
+      "type": "send_message",
+      "src": "H",
+      "dest": "F"
+    },
+    {
+      "at_ms": 453000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 483000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "J"
+    },
+    {
+      "at_ms": 493000,
+      "type": "send_message",
+      "src": "G",
+      "dest": "C"
+    },
+    {
+      "at_ms": 503000,
+      "type": "send_message",
+      "src": "D",
+      "dest": "I"
+    },
+    {
+      "at_ms": 513000,
+      "type": "send_message",
+      "src": "J",
+      "dest": "F"
+    },
+    {
+      "at_ms": 523000,
+      "type": "send_message",
+      "src": "B",
+      "dest": "G"
+    },
+    {
+      "at_ms": 533000,
+      "type": "send_message",
+      "src": "I",
+      "dest": "D"
+    },
+    {
+      "at_ms": 543000,
+      "type": "send_message",
+      "src": "C",
+      "dest": "J"
+    },
+    {
+      "at_ms": 553000,
+      "type": "send_message",
+      "src": "H",
+      "dest": "A"
+    },
+    {
+      "at_ms": 563000,
+      "type": "send_message",
+      "src": "F",
+      "dest": "G"
+    }
   ]
 }
