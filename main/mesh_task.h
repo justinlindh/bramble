@@ -8,6 +8,7 @@
 #include "channel_key.h"
 #include "channel_msg.h"
 #include "public_channel.h"
+#include "airtime_budget.h"
 
 /* Shared mesh state — protected by mutex, read by UI task */
 typedef struct {
@@ -19,6 +20,7 @@ typedef struct {
     bool             radio_ok;
     int16_t          last_rx_rssi;
     int8_t           last_rx_snr;
+    airtime_budget_t airtime;
 } mesh_shared_state_t;
 
 /**

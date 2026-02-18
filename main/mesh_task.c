@@ -80,6 +80,7 @@ static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
 /* Reliability — ACK tracking for outgoing unicast messages */
 static pending_ack_table_t s_pending_acks;
+static airtime_budget_t    s_airtime;
 
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
@@ -205,9 +206,15 @@ static int send_beacon(void) {
     size_t beacon_wire_len = bramble_beacon_wire_size(&beacon);
     int ret = radio_transmit(buf, (uint8_t)beacon_wire_len);
     if (ret == 0) {
+        uint32_t airtime_ms = 30 + (uint32_t)(beacon_wire_len * 4);
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        airtime_budget_refill(&s_airtime, now_ms);
+        airtime_budget_debit(&s_airtime, 0x03, airtime_ms);  /* broadcast tier */
+
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.beacon_tx_count++;
         s_shared.packets_tx++;
+        s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
         ESP_LOGI(TAG, "Beacon TX #%" PRIu32 " (neighbors: %d)",
                  s_shared.beacon_tx_count, neighbor_count(&s_neighbors));
@@ -1026,8 +1033,15 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
 
     int ret = radio_transmit(buf, (uint8_t)total);
     if (ret == 0) {
+        /* Estimate airtime: SF9 BW125kHz ≈ 3.7ms/byte + 30ms preamble */
+        uint32_t airtime_ms = 30 + (uint32_t)(total * 4);
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        airtime_budget_refill(&s_airtime, now_ms);
+        airtime_budget_debit(&s_airtime, 0x01, airtime_ms);  /* normal tier */
+
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
+        s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
 
         /* Register for ACK tracking (unicast only) */
@@ -1181,6 +1195,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     reverse_route_init(&s_reverse_routes);
     discovery_init(&s_pending_disc);
     pending_ack_init(&s_pending_acks);
+    airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 

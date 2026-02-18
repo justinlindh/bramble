@@ -52,6 +52,7 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "packets_tx", st.packets_tx);
     cJSON_AddNumberToObject(result, "packets_rx", st.packets_rx);
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+    cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
 #ifdef CONFIG_BRAMBLE_HAS_GPS
     cJSON_AddBoolToObject(result, "gps_available", true);
 #else
@@ -136,10 +137,14 @@ static int handle_get_routes(const cJSON *params, cJSON *result) {
 /* bramble.getAirtime */
 static int handle_get_airtime(const cJSON *params, cJSON *result) {
     (void)params;
-    /* TODO: expose airtime_budget_t from mesh task for real data */
-    cJSON_AddNumberToObject(result, "critical_remaining_ms", 0);
-    cJSON_AddNumberToObject(result, "normal_remaining_ms", 0);
-    cJSON_AddNumberToObject(result, "broadcast_remaining_ms", 0);
+    static mesh_shared_state_t st;
+    mesh_get_state(&st);
+    /* Refill before reporting so values are current */
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    airtime_budget_refill(&st.airtime, now_ms);
+    cJSON_AddNumberToObject(result, "critical_remaining_ms", airtime_budget_remaining(&st.airtime, 0x02));
+    cJSON_AddNumberToObject(result, "normal_remaining_ms", airtime_budget_remaining(&st.airtime, 0x01));
+    cJSON_AddNumberToObject(result, "broadcast_remaining_ms", airtime_budget_remaining(&st.airtime, 0x03));
     cJSON_AddNumberToObject(result, "critical_max_ms", AIRTIME_BUDGET_CRITICAL_MS);
     cJSON_AddNumberToObject(result, "normal_max_ms", AIRTIME_BUDGET_NORMAL_MS);
     cJSON_AddNumberToObject(result, "broadcast_max_ms", AIRTIME_BUDGET_BROADCAST_MS);
@@ -637,6 +642,7 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     /* Node address */
     char buf[12];
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
+    cJSON_AddStringToObject(result, "pubkey_hash", addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
 
     /* Radio config — read actual runtime state */
     radio_config_t rcfg;

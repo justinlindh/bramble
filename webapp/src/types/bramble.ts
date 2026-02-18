@@ -205,8 +205,9 @@ export interface ProbeResponse {
   rssi: number;
   snr: number;
   pathLen: number;
-  relayPath: number[];
-  receivedAt: number;
+  relayPath?: number[];
+  latencyMs?: number;
+  receivedAt?: number;
 }
 
 export interface ProbeResult {
