@@ -61,38 +61,25 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
         return;
     }
 
-    /* Send JSON + newline, chunked to negotiated MTU - 3 */
-    const size_t total = len + 1; /* +1 for \n */
-    uint16_t max_payload = (s_mtu > 3) ? (s_mtu - 3) : BLE_MTU_DEFAULT;
-    ESP_LOGI(TAG, "Sending notify %u bytes (mtu=%u, chunk=%u)", (unsigned)total, s_mtu, max_payload);
+    /*
+     * Send JSON + newline as a single mbuf chain.
+     * NimBLE handles L2CAP fragmentation internally based on negotiated MTU,
+     * so we don't need to chunk manually — just build one mbuf with the full payload.
+     */
+    ESP_LOGI(TAG, "Sending notify %u bytes (mtu=%u)", (unsigned)(len + 1), s_mtu);
 
-    for (size_t off = 0; off < total; ) {
-        size_t chunk = total - off;
-        if (chunk > max_payload) chunk = max_payload;
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(json, len);
+    if (!om) {
+        ESP_LOGW(TAG, "Failed to allocate mbuf for notify");
+        return;
+    }
+    /* Append newline */
+    uint8_t nl = '\n';
+    os_mbuf_append(om, &nl, 1);
 
-        /* Build chunk: data + trailing \n */
-        char tmp[256];
-        if (chunk > sizeof(tmp)) chunk = sizeof(tmp);
-        size_t copied = 0;
-        while (copied < chunk && off + copied < len) {
-            tmp[copied] = json[off + copied];
-            copied++;
-        }
-        if (copied < chunk && off + copied == len) {
-            tmp[copied++] = '\n';
-        }
-
-        struct os_mbuf *om = ble_hs_mbuf_from_flat(tmp, copied);
-        if (!om) {
-            ESP_LOGW(TAG, "Failed to allocate mbuf for notify");
-            return;
-        }
-        int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
-        if (rc != 0) {
-            ESP_LOGW(TAG, "Notify failed: %d (chunk %u bytes)", rc, (unsigned)copied);
-            return;
-        }
-        off += copied;
+    int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "Notify failed: %d (%u bytes)", rc, (unsigned)(len + 1));
     }
 }
 
