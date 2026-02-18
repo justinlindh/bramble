@@ -4,6 +4,7 @@ import type { MessageTier } from '../../types/bramble';
 import { sendMessage, shareLocationOnce } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
+import { showToast } from '../../components/Toast';
 import { ShareLocationToggle } from './ShareLocationButton';
 import type { LocationAttach } from './ShareLocationButton';
 import styles from './ComposeBar.module.css';
@@ -54,7 +55,6 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
   const [tier, setTier] = useState<MessageTier>('normal');
   const [locAttach, setLocAttach] = useState<LocationAttach>('off');
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isConnected = useStore(s => s.connectionState === 'connected');
   const gpsEnabled = useStore(s => s.config?.location?.enabled ?? false);
@@ -75,7 +75,6 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
     const trimmed = text.trim();
     if (!trimmed || !isConnected || sending) return;
 
-    setError('');
     setSending(true);
     setText('');
 
@@ -89,7 +88,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
         shareLocationOnce(dest, locTier as import('../../types/bramble').LocationTier).catch(() => {});
       }
     } catch (e) {
-      setError((e as Error).message ?? 'Send failed');
+      showToast((e as Error).message ?? 'Send failed', 'error', 5000);
       // restore text so user can retry
       setText(trimmed);
     } finally {
@@ -118,13 +117,6 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
 
   return (
     <div className={styles.compose}>
-      {error && (
-        <div className={styles.error} role="alert">
-          ⚠ {error}
-          <button className={styles.errorDismiss} onClick={() => setError('')}>✕</button>
-        </div>
-      )}
-
       {/* ── Options row (tier, location, counter) ── */}
       <div className={styles.controls}>
         {!isBroadcastConv && (
