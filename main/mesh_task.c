@@ -59,6 +59,7 @@ static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
+static char                s_node_name[17] = "";  /* loaded from NVS at startup */
 
 /* Routing state */
 static routing_table_t            s_routes;
@@ -176,12 +177,20 @@ static int send_beacon(void) {
     beacon.network_time = 0;  /* TODO: time sync */
     beacon.time_confidence = 0xFFFF;  /* no confidence */
 
+    /* Include node name in beacon (if set) */
+    if (s_node_name[0] != '\0') {
+        beacon.name_len = (uint8_t)strlen(s_node_name);
+        if (beacon.name_len > BEACON_NAME_MAX) beacon.name_len = BEACON_NAME_MAX;
+        memcpy(beacon.name, s_node_name, beacon.name_len);
+        beacon.name[beacon.name_len] = '\0';
+    }
+
     /* HMAC auth — covers ALL beacon fields (excluding auth_hmac itself) */
     /* Serialize beacon to get canonical byte representation, then HMAC everything
      * up to but not including the auth_hmac field at the end */
     uint8_t hmac_input[BEACON_SIZE];
     bramble_beacon_serialize(&beacon, hmac_input, sizeof(hmac_input));
-    /* HMAC over header(12) + payload(20) = 32 bytes, excludes auth_hmac[8] at end */
+    /* HMAC over header(12) + payload(20) = 32 bytes, excludes auth_hmac[12] at end */
     size_t hmac_len = BEACON_SIZE - sizeof(beacon.auth_hmac);
     uint8_t full_hmac[32];
     crypto_hmac_sha256(s_identity->private_key, 32, hmac_input, hmac_len, full_hmac);
@@ -193,7 +202,8 @@ static int send_beacon(void) {
         return -1;
     }
 
-    int ret = radio_transmit(buf, BEACON_SIZE);
+    size_t beacon_wire_len = bramble_beacon_wire_size(&beacon);
+    int ret = radio_transmit(buf, (uint8_t)beacon_wire_len);
     if (ret == 0) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.beacon_tx_count++;
@@ -240,6 +250,13 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     uint32_t t = now_ms();
     int idx = neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr,
                               beacon.pubkey_hash, t);
+    /* Store peer name if present */
+    if (idx >= 0 && beacon.name_len > 0) {
+        memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
+        s_neighbors.entries[idx].name[beacon.name_len] = '\0';
+    } else if (idx >= 0) {
+        s_neighbors.entries[idx].name[0] = '\0';
+    }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_shared.beacon_rx_count++;
@@ -1144,6 +1161,17 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
 
 void mesh_task_start(bramble_identity_t *identity) {
     s_identity = identity;
+
+    /* Load node name from NVS */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(s_node_name);
+        if (nvs_get_str(nvs, "node_name", s_node_name, &len) != ESP_OK) {
+            s_node_name[0] = '\0';
+        }
+        nvs_close(nvs);
+    }
+    ESP_LOGI(TAG, "Node name: %s", s_node_name[0] ? s_node_name : "(none)");
 
     neighbor_init(&s_neighbors);
     dedup_init(&s_dedup);

@@ -113,6 +113,8 @@ typedef struct {
     uint32_t broken_next_hop;
 } bramble_rerr_t;
 
+#define BEACON_NAME_MAX      16
+
 typedef struct {
     bramble_header_t header;
     uint32_t src_addr;
@@ -125,6 +127,9 @@ typedef struct {
     uint32_t network_time;
     uint16_t time_confidence;
     uint8_t  auth_hmac[12];
+    /* Optional: node name (appended after fixed fields) */
+    uint8_t  name_len;
+    char     name[BEACON_NAME_MAX + 1];
 } bramble_beacon_t;
 
 typedef struct {
@@ -182,6 +187,7 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t *p, const uint8_t *buf, size_t
 
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t *p, uint8_t *buf, size_t len);
 esp_err_t bramble_beacon_deserialize(bramble_beacon_t *p, const uint8_t *buf, size_t len);
+size_t    bramble_beacon_wire_size(const bramble_beacon_t *p);
 
 esp_err_t bramble_key_exchange_serialize(const bramble_key_exchange_t *p, uint8_t *buf, size_t len);
 esp_err_t bramble_key_exchange_deserialize(bramble_key_exchange_t *p, const uint8_t *buf, size_t len);

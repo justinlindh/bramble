@@ -159,7 +159,9 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t *p, const uint8_t *buf, size_t
 
 /* BEACON (40 bytes) */
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t *p, uint8_t *buf, size_t len) {
-    if (len < BEACON_SIZE) return ESP_ERR_INVALID_SIZE;
+    uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
+    size_t need = BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
+    if (len < need) return ESP_ERR_INVALID_SIZE;
     esp_err_t r = bramble_header_serialize(&p->header, buf, len);
     if (r != ESP_OK) return r;
     put_be32(buf + B, p->src_addr);
@@ -172,8 +174,18 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t *p, uint8_t *buf, size
     put_be32(buf + B + 14, p->network_time);
     put_be16(buf + B + 18, p->time_confidence);
     memcpy(buf + B + 20, p->auth_hmac, 12);
+    if (nlen > 0) {
+        buf[BEACON_SIZE] = nlen;
+        memcpy(buf + BEACON_SIZE + 1, p->name, nlen);
+    }
     return ESP_OK;
 }
+
+size_t bramble_beacon_wire_size(const bramble_beacon_t *p) {
+    uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
+    return BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
+}
+
 esp_err_t bramble_beacon_deserialize(bramble_beacon_t *p, const uint8_t *buf, size_t len) {
     if (len < BEACON_SIZE) return ESP_ERR_INVALID_SIZE;
     esp_err_t r = bramble_header_deserialize(&p->header, buf, len);
@@ -188,6 +200,17 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t *p, const uint8_t *buf, si
     p->network_time    = get_be32(buf + B + 14);
     p->time_confidence = get_be16(buf + B + 18);
     memcpy(p->auth_hmac, buf + B + 20, 12);
+    /* Optional name after fixed fields */
+    p->name_len = 0;
+    p->name[0] = '\0';
+    if (len > BEACON_SIZE) {
+        p->name_len = buf[BEACON_SIZE];
+        if (p->name_len > BEACON_NAME_MAX) p->name_len = BEACON_NAME_MAX;
+        if (len >= (size_t)(BEACON_SIZE + 1 + p->name_len)) {
+            memcpy(p->name, buf + BEACON_SIZE + 1, p->name_len);
+        }
+        p->name[p->name_len] = '\0';
+    }
     return ESP_OK;
 }
 

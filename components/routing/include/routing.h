@@ -23,6 +23,7 @@ typedef struct {
     uint8_t  delivery_rate;     /* EMA delivery rate 0-255 (255 = 100%) */
     uint8_t  airtime_remaining; /* last reported airtime % (from beacon) */
     uint16_t avg_latency_ms;    /* EMA round-trip latency */
+    char     name[17];          /* node name from beacon (max 16 chars + null) */
 } neighbor_entry_t;
 
 typedef struct {

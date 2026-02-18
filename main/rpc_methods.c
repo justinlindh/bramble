@@ -91,6 +91,9 @@ static int handle_get_neighbors(const cJSON *params, cJSON *result) {
         cJSON_AddNumberToObject(obj, "rssi", n->rssi);
         cJSON_AddNumberToObject(obj, "snr", n->snr);
         cJSON_AddNumberToObject(obj, "last_seen_ms", n->last_heard);
+        if (n->name[0] != '\0') {
+            cJSON_AddStringToObject(obj, "name", n->name);
+        }
         cJSON_AddItemToArray(arr, obj);
     }
     return 0;

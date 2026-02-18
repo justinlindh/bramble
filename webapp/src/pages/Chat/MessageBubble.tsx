@@ -64,19 +64,20 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
         <time className={styles.time} dateTime={new Date(message.timestampMs).toISOString()}>
           {formatTime(message.timestampMs)}
         </time>
-        {isOut && hasRelayPath && (
-          <span
-            className={styles.routeToggle}
-            onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
-            title={expanded ? 'Hide route' : 'Show route'}
-            role="button"
-            aria-label={expanded ? 'Hide route' : 'Show route'}
-          >
-            {expanded ? '▾' : '▸'}
-          </span>
-        )}
         {isOut && (
           <DeliveryBadge status={message.status} tier={message.tier} />
+        )}
+        {isOut && hasRelayPath && (
+          <button
+            className={`${styles.routeToggle} ${expanded ? styles.routeToggleActive : ''}`}
+            onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+            title={expanded ? 'Hide route' : 'Show route'}
+            aria-label={expanded ? 'Hide route' : 'Show route'}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="5" cy="6" r="2" /><circle cx="19" cy="18" r="2" /><path d="M7 6h6a4 4 0 0 1 4 4v2a4 4 0 0 1-4 4H5" />
+            </svg>
+          </button>
         )}
         {message.tier === 'critical' && (
           <span className={styles.tierTag} title="Critical priority"><IconCritical size={14} /></span>
