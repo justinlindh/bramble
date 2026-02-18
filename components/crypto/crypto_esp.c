@@ -9,7 +9,15 @@
 #include "mbedtls/ecdh.h"
 #include "mbedtls/ecp.h"
 #include "esp_random.h"
+#include "esp_log.h"
 #include <string.h>
+
+/* RNG callback for mbedtls_ecp_mul (required for side-channel blinding) */
+static int crypto_rng_callback(void *ctx, unsigned char *buf, size_t len) {
+    (void)ctx;
+    esp_fill_random(buf, len);
+    return 0;
+}
 
 int crypto_sha256(const uint8_t *data, size_t data_len, uint8_t *hash) {
     mbedtls_sha256(data, data_len, hash, 0);
@@ -116,7 +124,7 @@ int crypto_x25519_dh(const uint8_t *private_key, const uint8_t *peer_public_key,
     mbedtls_mpi_read_binary_le(&Qp.MBEDTLS_PRIVATE(X), peer_public_key, 32);
     mbedtls_mpi_lset(&Qp.MBEDTLS_PRIVATE(Z), 1);
 
-    if (mbedtls_ecp_mul(&grp, &R, &d, &Qp, NULL, NULL) == 0) {
+    if (mbedtls_ecp_mul(&grp, &R, &d, &Qp, crypto_rng_callback, NULL) == 0) {
         uint8_t buf[32];
         if (mbedtls_mpi_write_binary_le(&R.MBEDTLS_PRIVATE(X), buf, 32) == 0) {
             memcpy(shared_secret, buf, 32);
@@ -151,7 +159,8 @@ int crypto_generate_identity(bramble_identity_t *id) {
     mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519);
     mbedtls_mpi_read_binary_le(&d, id->private_key, 32);
 
-    int ret = mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, NULL, NULL);
+    /* RNG callback required for side-channel blinding on ESP-IDF mbedtls */
+    int ret = mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, crypto_rng_callback, NULL);
     if (ret == 0) {
         mbedtls_mpi_write_binary_le(&Q.MBEDTLS_PRIVATE(X), id->public_key, 32);
     }
