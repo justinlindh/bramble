@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE    2048
@@ -308,6 +309,13 @@ static const httpd_uri_t config_post_uri = {
     .handler = config_post_handler,
 };
 
+/* Called by httpd when any socket is closed (clean or LRU purge) */
+static void ws_close_fn(httpd_handle_t hd, int sockfd)
+{
+    client_remove(sockfd);
+    close(sockfd);
+}
+
 static const httpd_uri_t ws_uri = {
     .uri          = "/ws",
     .method       = HTTP_GET,
@@ -323,6 +331,8 @@ int ws_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_open_sockets = MAX_WS_CLIENTS + 2; /* +2 for HTTP clients */
+    config.lru_purge_enable = true;  /* close stale connections when slots full */
+    config.close_fn = ws_close_fn;   /* clean up tracked client FDs on close */
 
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) {
