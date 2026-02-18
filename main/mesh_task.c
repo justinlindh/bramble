@@ -206,10 +206,10 @@ static int send_beacon(void) {
     size_t beacon_wire_len = bramble_beacon_wire_size(&beacon);
     int ret = radio_transmit(buf, (uint8_t)beacon_wire_len);
     if (ret == 0) {
-        uint32_t airtime_ms = 30 + (uint32_t)(beacon_wire_len * 4);
-        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-        airtime_budget_refill(&s_airtime, now_ms);
-        airtime_budget_debit(&s_airtime, 0x03, airtime_ms);  /* broadcast tier */
+        uint32_t airtime_est = 30 + (uint32_t)(beacon_wire_len * 4);
+        uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        airtime_budget_refill(&s_airtime, t_now);
+        airtime_budget_debit(&s_airtime, 0x03, airtime_est);  /* broadcast tier */
 
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.beacon_tx_count++;
@@ -1034,10 +1034,10 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     int ret = radio_transmit(buf, (uint8_t)total);
     if (ret == 0) {
         /* Estimate airtime: SF9 BW125kHz ≈ 3.7ms/byte + 30ms preamble */
-        uint32_t airtime_ms = 30 + (uint32_t)(total * 4);
-        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-        airtime_budget_refill(&s_airtime, now_ms);
-        airtime_budget_debit(&s_airtime, 0x01, airtime_ms);  /* normal tier */
+        uint32_t airtime_est = 30 + (uint32_t)(total * 4);
+        uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        airtime_budget_refill(&s_airtime, t_now);
+        airtime_budget_debit(&s_airtime, 0x01, airtime_est);  /* normal tier */
 
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;

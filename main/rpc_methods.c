@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 
