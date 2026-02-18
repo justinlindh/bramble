@@ -6,18 +6,40 @@
 
 ---
 
-## Phase 1: Identity & NVS Persistence ✅ (mostly done)
+## Phase 1A: Frequency Plan System
+*Estimated: 30 min*
+
+Regulatory-compliant radio configuration with per-region frequency plans.
+
+### Task 1A.1: Create freq_plan component
+- New `components/freq_plan/` with `freq_plan.h` and `freq_plan.c`
+- `bramble_freq_plan_t` struct: name, freq range, default freq, max TX power, duty cycle limits, enforcement flag
+- Predefined plans: `FREQ_PLAN_US915`, `FREQ_PLAN_EU868`, `FREQ_PLAN_AU915`
+- `freq_plan_get_default()` returns compile-time default (Kconfig)
+- `freq_plan_validate_tx()` — checks freq bounds + TX power cap before any transmission
+- `freq_plan_get_duty_cycle_pct()` — returns max duty cycle (100=unlimited for US, 1 for EU)
+- **Kconfig:** `BRAMBLE_REGION` choice (US915/EU868/AU915) in `main/Kconfig.projbuild`
+- **Files:** `components/freq_plan/include/freq_plan.h`, `components/freq_plan/freq_plan.c`, `components/freq_plan/CMakeLists.txt`
+
+### Task 1A.2: Wire freq_plan into radio and airtime
+- `radio_init()` reads freq plan for frequency + TX power
+- `airtime_can_send()` respects freq plan duty cycle
+- Future: NVS runtime override, webapp Config page selection
+
+---
+
+## Phase 1B: Identity & NVS Persistence ✅ (mostly done)
 *Estimated: 30 min*
 
 The `identity` component already has NVS load/save. Wire it into main.c.
 
-### Task 1.1: Wire identity into main.c
+### Task 1B.1: Wire identity into main.c
 - Load identity from NVS on boot; generate + save if first boot
 - Display real address (derived from X25519 pubkey) on OLED
 - Log public key hash for debugging
 - **Files:** `main/main.c`
 
-### Task 1.2: Verify NVS persistence across reboots
+### Task 1B.2: Verify NVS persistence across reboots
 - Flash, note address, reset, confirm same address
 - **Validation:** Address stable across 3 reboots
 
