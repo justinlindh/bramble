@@ -10,6 +10,7 @@
 #include "button.h"
 #include "ui.h"
 #include "crypto.h"
+#include "identity.h"
 
 static const char *TAG = "bramble";
 
@@ -35,6 +36,7 @@ static void show_splash(void) {
 
 /* ── Screen renderers ───────────────────────────────────────────────── */
 
+static bramble_identity_t g_identity;
 static uint32_t my_addr = 0;
 static uint32_t boot_time_ms = 0;
 
@@ -126,13 +128,23 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     ESP_LOGI(TAG, "NVS initialized");
 
-    /* Generate node address from random bytes */
-    uint8_t addr_bytes[4];
-    crypto_random(addr_bytes, 4);
-    my_addr = (uint32_t)(addr_bytes[0] | (addr_bytes[1] << 8) |
-                         (addr_bytes[2] << 16) | (addr_bytes[3] << 24));
-    /* TODO: persist in NVS and derive from keypair */
-    ESP_LOGI(TAG, "Node address: %08" PRIX32, my_addr);
+    /* Load or generate persistent identity */
+    if (identity_load(&g_identity) == 0) {
+        ESP_LOGI(TAG, "Identity loaded from NVS");
+    } else {
+        ESP_LOGI(TAG, "No identity found, generating new keypair...");
+        if (identity_generate_and_save(&g_identity) != 0) {
+            ESP_LOGE(TAG, "Identity generation failed!");
+            // Fallback to random address
+            uint8_t addr_bytes[4];
+            crypto_random(addr_bytes, 4);
+            g_identity.address = (uint32_t)(addr_bytes[0] | (addr_bytes[1] << 8) |
+                                            (addr_bytes[2] << 16) | (addr_bytes[3] << 24));
+        }
+    }
+    my_addr = g_identity.address;
+    ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")",
+             my_addr, g_identity.pubkey_hash);
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
