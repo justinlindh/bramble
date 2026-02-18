@@ -214,6 +214,8 @@ function normalizeStatus(raw: any): NodeStatus {
     airtimeUsedMs: raw.airtimeUsedMs ?? 0,
     position: raw.position,
     gpsAvailable: raw.gps_available ?? raw.gpsAvailable ?? false,
+    batteryMv: raw.battery_mv ?? raw.batteryMv,
+    batteryPct: raw.battery_pct ?? raw.batteryPct,
   } as NodeStatus;
 }
 

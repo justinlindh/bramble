@@ -51,6 +51,11 @@ export function SystemInfo({ status, config }: Props) {
       mono: true,
       color: heapDanger ? 'danger' : heapWarning ? 'warning' : undefined,
     },
+    ...(status.batteryPct !== undefined ? [{
+      label: 'Battery',
+      value: `${status.batteryPct}% (${status.batteryMv ?? '?'} mV)`,
+      color: status.batteryPct < 10 ? 'danger' as const : status.batteryPct < 25 ? 'warning' as const : undefined,
+    }] : []),
     {
       label: 'Firmware',
       value: status.fwVersion,
