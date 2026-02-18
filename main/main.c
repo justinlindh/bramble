@@ -305,7 +305,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "=== BOOT STAGE: battery_init ===");
     battery_init();
-    ESP_LOGI(TAG, "Battery: %u mV (%u%%)", battery_read_mv(), battery_read_pct());
+    ESP_LOGI(TAG, "Battery: %" PRIu32 " mV (%u%%)", battery_read_mv(), battery_read_pct());
 
     /* Read connectivity mode */
     conn_mode_t boot_mode = conn_mode_get();

@@ -14,6 +14,8 @@
 #include "battery.h"
 #include "ota.h"
 #include "esp_sleep.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
