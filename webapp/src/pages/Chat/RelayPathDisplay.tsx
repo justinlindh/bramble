@@ -14,14 +14,16 @@ function shortAddr(addr: number): string {
 export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
   if (path.length === 0) return null;
 
-  const hops = [{ addr: myAddr, rssi: 0 }, ...path];
+  /* path already includes self as first hop from firmware */
+  const hops = path;
   const lastIndex = hops.length - 1;
 
   return (
-    <div className={styles.path} title="Critical message relay path">
+    <div className={styles.path} title="Message relay path">
       <span className={styles.pathLabel}>VIA</span>
       {hops.map((hop, i) => {
-        const cls = i === 0 ? styles.hopSelf : i === lastIndex ? styles.hopDest : styles.hop;
+        const isSelf = hop.addr === myAddr;
+        const cls = isSelf ? styles.hopSelf : i === lastIndex ? styles.hopDest : styles.hop;
         return (
           <React.Fragment key={`${hop.addr}-${i}`}>
             {i > 0 && <span className={styles.arrow}>→</span>}
