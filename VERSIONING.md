@@ -71,6 +71,7 @@ Independent semver. Each release documents which bramble-go version it depends o
 | bramble-go | Protocol Version | Firmware (min) |
 |------------|------------------|----------------|
 | v0.1.0     | 0.1.0            | v0.1.0         |
+| v0.2.0     | 0.1.0            | v0.1.0         |
 
 ## Adding a New RPC Method
 

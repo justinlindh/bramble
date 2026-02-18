@@ -86,6 +86,17 @@ See [`simulator/README.md`](simulator/README.md) for details.
 - [`docs/field-test-5node.md`](docs/field-test-5node.md) — 5-node field test plan
 - [`docs/field-test-20node.md`](docs/field-test-20node.md) — 20-node field test plan
 
+## API & SDK
+
+Bramble exposes a JSON-RPC 2.0 API for external control. The API spec, Go SDK, and CLI are maintained in separate repos:
+
+| Repo | Description |
+|------|-------------|
+| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI spec for the JSON-RPC interface |
+| [bramble-go](https://git.idiotica.org/dumbot/bramble-go) | Go SDK — connect via Serial, WebSocket, or BLE |
+| [bramble-cli](https://git.idiotica.org/dumbot/bramble-cli) | CLI tool built on bramble-go |
+| [VERSIONING.md](VERSIONING.md) | Version compatibility matrix |
+
 ## Status
 
 The protocol layer is implemented and tested in software. Hardware-dependent work (SX1262 SPI driver, FreeRTOS tasks, OLED/BLE/OTA) is paused pending hardware availability.
