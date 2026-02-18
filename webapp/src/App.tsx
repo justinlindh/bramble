@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
-import { disconnect, initMessageStore } from './store/actions';
+import { disconnect } from './store/actions';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -44,9 +44,7 @@ export default function App() {
   const prevState = useRef(connectionState);
   const errorToastId = useRef<string | null>(null);
 
-  useEffect(() => {
-    initMessageStore();
-  }, []);
+  // initMessageStore is now called during connect() with the node address
 
   // Toast notifications for connection state changes
   useEffect(() => {
