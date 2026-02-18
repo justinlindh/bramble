@@ -284,6 +284,9 @@ export async function loadMessages(sinceId?: number): Promise<void> {
     const dir = (m as any).direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
     const isBroadcast = dir === 'broadcast_in' || dir === 'broadcast_out';
+    // Skip self-addressed messages (firmware bug: old messages stored with wrong dest)
+    const myAddr = store.config?.identity?.address ?? 0;
+    if (!isBroadcast && fromAddr === toAddr && fromAddr === myAddr) continue;
     // Convert uptime-based timestamp to wall clock: now - (uptime - msg_time)
     const msgUptimeS = (m as any).timestamp_s ?? 0;
     const wallMs = deviceUptime > 0 && msgUptimeS > 0
