@@ -1,5 +1,6 @@
 #include "dummy_traffic.h"
 #include "packet.h"
+#include "crypto.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -68,10 +69,8 @@ void dummy_traffic_record_send(dummy_traffic_ctx_t *ctx, uint32_t airtime_ms, ui
 int dummy_traffic_build_packet(uint8_t *out, size_t size, uint32_t my_addr) {
     if (size < HEADER_SIZE) return -1;
 
-    // Fill entire packet with random bytes first (looks like ciphertext)
-    for (size_t i = 0; i < size; i++) {
-        out[i] = (uint8_t)(rand() & 0xFF);
-    }
+    // Fill entire packet with CSPRNG bytes (indistinguishable from ciphertext)
+    crypto_random(out, size);
 
     // Build a proper DATA header
     bramble_header_t hdr;
@@ -81,13 +80,16 @@ int dummy_traffic_build_packet(uint8_t *out, size_t size, uint32_t my_addr) {
     hdr.flags = FLAG_ENCRYPT;  // Looks like encrypted data
     hdr.hop_limit = 1;         // Don't relay — local cover traffic only
 
-    // Random dest_addr, avoiding broadcast (0xFFFFFFFF) and null (0x00000000)
-    do {
-        hdr.dest_addr = ((uint32_t)rand() << 16) | (uint32_t)rand();
-    } while (hdr.dest_addr == 0xFFFFFFFF || hdr.dest_addr == 0x00000000);
+    // Random dest_addr from CSPRNG, avoiding broadcast and null
+    uint8_t rnd[8];
+    crypto_random(rnd, sizeof(rnd));
+    memcpy(&hdr.dest_addr, rnd, 4);
+    if (hdr.dest_addr == 0xFFFFFFFF || hdr.dest_addr == 0x00000000) {
+        hdr.dest_addr = 0x12345678;  // fallback to arbitrary non-special value
+    }
 
-    // Random packet_id
-    hdr.packet_id = ((uint32_t)rand() << 16) | (uint32_t)rand();
+    // Random packet_id from CSPRNG
+    memcpy(&hdr.packet_id, rnd + 4, 4);
 
     // Serialize header into the buffer
     bramble_header_serialize(&hdr, out, size);
