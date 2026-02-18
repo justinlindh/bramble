@@ -1,9 +1,10 @@
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
 import { disconnect, initMessageStore } from './store/actions';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastContainer, showToast, dismissToast } from './components/Toast';
 import { IconChat, IconNodes, IconConfig, IconStats, IconMap } from './components/Icons';
 import { Chat } from './pages/Chat/Chat';
 import { Nodes } from './pages/Nodes/Nodes';
@@ -38,14 +39,35 @@ export default function App() {
   const activeTab = useStore(s => s.activeTab) as Tab;
   const setActiveTab = useStore(s => s.setActiveTab);
   const connectionState = useStore(s => s.connectionState);
+  const connectionError = useStore(s => s.connectionError);
   const isConnected = connectionState === 'connected';
+  const prevState = useRef(connectionState);
+  const errorToastId = useRef<string | null>(null);
 
   useEffect(() => {
     initMessageStore();
   }, []);
 
-  // Show the connection overlay whenever we're not in a live connected state
-  const showOverlay = connectionState !== 'connected';
+  // Toast notifications for connection state changes
+  useEffect(() => {
+    const prev = prevState.current;
+    prevState.current = connectionState;
+
+    // Clear old error toast when state changes
+    if (errorToastId.current && connectionState !== 'error') {
+      dismissToast(errorToastId.current);
+      errorToastId.current = null;
+    }
+
+    if (connectionState === 'error' && connectionError) {
+      errorToastId.current = showToast(connectionError, 'warning', 0); // persistent until resolved
+    } else if (connectionState === 'connected' && prev === 'error') {
+      showToast('Reconnected', 'success', 3000);
+    }
+  }, [connectionState, connectionError]);
+
+  // Show connection overlay for initial connect, not during auto-reconnect
+  const showOverlay = connectionState !== 'connected' && connectionState !== 'error';
 
   const handleConnectionToggle = () => {
     if (isConnected) {
@@ -66,7 +88,9 @@ export default function App() {
         <span className={styles.statusArea}>
           <StatusDot state={connectionState} />
           <span className={styles.statusLabel}>
-            {connectionState === 'connected' ? 'Connected' : connectionState}
+            {connectionState === 'connected' ? 'Connected'
+             : connectionState === 'error' ? 'Reconnecting…'
+             : connectionState}
           </span>
         </span>
 
@@ -118,6 +142,9 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {/* Toast notifications */}
+      <ToastContainer />
 
       {/* Connection overlay (shown when disconnected/connecting) */}
       {showOverlay && <ConnectionOverlay />}
