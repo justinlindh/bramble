@@ -86,6 +86,20 @@ static airtime_budget_t    s_airtime;
 static bramble_channel_t   s_channels[MAX_CHANNELS];
 static int                 s_num_channels = 0;
 
+/* Mailbox — store-and-forward for offline neighbors */
+static bool s_mailbox_enabled = false;
+#define MAILBOX_BEACON_FLAG 0x01
+#define MAX_MAILBOX_MSGS 20
+#define MAILBOX_EXPIRY_MS (3600 * 1000)  /* 1 hour */
+typedef struct {
+    uint32_t dest_addr;
+    uint8_t  raw_pkt[256];
+    uint8_t  raw_len;
+    uint32_t timestamp;
+    bool     used;
+} mailbox_entry_t;
+static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
+
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
 /* Forward declarations */
@@ -174,7 +188,7 @@ static int send_beacon(void) {
     beacon.battery_pct = 100;  /* TODO: read ADC */
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
-    beacon.flags = 0;
+    beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
     beacon.network_time = 0;  /* TODO: time sync */
     beacon.time_confidence = 0xFFFF;  /* no confidence */
 
@@ -275,6 +289,11 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     if (idx >= 0) {
         ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)",
                  beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors));
+
+        /* Mailbox: flush any stored messages for this newly-seen neighbor */
+        if (s_mailbox_enabled) {
+            mailbox_flush_for(beacon.src_addr);
+        }
     }
 
     /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI */
@@ -675,6 +694,53 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 
 /* ── Data forwarding for multi-hop ──────────────────────────────────── */
 
+/* ── Mailbox helpers ─────────────────────────────────────────────────── */
+
+static bool mailbox_store(uint32_t dest_addr, const uint8_t *raw, uint8_t raw_len) {
+    if (!s_mailbox_enabled || raw_len > 255) return false;
+
+    /* Find free slot (or oldest) */
+    int slot = -1;
+    uint32_t oldest_ts = UINT32_MAX;
+    int oldest_slot = 0;
+    for (int i = 0; i < MAX_MAILBOX_MSGS; i++) {
+        if (!s_mailbox[i].used) { slot = i; break; }
+        if (s_mailbox[i].timestamp < oldest_ts) {
+            oldest_ts = s_mailbox[i].timestamp;
+            oldest_slot = i;
+        }
+    }
+    if (slot < 0) slot = oldest_slot; /* evict oldest */
+
+    s_mailbox[slot].dest_addr = dest_addr;
+    memcpy(s_mailbox[slot].raw_pkt, raw, raw_len);
+    s_mailbox[slot].raw_len = raw_len;
+    s_mailbox[slot].timestamp = now_ms();
+    s_mailbox[slot].used = true;
+
+    ESP_LOGI(TAG, "Mailbox: stored packet for %08" PRIX32 " (slot %d)", dest_addr, slot);
+    return true;
+}
+
+static void mailbox_flush_for(uint32_t dest_addr) {
+    for (int i = 0; i < MAX_MAILBOX_MSGS; i++) {
+        if (s_mailbox[i].used && s_mailbox[i].dest_addr == dest_addr) {
+            ESP_LOGI(TAG, "Mailbox: delivering stored packet to %08" PRIX32, dest_addr);
+            transmit_packet(s_mailbox[i].raw_pkt, s_mailbox[i].raw_len);
+            s_mailbox[i].used = false;
+        }
+    }
+}
+
+static void mailbox_expire(uint32_t t) {
+    for (int i = 0; i < MAX_MAILBOX_MSGS; i++) {
+        if (s_mailbox[i].used && (t - s_mailbox[i].timestamp) > MAILBOX_EXPIRY_MS) {
+            ESP_LOGW(TAG, "Mailbox: expired packet for %08" PRIX32, s_mailbox[i].dest_addr);
+            s_mailbox[i].used = false;
+        }
+    }
+}
+
 static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_header_t *header) {
     if (header->hop_limit <= 1) {
         ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
@@ -684,8 +750,13 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     /* Look up route to destination */
     route_entry_t *route = route_lookup(&s_routes, header->dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
-        ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
-        send_rerr(header->dest_addr, s_identity->address);
+        /* If mailbox enabled, store for later delivery instead of dropping */
+        if (s_mailbox_enabled && mailbox_store(header->dest_addr, data, len)) {
+            ESP_LOGI(TAG, "No route to %08" PRIX32 " — stored in mailbox", header->dest_addr);
+        } else {
+            ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
+            send_rerr(header->dest_addr, s_identity->address);
+        }
         return;
     }
 
@@ -906,6 +977,9 @@ static void mesh_task(void *param) {
             route_maintenance(&s_routes, t);
             reverse_route_purge(&s_reverse_routes, t);
             last_purge_ms = t;
+
+            /* Expire old mailbox entries */
+            if (s_mailbox_enabled) mailbox_expire(t);
 
             /* Update shared state */
             xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -1203,6 +1277,53 @@ void mesh_task_start(bramble_identity_t *identity) {
     public_channel_init(s_channels, &s_num_channels);
     ESP_LOGI(TAG, "Public channel initialized (%d channels)", s_num_channels);
 
+    /* Load additional channels from NVS (persisted by addChannel RPC) */
+    {
+        nvs_handle_t ch_nvs;
+        if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) == ESP_OK) {
+            uint8_t ch_count = 0;
+            if (nvs_get_u8(ch_nvs, "ch_count", &ch_count) == ESP_OK && ch_count > 1) {
+                for (int i = 1; i < ch_count && s_num_channels < MAX_CHANNELS; i++) {
+                    char key_name[20], key_psk[20];
+                    snprintf(key_name, sizeof(key_name), "ch%d_name", i);
+                    snprintf(key_psk, sizeof(key_psk), "ch%d_psk", i);
+
+                    char psk[65] = "";
+                    size_t psk_len = sizeof(psk);
+                    if (nvs_get_str(ch_nvs, key_psk, psk, &psk_len) == ESP_OK && psk_len > 1) {
+                        bramble_channel_t *ch = &s_channels[s_num_channels];
+                        channel_derive_key(psk, ch);
+                        ch->channel_id = (uint8_t)s_num_channels;
+                        s_num_channels++;
+
+                        char name[20] = "";
+                        size_t name_len = sizeof(name);
+                        nvs_get_str(ch_nvs, key_name, name, &name_len);
+                        ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", i, name[0] ? name : "(unnamed)");
+                    }
+                }
+            }
+            nvs_close(ch_nvs);
+            if (s_num_channels > 1) {
+                ESP_LOGI(TAG, "Total channels after NVS load: %d", s_num_channels);
+            }
+        }
+    }
+
+    /* Load mailbox enabled state from NVS */
+    {
+        nvs_handle_t mb_nvs;
+        if (nvs_open("bramble_mb", NVS_READONLY, &mb_nvs) == ESP_OK) {
+            uint8_t enabled = 0;
+            if (nvs_get_u8(mb_nvs, "enabled", &enabled) == ESP_OK) {
+                s_mailbox_enabled = (enabled != 0);
+                ESP_LOGI(TAG, "Mailbox: %s (from NVS)", s_mailbox_enabled ? "enabled" : "disabled");
+            }
+            nvs_close(mb_nvs);
+        }
+        memset(s_mailbox, 0, sizeof(s_mailbox));
+    }
+
     s_state_mutex = xSemaphoreCreateMutex();
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
 
@@ -1275,6 +1396,15 @@ int mesh_remove_channel(int index) {
 
 int mesh_get_channel_count(void) {
     return s_num_channels;
+}
+
+void mesh_set_mailbox(bool enabled) {
+    s_mailbox_enabled = enabled;
+    ESP_LOGI(TAG, "Mailbox runtime: %s", enabled ? "enabled" : "disabled");
+}
+
+bool mesh_get_mailbox(void) {
+    return s_mailbox_enabled;
 }
 
 /* ── Probe tracking ──────────────────────────────────────────────────── */

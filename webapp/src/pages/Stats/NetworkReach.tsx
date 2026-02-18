@@ -10,8 +10,8 @@ function shortAddr(addr: number): string {
 }
 
 function formatPath(r: ProbeResponse): string {
-  if (r.hopCount <= 1 || r.relayPath.length === 0) return 'direct';
-  return r.relayPath.map(a => '→ ' + shortAddr(a)).join(' ');
+  if (r.hopCount <= 1 || !r.relayPath?.length) return 'direct';
+  return r.relayPath.map((a: number) => '→ ' + shortAddr(a)).join(' ');
 }
 
 function hopClass(hops: number): string {

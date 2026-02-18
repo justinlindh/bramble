@@ -85,4 +85,10 @@ int mesh_set_default_channel(int index);
  */
 uint32_t mesh_send_probe(void);
 
+/**
+ * Enable/disable mailbox (store-and-forward for offline neighbors).
+ */
+void mesh_set_mailbox(bool enabled);
+bool mesh_get_mailbox(void);
+
 #endif
