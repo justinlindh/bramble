@@ -3,10 +3,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_TIME_SHIFT_MS 5000
+#define MAX_TIME_SHIFT_MS 2000       /* Tighter clamp: ±2s per sync (was ±5s) */
 #define TIME_SYNC_INTERVAL_MS 300000
 #define MAX_STRATUM 7
-#define CORROBORATION_REQUIRED 2
+#define CORROBORATION_REQUIRED 3    /* Require 3 corroborating sources for stratum-0 (was 2) */
 
 typedef struct {
     int64_t  offset_ms;

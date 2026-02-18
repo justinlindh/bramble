@@ -36,10 +36,10 @@ typedef struct {
 typedef struct {
     uint32_t src_addr;
     uint32_t cancel_timestamp;
-    uint8_t auth_tag[4];  /* HMAC-SHA256 truncated to 4 bytes */
+    uint8_t auth_tag[8];  /* HMAC-SHA256 truncated to 8 bytes */
 } emergency_cancel_t;
 
-#define EMERGENCY_CANCEL_SIZE 12
+#define EMERGENCY_CANCEL_SIZE 16
 
 /* Emergency manager state */
 typedef struct {

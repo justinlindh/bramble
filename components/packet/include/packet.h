@@ -52,7 +52,7 @@
 #define RREQ_SIZE                30
 #define RREP_SIZE                34
 #define RERR_SIZE                24
-#define BEACON_SIZE              36
+#define BEACON_SIZE              40
 #define KEY_EXCHANGE_SIZE        101
 #define DELIVERY_RECEIPT_MIN_SIZE 22
 #define DELIVERY_RECEIPT_MAX_SIZE 54
@@ -117,7 +117,7 @@ typedef struct {
     uint8_t  flags;
     uint32_t network_time;
     uint16_t time_confidence;
-    uint8_t  auth_hmac[4];
+    uint8_t  auth_hmac[8];
 } bramble_beacon_t;
 
 typedef struct {
