@@ -522,22 +522,44 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     char buf[12];
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
 
-    /* Radio config — reflect static defaults (until setRadio is implemented) */
+    /* Radio config — read actual runtime state */
+    radio_config_t rcfg;
+    radio_get_config(&rcfg);
     cJSON *radio = cJSON_CreateObject();
-    cJSON_AddNumberToObject(radio, "frequency_mhz", 915.0);
-    cJSON_AddNumberToObject(radio, "sf", 9);
-    cJSON_AddNumberToObject(radio, "bw_hz", 125000);
-    cJSON_AddNumberToObject(radio, "tx_power_dbm", 17);
-    cJSON_AddStringToObject(radio, "profile", "long_range");
+    cJSON_AddNumberToObject(radio, "frequency_mhz", rcfg.frequency_mhz);
+    cJSON_AddNumberToObject(radio, "sf", rcfg.sf);
+    cJSON_AddNumberToObject(radio, "bw_hz", rcfg.bw_hz);
+    cJSON_AddNumberToObject(radio, "tx_power_dbm", rcfg.tx_power);
+    cJSON_AddNumberToObject(radio, "coding_rate", rcfg.coding_rate);
+    cJSON_AddStringToObject(radio, "profile", "custom");
     cJSON_AddItemToObject(result, "radio", radio);
 
-    /* Channel list — public channel always present */
+    /* Channel list — read from mesh task */
+    int ch_count = mesh_get_channel_count();
     cJSON *channels = cJSON_CreateArray();
-    cJSON *pub = cJSON_CreateObject();
-    cJSON_AddStringToObject(pub, "name", "public");
-    cJSON_AddNumberToObject(pub, "id", 0);
-    cJSON_AddBoolToObject(pub, "is_default", true);
-    cJSON_AddItemToArray(channels, pub);
+
+    /* Read channel names from NVS */
+    nvs_handle_t ch_nvs;
+    bool ch_nvs_open = (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) == ESP_OK);
+
+    for (int i = 0; i < ch_count; i++) {
+        cJSON *ch = cJSON_CreateObject();
+        char ch_name[20] = "";
+        if (i == 0) {
+            strcpy(ch_name, "public");
+        } else if (ch_nvs_open) {
+            char key[20];
+            snprintf(key, sizeof(key), "ch%d_name", i);
+            size_t len = sizeof(ch_name);
+            if (nvs_get_str(ch_nvs, key, ch_name, &len) != ESP_OK)
+                snprintf(ch_name, sizeof(ch_name), "channel_%d", i);
+        }
+        cJSON_AddStringToObject(ch, "name", ch_name);
+        cJSON_AddNumberToObject(ch, "id", i);
+        cJSON_AddBoolToObject(ch, "is_default", i == 0);
+        cJSON_AddItemToArray(channels, ch);
+    }
+    if (ch_nvs_open) nvs_close(ch_nvs);
     cJSON_AddItemToObject(result, "channels", channels);
 
     return 0;
