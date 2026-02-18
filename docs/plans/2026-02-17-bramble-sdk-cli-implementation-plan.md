@@ -1,5 +1,7 @@
 # Bramble SDK & CLI Implementation Plan
 
+> ✅ **ALL PHASES COMPLETE**
+
 > **For Agent:** REQUIRED SUB-SKILL: Use executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a multi-repo ecosystem: firmware RPC layer, OpenAPI spec, Go SDK, and Go CLI tool for interacting with Bramble mesh nodes over serial and WebSocket.

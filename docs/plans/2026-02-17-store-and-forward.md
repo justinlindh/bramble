@@ -1,5 +1,7 @@
 # Store-and-Forward for Offline Nodes
 
+> ✅ **SIMULATOR IMPLEMENTATION COMPLETE** (2026-02-17) — Checkboxes below not updated but all tasks were implemented in the simulator branch.
+
 > Let messages survive destination outages. Mailbox nodes buffer E2E-encrypted messages and deliver them when the destination rejoins the mesh.
 
 **Date:** 2026-02-17

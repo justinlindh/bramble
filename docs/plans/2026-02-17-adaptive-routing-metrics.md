@@ -1,5 +1,7 @@
 # Adaptive Routing Metrics
 
+> ✅ **SIMULATOR IMPLEMENTATION COMPLETE** (2026-02-17) — Checkboxes below not updated but all tasks were implemented in the simulator branch.
+
 **Date:** 2026-02-17
 **Status:** Draft
 **Area:** `components/routing/`, `components/airtime/`
