@@ -186,6 +186,8 @@ class TestContext:
     node2: Transport
     node1_addr: str = ""
     node2_addr: str = ""
+    node1_name: str = ""
+    node2_name: str = ""
     results: list = field(default_factory=list)
     original_radio: dict = field(default_factory=dict)
     original_name: str = ""
@@ -526,8 +528,8 @@ async def run_tests(node1_spec: str, node2_spec: str):
     print(f"\n{'='*60}")
     print(f"Bramble E2E Test Suite")
     print(f"{'='*60}")
-    print(f"  Node 1: {node1.label()}")
-    print(f"  Node 2: {node2.label()}")
+    print(f"  Node 1 (Alice): {node1.label()}")
+    print(f"  Node 2 (Bob):   {node2.label()}")
     print(f"{'='*60}\n")
 
     # Connect
@@ -548,6 +550,26 @@ async def run_tests(node1_spec: str, node2_spec: str):
         return 1
 
     ctx = TestContext(node1=node1, node2=node2)
+
+    # Resolve node names from firmware config
+    try:
+        r1 = await node1.rpc("bramble.getConfig", timeout=5)
+        ctx.node1_name = r1.get("result", {}).get("node_name", "") or node1.label()
+        ctx.node1_addr = r1.get("result", {}).get("address", "")
+    except Exception:
+        ctx.node1_name = node1.label()
+    try:
+        r2 = await node2.rpc("bramble.getConfig", timeout=5)
+        ctx.node2_name = r2.get("result", {}).get("node_name", "") or node2.label()
+        ctx.node2_addr = r2.get("result", {}).get("address", "")
+    except Exception:
+        ctx.node2_name = node2.label()
+
+    print(f"\n{'='*60}")
+    print(f"Node identities:")
+    print(f"  Node 1: {ctx.node1_name!r} ({node1.label()})")
+    print(f"  Node 2: {ctx.node2_name!r} ({node2.label()})")
+    print(f"{'='*60}\n")
 
     print(f"\nRunning {len(ALL_TESTS)} tests...\n")
 

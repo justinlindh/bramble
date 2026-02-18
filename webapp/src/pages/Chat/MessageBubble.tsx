@@ -26,7 +26,6 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
   const tierCls = TIER_CLASS[message.tier] ?? '';
 
   const hasRelayPath =
-    message.tier === 'critical' &&
     message.relayPath &&
     message.relayPath.length > 0;
 
