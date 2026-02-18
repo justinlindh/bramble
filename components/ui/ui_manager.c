@@ -11,6 +11,30 @@ void ui_init(ui_state_t *state) {
 void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
     state->last_activity = now_ms;
 
+    /* Settings screen has its own button handling */
+    if (state->current_screen == SCREEN_SETTINGS && state->settings_editing) {
+        switch (btn) {
+        case BTN_SHORT_PRESS:
+            /* Cycle through options */
+            state->settings_cursor = (state->settings_cursor + 1) % CONN_MODE_COUNT;
+            state->screen_dirty = true;
+            break;
+        case BTN_LONG_PRESS:
+            /* Confirm selection — main.c checks settings_confirmed */
+            state->settings_confirmed = true;
+            state->screen_dirty = true;
+            break;
+        case BTN_DOUBLE_PRESS:
+            /* Cancel — exit edit mode */
+            state->settings_editing = false;
+            state->screen_dirty = true;
+            break;
+        default:
+            break;
+        }
+        return;
+    }
+
     switch (btn) {
     case BTN_SHORT_PRESS: {
         ui_screen_t prev = state->current_screen;
@@ -21,6 +45,10 @@ void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
         break;
     }
     case BTN_LONG_PRESS:
+        /* Enter settings edit mode on Settings screen */
+        if (state->current_screen == SCREEN_SETTINGS) {
+            state->settings_editing = true;
+        }
         state->screen_dirty = true;
         break;
     case BTN_DOUBLE_PRESS: {

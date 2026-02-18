@@ -20,8 +20,31 @@
 #include "msg_store.h"
 #include "mdns.h"
 #include "ble_server.h"
+#include "esp_system.h"
 
 static const char *TAG = "bramble";
+
+/* ── Connectivity mode (NVS-persisted) ──────────────────────────────── */
+
+conn_mode_t conn_mode_get(void) {
+    nvs_handle_t nvs;
+    uint8_t mode = CONN_MODE_BOTH; /* default: both WiFi and BLE */
+    if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, "conn_mode", &mode);
+        nvs_close(nvs);
+    }
+    if (mode >= CONN_MODE_COUNT) mode = CONN_MODE_BOTH;
+    return (conn_mode_t)mode;
+}
+
+static void conn_mode_set(conn_mode_t mode) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "conn_mode", (uint8_t)mode);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
 
 /* ── Splash screen ──────────────────────────────────────────────────── */
 
@@ -160,19 +183,48 @@ static void render_screen(ui_state_t *ui) {
         display_flush();
         break;
     }
-    case SCREEN_SETTINGS:
+    case SCREEN_SETTINGS: {
         display_clear();
         display_draw_text(0, 0, "Settings");
         display_hline(0, 10, 128);
-        char line[32];
-        snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
-        display_draw_text(0, 14, line);
-        display_draw_text(0, 24, "Radio: SF9 BW125");
-        display_draw_text(0, 34, "Freq: 915.0 MHz");
-        display_draw_text(0, 44, "TX: 17 dBm");
-        display_draw_text(0, 56, "[press] next screen");
+
+        if (ui->settings_editing) {
+            /* Mode selection UI */
+            display_draw_text(0, 14, "Connectivity Mode:");
+            static const char *mode_names[] = {"WiFi", "BLE", "WiFi + BLE"};
+            conn_mode_t current = conn_mode_get();
+            for (int i = 0; i < CONN_MODE_COUNT; i++) {
+                char ml[32];
+                const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
+                const char *mark = (i == (int)current) ? " *" : "";
+                snprintf(ml, sizeof(ml), "%s %s%s", arrow, mode_names[i], mark);
+                display_draw_text(0, 26 + i * 12, ml);
+            }
+            display_draw_text(0, 56, "[hold]OK [2x]cancel");
+        } else {
+            char line[32];
+            snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
+            display_draw_text(0, 14, line);
+
+            conn_mode_t cur_mode = conn_mode_get();
+            static const char *mnames[] = {"WiFi", "BLE", "WiFi+BLE"};
+            snprintf(line, sizeof(line), "Mode: %s", mnames[cur_mode]);
+            display_draw_text(0, 24, line);
+
+            const char *ip = wifi_manager_get_ip();
+            if (ip && ip[0] != '\0') {
+                snprintf(line, sizeof(line), "IP: %s", ip);
+                display_draw_text(0, 34, line);
+            } else {
+                display_draw_text(0, 34, "IP: (no WiFi)");
+            }
+
+            display_draw_text(0, 44, "BLE: advertising");
+            display_draw_text(0, 56, "[hold] change mode");
+        }
         display_flush();
         break;
+    }
     default:
         display_clear();
         display_draw_text(0, 28, "Unknown screen");
@@ -237,27 +289,36 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: button_init ===");
     button_init();
 
-    /* Init WiFi (station mode if SSID configured, AP fallback) */
-    ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
-    if (wifi_manager_init() == 0) {
-        const char *ip = wifi_manager_get_ip();
-        if (ip[0] != '\0') {
-            ESP_LOGI(TAG, "WiFi ready: %s", ip);
+    /* Read connectivity mode */
+    conn_mode_t boot_mode = conn_mode_get();
+    static const char *mode_str[] = {"WiFi", "BLE", "WiFi+BLE"};
+    ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
 
-            ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
-            ws_server_start();
+    /* Init WiFi if mode includes it */
+    if (boot_mode == CONN_MODE_WIFI || boot_mode == CONN_MODE_BOTH) {
+        ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
+        if (wifi_manager_init() == 0) {
+            const char *ip = wifi_manager_get_ip();
+            if (ip[0] != '\0') {
+                ESP_LOGI(TAG, "WiFi ready: %s", ip);
 
-            ESP_LOGI(TAG, "=== BOOT STAGE: mdns_init ===");
-            mdns_init();
-            char hostname[32];
-            snprintf(hostname, sizeof(hostname), "bramble-%04" PRIx32, my_addr & 0xFFFF);
-            mdns_hostname_set(hostname);
-            mdns_instance_name_set("Bramble Mesh Node");
-            mdns_service_add("Bramble", "_bramble", "_tcp", 80, NULL, 0);
-            ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+                ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
+                ws_server_start();
+
+                ESP_LOGI(TAG, "=== BOOT STAGE: mdns_init ===");
+                mdns_init();
+                char hostname[32];
+                snprintf(hostname, sizeof(hostname), "bramble-%04" PRIx32, my_addr & 0xFFFF);
+                mdns_hostname_set(hostname);
+                mdns_instance_name_set("Bramble Mesh Node");
+                mdns_service_add("Bramble", "_bramble", "_tcp", 80, NULL, 0);
+                ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+            }
+        } else {
+            ESP_LOGW(TAG, "WiFi init failed");
         }
     } else {
-        ESP_LOGW(TAG, "WiFi init failed — running without network");
+        ESP_LOGI(TAG, "WiFi disabled by connectivity mode");
     }
 
     /* Start mesh task (radio + beacons on CPU1).
@@ -274,13 +335,17 @@ void app_main(void)
     rpc_init();
     rpc_methods_init(&g_identity);
 
-    /* Start BLE GATT server (NUS for JSON-RPC) */
-    ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
-    if (ble_server_init() == 0) {
-        ble_server_start();
-        ESP_LOGI(TAG, "BLE server started");
+    /* Start BLE GATT server if mode includes it */
+    if (boot_mode == CONN_MODE_BLE || boot_mode == CONN_MODE_BOTH) {
+        ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
+        if (ble_server_init() == 0) {
+            ble_server_start();
+            ESP_LOGI(TAG, "BLE server started");
+        } else {
+            ESP_LOGW(TAG, "BLE init failed");
+        }
     } else {
-        ESP_LOGW(TAG, "BLE init failed — running without BLE");
+        ESP_LOGI(TAG, "BLE disabled by connectivity mode");
     }
 
     /* Start serial CLI (with JSON-RPC auto-detect) */
@@ -307,6 +372,31 @@ void app_main(void)
         if (btn != BTN_NONE) {
             ESP_LOGI(TAG, "Button event: %d", btn);
             ui_handle_button(&ui, btn, now_ms);
+        }
+
+        /* Handle connectivity mode change confirmation */
+        if (ui.settings_confirmed) {
+            ui.settings_confirmed = false;
+            ui.settings_editing = false;
+            conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
+            conn_mode_t old_mode = conn_mode_get();
+            if (new_mode != old_mode) {
+                conn_mode_set(new_mode);
+                ESP_LOGI(TAG, "Connectivity mode changed to %d, rebooting...", new_mode);
+
+                /* Show confirmation on OLED before reboot */
+                display_clear();
+                static const char *mnames[] = {"WiFi", "BLE", "WiFi+BLE"};
+                display_draw_text(16, 16, "Mode changed:");
+                display_draw_text_large(16, 30, mnames[new_mode]);
+                display_draw_text(16, 50, "Rebooting...");
+                display_flush();
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                esp_restart();
+            } else {
+                /* Same mode — just exit edit */
+                ui.screen_dirty = true;
+            }
         }
 
         /* Check inactivity timeout */
