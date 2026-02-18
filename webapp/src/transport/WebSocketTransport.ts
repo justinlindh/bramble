@@ -29,8 +29,8 @@ export class WebSocketTransport implements Transport {
   // Keepalive
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private lastPong = 0;
-  private static PING_INTERVAL = 15_000;  // send ping every 15s
-  private static PONG_TIMEOUT = 10_000;   // if no pong in 10s, consider dead
+  private static PING_INTERVAL = 10_000;  // send ping every 10s
+  private static PONG_TIMEOUT = 5_000;    // if no pong in 5s, consider dead
 
   constructor(url: string) {
     this.url = url;
@@ -161,14 +161,47 @@ export class WebSocketTransport implements Transport {
     this.intentionalClose = true;
     this.autoReconnect = false;
     this.clearReconnectTimer();
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
     this.cleanup();
   }
+
+  private visibilityHandler: (() => void) | null = null;
 
   /** Enable auto-reconnect. Call once after first successful connect(). */
   enableAutoReconnect(cbs?: WsReconnectCallbacks): void {
     this.autoReconnect = true;
     this.reconnectDelay = 1000;
     this.reconnectCbs = cbs ?? {};
+
+    // Immediately check connection when tab becomes visible (mobile resume)
+    if (this.visibilityHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    }
+    this.visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (this._connected && this.ws?.readyState === WebSocket.OPEN) {
+        // Connection looks alive — send an immediate ping to verify
+        try {
+          this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method: 'bramble.ping' }));
+        } catch { /* will trigger close → reconnect */ }
+        // If no response within 2s, force close
+        setTimeout(() => {
+          if (this._connected && Date.now() - this.lastPong > 3000) {
+            console.warn('[WS] Stale after resume — forcing reconnect');
+            try { this.ws?.close(); } catch { /* */ }
+          }
+        }, 2000);
+      } else if (this.autoReconnect && !this._connected && !this.reconnectTimer) {
+        // Not connected, no pending reconnect — try immediately
+        console.log('[WS] Tab visible — immediate reconnect');
+        this.reconnectDelay = 500;
+        this.scheduleReconnect();
+      }
+    };
+    document.addEventListener('visibilitychange', this.visibilityHandler);
   }
 
   // ── Internal helpers ──────────────────────────────────────────────
