@@ -45,4 +45,10 @@ int mesh_send_broadcast(const uint8_t *data, size_t len);
  */
 int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
 
+/**
+ * Schedule a system reboot after delay_ms milliseconds.
+ * Uses a one-shot FreeRTOS timer; safe to call from any task.
+ */
+void mesh_reboot_delayed(int delay_ms);
+
 #endif
