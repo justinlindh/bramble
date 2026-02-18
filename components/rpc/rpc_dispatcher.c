@@ -1,6 +1,7 @@
 #include "rpc_dispatcher.h"
 #include "cJSON.h"
 #include "esp_log.h"
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "rpc";
