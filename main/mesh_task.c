@@ -336,6 +336,23 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
         cJSON_AddStringToObject(params, "packet_id", pkt_buf);
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
+
+        /* Build relay path: [self → (intermediate hops) → dest]
+         * For direct neighbor delivery, path is just [self, dest].
+         * TODO: track actual forwarding hops for multi-hop routes */
+        cJSON *path = cJSON_AddArrayToObject(params, "relayPath");
+        char hop_buf[12];
+        cJSON *self_hop = cJSON_CreateObject();
+        snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, s_identity->address);
+        cJSON_AddStringToObject(self_hop, "addr", hop_buf);
+        cJSON_AddNumberToObject(self_hop, "rssi", 0);
+        cJSON_AddItemToArray(path, self_hop);
+
+        cJSON *dest_hop = cJSON_CreateObject();
+        cJSON_AddStringToObject(dest_hop, "addr", addr_buf); /* ack.src_addr = the peer */
+        cJSON_AddNumberToObject(dest_hop, "rssi", ack.rssi_at_dest);
+        cJSON_AddItemToArray(path, dest_hop);
+
         rpc_notify("bramble.onAck", params);
         cJSON_Delete(params);
     }

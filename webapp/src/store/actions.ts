@@ -339,7 +339,12 @@ function handleAck(params: unknown): void {
   /* Firmware sends snake_case (packet_id), webapp convention is camelCase */
   const packetId = (p.packetId ?? p.packet_id) as string | undefined;
   const status = (p.status as string) ?? 'delivered';
-  const relayPath = p.relayPath as RelayHop[] | undefined;
+  /* Normalize relayPath: firmware sends addr as hex string, webapp needs number */
+  const rawPath = p.relayPath as Array<{ addr: string | number; rssi: number }> | undefined;
+  const relayPath: RelayHop[] | undefined = rawPath?.map(hop => ({
+    addr: typeof hop.addr === 'string' ? parseInt(hop.addr, 16) : hop.addr,
+    rssi: hop.rssi ?? 0,
+  }));
 
   if (!packetId) return;
   const msgId = packetIdToMsgId.get(packetId);
