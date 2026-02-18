@@ -1,0 +1,32 @@
+menu "Bramble WiFi"
+
+config BRAMBLE_WIFI_ENABLED
+    bool "Enable WiFi"
+    default y
+
+config BRAMBLE_WIFI_SSID
+    string "WiFi SSID (station mode)"
+    default ""
+    depends on BRAMBLE_WIFI_ENABLED
+
+config BRAMBLE_WIFI_PASSWORD
+    string "WiFi Password (station mode)"
+    default ""
+    depends on BRAMBLE_WIFI_ENABLED
+
+config BRAMBLE_WIFI_AP_SSID
+    string "WiFi AP SSID (fallback)"
+    default "Bramble"
+    depends on BRAMBLE_WIFI_ENABLED
+
+config BRAMBLE_WIFI_AP_PASSWORD
+    string "WiFi AP Password"
+    default "bramble123"
+    depends on BRAMBLE_WIFI_ENABLED
+
+config BRAMBLE_WIFI_STA_TIMEOUT_S
+    int "Station connect timeout (seconds)"
+    default 10
+    depends on BRAMBLE_WIFI_ENABLED
+
+endmenu
