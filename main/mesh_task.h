@@ -41,9 +41,9 @@ int mesh_send_broadcast(const uint8_t *data, size_t len);
 /**
  * Send an encrypted message to a specific address.
  * Uses public channel for now (DM encryption requires key exchange).
- * Returns 0 on success.
+ * Returns packet_id (>0) on success, 0 on failure.
  */
-int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
+uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
 
 /**
  * Schedule a system reboot after delay_ms milliseconds.
