@@ -333,7 +333,7 @@ int ble_server_init(void)
         ESP_LOGE(TAG, "Failed to create RPC queue");
         return -1;
     }
-    xTaskCreate(ble_rpc_task, "ble_rpc", 4096, NULL, 5, NULL);
+    xTaskCreate(ble_rpc_task, "ble_rpc", 8192, NULL, 5, NULL);
 
     int rc = nimble_port_init();
     if (rc != 0) {
