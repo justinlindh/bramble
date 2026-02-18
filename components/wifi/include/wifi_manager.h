@@ -1,11 +1,12 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum {
-    WIFI_MODE_OFF,
-    WIFI_MODE_STATION,
-    WIFI_MODE_AP,
+    BRAMBLE_WIFI_OFF,
+    BRAMBLE_WIFI_STATION,
+    BRAMBLE_WIFI_AP,
 } bramble_wifi_mode_t;
 
 typedef struct {

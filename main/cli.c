@@ -147,8 +147,8 @@ static int cmd_wifi(int argc, char **argv) {
     if (strcmp(argv[1], "status") == 0) {
         wifi_status_t st;
         wifi_manager_get_status(&st);
-        const char *mode_str = st.mode == WIFI_MODE_STATION ? "Station" :
-                               st.mode == WIFI_MODE_AP ? "AP" : "Off";
+        const char *mode_str = st.mode == BRAMBLE_WIFI_STATION ? "Station" :
+                               st.mode == BRAMBLE_WIFI_AP ? "AP" : "Off";
         printf("Mode:  %s\n", mode_str);
         printf("SSID:  %s\n", st.ssid);
         printf("IP:    %s\n", st.ip_addr);

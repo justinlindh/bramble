@@ -200,8 +200,8 @@ static esp_err_t config_status_handler(httpd_req_t *req)
 {
     wifi_status_t st;
     wifi_manager_get_status(&st);
-    const char *mode_str = st.mode == WIFI_MODE_STATION ? "Station" :
-                           st.mode == WIFI_MODE_AP ? "AP" : "Off";
+    const char *mode_str = st.mode == BRAMBLE_WIFI_STATION ? "Station" :
+                           st.mode == BRAMBLE_WIFI_AP ? "AP" : "Off";
     char json[256];
     snprintf(json, sizeof(json),
              "{\"mode\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\"}",
