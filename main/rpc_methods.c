@@ -318,10 +318,14 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
         if (!m) continue;
 
         cJSON *obj = cJSON_CreateObject();
+        char buf2[12];
+        bool is_out = (m->direction == MSG_DIR_OUTGOING || m->direction == MSG_DIR_BROADCAST_OUT);
         cJSON_AddStringToObject(obj, "from",
-            (m->direction == MSG_DIR_OUTGOING || m->direction == MSG_DIR_BROADCAST_OUT)
-            ? addr_hex(s_identity->address, buf, sizeof(buf))
-            : addr_hex(m->peer_addr, buf, sizeof(buf)));
+            is_out ? addr_hex(s_identity->address, buf, sizeof(buf))
+                   : addr_hex(m->peer_addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "to",
+            is_out ? addr_hex(m->peer_addr, buf2, sizeof(buf2))
+                   : addr_hex(s_identity->address, buf2, sizeof(buf2)));
 
         const char *dir_str = "incoming";
         switch (m->direction) {
