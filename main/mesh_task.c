@@ -82,6 +82,11 @@ static int                 s_num_channels = 0;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
+static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
+    snprintf(buf, len, "%08" PRIX32, addr);
+    return buf;
+}
+
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
@@ -563,6 +568,12 @@ static void handle_rx_packet(const rx_packet_t *pkt) {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
         break;
+    case PKT_TYPE_PROBE:
+        handle_probe(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
+    case PKT_TYPE_PROBE_ACK:
+        handle_probe_ack(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
     default:
         ESP_LOGD(TAG, "Unhandled packet type 0x%02X", header.type);
         break;
@@ -998,6 +1009,126 @@ int mesh_remove_channel(int index) {
 
 int mesh_get_channel_count(void) {
     return s_num_channels;
+}
+
+/* ── Probe tracking ──────────────────────────────────────────────────── */
+
+#define MAX_PROBE_RESULTS 16
+typedef struct {
+    uint32_t addr;
+    uint8_t  hops;
+    int16_t  rssi;
+    int8_t   snr;
+    uint32_t latency_ms;
+} probe_result_t;
+
+static uint32_t       s_probe_id = 0;
+static uint32_t       s_probe_sent_ms = 0;
+static probe_result_t s_probe_results[MAX_PROBE_RESULTS];
+static int            s_probe_result_count = 0;
+
+uint32_t mesh_send_probe(void) {
+    uint32_t pid = next_packet_id();
+    s_probe_id = pid;
+    s_probe_sent_ms = now_ms();
+    s_probe_result_count = 0;
+
+    /* Build probe packet: header(12) + source_addr(4) */
+    uint8_t buf[20];
+    bramble_header_t header = {
+        .version = BRAMBLE_VERSION,
+        .type = PKT_TYPE_PROBE,
+        .flags = 0,
+        .hop_limit = 8,
+        .dest_addr = 0xFFFFFFFF,
+        .packet_id = pid,
+    };
+    bramble_header_serialize(&header, buf, HEADER_SIZE);
+    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
+
+    int rc = radio_transmit(buf, HEADER_SIZE + 4);
+    if (rc == 0) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_shared.packets_tx++;
+        xSemaphoreGive(s_state_mutex);
+    }
+    ESP_LOGI("mesh", "Probe sent: id=%08" PRIX32, pid);
+    return pid;
+}
+
+static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    if (len < HEADER_SIZE + 4) return;
+
+    bramble_header_t header;
+    bramble_header_deserialize(&header, data, len);
+
+    uint32_t src_addr;
+    memcpy(&src_addr, data + HEADER_SIZE, 4);
+
+    /* Send probe ACK back */
+    uint8_t buf[20];
+    bramble_header_t ack_header = {
+        .version = BRAMBLE_VERSION,
+        .type = PKT_TYPE_PROBE_ACK,
+        .flags = 0,
+        .hop_limit = 8,
+        .dest_addr = src_addr,
+        .packet_id = header.packet_id,
+    };
+    bramble_header_serialize(&ack_header, buf, HEADER_SIZE);
+    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
+    buf[HEADER_SIZE + 4] = 1; /* hops = 1 for direct */
+
+    radio_transmit(buf, HEADER_SIZE + 5);
+
+    /* Forward probe if hop limit allows */
+    if (header.hop_limit > 1) {
+        bramble_header_t fwd = header;
+        fwd.hop_limit--;
+        uint8_t fwd_buf[20];
+        bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
+        memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
+        radio_transmit(fwd_buf, HEADER_SIZE + 4);
+    }
+}
+
+static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    if (len < HEADER_SIZE + 5) return;
+
+    bramble_header_t header;
+    bramble_header_deserialize(&header, data, len);
+
+    /* Only process if this ACK is for our probe */
+    if (header.packet_id != s_probe_id) return;
+    if (header.dest_addr != s_identity->address) return;
+
+    uint32_t resp_addr;
+    memcpy(&resp_addr, data + HEADER_SIZE, 4);
+    uint8_t hops = data[HEADER_SIZE + 4];
+
+    if (s_probe_result_count < MAX_PROBE_RESULTS) {
+        probe_result_t *r = &s_probe_results[s_probe_result_count++];
+        r->addr = resp_addr;
+        r->hops = hops;
+        r->rssi = rssi;
+        r->snr = snr;
+        r->latency_ms = now_ms() - s_probe_sent_ms;
+    }
+
+    char buf[12];
+    ESP_LOGI("mesh", "Probe ACK from %s hops=%u rssi=%d latency=%" PRIu32 "ms",
+             addr_hex(resp_addr, buf, sizeof(buf)), hops, rssi,
+             now_ms() - s_probe_sent_ms);
+
+    /* Emit notification */
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "address", addr_hex(resp_addr, buf, sizeof(buf)));
+    cJSON_AddNumberToObject(params, "hops", hops);
+    cJSON_AddNumberToObject(params, "rssi", rssi);
+    cJSON_AddNumberToObject(params, "snr", snr);
+    cJSON_AddNumberToObject(params, "latency_ms", now_ms() - s_probe_sent_ms);
+    rpc_notify("bramble.onProbeResult", params);
+    cJSON_Delete(params);
 }
 
 int mesh_set_default_channel(int index) {
