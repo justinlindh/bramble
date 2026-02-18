@@ -82,6 +82,10 @@ static int                 s_num_channels = 0;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
+/* Forward declarations */
+static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
+static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
+
 static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
     snprintf(buf, len, "%08" PRIX32, addr);
     return buf;
