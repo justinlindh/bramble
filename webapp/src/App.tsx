@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
-import { disconnect } from './store/actions';
+import { disconnect, loadNeighbors } from './store/actions';
+import { usePoll } from './hooks/usePoll';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -45,6 +46,9 @@ export default function App() {
   const errorToastId = useRef<string | null>(null);
 
   // initMessageStore is now called during connect() with the node address
+
+  // Global neighbor poll for presence status (works from any tab)
+  usePoll(isConnected ? loadNeighbors : () => Promise.resolve(), 10_000);
 
   // Toast notifications for connection state changes
   useEffect(() => {
