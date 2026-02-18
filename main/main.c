@@ -46,7 +46,7 @@ static void render_main_screen(void) {
     display_hline(0, 10, 128);
 
     /* Node address */
-    char line[32];
+    char line[48];
     snprintf(line, sizeof(line), "Node: %08" PRIX32, my_addr);
     display_draw_text(0, 14, line);
 
