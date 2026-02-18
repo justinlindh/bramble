@@ -125,7 +125,8 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     // Clean up any partially-initialised client so we start fresh on retry
     client?.clearSubscriptions();
     client = null;
-    store.setConnectionState('error', friendlyError((e as Error).message));
+    // Show overlay so user can retry — 'disconnected' shows the connect UI
+    store.setConnectionState('disconnected', friendlyError((e as Error).message));
   }
 }
 

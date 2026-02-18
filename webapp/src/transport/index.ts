@@ -7,10 +7,19 @@ export { SerialTransport } from './SerialTransport';
 export { BLETransport } from './BLETransport';
 export { WebSocketTransport } from './WebSocketTransport';
 
+function resolveMockWsUrl(): string {
+  if (typeof location === 'undefined') return 'ws://localhost:3005';
+  const { hostname, protocol, port } = location;
+  const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
+  if (protocol === 'https:') return `${wsProtocol}//${hostname}:${port || '443'}/ws`;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'ws://localhost:3005';
+  return `ws://${hostname}:3005`;
+}
+
 export function createTransport(type: TransportType, options?: { url?: string }): Transport {
   if (type === 'ble') return new BLETransport();
-  if (type === 'websocket') return new WebSocketTransport();
-  if (type === 'wifi') return new WebSocketTransport(options?.url);
+  if (type === 'websocket') return new WebSocketTransport(resolveMockWsUrl());
+  if (type === 'wifi') return new WebSocketTransport(options?.url ?? 'ws://192.168.4.1/ws');
   return new SerialTransport();
 }
 

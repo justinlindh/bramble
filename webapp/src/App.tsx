@@ -70,10 +70,9 @@ export default function App() {
   const showOverlay = connectionState !== 'connected' && connectionState !== 'error';
 
   const handleConnectionToggle = () => {
-    if (isConnected) {
+    if (isConnected || connectionState === 'error') {
       disconnect();
     }
-    // Connecting / error recovery is triggered from the overlay
   };
 
   return (
@@ -94,7 +93,7 @@ export default function App() {
           </span>
         </span>
 
-        {isConnected && (
+        {(isConnected || connectionState === 'error') && (
           <button
             className={styles.disconnectBtn}
             onClick={handleConnectionToggle}
