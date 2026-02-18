@@ -138,6 +138,19 @@ static int ssd1306_cmd2(uint8_t cmd, uint8_t val) {
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int display_init(void) {
+    /* Enable Vext power to OLED (Heltec V3: GPIO36 LOW = power on) */
+    gpio_config_t vext_conf = {
+        .pin_bit_mask = (1ULL << DISPLAY_VEXT_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&vext_conf);
+    gpio_set_level(DISPLAY_VEXT_PIN, 0); /* LOW = power on */
+    vTaskDelay(pdMS_TO_TICKS(50));       /* Let power stabilize */
+    ESP_LOGI(TAG, "Vext power enabled (GPIO%d LOW)", DISPLAY_VEXT_PIN);
+
     /* Reset the display via RST pin */
     gpio_config_t rst_conf = {
         .pin_bit_mask = (1ULL << DISPLAY_RST_PIN),
@@ -148,9 +161,9 @@ int display_init(void) {
     };
     gpio_config(&rst_conf);
     gpio_set_level(DISPLAY_RST_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(DISPLAY_RST_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     /* Init I2C master bus */
     i2c_master_bus_config_t bus_cfg = {

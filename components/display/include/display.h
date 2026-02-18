@@ -8,6 +8,7 @@
 #define DISPLAY_SDA_PIN     17
 #define DISPLAY_SCL_PIN     18
 #define DISPLAY_RST_PIN     21
+#define DISPLAY_VEXT_PIN    36  /* Power gate: LOW = OLED on */
 
 /* SSD1306 128x64 parameters */
 #define DISPLAY_WIDTH       128
