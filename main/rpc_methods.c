@@ -430,30 +430,79 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-/* bramble.setLocationContact — stub: params {"address":"HEXADDR"} */
 static int handle_set_location_contact(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: add address to location-sharing whitelist */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "setLocationContact not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    const char *tier = cJSON_GetStringValue(cJSON_GetObjectItem(params, "tier"));
+    if (!addr_str) return RPC_ERR_INVALID_PARAMS;
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        return 0;
+    }
+
+    /* Store contact tier: key = "lc_HEXADDR", value = tier string */
+    char key[16];
+    snprintf(key, sizeof(key), "lc_%.8s", addr_str);
+    nvs_set_str(nvs, key, tier ? tier : "zone");
+    nvs_commit(nvs);
+    nvs_close(nvs);
+
+    cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
-/* bramble.removeLocationContact — stub: params {"address":"HEXADDR"} */
 static int handle_remove_location_contact(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: remove address from location-sharing whitelist */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "removeLocationContact not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    if (!addr_str) return RPC_ERR_INVALID_PARAMS;
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        return 0;
+    }
+
+    char key[16];
+    snprintf(key, sizeof(key), "lc_%.8s", addr_str);
+    nvs_erase_key(nvs, key);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+
+    cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
-/* bramble.shareLocationOnce — stub: params {"address":"HEXADDR"} */
 static int handle_share_location_once(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: send a single location beacon to the specified address */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "shareLocationOnce not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    if (!addr_str) return RPC_ERR_INVALID_PARAMS;
+
+    /* Read stored location from NVS */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "no location configured");
+        return 0;
+    }
+    int32_t lat_e6 = 0, lon_e6 = 0;
+    nvs_get_i32(nvs, "lat_e6", &lat_e6);
+    nvs_get_i32(nvs, "lon_e6", &lon_e6);
+    nvs_close(nvs);
+
+    if (lat_e6 == 0 && lon_e6 == 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "no location set (use setLocationConfig with lat/lon)");
+        return 0;
+    }
+
+    /* TODO: send location packet over LoRa to the specified address */
+    /* For now, just confirm the location is set */
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddNumberToObject(result, "lat", lat_e6 / 1e6);
+    cJSON_AddNumberToObject(result, "lon", lon_e6 / 1e6);
+    cJSON_AddStringToObject(result, "note", "location packet TX not yet wired (no GPS hardware)");
     return 0;
 }
 
