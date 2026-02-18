@@ -238,6 +238,6 @@ void cli_init(bramble_identity_t *identity) {
     /* Register UART as notification transport */
     rpc_register_notify_transport(uart_notify_cb, NULL);
 
-    xTaskCreate(cli_task, "cli", 8192, NULL, 3, NULL);
+    xTaskCreate(cli_task, "cli", 8192, NULL, 1, NULL);  /* Priority 1 — same as main_task, won't starve UI */
     ESP_LOGI(TAG, "CLI initialized");
 }
