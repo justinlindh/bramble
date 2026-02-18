@@ -110,16 +110,16 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     client.subscribe('probe.complete', (params) => handleProbeComplete(params));
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
 
-    // Initial data load — critical methods must succeed; optional ones are best-effort
-    const optional = (p: Promise<void>) => p.catch(() => {/* best-effort */});
+    // Initial data load — all best-effort so a slow RPC doesn't kill the connection
+    const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
     await Promise.all([
-      loadConfig(),
-      loadStatus(),
-      loadAirtime(),
-      loadNeighbors(),
-      loadRoutes(),
-      optional(loadMessages()),
-      optional(loadPeerLocations()),
+      opt(loadConfig()),
+      opt(loadStatus()),
+      opt(loadAirtime()),
+      opt(loadNeighbors()),
+      opt(loadRoutes()),
+      opt(loadMessages()),
+      opt(loadPeerLocations()),
     ]);
   } catch (e) {
     // Clean up any partially-initialised client so we start fresh on retry
@@ -260,7 +260,8 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   if (sinceId !== undefined) params.since_id = sinceId;
   const result = await client.rpc<{ messages: IncomingMessage[] }>(
     'bramble.getMessages',
-    params
+    params,
+    10000, // longer timeout — serializing 20 messages can be slow on ESP32
   );
   const store = useStore.getState();
   for (const m of result.messages ?? []) {
