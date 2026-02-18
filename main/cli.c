@@ -33,7 +33,7 @@ static bramble_identity_t *s_identity;
 
 static int cmd_peers(int argc, char **argv) {
     (void)argc; (void)argv;
-    mesh_shared_state_t state;
+    static mesh_shared_state_t state;
     mesh_get_state(&state);
 
     int count = neighbor_count(&state.neighbors);
@@ -50,7 +50,7 @@ static int cmd_peers(int argc, char **argv) {
 
 static int cmd_status(int argc, char **argv) {
     (void)argc; (void)argv;
-    mesh_shared_state_t state;
+    static mesh_shared_state_t state;
     mesh_get_state(&state);
 
     printf("Node:     %08" PRIX32 "\n", s_identity->address);

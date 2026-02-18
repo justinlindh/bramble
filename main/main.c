@@ -84,8 +84,8 @@ static void render_main_screen(void) {
     snprintf(line, sizeof(line), "Node: %08" PRIX32, my_addr);
     display_draw_text(0, 14, line);
 
-    /* Get live mesh state */
-    mesh_shared_state_t mesh;
+    /* Get live mesh state (static to avoid stack overflow — neighbor_table_t is ~1.8KB) */
+    static mesh_shared_state_t mesh;
     mesh_get_state(&mesh);
 
     /* Neighbors */
@@ -163,7 +163,7 @@ static void render_screen(ui_state_t *ui) {
         display_clear();
         display_draw_text(0, 0, "Nodes");
         display_hline(0, 10, 128);
-        mesh_shared_state_t mesh_n;
+        static mesh_shared_state_t mesh_n;
         mesh_get_state(&mesh_n);
         int cnt = neighbor_count(&mesh_n.neighbors);
         if (cnt == 0) {
