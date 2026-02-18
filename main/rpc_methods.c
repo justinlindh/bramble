@@ -11,6 +11,9 @@
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "battery.h"
+#include "ota.h"
+#include "esp_sleep.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -54,6 +57,8 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "packets_rx", st.packets_rx);
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
+    cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
+    cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
 #ifdef CONFIG_BRAMBLE_HAS_GPS
     cJSON_AddBoolToObject(result, "gps_available", true);
 #else
@@ -710,6 +715,79 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
 
 /* ── Registration ───────────────────────────────────────────────────── */
 
+/* OTA task — runs in background after RPC response */
+static char s_ota_url[256];
+static void ota_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(500)); /* let RPC response flush */
+    int rc = ota_wifi_start(s_ota_url);
+    if (rc == 0) {
+        ESP_LOGI("ota", "OTA complete — rebooting...");
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        esp_restart();
+    }
+    ESP_LOGE("ota", "OTA failed");
+    vTaskDelete(NULL);
+}
+
+/* bramble.otaUpdate — start OTA from URL */
+static int handle_ota_update(const cJSON *params, cJSON *result) {
+    const char *url = cJSON_GetStringValue(cJSON_GetObjectItem(params, "url"));
+    if (!url || strlen(url) == 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "url parameter required");
+        return 0;
+    }
+
+    strncpy(s_ota_url, url, sizeof(s_ota_url) - 1);
+    s_ota_url[sizeof(s_ota_url) - 1] = '\0';
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "note", "OTA starting — device will reboot on success");
+    cJSON_AddStringToObject(result, "partition", ota_get_running_partition());
+
+    xTaskCreate(ota_task, "ota", 8192, NULL, 3, NULL);
+    return 0;
+}
+
+/* bramble.sleep — enter deep sleep with optional wake timer */
+static int handle_sleep(const cJSON *params, cJSON *result) {
+    int wake_sec = 0;
+    if (params) {
+        cJSON *ws = cJSON_GetObjectItem(params, "wake_after_s");
+        if (ws && cJSON_IsNumber(ws)) wake_sec = ws->valueint;
+    }
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    if (wake_sec > 0) {
+        cJSON_AddNumberToObject(result, "wake_after_s", wake_sec);
+        cJSON_AddStringToObject(result, "note", "Entering deep sleep with timer wake");
+    } else {
+        cJSON_AddStringToObject(result, "note", "Entering deep sleep (LoRa DIO1 wake only)");
+    }
+
+    /* Delay to let RPC response flush, then sleep */
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    if (wake_sec > 0) {
+        esp_sleep_enable_timer_wakeup((uint64_t)wake_sec * 1000000ULL);
+    }
+
+    /* Wake on LoRa DIO1 (GPIO14 on Heltec V3) — any incoming packet */
+    esp_sleep_enable_ext0_wakeup(14, 1); /* wake on HIGH */
+
+    esp_deep_sleep_start();
+    /* never reached */
+    return 0;
+}
+
+/* bramble.getBattery — returns battery voltage and percentage */
+static int handle_get_battery(const cJSON *params, cJSON *result) {
+    (void)params;
+    cJSON_AddNumberToObject(result, "voltage_mv", battery_read_mv());
+    cJSON_AddNumberToObject(result, "percentage", battery_read_pct());
+    return 0;
+}
+
 void rpc_methods_init(bramble_identity_t *identity) {
     s_identity = identity;
 
@@ -740,6 +818,9 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setLocationContact",   handle_set_location_contact);
     rpc_register("bramble.removeLocationContact",handle_remove_location_contact);
     rpc_register("bramble.shareLocationOnce",    handle_share_location_once);
+    rpc_register("bramble.otaUpdate",            handle_ota_update);
+    rpc_register("bramble.getBattery",           handle_get_battery);
+    rpc_register("bramble.sleep",               handle_sleep);
 
-    ESP_LOGI(TAG, "RPC methods registered (query: 10, action: 14)");
+    ESP_LOGI(TAG, "RPC methods registered (query: 13, action: 16)");
 }

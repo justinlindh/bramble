@@ -14,6 +14,7 @@
 #include "msg_store.h"
 #include "discovery.h"
 #include "reliability.h"
+#include "battery.h"
 #include "cJSON.h"
 
 #include "freertos/FreeRTOS.h"
@@ -185,7 +186,7 @@ static int send_beacon(void) {
     beacon.src_addr = s_identity->address;
     beacon.pubkey_hash = s_identity->pubkey_hash;
     beacon.uptime_min = (uint16_t)(now_ms() / 60000);
-    beacon.battery_pct = 100;  /* TODO: read ADC */
+    beacon.battery_pct = battery_read_pct();
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;

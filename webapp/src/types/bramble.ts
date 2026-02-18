@@ -121,6 +121,8 @@ export interface NodeStatus {
   airtimeUsedMs: number;    // total since boot
   position?: Position;      // current GPS position if available
   gpsAvailable?: boolean;   // hardware has GPS module
+  batteryMv?: number;       // battery voltage in millivolts
+  batteryPct?: number;      // battery percentage 0-100
 }
 
 // ─── Location ──────────────────────────────────────────────────────────

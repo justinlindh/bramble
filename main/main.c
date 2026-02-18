@@ -21,6 +21,7 @@
 #include "mdns.h"
 #include "ble_server.h"
 #include "esp_system.h"
+#include "battery.h"
 
 static const char *TAG = "bramble";
 
@@ -75,8 +76,17 @@ static uint32_t boot_time_ms = 0;
 static void render_main_screen(void) {
     display_clear();
 
-    /* Header */
-    display_draw_text(0, 0, "Bramble");
+    /* Header — name + battery */
+    {
+        uint8_t bpct = battery_read_pct();
+        char hdr[32];
+        if (bpct > 0) {
+            snprintf(hdr, sizeof(hdr), "Bramble      %3u%%", bpct);
+        } else {
+            snprintf(hdr, sizeof(hdr), "Bramble      USB");
+        }
+        display_draw_text(0, 0, hdr);
+    }
     display_hline(0, 10, 128);
 
     /* Node address */
@@ -292,6 +302,10 @@ void app_main(void)
     /* Init button */
     ESP_LOGI(TAG, "=== BOOT STAGE: button_init ===");
     button_init();
+
+    ESP_LOGI(TAG, "=== BOOT STAGE: battery_init ===");
+    battery_init();
+    ESP_LOGI(TAG, "Battery: %u mV (%u%%)", battery_read_mv(), battery_read_pct());
 
     /* Read connectivity mode */
     conn_mode_t boot_mode = conn_mode_get();
