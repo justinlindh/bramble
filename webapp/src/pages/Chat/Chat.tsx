@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useStore } from '../../store/index';
 import { useConversation, useMyAddress } from '../../store/selectors';
-import { IconChat, IconBroadcast } from '../../components/Icons';
+import { IconChat, IconBroadcast, IconHash } from '../../components/Icons';
 import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
+import { ChannelDetailPanel } from './ChannelDetailPanel';
 import styles from './Chat.module.css';
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
@@ -54,17 +55,19 @@ function MessageList({ conversationId }: { conversationId: string }) {
 
 // ─── Chat header ──────────────────────────────────────────────────────────────
 
-function ChatHeader({ conversationId }: { conversationId: string }) {
+function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string; onToggleDetail?: () => void }) {
   const conversations = useStore(s => s.conversations);
   const conv = conversations.get(conversationId);
 
   let title: ReactNode = conv?.label ?? conversationId;
   let subtitle = '';
+  const isChannel = conversationId.startsWith('ch:');
 
   if (conversationId === 'broadcast') {
     title = <><IconBroadcast size={16} /> Broadcast</>;
     subtitle = 'All nodes in range';
-  } else if (conversationId.startsWith('ch:')) {
+  } else if (isChannel) {
+    title = <><IconHash size={14} /> {conv?.label ?? `ch-${conversationId.slice(3)}`}</>;
     subtitle = `Channel ${conversationId.slice(3)}`;
   } else if (conversationId.startsWith('dm:')) {
     const addr = parseInt(conversationId.slice(3), 10);
@@ -72,11 +75,17 @@ function ChatHeader({ conversationId }: { conversationId: string }) {
   }
 
   return (
-    <div className={styles.chatHeader}>
+    <div
+      className={`${styles.chatHeader} ${isChannel ? styles.chatHeaderClickable : ''}`}
+      onClick={isChannel ? onToggleDetail : undefined}
+      role={isChannel ? 'button' : undefined}
+      title={isChannel ? 'Click for channel details' : undefined}
+    >
       <div className={styles.chatHeaderText}>
         <span className={styles.chatTitle}>{title}</span>
         {subtitle && <span className={styles.chatSubtitle}>{subtitle}</span>}
       </div>
+      {isChannel && <span className={styles.chevron}>▸</span>}
     </div>
   );
 }
@@ -87,6 +96,16 @@ export function Chat() {
   const conversations = useStore(s => s.conversations);
   const activeConversationId = useStore(s => s.activeConversationId);
   const setActiveConversation = useStore(s => s.setActiveConversation);
+  const [showDetail, setShowDetail] = useState(false);
+
+  const toggleDetail = useCallback(() => setShowDetail(v => !v), []);
+
+  // Hide detail panel when switching conversations
+  useEffect(() => {
+    setShowDetail(false);
+  }, [activeConversationId]);
+
+  const isChannel = activeConversationId.startsWith('ch:');
 
   return (
     <div className={styles.chat}>
@@ -96,9 +115,18 @@ export function Chat() {
         onSelect={setActiveConversation}
       />
       <div className={styles.pane}>
-        <ChatHeader conversationId={activeConversationId} />
-        <MessageList conversationId={activeConversationId} />
-        <ComposeBar conversationId={activeConversationId} />
+        <ChatHeader conversationId={activeConversationId} onToggleDetail={toggleDetail} />
+        {showDetail && isChannel ? (
+          <ChannelDetailPanel
+            channelIndex={parseInt(activeConversationId.slice(3), 10)}
+            onClose={() => setShowDetail(false)}
+          />
+        ) : (
+          <>
+            <MessageList conversationId={activeConversationId} />
+            <ComposeBar conversationId={activeConversationId} />
+          </>
+        )}
       </div>
     </div>
   );

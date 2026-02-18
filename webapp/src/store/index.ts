@@ -17,7 +17,7 @@ import type {
 
 function formatAddr(id: string): string {
   if (id === 'broadcast') return '📢 Broadcast';
-  if (id.startsWith('ch:')) return `#ch-${id.slice(3)}`;
+  if (id.startsWith('ch:')) return `ch-${id.slice(3)}`;
   if (id.startsWith('dm:')) return `0x${Number(id.slice(3)).toString(16).toUpperCase()}`;
   return id;
 }
