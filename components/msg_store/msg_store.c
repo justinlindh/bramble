@@ -23,12 +23,15 @@ void msg_store_init(void) {
     s_count = 0;
 }
 
-void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
-                   const char *text, size_t text_len,
-                   int8_t rssi, int8_t snr) {
+void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
+                      const char *text, size_t text_len,
+                      int8_t rssi, int8_t snr,
+                      uint32_t packet_id, msg_status_t status) {
     stored_msg_t *m = &s_msgs[s_head];
     m->peer_addr = peer_addr;
     m->direction = dir;
+    m->status = status;
+    m->packet_id = packet_id;
     m->timestamp_s = get_uptime_s();
     m->rssi = rssi;
     m->snr = snr;
@@ -44,6 +47,26 @@ void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
     if (s_count < MSG_STORE_MAX) {
         s_count++;
     }
+}
+
+void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
+                   const char *text, size_t text_len,
+                   int8_t rssi, int8_t snr) {
+    msg_store_add_ex(peer_addr, dir, text, text_len, rssi, snr, 0, MSG_STATUS_NONE);
+}
+
+bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
+    if (packet_id == 0) return false;
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    /* Search newest first for faster match */
+    for (int i = s_count - 1; i >= 0; i--) {
+        int idx = (start + i) % MSG_STORE_MAX;
+        if (s_msgs[idx].packet_id == packet_id) {
+            s_msgs[idx].status = status;
+            return true;
+        }
+    }
+    return false;
 }
 
 int msg_store_count(void) {
