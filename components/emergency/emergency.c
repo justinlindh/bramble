@@ -157,7 +157,7 @@ int emergency_cancel_serialize(const emergency_cancel_t *cancel, uint8_t *buf, s
 
     emg_put_u32(buf + 0, cancel->src_addr);
     emg_put_u32(buf + 4, cancel->cancel_timestamp);
-    memcpy(buf + 8, cancel->auth_tag, 4);
+    memcpy(buf + 8, cancel->auth_tag, 8);
 
     return EMERGENCY_CANCEL_SIZE;
 }
@@ -167,7 +167,7 @@ int emergency_cancel_deserialize(const uint8_t *buf, size_t len, emergency_cance
 
     cancel->src_addr = emg_get_u32(buf + 0);
     cancel->cancel_timestamp = emg_get_u32(buf + 4);
-    memcpy(cancel->auth_tag, buf + 8, 4);
+    memcpy(cancel->auth_tag, buf + 8, 8);
 
     return 0;
 }

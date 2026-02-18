@@ -28,20 +28,20 @@ bramble_beacon_t beacon_build(uint32_t my_addr, uint32_t pubkey_hash,
 }
 
 void beacon_compute_hmac(bramble_beacon_t *beacon, const uint8_t *shared_key, size_t key_len) {
-    /* Serialize first 32 bytes (everything before auth_hmac) */
+    /* Serialize beacon with zeroed HMAC, then compute over the pre-HMAC portion */
     uint8_t buf[BEACON_SIZE];
-    memset(beacon->auth_hmac, 0, 4);
+    memset(beacon->auth_hmac, 0, 8);
     bramble_beacon_serialize(beacon, buf, BEACON_SIZE);
-    /* HMAC over bytes 0-31 */
+    /* HMAC over bytes 0..31 (everything before the auth_hmac field) */
     uint8_t full_hmac[32];
     crypto_hmac_sha256(shared_key, key_len, buf, 32, full_hmac);
-    memcpy(beacon->auth_hmac, full_hmac, 4);
+    memcpy(beacon->auth_hmac, full_hmac, 8);
 }
 
 bool beacon_verify_hmac(const bramble_beacon_t *beacon, const uint8_t *shared_key, size_t key_len) {
     bramble_beacon_t copy = *beacon;
-    uint8_t saved[4];
-    memcpy(saved, copy.auth_hmac, 4);
+    uint8_t saved[8];
+    memcpy(saved, copy.auth_hmac, 8);
     beacon_compute_hmac(&copy, shared_key, key_len);
-    return memcmp(saved, copy.auth_hmac, 4) == 0;
+    return memcmp(saved, copy.auth_hmac, 8) == 0;
 }

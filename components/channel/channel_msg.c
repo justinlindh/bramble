@@ -8,7 +8,7 @@ int channel_msg_encrypt(const bramble_channel_t *ch, uint32_t src_addr, uint8_t 
 
     /* Build inner plaintext: channel_id(1) + epoch(2) + app_type(1) + src_addr(4) + data */
     size_t pt_len = CHANNEL_MSG_OVERHEAD + data_len;
-    uint8_t pt[2048];
+    uint8_t pt[256];  /* Max channel payload is ~173 bytes; 256 provides margin */
     if (pt_len > sizeof(pt)) return -1;
 
     pt[0] = ch->channel_id;
@@ -45,7 +45,7 @@ int channel_msg_decrypt(bramble_channel_t *channels, int num_channels,
     if (!channels || !nonce || !ciphertext || !tag || !info_out) return -1;
     if (ct_len < CHANNEL_MSG_OVERHEAD) return -1;
 
-    uint8_t pt[2048];
+    uint8_t pt[256];  /* Max channel payload is ~173 bytes; 256 provides margin */
     if (ct_len > sizeof(pt)) return -1;
 
     /* Constant-time trial decryption: always try ALL channels to prevent

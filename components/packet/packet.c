@@ -139,7 +139,7 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t *p, const uint8_t *buf, size_t
     return ESP_OK;
 }
 
-/* BEACON (36 bytes) */
+/* BEACON (40 bytes) */
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t *p, uint8_t *buf, size_t len) {
     if (len < BEACON_SIZE) return ESP_ERR_INVALID_SIZE;
     esp_err_t r = bramble_header_serialize(&p->header, buf, len);
@@ -153,7 +153,7 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t *p, uint8_t *buf, size
     buf[B + 13] = p->flags;
     put_be32(buf + B + 14, p->network_time);
     put_be16(buf + B + 18, p->time_confidence);
-    memcpy(buf + B + 20, p->auth_hmac, 4);
+    memcpy(buf + B + 20, p->auth_hmac, 8);
     return ESP_OK;
 }
 esp_err_t bramble_beacon_deserialize(bramble_beacon_t *p, const uint8_t *buf, size_t len) {
@@ -169,7 +169,7 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t *p, const uint8_t *buf, si
     p->flags           = buf[B + 13];
     p->network_time    = get_be32(buf + B + 14);
     p->time_confidence = get_be16(buf + B + 18);
-    memcpy(p->auth_hmac, buf + B + 20, 4);
+    memcpy(p->auth_hmac, buf + B + 20, 8);
     return ESP_OK;
 }
 
