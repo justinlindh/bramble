@@ -120,6 +120,7 @@ export interface NodeStatus {
   routeCount: number;
   airtimeUsedMs: number;    // total since boot
   position?: Position;      // current GPS position if available
+  gpsAvailable?: boolean;   // hardware has GPS module
 }
 
 // ─── Location ──────────────────────────────────────────────────────────

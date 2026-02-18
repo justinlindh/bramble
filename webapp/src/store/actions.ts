@@ -211,6 +211,7 @@ function normalizeStatus(raw: any): NodeStatus {
     routeCount: raw.routeCount ?? 0,
     airtimeUsedMs: raw.airtimeUsedMs ?? 0,
     position: raw.position,
+    gpsAvailable: raw.gps_available ?? raw.gpsAvailable ?? false,
   } as NodeStatus;
 }
 

@@ -52,6 +52,11 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "packets_tx", st.packets_tx);
     cJSON_AddNumberToObject(result, "packets_rx", st.packets_rx);
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+#ifdef CONFIG_BRAMBLE_HAS_GPS
+    cJSON_AddBoolToObject(result, "gps_available", true);
+#else
+    cJSON_AddBoolToObject(result, "gps_available", false);
+#endif
     return 0;
 }
 
