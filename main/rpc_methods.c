@@ -90,7 +90,10 @@ static int handle_get_neighbors(const cJSON *params, cJSON *result) {
         cJSON_AddStringToObject(obj, "address", addr_hex(n->addr, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "rssi", n->rssi);
         cJSON_AddNumberToObject(obj, "snr", n->snr);
-        cJSON_AddNumberToObject(obj, "last_seen_ms", n->last_heard);
+        /* Return time since last heard (ms ago), not absolute timestamp */
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        uint32_t ago = (now > n->last_heard) ? (now - n->last_heard) : 0;
+        cJSON_AddNumberToObject(obj, "last_seen_ms", ago);
         if (n->name[0] != '\0') {
             cJSON_AddStringToObject(obj, "name", n->name);
         }
