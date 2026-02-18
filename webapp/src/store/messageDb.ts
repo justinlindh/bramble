@@ -12,16 +12,25 @@ function computeConversationId(msg: Message): string {
 
 class MessageDb {
   private db: IDBDatabase | null = null;
-  private readonly DB_NAME = 'bramble-messages';
   private readonly DB_VERSION = 1;
   private readonly STORE_NAME = 'messages';
+  private nodeAddr: string = '';
 
-  async open(): Promise<void> {
+  /** Open (or reopen) the DB for a specific node address */
+  async open(nodeAddr?: string): Promise<void> {
+    const addr = nodeAddr || 'default';
+    // If switching nodes, close old DB
+    if (this.db && this.nodeAddr !== addr) {
+      this.db.close();
+      this.db = null;
+    }
+    this.nodeAddr = addr;
     if (this.db) return;
     if (typeof indexedDB === 'undefined') return;
 
+    const dbName = `bramble-messages-${addr}`;
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+      const req = indexedDB.open(dbName, this.DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(this.STORE_NAME)) {

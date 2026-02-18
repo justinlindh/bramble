@@ -46,9 +46,9 @@ let client: BrambleClient | null = null;
 
 // ─── Message persistence ─────────────────────────────────────────────────
 
-export async function initMessageStore(): Promise<void> {
+export async function initMessageStore(nodeAddr?: string): Promise<void> {
   try {
-    await messageDb.open();
+    await messageDb.open(nodeAddr);
     const cached = await messageDb.getMessages();
     if (cached.length > 0) {
       useStore.getState().loadCachedMessages(cached);
@@ -110,10 +110,19 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     client.subscribe('probe.complete', (params) => handleProbeComplete(params));
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
 
+    // Clear stale data from previous node connection
+    store.resetNodeData();
+
     // Initial data load — all best-effort so a slow RPC doesn't kill the connection
     const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
+
+    // Load config first to get node address for IndexedDB namespacing
+    await opt(loadConfig());
+    const nodeAddr = store.config?.identity?.address;
+    const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+    await initMessageStore(addrHex);
+
     await Promise.all([
-      opt(loadConfig()),
       opt(loadStatus()),
       opt(loadAirtime()),
       opt(loadNeighbors()),

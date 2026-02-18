@@ -48,6 +48,7 @@ interface Actions {
   setMapFocusAddr: (addr: number | null) => void;
   loadCachedMessages: (msgs: Message[]) => void;
   peerNames: Map<number, string>;
+  resetNodeData: () => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -151,6 +152,21 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setActiveTab: (tab: string) => set({ activeTab: tab }),
   setShowRoutes: (show: boolean) => set({ showRoutes: show }),
+
+  resetNodeData: () => set({
+    messages: [],
+    conversations: new Map(),
+    neighbors: [],
+    routes: [],
+    peerNames: new Map(),
+    config: null as any,
+    status: null as any,
+    airtime: null as any,
+    probeResult: null,
+    probeCollecting: false,
+    peerLocations: [],
+    mapFocusAddr: null,
+  }),
 
   setProbeResult: (r) => set({ probeResult: r }),
   setProbeCollecting: (c) => set({ probeCollecting: c }),
