@@ -275,21 +275,29 @@ export async function loadMessages(sinceId?: number): Promise<void> {
     10000, // longer timeout — serializing 20 messages can be slow on ESP32
   );
   const store = useStore.getState();
+  // Get device uptime to convert uptime-based timestamps to wall clock
+  const deviceUptime = store.status?.uptimeSec ?? 0;
+  const now = Date.now();
   for (const m of result.messages ?? []) {
     const fromAddr = typeof m.from === 'string' ? parseInt(m.from, 16) : (m.from ?? 0);
     const toAddr = typeof m.to === 'string' ? parseInt(m.to, 16) : (m.to ?? 0);
     const dir = (m as any).direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
     const isBroadcast = dir === 'broadcast_in' || dir === 'broadcast_out';
+    // Convert uptime-based timestamp to wall clock: now - (uptime - msg_time)
+    const msgUptimeS = (m as any).timestamp_s ?? 0;
+    const wallMs = deviceUptime > 0 && msgUptimeS > 0
+      ? now - (deviceUptime - msgUptimeS) * 1000
+      : now;
     const fwMsg: Message = {
-      id: m.msgId ?? `fw-${(m as any).timestamp_s ?? Date.now()}-${fromAddr}`,
+      id: m.msgId ?? `fw-${msgUptimeS || Date.now()}-${fromAddr}`,
       direction: isOutgoing ? 'outgoing' : 'incoming',
       from: fromAddr,
       to: isBroadcast ? 0xFFFFFFFF : toAddr,
       text: m.text,
       tier: m.tier,
       channelIndex: isBroadcast ? undefined : m.channelIndex,
-      timestampMs: ((m as any).timestamp_s ?? m.timestamp ?? 0) * 1000,
+      timestampMs: wallMs,
       status: 'delivered',
     };
     /* Check if we already have a cached version (from IndexedDB) with relay path data.
