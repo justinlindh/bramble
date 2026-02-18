@@ -268,7 +268,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
 
 // ─── Messaging ────────────────────────────────────────────────────────────
 
-const packetIdToMsgId = new Map<number, string>();
+const packetIdToMsgId = new Map<string, string>();
 
 export async function sendMessage(
   dest: number,
@@ -300,10 +300,10 @@ export async function sendMessage(
     const params = isBroadcast
       ? { text }
       : { dest: dest.toString(16).toUpperCase().padStart(8, '0'), text };
-    const result = await client.rpc<{ message_id?: string; status?: string; packetId?: number }>(method, params);
+    const result = await client.rpc<{ message_id?: string; status?: string; packetId?: string }>(method, params);
     store.updateMessageStatus(msg.id, 'sent');
     messageDb.updateMessageStatus(msg.id, 'sent').catch(() => {});
-    if (result?.packetId !== undefined) {
+    if (result?.packetId) {
       packetIdToMsgId.set(result.packetId, msg.id);
     }
   } catch (e) {
@@ -316,11 +316,13 @@ export async function sendMessage(
 // ─── Notification handlers ────────────────────────────────────────────────
 
 function handleAck(params: unknown): void {
-  const { packetId, status, relayPath } = params as {
-    packetId: number;
-    status: string;
-    relayPath?: RelayHop[];
-  };
+  const p = params as Record<string, unknown>;
+  /* Firmware sends snake_case (packet_id), webapp convention is camelCase */
+  const packetId = (p.packetId ?? p.packet_id) as string | undefined;
+  const status = (p.status as string) ?? 'delivered';
+  const relayPath = p.relayPath as RelayHop[] | undefined;
+
+  if (!packetId) return;
   const msgId = packetIdToMsgId.get(packetId);
   if (msgId) {
     packetIdToMsgId.delete(packetId);

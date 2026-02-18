@@ -1045,10 +1045,10 @@ static int initiate_discovery(uint32_t dest_addr) {
     return 0;
 }
 
-int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
+uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
     if (s_num_channels == 0) {
         ESP_LOGE(TAG, "No channels initialized");
-        return -1;
+        return 0;
     }
 
     /* For non-neighbor destinations, check route table */
@@ -1064,7 +1064,7 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
             queue_message(dest_addr, data, len);
             /* Still store in msg_store so UI shows it as pending */
             msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
-            return 0; /* queued, not an error */
+            return 1; /* queued — nonzero = success but no packet_id yet */
         }
         /* Have a route — send_data_packet will transmit (next hop gets it) */
     }
@@ -1077,7 +1077,7 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
                                   data, len, nonce, ciphertext, tag);
     if (ret != 0) {
         ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
-        return ret;
+        return 0;
     }
 
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
@@ -1086,7 +1086,7 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
         msg_store_add_ex(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0,
                          pkt_id, MSG_STATUS_SENT);
     }
-    return pkt_id ? 0 : -1;
+    return pkt_id;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

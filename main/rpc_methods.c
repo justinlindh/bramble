@@ -156,15 +156,16 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
     }
 
     uint32_t dest = (uint32_t)strtoul(dest_str, NULL, 16);
-    int rc = mesh_send_message(dest, (const uint8_t *)text, strlen(text));
-    if (rc != 0) {
-        ESP_LOGW(TAG, "mesh_send_message to %08" PRIX32 " failed: %d", dest, rc);
+    uint32_t pkt_id = mesh_send_message(dest, (const uint8_t *)text, strlen(text));
+    if (pkt_id == 0) {
+        ESP_LOGW(TAG, "mesh_send_message to %08" PRIX32 " failed", dest);
         cJSON_AddStringToObject(result, "error", "send failed");
         return RPC_ERR_RADIO;
     }
 
-    /* TODO: generate a proper message ID (sequence counter + address) */
-    cJSON_AddStringToObject(result, "message_id", "TODO");
+    char pkt_id_str[12];
+    snprintf(pkt_id_str, sizeof(pkt_id_str), "%08" PRIX32, pkt_id);
+    cJSON_AddStringToObject(result, "packetId", pkt_id_str);
     cJSON_AddStringToObject(result, "status", "sent");
     return 0;
 }
