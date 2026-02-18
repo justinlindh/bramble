@@ -106,8 +106,8 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
     client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
     client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
-    client.subscribe('probe.ack', (params) => handleProbeAck(params));
-    client.subscribe('probe.complete', (params) => handleProbeComplete(params));
+    client.subscribe('bramble.onProbeResult', (params) => handleProbeAck(params));
+    client.subscribe('bramble.onProbeComplete', (params) => handleProbeComplete(params));
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
 
     // Clear stale data from previous node connection
@@ -163,7 +163,7 @@ function normalizeConfig(raw: any): BrambleConfig {
   return {
     identity: {
       address: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.identity?.address ?? 0),
-      pubkeyHash: raw.identity?.pubkeyHash ?? 0,
+      pubkeyHash: typeof raw.pubkey_hash === 'string' ? parseInt(raw.pubkey_hash, 16) : (raw.identity?.pubkeyHash ?? 0),
       name: raw.node_name ?? raw.identity?.name ?? '',
       pubkeyB64: raw.identity?.pubkeyB64 ?? '',
     },
@@ -202,7 +202,7 @@ export async function loadConfig(): Promise<void> {
 function normalizeStatus(raw: any): NodeStatus {
   return {
     uptimeSec: raw.uptime_s ?? raw.uptimeSec ?? 0,
-    freeHeapBytes: raw.freeHeapBytes ?? 0,
+    freeHeapBytes: raw.free_heap ?? raw.freeHeapBytes ?? 0,
     fwVersion: raw.firmware_version ?? raw.fwVersion ?? '',
     txCount: raw.packets_tx ?? raw.txCount ?? 0,
     rxCount: raw.packets_rx ?? raw.rxCount ?? 0,
@@ -484,7 +484,15 @@ export async function sendProbe(): Promise<void> {
 }
 
 function handleProbeAck(params: unknown): void {
-  const ack = params as ProbeResponse;
+  const raw = params as any;
+  const ack: ProbeResponse = {
+    responderAddr: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.responderAddr ?? 0),
+    hopCount: raw.hops ?? raw.hopCount ?? 0,
+    rssi: raw.rssi ?? 0,
+    snr: raw.snr ?? 0,
+    pathLen: raw.hops ?? raw.pathLen ?? 0,
+    latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
+  };
   const store = useStore.getState();
   const prev = store.probeResult;
   if (!prev || prev.complete) return;
