@@ -4,12 +4,13 @@
 ## Overview
 The Bramble webapp has full UI for all config features. Most RPC methods are now implemented.
 
-## Status
+## Status — ✅ ALL PHASES COMPLETE (2026-02-18)
 1. ✅ **Radio Settings** (setRadio) — full parse/validate/apply/NVS persist/boot load
-2. ✅ **Channel Management** (addChannel, removeChannel, setDefaultChannel) — with NVS persist
+2. ✅ **Channel Management** (addChannel, removeChannel, setDefaultChannel) — with NVS persist + boot load
 3. ✅ **Network Probe** (sendProbe) — probe TX, ACK, onProbeResult notification
-4. ⚠️ **Mailbox** (setMailbox) — NVS toggle works, but NO store-and-forward delivery logic
-5. ⚠️ **Location** — NVS config + contacts + getPeerLocations works, but shareLocationOnce has NO LoRa TX (just reads NVS)
+4. ✅ **Mailbox** (setMailbox) — NVS toggle + runtime flag + 20-slot store-and-forward buffer + flush on beacon + 1hr expiry
+5. ✅ **Location** — NVS config + contacts + getPeerLocations + shareLocationOnce sends actual LoRa packet
+6. ✅ **Webapp** — assertOk error feedback, onPeerLocation subscription, pre-existing TS fixes
 
 ## Dependencies
 - Radio: `components/radio/sx1262.c`, `components/freq_plan/`
@@ -73,7 +74,7 @@ The Bramble webapp has full UI for all config features. Most RPC methods are now
 - Swap channel to index 0 position (send/receive defaults to index 0)
 - Update NVS ordering
 
-### Task 2.4: Load channels from NVS on boot ⬜ NOT DONE — channels don't survive reboot
+### Task 2.4: Load channels from NVS on boot ✅
 - In `mesh_task_start()`: after public channel init, load additional channels from NVS
 - Merge: public channel always at index 0, NVS channels appended
 - Cap at MAX_CHANNELS (currently defined in channel types)
@@ -103,24 +104,24 @@ The Bramble webapp has full UI for all config features. Most RPC methods are now
 
 ---
 
-## Phase 4: Mailbox (setMailbox) ⚠️ PARTIAL
+## Phase 4: Mailbox (setMailbox) ✅ COMPLETE
 *Estimate: 30 minutes*
 
-### Task 4.1: Implement setMailbox ✅ (NVS toggle only)
+### Task 4.1: Implement setMailbox ✅
 - File: `main/rpc_methods.c` → `handle_set_mailbox()`
 - Parse params: `enabled` (bool), optionally `max_stored` (number, default 20)
 - Set flag in mesh_task state, persist to NVS
 - When enabled: beacon includes BEACON_FLAG_MAILBOX (0x01)
 - When receiving data for a destination that's a known neighbor but currently offline, store in message store for later delivery
 
-### Task 4.2: Store-and-forward delivery ⬜ NOT DONE — no actual buffering/forwarding logic in mesh_task
+### Task 4.2: Store-and-forward delivery ✅ (20-slot mailbox, flush on beacon, 1hr expiry)
 - In `handle_rx_packet()` for DATA packets: if dest is a known neighbor but not recently heard, queue for later
 - When neighbor comes back online (beacon rx), flush stored messages
 - Add `bramble.getMailbox` RPC for viewing queued messages
 
 ---
 
-## Phase 5: Location Features ⚠️ PARTIAL
+## Phase 5: Location Features ✅ COMPLETE
 *Estimate: 1.5 hours*
 
 ### Task 5.1: Implement setLocationConfig ✅ (NVS persist + manual lat/lon)
@@ -141,7 +142,7 @@ The Bramble webapp has full UI for all config features. Most RPC methods are now
 - Store in a static array (peer_addr, lat, lon, tier, timestamp)
 - Max 32 peer locations, expire after 1 hour
 
-### Task 5.4: Location packet TX/RX ⬜ NOT DONE — no LoRa location packets, shareLocationOnce is a stub
+### Task 5.4: Location packet TX/RX ✅ (sends as encrypted DATA message with JSON location payload)
 - On location beacon timer: build location packet with coordinates + tier
 - Filter recipients based on contact whitelist
 - On RX: parse location data, store in peer locations table
@@ -149,7 +150,7 @@ The Bramble webapp has full UI for all config features. Most RPC methods are now
 
 ---
 
-## Phase 6: Webapp Normalization Updates ⚠️ PARTIAL
+## Phase 6: Webapp Normalization Updates ✅ COMPLETE
 *Estimate: 30 minutes*
 
 ### Task 6.1: Update normalizeConfig for new fields ✅ (already normalizes radio, channels, location)
@@ -157,11 +158,11 @@ The Bramble webapp has full UI for all config features. Most RPC methods are now
 - Channel count, hasPsk detection
 - Location config fields
 
-### Task 6.2: Handle new notifications ⚠️ (onProbeResult ✅, onPeerLocation ⬜ not subscribed)
+### Task 6.2: Handle new notifications ✅
 - `bramble.onProbeResult` → update store probe results
 - `bramble.onPeerLocation` → update map markers
 
-### Task 6.3: Error feedback in UI ⬜ NOT VERIFIED — need to check if RPC error responses surface in webapp
+### Task 6.3: Error feedback in UI ✅ (assertOk helper throws on {ok:false} RPC results)
 - Currently stubbed RPCs return `{ok: false, note: "..."}` silently
 - Webapp should show the error/note to the user
 - Check if actions.ts handles non-exception error responses
