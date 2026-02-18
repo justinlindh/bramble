@@ -3,6 +3,7 @@
  */
 
 #include "mesh_task.h"
+#include "rpc_dispatcher.h"
 #include "radio.h"
 #include "packet.h"
 #include "crypto.h"
@@ -15,8 +16,11 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
+#include "freertos/timers.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_task_wdt.h"
 #include <string.h>
 #include <inttypes.h>
 
@@ -68,6 +72,31 @@ static uint32_t next_packet_id(void) {
         counter = (uint32_t)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
     }
     return counter++;
+}
+
+/* ── Reboot timer ───────────────────────────────────────────────────── */
+
+static void reboot_timer_cb(TimerHandle_t xTimer) {
+    (void)xTimer;
+    ESP_LOGI(TAG, "Rebooting (requested via RPC)...");
+    esp_restart();
+}
+
+void mesh_reboot_delayed(int delay_ms) {
+    if (delay_ms <= 0) delay_ms = 100;
+    TimerHandle_t t = xTimerCreate("reboot", pdMS_TO_TICKS(delay_ms),
+                                   pdFALSE, NULL, reboot_timer_cb);
+    if (t == NULL) {
+        ESP_LOGE(TAG, "Failed to create reboot timer — rebooting immediately");
+        esp_restart();
+        return;
+    }
+    if (xTimerStart(t, pdMS_TO_TICKS(100)) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start reboot timer — rebooting immediately");
+        esp_restart();
+    } else {
+        ESP_LOGI(TAG, "Reboot scheduled in %d ms", delay_ms);
+    }
 }
 
 /* ── Radio callbacks (ISR context → queue) ──────────────────────────── */
@@ -178,6 +207,9 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)",
                  beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors));
     }
+
+    /* Notify any RPC clients that the neighbor table changed */
+    rpc_notify("bramble.onNeighborChange", NULL);
 }
 
 static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -288,13 +320,24 @@ static void handle_rx_packet(const rx_packet_t *pkt) {
 static void mesh_task(void *param) {
     (void)param;
 
-    ESP_LOGI(TAG, "Mesh task starting on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task start (core %d) ===", xPortGetCoreID());
+
+    /* Subscribe this task to the task watchdog timer.
+     * If the main loop stalls (or radio_init hangs), the WDT will trigger
+     * a reset after CONFIG_ESP_TASK_WDT_TIMEOUT_S seconds. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: watchdog subscribe ===");
+    esp_err_t wdt_err = esp_task_wdt_add(NULL);
+    if (wdt_err != ESP_OK) {
+        ESP_LOGW(TAG, "Could not subscribe to task WDT: %d (continuing anyway)", wdt_err);
+    }
 
     /* Initialize radio with frequency plan */
+    ESP_LOGI(TAG, "=== BOOT STAGE: frequency plan init ===");
     const bramble_freq_plan_t *plan = freq_plan_get_default();
     ESP_LOGI(TAG, "Frequency plan: %s (%.1f MHz, max %d dBm)",
              plan->name, plan->default_freq_mhz, plan->max_tx_power_dbm);
 
+    ESP_LOGI(TAG, "=== BOOT STAGE: radio profile config ===");
     radio_config_t radio_cfg;
     radio_get_profile_config(RADIO_PROFILE_LONG_RANGE, &radio_cfg);
 
@@ -308,10 +351,14 @@ static void mesh_task(void *param) {
              radio_cfg.frequency_mhz, radio_cfg.sf,
              (unsigned long)radio_cfg.bw_hz, radio_cfg.tx_power);
 
-    /* Init radio */
+    /* Register radio callbacks before init */
+    ESP_LOGI(TAG, "=== BOOT STAGE: register radio callbacks ===");
     radio_set_rx_callback(on_rx);
     radio_set_tx_done_callback(on_tx_done);
 
+    /* Init radio — this is where hangs have been observed on SX1262.
+     * The task watchdog will reset the device if radio_init() never returns. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: radio_init (SX1262) — WDT active ===");
     int ret = radio_init(&radio_cfg);
     if (ret != 0) {
         ESP_LOGE(TAG, "Radio init failed: %d", ret);
@@ -319,11 +366,12 @@ static void mesh_task(void *param) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.radio_ok = false;
         xSemaphoreGive(s_state_mutex);
+        esp_task_wdt_delete(NULL);
         vTaskDelete(NULL);
         return;
     }
 
-    ESP_LOGI(TAG, "Radio initialized — starting RX");
+    ESP_LOGI(TAG, "=== BOOT STAGE: radio initialized — starting RX ===");
     radio_start_rx();
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -336,18 +384,26 @@ static void mesh_task(void *param) {
     uint32_t beacon_interval = BEACON_INTERVAL_MS;
 
     /* Add initial jitter before first beacon */
+    ESP_LOGI(TAG, "=== BOOT STAGE: beacon jitter delay ===");
     uint8_t jitter_buf[2];
     crypto_random(jitter_buf, 2);
     uint32_t initial_delay = (uint32_t)(jitter_buf[0] | (jitter_buf[1] << 8)) % BEACON_JITTER_MS;
+    /* Reset WDT during the jitter sleep to avoid spurious WDT triggers */
+    esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(initial_delay));
 
-    ESP_LOGI(TAG, "Sending first beacon...");
+    ESP_LOGI(TAG, "=== BOOT STAGE: sending first beacon ===");
     send_beacon();
     last_beacon_ms = now_ms();
+
+    ESP_LOGI(TAG, "=== BOOT STAGE: entering main mesh loop ===");
 
     /* Main loop */
     while (1) {
         uint32_t t = now_ms();
+
+        /* Reset task watchdog — if this stops being called, WDT resets device */
+        esp_task_wdt_reset();
 
         /* Process received packets */
         rx_packet_t pkt;

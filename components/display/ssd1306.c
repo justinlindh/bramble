@@ -284,22 +284,34 @@ void display_draw_text_large(int x, int y, const char *text) {
 }
 
 void display_flush(void) {
-    if (!initialized && !dev_handle) return;
+    if (!initialized || !dev_handle) return;
 
     /* Set column address range: 0 to 127 */
     uint8_t col_cmd[] = { 0x00, 0x21, 0x00, 0x7F };
-    i2c_master_transmit(dev_handle, col_cmd, 4, 100);
+    esp_err_t err = i2c_master_transmit(dev_handle, col_cmd, 4, 100);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "display_flush col_cmd failed: %d", err);
+        return;
+    }
 
     /* Set page address range: 0 to 7 */
     uint8_t page_cmd[] = { 0x00, 0x22, 0x00, 0x07 };
-    i2c_master_transmit(dev_handle, page_cmd, 4, 100);
+    err = i2c_master_transmit(dev_handle, page_cmd, 4, 100);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "display_flush page_cmd failed: %d", err);
+        return;
+    }
 
     /* Send framebuffer in chunks (I2C buffer limit) */
     for (int i = 0; i < (int)sizeof(fb); i += 128) {
         uint8_t buf[129];
         buf[0] = 0x40; /* Co=0, D/C#=1 → data */
         memcpy(buf + 1, fb + i, 128);
-        i2c_master_transmit(dev_handle, buf, 129, 100);
+        err = i2c_master_transmit(dev_handle, buf, 129, 100);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "display_flush data chunk %d failed: %d", i / 128, err);
+            return;
+        }
     }
 }
 
