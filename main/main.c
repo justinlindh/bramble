@@ -17,6 +17,7 @@
 #include "rpc_methods.h"
 #include "wifi_manager.h"
 #include "ws_server.h"
+#include "msg_store.h"
 #include "mdns.h"
 
 static const char *TAG = "bramble";
@@ -104,14 +105,36 @@ static void render_screen(ui_state_t *ui) {
     case SCREEN_MAIN:
         render_main_screen();
         break;
-    case SCREEN_MESSAGES:
+    case SCREEN_MESSAGES: {
         display_clear();
-        display_draw_text(0, 0, "Messages");
+        int mcount = msg_store_count();
+        char hdr[32];
+        snprintf(hdr, sizeof(hdr), "Messages (%d)", mcount);
+        display_draw_text(0, 0, hdr);
         display_hline(0, 10, 128);
-        display_draw_text(0, 24, "(no messages yet)");
+
+        if (mcount == 0) {
+            display_draw_text(0, 24, "(no messages yet)");
+        } else {
+            /* Show last 3 messages (newest at bottom), 14px per line */
+            int start = mcount > 3 ? mcount - 3 : 0;
+            int y = 14;
+            for (int i = start; i < mcount && y < 54; i++) {
+                const stored_msg_t *m = msg_store_get(i);
+                if (!m) continue;
+                char line[24];  /* 21 chars fit on 128px at 6px/char */
+                const char *arrow = (m->direction == MSG_DIR_OUTGOING ||
+                                     m->direction == MSG_DIR_BROADCAST_OUT)
+                                    ? ">" : "<";
+                snprintf(line, sizeof(line), "%s %.20s", arrow, m->text);
+                display_draw_text(0, y, line);
+                y += 14;
+            }
+        }
         display_draw_text(0, 56, "[press] next screen");
         display_flush();
         break;
+    }
     case SCREEN_NODES: {
         display_clear();
         display_draw_text(0, 0, "Nodes");
@@ -241,6 +264,9 @@ void app_main(void)
      * the task watchdog (CONFIG_ESP_TASK_WDT_TIMEOUT_S) will force a reset. */
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
     mesh_task_start(&g_identity);
+
+    /* Init message store */
+    msg_store_init();
 
     /* Init RPC dispatcher and register methods */
     ESP_LOGI(TAG, "=== BOOT STAGE: rpc_init ===");
