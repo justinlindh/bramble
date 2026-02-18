@@ -166,7 +166,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={isConnected ? 'Type a message… (Enter to send, Shift+Enter for newline)' : 'Connect to a node to send messages'}
+          placeholder={isConnected ? 'Type a message…' : 'Connect to a node to send messages'}
           disabled={!isConnected || sending}
           rows={1}
           aria-label="Message input"
