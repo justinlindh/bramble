@@ -106,6 +106,8 @@ static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
 /* Forward declarations */
 static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
 static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
+static void mailbox_flush_for(uint32_t dest_addr);
+static int transmit_packet(const uint8_t *buf, uint8_t len);
 
 static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
     snprintf(buf, len, "%08" PRIX32, addr);
