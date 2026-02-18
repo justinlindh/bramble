@@ -272,7 +272,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
     const dir = (m as any).direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
     const isBroadcast = dir === 'broadcast_in' || dir === 'broadcast_out';
-    store.addMessage({
+    const fwMsg: Message = {
       id: m.msgId ?? `fw-${(m as any).timestamp_s ?? Date.now()}-${fromAddr}`,
       direction: isOutgoing ? 'outgoing' : 'incoming',
       from: fromAddr,
@@ -282,7 +282,14 @@ export async function loadMessages(sinceId?: number): Promise<void> {
       channelIndex: isBroadcast ? undefined : m.channelIndex,
       timestampMs: ((m as any).timestamp_s ?? m.timestamp ?? 0) * 1000,
       status: 'delivered',
-    });
+    };
+    /* Check if we already have a cached version (from IndexedDB) with relay path data.
+     * Match by text + timestamp proximity since firmware IDs differ from webapp IDs. */
+    const existing = store.messages.find(
+      ex => ex.text === fwMsg.text && Math.abs(ex.timestampMs - fwMsg.timestampMs) < 5000
+    );
+    if (existing?.relayPath) continue; // keep cached version with relay path
+    store.addMessage(fwMsg);
   }
 }
 
