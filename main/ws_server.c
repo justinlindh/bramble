@@ -1,8 +1,11 @@
 #include "ws_server.h"
 #include "rpc_dispatcher.h"
+#include "wifi_manager.h"
+#include "mesh_task.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdlib.h>
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE    2048
@@ -153,6 +156,158 @@ static esp_err_t ws_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ── WiFi config web page ────────────────────────────────────────────── */
+
+static const char *CONFIG_HTML =
+    "<!DOCTYPE html><html><head>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Bramble WiFi Setup</title>"
+    "<style>"
+    "body{font-family:sans-serif;max-width:400px;margin:40px auto;padding:0 20px;background:#1a1a1a;color:#e0e0e0}"
+    "h1{color:#4ade80;font-size:1.4em}input{width:100%%;padding:8px;margin:4px 0 12px;box-sizing:border-box;"
+    "background:#2a2a2a;color:#e0e0e0;border:1px solid #444;border-radius:4px}"
+    "button{background:#4ade80;color:#1a1a1a;border:none;padding:10px 20px;border-radius:4px;"
+    "cursor:pointer;font-weight:bold;width:100%%}button:hover{background:#22c55e}"
+    ".status{background:#2a2a2a;padding:12px;border-radius:4px;margin-bottom:16px;font-size:0.9em}"
+    ".ok{color:#4ade80}.warn{color:#facc15}"
+    "</style></head><body>"
+    "<h1>&#x1f310; Bramble WiFi Setup</h1>"
+    "<div class='status' id='st'>Loading...</div>"
+    "<form method='POST' action='/config'>"
+    "<label>WiFi Network (SSID)</label>"
+    "<input name='ssid' required placeholder='Your WiFi name'>"
+    "<label>Password</label>"
+    "<input name='pass' type='password' placeholder='WiFi password'>"
+    "<button type='submit'>Save &amp; Reboot</button>"
+    "</form>"
+    "<script>"
+    "fetch('/config/status').then(r=>r.json()).then(d=>{"
+    "let s=document.getElementById('st');"
+    "let m=d.mode=='Station'?'<span class=ok>Connected</span>':'<span class=warn>AP Mode</span>';"
+    "s.innerHTML='Mode: '+m+'<br>SSID: '+(d.ssid||'(none)')+'<br>IP: '+d.ip;"
+    "}).catch(()=>{document.getElementById('st').textContent='Status unavailable';})"
+    "</script>"
+    "</body></html>";
+
+static esp_err_t config_page_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, CONFIG_HTML, strlen(CONFIG_HTML));
+    return ESP_OK;
+}
+
+static esp_err_t config_status_handler(httpd_req_t *req)
+{
+    wifi_status_t st;
+    wifi_manager_get_status(&st);
+    const char *mode_str = st.mode == WIFI_MODE_STATION ? "Station" :
+                           st.mode == WIFI_MODE_AP ? "AP" : "Off";
+    char json[256];
+    snprintf(json, sizeof(json),
+             "{\"mode\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\"}",
+             mode_str, st.ssid, st.ip_addr);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, strlen(json));
+    return ESP_OK;
+}
+
+/* URL-decode in place. Returns decoded length. */
+static int url_decode(char *dst, const char *src, int src_len)
+{
+    int di = 0;
+    for (int i = 0; i < src_len; i++) {
+        if (src[i] == '+') {
+            dst[di++] = ' ';
+        } else if (src[i] == '%' && i + 2 < src_len) {
+            char hex[3] = { src[i+1], src[i+2], 0 };
+            dst[di++] = (char)strtol(hex, NULL, 16);
+            i += 2;
+        } else {
+            dst[di++] = src[i];
+        }
+    }
+    dst[di] = '\0';
+    return di;
+}
+
+static esp_err_t config_post_handler(httpd_req_t *req)
+{
+    char body[256] = {0};
+    int len = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (len <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty body");
+        return ESP_FAIL;
+    }
+    body[len] = '\0';
+
+    /* Parse form: ssid=xxx&pass=xxx */
+    char ssid[33] = {0};
+    char pass[65] = {0};
+
+    char *ssid_start = strstr(body, "ssid=");
+    char *pass_start = strstr(body, "pass=");
+
+    if (ssid_start) {
+        ssid_start += 5;
+        char *end = strchr(ssid_start, '&');
+        int slen = end ? (int)(end - ssid_start) : (int)strlen(ssid_start);
+        if (slen > 32) slen = 32;
+        url_decode(ssid, ssid_start, slen);
+    }
+
+    if (pass_start) {
+        pass_start += 5;
+        char *end = strchr(pass_start, '&');
+        int plen = end ? (int)(end - pass_start) : (int)strlen(pass_start);
+        if (plen > 64) plen = 64;
+        url_decode(pass, pass_start, plen);
+    }
+
+    if (ssid[0] == '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID required");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "WiFi config received: SSID=%s", ssid);
+    wifi_manager_nvs_set_creds(ssid, pass);
+
+    const char *resp =
+        "<!DOCTYPE html><html><head>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<style>body{font-family:sans-serif;max-width:400px;margin:40px auto;padding:0 20px;"
+        "background:#1a1a1a;color:#e0e0e0;text-align:center}"
+        "h1{color:#4ade80}</style></head><body>"
+        "<h1>&#x2705; Saved!</h1>"
+        "<p>WiFi credentials saved. Rebooting in 3 seconds...</p>"
+        "<p>Connect to your WiFi network and find the device at its new IP.</p>"
+        "</body></html>";
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, resp, strlen(resp));
+
+    /* Reboot after a short delay to let the response flush */
+    mesh_reboot_delayed(3000);
+    return ESP_OK;
+}
+
+static const httpd_uri_t config_page_uri = {
+    .uri     = "/",
+    .method  = HTTP_GET,
+    .handler = config_page_handler,
+};
+
+static const httpd_uri_t config_status_uri = {
+    .uri     = "/config/status",
+    .method  = HTTP_GET,
+    .handler = config_status_handler,
+};
+
+static const httpd_uri_t config_post_uri = {
+    .uri     = "/config",
+    .method  = HTTP_POST,
+    .handler = config_post_handler,
+};
+
 static const httpd_uri_t ws_uri = {
     .uri          = "/ws",
     .method       = HTTP_GET,
@@ -176,7 +331,10 @@ int ws_server_start(void)
     }
 
     httpd_register_uri_handler(s_server, &ws_uri);
-    ESP_LOGI(TAG, "WebSocket server started on port 80 at /ws");
+    httpd_register_uri_handler(s_server, &config_page_uri);
+    httpd_register_uri_handler(s_server, &config_status_uri);
+    httpd_register_uri_handler(s_server, &config_post_uri);
+    ESP_LOGI(TAG, "WebSocket server started on port 80 (/ws + /config)");
 
     /* Register push notification transport */
     if (rpc_register_notify_transport(ws_notify_cb, NULL) != 0) {
