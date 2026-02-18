@@ -251,14 +251,15 @@ export async function loadMessages(sinceId?: number): Promise<void> {
     const toAddr = typeof m.to === 'string' ? parseInt(m.to, 16) : (m.to ?? 0);
     const dir = (m as any).direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
+    const isBroadcast = dir === 'broadcast_in' || dir === 'broadcast_out';
     store.addMessage({
-      id: m.msgId ?? `fw-${(m as any).timestamp_s ?? Date.now()}`,
+      id: m.msgId ?? `fw-${(m as any).timestamp_s ?? Date.now()}-${fromAddr}`,
       direction: isOutgoing ? 'outgoing' : 'incoming',
       from: fromAddr,
-      to: toAddr,
+      to: isBroadcast ? 0xFFFFFFFF : toAddr,
       text: m.text,
       tier: m.tier,
-      channelIndex: m.channelIndex,
+      channelIndex: isBroadcast ? undefined : m.channelIndex,
       timestampMs: ((m as any).timestamp_s ?? m.timestamp ?? 0) * 1000,
       status: 'delivered',
     });
@@ -294,12 +295,12 @@ export async function sendMessage(
   messageDb.saveMessage(msg).catch(() => {});
 
   try {
-    const result = await client.rpc<{ packetId: number }>('bramble.sendMessage', {
-      dest,
-      text,
-      tier,
-      ...(channelIndex !== undefined ? { channelIndex } : {}),
-    });
+    const isBroadcast = dest === 0xFFFFFFFF;
+    const method = isBroadcast ? 'bramble.sendBroadcast' : 'bramble.sendMessage';
+    const params = isBroadcast
+      ? { text }
+      : { dest: dest.toString(16).toUpperCase().padStart(8, '0'), text };
+    const result = await client.rpc<{ message_id?: string; status?: string; packetId?: number }>(method, params);
     store.updateMessageStatus(msg.id, 'sent');
     messageDb.updateMessageStatus(msg.id, 'sent').catch(() => {});
     if (result?.packetId !== undefined) {
