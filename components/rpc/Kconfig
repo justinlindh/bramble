@@ -1,0 +1,19 @@
+menu "Bramble RPC"
+
+config BRAMBLE_RPC_ENABLED
+    bool "Enable JSON-RPC dispatcher"
+    default y
+
+config BRAMBLE_RPC_MAX_REQUEST
+    int "Max JSON-RPC request size (bytes)"
+    default 1024
+
+config BRAMBLE_RPC_MAX_RESPONSE
+    int "Max JSON-RPC response size (bytes)"
+    default 2048
+
+config BRAMBLE_RPC_MAX_METHODS
+    int "Max registered RPC methods"
+    default 32
+
+endmenu
