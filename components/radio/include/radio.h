@@ -40,6 +40,8 @@ typedef void (*radio_tx_done_callback_t)(void);
 typedef void (*radio_cad_done_callback_t)(bool detected);
 
 int  radio_init(const radio_config_t *config);
+int  radio_reconfigure(const radio_config_t *config);
+void radio_get_config(radio_config_t *config);
 void radio_get_profile_config(radio_profile_t profile, radio_config_t *config);
 int  radio_transmit(const uint8_t *data, uint8_t len);
 void radio_start_rx(void);

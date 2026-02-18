@@ -177,6 +177,34 @@ static void radio_task(void *arg)
 /*  Profile defaults                                                   */
 /* ------------------------------------------------------------------ */
 
+int radio_reconfigure(const radio_config_t *config)
+{
+    ESP_LOGI(TAG, "Reconfiguring radio: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
+             config->frequency_mhz, config->sf, config->bw_hz, config->tx_power);
+
+    /* Put radio in standby before reconfiguring (0 = RC oscillator) */
+    sx1262_set_standby(0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    memcpy(&s_config, config, sizeof(s_config));
+
+    int rc = configure_radio(config);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "configure_radio failed during reconfigure");
+        return rc;
+    }
+
+    /* Resume RX */
+    radio_start_rx();
+    ESP_LOGI(TAG, "Radio reconfigured successfully");
+    return 0;
+}
+
+void radio_get_config(radio_config_t *config)
+{
+    memcpy(config, &s_config, sizeof(*config));
+}
+
 void radio_get_profile_config(radio_profile_t profile, radio_config_t *config)
 {
     memset(config, 0, sizeof(*config));

@@ -56,4 +56,25 @@ void mesh_reboot_delayed(int delay_ms);
  */
 void mesh_get_routes(routing_table_t *out);
 
+/**
+ * Add a channel to the mesh. Returns channel index or -1 on error.
+ */
+int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len);
+
+/**
+ * Remove a channel by index. Returns 0 on success.
+ * Cannot remove index 0 (public channel).
+ */
+int mesh_remove_channel(int index);
+
+/**
+ * Get channel count.
+ */
+int mesh_get_channel_count(void);
+
+/**
+ * Set default channel (swap to index 0). Returns 0 on success.
+ */
+int mesh_set_default_channel(int index);
+
 #endif
