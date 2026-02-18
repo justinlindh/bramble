@@ -33,4 +33,21 @@ menu "Bramble Configuration"
             bool "Fast (SF7, 500kHz)"
     endchoice
 
+    choice BRAMBLE_REGION
+        prompt "Bramble frequency region"
+        default BRAMBLE_REGION_US915
+        help
+            Select the regulatory region for LoRa radio operation.
+
+        config BRAMBLE_REGION_US915
+            bool "US915 (FCC 902-928 MHz)"
+
+        config BRAMBLE_REGION_EU868
+            bool "EU868 (ETSI 863-870 MHz)"
+
+        config BRAMBLE_REGION_AU915
+            bool "AU915 (ACMA 915-928 MHz)"
+
+    endchoice
+
 endmenu
