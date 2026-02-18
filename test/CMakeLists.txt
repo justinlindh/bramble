@@ -382,3 +382,19 @@ target_include_directories(test_public_channel PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
 )
 target_link_libraries(test_public_channel ssl crypto)
+
+# RPC dispatcher tests
+add_executable(test_rpc_dispatcher
+    test_rpc_dispatcher.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+)
+target_include_directories(test_rpc_dispatcher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+)
+target_compile_definitions(test_rpc_dispatcher PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=16
+)
