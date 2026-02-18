@@ -219,7 +219,11 @@ static void render_screen(ui_state_t *ui) {
                 display_draw_text(0, 34, "IP: (no WiFi)");
             }
 
-            display_draw_text(0, 44, "BLE: advertising");
+            if (cur_mode == CONN_MODE_BLE || cur_mode == CONN_MODE_BOTH) {
+                display_draw_text(0, 44, "BLE: advertising");
+            } else {
+                display_draw_text(0, 44, "BLE: off");
+            }
             display_draw_text(0, 56, "[hold] change mode");
         }
         display_flush();
