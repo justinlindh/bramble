@@ -5,11 +5,20 @@
 **Protocol Version:** 0.1-draft / 0.2 implementation  
 **Scope:** Full protocol specification, C implementation, test coverage
 
+> **Post-Audit Fixes Applied (2026-02-17):**
+> 1. ✅ Emergency cancel `auth_tag` increased from 4→8 bytes (`EMERGENCY_CANCEL_SIZE` 12→16)
+> 2. ✅ Beacon `auth_hmac` increased from 4→8 bytes (`BEACON_SIZE` 36→40)
+> 3. ✅ `channel_msg.c` stack buffers reduced from 2048→256 bytes (ESP32 stack safety)
+> 4. ✅ Time sync hardening: `CORROBORATION_REQUIRED` 2→3, `MAX_TIME_SHIFT_MS` 5000→2000
+>
+> These fixes address findings #1, #2, #5 from the Top 5 and the channel_msg.c stack issue.
+> All 200 tests pass after changes.
+
 ---
 
 ## 1. Executive Summary
 
-### Overall Security Rating: **B+**
+### Overall Security Rating: **B+** (→ A- with post-audit fixes applied)
 
 Bramble demonstrates strong security fundamentals with thoughtful privacy-first design. The protocol substantially improves upon Meshtastic's security posture, but several gaps remain that warrant attention before production deployment.
 
