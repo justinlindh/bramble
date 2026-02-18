@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 // Dummy traffic configuration
 #define DUMMY_TRAFFIC_MIN_INTERVAL_MS  5000   // 5 seconds minimum
