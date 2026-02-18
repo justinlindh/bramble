@@ -421,12 +421,40 @@ static int handle_set_mailbox(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-/* bramble.setLocationConfig — stub: params {"enabled": bool, "interval_s": int} */
 static int handle_set_location_config(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: configure GPS / location beacon interval */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "setLocationConfig not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "NVS open failed");
+        return 0;
+    }
+
+    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    if (enabled && cJSON_IsBool(enabled))
+        nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
+
+    cJSON *interval = cJSON_GetObjectItem(params, "interval_s");
+    if (interval && cJSON_IsNumber(interval))
+        nvs_set_u16(nvs, "interval_s", (uint16_t)interval->valueint);
+
+    cJSON *tier = cJSON_GetObjectItem(params, "default_tier");
+    if (tier && cJSON_IsString(tier))
+        nvs_set_str(nvs, "def_tier", tier->valuestring);
+
+    /* Accept manual coordinates (no GPS hardware on Heltec V3) */
+    cJSON *lat = cJSON_GetObjectItem(params, "lat");
+    cJSON *lon = cJSON_GetObjectItem(params, "lon");
+    if (lat && cJSON_IsNumber(lat))
+        nvs_set_i32(nvs, "lat_e6", (int32_t)(lat->valuedouble * 1e6));
+    if (lon && cJSON_IsNumber(lon))
+        nvs_set_i32(nvs, "lon_e6", (int32_t)(lon->valuedouble * 1e6));
+
+    nvs_commit(nvs);
+    nvs_close(nvs);
+
+    cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
@@ -544,11 +572,35 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-/* bramble.getPeerLocations — stub, returns empty array */
+/* bramble.getPeerLocations — returns own location + any received peer locations */
 static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     (void)params;
-    /* TODO: return last known location for each peer that shares location */
-    cJSON_AddArrayToObject(result, "locations");
+    cJSON *peers = cJSON_AddArrayToObject(result, "peers");
+
+    /* Include own location if set */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
+        int32_t lat_e6 = 0, lon_e6 = 0;
+        uint8_t enabled = 0;
+        nvs_get_u8(nvs, "enabled", &enabled);
+        nvs_get_i32(nvs, "lat_e6", &lat_e6);
+        nvs_get_i32(nvs, "lon_e6", &lon_e6);
+        nvs_close(nvs);
+
+        if (enabled && (lat_e6 != 0 || lon_e6 != 0)) {
+            cJSON *self = cJSON_CreateObject();
+            char buf[12];
+            cJSON_AddStringToObject(self, "address",
+                addr_hex(s_identity->address, buf, sizeof(buf)));
+            cJSON_AddNumberToObject(self, "lat", lat_e6 / 1e6);
+            cJSON_AddNumberToObject(self, "lon", lon_e6 / 1e6);
+            cJSON_AddStringToObject(self, "tier", "exact");
+            cJSON_AddBoolToObject(self, "is_self", true);
+            cJSON_AddItemToArray(peers, self);
+        }
+    }
+
+    /* TODO: add received peer locations once location packets are implemented */
     return 0;
 }
 
