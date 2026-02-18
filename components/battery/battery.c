@@ -2,6 +2,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+/* ESP32-S3 supports curve fitting calibration only (no line fitting) */
 #include "esp_log.h"
 
 static const char *TAG = "battery";
@@ -51,17 +52,8 @@ void battery_init(void)
     };
     err = adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali_handle);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Curve fitting cali failed, trying line fitting");
-        adc_cali_line_fitting_config_t line_cfg = {
-            .unit_id = BATTERY_ADC_UNIT,
-            .atten = BATTERY_ADC_ATTEN,
-            .bitwidth = ADC_BITWIDTH_DEFAULT,
-        };
-        err = adc_cali_create_scheme_line_fitting(&line_cfg, &s_cali_handle);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "No ADC calibration available — raw readings only");
-            s_cali_handle = NULL;
-        }
+        ESP_LOGW(TAG, "ADC calibration failed (%d) — raw readings only", err);
+        s_cali_handle = NULL;
     }
 
     s_initialized = true;
