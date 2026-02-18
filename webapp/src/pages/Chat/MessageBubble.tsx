@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import type { Message } from '../../types/bramble';
-import { AddressLabel } from '../../components/AddressLabel';
 import { DeliveryBadge } from './DeliveryBadge';
 import { RelayPathDisplay } from './RelayPathDisplay';
 import { IconCritical, IconBroadcast } from '../../components/Icons';
 import { useStore } from '../../store/index';
+import { usePeerInfo } from '../../hooks/usePeer';
 import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
@@ -33,6 +33,7 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
     message.relayPath &&
     message.relayPath.length > 0;
 
+  const { displayName, fullHex } = usePeerInfo(message.from);
   const showPath = hasRelayPath && (showRoutesGlobal || expanded);
 
   return (
@@ -45,7 +46,7 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
     >
       {/* Sender label for incoming messages */}
       {!isOut && (
-        <AddressLabel addr={message.from} short className={styles.sender} />
+        <span className={styles.sender} title={fullHex}>{displayName}</span>
       )}
 
       {/* Message text */}

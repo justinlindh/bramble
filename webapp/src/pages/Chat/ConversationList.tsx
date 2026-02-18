@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus } from '../../components/Icons';
+import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
 import styles from './ConversationList.module.css';
 
 interface ConversationListProps {
@@ -11,6 +12,29 @@ interface ConversationListProps {
 
 // Broadcast address constant
 const BROADCAST_ADDR = 0xffffffff;
+
+function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolean; onSelect: (id: string) => void }) {
+  const addr = conv.peerAddr ?? parseInt(conv.id.slice(3), 10);
+  const { displayName, fullHex, status } = usePeerInfo(addr);
+  return (
+    <button
+      className={`${styles.item} ${active ? styles.active : ''}`}
+      onClick={() => onSelect(conv.id)}
+      title={fullHex}
+    >
+      <span className={styles.icon}><IconUser size={16} /></span>
+      <span className={styles.label}>{displayName}</span>
+      <span
+        className={styles.statusDot}
+        style={{ background: STATUS_COLORS[status] }}
+        title={status === 'online' ? 'Online' : status === 'reachable' ? 'Reachable' : 'Unknown'}
+      />
+      {conv.unreadCount > 0 && (
+        <span className={styles.badge}>{conv.unreadCount}</span>
+      )}
+    </button>
+  );
+}
 
 export function ConversationList({ conversations, activeId, onSelect }: ConversationListProps) {
   const [showDmDialog, setShowDmDialog] = useState(false);
@@ -85,17 +109,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
       </div>
 
       {dms.map(conv => (
-        <button
-          key={conv.id}
-          className={`${styles.item} ${activeId === conv.id ? styles.active : ''}`}
-          onClick={() => onSelect(conv.id)}
-        >
-          <span className={styles.icon}><IconUser size={16} /></span>
-          <span className={styles.label}>{conv.label}</span>
-          {conv.unreadCount > 0 && (
-            <span className={styles.badge}>{conv.unreadCount}</span>
-          )}
-        </button>
+        <DmItem key={conv.id} conv={conv} active={activeId === conv.id} onSelect={onSelect} />
       ))}
 
       {dms.length === 0 && (

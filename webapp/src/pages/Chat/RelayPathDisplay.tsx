@@ -1,5 +1,6 @@
 import React from 'react';
 import type { RelayHop } from '../../types/bramble';
+import { useStore } from '../../store/index';
 import styles from './RelayPathDisplay.module.css';
 
 interface RelayPathDisplayProps {
@@ -12,6 +13,7 @@ function shortAddr(addr: number): string {
 }
 
 export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
+  const peerNames = useStore(s => s.peerNames);
   if (path.length === 0) return null;
 
   /* path already includes self as first hop from firmware */
@@ -27,7 +29,9 @@ export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
         return (
           <React.Fragment key={`${hop.addr}-${i}`}>
             {i > 0 && <span className={styles.arrow}>→</span>}
-            <span className={cls}>{shortAddr(hop.addr)}</span>
+            <span className={cls} title={`0x${hop.addr.toString(16).toUpperCase().padStart(8, '0')}`}>
+              {peerNames.get(hop.addr) || shortAddr(hop.addr)}
+            </span>
             {hop.rssi !== 0 && (
               <span className={styles.rssi}>{hop.rssi}</span>
             )}

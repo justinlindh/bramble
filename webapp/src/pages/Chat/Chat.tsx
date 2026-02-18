@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useStore } from '../../store/index';
 import { useConversation, useMyAddress } from '../../store/selectors';
 import { IconChat, IconBroadcast, IconHash } from '../../components/Icons';
+import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
 import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
@@ -59,26 +60,38 @@ function MessageList({ conversationId }: { conversationId: string }) {
 
 // ─── Chat header ──────────────────────────────────────────────────────────────
 
+function DmHeaderInfo({ addr }: { addr: number }) {
+  const { displayName, fullHex, status, lastSeen } = usePeerInfo(addr);
+  const statusLabel = status === 'online' ? 'Online'
+    : status === 'reachable' ? 'Reachable'
+    : 'Unknown';
+  const statusText = status === 'online' ? 'Online'
+    : lastSeen ? `Last seen ${lastSeen}`
+    : 'Unknown';
+  return (
+    <>
+      <span className={styles.chatTitle}>
+        <span
+          className={styles.statusDot}
+          style={{ background: STATUS_COLORS[status] }}
+          title={statusLabel}
+        />
+        {displayName}
+      </span>
+      <span className={styles.chatSubtitle}>{statusText} · {fullHex}</span>
+    </>
+  );
+}
+
 function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string; onToggleDetail?: () => void }) {
   const conversations = useStore(s => s.conversations);
   const conv = conversations.get(conversationId);
   const showRoutes = useStore(s => s.showRoutes);
   const setShowRoutes = useStore(s => s.setShowRoutes);
 
-  let title: ReactNode = conv?.label ?? conversationId;
-  let subtitle = '';
   const isChannel = conversationId.startsWith('ch:');
-
-  if (conversationId === 'broadcast') {
-    title = <><IconBroadcast size={16} /> Broadcast</>;
-    subtitle = 'All nodes in range';
-  } else if (isChannel) {
-    title = <><IconHash size={14} /> {conv?.label ?? `ch-${conversationId.slice(3)}`}</>;
-    subtitle = `Channel ${conversationId.slice(3)}`;
-  } else if (conversationId.startsWith('dm:')) {
-    const addr = parseInt(conversationId.slice(3), 10);
-    subtitle = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
-  }
+  const isDm = conversationId.startsWith('dm:');
+  const dmAddr = isDm ? parseInt(conversationId.slice(3), 10) : 0;
 
   return (
     <div
@@ -88,8 +101,21 @@ function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string
       title={isChannel ? 'Click for channel details' : undefined}
     >
       <div className={styles.chatHeaderText}>
-        <span className={styles.chatTitle}>{title}</span>
-        {subtitle && <span className={styles.chatSubtitle}>{subtitle}</span>}
+        {isDm ? (
+          <DmHeaderInfo addr={dmAddr} />
+        ) : conversationId === 'broadcast' ? (
+          <>
+            <span className={styles.chatTitle}><IconBroadcast size={16} /> Broadcast</span>
+            <span className={styles.chatSubtitle}>All nodes in range</span>
+          </>
+        ) : isChannel ? (
+          <>
+            <span className={styles.chatTitle}><IconHash size={14} /> {conv?.label ?? `ch-${conversationId.slice(3)}`}</span>
+            <span className={styles.chatSubtitle}>Channel {conversationId.slice(3)}</span>
+          </>
+        ) : (
+          <span className={styles.chatTitle}>{conv?.label ?? conversationId}</span>
+        )}
       </div>
       <button
         className={`${styles.routeBtn} ${showRoutes ? styles.routeBtnActive : ''}`}
