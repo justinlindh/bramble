@@ -82,6 +82,21 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     store.setConnectionState('connected');
     store.setTransport(transport);
 
+    // Enable auto-reconnect for WiFi/WebSocket transports
+    if ('enableAutoReconnect' in transport && typeof (transport as any).enableAutoReconnect === 'function') {
+      (transport as any).enableAutoReconnect({
+        onDisconnect: () => {
+          useStore.getState().setConnectionState('error', 'Connection lost — reconnecting…');
+        },
+        onReconnect: async () => {
+          useStore.getState().setConnectionState('connected');
+          try {
+            await Promise.all([loadConfig(), loadNeighbors(), loadRoutes(), loadMessages(), loadAirtime()]);
+          } catch { /* best effort */ }
+        },
+      });
+    }
+
     // Subscribe to push events
     client.subscribe('bramble.onMessage', (params) =>
       handleIncomingMessage(params)
@@ -415,11 +430,15 @@ export async function sendProbe(): Promise<void> {
   if (!client) throw new Error('Not connected');
   const store = useStore.getState();
 
-  const result = await client.rpc<{ probeId: number; ackWindow: number }>('bramble.sendProbe');
+  const raw = await client.rpc<Record<string, unknown>>('bramble.sendProbe');
+  /* Firmware returns probe_id (snake_case hex string), no ackWindow */
+  const probeIdStr = (raw.probeId ?? raw.probe_id) as string | undefined;
+  const probeId = probeIdStr ? parseInt(probeIdStr, 16) : Math.floor(Math.random() * 0xFFFFFFFF);
+  const ackWindow = (raw.ackWindow ?? raw.ack_window ?? 30) as number;
   store.setProbeResult({
-    probeId: result.probeId,
+    probeId,
     sentAt: Date.now(),
-    ackWindow: result.ackWindow,
+    ackWindow,
     responses: [],
     complete: false,
   });

@@ -32,6 +32,11 @@ export class WebSocketTransport implements Transport {
   private pending = new Map<number, Pending>();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   private readonly url: string;
+  private autoReconnect = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDelay = 1000;
+  private onReconnect: (() => void) | null = null;
+  private onDisconnect: (() => void) | null = null;
 
   constructor(url?: string) {
     this.url = url ?? resolveWsUrl();
@@ -70,15 +75,19 @@ export class WebSocketTransport implements Transport {
       });
 
       ws.addEventListener('close', () => {
-        if (this._connected) {
-          this._connected = false;
+        const wasConnected = this._connected;
+        this._connected = false;
+        if (wasConnected) {
           this.rejectAll(new Error('WebSocket connection closed'));
+          this.onDisconnect?.();
+          this.scheduleReconnect();
         }
       });
 
       ws.addEventListener('error', () => {
-        if (this._connected) {
-          this._connected = false;
+        const wasConnected = this._connected;
+        this._connected = false;
+        if (wasConnected) {
           this.rejectAll(new Error('WebSocket error'));
         }
       });
@@ -138,6 +147,11 @@ export class WebSocketTransport implements Transport {
   }
 
   async disconnect(): Promise<void> {
+    this.autoReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this._connected = false;
     this.rejectAll(new Error('Disconnected'));
     try {
@@ -146,5 +160,31 @@ export class WebSocketTransport implements Transport {
       /* ignore */
     }
     this.ws = null;
+  }
+
+  /** Enable auto-reconnect after a successful connect. Call after connect(). */
+  enableAutoReconnect(opts?: { onReconnect?: () => void; onDisconnect?: () => void }): void {
+    this.autoReconnect = true;
+    this.reconnectDelay = 1000;
+    this.onReconnect = opts?.onReconnect ?? null;
+    this.onDisconnect = opts?.onDisconnect ?? null;
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.autoReconnect || this.reconnectTimer) return;
+    const delay = Math.min(this.reconnectDelay, 15000);
+    console.log(`[WS] Reconnecting in ${delay}ms…`);
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      try {
+        await this.connect();
+        this.reconnectDelay = 1000; // reset on success
+        console.log('[WS] Reconnected');
+        this.onReconnect?.();
+      } catch {
+        this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 15000);
+        this.scheduleReconnect();
+      }
+    }, delay);
   }
 }
