@@ -11,6 +11,8 @@
 
 #include "cli.h"
 #include "mesh_task.h"
+#include "rpc_dispatcher.h"
+#include "rpc_methods.h"
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_vfs_dev.h"
@@ -143,6 +145,15 @@ static int cmd_help(int argc, char **argv) {
     return 0;
 }
 
+/* ── UART notification callback for JSON-RPC ────────────────────────── */
+
+static void uart_notify_cb(const char *json, size_t len, void *ctx) {
+    (void)ctx;
+    (void)len;
+    printf("%s\n", json);
+    fflush(stdout);
+}
+
 /* ── CLI task ───────────────────────────────────────────────────────── */
 
 static void cli_task(void *param) {
@@ -175,13 +186,23 @@ static void cli_task(void *param) {
         if (strlen(line) > 0) {
             linenoiseHistoryAdd(line);
 
-            /* Parse and dispatch via esp_console */
-            int ret;
-            esp_err_t err = esp_console_run(line, &ret);
-            if (err == ESP_ERR_NOT_FOUND) {
-                printf("Unknown command. Type 'help'.\n");
-            } else if (err == ESP_ERR_INVALID_ARG) {
-                /* empty input */
+            if (line[0] == '{') {
+                /* JSON-RPC mode */
+                char response[2048];
+                int rpc_len = rpc_dispatch(line, response, sizeof(response));
+                if (rpc_len > 0) {
+                    printf("%s\n", response);
+                    fflush(stdout);
+                }
+            } else {
+                /* Human console mode */
+                int ret;
+                esp_err_t err = esp_console_run(line, &ret);
+                if (err == ESP_ERR_NOT_FOUND) {
+                    printf("Unknown command. Type 'help'.\n");
+                } else if (err == ESP_ERR_INVALID_ARG) {
+                    /* empty input */
+                }
             }
         }
         linenoiseFree(line);
@@ -210,6 +231,13 @@ void cli_init(bramble_identity_t *identity) {
     for (int i = 0; i < (int)(sizeof(cmds) / sizeof(cmds[0])); i++) {
         esp_console_cmd_register(&cmds[i]);
     }
+
+    /* Initialize JSON-RPC dispatcher */
+    rpc_init();
+    rpc_methods_init(identity);
+
+    /* Register UART as notification transport */
+    rpc_register_notify_transport(uart_notify_cb, NULL);
 
     xTaskCreate(cli_task, "cli", 4096, NULL, 3, NULL);
     ESP_LOGI(TAG, "CLI initialized");
