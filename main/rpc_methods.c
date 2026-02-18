@@ -340,7 +340,7 @@ static int handle_add_channel(const cJSON *params, cJSON *result) {
     /* Persist channel to NVS */
     nvs_handle_t nvs;
     if (nvs_open("bramble_ch", NVS_READWRITE, &nvs) == ESP_OK) {
-        char key_name[16], key_psk[16];
+        char key_name[20], key_psk[20];
         snprintf(key_name, sizeof(key_name), "ch%d_name", idx);
         snprintf(key_psk, sizeof(key_psk), "ch%d_psk", idx);
         nvs_set_str(nvs, key_name, name);
