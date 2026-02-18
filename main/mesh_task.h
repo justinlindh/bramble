@@ -5,6 +5,9 @@
 #include "routing.h"
 #include "dedup.h"
 #include "freq_plan.h"
+#include "channel_key.h"
+#include "channel_msg.h"
+#include "public_channel.h"
 
 /* Shared mesh state — protected by mutex, read by UI task */
 typedef struct {
@@ -28,5 +31,18 @@ void mesh_task_start(bramble_identity_t *identity);
  * Get a snapshot of shared state (thread-safe).
  */
 void mesh_get_state(mesh_shared_state_t *out);
+
+/**
+ * Send a broadcast message on the public channel.
+ * Returns 0 on success.
+ */
+int mesh_send_broadcast(const uint8_t *data, size_t len);
+
+/**
+ * Send an encrypted message to a specific address.
+ * Uses public channel for now (DM encryption requires key exchange).
+ * Returns 0 on success.
+ */
+int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
 
 #endif
