@@ -41,11 +41,12 @@ static const ble_uuid128_t NUS_RX_UUID =
                      0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e);
 
 #define BLE_RPC_BUF_SIZE 2048
-#define BLE_MTU_PAYLOAD  240  /* conservative; negotiated MTU may be higher */
+#define BLE_MTU_DEFAULT  20   /* ATT_MTU(23) - 3 byte ATT header */
 
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_rx_attr_handle; /* handle for RX characteristic (notify) */
 static bool     s_rx_notify_enabled = false;
+static uint16_t s_mtu = BLE_MTU_DEFAULT + 3; /* negotiated ATT MTU */
 static char     s_line_buf[BLE_RPC_BUF_SIZE];
 static size_t   s_line_len = 0;
 static char     s_device_name[32] = "Bramble";
@@ -60,16 +61,18 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
         return;
     }
 
-    /* Send JSON + newline, chunked to MTU */
-    struct os_mbuf *om;
+    /* Send JSON + newline, chunked to negotiated MTU - 3 */
     const size_t total = len + 1; /* +1 for \n */
-    char tmp[BLE_MTU_PAYLOAD];
+    uint16_t max_payload = (s_mtu > 3) ? (s_mtu - 3) : BLE_MTU_DEFAULT;
+    ESP_LOGI(TAG, "Sending notify %u bytes (mtu=%u, chunk=%u)", (unsigned)total, s_mtu, max_payload);
 
     for (size_t off = 0; off < total; ) {
         size_t chunk = total - off;
-        if (chunk > BLE_MTU_PAYLOAD) chunk = BLE_MTU_PAYLOAD;
+        if (chunk > max_payload) chunk = max_payload;
 
-        /* Copy data, appending \n at the end */
+        /* Build chunk: data + trailing \n */
+        char tmp[256];
+        if (chunk > sizeof(tmp)) chunk = sizeof(tmp);
         size_t copied = 0;
         while (copied < chunk && off + copied < len) {
             tmp[copied] = json[off + copied];
@@ -79,17 +82,17 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
             tmp[copied++] = '\n';
         }
 
-        om = ble_hs_mbuf_from_flat(tmp, chunk);
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(tmp, copied);
         if (!om) {
             ESP_LOGW(TAG, "Failed to allocate mbuf for notify");
             return;
         }
         int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
         if (rc != 0) {
-            ESP_LOGW(TAG, "Notify failed: %d", rc);
+            ESP_LOGW(TAG, "Notify failed: %d (chunk %u bytes)", rc, (unsigned)copied);
             return;
         }
-        off += chunk;
+        off += copied;
     }
 }
 
@@ -248,6 +251,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
                  event->disconnect.reason);
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         s_rx_notify_enabled = false;
+        s_mtu = BLE_MTU_DEFAULT + 3;
         s_line_len = 0;
         start_advertising();
         break;
@@ -261,6 +265,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         break;
 
     case BLE_GAP_EVENT_MTU:
+        s_mtu = event->mtu.value;
         ESP_LOGI(TAG, "MTU updated: conn=%d, mtu=%d",
                  event->mtu.conn_handle, event->mtu.value);
         break;
