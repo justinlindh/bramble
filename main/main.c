@@ -45,6 +45,7 @@ static uint32_t my_addr = 0;
 static uint32_t boot_time_ms = 0;
 
 static void render_main_screen(void) {
+    ESP_LOGI(TAG, "render_main_screen called");
     display_clear();
 
     /* Header */
