@@ -3,6 +3,8 @@
 #include "mesh_task.h"
 #include "msg_store.h"
 #include "airtime_budget.h"
+#include "radio.h"
+#include "freq_plan.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -212,10 +214,75 @@ static int handle_send_probe(const cJSON *params, cJSON *result) {
 
 /* bramble.setRadio — stub: params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
 static int handle_set_radio(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: validate params, reconfigure radio, persist to NVS */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "radio reconfiguration not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+
+    /* Get current config as base */
+    radio_config_t cfg;
+    radio_get_config(&cfg);
+
+    /* Apply any provided fields */
+    cJSON *freq = cJSON_GetObjectItem(params, "frequency_mhz");
+    cJSON *sf   = cJSON_GetObjectItem(params, "sf");
+    cJSON *bw   = cJSON_GetObjectItem(params, "bw_hz");
+    cJSON *txp  = cJSON_GetObjectItem(params, "tx_power_dbm");
+    cJSON *cr   = cJSON_GetObjectItem(params, "coding_rate");
+
+    if (freq && cJSON_IsNumber(freq)) cfg.frequency_mhz = (float)freq->valuedouble;
+    if (sf   && cJSON_IsNumber(sf))   cfg.sf = (uint8_t)sf->valueint;
+    if (bw   && cJSON_IsNumber(bw))   cfg.bw_hz = (uint32_t)bw->valuedouble;
+    if (txp  && cJSON_IsNumber(txp))  cfg.tx_power = (int8_t)txp->valueint;
+    if (cr   && cJSON_IsNumber(cr))   cfg.coding_rate = (uint8_t)cr->valueint;
+
+    /* Validate against freq plan */
+    const bramble_freq_plan_t *plan = freq_plan_get_default();
+    if (!freq_plan_valid_freq(plan, cfg.frequency_mhz)) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "frequency out of region bounds");
+        return 0;
+    }
+    cfg.tx_power = freq_plan_clamp_power(plan, cfg.tx_power);
+    if (cfg.sf < 6 || cfg.sf > 12) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "SF must be 6-12");
+        return 0;
+    }
+    if (cfg.bw_hz != 125000 && cfg.bw_hz != 250000 && cfg.bw_hz != 500000) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "BW must be 125000, 250000, or 500000");
+        return 0;
+    }
+
+    /* Apply */
+    int rc = radio_reconfigure(&cfg);
+    if (rc != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "radio reconfigure failed");
+        return 0;
+    }
+
+    /* Persist to NVS */
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("bramble_radio", NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        /* Store as integers to avoid float NVS issues */
+        nvs_set_u32(nvs, "freq_khz", (uint32_t)(cfg.frequency_mhz * 1000));
+        nvs_set_u8(nvs, "sf", cfg.sf);
+        nvs_set_u32(nvs, "bw_hz", cfg.bw_hz);
+        nvs_set_i8(nvs, "tx_power", cfg.tx_power);
+        nvs_set_u8(nvs, "cr", cfg.coding_rate);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
+    ESP_LOGI(TAG, "Radio reconfigured: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
+             cfg.frequency_mhz, cfg.sf, cfg.bw_hz, cfg.tx_power);
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddNumberToObject(result, "frequency_mhz", cfg.frequency_mhz);
+    cJSON_AddNumberToObject(result, "sf", cfg.sf);
+    cJSON_AddNumberToObject(result, "bw_hz", cfg.bw_hz);
+    cJSON_AddNumberToObject(result, "tx_power_dbm", cfg.tx_power);
+    cJSON_AddNumberToObject(result, "coding_rate", cfg.coding_rate);
     return 0;
 }
 
@@ -254,37 +321,104 @@ static int handle_set_node_name(const cJSON *params, cJSON *result) {
 
 /* bramble.addChannel — stub: params {"name":"...", "psk":"hexkey"} */
 static int handle_add_channel(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: parse PSK, derive channel key, add to s_channels */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "addChannel not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
+    const char *psk = cJSON_GetStringValue(cJSON_GetObjectItem(params, "psk"));
+    if (!name || strlen(name) == 0 || strlen(name) > 16) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    int idx = mesh_add_channel(name,
+                               psk ? (const uint8_t *)psk : NULL,
+                               psk ? strlen(psk) : 0);
+    if (idx < 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "channel limit reached");
+        return 0;
+    }
+
+    /* Persist channel to NVS */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_ch", NVS_READWRITE, &nvs) == ESP_OK) {
+        char key_name[16], key_psk[16];
+        snprintf(key_name, sizeof(key_name), "ch%d_name", idx);
+        snprintf(key_psk, sizeof(key_psk), "ch%d_psk", idx);
+        nvs_set_str(nvs, key_name, name);
+        if (psk) nvs_set_str(nvs, key_psk, psk);
+        nvs_set_u8(nvs, "ch_count", (uint8_t)mesh_get_channel_count());
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddNumberToObject(result, "index", idx);
+    cJSON_AddStringToObject(result, "name", name);
     return 0;
 }
 
-/* bramble.removeChannel — stub: params {"name":"..."} */
 static int handle_remove_channel(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: find and remove channel by name */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "removeChannel not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    cJSON *idx_j = cJSON_GetObjectItem(params, "index");
+    if (!idx_j || !cJSON_IsNumber(idx_j)) return RPC_ERR_INVALID_PARAMS;
+    int index = idx_j->valueint;
+
+    if (index == 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "cannot remove public channel");
+        return 0;
+    }
+
+    int rc = mesh_remove_channel(index);
+    if (rc != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "invalid channel index");
+        return 0;
+    }
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_ch", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "ch_count", (uint8_t)mesh_get_channel_count());
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddNumberToObject(result, "channels", mesh_get_channel_count());
     return 0;
 }
 
-/* bramble.setDefaultChannel — stub: params {"name":"..."} */
 static int handle_set_default_channel(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: reorder channel list so named channel is index 0 */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "setDefaultChannel not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    cJSON *idx_j = cJSON_GetObjectItem(params, "index");
+    if (!idx_j || !cJSON_IsNumber(idx_j)) return RPC_ERR_INVALID_PARAMS;
+
+    int rc = mesh_set_default_channel(idx_j->valueint);
+    if (rc != 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "invalid channel index");
+        return 0;
+    }
+
+    cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
-/* bramble.setMailbox — stub: params {"enabled": bool, "max_messages": int} */
 static int handle_set_mailbox(const cJSON *params, cJSON *result) {
-    (void)params;
-    /* TODO: configure store-and-forward mailbox */
-    cJSON_AddBoolToObject(result, "ok", false);
-    cJSON_AddStringToObject(result, "note", "setMailbox not yet implemented");
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    if (!enabled || !cJSON_IsBool(enabled)) return RPC_ERR_INVALID_PARAMS;
+
+    /* Persist to NVS */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_mb", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
+    ESP_LOGI("rpc", "Mailbox %s", cJSON_IsTrue(enabled) ? "enabled" : "disabled");
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddBoolToObject(result, "enabled", cJSON_IsTrue(enabled));
     return 0;
 }
 

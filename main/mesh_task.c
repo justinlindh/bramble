@@ -599,6 +599,29 @@ static void mesh_task(void *param) {
     radio_cfg.sf = plan->default_sf;
     radio_cfg.bw_hz = plan->default_bw_hz;
 
+    /* Check NVS for user-saved radio config (overrides defaults) */
+    {
+        nvs_handle_t nvs;
+        if (nvs_open("bramble_radio", NVS_READONLY, &nvs) == ESP_OK) {
+            uint32_t freq_khz = 0;
+            uint8_t sf = 0, cr = 0;
+            uint32_t bw = 0;
+            int8_t txp = 0;
+            if (nvs_get_u32(nvs, "freq_khz", &freq_khz) == ESP_OK)
+                radio_cfg.frequency_mhz = freq_khz / 1000.0f;
+            if (nvs_get_u8(nvs, "sf", &sf) == ESP_OK)
+                radio_cfg.sf = sf;
+            if (nvs_get_u32(nvs, "bw_hz", &bw) == ESP_OK)
+                radio_cfg.bw_hz = bw;
+            if (nvs_get_i8(nvs, "tx_power", &txp) == ESP_OK)
+                radio_cfg.tx_power = freq_plan_clamp_power(plan, txp);
+            if (nvs_get_u8(nvs, "cr", &cr) == ESP_OK)
+                radio_cfg.coding_rate = cr;
+            nvs_close(nvs);
+            ESP_LOGI(TAG, "Loaded radio config from NVS");
+        }
+    }
+
     ESP_LOGI(TAG, "Radio config: %.1f MHz SF%d BW%lu TX:%d dBm",
              radio_cfg.frequency_mhz, radio_cfg.sf,
              (unsigned long)radio_cfg.bw_hz, radio_cfg.tx_power);
@@ -920,4 +943,76 @@ void mesh_get_routes(routing_table_t *out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_routes;
     xSemaphoreGive(s_state_mutex);
+}
+
+int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (s_num_channels >= MAX_CHANNELS) {
+        xSemaphoreGive(s_state_mutex);
+        return -1;
+    }
+
+    bramble_channel_t *ch = &s_channels[s_num_channels];
+    if (psk && psk_len > 0) {
+        /* Use provided PSK — treat as passphrase string */
+        char psk_str[65];
+        size_t copy_len = psk_len < sizeof(psk_str) - 1 ? psk_len : sizeof(psk_str) - 1;
+        memcpy(psk_str, psk, copy_len);
+        psk_str[copy_len] = '\0';
+        channel_derive_key(psk_str, ch);
+    } else {
+        /* Generate random key */
+        crypto_random(ch->key, BRAMBLE_KEY_SIZE);
+        ch->epoch = 0;
+    }
+    ch->channel_id = (uint8_t)s_num_channels;
+
+    int idx = s_num_channels;
+    s_num_channels++;
+    xSemaphoreGive(s_state_mutex);
+
+    ESP_LOGI("mesh", "Channel added: idx=%d name=%s", idx, name ? name : "(unnamed)");
+    return idx;
+}
+
+int mesh_remove_channel(int index) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (index <= 0 || index >= s_num_channels) {
+        xSemaphoreGive(s_state_mutex);
+        return -1; /* can't remove public channel (0) or invalid index */
+    }
+
+    /* Compact array */
+    for (int i = index; i < s_num_channels - 1; i++) {
+        s_channels[i] = s_channels[i + 1];
+        s_channels[i].channel_id = (uint8_t)i;
+    }
+    s_num_channels--;
+    xSemaphoreGive(s_state_mutex);
+
+    ESP_LOGI("mesh", "Channel removed: idx=%d, %d remaining", index, s_num_channels);
+    return 0;
+}
+
+int mesh_get_channel_count(void) {
+    return s_num_channels;
+}
+
+int mesh_set_default_channel(int index) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (index <= 0 || index >= s_num_channels) {
+        xSemaphoreGive(s_state_mutex);
+        return -1;
+    }
+
+    /* Swap with index 0 */
+    bramble_channel_t tmp = s_channels[0];
+    s_channels[0] = s_channels[index];
+    s_channels[index] = tmp;
+    s_channels[0].channel_id = 0;
+    s_channels[index].channel_id = (uint8_t)index;
+    xSemaphoreGive(s_state_mutex);
+
+    ESP_LOGI("mesh", "Default channel changed to former idx=%d", index);
+    return 0;
 }
