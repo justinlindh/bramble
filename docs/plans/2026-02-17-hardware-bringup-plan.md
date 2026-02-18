@@ -11,9 +11,9 @@
 - ✅ Phase 3: Beacon TX/RX + neighbor discovery — **TWO NODES COMMUNICATING**
   - Board 1: 1191C6E0, Board 2: 6EEA8967
   - RSSI: -40/-44 dBm, SNR: 10 (excellent signal, boards on same desk)
-- ⬜ Phase 4: Packet dispatch & routing
-- ⬜ Phase 5: WiFi + WebSocket server
-- ⬜ Phase 6: Two-node mesh end-to-end messaging
+- ✅ Phase 4: Packet dispatch & routing
+- ✅ Phase 5: WiFi + WebSocket server
+- ✅ Phase 6: Two-node mesh end-to-end messaging
 - ⬜ Phase 7: Polish (battery, sleep, OTA)
 
 ---
