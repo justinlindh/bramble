@@ -433,9 +433,12 @@ static int handle_set_mailbox(const cJSON *params, cJSON *result) {
         nvs_close(nvs);
     }
 
-    ESP_LOGI("rpc", "Mailbox %s", cJSON_IsTrue(enabled) ? "enabled" : "disabled");
+    bool en = cJSON_IsTrue(enabled);
+    mesh_set_mailbox(en);
+
+    ESP_LOGI("rpc", "Mailbox %s", en ? "enabled" : "disabled");
     cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddBoolToObject(result, "enabled", cJSON_IsTrue(enabled));
+    cJSON_AddBoolToObject(result, "enabled", en);
     return 0;
 }
 
@@ -543,12 +546,29 @@ static int handle_share_location_once(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    /* TODO: send location packet over LoRa to the specified address */
-    /* For now, just confirm the location is set */
+    /* Build location payload as JSON and send as a message */
+    char payload[128];
+    snprintf(payload, sizeof(payload),
+             "{\"type\":\"location\",\"lat\":%.6f,\"lon\":%.6f}",
+             lat_e6 / 1e6, lon_e6 / 1e6);
+
+    /* Parse destination address */
+    uint32_t dest_addr = (uint32_t)strtoul(addr_str, NULL, 16);
+    uint32_t pkt_id = mesh_send_message(dest_addr,
+                                        (const uint8_t *)payload,
+                                        strlen(payload));
+    if (pkt_id == 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "send failed (no route or radio busy)");
+        return 0;
+    }
+
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddNumberToObject(result, "lat", lat_e6 / 1e6);
     cJSON_AddNumberToObject(result, "lon", lon_e6 / 1e6);
-    cJSON_AddStringToObject(result, "note", "location packet TX not yet wired (no GPS hardware)");
+    char pkt_buf[12];
+    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pkt_id);
+    cJSON_AddStringToObject(result, "packetId", pkt_buf);
     return 0;
 }
 

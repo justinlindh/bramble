@@ -17,6 +17,7 @@ import type {
   LocationConfig,
   LocationContact,
   LocationTier,
+  Message,
 } from '../types/bramble';
 
 // Map technical error messages to human-friendly text
@@ -109,6 +110,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     client.subscribe('bramble.onProbeResult', (params) => handleProbeAck(params));
     client.subscribe('bramble.onProbeComplete', (params) => handleProbeComplete(params));
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
+    client.subscribe('bramble.onPeerLocation', (params) => handleLocationUpdate(params));
 
     // Clear stale data from previous node connection
     store.resetNodeData();
@@ -410,9 +412,18 @@ async function refreshNeighbors(): Promise<void> {
 
 // ─── Config mutations ────────────────────────────────────────────────────
 
+/** Throw if an RPC result has ok:false with an error message */
+function assertOk(result: unknown, fallback = 'Operation failed'): void {
+  const r = result as Record<string, unknown> | null;
+  if (r && r.ok === false) {
+    throw new Error((r.error as string) || fallback);
+  }
+}
+
 export async function saveRadio(radio: import('../types/bramble').RadioConfig): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.setRadio', radio as unknown as Record<string, unknown>);
+  const result = await client.rpc('bramble.setRadio', radio as unknown as Record<string, unknown>);
+  assertOk(result, 'Radio config failed');
   await loadConfig();
 }
 
@@ -424,29 +435,33 @@ export async function saveNodeName(name: string): Promise<void> {
 
 export async function addChannel(name: string, psk?: string): Promise<number> {
   if (!client) throw new Error('Not connected');
-  const result = await client.rpc<{ index: number }>('bramble.addChannel', {
+  const result = await client.rpc<{ ok: boolean; index: number; error?: string }>('bramble.addChannel', {
     name,
     ...(psk ? { psk } : {}),
   });
+  assertOk(result, 'Failed to add channel');
   await loadConfig();
   return result.index;
 }
 
 export async function removeChannel(index: number): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.removeChannel', { index });
+  const result = await client.rpc('bramble.removeChannel', { index });
+  assertOk(result, 'Failed to remove channel');
   await loadConfig();
 }
 
 export async function setMailbox(enabled: boolean): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.setMailbox', { enabled });
+  const result = await client.rpc('bramble.setMailbox', { enabled });
+  assertOk(result, 'Failed to set mailbox');
   await loadConfig();
 }
 
 export async function setDefaultChannel(index: number): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.setDefaultChannel', { index });
+  const result = await client.rpc('bramble.setDefaultChannel', { index });
+  assertOk(result, 'Failed to set default channel');
   await loadConfig();
 }
 
@@ -521,7 +536,8 @@ export async function loadPeerLocations(): Promise<void> {
 
 export async function setLocationConfig(config: Partial<LocationConfig>): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
+  const result = await client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
+  assertOk(result, 'Failed to save location config');
   await loadConfig();
 }
 
@@ -535,13 +551,15 @@ export async function setLocationContact(
   const params: Record<string, unknown> = { addr, tier };
   if (intervalSec !== undefined) params.intervalSec = intervalSec;
   if (distanceTriggerM !== undefined) params.distanceTriggerM = distanceTriggerM;
-  await client.rpc('bramble.setLocationContact', params);
+  const result = await client.rpc('bramble.setLocationContact', params);
+  assertOk(result, 'Failed to set location contact');
   await loadConfig();
 }
 
 export async function removeLocationContact(addr: number): Promise<void> {
   if (!client) throw new Error('Not connected');
-  await client.rpc('bramble.removeLocationContact', { addr });
+  const result = await client.rpc('bramble.removeLocationContact', { addr });
+  assertOk(result, 'Failed to remove location contact');
   await loadConfig();
 }
 
@@ -549,7 +567,8 @@ export async function shareLocationOnce(addr: number, tier?: LocationTier): Prom
   if (!client) throw new Error('Not connected');
   const params: Record<string, unknown> = { addr };
   if (tier !== undefined) params.tier = tier;
-  await client.rpc('bramble.shareLocationOnce', params);
+  const result = await client.rpc('bramble.shareLocationOnce', params);
+  assertOk(result, 'Failed to share location');
 }
 
 function handleLocationUpdate(params: unknown): void {
