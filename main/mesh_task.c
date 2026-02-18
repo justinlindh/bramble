@@ -176,16 +176,16 @@ static int send_beacon(void) {
     beacon.network_time = 0;  /* TODO: time sync */
     beacon.time_confidence = 0xFFFF;  /* no confidence */
 
-    /* HMAC auth (truncated to 8 bytes) */
-    uint8_t hmac_data[20];  /* src_addr(4) + pubkey_hash(4) + uptime(2) + battery(1) + neighbors(1) + ... */
-    memcpy(hmac_data, &beacon.src_addr, 4);
-    memcpy(hmac_data + 4, &beacon.pubkey_hash, 4);
-    memcpy(hmac_data + 8, &beacon.uptime_min, 2);
-    hmac_data[10] = beacon.battery_pct;
-    hmac_data[11] = beacon.neighbor_count;
+    /* HMAC auth — covers ALL beacon fields (excluding auth_hmac itself) */
+    /* Serialize beacon to get canonical byte representation, then HMAC everything
+     * up to but not including the auth_hmac field at the end */
+    uint8_t hmac_input[BEACON_SIZE];
+    bramble_beacon_serialize(&beacon, hmac_input, sizeof(hmac_input));
+    /* HMAC over header(12) + payload(20) = 32 bytes, excludes auth_hmac[8] at end */
+    size_t hmac_len = BEACON_SIZE - sizeof(beacon.auth_hmac);
     uint8_t full_hmac[32];
-    crypto_hmac_sha256(s_identity->private_key, 32, hmac_data, 12, full_hmac);
-    memcpy(beacon.auth_hmac, full_hmac, 8);
+    crypto_hmac_sha256(s_identity->private_key, 32, hmac_input, hmac_len, full_hmac);
+    memcpy(beacon.auth_hmac, full_hmac, sizeof(beacon.auth_hmac));
 
     uint8_t buf[64];
     if (bramble_beacon_serialize(&beacon, buf, sizeof(buf)) != ESP_OK) {
@@ -219,10 +219,20 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     /* Ignore our own beacons */
     if (beacon.src_addr == s_identity->address) return;
 
-    /* Check for address collision */
+    /* Check for address collision — different pubkey_hash but same address */
     if (identity_check_collision(s_identity, beacon.src_addr, beacon.pubkey_hash)) {
-        ESP_LOGW(TAG, "Address collision detected with %08" PRIX32, beacon.src_addr);
-        /* TODO: trigger re-keying */
+        ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 " — regenerating identity!", beacon.src_addr);
+        /* Regenerate keypair and persist to NVS */
+        identity_generate_and_save(s_identity);
+        ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
+        /* Notify webapp */
+        cJSON *params = cJSON_CreateObject();
+        char addr_buf[12];
+        snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, s_identity->address);
+        cJSON_AddStringToObject(params, "new_address", addr_buf);
+        cJSON_AddStringToObject(params, "reason", "address_collision");
+        rpc_notify("bramble.onIdentityChange", params);
+        cJSON_Delete(params);
         return;
     }
 
@@ -241,6 +251,20 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     if (idx >= 0) {
         ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)",
                  beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors));
+    }
+
+    /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI */
+    {
+        int nc = neighbor_count(&s_neighbors);
+        if (nc >= 3) {
+            int8_t rssi_vals[MAX_NEIGHBORS];
+            for (int i = 0; i < nc && i < MAX_NEIGHBORS; i++) {
+                rssi_vals[i] = s_neighbors.entries[i].rssi;
+            }
+            if (sybil_check_rssi_cluster(rssi_vals, nc)) {
+                ESP_LOGW(TAG, "SYBIL WARNING: %d neighbors with suspiciously similar RSSI", nc);
+            }
+        }
     }
 
     /* Notify any RPC clients that the neighbor table changed */
@@ -1004,8 +1028,17 @@ static int initiate_discovery(uint32_t dest_addr) {
     uint32_t query_id = next_packet_id();
     discovery_start(&s_pending_disc, dest_addr, query_id, now_ms());
 
-    /* Build and send RREQ */
-    uint32_t encrypted_source = s_identity->address; /* TODO: encrypt with salt for privacy */
+    /* Encrypt originator address for privacy — intermediate nodes can't read it.
+     * Destination can decrypt by trying XOR with HMAC(shared_key, query_id).
+     * We use HMAC(private_key, query_id) as a deterministic mask. The destination,
+     * once it receives the RREQ, can try decryption with known peer keys. */
+    uint8_t salt_input[4];
+    memcpy(salt_input, &query_id, 4);
+    uint8_t mask_hash[32];
+    crypto_hmac_sha256(s_identity->private_key, 32, salt_input, 4, mask_hash);
+    uint32_t mask;
+    memcpy(&mask, mask_hash, 4);
+    uint32_t encrypted_source = s_identity->address ^ mask;
     bramble_rreq_t rreq = rreq_build_originator(s_identity->address, dest_addr,
                                                   query_id, encrypted_source);
     send_rreq(&rreq);
