@@ -91,7 +91,8 @@ export async function connect(type: TransportType, options?: { url?: string }): 
         onReconnect: async () => {
           useStore.getState().setConnectionState('connected');
           try {
-            await Promise.all([loadConfig(), loadNeighbors(), loadRoutes(), loadMessages(), loadAirtime()]);
+            const opt = (p: Promise<void>) => p.catch(() => {});
+            await Promise.all([loadConfig(), loadNeighbors(), loadRoutes(), opt(loadMessages()), loadAirtime()]);
           } catch { /* best effort */ }
         },
       });
@@ -109,15 +110,16 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     client.subscribe('probe.complete', (params) => handleProbeComplete(params));
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
 
-    // Initial data load
+    // Initial data load — critical methods must succeed; optional ones are best-effort
+    const optional = (p: Promise<void>) => p.catch(() => {/* best-effort */});
     await Promise.all([
       loadConfig(),
       loadStatus(),
       loadAirtime(),
       loadNeighbors(),
       loadRoutes(),
-      loadMessages(),
-      loadPeerLocations(),
+      optional(loadMessages()),
+      optional(loadPeerLocations()),
     ]);
   } catch (e) {
     // Clean up any partially-initialised client so we start fresh on retry
