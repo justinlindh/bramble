@@ -14,7 +14,7 @@
 - ✅ Phase 4: Packet dispatch & routing
 - ✅ Phase 5: WiFi + WebSocket server
 - ✅ Phase 6: Two-node mesh end-to-end messaging
-- ⬜ Phase 7: Polish (battery, sleep, OTA)
+- ✅ Phase 7: Polish (battery, sleep, OTA, 8MB flash)
 
 ---
 
@@ -258,24 +258,23 @@ This is the big one. The SX1262 is an SPI peripheral with a complex command inte
 
 ---
 
-## Phase 7: Polish & Robustness
-*Estimated: ongoing*
+## Phase 7: Polish & Robustness ✅ COMPLETE (2026-02-18)
 
-### Task 7.1: Battery ADC reading
-- Heltec V3: battery voltage on GPIO1 (voltage divider)
-- Read ADC, convert to percentage, show on OLED + beacon
+### Task 7.1: Battery ADC reading ✅
+- `components/battery/` — GPIO1 ADC with curve fitting calibration
+- LiPo discharge curve (piecewise linear), OLED header, beacon, getStatus RPC, webapp Stats
 
-### Task 7.2: Deep sleep
-- On inactivity → deep sleep with LoRa wake-on-radio (WOR)
-- Wake on DIO1 (incoming packet) or timer (beacon interval)
+### Task 7.2: Deep sleep ✅
+- `bramble.sleep` RPC — opt-in deep sleep with DIO1 (LoRa) wake + optional timer
+- Not automatic — triggered via RPC or CLI
 
-### Task 7.3: OTA updates
-- ESP-IDF OTA via WiFi (partition table already has app0/app1)
-- Triggered from webapp settings page
+### Task 7.3: OTA updates ✅
+- `components/ota/` — esp_https_ota in background FreeRTOS task
+- `bramble.otaUpdate` RPC accepts URL, auto-reboot on success
 
-### Task 7.4: Flash size fix
-- Update partition table for 8MB flash (currently only using 4MB)
-- More space for SPIFFS (config files, message history)
+### Task 7.4: Flash size fix ✅
+- Partition table for 8MB: app0/app1 = 3MB each (was 1.75MB), SPIFFS = 2MB (was 448KB)
+- sdkconfig.defaults: FLASHSIZE_8MB
 
 ---
 
