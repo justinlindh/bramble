@@ -13,6 +13,11 @@
 #include "identity.h"
 #include "mesh_task.h"
 #include "cli.h"
+#include "rpc_dispatcher.h"
+#include "rpc_methods.h"
+#include "wifi_manager.h"
+#include "ws_server.h"
+#include "mdns.h"
 
 static const char *TAG = "bramble";
 
@@ -67,8 +72,12 @@ static void render_main_screen(void) {
         display_draw_text(0, 24, "Radio: initializing...");
     }
 
-    /* Last RX signal */
-    if (n > 0) {
+    /* WiFi IP address (if connected), else last RX signal */
+    const char *ip = wifi_manager_get_ip();
+    if (ip && ip[0] != '\0') {
+        snprintf(line, sizeof(line), "IP: %s", ip);
+        display_draw_text(0, 34, line);
+    } else if (n > 0) {
         snprintf(line, sizeof(line), "RSSI:%d SNR:%d",
                  mesh.last_rx_rssi, mesh.last_rx_snr);
         display_draw_text(0, 34, line);
@@ -152,12 +161,15 @@ static void render_screen(ui_state_t *ui) {
 
 void app_main(void)
 {
+    ESP_LOGI(TAG, "=== BOOT STAGE: app_main entry ===");
     ESP_LOGI(TAG, "Bramble LoRa Mesh starting...");
 
     /* NVS init */
+    ESP_LOGI(TAG, "=== BOOT STAGE: nvs_flash_init ===");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
         ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS partition truncated/new version — erasing and reinitializing");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
@@ -165,13 +177,15 @@ void app_main(void)
     ESP_LOGI(TAG, "NVS initialized");
 
     /* Load or generate persistent identity */
+    ESP_LOGI(TAG, "=== BOOT STAGE: identity_load ===");
     if (identity_load(&g_identity) == 0) {
         ESP_LOGI(TAG, "Identity loaded from NVS");
     } else {
         ESP_LOGI(TAG, "No identity found, generating new keypair...");
+        ESP_LOGI(TAG, "=== BOOT STAGE: identity_generate_and_save ===");
         if (identity_generate_and_save(&g_identity) != 0) {
             ESP_LOGE(TAG, "Identity generation failed!");
-            // Fallback to random address
+            /* Fallback to random address */
             uint8_t addr_bytes[4];
             crypto_random(addr_bytes, 4);
             g_identity.address = (uint32_t)(addr_bytes[0] | (addr_bytes[1] << 8) |
@@ -185,31 +199,68 @@ void app_main(void)
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
     /* Init display */
+    ESP_LOGI(TAG, "=== BOOT STAGE: display_init ===");
     if (display_init() != 0) {
         ESP_LOGE(TAG, "Display init failed!");
     } else {
+        ESP_LOGI(TAG, "=== BOOT STAGE: show_splash ===");
         show_splash();
-        ESP_LOGI(TAG, "Splash screen displayed");
+        ESP_LOGI(TAG, "Splash screen displayed — waiting 2 s");
         vTaskDelay(pdMS_TO_TICKS(2000)); /* Show splash for 2 seconds */
     }
 
     /* Init button */
+    ESP_LOGI(TAG, "=== BOOT STAGE: button_init ===");
     button_init();
 
-    /* Start mesh task (radio + beacons on CPU1) */
+    /* Init WiFi (station mode if SSID configured, AP fallback) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
+    if (wifi_manager_init() == 0) {
+        const char *ip = wifi_manager_get_ip();
+        if (ip[0] != '\0') {
+            ESP_LOGI(TAG, "WiFi ready: %s", ip);
+
+            ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
+            ws_server_start();
+
+            ESP_LOGI(TAG, "=== BOOT STAGE: mdns_init ===");
+            mdns_init();
+            char hostname[32];
+            snprintf(hostname, sizeof(hostname), "bramble-%04" PRIx32, my_addr & 0xFFFF);
+            mdns_hostname_set(hostname);
+            mdns_instance_name_set("Bramble Mesh Node");
+            mdns_service_add("Bramble", "_bramble", "_tcp", 80, NULL, 0);
+            ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+        }
+    } else {
+        ESP_LOGW(TAG, "WiFi init failed — running without network");
+    }
+
+    /* Start mesh task (radio + beacons on CPU1).
+     * NOTE: radio_init() runs inside mesh_task on CPU1 — if it hangs,
+     * the task watchdog (CONFIG_ESP_TASK_WDT_TIMEOUT_S) will force a reset. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
     mesh_task_start(&g_identity);
 
-    /* Start serial CLI */
+    /* Init RPC dispatcher and register methods */
+    ESP_LOGI(TAG, "=== BOOT STAGE: rpc_init ===");
+    rpc_init();
+    rpc_methods_init(&g_identity);
+
+    /* Start serial CLI (with JSON-RPC auto-detect) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: cli_init ===");
     cli_init(&g_identity);
 
     /* Init UI state machine */
+    ESP_LOGI(TAG, "=== BOOT STAGE: ui_init ===");
     ui_state_t ui;
     ui_init(&ui);
 
     /* Render initial screen */
+    ESP_LOGI(TAG, "=== BOOT STAGE: initial render ===");
     render_screen(&ui);
 
-    ESP_LOGI(TAG, "Entering main loop (UI on CPU0, mesh on CPU1)");
+    ESP_LOGI(TAG, "=== BOOT STAGE: main loop start (UI on CPU0, mesh on CPU1) ===");
 
     /* Main loop — 50ms tick (20 Hz) */
     while (1) {
