@@ -13,6 +13,9 @@
 #include "ble_server.h"
 #include "rpc_dispatcher.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_nimble_hci.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -51,6 +54,13 @@ static char     s_line_buf[BLE_RPC_BUF_SIZE];
 static size_t   s_line_len = 0;
 static char     s_device_name[32] = "Bramble";
 
+/* Deferred RPC processing — can't call notify from GATT access context */
+static QueueHandle_t s_rpc_queue = NULL;
+typedef struct {
+    char data[BLE_RPC_BUF_SIZE];
+    size_t len;
+} ble_rpc_msg_t;
+
 /* ── RPC notification callback (registered with rpc_dispatcher) ────── */
 
 static void ble_notify_cb(const char *json, size_t len, void *ctx)
@@ -85,25 +95,39 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
 
 /* ── Process incoming data (JSON-RPC lines) ──────────────────────────── */
 
+/* BLE RPC processing task — runs in its own context, safe to call notify */
+static void ble_rpc_task(void *param)
+{
+    (void)param;
+    ble_rpc_msg_t msg;
+    while (1) {
+        if (xQueueReceive(s_rpc_queue, &msg, portMAX_DELAY) == pdTRUE) {
+            msg.data[msg.len] = '\0';
+            ESP_LOGI(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)msg.len, msg.data);
+
+            char resp[BLE_RPC_BUF_SIZE];
+            int resp_len = rpc_dispatch(msg.data, resp, sizeof(resp));
+            ESP_LOGI(TAG, "BLE RPC response (%d bytes)", resp_len);
+            if (resp_len > 0) {
+                ble_notify_cb(resp, (size_t)resp_len, NULL);
+            }
+        }
+    }
+}
+
 static void process_ble_data(const uint8_t *data, size_t len)
 {
-    ESP_LOGI(TAG, "BLE RX %u bytes", (unsigned)len);
     for (size_t i = 0; i < len; i++) {
         char c = (char)data[i];
         if (c == '\n' || c == '\r') {
             if (s_line_len > 0) {
-                s_line_buf[s_line_len] = '\0';
-                ESP_LOGI(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)s_line_len, s_line_buf);
-
-                /* Dispatch through existing RPC system */
-                char resp[BLE_RPC_BUF_SIZE];
-                int resp_len = rpc_dispatch(s_line_buf, resp, sizeof(resp));
-                ESP_LOGI(TAG, "BLE RPC response (%d bytes)", resp_len);
-                if (resp_len > 0) {
-                    /* Send response back via notify */
-                    ble_notify_cb(resp, (size_t)resp_len, NULL);
+                /* Queue the complete line for processing in the RPC task */
+                ble_rpc_msg_t msg;
+                if (s_line_len < sizeof(msg.data)) {
+                    memcpy(msg.data, s_line_buf, s_line_len);
+                    msg.len = s_line_len;
+                    xQueueSend(s_rpc_queue, &msg, 0);
                 }
-
                 s_line_len = 0;
             }
         } else if (s_line_len < BLE_RPC_BUF_SIZE - 1) {
@@ -302,6 +326,14 @@ int ble_server_init(void)
         }
         nvs_close(nvs);
     }
+
+    /* Create RPC processing queue and task */
+    s_rpc_queue = xQueueCreate(4, sizeof(ble_rpc_msg_t));
+    if (!s_rpc_queue) {
+        ESP_LOGE(TAG, "Failed to create RPC queue");
+        return -1;
+    }
+    xTaskCreate(ble_rpc_task, "ble_rpc", 4096, NULL, 5, NULL);
 
     int rc = nimble_port_init();
     if (rc != 0) {
