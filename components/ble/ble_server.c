@@ -55,8 +55,10 @@ static char     s_device_name[32] = "Bramble";
 static void ble_notify_cb(const char *json, size_t len, void *ctx)
 {
     (void)ctx;
-    if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE || !s_rx_notify_enabled)
+    if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE || !s_rx_notify_enabled) {
+        ESP_LOGW(TAG, "Cannot notify: conn=%d notify=%d", s_conn_handle, s_rx_notify_enabled);
         return;
+    }
 
     /* Send JSON + newline, chunked to MTU */
     struct os_mbuf *om;
@@ -95,15 +97,18 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
 
 static void process_ble_data(const uint8_t *data, size_t len)
 {
+    ESP_LOGI(TAG, "BLE RX %u bytes", (unsigned)len);
     for (size_t i = 0; i < len; i++) {
         char c = (char)data[i];
         if (c == '\n' || c == '\r') {
             if (s_line_len > 0) {
                 s_line_buf[s_line_len] = '\0';
+                ESP_LOGI(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)s_line_len, s_line_buf);
 
                 /* Dispatch through existing RPC system */
                 char resp[BLE_RPC_BUF_SIZE];
                 int resp_len = rpc_dispatch(s_line_buf, resp, sizeof(resp));
+                ESP_LOGI(TAG, "BLE RPC response (%d bytes)", resp_len);
                 if (resp_len > 0) {
                     /* Send response back via notify */
                     ble_notify_cb(resp, (size_t)resp_len, NULL);
