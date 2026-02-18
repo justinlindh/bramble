@@ -15,6 +15,9 @@
 #include "cli.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
+#include "wifi_manager.h"
+#include "ws_server.h"
+#include "mdns.h"
 
 static const char *TAG = "bramble";
 
@@ -69,8 +72,12 @@ static void render_main_screen(void) {
         display_draw_text(0, 24, "Radio: initializing...");
     }
 
-    /* Last RX signal */
-    if (n > 0) {
+    /* WiFi IP address (if connected), else last RX signal */
+    const char *ip = wifi_manager_get_ip();
+    if (ip && ip[0] != '\0') {
+        snprintf(line, sizeof(line), "IP: %s", ip);
+        display_draw_text(0, 34, line);
+    } else if (n > 0) {
         snprintf(line, sizeof(line), "RSSI:%d SNR:%d",
                  mesh.last_rx_rssi, mesh.last_rx_snr);
         display_draw_text(0, 34, line);
@@ -205,6 +212,29 @@ void app_main(void)
     /* Init button */
     ESP_LOGI(TAG, "=== BOOT STAGE: button_init ===");
     button_init();
+
+    /* Init WiFi (station mode if SSID configured, AP fallback) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
+    if (wifi_manager_init() == 0) {
+        const char *ip = wifi_manager_get_ip();
+        if (ip[0] != '\0') {
+            ESP_LOGI(TAG, "WiFi ready: %s", ip);
+
+            ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
+            ws_server_start();
+
+            ESP_LOGI(TAG, "=== BOOT STAGE: mdns_init ===");
+            mdns_init();
+            char hostname[32];
+            snprintf(hostname, sizeof(hostname), "bramble-%04" PRIx32, my_addr & 0xFFFF);
+            mdns_hostname_set(hostname);
+            mdns_instance_name_set("Bramble Mesh Node");
+            mdns_service_add("Bramble", "_bramble", "_tcp", 80, NULL, 0);
+            ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+        }
+    } else {
+        ESP_LOGW(TAG, "WiFi init failed — running without network");
+    }
 
     /* Start mesh task (radio + beacons on CPU1).
      * NOTE: radio_init() runs inside mesh_task on CPU1 — if it hangs,
