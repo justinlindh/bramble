@@ -11,6 +11,7 @@
 #include "ui.h"
 #include "crypto.h"
 #include "identity.h"
+#include "mesh_task.h"
 
 static const char *TAG = "bramble";
 
@@ -52,8 +53,25 @@ static void render_main_screen(void) {
     snprintf(line, sizeof(line), "Node: %08" PRIX32, my_addr);
     display_draw_text(0, 14, line);
 
-    /* Neighbors (stub — no radio yet) */
-    display_draw_text(0, 24, "Peers: 0  (no radio)");
+    /* Get live mesh state */
+    mesh_shared_state_t mesh;
+    mesh_get_state(&mesh);
+
+    /* Neighbors */
+    int n = neighbor_count(&mesh.neighbors);
+    if (mesh.radio_ok) {
+        snprintf(line, sizeof(line), "Peers: %d", n);
+        display_draw_text(0, 24, line);
+    } else {
+        display_draw_text(0, 24, "Radio: initializing...");
+    }
+
+    /* Last RX signal */
+    if (n > 0) {
+        snprintf(line, sizeof(line), "RSSI:%d SNR:%d",
+                 mesh.last_rx_rssi, mesh.last_rx_snr);
+        display_draw_text(0, 34, line);
+    }
 
     /* Uptime */
     uint32_t up_sec = (uint32_t)((esp_timer_get_time() / 1000000ULL) -
@@ -61,11 +79,12 @@ static void render_main_screen(void) {
     char uptime[32];
     ui_format_uptime(up_sec, uptime, sizeof(uptime));
     snprintf(line, sizeof(line), "Up: %s", uptime);
-    display_draw_text(0, 34, line);
+    display_draw_text(0, 44, line);
 
-    /* Status */
-    display_draw_text(0, 48, "Radio: not init");
-    display_draw_text(0, 56, "[press] cycle screens");
+    /* Beacon counts */
+    snprintf(line, sizeof(line), "TX:%" PRIu32 " RX:%" PRIu32,
+             mesh.beacon_tx_count, mesh.beacon_rx_count);
+    display_draw_text(0, 56, line);
 
     display_flush();
 }
@@ -83,14 +102,30 @@ static void render_screen(ui_state_t *ui) {
         display_draw_text(0, 56, "[press] next screen");
         display_flush();
         break;
-    case SCREEN_NODES:
+    case SCREEN_NODES: {
         display_clear();
         display_draw_text(0, 0, "Nodes");
         display_hline(0, 10, 128);
-        display_draw_text(0, 24, "(no neighbors yet)");
+        mesh_shared_state_t mesh_n;
+        mesh_get_state(&mesh_n);
+        int cnt = neighbor_count(&mesh_n.neighbors);
+        if (cnt == 0) {
+            display_draw_text(0, 24, "(no neighbors yet)");
+        } else {
+            char nl[48];
+            int y = 14;
+            for (int i = 0; i < mesh_n.neighbors.count && y < 56; i++) {
+                neighbor_entry_t *e = &mesh_n.neighbors.entries[i];
+                if (e->addr == 0) continue;
+                snprintf(nl, sizeof(nl), "%08" PRIX32 " %ddBm", e->addr, e->rssi);
+                display_draw_text(0, y, nl);
+                y += 10;
+            }
+        }
         display_draw_text(0, 56, "[press] next screen");
         display_flush();
         break;
+    }
     case SCREEN_SETTINGS:
         display_clear();
         display_draw_text(0, 0, "Settings");
@@ -160,6 +195,9 @@ void app_main(void)
     /* Init button */
     button_init();
 
+    /* Start mesh task (radio + beacons on CPU1) */
+    mesh_task_start(&g_identity);
+
     /* Init UI state machine */
     ui_state_t ui;
     ui_init(&ui);
@@ -167,7 +205,7 @@ void app_main(void)
     /* Render initial screen */
     render_screen(&ui);
 
-    ESP_LOGI(TAG, "Entering main loop");
+    ESP_LOGI(TAG, "Entering main loop (UI on CPU0, mesh on CPU1)");
 
     /* Main loop — 50ms tick (20 Hz) */
     while (1) {
