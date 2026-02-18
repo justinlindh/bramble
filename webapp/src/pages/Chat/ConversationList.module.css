@@ -71,6 +71,14 @@
 }
 
 /* ── Unread badge ─────────────────────────────── */
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .badge {
   background: var(--danger);
   color: #fff;
