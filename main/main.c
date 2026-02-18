@@ -45,8 +45,11 @@ static uint32_t my_addr = 0;
 static uint32_t boot_time_ms = 0;
 
 static void render_main_screen(void) {
-    ESP_LOGI(TAG, "render_main_screen called");
     display_clear();
+    /* DEBUG: fill top-left corner to prove display updates */
+    for (int x = 0; x < 20; x++)
+        for (int y = 0; y < 20; y++)
+            display_pixel(x, y, true);
 
     /* Header */
     display_draw_text(0, 0, "Bramble");
