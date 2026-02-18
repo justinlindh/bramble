@@ -12,6 +12,7 @@
 #include "crypto.h"
 #include "identity.h"
 #include "mesh_task.h"
+#include "cli.h"
 
 static const char *TAG = "bramble";
 
@@ -197,6 +198,9 @@ void app_main(void)
 
     /* Start mesh task (radio + beacons on CPU1) */
     mesh_task_start(&g_identity);
+
+    /* Start serial CLI */
+    cli_init(&g_identity);
 
     /* Init UI state machine */
     ui_state_t ui;

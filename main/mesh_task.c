@@ -7,6 +7,9 @@
 #include "packet.h"
 #include "crypto.h"
 #include "security.h"
+#include "channel_key.h"
+#include "channel_msg.h"
+#include "public_channel.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -46,6 +49,10 @@ static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
+
+/* Channel state */
+static bramble_channel_t   s_channels[MAX_CHANNELS];
+static int                 s_num_channels = 0;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -173,6 +180,61 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     }
 }
 
+static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    (void)rssi; (void)snr;
+
+    /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
+    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+        ESP_LOGW(TAG, "Data packet too short: %u", len);
+        return;
+    }
+
+    uint32_t src_addr;
+    memcpy(&src_addr, data + HEADER_SIZE, 4);
+
+    const uint8_t *nonce = data + HEADER_SIZE + 4;
+    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    const uint8_t *ciphertext = nonce + BRAMBLE_NONCE_SIZE;
+    const uint8_t *tag = ciphertext + ct_len;
+
+    /* Try to decrypt with known channels */
+    channel_msg_info_t info;
+    uint8_t plaintext[256];
+    /* We need a buffer for decryption — copy ciphertext for in-place decrypt */
+    if (ct_len > sizeof(plaintext)) {
+        ESP_LOGW(TAG, "Data too large: %u", (unsigned)ct_len);
+        return;
+    }
+    memcpy(plaintext, ciphertext, ct_len);
+
+    int ret = channel_msg_decrypt(s_channels, s_num_channels,
+                                  nonce, ciphertext, ct_len, tag, &info);
+    if (ret != 0) {
+        ESP_LOGW(TAG, "Failed to decrypt data from %08" PRIX32, src_addr);
+        return;
+    }
+
+    /* Extract the text message from the decrypted payload */
+    if (info.data_len > 0) {
+        /* Null-terminate for printing */
+        char text[256];
+        size_t tlen = info.data_len;
+        if (tlen >= sizeof(text)) tlen = sizeof(text) - 1;
+        memcpy(text, info.data, tlen);
+        text[tlen] = '\0';
+
+        ESP_LOGI(TAG, "");
+        ESP_LOGI(TAG, "*** MESSAGE from %08" PRIX32 " ***", info.src_addr);
+        ESP_LOGI(TAG, ">>> %s", text);
+        ESP_LOGI(TAG, "*** (ch:%d RSSI:%d SNR:%d) ***", info.channel_id, rssi, snr);
+
+        /* Also print to stdout for CLI users */
+        printf("\n[MSG from %08" PRIX32 "] %s\n", info.src_addr, text);
+        printf("bramble> ");
+        fflush(stdout);
+    }
+}
+
 static void handle_rx_packet(const rx_packet_t *pkt) {
     if (pkt->len < HEADER_SIZE) {
         ESP_LOGW(TAG, "Packet too short: %u bytes", pkt->len);
@@ -213,8 +275,7 @@ static void handle_rx_packet(const rx_packet_t *pkt) {
         /* TODO: wire routing component */
         break;
     case PKT_TYPE_DATA:
-        ESP_LOGI(TAG, "Data packet received");
-        /* TODO: wire channel decrypt + delivery */
+        handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
     default:
         ESP_LOGD(TAG, "Unhandled packet type 0x%02X", header.type);
@@ -323,6 +384,91 @@ static void mesh_task(void *param) {
     }
 }
 
+/* ── Send functions ──────────────────────────────────────────────────── */
+
+static int send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
+                            const uint8_t *nonce, const uint8_t *ciphertext, size_t ct_len,
+                            const uint8_t *tag) {
+    /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
+    size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
+    if (total > 255) {
+        ESP_LOGE(TAG, "Data packet too large: %u bytes", (unsigned)total);
+        return -1;
+    }
+
+    uint8_t buf[255];
+    bramble_header_t header = {
+        .version = BRAMBLE_VERSION,
+        .type = PKT_TYPE_DATA,
+        .flags = FLAG_ENCRYPT | FLAG_CHANNEL,
+        .hop_limit = 3,
+        .dest_addr = dest_addr,
+        .packet_id = next_packet_id(),
+    };
+
+    bramble_header_serialize(&header, buf, HEADER_SIZE);
+    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
+    memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
+    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
+
+    int ret = radio_transmit(buf, (uint8_t)total);
+    if (ret == 0) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_shared.packets_tx++;
+        xSemaphoreGive(s_state_mutex);
+    }
+    return ret;
+}
+
+int mesh_send_broadcast(const uint8_t *data, size_t len) {
+    if (s_num_channels == 0) {
+        ESP_LOGE(TAG, "No channels initialized");
+        return -1;
+    }
+
+    if (!public_channel_can_send(now_ms())) {
+        ESP_LOGW(TAG, "Rate limited on public channel");
+        return -2;
+    }
+
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t ciphertext[256 + CHANNEL_MSG_OVERHEAD];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+
+    int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01, /* app_type: text */
+                                  data, len, nonce, ciphertext, tag);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
+        return ret;
+    }
+
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
+    return send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
+}
+
+int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
+    /* For now, use public channel for all messages (DM encryption needs key exchange) */
+    if (s_num_channels == 0) {
+        ESP_LOGE(TAG, "No channels initialized");
+        return -1;
+    }
+
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t ciphertext[256 + CHANNEL_MSG_OVERHEAD];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+
+    int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01,
+                                  data, len, nonce, ciphertext, tag);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
+        return ret;
+    }
+
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
+    return send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 void mesh_task_start(bramble_identity_t *identity) {
@@ -332,6 +478,10 @@ void mesh_task_start(bramble_identity_t *identity) {
     dedup_init(&s_dedup);
     rreq_rate_init(&s_rreq_rl);
     memset(&s_shared, 0, sizeof(s_shared));
+
+    /* Initialize public channel (well-known PSK, no key exchange needed) */
+    public_channel_init(s_channels, &s_num_channels);
+    ESP_LOGI(TAG, "Public channel initialized (%d channels)", s_num_channels);
 
     s_state_mutex = xSemaphoreCreateMutex();
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
