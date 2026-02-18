@@ -14,6 +14,14 @@ typedef enum {
     SCREEN_COUNT
 } ui_screen_t;
 
+/* Connectivity modes for WiFi/BLE switcher */
+typedef enum {
+    CONN_MODE_WIFI = 0,
+    CONN_MODE_BLE,
+    CONN_MODE_BOTH,
+    CONN_MODE_COUNT
+} conn_mode_t;
+
 typedef enum {
     BTN_NONE = 0,
     BTN_SHORT_PRESS,
@@ -45,6 +53,9 @@ typedef struct {
     uint32_t screen_enter_time;
     uint32_t last_activity;
     bool screen_dirty;
+    int settings_cursor;        /* selected option on Settings screen */
+    bool settings_editing;      /* true when in settings edit mode */
+    bool settings_confirmed;    /* set true on long-press confirm */
 } ui_state_t;
 
 void ui_init(ui_state_t *state);
