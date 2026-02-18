@@ -13,6 +13,7 @@
 #include "mesh_task.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
+#include "wifi_manager.h"
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_vfs_dev.h"
@@ -132,6 +133,74 @@ static int cmd_send(int argc, char **argv) {
     return ret;
 }
 
+/* ── Command: wifi ──────────────────────────────────────────────────── */
+
+static int cmd_wifi(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage:\n");
+        printf("  wifi status              Show WiFi status\n");
+        printf("  wifi set <ssid> <pass>   Save WiFi credentials (persists across reflash)\n");
+        printf("  wifi clear               Clear saved credentials\n");
+        return 0;
+    }
+
+    if (strcmp(argv[1], "status") == 0) {
+        wifi_status_t st;
+        wifi_manager_get_status(&st);
+        const char *mode_str = st.mode == WIFI_MODE_STATION ? "Station" :
+                               st.mode == WIFI_MODE_AP ? "AP" : "Off";
+        printf("Mode:  %s\n", mode_str);
+        printf("SSID:  %s\n", st.ssid);
+        printf("IP:    %s\n", st.ip_addr);
+
+        /* Show saved NVS creds (SSID only, not password) */
+        char nvs_ssid[33] = {0};
+        char nvs_pass[65] = {0};
+        if (wifi_manager_nvs_get_creds(nvs_ssid, sizeof(nvs_ssid),
+                                        nvs_pass, sizeof(nvs_pass)) == 0) {
+            printf("Saved: %s (in NVS)\n", nvs_ssid);
+        } else {
+            printf("Saved: (none)\n");
+        }
+    } else if (strcmp(argv[1], "set") == 0) {
+        if (argc < 3) {
+            printf("Usage: wifi set <ssid> [password]\n");
+            return 1;
+        }
+        const char *ssid = argv[2];
+        const char *pass = argc >= 4 ? argv[3] : "";
+        if (wifi_manager_nvs_set_creds(ssid, pass) == 0) {
+            printf("WiFi credentials saved. Reboot to connect.\n");
+            printf("  SSID: %s\n", ssid);
+            printf("  Pass: %s\n", pass[0] ? "****" : "(open)");
+        } else {
+            printf("Failed to save credentials.\n");
+            return 1;
+        }
+    } else if (strcmp(argv[1], "clear") == 0) {
+        if (wifi_manager_nvs_clear_creds() == 0) {
+            printf("WiFi credentials cleared. Reboot to use AP mode.\n");
+        } else {
+            printf("Failed to clear credentials.\n");
+            return 1;
+        }
+    } else {
+        printf("Unknown wifi subcommand: %s\n", argv[1]);
+        return 1;
+    }
+    return 0;
+}
+
+/* ── Command: reboot ────────────────────────────────────────────────── */
+
+static int cmd_reboot(int argc, char **argv) {
+    (void)argc; (void)argv;
+    printf("Rebooting...\n");
+    fflush(stdout);
+    mesh_reboot_delayed(500);
+    return 0;
+}
+
 /* ── Command: help ──────────────────────────────────────────────────── */
 
 static int cmd_help(int argc, char **argv) {
@@ -141,6 +210,8 @@ static int cmd_help(int argc, char **argv) {
     printf("  send <addr> <msg>      Send encrypted to address\n");
     printf("  peers                  List neighbors\n");
     printf("  status                 Node status\n");
+    printf("  wifi status|set|clear  WiFi management\n");
+    printf("  reboot                 Restart device\n");
     printf("  help                   This help\n");
     return 0;
 }
@@ -226,6 +297,8 @@ void cli_init(bramble_identity_t *identity) {
         { .command = "status",    .help = "Node status",             .func = cmd_status },
         { .command = "broadcast", .help = "Send on public channel",  .func = cmd_broadcast },
         { .command = "send",      .help = "Send to address",         .func = cmd_send },
+        { .command = "wifi",      .help = "WiFi management",         .func = cmd_wifi },
+        { .command = "reboot",    .help = "Restart device",          .func = cmd_reboot },
         { .command = "help",      .help = "Show commands",           .func = cmd_help },
     };
     for (int i = 0; i < (int)(sizeof(cmds) / sizeof(cmds[0])); i++) {

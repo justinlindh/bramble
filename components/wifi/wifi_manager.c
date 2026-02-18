@@ -3,6 +3,8 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include <string.h>
@@ -12,6 +14,10 @@ static const char *TAG = "wifi_mgr";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
+#define NVS_NAMESPACE      "bramble_wifi"
+#define NVS_KEY_SSID       "ssid"
+#define NVS_KEY_PASSWORD   "password"
+
 static EventGroupHandle_t s_wifi_event_group = NULL;
 static wifi_status_t s_status = {
     .mode    = WIFI_MODE_OFF,
@@ -19,6 +25,58 @@ static wifi_status_t s_status = {
     .ssid    = "",
     .rssi    = 0,
 };
+
+/* ── NVS helpers ─────────────────────────────────────────────────────── */
+
+int wifi_manager_nvs_get_creds(char *ssid, size_t ssid_len,
+                                char *password, size_t pass_len)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) return -1;
+
+    err = nvs_get_str(nvs, NVS_KEY_SSID, ssid, &ssid_len);
+    if (err != ESP_OK || ssid[0] == '\0') {
+        nvs_close(nvs);
+        return -1;
+    }
+
+    err = nvs_get_str(nvs, NVS_KEY_PASSWORD, password, &pass_len);
+    if (err != ESP_OK) {
+        password[0] = '\0'; /* Open network — no password */
+    }
+
+    nvs_close(nvs);
+    return 0;
+}
+
+int wifi_manager_nvs_set_creds(const char *ssid, const char *password)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return -1;
+
+    nvs_set_str(nvs, NVS_KEY_SSID, ssid);
+    nvs_set_str(nvs, NVS_KEY_PASSWORD, password ? password : "");
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    ESP_LOGI(TAG, "WiFi credentials saved to NVS (SSID: %s)", ssid);
+    return 0;
+}
+
+int wifi_manager_nvs_clear_creds(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return -1;
+
+    nvs_erase_key(nvs, NVS_KEY_SSID);
+    nvs_erase_key(nvs, NVS_KEY_PASSWORD);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    ESP_LOGI(TAG, "WiFi credentials cleared from NVS");
+    return 0;
+}
 
 /* ── Event handlers ──────────────────────────────────────────────────── */
 
@@ -42,7 +100,7 @@ static void sta_event_handler(void *arg, esp_event_base_t event_base,
 
 /* ── Station mode ────────────────────────────────────────────────────── */
 
-static int try_station_mode(void)
+static int try_station_mode(const char *ssid, const char *password)
 {
     esp_netif_create_default_wifi_sta();
 
@@ -65,13 +123,9 @@ static int try_station_mode(void)
                                                         &instance_got_ip));
 
     wifi_config_t wifi_cfg = {0};
-    strncpy((char *)wifi_cfg.sta.ssid,
-            CONFIG_BRAMBLE_WIFI_SSID,
-            sizeof(wifi_cfg.sta.ssid) - 1);
-    strncpy((char *)wifi_cfg.sta.password,
-            CONFIG_BRAMBLE_WIFI_PASSWORD,
-            sizeof(wifi_cfg.sta.password) - 1);
-    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid) - 1);
+    strncpy((char *)wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password) - 1);
+    wifi_cfg.sta.threshold.authmode = password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
@@ -86,14 +140,13 @@ static int try_station_mode(void)
         pdFALSE, pdFALSE,
         pdMS_TO_TICKS(CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S * 1000));
 
-    /* Unregister handlers regardless of outcome */
     esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip);
     esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id);
     vEventGroupDelete(s_wifi_event_group);
     s_wifi_event_group = NULL;
 
     if (bits & WIFI_CONNECTED_BIT) {
-        strncpy(s_status.ssid, CONFIG_BRAMBLE_WIFI_SSID, sizeof(s_status.ssid) - 1);
+        strncpy(s_status.ssid, ssid, sizeof(s_status.ssid) - 1);
         ESP_LOGI(TAG, "Station mode connected: SSID=%s IP=%s",
                  s_status.ssid, s_status.ip_addr);
         return 0;
@@ -130,7 +183,6 @@ static int start_ap_mode(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* AP netif always uses 192.168.4.1 */
     strncpy(s_status.ip_addr, "192.168.4.1", sizeof(s_status.ip_addr) - 1);
     strncpy(s_status.ssid, CONFIG_BRAMBLE_WIFI_AP_SSID, sizeof(s_status.ssid) - 1);
     s_status.mode = WIFI_MODE_AP;
@@ -146,14 +198,27 @@ int wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    /* Check NVS for saved credentials first */
+    char nvs_ssid[33] = {0};
+    char nvs_pass[65] = {0};
+    if (wifi_manager_nvs_get_creds(nvs_ssid, sizeof(nvs_ssid),
+                                    nvs_pass, sizeof(nvs_pass)) == 0) {
+        ESP_LOGI(TAG, "Found NVS WiFi credentials — trying station: %s", nvs_ssid);
+        if (try_station_mode(nvs_ssid, nvs_pass) == 0) {
+            return 0;
+        }
+        ESP_LOGW(TAG, "NVS station failed — falling back to AP");
+    }
+
+    /* Fall back to Kconfig defaults */
 #if defined(CONFIG_BRAMBLE_WIFI_SSID) && (CONFIG_BRAMBLE_WIFI_SSID[0] != '\0')
-    ESP_LOGI(TAG, "SSID configured — trying station mode: %s", CONFIG_BRAMBLE_WIFI_SSID);
-    if (try_station_mode() == 0) {
+    ESP_LOGI(TAG, "Trying Kconfig SSID: %s", CONFIG_BRAMBLE_WIFI_SSID);
+    if (try_station_mode(CONFIG_BRAMBLE_WIFI_SSID, CONFIG_BRAMBLE_WIFI_PASSWORD) == 0) {
         return 0;
     }
-    ESP_LOGW(TAG, "Station failed — falling back to AP mode");
+    ESP_LOGW(TAG, "Kconfig station failed — falling back to AP");
 #else
-    ESP_LOGI(TAG, "No SSID configured — starting AP mode directly");
+    ESP_LOGI(TAG, "No WiFi credentials — starting AP mode");
 #endif
 
     return start_ap_mode();
