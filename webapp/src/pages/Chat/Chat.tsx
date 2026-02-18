@@ -62,6 +62,8 @@ function MessageList({ conversationId }: { conversationId: string }) {
 function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string; onToggleDetail?: () => void }) {
   const conversations = useStore(s => s.conversations);
   const conv = conversations.get(conversationId);
+  const showRoutes = useStore(s => s.showRoutes);
+  const setShowRoutes = useStore(s => s.setShowRoutes);
 
   let title: ReactNode = conv?.label ?? conversationId;
   let subtitle = '';
@@ -89,6 +91,14 @@ function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string
         <span className={styles.chatTitle}>{title}</span>
         {subtitle && <span className={styles.chatSubtitle}>{subtitle}</span>}
       </div>
+      <button
+        className={`${styles.routeBtn} ${showRoutes ? styles.routeBtnActive : ''}`}
+        onClick={(e) => { e.stopPropagation(); setShowRoutes(!showRoutes); }}
+        title={showRoutes ? 'Hide all routes' : 'Show all routes'}
+        aria-label={showRoutes ? 'Hide all routes' : 'Show all routes'}
+      >
+        ⇆
+      </button>
       {isChannel && <span className={styles.chevron}>▸</span>}
     </div>
   );
