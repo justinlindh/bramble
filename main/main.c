@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -46,7 +47,7 @@ static void render_main_screen(void) {
 
     /* Node address */
     char line[32];
-    snprintf(line, sizeof(line), "Node: %08lX", (unsigned long)my_addr);
+    snprintf(line, sizeof(line), "Node: %08" PRIX32, my_addr);
     display_draw_text(0, 14, line);
 
     /* Neighbors (stub — no radio yet) */
@@ -93,7 +94,7 @@ static void render_screen(ui_state_t *ui) {
         display_draw_text(0, 0, "Settings");
         display_hline(0, 10, 128);
         char line[32];
-        snprintf(line, sizeof(line), "Addr: %08lX", (unsigned long)my_addr);
+        snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
         display_draw_text(0, 14, line);
         display_draw_text(0, 24, "Radio: SF9 BW125");
         display_draw_text(0, 34, "Freq: 915.0 MHz");
@@ -131,7 +132,7 @@ void app_main(void)
     my_addr = (uint32_t)(addr_bytes[0] | (addr_bytes[1] << 8) |
                          (addr_bytes[2] << 16) | (addr_bytes[3] << 24));
     /* TODO: persist in NVS and derive from keypair */
-    ESP_LOGI(TAG, "Node address: %08lX", (unsigned long)my_addr);
+    ESP_LOGI(TAG, "Node address: %08" PRIX32, my_addr);
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
