@@ -38,7 +38,7 @@ static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
 static int handle_get_status(const cJSON *params, cJSON *result) {
     (void)params;
     char buf[12];
-    mesh_shared_state_t st;
+    static mesh_shared_state_t st;
     mesh_get_state(&st);
 
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
@@ -76,7 +76,7 @@ static int handle_get_version(const cJSON *params, cJSON *result) {
 /* bramble.getNeighbors */
 static int handle_get_neighbors(const cJSON *params, cJSON *result) {
     (void)params;
-    mesh_shared_state_t st;
+    static mesh_shared_state_t st;
     mesh_get_state(&st);
 
     cJSON *arr = cJSON_AddArrayToObject(result, "neighbors");
