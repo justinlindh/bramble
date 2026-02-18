@@ -77,4 +77,10 @@ int mesh_get_channel_count(void);
  */
 int mesh_set_default_channel(int index);
 
+/**
+ * Send a network reachability probe (broadcast).
+ * Returns the probe packet ID.
+ */
+uint32_t mesh_send_probe(void);
+
 #endif

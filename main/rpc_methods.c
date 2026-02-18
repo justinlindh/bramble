@@ -202,13 +202,12 @@ static int handle_reboot(const cJSON *params, cJSON *result) {
 
 /* bramble.sendProbe — stub: params {"dest":"HEXADDR"} */
 static int handle_send_probe(const cJSON *params, cJSON *result) {
-    const char *dest_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dest"));
-    if (!dest_str) {
-        return RPC_ERR_INVALID_PARAMS;
-    }
-    /* TODO: implement route probe / link test */
+    (void)params;
+    uint32_t probe_id = mesh_send_probe();
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%08" PRIX32, probe_id);
     cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddStringToObject(result, "note", "probe not yet implemented");
+    cJSON_AddStringToObject(result, "probe_id", buf);
     return 0;
 }
 
