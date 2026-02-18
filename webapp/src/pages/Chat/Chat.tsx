@@ -32,23 +32,27 @@ function EmptyMessages({ convId }: { convId: string }) {
 function MessageList({ conversationId }: { conversationId: string }) {
   const { messages } = useConversation(conversationId);
   const myAddr = useMyAddress();
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when messages change (new message, status update, etc.)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+    const el = listRef.current;
+    if (!el) return;
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [messages.length, messages[messages.length - 1]?.status]);
 
   if (messages.length === 0) {
     return <EmptyMessages convId={conversationId} />;
   }
 
   return (
-    <div className={styles.messageList} aria-live="polite" aria-label="Messages">
+    <div ref={listRef} className={styles.messageList} aria-live="polite" aria-label="Messages">
       {messages.map(msg => (
         <MessageBubble key={msg.id} message={msg} myAddr={myAddr} />
       ))}
-      <div ref={bottomRef} />
     </div>
   );
 }
