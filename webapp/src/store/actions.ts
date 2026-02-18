@@ -231,7 +231,7 @@ export async function loadAirtime(): Promise<void> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeNeighbor(raw: any): Neighbor {
+function normalizeNeighbor(raw: any): Neighbor & { name?: string } {
   return {
     addr: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.addr ?? 0),
     rssi: raw.rssi ?? 0,
@@ -240,7 +240,8 @@ function normalizeNeighbor(raw: any): Neighbor {
     lastHeardMs: raw.last_seen_ms ?? raw.lastHeardMs ?? 0,
     isMailbox: raw.isMailbox ?? false,
     airtimeRemaining: raw.airtimeRemaining ?? 0,
-  } as Neighbor;
+    ...(raw.name ? { name: raw.name } : {}),
+  } as Neighbor & { name?: string };
 }
 
 export async function loadNeighbors(): Promise<void> {

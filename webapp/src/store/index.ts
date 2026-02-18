@@ -15,10 +15,15 @@ import type {
   PeerLocation,
 } from '../types/bramble';
 
-function formatAddr(id: string): string {
+function formatAddr(id: string, peerNames?: Map<number, string>): string {
   if (id === 'broadcast') return '📢 Broadcast';
   if (id.startsWith('ch:')) return `ch-${id.slice(3)}`;
-  if (id.startsWith('dm:')) return `0x${Number(id.slice(3)).toString(16).toUpperCase()}`;
+  if (id.startsWith('dm:')) {
+    const addr = Number(id.slice(3));
+    const name = peerNames?.get(addr);
+    if (name) return name;
+    return `0x${addr.toString(16).toUpperCase()}`;
+  }
   return id;
 }
 
@@ -42,6 +47,7 @@ interface Actions {
   setPeerLocations: (locs: PeerLocation[]) => void;
   setMapFocusAddr: (addr: number | null) => void;
   loadCachedMessages: (msgs: Message[]) => void;
+  peerNames: Map<number, string>;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -60,6 +66,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   activeTab: 'chat',
   showRoutes: false,
   probeResult: null,
+  peerNames: new Map(),
   probeCollecting: false,
   peerLocations: [],
   mapFocusAddr: null,
@@ -70,13 +77,25 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setTransport: (t) => set({ transport: t }),
 
-  setConfig: (c) => set({ config: c }),
+  setConfig: (c) => set(state => {
+    const names = new Map(state.peerNames);
+    if (c.identity?.name && c.identity.name !== '(unnamed)') {
+      names.set(c.identity.address, c.identity.name);
+    }
+    return { config: c, peerNames: names };
+  }),
 
   setStatus: (s) => set({ status: s }),
 
   setAirtime: (a) => set({ airtime: a }),
 
-  setNeighbors: (n) => set({ neighbors: n }),
+  setNeighbors: (n) => set(state => {
+    const names = new Map(state.peerNames);
+    for (const nb of n) {
+      if ((nb as any).name) names.set(nb.addr, (nb as any).name);
+    }
+    return { neighbors: n, peerNames: names };
+  }),
 
   setRoutes: (r) => set({ routes: r }),
 
@@ -103,7 +122,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       const prev = convs.get(convId);
       convs.set(convId, {
         id: convId,
-        label: prev?.label ?? formatAddr(convId),
+        label: formatAddr(convId, state.peerNames),
         peerAddr:
           msg.channelIndex !== undefined || isBroadcast
             ? undefined
@@ -156,7 +175,7 @@ export const useStore = create<AppState & Actions>((set) => ({
         if (shouldUpdate) {
           convs.set(convId, {
             id: convId,
-            label: prev?.label ?? formatAddr(convId),
+            label: formatAddr(convId, state.peerNames),
             peerAddr:
               msg.channelIndex !== undefined || isBroadcast
                 ? undefined
