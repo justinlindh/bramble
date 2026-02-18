@@ -10,6 +10,7 @@ import styles from './Config.module.css';
 
 export function Config() {
   const config = useStore((s) => s.config);
+  const status = useStore((s) => s.status);
   const neighbors = useStore((s) => s.neighbors);
   const routes = useStore((s) => s.routes);
 
@@ -56,7 +57,7 @@ export function Config() {
       {/* ── Location ── */}
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
-        <LocationSection location={config.location} neighbors={neighbors} />
+        <LocationSection location={config.location} neighbors={neighbors} gpsAvailable={status?.gpsAvailable} />
       </section>
 
       {/* ── Data ── */}

@@ -136,6 +136,15 @@
   font-size: 0.85rem;
 }
 
+.unavailable {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
 .shareNone {
   color: var(--text-muted);
   font-size: 0.85rem;

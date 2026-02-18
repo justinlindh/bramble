@@ -8,6 +8,7 @@ import styles from './LocationSection.module.css';
 interface LocationSectionProps {
   location: LocationConfig;
   neighbors: Neighbor[];
+  gpsAvailable?: boolean;
 }
 
 const TIER_LABELS: Record<LocationTier, { label: string; desc: string; cls: string }> = {
@@ -21,7 +22,7 @@ function shortAddr(addr: number): string {
   return '0x' + addr.toString(16).toUpperCase().padStart(8, '0').slice(-4);
 }
 
-export function LocationSection({ location, neighbors }: LocationSectionProps) {
+export function LocationSection({ location, neighbors, gpsAvailable = false }: LocationSectionProps) {
   const [error, setError] = useState('');
   const [showWarning, setShowWarning] = useState(false);
   const [addingPeer, setAddingPeer] = useState(false);
@@ -105,20 +106,27 @@ export function LocationSection({ location, neighbors }: LocationSectionProps) {
       {/* GPS toggle */}
       <div className={styles.row}>
         <span className={styles.label}>GPS</span>
-        <label className={styles.toggle}
-               title={location.enabled
-                 ? 'GPS is active — location can be shared with contacts'
-                 : 'GPS is off — no location data collected or shared'}>
-          <input
-            type="checkbox"
-            checked={location.enabled}
-            onChange={(e) => handleGpsToggle(e.target.checked)}
-          />
-          <span>{location.enabled ? 'Enabled' : 'Disabled'}</span>
-          {location.enabled
-            ? <IconLocation size={14} />
-            : <IconLocationOff size={14} />}
-        </label>
+        {gpsAvailable ? (
+          <label className={styles.toggle}
+                 title={location.enabled
+                   ? 'GPS is active — location can be shared with contacts'
+                   : 'GPS is off — no location data collected or shared'}>
+            <input
+              type="checkbox"
+              checked={location.enabled}
+              onChange={(e) => handleGpsToggle(e.target.checked)}
+            />
+            <span>{location.enabled ? 'Enabled' : 'Disabled'}</span>
+            {location.enabled
+              ? <IconLocation size={14} />
+              : <IconLocationOff size={14} />}
+          </label>
+        ) : (
+          <span className={styles.unavailable} title="This device has no GPS hardware. Boards with GPS (e.g. T-Beam) will show controls here.">
+            No GPS hardware
+            <IconLocationOff size={14} />
+          </span>
+        )}
       </div>
 
       {/* Sharing summary */}
