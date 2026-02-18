@@ -6,23 +6,9 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-function resolveWsUrl(): string {
-  if (typeof location === 'undefined') return 'ws://localhost:3005';
-  const { hostname, protocol, port } = location;
-  const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-
-  // When served via Caddy (HTTPS), WebSocket is proxied through /ws path
-  if (protocol === 'https:') {
-    return `${wsProtocol}//${hostname}:${port || '443'}/ws`;
-  }
-
-  // Local dev: direct connection to mock-node
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'ws://localhost:3005';
-  }
-
-  // LAN HTTP: direct to mock-node port
-  return `ws://${hostname}:3005`;
+export interface WsReconnectCallbacks {
+  onDisconnect?: () => void;
+  onReconnect?: () => void;
 }
 
 export class WebSocketTransport implements Transport {
@@ -31,15 +17,23 @@ export class WebSocketTransport implements Transport {
   private rpcId = 0;
   private pending = new Map<number, Pending>();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
-  private readonly url: string;
+  readonly url: string;
+
+  // Reconnect state
   private autoReconnect = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
-  private onReconnect: (() => void) | null = null;
-  private onDisconnect: (() => void) | null = null;
+  private reconnectCbs: WsReconnectCallbacks = {};
+  private intentionalClose = false;
 
-  constructor(url?: string) {
-    this.url = url ?? resolveWsUrl();
+  // Keepalive
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPong = 0;
+  private static PING_INTERVAL = 15_000;  // send ping every 15s
+  private static PONG_TIMEOUT = 10_000;   // if no pong in 10s, consider dead
+
+  constructor(url: string) {
+    this.url = url;
   }
 
   get connected(): boolean {
@@ -48,21 +42,36 @@ export class WebSocketTransport implements Transport {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (this._connected) {
+      if (this._connected && this.ws?.readyState === WebSocket.OPEN) {
         resolve();
         return;
       }
 
+      // Clean up any stale socket
+      this.cleanup();
+
       const ws = new WebSocket(this.url);
       this.ws = ws;
 
-      const onOpen = () => {
-        this._connected = true;
+      const connectTimeout = setTimeout(() => {
+        ws.removeEventListener('open', onOpen);
         ws.removeEventListener('error', onInitError);
+        try { ws.close(); } catch { /* */ }
+        reject(new Error(`WebSocket connect timeout: ${this.url}`));
+      }, 8000);
+
+      const onOpen = () => {
+        clearTimeout(connectTimeout);
+        ws.removeEventListener('error', onInitError);
+        this._connected = true;
+        this.intentionalClose = false;
+        this.lastPong = Date.now();
+        this.startKeepalive();
         resolve();
       };
 
-      const onInitError = (ev: Event) => {
+      const onInitError = () => {
+        clearTimeout(connectTimeout);
         ws.removeEventListener('open', onOpen);
         reject(new Error(`WebSocket connection failed: ${this.url}`));
       };
@@ -76,25 +85,23 @@ export class WebSocketTransport implements Transport {
 
       ws.addEventListener('close', () => {
         const wasConnected = this._connected;
-        this._connected = false;
-        if (wasConnected) {
-          this.rejectAll(new Error('WebSocket connection closed'));
-          this.onDisconnect?.();
+        this.cleanup();
+        if (wasConnected && !this.intentionalClose) {
+          this.reconnectCbs.onDisconnect?.();
           this.scheduleReconnect();
         }
       });
 
       ws.addEventListener('error', () => {
-        const wasConnected = this._connected;
-        this._connected = false;
-        if (wasConnected) {
-          this.rejectAll(new Error('WebSocket error'));
-        }
+        // Error before close — close event will follow and handle reconnect
       });
     });
   }
 
   private handleMessage(data: string): void {
+    // Any message counts as a "pong" for keepalive
+    this.lastPong = Date.now();
+
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(data);
@@ -102,6 +109,7 @@ export class WebSocketTransport implements Transport {
       return;
     }
 
+    // RPC response
     if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
       const { resolve, reject, timer } = this.pending.get(msg.id)!;
       clearTimeout(timer);
@@ -111,15 +119,26 @@ export class WebSocketTransport implements Transport {
       } else {
         resolve(msg.result);
       }
-    } else if (msg.method && !('id' in msg)) {
+      return;
+    }
+
+    // Notification (no id)
+    if (msg.method && !('id' in msg)) {
       this.notifyCb?.(msg.method as string, msg.params);
     }
   }
 
   async sendRPC<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<T> {
-    if (!this._connected || !this.ws) throw new Error('Not connected');
+    if (!this._connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected');
+    }
+
     const id = ++this.rpcId;
-    this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    try {
+      this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    } catch (e) {
+      throw new Error(`WebSocket send failed: ${(e as Error).message}`);
+    }
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -138,6 +157,32 @@ export class WebSocketTransport implements Transport {
     this.notifyCb = cb;
   }
 
+  async disconnect(): Promise<void> {
+    this.intentionalClose = true;
+    this.autoReconnect = false;
+    this.clearReconnectTimer();
+    this.cleanup();
+  }
+
+  /** Enable auto-reconnect. Call once after first successful connect(). */
+  enableAutoReconnect(cbs?: WsReconnectCallbacks): void {
+    this.autoReconnect = true;
+    this.reconnectDelay = 1000;
+    this.reconnectCbs = cbs ?? {};
+  }
+
+  // ── Internal helpers ──────────────────────────────────────────────
+
+  private cleanup(): void {
+    this._connected = false;
+    this.stopKeepalive();
+    this.rejectAll(new Error('Connection closed'));
+    if (this.ws) {
+      try { this.ws.close(); } catch { /* */ }
+      this.ws = null;
+    }
+  }
+
   private rejectAll(err: Error): void {
     for (const [, { reject, timer }] of this.pending) {
       clearTimeout(timer);
@@ -146,29 +191,53 @@ export class WebSocketTransport implements Transport {
     this.pending.clear();
   }
 
-  async disconnect(): Promise<void> {
-    this.autoReconnect = false;
+  private clearReconnectTimer(): void {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this._connected = false;
-    this.rejectAll(new Error('Disconnected'));
-    try {
-      this.ws?.close();
-    } catch {
-      /* ignore */
-    }
-    this.ws = null;
   }
 
-  /** Enable auto-reconnect after a successful connect. Call after connect(). */
-  enableAutoReconnect(opts?: { onReconnect?: () => void; onDisconnect?: () => void }): void {
-    this.autoReconnect = true;
-    this.reconnectDelay = 1000;
-    this.onReconnect = opts?.onReconnect ?? null;
-    this.onDisconnect = opts?.onDisconnect ?? null;
+  // ── Keepalive ─────────────────────────────────────────────────────
+
+  private startKeepalive(): void {
+    this.stopKeepalive();
+    this.pingTimer = setInterval(() => {
+      if (!this._connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+      // Check if we haven't heard anything in a while
+      const silence = Date.now() - this.lastPong;
+      if (silence > WebSocketTransport.PING_INTERVAL + WebSocketTransport.PONG_TIMEOUT) {
+        console.warn(`[WS] No data in ${(silence / 1000).toFixed(0)}s — closing as dead`);
+        try { this.ws.close(); } catch { /* */ }
+        return;
+      }
+
+      // Send a lightweight ping RPC — any response resets lastPong
+      try {
+        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method: 'bramble.ping' }));
+        // Set up a timeout to clean up this pending entry
+        const pingId = this.rpcId;
+        const timer = setTimeout(() => { this.pending.delete(pingId); }, 10000);
+        this.pending.set(pingId, {
+          resolve: () => { clearTimeout(timer); },
+          reject: () => { clearTimeout(timer); },
+          timer,
+        });
+      } catch {
+        // send failed — close event will fire
+      }
+    }, WebSocketTransport.PING_INTERVAL);
   }
+
+  private stopKeepalive(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  // ── Reconnect ─────────────────────────────────────────────────────
 
   private scheduleReconnect(): void {
     if (!this.autoReconnect || this.reconnectTimer) return;
@@ -178,9 +247,9 @@ export class WebSocketTransport implements Transport {
       this.reconnectTimer = null;
       try {
         await this.connect();
-        this.reconnectDelay = 1000; // reset on success
+        this.reconnectDelay = 1000;
         console.log('[WS] Reconnected');
-        this.onReconnect?.();
+        this.reconnectCbs.onReconnect?.();
       } catch {
         this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 15000);
         this.scheduleReconnect();
