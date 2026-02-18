@@ -19,6 +19,7 @@
 #include "ws_server.h"
 #include "msg_store.h"
 #include "mdns.h"
+#include "ble_server.h"
 
 static const char *TAG = "bramble";
 
@@ -272,6 +273,15 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: rpc_init ===");
     rpc_init();
     rpc_methods_init(&g_identity);
+
+    /* Start BLE GATT server (NUS for JSON-RPC) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
+    if (ble_server_init() == 0) {
+        ble_server_start();
+        ESP_LOGI(TAG, "BLE server started");
+    } else {
+        ESP_LOGW(TAG, "BLE init failed — running without BLE");
+    }
 
     /* Start serial CLI (with JSON-RPC auto-detect) */
     ESP_LOGI(TAG, "=== BOOT STAGE: cli_init ===");
