@@ -298,6 +298,15 @@ void app_main(void)
     static const char *mode_str[] = {"WiFi", "BLE", "WiFi+BLE"};
     ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
 
+    /* Init RPC dispatcher and register methods BEFORE transports
+     * so ws_server/ble notify registrations aren't wiped by rpc_init() */
+    ESP_LOGI(TAG, "=== BOOT STAGE: rpc_init ===");
+    rpc_init();
+    rpc_methods_init(&g_identity);
+
+    /* Init message store */
+    msg_store_init();
+
     /* Init WiFi if mode includes it */
     if (boot_mode == CONN_MODE_WIFI || boot_mode == CONN_MODE_BOTH) {
         ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
@@ -330,14 +339,6 @@ void app_main(void)
      * the task watchdog (CONFIG_ESP_TASK_WDT_TIMEOUT_S) will force a reset. */
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
     mesh_task_start(&g_identity);
-
-    /* Init message store */
-    msg_store_init();
-
-    /* Init RPC dispatcher and register methods */
-    ESP_LOGI(TAG, "=== BOOT STAGE: rpc_init ===");
-    rpc_init();
-    rpc_methods_init(&g_identity);
 
     /* Start BLE GATT server if mode includes it */
     if (boot_mode == CONN_MODE_BLE || boot_mode == CONN_MODE_BOTH) {
