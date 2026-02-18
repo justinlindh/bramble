@@ -323,7 +323,6 @@ int ws_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_open_sockets = MAX_WS_CLIENTS + 2; /* +2 for HTTP clients */
-    config.max_req_hdr_len = 1024;                 /* Browser headers exceed 512 default */
 
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) {
