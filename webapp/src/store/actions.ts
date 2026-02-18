@@ -6,6 +6,7 @@ import type {
   BrambleConfig,
   NodeStatus,
   AirtimeStatus,
+  AirtimeTier,
   Neighbor,
   Route,
   IncomingMessage,
@@ -126,28 +127,108 @@ export async function disconnect(): Promise<void> {
 
 // ─── Data loading ────────────────────────────────────────────────────────
 
+/**
+ * Normalize firmware config response to match BrambleConfig interface.
+ * Firmware returns flat structure; webapp expects nested identity/radio objects.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeConfig(raw: any): BrambleConfig {
+  return {
+    identity: {
+      address: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.identity?.address ?? 0),
+      pubkeyHash: raw.identity?.pubkeyHash ?? 0,
+      name: raw.node_name ?? raw.identity?.name ?? '',
+      pubkeyB64: raw.identity?.pubkeyB64 ?? '',
+    },
+    radio: {
+      txPowerDbm: raw.radio?.tx_power_dbm ?? raw.radio?.txPowerDbm ?? 0,
+      sf: raw.radio?.sf ?? 9,
+      bwKhz: raw.radio?.bw_hz ? Math.round(raw.radio.bw_hz / 1000) : (raw.radio?.bwKhz ?? 125),
+      cr: raw.radio?.cr ?? 5,
+      freqMhz: raw.radio?.frequency_mhz ?? raw.radio?.freqMhz ?? 915.0,
+    },
+    channels: (raw.channels ?? []).map((ch: any) => ({
+      index: ch.id ?? ch.index ?? 0,
+      name: ch.name ?? '',
+      hasPsk: ch.hasPsk ?? false,
+      epoch: ch.epoch ?? 0,
+      isDefault: ch.is_default ?? ch.isDefault ?? false,
+    })),
+    mailboxEnabled: raw.mailboxEnabled ?? false,
+    location: raw.location ?? {
+      enabled: false,
+      contacts: [],
+      defaultIntervalSec: 60,
+      defaultDistanceTriggerM: 100,
+      stationaryBackoff: 3,
+    },
+  } as BrambleConfig;
+}
+
 export async function loadConfig(): Promise<void> {
   if (!client) return;
-  const result = await client.rpc<BrambleConfig>('bramble.getConfig');
-  useStore.getState().setConfig(result);
+  const result = await client.rpc<any>('bramble.getConfig');
+  useStore.getState().setConfig(normalizeConfig(result));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeStatus(raw: any): NodeStatus {
+  return {
+    uptimeSec: raw.uptime_s ?? raw.uptimeSec ?? 0,
+    freeHeapBytes: raw.freeHeapBytes ?? 0,
+    fwVersion: raw.firmware_version ?? raw.fwVersion ?? '',
+    txCount: raw.packets_tx ?? raw.txCount ?? 0,
+    rxCount: raw.packets_rx ?? raw.rxCount ?? 0,
+    droppedCount: raw.droppedCount ?? 0,
+    neighborCount: raw.peers ?? raw.neighborCount ?? 0,
+    routeCount: raw.routeCount ?? 0,
+    airtimeUsedMs: raw.airtimeUsedMs ?? 0,
+    position: raw.position,
+  } as NodeStatus;
 }
 
 export async function loadStatus(): Promise<void> {
   if (!client) return;
-  const result = await client.rpc<NodeStatus>('bramble.getStatus');
-  useStore.getState().setStatus(result);
+  const result = await client.rpc<any>('bramble.getStatus');
+  useStore.getState().setStatus(normalizeStatus(result));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeAirtime(raw: any): AirtimeStatus {
+  // Firmware returns flat fields; webapp expects { tiers: [...] }
+  if (raw.tiers) return raw as AirtimeStatus;
+  return {
+    tiers: [
+      { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs: 0 },
+      { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs: 0 },
+      { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs: 0 },
+    ].map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })) as [AirtimeTier, AirtimeTier, AirtimeTier],
+  };
 }
 
 export async function loadAirtime(): Promise<void> {
   if (!client) return;
-  const result = await client.rpc<AirtimeStatus>('bramble.getAirtime');
-  useStore.getState().setAirtime(result);
+  const result = await client.rpc<any>('bramble.getAirtime');
+  useStore.getState().setAirtime(normalizeAirtime(result));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeNeighbor(raw: any): Neighbor {
+  return {
+    addr: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.addr ?? 0),
+    rssi: raw.rssi ?? 0,
+    snr: raw.snr ?? 0,
+    deliveryRate: raw.deliveryRate ?? 0,
+    lastHeardMs: raw.last_seen_ms ?? raw.lastHeardMs ?? 0,
+    isMailbox: raw.isMailbox ?? false,
+    airtimeRemaining: raw.airtimeRemaining ?? 0,
+  } as Neighbor;
 }
 
 export async function loadNeighbors(): Promise<void> {
   if (!client) return;
-  const result = await client.rpc<{ neighbors: Neighbor[] }>('bramble.getNeighbors');
-  useStore.getState().setNeighbors(result.neighbors ?? []);
+  const result = await client.rpc<{ neighbors: any[] }>('bramble.getNeighbors');
+  useStore.getState().setNeighbors((result.neighbors ?? []).map(normalizeNeighbor));
 }
 
 export async function loadRoutes(): Promise<void> {
@@ -166,15 +247,19 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   );
   const store = useStore.getState();
   for (const m of result.messages ?? []) {
+    const fromAddr = typeof m.from === 'string' ? parseInt(m.from, 16) : (m.from ?? 0);
+    const toAddr = typeof m.to === 'string' ? parseInt(m.to, 16) : (m.to ?? 0);
+    const dir = (m as any).direction;
+    const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
     store.addMessage({
-      id: m.msgId,
-      direction: 'incoming',
-      from: m.from,
-      to: m.to,
+      id: m.msgId ?? `fw-${(m as any).timestamp_s ?? Date.now()}`,
+      direction: isOutgoing ? 'outgoing' : 'incoming',
+      from: fromAddr,
+      to: toAddr,
       text: m.text,
       tier: m.tier,
       channelIndex: m.channelIndex,
-      timestampMs: m.timestamp * 1000,
+      timestampMs: ((m as any).timestamp_s ?? m.timestamp ?? 0) * 1000,
       status: 'delivered',
     });
   }
@@ -245,15 +330,17 @@ function handleAck(params: unknown): void {
 }
 
 function handleIncomingMessage(params: unknown): void {
-  const p = params as IncomingMessage;
+  const p = params as any;
+  const fromAddr = typeof p.from === 'string' ? parseInt(p.from, 16) : (p.from ?? 0);
+  const toAddr = typeof p.to === 'string' ? parseInt(p.to, 16) : (p.to ?? 0);
   const msg = {
-    id: p.msgId,
+    id: p.msgId ?? `rt-${Date.now()}`,
     direction: 'incoming' as const,
-    from: p.from,
-    to: p.to,
+    from: fromAddr,
+    to: toAddr,
     text: p.text,
     tier: p.tier,
-    channelIndex: p.channelIndex,
+    channelIndex: p.channelIndex ?? (p.channel as number | undefined),
     timestampMs: Date.now(),
     status: 'delivered' as const,
   };

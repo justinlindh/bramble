@@ -28,8 +28,8 @@ export function ConnectionOverlay() {
       const ip = wifiIp.trim();
       if (!ip) return;
       saveIp(ip);
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = ip.includes('://') ? ip : `${proto}://${ip}/ws`;
+      // Always use ws:// for direct device connections — boards don't support TLS
+      const url = ip.includes('://') ? ip : `ws://${ip}/ws`;
       connect(transportType, { url });
     } else {
       connect(transportType);
