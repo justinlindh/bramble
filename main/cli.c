@@ -14,6 +14,7 @@
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_vfs_dev.h"
+#include "esp_task_wdt.h"
 #include "driver/uart.h"
 #include "linenoise/linenoise.h"
 #include "freertos/FreeRTOS.h"
@@ -161,6 +162,9 @@ static void cli_task(void *param) {
     printf("  Node: %08" PRIX32 "\n", s_identity->address);
     printf("  Type 'help' for commands\n");
     printf("=================================\n");
+
+    /* Disable task watchdog for CLI task (linenoise blocks on input) */
+    esp_task_wdt_delete(NULL);
 
     while (1) {
         char *line = linenoise("bramble> ");
