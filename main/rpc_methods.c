@@ -97,8 +97,26 @@ static int handle_get_neighbors(const cJSON *params, cJSON *result) {
 /* bramble.getRoutes */
 static int handle_get_routes(const cJSON *params, cJSON *result) {
     (void)params;
-    /* TODO: wire up routing table once route_table_t is exposed */
-    cJSON_AddArrayToObject(result, "routes");
+    routing_table_t routes;
+    mesh_get_routes(&routes);
+
+    cJSON *arr = cJSON_AddArrayToObject(result, "routes");
+    char buf[12];
+    static const char *state_names[] = {
+        "discovering", "unverified", "active", "stale", "broken"
+    };
+    for (int i = 0; i < routes.count; i++) {
+        const route_entry_t *r = &routes.entries[i];
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
+        cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
+        cJSON_AddNumberToObject(obj, "hop_count", r->hop_count);
+        cJSON_AddNumberToObject(obj, "metric", r->metric);
+        cJSON_AddStringToObject(obj, "state",
+            r->state <= ROUTE_BROKEN ? state_names[r->state] : "unknown");
+        cJSON_AddNumberToObject(obj, "use_count", r->use_count);
+        cJSON_AddItemToArray(arr, obj);
+    }
     return 0;
 }
 

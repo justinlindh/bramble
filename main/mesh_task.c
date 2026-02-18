@@ -12,6 +12,7 @@
 #include "channel_msg.h"
 #include "public_channel.h"
 #include "msg_store.h"
+#include "discovery.h"
 #include "cJSON.h"
 
 #include "freertos/FreeRTOS.h"
@@ -55,6 +56,23 @@ static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
+
+/* Routing state */
+static routing_table_t            s_routes;
+static rreq_dedup_t               s_rreq_dedup;
+static reverse_route_table_t      s_reverse_routes;
+static pending_discovery_table_t  s_pending_disc;
+
+/* Queued messages waiting for route discovery */
+#define MAX_QUEUED_MSGS 8
+typedef struct {
+    uint32_t dest_addr;
+    uint8_t  data[256];
+    size_t   len;
+    uint32_t timestamp;
+    bool     used;
+} queued_msg_t;
+static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
@@ -290,6 +308,209 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     }
 }
 
+/* ── Routing packet handlers ────────────────────────────────────────── */
+
+static int transmit_packet(const uint8_t *buf, uint8_t len) {
+    int ret = radio_transmit(buf, len);
+    if (ret == 0) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_shared.packets_tx++;
+        xSemaphoreGive(s_state_mutex);
+    }
+    return ret;
+}
+
+static void send_rreq(const bramble_rreq_t *rreq) {
+    uint8_t buf[64];
+    if (bramble_rreq_serialize(rreq, buf, sizeof(buf)) == ESP_OK) {
+        ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32,
+                 rreq->query_id, rreq->header.dest_addr);
+        transmit_packet(buf, HEADER_SIZE + 18); /* RREQ payload = 18 bytes */
+    }
+}
+
+static void send_rrep(const bramble_rrep_t *rrep) {
+    uint8_t buf[64];
+    if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
+        ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32,
+                 rrep->query_id, rrep->next_hop);
+        transmit_packet(buf, HEADER_SIZE + 19); /* RREP payload = 19 bytes */
+    }
+}
+
+static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
+    bramble_rerr_t rerr = {
+        .header = {
+            .version = BRAMBLE_VERSION,
+            .type = PKT_TYPE_RERR,
+            .flags = 0,
+            .hop_limit = 3,
+            .dest_addr = 0xFFFFFFFF, /* broadcast */
+            .packet_id = next_packet_id(),
+        },
+        .reporter_addr = s_identity->address,
+        .broken_dest = broken_dest,
+        .broken_next_hop = broken_next_hop,
+    };
+    uint8_t buf[64];
+    if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
+        ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
+        transmit_packet(buf, HEADER_SIZE + 12);
+    }
+}
+
+static void flush_queued_messages(uint32_t dest_addr) {
+    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+        if (s_queued_msgs[i].used && s_queued_msgs[i].dest_addr == dest_addr) {
+            ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)",
+                     dest_addr, (unsigned)s_queued_msgs[i].len);
+            mesh_send_message(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len);
+            s_queued_msgs[i].used = false;
+        }
+    }
+}
+
+static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    bramble_rreq_t rreq;
+    if (bramble_rreq_deserialize(&rreq, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Invalid RREQ packet");
+        return;
+    }
+
+    ESP_LOGI(TAG, "RX RREQ query=%08" PRIX32 " dest=%08" PRIX32 " hops=%u metric=%u",
+             rreq.query_id, rreq.header.dest_addr, rreq.hop_count, rreq.metric);
+
+    /* RREQ dedup — drop if already seen */
+    if (rreq_dedup_check_and_add(&s_rreq_dedup, rreq.query_id, now_ms())) {
+        ESP_LOGD(TAG, "Duplicate RREQ query=%08" PRIX32, rreq.query_id);
+        return;
+    }
+
+    /* Record reverse route (for RREP path back) */
+    reverse_route_add(&s_reverse_routes, rreq.query_id, rreq.prev_hop, now_ms());
+
+    /* Is this RREQ for us? */
+    if (rreq.header.dest_addr == s_identity->address) {
+        ESP_LOGI(TAG, "RREQ is for us — sending RREP");
+        bramble_rrep_t rrep = rrep_build_destination(&rreq, s_identity->address);
+
+        /* Route RREP back toward the previous hop */
+        reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rreq.query_id);
+        if (rev) {
+            rrep.next_hop = rev->prev_hop;
+        }
+        send_rrep(&rrep);
+
+        /* Install route to the source via prev_hop */
+        uint8_t metric = rreq.metric + compute_link_penalty(rssi, snr);
+        route_install(&s_routes, rreq.prev_hop, rreq.prev_hop,
+                      rreq.hop_count, metric, ROUTE_ACTIVE, now_ms());
+        return;
+    }
+
+    /* Not for us — forward the RREQ */
+    if (rreq.header.hop_limit > 0) {
+        bramble_rreq_t fwd = rreq_forward(&rreq, s_identity->address, rssi, snr);
+        send_rreq(&fwd);
+    }
+}
+
+static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    bramble_rrep_t rrep;
+    if (bramble_rrep_deserialize(&rrep, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Invalid RREP packet");
+        return;
+    }
+
+    ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
+             rrep.query_id, rrep.src_addr, rrep.hop_count);
+
+    /* Install route to the destination (RREP source) via the sender */
+    uint8_t metric = rrep.route_metric + compute_link_penalty(rssi, snr);
+    route_install(&s_routes, rrep.src_addr, rrep.header.dest_addr == s_identity->address
+                  ? rrep.src_addr : rrep.next_hop,
+                  rrep.hop_count, metric, ROUTE_ACTIVE, now_ms());
+
+    /* Is this RREP for us (we originated the RREQ)? */
+    pending_discovery_t *pd = discovery_lookup_by_query(&s_pending_disc, rrep.query_id);
+    if (pd) {
+        ESP_LOGI(TAG, "Route discovered to %08" PRIX32 " (hops=%u, metric=%u)",
+                 pd->dest_addr, rrep.hop_count, metric);
+        discovery_remove(&s_pending_disc, pd->dest_addr);
+
+        /* Flush queued messages waiting for this route */
+        flush_queued_messages(pd->dest_addr);
+        return;
+    }
+
+    /* Not for us — forward RREP toward the originator via reverse route */
+    reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rrep.query_id);
+    if (rev) {
+        bramble_rrep_t fwd = rrep_forward(&rrep, rev->prev_hop);
+        send_rrep(&fwd);
+    } else {
+        ESP_LOGW(TAG, "No reverse route for RREP query=%08" PRIX32, rrep.query_id);
+    }
+}
+
+static void handle_rerr(const uint8_t *data, uint8_t len) {
+    bramble_rerr_t rerr;
+    if (bramble_rerr_deserialize(&rerr, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Invalid RERR packet");
+        return;
+    }
+
+    ESP_LOGW(TAG, "RX RERR: dest=%08" PRIX32 " broken_hop=%08" PRIX32,
+             rerr.broken_dest, rerr.broken_next_hop);
+
+    /* Invalidate route if it uses the broken next hop */
+    route_entry_t *route = route_lookup(&s_routes, rerr.broken_dest);
+    if (route && route->next_hop == rerr.broken_next_hop) {
+        route->state = ROUTE_BROKEN;
+        route->fail_count++;
+        ESP_LOGW(TAG, "Route to %08" PRIX32 " marked BROKEN", rerr.broken_dest);
+
+        /* Forward RERR if hop limit allows */
+        if (rerr.header.hop_limit > 1) {
+            send_rerr(rerr.broken_dest, rerr.broken_next_hop);
+        }
+    }
+}
+
+/* ── Data forwarding for multi-hop ──────────────────────────────────── */
+
+static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_header_t *header) {
+    if (header->hop_limit <= 1) {
+        ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
+        return;
+    }
+
+    /* Look up route to destination */
+    route_entry_t *route = route_lookup(&s_routes, header->dest_addr);
+    if (!route || route->state == ROUTE_BROKEN) {
+        ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
+        send_rerr(header->dest_addr, s_identity->address);
+        return;
+    }
+
+    /* Rebuild header with decremented hop limit */
+    uint8_t buf[256];
+    if (len > sizeof(buf)) return;
+    memcpy(buf, data, len);
+
+    bramble_header_t fwd_hdr = *header;
+    fwd_hdr.hop_limit--;
+    bramble_header_serialize(&fwd_hdr, buf, HEADER_SIZE);
+
+    ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32,
+             header->dest_addr, route->next_hop);
+    transmit_packet(buf, len);
+
+    /* Update route usage */
+    route->last_used = now_ms();
+    route->use_count++;
+}
+
 static void handle_rx_packet(const rx_packet_t *pkt) {
     if (pkt->len < HEADER_SIZE) {
         ESP_LOGW(TAG, "Packet too short: %u bytes", pkt->len);
@@ -324,13 +545,21 @@ static void handle_rx_packet(const rx_packet_t *pkt) {
         /* TODO: wire reliability component */
         break;
     case PKT_TYPE_RREQ:
+        handle_rreq(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
     case PKT_TYPE_RREP:
+        handle_rrep(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
     case PKT_TYPE_RERR:
-        ESP_LOGD(TAG, "Routing packet (type 0x%02X)", header.type);
-        /* TODO: wire routing component */
+        handle_rerr(pkt->data, pkt->len);
         break;
     case PKT_TYPE_DATA:
-        handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        /* Check if this data is for us or needs forwarding */
+        if (header.dest_addr != s_identity->address && header.dest_addr != 0xFFFFFFFF) {
+            forward_data_packet(pkt->data, pkt->len, &header);
+        } else {
+            handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        }
         break;
     default:
         ESP_LOGD(TAG, "Unhandled packet type 0x%02X", header.type);
@@ -446,16 +675,62 @@ static void mesh_task(void *param) {
             beacon_interval = BEACON_INTERVAL_MS + jitter;
         }
 
-        /* Periodic neighbor purge */
+        /* Periodic neighbor purge + route maintenance */
         if ((t - last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
             neighbor_purge(&s_neighbors, t);
             dedup_purge(&s_dedup, t);
+            route_maintenance(&s_routes, t);
+            reverse_route_purge(&s_reverse_routes, t);
             last_purge_ms = t;
 
             /* Update shared state */
             xSemaphoreTake(s_state_mutex, portMAX_DELAY);
             s_shared.neighbors = s_neighbors;
             xSemaphoreGive(s_state_mutex);
+
+            /* Expire queued messages older than 60s */
+            for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+                if (s_queued_msgs[i].used && (t - s_queued_msgs[i].timestamp) > 60000) {
+                    ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
+                             s_queued_msgs[i].dest_addr);
+                    s_queued_msgs[i].used = false;
+                }
+            }
+        }
+
+        /* Discovery retries (check every 5s) */
+        {
+            static uint32_t last_disc_check = 0;
+            if ((t - last_disc_check) >= 5000) {
+                last_disc_check = t;
+                for (int i = 0; i < s_pending_disc.count; i++) {
+                    pending_discovery_t *pd = &s_pending_disc.entries[i];
+                    if (discovery_should_retry(pd, t)) {
+                        if (pd->attempts >= MAX_RREQ_ATTEMPTS) {
+                            ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
+                                     pd->dest_addr, pd->attempts);
+                            /* Clear queued messages for this dest */
+                            for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
+                                if (s_queued_msgs[j].used &&
+                                    s_queued_msgs[j].dest_addr == pd->dest_addr) {
+                                    s_queued_msgs[j].used = false;
+                                }
+                            }
+                            discovery_remove(&s_pending_disc, pd->dest_addr);
+                            i--; /* re-check same index after remove */
+                        } else {
+                            ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32 " (attempt %u)",
+                                     pd->dest_addr, pd->attempts + 1);
+                            discovery_record_attempt(pd, t);
+                            uint32_t enc_src = s_identity->address;
+                            bramble_rreq_t rreq = rreq_build_originator(
+                                s_identity->address, pd->dest_addr,
+                                pd->query_id, enc_src);
+                            send_rreq(&rreq);
+                        }
+                    }
+                }
+            }
         }
 
         /* Sleep 10ms between polls */
@@ -531,11 +806,61 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     return rc;
 }
 
+static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
+    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+        if (!s_queued_msgs[i].used) {
+            s_queued_msgs[i].dest_addr = dest_addr;
+            memcpy(s_queued_msgs[i].data, data, len);
+            s_queued_msgs[i].len = len;
+            s_queued_msgs[i].timestamp = now_ms();
+            s_queued_msgs[i].used = true;
+            ESP_LOGI(TAG, "Queued msg for %08" PRIX32 " (waiting for route)", dest_addr);
+            return 0;
+        }
+    }
+    ESP_LOGW(TAG, "Message queue full, dropping msg for %08" PRIX32, dest_addr);
+    return -3;
+}
+
+static int initiate_discovery(uint32_t dest_addr) {
+    if (!rreq_rate_allow(&s_rreq_rl, s_identity->address, dest_addr, now_ms())) {
+        ESP_LOGW(TAG, "RREQ rate limited");
+        return -1;
+    }
+
+    uint32_t query_id = next_packet_id();
+    discovery_start(&s_pending_disc, dest_addr, query_id, now_ms());
+
+    /* Build and send RREQ */
+    uint32_t encrypted_source = s_identity->address; /* TODO: encrypt with salt for privacy */
+    bramble_rreq_t rreq = rreq_build_originator(s_identity->address, dest_addr,
+                                                  query_id, encrypted_source);
+    send_rreq(&rreq);
+    return 0;
+}
+
 int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
-    /* For now, use public channel for all messages (DM encryption needs key exchange) */
     if (s_num_channels == 0) {
         ESP_LOGE(TAG, "No channels initialized");
         return -1;
+    }
+
+    /* For non-neighbor destinations, check route table */
+    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, dest_addr);
+    if (!nb) {
+        /* Not a direct neighbor — need routing */
+        route_entry_t *route = route_lookup(&s_routes, dest_addr);
+        if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
+            /* No route — start discovery and queue the message */
+            if (!discovery_lookup(&s_pending_disc, dest_addr)) {
+                initiate_discovery(dest_addr);
+            }
+            queue_message(dest_addr, data, len);
+            /* Still store in msg_store so UI shows it as pending */
+            msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
+            return 0; /* queued, not an error */
+        }
+        /* Have a route — send_data_packet will transmit (next hop gets it) */
     }
 
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
@@ -552,8 +877,7 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
     int rc = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
     if (rc == 0) {
-        msg_store_add(dest_addr, MSG_DIR_OUTGOING,
-                      (const char *)data, len, 0, 0);
+        msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
     }
     return rc;
 }
@@ -566,6 +890,11 @@ void mesh_task_start(bramble_identity_t *identity) {
     neighbor_init(&s_neighbors);
     dedup_init(&s_dedup);
     rreq_rate_init(&s_rreq_rl);
+    route_init(&s_routes);
+    rreq_dedup_init(&s_rreq_dedup);
+    reverse_route_init(&s_reverse_routes);
+    discovery_init(&s_pending_disc);
+    memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
     /* Initialize public channel (well-known PSK, no key exchange needed) */
@@ -584,5 +913,11 @@ void mesh_task_start(bramble_identity_t *identity) {
 void mesh_get_state(mesh_shared_state_t *out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_shared;
+    xSemaphoreGive(s_state_mutex);
+}
+
+void mesh_get_routes(routing_table_t *out) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    *out = s_routes;
     xSemaphoreGive(s_state_mutex);
 }

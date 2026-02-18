@@ -51,4 +51,9 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
  */
 void mesh_reboot_delayed(int delay_ms);
 
+/**
+ * Get a snapshot of the routing table (thread-safe).
+ */
+void mesh_get_routes(routing_table_t *out);
+
 #endif
