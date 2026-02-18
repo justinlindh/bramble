@@ -35,6 +35,8 @@ interface Actions {
   setActiveConversation: (id: string) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  showRoutes: boolean;
+  setShowRoutes: (show: boolean) => void;
   setProbeResult: (r: ProbeResult | null) => void;
   setProbeCollecting: (c: boolean) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
@@ -56,6 +58,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   conversations: new Map(),
   activeConversationId: 'broadcast',
   activeTab: 'chat',
+  showRoutes: false,
   probeResult: null,
   probeCollecting: false,
   peerLocations: [],
@@ -128,6 +131,7 @@ export const useStore = create<AppState & Actions>((set) => ({
     })),
 
   setActiveTab: (tab: string) => set({ activeTab: tab }),
+  setShowRoutes: (show: boolean) => set({ showRoutes: show }),
 
   setProbeResult: (r) => set({ probeResult: r }),
   setProbeCollecting: (c) => set({ probeCollecting: c }),

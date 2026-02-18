@@ -279,7 +279,7 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
             .version = BRAMBLE_VERSION,
             .type = PKT_TYPE_ACK,
             .flags = 0,
-            .hop_limit = 3,
+            .hop_limit = 8,
             .dest_addr = dest_addr,
             .packet_id = next_packet_id(),
         },
@@ -287,6 +287,8 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         .ack_packet_id = ack_packet_id,
         .ack_flags = 0,
         .rssi_at_dest = rssi,
+        .hop_count = 1,
+        .relay_path = { s_identity->address },  /* destination is first hop */
     };
 
     uint8_t buf[64];
@@ -295,11 +297,42 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         ESP_LOGE(TAG, "ACK serialize failed");
         return;
     }
-    /* ACK is header(12) + src_addr(4) + ack_packet_id(4) + flags(1) + rssi(1) = 22 bytes */
-    int ret = radio_transmit(buf, HEADER_SIZE + 10);
+    size_t wire_len = bramble_ack_wire_size(&ack);
+    int ret = radio_transmit(buf, (uint8_t)wire_len);
     if (ret == 0) {
-        ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32, ack_packet_id, dest_addr);
+        ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32 " (%u hops)",
+                 ack_packet_id, dest_addr, ack.hop_count);
     }
+}
+
+static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
+    /* Append our address to the relay path */
+    if (ack->hop_count < ACK_MAX_HOPS) {
+        ack->relay_path[ack->hop_count++] = s_identity->address;
+    }
+
+    /* Decrement hop limit */
+    if (ack->header.hop_limit <= 1) {
+        ESP_LOGD(TAG, "ACK hop limit reached, dropping");
+        return;
+    }
+    ack->header.hop_limit--;
+
+    /* Look up route back to the original sender */
+    route_entry_t *route = route_lookup(&s_routes, ack->header.dest_addr);
+    if (!route || route->state == ROUTE_BROKEN) {
+        ESP_LOGW(TAG, "No route to forward ACK to %08" PRIX32, ack->header.dest_addr);
+        return;
+    }
+
+    uint8_t buf[64];
+    esp_err_t err = bramble_ack_serialize(ack, buf, sizeof(buf));
+    if (err != ESP_OK) return;
+
+    size_t wire_len = bramble_ack_wire_size(ack);
+    ESP_LOGI(TAG, "Forwarding ACK for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
+             ack->ack_packet_id, ack->header.dest_addr, ack->hop_count);
+    radio_transmit(buf, (uint8_t)wire_len);
 }
 
 static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -310,23 +343,21 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
         return;
     }
 
-    /* Only process ACKs addressed to us */
-    bramble_header_t hdr;
-    bramble_header_deserialize(&hdr, data, len);
-    if (hdr.dest_addr != s_identity->address) {
-        /* Forward ACK if not for us */
+    /* Not for us — forward it */
+    if (ack.header.dest_addr != s_identity->address) {
+        forward_ack(&ack, rssi);
         return;
     }
 
-    ESP_LOGI(TAG, "ACK received for pkt %08" PRIX32 " from %08" PRIX32 " (RSSI at dest: %d)",
-             ack.ack_packet_id, ack.src_addr, ack.rssi_at_dest);
+    ESP_LOGI(TAG, "ACK received for pkt %08" PRIX32 " from %08" PRIX32 " (RSSI at dest: %d, %u hops)",
+             ack.ack_packet_id, ack.src_addr, ack.rssi_at_dest, ack.hop_count);
 
     /* Remove from pending ACK table */
     bool found = pending_ack_remove(&s_pending_acks, ack.ack_packet_id);
 
     /* Update message store status */
     if (msg_store_update_status(ack.ack_packet_id, MSG_STATUS_DELIVERED)) {
-        /* Notify webapp */
+        /* Notify webapp with full relay path from ACK */
         char addr_buf[12];
         snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, ack.src_addr);
         cJSON *params = cJSON_CreateObject();
@@ -337,21 +368,24 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
 
-        /* Build relay path: [self → (intermediate hops) → dest]
-         * For direct neighbor delivery, path is just [self, dest].
-         * TODO: track actual forwarding hops for multi-hop routes */
+        /* Relay path from ACK: [dest, relay1, relay2, ...] → prepend sender */
         cJSON *path = cJSON_AddArrayToObject(params, "relayPath");
         char hop_buf[12];
+        /* First hop: the sender (us) */
         cJSON *self_hop = cJSON_CreateObject();
         snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, s_identity->address);
         cJSON_AddStringToObject(self_hop, "addr", hop_buf);
         cJSON_AddNumberToObject(self_hop, "rssi", 0);
         cJSON_AddItemToArray(path, self_hop);
-
-        cJSON *dest_hop = cJSON_CreateObject();
-        cJSON_AddStringToObject(dest_hop, "addr", addr_buf); /* ack.src_addr = the peer */
-        cJSON_AddNumberToObject(dest_hop, "rssi", ack.rssi_at_dest);
-        cJSON_AddItemToArray(path, dest_hop);
+        /* Intermediate + destination hops from ACK (reversed: ACK records dest→sender) */
+        for (int i = ack.hop_count - 1; i >= 0; i--) {
+            cJSON *hop = cJSON_CreateObject();
+            snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, ack.relay_path[i]);
+            cJSON_AddStringToObject(hop, "addr", hop_buf);
+            /* RSSI: only meaningful for the destination hop */
+            cJSON_AddNumberToObject(hop, "rssi", (i == 0) ? ack.rssi_at_dest : 0);
+            cJSON_AddItemToArray(path, hop);
+        }
 
         rpc_notify("bramble.onAck", params);
         cJSON_Delete(params);

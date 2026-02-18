@@ -50,7 +50,10 @@
 
 /* Sizes */
 #define HEADER_SIZE              12
-#define ACK_SIZE                 22
+#define ACK_BASE_SIZE            23   /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) */
+#define ACK_MAX_HOPS             8
+#define ACK_MAX_SIZE             (ACK_BASE_SIZE + ACK_MAX_HOPS * 4)  /* 23 + 32 = 55 */
+#define ACK_SIZE                 ACK_BASE_SIZE  /* backward compat for min size checks */
 #define RREQ_SIZE                30
 #define RREP_SIZE                34
 #define RERR_SIZE                24
@@ -79,6 +82,8 @@ typedef struct {
     uint32_t ack_packet_id;
     uint8_t  ack_flags;
     int8_t   rssi_at_dest;
+    uint8_t  hop_count;                    /* number of addresses in relay_path */
+    uint32_t relay_path[ACK_MAX_HOPS];     /* hop trail: [dest, relay1, relay2, ...] */
 } bramble_ack_t;
 
 typedef struct {
@@ -164,6 +169,7 @@ esp_err_t bramble_header_deserialize(bramble_header_t *h, const uint8_t *buf, si
 
 esp_err_t bramble_ack_serialize(const bramble_ack_t *p, uint8_t *buf, size_t len);
 esp_err_t bramble_ack_deserialize(bramble_ack_t *p, const uint8_t *buf, size_t len);
+size_t    bramble_ack_wire_size(const bramble_ack_t *p);
 
 esp_err_t bramble_rreq_serialize(const bramble_rreq_t *p, uint8_t *buf, size_t len);
 esp_err_t bramble_rreq_deserialize(bramble_rreq_t *p, const uint8_t *buf, size_t len);

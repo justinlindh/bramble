@@ -47,23 +47,41 @@ esp_err_t bramble_header_deserialize(bramble_header_t *h, const uint8_t *buf, si
 
 /* ACK (22 bytes) */
 esp_err_t bramble_ack_serialize(const bramble_ack_t *p, uint8_t *buf, size_t len) {
-    if (len < ACK_SIZE) return ESP_ERR_INVALID_SIZE;
+    uint8_t hops = p->hop_count > ACK_MAX_HOPS ? ACK_MAX_HOPS : p->hop_count;
+    size_t need = ACK_BASE_SIZE + hops * 4;
+    if (len < need) return ESP_ERR_INVALID_SIZE;
     esp_err_t r = bramble_header_serialize(&p->header, buf, len);
     if (r != ESP_OK) return r;
     put_be32(buf + B, p->src_addr);
     put_be32(buf + B + 4, p->ack_packet_id);
     buf[B + 8] = p->ack_flags;
     buf[B + 9] = (uint8_t)p->rssi_at_dest;
+    buf[B + 10] = hops;
+    for (int i = 0; i < hops; i++) {
+        put_be32(buf + B + 11 + i * 4, p->relay_path[i]);
+    }
     return ESP_OK;
 }
+
+size_t bramble_ack_wire_size(const bramble_ack_t *p) {
+    uint8_t hops = p->hop_count > ACK_MAX_HOPS ? ACK_MAX_HOPS : p->hop_count;
+    return ACK_BASE_SIZE + hops * 4;
+}
+
 esp_err_t bramble_ack_deserialize(bramble_ack_t *p, const uint8_t *buf, size_t len) {
-    if (len < ACK_SIZE) return ESP_ERR_INVALID_SIZE;
+    if (len < ACK_BASE_SIZE) return ESP_ERR_INVALID_SIZE;
     esp_err_t r = bramble_header_deserialize(&p->header, buf, len);
     if (r != ESP_OK) return r;
     p->src_addr      = get_be32(buf + B);
     p->ack_packet_id = get_be32(buf + B + 4);
     p->ack_flags     = buf[B + 8];
     p->rssi_at_dest  = (int8_t)buf[B + 9];
+    p->hop_count     = buf[B + 10];
+    if (p->hop_count > ACK_MAX_HOPS) p->hop_count = ACK_MAX_HOPS;
+    /* Read as many hops as available in buffer */
+    for (int i = 0; i < p->hop_count && (size_t)(B + 11 + (i + 1) * 4) <= len; i++) {
+        p->relay_path[i] = get_be32(buf + B + 11 + i * 4);
+    }
     return ESP_OK;
 }
 

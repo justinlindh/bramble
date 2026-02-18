@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import type { Message } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
 import { DeliveryBadge } from './DeliveryBadge';
 import { RelayPathDisplay } from './RelayPathDisplay';
 import { IconCritical, IconBroadcast } from '../../components/Icons';
+import { useStore } from '../../store/index';
 import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
@@ -24,10 +26,14 @@ const TIER_CLASS: Record<string, string> = {
 export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
   const isOut = message.direction === 'outgoing';
   const tierCls = TIER_CLASS[message.tier] ?? '';
+  const showRoutesGlobal = useStore(s => s.showRoutes);
+  const [expanded, setExpanded] = useState(false);
 
   const hasRelayPath =
     message.relayPath &&
     message.relayPath.length > 0;
+
+  const showPath = hasRelayPath && (showRoutesGlobal || expanded);
 
   return (
     <div
@@ -45,8 +51,8 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
       {/* Message text */}
       <p className={styles.text}>{message.text}</p>
 
-      {/* Relay path (Critical tier with ack path) */}
-      {hasRelayPath && (
+      {/* Relay path (shown when global toggle on OR individually expanded) */}
+      {showPath && (
         <RelayPathDisplay
           path={message.relayPath!}
           myAddr={myAddr}
@@ -58,6 +64,17 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
         <time className={styles.time} dateTime={new Date(message.timestampMs).toISOString()}>
           {formatTime(message.timestampMs)}
         </time>
+        {isOut && hasRelayPath && (
+          <span
+            className={styles.routeToggle}
+            onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+            title={expanded ? 'Hide route' : 'Show route'}
+            role="button"
+            aria-label={expanded ? 'Hide route' : 'Show route'}
+          >
+            {expanded ? '▾' : '▸'}
+          </span>
+        )}
         {isOut && (
           <DeliveryBadge status={message.status} tier={message.tier} />
         )}
