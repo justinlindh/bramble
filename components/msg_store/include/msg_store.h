@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,9 +19,18 @@ typedef enum {
     MSG_DIR_BROADCAST_OUT = 3,
 } msg_direction_t;
 
+typedef enum {
+    MSG_STATUS_NONE = 0,       /* No delivery tracking (incoming/broadcast) */
+    MSG_STATUS_SENT = 1,       /* Transmitted over radio */
+    MSG_STATUS_DELIVERED = 2,  /* ACK received from recipient */
+    MSG_STATUS_FAILED = 3,     /* Max retries exhausted */
+} msg_status_t;
+
 typedef struct {
     uint32_t        peer_addr;      /* Remote address (sender or recipient) */
     msg_direction_t direction;
+    msg_status_t    status;         /* Delivery status (outgoing only) */
+    uint32_t        packet_id;      /* Packet ID for ACK correlation */
     uint32_t        timestamp_s;    /* Uptime seconds when stored */
     int8_t          rssi;           /* RX RSSI (0 for outgoing) */
     int8_t          snr;            /* RX SNR (0 for outgoing) */
@@ -36,10 +46,23 @@ void msg_store_init(void);
 /**
  * Add a message to the store.  If full, the oldest message is evicted.
  * text is copied internally (truncated to MSG_TEXT_MAX-1).
+ * packet_id is used for ACK correlation (0 = no tracking).
  */
+void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
+                      const char *text, size_t text_len,
+                      int8_t rssi, int8_t snr,
+                      uint32_t packet_id, msg_status_t status);
+
+/* Convenience wrapper (no ACK tracking) */
 void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
                    const char *text, size_t text_len,
                    int8_t rssi, int8_t snr);
+
+/**
+ * Update delivery status for a message by packet_id.
+ * Returns true if found and updated.
+ */
+bool msg_store_update_status(uint32_t packet_id, msg_status_t status);
 
 /**
  * Get total number of stored messages.

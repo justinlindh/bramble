@@ -567,6 +567,10 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
         cJSON_AddNumberToObject(obj, "timestamp_s", m->timestamp_s);
         if (m->rssi != 0) cJSON_AddNumberToObject(obj, "rssi", m->rssi);
         if (m->snr != 0)  cJSON_AddNumberToObject(obj, "snr", m->snr);
+        static const char *status_names[] = {"none", "sent", "delivered", "failed"};
+        if (m->status > 0 && m->status <= 3) {
+            cJSON_AddStringToObject(obj, "status", status_names[m->status]);
+        }
         cJSON_AddItemToArray(arr, obj);
     }
     return 0;

@@ -13,6 +13,7 @@
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
+#include "reliability.h"
 #include "cJSON.h"
 
 #include "freertos/FreeRTOS.h"
@@ -75,6 +76,9 @@ typedef struct {
     bool     used;
 } queued_msg_t;
 static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
+
+/* Reliability — ACK tracking for outgoing unicast messages */
+static pending_ack_table_t s_pending_acks;
 
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
@@ -243,6 +247,80 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     rpc_notify("bramble.onNeighborChange", NULL);
 }
 
+/* ── ACK handling ────────────────────────────────────────────────────── */
+
+static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
+    bramble_ack_t ack = {
+        .header = {
+            .version = BRAMBLE_VERSION,
+            .type = PKT_TYPE_ACK,
+            .flags = 0,
+            .hop_limit = 3,
+            .dest_addr = dest_addr,
+            .packet_id = next_packet_id(),
+        },
+        .src_addr = s_identity->address,
+        .ack_packet_id = ack_packet_id,
+        .ack_flags = 0,
+        .rssi_at_dest = rssi,
+    };
+
+    uint8_t buf[64];
+    esp_err_t err = bramble_ack_serialize(&ack, buf, sizeof(buf));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ACK serialize failed");
+        return;
+    }
+    /* ACK is header(12) + src_addr(4) + ack_packet_id(4) + flags(1) + rssi(1) = 22 bytes */
+    int ret = radio_transmit(buf, HEADER_SIZE + 10);
+    if (ret == 0) {
+        ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32, ack_packet_id, dest_addr);
+    }
+}
+
+static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    bramble_ack_t ack;
+    esp_err_t err = bramble_ack_deserialize(&ack, data, len);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ACK deserialize failed");
+        return;
+    }
+
+    /* Only process ACKs addressed to us */
+    bramble_header_t hdr;
+    bramble_header_deserialize(&hdr, data, len);
+    if (hdr.dest_addr != s_identity->address) {
+        /* Forward ACK if not for us */
+        return;
+    }
+
+    ESP_LOGI(TAG, "ACK received for pkt %08" PRIX32 " from %08" PRIX32 " (RSSI at dest: %d)",
+             ack.ack_packet_id, ack.src_addr, ack.rssi_at_dest);
+
+    /* Remove from pending ACK table */
+    bool found = pending_ack_remove(&s_pending_acks, ack.ack_packet_id);
+
+    /* Update message store status */
+    if (msg_store_update_status(ack.ack_packet_id, MSG_STATUS_DELIVERED)) {
+        /* Notify webapp */
+        char addr_buf[12];
+        snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, ack.src_addr);
+        cJSON *params = cJSON_CreateObject();
+        cJSON_AddStringToObject(params, "from", addr_buf);
+        char pkt_buf[12];
+        snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, ack.ack_packet_id);
+        cJSON_AddStringToObject(params, "packet_id", pkt_buf);
+        cJSON_AddStringToObject(params, "status", "delivered");
+        cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
+        rpc_notify("bramble.onAck", params);
+        cJSON_Delete(params);
+    }
+
+    if (found) {
+        ESP_LOGI(TAG, "Message delivered to %08" PRIX32, ack.src_addr);
+    }
+}
+
 static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
@@ -310,6 +388,14 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                 dir == MSG_DIR_BROADCAST_IN);
             rpc_notify("bramble.onMessage", params);
             cJSON_Delete(params);
+        }
+
+        /* Send ACK for unicast messages (not broadcasts) */
+        if (dir == MSG_DIR_INCOMING) {
+            /* Deserialize packet_id from header (big-endian at offset 8) */
+            bramble_header_t rx_hdr;
+            bramble_header_deserialize(&rx_hdr, data, len);
+            send_ack(info.src_addr, rx_hdr.packet_id, rssi);
         }
 
         /* Also print to stdout for CLI users */
@@ -552,8 +638,7 @@ static void handle_rx_packet(const rx_packet_t *pkt) {
         handle_beacon(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
     case PKT_TYPE_ACK:
-        ESP_LOGD(TAG, "ACK received");
-        /* TODO: wire reliability component */
+        handle_ack(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
     case PKT_TYPE_RREQ:
         handle_rreq(pkt->data, pkt->len, pkt->rssi, pkt->snr);
@@ -773,6 +858,43 @@ static void mesh_task(void *param) {
             }
         }
 
+        /* ACK retry tick — retransmit unacknowledged packets */
+        {
+            static uint32_t last_ack_tick = 0;
+            if ((t - last_ack_tick) >= 1000) {  /* Check every 1s */
+                last_ack_tick = t;
+                for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+                    pending_ack_t *pa = &s_pending_acks.entries[i];
+                    if (!pa->active) continue;
+                    if (t >= pa->next_retry_ms) {
+                        if (pa->attempt >= pa->max_attempts) {
+                            ESP_LOGW(TAG, "Message %08" PRIX32 " to %08" PRIX32 " failed after %u attempts",
+                                     pa->packet_id, pa->dest_addr, pa->attempt);
+                            msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
+                            /* Notify webapp of failure */
+                            {
+                                cJSON *params = cJSON_CreateObject();
+                                char pkt_buf[12];
+                                snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pa->packet_id);
+                                cJSON_AddStringToObject(params, "packet_id", pkt_buf);
+                                cJSON_AddStringToObject(params, "status", "failed");
+                                rpc_notify("bramble.onAck", params);
+                                cJSON_Delete(params);
+                            }
+                            pa->active = false;
+                        } else {
+                            ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
+                                     pa->packet_id, pa->dest_addr,
+                                     pa->attempt + 1, pa->max_attempts);
+                            radio_transmit(pa->packet_data, pa->packet_len);
+                            pa->attempt++;
+                            pa->next_retry_ms = t + tier_base_delay_ms(pa->tier) * pa->attempt;
+                        }
+                    }
+                }
+            }
+        }
+
         /* Sleep 10ms between polls */
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -780,24 +902,28 @@ static void mesh_task(void *param) {
 
 /* ── Send functions ──────────────────────────────────────────────────── */
 
-static int send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
-                            const uint8_t *nonce, const uint8_t *ciphertext, size_t ct_len,
-                            const uint8_t *tag) {
+/**
+ * Send a DATA packet. Returns packet_id on success, 0 on failure.
+ */
+static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
+                                 const uint8_t *nonce, const uint8_t *ciphertext, size_t ct_len,
+                                 const uint8_t *tag) {
     /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
         ESP_LOGE(TAG, "Data packet too large: %u bytes", (unsigned)total);
-        return -1;
+        return 0;
     }
 
     uint8_t buf[255];
+    uint32_t pkt_id = next_packet_id();
     bramble_header_t header = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_DATA,
         .flags = FLAG_ENCRYPT | FLAG_CHANNEL,
         .hop_limit = 3,
         .dest_addr = dest_addr,
-        .packet_id = next_packet_id(),
+        .packet_id = pkt_id,
     };
 
     bramble_header_serialize(&header, buf, HEADER_SIZE);
@@ -811,8 +937,15 @@ static int send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t p
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
         xSemaphoreGive(s_state_mutex);
+
+        /* Register for ACK tracking (unicast only) */
+        if (dest_addr != 0xFFFFFFFF) {
+            pending_ack_add(&s_pending_acks, pkt_id, dest_addr,
+                            MSG_TIER_NORMAL, buf, (uint16_t)total, now_ms());
+        }
+        return pkt_id;
     }
-    return ret;
+    return 0;
 }
 
 int mesh_send_broadcast(const uint8_t *data, size_t len) {
@@ -838,12 +971,12 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     }
 
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    int rc = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
-    if (rc == 0) {
+    uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
+    if (pkt_id != 0) {
         msg_store_add(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                       (const char *)data, len, 0, 0);
     }
-    return rc;
+    return pkt_id ? 0 : -1;
 }
 
 static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
@@ -915,11 +1048,12 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
     }
 
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    int rc = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
-    if (rc == 0) {
-        msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
+    uint32_t pkt_id = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
+    if (pkt_id != 0) {
+        msg_store_add_ex(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0,
+                         pkt_id, MSG_STATUS_SENT);
     }
-    return rc;
+    return pkt_id ? 0 : -1;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -934,6 +1068,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     rreq_dedup_init(&s_rreq_dedup);
     reverse_route_init(&s_reverse_routes);
     discovery_init(&s_pending_disc);
+    pending_ack_init(&s_pending_acks);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 

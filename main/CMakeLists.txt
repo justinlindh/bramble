@@ -6,5 +6,5 @@ idf_component_register(
              radio packet routing dedup security freq_plan
              channel console esp_vfs_console rpc airtime
              wifi esp_http_server mdns esp_netif msg_store
-             ble
+             ble reliability
 )
