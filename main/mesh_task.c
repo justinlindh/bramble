@@ -11,6 +11,8 @@
 #include "channel_key.h"
 #include "channel_msg.h"
 #include "public_channel.h"
+#include "msg_store.h"
+#include "cJSON.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -103,7 +105,7 @@ void mesh_reboot_delayed(int delay_ms) {
 
 static void on_rx(const uint8_t *data, uint8_t len, const radio_rx_info_t *info) {
     rx_packet_t pkt;
-    if (len > sizeof(pkt.data)) len = sizeof(pkt.data);
+    /* len is uint8_t (max 255), pkt.data is 256 bytes — always fits */
     memcpy(pkt.data, data, len);
     pkt.len = len;
     pkt.rssi = info->rssi;
@@ -213,8 +215,6 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 }
 
 static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
-    (void)rssi; (void)snr;
-
     /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Data packet too short: %u", len);
@@ -259,6 +259,29 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         ESP_LOGI(TAG, "*** MESSAGE from %08" PRIX32 " ***", info.src_addr);
         ESP_LOGI(TAG, ">>> %s", text);
         ESP_LOGI(TAG, "*** (ch:%d RSSI:%d SNR:%d) ***", info.channel_id, rssi, snr);
+
+        /* Store in message store — check header dest for broadcast detection */
+        uint32_t hdr_dest;
+        memcpy(&hdr_dest, data + 4, 4);  /* dest_addr at offset 4 in header */
+        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
+            ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
+        msg_store_add(info.src_addr, dir, text, tlen, rssi, snr);
+
+        /* Emit onMessage notification via RPC */
+        {
+            char addr_buf[12];
+            snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
+            cJSON *params = cJSON_CreateObject();
+            cJSON_AddStringToObject(params, "from", addr_buf);
+            cJSON_AddStringToObject(params, "text", text);
+            cJSON_AddNumberToObject(params, "rssi", rssi);
+            cJSON_AddNumberToObject(params, "snr", snr);
+            cJSON_AddNumberToObject(params, "channel", info.channel_id);
+            cJSON_AddBoolToObject(params, "broadcast",
+                dir == MSG_DIR_BROADCAST_IN);
+            rpc_notify("bramble.onMessage", params);
+            cJSON_Delete(params);
+        }
 
         /* Also print to stdout for CLI users */
         printf("\n[MSG from %08" PRIX32 "] %s\n", info.src_addr, text);
@@ -500,7 +523,12 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     }
 
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    return send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
+    int rc = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
+    if (rc == 0) {
+        msg_store_add(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
+                      (const char *)data, len, 0, 0);
+    }
+    return rc;
 }
 
 int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
@@ -522,7 +550,12 @@ int mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
     }
 
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    return send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
+    int rc = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
+    if (rc == 0) {
+        msg_store_add(dest_addr, MSG_DIR_OUTGOING,
+                      (const char *)data, len, 0, 0);
+    }
+    return rc;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

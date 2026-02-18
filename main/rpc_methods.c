@@ -1,6 +1,7 @@
 #include "rpc_methods.h"
 #include "rpc_dispatcher.h"
 #include "mesh_task.h"
+#include "msg_store.h"
 #include "airtime_budget.h"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -305,11 +306,37 @@ static int handle_share_location_once(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-/* bramble.getMessages — stub, returns empty array */
+/* bramble.getMessages — returns stored messages from ring buffer */
 static int handle_get_messages(const cJSON *params, cJSON *result) {
     (void)params;
-    /* TODO: return stored messages from mailbox / receive queue */
-    cJSON_AddArrayToObject(result, "messages");
+    cJSON *arr = cJSON_AddArrayToObject(result, "messages");
+    char buf[12];
+
+    int count = msg_store_count();
+    for (int i = 0; i < count; i++) {
+        const stored_msg_t *m = msg_store_get(i);
+        if (!m) continue;
+
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "from",
+            (m->direction == MSG_DIR_OUTGOING || m->direction == MSG_DIR_BROADCAST_OUT)
+            ? addr_hex(s_identity->address, buf, sizeof(buf))
+            : addr_hex(m->peer_addr, buf, sizeof(buf)));
+
+        const char *dir_str = "incoming";
+        switch (m->direction) {
+            case MSG_DIR_OUTGOING:       dir_str = "outgoing"; break;
+            case MSG_DIR_BROADCAST_IN:   dir_str = "broadcast_in"; break;
+            case MSG_DIR_BROADCAST_OUT:  dir_str = "broadcast_out"; break;
+            default: break;
+        }
+        cJSON_AddStringToObject(obj, "direction", dir_str);
+        cJSON_AddStringToObject(obj, "text", m->text);
+        cJSON_AddNumberToObject(obj, "timestamp_s", m->timestamp_s);
+        if (m->rssi != 0) cJSON_AddNumberToObject(obj, "rssi", m->rssi);
+        if (m->snr != 0)  cJSON_AddNumberToObject(obj, "snr", m->snr);
+        cJSON_AddItemToArray(arr, obj);
+    }
     return 0;
 }
 

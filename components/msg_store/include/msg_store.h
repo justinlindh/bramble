@@ -1,0 +1,64 @@
+#ifndef MSG_STORE_H
+#define MSG_STORE_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define MSG_STORE_MAX       20
+#define MSG_TEXT_MAX        200
+
+typedef enum {
+    MSG_DIR_INCOMING = 0,
+    MSG_DIR_OUTGOING = 1,
+    MSG_DIR_BROADCAST_IN = 2,
+    MSG_DIR_BROADCAST_OUT = 3,
+} msg_direction_t;
+
+typedef struct {
+    uint32_t        peer_addr;      /* Remote address (sender or recipient) */
+    msg_direction_t direction;
+    uint32_t        timestamp_s;    /* Uptime seconds when stored */
+    int8_t          rssi;           /* RX RSSI (0 for outgoing) */
+    int8_t          snr;            /* RX SNR (0 for outgoing) */
+    uint16_t        text_len;
+    char            text[MSG_TEXT_MAX];
+} stored_msg_t;
+
+/**
+ * Initialize the message store.  Call once at startup.
+ */
+void msg_store_init(void);
+
+/**
+ * Add a message to the store.  If full, the oldest message is evicted.
+ * text is copied internally (truncated to MSG_TEXT_MAX-1).
+ */
+void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
+                   const char *text, size_t text_len,
+                   int8_t rssi, int8_t snr);
+
+/**
+ * Get total number of stored messages.
+ */
+int msg_store_count(void);
+
+/**
+ * Get message at index (0 = oldest).  Returns NULL if out of range.
+ * Returned pointer is valid until next msg_store_add.
+ */
+const stored_msg_t *msg_store_get(int index);
+
+/**
+ * Clear all stored messages.
+ */
+void msg_store_clear(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MSG_STORE_H */
