@@ -4,9 +4,21 @@
 **Target:** Heltec WiFi LoRa 32 V3 × 2
 **Goal:** Two-node mesh communicating over LoRa with OLED status and webapp connectivity
 
+## Status (2026-02-17 18:13 PST)
+- ✅ Phase 1A: Frequency Plan (US915/EU868/AU915 + Kconfig)
+- ✅ Phase 1B: Identity persistence (X25519 keypair in NVS)
+- ✅ Phase 2: SX1262 radio driver (SPI, TX/RX, DIO1 ISR)
+- ✅ Phase 3: Beacon TX/RX + neighbor discovery — **TWO NODES COMMUNICATING**
+  - Board 1: 1191C6E0, Board 2: 6EEA8967
+  - RSSI: -40/-44 dBm, SNR: 10 (excellent signal, boards on same desk)
+- ⬜ Phase 4: Packet dispatch & routing
+- ⬜ Phase 5: WiFi + WebSocket server
+- ⬜ Phase 6: Two-node mesh end-to-end messaging
+- ⬜ Phase 7: Polish (battery, sleep, OTA)
+
 ---
 
-## Phase 1A: Frequency Plan System
+## Phase 1A: Frequency Plan System ✅ COMPLETE
 *Estimated: 30 min*
 
 Regulatory-compliant radio configuration with per-region frequency plans.
@@ -28,7 +40,7 @@ Regulatory-compliant radio configuration with per-region frequency plans.
 
 ---
 
-## Phase 1B: Identity & NVS Persistence ✅ (mostly done)
+## Phase 1B: Identity & NVS Persistence ✅ COMPLETE
 *Estimated: 30 min*
 
 The `identity` component already has NVS load/save. Wire it into main.c.
@@ -45,7 +57,7 @@ The `identity` component already has NVS load/save. Wire it into main.c.
 
 ---
 
-## Phase 2: SX1262 LoRa Radio Driver
+## Phase 2: SX1262 LoRa Radio Driver ✅ COMPLETE
 *Estimated: 3–4 hours*
 
 This is the big one. The SX1262 is an SPI peripheral with a complex command interface. We need a low-level driver that implements our existing `radio.h` interface.
@@ -125,7 +137,7 @@ This is the big one. The SX1262 is an SPI peripheral with a complex command inte
 
 ---
 
-## Phase 3: Beacon TX/RX — First Over-the-Air Communication
+## Phase 3: Beacon TX/RX — First Over-the-Air Communication ✅ COMPLETE
 *Estimated: 2–3 hours*
 
 ### Task 3.1: Create mesh task (FreeRTOS)
