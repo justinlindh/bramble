@@ -32,6 +32,10 @@ static const bramble_board_config_t board_tdeck_plus = {
 
     .i2c_sda = 18,
     .i2c_scl = 8,
+
+    .keyboard_int = 46,
+
+    .trackball = { .up = 3, .down = 2, .left = 15, .right = 1, .center = 0 },
 };
 
 #endif /* BOARD_TDECK_PLUS_H */

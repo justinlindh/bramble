@@ -77,6 +77,15 @@ typedef struct {
     int divider_factor; /* Voltage divider multiplier (e.g., 2) */
 } board_battery_config_t;
 
+/* Trackball pin config */
+typedef struct {
+    int up;
+    int down;
+    int left;
+    int right;
+    int center;
+} board_trackball_pins_t;
+
 /* Full board configuration */
 typedef struct {
     const char *name;           /* Human-readable name */
@@ -114,6 +123,12 @@ typedef struct {
     /* I2C bus (for keyboard, trackball, sensors) */
     int i2c_sda;
     int i2c_scl;
+
+    /* Keyboard interrupt GPIO */
+    int keyboard_int;  /* Keyboard interrupt GPIO (-1 if none) */
+
+    /* Trackball */
+    board_trackball_pins_t trackball;
 } bramble_board_config_t;
 
 /**

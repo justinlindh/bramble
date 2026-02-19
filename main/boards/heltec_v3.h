@@ -29,6 +29,10 @@ static const bramble_board_config_t board_heltec_v3 = {
 
     .i2c_sda = -1,
     .i2c_scl = -1,
+
+    .keyboard_int = -1,
+
+    .trackball = { .up = -1, .down = -1, .left = -1, .right = -1, .center = -1 },
 };
 
 #endif /* BOARD_HELTEC_V3_H */

@@ -27,6 +27,12 @@ typedef enum {
     BTN_SHORT_PRESS,
     BTN_LONG_PRESS,
     BTN_DOUBLE_PRESS,
+    /* Trackball directions (T-Deck Plus) */
+    BTN_UP,
+    BTN_DOWN,
+    BTN_LEFT,
+    BTN_RIGHT,
+    BTN_SELECT,
 } ui_button_t;
 
 typedef struct {
