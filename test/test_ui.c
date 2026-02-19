@@ -118,6 +118,86 @@ void test_already_on_main_no_timeout(void) {
     TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
 }
 
+/* ── Trackball navigation tests ────────────────────────────────────── */
+
+void test_trackball_right_next_screen(void) {
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+    ui_handle_button(&state, BTN_RIGHT, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+}
+
+void test_trackball_down_next_screen(void) {
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+}
+
+void test_trackball_left_prev_screen(void) {
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+    ui_handle_button(&state, BTN_LEFT, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+}
+
+void test_trackball_up_prev_screen(void) {
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+    ui_handle_button(&state, BTN_UP, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+}
+
+void test_trackball_select_on_messages_opens_compose(void) {
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+    
+    ui_handle_button(&state, BTN_SELECT, 2000);
+    TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(0, state.compose_len);
+    TEST_ASSERT_TRUE(state.compose_active);
+}
+
+void test_trackball_select_on_settings_enters_edit(void) {
+    // Navigate to settings
+    state.current_screen = SCREEN_SETTINGS;
+    TEST_ASSERT_FALSE(state.settings_editing);
+    
+    ui_handle_button(&state, BTN_SELECT, 1000);
+    TEST_ASSERT_TRUE(state.settings_editing);
+}
+
+void test_trackball_settings_edit_navigation(void) {
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = true;
+    state.settings_cursor = 0;
+    
+    // Down = next option
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(1, state.settings_cursor);
+    
+    // Up = previous option
+    ui_handle_button(&state, BTN_UP, 2000);
+    TEST_ASSERT_EQUAL(0, state.settings_cursor);
+    
+    // Wrap-around test
+    ui_handle_button(&state, BTN_UP, 3000);
+    TEST_ASSERT_EQUAL(CONN_MODE_COUNT - 1, state.settings_cursor);
+}
+
+void test_trackball_settings_edit_confirm_with_select(void) {
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = true;
+    state.settings_confirmed = false;
+    
+    ui_handle_button(&state, BTN_SELECT, 1000);
+    TEST_ASSERT_TRUE(state.settings_confirmed);
+}
+
+void test_trackball_settings_edit_cancel_with_left(void) {
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = true;
+    
+    ui_handle_button(&state, BTN_LEFT, 1000);
+    TEST_ASSERT_FALSE(state.settings_editing);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -133,5 +213,14 @@ int main(void) {
     RUN_TEST(test_format_uptime_days);
     RUN_TEST(test_format_buffer_too_small);
     RUN_TEST(test_already_on_main_no_timeout);
+    RUN_TEST(test_trackball_right_next_screen);
+    RUN_TEST(test_trackball_down_next_screen);
+    RUN_TEST(test_trackball_left_prev_screen);
+    RUN_TEST(test_trackball_up_prev_screen);
+    RUN_TEST(test_trackball_select_on_messages_opens_compose);
+    RUN_TEST(test_trackball_select_on_settings_enters_edit);
+    RUN_TEST(test_trackball_settings_edit_navigation);
+    RUN_TEST(test_trackball_settings_edit_confirm_with_select);
+    RUN_TEST(test_trackball_settings_edit_cancel_with_left);
     return UNITY_END();
 }

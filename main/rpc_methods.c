@@ -16,6 +16,8 @@
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
+#include "board_config.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -802,6 +804,30 @@ static int handle_get_battery(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+/* bramble.setBacklight — control display backlight */
+static int handle_set_backlight(const cJSON *params, cJSON *result) {
+    const bramble_board_config_t *board = board_get_config();
+    if (board->spi_display.backlight < 0) {
+        cJSON_AddStringToObject(result, "error", "no backlight control");
+        return -1;
+    }
+    
+    cJSON *level = cJSON_GetObjectItem(params, "level");
+    if (!level || !cJSON_IsNumber(level)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    
+    int val = level->valueint;
+    if (val <= 0) {
+        gpio_set_level(board->spi_display.backlight, 0);
+    } else {
+        gpio_set_level(board->spi_display.backlight, 1);
+    }
+    /* Note: GPIO-based backlight is on/off only. PWM for dimming is future work. */
+    cJSON_AddNumberToObject(result, "level", val > 0 ? 255 : 0);
+    return 0;
+}
+
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "gps.h"
 #include "sdcard.h"
@@ -874,6 +900,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.shareLocationOnce",    handle_share_location_once);
     rpc_register("bramble.otaUpdate",            handle_ota_update);
     rpc_register("bramble.getBattery",           handle_get_battery);
+    rpc_register("bramble.setBacklight",         handle_set_backlight);
     rpc_register("bramble.sleep",               handle_sleep);
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS

@@ -11,21 +11,25 @@ void ui_init(ui_state_t *state) {
 void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
     state->last_activity = now_ms;
 
-    /* Settings screen has its own button handling */
+    /* Settings screen editing */
     if (state->current_screen == SCREEN_SETTINGS && state->settings_editing) {
         switch (btn) {
         case BTN_SHORT_PRESS:
-            /* Cycle through options */
+        case BTN_UP:    /* trackball up = previous option */
+            state->settings_cursor = (state->settings_cursor + CONN_MODE_COUNT - 1) % CONN_MODE_COUNT;
+            state->screen_dirty = true;
+            break;
+        case BTN_DOWN:  /* trackball down = next option */
             state->settings_cursor = (state->settings_cursor + 1) % CONN_MODE_COUNT;
             state->screen_dirty = true;
             break;
         case BTN_LONG_PRESS:
-            /* Confirm selection — main.c checks settings_confirmed */
+        case BTN_SELECT: /* trackball center = confirm */
             state->settings_confirmed = true;
             state->screen_dirty = true;
             break;
         case BTN_DOUBLE_PRESS:
-            /* Cancel — exit edit mode */
+        case BTN_LEFT:  /* trackball left = cancel/back */
             state->settings_editing = false;
             state->screen_dirty = true;
             break;
@@ -36,7 +40,10 @@ void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
     }
 
     switch (btn) {
-    case BTN_SHORT_PRESS: {
+    case BTN_SHORT_PRESS:
+    case BTN_RIGHT:     /* trackball right = next screen */
+    case BTN_DOWN:      /* trackball down = next screen */
+    {
         ui_screen_t prev = state->current_screen;
         state->prev_screen = prev;
         state->current_screen = (ui_screen_t)((prev + 1) % SCREEN_COUNT);
@@ -44,8 +51,35 @@ void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
         state->screen_dirty = true;
         break;
     }
+    case BTN_LEFT:      /* trackball left = previous screen */
+    case BTN_UP:        /* trackball up = previous screen */
+    {
+        ui_screen_t prev = state->current_screen;
+        state->prev_screen = prev;
+        state->current_screen = (ui_screen_t)((prev + SCREEN_COUNT - 1) % SCREEN_COUNT);
+        state->screen_enter_time = now_ms;
+        state->screen_dirty = true;
+        break;
+    }
+    case BTN_SELECT:    /* trackball center = same as short press for now */
+    {
+        /* On messages screen: could open compose. On settings: enter edit mode */
+        if (state->current_screen == SCREEN_SETTINGS) {
+            state->settings_editing = true;
+            state->screen_dirty = true;
+        } else if (state->current_screen == SCREEN_MESSAGES) {
+            /* Enter compose mode */
+            state->prev_screen = state->current_screen;
+            state->current_screen = SCREEN_COMPOSE;
+            state->screen_enter_time = now_ms;
+            state->compose_len = 0;
+            state->compose_buf[0] = '\0';
+            state->compose_active = true;
+            state->screen_dirty = true;
+        }
+        break;
+    }
     case BTN_LONG_PRESS:
-        /* Enter settings edit mode on Settings screen */
         if (state->current_screen == SCREEN_SETTINGS) {
             state->settings_editing = true;
         }
