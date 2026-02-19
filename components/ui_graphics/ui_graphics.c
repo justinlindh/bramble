@@ -4,10 +4,12 @@
 #include "lv_port_trackball.h"
 #include "lv_port_keyboard.h"
 #include "theme/bramble_theme.h"
+#include "screens/scr_layout.h"
 #include "lvgl.h"
 #include "esp_log.h"
 
 static const char *TAG = "ui_gfx";
+bramble_layout_t *s_layout = NULL;  /* NOT static — screens need access */
 
 int ui_graphics_init(void) {
     ESP_LOGI(TAG, "Initializing LVGL graphical UI");
@@ -20,18 +22,13 @@ int ui_graphics_init(void) {
     }
     
     bramble_theme_init(disp);
-    
     lv_port_touch_init();
     lv_port_trackball_init();
     lv_port_keyboard_init();
     
-    /* Temporary test — will be replaced by layout in Task 7 */
-    lv_obj_t *label = lv_label_create(lv_screen_active());
-    lv_label_set_text(label, "BRAMBLE");
-    lv_obj_set_style_text_color(label, lv_color_hex(0x0F9B8E), 0);
-    lv_obj_center(label);
+    s_layout = layout_create();
     
-    ESP_LOGI(TAG, "LVGL initialized with theme and all inputs");
+    ESP_LOGI(TAG, "LVGL initialized with layout");
     return 0;
 }
 
