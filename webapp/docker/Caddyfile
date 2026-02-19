@@ -8,17 +8,43 @@ https:// {
 		on_demand
 	}
 
-	@websocket {
+	handle /proxy/* {
+		reverse_proxy ws-proxy:3006
+	}
+
+	@mock-ws {
 		path /ws
 		header Connection *Upgrade*
 		header Upgrade websocket
 	}
+	handle @mock-ws {
+		reverse_proxy mock-node:3005
+	}
 
-	reverse_proxy @websocket mock-node:3005
-
-	reverse_proxy bramble-webapp:80
+	handle {
+		reverse_proxy bramble-webapp:80
+	}
 }
 
 http:// {
-	redir https://{host}:3443{uri} permanent
+	handle /health {
+		respond "ok" 200
+	}
+
+	handle /proxy/* {
+		reverse_proxy ws-proxy:3006
+	}
+
+	@mock-ws {
+		path /ws
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @mock-ws {
+		reverse_proxy mock-node:3005
+	}
+
+	handle {
+		reverse_proxy bramble-webapp:80
+	}
 }

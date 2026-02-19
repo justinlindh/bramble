@@ -28,8 +28,17 @@ export function ConnectionOverlay() {
       const ip = wifiIp.trim();
       if (!ip) return;
       saveIp(ip);
-      // Always use ws:// for direct device connections — boards don't support TLS
-      const url = ip.includes('://') ? ip : `ws://${ip}/ws`;
+      let url: string;
+      if (ip.includes('://')) {
+        // User provided a full URL — use as-is
+        url = ip;
+      } else if (location.protocol === 'https:') {
+        // HTTPS page can't connect to plain ws:// (mixed content).
+        // Route through the WS proxy which bridges wss:// → ws://device.
+        url = `wss://${location.host}/proxy/${ip}`;
+      } else {
+        url = `ws://${ip}/ws`;
+      }
       connect(transportType, { url });
     } else {
       connect(transportType);
