@@ -213,7 +213,11 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
         return RPC_ERR_RADIO;
     }
 
-    cJSON_AddStringToObject(result, "message_id", "TODO");
+    /* Generate message ID from incrementing counter (broadcast packets don't return packet_id) */
+    static uint32_t broadcast_msg_counter = 1;
+    char msg_id[12];
+    snprintf(msg_id, sizeof(msg_id), "B%07u", broadcast_msg_counter++);
+    cJSON_AddStringToObject(result, "message_id", msg_id);
     cJSON_AddStringToObject(result, "status", "sent");
     return 0;
 }
@@ -653,7 +657,10 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
         }
     }
 
-    /* TODO: add received peer locations once location packets are implemented */
+    /* TODO: add received peer locations — pending peer location protocol integration.
+     * Location component (components/location) exists with cache API, but mesh_task.c
+     * does not yet handle PKT_TYPE_LOCATION packets or maintain a location_manager_t.
+     * Once integrated, use location_cache_get() to retrieve peer positions here. */
     return 0;
 }
 
