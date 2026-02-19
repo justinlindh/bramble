@@ -341,13 +341,16 @@ void display_draw_text_large(int x, int y, const char *text) {
 void display_flush(void) {
     if (!fb || !initialized) return;
 
-    /* Set window to full screen */
+    /* Set window to full screen.
+     * With MADCTL MV bit set (landscape), the controller swaps column/row
+     * addressing internally. CASET addresses the physical short dimension (240)
+     * and RASET addresses the physical long dimension (320). */
     st7789_write_cmd(ST7789_CASET);
-    uint8_t caset[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
+    uint8_t caset[] = {0x00, 0x00, ((DISPLAY_HEIGHT - 1) >> 8) & 0xFF, (DISPLAY_HEIGHT - 1) & 0xFF};
     st7789_write_data(caset, 4);
 
     st7789_write_cmd(ST7789_RASET);
-    uint8_t raset[] = {0x00, 0x00, ((DISPLAY_HEIGHT - 1) >> 8) & 0xFF, (DISPLAY_HEIGHT - 1) & 0xFF};
+    uint8_t raset[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
     st7789_write_data(raset, 4);
 
     st7789_write_cmd(ST7789_RAMWR);
