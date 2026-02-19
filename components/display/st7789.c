@@ -446,9 +446,23 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
     uint8_t ra[4] = { y1 >> 8, y1 & 0xFF, y2 >> 8, y2 & 0xFF };
     st7789_write_data(ra, 4);
     
-    /* Write pixels */
+    /* Write pixels — must copy through internal RAM because PSRAM is not
+     * DMA-accessible on ESP32-S3 and LVGL buffers live in PSRAM. */
     st7789_write_cmd(0x2C);  /* RAMWR */
-    st7789_write_data((const uint8_t *)buf, w * h * 2);
+    const uint8_t *src = (const uint8_t *)buf;
+    size_t total = (size_t)w * h * 2;
+    uint8_t dma_buf[512];  /* Stack — guaranteed internal SRAM */
+
+    st7789_dc_data();
+    for (size_t sent = 0; sent < total; sent += sizeof(dma_buf)) {
+        size_t chunk = (total - sent > sizeof(dma_buf)) ? sizeof(dma_buf) : (total - sent);
+        memcpy(dma_buf, src + sent, chunk);
+        spi_transaction_t t = {
+            .length = chunk * 8,
+            .tx_buffer = dma_buf,
+        };
+        spi_device_polling_transmit(spi, &t);
+    }
 }
 
 int display_get_width(void) { return DISPLAY_WIDTH; }
