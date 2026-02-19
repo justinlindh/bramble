@@ -456,7 +456,14 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
     st7789_dc_data();
     for (size_t sent = 0; sent < total; sent += sizeof(dma_buf)) {
         size_t chunk = (total - sent > sizeof(dma_buf)) ? sizeof(dma_buf) : (total - sent);
-        memcpy(dma_buf, src + sent, chunk);
+        /* Copy and byte-swap: LVGL outputs little-endian RGB565 but ST7789
+         * expects big-endian (MSB first). Swap each pixel's two bytes. */
+        const uint16_t *src16 = (const uint16_t *)(src + sent);
+        uint16_t *dst16 = (uint16_t *)dma_buf;
+        size_t px_count = chunk / 2;
+        for (size_t p = 0; p < px_count; p++) {
+            dst16[p] = __builtin_bswap16(src16[p]);
+        }
         spi_transaction_t t = {
             .length = chunk * 8,
             .tx_buffer = dma_buf,

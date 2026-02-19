@@ -2,6 +2,7 @@
 #include "display.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include <inttypes.h>
 
 static const char *TAG = "lv_port_disp";
 
@@ -10,7 +11,14 @@ static const char *TAG = "lv_port_disp";
 #define BUF_LINES 40
 #define BUF_SIZE (DISP_HOR_RES * BUF_LINES * sizeof(lv_color16_t))
 
+static uint32_t flush_count = 0;
+
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+    flush_count++;
+    if (flush_count <= 10 || (flush_count % 100) == 0) {
+        ESP_LOGI(TAG, "flush_cb #%"PRIu32": (%"PRId32",%"PRId32")-(%"PRId32",%"PRId32")",
+                 flush_count, area->x1, area->y1, area->x2, area->y2);
+    }
     display_flush_area(area->x1, area->y1, area->x2, area->y2,
                        (const uint16_t *)px_map);
     lv_display_flush_ready(disp);
