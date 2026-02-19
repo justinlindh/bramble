@@ -33,6 +33,11 @@
 #include "audio.h"
 #endif
 
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+#include "lvgl.h"
+#include "ui_graphics.h"
+#endif
+
 static const char *TAG = "bramble";
 
 /* ── Layout constants derived from display size ─────────────────────── */
@@ -409,6 +414,23 @@ static void render_screen(ui_state_t *ui) {
 
 /* ── Main ───────────────────────────────────────────────────────────── */
 
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+static void lv_tick_cb(void *arg) {
+    (void)arg;
+    lv_tick_inc(1);
+}
+
+static void ui_graphics_task(void *arg) {
+    (void)arg;
+    while (1) {
+        uint32_t delay = ui_graphics_tick();
+        if (delay < 5) delay = 5;
+        if (delay > 30) delay = 30;
+        vTaskDelay(pdMS_TO_TICKS(delay));
+    }
+}
+#endif
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "=== BOOT STAGE: app_main entry ===");
@@ -579,7 +601,24 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: cli_init ===");
     cli_init(&g_identity);
 
-    /* Init UI state machine */
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+    /* Initialize LVGL graphical UI */
+    ESP_LOGI(TAG, "=== BOOT STAGE: ui_graphics_init ===");
+    ui_graphics_init();
+    
+    /* Create 1ms tick timer for LVGL */
+    const esp_timer_create_args_t tick_args = {
+        .callback = lv_tick_cb,
+        .name = "lv_tick"
+    };
+    esp_timer_handle_t tick_timer;
+    esp_timer_create(&tick_args, &tick_timer);
+    esp_timer_start_periodic(tick_timer, 1000);
+    
+    /* Create LVGL task on core 1 (core 0 runs mesh) */
+    xTaskCreatePinnedToCore(ui_graphics_task, "ui_gfx", 8192, NULL, 5, NULL, 1);
+#else
+    /* Init text UI state machine (Heltec and other non-graphical boards) */
     ESP_LOGI(TAG, "=== BOOT STAGE: ui_init ===");
     ui_state_t ui;
     ui_init(&ui);
@@ -587,11 +626,16 @@ void app_main(void)
     /* Render initial screen */
     ESP_LOGI(TAG, "=== BOOT STAGE: initial render ===");
     render_screen(&ui);
+#endif
 
-    ESP_LOGI(TAG, "=== BOOT STAGE: main loop start (UI on CPU0, mesh on CPU1) ===");
+    ESP_LOGI(TAG, "=== BOOT STAGE: main loop start ===");
 
-    /* Main loop — 50ms tick (20 Hz) */
     while (1) {
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+        /* LVGL runs in its own task — main loop just keeps watchdog happy */
+        vTaskDelay(pdMS_TO_TICKS(1000));
+#else
+        /* Main loop — 50ms tick (20 Hz) */
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
         /* Poll button / trackball */
@@ -699,5 +743,6 @@ void app_main(void)
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
+#endif
     }
 }
