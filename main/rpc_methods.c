@@ -20,6 +20,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/statvfs.h>
 
 #define BRAMBLE_VERSION_STR      "0.1.0-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.1.0"
@@ -830,6 +831,12 @@ static int handle_get_storage_info(const cJSON *params, cJSON *result) {
     cJSON_AddBoolToObject(result, "sd_present", sdcard_is_present());
     if (sdcard_is_present()) {
         cJSON_AddStringToObject(result, "mount_point", sdcard_get_mount_point());
+        /* If SD is mounted, get free space */
+        struct statvfs stat;
+        if (statvfs(sdcard_get_mount_point(), &stat) == 0) {
+            uint64_t free_kb = ((uint64_t)stat.f_bfree * stat.f_bsize) / 1024;
+            cJSON_AddNumberToObject(result, "sd_free_kb", (double)free_kb);
+        }
     }
     return 0;
 }

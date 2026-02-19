@@ -2,6 +2,8 @@
 # Build and flash Bramble to Heltec V3 via GPU box (192.168.1.199)
 # Usage: bash scripts/flash.sh [PORT]
 # Assumes code is already committed and pushed to Gitea.
+#
+# NOTE: For T-Deck Plus, use scripts/flash-local.sh instead (USB-connected to local machine).
 set -euo pipefail
 
 PORT="${1:-/dev/ttyUSB0}"
