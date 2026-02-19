@@ -223,7 +223,11 @@ static void render_screen(ui_state_t *ui) {
                 y += LINE_H;
             }
         }
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        display_draw_text(2, FOOTER_Y, "[o] compose  < > navigate");
+#else
         display_draw_text(2, FOOTER_Y, "[press] next screen");
+#endif
         display_flush();
         break;
     }
@@ -250,7 +254,11 @@ static void render_screen(ui_state_t *ui) {
                 y += LINE_H;
             }
         }
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        display_draw_text(2, FOOTER_Y, "< > navigate  [o] select");
+#else
         display_draw_text(2, FOOTER_Y, "[press] next screen");
+#endif
         display_flush();
         break;
     }
@@ -274,7 +282,11 @@ static void render_screen(ui_state_t *ui) {
                 display_draw_text(2, y, ml);
                 y += LINE_H;
             }
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+            display_draw_text(2, FOOTER_Y, "^v choose  [o]OK  [<]cancel");
+#else
             display_draw_text(2, FOOTER_Y, "[hold]OK [2x]cancel");
+#endif
         } else {
             char line[64];
             int y = CONTENT_Y;
@@ -302,14 +314,55 @@ static void render_screen(ui_state_t *ui) {
             } else {
                 display_draw_text(2, y, "BLE: off");
             }
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+            display_draw_text(2, FOOTER_Y, "[o] edit  < > navigate");
+#else
             display_draw_text(2, FOOTER_Y, "[hold] change mode");
+#endif
         }
         display_flush();
         break;
     }
     case SCREEN_COMPOSE: {
-        /* Quick status / about screen */
         display_clear();
+        
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        /* T-Deck Plus: full compose screen with keyboard input */
+        display_draw_text(2, HEADER_Y, "Compose");
+        
+        /* Show recipient (broadcast for now) */
+        char recip[] = "To: Broadcast";
+        int recip_x = DISPLAY_WIDTH - (strlen(recip) * FONT_W) - 2;
+        display_draw_text(recip_x, HEADER_Y, recip);
+        
+        display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
+        
+        /* Message text area */
+        int y = CONTENT_Y;
+        int chars_per_row = CHARS_PER_LINE - 1;  /* leave margin */
+        
+        /* Word-wrap compose buffer */
+        for (int i = 0; i < ui.compose_len && y < FOOTER_Y - LINE_H; ) {
+            char row[64];
+            int row_len = (ui.compose_len - i > chars_per_row) ? chars_per_row : ui.compose_len - i;
+            memcpy(row, ui.compose_buf + i, row_len);
+            row[row_len] = '\0';
+            display_draw_text(2, y, row);
+            i += row_len;
+            y += LINE_H;
+        }
+        
+        /* Cursor (blinking underscore after text) */
+        int cursor_x = 2 + (ui.compose_len % chars_per_row) * FONT_W;
+        int cursor_y = CONTENT_Y + (ui.compose_len / chars_per_row) * LINE_H;
+        if (cursor_y < FOOTER_Y - LINE_H) {
+            display_draw_text(cursor_x, cursor_y, "_");
+        }
+        
+        /* Footer */
+        display_draw_text(2, FOOTER_Y, "[Enter] Send  [Esc/Left] Back");
+#else
+        /* Heltec: About screen (existing code) */
         display_draw_text(2, HEADER_Y, "About");
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
@@ -338,7 +391,10 @@ static void render_screen(ui_state_t *ui) {
         snprintf(line, sizeof(line), "TX:%"PRIu32" RX:%"PRIu32,
                  about_mesh.packets_tx, about_mesh.packets_rx);
         display_draw_text(2, y, line);
-
+        
+        display_draw_text(2, FOOTER_Y, "[press] next screen");
+#endif
+        
         display_flush();
         break;
     }
@@ -538,6 +594,42 @@ void app_main(void)
             ESP_LOGI(TAG, "Button event: %d", btn);
             ui_handle_button(&ui, btn, now_ms);
         }
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        /* Keyboard input — only active on compose screen */
+        char key;
+        while (keyboard_poll(&key)) {
+            if (ui_get_screen(&ui) == SCREEN_COMPOSE) {
+                if (key == '\n' || key == '\r') {
+                    /* Send the message */
+                    if (ui.compose_len > 0) {
+                        ui.compose_buf[ui.compose_len] = '\0';
+                        mesh_send_broadcast((const uint8_t *)ui.compose_buf, ui.compose_len);
+                        ui.compose_len = 0;
+                        ui.compose_buf[0] = '\0';
+                        /* Return to messages screen */
+                        ui.current_screen = SCREEN_MESSAGES;
+                    }
+                } else if (key == '\b' || key == 127) {
+                    /* Backspace */
+                    if (ui.compose_len > 0) {
+                        ui.compose_len--;
+                        ui.compose_buf[ui.compose_len] = '\0';
+                    }
+                } else if (key == 27) {
+                    /* Escape — cancel compose */
+                    ui.compose_len = 0;
+                    ui.compose_buf[0] = '\0';
+                    ui.current_screen = SCREEN_MESSAGES;
+                } else if (key >= 32 && key < 127 && ui.compose_len < COMPOSE_BUF_SIZE - 1) {
+                    /* Regular character */
+                    ui.compose_buf[ui.compose_len++] = key;
+                    ui.compose_buf[ui.compose_len] = '\0';
+                }
+                ui.screen_dirty = true;
+            }
+        }
+#endif
 
         /* Handle connectivity mode change confirmation */
         if (ui.settings_confirmed) {
