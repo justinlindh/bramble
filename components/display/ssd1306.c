@@ -1,9 +1,10 @@
 /**
- * SSD1306 128x64 OLED driver for Heltec WiFi LoRa 32 V3
+ * SSD1306 128x64 OLED driver with board-specific I2C configuration
  * Uses ESP-IDF I2C master driver.
  */
 
 #include "include/display.h"
+#include "board_config.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -12,6 +13,7 @@
 #include <string.h>
 
 static const char *TAG = "display";
+static const bramble_board_config_t *s_board = NULL;
 
 /* ── Framebuffer ─────────────────────────────────────────────────────── */
 
@@ -138,39 +140,50 @@ static int ssd1306_cmd2(uint8_t cmd, uint8_t val) {
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 int display_init(void) {
-    /* Enable Vext power to OLED (Heltec V3: GPIO36 LOW = power on) */
-    gpio_config_t vext_conf = {
-        .pin_bit_mask = (1ULL << DISPLAY_VEXT_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    gpio_config(&vext_conf);
-    gpio_set_level(DISPLAY_VEXT_PIN, 0); /* LOW = power on */
-    vTaskDelay(pdMS_TO_TICKS(50));       /* Let power stabilize */
-    ESP_LOGI(TAG, "Vext power enabled (GPIO%d LOW)", DISPLAY_VEXT_PIN);
+    /* Get board configuration */
+    s_board = board_get_config();
+
+    /* Only SSD1306 boards for now (I2C display) */
+    if (!(s_board->capabilities & BOARD_CAP_DISPLAY_SSD1306)) {
+        ESP_LOGW(TAG, "Display not supported on this board");
+        return -1;
+    }
+
+    /* Enable Vext power if board has it (e.g., Heltec V3: GPIO36 LOW = power on) */
+    if (s_board->i2c_display.vext != -1) {
+        gpio_config_t vext_conf = {
+            .pin_bit_mask = (1ULL << s_board->i2c_display.vext),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&vext_conf);
+        gpio_set_level(s_board->i2c_display.vext, 0); /* LOW = power on */
+        vTaskDelay(pdMS_TO_TICKS(50));       /* Let power stabilize */
+        ESP_LOGI(TAG, "Vext power enabled (GPIO%d LOW)", s_board->i2c_display.vext);
+    }
 
     /* Reset the display via RST pin */
     gpio_config_t rst_conf = {
-        .pin_bit_mask = (1ULL << DISPLAY_RST_PIN),
+        .pin_bit_mask = (1ULL << s_board->i2c_display.rst),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&rst_conf);
-    gpio_set_level(DISPLAY_RST_PIN, 0);
+    gpio_set_level(s_board->i2c_display.rst, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
-    gpio_set_level(DISPLAY_RST_PIN, 1);
+    gpio_set_level(s_board->i2c_display.rst, 1);
     vTaskDelay(pdMS_TO_TICKS(20));
 
     /* Init I2C master bus */
     i2c_master_bus_config_t bus_cfg = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = DISPLAY_I2C_PORT,
-        .scl_io_num = DISPLAY_SCL_PIN,
-        .sda_io_num = DISPLAY_SDA_PIN,
+        .scl_io_num = s_board->i2c_display.scl,
+        .sda_io_num = s_board->i2c_display.sda,
         .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
@@ -182,7 +195,7 @@ int display_init(void) {
 
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = DISPLAY_I2C_ADDR,
+        .device_address = s_board->i2c_display.addr,
         .scl_speed_hz = DISPLAY_I2C_FREQ_HZ,
     };
     err = i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_handle);

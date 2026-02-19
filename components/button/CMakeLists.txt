@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "button.c"
     INCLUDE_DIRS "include"
-    REQUIRES driver esp_driver_gpio ui
+    REQUIRES driver esp_driver_gpio ui board_config
 )

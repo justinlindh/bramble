@@ -4,16 +4,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Heltec WiFi LoRa 32 V3 OLED pins */
-#define DISPLAY_SDA_PIN     17
-#define DISPLAY_SCL_PIN     18
-#define DISPLAY_RST_PIN     21
-#define DISPLAY_VEXT_PIN    36  /* Power gate: LOW = OLED on */
-
-/* SSD1306 128x64 parameters */
+/* Display dimensions — board-specific */
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#define DISPLAY_WIDTH       320
+#define DISPLAY_HEIGHT      240
+#else
+/* Default: Heltec V3 and other SSD1306 boards */
 #define DISPLAY_WIDTH       128
 #define DISPLAY_HEIGHT      64
-#define DISPLAY_I2C_ADDR    0x3C
+#endif
+
+/* I2C parameters (for SSD1306 boards) */
 #define DISPLAY_I2C_PORT    0
 #define DISPLAY_I2C_FREQ_HZ 400000
 

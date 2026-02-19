@@ -22,6 +22,7 @@
 #include "ble_server.h"
 #include "esp_system.h"
 #include "battery.h"
+#include "board_config.h"
 
 static const char *TAG = "bramble";
 
@@ -284,6 +285,13 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "=== BOOT STAGE: app_main entry ===");
     ESP_LOGI(TAG, "Bramble LoRa Mesh starting...");
+
+    /* Board-level init: power rails, shared SPI bus */
+    ESP_LOGI(TAG, "=== BOOT STAGE: board_init ===");
+    if (board_init() != 0) {
+        ESP_LOGE(TAG, "Board init failed — halting");
+        return;
+    }
 
     /* NVS init */
     ESP_LOGI(TAG, "=== BOOT STAGE: nvs_flash_init ===");

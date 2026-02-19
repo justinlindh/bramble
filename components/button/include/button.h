@@ -4,9 +4,6 @@
 #include <stdint.h>
 #include "ui.h"
 
-/* Heltec V3 PRG button = GPIO0 (active low) */
-#define BUTTON_GPIO     0
-
 /* Timing thresholds (ms) */
 #define BUTTON_DEBOUNCE_MS      50
 #define BUTTON_LONG_PRESS_MS    800

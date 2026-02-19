@@ -9,6 +9,7 @@
 #ifdef ESP_PLATFORM
 
 #include "sx1262.h"
+#include "board_config.h"
 
 #include <string.h>
 #include <inttypes.h>
@@ -23,13 +24,14 @@
 static const char *TAG = "sx1262";
 
 static spi_device_handle_t s_spi;
+static const bramble_board_config_t *s_board = NULL;
 
 /* ------------------------------------------------------------------ */
 /*  Helper: NSS control                                                */
 /* ------------------------------------------------------------------ */
 
-static inline void nss_low(void)  { gpio_set_level(SX1262_PIN_NSS, 0); }
-static inline void nss_high(void) { gpio_set_level(SX1262_PIN_NSS, 1); }
+static inline void nss_low(void)  { gpio_set_level(s_board->radio.cs, 0); }
+static inline void nss_high(void) { gpio_set_level(s_board->radio.cs, 1); }
 
 /* ------------------------------------------------------------------ */
 /*  BUSY                                                               */
@@ -38,7 +40,7 @@ static inline void nss_high(void) { gpio_set_level(SX1262_PIN_NSS, 1); }
 int sx1262_wait_busy(uint32_t timeout_ms)
 {
     uint32_t start = xTaskGetTickCount();
-    while (gpio_get_level(SX1262_PIN_BUSY)) {
+    while (gpio_get_level(s_board->radio.busy)) {
         if ((xTaskGetTickCount() - start) * portTICK_PERIOD_MS >= timeout_ms) {
             ESP_LOGE(TAG, "BUSY timeout (%" PRIu32 " ms)", timeout_ms);
             return -1;
@@ -200,9 +202,9 @@ int sx1262_get_status(uint8_t *status)
 
 int sx1262_reset(void)
 {
-    gpio_set_level(SX1262_PIN_RST, 0);
+    gpio_set_level(s_board->radio.rst, 0);
     vTaskDelay(pdMS_TO_TICKS(1));
-    gpio_set_level(SX1262_PIN_RST, 1);
+    gpio_set_level(s_board->radio.rst, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
     return sx1262_wait_busy(100);
 }
@@ -460,22 +462,24 @@ int sx1262_set_regulator_mode(uint8_t mode)
 
 int sx1262_init(void)
 {
-    ESP_LOGD(TAG, "Initializing SX1262");
+    /* Get board configuration */
+    s_board = board_get_config();
+    ESP_LOGD(TAG, "Initializing SX1262 for %s", s_board->short_name);
 
     /* --- GPIO --- */
     gpio_config_t out_conf = {
-        .pin_bit_mask = (1ULL << SX1262_PIN_NSS) | (1ULL << SX1262_PIN_RST),
+        .pin_bit_mask = (1ULL << s_board->radio.cs) | (1ULL << s_board->radio.rst),
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     gpio_config(&out_conf);
-    gpio_set_level(SX1262_PIN_NSS, 1);
-    gpio_set_level(SX1262_PIN_RST, 1);
+    gpio_set_level(s_board->radio.cs, 1);
+    gpio_set_level(s_board->radio.rst, 1);
 
     gpio_config_t in_conf = {
-        .pin_bit_mask = (1ULL << SX1262_PIN_BUSY) | (1ULL << SX1262_PIN_DIO1),
+        .pin_bit_mask = (1ULL << s_board->radio.busy) | (1ULL << s_board->radio.dio1),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -484,18 +488,26 @@ int sx1262_init(void)
     gpio_config(&in_conf);
 
     /* --- SPI bus --- */
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num   = SX1262_PIN_MOSI,
-        .miso_io_num   = SX1262_PIN_MISO,
-        .sclk_io_num   = SX1262_PIN_SCK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 256,
-    };
-    esp_err_t err = spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
-        return -1;
+    esp_err_t err;
+    if (s_board->capabilities & BOARD_CAP_SHARED_SPI) {
+        /* Shared SPI: bus already initialized by board_init(), just add device */
+        ESP_LOGD(TAG, "Using shared SPI bus");
+    } else {
+        /* Non-shared SPI: initialize our own bus */
+        ESP_LOGD(TAG, "Initializing dedicated SPI bus");
+        spi_bus_config_t bus_cfg = {
+            .mosi_io_num   = s_board->spi.mosi,
+            .miso_io_num   = s_board->spi.miso,
+            .sclk_io_num   = s_board->spi.sck,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = s_board->spi_max_transfer_sz,
+        };
+        err = spi_bus_initialize(s_board->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
+            return -1;
+        }
     }
 
     spi_device_interface_config_t dev_cfg = {
@@ -506,7 +518,7 @@ int sx1262_init(void)
         .pre_cb         = NULL,
         .post_cb        = NULL,
     };
-    err = spi_bus_add_device(SPI2_HOST, &dev_cfg, &s_spi);
+    err = spi_bus_add_device(s_board->spi_host, &dev_cfg, &s_spi);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SPI add device failed: %s", esp_err_to_name(err));
         return -1;
@@ -518,18 +530,25 @@ int sx1262_init(void)
     /* --- Standby STDBY_RC --- */
     if (sx1262_set_standby(0) != 0) return -1;
 
-    /* --- Heltec V3: DIO3 as TCXO (1.7V, 5ms timeout) --- */
-    if (sx1262_set_dio3_as_tcxo(1.7f, 5) != 0) return -1;
+    /* --- Oscillator configuration --- */
+    if (s_board->radio_osc == RADIO_OSC_TCXO_DIO3) {
+        ESP_LOGD(TAG, "Configuring TCXO (%.1fV)", s_board->radio_tcxo_voltage);
+        if (sx1262_set_dio3_as_tcxo(s_board->radio_tcxo_voltage, 5) != 0) return -1;
+    } else {
+        ESP_LOGD(TAG, "Using crystal oscillator (no TCXO)");
+    }
 
     /* --- Calibrate all blocks --- */
     if (sx1262_calibrate(0x7F) != 0) return -1;
     vTaskDelay(pdMS_TO_TICKS(5)); /* wait for calibration */
 
-    /* --- Calibrate image for 915 MHz --- */
+    /* --- Calibrate image for 915 MHz (TODO: use region config) --- */
     if (sx1262_calibrate_image(915.0f) != 0) return -1;
 
-    /* --- DC-DC regulator (Heltec V3 uses DC-DC) --- */
-    if (sx1262_set_regulator_mode(1) != 0) return -1;
+    /* --- Regulator mode --- */
+    uint8_t reg_mode = (s_board->radio_reg == RADIO_REG_DCDC) ? 1 : 0;
+    ESP_LOGD(TAG, "Regulator mode: %s", (reg_mode == 1) ? "DC-DC" : "LDO");
+    if (sx1262_set_regulator_mode(reg_mode) != 0) return -1;
 
     /* --- LoRa packet type --- */
     if (sx1262_set_packet_type(1) != 0) return -1;
