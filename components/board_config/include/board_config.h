@@ -26,6 +26,8 @@ typedef int gpio_num_t;
 #define BOARD_CAP_BATTERY_ADC       (1 << 7)
 #define BOARD_CAP_SHARED_SPI        (1 << 8)  /* SPI bus shared with display/SD */
 #define BOARD_CAP_PERIPHERAL_POWER  (1 << 9)  /* Needs power pin enabled first */
+#define BOARD_CAP_TOUCH             (1 << 10)  /* Capacitive touchscreen */
+#define BOARD_CAP_IO_EXPANDER       (1 << 11)  /* PCA9535 or similar */
 
 /* Radio oscillator type */
 typedef enum {
@@ -100,6 +102,13 @@ typedef struct {
     int i2s_dout;   /* Data out to speaker */
 } board_audio_config_t;
 
+/* Touch controller config */
+typedef struct {
+    int int_pin;        /* Interrupt GPIO */
+    int rst_pin;        /* Reset GPIO (-1 if shared/none) */
+    uint8_t i2c_addr;   /* I2C address (0x5D or 0x14 for GT911) */
+} board_touch_config_t;
+
 /* Full board configuration */
 typedef struct {
     const char *name;           /* Human-readable name */
@@ -143,6 +152,9 @@ typedef struct {
 
     /* Trackball */
     board_trackball_pins_t trackball;
+
+    /* Touch */
+    board_touch_config_t touch;
 
     /* GPS */
     board_gps_config_t gps;

@@ -9,7 +9,8 @@ static const bramble_board_config_t board_tdeck_plus = {
     .capabilities = BOARD_CAP_DISPLAY_ST7789 | BOARD_CAP_KEYBOARD |
                     BOARD_CAP_TRACKBALL | BOARD_CAP_GPS | BOARD_CAP_SDCARD |
                     BOARD_CAP_AUDIO | BOARD_CAP_BATTERY_ADC |
-                    BOARD_CAP_SHARED_SPI | BOARD_CAP_PERIPHERAL_POWER,
+                    BOARD_CAP_SHARED_SPI | BOARD_CAP_PERIPHERAL_POWER |
+                    BOARD_CAP_TOUCH,
 
     .peripheral_power_pin = 10,
 
@@ -36,6 +37,8 @@ static const bramble_board_config_t board_tdeck_plus = {
     .keyboard_int = 46,
 
     .trackball = { .up = 3, .down = 2, .left = 15, .right = 1, .center = 0 },
+
+    .touch = { .int_pin = 16, .rst_pin = -1, .i2c_addr = 0x14 },
 
     .gps = { .tx = 43, .rx = 44, .baud = 9600 },
 
