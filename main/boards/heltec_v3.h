@@ -34,6 +34,8 @@ static const bramble_board_config_t board_heltec_v3 = {
 
     .trackball = { .up = -1, .down = -1, .left = -1, .right = -1, .center = -1 },
 
+    .touch = { .int_pin = -1, .rst_pin = -1, .i2c_addr = 0 },
+
     .gps = { .tx = -1, .rx = -1, .baud = 9600 },
 
     .sdcard_cs = -1,
