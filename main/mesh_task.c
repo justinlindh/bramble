@@ -31,6 +31,10 @@
 #include <string.h>
 #include <inttypes.h>
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "audio.h"
+#endif
+
 static const char *TAG = "mesh";
 
 /* ── Configuration ──────────────────────────────────────────────────── */
@@ -45,7 +49,7 @@ static const char *TAG = "mesh";
 /* ── Received packet queue item ─────────────────────────────────────── */
 
 typedef struct {
-    uint8_t data[256];
+    uint8_t data[BRAMBLE_MAX_PACKET_SIZE];
     uint8_t len;
     int16_t rssi;
     int8_t  snr;
@@ -72,7 +76,7 @@ static pending_discovery_table_t  s_pending_disc;
 #define MAX_QUEUED_MSGS 8
 typedef struct {
     uint32_t dest_addr;
-    uint8_t  data[256];
+    uint8_t  data[BRAMBLE_MAX_PACKET_SIZE];
     size_t   len;
     uint32_t timestamp;
     bool     used;
@@ -94,7 +98,7 @@ static bool s_mailbox_enabled = false;
 #define MAILBOX_EXPIRY_MS (3600 * 1000)  /* 1 hour */
 typedef struct {
     uint32_t dest_addr;
-    uint8_t  raw_pkt[256];
+    uint8_t  raw_pkt[BRAMBLE_MAX_PACKET_SIZE];
     uint8_t  raw_len;
     uint32_t timestamp;
     bool     used;
@@ -192,7 +196,9 @@ static int send_beacon(void) {
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
-    beacon.network_time = 0;  /* TODO: time sync */
+    /* TODO: timesync integration deferred — requires global timesync_state_t 
+     * and bidirectional packet flow. See components/timesync for implementation. */
+    beacon.network_time = 0;
     beacon.time_confidence = 0xFFFF;  /* no confidence */
 
     /* Include node name in beacon (if set) */
@@ -270,10 +276,14 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         return;
     }
 
-    /* Update neighbor table */
+    /* Update neighbor table — track if this is a new neighbor */
     uint32_t t = now_ms();
+    int old_count = neighbor_count(&s_neighbors);
     int idx = neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr,
                               beacon.pubkey_hash, t);
+    int new_count = neighbor_count(&s_neighbors);
+    bool is_new_peer = (new_count > old_count);
+    
     /* Store peer name if present */
     if (idx >= 0 && beacon.name_len > 0) {
         memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
@@ -290,8 +300,16 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     xSemaphoreGive(s_state_mutex);
 
     if (idx >= 0) {
-        ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)",
-                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors));
+        ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)%s",
+                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors),
+                 is_new_peer ? " [NEW]" : "");
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        /* Play peer join tone for new neighbors */
+        if (is_new_peer && audio_is_available()) {
+            audio_play_tone(AUDIO_TONE_PEER_JOIN);
+        }
+#endif
 
         /* Mailbox: flush any stored messages for this newly-seen neighbor */
         if (s_mailbox_enabled) {
@@ -459,13 +477,10 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     /* Try to decrypt with known channels */
     channel_msg_info_t info;
-    uint8_t plaintext[256];
-    /* We need a buffer for decryption — copy ciphertext for in-place decrypt */
-    if (ct_len > sizeof(plaintext)) {
+    if (ct_len > BRAMBLE_MAX_PACKET_SIZE) {
         ESP_LOGW(TAG, "Data too large: %u", (unsigned)ct_len);
         return;
     }
-    memcpy(plaintext, ciphertext, ct_len);
 
     int ret = channel_msg_decrypt(s_channels, s_num_channels,
                                   nonce, ciphertext, ct_len, tag, &info);
@@ -494,6 +509,13 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
         msg_store_add(info.src_addr, dir, text, tlen, rssi, snr);
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        /* Play message received tone */
+        if (audio_is_available()) {
+            audio_play_tone(AUDIO_TONE_MESSAGE_RX);
+        }
+#endif
 
         /* Emit onMessage notification via RPC */
         {
@@ -700,7 +722,7 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 /* ── Mailbox helpers ─────────────────────────────────────────────────── */
 
 static bool mailbox_store(uint32_t dest_addr, const uint8_t *raw, uint8_t raw_len) {
-    if (!s_mailbox_enabled || raw_len > 255) return false;
+    if (!s_mailbox_enabled) return false;
 
     /* Find free slot (or oldest) */
     int slot = -1;
@@ -764,8 +786,7 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     }
 
     /* Rebuild header with decremented hop limit */
-    uint8_t buf[256];
-    if (len > sizeof(buf)) return;
+    uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
     memcpy(buf, data, len);
 
     bramble_header_t fwd_hdr = *header;
@@ -781,7 +802,7 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     route->use_count++;
 }
 
-static void handle_rx_packet(const rx_packet_t *pkt) {
+static void mesh_process_rx_packet(const rx_packet_t *pkt) {
     if (pkt->len < HEADER_SIZE) {
         ESP_LOGW(TAG, "Packet too short: %u bytes", pkt->len);
         return;
@@ -844,6 +865,164 @@ static void handle_rx_packet(const rx_packet_t *pkt) {
 
 /* ── Main mesh task ─────────────────────────────────────────────────── */
 
+/**
+ * Initialize radio configuration from frequency plan and NVS overrides.
+ * Returns ESP_OK on success.
+ */
+static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
+    ESP_LOGI(TAG, "=== BOOT STAGE: frequency plan init ===");
+    const bramble_freq_plan_t *plan = freq_plan_get_default();
+    ESP_LOGI(TAG, "Frequency plan: %s (%.1f MHz, max %d dBm)",
+             plan->name, plan->default_freq_mhz, plan->max_tx_power_dbm);
+
+    ESP_LOGI(TAG, "=== BOOT STAGE: radio profile config ===");
+    radio_get_profile_config(RADIO_PROFILE_LONG_RANGE, radio_cfg);
+
+    /* Override with frequency plan values */
+    radio_cfg->frequency_mhz = plan->default_freq_mhz;
+    radio_cfg->tx_power = freq_plan_clamp_power(plan, radio_cfg->tx_power);
+    radio_cfg->sf = plan->default_sf;
+    radio_cfg->bw_hz = plan->default_bw_hz;
+
+    /* Check NVS for user-saved radio config (overrides defaults) */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_radio", NVS_READONLY, &nvs) == ESP_OK) {
+        uint32_t freq_khz = 0;
+        uint8_t sf = 0, cr = 0;
+        uint32_t bw = 0;
+        int8_t txp = 0;
+        if (nvs_get_u32(nvs, "freq_khz", &freq_khz) == ESP_OK)
+            radio_cfg->frequency_mhz = freq_khz / 1000.0f;
+        if (nvs_get_u8(nvs, "sf", &sf) == ESP_OK)
+            radio_cfg->sf = sf;
+        if (nvs_get_u32(nvs, "bw_hz", &bw) == ESP_OK)
+            radio_cfg->bw_hz = bw;
+        if (nvs_get_i8(nvs, "tx_power", &txp) == ESP_OK)
+            radio_cfg->tx_power = freq_plan_clamp_power(plan, txp);
+        if (nvs_get_u8(nvs, "cr", &cr) == ESP_OK)
+            radio_cfg->coding_rate = cr;
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "Loaded radio config from NVS");
+    }
+
+    ESP_LOGI(TAG, "Radio config: %.1f MHz SF%d BW%lu TX:%d dBm",
+             radio_cfg->frequency_mhz, radio_cfg->sf,
+             (unsigned long)radio_cfg->bw_hz, radio_cfg->tx_power);
+
+    return ESP_OK;
+}
+
+/**
+ * Perform periodic maintenance: beacons, neighbor purge, route cleanup, etc.
+ */
+static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
+                                     uint32_t *beacon_interval,
+                                     uint32_t *last_purge_ms) {
+    /* Periodic beacon TX */
+    if ((t - *last_beacon_ms) >= *beacon_interval) {
+        send_beacon();
+        *last_beacon_ms = t;
+
+        /* Add jitter for next interval */
+        uint8_t j[2];
+        crypto_random(j, 2);
+        int32_t jitter = ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
+        *beacon_interval = BEACON_INTERVAL_MS + jitter;
+    }
+
+    /* Periodic neighbor purge + route maintenance */
+    if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
+        neighbor_purge(&s_neighbors, t);
+        dedup_purge(&s_dedup, t);
+        route_maintenance(&s_routes, t);
+        reverse_route_purge(&s_reverse_routes, t);
+        *last_purge_ms = t;
+
+        /* Expire old mailbox entries */
+        if (s_mailbox_enabled) mailbox_expire(t);
+
+        /* Update shared state */
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_shared.neighbors = s_neighbors;
+        xSemaphoreGive(s_state_mutex);
+
+        /* Expire queued messages older than 60s */
+        for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+            if (s_queued_msgs[i].used && (t - s_queued_msgs[i].timestamp) > 60000) {
+                ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
+                         s_queued_msgs[i].dest_addr);
+                s_queued_msgs[i].used = false;
+            }
+        }
+    }
+
+    /* Discovery retries (check every 5s) */
+    static uint32_t last_disc_check = 0;
+    if ((t - last_disc_check) >= 5000) {
+        last_disc_check = t;
+        for (int i = 0; i < s_pending_disc.count; i++) {
+            pending_discovery_t *pd = &s_pending_disc.entries[i];
+            if (discovery_should_retry(pd, t)) {
+                if (pd->attempts >= MAX_RREQ_ATTEMPTS) {
+                    ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
+                             pd->dest_addr, pd->attempts);
+                    /* Clear queued messages for this dest */
+                    for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
+                        if (s_queued_msgs[j].used &&
+                            s_queued_msgs[j].dest_addr == pd->dest_addr) {
+                            s_queued_msgs[j].used = false;
+                        }
+                    }
+                    discovery_remove(&s_pending_disc, pd->dest_addr);
+                    i--; /* re-check same index after remove */
+                } else {
+                    ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32 " (attempt %u)",
+                             pd->dest_addr, pd->attempts + 1);
+                    discovery_record_attempt(pd, t);
+                    uint32_t enc_src = s_identity->address;
+                    bramble_rreq_t rreq = rreq_build_originator(
+                        s_identity->address, pd->dest_addr,
+                        pd->query_id, enc_src);
+                    send_rreq(&rreq);
+                }
+            }
+        }
+    }
+
+    /* ACK retry tick — retransmit unacknowledged packets */
+    static uint32_t last_ack_tick = 0;
+    if ((t - last_ack_tick) >= 1000) {  /* Check every 1s */
+        last_ack_tick = t;
+        for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+            pending_ack_t *pa = &s_pending_acks.entries[i];
+            if (!pa->active) continue;
+            if (t >= pa->next_retry_ms) {
+                if (pa->attempt >= pa->max_attempts) {
+                    ESP_LOGW(TAG, "Message %08" PRIX32 " to %08" PRIX32 " failed after %u attempts",
+                             pa->packet_id, pa->dest_addr, pa->attempt);
+                    msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
+                    /* Notify webapp of failure */
+                    cJSON *params = cJSON_CreateObject();
+                    char pkt_buf[12];
+                    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pa->packet_id);
+                    cJSON_AddStringToObject(params, "packet_id", pkt_buf);
+                    cJSON_AddStringToObject(params, "status", "failed");
+                    rpc_notify("bramble.onAck", params);
+                    cJSON_Delete(params);
+                    pa->active = false;
+                } else {
+                    ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
+                             pa->packet_id, pa->dest_addr,
+                             pa->attempt + 1, pa->max_attempts);
+                    radio_transmit(pa->packet_data, pa->packet_len);
+                    pa->attempt++;
+                    pa->next_retry_ms = t + tier_base_delay_ms(pa->tier) * pa->attempt;
+                }
+            }
+        }
+    }
+}
+
 static void mesh_task(void *param) {
     (void)param;
 
@@ -858,48 +1037,9 @@ static void mesh_task(void *param) {
         ESP_LOGW(TAG, "Could not subscribe to task WDT: %d (continuing anyway)", wdt_err);
     }
 
-    /* Initialize radio with frequency plan */
-    ESP_LOGI(TAG, "=== BOOT STAGE: frequency plan init ===");
-    const bramble_freq_plan_t *plan = freq_plan_get_default();
-    ESP_LOGI(TAG, "Frequency plan: %s (%.1f MHz, max %d dBm)",
-             plan->name, plan->default_freq_mhz, plan->max_tx_power_dbm);
-
-    ESP_LOGI(TAG, "=== BOOT STAGE: radio profile config ===");
+    /* Initialize radio configuration */
     radio_config_t radio_cfg;
-    radio_get_profile_config(RADIO_PROFILE_LONG_RANGE, &radio_cfg);
-
-    /* Override with frequency plan values */
-    radio_cfg.frequency_mhz = plan->default_freq_mhz;
-    radio_cfg.tx_power = freq_plan_clamp_power(plan, radio_cfg.tx_power);
-    radio_cfg.sf = plan->default_sf;
-    radio_cfg.bw_hz = plan->default_bw_hz;
-
-    /* Check NVS for user-saved radio config (overrides defaults) */
-    {
-        nvs_handle_t nvs;
-        if (nvs_open("bramble_radio", NVS_READONLY, &nvs) == ESP_OK) {
-            uint32_t freq_khz = 0;
-            uint8_t sf = 0, cr = 0;
-            uint32_t bw = 0;
-            int8_t txp = 0;
-            if (nvs_get_u32(nvs, "freq_khz", &freq_khz) == ESP_OK)
-                radio_cfg.frequency_mhz = freq_khz / 1000.0f;
-            if (nvs_get_u8(nvs, "sf", &sf) == ESP_OK)
-                radio_cfg.sf = sf;
-            if (nvs_get_u32(nvs, "bw_hz", &bw) == ESP_OK)
-                radio_cfg.bw_hz = bw;
-            if (nvs_get_i8(nvs, "tx_power", &txp) == ESP_OK)
-                radio_cfg.tx_power = freq_plan_clamp_power(plan, txp);
-            if (nvs_get_u8(nvs, "cr", &cr) == ESP_OK)
-                radio_cfg.coding_rate = cr;
-            nvs_close(nvs);
-            ESP_LOGI(TAG, "Loaded radio config from NVS");
-        }
-    }
-
-    ESP_LOGI(TAG, "Radio config: %.1f MHz SF%d BW%lu TX:%d dBm",
-             radio_cfg.frequency_mhz, radio_cfg.sf,
-             (unsigned long)radio_cfg.bw_hz, radio_cfg.tx_power);
+    mesh_init_radio_config(&radio_cfg);
 
     /* Register radio callbacks before init */
     ESP_LOGI(TAG, "=== BOOT STAGE: register radio callbacks ===");
@@ -958,118 +1098,11 @@ static void mesh_task(void *param) {
         /* Process received packets */
         rx_packet_t pkt;
         while (xQueueReceive(s_rx_queue, &pkt, 0) == pdTRUE) {
-            handle_rx_packet(&pkt);
+            mesh_process_rx_packet(&pkt);
         }
 
-        /* Periodic beacon TX */
-        if ((t - last_beacon_ms) >= beacon_interval) {
-            send_beacon();
-            last_beacon_ms = t;
-
-            /* Add jitter for next interval */
-            uint8_t j[2];
-            crypto_random(j, 2);
-            int32_t jitter = ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
-            beacon_interval = BEACON_INTERVAL_MS + jitter;
-        }
-
-        /* Periodic neighbor purge + route maintenance */
-        if ((t - last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
-            neighbor_purge(&s_neighbors, t);
-            dedup_purge(&s_dedup, t);
-            route_maintenance(&s_routes, t);
-            reverse_route_purge(&s_reverse_routes, t);
-            last_purge_ms = t;
-
-            /* Expire old mailbox entries */
-            if (s_mailbox_enabled) mailbox_expire(t);
-
-            /* Update shared state */
-            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-            s_shared.neighbors = s_neighbors;
-            xSemaphoreGive(s_state_mutex);
-
-            /* Expire queued messages older than 60s */
-            for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-                if (s_queued_msgs[i].used && (t - s_queued_msgs[i].timestamp) > 60000) {
-                    ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
-                             s_queued_msgs[i].dest_addr);
-                    s_queued_msgs[i].used = false;
-                }
-            }
-        }
-
-        /* Discovery retries (check every 5s) */
-        {
-            static uint32_t last_disc_check = 0;
-            if ((t - last_disc_check) >= 5000) {
-                last_disc_check = t;
-                for (int i = 0; i < s_pending_disc.count; i++) {
-                    pending_discovery_t *pd = &s_pending_disc.entries[i];
-                    if (discovery_should_retry(pd, t)) {
-                        if (pd->attempts >= MAX_RREQ_ATTEMPTS) {
-                            ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
-                                     pd->dest_addr, pd->attempts);
-                            /* Clear queued messages for this dest */
-                            for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
-                                if (s_queued_msgs[j].used &&
-                                    s_queued_msgs[j].dest_addr == pd->dest_addr) {
-                                    s_queued_msgs[j].used = false;
-                                }
-                            }
-                            discovery_remove(&s_pending_disc, pd->dest_addr);
-                            i--; /* re-check same index after remove */
-                        } else {
-                            ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32 " (attempt %u)",
-                                     pd->dest_addr, pd->attempts + 1);
-                            discovery_record_attempt(pd, t);
-                            uint32_t enc_src = s_identity->address;
-                            bramble_rreq_t rreq = rreq_build_originator(
-                                s_identity->address, pd->dest_addr,
-                                pd->query_id, enc_src);
-                            send_rreq(&rreq);
-                        }
-                    }
-                }
-            }
-        }
-
-        /* ACK retry tick — retransmit unacknowledged packets */
-        {
-            static uint32_t last_ack_tick = 0;
-            if ((t - last_ack_tick) >= 1000) {  /* Check every 1s */
-                last_ack_tick = t;
-                for (int i = 0; i < MAX_PENDING_ACKS; i++) {
-                    pending_ack_t *pa = &s_pending_acks.entries[i];
-                    if (!pa->active) continue;
-                    if (t >= pa->next_retry_ms) {
-                        if (pa->attempt >= pa->max_attempts) {
-                            ESP_LOGW(TAG, "Message %08" PRIX32 " to %08" PRIX32 " failed after %u attempts",
-                                     pa->packet_id, pa->dest_addr, pa->attempt);
-                            msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
-                            /* Notify webapp of failure */
-                            {
-                                cJSON *params = cJSON_CreateObject();
-                                char pkt_buf[12];
-                                snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pa->packet_id);
-                                cJSON_AddStringToObject(params, "packet_id", pkt_buf);
-                                cJSON_AddStringToObject(params, "status", "failed");
-                                rpc_notify("bramble.onAck", params);
-                                cJSON_Delete(params);
-                            }
-                            pa->active = false;
-                        } else {
-                            ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
-                                     pa->packet_id, pa->dest_addr,
-                                     pa->attempt + 1, pa->max_attempts);
-                            radio_transmit(pa->packet_data, pa->packet_len);
-                            pa->attempt++;
-                            pa->next_retry_ms = t + tier_base_delay_ms(pa->tier) * pa->attempt;
-                        }
-                    }
-                }
-            }
-        }
+        /* Perform all periodic maintenance tasks */
+        mesh_periodic_maintenance(t, &last_beacon_ms, &beacon_interval, &last_purge_ms);
 
         /* Sleep 10ms between polls */
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -1143,7 +1176,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     }
 
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
-    uint8_t ciphertext[256 + CHANNEL_MSG_OVERHEAD];
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
     uint8_t tag[BRAMBLE_TAG_SIZE];
 
     int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01, /* app_type: text */
@@ -1229,7 +1262,7 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
     }
 
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
-    uint8_t ciphertext[256 + CHANNEL_MSG_OVERHEAD];
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
     uint8_t tag[BRAMBLE_TAG_SIZE];
 
     int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01,
@@ -1259,6 +1292,8 @@ void mesh_task_start(bramble_identity_t *identity) {
         size_t len = sizeof(s_node_name);
         if (nvs_get_str(nvs, "node_name", s_node_name, &len) != ESP_OK) {
             s_node_name[0] = '\0';
+        } else {
+            s_node_name[sizeof(s_node_name) - 1] = '\0';  /* Ensure null termination */
         }
         nvs_close(nvs);
     }

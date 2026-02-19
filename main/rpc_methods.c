@@ -16,10 +16,17 @@
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
+#include "board_config.h"
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "audio.h"
+#endif
 
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+/* statvfs not available in ESP-IDF newlib */
 
 #define BRAMBLE_VERSION_STR      "0.1.0-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.1.0"
@@ -213,7 +220,11 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
         return RPC_ERR_RADIO;
     }
 
-    cJSON_AddStringToObject(result, "message_id", "TODO");
+    /* Generate message ID from incrementing counter (broadcast packets don't return packet_id) */
+    static uint32_t broadcast_msg_counter = 1;
+    char msg_id[12];
+    snprintf(msg_id, sizeof(msg_id), "B%07" PRIu32, broadcast_msg_counter++);
+    cJSON_AddStringToObject(result, "message_id", msg_id);
     cJSON_AddStringToObject(result, "status", "sent");
     return 0;
 }
@@ -653,7 +664,10 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
         }
     }
 
-    /* TODO: add received peer locations once location packets are implemented */
+    /* TODO: add received peer locations — pending peer location protocol integration.
+     * Location component (components/location) exists with cache API, but mesh_task.c
+     * does not yet handle PKT_TYPE_LOCATION packets or maintain a location_manager_t.
+     * Once integrated, use location_cache_get() to retrieve peer positions here. */
     return 0;
 }
 
@@ -794,6 +808,124 @@ static int handle_get_battery(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+/* bramble.setBacklight — control display backlight */
+static int handle_set_backlight(const cJSON *params, cJSON *result) {
+    const bramble_board_config_t *board = board_get_config();
+    if (board->spi_display.backlight < 0) {
+        cJSON_AddStringToObject(result, "error", "no backlight control");
+        return -1;
+    }
+    
+    cJSON *level = cJSON_GetObjectItem(params, "level");
+    if (!level || !cJSON_IsNumber(level)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    
+    int val = level->valueint;
+    if (val <= 0) {
+        gpio_set_level(board->spi_display.backlight, 0);
+    } else {
+        gpio_set_level(board->spi_display.backlight, 1);
+    }
+    /* Note: GPIO-based backlight is on/off only. PWM for dimming is future work. */
+    cJSON_AddNumberToObject(result, "level", val > 0 ? 255 : 0);
+    return 0;
+}
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "gps.h"
+#include "sdcard.h"
+
+/* bramble.getGpsPosition — returns GPS position if available */
+static int handle_get_gps_position(const cJSON *params, cJSON *result) {
+    (void)params;
+    bramble_position_t pos;
+    if (gps_get_position(&pos)) {
+        cJSON_AddNumberToObject(result, "lat", pos.latitude_e7 / 1e7);
+        cJSON_AddNumberToObject(result, "lon", pos.longitude_e7 / 1e7);
+        cJSON_AddNumberToObject(result, "alt", pos.altitude_m);
+        cJSON_AddNumberToObject(result, "speed_kmh", pos.speed_kmh);
+        cJSON_AddNumberToObject(result, "heading_deg", pos.heading_deg2 * 2);
+        cJSON_AddNumberToObject(result, "accuracy_m", pos.accuracy_m);
+        cJSON_AddNumberToObject(result, "timestamp", pos.timestamp);
+        cJSON_AddBoolToObject(result, "valid", true);
+    } else {
+        cJSON_AddBoolToObject(result, "valid", false);
+    }
+    return 0;
+}
+
+/* bramble.getStorageInfo — returns SD card status */
+static int handle_get_storage_info(const cJSON *params, cJSON *result) {
+    (void)params;
+    cJSON_AddBoolToObject(result, "sd_present", sdcard_is_present());
+    if (sdcard_is_present()) {
+        cJSON_AddStringToObject(result, "mount_point", sdcard_get_mount_point());
+        /* Free space reporting: ESP-IDF doesn't expose statvfs, skip for now */
+    }
+    return 0;
+}
+
+/* bramble.playTone — play a predefined alert tone */
+static int handle_play_tone(const cJSON *params, cJSON *result) {
+    (void)result;
+    cJSON *tone = cJSON_GetObjectItem(params, "tone");
+    if (!tone || !cJSON_IsString(tone)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    const char *name = tone->valuestring;
+    audio_tone_t t;
+    
+    if (strcmp(name, "message_rx") == 0) {
+        t = AUDIO_TONE_MESSAGE_RX;
+    } else if (strcmp(name, "message_tx") == 0) {
+        t = AUDIO_TONE_MESSAGE_TX;
+    } else if (strcmp(name, "peer_join") == 0) {
+        t = AUDIO_TONE_PEER_JOIN;
+    } else if (strcmp(name, "peer_leave") == 0) {
+        t = AUDIO_TONE_PEER_LEAVE;
+    } else if (strcmp(name, "error") == 0) {
+        t = AUDIO_TONE_ERROR;
+    } else if (strcmp(name, "boot") == 0) {
+        t = AUDIO_TONE_BOOT;
+    } else if (strcmp(name, "gps_fix") == 0) {
+        t = AUDIO_TONE_GPS_FIX;
+    } else {
+        ESP_LOGW(TAG, "Unknown tone: %s", name);
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    if (audio_play_tone(t) != 0) {
+        ESP_LOGW(TAG, "Failed to play tone");
+        return RPC_ERR_INTERNAL;
+    }
+
+    return 0;
+}
+
+/* bramble.setMuted — mute or unmute audio */
+static int handle_set_muted(const cJSON *params, cJSON *result) {
+    (void)result;
+    cJSON *muted = cJSON_GetObjectItem(params, "muted");
+    if (!muted || !cJSON_IsBool(muted)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    audio_set_muted(cJSON_IsTrue(muted));
+    return 0;
+}
+
+/* bramble.getAudioStatus — get audio mute status */
+static int handle_get_audio_status(const cJSON *params, cJSON *result) {
+    (void)params;
+    cJSON_AddBoolToObject(result, "available", audio_is_available());
+    cJSON_AddBoolToObject(result, "muted", audio_get_muted());
+    cJSON_AddBoolToObject(result, "playing", audio_is_playing());
+    return 0;
+}
+#endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
+
 void rpc_methods_init(bramble_identity_t *identity) {
     s_identity = identity;
 
@@ -826,7 +958,16 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.shareLocationOnce",    handle_share_location_once);
     rpc_register("bramble.otaUpdate",            handle_ota_update);
     rpc_register("bramble.getBattery",           handle_get_battery);
+    rpc_register("bramble.setBacklight",         handle_set_backlight);
     rpc_register("bramble.sleep",               handle_sleep);
 
-    ESP_LOGI(TAG, "RPC methods registered (query: 13, action: 16)");
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+    rpc_register("bramble.getGpsPosition",       handle_get_gps_position);
+    rpc_register("bramble.getStorageInfo",       handle_get_storage_info);
+    rpc_register("bramble.playTone",             handle_play_tone);
+    rpc_register("bramble.setMuted",             handle_set_muted);
+    rpc_register("bramble.getAudioStatus",       handle_get_audio_status);
+#endif
+
+    ESP_LOGI(TAG, "RPC methods registered");
 }

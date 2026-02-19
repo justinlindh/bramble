@@ -88,6 +88,39 @@ static int format_error(cJSON *id, int code, const char *message, char *json_out
     return (int)len;
 }
 
+static int format_error_with_details(cJSON *id, int code, const char *message, const char *details, char *json_out, size_t out_len)
+{
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
+
+    cJSON *err = cJSON_CreateObject();
+    cJSON_AddNumberToObject(err, "code", code);
+    cJSON_AddStringToObject(err, "message", message);
+    if (details && details[0] != '\0') {
+        cJSON_AddStringToObject(err, "details", details);
+    }
+    cJSON_AddItemToObject(resp, "error", err);
+
+    if (id) {
+        cJSON_AddItemToObject(resp, "id", cJSON_Duplicate(id, 1));
+    } else {
+        cJSON_AddNullToObject(resp, "id");
+    }
+
+    char *out = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    if (!out) return -1;
+
+    size_t len = strlen(out);
+    if (len >= out_len) {
+        free(out);
+        return -1;
+    }
+    memcpy(json_out, out, len + 1);
+    free(out);
+    return (int)len;
+}
+
 static const char *error_message_for_code(int code)
 {
     switch (code) {
@@ -183,6 +216,8 @@ int rpc_dispatch(const char *json_in, char *json_out, size_t out_len)
         } else {
             size_t len = strlen(out);
             if (len >= out_len) {
+                ESP_LOGW(TAG, "RPC response truncated for method '%s' (%zu >= %zu)",
+                         method->valuestring, len, out_len);
                 free(out);
                 ret = -1;
             } else {

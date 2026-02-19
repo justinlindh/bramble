@@ -4,15 +4,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* ---------- Heltec WiFi LoRa 32 V3 pin assignments ---------- */
-#define SX1262_PIN_SCK   9
-#define SX1262_PIN_MISO  11
-#define SX1262_PIN_MOSI  10
-#define SX1262_PIN_NSS   8
-#define SX1262_PIN_RST   12
-#define SX1262_PIN_BUSY  13
-#define SX1262_PIN_DIO1  14
-
 /* ---------- SX1262 SPI op-codes ---------- */
 #define SX1262_CMD_SET_SLEEP          0x84
 #define SX1262_CMD_SET_STANDBY        0x80
