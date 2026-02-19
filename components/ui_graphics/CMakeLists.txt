@@ -1,5 +1,5 @@
 if(CONFIG_BRAMBLE_UI_GRAPHICAL)
-    set(SRCS
+    set(ui_gfx_srcs
         "ui_graphics.c"
         "lv_port_display.c"
         "lv_port_touch.c"
@@ -13,15 +13,15 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_stats.c"
         "screens/scr_settings.c"
     )
-
-    idf_component_register(
-        SRCS ${SRCS}
-        INCLUDE_DIRS "include" "."
-        REQUIRES display keyboard trackball board_config touch
-                 channel msg_store identity radio battery
-                 location gps rpc airtime wifi ble ui
-        PRIV_REQUIRES lvgl
-    )
 else()
-    idf_component_register()
+    set(ui_gfx_srcs "")
 endif()
+
+idf_component_register(
+    SRCS ${ui_gfx_srcs}
+    INCLUDE_DIRS "include" "."
+    REQUIRES display keyboard trackball board_config bramble_touch
+             channel msg_store identity radio battery
+             location gps rpc airtime wifi ble ui
+    PRIV_REQUIRES lvgl
+)

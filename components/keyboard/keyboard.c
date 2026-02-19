@@ -167,6 +167,10 @@ bool keyboard_has_data(void) {
     return !buffer_empty();
 }
 
+i2c_master_bus_handle_t keyboard_get_i2c_bus(void) {
+    return bus_handle;
+}
+
 #else  /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* Stub implementations for non-T-Deck boards */

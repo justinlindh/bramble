@@ -8,6 +8,9 @@ int ui_graphics_init(void);
 uint32_t ui_graphics_tick(void);
 void ui_graphics_notify(uint32_t event_mask);
 
+/** Call from 1ms timer — feeds LVGL tick. */
+void ui_graphics_tick_1ms(void);
+
 #define UI_EVT_MSG_RECEIVED     (1 << 0)
 #define UI_EVT_NODE_UPDATE      (1 << 1)
 #define UI_EVT_STATS_UPDATE     (1 << 2)

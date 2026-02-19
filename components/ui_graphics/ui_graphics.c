@@ -39,3 +39,7 @@ uint32_t ui_graphics_tick(void) {
 void ui_graphics_notify(uint32_t event_mask) {
     (void)event_mask;
 }
+
+void ui_graphics_tick_1ms(void) {
+    lv_tick_inc(1);
+}

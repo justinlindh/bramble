@@ -15,6 +15,15 @@
 int keyboard_init(void);
 
 /**
+ * Get the I2C master bus handle (shared with touch, sensors).
+ * Returns NULL if keyboard not initialized.
+ */
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "driver/i2c_master.h"
+i2c_master_bus_handle_t keyboard_get_i2c_bus(void);
+#endif
+
+/**
  * Poll for a keypress.
  * Returns true and writes the ASCII character to *out if a key is available.
  * Returns false if no key is pending.

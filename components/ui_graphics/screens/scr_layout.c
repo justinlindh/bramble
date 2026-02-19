@@ -14,7 +14,7 @@ static bramble_layout_t s_layout;
 static const char *tab_labels[TAB_COUNT] = {
     LV_SYMBOL_ENVELOPE " Chat",
     LV_SYMBOL_WIFI " Nodes",
-    LV_SYMBOL_BAR_CHART " Stats",
+    LV_SYMBOL_BARS " Stats",
     LV_SYMBOL_SETTINGS " Set"
 };
 
@@ -145,6 +145,8 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
         break;
     case TAB_SETTINGS:
         scr_settings_create(layout);
+        break;
+    case TAB_COUNT:
         break;
     }
 }

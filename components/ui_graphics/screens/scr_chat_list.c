@@ -44,7 +44,7 @@ void scr_chat_list_create(bramble_layout_t *layout) {
     lv_obj_set_style_bg_color(compose_btn, BR_COLOR_PRIMARY, 0);
     lv_obj_set_style_radius(compose_btn, BR_RADIUS, 0);
     lv_obj_t *compose_lbl = lv_label_create(compose_btn);
-    lv_label_set_text(compose_lbl, LV_SYMBOL_EDIT " New");
+    lv_label_set_text(compose_lbl, LV_SYMBOL_PLUS " New");
     lv_obj_set_style_text_font(compose_lbl, &lv_font_montserrat_12, 0);
     lv_obj_center(compose_lbl);
     lv_obj_add_event_cb(compose_btn, compose_click_cb, LV_EVENT_CLICKED, layout);

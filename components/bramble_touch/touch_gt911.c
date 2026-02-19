@@ -1,27 +1,23 @@
 #include "touch.h"
 #include "board_config.h"
-#include "driver/i2c.h"
+#include "keyboard.h"
+#include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char *TAG = "gt911";
 
+/* GT911 registers */
 #define GT911_COORD_ADDR    0x814E
 #define GT911_PRODUCT_ID    0x8140
 
-#define GT911_I2C_PORT      I2C_NUM_0
-#define GT911_TIMEOUT_MS    100
-
-static uint8_t gt911_addr = 0;
+static i2c_master_dev_handle_t gt911_dev = NULL;
 static bool initialized = false;
 
 static esp_err_t gt911_read_reg(uint16_t reg, uint8_t *data, size_t len) {
     uint8_t reg_buf[2] = { reg >> 8, reg & 0xFF };
-    esp_err_t ret = i2c_master_write_read_device(
-        GT911_I2C_PORT, gt911_addr, reg_buf, 2, data, len,
-        pdMS_TO_TICKS(GT911_TIMEOUT_MS));
-    return ret;
+    return i2c_master_transmit_receive(gt911_dev, reg_buf, 2, data, len, 100);
 }
 
 static esp_err_t gt911_write_reg(uint16_t reg, uint8_t *data, size_t len) {
@@ -30,9 +26,7 @@ static esp_err_t gt911_write_reg(uint16_t reg, uint8_t *data, size_t len) {
     buf[0] = reg >> 8;
     buf[1] = reg & 0xFF;
     memcpy(buf + 2, data, len);
-    esp_err_t ret = i2c_master_write_to_device(
-        GT911_I2C_PORT, gt911_addr, buf, 2 + len,
-        pdMS_TO_TICKS(GT911_TIMEOUT_MS));
+    esp_err_t ret = i2c_master_transmit(gt911_dev, buf, 2 + len, 100);
     free(buf);
     return ret;
 }
@@ -44,6 +38,14 @@ int touch_init(void) {
         return 0;
     }
 
+    /* Get shared I2C bus from keyboard driver */
+    i2c_master_bus_handle_t bus = keyboard_get_i2c_bus();
+    if (!bus) {
+        ESP_LOGE(TAG, "I2C bus not available (keyboard not initialized?)");
+        return -1;
+    }
+
+    /* Configure interrupt pin */
     if (board->touch.int_pin >= 0) {
         gpio_config_t io_conf = {
             .pin_bit_mask = (1ULL << board->touch.int_pin),
@@ -55,18 +57,32 @@ int touch_init(void) {
         gpio_config(&io_conf);
     }
 
+    /* Try both GT911 addresses */
     uint8_t addrs[] = { board->touch.i2c_addr,
                         board->touch.i2c_addr == 0x14 ? (uint8_t)0x5D : (uint8_t)0x14 };
-    uint8_t product_id[4] = {0};
     
     for (int i = 0; i < 2; i++) {
-        gt911_addr = addrs[i];
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = addrs[i],
+            .scl_speed_hz = 400000,
+        };
+        
+        if (i2c_master_bus_add_device(bus, &dev_cfg, &gt911_dev) != ESP_OK) {
+            continue;
+        }
+        
+        uint8_t product_id[4] = {0};
         if (gt911_read_reg(GT911_PRODUCT_ID, product_id, 4) == ESP_OK) {
             ESP_LOGI(TAG, "GT911 found at 0x%02X, product: %.4s",
-                     gt911_addr, product_id);
+                     addrs[i], product_id);
             initialized = true;
             return 0;
         }
+        
+        /* Remove device if probe failed, try next address */
+        i2c_master_bus_rm_device(gt911_dev);
+        gt911_dev = NULL;
     }
 
     ESP_LOGW(TAG, "GT911 not found at 0x%02X or 0x%02X", addrs[0], addrs[1]);
