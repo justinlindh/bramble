@@ -88,6 +88,7 @@ uint32_t mesh_send_probe(void);
 /**
  * Enable/disable mailbox (store-and-forward for offline neighbors).
  */
+void mesh_set_node_name(const char *name);
 void mesh_set_mailbox(bool enabled);
 bool mesh_get_mailbox(void);
 

@@ -337,6 +337,9 @@ static int handle_set_node_name(const cJSON *params, cJSON *result) {
         return RPC_ERR_INTERNAL;
     }
 
+    /* Update runtime name so beacons immediately reflect the change */
+    mesh_set_node_name(name);
+
     ESP_LOGI(TAG, "Node name set to: %s", name);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "name", name);
