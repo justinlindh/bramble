@@ -64,4 +64,17 @@ void display_set_contrast(uint8_t val);
 /** Invert display colors. */
 void display_invert(bool invert);
 
+/**
+ * Flush a rectangular area of pixels to the display.
+ * buf contains RGB565 pixels in row-major order.
+ * Used by LVGL display driver.
+ */
+void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf);
+
+/**
+ * Get display dimensions (for runtime queries).
+ */
+int display_get_width(void);
+int display_get_height(void);
+
 #endif
