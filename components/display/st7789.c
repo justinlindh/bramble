@@ -242,9 +242,38 @@ int display_init(void) {
     /* Run init sequence */
     st7789_init_sequence();
 
+    /* Directly clear GRAM before using framebuffer.
+     * This ensures no residual noise from previous firmware. */
+    {
+        st7789_write_cmd(ST7789_CASET);
+        uint8_t c[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
+        st7789_write_data(c, 4);
+        st7789_write_cmd(ST7789_RASET);
+        uint8_t r[] = {0x00, 0x00, ((DISPLAY_HEIGHT - 1) >> 8) & 0xFF, (DISPLAY_HEIGHT - 1) & 0xFF};
+        st7789_write_data(r, 4);
+        st7789_write_cmd(ST7789_RAMWR);
+        st7789_dc_data();
+
+        /* Send 320×240×2 = 153600 bytes of zeros in small chunks */
+        uint8_t zero_buf[512];
+        memset(zero_buf, 0, sizeof(zero_buf));
+        size_t total = DISPLAY_WIDTH * DISPLAY_HEIGHT * 2;
+        spi_device_acquire_bus(spi, portMAX_DELAY);
+        for (size_t sent = 0; sent < total; sent += sizeof(zero_buf)) {
+            size_t chunk = (total - sent > sizeof(zero_buf)) ? sizeof(zero_buf) : (total - sent);
+            spi_transaction_t t = {
+                .length = chunk * 8,
+                .tx_buffer = zero_buf,
+            };
+            spi_device_polling_transmit(spi, &t);
+        }
+        spi_device_release_bus(spi);
+        ESP_LOGI(TAG, "GRAM cleared (%zu bytes)", total);
+    }
+
     initialized = true;
     
-    /* Clear screen on init */
+    /* Flush framebuffer to confirm display works */
     display_flush();
     
     ESP_LOGI(TAG, "ST7789 display initialized (320×240, RGB565 framebuffer in PSRAM)");
@@ -341,32 +370,44 @@ void display_draw_text_large(int x, int y, const char *text) {
 void display_flush(void) {
     if (!fb || !initialized) return;
 
-    /* Set window to full screen.
-     * With MADCTL MV bit set (landscape), the controller swaps column/row
-     * addressing internally. CASET addresses the physical short dimension (240)
-     * and RASET addresses the physical long dimension (320). */
+    /* Set window to full screen (logical coordinates, MADCTL handles rotation) */
     st7789_write_cmd(ST7789_CASET);
-    uint8_t caset[] = {0x00, 0x00, ((DISPLAY_HEIGHT - 1) >> 8) & 0xFF, (DISPLAY_HEIGHT - 1) & 0xFF};
+    uint8_t caset[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
     st7789_write_data(caset, 4);
 
     st7789_write_cmd(ST7789_RASET);
-    uint8_t raset[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
+    uint8_t raset[] = {0x00, 0x00, ((DISPLAY_HEIGHT - 1) >> 8) & 0xFF, (DISPLAY_HEIGHT - 1) & 0xFF};
     st7789_write_data(raset, 4);
 
     st7789_write_cmd(ST7789_RAMWR);
 
-    /* Send framebuffer in 16-row chunks to avoid DMA size limits */
+    /* Send framebuffer in small chunks via a stack-allocated DMA-safe buffer.
+     * PSRAM is not DMA-accessible on ESP32-S3 — must copy to internal RAM first.
+     * Use stack variable (not static) to guarantee internal RAM placement,
+     * since CONFIG_SPIRAM_USE_MALLOC can place statics in PSRAM. */
     st7789_dc_data();
-    const int rows_per_chunk = 16;
-    const size_t chunk_size = DISPLAY_WIDTH * rows_per_chunk * 2;  /* bytes */
+    uint8_t dma_buf[512];  /* Stack-allocated, guaranteed internal SRAM */
 
-    for (int row = 0; row < DISPLAY_HEIGHT; row += rows_per_chunk) {
+    spi_device_acquire_bus(spi, portMAX_DELAY);
+
+    const uint8_t *src = (const uint8_t *)fb;
+    size_t total = DISPLAY_WIDTH * DISPLAY_HEIGHT * 2;
+
+    for (size_t sent = 0; sent < total; sent += sizeof(dma_buf)) {
+        size_t chunk = (total - sent > sizeof(dma_buf)) ? sizeof(dma_buf) : (total - sent);
+        memcpy(dma_buf, src + sent, chunk);
         spi_transaction_t t = {
-            .length = chunk_size * 8,
-            .tx_buffer = &fb[row * DISPLAY_WIDTH],
+            .length = chunk * 8,
+            .tx_buffer = dma_buf,
         };
-        spi_device_polling_transmit(spi, &t);
+        esp_err_t ret = spi_device_polling_transmit(spi, &t);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI flush error at offset %zu: %s", sent, esp_err_to_name(ret));
+            break;
+        }
     }
+
+    spi_device_release_bus(spi);
 }
 
 void display_power(bool on) {

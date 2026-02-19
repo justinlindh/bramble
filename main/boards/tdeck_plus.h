@@ -18,9 +18,9 @@ static const bramble_board_config_t board_tdeck_plus = {
     .spi_max_transfer_sz = 320 * 240 * 2,  /* Full framebuffer DMA */
 
     .radio = { .cs = 9, .rst = 17, .busy = 13, .dio1 = 45 },
-    .radio_osc = RADIO_OSC_CRYSTAL,
-    .radio_tcxo_voltage = 0.0f,
-    .radio_reg = RADIO_REG_LDO,
+    .radio_osc = RADIO_OSC_TCXO_DIO3,
+    .radio_tcxo_voltage = 1.8f,
+    .radio_reg = RADIO_REG_DCDC,
 
     .display_width = 320,
     .display_height = 240,
