@@ -398,3 +398,15 @@ target_include_directories(test_rpc_dispatcher PRIVATE
 target_compile_definitions(test_rpc_dispatcher PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=16
 )
+
+# NMEA parser tests (pure C, no ESP-IDF deps)
+add_executable(test_nmea_parser
+    test_nmea_parser.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+)
+target_include_directories(test_nmea_parser PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+)
+target_link_libraries(test_nmea_parser m)
