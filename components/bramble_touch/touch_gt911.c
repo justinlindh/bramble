@@ -116,6 +116,11 @@ bool touch_read(touch_point_t *point) {
     point->y = (data[3] << 8) | data[2];
     point->pressed = true;
 
+    static uint32_t touch_log_count = 0;
+    if (++touch_log_count <= 10) {
+        ESP_LOGI(TAG, "Touch: x=%d y=%d", point->x, point->y);
+    }
+
     uint8_t zero = 0;
     gt911_write_reg(GT911_COORD_ADDR, &zero, 1);
 
