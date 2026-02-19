@@ -794,6 +794,40 @@ static int handle_get_battery(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "gps.h"
+#include "sdcard.h"
+
+/* bramble.getGpsPosition — returns GPS position if available */
+static int handle_get_gps_position(const cJSON *params, cJSON *result) {
+    (void)params;
+    bramble_position_t pos;
+    if (gps_get_position(&pos)) {
+        cJSON_AddNumberToObject(result, "lat", pos.latitude_e7 / 1e7);
+        cJSON_AddNumberToObject(result, "lon", pos.longitude_e7 / 1e7);
+        cJSON_AddNumberToObject(result, "alt", pos.altitude_m);
+        cJSON_AddNumberToObject(result, "speed_kmh", pos.speed_kmh);
+        cJSON_AddNumberToObject(result, "heading_deg", pos.heading_deg2 * 2);
+        cJSON_AddNumberToObject(result, "accuracy_m", pos.accuracy_m);
+        cJSON_AddNumberToObject(result, "timestamp", pos.timestamp);
+        cJSON_AddBoolToObject(result, "valid", true);
+    } else {
+        cJSON_AddBoolToObject(result, "valid", false);
+    }
+    return 0;
+}
+
+/* bramble.getStorageInfo — returns SD card status */
+static int handle_get_storage_info(const cJSON *params, cJSON *result) {
+    (void)params;
+    cJSON_AddBoolToObject(result, "sd_present", sdcard_is_present());
+    if (sdcard_is_present()) {
+        cJSON_AddStringToObject(result, "mount_point", sdcard_get_mount_point());
+    }
+    return 0;
+}
+#endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
+
 void rpc_methods_init(bramble_identity_t *identity) {
     s_identity = identity;
 
@@ -827,6 +861,11 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.otaUpdate",            handle_ota_update);
     rpc_register("bramble.getBattery",           handle_get_battery);
     rpc_register("bramble.sleep",               handle_sleep);
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+    rpc_register("bramble.getGpsPosition",       handle_get_gps_position);
+    rpc_register("bramble.getStorageInfo",       handle_get_storage_info);
+#endif
 
     ESP_LOGI(TAG, "RPC methods registered (query: 13, action: 16)");
 }

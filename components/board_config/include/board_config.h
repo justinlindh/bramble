@@ -86,6 +86,13 @@ typedef struct {
     int center;
 } board_trackball_pins_t;
 
+/* GPS UART config */
+typedef struct {
+    int tx;
+    int rx;
+    int baud;
+} board_gps_config_t;
+
 /* Full board configuration */
 typedef struct {
     const char *name;           /* Human-readable name */
@@ -129,6 +136,12 @@ typedef struct {
 
     /* Trackball */
     board_trackball_pins_t trackball;
+
+    /* GPS */
+    board_gps_config_t gps;
+
+    /* SD card CS pin */
+    int sdcard_cs;
 } bramble_board_config_t;
 
 /**

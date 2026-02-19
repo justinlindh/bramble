@@ -36,6 +36,10 @@ static const bramble_board_config_t board_tdeck_plus = {
     .keyboard_int = 46,
 
     .trackball = { .up = 3, .down = 2, .left = 15, .right = 1, .center = 0 },
+
+    .gps = { .tx = 43, .rx = 44, .baud = 9600 },
+
+    .sdcard_cs = 39,
 };
 
 #endif /* BOARD_TDECK_PLUS_H */
