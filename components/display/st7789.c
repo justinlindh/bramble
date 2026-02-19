@@ -100,13 +100,16 @@ static void st7789_init_sequence(void) {
     st7789_write_cmd(ST7789_SLPOUT);
     vTaskDelay(pdMS_TO_TICKS(150));
 
+    /* Normal display mode on */
+    st7789_write_cmd(0x13);  // NORON
+
     /* Pixel format: 16-bit RGB565 */
     st7789_write_cmd(ST7789_COLMOD);
     st7789_write_byte(0x55);
 
     /* Memory access control: landscape, RGB, left-to-right for 320×240 */
     st7789_write_cmd(ST7789_MADCTL);
-    st7789_write_byte(0x60);
+    st7789_write_byte(0x68);
 
     /* Porch control */
     st7789_write_cmd(ST7789_PORCTRL);
@@ -115,11 +118,11 @@ static void st7789_init_sequence(void) {
 
     /* Gate control */
     st7789_write_cmd(ST7789_GCTRL);
-    st7789_write_byte(0x35);
+    st7789_write_byte(0x75);
 
     /* VCOM setting */
     st7789_write_cmd(ST7789_VCOMS);
-    st7789_write_byte(0x19);
+    st7789_write_byte(0x1A);
 
     /* LCM control */
     st7789_write_cmd(ST7789_LCMCTRL);
@@ -131,7 +134,7 @@ static void st7789_init_sequence(void) {
 
     /* VRH set */
     st7789_write_cmd(ST7789_VRH);
-    st7789_write_byte(0x12);
+    st7789_write_byte(0x13);
 
     /* VDV set */
     st7789_write_cmd(ST7789_VDV);
@@ -149,25 +152,35 @@ static void st7789_init_sequence(void) {
     /* Positive gamma correction */
     st7789_write_cmd(ST7789_PVGAMCTRL);
     uint8_t gamma_pos[] = {
-        0xD0, 0x08, 0x11, 0x08, 0x0C, 0x15, 0x39, 0x33,
-        0x50, 0x36, 0x13, 0x14, 0x29, 0x2D
+        0xD0, 0x0D, 0x14, 0x0D, 0x0D, 0x09, 0x38, 0x44,
+        0x4E, 0x3A, 0x17, 0x18, 0x2F, 0x30
     };
     st7789_write_data(gamma_pos, 14);
 
     /* Negative gamma correction */
     st7789_write_cmd(ST7789_NVGAMCTRL);
     uint8_t gamma_neg[] = {
-        0xD0, 0x08, 0x10, 0x08, 0x06, 0x06, 0x39, 0x44,
-        0x51, 0x0B, 0x16, 0x14, 0x2F, 0x31
+        0xD0, 0x09, 0x0F, 0x08, 0x07, 0x14, 0x37, 0x44,
+        0x4D, 0x38, 0x15, 0x16, 0x2C, 0x3E
     };
     st7789_write_data(gamma_neg, 14);
 
     /* Invert on */
     st7789_write_cmd(ST7789_INVON);
 
+    /* Set initial window (portrait orientation) */
+    st7789_write_cmd(ST7789_CASET);
+    uint8_t init_caset[] = {0x00, 0x00, 0x00, 0xEF};  // 0-239 (portrait column)
+    st7789_write_data(init_caset, 4);
+
+    st7789_write_cmd(ST7789_RASET);
+    uint8_t init_raset[] = {0x00, 0x00, 0x01, 0x3F};  // 0-319 (portrait row)
+    st7789_write_data(init_raset, 4);
+
     /* Display on */
+    vTaskDelay(pdMS_TO_TICKS(120));
     st7789_write_cmd(ST7789_DISPON);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(120));
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -226,6 +239,10 @@ int display_init(void) {
     st7789_init_sequence();
 
     initialized = true;
+    
+    /* Clear screen on init */
+    display_flush();
+    
     ESP_LOGI(TAG, "ST7789 display initialized (320×240, RGB565 framebuffer in PSRAM)");
     return 0;
 }
@@ -322,11 +339,11 @@ void display_flush(void) {
 
     /* Set window to full screen */
     st7789_write_cmd(ST7789_CASET);
-    uint8_t caset[] = {0x00, 0x00, (DISPLAY_WIDTH >> 8) & 0xFF, DISPLAY_WIDTH & 0xFF};
+    uint8_t caset[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
     st7789_write_data(caset, 4);
 
     st7789_write_cmd(ST7789_RASET);
-    uint8_t raset[] = {0x00, 0x00, (DISPLAY_HEIGHT >> 8) & 0xFF, DISPLAY_HEIGHT & 0xFF};
+    uint8_t raset[] = {0x00, 0x00, ((DISPLAY_HEIGHT - 1) >> 8) & 0xFF, (DISPLAY_HEIGHT - 1) & 0xFF};
     st7789_write_data(raset, 4);
 
     st7789_write_cmd(ST7789_RAMWR);
