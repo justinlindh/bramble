@@ -206,7 +206,7 @@ static int send_beacon(void) {
     /* HMAC auth — covers ALL beacon fields (excluding auth_hmac itself) */
     /* Serialize beacon to get canonical byte representation, then HMAC everything
      * up to but not including the auth_hmac field at the end */
-    uint8_t hmac_input[BEACON_SIZE];
+    uint8_t hmac_input[BEACON_SIZE + 1 + BEACON_NAME_MAX];
     bramble_beacon_serialize(&beacon, hmac_input, sizeof(hmac_input));
     /* HMAC over header(12) + payload(20) = 32 bytes, excludes auth_hmac[12] at end */
     size_t hmac_len = BEACON_SIZE - sizeof(beacon.auth_hmac);
@@ -1399,6 +1399,16 @@ int mesh_remove_channel(int index) {
 
 int mesh_get_channel_count(void) {
     return s_num_channels;
+}
+
+void mesh_set_node_name(const char *name) {
+    if (name && strlen(name) < sizeof(s_node_name)) {
+        strncpy(s_node_name, name, sizeof(s_node_name) - 1);
+        s_node_name[sizeof(s_node_name) - 1] = '\0';
+    } else {
+        s_node_name[0] = '\0';
+    }
+    ESP_LOGI(TAG, "Node name updated: %s", s_node_name[0] ? s_node_name : "(none)");
 }
 
 void mesh_set_mailbox(bool enabled) {
