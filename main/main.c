@@ -482,10 +482,17 @@ void app_main(void)
     if (display_init() != 0) {
         ESP_LOGE(TAG, "Display init failed!");
     } else {
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+        /* LVGL will handle its own rendering — just clear the display */
+        ESP_LOGI(TAG, "=== BOOT STAGE: clear display for LVGL ===");
+        display_clear();
+        display_flush();
+#else
         ESP_LOGI(TAG, "=== BOOT STAGE: show_splash ===");
         show_splash();
         ESP_LOGI(TAG, "Splash screen displayed — waiting 2 s");
         vTaskDelay(pdMS_TO_TICKS(2000)); /* Show splash for 2 seconds */
+#endif
     }
 
     /* Init button */
