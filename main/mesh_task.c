@@ -722,7 +722,7 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 /* ── Mailbox helpers ─────────────────────────────────────────────────── */
 
 static bool mailbox_store(uint32_t dest_addr, const uint8_t *raw, uint8_t raw_len) {
-    if (!s_mailbox_enabled || raw_len > 255) return false;
+    if (!s_mailbox_enabled) return false;
 
     /* Find free slot (or oldest) */
     int slot = -1;
@@ -787,7 +787,6 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
 
     /* Rebuild header with decremented hop limit */
     uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
-    if (len > sizeof(buf)) return;
     memcpy(buf, data, len);
 
     bramble_header_t fwd_hdr = *header;
