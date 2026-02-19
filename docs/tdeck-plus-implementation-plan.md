@@ -184,7 +184,7 @@ Create a board-specific header with all pin definitions and initialization:
 #define BOARD_I2C_SDA        18
 #define BOARD_I2C_SCL         8
 #define BOARD_KEYBOARD_INT   46
-#define BOARD_TOUCH_INT      16  /* unused on T-Deck Plus — no touch */
+#define BOARD_TOUCH_INT      16  /* GT911 capacitive touch interrupt */
 
 /* Trackball (Hall Effect) */
 #define BOARD_TBOX_G01        3   /* up    */
