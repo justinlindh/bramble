@@ -150,12 +150,13 @@ static int handle_get_airtime(const cJSON *params, cJSON *result) {
     /* Refill before reporting so values are current */
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     airtime_budget_refill(&st.airtime, now_ms);
-    cJSON_AddNumberToObject(result, "critical_remaining_ms", airtime_budget_remaining(&st.airtime, 0x02));
-    cJSON_AddNumberToObject(result, "normal_remaining_ms", airtime_budget_remaining(&st.airtime, 0x01));
-    cJSON_AddNumberToObject(result, "broadcast_remaining_ms", airtime_budget_remaining(&st.airtime, 0x03));
+    cJSON_AddNumberToObject(result, "critical_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_CRITICAL));
+    cJSON_AddNumberToObject(result, "normal_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_NORMAL));
+    cJSON_AddNumberToObject(result, "broadcast_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_BROADCAST));
     cJSON_AddNumberToObject(result, "critical_max_ms", AIRTIME_BUDGET_CRITICAL_MS);
     cJSON_AddNumberToObject(result, "normal_max_ms", AIRTIME_BUDGET_NORMAL_MS);
     cJSON_AddNumberToObject(result, "broadcast_max_ms", AIRTIME_BUDGET_BROADCAST_MS);
+    cJSON_AddNumberToObject(result, "next_refill_ms", airtime_budget_next_refill_ms(&st.airtime, now_ms));
     return 0;
 }
 
