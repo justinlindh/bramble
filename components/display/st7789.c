@@ -428,3 +428,28 @@ void display_invert(bool invert) {
     if (!initialized) return;
     st7789_write_cmd(invert ? 0x21 : 0x20);  /* INVON / INVOFF */
 }
+
+void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
+    if (!initialized || !buf) return;
+    
+    int w = x2 - x1 + 1;
+    int h = y2 - y1 + 1;
+    if (w <= 0 || h <= 0) return;
+    
+    /* Set column address */
+    st7789_write_cmd(0x2A);  /* CASET */
+    uint8_t ca[4] = { x1 >> 8, x1 & 0xFF, x2 >> 8, x2 & 0xFF };
+    st7789_write_data(ca, 4);
+    
+    /* Set row address */
+    st7789_write_cmd(0x2B);  /* RASET */
+    uint8_t ra[4] = { y1 >> 8, y1 & 0xFF, y2 >> 8, y2 & 0xFF };
+    st7789_write_data(ra, 4);
+    
+    /* Write pixels */
+    st7789_write_cmd(0x2C);  /* RAMWR */
+    st7789_write_data((const uint8_t *)buf, w * h * 2);
+}
+
+int display_get_width(void) { return DISPLAY_WIDTH; }
+int display_get_height(void) { return DISPLAY_HEIGHT; }

@@ -1,6 +1,7 @@
 if(CONFIG_BRAMBLE_UI_GRAPHICAL)
     set(SRCS
         "ui_graphics.c"
+        "lv_port_display.c"
     )
 
     idf_component_register(
