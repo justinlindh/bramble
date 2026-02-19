@@ -1586,7 +1586,7 @@ git push origin master v0.2.0
 
 ## Phase 7: WiFi WebSocket Transport
 
-### Task 7.1: Firmware WiFi station mode
+### Task 7.1: Firmware WiFi station mode ✅
 
 **Files:**
 - Create: `components/wifi/` (or `main/wifi_task.c`)
@@ -1614,7 +1614,7 @@ git commit -m "feat(wifi): WiFi station mode with AP fallback"
 
 ---
 
-### Task 7.2: Firmware WebSocket server
+### Task 7.2: Firmware WebSocket server ✅
 
 **Files:**
 - Create: `main/ws_server.c`
@@ -1645,7 +1645,7 @@ git commit -m "feat: WebSocket server for JSON-RPC over WiFi"
 
 ---
 
-### Task 7.3: SDK WebSocket transport + CLI flag
+### Task 7.3: SDK WebSocket transport + CLI flag ✅
 
 **Files:**
 - Modify: `bramble-go/transport/websocket.go` (if not already complete)
@@ -1680,7 +1680,7 @@ git tag v0.3.0
 
 ---
 
-### Task 7.4: mDNS discovery
+### Task 7.4: mDNS discovery ✅
 
 **Files:**
 - Firmware: `main/main.c` (add mDNS service advertisement)
@@ -1703,7 +1703,7 @@ bramble discover
 
 ## Phase 8: Polish + Docs
 
-### Task 8.1: Auto-reconnect in transports
+### Task 8.1: Auto-reconnect in transports ✅
 
 **Files:**
 - Modify: `bramble-go/transport/serial.go`
@@ -1719,7 +1719,7 @@ Implement exponential backoff reconnect. On disconnect, attempt reconnect: 1s, 2
 
 ---
 
-### Task 8.2: Shell completion
+### Task 8.2: Shell completion ✅
 
 **Files:**
 - Modify: `bramble-cli/cmd/bramble/main.go`
@@ -1738,7 +1738,7 @@ bramble completion fish > ~/.config/fish/completions/bramble.fish
 
 ---
 
-### Task 8.3: README + examples for each repo
+### Task 8.3: README + examples for each repo ✅
 
 **Files:**
 - Modify: `bramble/README.md` — add API spec section, link to VERSIONING.md
@@ -1753,7 +1753,7 @@ bramble completion fish > ~/.config/fish/completions/bramble.fish
 
 ---
 
-### Task 8.4: Final tags
+### Task 8.4: Final tags ⏳ (ready when you want to cut a release)
 
 ```bash
 # bramble firmware
