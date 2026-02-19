@@ -273,8 +273,11 @@ int display_init(void) {
 
     initialized = true;
     
-    /* Flush framebuffer to confirm display works */
+    /* Flush black framebuffer to clear screen */
     display_flush();
+    
+    ESP_LOGI(TAG, "ST7789 initialized: %dx%d, FB=%d bytes",
+             DISPLAY_WIDTH, DISPLAY_HEIGHT, FB_SIZE);
     
     ESP_LOGI(TAG, "ST7789 display initialized (320×240, RGB565 framebuffer in PSRAM)");
     return 0;
