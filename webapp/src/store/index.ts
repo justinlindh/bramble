@@ -14,6 +14,7 @@ import type {
   ProbeResult,
   PeerLocation,
 } from '../types/bramble';
+import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
 function formatAddr(id: string, peerNames?: Map<number, string>): string {
   if (id === 'broadcast') return '📢 Broadcast';
@@ -25,6 +26,18 @@ function formatAddr(id: string, peerNames?: Map<number, string>): string {
     return `0x${addr.toString(16).toUpperCase()}`;
   }
   return id;
+}
+
+function persistUnreads(conversations: Map<string, any>, config: BrambleConfig | null): void {
+  if (!config?.identity?.address) return;
+  const nodeAddr = config.identity.address.toString(16).toUpperCase().padStart(8, '0');
+  const counts: Record<string, number> = {};
+  for (const [id, conv] of conversations) {
+    if (conv.unreadCount > 0) {
+      counts[id] = conv.unreadCount;
+    }
+  }
+  saveUnreadCounts(nodeAddr, counts);
 }
 
 interface Actions {
@@ -138,6 +151,9 @@ export const useStore = create<AppState & Actions>((set) => ({
           (msg.direction === 'incoming' ? 1 : 0),
       });
 
+      // Persist unread counts to localStorage
+      persistUnreads(convs, state.config);
+
       return { messages: msgs, conversations: convs };
     }),
 
@@ -176,6 +192,10 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   loadCachedMessages: (msgs: Message[]) =>
     set(state => {
+      // Load persisted unread counts from localStorage
+      const nodeAddr = state.config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0');
+      const savedUnreads = loadUnreadCounts(nodeAddr);
+
       // Rebuild conversations from cached messages
       const convs = new Map(state.conversations);
       for (const msg of msgs) {
@@ -201,7 +221,7 @@ export const useStore = create<AppState & Actions>((set) => ({
             channelIndex: msg.channelIndex,
             lastMessage: msg.text.slice(0, 60),
             lastMessageTime: msg.timestampMs,
-            unreadCount: prev?.unreadCount ?? 0,
+            unreadCount: savedUnreads[convId] ?? 0,
           });
         }
       }
@@ -213,6 +233,10 @@ export const useStore = create<AppState & Actions>((set) => ({
       const convs = new Map(state.conversations);
       const conv = convs.get(id);
       if (conv) convs.set(id, { ...conv, unreadCount: 0 });
+      
+      // Persist unread counts to localStorage
+      persistUnreads(convs, state.config);
+      
       return { activeConversationId: id, conversations: convs };
     }),
 }));
