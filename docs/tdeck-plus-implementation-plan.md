@@ -2,8 +2,18 @@
 
 **Author:** Agent (subagent task)  
 **Date:** 2026-02-18  
-**Status:** Ready for implementation  
+**Status:** Phase 1 COMPLETE — merged to master 2026-02-19  
 **Estimated effort:** 8–12 days (full support), ~3–4 days (radio + basic UI minimum viable)
+
+### Phase 1 Completion Summary (2026-02-19)
+All core hardware support implemented and working: board HAL, radio (SX1262 w/ TCXO), ST7789 display (320×240 fullscreen), keyboard, trackball, GPS, SD card, audio, resolution-aware UI, RPC extensions. 15 commits on `feature/tdeck-plus-support`, merged to master.
+
+### Remaining for Phase 2 (Future)
+- Rich graphical UI overhaul (the display can handle much more than text — 320×240 IPS is capable of full GUI)
+- Font scaling — current text is quite small on the 320×240 display, needs larger fonts
+- Battery monitoring (section 10)
+- Power management / deep sleep
+- Touch/trackball gesture refinement
 
 ---
 
