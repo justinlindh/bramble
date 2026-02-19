@@ -1,4 +1,5 @@
 #include "scr_layout.h"
+#include "scr_chat_list.h"
 #include "theme/bramble_theme.h"
 #include "battery.h"
 #include "esp_log.h"
@@ -129,13 +130,20 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
     lv_obj_clean(layout->content_area);
     layout->active_tab = tab;
     
-    /* Screen content creation will be added in Phase 3 tasks */
-    /* For now, show a placeholder label */
-    static const char *tab_names[] = {"Chat", "Nodes", "Stats", "Settings"};
-    lv_obj_t *placeholder = lv_label_create(layout->content_area);
-    lv_label_set_text_fmt(placeholder, "%s Screen", tab_names[tab]);
-    lv_obj_set_style_text_color(placeholder, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_center(placeholder);
+    switch (tab) {
+    case TAB_CHAT:
+        scr_chat_list_create(layout);
+        break;
+    default: {
+        /* Placeholder for unimplemented screens */
+        static const char *tab_names[] = {"Chat", "Nodes", "Stats", "Settings"};
+        lv_obj_t *placeholder = lv_label_create(layout->content_area);
+        lv_label_set_text_fmt(placeholder, "%s Screen", tab_names[tab]);
+        lv_obj_set_style_text_color(placeholder, BR_COLOR_TEXT_SEC, 0);
+        lv_obj_center(placeholder);
+        break;
+    }
+    }
 }
 
 void layout_update_status(bramble_layout_t *layout) {
