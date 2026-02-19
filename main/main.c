@@ -30,6 +30,7 @@
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "gps.h"
 #include "sdcard.h"
+#include "audio.h"
 #endif
 
 static const char *TAG = "bramble";
@@ -342,10 +343,10 @@ static void render_screen(ui_state_t *ui) {
         int chars_per_row = CHARS_PER_LINE - 1;  /* leave margin */
         
         /* Word-wrap compose buffer */
-        for (int i = 0; i < ui.compose_len && y < FOOTER_Y - LINE_H; ) {
+        for (int i = 0; i < ui->compose_len && y < FOOTER_Y - LINE_H; ) {
             char row[64];
-            int row_len = (ui.compose_len - i > chars_per_row) ? chars_per_row : ui.compose_len - i;
-            memcpy(row, ui.compose_buf + i, row_len);
+            int row_len = (ui->compose_len - i > chars_per_row) ? chars_per_row : ui->compose_len - i;
+            memcpy(row, ui->compose_buf + i, row_len);
             row[row_len] = '\0';
             display_draw_text(2, y, row);
             i += row_len;
@@ -353,8 +354,8 @@ static void render_screen(ui_state_t *ui) {
         }
         
         /* Cursor (blinking underscore after text) */
-        int cursor_x = 2 + (ui.compose_len % chars_per_row) * FONT_W;
-        int cursor_y = CONTENT_Y + (ui.compose_len / chars_per_row) * LINE_H;
+        int cursor_x = 2 + (ui->compose_len % chars_per_row) * FONT_W;
+        int cursor_y = CONTENT_Y + (ui->compose_len / chars_per_row) * LINE_H;
         if (cursor_y < FOOTER_Y - LINE_H) {
             display_draw_text(cursor_x, cursor_y, "_");
         }
@@ -500,6 +501,17 @@ void app_main(void)
         ESP_LOGI(TAG, "SD card mounted at %s", sdcard_get_mount_point());
     } else {
         ESP_LOGW(TAG, "SD card init failed or not present");
+    }
+
+    /* Init audio (T-Deck Plus only) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: audio_init ===");
+    if (board_has_cap(BOARD_CAP_AUDIO)) {
+        if (audio_init() == 0) {
+            ESP_LOGI(TAG, "Audio initialized");
+            audio_play_tone(AUDIO_TONE_BOOT);
+        } else {
+            ESP_LOGW(TAG, "Audio init failed");
+        }
     }
 #endif
 

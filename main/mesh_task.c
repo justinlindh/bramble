@@ -31,6 +31,10 @@
 #include <string.h>
 #include <inttypes.h>
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "audio.h"
+#endif
+
 static const char *TAG = "mesh";
 
 /* ── Configuration ──────────────────────────────────────────────────── */
@@ -272,10 +276,14 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         return;
     }
 
-    /* Update neighbor table */
+    /* Update neighbor table — track if this is a new neighbor */
     uint32_t t = now_ms();
+    int old_count = neighbor_count(&s_neighbors);
     int idx = neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr,
                               beacon.pubkey_hash, t);
+    int new_count = neighbor_count(&s_neighbors);
+    bool is_new_peer = (new_count > old_count);
+    
     /* Store peer name if present */
     if (idx >= 0 && beacon.name_len > 0) {
         memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
@@ -292,8 +300,16 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     xSemaphoreGive(s_state_mutex);
 
     if (idx >= 0) {
-        ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)",
-                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors));
+        ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)%s",
+                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors),
+                 is_new_peer ? " [NEW]" : "");
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        /* Play peer join tone for new neighbors */
+        if (is_new_peer && audio_is_available()) {
+            audio_play_tone(AUDIO_TONE_PEER_JOIN);
+        }
+#endif
 
         /* Mailbox: flush any stored messages for this newly-seen neighbor */
         if (s_mailbox_enabled) {
@@ -493,6 +509,13 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
         msg_store_add(info.src_addr, dir, text, tlen, rssi, snr);
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        /* Play message received tone */
+        if (audio_is_available()) {
+            audio_play_tone(AUDIO_TONE_MESSAGE_RX);
+        }
+#endif
 
         /* Emit onMessage notification via RPC */
         {
