@@ -1,5 +1,6 @@
 #include "scr_layout.h"
 #include "scr_chat_list.h"
+#include "scr_nodes.h"
 #include "theme/bramble_theme.h"
 #include "battery.h"
 #include "esp_log.h"
@@ -133,6 +134,9 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
     switch (tab) {
     case TAB_CHAT:
         scr_chat_list_create(layout);
+        break;
+    case TAB_NODES:
+        scr_nodes_create(layout);
         break;
     default: {
         /* Placeholder for unimplemented screens */
