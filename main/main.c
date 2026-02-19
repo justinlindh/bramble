@@ -23,6 +23,8 @@
 #include "esp_system.h"
 #include "battery.h"
 #include "board_config.h"
+#include "keyboard.h"
+#include "trackball.h"
 
 static const char *TAG = "bramble";
 
@@ -342,6 +344,14 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: button_init ===");
     button_init();
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+    /* Init keyboard and trackball (T-Deck Plus only) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: keyboard_init ===");
+    keyboard_init();
+    ESP_LOGI(TAG, "=== BOOT STAGE: trackball_init ===");
+    trackball_init();
+#endif
+
     ESP_LOGI(TAG, "=== BOOT STAGE: battery_init ===");
     battery_init();
     ESP_LOGI(TAG, "Battery: %" PRIu32 " mV (%u%%)", battery_read_mv(), battery_read_pct());
@@ -425,8 +435,14 @@ void app_main(void)
     while (1) {
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-        /* Poll button */
-        ui_button_t btn = button_poll(now_ms);
+        /* Poll button / trackball */
+        ui_button_t btn = BTN_NONE;
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        btn = trackball_poll();
+        /* keyboard_poll handled separately for text input later */
+#else
+        btn = button_poll(now_ms);
+#endif
         if (btn != BTN_NONE) {
             ESP_LOGI(TAG, "Button event: %d", btn);
             ui_handle_button(&ui, btn, now_ms);

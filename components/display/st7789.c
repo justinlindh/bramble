@@ -1,0 +1,362 @@
+/**
+ * ST7789 320x240 TFT display driver for T-Deck Plus
+ * Uses SPI (shared bus with SD card and LoRa radio)
+ * 16-bit RGB565 framebuffer in PSRAM
+ */
+
+#include "include/display.h"
+#include "include/font_6x8.h"
+#include "board_config.h"
+#include "driver/spi_master.h"
+#include "driver/gpio.h"
+#include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <string.h>
+
+static const char *TAG = "st7789";
+static const bramble_board_config_t *s_board = NULL;
+
+/* ── Framebuffer ─────────────────────────────────────────────────────── */
+
+/* 320×240 pixels, 16-bit RGB565 format */
+#define FB_SIZE (DISPLAY_WIDTH * DISPLAY_HEIGHT * 2)
+static uint16_t *fb = NULL;  /* Allocated in PSRAM */
+
+/* SPI device handle */
+static spi_device_handle_t spi;
+static bool initialized = false;
+
+/* Color constants (RGB565) */
+#define COLOR_BLACK  0x0000
+#define COLOR_WHITE  0xFFFF
+
+/* ── ST7789 Commands ─────────────────────────────────────────────────── */
+
+#define ST7789_SWRESET    0x01
+#define ST7789_SLPOUT     0x11
+#define ST7789_INVON      0x21
+#define ST7789_DISPOFF    0x28
+#define ST7789_DISPON     0x29
+#define ST7789_CASET      0x2A
+#define ST7789_RASET      0x2B
+#define ST7789_RAMWR      0x2C
+#define ST7789_MADCTL     0x36
+#define ST7789_COLMOD     0x3A
+#define ST7789_PORCTRL    0xB2
+#define ST7789_GCTRL      0xB7
+#define ST7789_VCOMS      0xBB
+#define ST7789_LCMCTRL    0xC0
+#define ST7789_VDVVRHEN   0xC2
+#define ST7789_VRH        0xC3
+#define ST7789_VDV        0xC4
+#define ST7789_FRCTRL2    0xC6
+#define ST7789_PWCTRL1    0xD0
+#define ST7789_PVGAMCTRL  0xE0
+#define ST7789_NVGAMCTRL  0xE1
+
+/* ── SPI Helpers ─────────────────────────────────────────────────────── */
+
+static void st7789_dc_cmd(void) {
+    gpio_set_level(s_board->spi_display.dc, 0);
+}
+
+static void st7789_dc_data(void) {
+    gpio_set_level(s_board->spi_display.dc, 1);
+}
+
+static void st7789_write_cmd(uint8_t cmd) {
+    st7789_dc_cmd();
+    spi_transaction_t t = {
+        .length = 8,
+        .tx_buffer = &cmd,
+    };
+    spi_device_polling_transmit(spi, &t);
+}
+
+static void st7789_write_data(const uint8_t *data, size_t len) {
+    if (len == 0) return;
+    st7789_dc_data();
+    spi_transaction_t t = {
+        .length = len * 8,
+        .tx_buffer = data,
+    };
+    spi_device_polling_transmit(spi, &t);
+}
+
+static void st7789_write_byte(uint8_t val) {
+    st7789_write_data(&val, 1);
+}
+
+/* ── ST7789 Init Sequence (LilyGO T-Deck custom) ────────────────────── */
+
+static void st7789_init_sequence(void) {
+    /* Software reset */
+    st7789_write_cmd(ST7789_SWRESET);
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    /* Sleep out */
+    st7789_write_cmd(ST7789_SLPOUT);
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    /* Pixel format: 16-bit RGB565 */
+    st7789_write_cmd(ST7789_COLMOD);
+    st7789_write_byte(0x55);
+
+    /* Memory access control: landscape, RGB, left-to-right for 320×240 */
+    st7789_write_cmd(ST7789_MADCTL);
+    st7789_write_byte(0x60);
+
+    /* Porch control */
+    st7789_write_cmd(ST7789_PORCTRL);
+    uint8_t porch[] = {0x0C, 0x0C, 0x00, 0x33, 0x33};
+    st7789_write_data(porch, 5);
+
+    /* Gate control */
+    st7789_write_cmd(ST7789_GCTRL);
+    st7789_write_byte(0x35);
+
+    /* VCOM setting */
+    st7789_write_cmd(ST7789_VCOMS);
+    st7789_write_byte(0x19);
+
+    /* LCM control */
+    st7789_write_cmd(ST7789_LCMCTRL);
+    st7789_write_byte(0x2C);
+
+    /* VDV and VRH enable */
+    st7789_write_cmd(ST7789_VDVVRHEN);
+    st7789_write_byte(0x01);
+
+    /* VRH set */
+    st7789_write_cmd(ST7789_VRH);
+    st7789_write_byte(0x12);
+
+    /* VDV set */
+    st7789_write_cmd(ST7789_VDV);
+    st7789_write_byte(0x20);
+
+    /* Frame rate control */
+    st7789_write_cmd(ST7789_FRCTRL2);
+    st7789_write_byte(0x0F);
+
+    /* Power control */
+    st7789_write_cmd(ST7789_PWCTRL1);
+    uint8_t pwctrl[] = {0xA4, 0xA1};
+    st7789_write_data(pwctrl, 2);
+
+    /* Positive gamma correction */
+    st7789_write_cmd(ST7789_PVGAMCTRL);
+    uint8_t gamma_pos[] = {
+        0xD0, 0x08, 0x11, 0x08, 0x0C, 0x15, 0x39, 0x33,
+        0x50, 0x36, 0x13, 0x14, 0x29, 0x2D
+    };
+    st7789_write_data(gamma_pos, 14);
+
+    /* Negative gamma correction */
+    st7789_write_cmd(ST7789_NVGAMCTRL);
+    uint8_t gamma_neg[] = {
+        0xD0, 0x08, 0x10, 0x08, 0x06, 0x06, 0x39, 0x44,
+        0x51, 0x0B, 0x16, 0x14, 0x2F, 0x31
+    };
+    st7789_write_data(gamma_neg, 14);
+
+    /* Invert on */
+    st7789_write_cmd(ST7789_INVON);
+
+    /* Display on */
+    st7789_write_cmd(ST7789_DISPON);
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
+/* ── Public API ──────────────────────────────────────────────────────── */
+
+int display_init(void) {
+    /* Get board configuration */
+    s_board = board_get_config();
+
+    /* Only ST7789 boards (T-Deck Plus) */
+    if (!(s_board->capabilities & BOARD_CAP_DISPLAY_ST7789)) {
+        ESP_LOGW(TAG, "ST7789 display not supported on this board");
+        return -1;
+    }
+
+    /* Allocate framebuffer in PSRAM */
+    fb = heap_caps_malloc(FB_SIZE, MALLOC_CAP_SPIRAM);
+    if (!fb) {
+        ESP_LOGE(TAG, "Failed to allocate framebuffer in PSRAM");
+        return -1;
+    }
+    memset(fb, 0, FB_SIZE);  /* Start with black screen */
+
+    /* Configure DC and backlight GPIOs */
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << s_board->spi_display.dc) |
+                        (1ULL << s_board->spi_display.backlight),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+
+    /* Set DC to data mode initially, backlight on */
+    gpio_set_level(s_board->spi_display.dc, 1);
+    gpio_set_level(s_board->spi_display.backlight, 1);
+
+    /* Add SPI device (shared bus already initialized by board_init) */
+    spi_device_interface_config_t dev_cfg = {
+        .clock_speed_hz = 40 * 1000 * 1000,  /* 40 MHz */
+        .mode = 0,  /* SPI mode 0 */
+        .spics_io_num = s_board->spi_display.cs,
+        .queue_size = 7,
+        .pre_cb = NULL,
+    };
+
+    esp_err_t ret = spi_bus_add_device(s_board->spi_host, &dev_cfg, &spi);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add SPI device: %s", esp_err_to_name(ret));
+        heap_caps_free(fb);
+        fb = NULL;
+        return -1;
+    }
+
+    /* Run init sequence */
+    st7789_init_sequence();
+
+    initialized = true;
+    ESP_LOGI(TAG, "ST7789 display initialized (320×240, RGB565 framebuffer in PSRAM)");
+    return 0;
+}
+
+void display_clear(void) {
+    if (!fb) return;
+    memset(fb, 0, FB_SIZE);
+}
+
+void display_fill(void) {
+    if (!fb) return;
+    for (int i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++) {
+        fb[i] = COLOR_WHITE;
+    }
+}
+
+void display_pixel(int x, int y, bool on) {
+    if (!fb) return;
+    if (x < 0 || x >= DISPLAY_WIDTH || y < 0 || y >= DISPLAY_HEIGHT) return;
+    fb[y * DISPLAY_WIDTH + x] = on ? COLOR_WHITE : COLOR_BLACK;
+}
+
+void display_hline(int x, int y, int w) {
+    if (!fb) return;
+    if (y < 0 || y >= DISPLAY_HEIGHT) return;
+    int x_start = (x < 0) ? 0 : x;
+    int x_end = (x + w >= DISPLAY_WIDTH) ? DISPLAY_WIDTH : x + w;
+    for (int i = x_start; i < x_end; i++) {
+        fb[y * DISPLAY_WIDTH + i] = COLOR_WHITE;
+    }
+}
+
+void display_draw_text(int x, int y, const char *text) {
+    if (!fb || !text) return;
+    
+    int x_cursor = x;
+    for (const char *p = text; *p; p++) {
+        char c = *p;
+        if (c < 0x20 || c > 0x7E) c = '?';
+        
+        const uint8_t *glyph = font6x8[c - 0x20];
+        
+        /* Draw 6x8 glyph */
+        for (int col = 0; col < 6; col++) {
+            for (int row = 0; row < 8; row++) {
+                if (glyph[col] & (1 << row)) {
+                    int px = x_cursor + col;
+                    int py = y + row;
+                    if (px >= 0 && px < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT) {
+                        fb[py * DISPLAY_WIDTH + px] = COLOR_WHITE;
+                    }
+                }
+            }
+        }
+        x_cursor += 6;
+        if (x_cursor >= DISPLAY_WIDTH) break;
+    }
+}
+
+void display_draw_text_large(int x, int y, const char *text) {
+    if (!fb || !text) return;
+    
+    int x_cursor = x;
+    for (const char *p = text; *p; p++) {
+        char c = *p;
+        if (c < 0x20 || c > 0x7E) c = '?';
+        
+        const uint8_t *glyph = font6x8[c - 0x20];
+        
+        /* Draw 12x16 glyph (2x scaling) */
+        for (int col = 0; col < 6; col++) {
+            for (int row = 0; row < 8; row++) {
+                if (glyph[col] & (1 << row)) {
+                    /* Draw 2x2 pixel block */
+                    for (int dx = 0; dx < 2; dx++) {
+                        for (int dy = 0; dy < 2; dy++) {
+                            int px = x_cursor + col * 2 + dx;
+                            int py = y + row * 2 + dy;
+                            if (px >= 0 && px < DISPLAY_WIDTH && py >= 0 && py < DISPLAY_HEIGHT) {
+                                fb[py * DISPLAY_WIDTH + px] = COLOR_WHITE;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        x_cursor += 12;
+        if (x_cursor >= DISPLAY_WIDTH) break;
+    }
+}
+
+void display_flush(void) {
+    if (!fb || !initialized) return;
+
+    /* Set window to full screen */
+    st7789_write_cmd(ST7789_CASET);
+    uint8_t caset[] = {0x00, 0x00, (DISPLAY_WIDTH >> 8) & 0xFF, DISPLAY_WIDTH & 0xFF};
+    st7789_write_data(caset, 4);
+
+    st7789_write_cmd(ST7789_RASET);
+    uint8_t raset[] = {0x00, 0x00, (DISPLAY_HEIGHT >> 8) & 0xFF, DISPLAY_HEIGHT & 0xFF};
+    st7789_write_data(raset, 4);
+
+    st7789_write_cmd(ST7789_RAMWR);
+
+    /* Send framebuffer in 16-row chunks to avoid DMA size limits */
+    st7789_dc_data();
+    const int rows_per_chunk = 16;
+    const size_t chunk_size = DISPLAY_WIDTH * rows_per_chunk * 2;  /* bytes */
+
+    for (int row = 0; row < DISPLAY_HEIGHT; row += rows_per_chunk) {
+        spi_transaction_t t = {
+            .length = chunk_size * 8,
+            .tx_buffer = &fb[row * DISPLAY_WIDTH],
+        };
+        spi_device_polling_transmit(spi, &t);
+    }
+}
+
+void display_power(bool on) {
+    if (!initialized) return;
+    st7789_write_cmd(on ? ST7789_DISPON : ST7789_DISPOFF);
+}
+
+void display_set_contrast(uint8_t val) {
+    /* ST7789 doesn't have a simple contrast command like SSD1306 */
+    /* Could adjust VCOM or backlight brightness, but not implemented yet */
+    (void)val;
+}
+
+void display_invert(bool invert) {
+    if (!initialized) return;
+    st7789_write_cmd(invert ? 0x21 : 0x20);  /* INVON / INVOFF */
+}
