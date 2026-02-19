@@ -7,6 +7,7 @@
 
 #include "radio.h"
 #include "sx1262.h"
+#include "board_config.h"
 
 #include <string.h>
 #include <inttypes.h>
@@ -265,9 +266,10 @@ int radio_init(const radio_config_t *config)
     }
 
     /* Install DIO1 ISR */
-    gpio_set_intr_type(SX1262_PIN_DIO1, GPIO_INTR_POSEDGE);
+    const bramble_board_config_t *board = board_get_config();
+    gpio_set_intr_type(board->radio.dio1, GPIO_INTR_POSEDGE);
     gpio_install_isr_service(0);
-    gpio_isr_handler_add(SX1262_PIN_DIO1, dio1_isr_handler, NULL);
+    gpio_isr_handler_add(board->radio.dio1, dio1_isr_handler, NULL);
 
     /* Start continuous RX */
     radio_start_rx();
