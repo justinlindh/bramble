@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Neighbor, PeerLocation } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
 import { IconClock, IconMailbox, IconEnvelope, IconLocation } from '../../components/Icons';
+import { useStore } from '../../store';
 import styles from './NeighborCard.module.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ function isLocationFresh(loc: PeerLocation): boolean {
 
 export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: NeighborCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const peerName = useStore(s => s.peerNames.get(neighbor.addr));
   const health = neighborHealth(neighbor);
   const pdr = pdrPercent(neighbor.deliveryRate);
   const barPct = rssiBarPct(neighbor.rssi);
@@ -70,7 +72,14 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
     >
       {/* ── Header row ── */}
       <div className={styles.header}>
-        <AddressLabel addr={neighbor.addr} short />
+        <span className={styles.nameGroup}>
+          <AddressLabel addr={neighbor.addr} name={peerName} short={!peerName} />
+          {peerName && (
+            <span className={styles.addrSub}>
+              0x{neighbor.addr.toString(16).toUpperCase().padStart(8, '0').slice(-4)}
+            </span>
+          )}
+        </span>
         <span className={styles.rssi} title="Received Signal Strength Indicator">
           {neighbor.rssi} dBm
         </span>
