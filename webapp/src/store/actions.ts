@@ -229,7 +229,12 @@ export async function loadStatus(): Promise<void> {
 function normalizeAirtime(raw: any): AirtimeStatus {
   // Firmware returns flat fields; webapp expects { tiers: [...] }
   if (raw.tiers) return raw as AirtimeStatus;
-  const refillAtMs = Date.now() + (raw.next_refill_ms ?? 3600000);
+
+  // next_refill_ms is a duration (ms until next refill). 0 means "just refilled"
+  // — treat it as a full interval from now. Default to 1 hour if missing.
+  const nextRefillMs = raw.next_refill_ms ?? 3600000;
+  const refillAtMs = Date.now() + (nextRefillMs > 0 ? nextRefillMs : REFILL_INTERVAL_MS);
+
   return {
     tiers: [
       { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs },
@@ -238,6 +243,8 @@ function normalizeAirtime(raw: any): AirtimeStatus {
     ].map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })) as [AirtimeTier, AirtimeTier, AirtimeTier],
   };
 }
+
+const REFILL_INTERVAL_MS = 3600000;
 
 export async function loadAirtime(): Promise<void> {
   if (!client) return;
