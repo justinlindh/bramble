@@ -3,6 +3,7 @@
 #include "lv_port_touch.h"
 #include "lv_port_trackball.h"
 #include "lv_port_keyboard.h"
+#include "theme/bramble_theme.h"
 #include "lvgl.h"
 #include "esp_log.h"
 
@@ -18,16 +19,19 @@ int ui_graphics_init(void) {
         return -1;
     }
     
-    lv_port_touch_init();       /* OK if fails — trackball is fallback */
+    bramble_theme_init(disp);
+    
+    lv_port_touch_init();
     lv_port_trackball_init();
     lv_port_keyboard_init();
     
-    /* Temporary test — will be replaced by real UI */
+    /* Temporary test — will be replaced by layout in Task 7 */
     lv_obj_t *label = lv_label_create(lv_screen_active());
-    lv_label_set_text(label, "Touch me!");
+    lv_label_set_text(label, "BRAMBLE");
+    lv_obj_set_style_text_color(label, lv_color_hex(0x0F9B8E), 0);
     lv_obj_center(label);
     
-    ESP_LOGI(TAG, "LVGL initialized with all input devices");
+    ESP_LOGI(TAG, "LVGL initialized with theme and all inputs");
     return 0;
 }
 
