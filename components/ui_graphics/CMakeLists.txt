@@ -9,6 +9,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_layout.c"
         "screens/scr_chat_list.c"
         "screens/scr_chat_messages.c"
+        "screens/scr_nodes.c"
     )
 
     idf_component_register(
