@@ -1,4 +1,5 @@
 #include "battery.h"
+#include "board_config.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -7,21 +8,26 @@
 
 static const char *TAG = "battery";
 
-/* Heltec V3: battery voltage on GPIO1 = ADC1_CHANNEL_0
- * Voltage divider: 390K / 100K → factor = (390+100)/100 = 4.9
- * But Heltec schematic shows 2x 100K divider → factor = 2.0
- * Measured: ~2100 raw at 4.2V → factor ≈ 2.0 confirmed */
+/* ADC unit and attenuation (fixed for all boards) */
 #define BATTERY_ADC_UNIT    ADC_UNIT_1
-#define BATTERY_ADC_CHANNEL ADC_CHANNEL_0  /* GPIO1 */
 #define BATTERY_ADC_ATTEN   ADC_ATTEN_DB_12
-#define VOLTAGE_DIVIDER_FACTOR 2
 
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static adc_cali_handle_t s_cali_handle = NULL;
 static bool s_initialized = false;
+static const bramble_board_config_t *s_board = NULL;
 
 void battery_init(void)
 {
+    /* Get board configuration */
+    s_board = board_get_config();
+
+    /* Check if board has battery ADC capability */
+    if (!(s_board->capabilities & BOARD_CAP_BATTERY_ADC)) {
+        ESP_LOGI(TAG, "Board has no battery ADC support");
+        return;
+    }
+
     /* Configure ADC unit */
     adc_oneshot_unit_init_cfg_t unit_cfg = {
         .unit_id = BATTERY_ADC_UNIT,
@@ -37,7 +43,7 @@ void battery_init(void)
         .atten = BATTERY_ADC_ATTEN,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
-    err = adc_oneshot_config_channel(s_adc_handle, BATTERY_ADC_CHANNEL, &chan_cfg);
+    err = adc_oneshot_config_channel(s_adc_handle, s_board->battery.adc_channel, &chan_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ADC channel config failed: %d", err);
         return;
@@ -46,7 +52,7 @@ void battery_init(void)
     /* Calibration — try curve fitting first, fall back to line fitting */
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = BATTERY_ADC_UNIT,
-        .chan = BATTERY_ADC_CHANNEL,
+        .chan = s_board->battery.adc_channel,
         .atten = BATTERY_ADC_ATTEN,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
@@ -57,15 +63,16 @@ void battery_init(void)
     }
 
     s_initialized = true;
-    ESP_LOGI(TAG, "Battery ADC initialized (GPIO1, channel %d)", BATTERY_ADC_CHANNEL);
+    ESP_LOGI(TAG, "Battery ADC initialized (GPIO%d, channel %d, divider=%dx)",
+             s_board->battery.gpio, s_board->battery.adc_channel, s_board->battery.divider_factor);
 }
 
 uint32_t battery_read_mv(void)
 {
-    if (!s_initialized || !s_adc_handle) return 0;
+    if (!s_initialized || !s_adc_handle || !s_board) return 0;
 
     int raw = 0;
-    esp_err_t err = adc_oneshot_read(s_adc_handle, BATTERY_ADC_CHANNEL, &raw);
+    esp_err_t err = adc_oneshot_read(s_adc_handle, s_board->battery.adc_channel, &raw);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ADC read failed: %d", err);
         return 0;
@@ -79,8 +86,8 @@ uint32_t battery_read_mv(void)
         voltage_mv = (raw * 3300) / 4095;
     }
 
-    /* Apply voltage divider factor */
-    return (uint32_t)(voltage_mv * VOLTAGE_DIVIDER_FACTOR);
+    /* Apply voltage divider factor from board config */
+    return (uint32_t)(voltage_mv * s_board->battery.divider_factor);
 }
 
 uint8_t battery_mv_to_pct(uint32_t mv)
