@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <inttypes.h>
 
 static const char *TAG = "gt911";
 
@@ -123,9 +124,11 @@ bool touch_read(touch_point_t *point) {
     bool ready = (status & 0x80) != 0;
     int num_points = status & 0x0F;
 
-    static uint32_t status_log = 0;
-    if (ready && ++status_log <= 5) {
-        ESP_LOGI(TAG, "Status: 0x%02X, points: %d", status, num_points);
+    static uint32_t poll_count = 0;
+    poll_count++;
+    if (poll_count <= 3 || (ready && poll_count <= 20)) {
+        ESP_LOGI(TAG, "Poll #%"PRIu32" status=0x%02X ready=%d pts=%d",
+                 poll_count, status, ready, num_points);
     }
 
     if (!ready || num_points == 0) {
