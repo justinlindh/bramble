@@ -68,9 +68,8 @@ int sdcard_init(void) {
     /* Card info */
     if (s_card) {
         ESP_LOGI(TAG, "SD card mounted successfully");
-        ESP_LOGI(TAG, "Name: %s, Type: %s, Speed: %d MHz, Size: %llu MB",
+        ESP_LOGI(TAG, "Name: %s, Speed: %d MHz, Size: %llu MB",
                  s_card->cid.name,
-                 (s_card->ocr & SD_OCR_SDHC_CAP) ? "SDHC/SDXC" : "SDSC",
                  s_card->csd.tr_speed / 1000000,
                  ((uint64_t)s_card->csd.capacity) * s_card->csd.sector_size / (1024 * 1024));
     }
