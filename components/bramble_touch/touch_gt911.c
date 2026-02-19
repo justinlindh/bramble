@@ -17,6 +17,7 @@ static const char *TAG = "gt911";
 
 static i2c_master_dev_handle_t gt911_dev = NULL;
 static bool initialized = false;
+static void gt911_dump_config(void);
 
 static esp_err_t gt911_read_reg(uint16_t reg, uint8_t *data, size_t len) {
     uint8_t reg_buf[2] = { reg >> 8, reg & 0xFF };
@@ -96,6 +97,7 @@ int touch_init(void) {
             ESP_LOGI(TAG, "GT911 found at 0x%02X, product: %.4s",
                      addrs[i], product_id);
             initialized = true;
+            gt911_dump_config();
             return 0;
         }
         
@@ -106,6 +108,20 @@ int touch_init(void) {
 
     ESP_LOGW(TAG, "GT911 not found at 0x%02X or 0x%02X", addrs[0], addrs[1]);
     return -1;
+}
+
+static void gt911_dump_config(void) {
+    /* Read resolution config from GT911 registers */
+    uint8_t cfg[4] = {0};
+    if (gt911_read_reg(0x8048, cfg, 4) == ESP_OK) {
+        uint16_t x_res = cfg[0] | (cfg[1] << 8);
+        uint16_t y_res = cfg[2] | (cfg[3] << 8);
+        ESP_LOGI(TAG, "GT911 config resolution: %dx%d", x_res, y_res);
+    }
+    uint8_t mod = 0;
+    if (gt911_read_reg(0x8047, &mod, 1) == ESP_OK) {
+        ESP_LOGI(TAG, "GT911 module switch: 0x%02X (bit3=XY_swap, bit2=Y_inv, bit1=X_inv)", mod);
+    }
 }
 
 bool touch_read(touch_point_t *point) {
