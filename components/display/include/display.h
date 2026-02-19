@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
 
 /* Display dimensions — board-specific */
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
