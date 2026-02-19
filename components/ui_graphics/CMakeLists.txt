@@ -6,6 +6,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "lv_port_trackball.c"
         "lv_port_keyboard.c"
         "theme/bramble_theme.c"
+        "screens/scr_layout.c"
     )
 
     idf_component_register(
