@@ -229,11 +229,12 @@ export async function loadStatus(): Promise<void> {
 function normalizeAirtime(raw: any): AirtimeStatus {
   // Firmware returns flat fields; webapp expects { tiers: [...] }
   if (raw.tiers) return raw as AirtimeStatus;
+  const refillAtMs = Date.now() + (raw.next_refill_ms ?? 3600000);
   return {
     tiers: [
-      { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs: 0 },
-      { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs: 0 },
-      { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs: 0 },
+      { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs },
+      { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs },
+      { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs },
     ].map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })) as [AirtimeTier, AirtimeTier, AirtimeTier],
   };
 }

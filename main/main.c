@@ -239,6 +239,37 @@ static void render_screen(ui_state_t *ui) {
         display_flush();
         break;
     }
+    case SCREEN_COMPOSE: {
+        /* Quick status / about screen */
+        display_clear();
+        display_draw_text(0, 0, "About");
+        display_hline(0, 10, 128);
+
+        char line[48];
+        display_draw_text(0, 14, "Bramble Mesh v0.1");
+
+        uint8_t bpct = battery_read_pct();
+        uint32_t bmv = battery_read_mv();
+        if (bmv > 0) {
+            snprintf(line, sizeof(line), "Batt: %u%% (%"PRIu32"mV)", bpct, bmv);
+        } else {
+            snprintf(line, sizeof(line), "Power: USB");
+        }
+        display_draw_text(0, 26, line);
+
+        snprintf(line, sizeof(line), "Heap: %uKB",
+                 (unsigned)(esp_get_free_heap_size() / 1024));
+        display_draw_text(0, 38, line);
+
+        static mesh_shared_state_t about_mesh;
+        mesh_get_state(&about_mesh);
+        snprintf(line, sizeof(line), "TX:%"PRIu32" RX:%"PRIu32,
+                 about_mesh.packets_tx, about_mesh.packets_rx);
+        display_draw_text(0, 50, line);
+
+        display_flush();
+        break;
+    }
     default:
         display_clear();
         display_draw_text(0, 28, "Unknown screen");
