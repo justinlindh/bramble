@@ -1,5 +1,8 @@
 #include "ui_graphics.h"
 #include "lv_port_display.h"
+#include "lv_port_touch.h"
+#include "lv_port_trackball.h"
+#include "lv_port_keyboard.h"
 #include "lvgl.h"
 #include "esp_log.h"
 
@@ -15,12 +18,16 @@ int ui_graphics_init(void) {
         return -1;
     }
     
+    lv_port_touch_init();       /* OK if fails — trackball is fallback */
+    lv_port_trackball_init();
+    lv_port_keyboard_init();
+    
     /* Temporary test — will be replaced by real UI */
     lv_obj_t *label = lv_label_create(lv_screen_active());
-    lv_label_set_text(label, "BRAMBLE LVGL");
+    lv_label_set_text(label, "Touch me!");
     lv_obj_center(label);
     
-    ESP_LOGI(TAG, "LVGL initialized with display");
+    ESP_LOGI(TAG, "LVGL initialized with all input devices");
     return 0;
 }
 
