@@ -56,7 +56,28 @@ int board_init(void) {
     };
 
     if (cfg->capabilities & BOARD_CAP_SHARED_SPI) {
-        /* Shared SPI: init bus here, components add devices */
+        /* CRITICAL: Drive ALL SPI CS pins HIGH before bus init.
+         * On shared SPI buses, floating CS pins cause peripherals to
+         * receive each other's traffic — corrupting display GRAM, etc.
+         * (Learned from Meshtastic's earlyInitVariant pattern.) */
+        const int cs_pins[] = {
+            cfg->radio.cs,
+            cfg->spi_display.cs,
+            cfg->sdcard_cs,
+        };
+        for (int i = 0; i < 3; i++) {
+            if (cs_pins[i] >= 0) {
+                gpio_config_t cs_conf = {
+                    .pin_bit_mask = (1ULL << cs_pins[i]),
+                    .mode = GPIO_MODE_OUTPUT,
+                };
+                gpio_config(&cs_conf);
+                gpio_set_level(cs_pins[i], 1);  /* Deselect */
+            }
+        }
+        ESP_LOGI(TAG, "All SPI CS pins driven HIGH");
+
+        /* Now safe to initialize the shared SPI bus */
         esp_err_t err = spi_bus_initialize(cfg->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
