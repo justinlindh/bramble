@@ -30,7 +30,7 @@ static const tone_note_t tone_peer_join[] = {{523, 80, 30}, {659, 80, 30}, {784,
 static const tone_note_t tone_peer_leave[] = {{784, 80, 30}, {659, 80, 30}, {523, 120, 0}};
 static const tone_note_t tone_error[] = {{200, 200, 100}, {200, 200, 0}};
 static const tone_note_t tone_boot[] = {{523, 60, 20}, {659, 60, 20}, {784, 60, 20}, {1047, 120, 0}};
-static const tone_gps_fix[] = {{1000, 60, 40}, {1000, 60, 0}};
+static const tone_note_t tone_gps_fix[] = {{1000, 60, 40}, {1000, 60, 0}};
 
 /* Tone sequence descriptor */
 typedef struct {
@@ -48,20 +48,6 @@ static struct {
     bool playing;
 } s_audio = {0};
 
-/* Generate a sine wave tone into a buffer */
-static void generate_tone(int16_t *buf, size_t samples, uint16_t freq_hz, uint8_t volume) {
-    float vol_scale = volume / 100.0f;
-    for (size_t i = 0; i < samples; i++) {
-        float t = (float)i / SAMPLE_RATE;
-        buf[i] = (int16_t)(vol_scale * 16000.0f * sinf(2.0f * M_PI * freq_hz * t));
-    }
-}
-
-/* Generate silence */
-static void generate_silence(int16_t *buf, size_t samples) {
-    memset(buf, 0, samples * sizeof(int16_t));
-}
-
 /* Play a single beep */
 static void play_beep_internal(uint16_t freq_hz, uint16_t duration_ms, uint8_t volume) {
     if (!s_audio.initialized || s_audio.muted) {
@@ -78,7 +64,6 @@ static void play_beep_internal(uint16_t freq_hz, uint16_t duration_ms, uint8_t v
         size_t chunk = (total_samples - written > BUFFER_SAMPLES) ? BUFFER_SAMPLES : (total_samples - written);
         
         /* Generate tone chunk starting from the current phase */
-        float phase_offset = (float)written / SAMPLE_RATE;
         float vol_scale = volume / 100.0f;
         for (size_t i = 0; i < chunk; i++) {
             float t = ((float)(written + i)) / SAMPLE_RATE;
