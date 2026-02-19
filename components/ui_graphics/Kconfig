@@ -1,0 +1,18 @@
+menu "Bramble Graphical UI"
+    depends on BRAMBLE_BOARD_TDECK_PLUS
+
+    config BRAMBLE_UI_GRAPHICAL
+        bool "Enable LVGL graphical UI (T-Deck Plus)"
+        default y if BRAMBLE_BOARD_TDECK_PLUS
+        help
+            Enables the LVGL-based graphical UI for devices with
+            color LCD and touch support. Disables the text-based UI.
+
+    config BRAMBLE_TOUCH_ENABLED
+        bool "Enable GT911 touchscreen"
+        default y if BRAMBLE_UI_GRAPHICAL
+        depends on BRAMBLE_UI_GRAPHICAL
+        help
+            Enables the GT911 capacitive touch controller driver.
+
+endmenu
