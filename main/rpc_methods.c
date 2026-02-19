@@ -19,10 +19,14 @@
 #include "driver/gpio.h"
 #include "board_config.h"
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "audio.h"
+#endif
+
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/statvfs.h>
+/* statvfs not available in ESP-IDF newlib */
 
 #define BRAMBLE_VERSION_STR      "0.1.0-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.1.0"
@@ -857,13 +861,67 @@ static int handle_get_storage_info(const cJSON *params, cJSON *result) {
     cJSON_AddBoolToObject(result, "sd_present", sdcard_is_present());
     if (sdcard_is_present()) {
         cJSON_AddStringToObject(result, "mount_point", sdcard_get_mount_point());
-        /* If SD is mounted, get free space */
-        struct statvfs stat;
-        if (statvfs(sdcard_get_mount_point(), &stat) == 0) {
-            uint64_t free_kb = ((uint64_t)stat.f_bfree * stat.f_bsize) / 1024;
-            cJSON_AddNumberToObject(result, "sd_free_kb", (double)free_kb);
-        }
+        /* Free space reporting: ESP-IDF doesn't expose statvfs, skip for now */
     }
+    return 0;
+}
+
+/* bramble.playTone — play a predefined alert tone */
+static int handle_play_tone(const cJSON *params, cJSON *result) {
+    (void)result;
+    cJSON *tone = cJSON_GetObjectItem(params, "tone");
+    if (!tone || !cJSON_IsString(tone)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    const char *name = tone->valuestring;
+    audio_tone_t t;
+    
+    if (strcmp(name, "message_rx") == 0) {
+        t = AUDIO_TONE_MESSAGE_RX;
+    } else if (strcmp(name, "message_tx") == 0) {
+        t = AUDIO_TONE_MESSAGE_TX;
+    } else if (strcmp(name, "peer_join") == 0) {
+        t = AUDIO_TONE_PEER_JOIN;
+    } else if (strcmp(name, "peer_leave") == 0) {
+        t = AUDIO_TONE_PEER_LEAVE;
+    } else if (strcmp(name, "error") == 0) {
+        t = AUDIO_TONE_ERROR;
+    } else if (strcmp(name, "boot") == 0) {
+        t = AUDIO_TONE_BOOT;
+    } else if (strcmp(name, "gps_fix") == 0) {
+        t = AUDIO_TONE_GPS_FIX;
+    } else {
+        ESP_LOGW(TAG, "Unknown tone: %s", name);
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    if (audio_play_tone(t) != 0) {
+        ESP_LOGW(TAG, "Failed to play tone");
+        return RPC_ERR_INTERNAL;
+    }
+
+    return 0;
+}
+
+/* bramble.setMuted — mute or unmute audio */
+static int handle_set_muted(const cJSON *params, cJSON *result) {
+    (void)result;
+    cJSON *muted = cJSON_GetObjectItem(params, "muted");
+    if (!muted || !cJSON_IsBool(muted)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    audio_set_muted(cJSON_IsTrue(muted));
+    return 0;
+}
+
+/* bramble.getAudioStatus — get audio mute status */
+static int handle_get_audio_status(const cJSON *params, cJSON *result) {
+    (void)params;
+    cJSON_AddBoolToObject(result, "available", audio_is_available());
+    cJSON_AddBoolToObject(result, "muted", audio_get_muted());
+    cJSON_AddBoolToObject(result, "playing", audio_is_playing());
     return 0;
 }
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
@@ -906,7 +964,10 @@ void rpc_methods_init(bramble_identity_t *identity) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     rpc_register("bramble.getGpsPosition",       handle_get_gps_position);
     rpc_register("bramble.getStorageInfo",       handle_get_storage_info);
+    rpc_register("bramble.playTone",             handle_play_tone);
+    rpc_register("bramble.setMuted",             handle_set_muted);
+    rpc_register("bramble.getAudioStatus",       handle_get_audio_status);
 #endif
 
-    ESP_LOGI(TAG, "RPC methods registered (query: 13, action: 16)");
+    ESP_LOGI(TAG, "RPC methods registered");
 }

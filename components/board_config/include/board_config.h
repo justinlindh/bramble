@@ -93,6 +93,13 @@ typedef struct {
     int baud;
 } board_gps_config_t;
 
+/* Audio I2S config */
+typedef struct {
+    int i2s_ws;     /* Word select (LRCK) */
+    int i2s_bck;    /* Bit clock */
+    int i2s_dout;   /* Data out to speaker */
+} board_audio_config_t;
+
 /* Full board configuration */
 typedef struct {
     const char *name;           /* Human-readable name */
@@ -142,6 +149,9 @@ typedef struct {
 
     /* SD card CS pin */
     int sdcard_cs;
+
+    /* Audio */
+    board_audio_config_t audio;
 } bramble_board_config_t;
 
 /**

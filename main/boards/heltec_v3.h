@@ -37,6 +37,8 @@ static const bramble_board_config_t board_heltec_v3 = {
     .gps = { .tx = -1, .rx = -1, .baud = 9600 },
 
     .sdcard_cs = -1,
+
+    .audio = { .i2s_ws = -1, .i2s_bck = -1, .i2s_dout = -1 },
 };
 
 #endif /* BOARD_HELTEC_V3_H */

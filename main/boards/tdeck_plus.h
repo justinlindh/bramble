@@ -40,6 +40,8 @@ static const bramble_board_config_t board_tdeck_plus = {
     .gps = { .tx = 43, .rx = 44, .baud = 9600 },
 
     .sdcard_cs = 39,
+
+    .audio = { .i2s_ws = 5, .i2s_bck = 7, .i2s_dout = 6 },
 };
 
 #endif /* BOARD_TDECK_PLUS_H */
