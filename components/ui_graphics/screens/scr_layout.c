@@ -2,6 +2,7 @@
 #include "scr_chat_list.h"
 #include "scr_nodes.h"
 #include "scr_stats.h"
+#include "scr_settings.h"
 #include "theme/bramble_theme.h"
 #include "battery.h"
 #include "esp_log.h"
@@ -142,15 +143,9 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
     case TAB_STATS:
         scr_stats_create(layout);
         break;
-    default: {
-        /* Placeholder for unimplemented screens */
-        static const char *tab_names[] = {"Chat", "Nodes", "Stats", "Settings"};
-        lv_obj_t *placeholder = lv_label_create(layout->content_area);
-        lv_label_set_text_fmt(placeholder, "%s Screen", tab_names[tab]);
-        lv_obj_set_style_text_color(placeholder, BR_COLOR_TEXT_SEC, 0);
-        lv_obj_center(placeholder);
+    case TAB_SETTINGS:
+        scr_settings_create(layout);
         break;
-    }
     }
 }
 
