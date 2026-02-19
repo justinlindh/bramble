@@ -85,9 +85,10 @@ export class SerialTransport implements Transport {
     const payload = this.encoder.encode(
       JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'
     );
-    await this.writer!.write(payload);
 
-    return new Promise<T>((resolve, reject) => {
+    // Register pending BEFORE the async write so disconnect() can reject it
+    // even if we're awaiting the write when disconnect fires.
+    const promise = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`RPC timeout: ${method}`));
@@ -98,6 +99,20 @@ export class SerialTransport implements Transport {
         timer,
       });
     });
+
+    try {
+      await this.writer!.write(payload);
+    } catch {
+      // Write failed (port closed) — clean up pending entry
+      const entry = this.pending.get(id);
+      if (entry) {
+        clearTimeout(entry.timer);
+        this.pending.delete(id);
+        entry.reject(new Error('Not connected'));
+      }
+    }
+
+    return promise;
   }
 
   onNotification(cb: (method: string, params: unknown) => void): void {
