@@ -4,6 +4,8 @@
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 
 static const char *TAG = "gt911";
@@ -45,16 +47,32 @@ int touch_init(void) {
         return -1;
     }
 
-    /* Configure interrupt pin */
+    /* GT911 reset sequence: drive INT pin to select I2C address.
+     * INT LOW during reset → address 0x5D, INT HIGH → 0x14.
+     * The T-Deck Plus GT911 defaults to 0x5D. */
     if (board->touch.int_pin >= 0) {
-        gpio_config_t io_conf = {
+        /* Drive INT as output LOW to select 0x5D address */
+        gpio_config_t io_out = {
+            .pin_bit_mask = (1ULL << board->touch.int_pin),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&io_out);
+        gpio_set_level(board->touch.int_pin, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        /* Release INT pin back to input after address selection */
+        gpio_config_t io_in = {
             .pin_bit_mask = (1ULL << board->touch.int_pin),
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_DISABLE,
             .intr_type = GPIO_INTR_DISABLE,
         };
-        gpio_config(&io_conf);
+        gpio_config(&io_in);
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
     /* Try both GT911 addresses */
@@ -93,12 +111,22 @@ bool touch_read(touch_point_t *point) {
     if (!initialized || !point) return false;
 
     uint8_t status = 0;
-    if (gt911_read_reg(GT911_COORD_ADDR, &status, 1) != ESP_OK) {
+    esp_err_t err = gt911_read_reg(GT911_COORD_ADDR, &status, 1);
+    if (err != ESP_OK) {
+        static uint32_t err_count = 0;
+        if (++err_count <= 5) {
+            ESP_LOGW(TAG, "Status read failed: 0x%x", err);
+        }
         return false;
     }
 
     bool ready = (status & 0x80) != 0;
     int num_points = status & 0x0F;
+
+    static uint32_t status_log = 0;
+    if (ready && ++status_log <= 5) {
+        ESP_LOGI(TAG, "Status: 0x%02X, points: %d", status, num_points);
+    }
 
     if (!ready || num_points == 0) {
         point->pressed = false;
