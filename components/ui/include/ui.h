@@ -27,6 +27,12 @@ typedef enum {
     BTN_SHORT_PRESS,
     BTN_LONG_PRESS,
     BTN_DOUBLE_PRESS,
+    /* Trackball directions (T-Deck Plus) */
+    BTN_UP,
+    BTN_DOWN,
+    BTN_LEFT,
+    BTN_RIGHT,
+    BTN_SELECT,
 } ui_button_t;
 
 typedef struct {
@@ -47,6 +53,9 @@ typedef struct {
     int scroll_pos;
 } ui_nodes_data_t;
 
+/* Compose buffer for keyboard input */
+#define COMPOSE_BUF_SIZE 200
+
 typedef struct {
     ui_screen_t current_screen;
     ui_screen_t prev_screen;
@@ -56,6 +65,11 @@ typedef struct {
     int settings_cursor;        /* selected option on Settings screen */
     bool settings_editing;      /* true when in settings edit mode */
     bool settings_confirmed;    /* set true on long-press confirm */
+    
+    /* Compose state */
+    char compose_buf[COMPOSE_BUF_SIZE];
+    int compose_len;
+    bool compose_active;        /* true when in compose mode with cursor */
 } ui_state_t;
 
 void ui_init(ui_state_t *state);

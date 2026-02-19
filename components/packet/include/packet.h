@@ -40,6 +40,9 @@
 
 #define HEADER_FLAG_EMERGENCY     0x04  /* Emergency relay priority */
 
+/* Buffer sizes */
+#define BRAMBLE_MAX_PACKET_SIZE  256
+
 /* Flag bits */
 #define FLAG_TIER_SHIFT    6
 #define FLAG_TIER_MASK     0xC0

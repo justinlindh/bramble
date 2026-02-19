@@ -3,6 +3,8 @@
 # Usage: bash scripts/flash.sh [local|gpu] [PORT]
 #   local (default): build+flash on this machine
 #   gpu:             build+flash via GPU box (192.0.2.199)
+#
+# NOTE: For T-Deck Plus, use scripts/flash-local.sh instead (USB-connected to local machine).
 set -euo pipefail
 
 MODE="${1:-local}"
