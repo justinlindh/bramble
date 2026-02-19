@@ -86,7 +86,7 @@ go test ./...
 
 ## 3. Webapp Tests (Vitest)
 
-**What:** 34 tests covering Zustand store actions (message state transitions), SerialTransport protocol, and channel/node share URL encoding.
+**What:** 47 tests covering Zustand store actions (message state transitions), SerialTransport protocol, and channel/node share URL encoding.
 
 **Where:** `bramble/webapp/test/`
 
@@ -100,6 +100,7 @@ npx vitest run
 | File | Coverage |
 |------|----------|
 | `test/store/actions.test.ts` | Message lifecycle, delivery status, neighbor updates (9 tests) |
+| `test/store/airtime.test.ts` | Airtime normalizer: firmware→tier mapping, percentages, refill countdown, broadcast regression, edge cases (13 tests) |
 | `test/transport/SerialTransport.test.ts` | Web Serial JSON-RPC, connect/disconnect, RPC timeout (7 tests) |
 | `test/utils/channelShare.test.ts` | `bramble://` URL encode/decode for channels and nodes (18 tests) |
 
