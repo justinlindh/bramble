@@ -34,7 +34,7 @@
 #endif
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-#include "lvgl.h"
+/* lvgl.h not directly included — use ui_graphics API */
 #include "ui_graphics.h"
 #endif
 
@@ -417,7 +417,7 @@ static void render_screen(ui_state_t *ui) {
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
 static void lv_tick_cb(void *arg) {
     (void)arg;
-    lv_tick_inc(1);
+    ui_graphics_tick_1ms();
 }
 
 static void ui_graphics_task(void *arg) {
