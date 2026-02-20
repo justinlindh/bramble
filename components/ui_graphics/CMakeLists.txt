@@ -13,6 +13,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_nodes.c"
         "screens/scr_stats.c"
         "screens/scr_settings.c"
+        "chat_target.c"
         "assets/img_bramble_logo.c"
     )
 else()

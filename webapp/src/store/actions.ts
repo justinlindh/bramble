@@ -401,14 +401,16 @@ function handleIncomingMessage(params: unknown): void {
   const p = params as any;
   const fromAddr = typeof p.from === 'string' ? parseInt(p.from, 16) : (p.from ?? 0);
   const toAddr = typeof p.to === 'string' ? parseInt(p.to, 16) : (p.to ?? 0);
+  const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
+  const isBroadcast = p.broadcast === true || rawChannel === -1 || toAddr === 0xFFFFFFFF;
   const msg = {
     id: p.msgId ?? `rt-${Date.now()}`,
     direction: 'incoming' as const,
     from: fromAddr,
-    to: toAddr,
+    to: isBroadcast ? 0xFFFFFFFF : toAddr,
     text: p.text,
     tier: p.tier,
-    channelIndex: p.channelIndex ?? (p.channel as number | undefined),
+    channelIndex: isBroadcast ? undefined : rawChannel,
     timestampMs: Date.now(),
     status: 'delivered' as const,
   };

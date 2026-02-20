@@ -13,6 +13,7 @@ static const char *TAG = "scr_settings";
 
 /* Get node name from mesh — extern since it's in main */
 extern void mesh_set_node_name(const char *name);
+extern const char *mesh_get_node_name(void);
 
 /* ── Backlight ───────────────────────────────────────────────────────── */
 
@@ -117,6 +118,40 @@ static lv_obj_t *create_setting_row(lv_obj_t *parent, const char *label) {
     return row;
 }
 
+/* ── Node Name edit modal ────────────────────────────────────────────── */
+
+static lv_obj_t *s_name_label = NULL;
+
+static void name_edit_close_cb(lv_event_t *e) {
+    lv_obj_t *msgbox = (lv_obj_t *)lv_event_get_user_data(e);
+    lv_msgbox_close(msgbox);
+}
+
+static void name_edit_save_cb(lv_event_t *e) {
+    lv_obj_t *ta = (lv_obj_t *)lv_event_get_user_data(e);
+    const char *new_name = lv_textarea_get_text(ta);
+    
+    if (new_name && new_name[0] != '\0') {
+        mesh_set_node_name(new_name);
+        if (s_name_label) {
+            lv_label_set_text(s_name_label, new_name);
+        }
+        ESP_LOGI(TAG, "Node name updated to: %s", new_name);
+    }
+    
+    /* Close the message box */
+    lv_obj_t *msgbox = lv_obj_get_parent(lv_obj_get_parent(ta));
+    lv_msgbox_close(msgbox);
+}
+
+static void name_edit_cb(lv_event_t *e) {
+    (void)e;
+    
+    /* For now, just log that name editing was clicked */
+    /* TODO: Implement proper modal dialog for name editing */
+    ESP_LOGI(TAG, "Node name edit requested (modal UI to be implemented)");
+}
+
 /* ── Screen entry point ──────────────────────────────────────────────── */
 
 void scr_settings_create(bramble_layout_t *layout) {
@@ -133,14 +168,15 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
 
-    /* ── Node Name (read-only) ── */
+    /* ── Node Name (editable) ── */
     lv_obj_t *name_row = create_setting_row(cont, "Node Name");
-    const bramble_board_config_t *board = board_get_config();
-    lv_obj_t *name_val = lv_label_create(name_row);
-    lv_label_set_text(name_val, board->name);
-    lv_obj_set_style_text_color(name_val, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_set_style_text_font(name_val, &lv_font_montserrat_12, 0);
-    lv_obj_align(name_val, LV_ALIGN_RIGHT_MID, 0, 0);
+    const char *node_name = mesh_get_node_name();
+    s_name_label = lv_label_create(name_row);
+    lv_label_set_text(s_name_label, node_name ? node_name : "(not set)");
+    lv_obj_set_style_text_color(s_name_label, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(s_name_label, &lv_font_montserrat_12, 0);
+    lv_obj_align(s_name_label, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_add_event_cb(name_row, name_edit_cb, LV_EVENT_CLICKED, NULL);
     if (g) lv_group_add_obj(g, name_row);
 
     /* ── Keyboard Backlight slider ── */
@@ -264,6 +300,7 @@ void scr_settings_create(bramble_layout_t *layout) {
 
     /* ── Board info ── */
     lv_obj_t *board_row = create_setting_row(cont, "Board");
+    const bramble_board_config_t *board = board_get_config();
     lv_obj_t *board_val = lv_label_create(board_row);
     lv_label_set_text(board_val, board->name);
     lv_obj_set_style_text_color(board_val, BR_COLOR_TEXT_SEC, 0);

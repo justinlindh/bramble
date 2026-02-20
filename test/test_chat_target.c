@@ -38,11 +38,36 @@ void test_channel_matches_only_same_channel_index(void) {
     TEST_ASSERT_FALSE(chat_target_matches_message(t, &msg, -1));
 }
 
+void test_cycle_targets_walks_channels_then_wraps_to_broadcast(void) {
+    chat_target_t t = chat_target_default();
+
+    t = chat_target_cycle(t, 3);
+    TEST_ASSERT_EQUAL(CHAT_TARGET_CHANNEL, t.kind);
+    TEST_ASSERT_EQUAL(1, t.channel_index);
+
+    t = chat_target_cycle(t, 3);
+    TEST_ASSERT_EQUAL(CHAT_TARGET_CHANNEL, t.kind);
+    TEST_ASSERT_EQUAL(2, t.channel_index);
+
+    t = chat_target_cycle(t, 3);
+    TEST_ASSERT_EQUAL(CHAT_TARGET_BROADCAST, t.kind);
+    TEST_ASSERT_EQUAL(-1, t.channel_index);
+}
+
+void test_cycle_with_no_private_channels_stays_broadcast(void) {
+    chat_target_t t = chat_target_default();
+    t = chat_target_cycle(t, 1);
+    TEST_ASSERT_EQUAL(CHAT_TARGET_BROADCAST, t.kind);
+    TEST_ASSERT_EQUAL(-1, t.channel_index);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_target_is_broadcast);
     RUN_TEST(test_normalize_invalid_channel_falls_back_to_broadcast);
     RUN_TEST(test_broadcast_matches_only_broadcast_directions);
     RUN_TEST(test_channel_matches_only_same_channel_index);
+    RUN_TEST(test_cycle_targets_walks_channels_then_wraps_to_broadcast);
+    RUN_TEST(test_cycle_with_no_private_channels_stays_broadcast);
     return UNITY_END();
 }

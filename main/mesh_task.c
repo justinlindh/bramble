@@ -94,6 +94,7 @@ static airtime_budget_t    s_airtime;
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
 static int                 s_num_channels = 0;
+static int                 s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
 
 /* Mailbox — store-and-forward for offline neighbors */
 static bool s_mailbox_enabled = false;
@@ -537,7 +538,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             cJSON_AddStringToObject(params, "text", text);
             cJSON_AddNumberToObject(params, "rssi", rssi);
             cJSON_AddNumberToObject(params, "snr", snr);
-            cJSON_AddNumberToObject(params, "channel", info.channel_id);
+            cJSON_AddNumberToObject(params, "channel", (dir == MSG_DIR_BROADCAST_IN) ? -1 : info.channel_id);
             cJSON_AddBoolToObject(params, "broadcast",
                 dir == MSG_DIR_BROADCAST_IN);
             rpc_notify("bramble.onMessage", params);
@@ -1184,6 +1185,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         ESP_LOGE(TAG, "No channels initialized");
         return -1;
     }
+    ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u", (unsigned)s_channels[0].channel_id);
 
     if (!public_channel_can_send(now_ms())) {
         ESP_LOGW(TAG, "Rate limited on public channel");
@@ -1232,11 +1234,11 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
     uint32_t pkt_id = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
     if (pkt_id != 0) {
         msg_store_add_ex2(dest_addr,
-                          (dest_addr == 0xFFFFFFFF) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
+                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
                           (const char *)data, len, 0, 0,
                           pkt_id,
-                          (dest_addr == 0xFFFFFFFF) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
-                          (dest_addr == 0xFFFFFFFF) ? -1 : (int16_t)channel_idx);
+                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
+                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? -1 : (int16_t)channel_idx);
     }
     return pkt_id;
 }
@@ -1307,7 +1309,11 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
         /* Have a route — send_data_packet will transmit (next hop gets it) */
     }
 
-    return mesh_send_channel(0, dest_addr, data, len);
+    int send_idx = s_default_channel_idx;
+    if (send_idx < 0 || send_idx >= s_num_channels) {
+        send_idx = 0;
+    }
+    return mesh_send_channel(send_idx, dest_addr, data, len);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -1455,6 +1461,15 @@ int mesh_remove_channel(int index) {
         s_channels[i].channel_id = (uint8_t)i;
     }
     s_num_channels--;
+
+    if (s_default_channel_idx == index) {
+        s_default_channel_idx = 0;
+    } else if (s_default_channel_idx > index) {
+        s_default_channel_idx--;
+    }
+    if (s_default_channel_idx >= s_num_channels) {
+        s_default_channel_idx = 0;
+    }
     xSemaphoreGive(s_state_mutex);
 
     ESP_LOGI("mesh", "Channel removed: idx=%d, %d remaining", index, s_num_channels);
@@ -1606,19 +1621,27 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
 
 int mesh_set_default_channel(int index) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    if (index <= 0 || index >= s_num_channels) {
+    if (index < 0 || index >= s_num_channels) {
         xSemaphoreGive(s_state_mutex);
         return -1;
     }
 
-    /* Swap with index 0 */
-    bramble_channel_t tmp = s_channels[0];
-    s_channels[0] = s_channels[index];
-    s_channels[index] = tmp;
-    s_channels[0].channel_id = 0;
-    s_channels[index].channel_id = (uint8_t)index;
+    s_default_channel_idx = index;
     xSemaphoreGive(s_state_mutex);
 
-    ESP_LOGI("mesh", "Default channel changed to former idx=%d", index);
+    ESP_LOGI("mesh", "Default channel set to idx=%d (broadcast remains public channel 0)", index);
     return 0;
+}
+
+const char *mesh_get_node_name(void) {
+    if (s_node_name[0] == '\0') return NULL;
+    return s_node_name;
+}
+
+const char *mesh_get_peer_name(uint32_t addr) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, addr);
+    const char *name = (nb && nb->name[0] != '\0') ? nb->name : NULL;
+    xSemaphoreGive(s_state_mutex);
+    return name;
 }

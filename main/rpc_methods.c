@@ -227,6 +227,8 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
     snprintf(msg_id, sizeof(msg_id), "B%07" PRIu32, broadcast_msg_counter++);
     cJSON_AddStringToObject(result, "message_id", msg_id);
     cJSON_AddStringToObject(result, "status", "sent");
+    cJSON_AddBoolToObject(result, "broadcast", true);
+    cJSON_AddNumberToObject(result, "channel", -1);
     return 0;
 }
 
@@ -625,6 +627,8 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
         }
         cJSON_AddStringToObject(obj, "direction", dir_str);
         cJSON_AddStringToObject(obj, "text", m->text);
+        cJSON_AddNumberToObject(obj, "channel", m->channel_index);
+        cJSON_AddBoolToObject(obj, "broadcast", (m->direction == MSG_DIR_BROADCAST_IN || m->direction == MSG_DIR_BROADCAST_OUT));
         cJSON_AddNumberToObject(obj, "timestamp_s", m->timestamp_s);
         if (m->rssi != 0) cJSON_AddNumberToObject(obj, "rssi", m->rssi);
         if (m->snr != 0)  cJSON_AddNumberToObject(obj, "snr", m->snr);

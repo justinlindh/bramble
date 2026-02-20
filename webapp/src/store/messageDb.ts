@@ -3,8 +3,8 @@ import type { Message, DeliveryStatus, RelayHop } from '../types/bramble';
 type DbMessage = Message & { conversationId: string };
 
 function computeConversationId(msg: Message): string {
-  if (msg.to === 0xFFFFFFFF) return 'broadcast';
-  if (msg.channelIndex !== undefined) return `ch:${msg.channelIndex}`;
+  if (msg.to === 0xFFFFFFFF || msg.channelIndex === -1) return 'broadcast';
+  if (msg.channelIndex !== undefined && msg.channelIndex >= 0) return `ch:${msg.channelIndex}`;
   const a = Math.min(msg.from, msg.to);
   const b = Math.max(msg.from, msg.to);
   return `dm:${a.toString(16)}-${b.toString(16)}`;
