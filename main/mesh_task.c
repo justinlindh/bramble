@@ -35,6 +35,10 @@
 #include "audio.h"
 #endif
 
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+#include "ui_graphics.h"
+#endif
+
 static const char *TAG = "mesh";
 
 /* ── Configuration ──────────────────────────────────────────────────── */
@@ -509,6 +513,11 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
         msg_store_add(info.src_addr, dir, text, tlen, rssi, snr);
+
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+        /* Notify UI of new message for unread badge and refresh */
+        ui_graphics_notify(UI_EVT_MSG_RECEIVED);
+#endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
         /* Play message received tone */
