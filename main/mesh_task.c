@@ -512,7 +512,9 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         memcpy(&hdr_dest, data + 4, 4);  /* dest_addr at offset 4 in header */
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
-        msg_store_add(info.src_addr, dir, text, tlen, rssi, snr);
+        int16_t channel_index = (dir == MSG_DIR_BROADCAST_IN) ? -1 : (int16_t)info.channel_id;
+        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
+                          0, MSG_STATUS_NONE, channel_index);
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
         /* Notify UI of new message for unread badge and refresh */
@@ -1202,10 +1204,41 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
     uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
     if (pkt_id != 0) {
-        msg_store_add(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
-                      (const char *)data, len, 0, 0);
+        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
+                          (const char *)data, len, 0, 0,
+                          0, MSG_STATUS_NONE, -1);
     }
     return pkt_id ? 0 : -1;
+}
+
+uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len) {
+    if (channel_idx < 0 || channel_idx >= s_num_channels) {
+        ESP_LOGE(TAG, "Invalid channel index: %d (count=%d)", channel_idx, s_num_channels);
+        return 0;
+    }
+
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+
+    int ret = channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, 0x01,
+                                  data, len, nonce, ciphertext, tag);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
+        return 0;
+    }
+
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
+    uint32_t pkt_id = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
+    if (pkt_id != 0) {
+        msg_store_add_ex2(dest_addr,
+                          (dest_addr == 0xFFFFFFFF) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
+                          (const char *)data, len, 0, 0,
+                          pkt_id,
+                          (dest_addr == 0xFFFFFFFF) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
+                          (dest_addr == 0xFFFFFFFF) ? -1 : (int16_t)channel_idx);
+    }
+    return pkt_id;
 }
 
 static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
@@ -1274,24 +1307,7 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
         /* Have a route — send_data_packet will transmit (next hop gets it) */
     }
 
-    uint8_t nonce[BRAMBLE_NONCE_SIZE];
-    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
-    uint8_t tag[BRAMBLE_TAG_SIZE];
-
-    int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01,
-                                  data, len, nonce, ciphertext, tag);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
-        return 0;
-    }
-
-    size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    uint32_t pkt_id = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
-    if (pkt_id != 0) {
-        msg_store_add_ex(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0,
-                         pkt_id, MSG_STATUS_SENT);
-    }
-    return pkt_id;
+    return mesh_send_channel(0, dest_addr, data, len);
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
