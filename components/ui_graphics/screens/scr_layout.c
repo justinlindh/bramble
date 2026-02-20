@@ -150,6 +150,13 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
     lv_obj_clean(layout->content_area);
     layout->active_tab = tab;
     
+    /* Clear unread badge when switching to Chat tab */
+    if (tab == TAB_CHAT) {
+        extern void ui_graphics_clear_unread(void);
+        ui_graphics_clear_unread();
+        layout_set_unread(layout, 0);
+    }
+    
     switch (tab) {
     case TAB_CHAT:
         scr_chat_list_create(layout);
@@ -198,9 +205,39 @@ void layout_update_status(bramble_layout_t *layout) {
 }
 
 void layout_set_unread(bramble_layout_t *layout, int count) {
-    (void)layout;
-    (void)count;
-    /* TODO: badge overlay */
+    if (count > 0) {
+        /* Create or update badge */
+        if (layout->chat_badge == NULL) {
+            /* Create badge container */
+            layout->chat_badge = lv_obj_create(layout->tab_btns[TAB_CHAT]);
+            lv_obj_set_size(layout->chat_badge, 20, 20);
+            lv_obj_set_style_bg_color(layout->chat_badge, lv_color_hex(0xFF0000), 0);
+            lv_obj_set_style_bg_opa(layout->chat_badge, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(layout->chat_badge, 10, 0);  /* Circle */
+            lv_obj_set_style_border_width(layout->chat_badge, 0, 0);
+            lv_obj_set_style_pad_all(layout->chat_badge, 0, 0);
+            lv_obj_align(layout->chat_badge, LV_ALIGN_TOP_RIGHT, -2, 2);
+            lv_obj_clear_flag(layout->chat_badge, LV_OBJ_FLAG_SCROLLABLE);
+            
+            /* Add label with count */
+            lv_obj_t *lbl = lv_label_create(layout->chat_badge);
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_center(lbl);
+        }
+        
+        /* Update count text */
+        lv_obj_t *lbl = lv_obj_get_child(layout->chat_badge, 0);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", count > 99 ? 99 : count);
+        lv_label_set_text(lbl, buf);
+    } else {
+        /* Remove badge if count is 0 */
+        if (layout->chat_badge != NULL) {
+            lv_obj_delete(layout->chat_badge);
+            layout->chat_badge = NULL;
+        }
+    }
 }
 
 lv_obj_t *layout_get_content(bramble_layout_t *layout) {

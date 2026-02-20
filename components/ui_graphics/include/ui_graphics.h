@@ -7,6 +7,7 @@
 int ui_graphics_init(void);
 uint32_t ui_graphics_tick(void);
 void ui_graphics_notify(uint32_t event_mask);
+void ui_graphics_clear_unread(void);
 
 /** Call from 1ms timer — feeds LVGL tick. */
 void ui_graphics_tick_1ms(void);

@@ -13,12 +13,33 @@ static const char *TAG = "ui_gfx";
 bramble_layout_t *s_layout = NULL;  /* NOT static — screens need access */
 
 static lv_display_t *s_display = NULL;
+static volatile uint32_t s_pending_events = 0;
+static int s_unread_count = 0;
 
 /* Timer callbacks for periodic refresh */
 static void status_refresh_timer_cb(lv_timer_t *timer) {
     (void)timer;
     if (s_layout) {
         layout_update_status(s_layout);
+    }
+    
+    /* Check for pending notifications from other tasks */
+    uint32_t events = s_pending_events;
+    s_pending_events = 0;
+    
+    if (events & UI_EVT_MSG_RECEIVED) {
+        if (s_layout) {
+            if (s_layout->active_tab == TAB_CHAT) {
+                /* Chat is active - refresh it and clear unread */
+                layout_set_tab(s_layout, TAB_CHAT);
+                s_unread_count = 0;
+                layout_set_unread(s_layout, 0);
+            } else {
+                /* Chat is not active - increment unread and show badge */
+                s_unread_count++;
+                layout_set_unread(s_layout, s_unread_count);
+            }
+        }
     }
 }
 
@@ -85,7 +106,11 @@ uint32_t ui_graphics_tick(void) {
 }
 
 void ui_graphics_notify(uint32_t event_mask) {
-    (void)event_mask;
+    s_pending_events |= event_mask;  /* Atomic on ESP32 */
+}
+
+void ui_graphics_clear_unread(void) {
+    s_unread_count = 0;
 }
 
 void ui_graphics_tick_1ms(void) {
