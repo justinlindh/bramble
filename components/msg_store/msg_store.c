@@ -23,10 +23,11 @@ void msg_store_init(void) {
     s_count = 0;
 }
 
-void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
-                      const char *text, size_t text_len,
-                      int8_t rssi, int8_t snr,
-                      uint32_t packet_id, msg_status_t status) {
+void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir,
+                       const char *text, size_t text_len,
+                       int8_t rssi, int8_t snr,
+                       uint32_t packet_id, msg_status_t status,
+                       int16_t channel_index) {
     stored_msg_t *m = &s_msgs[s_head];
     m->peer_addr = peer_addr;
     m->direction = dir;
@@ -35,6 +36,7 @@ void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
     m->timestamp_s = get_uptime_s();
     m->rssi = rssi;
     m->snr = snr;
+    m->channel_index = channel_index;
 
     if (text_len >= MSG_TEXT_MAX) {
         text_len = MSG_TEXT_MAX - 1;
@@ -47,6 +49,13 @@ void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
     if (s_count < MSG_STORE_MAX) {
         s_count++;
     }
+}
+
+void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
+                      const char *text, size_t text_len,
+                      int8_t rssi, int8_t snr,
+                      uint32_t packet_id, msg_status_t status) {
+    msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status, -1);
 }
 
 void msg_store_add(uint32_t peer_addr, msg_direction_t dir,

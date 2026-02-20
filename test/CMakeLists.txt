@@ -421,3 +421,13 @@ target_include_directories(test_chat_target PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
+
+# Message store channel metadata tests
+add_executable(test_msg_store
+    test_msg_store.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+)
+target_include_directories(test_msg_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
