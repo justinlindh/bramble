@@ -532,9 +532,21 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         /* Emit onMessage notification via RPC */
         {
             char addr_buf[12];
+            char from_name[17] = {0};
             snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
+
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, info.src_addr);
+            if (nb && nb->name[0] != '\0') {
+                strncpy(from_name, nb->name, sizeof(from_name) - 1);
+            }
+            xSemaphoreGive(s_state_mutex);
+
             cJSON *params = cJSON_CreateObject();
             cJSON_AddStringToObject(params, "from", addr_buf);
+            if (from_name[0] != '\0') {
+                cJSON_AddStringToObject(params, "from_name", from_name);
+            }
             cJSON_AddStringToObject(params, "text", text);
             cJSON_AddNumberToObject(params, "rssi", rssi);
             cJSON_AddNumberToObject(params, "snr", snr);

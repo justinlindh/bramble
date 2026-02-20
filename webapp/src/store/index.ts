@@ -47,6 +47,7 @@ interface Actions {
   setStatus: (s: NodeStatus) => void;
   setAirtime: (a: AirtimeStatus) => void;
   setNeighbors: (n: Neighbor[]) => void;
+  setPeerName: (addr: number, name?: string) => void;
   setRoutes: (r: Route[]) => void;
   addMessage: (msg: Message) => void;
   updateMessageStatus: (id: string, status: DeliveryStatus, relayPath?: RelayHop[]) => void;
@@ -109,6 +110,13 @@ export const useStore = create<AppState & Actions>((set) => ({
       if ((nb as any).name) names.set(nb.addr, (nb as any).name);
     }
     return { neighbors: n, peerNames: names };
+  }),
+
+  setPeerName: (addr, name) => set(state => {
+    if (!addr || !name || !name.trim()) return {};
+    const names = new Map(state.peerNames);
+    names.set(addr, name.trim());
+    return { peerNames: names };
   }),
 
   setRoutes: (r) => set({ routes: r }),
