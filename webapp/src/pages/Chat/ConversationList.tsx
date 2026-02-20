@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus } from '../../components/Icons';
 import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
+import { addChannel } from '../../store/actions';
+import { useStore } from '../../store/index';
 import styles from './ConversationList.module.css';
 
 interface ConversationListProps {
@@ -41,10 +43,31 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   const [dmAddr, setDmAddr] = useState('');
   const [dmError, setDmError] = useState('');
 
+  const [showChannelDialog, setShowChannelDialog] = useState(false);
+  const [channelName, setChannelName] = useState('');
+  const [channelPsk, setChannelPsk] = useState('');
+  const [channelError, setChannelError] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+
+  const config = useStore(s => s.config);
+
   // Separate out channels and DMs
   // Broadcasts are filed under 'broadcast' in the map, never as 'dm:0xFFFFFFFF'
   const broadcastUnread = conversations.get('broadcast')?.unreadCount ?? 0;
-  const channels = [...conversations.values()].filter(c => c.id.startsWith('ch:'));
+
+  // Show channels from config even before first message arrives.
+  const channels = (config?.channels ?? [])
+    .filter(ch => ch.index > 0)
+    .map(ch => {
+      const id = `ch:${ch.index}`;
+      const existing = conversations.get(id);
+      return {
+        id,
+        label: ch.name?.trim() || `ch-${ch.index}`,
+        unreadCount: existing?.unreadCount ?? 0,
+      };
+    });
+
   const dms = [...conversations.values()].filter(
     c => c.id.startsWith('dm:') && parseInt(c.id.slice(3), 10) !== BROADCAST_ADDR
   );
@@ -63,6 +86,33 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
     setDmError('');
   };
 
+  const handleCreateChannel = async () => {
+    setChannelError('');
+    const name = channelName.trim();
+    if (!name) {
+      setChannelError('Channel name is required');
+      return;
+    }
+    if (name.length > 16) {
+      setChannelError('Channel name must be 16 characters or less');
+      return;
+    }
+    setIsCreating(true);
+    try {
+      const newChannelIndex = await addChannel(name, channelPsk.trim() || undefined);
+      // Success! Auto-switch to the new channel
+      onSelect(`ch:${newChannelIndex}`);
+      setShowChannelDialog(false);
+      setChannelName('');
+      setChannelPsk('');
+      setChannelError('');
+    } catch (err) {
+      setChannelError((err as Error).message);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   return (
     <aside className={styles.sidebar}>
       {/* ── Broadcast ────────────────────────────── */}
@@ -78,9 +128,18 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
       </button>
 
       {/* ── Channels ─────────────────────────────── */}
-      {channels.length > 0 && (
+      <div className={styles.dmHeader}>
         <p className={styles.groupHeader}>Channels</p>
-      )}
+        <button
+          className={styles.addBtn}
+          onClick={() => { setShowChannelDialog(true); setChannelError(''); setChannelName(''); setChannelPsk(''); }}
+          title="Create new channel"
+          aria-label="New channel"
+        >
+          <IconPlus size={16} />
+        </button>
+      </div>
+
       {channels.map(conv => (
         <button
           key={conv.id}
@@ -94,6 +153,10 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
           )}
         </button>
       ))}
+
+      {channels.length === 0 && (
+        <p className={styles.dmEmpty}>No channels yet</p>
+      )}
 
       {/* ── Direct Messages ───────────────────────── */}
       <div className={styles.dmHeader}>
@@ -134,6 +197,47 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
             <div className={styles.dialogBtns}>
               <button className={styles.dialogOpen} onClick={handleOpenDm}>Open</button>
               <button className={styles.dialogCancel} onClick={() => setShowDmDialog(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── New Channel Dialog ────────────────────── */}
+      {showChannelDialog && (
+        <div className={styles.dialogBackdrop} onClick={() => setShowChannelDialog(false)}>
+          <div className={styles.dialog} onClick={e => e.stopPropagation()}>
+            <h3 className={styles.dialogTitle}>Create Channel</h3>
+            <p className={styles.dialogDesc}>Enter channel details:</p>
+            <input
+              className={styles.dialogInput}
+              value={channelName}
+              onChange={e => { setChannelName(e.target.value); setChannelError(''); }}
+              placeholder="Channel name"
+              maxLength={16}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleCreateChannel()}
+              autoFocus
+            />
+            <input
+              className={styles.dialogInput}
+              type="password"
+              value={channelPsk}
+              onChange={e => { setChannelPsk(e.target.value); setChannelError(''); }}
+              placeholder="PSK (optional)"
+              onKeyDown={e => e.key === 'Enter' && handleCreateChannel()}
+              autoComplete="new-password"
+            />
+            {channelError && <p className={styles.dialogError}>{channelError}</p>}
+            <div className={styles.dialogBtns}>
+              <button
+                className={styles.dialogOpen}
+                onClick={handleCreateChannel}
+                disabled={isCreating || !channelName.trim()}
+              >
+                {isCreating ? 'Creating…' : 'Create'}
+              </button>
+              <button className={styles.dialogCancel} onClick={() => setShowChannelDialog(false)}>
                 Cancel
               </button>
             </div>
