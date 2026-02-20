@@ -240,3 +240,8 @@ void display_set_contrast(uint8_t val) {
 void display_invert(bool invert) {
     ssd1306_cmd(invert ? 0xA7 : 0xA6);
 }
+
+void display_set_backlight(uint8_t level) {
+    (void)level;
+    /* SSD1306 boards don't expose a backlight PWM path. */
+}
