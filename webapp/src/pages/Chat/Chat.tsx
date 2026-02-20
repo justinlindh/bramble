@@ -85,6 +85,7 @@ function DmHeaderInfo({ addr }: { addr: number }) {
 
 function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conversationId: string; onToggleDetail?: () => void; onToggleSidebar?: () => void }) {
   const conversations = useStore(s => s.conversations);
+  const config = useStore(s => s.config);
   const conv = conversations.get(conversationId);
   const showRoutes = useStore(s => s.showRoutes);
   const setShowRoutes = useStore(s => s.setShowRoutes);
@@ -118,7 +119,7 @@ function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conve
           </>
         ) : isChannel ? (
           <>
-            <span className={styles.chatTitle}><IconHash size={14} /> {conv?.label ?? `ch-${conversationId.slice(3)}`}</span>
+            <span className={styles.chatTitle}><IconHash size={14} /> {conv?.label ?? config?.channels?.find(c => c.index === Number(conversationId.slice(3)))?.name ?? `ch-${conversationId.slice(3)}`}</span>
             <span className={styles.chatSubtitle}>Channel {conversationId.slice(3)}</span>
           </>
         ) : (

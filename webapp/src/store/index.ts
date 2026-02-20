@@ -16,9 +16,13 @@ import type {
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
-function formatAddr(id: string, peerNames?: Map<number, string>): string {
+function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
   if (id === 'broadcast') return '📢 Broadcast';
-  if (id.startsWith('ch:')) return `ch-${id.slice(3)}`;
+  if (id.startsWith('ch:')) {
+    const idx = Number(id.slice(3));
+    const ch = config?.channels?.find(c => c.index === idx);
+    return ch?.name?.trim() ? ch.name : `ch-${idx}`;
+  }
   if (id.startsWith('dm:')) {
     const addr = Number(id.slice(3));
     const name = peerNames?.get(addr);
@@ -96,7 +100,15 @@ export const useStore = create<AppState & Actions>((set) => ({
     if (c.identity?.name && c.identity.name !== '(unnamed)') {
       names.set(c.identity.address, c.identity.name);
     }
-    return { config: c, peerNames: names };
+
+    const convs = new Map(state.conversations);
+    for (const [id, conv] of convs) {
+      if (id.startsWith('ch:')) {
+        convs.set(id, { ...conv, label: formatAddr(id, names, c) });
+      }
+    }
+
+    return { config: c, peerNames: names, conversations: convs };
   }),
 
   setStatus: (s) => set({ status: s }),
@@ -136,7 +148,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       const prev = convs.get(convId);
       convs.set(convId, {
         id: convId,
-        label: formatAddr(convId, state.peerNames),
+        label: formatAddr(convId, state.peerNames, state.config),
         peerAddr:
           msg.channelIndex !== undefined || isBroadcast
             ? undefined
@@ -211,7 +223,7 @@ export const useStore = create<AppState & Actions>((set) => ({
         if (shouldUpdate) {
           convs.set(convId, {
             id: convId,
-            label: formatAddr(convId, state.peerNames),
+            label: formatAddr(convId, state.peerNames, state.config),
             peerAddr:
               msg.channelIndex !== undefined || isBroadcast
                 ? undefined
