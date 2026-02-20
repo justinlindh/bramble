@@ -4,6 +4,7 @@
 #include "keyboard.h"
 #include "audio.h"
 #include "board_config.h"
+#include "ui.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include <stdio.h>
@@ -57,6 +58,30 @@ static void mute_changed_cb(lv_event_t *e) {
     if (s_volume_slider) {
         lv_obj_set_style_opa(s_volume_slider, muted ? LV_OPA_40 : LV_OPA_COVER, 0);
     }
+}
+
+/* ── Connectivity mode toggle ────────────────────────────────────────── */
+
+/* Store dropdown reference so the apply button can read it */
+static lv_obj_t *s_conn_dropdown = NULL;
+
+static void conn_apply_cb(lv_event_t *e) {
+    (void)e;
+    if (!s_conn_dropdown) return;
+
+    uint16_t sel = lv_dropdown_get_selected(s_conn_dropdown);
+    conn_mode_t new_mode = (conn_mode_t)sel;
+    conn_mode_t cur_mode = conn_mode_get();
+
+    if (new_mode == cur_mode) {
+        ESP_LOGI(TAG, "Connectivity mode unchanged (%d) — skipping reboot", (int)new_mode);
+        return;
+    }
+
+    /* Persist before reboot */
+    conn_mode_set(new_mode);
+    ESP_LOGW(TAG, "Connectivity mode set to %d — rebooting...", (int)new_mode);
+    esp_restart();
 }
 
 /* ── Reboot ──────────────────────────────────────────────────────────── */
@@ -169,6 +194,73 @@ void scr_settings_create(bramble_layout_t *layout) {
     }
     lv_obj_add_event_cb(s_mute_sw, mute_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g) lv_group_add_obj(g, s_mute_sw);
+
+    /* ── Connectivity Mode ── */
+    {
+        lv_obj_t *sep_conn = lv_obj_create(cont);
+        lv_obj_set_size(sep_conn, 296, 1);
+        lv_obj_set_style_bg_color(sep_conn, BR_COLOR_TEXT_SEC, 0);
+        lv_obj_set_style_bg_opa(sep_conn, LV_OPA_30, 0);
+        lv_obj_set_style_border_width(sep_conn, 0, 0);
+
+        lv_obj_t *conn_section_lbl = lv_label_create(cont);
+        lv_label_set_text(conn_section_lbl, LV_SYMBOL_WIFI " Connectivity Mode");
+        lv_obj_set_style_text_font(conn_section_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(conn_section_lbl, BR_COLOR_TEXT, 0);
+
+        /* Dropdown selector row */
+        lv_obj_t *conn_row = create_setting_row(cont, "Mode");
+        lv_obj_set_size(conn_row, 304, 48);
+
+        s_conn_dropdown = lv_dropdown_create(conn_row);
+        lv_dropdown_set_options(s_conn_dropdown,
+            "WiFi only\n"
+            "BLE only\n"
+            "WiFi + BLE");
+        lv_obj_set_size(s_conn_dropdown, 150, 34);
+        lv_obj_align(s_conn_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
+
+        /* Style to match dark theme */
+        lv_obj_set_style_bg_color(s_conn_dropdown, lv_color_hex(0x1E1E3A), 0);
+        lv_obj_set_style_text_color(s_conn_dropdown, BR_COLOR_TEXT, 0);
+        lv_obj_set_style_text_font(s_conn_dropdown, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_border_color(s_conn_dropdown, BR_COLOR_PRIMARY, 0);
+        lv_obj_set_style_border_width(s_conn_dropdown, 1, 0);
+
+        lv_obj_t *dd_list = lv_dropdown_get_list(s_conn_dropdown);
+        lv_obj_set_style_bg_color(dd_list, lv_color_hex(0x1E1E3A), 0);
+        lv_obj_set_style_text_color(dd_list, BR_COLOR_TEXT, 0);
+        lv_obj_set_style_text_font(dd_list, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_border_color(dd_list, BR_COLOR_PRIMARY, 0);
+
+        /* Pre-select the currently persisted mode */
+        conn_mode_t cur_conn = conn_mode_get();
+        lv_dropdown_set_selected(s_conn_dropdown, (uint16_t)cur_conn);
+
+        if (g) lv_group_add_obj(g, s_conn_dropdown);
+
+        /* Helper hint text */
+        lv_obj_t *conn_hint = lv_label_create(cont);
+        lv_label_set_text(conn_hint,
+            "WiFi: WebSocket RPC + OTA updates\n"
+            "BLE: Bluetooth GATT RPC\n"
+            "WiFi+BLE: Both (uses more RAM)");
+        lv_obj_set_style_text_font(conn_hint, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(conn_hint, BR_COLOR_TEXT_SEC, 0);
+
+        /* Apply & Reboot button */
+        lv_obj_t *apply_btn = lv_btn_create(cont);
+        lv_obj_set_size(apply_btn, 304, BR_TAP_TARGET_MIN);
+        lv_obj_set_style_bg_color(apply_btn, BR_COLOR_PRIMARY, 0);
+        lv_obj_set_style_bg_color(apply_btn, lv_color_hex(0x0A6B60), LV_STATE_PRESSED);
+        lv_obj_set_style_radius(apply_btn, BR_RADIUS, 0);
+        lv_obj_t *apply_lbl = lv_label_create(apply_btn);
+        lv_label_set_text(apply_lbl, LV_SYMBOL_OK " Apply Mode & Reboot");
+        lv_obj_set_style_text_font(apply_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_center(apply_lbl);
+        lv_obj_add_event_cb(apply_btn, conn_apply_cb, LV_EVENT_CLICKED, NULL);
+        if (g) lv_group_add_obj(g, apply_btn);
+    }
 
     /* ── Board info ── */
     lv_obj_t *board_row = create_setting_row(cont, "Board");
