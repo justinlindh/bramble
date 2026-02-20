@@ -827,8 +827,18 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         return;
     }
 
-    /* Dedup check: include packet type to avoid PROBE vs PROBE_ACK collisions. */
+    /* Dedup check:
+     * - include packet type to avoid PROBE vs PROBE_ACK collisions
+     * - for PROBE_ACK, include responder addr so multiple peers can respond
+     *   to the same probe_id without being collapsed as duplicates.
+     */
     uint32_t dedup_key = header.packet_id ^ (((uint32_t)header.type) << 24);
+    if (header.type == PKT_TYPE_PROBE_ACK && pkt->len >= HEADER_SIZE + 4) {
+        uint32_t resp_addr = 0;
+        memcpy(&resp_addr, pkt->data + HEADER_SIZE, 4);
+        dedup_key ^= resp_addr;
+    }
+
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
