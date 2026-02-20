@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "board_config.h"
+#include "display.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -822,13 +823,9 @@ static int handle_set_backlight(const cJSON *params, cJSON *result) {
     }
     
     int val = level->valueint;
-    if (val <= 0) {
-        gpio_set_level(board->spi_display.backlight, 0);
-    } else {
-        gpio_set_level(board->spi_display.backlight, 1);
-    }
-    /* Note: GPIO-based backlight is on/off only. PWM for dimming is future work. */
-    cJSON_AddNumberToObject(result, "level", val > 0 ? 255 : 0);
+    uint8_t duty = (val <= 0) ? 0 : (val >= 255 ? 255 : (uint8_t)val);
+    display_set_backlight(duty);
+    cJSON_AddNumberToObject(result, "level", duty);
     return 0;
 }
 
