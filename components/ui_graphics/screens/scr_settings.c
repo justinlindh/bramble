@@ -1,6 +1,7 @@
 #include "scr_settings.h"
 #include "theme/bramble_theme.h"
 #include "display.h"
+#include "keyboard.h"
 #include "board_config.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -14,7 +15,9 @@ extern void mesh_set_node_name(const char *name);
 static void backlight_changed_cb(lv_event_t *e) {
     lv_obj_t *slider = lv_event_get_target(e);
     int val = lv_slider_get_value(slider);
-    display_set_contrast(val * 255 / 100);
+    /* Keyboard backlight is binary (on/off via I2C to ESP32-C3 MCU).
+     * Slider min is 10, so any value = on. Use 0 threshold for off. */
+    keyboard_set_backlight(val > 0);
 }
 
 static void reboot_cb(lv_event_t *e) {
