@@ -121,23 +121,31 @@ bool touch_read(touch_point_t *point) {
     uint16_t raw_y = (data[3] << 8) | data[2];
 
     /* Map GT911 coordinates to display 320x240.
-     * GT911 may report in its configured resolution which could differ. */
+     * The display uses MADCTL 0x68 (MV=1, MX=1) for landscape rotation.
+     * GT911 reports in the panel's native portrait orientation, so we must
+     * swap axes and invert to match the display's logical coordinates:
+     *   display_x = raw_y (mapped to 0..319)
+     *   display_y = (gt911_x_res - 1 - raw_x) (mapped to 0..239)
+     */
     if (gt911_x_res > 0 && gt911_y_res > 0) {
-        point->x = (int)(raw_x * 320 / gt911_x_res);
-        point->y = (int)(raw_y * 240 / gt911_y_res);
+        point->x = (int)(raw_y * 320 / gt911_y_res);
+        point->y = (int)((gt911_x_res - 1 - raw_x) * 240 / gt911_x_res);
     } else {
-        point->x = raw_x;
-        point->y = raw_y;
+        point->x = raw_y;
+        point->y = raw_x;
     }
 
     /* Clamp */
     if (point->x >= 320) point->x = 319;
     if (point->y >= 240) point->y = 239;
+    if (point->x < 0) point->x = 0;
+    if (point->y < 0) point->y = 0;
     point->pressed = true;
 
     static uint32_t touch_log_count = 0;
-    if (++touch_log_count <= 5) {
-        ESP_LOGI(TAG, "Touch: (%d,%d)", point->x, point->y);
+    if (++touch_log_count <= 20) {
+        ESP_LOGI(TAG, "Touch raw=(%u,%u) → mapped=(%d,%d) [gt911 res=%ux%u]",
+                 raw_x, raw_y, point->x, point->y, gt911_x_res, gt911_y_res);
     }
 
     uint8_t zero = 0;
