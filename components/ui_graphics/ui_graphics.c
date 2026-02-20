@@ -5,11 +5,36 @@
 #include "lv_port_keyboard.h"
 #include "theme/bramble_theme.h"
 #include "screens/scr_layout.h"
+#include "screens/scr_splash.h"
 #include "lvgl.h"
 #include "esp_log.h"
 
 static const char *TAG = "ui_gfx";
 bramble_layout_t *s_layout = NULL;  /* NOT static — screens need access */
+
+static lv_display_t *s_display = NULL;
+
+/* Timer callback to transition from splash to main UI */
+static void splash_timer_cb(lv_timer_t *timer) {
+    ESP_LOGI(TAG, "Splash timeout — transitioning to main UI");
+    
+    /* Delete splash screen */
+    lv_obj_t *splash = lv_screen_active();
+    if (splash) {
+        lv_obj_delete(splash);
+    }
+    
+    /* Initialize theme and main UI */
+    bramble_theme_init(s_display);
+    lv_port_touch_init();
+    lv_port_trackball_init();
+    lv_port_keyboard_init();
+    
+    s_layout = layout_create();
+    
+    /* One-shot timer — delete itself */
+    lv_timer_delete(timer);
+}
 
 int ui_graphics_init(void) {
     ESP_LOGI(TAG, "Initializing LVGL graphical UI");
@@ -21,14 +46,15 @@ int ui_graphics_init(void) {
         return -1;
     }
     
-    bramble_theme_init(disp);
-    lv_port_touch_init();
-    lv_port_trackball_init();
-    lv_port_keyboard_init();
+    s_display = disp;
     
-    s_layout = layout_create();
+    /* Show splash screen */
+    scr_splash_create(disp);
     
-    ESP_LOGI(TAG, "LVGL initialized with layout");
+    /* Create one-shot timer to transition to main UI after 2 seconds */
+    lv_timer_create(splash_timer_cb, 2000, NULL);
+    
+    ESP_LOGI(TAG, "LVGL initialized with splash screen");
     return 0;
 }
 
