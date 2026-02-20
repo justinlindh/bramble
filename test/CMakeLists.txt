@@ -410,3 +410,14 @@ target_include_directories(test_nmea_parser PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
 )
 target_link_libraries(test_nmea_parser m)
+
+# Chat target helper tests
+add_executable(test_chat_target
+    test_chat_target.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/chat_target.c
+)
+target_include_directories(test_chat_target PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
