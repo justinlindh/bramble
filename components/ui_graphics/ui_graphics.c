@@ -57,14 +57,12 @@ static void tab_refresh_timer_cb(lv_timer_t *timer) {
 static void splash_timer_cb(lv_timer_t *timer) {
     ESP_LOGI(TAG, "Splash timeout — transitioning to main UI");
     
-    /* Delete splash screen */
-    lv_obj_t *splash = lv_screen_active();
-    if (splash) {
-        lv_obj_delete(splash);
-    }
-    
-    /* Initialize theme and main UI */
+    /* Initialize theme — applies to the active screen (still splash).
+     * layout_create() will build the main UI on this screen. */
     bramble_theme_init(s_display);
+    
+    /* Clean the splash content before building main UI */
+    lv_obj_clean(lv_screen_active());
     lv_port_touch_init();
     lv_port_trackball_init();
     lv_port_keyboard_init();
