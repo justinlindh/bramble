@@ -1091,6 +1091,10 @@ static void mesh_task(void *param) {
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(initial_delay));
 
+    /* Fresh WDT reset before send_beacon — TX can block up to 4s waiting for
+     * the SX1262 done IRQ.  Without this, jitter_delay + TX can exceed the
+     * 5s WDT window and reset the device before the main loop even starts. */
+    esp_task_wdt_reset();
     ESP_LOGI(TAG, "=== BOOT STAGE: sending first beacon ===");
     send_beacon();
     last_beacon_ms = now_ms();

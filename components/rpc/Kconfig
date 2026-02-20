@@ -14,6 +14,6 @@ config BRAMBLE_RPC_MAX_RESPONSE
 
 config BRAMBLE_RPC_MAX_METHODS
     int "Max registered RPC methods"
-    default 32
+    default 40
 
 endmenu
