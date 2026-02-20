@@ -8,6 +8,7 @@ static const char *TAG = "scr_compose";
 
 extern void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx);
 extern int mesh_get_channel_count(void);
+extern const char *mesh_get_channel_name(int index);
 
 static void back_click_cb(lv_event_t *e) {
     bramble_layout_t *layout = (bramble_layout_t *)lv_event_get_user_data(e);
@@ -94,7 +95,10 @@ void scr_chat_compose_open(bramble_layout_t *layout) {
         if (g) lv_group_add_obj(g, card);
 
         lv_obj_t *lbl = lv_label_create(card);
-        if (ch == 0) {
+        const char *ch_name = mesh_get_channel_name(ch);
+        if (ch_name && ch_name[0]) {
+            lv_label_set_text(lbl, ch_name);
+        } else if (ch == 0) {
             lv_label_set_text(lbl, "Broadcast");
         } else {
             static char ch_buf[32];

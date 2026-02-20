@@ -1493,6 +1493,27 @@ int mesh_get_channel_count(void) {
     return s_num_channels;
 }
 
+const char *mesh_get_channel_name(int index) {
+    static char name_buf[20];
+    if (index < 0 || index >= s_num_channels) return NULL;
+    if (index == 0) return "Broadcast";
+
+    nvs_handle_t ch_nvs;
+    if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) != ESP_OK) {
+        return NULL;
+    }
+
+    char key_name[20];
+    snprintf(key_name, sizeof(key_name), "ch%d_name", index);
+    size_t len = sizeof(name_buf);
+    esp_err_t err = nvs_get_str(ch_nvs, key_name, name_buf, &len);
+    nvs_close(ch_nvs);
+    if (err != ESP_OK || name_buf[0] == '\0') {
+        return NULL;
+    }
+    return name_buf;
+}
+
 void mesh_set_node_name(const char *name) {
     if (name && strlen(name) < sizeof(s_node_name)) {
         strncpy(s_node_name, name, sizeof(s_node_name) - 1);
