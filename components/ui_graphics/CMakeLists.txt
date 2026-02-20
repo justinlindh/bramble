@@ -25,5 +25,5 @@ idf_component_register(
     REQUIRES display keyboard trackball board_config bramble_touch
              channel msg_store identity radio battery
              location gps rpc airtime wifi ble ui
-    PRIV_REQUIRES lvgl
+    PRIV_REQUIRES lvgl esp_app_format
 )
