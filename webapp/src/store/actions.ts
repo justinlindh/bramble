@@ -403,6 +403,11 @@ function handleIncomingMessage(params: unknown): void {
   const toAddr = typeof p.to === 'string' ? parseInt(p.to, 16) : (p.to ?? 0);
   const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
   const isBroadcast = p.broadcast === true || rawChannel === -1 || toAddr === 0xFFFFFFFF;
+  const fromName = typeof p.from_name === 'string' ? p.from_name : (typeof p.fromName === 'string' ? p.fromName : undefined);
+  const store = useStore.getState();
+  if (fromAddr && fromName) {
+    store.setPeerName(fromAddr, fromName);
+  }
   const msg = {
     id: p.msgId ?? `rt-${Date.now()}`,
     direction: 'incoming' as const,
@@ -414,7 +419,7 @@ function handleIncomingMessage(params: unknown): void {
     timestampMs: Date.now(),
     status: 'delivered' as const,
   };
-  useStore.getState().addMessage(msg);
+  store.addMessage(msg);
   messageDb.saveMessage(msg).catch(() => {});
 }
 
