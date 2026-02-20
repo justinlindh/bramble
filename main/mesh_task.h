@@ -41,6 +41,12 @@ void mesh_get_state(mesh_shared_state_t *out);
 int mesh_send_broadcast(const uint8_t *data, size_t len);
 
 /**
+ * Send an encrypted message on a specific channel index.
+ * Returns packet_id (>0) on success, 0 on failure.
+ */
+uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len);
+
+/**
  * Send an encrypted message to a specific address.
  * Uses public channel for now (DM encryption requires key exchange).
  * Returns packet_id (>0) on success, 0 on failure.
