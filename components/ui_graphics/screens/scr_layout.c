@@ -147,6 +147,8 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
         }
     }
     
+    /* Flex/content-size screens can leave pending layout tasks; flush before clean. */
+    lv_refr_now(lv_display_get_default());
     lv_obj_clean(layout->content_area);
     layout->active_tab = tab;
     

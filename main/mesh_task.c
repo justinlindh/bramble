@@ -827,9 +827,11 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         return;
     }
 
-    /* Dedup check */
-    if (dedup_check_and_add(&s_dedup, header.packet_id, now_ms())) {
-        ESP_LOGD(TAG, "Duplicate packet %08" PRIX32, header.packet_id);
+    /* Dedup check: include packet type to avoid PROBE vs PROBE_ACK collisions. */
+    uint32_t dedup_key = header.packet_id ^ (((uint32_t)header.type) << 24);
+    if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
+        ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
+                 dedup_key, header.packet_id, header.type);
         return;
     }
 
@@ -1599,11 +1601,16 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
     buf[HEADER_SIZE + 4] = 1; /* hops = 1 for direct */
 
+    /* Stagger ACKs across nodes to reduce on-air collisions during probe fanout. */
+    uint32_t jitter_ms = 12 + (s_identity->address % 37);  /* 12..48 ms deterministic */
+    vTaskDelay(pdMS_TO_TICKS(jitter_ms));
+
     radio_transmit(buf, HEADER_SIZE + 5);
-    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1",
+    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1 jitter=%" PRIu32 "ms",
              header.packet_id,
              addr_hex(src_addr, src_buf, sizeof(src_buf)),
-             addr_hex(s_identity->address, me_buf, sizeof(me_buf)));
+             addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
+             jitter_ms);
 
     /* Forward probe if hop limit allows */
     if (header.hop_limit > 1) {
