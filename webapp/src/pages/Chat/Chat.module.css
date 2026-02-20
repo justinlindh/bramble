@@ -3,6 +3,16 @@
   display: flex;
   height: 100%;
   overflow: hidden;
+  position: relative;
+}
+
+.sidebarWrap {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.sidebarBackdrop {
+  display: none;
 }
 
 /* ── Main pane (right of sidebar) ────────────────────────────────── */
@@ -44,6 +54,18 @@
   border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
+}
+
+.conversationsBtn {
+  display: none;
+  margin-right: 10px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 2px 7px;
+  cursor: pointer;
 }
 
 .routeBtn {
@@ -119,20 +141,44 @@
   line-height: 1.5;
 }
 
-/* ── Mobile: hide sidebar, use full width ─────────────────────────── */
-@media (max-width: 540px) {
-  .chat {
-    flex-direction: column;
+/* ── Mobile portrait: conversations drawer ─────────────────────────── */
+@media (max-width: 540px) and (orientation: portrait) {
+  .conversationsBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  /* On mobile, sidebar collapses to a horizontal scrollable tab strip */
-  .chat > aside {
-    width: 100%;
-    min-width: unset;
-    flex-direction: row;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    padding: 4px;
+  .sidebarWrap {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 85%;
+    max-width: 320px;
+    transform: translateX(-102%);
+    transition: transform 0.18s ease;
+    z-index: 40;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  .sidebarBackdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+    z-index: 30;
+    display: block;
+  }
+
+  .sidebarBackdropOpen {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
