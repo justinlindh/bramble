@@ -38,33 +38,54 @@ def rgba_to_rgb565_alpha(img):
     return rgb565, alpha
 
 def write_c_array(rgb565, alpha, width, height, name, out_path):
-    """Write LVGL image C source."""
+    """Write LVGL image C source.
+    
+    LVGL v9 LV_COLOR_FORMAT_RGB565A8 is PLANAR:
+      - First: all RGB565 pixels (width * height * 2 bytes)
+      - Then:  all alpha values (width * height bytes)
+    stride = width * 2 (bytes per row, RGB565 only)
+    """
+    stride = width * 2
     with open(out_path, 'w') as f:
         f.write(f"/* Auto-generated from Bramble logo - do not edit manually */\n")
         f.write(f"/* Source: bramble/webapp/public/favicon.svg (MIT license) */\n\n")
         f.write(f"#include \"lvgl.h\"\n\n")
 
-        # CF_TRUE_COLOR_ALPHA: interleaved RGB565 + alpha
         f.write(f"static const uint8_t {name}_map[] = {{\n")
-        for i, (px, a) in enumerate(zip(rgb565, alpha)):
-            lo = px & 0xFF
-            hi = (px >> 8) & 0xFF
-            f.write(f"  0x{lo:02x}, 0x{hi:02x}, 0x{a:02x},")
-            if (i + 1) % 8 == 0:
-                f.write("\n")
-        f.write(f"\n}};\n\n")
+
+        # Planar: all RGB565 pixel data first
+        f.write(f"  /* RGB565 pixel data ({width * height * 2} bytes) */\n")
+        for row in range(height):
+            row_pixels = rgb565[row * width:(row + 1) * width]
+            chunks = []
+            for px in row_pixels:
+                lo = px & 0xFF
+                hi = (px >> 8) & 0xFF
+                chunks.append(f"0x{lo:02x}, 0x{hi:02x}")
+            # 8 pixels (16 bytes) per line
+            for i in range(0, len(chunks), 8):
+                f.write("  " + ",  ".join(chunks[i:i+8]) + ",\n")
+
+        # Then all alpha values
+        f.write(f"  /* Alpha data ({width * height} bytes) */\n")
+        for i in range(0, len(alpha), 16):
+            chunk = alpha[i:i+16]
+            f.write("  " + ", ".join(f"0x{a:02x}" for a in chunk) + ",\n")
+
+        f.write(f"}};\n\n")
 
         f.write(f"const lv_image_dsc_t {name} = {{\n")
         f.write(f"  .header = {{\n")
         f.write(f"    .cf = LV_COLOR_FORMAT_RGB565A8,\n")
         f.write(f"    .w = {width},\n")
         f.write(f"    .h = {height},\n")
+        f.write(f"    .stride = {stride},\n")
         f.write(f"  }},\n")
         f.write(f"  .data_size = {width * height * 3},\n")
         f.write(f"  .data = {name}_map,\n")
         f.write(f"}};\n")
 
-    print(f"Written {out_path} ({width}x{height}, {width*height*3} bytes)")
+    print(f"Written {out_path} ({width}x{height}, {width*height*3} bytes, stride={stride})")
 
 def main():
     base = Path(__file__).parent.parent
