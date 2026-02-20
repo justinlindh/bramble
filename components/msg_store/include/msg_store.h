@@ -34,6 +34,7 @@ typedef struct {
     uint32_t        timestamp_s;    /* Uptime seconds when stored */
     int8_t          rssi;           /* RX RSSI (0 for outgoing) */
     int8_t          snr;            /* RX SNR (0 for outgoing) */
+    int16_t         channel_index;  /* -1 = none/broadcast, >=0 = channel */
     uint16_t        text_len;
     char            text[MSG_TEXT_MAX];
 } stored_msg_t;
@@ -52,6 +53,13 @@ void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
                       const char *text, size_t text_len,
                       int8_t rssi, int8_t snr,
                       uint32_t packet_id, msg_status_t status);
+
+/* Extended API with channel index metadata */
+void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir,
+                       const char *text, size_t text_len,
+                       int8_t rssi, int8_t snr,
+                       uint32_t packet_id, msg_status_t status,
+                       int16_t channel_index);
 
 /* Convenience wrapper (no ACK tracking) */
 void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
