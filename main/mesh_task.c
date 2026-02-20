@@ -10,6 +10,7 @@
 #include "security.h"
 #include "channel_key.h"
 #include "channel_msg.h"
+#include "channel_storage.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -1366,39 +1367,50 @@ void mesh_task_start(bramble_identity_t *identity) {
     strncpy(s_channel_names[0], "Broadcast", sizeof(s_channel_names[0]) - 1);
     ESP_LOGI(TAG, "Public channel initialized (%d channels)", s_num_channels);
 
-    /* Load additional channels from NVS (persisted by addChannel RPC) */
+    /* Load additional channels from NVS using channel_storage (Phase 1) */
     {
-        nvs_handle_t ch_nvs;
-        if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) == ESP_OK) {
-            uint8_t ch_count = 0;
-            if (nvs_get_u8(ch_nvs, "ch_count", &ch_count) == ESP_OK && ch_count > 1) {
-                for (int i = 1; i < ch_count && s_num_channels < MAX_CHANNELS; i++) {
-                    char key_name[20], key_psk[20];
-                    snprintf(key_name, sizeof(key_name), "ch%d_name", i);
-                    snprintf(key_psk, sizeof(key_psk), "ch%d_psk", i);
+        bramble_channel_t loaded_channels[MAX_CHANNELS];
+        char loaded_names[MAX_CHANNELS][20];
+        int loaded_count = 0;
+        int loaded_default = 0;
 
-                    char psk[65] = "";
-                    size_t psk_len = sizeof(psk);
-                    if (nvs_get_str(ch_nvs, key_psk, psk, &psk_len) == ESP_OK && psk_len > 1) {
-                        bramble_channel_t *ch = &s_channels[s_num_channels];
-                        channel_derive_key(psk, ch);
-                        ch->channel_id = (uint8_t)s_num_channels;
-                        s_num_channels++;
-
-                        char name[20] = "";
-                        size_t name_len = sizeof(name);
-                        nvs_get_str(ch_nvs, key_name, name, &name_len);
-                        if (name[0]) {
-                            strncpy(s_channel_names[i], name, sizeof(s_channel_names[i]) - 1);
-                        }
-                        ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", i, name[0] ? name : "(unnamed)");
+        if (channel_storage_load(loaded_channels, &loaded_count, loaded_names, &loaded_default) == 0 
+            && loaded_count > 0) {
+            /* Merge loaded channels, preserving channel 0 (public) which is already initialized */
+            for (int i = 0; i < loaded_count && s_num_channels < MAX_CHANNELS; i++) {
+                /* Skip channel 0 if it was saved (public channel is always first) */
+                if (loaded_channels[i].channel_id == 0 && i == 0) {
+                    /* Copy the name if it exists */
+                    if (loaded_names[i][0] != '\0') {
+                        strncpy(s_channel_names[0], loaded_names[i], sizeof(s_channel_names[0]) - 1);
                     }
+                    continue;
                 }
+                
+                /* Add to channel list */
+                memcpy(&s_channels[s_num_channels], &loaded_channels[i], sizeof(bramble_channel_t));
+                
+                /* Ensure channel_id matches array index */
+                s_channels[s_num_channels].channel_id = (uint8_t)s_num_channels;
+                
+                /* Copy channel name */
+                if (loaded_names[i][0] != '\0') {
+                    strncpy(s_channel_names[s_num_channels], loaded_names[i], 
+                           sizeof(s_channel_names[s_num_channels]) - 1);
+                }
+                
+                ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", s_num_channels, 
+                        loaded_names[i][0] ? loaded_names[i] : "(unnamed)");
+                s_num_channels++;
             }
-            nvs_close(ch_nvs);
-            if (s_num_channels > 1) {
-                ESP_LOGI(TAG, "Total channels after NVS load: %d", s_num_channels);
+            
+            /* Restore default channel index */
+            if (loaded_default >= 0 && loaded_default < s_num_channels) {
+                s_default_channel_idx = loaded_default;
             }
+            
+            ESP_LOGI(TAG, "Total channels after NVS load: %d (default=%d)", 
+                    s_num_channels, s_default_channel_idx);
         }
     }
 
@@ -1468,25 +1480,9 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
         s_channel_names[idx][0] = '\0';
     }
 
-    /* Persist channel metadata */
-    nvs_handle_t ch_nvs;
-    if (nvs_open("bramble_ch", NVS_READWRITE, &ch_nvs) == ESP_OK) {
-        char key_name[20], key_psk[20];
-        snprintf(key_name, sizeof(key_name), "ch%d_name", idx);
-        snprintf(key_psk, sizeof(key_psk), "ch%d_psk", idx);
-        if (name && name[0]) {
-            nvs_set_str(ch_nvs, key_name, name);
-        }
-        if (psk && psk_len > 0) {
-            char psk_str[65];
-            size_t copy_len = psk_len < sizeof(psk_str) - 1 ? psk_len : sizeof(psk_str) - 1;
-            memcpy(psk_str, psk, copy_len);
-            psk_str[copy_len] = '\0';
-            nvs_set_str(ch_nvs, key_psk, psk_str);
-        }
-        nvs_set_u8(ch_nvs, "ch_count", (uint8_t)s_num_channels);
-        nvs_commit(ch_nvs);
-        nvs_close(ch_nvs);
+    /* Persist all channels using channel_storage (Phase 1) */
+    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
+        ESP_LOGW(TAG, "Failed to persist channels to NVS");
     }
 
     xSemaphoreGive(s_state_mutex);
@@ -1520,6 +1516,12 @@ int mesh_remove_channel(int index) {
     if (s_default_channel_idx >= s_num_channels) {
         s_default_channel_idx = 0;
     }
+
+    /* Persist channels after removal (Phase 1) */
+    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
+        ESP_LOGW(TAG, "Failed to persist channels to NVS after removal");
+    }
+
     xSemaphoreGive(s_state_mutex);
 
     ESP_LOGI("mesh", "Channel removed: idx=%d, %d remaining", index, s_num_channels);
@@ -1763,6 +1765,12 @@ int mesh_set_default_channel(int index) {
     }
 
     s_default_channel_idx = index;
+
+    /* Persist default channel (Phase 1) */
+    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
+        ESP_LOGW(TAG, "Failed to persist default channel to NVS");
+    }
+
     xSemaphoreGive(s_state_mutex);
 
     ESP_LOGI("mesh", "Default channel set to idx=%d (broadcast remains public channel 0)", index);
@@ -1780,4 +1788,14 @@ const char *mesh_get_peer_name(uint32_t addr) {
     const char *name = (nb && nb->name[0] != '\0') ? nb->name : NULL;
     xSemaphoreGive(s_state_mutex);
     return name;
+}
+
+int mesh_get_channel_info(int *default_idx) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    int count = s_num_channels;
+    if (default_idx) {
+        *default_idx = s_default_channel_idx;
+    }
+    xSemaphoreGive(s_state_mutex);
+    return count;
 }

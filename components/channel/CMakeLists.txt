@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "channel_key.c" "channel_msg.c" "public_channel.c"
+    SRCS "channel_key.c" "channel_msg.c" "public_channel.c" "channel_storage.c"
     INCLUDE_DIRS "include"
-    REQUIRES crypto
+    REQUIRES crypto nvs_flash
 )
