@@ -111,6 +111,7 @@ void scr_nodes_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_all(list, 4, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 4, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);  /* Prevent horizontal scroll */
 
     if (count == 0) {
         lv_obj_t *empty = lv_label_create(list);

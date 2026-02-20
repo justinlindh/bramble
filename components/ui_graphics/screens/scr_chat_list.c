@@ -3,11 +3,13 @@
 #include "msg_store.h"
 #include "esp_log.h"
 #include <stdio.h>
+#include <stdint.h>
 
 static const char *TAG = "scr_chat";
 
 /* Forward declare — message view from Task 9 */
 extern void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx);
+extern int mesh_get_channel_count(void);
 
 static void compose_click_cb(lv_event_t *e) {
     bramble_layout_t *layout = (bramble_layout_t *)lv_event_get_user_data(e);
@@ -15,8 +17,9 @@ static void compose_click_cb(lv_event_t *e) {
 }
 
 static void msg_item_click_cb(lv_event_t *e) {
-    bramble_layout_t *layout = (bramble_layout_t *)lv_event_get_user_data(e);
-    scr_chat_messages_open(layout, 0);
+    int channel_idx = (int)(intptr_t)lv_event_get_user_data(e);
+    extern bramble_layout_t *s_layout;
+    scr_chat_messages_open(s_layout, channel_idx);
 }
 
 void scr_chat_list_create(bramble_layout_t *layout) {
@@ -61,29 +64,14 @@ void scr_chat_list_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_all(list, 4, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 4, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);  /* Prevent horizontal scroll */
     
-    int count = msg_store_count();
-    
-    if (count == 0) {
-        lv_obj_t *empty = lv_label_create(list);
-        lv_label_set_text(empty, "No messages yet.\nTap 'New' to compose.");
-        lv_obj_set_style_text_color(empty, BR_COLOR_TEXT_SEC, 0);
-        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_center(empty);
-        return;
-    }
-    
-    /* Show messages newest-first (store is oldest-first) */
-    int start = count > 10 ? count - 10 : 0;  /* Show last 10 */
-    for (int i = count - 1; i >= start; i--) {
-        const stored_msg_t *msg = msg_store_get(i);
-        if (!msg) continue;
-        
-        bool is_outgoing = (msg->direction == MSG_DIR_OUTGOING || 
-                           msg->direction == MSG_DIR_BROADCAST_OUT);
-        
+    /* Channel quick-picks */
+    int channel_count = mesh_get_channel_count();
+    int max_channel = channel_count > 4 ? 4 : channel_count;
+    for (int ch = 0; ch < max_channel; ch++) {
         lv_obj_t *card = lv_obj_create(list);
-        lv_obj_set_size(card, 304, 48);
+        lv_obj_set_size(card, 304, 36);
         lv_obj_set_style_bg_color(card, BR_COLOR_SURFACE, 0);
         lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(card, BR_RADIUS, 0);
@@ -91,37 +79,30 @@ void scr_chat_list_create(bramble_layout_t *layout) {
         lv_obj_set_style_pad_all(card, 6, 0);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-        
-        /* Focus style for trackball */
         lv_obj_set_style_bg_color(card, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
         lv_obj_set_style_bg_opa(card, LV_OPA_30, LV_STATE_FOCUSED);
         if (g) lv_group_add_obj(g, card);
-        
-        /* Direction indicator + peer address */
-        char header_buf[32];
-        if (is_outgoing) {
-            snprintf(header_buf, sizeof(header_buf), LV_SYMBOL_RIGHT " You");
+
+        lv_obj_t *lbl = lv_label_create(card);
+        if (ch == 0) {
+            lv_label_set_text(lbl, "# Broadcast");
         } else {
-            snprintf(header_buf, sizeof(header_buf), LV_SYMBOL_LEFT " %08lX",
-                     (unsigned long)msg->peer_addr);
+            static char ch_buf[16];
+            snprintf(ch_buf, sizeof(ch_buf), "# Channel %d", ch);
+            lv_label_set_text(lbl, ch_buf);
         }
-        lv_obj_t *hdr = lv_label_create(card);
-        lv_label_set_text(hdr, header_buf);
-        lv_obj_set_style_text_font(hdr, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(hdr, is_outgoing ? BR_COLOR_SENT : BR_COLOR_PRIMARY, 0);
-        lv_obj_set_pos(hdr, 0, 0);
-        
-        /* Message preview */
-        lv_obj_t *preview = lv_label_create(card);
-        lv_label_set_text(preview, msg->text);
-        lv_obj_set_style_text_font(preview, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(preview, BR_COLOR_TEXT, 0);
-        lv_obj_set_pos(preview, 0, 16);
-        lv_label_set_long_mode(preview, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(preview, 290);
-        
-        lv_obj_add_event_cb(card, msg_item_click_cb, LV_EVENT_CLICKED, layout);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+        lv_obj_add_event_cb(card, msg_item_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ch);
     }
+
+    lv_obj_t *hint = lv_label_create(list);
+    lv_label_set_text(hint, "Select a channel to view messages.");
+    lv_obj_set_style_text_color(hint, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(hint, 304);
 }
 
 void scr_chat_list_refresh(bramble_layout_t *layout) {
