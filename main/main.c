@@ -18,6 +18,7 @@
 #include "wifi_manager.h"
 #include "ws_server.h"
 #include "msg_store.h"
+#include "esp_spiffs.h"
 #include "mdns.h"
 #include "ble_server.h"
 #include "esp_system.h"
@@ -559,8 +560,31 @@ void app_main(void)
     rpc_init();
     rpc_methods_init(&g_identity);
 
-    /* Init message store */
+#if CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
+    /* Mount SPIFFS for persisted message storage */
+    ESP_LOGI(TAG, "=== BOOT STAGE: spiffs_mount ===");
+    esp_vfs_spiffs_conf_t spiffs_conf = {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true,
+    };
+    esp_err_t spiffs_ret = esp_vfs_spiffs_register(&spiffs_conf);
+    if (spiffs_ret != ESP_OK) {
+        ESP_LOGW(TAG, "SPIFFS mount failed (%s), msg persistence disabled", esp_err_to_name(spiffs_ret));
+    } else {
+        size_t total = 0, used = 0;
+        if (esp_spiffs_info(NULL, &total, &used) == ESP_OK) {
+            ESP_LOGI(TAG, "SPIFFS mounted: used=%u / total=%u bytes", (unsigned)used, (unsigned)total);
+        }
+    }
+
+    /* Init message store with persistence restore */
+    msg_store_init_with_persistence();
+#else
+    /* Init message store (RAM-only) */
     msg_store_init();
+#endif
 
     /* Init WiFi if mode includes it */
     if (boot_mode == CONN_MODE_WIFI || boot_mode == CONN_MODE_BOTH) {

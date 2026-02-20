@@ -5,7 +5,7 @@ idf_component_register(
              display button ui crypto identity
              radio packet routing dedup security freq_plan
              channel console esp_vfs_console rpc airtime
-             wifi esp_http_server mdns esp_netif msg_store
+             wifi esp_http_server mdns esp_netif msg_store spiffs
              ble reliability battery ota board_config
              keyboard trackball location gps sdcard audio
              ui_graphics

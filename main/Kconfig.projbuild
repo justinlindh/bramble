@@ -53,4 +53,22 @@ menu "Bramble Configuration"
 
     endchoice
 
+    menu "Bramble Message Persistence"
+        config BRAMBLE_MSG_PERSIST_ENABLED
+            bool "Enable message persistence to SPIFFS"
+            default y
+
+        config BRAMBLE_MSG_PERSIST_MAX
+            int "Maximum persisted messages"
+            default 200
+            range 50 1000
+            depends on BRAMBLE_MSG_PERSIST_ENABLED
+
+        config BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT
+            int "Percentage of messages to keep on rollover"
+            default 75
+            range 50 90
+            depends on BRAMBLE_MSG_PERSIST_ENABLED
+    endmenu
+
 endmenu
