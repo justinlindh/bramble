@@ -136,8 +136,8 @@ bool touch_read(touch_point_t *point) {
     point->pressed = true;
 
     static uint32_t touch_log_count = 0;
-    if (++touch_log_count <= 20) {
-        ESP_LOGI(TAG, "Touch: raw(%d,%d) → (%d,%d)", raw_x, raw_y, point->x, point->y);
+    if (++touch_log_count <= 5) {
+        ESP_LOGI(TAG, "Touch: (%d,%d)", point->x, point->y);
     }
 
     uint8_t zero = 0;
