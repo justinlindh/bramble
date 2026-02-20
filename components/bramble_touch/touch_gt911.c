@@ -143,9 +143,8 @@ bool touch_read(touch_point_t *point) {
     point->pressed = true;
 
     static uint32_t touch_log_count = 0;
-    if (++touch_log_count <= 20) {
-        ESP_LOGI(TAG, "Touch raw=(%u,%u) → mapped=(%d,%d) [gt911 res=%ux%u]",
-                 raw_x, raw_y, point->x, point->y, gt911_x_res, gt911_y_res);
+    if (++touch_log_count <= 5) {
+        ESP_LOGI(TAG, "Touch: raw(%u,%u) → (%d,%d)", raw_x, raw_y, point->x, point->y);
     }
 
     uint8_t zero = 0;
