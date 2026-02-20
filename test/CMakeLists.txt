@@ -431,3 +431,14 @@ add_executable(test_msg_store
 target_include_directories(test_msg_store PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
+
+# Message store SPIFFS persistence tests
+add_executable(test_msg_store_spiffs
+    test_msg_store_spiffs.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store_spiffs.c
+)
+target_include_directories(test_msg_store_spiffs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
