@@ -178,7 +178,10 @@ void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
     lv_obj_set_style_text_color(s_compose_ta, BR_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_compose_ta, &lv_font_montserrat_14, 0);
     lv_obj_set_style_border_color(s_compose_ta, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
-    if (g) lv_group_add_obj(g, s_compose_ta);
+    if (g) {
+        lv_group_add_obj(g, s_compose_ta);
+        lv_group_focus_obj(s_compose_ta);  /* ensure keyboard types into compose bar immediately */
+    }
 
     lv_obj_t *send_btn = lv_btn_create(compose_bar);
     lv_obj_set_size(send_btn, 44, 36);
