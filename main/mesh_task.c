@@ -93,6 +93,7 @@ static airtime_budget_t    s_airtime;
 
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
+static char                s_channel_names[MAX_CHANNELS][20];
 static int                 s_num_channels = 0;
 static int                 s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
 
@@ -1361,6 +1362,8 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     /* Initialize public channel (well-known PSK, no key exchange needed) */
     public_channel_init(s_channels, &s_num_channels);
+    memset(s_channel_names, 0, sizeof(s_channel_names));
+    strncpy(s_channel_names[0], "Broadcast", sizeof(s_channel_names[0]) - 1);
     ESP_LOGI(TAG, "Public channel initialized (%d channels)", s_num_channels);
 
     /* Load additional channels from NVS (persisted by addChannel RPC) */
@@ -1385,6 +1388,9 @@ void mesh_task_start(bramble_identity_t *identity) {
                         char name[20] = "";
                         size_t name_len = sizeof(name);
                         nvs_get_str(ch_nvs, key_name, name, &name_len);
+                        if (name[0]) {
+                            strncpy(s_channel_names[i], name, sizeof(s_channel_names[i]) - 1);
+                        }
                         ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", i, name[0] ? name : "(unnamed)");
                     }
                 }
@@ -1455,6 +1461,34 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
 
     int idx = s_num_channels;
     s_num_channels++;
+
+    if (name && name[0]) {
+        strncpy(s_channel_names[idx], name, sizeof(s_channel_names[idx]) - 1);
+    } else {
+        s_channel_names[idx][0] = '\0';
+    }
+
+    /* Persist channel metadata */
+    nvs_handle_t ch_nvs;
+    if (nvs_open("bramble_ch", NVS_READWRITE, &ch_nvs) == ESP_OK) {
+        char key_name[20], key_psk[20];
+        snprintf(key_name, sizeof(key_name), "ch%d_name", idx);
+        snprintf(key_psk, sizeof(key_psk), "ch%d_psk", idx);
+        if (name && name[0]) {
+            nvs_set_str(ch_nvs, key_name, name);
+        }
+        if (psk && psk_len > 0) {
+            char psk_str[65];
+            size_t copy_len = psk_len < sizeof(psk_str) - 1 ? psk_len : sizeof(psk_str) - 1;
+            memcpy(psk_str, psk, copy_len);
+            psk_str[copy_len] = '\0';
+            nvs_set_str(ch_nvs, key_psk, psk_str);
+        }
+        nvs_set_u8(ch_nvs, "ch_count", (uint8_t)s_num_channels);
+        nvs_commit(ch_nvs);
+        nvs_close(ch_nvs);
+    }
+
     xSemaphoreGive(s_state_mutex);
 
     ESP_LOGI("mesh", "Channel added: idx=%d name=%s", idx, name ? name : "(unnamed)");
@@ -1472,7 +1506,10 @@ int mesh_remove_channel(int index) {
     for (int i = index; i < s_num_channels - 1; i++) {
         s_channels[i] = s_channels[i + 1];
         s_channels[i].channel_id = (uint8_t)i;
+        strncpy(s_channel_names[i], s_channel_names[i + 1], sizeof(s_channel_names[i]) - 1);
+        s_channel_names[i][sizeof(s_channel_names[i]) - 1] = '\0';
     }
+    s_channel_names[s_num_channels - 1][0] = '\0';
     s_num_channels--;
 
     if (s_default_channel_idx == index) {
@@ -1494,8 +1531,10 @@ int mesh_get_channel_count(void) {
 }
 
 const char *mesh_get_channel_name(int index) {
-    static char name_buf[20];
     if (index < 0 || index >= s_num_channels) return NULL;
+    if (s_channel_names[index][0]) return s_channel_names[index];
+
+    static char name_buf[20];
     if (index == 0) return "Broadcast";
 
     nvs_handle_t ch_nvs;
@@ -1511,7 +1550,9 @@ const char *mesh_get_channel_name(int index) {
     if (err != ESP_OK || name_buf[0] == '\0') {
         return NULL;
     }
-    return name_buf;
+    strncpy(s_channel_names[index], name_buf, sizeof(s_channel_names[index]) - 1);
+    s_channel_names[index][sizeof(s_channel_names[index]) - 1] = '\0';
+    return s_channel_names[index];
 }
 
 void mesh_set_node_name(const char *name) {
