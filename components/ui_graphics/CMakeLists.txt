@@ -10,6 +10,8 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_layout.c"
         "screens/scr_chat_list.c"
         "screens/scr_chat_messages.c"
+        "screens/scr_chat_compose.c"
+        "screens/scr_channel_create.c"
         "screens/scr_nodes.c"
         "screens/scr_stats.c"
         "screens/scr_settings.c"
