@@ -88,6 +88,13 @@ const stored_msg_t *msg_store_get(int index);
  */
 void msg_store_clear(void);
 
+/**
+ * Initialize message store with SPIFFS persistence.
+ * If persistence is enabled and messages are found, loads recent messages into RAM.
+ * Call this instead of msg_store_init() to enable persistence.
+ */
+void msg_store_init_with_persistence(void);
+
 #ifdef __cplusplus
 }
 #endif

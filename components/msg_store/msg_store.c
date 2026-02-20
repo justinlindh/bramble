@@ -5,6 +5,10 @@
 #include "esp_timer.h"
 #endif
 
+#ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
+#include "msg_store_spiffs.h"
+#endif
+
 static stored_msg_t s_msgs[MSG_STORE_MAX];
 static int s_head = 0;   /* Next write position */
 static int s_count = 0;  /* Number of stored messages */
@@ -49,6 +53,18 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir,
     if (s_count < MSG_STORE_MAX) {
         s_count++;
     }
+
+#ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
+    /* Persist to SPIFFS */
+    if (msg_store_spiffs_save(m) == 0) {
+        /* Check if rollover needed */
+        int total = msg_store_spiffs_get_count();
+        if (total >= CONFIG_BRAMBLE_MSG_PERSIST_MAX) {
+            msg_store_spiffs_rollover(CONFIG_BRAMBLE_MSG_PERSIST_MAX,
+                                     CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT);
+        }
+    }
+#endif
 }
 
 void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
@@ -93,4 +109,31 @@ const stored_msg_t *msg_store_get(int index) {
 void msg_store_clear(void) {
     s_head = 0;
     s_count = 0;
+}
+
+void msg_store_init_with_persistence(void) {
+    msg_store_init();
+
+#ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
+    /* Initialize SPIFFS persistence */
+    if (msg_store_spiffs_init() == 0) {
+        /* Load recent messages into RAM buffer */
+        stored_msg_t loaded[MSG_STORE_MAX];
+        int count = msg_store_spiffs_load_recent(loaded, MSG_STORE_MAX);
+        
+        /* Restore messages to RAM without re-persisting */
+        for (int i = 0; i < count; i++) {
+            stored_msg_t *src = &loaded[i];
+            stored_msg_t *dst = &s_msgs[s_head];
+            
+            /* Copy message data directly */
+            memcpy(dst, src, sizeof(stored_msg_t));
+            
+            s_head = (s_head + 1) % MSG_STORE_MAX;
+            if (s_count < MSG_STORE_MAX) {
+                s_count++;
+            }
+        }
+    }
+#endif
 }
