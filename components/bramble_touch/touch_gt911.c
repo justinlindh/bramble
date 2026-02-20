@@ -49,23 +49,8 @@ int touch_init(void) {
         return -1;
     }
 
-    /* GT911 reset sequence: drive INT pin to select I2C address.
-     * INT LOW during reset → address 0x5D, INT HIGH → 0x14.
-     * The T-Deck Plus GT911 defaults to 0x5D. */
+    /* Configure interrupt pin as input (GT911 uses it for touch-ready signal) */
     if (board->touch.int_pin >= 0) {
-        /* Drive INT as output LOW to select 0x5D address */
-        gpio_config_t io_out = {
-            .pin_bit_mask = (1ULL << board->touch.int_pin),
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        gpio_config(&io_out);
-        gpio_set_level(board->touch.int_pin, 0);
-        vTaskDelay(pdMS_TO_TICKS(10));
-
-        /* Release INT pin back to input after address selection */
         gpio_config_t io_in = {
             .pin_bit_mask = (1ULL << board->touch.int_pin),
             .mode = GPIO_MODE_INPUT,
@@ -74,7 +59,6 @@ int touch_init(void) {
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&io_in);
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
     /* Try both GT911 addresses */
