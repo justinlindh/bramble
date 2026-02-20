@@ -1705,7 +1705,7 @@ GPIO  | Function            | Notes
 13    | RADIO_BUSY         | SX1262 BUSY line
 14    | ES7210_DIN         | Audio codec
 15    | TBOX_G03 (left)    | Hall Effect sensor
-16    | TOUCH_INT          | (unused — no touch on T-Deck Plus)
+16    | TOUCH_INT          | GT911 capacitive touch interrupt (polling mode)
 17    | RADIO_RST          | SX1262 reset
 18    | I2C_SDA            | Keyboard + touch
 21    | ES7210_LRCK        | Audio codec
