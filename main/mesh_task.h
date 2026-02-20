@@ -81,6 +81,11 @@ int mesh_remove_channel(int index);
 int mesh_get_channel_count(void);
 
 /**
+ * Get channel name by index (returns NULL if unavailable).
+ */
+const char *mesh_get_channel_name(int index);
+
+/**
  * Set default channel index for unicast send routing.
  * Broadcast always uses the public channel (index 0).
  * Returns 0 on success.

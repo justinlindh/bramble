@@ -20,6 +20,7 @@ static void render_messages_for_target(void);
 extern int mesh_send_broadcast(const uint8_t *data, size_t len);
 extern uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len);
 extern int mesh_get_channel_count(void);
+extern const char *mesh_get_channel_name(int index);
 extern const char *mesh_get_peer_name(uint32_t addr);
 
 static void update_title(void) {
@@ -27,9 +28,14 @@ static void update_title(void) {
     if (s_target.kind == CHAT_TARGET_BROADCAST) {
         lv_label_set_text(s_title, "Broadcast");
     } else {
-        static char buf[24];
-        snprintf(buf, sizeof(buf), "Channel %d", (int)s_target.channel_index);
-        lv_label_set_text(s_title, buf);
+        const char *name = mesh_get_channel_name((int)s_target.channel_index);
+        if (name && name[0]) {
+            lv_label_set_text(s_title, name);
+        } else {
+            static char buf[24];
+            snprintf(buf, sizeof(buf), "Channel %d", (int)s_target.channel_index);
+            lv_label_set_text(s_title, buf);
+        }
     }
 }
 
