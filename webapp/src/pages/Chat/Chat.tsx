@@ -83,7 +83,7 @@ function DmHeaderInfo({ addr }: { addr: number }) {
   );
 }
 
-function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string; onToggleDetail?: () => void }) {
+function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conversationId: string; onToggleDetail?: () => void; onToggleSidebar?: () => void }) {
   const conversations = useStore(s => s.conversations);
   const conv = conversations.get(conversationId);
   const showRoutes = useStore(s => s.showRoutes);
@@ -100,6 +100,14 @@ function ChatHeader({ conversationId, onToggleDetail }: { conversationId: string
       role={isChannel ? 'button' : undefined}
       title={isChannel ? 'Click for channel details' : undefined}
     >
+      <button
+        className={styles.conversationsBtn}
+        onClick={(e) => { e.stopPropagation(); onToggleSidebar?.(); }}
+        aria-label="Open conversations"
+        title="Conversations"
+      >
+        ☰
+      </button>
       <div className={styles.chatHeaderText}>
         {isDm ? (
           <DmHeaderInfo addr={dmAddr} />
@@ -137,6 +145,7 @@ export function Chat() {
   const activeConversationId = useStore(s => s.activeConversationId);
   const setActiveConversation = useStore(s => s.setActiveConversation);
   const [showDetail, setShowDetail] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const toggleDetail = useCallback(() => setShowDetail(v => !v), []);
 
@@ -149,13 +158,19 @@ export function Chat() {
 
   return (
     <div className={styles.chat}>
-      <ConversationList
-        conversations={conversations}
-        activeId={activeConversationId}
-        onSelect={setActiveConversation}
-      />
+      <div className={`${styles.sidebarBackdrop} ${sidebarOpen ? styles.sidebarBackdropOpen : ''}`} onClick={() => setSidebarOpen(false)} />
+      <div className={`${styles.sidebarWrap} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
+        <ConversationList
+          conversations={conversations}
+          activeId={activeConversationId}
+          onSelect={(id) => {
+            setActiveConversation(id);
+            setSidebarOpen(false);
+          }}
+        />
+      </div>
       <div className={styles.pane}>
-        <ChatHeader conversationId={activeConversationId} onToggleDetail={toggleDetail} />
+        <ChatHeader conversationId={activeConversationId} onToggleDetail={toggleDetail} onToggleSidebar={() => setSidebarOpen(v => !v)} />
         {showDetail && isChannel ? (
           <ChannelDetailPanel
             channelIndex={parseInt(activeConversationId.slice(3), 10)}
