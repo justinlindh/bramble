@@ -8,6 +8,7 @@
 #include "include/font_6x8.h"
 #include "board_config.h"
 #include "driver/spi_master.h"
+#include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -207,20 +208,43 @@ int display_init(void) {
     }
     memset(fb, 0, FB_SIZE);  /* Start with black screen */
 
-    /* Configure DC and backlight GPIOs */
+    /* Configure DC GPIO (command/data select) */
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << s_board->spi_display.dc) |
-                        (1ULL << s_board->spi_display.backlight),
+        .pin_bit_mask = (1ULL << s_board->spi_display.dc),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io_conf);
-
-    /* Set DC to data mode initially, backlight on */
     gpio_set_level(s_board->spi_display.dc, 1);
-    gpio_set_level(s_board->spi_display.backlight, 1);
+
+    /* Backlight via LEDC PWM — raw gpio_set_level is insufficient to
+     * reliably activate the T-Deck Plus backlight IC (LilyGo uses LEDC).
+     * Timer 0 / Channel 0 / 10 kHz / 8-bit duty */
+    if (s_board->spi_display.backlight >= 0) {
+        ledc_timer_config_t bl_timer = {
+            .speed_mode      = LEDC_LOW_SPEED_MODE,
+            .timer_num       = LEDC_TIMER_0,
+            .duty_resolution = LEDC_TIMER_8_BIT,
+            .freq_hz         = 10000,
+            .clk_cfg         = LEDC_AUTO_CLK,
+        };
+        ledc_timer_config(&bl_timer);
+
+        ledc_channel_config_t bl_channel = {
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel    = LEDC_CHANNEL_0,
+            .timer_sel  = LEDC_TIMER_0,
+            .intr_type  = LEDC_INTR_DISABLE,
+            .gpio_num   = s_board->spi_display.backlight,
+            .duty       = 255,  /* full brightness */
+            .hpoint     = 0,
+        };
+        ledc_channel_config(&bl_channel);
+        ESP_LOGI(TAG, "Backlight LEDC initialized (GPIO%d, duty=255/255)",
+                 s_board->spi_display.backlight);
+    }
 
     /* Add SPI device (shared bus already initialized by board_init) */
     spi_device_interface_config_t dev_cfg = {
@@ -416,6 +440,14 @@ void display_flush(void) {
 void display_power(bool on) {
     if (!initialized) return;
     st7789_write_cmd(on ? ST7789_DISPON : ST7789_DISPOFF);
+}
+
+void display_set_backlight(uint8_t level) {
+    /* level 0 = off, 255 = full brightness */
+    if (s_board && s_board->spi_display.backlight >= 0) {
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, level);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    }
 }
 
 void display_set_contrast(uint8_t val) {

@@ -75,12 +75,18 @@ static void keyboard_read_key(void) {
     uint8_t key = 0;
     esp_err_t ret = i2c_master_receive(dev_handle, &key, 1, 100);
     
-    if (ret == ESP_OK && key != 0) {
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "I2C read failed: %s", esp_err_to_name(ret));
+    } else if (key == 0) {
+        ESP_LOGD(TAG, "I2C read OK but key=0 (MCU not ready?)");
+    } else {
+        ESP_LOGI(TAG, "Key read: '%c' (0x%02x)", (key >= 0x20 && key < 0x7F) ? key : '?', key);
         buffer_push(key);
     }
     
     key_available = false;
 }
+
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
@@ -155,6 +161,7 @@ bool keyboard_poll(char *out) {
 
     /* Check interrupt flag and read if available */
     if (key_available) {
+        ESP_LOGI(TAG, "ISR triggered — reading from keyboard MCU");
         keyboard_read_key();
     }
 

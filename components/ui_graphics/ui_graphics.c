@@ -61,6 +61,14 @@ static void splash_timer_cb(lv_timer_t *timer) {
      * layout_create() will build the main UI on this screen. */
     bramble_theme_init(s_display);
     
+    /* Force LVGL to complete all pending layout/render work before cleaning
+     * the splash screen. The flex container (LV_SIZE_CONTENT) leaves pending
+     * layout tasks in LVGL's queue. If we call lv_obj_clean() while these are
+     * outstanding, the timer linked list can get corrupted — which silently
+     * kills the indev read timer and breaks keyboard/trackball input.
+     * lv_refr_now() flushes all pending layouts before we delete anything. */
+    lv_refr_now(s_display);
+
     /* Clean the splash content before building main UI */
     lv_obj_clean(lv_screen_active());
     lv_port_touch_init();
