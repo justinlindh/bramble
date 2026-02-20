@@ -39,6 +39,12 @@ static TaskHandle_t  s_tx_waiter;   /* task waiting for TX done */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
+/* STDBY_RC (mode 0): the SX1262 auto-enables TCXO via DIO3 when entering
+ * TX or RX, so we don't need to stay in STDBY_XOSC between commands. */
+static inline int radio_standby(void) {
+    return sx1262_set_standby(0);
+}
+
 /* Convert bw_hz (e.g. 125000) to bw code for sx1262_set_modulation_params */
 static uint8_t bw_hz_to_code(uint32_t bw_hz)
 {
@@ -185,7 +191,7 @@ int radio_reconfigure(const radio_config_t *config)
              config->frequency_mhz, config->sf, config->bw_hz, config->tx_power);
 
     /* Put radio in standby before reconfiguring (0 = RC oscillator) */
-    sx1262_set_standby(0);
+    radio_standby();
     vTaskDelay(pdMS_TO_TICKS(10));
 
     memcpy(&s_config, config, sizeof(s_config));
@@ -287,7 +293,7 @@ int radio_transmit(const uint8_t *data, uint8_t len)
     s_tx_waiter = xTaskGetCurrentTaskHandle();
 
     /* Switch to standby */
-    sx1262_set_standby(0);
+    radio_standby();
 
     /* Write payload to buffer */
     sx1262_write_buffer(0, data, len);
@@ -309,6 +315,10 @@ int radio_transmit(const uint8_t *data, uint8_t len)
         radio_start_rx();
         return -1;
     }
+    ESP_LOGI(TAG, "TX started: %u bytes, DIO1_GPIO=%d, BUSY_GPIO=%d",
+             len,
+             gpio_get_level(board_get_config()->radio.dio1),
+             gpio_get_level(board_get_config()->radio.busy));
 
     /* Reset WDT before the blocking wait — TX can take up to 4s and the
      * caller may have consumed most of the 5s WDT window already. */
@@ -319,9 +329,15 @@ int radio_transmit(const uint8_t *data, uint8_t len)
     s_tx_waiter = NULL;
 
     if (notified == 0) {
-        ESP_LOGE(TAG, "TX timeout: DIO1 IRQ never fired (TCXO issue? DIO1 wiring?)");
+        /* Diagnostic: read back what the radio chip thinks happened */
+        uint16_t irq_status = sx1262_get_irq_status();
+        int dio1_level = gpio_get_level(board_get_config()->radio.dio1);
+        ESP_LOGE(TAG, "TX timeout: DIO1=%d IRQ_reg=0x%04x (TxDone=%d Timeout=%d)",
+                 dio1_level, irq_status,
+                 (irq_status & SX1262_IRQ_TX_DONE) ? 1 : 0,
+                 (irq_status & SX1262_IRQ_TIMEOUT)  ? 1 : 0);
         atomic_store(&s_state, RADIO_STATE_IDLE);
-        sx1262_set_standby(0);
+        radio_standby();
         radio_start_rx();
         return -1;
     }
@@ -338,7 +354,7 @@ int radio_transmit(const uint8_t *data, uint8_t len)
 
 void radio_start_rx(void)
 {
-    sx1262_set_standby(0);
+    radio_standby();
     sx1262_clear_irq_status(0x03FF);
     sx1262_set_rx(0); /* continuous */
     atomic_store(&s_state, RADIO_STATE_RX);
@@ -346,7 +362,7 @@ void radio_start_rx(void)
 
 void radio_cad(void)
 {
-    sx1262_set_standby(0);
+    radio_standby();
     sx1262_clear_irq_status(0x03FF);
     atomic_store(&s_state, RADIO_STATE_CAD);
     sx1262_set_cad();
@@ -381,7 +397,7 @@ void radio_set_cad_done_callback(radio_cad_done_callback_t cb)
 
 void radio_sleep(void)
 {
-    sx1262_set_standby(0);
+    radio_standby();
     sx1262_set_sleep(0x04); /* warm start (retain config) */
     atomic_store(&s_state, RADIO_STATE_SLEEP);
 }
