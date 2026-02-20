@@ -69,21 +69,24 @@ static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
 
 conn_mode_t conn_mode_get(void) {
     nvs_handle_t nvs;
-    uint8_t mode = CONN_MODE_BOTH; /* default: both WiFi and BLE */
+    /* Default: WiFi only (same as Heltec boards). BLE can be enabled via
+     * the Settings screen. Running both on ESP32-S3 exhausts internal SRAM. */
+    uint8_t mode = CONN_MODE_WIFI;
     if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
         nvs_get_u8(nvs, "conn_mode", &mode);
         nvs_close(nvs);
     }
-    if (mode >= CONN_MODE_COUNT) mode = CONN_MODE_BOTH;
+    if (mode >= CONN_MODE_COUNT) mode = CONN_MODE_WIFI;
     return (conn_mode_t)mode;
 }
 
-static void conn_mode_set(conn_mode_t mode) {
+void conn_mode_set(conn_mode_t mode) {
     nvs_handle_t nvs;
     if (nvs_open("bramble", NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "conn_mode", (uint8_t)mode);
         nvs_commit(nvs);
         nvs_close(nvs);
+        ESP_LOGI(TAG, "Connectivity mode saved: %d", (int)mode);
     }
 }
 

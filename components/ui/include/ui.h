@@ -78,6 +78,11 @@ ui_screen_t ui_get_screen(const ui_state_t *state);
 bool ui_needs_redraw(const ui_state_t *state);
 void ui_mark_drawn(ui_state_t *state);
 
+/* Connectivity mode — NVS-persisted, applied on next boot.
+ * Implemented in main/main.c; declared here so any UI component can call them. */
+conn_mode_t conn_mode_get(void);
+void conn_mode_set(conn_mode_t mode);
+
 #define UI_INACTIVITY_TIMEOUT_MS 60000
 void ui_check_timeout(ui_state_t *state, uint32_t now_ms);
 
