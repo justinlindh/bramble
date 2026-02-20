@@ -35,6 +35,15 @@ static void volume_changed_cb(lv_event_t *e) {
     audio_set_volume((uint8_t)val);
 }
 
+static void volume_released_cb(lv_event_t *e) {
+    (void)e;
+    /* Play a short confirmation tone at the new volume so the user can hear
+     * the result immediately.  Skip if muted — that's expected silence. */
+    if (!audio_get_muted()) {
+        audio_play_beep(880, 80);
+    }
+}
+
 /* ── Silent mode ─────────────────────────────────────────────────────── */
 
 static lv_obj_t *s_mute_sw = NULL;
@@ -140,6 +149,7 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_TEXT, LV_PART_KNOB);
     lv_obj_add_event_cb(s_volume_slider, volume_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(s_volume_slider, volume_released_cb, LV_EVENT_RELEASED, NULL);
     /* Dim the slider when already muted to hint it's inactive */
     if (cur_muted) {
         lv_obj_set_style_opa(s_volume_slider, LV_OPA_40, 0);

@@ -15,6 +15,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -301,6 +302,10 @@ int radio_transmit(const uint8_t *data, uint8_t len)
     /* Clear IRQ and start TX with 3s timeout */
     sx1262_clear_irq_status(0x03FF);
     sx1262_set_tx(3000);
+
+    /* Reset WDT before the blocking wait — TX can take up to 4s and the
+     * caller may have consumed most of the 5s WDT window already. */
+    esp_task_wdt_reset();
 
     /* Wait for TX done notification (max 4s) */
     uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(4000));
