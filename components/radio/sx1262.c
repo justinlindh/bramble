@@ -71,7 +71,9 @@ static int spi_transfer(const uint8_t *tx, uint8_t *rx, size_t len)
 
 int sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(100) != 0) return -1;
+    /* 500ms: generous enough for TCXO startup (32ms) + calibration overhead
+     * while still detecting genuinely stuck BUSY within half a second. */
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     uint8_t tx[1 + len];
     tx[0] = cmd;
@@ -85,7 +87,7 @@ int sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
 
 int sx1262_read_command(uint8_t cmd, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(100) != 0) return -1;
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     /* cmd + 1 NOP (status) + len data bytes */
     size_t total = 2 + len;
@@ -104,7 +106,7 @@ int sx1262_read_command(uint8_t cmd, uint8_t *data, size_t len)
 
 int sx1262_write_register(uint16_t addr, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(100) != 0) return -1;
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     size_t total = 3 + len; /* cmd + addr_hi + addr_lo + data */
     uint8_t tx[total];
@@ -121,7 +123,7 @@ int sx1262_write_register(uint16_t addr, const uint8_t *data, size_t len)
 
 int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(100) != 0) return -1;
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     /* cmd + addr_hi + addr_lo + 1 NOP + len data */
     size_t total = 4 + len;
@@ -142,7 +144,7 @@ int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
 
 int sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(100) != 0) return -1;
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     size_t total = 2 + len; /* cmd + offset + data */
     uint8_t tx[total];
@@ -158,7 +160,7 @@ int sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
 
 int sx1262_read_buffer(uint8_t offset, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(100) != 0) return -1;
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     /* cmd + offset + 1 NOP + len data */
     size_t total = 3 + len;
@@ -185,7 +187,7 @@ int sx1262_get_status(uint8_t *status)
     uint8_t st;
     int rc = sx1262_read_command(SX1262_CMD_GET_STATUS, &st, 0);
     /* Status is actually in the first response byte (index 1) — re-read */
-    if (sx1262_wait_busy(100) != 0) return -1;
+    if (sx1262_wait_busy(500) != 0) return -1;
 
     uint8_t tx[2] = { SX1262_CMD_GET_STATUS, 0x00 };
     uint8_t rx[2] = { 0 };
@@ -206,7 +208,7 @@ int sx1262_reset(void)
     vTaskDelay(pdMS_TO_TICKS(1));
     gpio_set_level(s_board->radio.rst, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
-    return sx1262_wait_busy(100);
+    return sx1262_wait_busy(500);
 }
 
 /* ------------------------------------------------------------------ */
@@ -429,7 +431,21 @@ int sx1262_set_dio3_as_tcxo(float voltage, uint32_t timeout_ms)
 
 int sx1262_calibrate(uint8_t cal_mask)
 {
-    return sx1262_write_command(SX1262_CMD_CALIBRATE, &cal_mask, 1);
+    /* Calibrating all blocks (0x7F) on a TCXO board keeps BUSY high while
+     * each sub-block calibrates against the TCXO.  RadioLib uses 5000ms for
+     * this wait.  100ms (the default write_command BUSY wait) is not enough.
+     * We wait for BUSY before sending the command, then send it, then wait
+     * again for the calibration to complete. */
+    if (sx1262_wait_busy(500) != 0) return -1;
+
+    uint8_t cmd = SX1262_CMD_CALIBRATE;
+    uint8_t tx[2] = { cmd, cal_mask };
+    nss_low();
+    spi_transfer(tx, NULL, 2);
+    nss_high();
+
+    /* Wait up to 1000ms for all calibration blocks to complete */
+    return sx1262_wait_busy(1000);
 }
 
 int sx1262_calibrate_image(float freq_mhz)
@@ -533,14 +549,20 @@ int sx1262_init(void)
     /* --- Oscillator configuration --- */
     if (s_board->radio_osc == RADIO_OSC_TCXO_DIO3) {
         ESP_LOGD(TAG, "Configuring TCXO (%.1fV)", s_board->radio_tcxo_voltage);
-        if (sx1262_set_dio3_as_tcxo(s_board->radio_tcxo_voltage, 5) != 0) return -1;
+        /* TCXO startup delay: 32ms covers worst-case startup for oscillators
+         * used on T-Deck Plus and similar boards (5ms was too short — the SX1262
+         * re-enables DIO3 at every TX/RX transition and must wait this long for
+         * the TCXO to stabilize.  Meshtastic / RadioLib use 1600ms in some
+         * configs; 32ms is conservative but not wasteful for 915 MHz LoRa. */
+        if (sx1262_set_dio3_as_tcxo(s_board->radio_tcxo_voltage, 32) != 0) return -1;
     } else {
         ESP_LOGD(TAG, "Using crystal oscillator (no TCXO)");
     }
 
     /* --- Calibrate all blocks --- */
+    /* sx1262_calibrate() has its own extended BUSY wait (up to 1000ms) to
+     * cover TCXO boards where all-block calibration can take ~140ms+. */
     if (sx1262_calibrate(0x7F) != 0) return -1;
-    vTaskDelay(pdMS_TO_TICKS(5)); /* wait for calibration */
 
     /* --- Calibrate image for 915 MHz (TODO: use region config) --- */
     if (sx1262_calibrate_image(915.0f) != 0) return -1;

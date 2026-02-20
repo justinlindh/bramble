@@ -299,20 +299,27 @@ int radio_transmit(const uint8_t *data, uint8_t len)
                              s_config.crc ? 1 : 0,
                              0);
 
-    /* Clear IRQ and start TX with 3s timeout */
+    /* Clear IRQ and start TX with 3s hardware timeout */
     sx1262_clear_irq_status(0x03FF);
-    sx1262_set_tx(3000);
+    int tx_err = sx1262_set_tx(3000);
+    if (tx_err != 0) {
+        ESP_LOGE(TAG, "sx1262_set_tx failed (BUSY timeout?), aborting TX");
+        s_tx_waiter = NULL;
+        atomic_store(&s_state, RADIO_STATE_IDLE);
+        radio_start_rx();
+        return -1;
+    }
 
     /* Reset WDT before the blocking wait — TX can take up to 4s and the
      * caller may have consumed most of the 5s WDT window already. */
     esp_task_wdt_reset();
 
-    /* Wait for TX done notification (max 4s) */
+    /* Wait for TX done (or TX timeout) notification — max 4s FreeRTOS timeout */
     uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(4000));
     s_tx_waiter = NULL;
 
     if (notified == 0) {
-        ESP_LOGE(TAG, "TX timeout waiting for done notification");
+        ESP_LOGE(TAG, "TX timeout: DIO1 IRQ never fired (TCXO issue? DIO1 wiring?)");
         atomic_store(&s_state, RADIO_STATE_IDLE);
         sx1262_set_standby(0);
         radio_start_rx();
