@@ -14,6 +14,24 @@ bramble_layout_t *s_layout = NULL;  /* NOT static — screens need access */
 
 static lv_display_t *s_display = NULL;
 
+/* Timer callbacks for periodic refresh */
+static void status_refresh_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (s_layout) {
+        layout_update_status(s_layout);
+    }
+}
+
+static void tab_refresh_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (!s_layout) return;
+    
+    /* Only refresh Stats and Nodes tabs (not Chat or Settings) */
+    if (s_layout->active_tab == TAB_STATS || s_layout->active_tab == TAB_NODES) {
+        layout_set_tab(s_layout, s_layout->active_tab);
+    }
+}
+
 /* Timer callback to transition from splash to main UI */
 static void splash_timer_cb(lv_timer_t *timer) {
     ESP_LOGI(TAG, "Splash timeout — transitioning to main UI");
@@ -31,6 +49,10 @@ static void splash_timer_cb(lv_timer_t *timer) {
     lv_port_keyboard_init();
     
     s_layout = layout_create();
+    
+    /* Create periodic refresh timers */
+    lv_timer_create(status_refresh_timer_cb, 2000, NULL);  /* Status bar: 2s */
+    lv_timer_create(tab_refresh_timer_cb, 5000, NULL);     /* Tab content: 5s */
     
     /* One-shot timer — delete itself */
     lv_timer_delete(timer);
