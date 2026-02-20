@@ -111,7 +111,13 @@ wss.on('connection', (browserWs, req, deviceWs, targetIp) => {
   deviceWs.on('close', (code, reason) => {
     console.log(`[proxy] device ${targetIp} closed (${code})`);
     if (browserWs.readyState === WebSocket.OPEN) {
-      browserWs.close(code || 1000, reason || 'Device disconnected');
+      const safeCode = (code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006 && code !== 1015)
+        ? code
+        : 1000;
+      const safeReason = (typeof reason === 'string' && reason.length > 0)
+        ? reason
+        : 'Device disconnected';
+      browserWs.close(safeCode, safeReason);
     }
   });
 
