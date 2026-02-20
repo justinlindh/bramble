@@ -20,6 +20,7 @@ static void render_messages_for_target(void);
 extern int mesh_send_broadcast(const uint8_t *data, size_t len);
 extern uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len);
 extern int mesh_get_channel_count(void);
+extern const char *mesh_get_peer_name(uint32_t addr);
 
 static void update_title(void) {
     if (!s_title) return;
@@ -63,12 +64,11 @@ static void back_click_cb(lv_event_t *e) {
     scr_chat_list_create(layout);
 }
 
-static void send_click_cb(lv_event_t *e) {
-    (void)e;
+static void send_current_message(void) {
     if (!s_compose_ta) return;
     const char *text = lv_textarea_get_text(s_compose_ta);
     if (!text || !text[0]) return;
-    
+
     size_t len = strlen(text);
     int rc = 0;
     ESP_LOGI(TAG, "send_click target kind=%d ch=%d active=%d len=%u", (int)s_target.kind, (int)s_target.channel_index, s_active_channel, (unsigned)len);
@@ -84,6 +84,16 @@ static void send_click_cb(lv_event_t *e) {
     } else {
         ESP_LOGW(TAG, "send failed for target kind=%d ch=%d", (int)s_target.kind, (int)s_target.channel_index);
     }
+}
+
+static void send_click_cb(lv_event_t *e) {
+    (void)e;
+    send_current_message();
+}
+
+static void compose_ready_cb(lv_event_t *e) {
+    (void)e;
+    send_current_message();
 }
 
 static void add_message_bubble(lv_obj_t *parent, const char *sender,
@@ -142,9 +152,15 @@ static void render_messages_for_target(void) {
         bool is_mine = (msg->direction == MSG_DIR_OUTGOING ||
                         msg->direction == MSG_DIR_BROADCAST_OUT);
 
-        char sender[16];
+        char sender[20];
         if (!is_mine) {
-            snprintf(sender, sizeof(sender), "%08lX", (unsigned long)msg->peer_addr);
+            /* Try to get peer name first, fallback to hex address */
+            const char *peer_name = mesh_get_peer_name(msg->peer_addr);
+            if (peer_name) {
+                snprintf(sender, sizeof(sender), "%s", peer_name);
+            } else {
+                snprintf(sender, sizeof(sender), "%08lX", (unsigned long)msg->peer_addr);
+            }
         }
 
         add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg->text, is_mine);
@@ -235,6 +251,7 @@ void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
     lv_obj_set_pos(s_compose_ta, 0, 0);
     lv_textarea_set_placeholder_text(s_compose_ta, "Type message...");
     lv_textarea_set_one_line(s_compose_ta, true);
+    lv_obj_add_event_cb(s_compose_ta, compose_ready_cb, LV_EVENT_READY, NULL);  /* Enter key sends */
     lv_obj_set_style_bg_color(s_compose_ta, BR_COLOR_BG, 0);
     lv_obj_set_style_text_color(s_compose_ta, BR_COLOR_TEXT, 0);
     lv_obj_set_style_text_font(s_compose_ta, &lv_font_montserrat_14, 0);

@@ -48,3 +48,21 @@ bool chat_target_matches_message(chat_target_t target,
 
     return message_channel_index >= 0 && message_channel_index == target.channel_index;
 }
+
+chat_target_t chat_target_cycle(chat_target_t current, int channel_count) {
+    /* Only broadcast exists */
+    if (channel_count <= 1) {
+        return chat_target_default();
+    }
+
+    if (current.kind == CHAT_TARGET_BROADCAST) {
+        return chat_target_normalize(CHAT_TARGET_CHANNEL, 1, channel_count);
+    }
+
+    int next = current.channel_index + 1;
+    if (next >= channel_count) {
+        return chat_target_default();
+    }
+
+    return chat_target_normalize(CHAT_TARGET_CHANNEL, next, channel_count);
+}

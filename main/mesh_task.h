@@ -81,7 +81,9 @@ int mesh_remove_channel(int index);
 int mesh_get_channel_count(void);
 
 /**
- * Set default channel (swap to index 0). Returns 0 on success.
+ * Set default channel index for unicast send routing.
+ * Broadcast always uses the public channel (index 0).
+ * Returns 0 on success.
  */
 int mesh_set_default_channel(int index);
 
@@ -97,5 +99,15 @@ uint32_t mesh_send_probe(void);
 void mesh_set_node_name(const char *name);
 void mesh_set_mailbox(bool enabled);
 bool mesh_get_mailbox(void);
+
+/**
+ * Get the current node name (returns NULL if not set).
+ */
+const char *mesh_get_node_name(void);
+
+/**
+ * Get a peer's name from the neighbor table (returns NULL if not found or no name).
+ */
+const char *mesh_get_peer_name(uint32_t addr);
 
 #endif

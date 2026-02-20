@@ -29,6 +29,9 @@ bool chat_target_matches_message(chat_target_t target,
                                  const stored_msg_t *msg,
                                  int message_channel_index);
 
+/* Cycle target: broadcast -> channel 1..N-1 -> broadcast */
+chat_target_t chat_target_cycle(chat_target_t current, int channel_count);
+
 #ifdef __cplusplus
 }
 #endif
