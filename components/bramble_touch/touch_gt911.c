@@ -159,13 +159,18 @@ bool touch_read(touch_point_t *point) {
         return false;
     }
 
-    point->x = (data[1] << 8) | data[0];
-    point->y = (data[3] << 8) | data[2];
+    uint16_t raw_x = (data[1] << 8) | data[0];
+    uint16_t raw_y = (data[3] << 8) | data[2];
+
+    /* GT911 is configured for 240x320 portrait with XY swap.
+     * Scale to display resolution (320x240 landscape). */
+    point->x = raw_x * 320 / 240;
+    point->y = raw_y * 240 / 320;
     point->pressed = true;
 
     static uint32_t touch_log_count = 0;
     if (++touch_log_count <= 10) {
-        ESP_LOGI(TAG, "Touch: x=%d y=%d", point->x, point->y);
+        ESP_LOGI(TAG, "Touch: raw(%d,%d) → screen(%d,%d)", raw_x, raw_y, point->x, point->y);
     }
 
     uint8_t zero = 0;
