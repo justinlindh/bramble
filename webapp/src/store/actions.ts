@@ -278,6 +278,14 @@ export async function loadRoutes(): Promise<void> {
   useStore.getState().setRoutes(result.routes ?? []);
 }
 
+function isLikelyDuplicate(existing: Message, candidate: Message): boolean {
+  if (existing.direction !== candidate.direction) return false;
+  if (existing.from !== candidate.from || existing.to !== candidate.to) return false;
+  if ((existing.channelIndex ?? -1) !== (candidate.channelIndex ?? -1)) return false;
+  if (existing.text !== candidate.text) return false;
+  return Math.abs(existing.timestampMs - candidate.timestampMs) < 5000;
+}
+
 export async function loadMessages(sinceId?: number): Promise<void> {
   if (!client) return;
   const params: Record<string, unknown> = { limit: 100 };
@@ -316,12 +324,12 @@ export async function loadMessages(sinceId?: number): Promise<void> {
       timestampMs: wallMs,
       status: 'delivered',
     };
-    /* Check if we already have a cached version (from IndexedDB) with relay path data.
-     * Match by text + timestamp proximity since firmware IDs differ from webapp IDs. */
-    const existing = store.messages.find(
-      ex => ex.text === fwMsg.text && Math.abs(ex.timestampMs - fwMsg.timestampMs) < 5000
-    );
-    if (existing?.relayPath) continue; // keep cached version with relay path
+    const existing = store.messages.find(ex => isLikelyDuplicate(ex, fwMsg));
+    if (existing) {
+      // Preserve richer cached message (e.g., relay path/status from web-side send path).
+      if (existing.relayPath && !fwMsg.relayPath) continue;
+      continue;
+    }
     store.addMessage(fwMsg);
   }
 }
