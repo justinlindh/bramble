@@ -1576,6 +1576,15 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     uint32_t src_addr;
     memcpy(&src_addr, data + HEADER_SIZE, 4);
 
+    char src_buf[12], me_buf[12];
+    ESP_LOGI(TAG, "PROBE RX pid=%08" PRIX32 " src=%s me=%s hop=%u rssi=%d snr=%d",
+             header.packet_id,
+             addr_hex(src_addr, src_buf, sizeof(src_buf)),
+             addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
+             (unsigned)header.hop_limit,
+             (int)rssi,
+             (int)snr);
+
     /* Send probe ACK back */
     uint8_t buf[20];
     bramble_header_t ack_header = {
@@ -1591,6 +1600,10 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     buf[HEADER_SIZE + 4] = 1; /* hops = 1 for direct */
 
     radio_transmit(buf, HEADER_SIZE + 5);
+    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1",
+             header.packet_id,
+             addr_hex(src_addr, src_buf, sizeof(src_buf)),
+             addr_hex(s_identity->address, me_buf, sizeof(me_buf)));
 
     /* Forward probe if hop limit allows */
     if (header.hop_limit > 1) {
@@ -1600,6 +1613,7 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
         bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
         memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
         radio_transmit(fwd_buf, HEADER_SIZE + 4);
+        ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id, (unsigned)fwd.hop_limit);
     }
 }
 
@@ -1609,9 +1623,21 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     bramble_header_t header;
     bramble_header_deserialize(&header, data, len);
 
+    char me_buf[12], dst_buf[12];
+
     /* Only process if this ACK is for our probe */
-    if (header.packet_id != s_probe_id) return;
-    if (header.dest_addr != s_identity->address) return;
+    if (header.packet_id != s_probe_id) {
+        ESP_LOGI(TAG, "PROBE ACK RX ignored pid=%08" PRIX32 " expected=%08" PRIX32,
+                 header.packet_id, s_probe_id);
+        return;
+    }
+    if (header.dest_addr != s_identity->address) {
+        ESP_LOGI(TAG, "PROBE ACK RX ignored wrong-dest=%s me=%s pid=%08" PRIX32,
+                 addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)),
+                 addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
+                 header.packet_id);
+        return;
+    }
 
     uint32_t resp_addr;
     memcpy(&resp_addr, data + HEADER_SIZE, 4);
@@ -1627,9 +1653,13 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     }
 
     char buf[12];
-    ESP_LOGI("mesh", "Probe ACK from %s hops=%u rssi=%d latency=%" PRIu32 "ms",
-             addr_hex(resp_addr, buf, sizeof(buf)), hops, rssi,
-             now_ms() - s_probe_sent_ms);
+    ESP_LOGI(TAG, "PROBE ACK RX from=%s hops=%u rssi=%d snr=%d latency=%" PRIu32 "ms pid=%08" PRIX32,
+             addr_hex(resp_addr, buf, sizeof(buf)),
+             (unsigned)hops,
+             (int)rssi,
+             (int)snr,
+             now_ms() - s_probe_sent_ms,
+             header.packet_id);
 
     /* Emit notification */
     cJSON *params = cJSON_CreateObject();
