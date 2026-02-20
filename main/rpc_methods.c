@@ -901,6 +901,21 @@ static int handle_play_tone(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+/* bramble.setVolume — set audio volume 0-100 */
+static int handle_set_volume(const cJSON *params, cJSON *result) {
+    (void)result;
+    cJSON *vol = cJSON_GetObjectItem(params, "volume");
+    if (!vol || !cJSON_IsNumber(vol)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    int v = (int)cJSON_GetNumberValue(vol);
+    if (v < 0 || v > 100) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    audio_set_volume((uint8_t)v);
+    return 0;
+}
+
 /* bramble.setMuted — mute or unmute audio */
 static int handle_set_muted(const cJSON *params, cJSON *result) {
     (void)result;
@@ -908,17 +923,17 @@ static int handle_set_muted(const cJSON *params, cJSON *result) {
     if (!muted || !cJSON_IsBool(muted)) {
         return RPC_ERR_INVALID_PARAMS;
     }
-
     audio_set_muted(cJSON_IsTrue(muted));
     return 0;
 }
 
-/* bramble.getAudioStatus — get audio mute status */
+/* bramble.getAudioStatus — get volume, mute, and playback state */
 static int handle_get_audio_status(const cJSON *params, cJSON *result) {
     (void)params;
-    cJSON_AddBoolToObject(result, "available", audio_is_available());
-    cJSON_AddBoolToObject(result, "muted", audio_get_muted());
-    cJSON_AddBoolToObject(result, "playing", audio_is_playing());
+    cJSON_AddBoolToObject(result,   "available", audio_is_available());
+    cJSON_AddNumberToObject(result, "volume",    audio_get_volume());
+    cJSON_AddBoolToObject(result,   "muted",     audio_get_muted());
+    cJSON_AddBoolToObject(result,   "playing",   audio_is_playing());
     return 0;
 }
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
@@ -962,6 +977,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.getGpsPosition",       handle_get_gps_position);
     rpc_register("bramble.getStorageInfo",       handle_get_storage_info);
     rpc_register("bramble.playTone",             handle_play_tone);
+    rpc_register("bramble.setVolume",            handle_set_volume);
     rpc_register("bramble.setMuted",             handle_set_muted);
     rpc_register("bramble.getAudioStatus",       handle_get_audio_status);
 #endif

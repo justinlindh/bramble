@@ -12,6 +12,7 @@
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -30,8 +31,9 @@ static char key_buffer[KEY_BUFFER_SIZE];
 static volatile int key_head = 0;
 static volatile int key_tail = 0;
 
-/* Interrupt flag */
-static volatile bool key_available = false;
+/* Polling cooldown — avoid hammering I2C on every LVGL tick (~30ms) */
+static int64_t last_poll_us = 0;
+#define POLL_INTERVAL_US  20000  /* 20ms minimum between I2C reads */
 
 /* ── Circular Buffer Helpers ────────────────────────────────────────── */
 
@@ -63,28 +65,26 @@ static inline bool buffer_pop(char *out) {
     return true;
 }
 
-/* ── ISR ────────────────────────────────────────────────────────────── */
-
-static void IRAM_ATTR keyboard_isr_handler(void *arg) {
-    key_available = true;
-}
-
 /* ── I2C Read Key ───────────────────────────────────────────────────── */
 
+/* Read one byte from keyboard MCU. Non-zero = key code, 0 = no key.
+ * Called directly from keyboard_poll() in polling mode (no ISR). */
 static void keyboard_read_key(void) {
     uint8_t key = 0;
-    esp_err_t ret = i2c_master_receive(dev_handle, &key, 1, 100);
-    
+    esp_err_t ret = i2c_master_receive(dev_handle, &key, 1, 50);
+
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "I2C read failed: %s", esp_err_to_name(ret));
-    } else if (key == 0) {
-        ESP_LOGD(TAG, "I2C read OK but key=0 (MCU not ready?)");
-    } else {
-        ESP_LOGI(TAG, "Key read: '%c' (0x%02x)", (key >= 0x20 && key < 0x7F) ? key : '?', key);
+        /* Suppress repeated noise — only log every ~2 sec */
+        static int64_t last_err_us = 0;
+        int64_t now = esp_timer_get_time();
+        if (now - last_err_us > 2000000) {
+            ESP_LOGW(TAG, "I2C read failed: %s", esp_err_to_name(ret));
+            last_err_us = now;
+        }
+    } else if (key != 0) {
+        ESP_LOGI(TAG, "Key: '%c' (0x%02x)", (key >= 0x20 && key < 0x7F) ? key : '?', key);
         buffer_push(key);
     }
-    
-    key_available = false;
 }
 
 
@@ -135,37 +135,31 @@ int keyboard_init(void) {
         return -1;
     }
 
-    /* Configure interrupt GPIO */
-    if (s_board->keyboard_int != -1) {
-        gpio_config_t io_conf = {
-            .pin_bit_mask = (1ULL << s_board->keyboard_int),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_ENABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_NEGEDGE,
-        };
-        gpio_config(&io_conf);
-
-        /* Install ISR service if not already installed */
-        gpio_install_isr_service(0);
-        gpio_isr_handler_add(s_board->keyboard_int, keyboard_isr_handler, NULL);
-    }
+    /* GPIO 46 is the keyboard data-ready line on T-Deck Plus, but it is
+     * unreliable as a hardware interrupt (strapping pin behaviour, pull
+     * direction, board-level noise).  Meshtastic likewise leaves it unused.
+     * We use pure I2C polling instead: keyboard_poll() reads one byte every
+     * POLL_INTERVAL_US microseconds; the MCU returns 0x00 when idle. */
+    ESP_LOGD(TAG, "Keyboard running in polling mode (GPIO%d ISR skipped)",
+             s_board->keyboard_int);
 
     initialized = true;
-    ESP_LOGI(TAG, "Keyboard initialized (I2C 0x55)");
+    ESP_LOGI(TAG, "Keyboard initialized (I2C 0x55, polling mode)");
     return 0;
 }
 
 bool keyboard_poll(char *out) {
     if (!initialized || !out) return false;
 
-    /* Check interrupt flag and read if available */
-    if (key_available) {
-        ESP_LOGI(TAG, "ISR triggered — reading from keyboard MCU");
+    /* Rate-limit I2C reads so we don't saturate the bus.
+     * LVGL calls this every ~30ms; we read every 20ms max. */
+    int64_t now = esp_timer_get_time();
+    if (now - last_poll_us >= POLL_INTERVAL_US) {
+        last_poll_us = now;
         keyboard_read_key();
     }
 
-    /* Pop from buffer */
+    /* Return any buffered key */
     return buffer_pop(out);
 }
 
@@ -178,16 +172,19 @@ i2c_master_bus_handle_t keyboard_get_i2c_bus(void) {
     return bus_handle;
 }
 
-void keyboard_set_backlight(bool on) {
+void keyboard_set_backlight(uint8_t brightness) {
     if (!initialized || !dev_handle) return;
-    /* I2C command: write {0x01, val} to keyboard MCU at 0x55.
-     * Register 0x01 = LILYGO_KB_BRIGHTNESS_CMD. val: 0=off, 1=on. */
-    uint8_t cmd[2] = { 0x01, on ? 1 : 0 };
+    /* I2C command to keyboard MCU at 0x55:
+     *   byte[0] = 0x01  (LILYGO_KB_BRIGHTNESS_CMD register)
+     *   byte[1] = 0..255 (PWM duty; 0 = off, 255 = maximum brightness)
+     * Note: the MCU may only implement on/off (treating any value >0 as on),
+     * but sending the full range is safe and correct. */
+    uint8_t cmd[2] = { 0x01, brightness };
     esp_err_t ret = i2c_master_transmit(dev_handle, cmd, sizeof(cmd), 100);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Keyboard backlight set failed: %s", esp_err_to_name(ret));
     } else {
-        ESP_LOGI(TAG, "Keyboard backlight %s", on ? "ON" : "OFF");
+        ESP_LOGI(TAG, "Keyboard backlight brightness=%u", brightness);
     }
 }
 
@@ -208,8 +205,8 @@ bool keyboard_has_data(void) {
     return false;
 }
 
-void keyboard_set_backlight(bool on) {
-    (void)on;
+void keyboard_set_backlight(uint8_t brightness) {
+    (void)brightness;
 }
 
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */

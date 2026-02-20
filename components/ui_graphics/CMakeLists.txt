@@ -23,7 +23,7 @@ idf_component_register(
     SRCS ${ui_gfx_srcs}
     INCLUDE_DIRS "include" "."
     REQUIRES display keyboard trackball board_config bramble_touch
-             channel msg_store identity radio battery
+             channel msg_store identity radio battery audio
              location gps rpc airtime wifi ble ui
     PRIV_REQUIRES lvgl esp_app_format
 )
