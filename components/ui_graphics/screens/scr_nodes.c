@@ -51,6 +51,8 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     }
     lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(name_lbl, BR_COLOR_TEXT, 0);
+    lv_obj_set_width(name_lbl, LV_PCT(68));
+    lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(name_lbl, 0, 0);
 
     /* Info line: rssi, last heard */
@@ -61,6 +63,8 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     lv_label_set_text(info_lbl, info);
     lv_obj_set_style_text_font(info_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(info_lbl, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_width(info_lbl, LV_PCT(68));
+    lv_label_set_long_mode(info_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(info_lbl, 0, 20);
     
     /* Signal strength bar */
@@ -105,7 +109,8 @@ void scr_nodes_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_top(title, 4, 0);
     
     lv_obj_t *list = lv_obj_create(cont);
-    lv_obj_set_size(list, 320, BR_CONTENT_H - 24);
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_height(list, BR_CONTENT_H - 24);
     lv_obj_set_pos(list, 0, 22);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(list, 0, 0);
