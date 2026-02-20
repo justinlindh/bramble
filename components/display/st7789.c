@@ -73,7 +73,7 @@ static void st7789_write_cmd(uint8_t cmd) {
         .length = 8,
         .tx_buffer = &cmd,
     };
-    spi_device_polling_transmit(spi, &t);
+    spi_device_transmit(spi, &t);
 }
 
 static void st7789_write_data(const uint8_t *data, size_t len) {
@@ -83,7 +83,7 @@ static void st7789_write_data(const uint8_t *data, size_t len) {
         .length = len * 8,
         .tx_buffer = data,
     };
-    spi_device_polling_transmit(spi, &t);
+    spi_device_transmit(spi, &t);
 }
 
 static void st7789_write_byte(uint8_t val) {
@@ -289,7 +289,7 @@ int display_init(void) {
                 .length = chunk * 8,
                 .tx_buffer = zero_buf,
             };
-            spi_device_polling_transmit(spi, &t);
+            spi_device_transmit(spi, &t);
         }
         spi_device_release_bus(spi);
         ESP_LOGI(TAG, "GRAM cleared (%zu bytes)", total);
@@ -427,7 +427,7 @@ void display_flush(void) {
             .length = chunk * 8,
             .tx_buffer = dma_buf,
         };
-        esp_err_t ret = spi_device_polling_transmit(spi, &t);
+        esp_err_t ret = spi_device_transmit(spi, &t);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "SPI flush error at offset %zu: %s", sent, esp_err_to_name(ret));
             break;
@@ -500,7 +500,7 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
             .length = chunk * 8,
             .tx_buffer = dma_buf,
         };
-        spi_device_polling_transmit(spi, &t);
+        spi_device_transmit(spi, &t);
     }
 }
 

@@ -30,8 +30,23 @@ static const bramble_board_config_t *s_board = NULL;
 /*  Helper: NSS control                                                */
 /* ------------------------------------------------------------------ */
 
-static inline void nss_low(void)  { gpio_set_level(s_board->radio.cs, 0); }
-static inline void nss_high(void) { gpio_set_level(s_board->radio.cs, 1); }
+/* On the shared SPI bus (T-Deck Plus) the radio uses manual CS, but we must
+ * hold the bus lock between asserting CS and completing the transfer.
+ * Otherwise the display task can run its own SPI transaction while radio CS
+ * is low, and the SX1262 receives the display data as part of its frame —
+ * silently corrupting the command.  spi_device_acquire_bus / release_bus
+ * serialises access so no other device can interleave. */
+static void nss_low(void)
+{
+    spi_device_acquire_bus(s_spi, portMAX_DELAY);
+    gpio_set_level(s_board->radio.cs, 0);
+}
+
+static void nss_high(void)
+{
+    gpio_set_level(s_board->radio.cs, 1);
+    spi_device_release_bus(s_spi);
+}
 
 /* ------------------------------------------------------------------ */
 /*  BUSY                                                               */
@@ -71,9 +86,9 @@ static int spi_transfer(const uint8_t *tx, uint8_t *rx, size_t len)
 
 int sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
 {
-    /* 500ms: generous enough for TCXO startup (32ms) + calibration overhead
-     * while still detecting genuinely stuck BUSY within half a second. */
-    if (sx1262_wait_busy(500) != 0) return -1;
+    /* 2000ms: covers TCXO startup (≤32ms) + calibration overhead on TCXO
+     * boards, while still detecting a genuinely stuck BUSY line. */
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     uint8_t tx[1 + len];
     tx[0] = cmd;
@@ -87,7 +102,7 @@ int sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
 
 int sx1262_read_command(uint8_t cmd, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     /* cmd + 1 NOP (status) + len data bytes */
     size_t total = 2 + len;
@@ -106,7 +121,7 @@ int sx1262_read_command(uint8_t cmd, uint8_t *data, size_t len)
 
 int sx1262_write_register(uint16_t addr, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     size_t total = 3 + len; /* cmd + addr_hi + addr_lo + data */
     uint8_t tx[total];
@@ -123,7 +138,7 @@ int sx1262_write_register(uint16_t addr, const uint8_t *data, size_t len)
 
 int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     /* cmd + addr_hi + addr_lo + 1 NOP + len data */
     size_t total = 4 + len;
@@ -144,7 +159,7 @@ int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
 
 int sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     size_t total = 2 + len; /* cmd + offset + data */
     uint8_t tx[total];
@@ -160,7 +175,7 @@ int sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
 
 int sx1262_read_buffer(uint8_t offset, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     /* cmd + offset + 1 NOP + len data */
     size_t total = 3 + len;
@@ -187,7 +202,7 @@ int sx1262_get_status(uint8_t *status)
     uint8_t st;
     int rc = sx1262_read_command(SX1262_CMD_GET_STATUS, &st, 0);
     /* Status is actually in the first response byte (index 1) — re-read */
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     uint8_t tx[2] = { SX1262_CMD_GET_STATUS, 0x00 };
     uint8_t rx[2] = { 0 };
@@ -208,7 +223,7 @@ int sx1262_reset(void)
     vTaskDelay(pdMS_TO_TICKS(1));
     gpio_set_level(s_board->radio.rst, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
-    return sx1262_wait_busy(500);
+    return sx1262_wait_busy(2000);
 }
 
 /* ------------------------------------------------------------------ */
@@ -436,7 +451,7 @@ int sx1262_calibrate(uint8_t cal_mask)
      * this wait.  100ms (the default write_command BUSY wait) is not enough.
      * We wait for BUSY before sending the command, then send it, then wait
      * again for the calibration to complete. */
-    if (sx1262_wait_busy(500) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) return -1;
 
     uint8_t cmd = SX1262_CMD_CALIBRATE;
     uint8_t tx[2] = { cmd, cal_mask };
@@ -444,8 +459,9 @@ int sx1262_calibrate(uint8_t cal_mask)
     spi_transfer(tx, NULL, 2);
     nss_high();
 
-    /* Wait up to 1000ms for all calibration blocks to complete */
-    return sx1262_wait_busy(1000);
+    /* Wait up to 5000ms for all calibration blocks to complete.
+     * RadioLib uses this value — TCXO boards can be slow. */
+    return sx1262_wait_busy(5000);
 }
 
 int sx1262_calibrate_image(float freq_mhz)
@@ -560,12 +576,16 @@ int sx1262_init(void)
     }
 
     /* --- Calibrate all blocks --- */
-    /* sx1262_calibrate() has its own extended BUSY wait (up to 1000ms) to
+    /* sx1262_calibrate() has its own extended BUSY wait (up to 5000ms) to
      * cover TCXO boards where all-block calibration can take ~140ms+. */
     if (sx1262_calibrate(0x7F) != 0) return -1;
 
     /* --- Calibrate image for 915 MHz (TODO: use region config) --- */
     if (sx1262_calibrate_image(915.0f) != 0) return -1;
+
+    /* Leave in STDBY_RC after init. The SX1262 automatically re-enables the
+     * TCXO (via DIO3) when entering TX or RX, so there is no need to stay
+     * in STDBY_XOSC between commands. */
 
     /* --- Regulator mode --- */
     uint8_t reg_mode = (s_board->radio_reg == RADIO_REG_DCDC) ? 1 : 0;

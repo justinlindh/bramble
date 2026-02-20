@@ -31,6 +31,15 @@ if [ ! -f "$HOME/src/esp-idf/export.sh" ]; then
     exit 1
 fi
 
+# The ESP-IDF venv may have been built with a Python version (e.g. 3.14) that
+# isn't the system default.  Prepend the newest existing venv's bin/ so that
+# detect_python.sh picks up the right interpreter.
+IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1)
+if [ -n "$IDF_VENV" ] && [ -x "$IDF_VENV/bin/python3" ]; then
+    export PATH="$IDF_VENV/bin:$PATH"
+    echo "==> Using Python from $IDF_VENV ($($IDF_VENV/bin/python3 --version))"
+fi
+
 echo "==> Sourcing ESP-IDF environment..."
 source "$HOME/src/esp-idf/export.sh"
 
