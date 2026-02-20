@@ -11,8 +11,8 @@
 
 static const char *TAG = "scr_settings";
 
-/* Get node name from mesh — extern since it's in main */
-extern void mesh_set_node_name(const char *name);
+/* Get/set node name from mesh — extern since it's in main */
+extern int mesh_set_node_name_persist(const char *name);
 extern const char *mesh_get_node_name(void);
 
 /* ── Backlight ───────────────────────────────────────────────────────── */
@@ -121,35 +121,95 @@ static lv_obj_t *create_setting_row(lv_obj_t *parent, const char *label) {
 /* ── Node Name edit modal ────────────────────────────────────────────── */
 
 static lv_obj_t *s_name_label = NULL;
+static lv_obj_t *s_name_edit_overlay = NULL;
+static lv_obj_t *s_name_edit_ta = NULL;
+
+static void name_edit_close(void) {
+    if (!s_name_edit_overlay) return;
+    lv_obj_delete(s_name_edit_overlay);
+    s_name_edit_overlay = NULL;
+    s_name_edit_ta = NULL;
+}
 
 static void name_edit_close_cb(lv_event_t *e) {
-    lv_obj_t *msgbox = (lv_obj_t *)lv_event_get_user_data(e);
-    lv_msgbox_close(msgbox);
+    (void)e;
+    name_edit_close();
 }
 
 static void name_edit_save_cb(lv_event_t *e) {
-    lv_obj_t *ta = (lv_obj_t *)lv_event_get_user_data(e);
-    const char *new_name = lv_textarea_get_text(ta);
-    
+    (void)e;
+    if (!s_name_edit_ta) return;
+    const char *new_name = lv_textarea_get_text(s_name_edit_ta);
+
     if (new_name && new_name[0] != '\0') {
-        mesh_set_node_name(new_name);
-        if (s_name_label) {
-            lv_label_set_text(s_name_label, new_name);
+        if (mesh_set_node_name_persist(new_name) == 0) {
+            if (s_name_label) lv_label_set_text(s_name_label, new_name);
+            ESP_LOGI(TAG, "Node name updated to: %s", new_name);
+        } else {
+            ESP_LOGW(TAG, "Failed to persist node name");
         }
-        ESP_LOGI(TAG, "Node name updated to: %s", new_name);
     }
-    
-    /* Close the message box */
-    lv_obj_t *msgbox = lv_obj_get_parent(lv_obj_get_parent(ta));
-    lv_msgbox_close(msgbox);
+
+    name_edit_close();
 }
 
 static void name_edit_cb(lv_event_t *e) {
     (void)e;
-    
-    /* For now, just log that name editing was clicked */
-    /* TODO: Implement proper modal dialog for name editing */
-    ESP_LOGI(TAG, "Node name edit requested (modal UI to be implemented)");
+    if (s_name_edit_overlay) return;
+
+    lv_obj_t *scr = lv_screen_active();
+    s_name_edit_overlay = lv_obj_create(scr);
+    lv_obj_set_size(s_name_edit_overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_name_edit_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_name_edit_overlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(s_name_edit_overlay, 0, 0);
+    lv_obj_set_style_pad_all(s_name_edit_overlay, 0, 0);
+
+    lv_obj_t *panel = lv_obj_create(s_name_edit_overlay);
+    lv_obj_set_size(panel, 290, 132);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, BR_COLOR_SURFACE, 0);
+    lv_obj_set_style_border_width(panel, 0, 0);
+    lv_obj_set_style_radius(panel, BR_RADIUS, 0);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "Set Node Name");
+    lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 6);
+
+    s_name_edit_ta = lv_textarea_create(panel);
+    lv_obj_set_size(s_name_edit_ta, 274, 36);
+    lv_obj_align(s_name_edit_ta, LV_ALIGN_TOP_MID, 0, 30);
+    lv_textarea_set_max_length(s_name_edit_ta, 16);
+    lv_textarea_set_one_line(s_name_edit_ta, true);
+    const char *node_name = mesh_get_node_name();
+    lv_textarea_set_text(s_name_edit_ta, node_name ? node_name : "");
+
+    lv_obj_t *cancel_btn = lv_btn_create(panel);
+    lv_obj_set_size(cancel_btn, 128, 30);
+    lv_obj_align(cancel_btn, LV_ALIGN_BOTTOM_LEFT, 8, -8);
+    lv_obj_add_event_cb(cancel_btn, name_edit_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_lbl, "Cancel");
+    lv_obj_center(cancel_lbl);
+
+    lv_obj_t *save_btn = lv_btn_create(panel);
+    lv_obj_set_size(save_btn, 128, 30);
+    lv_obj_align(save_btn, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
+    lv_obj_set_style_bg_color(save_btn, BR_COLOR_PRIMARY, 0);
+    lv_obj_add_event_cb(save_btn, name_edit_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *save_lbl = lv_label_create(save_btn);
+    lv_label_set_text(save_lbl, "Save");
+    lv_obj_center(save_lbl);
+
+    lv_group_t *g = lv_group_get_default();
+    if (g) {
+        lv_group_add_obj(g, s_name_edit_ta);
+        lv_group_add_obj(g, cancel_btn);
+        lv_group_add_obj(g, save_btn);
+        lv_group_focus_obj(s_name_edit_ta);
+    }
 }
 
 /* ── Screen entry point ──────────────────────────────────────────────── */
