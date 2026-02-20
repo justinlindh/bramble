@@ -47,11 +47,12 @@ def write_c_array(rgb565, alpha, width, height, name, out_path):
     """
     stride = width * 2
     with open(out_path, 'w') as f:
-        f.write(f"/* Auto-generated from Bramble logo - do not edit manually */\n")
-        f.write(f"/* Source: bramble/webapp/public/favicon.svg (MIT license) */\n\n")
+        f.write(f"/* Auto-generated from bramble-logo.png — do not edit manually */\n")
+        f.write(f"/* Flash-resident: static const keeps this in .rodata (flash, not RAM) */\n\n")
         f.write(f"#include \"lvgl.h\"\n\n")
 
-        f.write(f"static const uint8_t {name}_map[] = {{\n")
+        f.write(f"/* {width}x{height} px — {width * height * 3} bytes in flash */\n")
+        f.write(f"static const uint8_t {name}_map[] __attribute__((aligned(4))) = {{\n")
 
         # Planar: all RGB565 pixel data first
         f.write(f"  /* RGB565 pixel data ({width * height * 2} bytes) */\n")
@@ -89,12 +90,17 @@ def write_c_array(rgb565, alpha, width, height, name, out_path):
 
 def main():
     base = Path(__file__).parent.parent
-    svg_path = base / "webapp" / "public" / "favicon.svg"
+    # Prefer the full webapp logo (512x512 RGBA) over the small favicon SVG
+    png_primary = base / "webapp" / "public" / "bramble-logo.png"
+    svg_path    = base / "webapp" / "public" / "favicon.svg"
     png_fallback = base / "assets" / "bramble-logo.png"
 
-    size = 80  # 80x80 for splash on 320x240
+    size = 100  # 100x100 for splash on 320x240 T-Deck Plus
 
-    if svg_path.exists():
+    if png_primary.exists():
+        print(f"Resizing PNG: {png_primary}")
+        img = Image.open(png_primary).convert("RGBA").resize((size, size), Image.LANCZOS)
+    elif svg_path.exists():
         print(f"Converting SVG: {svg_path}")
         img = svg_to_png(svg_path, size)
     elif png_fallback.exists():
