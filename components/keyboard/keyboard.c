@@ -178,6 +178,19 @@ i2c_master_bus_handle_t keyboard_get_i2c_bus(void) {
     return bus_handle;
 }
 
+void keyboard_set_backlight(bool on) {
+    if (!initialized || !dev_handle) return;
+    /* I2C command: write {0x01, val} to keyboard MCU at 0x55.
+     * Register 0x01 = LILYGO_KB_BRIGHTNESS_CMD. val: 0=off, 1=on. */
+    uint8_t cmd[2] = { 0x01, on ? 1 : 0 };
+    esp_err_t ret = i2c_master_transmit(dev_handle, cmd, sizeof(cmd), 100);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Keyboard backlight set failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Keyboard backlight %s", on ? "ON" : "OFF");
+    }
+}
+
 #else  /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* Stub implementations for non-T-Deck boards */
@@ -193,6 +206,10 @@ bool keyboard_poll(char *out) {
 
 bool keyboard_has_data(void) {
     return false;
+}
+
+void keyboard_set_backlight(bool on) {
+    (void)on;
 }
 
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */

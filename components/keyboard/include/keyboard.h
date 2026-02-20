@@ -36,4 +36,10 @@ bool keyboard_poll(char *out);
  */
 bool keyboard_has_data(void);
 
+/**
+ * Control keyboard backlight LEDs via I2C command to keyboard MCU.
+ * on=true: LEDs on, on=false: LEDs off.
+ */
+void keyboard_set_backlight(bool on);
+
 #endif /* BRAMBLE_KEYBOARD_H */

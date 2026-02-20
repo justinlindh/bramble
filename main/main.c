@@ -503,6 +503,7 @@ void app_main(void)
     /* Init keyboard and trackball (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: keyboard_init ===");
     keyboard_init();
+    keyboard_set_backlight(true);  /* Turn on keyboard LEDs */
     ESP_LOGI(TAG, "=== BOOT STAGE: trackball_init ===");
     trackball_init();
 #endif
