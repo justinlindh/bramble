@@ -379,18 +379,7 @@ static int handle_add_channel(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    /* Persist channel to NVS */
-    nvs_handle_t nvs;
-    if (nvs_open("bramble_ch", NVS_READWRITE, &nvs) == ESP_OK) {
-        char key_name[20], key_psk[20];
-        snprintf(key_name, sizeof(key_name), "ch%d_name", idx);
-        snprintf(key_psk, sizeof(key_psk), "ch%d_psk", idx);
-        nvs_set_str(nvs, key_name, name);
-        if (psk) nvs_set_str(nvs, key_psk, psk);
-        nvs_set_u8(nvs, "ch_count", (uint8_t)mesh_get_channel_count());
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
+    /* Persistence is now handled in mesh_add_channel (Phase 1) */
 
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddNumberToObject(result, "index", idx);
@@ -417,12 +406,7 @@ static int handle_remove_channel(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    nvs_handle_t nvs;
-    if (nvs_open("bramble_ch", NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "ch_count", (uint8_t)mesh_get_channel_count());
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
+    /* Persistence is now handled in mesh_remove_channel (Phase 1) */
 
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddNumberToObject(result, "channels", mesh_get_channel_count());

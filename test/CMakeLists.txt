@@ -74,6 +74,18 @@ target_include_directories(test_channel_key PRIVATE
 )
 target_link_libraries(test_channel_key ssl crypto)
 
+# Channel storage tests (Phase 1 persistence)
+add_executable(test_channel_storage
+    test_channel_storage.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_channel_storage PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+)
+target_link_libraries(test_channel_storage ssl crypto)
+
 # Key exchange tests
 add_executable(test_key_exchange
     test_key_exchange.c

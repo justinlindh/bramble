@@ -116,4 +116,11 @@ const char *mesh_get_node_name(void);
  */
 const char *mesh_get_peer_name(uint32_t addr);
 
+/**
+ * Get channel count and default channel index (thread-safe).
+ * If default_idx is not NULL, sets it to the current default channel index.
+ * Returns the number of channels.
+ */
+int mesh_get_channel_info(int *default_idx);
+
 #endif
