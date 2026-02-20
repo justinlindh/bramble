@@ -25,7 +25,8 @@ extern void mesh_get_state(ui_mesh_state_t *out);
 
 static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32_t now_ms) {
     lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_set_size(card, 304, 48);
+    lv_obj_set_width(card, LV_PCT(100));
+    lv_obj_set_height(card, 48);
     lv_obj_set_style_bg_color(card, BR_COLOR_SURFACE, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, BR_RADIUS, 0);
@@ -66,7 +67,7 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     lv_obj_t *bar = lv_bar_create(card);
     lv_obj_set_size(bar, 40, 8);
     lv_obj_align(bar, LV_ALIGN_TOP_RIGHT, -40, 4);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x333344), 0);
+    lv_obj_set_style_bg_color(bar, BR_COLOR_SURFACE_2, 0);
     lv_obj_set_style_bg_color(bar, BR_COLOR_SUCCESS, LV_PART_INDICATOR);
     int pct = (n->rssi + 120) * 100 / 70;
     if (pct < 0) pct = 0;
@@ -112,6 +113,7 @@ void scr_nodes_create(bramble_layout_t *layout) {
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 4, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);  /* Prevent horizontal scroll */
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);  /* Hide stray bars */
 
     if (count == 0) {
         lv_obj_t *empty = lv_label_create(list);

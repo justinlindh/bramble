@@ -163,3 +163,16 @@
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+
+.nodeCell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.nodeSub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-left: 0.1rem;
+  font-family: var(--font-mono, monospace);
+}

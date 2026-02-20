@@ -501,14 +501,28 @@ export async function sendProbe(): Promise<void> {
   const probeIdStr = (raw.probeId ?? raw.probe_id) as string | undefined;
   const probeId = probeIdStr ? parseInt(probeIdStr, 16) : Math.floor(Math.random() * 0xFFFFFFFF);
   const ackWindow = (raw.ackWindow ?? raw.ack_window ?? 30) as number;
+  const sentAt = Date.now();
+
   store.setProbeResult({
     probeId,
-    sentAt: Date.now(),
+    sentAt,
     ackWindow,
     responses: [],
     complete: false,
   });
   store.setProbeCollecting(true);
+
+  /* Firmware currently emits onProbeResult but not onProbeComplete.
+   * Auto-finalize at ack-window expiry to avoid stuck Collecting state. */
+  setTimeout(() => {
+    const s = useStore.getState();
+    const cur = s.probeResult;
+    if (!cur) return;
+    if (cur.probeId !== probeId) return;      /* newer probe started */
+    if (!s.probeCollecting || cur.complete) return;
+    s.setProbeResult({ ...cur, complete: true });
+    s.setProbeCollecting(false);
+  }, Math.max(1, ackWindow) * 1000 + 150);
 }
 
 function handleProbeAck(params: unknown): void {
@@ -531,7 +545,13 @@ function handleProbeAck(params: unknown): void {
 }
 
 function handleProbeComplete(params: unknown): void {
-  const { probeId } = params as { probeId: number };
+  const p = params as any;
+  const probeId = typeof p.probeId === 'string'
+    ? parseInt(p.probeId, 16)
+    : typeof p.probe_id === 'string'
+    ? parseInt(p.probe_id, 16)
+    : (p.probeId ?? p.probe_id);
+
   const store = useStore.getState();
   const prev = store.probeResult;
   if (!prev || prev.probeId !== probeId) return;

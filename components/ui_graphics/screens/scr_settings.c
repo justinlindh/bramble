@@ -160,7 +160,7 @@ static void name_edit_cb(lv_event_t *e) {
     lv_obj_t *scr = lv_screen_active();
     s_name_edit_overlay = lv_obj_create(scr);
     lv_obj_set_size(s_name_edit_overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(s_name_edit_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(s_name_edit_overlay, BR_COLOR_BG, 0);
     lv_obj_set_style_bg_opa(s_name_edit_overlay, LV_OPA_70, 0);
     lv_obj_set_style_border_width(s_name_edit_overlay, 0, 0);
     lv_obj_set_style_pad_all(s_name_edit_overlay, 0, 0);
@@ -247,7 +247,7 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_align(bl_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(bl_slider, 0, 100);
     lv_slider_set_value(bl_slider, 80, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(bl_slider, lv_color_hex(0x333344), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bl_slider, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(bl_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(bl_slider, BR_COLOR_TEXT, LV_PART_KNOB);
     lv_obj_add_event_cb(bl_slider, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -266,7 +266,7 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_align(s_volume_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(s_volume_slider, 0, 100);
     lv_slider_set_value(s_volume_slider, cur_vol, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(s_volume_slider, lv_color_hex(0x333344), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_TEXT, LV_PART_KNOB);
     lv_obj_add_event_cb(s_volume_slider, volume_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -281,7 +281,7 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_t *mute_row = create_setting_row(cont, LV_SYMBOL_MUTE " Silent");
     s_mute_sw = lv_switch_create(mute_row);
     lv_obj_align(s_mute_sw, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_mute_sw, lv_color_hex(0x333344), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_TEXT, LV_PART_KNOB);
     /* Reflect saved mute state */
@@ -317,14 +317,14 @@ void scr_settings_create(bramble_layout_t *layout) {
         lv_obj_align(s_conn_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
 
         /* Style to match dark theme */
-        lv_obj_set_style_bg_color(s_conn_dropdown, lv_color_hex(0x1E1E3A), 0);
+        lv_obj_set_style_bg_color(s_conn_dropdown, BR_COLOR_SURFACE_2, 0);
         lv_obj_set_style_text_color(s_conn_dropdown, BR_COLOR_TEXT, 0);
         lv_obj_set_style_text_font(s_conn_dropdown, &lv_font_montserrat_12, 0);
         lv_obj_set_style_border_color(s_conn_dropdown, BR_COLOR_PRIMARY, 0);
         lv_obj_set_style_border_width(s_conn_dropdown, 1, 0);
 
         lv_obj_t *dd_list = lv_dropdown_get_list(s_conn_dropdown);
-        lv_obj_set_style_bg_color(dd_list, lv_color_hex(0x1E1E3A), 0);
+        lv_obj_set_style_bg_color(dd_list, BR_COLOR_SURFACE_2, 0);
         lv_obj_set_style_text_color(dd_list, BR_COLOR_TEXT, 0);
         lv_obj_set_style_text_font(dd_list, &lv_font_montserrat_12, 0);
         lv_obj_set_style_border_color(dd_list, BR_COLOR_PRIMARY, 0);
@@ -348,7 +348,7 @@ void scr_settings_create(bramble_layout_t *layout) {
         lv_obj_t *apply_btn = lv_btn_create(cont);
         lv_obj_set_size(apply_btn, 304, BR_TAP_TARGET_MIN);
         lv_obj_set_style_bg_color(apply_btn, BR_COLOR_PRIMARY, 0);
-        lv_obj_set_style_bg_color(apply_btn, lv_color_hex(0x0A6B60), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(apply_btn, lv_color_hex(0x1A6628), LV_STATE_PRESSED);  /* Darker green */
         lv_obj_set_style_radius(apply_btn, BR_RADIUS, 0);
         lv_obj_t *apply_lbl = lv_label_create(apply_btn);
         lv_label_set_text(apply_lbl, LV_SYMBOL_OK " Apply Mode & Reboot");

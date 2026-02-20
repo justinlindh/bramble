@@ -50,7 +50,7 @@ bramble_layout_t *layout_create(void) {
     s_layout.status_bar = lv_obj_create(scr);
     lv_obj_set_size(s_layout.status_bar, 320, BR_STATUS_BAR_H);
     lv_obj_set_pos(s_layout.status_bar, 0, 0);
-    lv_obj_set_style_bg_color(s_layout.status_bar, lv_color_hex(0x111122), 0);
+    lv_obj_set_style_bg_color(s_layout.status_bar, BR_COLOR_SURFACE, 0);
     lv_obj_set_style_bg_opa(s_layout.status_bar, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_layout.status_bar, 0, 0);
     lv_obj_set_style_border_width(s_layout.status_bar, 0, 0);
@@ -99,7 +99,7 @@ bramble_layout_t *layout_create(void) {
     s_layout.tab_bar = lv_obj_create(scr);
     lv_obj_set_size(s_layout.tab_bar, 320, BR_TAB_BAR_H);
     lv_obj_set_pos(s_layout.tab_bar, 0, 240 - BR_TAB_BAR_H);
-    lv_obj_set_style_bg_color(s_layout.tab_bar, lv_color_hex(0x111122), 0);
+    lv_obj_set_style_bg_color(s_layout.tab_bar, BR_COLOR_SURFACE, 0);
     lv_obj_set_style_bg_opa(s_layout.tab_bar, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_layout.tab_bar, 0, 0);
     lv_obj_set_style_border_width(s_layout.tab_bar, 0, 0);
@@ -211,7 +211,7 @@ void layout_set_unread(bramble_layout_t *layout, int count) {
             /* Create badge container */
             layout->chat_badge = lv_obj_create(layout->tab_btns[TAB_CHAT]);
             lv_obj_set_size(layout->chat_badge, 20, 20);
-            lv_obj_set_style_bg_color(layout->chat_badge, lv_color_hex(0xFF0000), 0);
+            lv_obj_set_style_bg_color(layout->chat_badge, BR_COLOR_DANGER, 0);
             lv_obj_set_style_bg_opa(layout->chat_badge, LV_OPA_COVER, 0);
             lv_obj_set_style_radius(layout->chat_badge, 10, 0);  /* Circle */
             lv_obj_set_style_border_width(layout->chat_badge, 0, 0);
@@ -222,7 +222,7 @@ void layout_set_unread(bramble_layout_t *layout, int count) {
             /* Add label with count */
             lv_obj_t *lbl = lv_label_create(layout->chat_badge);
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
             lv_obj_center(lbl);
         }
         

@@ -99,7 +99,8 @@ static void compose_ready_cb(lv_event_t *e) {
 static void add_message_bubble(lv_obj_t *parent, const char *sender,
                                 const char *text, bool is_mine) {
     lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_size(row, 304, LV_SIZE_CONTENT);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_pad_all(row, 0, 0);
@@ -231,6 +232,7 @@ void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
     lv_obj_set_flex_flow(s_msg_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_msg_list, 4, 0);
     lv_obj_set_scroll_dir(s_msg_list, LV_DIR_VER);  /* Prevent horizontal scroll */
+    lv_obj_set_scrollbar_mode(s_msg_list, LV_SCROLLBAR_MODE_OFF);  /* Hide stray bars */
 
     /* Load messages from store */
     render_messages_for_target();

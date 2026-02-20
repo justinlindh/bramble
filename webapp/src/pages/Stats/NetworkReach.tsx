@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../../store/index';
 import { sendProbe } from '../../store/actions';
 import { IconProbe } from '../../components/Icons';
+import { AddressLabel } from '../../components/AddressLabel';
 import type { ProbeResponse } from '../../types/bramble';
 import styles from './NetworkReach.module.css';
 
@@ -23,6 +24,7 @@ function hopClass(hops: number): string {
 
 function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
   const sorted = [...responses].sort((a, b) => a.hopCount - b.hopCount);
+  const peerNames = useStore(s => s.peerNames);
   if (sorted.length === 0) return null;
   return (
     <table className={styles.table}>
@@ -38,7 +40,14 @@ function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
       <tbody>
         {sorted.map(r => (
           <tr key={r.responderAddr}>
-            <td>{shortAddr(r.responderAddr)}</td>
+            <td>
+              <div className={styles.nodeCell}>
+                <AddressLabel addr={r.responderAddr} name={peerNames.get(r.responderAddr)} short={!peerNames.get(r.responderAddr)} />
+                {peerNames.get(r.responderAddr) && (
+                  <span className={styles.nodeSub}>{shortAddr(r.responderAddr)}</span>
+                )}
+              </div>
+            </td>
             <td>
               <span className={`${styles.hopBadge} ${hopClass(r.hopCount)}`}>
                 {r.hopCount}
