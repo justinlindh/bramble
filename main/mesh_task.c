@@ -1636,8 +1636,12 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     uint32_t jitter_ms = 12 + (s_identity->address % 37);  /* 12..48 ms deterministic */
     vTaskDelay(pdMS_TO_TICKS(jitter_ms));
 
+    /* Send ACK twice (with tiny spacing) to improve reliability under contention. */
     radio_transmit(buf, HEADER_SIZE + 5);
-    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1 jitter=%" PRIu32 "ms",
+    vTaskDelay(pdMS_TO_TICKS(22));
+    radio_transmit(buf, HEADER_SIZE + 5);
+
+    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1 jitter=%" PRIu32 "ms x2",
              header.packet_id,
              addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
