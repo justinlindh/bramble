@@ -2,6 +2,7 @@
 #include "theme/bramble_theme.h"
 #include "routing.h"
 #include "airtime_budget.h"
+#include "wifi_manager.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
@@ -110,16 +111,31 @@ void scr_stats_create(bramble_layout_t *layout) {
     uint32_t uptime_us = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     uint32_t up_h = uptime_us / 3600;
     uint32_t up_m = (uptime_us % 3600) / 60;
+    const char *ip = wifi_manager_get_ip();
     
-    char sys_buf[128];
-    snprintf(sys_buf, sizeof(sys_buf),
-             "Free heap:  %u KB\n"
-             "PSRAM free: %.1f MB\n"
-             "Uptime:     %luh %lum",
-             (unsigned)(free_heap / 1024),
-             free_psram / (1024.0 * 1024.0),
-             (unsigned long)up_h,
-             (unsigned long)up_m);
+    char sys_buf[160];
+    if (ip && ip[0] != '\0') {
+        snprintf(sys_buf, sizeof(sys_buf),
+                 "Free heap:  %u KB\n"
+                 "PSRAM free: %.1f MB\n"
+                 "Uptime:     %luh %lum\n"
+                 "IP address: %s",
+                 (unsigned)(free_heap / 1024),
+                 free_psram / (1024.0 * 1024.0),
+                 (unsigned long)up_h,
+                 (unsigned long)up_m,
+                 ip);
+    } else {
+        snprintf(sys_buf, sizeof(sys_buf),
+                 "Free heap:  %u KB\n"
+                 "PSRAM free: %.1f MB\n"
+                 "Uptime:     %luh %lum\n"
+                 "IP address: (WiFi off)",
+                 (unsigned)(free_heap / 1024),
+                 free_psram / (1024.0 * 1024.0),
+                 (unsigned long)up_h,
+                 (unsigned long)up_m);
+    }
     
     lv_obj_t *sys_lbl = lv_label_create(cont);
     lv_label_set_text(sys_lbl, sys_buf);
