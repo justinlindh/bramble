@@ -6,12 +6,14 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "lv_port_trackball.c"
         "lv_port_keyboard.c"
         "theme/bramble_theme.c"
+        "screens/scr_splash.c"
         "screens/scr_layout.c"
         "screens/scr_chat_list.c"
         "screens/scr_chat_messages.c"
         "screens/scr_nodes.c"
         "screens/scr_stats.c"
         "screens/scr_settings.c"
+        "assets/img_bramble_logo.c"
     )
 else()
     set(ui_gfx_srcs "")
