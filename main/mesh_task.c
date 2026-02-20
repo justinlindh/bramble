@@ -1491,6 +1491,28 @@ void mesh_set_node_name(const char *name) {
     ESP_LOGI(TAG, "Node name updated: %s", s_node_name[0] ? s_node_name : "(none)");
 }
 
+int mesh_set_node_name_persist(const char *name) {
+    if (!name || name[0] == '\0' || strlen(name) >= sizeof(s_node_name)) {
+        return -1;
+    }
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble", NVS_READWRITE, &nvs) != ESP_OK) {
+        return -1;
+    }
+    esp_err_t err = nvs_set_str(nvs, "node_name", name);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        return -1;
+    }
+
+    mesh_set_node_name(name);
+    return 0;
+}
+
 void mesh_set_mailbox(bool enabled) {
     s_mailbox_enabled = enabled;
     ESP_LOGI(TAG, "Mailbox runtime: %s", enabled ? "enabled" : "disabled");
