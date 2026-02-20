@@ -62,17 +62,9 @@ int touch_init(void) {
         return -1;
     }
 
-    /* Configure interrupt pin as input */
-    if (board->touch.int_pin >= 0) {
-        gpio_config_t io_in = {
-            .pin_bit_mask = (1ULL << board->touch.int_pin),
-            .mode = GPIO_MODE_INPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        gpio_config(&io_in);
-    }
+    /* NOTE: Do NOT configure the INT pin — leave it floating.
+     * The GT911 on T-Deck Plus works in polling mode without INT.
+     * Configuring it as input can interfere with touch detection. */
 
     /* Try both GT911 addresses (0x14 and 0x5D) */
     uint8_t addrs[] = { board->touch.i2c_addr,
