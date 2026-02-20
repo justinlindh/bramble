@@ -2,6 +2,7 @@
 #include "theme/bramble_theme.h"
 #include "display.h"
 #include "keyboard.h"
+#include "audio.h"
 #include "board_config.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -12,19 +13,52 @@ static const char *TAG = "scr_settings";
 /* Get node name from mesh — extern since it's in main */
 extern void mesh_set_node_name(const char *name);
 
+/* ── Backlight ───────────────────────────────────────────────────────── */
+
 static void backlight_changed_cb(lv_event_t *e) {
     lv_obj_t *slider = lv_event_get_target(e);
-    int val = lv_slider_get_value(slider);
-    /* Keyboard backlight is binary (on/off via I2C to ESP32-C3 MCU).
-     * Slider min is 10, so any value = on. Use 0 threshold for off. */
-    keyboard_set_backlight(val > 0);
+    int val = lv_slider_get_value(slider);  /* 0..100 */
+    /* Map slider range 0-100 → PWM brightness 0-255.
+     * The keyboard MCU accepts the full 0-255 range; if it only supports
+     * on/off, any value >0 will enable the backlight. */
+    uint8_t brightness = (uint8_t)(val * 255 / 100);
+    keyboard_set_backlight(brightness);
 }
+
+/* ── Volume ──────────────────────────────────────────────────────────── */
+
+static lv_obj_t *s_volume_slider = NULL;
+
+static void volume_changed_cb(lv_event_t *e) {
+    lv_obj_t *slider = lv_event_get_target(e);
+    int val = lv_slider_get_value(slider);  /* 0..100 */
+    audio_set_volume((uint8_t)val);
+}
+
+/* ── Silent mode ─────────────────────────────────────────────────────── */
+
+static lv_obj_t *s_mute_sw = NULL;
+
+static void mute_changed_cb(lv_event_t *e) {
+    lv_obj_t *sw = lv_event_get_target(e);
+    bool muted = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    audio_set_muted(muted);
+
+    /* Dim the volume slider when muted to hint it's inactive */
+    if (s_volume_slider) {
+        lv_obj_set_style_opa(s_volume_slider, muted ? LV_OPA_40 : LV_OPA_COVER, 0);
+    }
+}
+
+/* ── Reboot ──────────────────────────────────────────────────────────── */
 
 static void reboot_cb(lv_event_t *e) {
     (void)e;
     ESP_LOGW(TAG, "Rebooting by user request...");
     esp_restart();
 }
+
+/* ── Helper: labeled setting row ─────────────────────────────────────── */
 
 static lv_obj_t *create_setting_row(lv_obj_t *parent, const char *label) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -35,35 +69,37 @@ static lv_obj_t *create_setting_row(lv_obj_t *parent, const char *label) {
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_pad_all(row, 6, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    
+
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(row, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_opa(row, LV_OPA_30, LV_STATE_FOCUSED);
-    
+
     lv_obj_t *lbl = lv_label_create(row);
     lv_label_set_text(lbl, label);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
-    
+
     return row;
 }
+
+/* ── Screen entry point ──────────────────────────────────────────────── */
 
 void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_t *cont = layout_get_content(layout);
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, BR_PADDING, 0);
     lv_obj_set_style_pad_row(cont, 4, 0);
-    
+
     lv_group_t *g = lv_group_get_default();
-    
-    /* Title */
+
+    /* ── Title ── */
     lv_obj_t *title = lv_label_create(cont);
     lv_label_set_text(title, "Settings");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
-    
-    /* Node Name (read-only for now) */
+
+    /* ── Node Name (read-only) ── */
     lv_obj_t *name_row = create_setting_row(cont, "Node Name");
     const bramble_board_config_t *board = board_get_config();
     lv_obj_t *name_val = lv_label_create(name_row);
@@ -72,45 +108,82 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_set_style_text_font(name_val, &lv_font_montserrat_12, 0);
     lv_obj_align(name_val, LV_ALIGN_RIGHT_MID, 0, 0);
     if (g) lv_group_add_obj(g, name_row);
-    
-    /* Backlight slider */
+
+    /* ── Keyboard Backlight slider ── */
     lv_obj_t *bl_row = create_setting_row(cont, "Backlight");
     lv_obj_set_size(bl_row, 304, 48);
-    lv_obj_t *slider = lv_slider_create(bl_row);
-    lv_obj_set_size(slider, 140, 10);
-    lv_obj_align(slider, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_slider_set_range(slider, 10, 100);
-    lv_slider_set_value(slider, 80, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(0x333344), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider, BR_COLOR_TEXT, LV_PART_KNOB);
-    lv_obj_add_event_cb(slider, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    if (g) lv_group_add_obj(g, slider);
-    
-    /* Board info */
+    lv_obj_t *bl_slider = lv_slider_create(bl_row);
+    lv_obj_set_size(bl_slider, 140, 10);
+    lv_obj_align(bl_slider, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_slider_set_range(bl_slider, 0, 100);
+    lv_slider_set_value(bl_slider, 80, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(bl_slider, lv_color_hex(0x333344), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bl_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bl_slider, BR_COLOR_TEXT, LV_PART_KNOB);
+    lv_obj_add_event_cb(bl_slider, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) lv_group_add_obj(g, bl_slider);
+    /* Apply initial brightness — LV_EVENT_VALUE_CHANGED doesn't fire at creation */
+    keyboard_set_backlight(80 * 255 / 100);
+
+    /* ── Volume slider ── */
+    uint8_t cur_vol   = audio_get_volume();
+    bool    cur_muted = audio_get_muted();
+
+    lv_obj_t *vol_row = create_setting_row(cont, LV_SYMBOL_AUDIO " Volume");
+    lv_obj_set_size(vol_row, 304, 48);
+    s_volume_slider = lv_slider_create(vol_row);
+    lv_obj_set_size(s_volume_slider, 140, 10);
+    lv_obj_align(s_volume_slider, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_slider_set_range(s_volume_slider, 0, 100);
+    lv_slider_set_value(s_volume_slider, cur_vol, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(s_volume_slider, lv_color_hex(0x333344), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_volume_slider, BR_COLOR_TEXT, LV_PART_KNOB);
+    lv_obj_add_event_cb(s_volume_slider, volume_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    /* Dim the slider when already muted to hint it's inactive */
+    if (cur_muted) {
+        lv_obj_set_style_opa(s_volume_slider, LV_OPA_40, 0);
+    }
+    if (g) lv_group_add_obj(g, s_volume_slider);
+
+    /* ── Silent mode toggle ── */
+    lv_obj_t *mute_row = create_setting_row(cont, LV_SYMBOL_MUTE " Silent");
+    s_mute_sw = lv_switch_create(mute_row);
+    lv_obj_align(s_mute_sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s_mute_sw, lv_color_hex(0x333344), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_TEXT, LV_PART_KNOB);
+    /* Reflect saved mute state */
+    if (cur_muted) {
+        lv_obj_add_state(s_mute_sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(s_mute_sw, mute_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) lv_group_add_obj(g, s_mute_sw);
+
+    /* ── Board info ── */
     lv_obj_t *board_row = create_setting_row(cont, "Board");
     lv_obj_t *board_val = lv_label_create(board_row);
     lv_label_set_text(board_val, board->name);
     lv_obj_set_style_text_color(board_val, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(board_val, &lv_font_montserrat_12, 0);
     lv_obj_align(board_val, LV_ALIGN_RIGHT_MID, 0, 0);
-    
-    /* Separator */
+
+    /* ── Separator ── */
     lv_obj_t *sep = lv_obj_create(cont);
     lv_obj_set_size(sep, 296, 1);
     lv_obj_set_style_bg_color(sep, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_bg_opa(sep, LV_OPA_30, 0);
     lv_obj_set_style_border_width(sep, 0, 0);
-    
-    /* Version */
+
+    /* ── Version ── */
     lv_obj_t *ver_row = create_setting_row(cont, "Version");
     lv_obj_t *ver_val = lv_label_create(ver_row);
-    lv_label_set_text(ver_val, "0.9.1-tdeck");  /* Hardcoded for now */
+    lv_label_set_text(ver_val, "0.9.1-tdeck");
     lv_obj_set_style_text_color(ver_val, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(ver_val, &lv_font_montserrat_12, 0);
     lv_obj_align(ver_val, LV_ALIGN_RIGHT_MID, 0, 0);
-    
-    /* Reboot button */
+
+    /* ── Reboot button ── */
     lv_obj_t *reboot_btn = lv_btn_create(cont);
     lv_obj_set_size(reboot_btn, 304, BR_TAP_TARGET_MIN);
     lv_obj_set_style_bg_color(reboot_btn, BR_COLOR_DANGER, 0);

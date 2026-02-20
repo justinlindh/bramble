@@ -7,6 +7,7 @@
 #define BRAMBLE_KEYBOARD_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /**
  * Initialize keyboard I2C and interrupt.
@@ -37,9 +38,11 @@ bool keyboard_poll(char *out);
 bool keyboard_has_data(void);
 
 /**
- * Control keyboard backlight LEDs via I2C command to keyboard MCU.
- * on=true: LEDs on, on=false: LEDs off.
+ * Set keyboard backlight brightness via I2C command to keyboard MCU.
+ * brightness: 0 = off, 255 = maximum.  Values are passed directly to the
+ * MCU as a PWM duty cycle; if the MCU firmware treats it as on/off only,
+ * any value >0 will enable the backlight.
  */
-void keyboard_set_backlight(bool on);
+void keyboard_set_backlight(uint8_t brightness);
 
 #endif /* BRAMBLE_KEYBOARD_H */
