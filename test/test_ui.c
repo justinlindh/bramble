@@ -198,16 +198,14 @@ void test_trackball_settings_edit_cancel_with_left(void) {
     TEST_ASSERT_FALSE(state.settings_editing);
 }
 
-void test_conn_mode_resolve_boot_keeps_mode_when_not_constrained(void) {
+void test_conn_mode_resolve_boot_keeps_supported_modes(void) {
     TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_WIFI, false));
     TEST_ASSERT_EQUAL(CONN_MODE_BLE, conn_mode_resolve_boot(CONN_MODE_BLE, false));
-    TEST_ASSERT_EQUAL(CONN_MODE_BOTH, conn_mode_resolve_boot(CONN_MODE_BOTH, false));
 }
 
-void test_conn_mode_resolve_boot_downgrades_both_when_constrained(void) {
+void test_conn_mode_resolve_boot_normalizes_legacy_both(void) {
+    TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_BOTH, false));
     TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_BOTH, true));
-    TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_WIFI, true));
-    TEST_ASSERT_EQUAL(CONN_MODE_BLE, conn_mode_resolve_boot(CONN_MODE_BLE, true));
 }
 
 int main(void) {
@@ -230,8 +228,8 @@ int main(void) {
     RUN_TEST(test_trackball_left_prev_screen);
     RUN_TEST(test_trackball_up_prev_screen);
     RUN_TEST(test_trackball_select_on_messages_opens_compose);
-    RUN_TEST(test_conn_mode_resolve_boot_keeps_mode_when_not_constrained);
-    RUN_TEST(test_conn_mode_resolve_boot_downgrades_both_when_constrained);
+    RUN_TEST(test_conn_mode_resolve_boot_keeps_supported_modes);
+    RUN_TEST(test_conn_mode_resolve_boot_normalizes_legacy_both);
     RUN_TEST(test_trackball_select_on_settings_enters_edit);
     RUN_TEST(test_trackball_settings_edit_navigation);
     RUN_TEST(test_trackball_settings_edit_confirm_with_select);
