@@ -117,23 +117,19 @@ void msg_store_init_with_persistence(void) {
 #ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
     /* Initialize SPIFFS persistence */
     if (msg_store_spiffs_init() == 0) {
-        /* Load recent messages into RAM buffer */
-        stored_msg_t loaded[MSG_STORE_MAX];
-        int count = msg_store_spiffs_load_recent(loaded, MSG_STORE_MAX);
-        
-        /* Restore messages to RAM without re-persisting */
-        for (int i = 0; i < count; i++) {
-            stored_msg_t *src = &loaded[i];
-            stored_msg_t *dst = &s_msgs[s_head];
-            
-            /* Copy message data directly */
-            memcpy(dst, src, sizeof(stored_msg_t));
-            
-            s_head = (s_head + 1) % MSG_STORE_MAX;
-            if (s_count < MSG_STORE_MAX) {
-                s_count++;
-            }
-        }
+        /*
+         * ROOT-CAUSE FIX:
+         * Do NOT allocate stored_msg_t loaded[MSG_STORE_MAX] on stack here.
+         * app_main runs with a small default main-task stack (often 3584 bytes).
+         * A local loaded[] buffer is ~4.4KB (20 * sizeof(stored_msg_t)) and can
+         * overflow main-task stack, causing later boot-stage crashes.
+         */
+        int count = msg_store_spiffs_load_recent(s_msgs, MSG_STORE_MAX);
+        if (count < 0) count = 0;
+        if (count > MSG_STORE_MAX) count = MSG_STORE_MAX;
+
+        s_count = count;
+        s_head = count % MSG_STORE_MAX;
     }
 #endif
 }

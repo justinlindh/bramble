@@ -55,6 +55,19 @@ See also:
 
 ---
 
+## JSON-RPC API Notes (Current Firmware)
+
+The runtime source of truth for available RPC methods is `main/rpc_methods.c`.
+The OpenAPI document (`api/openapi.yaml`) is kept in sync with that registry.
+
+Notable wire-format details clients must honor:
+- `bramble.getAirtime` returns flat fields (`critical_remaining_ms`, etc.)
+- `bramble.sendMessage` returns `packetId` as a hex string
+- `bramble.setRadio` expects snake_case keys (`frequency_mhz`, `bw_hz`, `tx_power_dbm`, `coding_rate`)
+- location contact methods use `address` as 8-char hex string
+
+---
+
 ## Packet Format
 
 ### Common Header (12 bytes)
@@ -90,11 +103,11 @@ Additionally, `HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) signals emergen
 
 | Value | Name | Description | Size |
 |-------|------|-------------|------|
-| `0x01` | `PKT_TYPE_ACK` | End-to-end acknowledgement | 22 bytes |
+| `0x01` | `PKT_TYPE_ACK` | End-to-end acknowledgement | 23–55 bytes |
 | `0x02` | `PKT_TYPE_RREQ` | Route Request (AODV route discovery) | 30 bytes |
 | `0x03` | `PKT_TYPE_RREP` | Route Reply | 34 bytes |
 | `0x04` | `PKT_TYPE_RERR` | Route Error (broken link notification) | 24 bytes |
-| `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 36 bytes |
+| `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 44+ bytes (name optional) |
 | `0x06` | `PKT_TYPE_KEY_EXCHANGE` | X25519 key exchange (3-step) | 101 bytes |
 | `0x07` | `PKT_TYPE_DELIVERY_RECEIPT` | Path-tracing delivery receipt | 22–54 bytes |
 | `0x08` | `PKT_TYPE_CONGESTION` | Congestion notification | 20 bytes |
@@ -107,6 +120,9 @@ Additionally, `HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) signals emergen
 | `0x0F` | `PKT_TYPE_EMERGENCY` | Emergency beacon (plaintext, broadcast) | 17–49 bytes |
 | `0x10` | `PKT_TYPE_EMERGENCY_CANCEL` | Cancel an active emergency (authenticated) | 12 bytes |
 | `0x11` | `PKT_TYPE_CODED` | XOR network-coded packet (two components) | variable |
+| `0x12` | `PKT_TYPE_PROBE` | Network reachability probe | variable |
+| `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
+| `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 
 ### Beacon Flags
 
