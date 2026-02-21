@@ -92,4 +92,9 @@ int ui_format_main_line2(const ui_main_data_t *data, char *buf, size_t buf_len);
 int ui_format_main_line3(const ui_main_data_t *data, char *buf, size_t buf_len);
 int ui_format_uptime(uint32_t uptime_sec, char *buf, size_t buf_len);
 
+/* Resolve requested connectivity mode for board memory constraints.
+ * low_sram_board=true downgrades WiFi+BLE to WiFi-only.
+ */
+conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board);
+
 #endif
