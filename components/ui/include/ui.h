@@ -17,9 +17,9 @@ typedef enum {
 /* Connectivity modes for WiFi/BLE switcher */
 typedef enum {
     CONN_MODE_WIFI = 0,
-    CONN_MODE_BLE,
-    CONN_MODE_BOTH,
-    CONN_MODE_COUNT
+    CONN_MODE_BLE = 1,
+    CONN_MODE_BOTH = 2, /* legacy persisted value; normalized to WiFi */
+    CONN_MODE_COUNT = 2 /* exposed modes are exclusive: WiFi or BLE */
 } conn_mode_t;
 
 typedef enum {
@@ -92,8 +92,8 @@ int ui_format_main_line2(const ui_main_data_t *data, char *buf, size_t buf_len);
 int ui_format_main_line3(const ui_main_data_t *data, char *buf, size_t buf_len);
 int ui_format_uptime(uint32_t uptime_sec, char *buf, size_t buf_len);
 
-/* Resolve requested connectivity mode for board memory constraints.
- * low_sram_board=true downgrades WiFi+BLE to WiFi-only.
+/* Normalize persisted connectivity mode at boot.
+ * Legacy WiFi+BLE values are coerced to WiFi (exclusive mode policy).
  */
 conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board);
 

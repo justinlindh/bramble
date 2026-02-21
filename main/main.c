@@ -77,7 +77,7 @@ conn_mode_t conn_mode_get(void) {
         nvs_get_u8(nvs, "conn_mode", &mode);
         nvs_close(nvs);
     }
-    if (mode >= CONN_MODE_COUNT) mode = CONN_MODE_WIFI;
+    if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT) mode = CONN_MODE_WIFI;
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     return conn_mode_resolve_boot((conn_mode_t)mode, true);
@@ -287,7 +287,7 @@ static void render_screen(ui_state_t *ui) {
             int y = CONTENT_Y;
             display_draw_text(2, y, "Connectivity Mode:");
             y += LINE_H + 4;
-            static const char *mode_names[] = {"WiFi", "BLE", "WiFi + BLE"};
+            static const char *mode_names[] = {"WiFi", "BLE"};
             conn_mode_t current = conn_mode_get();
             for (int i = 0; i < CONN_MODE_COUNT; i++) {
                 char ml[32];
@@ -310,7 +310,7 @@ static void render_screen(ui_state_t *ui) {
             y += LINE_H;
 
             conn_mode_t cur_mode = conn_mode_get();
-            static const char *mnames[] = {"WiFi", "BLE", "WiFi+BLE"};
+            static const char *mnames[] = {"WiFi", "BLE"};
             snprintf(line, sizeof(line), "Mode: %s", mnames[cur_mode]);
             display_draw_text(2, y, line);
             y += LINE_H;
@@ -324,7 +324,7 @@ static void render_screen(ui_state_t *ui) {
             }
             y += LINE_H;
 
-            if (cur_mode == CONN_MODE_BLE || cur_mode == CONN_MODE_BOTH) {
+            if (cur_mode == CONN_MODE_BLE) {
                 display_draw_text(2, y, "BLE: advertising");
             } else {
                 display_draw_text(2, y, "BLE: off");
@@ -556,7 +556,7 @@ void app_main(void)
 
     /* Read connectivity mode */
     conn_mode_t boot_mode = conn_mode_get();
-    static const char *mode_str[] = {"WiFi", "BLE", "WiFi+BLE"};
+    static const char *mode_str[] = {"WiFi", "BLE"};
     ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
 
     /* Init RPC dispatcher and register methods BEFORE transports
@@ -591,8 +591,8 @@ void app_main(void)
     msg_store_init();
 #endif
 
-    /* Init WiFi if mode includes it */
-    if (boot_mode == CONN_MODE_WIFI || boot_mode == CONN_MODE_BOTH) {
+    /* Init WiFi if selected */
+    if (boot_mode == CONN_MODE_WIFI) {
         ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
         if (wifi_manager_init() == 0) {
             const char *ip = wifi_manager_get_ip();
@@ -624,8 +624,8 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
     mesh_task_start(&g_identity);
 
-    /* Start BLE GATT server if mode includes it */
-    if (boot_mode == CONN_MODE_BLE || boot_mode == CONN_MODE_BOTH) {
+    /* Start BLE GATT server if selected */
+    if (boot_mode == CONN_MODE_BLE) {
         ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
         if (ble_server_init() == 0) {
             ble_server_start();
@@ -739,7 +739,7 @@ void app_main(void)
 
                 /* Show confirmation before reboot */
                 display_clear();
-                static const char *mnames[] = {"WiFi", "BLE", "WiFi+BLE"};
+                static const char *mnames[] = {"WiFi", "BLE"};
                 
                 /* Center the confirmation text */
                 const char *msg1 = "Mode changed:";

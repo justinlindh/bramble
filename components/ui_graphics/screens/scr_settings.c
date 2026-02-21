@@ -311,8 +311,7 @@ void scr_settings_create(bramble_layout_t *layout) {
         s_conn_dropdown = lv_dropdown_create(conn_row);
         lv_dropdown_set_options(s_conn_dropdown,
             "WiFi only\n"
-            "BLE only\n"
-            "WiFi + BLE");
+            "BLE only");
         lv_obj_set_size(s_conn_dropdown, 150, 34);
         lv_obj_align(s_conn_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
 
@@ -340,7 +339,7 @@ void scr_settings_create(bramble_layout_t *layout) {
         lv_label_set_text(conn_hint,
             "WiFi: WebSocket RPC + OTA updates\n"
             "BLE: Bluetooth GATT RPC\n"
-            "WiFi+BLE: Both (uses more RAM)");
+            "Modes are exclusive");
         lv_obj_set_style_text_font(conn_hint, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(conn_hint, BR_COLOR_TEXT_SEC, 0);
 
