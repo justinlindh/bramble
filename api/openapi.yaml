@@ -210,10 +210,10 @@ paths:
   /rpc/bramble.sendMessage:
     post:
       operationId: sendMessage
-      summary: Send a text message
+      summary: Send a direct text message
       description: >
-        Sends a message to a destination address (or broadcast).
-        Returns immediately with a packetId; delivery status arrives
+        Sends a unicast message to a destination address.
+        Returns immediately with a packet identifier; delivery status arrives
         via bramble.onAck notification.
       tags: [action]
       requestBody:
@@ -228,6 +228,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SendMessageResponse'
+
+  /rpc/bramble.sendBroadcast:
+    post:
+      operationId: sendBroadcast
+      summary: Broadcast a text message
+      description: Sends a broadcast message on the public channel.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendBroadcastParams'
+      responses:
+        '200':
+          description: Broadcast queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendBroadcastResponse'
 
   /rpc/bramble.sendProbe:
     post:
@@ -795,18 +814,36 @@ components:
 
     AirtimeResponse:
       type: object
-      required: [tiers]
+      description: Current airtime budget state (flat firmware format).
+      required:
+        - critical_remaining_ms
+        - normal_remaining_ms
+        - broadcast_remaining_ms
+        - critical_max_ms
+        - normal_max_ms
+        - broadcast_max_ms
+        - next_refill_ms
       properties:
-        tiers:
-          type: array
-          items:
-            $ref: '#/components/schemas/AirtimeTier'
+        critical_remaining_ms:
+          type: integer
+        normal_remaining_ms:
+          type: integer
+        broadcast_remaining_ms:
+          type: integer
+        critical_max_ms:
+          type: integer
+        normal_max_ms:
+          type: integer
+        broadcast_max_ms:
+          type: integer
+        next_refill_ms:
+          type: integer
 
     PeerLocationsResponse:
       type: object
-      required: [peerLocations]
+      required: [peers]
       properties:
-        peerLocations:
+        peers:
           type: array
           items:
             $ref: '#/components/schemas/LocationPeer'
@@ -883,26 +920,47 @@ components:
 
     SendMessageParams:
       type: object
-      description: Parameters for sending a message.
+      description: Parameters for sending a direct message.
       required: [dest, text]
       properties:
         dest:
-          type: integer
-          description: Destination address (uint32). Use 0xFFFFFFFF for broadcast.
+          type: string
+          description: Destination node address as 8-char uppercase hex (e.g. "04CAAAF8").
         text:
           type: string
           description: Message text content.
-        channel_id:
-          type: integer
-          description: Channel index to send on (default channel if omitted).
 
     SendMessageResponse:
       type: object
-      required: [packetId]
+      required: [packetId, status]
       properties:
         packetId:
+          type: string
+          description: Packet ID as uppercase hex string.
+        status:
+          type: string
+          enum: [sent]
+
+    SendBroadcastParams:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+
+    SendBroadcastResponse:
+      type: object
+      required: [message_id, status, broadcast, channel]
+      properties:
+        message_id:
+          type: string
+        status:
+          type: string
+          enum: [sent]
+        broadcast:
+          type: boolean
+        channel:
           type: integer
-          description: Packet ID for tracking delivery via bramble.onAck.
 
     SendProbeResponse:
       type: object
@@ -919,19 +977,19 @@ components:
       type: object
       description: Radio parameters to update. All fields optional.
       properties:
-        txPowerDbm:
+        tx_power_dbm:
           type: integer
           description: Transmit power in dBm.
         sf:
           type: integer
-          description: LoRa spreading factor (7-12).
-        bwKhz:
+          description: LoRa spreading factor (6-12).
+        bw_hz:
           type: integer
-          description: Bandwidth in kHz.
-        cr:
+          description: Bandwidth in Hz (125000, 250000, 500000).
+        coding_rate:
           type: integer
-          description: Coding rate (5-8).
-        freqMhz:
+          description: Coding rate denominator (5-8).
+        frequency_mhz:
           type: number
           description: Frequency in MHz.
 
@@ -993,49 +1051,45 @@ components:
         enabled:
           type: boolean
           description: Enable or disable location sharing.
-        defaultIntervalSec:
+        interval_s:
           type: integer
           description: Default update interval in seconds.
-        defaultDistanceTriggerM:
-          type: integer
-          description: Default distance trigger in meters.
-        stationaryBackoff:
-          type: integer
-          description: Backoff multiplier when stationary.
+        default_tier:
+          type: string
+          description: Default location sharing tier.
+        lat:
+          type: number
+          description: Optional manual latitude.
+        lon:
+          type: number
+          description: Optional manual longitude.
 
     SetLocationContactParams:
       type: object
-      required: [addr, tier]
+      required: [address, tier]
       properties:
-        addr:
-          type: integer
-          description: Peer address (uint32).
+        address:
+          type: string
+          description: Peer address as 8-char uppercase hex.
         tier:
           type: string
-          enum: [full, coarse, presence]
           description: Location sharing tier.
-        intervalSec:
-          type: integer
-          description: Update interval in seconds.
-        distanceTriggerM:
-          type: integer
-          description: Distance trigger in meters.
 
     RemoveLocationContactParams:
       type: object
-      required: [addr]
+      required: [address]
       properties:
-        addr:
-          type: integer
-          description: Peer address to remove.
+        address:
+          type: string
+          description: Peer address as 8-char uppercase hex.
 
     ShareLocationOnceParams:
       type: object
-      required: [addr]
+      required: [address]
       properties:
-        addr:
-          type: integer
-          description: Peer address to share location with.
+        address:
+          type: string
+          description: Peer address as 8-char uppercase hex.
 
     # ── Notification Payloads ────────────────────────────────────────────────
 
