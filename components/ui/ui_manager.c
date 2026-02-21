@@ -120,3 +120,10 @@ void ui_check_timeout(ui_state_t *state, uint32_t now_ms) {
         state->last_activity = now_ms;
     }
 }
+
+conn_mode_t conn_mode_resolve_boot(conn_mode_t requested, bool low_sram_board) {
+    if (low_sram_board && requested == CONN_MODE_BOTH) {
+        return CONN_MODE_WIFI;
+    }
+    return requested;
+}

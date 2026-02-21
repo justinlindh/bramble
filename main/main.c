@@ -78,7 +78,12 @@ conn_mode_t conn_mode_get(void) {
         nvs_close(nvs);
     }
     if (mode >= CONN_MODE_COUNT) mode = CONN_MODE_WIFI;
-    return (conn_mode_t)mode;
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+    return conn_mode_resolve_boot((conn_mode_t)mode, true);
+#else
+    return conn_mode_resolve_boot((conn_mode_t)mode, false);
+#endif
 }
 
 void conn_mode_set(conn_mode_t mode) {
