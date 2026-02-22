@@ -4,6 +4,7 @@ import { saveNodeName, setMailbox } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { encodeNodeShare } from '../../utils/channelShare';
+import { IconKey, IconNodes } from '../../components/Icons';
 import styles from './IdentitySection.module.css';
 
 interface IdentitySectionProps {
@@ -130,14 +131,14 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
         <span className={styles.label} />
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button className={styles.exportBtn} onClick={handleExport}>
-            🔑 Export Key Backup
+            <IconKey size={16} /> Export Key Backup
           </button>
           <button
             className={styles.exportBtn}
             onClick={() => setShowNodeShare(true)}
             title="Share your node identity as a QR code so others can save your public key"
           >
-            📡 Share Node
+            <IconNodes size={16} /> Share Node
           </button>
         </div>
       </div>

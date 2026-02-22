@@ -38,7 +38,7 @@ function saveShowRoutes(show: boolean): void {
 }
 
 function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
-  if (id === 'broadcast') return '📢 Broadcast';
+  if (id === 'broadcast') return 'Broadcast';
   if (id.startsWith('ch:')) {
     const idx = Number(id.slice(3));
     const ch = config?.channels?.find(c => c.index === idx);
