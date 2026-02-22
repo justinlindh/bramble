@@ -108,6 +108,52 @@ describe('Zustand store — message state transitions', () => {
     expect(useStore.getState().activeConversationId).toBe(`dm:${0x5678}`);
   });
 
+  it('incoming message does not increment unread for active conversation', () => {
+    // Set conversation as active first
+    const convId = `dm:${0x5678}`;
+    useStore.getState().setActiveConversation(convId);
+
+    // Add incoming messages while conversation is active
+    const msg1 = makeMsg({
+      direction: 'incoming',
+      from: 0x5678,
+      to: 0,
+      status: 'delivered',
+    });
+    useStore.getState().addMessage(msg1);
+
+    // Unread count should remain 0 because conversation is active
+    expect(useStore.getState().conversations.get(convId)?.unreadCount).toBe(0);
+
+    // Add another message - still should be 0
+    const msg2 = makeMsg({
+      ...msg1,
+      id: crypto.randomUUID(),
+      text: 'Another message',
+    });
+    useStore.getState().addMessage(msg2);
+
+    expect(useStore.getState().conversations.get(convId)?.unreadCount).toBe(0);
+  });
+
+  it('incoming message increments unread for inactive conversation', () => {
+    // Set a different conversation as active
+    useStore.getState().setActiveConversation('broadcast');
+
+    // Add incoming messages to a different conversation
+    const msg = makeMsg({
+      direction: 'incoming',
+      from: 0x5678,
+      to: 0,
+      status: 'delivered',
+    });
+    useStore.getState().addMessage(msg);
+
+    // Unread count should increment because conversation is not active
+    const conv = useStore.getState().conversations.get(`dm:${0x5678}`);
+    expect(conv?.unreadCount).toBe(1);
+  });
+
   it('caps messages at 500', () => {
     for (let i = 0; i < 510; i++) {
       useStore.getState().addMessage(makeMsg({ id: `msg-${i}` }));

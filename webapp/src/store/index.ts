@@ -172,6 +172,13 @@ export const useStore = create<AppState & Actions>((set) => ({
       // Update conversation summary
       const convs = new Map(state.conversations);
       const prev = convs.get(convId);
+      
+      // Only increment unread count if:
+      // 1. Message is incoming, AND
+      // 2. This conversation is NOT currently active
+      const isActive = state.activeConversationId === convId;
+      const shouldIncrementUnread = msg.direction === 'incoming' && !isActive;
+      
       convs.set(convId, {
         id: convId,
         label: formatAddr(convId, state.peerNames, state.config),
@@ -186,7 +193,7 @@ export const useStore = create<AppState & Actions>((set) => ({
         lastMessageTime: msg.timestampMs,
         unreadCount:
           (prev?.unreadCount ?? 0) +
-          (msg.direction === 'incoming' ? 1 : 0),
+          (shouldIncrementUnread ? 1 : 0),
       });
 
       // Persist unread counts to localStorage
