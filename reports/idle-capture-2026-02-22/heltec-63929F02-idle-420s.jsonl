@@ -1,0 +1,4 @@
+{"seq": 90, "timestamp_ms": 0, "pkt_type": 5, "category": "beacon", "airtime_tier": "broadcast", "packet_len": 50, "rssi": -40, "is_tx": false}
+{"seq": 91, "timestamp_ms": 0, "pkt_type": 5, "category": "beacon", "airtime_tier": "broadcast", "packet_len": 49, "rssi": -39, "is_tx": false}
+{"seq": 92, "timestamp_ms": 0, "pkt_type": 5, "category": "beacon", "airtime_tier": "broadcast", "packet_len": 50, "rssi": -40, "is_tx": false}
+{"seq": 93, "timestamp_ms": 0, "pkt_type": 5, "category": "beacon", "airtime_tier": "broadcast", "packet_len": 49, "rssi": -39, "is_tx": false}

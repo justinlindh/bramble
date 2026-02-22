@@ -68,7 +68,7 @@ async def capture():
     global last_seq
     
     print(f"[+] Connecting to {url}")
-    async with websockets.connect(url, open_timeout=10) as ws:
+    async with websockets.connect(url, open_timeout=10, ping_interval=None) as ws:
         print("[+] Connected")
         
         # Enable traffic debug
