@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Neighbor, PeerLocation } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
-import { IconClock, IconMailbox, IconEnvelope, IconLocation } from '../../components/Icons';
+import { IconClock, IconEnvelope, IconLocation } from '../../components/Icons';
 import { useStore } from '../../store';
 import styles from './NeighborCard.module.css';
 
@@ -98,9 +98,6 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
         <span title="Packet Delivery Rate">PDR: {pdr}%</span>
         <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr} dB</span>
         <span title="Last heard"><IconClock size={13} /> {formatAgo(neighbor.lastHeardMs)}</span>
-        {neighbor.isMailbox && (
-          <span className={styles.badgeMailbox} title="This node stores messages for offline destinations and delivers them when they come back in range"><IconMailbox size={13} /> Mailbox</span>
-        )}
         {peerLocation && isLocationFresh(peerLocation) && (
           <button
             className={styles.badgeLocation}

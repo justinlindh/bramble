@@ -35,7 +35,6 @@ export interface Neighbor {
   snr: number;
   deliveryRate: number;     // 0-255, 255 = 100%
   lastHeardMs: number;      // milliseconds ago
-  isMailbox: boolean;
   airtimeRemaining: number; // 0-100 %
 }
 

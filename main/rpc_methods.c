@@ -119,6 +119,8 @@ static int handle_get_neighbors(const cJSON *params, cJSON *result) {
         cJSON_AddStringToObject(obj, "address", addr_hex(n->addr, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "rssi", n->rssi);
         cJSON_AddNumberToObject(obj, "snr", n->snr);
+        cJSON_AddNumberToObject(obj, "deliveryRate", n->delivery_rate);
+        cJSON_AddNumberToObject(obj, "airtimeRemaining", n->airtime_remaining);
         /* Return time since last heard (ms ago), not absolute timestamp */
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000ULL);
         uint32_t ago = (now > n->last_heard) ? (now - n->last_heard) : 0;

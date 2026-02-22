@@ -46,6 +46,41 @@
   text-transform: capitalize;
 }
 
+.statusDivider {
+  font-size: 0.8rem;
+  color: var(--border);
+  user-select: none;
+}
+
+.nodeLabel {
+  font-size: 0.8rem;
+  color: var(--text);
+  font-weight: 500;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hide node label text on very small screens (mobile portrait) */
+@media (max-width: 400px) {
+  .nodeLabel {
+    max-width: 80px;
+  }
+}
+
+/* On mobile landscape (small height), keep it compact */
+@media (max-height: 450px) and (max-width: 900px) {
+  .nodeLabel {
+    max-width: 100px;
+    font-size: 0.75rem;
+  }
+  
+  .statusLabel {
+    font-size: 0.75rem;
+  }
+}
+
 .disconnectBtn {
   background: none;
   border: 1px solid var(--border);

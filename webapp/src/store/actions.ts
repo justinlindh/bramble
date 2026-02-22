@@ -261,7 +261,6 @@ function normalizeNeighbor(raw: any): Neighbor & { name?: string } {
     snr: raw.snr ?? 0,
     deliveryRate: raw.deliveryRate ?? 0,
     lastHeardMs: raw.last_seen_ms ?? raw.lastHeardMs ?? 0,
-    isMailbox: raw.isMailbox ?? false,
     airtimeRemaining: raw.airtimeRemaining ?? 0,
     ...(raw.name ? { name: raw.name } : {}),
   } as Neighbor & { name?: string };
