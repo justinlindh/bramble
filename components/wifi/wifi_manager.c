@@ -99,6 +99,15 @@ static void sta_event_handler(void *arg, esp_event_base_t event_base,
 
         /* Invalidate stale IP immediately so status reflects reality. */
         s_status.ip_addr[0] = '\0';
+        
+        /* Stop WebSocket server during disconnection to free resources.
+         * It will restart automatically when we get an IP on reconnection. */
+        extern void ws_server_stop(void);
+        extern bool ws_server_is_running(void);
+        if (ws_server_is_running()) {
+            ESP_LOGI(TAG, "Stopping WebSocket server during disconnection");
+            ws_server_stop();
+        }
 
         if (s_wifi_event_group) {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
@@ -112,6 +121,16 @@ static void sta_event_handler(void *arg, esp_event_base_t event_base,
                  IPSTR, IP2STR(&event->ip_info.ip));
         s_status.mode = BRAMBLE_WIFI_STATION;
         ESP_LOGI(TAG, "Got IP: %s", s_status.ip_addr);
+        
+        /* Start WebSocket server now that we have an IP.
+         * ws_server_start() is idempotent, safe to call multiple times.
+         * This ensures the server starts on:
+         *   - Initial WiFi connection at boot
+         *   - Reconnection after temporary disconnect
+         *   - AP → Station mode transition */
+        extern int ws_server_start(void);
+        ws_server_start();
+        
         if (s_wifi_event_group) {
             xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         }

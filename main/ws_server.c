@@ -15,6 +15,7 @@ static const char *TAG = "ws";
 static httpd_handle_t s_server = NULL;
 static int s_client_fds[MAX_WS_CLIENTS];
 static int s_client_count = 0;
+static bool s_server_running = false;
 
 /* ── Client tracking ─────────────────────────────────────────────────── */
 
@@ -328,6 +329,12 @@ static const httpd_uri_t ws_uri = {
 
 int ws_server_start(void)
 {
+    /* Idempotent: no-op if already running */
+    if (s_server_running) {
+        ESP_LOGD(TAG, "WebSocket server already running");
+        return 0;
+    }
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.max_open_sockets = MAX_WS_CLIENTS + 2; /* +2 for HTTP clients */
@@ -351,6 +358,7 @@ int ws_server_start(void)
         ESP_LOGW(TAG, "Failed to register WS notify transport (table full?)");
     }
 
+    s_server_running = true;
     return 0;
 }
 
@@ -360,6 +368,12 @@ void ws_server_stop(void)
         httpd_stop(s_server);
         s_server = NULL;
         s_client_count = 0;
+        s_server_running = false;
         ESP_LOGI(TAG, "WebSocket server stopped");
     }
+}
+
+bool ws_server_is_running(void)
+{
+    return s_server_running;
 }
