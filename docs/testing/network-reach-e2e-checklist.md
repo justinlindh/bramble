@@ -1,66 +1,52 @@
-# Network Reach E2E Checklist (v2)
+# Network Reach E2E Checklist (v2 Sweep)
 
 ## Objective
-Validate that Network Reach reports **unique reachable responders** per probe, excludes self, and completes cleanly.
+Validate that 3-round sweep aggregation improves consistency while staying bounded in airtime and preserving deterministic UI output.
 
 ## Preconditions
-- Firmware includes:
-  - responder upsert semantics (one row per responder)
-  - self-responder filter
-  - `bramble.onProbeComplete` notification
-  - `bramble.sendProbe` returns `ack_window`
-- Webapp includes probe-result normalization by responder address.
+- Firmware includes sweep mode + aggregated `onProbeComplete.responders[]` with `seen_rounds`.
+- Webapp renders confidence (`seen_rounds/3`) and dedupes by responder.
+- Temporary probe debug spam removed.
 
-## Test matrix
+## Test plan
 
-### A) Basic single-hop (strong links)
-1. Run probe from Node A.
-2. Confirm `onProbeResult` notifications for each reachable peer.
-3. Confirm each responder appears once in UI (no duplicate rows).
-4. Confirm no self row.
-5. Confirm probe exits collecting state via `onProbeComplete`.
+### A) Baseline consistency (before/after)
+1. Pick origin node (example: `63929F02` / `192.0.2.0`) in a 3-node mesh.
+2. Run N probes (recommend N=10+), capturing trace output (`scripts/probe-trace.py`).
+3. Compute per-run responder count and responder set.
+4. Repeat with sweep mode enabled.
 
-Expected: stable unique responder list, no self, no duplicate rows.
+Expected: lower variance in responder count/set post-sweep.
 
-### B) Mixed firmware compatibility
-1. Probe from a v2 node with at least one older node in mesh.
-2. Confirm results still normalize in webapp.
+### B) Confidence quality check
+1. For each responder in final results, verify confidence shown as `seen_rounds/3`.
+2. Confirm responders seen across more rounds generally have more stable presence across repeated probe runs.
 
-Expected: no duplicate UI rows; completion still works (event or timeout fallback).
+Expected: confidence aligns with observed stability.
 
-### C) Weak/asymmetric link
-1. Place one peer at marginal RSSI.
-2. Probe repeatedly (5 runs).
-3. Compare unique responders per run.
+### C) Backward compatibility
+1. Include at least one older node that does not send round metadata.
+2. Run probe.
 
-Expected: weak peer may intermittently fail, but when received it appears once and never as self.
+Expected: node still appears (typically `1/3` confidence), no parsing failures.
 
-### D) From each node
-1. Probe from each node in 3-node mesh.
-2. Record unique responder set each time.
+### D) Airtime sanity
+1. Verify origin sends exactly 3 probe TX per user trigger.
+2. Verify collection completes in fixed window (5s currently).
 
-Expected: topology asymmetry may differ by origin, but invariants hold for every origin.
+Expected: bounded, predictable airtime and completion timing.
 
-## Quick verification commands
+## Evidence to attach in wrap-up
+- Trace artifacts (`tmp/probe-trace-*.jsonl`)
+- Before/after table for N runs:
+  - mean responders
+  - min/max responders
+  - % runs with full expected set
+- Example per-origin output for all 3 nodes.
 
-### WS probe (example)
-Use existing helper script:
-
-```bash
-python3 probe_call.py 192.0.2.0
-```
-
-### Serial sanity
-- `bramble.getVersion`
-- `bramble.getStatus`
-- `bramble.getNeighbors`
-
-## Pass/fail criteria
-- PASS if all invariants hold:
-  - no self responders
-  - no duplicate responder rows
-  - completion observed
-- FAIL if any invariant breaks.
-
-## Notes from current environment
-- Node `192.0.2.0` currently reports a single responder (`04CAAAF8`) in repeated runs despite seeing 2 neighbors; this indicates likely RF/asymmetric reachability behavior for that origin, not a duplicate/self normalization bug.
+## Pass criteria
+- No self responders.
+- No duplicate rows per responder.
+- Completion always observed.
+- Confidence rendered and coherent with trace evidence.
+- Consistency metrics improve vs single-shot baseline.

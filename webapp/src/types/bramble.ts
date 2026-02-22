@@ -210,6 +210,8 @@ export interface ProbeResponse {
   relayPath?: number[];
   latencyMs?: number;
   receivedAt?: number;
+  seenRounds?: number;
+  confidence?: number;
 }
 
 export interface ProbeResult {

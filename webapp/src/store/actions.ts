@@ -514,6 +514,8 @@ export function upsertProbeResponse(responses: ProbeResponse[], next: ProbeRespo
     // keep latest receive timestamp/latency if present in next
     receivedAt: next.receivedAt ?? prev.receivedAt,
     latencyMs: next.latencyMs ?? prev.latencyMs,
+    seenRounds: Math.max(prev.seenRounds ?? 1, next.seenRounds ?? 1),
+    confidence: Math.max(prev.confidence ?? 0, next.confidence ?? 0),
   };
 
   const out = [...responses];
@@ -560,6 +562,8 @@ function handleProbeAck(params: unknown): void {
     ? parseInt(raw.address.replace(/^0x/i, ''), 16)
     : (raw.responderAddr ?? 0);
 
+  const roundsTotal = 3;
+  const seenRounds = Math.max(1, Math.min(roundsTotal, raw.seen_rounds ?? 1));
   const ack: ProbeResponse = {
     responderAddr: Number.isFinite(parsedAddr) ? parsedAddr : 0,
     hopCount: raw.hops ?? raw.hopCount ?? 0,
@@ -567,6 +571,8 @@ function handleProbeAck(params: unknown): void {
     snr: raw.snr ?? 0,
     pathLen: raw.hops ?? raw.pathLen ?? 0,
     latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
+    seenRounds,
+    confidence: seenRounds / roundsTotal,
   };
   const probeId = typeof raw.probeId === 'string'
     ? parseInt(raw.probeId, 16)
@@ -599,7 +605,29 @@ function handleProbeComplete(params: unknown): void {
   const store = useStore.getState();
   const prev = store.probeResult;
   if (!prev || prev.probeId !== probeId) return;
-  store.setProbeResult({ ...prev, complete: true });
+
+  const roundsTotal = Math.max(1, Number(p.rounds_total ?? p.roundsTotal ?? 3));
+  const responders = Array.isArray(p.responders) ? p.responders : [];
+
+  let responses = prev.responses;
+  for (const r of responders) {
+    const addr = typeof r.address === 'string'
+      ? parseInt(r.address.replace(/^0x/i, ''), 16)
+      : (r.responderAddr ?? 0);
+    const seenRounds = Math.max(1, Math.min(roundsTotal, Number(r.seen_rounds ?? r.seenRounds ?? 1)));
+    responses = upsertProbeResponse(responses, {
+      responderAddr: Number.isFinite(addr) ? addr : 0,
+      hopCount: r.hops ?? r.hopCount ?? 0,
+      rssi: r.rssi ?? 0,
+      snr: r.snr ?? 0,
+      pathLen: r.hops ?? r.pathLen ?? 0,
+      latencyMs: r.latency_ms ?? r.latencyMs ?? 0,
+      seenRounds,
+      confidence: seenRounds / roundsTotal,
+    });
+  }
+
+  store.setProbeResult({ ...prev, responses, complete: true });
   store.setProbeCollecting(false);
 }
 

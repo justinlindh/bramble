@@ -251,11 +251,15 @@ static int handle_reboot(const cJSON *params, cJSON *result) {
 static int handle_send_probe(const cJSON *params, cJSON *result) {
     (void)params;
     uint32_t probe_id = mesh_send_probe();
+    if (probe_id == 0) {
+        return RPC_ERR_INTERNAL;
+    }
     char buf[12];
     snprintf(buf, sizeof(buf), "%08" PRIX32, probe_id);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "probe_id", buf);
-    cJSON_AddNumberToObject(result, "ack_window", 3);
+    cJSON_AddNumberToObject(result, "ack_window", 5);
+    cJSON_AddNumberToObject(result, "rounds_total", 3);
     return 0;
 }
 
