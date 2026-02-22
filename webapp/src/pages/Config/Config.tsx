@@ -4,6 +4,7 @@ import { RadioForm } from './RadioForm';
 import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
 import { LocationSection } from './LocationSection';
+import { TrafficDebugSection } from './TrafficDebugSection';
 import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning } from '../../components/Icons';
 import { messageDb } from '../../store/messageDb';
 import styles from './Config.module.css';
@@ -58,6 +59,12 @@ export function Config() {
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
         <LocationSection location={config.location} neighbors={neighbors} gpsAvailable={status?.gpsAvailable} />
+      </section>
+
+      {/* ── Traffic Debug ── */}
+      <section className={styles.section}>
+        <h2><IconWarning size={18} /> Traffic Debug</h2>
+        <TrafficDebugSection />
       </section>
 
       {/* ── Data ── */}

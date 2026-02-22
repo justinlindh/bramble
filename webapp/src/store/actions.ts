@@ -111,6 +111,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     client.subscribe('bramble.onProbeComplete', (params) => handleProbeComplete(params));
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
     client.subscribe('bramble.onPeerLocation', (params) => handleLocationUpdate(params));
+    client.subscribe('bramble.onTrafficEvent', (params) => handleTrafficEvent(params));
 
     // Clear stale data from previous node connection
     store.resetNodeData();
@@ -688,6 +689,90 @@ function handleLocationUpdate(params: unknown): void {
   } else {
     store.setPeerLocations([...existing, update]);
   }
+}
+
+// ─── Traffic Debug ────────────────────────────────────────────────────────
+
+export async function loadTrafficDebugStatus(): Promise<void> {
+  if (!client) return;
+  try {
+    const result = await client.rpc<any>('bramble.getTrafficDebug');
+    const status: any = {
+      config: {
+        enabled: result.enabled ?? false,
+        includeTx: result.include_tx ?? result.includeTx ?? true,
+        includeRx: result.include_rx ?? result.includeRx ?? true,
+        sampleRate: result.sample_rate ?? result.sampleRate ?? 100,
+      },
+      ringSize: result.ring_size ?? result.ringSize ?? 512,
+      ringUsed: result.ring_used ?? result.ringUsed ?? 0,
+      droppedCount: result.dropped_count ?? result.droppedCount ?? 0,
+      lastSeq: result.last_seq ?? result.lastSeq ?? 0,
+    };
+    useStore.getState().setTrafficDebugStatus(status);
+  } catch (e) {
+    console.warn('[loadTrafficDebugStatus] failed:', (e as Error).message);
+  }
+}
+
+export async function setTrafficDebugConfig(config: {
+  enabled?: boolean;
+  includeTx?: boolean;
+  includeRx?: boolean;
+  sampleRate?: number;
+}): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  const params: Record<string, unknown> = {};
+  if (config.enabled !== undefined) params.enabled = config.enabled;
+  if (config.includeTx !== undefined) params.include_tx = config.includeTx;
+  if (config.includeRx !== undefined) params.include_rx = config.includeRx;
+  if (config.sampleRate !== undefined) params.sample_rate = config.sampleRate;
+  
+  await client.rpc('bramble.setTrafficDebug', params);
+  await loadTrafficDebugStatus();
+}
+
+export async function loadTrafficEvents(sinceSeq?: number): Promise<void> {
+  if (!client) return;
+  try {
+    const params: Record<string, unknown> = { limit: 500 };
+    if (sinceSeq !== undefined) params.since_seq = sinceSeq;
+    const result = await client.rpc<{ events: any[] }>('bramble.getTrafficEvents', params);
+    const events = (result.events ?? []).map((e: any): any => ({
+      seq: e.seq,
+      timestampMs: e.timestamp_ms ?? e.timestampMs ?? Date.now(),
+      direction: e.direction ?? 'tx',
+      category: e.category ?? 'other',
+      packetType: e.packet_type ?? e.packetType ?? 'unknown',
+      tier: e.tier ?? 'normal',
+      airtimeBucket: e.airtime_bucket ?? e.airtimeBucket ?? 'normal',
+      airtimeDebitUs: e.airtime_debit_us ?? e.airtimeDebitUs ?? 0,
+      queueDepth: e.queue_depth ?? e.queueDepth,
+      rssi: e.rssi,
+      snr: e.snr,
+    }));
+    useStore.getState().addTrafficEvents(events);
+  } catch (e) {
+    console.warn('[loadTrafficEvents] failed:', (e as Error).message);
+  }
+}
+
+function handleTrafficEvent(params: unknown): void {
+  const e = params as any;
+  const event: any = {
+    seq: e.seq,
+    timestampMs: e.timestamp_ms ?? e.timestampMs ?? Date.now(),
+    direction: e.direction ?? 'tx',
+    category: e.category ?? 'other',
+    packetType: e.packet_type ?? e.packetType ?? 'unknown',
+    tier: e.tier ?? 'normal',
+    airtimeBucket: e.airtime_bucket ?? e.airtimeBucket ?? 'normal',
+    airtimeDebitUs: e.airtime_debit_us ?? e.airtimeDebitUs ?? 0,
+    queueDepth: e.queue_depth ?? e.queueDepth,
+    rssi: e.rssi,
+    snr: e.snr,
+  };
+  useStore.getState().addTrafficEvent(event);
 }
 
 export function getClient(): BrambleClient | null {
