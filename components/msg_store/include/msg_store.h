@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 #define MSG_STORE_MAX       20
-#define MSG_TEXT_MAX        200
+#define MSG_TEXT_MAX        640
 
 typedef enum {
     MSG_DIR_INCOMING = 0,
