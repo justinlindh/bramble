@@ -463,3 +463,12 @@ add_executable(test_probe_v2_spec
 target_include_directories(test_probe_v2_spec PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/bramble_probe/include
 )
+
+# Traffic debug telemetry tests
+add_executable(test_traffic_debug
+    test_traffic_debug.c
+    unity/unity.c
+)
+target_include_directories(test_traffic_debug PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+)
