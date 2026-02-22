@@ -7,6 +7,16 @@ Network Reach answers: "Which peers are reachable from this node right now?"
 
 It uses active probing and ACK collection with strict invariants so UI results are stable and meaningful.
 
+## Wire/runtime behavior (v2)
+
+- `bramble.sendProbe` returns:
+  - `probe_id` (hex string)
+  - `ack_window` (seconds; currently `3`)
+- During collection, firmware emits `bramble.onProbeResult` with:
+  - `probe_id`, `address`, `hops`, `rssi`, `snr`, `latency_ms`
+- At collection end, firmware emits `bramble.onProbeComplete` with:
+  - `probe_id`, `unique_count`, `duration_ms`
+
 ## Invariants
 
 1. **No self responder**
