@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../../store/index';
 import { sendProbe } from '../../store/actions';
 import { IconProbe } from '../../components/Icons';
@@ -22,11 +22,19 @@ function hopClass(hops: number): string {
   return styles.hop4;
 }
 
-function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
-  const sorted = [...responses].sort((a, b) => {
-    const conf = (b.seenRounds ?? 1) - (a.seenRounds ?? 1);
-    if (conf !== 0) return conf;
-    return a.hopCount - b.hopCount;
+type ProbeRow = {
+  responderAddr: number;
+  response?: ProbeResponse;
+};
+
+function ResultsTable({ rows }: { rows: ProbeRow[] }) {
+  const sorted = [...rows].sort((a, b) => {
+    const aSeen = a.response?.seenRounds ?? 0;
+    const bSeen = b.response?.seenRounds ?? 0;
+    if (bSeen !== aSeen) return bSeen - aSeen;
+    const aHops = a.response?.hopCount ?? 99;
+    const bHops = b.response?.hopCount ?? 99;
+    return aHops - bHops;
   });
   const peerNames = useStore(s => s.peerNames);
   if (sorted.length === 0) return null;
@@ -43,27 +51,31 @@ function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
         </tr>
       </thead>
       <tbody>
-        {sorted.map(r => (
-          <tr key={r.responderAddr}>
+        {sorted.map(({ responderAddr, response }) => {
+          const name = peerNames.get(responderAddr);
+          return (
+          <tr key={responderAddr}>
             <td>
               <div className={styles.nodeCell}>
-                <AddressLabel addr={r.responderAddr} name={peerNames.get(r.responderAddr)} short={!peerNames.get(r.responderAddr)} />
-                {peerNames.get(r.responderAddr) && (
-                  <span className={styles.nodeSub}>{shortAddr(r.responderAddr)}</span>
+                <AddressLabel addr={responderAddr} name={name} short={!name} />
+                {name && (
+                  <span className={styles.nodeSub}>{shortAddr(responderAddr)}</span>
                 )}
               </div>
             </td>
             <td>
-              <span className={`${styles.hopBadge} ${hopClass(r.hopCount)}`}>
-                {r.hopCount}
-              </span>
+              {response ? (
+                <span className={`${styles.hopBadge} ${hopClass(response.hopCount)}`}>
+                  {response.hopCount}
+                </span>
+              ) : '—'}
             </td>
-            <td>{`${r.seenRounds ?? 1}/3`}</td>
-            <td>{r.rssi} dBm</td>
-            <td>{r.snr.toFixed(1)}</td>
-            <td className={styles.pathCell}>{formatPath(r)}</td>
+            <td>{response ? `${response.seenRounds ?? 1}/3` : '0/3'}</td>
+            <td>{response ? `${response.rssi} dBm` : 'no response'}</td>
+            <td>{response ? response.snr.toFixed(1) : '—'}</td>
+            <td className={styles.pathCell}>{response ? formatPath(response) : '—'}</td>
           </tr>
-        ))}
+        )})}
       </tbody>
     </table>
   );
@@ -73,6 +85,22 @@ export function NetworkReach() {
   const probeResult = useStore(s => s.probeResult);
   const collecting = useStore(s => s.probeCollecting);
   const isConnected = useStore(s => s.connectionState === 'connected');
+  const neighbors = useStore(s => s.neighbors);
+  const selfAddr = useStore(s => s.config?.identity.address);
+
+  const rows = useMemo(() => {
+    const responseMap = new Map<number, ProbeResponse>();
+    for (const r of probeResult?.responses ?? []) responseMap.set(r.responderAddr, r);
+
+    const known = new Set<number>();
+    for (const n of neighbors) {
+      if (selfAddr !== undefined && n.addr === selfAddr) continue;
+      known.add(n.addr);
+    }
+    for (const addr of responseMap.keys()) known.add(addr);
+
+    return [...known].map(addr => ({ responderAddr: addr, response: responseMap.get(addr) }));
+  }, [probeResult, neighbors, selfAddr]);
 
   const [remaining, setRemaining] = useState(0);
   const [sending, setSending] = useState(false);
@@ -147,7 +175,7 @@ export function NetworkReach() {
           <div className={styles.responseCount}>
             Responses: {probeResult.responses.length} so far
           </div>
-          <ResultsTable responses={probeResult.responses} />
+          <ResultsTable rows={rows} />
         </>
       )}
 
@@ -156,7 +184,7 @@ export function NetworkReach() {
           <div className={styles.meta}>
             Sent: {sentTime} · Responses: {probeResult.responses.length} nodes
           </div>
-          <ResultsTable responses={probeResult.responses} />
+          <ResultsTable rows={rows} />
           <button
             className={styles.probeBtn}
             onClick={() => void handleSend()}
