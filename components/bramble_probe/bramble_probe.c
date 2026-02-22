@@ -146,15 +146,40 @@ void bramble_probe_handle_ack(bramble_probe_state_t *state,
     if (!state->collecting || ack->probe_id != state->result.probe_id)
         return;
 
+    /* Never include ourselves as a responder. */
+    if (ack->src_addr == state->my_addr)
+        return;
+
+    bool has_rssi = (ack->flags & PROBE_FLAG_INCLUDE_RSSI) && len >= 14;
+    uint32_t latency_ms = now_ms - state->result.start_ms;
+
+    /* Upsert by responder address: one logical row per responder. */
+    for (uint16_t i = 0; i < state->result.response_count; i++) {
+        probe_response_t *existing = &state->result.responses[i];
+        if (existing->responder_addr != ack->src_addr)
+            continue;
+
+        existing->hop_count = ack->hop_count;
+        existing->latency_ms = latency_ms; /* latest latency */
+
+        if (has_rssi) {
+            if (!existing->has_rssi || ack->rssi > existing->rssi) {
+                existing->rssi = ack->rssi; /* keep best RSSI */
+            }
+            existing->has_rssi = true;
+        }
+        return;
+    }
+
     if (state->result.response_count >= PROBE_MAX_RESPONSES)
         return;
 
     probe_response_t *resp = &state->result.responses[state->result.response_count];
     resp->responder_addr = ack->src_addr;
     resp->hop_count = ack->hop_count;
-    resp->latency_ms = now_ms - state->result.start_ms;
-    resp->has_rssi = (ack->flags & PROBE_FLAG_INCLUDE_RSSI) && len >= 14;
-    resp->rssi = resp->has_rssi ? ack->rssi : 0;
+    resp->latency_ms = latency_ms;
+    resp->has_rssi = has_rssi;
+    resp->rssi = has_rssi ? ack->rssi : 0;
 
     state->result.response_count++;
 }
