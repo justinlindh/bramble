@@ -246,7 +246,7 @@ static int send_beacon(void) {
     }
 
     size_t beacon_wire_len = bramble_beacon_wire_size(&beacon);
-    int ret = radio_transmit(buf, (uint8_t)beacon_wire_len);
+    int ret = transmit_packet(buf, (uint8_t)beacon_wire_len);
     if (ret == 0) {
         uint32_t airtime_est = 30 + (uint32_t)(beacon_wire_len * 4);
         uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -381,7 +381,7 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         return;
     }
     size_t wire_len = bramble_ack_wire_size(&ack);
-    int ret = radio_transmit(buf, (uint8_t)wire_len);
+    int ret = transmit_packet(buf, (uint8_t)wire_len);
     if (ret == 0) {
         ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32 " (%u hops)",
                  ack_packet_id, dest_addr, ack.hop_count);
@@ -415,7 +415,7 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
     size_t wire_len = bramble_ack_wire_size(ack);
     ESP_LOGI(TAG, "Forwarding ACK for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
              ack->ack_packet_id, ack->header.dest_addr, ack->hop_count);
-    radio_transmit(buf, (uint8_t)wire_len);
+    transmit_packet(buf, (uint8_t)wire_len);
 }
 
 static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -1292,7 +1292,7 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
     memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
 
-    int ret = radio_transmit(buf, (uint8_t)total);
+    int ret = transmit_packet(buf, (uint8_t)total);
     if (ret == 0) {
         /* Estimate airtime: SF9 BW125kHz ≈ 3.7ms/byte + 30ms preamble */
         uint32_t airtime_est = 30 + (uint32_t)(total * 4);
@@ -1738,7 +1738,7 @@ static int mesh_send_probe_round(uint32_t pid, uint8_t round) {
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
     buf[HEADER_SIZE + 4] = round;
 
-    int rc = radio_transmit(buf, HEADER_SIZE + 5);
+    int rc = transmit_packet(buf, HEADER_SIZE + 5);
     if (rc == 0) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
@@ -1832,7 +1832,7 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
 
     /* Controlled retries without long tail. */
     for (int i = 0; i < 3; i++) {
-        radio_transmit(buf, HEADER_SIZE + 6);
+        transmit_packet(buf, HEADER_SIZE + 6);
         if (i < 2) vTaskDelay(pdMS_TO_TICKS(140));
     }
 
@@ -1850,7 +1850,7 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
         uint8_t fwd_buf[20];
         bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
         memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
-        radio_transmit(fwd_buf, HEADER_SIZE + 4);
+        transmit_packet(fwd_buf, HEADER_SIZE + 4);
         ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id, (unsigned)fwd.hop_limit);
     }
 }
@@ -1871,7 +1871,7 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
             uint8_t fwd_buf[BRAMBLE_MAX_PACKET_SIZE];
             memcpy(fwd_buf, data, len);
             bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
-            radio_transmit(fwd_buf, len);
+            transmit_packet(fwd_buf, len);
             ESP_LOGI(TAG, "PROBE ACK FWD pid=%08" PRIX32 " dest=%s hop=%u",
                      header.packet_id,
                      addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)),
