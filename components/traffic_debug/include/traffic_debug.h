@@ -33,6 +33,12 @@ typedef struct {
 } traffic_event_t;
 
 /**
+ * Traffic event notification callback
+ * Called when a new event is recorded (if callback is registered)
+ */
+typedef void (*traffic_event_cb_t)(const traffic_event_t *evt, void *ctx);
+
+/**
  * Traffic debug ring buffer state
  */
 typedef struct {
@@ -43,6 +49,8 @@ typedef struct {
     uint32_t dropped_count;    /* Total events dropped due to wrap */
     uint32_t next_seq;         /* Next sequence number to assign */
     bool enabled;              /* Runtime enable/disable gate */
+    traffic_event_cb_t notify_cb; /* Notification callback */
+    void *notify_ctx;          /* Callback context */
 } traffic_debug_t;
 
 /**
@@ -122,5 +130,13 @@ uint32_t traffic_debug_get_dropped(traffic_debug_t *td);
  * @return Pointer to event, or NULL if invalid
  */
 const traffic_event_t *traffic_debug_get_event(traffic_debug_t *td, uint16_t index);
+
+/**
+ * Register notification callback for real-time event stream
+ * @param td Traffic debug instance
+ * @param cb Callback function (NULL to unregister)
+ * @param ctx Context pointer passed to callback
+ */
+void traffic_debug_set_notify_callback(traffic_debug_t *td, traffic_event_cb_t cb, void *ctx);
 
 #endif /* BRAMBLE_TRAFFIC_DEBUG_H */

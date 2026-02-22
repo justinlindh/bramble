@@ -9,6 +9,7 @@
 #include "channel_msg.h"
 #include "public_channel.h"
 #include "airtime_budget.h"
+#include "traffic_debug.h"
 
 /* Shared mesh state — protected by mutex, read by UI task */
 typedef struct {
@@ -122,5 +123,25 @@ const char *mesh_get_peer_name(uint32_t addr);
  * Returns the number of channels.
  */
 int mesh_get_channel_info(int *default_idx);
+
+/**
+ * Get traffic debug instance (for RPC query access).
+ */
+traffic_debug_t *mesh_get_traffic_debug(void);
+
+/**
+ * Set traffic debug runtime configuration and persist to NVS.
+ */
+void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx, uint8_t sample_rate);
+
+/**
+ * Get traffic debug runtime configuration.
+ */
+void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *include_rx, uint8_t *sample_rate);
+
+/**
+ * Load traffic debug config from NVS at startup.
+ */
+void mesh_traffic_debug_load_config(void);
 
 #endif

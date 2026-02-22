@@ -33,6 +33,8 @@ void traffic_debug_init(traffic_debug_t *td, traffic_event_t *buffer, uint16_t c
     td->events = buffer;
     td->capacity = capacity;
     td->enabled = false;
+    td->notify_cb = NULL;
+    td->notify_ctx = NULL;
 }
 
 void traffic_debug_enable(traffic_debug_t *td, bool enabled) {
@@ -141,6 +143,11 @@ static void record_event(traffic_debug_t *td, uint8_t pkt_type, uint16_t len,
     
     /* Advance head (circular) */
     td->head = (td->head + 1) % td->capacity;
+    
+    /* Notify callback if registered */
+    if (td->notify_cb) {
+        td->notify_cb(evt, td->notify_ctx);
+    }
 }
 
 void traffic_debug_record_tx(traffic_debug_t *td, uint8_t pkt_type, uint16_t len, uint8_t tier) {
@@ -174,4 +181,9 @@ const traffic_event_t *traffic_debug_get_event(traffic_debug_t *td, uint16_t ind
     }
     
     return &td->events[physical_idx];
+}
+
+void traffic_debug_set_notify_callback(traffic_debug_t *td, traffic_event_cb_t cb, void *ctx) {
+    td->notify_cb = cb;
+    td->notify_ctx = ctx;
 }

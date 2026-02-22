@@ -938,6 +938,131 @@ static int handle_get_audio_status(const cJSON *params, cJSON *result) {
 }
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
+/* ── Traffic debug RPC methods ─────────────────────────────────────── */
+
+/* bramble.setTrafficDebug — params: {"enabled":bool, "include_tx":bool, "include_rx":bool, "sample_rate":0-100} */
+static int handle_set_traffic_debug(const cJSON *params, cJSON *result) {
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    
+    /* Default values */
+    bool enabled = false;
+    bool include_tx = true;
+    bool include_rx = true;
+    uint8_t sample_rate = 100;
+    
+    cJSON *en = cJSON_GetObjectItem(params, "enabled");
+    if (en && cJSON_IsBool(en)) enabled = cJSON_IsTrue(en);
+    
+    cJSON *tx = cJSON_GetObjectItem(params, "include_tx");
+    if (tx && cJSON_IsBool(tx)) include_tx = cJSON_IsTrue(tx);
+    
+    cJSON *rx = cJSON_GetObjectItem(params, "include_rx");
+    if (rx && cJSON_IsBool(rx)) include_rx = cJSON_IsTrue(rx);
+    
+    cJSON *sr = cJSON_GetObjectItem(params, "sample_rate");
+    if (sr && cJSON_IsNumber(sr)) {
+        int val = sr->valueint;
+        sample_rate = (val < 0) ? 0 : (val > 100 ? 100 : (uint8_t)val);
+    }
+    
+    mesh_traffic_debug_set_config(enabled, include_tx, include_rx, sample_rate);
+    
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddBoolToObject(result, "enabled", enabled);
+    cJSON_AddBoolToObject(result, "include_tx", include_tx);
+    cJSON_AddBoolToObject(result, "include_rx", include_rx);
+    cJSON_AddNumberToObject(result, "sample_rate", sample_rate);
+    return 0;
+}
+
+/* bramble.getTrafficDebug — returns current config + buffer state */
+static int handle_get_traffic_debug(const cJSON *params, cJSON *result) {
+    (void)params;
+    
+    bool enabled, include_tx, include_rx;
+    uint8_t sample_rate;
+    mesh_traffic_debug_get_config(&enabled, &include_tx, &include_rx, &sample_rate);
+    
+    traffic_debug_t *td = mesh_get_traffic_debug();
+    
+    cJSON_AddBoolToObject(result, "enabled", enabled);
+    cJSON_AddBoolToObject(result, "include_tx", include_tx);
+    cJSON_AddBoolToObject(result, "include_rx", include_rx);
+    cJSON_AddNumberToObject(result, "sample_rate", sample_rate);
+    cJSON_AddNumberToObject(result, "buffer_capacity", 512);
+    cJSON_AddNumberToObject(result, "buffer_count", traffic_debug_get_count(td));
+    cJSON_AddNumberToObject(result, "dropped_count", traffic_debug_get_dropped(td));
+    
+    return 0;
+}
+
+/* bramble.getTrafficEvents — params: {"since_seq":uint32, "limit":uint16} */
+static int handle_get_traffic_events(const cJSON *params, cJSON *result) {
+    traffic_debug_t *td = mesh_get_traffic_debug();
+    
+    uint32_t since_seq = 0;
+    uint16_t limit = 100;  /* default limit */
+    
+    if (params) {
+        cJSON *seq = cJSON_GetObjectItem(params, "since_seq");
+        if (seq && cJSON_IsNumber(seq)) since_seq = (uint32_t)seq->valuedouble;
+        
+        cJSON *lim = cJSON_GetObjectItem(params, "limit");
+        if (lim && cJSON_IsNumber(lim)) {
+            int val = lim->valueint;
+            limit = (val <= 0) ? 100 : (val > 512 ? 512 : (uint16_t)val);
+        }
+    }
+    
+    cJSON *events = cJSON_AddArrayToObject(result, "events");
+    
+    uint16_t count = traffic_debug_get_count(td);
+    uint16_t returned = 0;
+    
+    for (uint16_t i = 0; i < count && returned < limit; i++) {
+        const traffic_event_t *evt = traffic_debug_get_event(td, i);
+        if (!evt) break;
+        
+        /* Filter by seq if requested */
+        if (since_seq > 0 && evt->seq <= since_seq) continue;
+        
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddNumberToObject(obj, "seq", evt->seq);
+        cJSON_AddNumberToObject(obj, "timestamp_ms", evt->timestamp_ms);
+        cJSON_AddNumberToObject(obj, "pkt_type", evt->pkt_type);
+        
+        /* Category as string */
+        static const char *cat_names[] = {
+            "beacon", "timesync", "routing", "ack", "chat", "maintenance", "other"
+        };
+        if (evt->category < 7) {
+            cJSON_AddStringToObject(obj, "category", cat_names[evt->category]);
+        } else {
+            cJSON_AddStringToObject(obj, "category", "unknown");
+        }
+        
+        /* Airtime tier as string */
+        static const char *tier_names[] = { "none", "normal", "critical", "broadcast" };
+        if (evt->airtime_tier <= 3) {
+            cJSON_AddStringToObject(obj, "airtime_tier", tier_names[evt->airtime_tier]);
+        } else {
+            cJSON_AddStringToObject(obj, "airtime_tier", "unknown");
+        }
+        
+        cJSON_AddNumberToObject(obj, "packet_len", evt->packet_len);
+        cJSON_AddNumberToObject(obj, "rssi", evt->rssi);
+        cJSON_AddBoolToObject(obj, "is_tx", evt->is_tx);
+        
+        cJSON_AddItemToArray(events, obj);
+        returned++;
+    }
+    
+    cJSON_AddNumberToObject(result, "returned", returned);
+    cJSON_AddNumberToObject(result, "total_available", count);
+    
+    return 0;
+}
+
 void rpc_methods_init(bramble_identity_t *identity) {
     s_identity = identity;
 
@@ -981,6 +1106,11 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setMuted",             handle_set_muted);
     rpc_register("bramble.getAudioStatus",       handle_get_audio_status);
 #endif
+
+    /* Traffic debug methods */
+    rpc_register("bramble.setTrafficDebug",      handle_set_traffic_debug);
+    rpc_register("bramble.getTrafficDebug",      handle_get_traffic_debug);
+    rpc_register("bramble.getTrafficEvents",     handle_get_traffic_events);
 
     ESP_LOGI(TAG, "RPC methods registered");
 }
