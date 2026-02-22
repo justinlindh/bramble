@@ -197,8 +197,18 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
+    size_t text_len = strlen(text);
+    /* Max DATA packet is 255 bytes; overhead is header(12)+src(4)+nonce(12)+tag(16)+channel(8)=52 */
+    const size_t max_text_len = 203;
+    if (text_len > max_text_len) {
+        cJSON_AddStringToObject(result, "error", "message too long");
+        cJSON_AddNumberToObject(result, "max_bytes", (double)max_text_len);
+        cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
     uint32_t dest = (uint32_t)strtoul(dest_str, NULL, 16);
-    uint32_t pkt_id = mesh_send_message(dest, (const uint8_t *)text, strlen(text));
+    uint32_t pkt_id = mesh_send_message(dest, (const uint8_t *)text, text_len);
     if (pkt_id == 0) {
         ESP_LOGW(TAG, "mesh_send_message to %08" PRIX32 " failed", dest);
         cJSON_AddStringToObject(result, "error", "send failed");
@@ -219,7 +229,17 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
-    int rc = mesh_send_broadcast((const uint8_t *)text, strlen(text));
+    size_t text_len = strlen(text);
+    /* Max DATA packet is 255 bytes; overhead is header(12)+src(4)+nonce(12)+tag(16)+channel(8)=52 */
+    const size_t max_text_len = 203;
+    if (text_len > max_text_len) {
+        cJSON_AddStringToObject(result, "error", "message too long");
+        cJSON_AddNumberToObject(result, "max_bytes", (double)max_text_len);
+        cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    int rc = mesh_send_broadcast((const uint8_t *)text, text_len);
     if (rc == -2) {
         cJSON_AddStringToObject(result, "error", "rate limited");
         return RPC_ERR_RATE_LIMIT;
