@@ -23,7 +23,11 @@ function hopClass(hops: number): string {
 }
 
 function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
-  const sorted = [...responses].sort((a, b) => a.hopCount - b.hopCount);
+  const sorted = [...responses].sort((a, b) => {
+    const conf = (b.seenRounds ?? 1) - (a.seenRounds ?? 1);
+    if (conf !== 0) return conf;
+    return a.hopCount - b.hopCount;
+  });
   const peerNames = useStore(s => s.peerNames);
   if (sorted.length === 0) return null;
   return (
@@ -32,6 +36,7 @@ function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
         <tr>
           <th>Node</th>
           <th title="Number of relay nodes between you and this node. 1 = direct neighbor.">Hops</th>
+          <th title="How many sweep rounds this node was seen in (out of 3).">Confidence</th>
           <th title="Received Signal Strength (dBm). Closer to 0 is stronger. Above −90 is good, below −110 is weak.">RSSI</th>
           <th title="Signal-to-Noise Ratio (dB). Higher is better. Above 0 means signal is stronger than noise.">SNR</th>
           <th title="The chain of relay nodes this probe passed through to reach the destination.">Path</th>
@@ -53,6 +58,7 @@ function ResultsTable({ responses }: { responses: ProbeResponse[] }) {
                 {r.hopCount}
               </span>
             </td>
+            <td>{`${r.seenRounds ?? 1}/3`}</td>
             <td>{r.rssi} dBm</td>
             <td>{r.snr.toFixed(1)}</td>
             <td className={styles.pathCell}>{formatPath(r)}</td>

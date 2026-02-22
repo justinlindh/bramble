@@ -118,6 +118,8 @@ static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
 /* Forward declarations */
 static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
 static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
+static int mesh_send_probe_round(uint32_t pid, uint8_t round);
+static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
 static int transmit_packet(const uint8_t *buf, uint8_t len);
 
@@ -837,9 +839,13 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
      */
     uint32_t dedup_key = header.packet_id ^ (((uint32_t)header.type) << 24);
     if (header.type == PKT_TYPE_PROBE_ACK && pkt->len >= HEADER_SIZE + 4) {
-        uint32_t resp_addr = 0;
-        memcpy(&resp_addr, pkt->data + HEADER_SIZE, 4);
-        dedup_key ^= resp_addr;
+        uint32_t probe_ack_resp_addr = 0;
+        memcpy(&probe_ack_resp_addr, pkt->data + HEADER_SIZE, 4);
+        dedup_key ^= probe_ack_resp_addr;
+        if (pkt->len >= HEADER_SIZE + 6) {
+            uint8_t probe_round = pkt->data[HEADER_SIZE + 5];
+            dedup_key ^= ((uint32_t)probe_round << 16);
+        }
     }
 
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
@@ -943,12 +949,30 @@ static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
 /**
  * Perform periodic maintenance: beacons, neighbor purge, route cleanup, etc.
  */
-#define PROBE_COLLECTION_WINDOW_MS 3000
-static uint32_t s_probe_id;
-static uint32_t s_probe_sent_ms;
-static bool s_probe_collecting;
-static bool s_probe_complete_emitted;
-static int s_probe_result_count;
+#define PROBE_SWEEP_ROUNDS 3
+#define PROBE_SWEEP_INTERVAL_MS 350
+#define PROBE_COLLECTION_WINDOW_MS 5000
+#define MAX_PROBE_RESULTS 16
+
+typedef struct {
+    uint32_t addr;
+    uint8_t  hops;
+    int16_t  rssi;
+    int8_t   snr;
+    uint32_t latency_ms;
+    uint8_t  seen_round_mask;
+} probe_result_t;
+
+static uint32_t       s_probe_id;
+static uint32_t       s_probe_sent_ms;
+static bool           s_probe_collecting;
+static bool           s_probe_complete_emitted;
+static probe_result_t s_probe_results[MAX_PROBE_RESULTS];
+static int            s_probe_result_count;
+static uint8_t        s_probe_rounds_sent;
+static uint32_t       s_probe_next_round_ms;
+static bool           s_probe_request_pending;
+static uint32_t       s_probe_request_id;
 
 static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                                      uint32_t *beacon_interval,
@@ -1057,6 +1081,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         }
     }
 
+    if (s_probe_collecting && s_probe_rounds_sent < PROBE_SWEEP_ROUNDS && t >= s_probe_next_round_ms) {
+        uint8_t round = (uint8_t)(s_probe_rounds_sent + 1);
+        mesh_send_probe_round(s_probe_id, round);
+        s_probe_rounds_sent = round;
+        s_probe_next_round_ms = t + PROBE_SWEEP_INTERVAL_MS;
+    }
+
     /* Probe completion event */
     if (s_probe_collecting && !s_probe_complete_emitted && (t - s_probe_sent_ms) >= PROBE_COLLECTION_WINDOW_MS) {
         cJSON *params = cJSON_CreateObject();
@@ -1065,12 +1096,30 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         cJSON_AddStringToObject(params, "probe_id", pid_buf);
         cJSON_AddNumberToObject(params, "unique_count", s_probe_result_count);
         cJSON_AddNumberToObject(params, "duration_ms", t - s_probe_sent_ms);
+        cJSON_AddNumberToObject(params, "rounds_total", PROBE_SWEEP_ROUNDS);
+
+        cJSON *responders = cJSON_AddArrayToObject(params, "responders");
+        for (int i = 0; i < s_probe_result_count; i++) {
+            probe_result_t *r = &s_probe_results[i];
+            int seen_rounds = __builtin_popcount((unsigned)r->seen_round_mask);
+            cJSON *item = cJSON_CreateObject();
+            char addr_buf[12];
+            cJSON_AddStringToObject(item, "address", addr_hex(r->addr, addr_buf, sizeof(addr_buf)));
+            cJSON_AddNumberToObject(item, "hops", r->hops);
+            cJSON_AddNumberToObject(item, "rssi", r->rssi);
+            cJSON_AddNumberToObject(item, "snr", r->snr);
+            cJSON_AddNumberToObject(item, "latency_ms", r->latency_ms);
+            cJSON_AddNumberToObject(item, "seen_rounds", seen_rounds);
+            cJSON_AddItemToArray(responders, item);
+        }
+
         rpc_notify("bramble.onProbeComplete", params);
         cJSON_Delete(params);
 
         s_probe_complete_emitted = true;
         s_probe_collecting = false;
-        ESP_LOGI(TAG, "PROBE COMPLETE pid=%08" PRIX32 " unique=%d", s_probe_id, s_probe_result_count);
+        ESP_LOGI(TAG, "PROBE COMPLETE pid=%08" PRIX32 " unique=%d rounds=%u", s_probe_id,
+                 s_probe_result_count, (unsigned)PROBE_SWEEP_ROUNDS);
     }
 }
 
@@ -1154,6 +1203,18 @@ static void mesh_task(void *param) {
         rx_packet_t pkt;
         while (xQueueReceive(s_rx_queue, &pkt, 0) == pdTRUE) {
             mesh_process_rx_packet(&pkt);
+        }
+
+        /* Start queued probe requests in mesh task context (avoids RPC/SPI contention). */
+        uint32_t queued_pid = 0;
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        if (s_probe_request_pending && !s_probe_collecting) {
+            queued_pid = s_probe_request_id;
+            s_probe_request_pending = false;
+        }
+        xSemaphoreGive(s_state_mutex);
+        if (queued_pid != 0) {
+            mesh_start_probe_sweep(queued_pid);
         }
 
         /* Perform all periodic maintenance tasks */
@@ -1624,31 +1685,8 @@ bool mesh_get_mailbox(void) {
 
 /* ── Probe tracking ──────────────────────────────────────────────────── */
 
-#define MAX_PROBE_RESULTS 16
-typedef struct {
-    uint32_t addr;
-    uint8_t  hops;
-    int16_t  rssi;
-    int8_t   snr;
-    uint32_t latency_ms;
-} probe_result_t;
-
-static uint32_t       s_probe_id = 0;
-static uint32_t       s_probe_sent_ms = 0;
-static bool           s_probe_collecting = false;
-static bool           s_probe_complete_emitted = false;
-static probe_result_t s_probe_results[MAX_PROBE_RESULTS];
-static int            s_probe_result_count = 0;
-
-uint32_t mesh_send_probe(void) {
-    uint32_t pid = next_packet_id();
-    s_probe_id = pid;
-    s_probe_sent_ms = now_ms();
-    s_probe_result_count = 0;
-    s_probe_collecting = true;
-    s_probe_complete_emitted = false;
-
-    /* Build probe packet: header(12) + source_addr(4) */
+static int mesh_send_probe_round(uint32_t pid, uint8_t round) {
+    /* Probe packet: header(12) + source_addr(4) + round(1) */
     uint8_t buf[20];
     bramble_header_t header = {
         .version = BRAMBLE_VERSION,
@@ -1660,19 +1698,51 @@ uint32_t mesh_send_probe(void) {
     };
     bramble_header_serialize(&header, buf, HEADER_SIZE);
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
+    buf[HEADER_SIZE + 4] = round;
 
-    int sent_ok = 0;
-    for (int i = 0; i < 3; i++) {
-        int rc = radio_transmit(buf, HEADER_SIZE + 4);
-        if (rc == 0) sent_ok++;
-        if (i < 2) vTaskDelay(pdMS_TO_TICKS(90));
-    }
-    if (sent_ok > 0) {
+    int rc = radio_transmit(buf, HEADER_SIZE + 5);
+    if (rc == 0) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
         xSemaphoreGive(s_state_mutex);
     }
-    ESP_LOGI("mesh", "Probe sent: id=%08" PRIX32 " tx=%d/3", pid, sent_ok);
+    ESP_LOGI(TAG, "PROBE SWEEP TX pid=%08" PRIX32 " round=%u rc=%d", pid, (unsigned)round, rc);
+    return rc;
+}
+
+static void mesh_start_probe_sweep(uint32_t pid) {
+    s_probe_id = pid;
+    s_probe_sent_ms = now_ms();
+    s_probe_result_count = 0;
+    s_probe_collecting = true;
+    s_probe_complete_emitted = false;
+    s_probe_rounds_sent = 0;
+    s_probe_next_round_ms = s_probe_sent_ms;
+
+    /* Round 1 immediate; rounds 2..N sent by periodic maintenance. */
+    mesh_send_probe_round(pid, 1);
+    s_probe_rounds_sent = 1;
+    s_probe_next_round_ms = s_probe_sent_ms + PROBE_SWEEP_INTERVAL_MS;
+
+    ESP_LOGI(TAG, "PROBE SWEEP START pid=%08" PRIX32 " rounds=%u interval_ms=%u", pid,
+             (unsigned)PROBE_SWEEP_ROUNDS, (unsigned)PROBE_SWEEP_INTERVAL_MS);
+}
+
+uint32_t mesh_send_probe(void) {
+    uint32_t pid = next_packet_id();
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (s_probe_request_pending || s_probe_collecting) {
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGW(TAG, "PROBE request ignored: busy (pending=%d collecting=%d)",
+                 s_probe_request_pending, s_probe_collecting);
+        return 0;
+    }
+    s_probe_request_pending = true;
+    s_probe_request_id = pid;
+    xSemaphoreGive(s_state_mutex);
+
+    ESP_LOGI(TAG, "PROBE SWEEP QUEUED pid=%08" PRIX32, pid);
     return pid;
 }
 
@@ -1684,10 +1754,12 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
 
     uint32_t src_addr;
     memcpy(&src_addr, data + HEADER_SIZE, 4);
+    uint8_t probe_round = (len >= HEADER_SIZE + 5) ? data[HEADER_SIZE + 4] : 1;
 
     char src_buf[12], me_buf[12];
-    ESP_LOGI(TAG, "PROBE RX pid=%08" PRIX32 " src=%s me=%s hop=%u rssi=%d snr=%d",
+    ESP_LOGI(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
              header.packet_id,
+             (unsigned)probe_round,
              addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
              (unsigned)header.hop_limit,
@@ -1713,21 +1785,22 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     bramble_header_serialize(&ack_header, buf, HEADER_SIZE);
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
     buf[HEADER_SIZE + 4] = 1; /* hops = 1 for direct */
+    buf[HEADER_SIZE + 5] = probe_round;
 
-    /* Stagger ACKs with a random jitter window (200..1400ms) so that two nearby nodes
-     * statistically avoid systematic collision (deterministic address-based jitter
-     * caused near-identical slots for adjacent nodes). */
-    uint32_t jitter_ms = 200 + (esp_random() % 1200);
+    /* Deterministic slotting + bounded jitter for consistent separation among responders. */
+    uint32_t slot_ms = 300 + ((s_identity->address % 6) * 110);   /* 300..850 */
+    uint32_t jitter_ms = slot_ms + (esp_random() % 120);           /* +0..119 */
     vTaskDelay(pdMS_TO_TICKS(jitter_ms));
 
-    /* Send ACK multiple times with spacing for better reliability on weak/asymmetric links. */
-    for (int i = 0; i < 5; i++) {
-        radio_transmit(buf, HEADER_SIZE + 5);
-        if (i < 4) vTaskDelay(pdMS_TO_TICKS(120));
+    /* Controlled retries without long tail. */
+    for (int i = 0; i < 3; i++) {
+        radio_transmit(buf, HEADER_SIZE + 6);
+        if (i < 2) vTaskDelay(pdMS_TO_TICKS(140));
     }
 
-    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1 jitter=%" PRIu32 "ms x5",
+    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " round=%u to=%s from=%s hops=1 jitter=%" PRIu32 "ms x3",
              header.packet_id,
+             (unsigned)probe_round,
              addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
              jitter_ms);
@@ -1773,14 +1846,14 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
 
     /* Only process if this ACK is for our active probe */
     if (!s_probe_collecting || header.packet_id != s_probe_id) {
-        ESP_LOGI(TAG, "PROBE ACK RX ignored pid=%08" PRIX32 " expected=%08" PRIX32,
-                 header.packet_id, s_probe_id);
         return;
     }
 
     uint32_t resp_addr;
     memcpy(&resp_addr, data + HEADER_SIZE, 4);
     uint8_t hops = data[HEADER_SIZE + 4];
+    uint8_t probe_round = (len >= HEADER_SIZE + 6) ? data[HEADER_SIZE + 5] : 1;
+    if (probe_round < 1 || probe_round > PROBE_SWEEP_ROUNDS) probe_round = 1;
 
     /* Never include self in probe responders. */
     if (resp_addr == s_identity->address) {
@@ -1805,6 +1878,7 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
         r->latency_ms = latency; /* latest latency */
         if (rssi > r->rssi) r->rssi = rssi; /* best RSSI */
         if (snr > r->snr) r->snr = snr;      /* best SNR */
+        r->seen_round_mask |= (uint8_t)(1u << (probe_round - 1));
     } else if (s_probe_result_count < MAX_PROBE_RESULTS) {
         probe_result_t *r = &s_probe_results[s_probe_result_count++];
         r->addr = resp_addr;
@@ -1812,11 +1886,13 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
         r->rssi = rssi;
         r->snr = snr;
         r->latency_ms = latency;
+        r->seen_round_mask = (uint8_t)(1u << (probe_round - 1));
     }
 
     char buf[12];
-    ESP_LOGI(TAG, "PROBE ACK RX from=%s hops=%u rssi=%d snr=%d latency=%" PRIu32 "ms pid=%08" PRIX32,
+    ESP_LOGI(TAG, "PROBE ACK RX from=%s round=%u hops=%u rssi=%d snr=%d latency=%" PRIu32 "ms pid=%08" PRIX32,
              addr_hex(resp_addr, buf, sizeof(buf)),
+             (unsigned)probe_round,
              (unsigned)hops,
              (int)rssi,
              (int)snr,
@@ -1830,6 +1906,7 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     cJSON_AddNumberToObject(params, "rssi", rssi);
     cJSON_AddNumberToObject(params, "snr", snr);
     cJSON_AddNumberToObject(params, "latency_ms", latency);
+    cJSON_AddNumberToObject(params, "probe_round", probe_round);
     char pid_buf[12];
     snprintf(pid_buf, sizeof(pid_buf), "%08" PRIX32, s_probe_id);
     cJSON_AddStringToObject(params, "probe_id", pid_buf);
