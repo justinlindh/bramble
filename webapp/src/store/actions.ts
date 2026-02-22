@@ -343,6 +343,11 @@ export async function loadMessages(sinceId?: number): Promise<void> {
 // ─── Messaging ────────────────────────────────────────────────────────────
 
 const packetIdToMsgId = new Map<string, string>();
+const MAX_MESSAGE_BYTES = 203;
+
+function utf8ByteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
 
 export async function sendMessage(
   dest: number,
@@ -352,6 +357,11 @@ export async function sendMessage(
 ): Promise<void> {
   if (!client) throw new Error('Not connected');
   const store = useStore.getState();
+
+  const messageBytes = utf8ByteLength(text);
+  if (messageBytes > MAX_MESSAGE_BYTES) {
+    throw new Error(`Message too long (${messageBytes} bytes). Max is ${MAX_MESSAGE_BYTES} bytes.`);
+  }
 
   const msg = {
     id: uuid(),

@@ -36,6 +36,9 @@ int neighbor_update(neighbor_table_t *table, uint32_t addr, int8_t rssi, int8_t 
     table->entries[idx].snr = snr;
     table->entries[idx].pubkey_hash = pubkey_hash;
     table->entries[idx].last_heard = now_ms;
+    /* Defaults until reliability/airtime telemetry is populated from runtime stats */
+    table->entries[idx].delivery_rate = 255;      /* 100% */
+    table->entries[idx].airtime_remaining = 100;  /* 100% */
     return idx;
 }
 
