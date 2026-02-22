@@ -62,15 +62,19 @@ static void mute_changed_cb(lv_event_t *e) {
 /* ── Sleep mode ─────────────────────────────────────────────────────── */
 
 static lv_obj_t *s_sleep_timeout_slider = NULL;
+static lv_obj_t *s_sleep_timeout_label = NULL;
 
 static void sleep_enabled_cb(lv_event_t *e) {
     lv_obj_t *sw = lv_event_get_target(e);
     bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
     sleep_manager_set_enabled(enabled);
 
-    /* Dim the timeout slider when sleep is disabled */
+    /* Dim the timeout slider and label when sleep is disabled */
     if (s_sleep_timeout_slider) {
         lv_obj_set_style_opa(s_sleep_timeout_slider, enabled ? LV_OPA_COVER : LV_OPA_40, 0);
+    }
+    if (s_sleep_timeout_label) {
+        lv_obj_set_style_opa(s_sleep_timeout_label, enabled ? LV_OPA_COVER : LV_OPA_40, 0);
     }
 }
 
@@ -78,6 +82,13 @@ static void sleep_timeout_changed_cb(lv_event_t *e) {
     lv_obj_t *slider = lv_event_get_target(e);
     int val = lv_slider_get_value(slider);  /* 10..300 seconds */
     sleep_manager_set_timeout((uint16_t)val);
+    
+    /* Update the value label */
+    if (s_sleep_timeout_label) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%ds", val);
+        lv_label_set_text(s_sleep_timeout_label, buf);
+    }
 }
 
 /* ── Connectivity mode toggle ────────────────────────────────────────── */
@@ -327,10 +338,20 @@ void scr_settings_create(bramble_layout_t *layout) {
     if (g) lv_group_add_obj(g, sleep_sw);
 
     /* Sleep timeout slider */
-    lv_obj_t *sleep_timeout_row = create_setting_row(cont, "Timeout (sec)");
+    lv_obj_t *sleep_timeout_row = create_setting_row(cont, "Timeout");
     lv_obj_set_size(sleep_timeout_row, 304, 48);
+    
+    /* Value label showing "XXs" */
+    s_sleep_timeout_label = lv_label_create(sleep_timeout_row);
+    char timeout_buf[16];
+    snprintf(timeout_buf, sizeof(timeout_buf), "%us", cur_sleep_timeout);
+    lv_label_set_text(s_sleep_timeout_label, timeout_buf);
+    lv_obj_set_style_text_color(s_sleep_timeout_label, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(s_sleep_timeout_label, &lv_font_montserrat_12, 0);
+    lv_obj_align(s_sleep_timeout_label, LV_ALIGN_RIGHT_MID, -150, 0);
+    
     s_sleep_timeout_slider = lv_slider_create(sleep_timeout_row);
-    lv_obj_set_size(s_sleep_timeout_slider, 140, 10);
+    lv_obj_set_size(s_sleep_timeout_slider, 100, 10);
     lv_obj_align(s_sleep_timeout_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(s_sleep_timeout_slider, 10, 300);
     lv_slider_set_value(s_sleep_timeout_slider, cur_sleep_timeout, LV_ANIM_OFF);
@@ -338,9 +359,10 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_set_style_bg_color(s_sleep_timeout_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(s_sleep_timeout_slider, BR_COLOR_TEXT, LV_PART_KNOB);
     lv_obj_add_event_cb(s_sleep_timeout_slider, sleep_timeout_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    /* Dim slider if sleep is disabled */
+    /* Dim slider and label if sleep is disabled */
     if (!cur_sleep_enabled) {
         lv_obj_set_style_opa(s_sleep_timeout_slider, LV_OPA_40, 0);
+        lv_obj_set_style_opa(s_sleep_timeout_label, LV_OPA_40, 0);
     }
     if (g) lv_group_add_obj(g, s_sleep_timeout_slider);
 
