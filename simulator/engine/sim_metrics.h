@@ -20,6 +20,9 @@ typedef struct {
     uint64_t crypto_encrypted;         /* packets encrypted */
     uint64_t crypto_decrypted;         /* packets decrypted */
     uint64_t crypto_auth_failed;       /* packets with auth failure */
+    uint64_t beacons_sent;             /* total beacons transmitted (control airtime) */
+    uint64_t rreqs_sent;               /* total RREQs transmitted (control airtime) */
+    uint64_t rreps_sent;               /* total RREPs transmitted (control airtime) */
     int active_nodes;
 } metrics_state_t;
 
@@ -28,8 +31,12 @@ void metrics_record_packet_sent(metrics_state_t *metrics);
 void metrics_record_message_sent(metrics_state_t *metrics);
 void metrics_record_packet_delivered(metrics_state_t *metrics, uint64_t latency_us);
 void metrics_record_packet_dropped(metrics_state_t *metrics);
+void metrics_record_beacon_sent(metrics_state_t *metrics);
+void metrics_record_rreq_sent(metrics_state_t *metrics);
+void metrics_record_rrep_sent(metrics_state_t *metrics);
 void metrics_update_active_nodes(metrics_state_t *metrics, int count);
 double metrics_delivery_rate(const metrics_state_t *metrics);
 double metrics_avg_latency_ms(const metrics_state_t *metrics);
+double metrics_control_airtime_pct(const metrics_state_t *metrics);
 
 #endif /* SIM_METRICS_H */

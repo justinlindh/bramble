@@ -138,6 +138,10 @@ func metricsAvgLatencyMs(m *C.metrics_state_t) float64 {
 	return float64(C.metrics_avg_latency_ms(m))
 }
 
+func metricsControlAirtimePct(m *C.metrics_state_t) float64 {
+	return float64(C.metrics_control_airtime_pct(m))
+}
+
 // --- Anomaly ---
 
 func anomalyInit(t *C.node_anomaly_tracker_t) {
