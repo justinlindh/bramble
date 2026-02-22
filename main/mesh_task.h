@@ -144,4 +144,59 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
  */
 void mesh_traffic_debug_load_config(void);
 
+/**
+ * Adaptive beacon interval policy mode
+ */
+typedef enum {
+    BEACON_MODE_FIXED = 0,      /* Fixed 60s interval (default, backward-compatible) */
+    BEACON_MODE_ADAPTIVE = 1,   /* Adaptive mode based on mesh conditions */
+} beacon_policy_mode_t;
+
+/**
+ * Adaptive beacon interval configuration
+ */
+typedef struct {
+    bool                enabled;            /* Enable adaptive policy (default: false) */
+    beacon_policy_mode_t mode;              /* Policy mode */
+    uint32_t            base_interval_ms;   /* Base interval (default: 60000) */
+    uint32_t            min_interval_ms;    /* Minimum interval (default: 30000) */
+    uint32_t            max_interval_ms;    /* Maximum interval (default: 120000) */
+    uint8_t             dense_threshold;    /* Neighbor count for dense mode (default: 10) */
+    uint8_t             churn_threshold;    /* Neighbor changes/min for churn (default: 3) */
+    uint32_t            churn_window_ms;    /* Time window for churn detection (default: 60000) */
+} beacon_policy_config_t;
+
+/**
+ * Adaptive beacon interval runtime status
+ */
+typedef struct {
+    beacon_policy_mode_t active_mode;       /* Currently active mode */
+    uint32_t            current_interval_ms; /* Current beacon interval */
+    uint8_t             neighbor_count;      /* Current neighbor count */
+    uint8_t             churn_events;        /* Churn events in current window */
+    uint32_t            last_transition_ms;  /* Last mode transition timestamp */
+    bool                in_backoff;          /* Currently in dense/churn backoff */
+} beacon_policy_status_t;
+
+/**
+ * Set beacon policy configuration and persist to NVS.
+ * Returns 0 on success.
+ */
+int mesh_set_beacon_policy(const beacon_policy_config_t *config);
+
+/**
+ * Get current beacon policy configuration.
+ */
+void mesh_get_beacon_policy(beacon_policy_config_t *config);
+
+/**
+ * Get beacon policy runtime status.
+ */
+void mesh_get_beacon_status(beacon_policy_status_t *status);
+
+/**
+ * Load beacon policy config from NVS at startup.
+ */
+void mesh_beacon_policy_load_config(void);
+
 #endif

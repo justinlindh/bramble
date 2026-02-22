@@ -1065,6 +1065,104 @@ static int handle_get_traffic_events(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+/* bramble.setBeaconPolicy — params: {"enabled":bool, "mode":str, "baseIntervalMs":num, ...} */
+static int handle_set_beacon_policy(const cJSON *params, cJSON *result) {
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    
+    beacon_policy_config_t config;
+    mesh_get_beacon_policy(&config);  /* Start with current config */
+    
+    /* Parse parameters */
+    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    cJSON *mode_str = cJSON_GetObjectItem(params, "mode");
+    cJSON *base_ms = cJSON_GetObjectItem(params, "baseIntervalMs");
+    cJSON *min_ms = cJSON_GetObjectItem(params, "minIntervalMs");
+    cJSON *max_ms = cJSON_GetObjectItem(params, "maxIntervalMs");
+    cJSON *dense_th = cJSON_GetObjectItem(params, "denseThreshold");
+    cJSON *churn_th = cJSON_GetObjectItem(params, "churnThreshold");
+    cJSON *churn_win = cJSON_GetObjectItem(params, "churnWindowMs");
+    
+    if (enabled && cJSON_IsBool(enabled)) {
+        config.enabled = cJSON_IsTrue(enabled);
+    }
+    
+    if (mode_str && cJSON_IsString(mode_str)) {
+        const char *mode = cJSON_GetStringValue(mode_str);
+        if (strcmp(mode, "fixed") == 0) {
+            config.mode = BEACON_MODE_FIXED;
+        } else if (strcmp(mode, "adaptive") == 0) {
+            config.mode = BEACON_MODE_ADAPTIVE;
+        } else {
+            cJSON_AddStringToObject(result, "error", "Invalid mode (use 'fixed' or 'adaptive')");
+            return RPC_ERR_INVALID_PARAMS;
+        }
+    }
+    
+    if (base_ms && cJSON_IsNumber(base_ms)) {
+        config.base_interval_ms = (uint32_t)base_ms->valuedouble;
+    }
+    if (min_ms && cJSON_IsNumber(min_ms)) {
+        config.min_interval_ms = (uint32_t)min_ms->valuedouble;
+    }
+    if (max_ms && cJSON_IsNumber(max_ms)) {
+        config.max_interval_ms = (uint32_t)max_ms->valuedouble;
+    }
+    if (dense_th && cJSON_IsNumber(dense_th)) {
+        config.dense_threshold = (uint8_t)dense_th->valueint;
+    }
+    if (churn_th && cJSON_IsNumber(churn_th)) {
+        config.churn_threshold = (uint8_t)churn_th->valueint;
+    }
+    if (churn_win && cJSON_IsNumber(churn_win)) {
+        config.churn_window_ms = (uint32_t)churn_win->valuedouble;
+    }
+    
+    /* Apply the configuration */
+    int rc = mesh_set_beacon_policy(&config);
+    if (rc != 0) {
+        cJSON_AddStringToObject(result, "error", "Failed to set beacon policy");
+        return RPC_ERR_INTERNAL;
+    }
+    
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+/* bramble.getBeaconPolicy — returns config and status */
+static int handle_get_beacon_policy(const cJSON *params, cJSON *result) {
+    (void)params;
+    
+    beacon_policy_config_t config;
+    beacon_policy_status_t status;
+    
+    mesh_get_beacon_policy(&config);
+    mesh_get_beacon_status(&status);
+    
+    /* Config */
+    cJSON *cfg = cJSON_AddObjectToObject(result, "config");
+    cJSON_AddBoolToObject(cfg, "enabled", config.enabled);
+    cJSON_AddStringToObject(cfg, "mode", 
+        config.mode == BEACON_MODE_FIXED ? "fixed" : "adaptive");
+    cJSON_AddNumberToObject(cfg, "baseIntervalMs", config.base_interval_ms);
+    cJSON_AddNumberToObject(cfg, "minIntervalMs", config.min_interval_ms);
+    cJSON_AddNumberToObject(cfg, "maxIntervalMs", config.max_interval_ms);
+    cJSON_AddNumberToObject(cfg, "denseThreshold", config.dense_threshold);
+    cJSON_AddNumberToObject(cfg, "churnThreshold", config.churn_threshold);
+    cJSON_AddNumberToObject(cfg, "churnWindowMs", config.churn_window_ms);
+    
+    /* Status */
+    cJSON *st = cJSON_AddObjectToObject(result, "status");
+    cJSON_AddStringToObject(st, "activeMode",
+        status.active_mode == BEACON_MODE_FIXED ? "fixed" : "adaptive");
+    cJSON_AddNumberToObject(st, "currentIntervalMs", status.current_interval_ms);
+    cJSON_AddNumberToObject(st, "neighborCount", status.neighbor_count);
+    cJSON_AddNumberToObject(st, "churnEvents", status.churn_events);
+    cJSON_AddNumberToObject(st, "lastTransitionMs", status.last_transition_ms);
+    cJSON_AddBoolToObject(st, "inBackoff", status.in_backoff);
+    
+    return 0;
+}
+
 void rpc_methods_init(bramble_identity_t *identity) {
     s_identity = identity;
 
@@ -1113,6 +1211,10 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setTrafficDebug",      handle_set_traffic_debug);
     rpc_register("bramble.getTrafficDebug",      handle_get_traffic_debug);
     rpc_register("bramble.getTrafficEvents",     handle_get_traffic_events);
+
+    /* Beacon policy methods */
+    rpc_register("bramble.setBeaconPolicy",      handle_set_beacon_policy);
+    rpc_register("bramble.getBeaconPolicy",      handle_get_beacon_policy);
 
     ESP_LOGI(TAG, "RPC methods registered");
 }
