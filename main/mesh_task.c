@@ -17,6 +17,7 @@
 #include "reliability.h"
 #include "battery.h"
 #include "traffic_debug.h"
+#include "fragment.h"
 #include "cJSON.h"
 
 #include "esp_random.h"
@@ -101,6 +102,9 @@ static airtime_budget_t    s_airtime;
 #define TRAFFIC_DEBUG_CAPACITY 512
 static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t     s_traffic_debug;
+
+/* Fragment reassembly context */
+static reassembly_ctx_t    s_reassembly;
 
 /* Adaptive beacon interval policy */
 static beacon_policy_config_t s_beacon_policy = {
@@ -537,7 +541,101 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     /* Extract the text message from the decrypted payload */
     if (info.data_len > 0) {
-        /* Null-terminate for printing */
+        /* Check if this is a fragment */
+        if (info.data_len >= FRAG_HEADER_SIZE) {
+            frag_header_t frag_hdr;
+            frag_hdr.frag_index = info.data[0];
+            frag_hdr.frag_total = info.data[1];
+            frag_hdr.message_id = info.data[2] | ((uint16_t)info.data[3] << 8);
+
+            /* Validate fragment header — indices < total and total within limits */
+            if (frag_hdr.frag_total > 1 && frag_hdr.frag_index < frag_hdr.frag_total &&
+                frag_hdr.frag_total <= FRAG_MAX_FRAGMENTS) {
+                /* This is a fragment — process through reassembly */
+                ESP_LOGI(TAG, "RX fragment %u/%u msg_id=%04X from %08" PRIX32,
+                         frag_hdr.frag_index + 1, frag_hdr.frag_total,
+                         frag_hdr.message_id, info.src_addr);
+
+                int ret = reassembly_add(&s_reassembly, &frag_hdr,
+                                        info.data + FRAG_HEADER_SIZE,
+                                        info.data_len - FRAG_HEADER_SIZE,
+                                        now_ms());
+                if (ret == 1) {
+                    /* Reassembly complete — collect the full message */
+                    uint8_t reassembled[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT];
+                    int total_len = reassembly_collect(&s_reassembly, frag_hdr.message_id,
+                                                       reassembled, sizeof(reassembled));
+                    if (total_len > 0) {
+                        /* Process the reassembled message */
+                        char text[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT + 1];
+                        size_t tlen = (size_t)total_len;
+                        if (tlen >= sizeof(text)) tlen = sizeof(text) - 1;
+                        memcpy(text, reassembled, tlen);
+                        text[tlen] = '\0';
+
+                        ESP_LOGI(TAG, "");
+                        ESP_LOGI(TAG, "*** REASSEMBLED MESSAGE from %08" PRIX32 " ***", info.src_addr);
+                        ESP_LOGI(TAG, ">>> %s", text);
+                        ESP_LOGI(TAG, "*** (%u bytes from %u fragments, ch:%d RSSI:%d SNR:%d) ***",
+                                 (unsigned)total_len, frag_hdr.frag_total, info.channel_id, rssi, snr);
+
+                        /* Store and notify for reassembled message */
+                        uint32_t hdr_dest;
+                        memcpy(&hdr_dest, data + 4, 4);
+                        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
+                            ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
+                        int16_t channel_index = (dir == MSG_DIR_BROADCAST_IN) ? -1 : (int16_t)info.channel_id;
+                        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
+                                          0, MSG_STATUS_NONE, channel_index);
+
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+                        ui_graphics_notify(UI_EVT_MSG_RECEIVED);
+#endif
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+                        if (audio_is_available()) {
+                            audio_play_tone(AUDIO_TONE_MESSAGE_RX);
+                        }
+#endif
+
+                        /* Emit onMessage notification via RPC */
+                        {
+                            char addr_buf[12];
+                            snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
+
+                            cJSON *params = cJSON_CreateObject();
+                            cJSON_AddStringToObject(params, "from", addr_buf);
+                            cJSON_AddStringToObject(params, "text", text);
+                            cJSON_AddNumberToObject(params, "rssi", rssi);
+                            cJSON_AddNumberToObject(params, "snr", snr);
+                            cJSON_AddNumberToObject(params, "channel", (dir == MSG_DIR_BROADCAST_IN) ? -1 : info.channel_id);
+                            cJSON_AddBoolToObject(params, "broadcast", dir == MSG_DIR_BROADCAST_IN);
+                            rpc_notify("bramble.onMessage", params);
+                            cJSON_Delete(params);
+                        }
+
+                        /* Send ACK for unicast messages */
+                        if (dir == MSG_DIR_INCOMING) {
+                            bramble_header_t rx_hdr;
+                            bramble_header_deserialize(&rx_hdr, data, len);
+                            send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+                        }
+
+                        /* Print to stdout */
+                        printf("\n[MSG from %08" PRIX32 "] %s\n", info.src_addr, text);
+                        printf("bramble> ");
+                        fflush(stdout);
+                    } else {
+                        ESP_LOGW(TAG, "Failed to collect reassembled message");
+                    }
+                } else if (ret < 0) {
+                    ESP_LOGW(TAG, "Fragment reassembly failed");
+                }
+                return; /* Fragment processed, don't treat as regular message */
+            }
+        }
+
+        /* Not a fragment — process as regular single-packet message */
         char text[256];
         size_t tlen = info.data_len;
         if (tlen >= sizeof(text)) tlen = sizeof(text) - 1;
@@ -1243,6 +1341,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         dedup_purge(&s_dedup, t);
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
+        reassembly_purge(&s_reassembly, t);
         *last_purge_ms = t;
 
         /* Expire old mailbox entries */
@@ -1551,6 +1650,57 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         return -2;
     }
 
+    /* Check if fragmentation is needed */
+    if (len > FRAG_MAX_PLAINTEXT) {
+        /* Long message — split into fragments */
+        uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
+        fragment_t frags[FRAG_MAX_FRAGMENTS];
+        int num_frags = fragment_split(data, len, msg_id, frags, FRAG_MAX_FRAGMENTS);
+        
+        if (num_frags <= 0) {
+            ESP_LOGE(TAG, "Fragment split failed for %u bytes", (unsigned)len);
+            return -1;
+        }
+
+        ESP_LOGI(TAG, "Sending broadcast message as %d fragments (msg_id=%04X)", num_frags, msg_id);
+
+        /* Send each fragment with pacing */
+        for (int i = 0; i < num_frags; i++) {
+            uint8_t nonce[BRAMBLE_NONCE_SIZE];
+            uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
+            uint8_t tag[BRAMBLE_TAG_SIZE];
+
+            int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01,
+                                         frags[i].data, frags[i].len,
+                                         nonce, ciphertext, tag);
+            if (ret != 0) {
+                ESP_LOGE(TAG, "Fragment %d encrypt failed: %d", i, ret);
+                continue;
+            }
+
+            size_t ct_len = CHANNEL_MSG_OVERHEAD + frags[i].len;
+            uint32_t pkt_id = send_data_packet(0xFFFFFFFF, frags[i].data, frags[i].len,
+                                              nonce, ciphertext, ct_len, tag);
+            if (pkt_id == 0) {
+                ESP_LOGW(TAG, "Fragment %d transmission failed", i);
+            } else {
+                ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
+            }
+
+            /* Inter-fragment pacing to avoid flooding */
+            if (i < num_frags - 1) {
+                vTaskDelay(pdMS_TO_TICKS(50)); /* 50ms between fragments */
+            }
+        }
+
+        /* Store the full message in message store */
+        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
+                          (const char *)data, len, 0, 0,
+                          0, MSG_STATUS_NONE, -1);
+        return 0;
+    }
+
+    /* Short message — fast path (no fragmentation) */
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
     uint8_t tag[BRAMBLE_TAG_SIZE];
@@ -1578,6 +1728,64 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
         return 0;
     }
 
+    /* Check if fragmentation is needed */
+    if (len > FRAG_MAX_PLAINTEXT) {
+        /* Long message — split into fragments */
+        uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
+        fragment_t frags[FRAG_MAX_FRAGMENTS];
+        int num_frags = fragment_split(data, len, msg_id, frags, FRAG_MAX_FRAGMENTS);
+        
+        if (num_frags <= 0) {
+            ESP_LOGE(TAG, "Fragment split failed for %u bytes", (unsigned)len);
+            return 0;
+        }
+
+        ESP_LOGI(TAG, "Sending channel message as %d fragments (msg_id=%04X)", num_frags, msg_id);
+
+        uint32_t first_pkt_id = 0;
+        /* Send each fragment with pacing */
+        for (int i = 0; i < num_frags; i++) {
+            uint8_t nonce[BRAMBLE_NONCE_SIZE];
+            uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
+            uint8_t tag[BRAMBLE_TAG_SIZE];
+
+            int ret = channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, 0x01,
+                                         frags[i].data, frags[i].len,
+                                         nonce, ciphertext, tag);
+            if (ret != 0) {
+                ESP_LOGE(TAG, "Fragment %d encrypt failed: %d", i, ret);
+                continue;
+            }
+
+            size_t ct_len = CHANNEL_MSG_OVERHEAD + frags[i].len;
+            uint32_t pkt_id = send_data_packet(dest_addr, frags[i].data, frags[i].len,
+                                              nonce, ciphertext, ct_len, tag);
+            if (pkt_id == 0) {
+                ESP_LOGW(TAG, "Fragment %d transmission failed", i);
+            } else {
+                if (i == 0) first_pkt_id = pkt_id;
+                ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
+            }
+
+            /* Inter-fragment pacing to avoid flooding */
+            if (i < num_frags - 1) {
+                vTaskDelay(pdMS_TO_TICKS(50)); /* 50ms between fragments */
+            }
+        }
+
+        /* Store the full message in message store */
+        if (first_pkt_id != 0) {
+            msg_store_add_ex2(dest_addr,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
+                              (const char *)data, len, 0, 0,
+                              first_pkt_id,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? -1 : (int16_t)channel_idx);
+        }
+        return first_pkt_id;
+    }
+
+    /* Short message — fast path (no fragmentation) */
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
     uint8_t tag[BRAMBLE_TAG_SIZE];
@@ -1706,6 +1914,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
+    reassembly_init(&s_reassembly);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
