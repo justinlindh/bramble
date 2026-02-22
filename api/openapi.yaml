@@ -478,6 +478,72 @@ paths:
               schema:
                 $ref: '#/components/schemas/OkResponse'
 
+  # ── Traffic Debug Methods ──────────────────────────────────────────────────
+
+  /rpc/bramble.setTrafficDebug:
+    post:
+      operationId: setTrafficDebug
+      summary: Configure traffic debug telemetry
+      description: >
+        Enable or disable traffic debug event recording and configure sampling parameters.
+        Settings are persisted to NVS and survive reboots.
+      tags: [debug]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetTrafficDebugParams'
+      responses:
+        '200':
+          description: Traffic debug config updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetTrafficDebugResponse'
+
+  /rpc/bramble.getTrafficDebug:
+    post:
+      operationId: getTrafficDebug
+      summary: Get traffic debug configuration and buffer state
+      description: >
+        Returns current traffic debug configuration, ring buffer utilization,
+        and dropped event count.
+      tags: [debug]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '200':
+          description: Traffic debug status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTrafficDebugResponse'
+
+  /rpc/bramble.getTrafficEvents:
+    post:
+      operationId: getTrafficEvents
+      summary: Retrieve traffic events from ring buffer
+      description: >
+        Fetch traffic events from the in-memory ring buffer.
+        Use since_seq to request only new events (incremental pull).
+        Events are returned in chronological order (oldest first).
+      tags: [debug]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetTrafficEventsParams'
+      responses:
+        '200':
+          description: Traffic events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTrafficEventsResponse'
+
 components:
   schemas:
     # ── Primitives / Empty ───────────────────────────────────────────────────
@@ -1172,6 +1238,148 @@ components:
         lastUpdatedMs:
           type: integer
 
+    # ── Traffic Debug Types ────────────────────────────────────────────────
+
+    SetTrafficDebugParams:
+      type: object
+      description: Parameters for bramble.setTrafficDebug.
+      properties:
+        enabled:
+          type: boolean
+          description: Enable or disable traffic event recording.
+          default: false
+        include_tx:
+          type: boolean
+          description: Record TX (transmit) events.
+          default: true
+        include_rx:
+          type: boolean
+          description: Record RX (receive) events.
+          default: true
+        sample_rate:
+          type: integer
+          description: >
+            Sampling rate percentage (0-100). 100 = capture all events,
+            50 = capture ~50% of events (randomized sampling).
+          minimum: 0
+          maximum: 100
+          default: 100
+
+    SetTrafficDebugResponse:
+      type: object
+      description: Response from bramble.setTrafficDebug.
+      required: [ok, enabled, include_tx, include_rx, sample_rate]
+      properties:
+        ok:
+          type: boolean
+          description: Always true on success.
+        enabled:
+          type: boolean
+          description: Current enabled state.
+        include_tx:
+          type: boolean
+          description: Current TX inclusion state.
+        include_rx:
+          type: boolean
+          description: Current RX inclusion state.
+        sample_rate:
+          type: integer
+          description: Current sample rate percentage.
+
+    GetTrafficDebugResponse:
+      type: object
+      description: Response from bramble.getTrafficDebug.
+      required: [enabled, include_tx, include_rx, sample_rate, buffer_capacity, buffer_count, dropped_count]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether traffic debug is currently enabled.
+        include_tx:
+          type: boolean
+          description: Whether TX events are being recorded.
+        include_rx:
+          type: boolean
+          description: Whether RX events are being recorded.
+        sample_rate:
+          type: integer
+          description: Current sample rate percentage (0-100).
+        buffer_capacity:
+          type: integer
+          description: Ring buffer capacity (max events that can be stored).
+        buffer_count:
+          type: integer
+          description: Number of events currently in buffer.
+        dropped_count:
+          type: integer
+          description: Total events dropped due to buffer wrap or backpressure.
+
+    GetTrafficEventsParams:
+      type: object
+      description: Parameters for bramble.getTrafficEvents.
+      properties:
+        since_seq:
+          type: integer
+          description: >
+            Only return events with seq > since_seq. Use 0 or omit to fetch all available events.
+          default: 0
+        limit:
+          type: integer
+          description: Maximum number of events to return (1-512).
+          minimum: 1
+          maximum: 512
+          default: 100
+
+    GetTrafficEventsResponse:
+      type: object
+      description: Response from bramble.getTrafficEvents.
+      required: [events, returned, total_available]
+      properties:
+        events:
+          type: array
+          description: Array of traffic events (oldest first).
+          items:
+            $ref: '#/components/schemas/TrafficEvent'
+        returned:
+          type: integer
+          description: Number of events returned in this response.
+        total_available:
+          type: integer
+          description: Total events currently available in buffer.
+
+    TrafficEvent:
+      type: object
+      description: >
+        A single traffic event capturing TX or RX packet metadata.
+        Used for airtime analysis and network efficiency monitoring.
+      required: [seq, timestamp_ms, pkt_type, category, airtime_tier, packet_len, rssi, is_tx]
+      properties:
+        seq:
+          type: integer
+          description: Monotonic sequence number (unique per event).
+        timestamp_ms:
+          type: integer
+          description: Event timestamp in milliseconds since boot.
+        pkt_type:
+          type: integer
+          description: Packet type ID from firmware packet.h.
+        category:
+          type: string
+          description: Classified traffic category.
+          enum: [beacon, timesync, routing, ack, chat, maintenance, other, unknown]
+        airtime_tier:
+          type: string
+          description: Airtime bucket used for this packet.
+          enum: [none, normal, critical, broadcast, unknown]
+        packet_len:
+          type: integer
+          description: Packet length in bytes (on-air payload size).
+        rssi:
+          type: integer
+          description: Received signal strength in dBm (0 for TX events).
+        is_tx:
+          type: boolean
+          description: true if this is a TX event, false for RX.
+
 # ── Notifications (extension) ──────────────────────────────────────────────
 
 x-notifications:
@@ -1224,3 +1432,11 @@ x-notifications:
     description: Location update received from a peer.
     payload:
       $ref: '#/components/schemas/LocationUpdatePayload'
+
+  bramble.onTrafficEvent:
+    description: >
+      Real-time traffic event notification. Emitted when traffic debug is enabled
+      and a new TX or RX event is recorded. Clients can use this for live monitoring
+      or reconnect backfill via bramble.getTrafficEvents(since_seq).
+    payload:
+      $ref: '#/components/schemas/TrafficEvent'
