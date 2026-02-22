@@ -1,0 +1,184 @@
+{
+  "name": "airtime-adaptive-10",
+  "mode": "deterministic",
+  "duration_ms": 600000,
+  "nodes": [
+    {
+      "id": "N001",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "id": "N002",
+      "x": 120,
+      "y": 0
+    },
+    {
+      "id": "N003",
+      "x": 240,
+      "y": 0
+    },
+    {
+      "id": "N004",
+      "x": 360,
+      "y": 0
+    },
+    {
+      "id": "N005",
+      "x": 0,
+      "y": 120
+    },
+    {
+      "id": "N006",
+      "x": 120,
+      "y": 120
+    },
+    {
+      "id": "N007",
+      "x": 240,
+      "y": 120
+    },
+    {
+      "id": "N008",
+      "x": 360,
+      "y": 120
+    },
+    {
+      "id": "N009",
+      "x": 0,
+      "y": 240
+    },
+    {
+      "id": "N010",
+      "x": 120,
+      "y": 240
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": [
+    {
+      "at_ms": 10000,
+      "type": "send_message",
+      "src": "N001",
+      "dest": "N007"
+    },
+    {
+      "at_ms": 40000,
+      "type": "send_message",
+      "src": "N002",
+      "dest": "N008"
+    },
+    {
+      "at_ms": 70000,
+      "type": "send_message",
+      "src": "N003",
+      "dest": "N009"
+    },
+    {
+      "at_ms": 100000,
+      "type": "send_message",
+      "src": "N004",
+      "dest": "N010"
+    },
+    {
+      "at_ms": 130000,
+      "type": "send_message",
+      "src": "N005",
+      "dest": "N001"
+    },
+    {
+      "at_ms": 160000,
+      "type": "send_message",
+      "src": "N006",
+      "dest": "N002"
+    },
+    {
+      "at_ms": 190000,
+      "type": "send_message",
+      "src": "N007",
+      "dest": "N003"
+    },
+    {
+      "at_ms": 220000,
+      "type": "send_message",
+      "src": "N008",
+      "dest": "N004"
+    },
+    {
+      "at_ms": 250000,
+      "type": "send_message",
+      "src": "N009",
+      "dest": "N005"
+    },
+    {
+      "at_ms": 280000,
+      "type": "send_message",
+      "src": "N010",
+      "dest": "N006"
+    },
+    {
+      "at_ms": 310000,
+      "type": "send_message",
+      "src": "N001",
+      "dest": "N007"
+    },
+    {
+      "at_ms": 340000,
+      "type": "send_message",
+      "src": "N002",
+      "dest": "N008"
+    },
+    {
+      "at_ms": 370000,
+      "type": "send_message",
+      "src": "N003",
+      "dest": "N009"
+    },
+    {
+      "at_ms": 400000,
+      "type": "send_message",
+      "src": "N004",
+      "dest": "N010"
+    },
+    {
+      "at_ms": 430000,
+      "type": "send_message",
+      "src": "N005",
+      "dest": "N001"
+    },
+    {
+      "at_ms": 460000,
+      "type": "send_message",
+      "src": "N006",
+      "dest": "N002"
+    },
+    {
+      "at_ms": 490000,
+      "type": "send_message",
+      "src": "N007",
+      "dest": "N003"
+    },
+    {
+      "at_ms": 520000,
+      "type": "send_message",
+      "src": "N008",
+      "dest": "N004"
+    },
+    {
+      "at_ms": 550000,
+      "type": "send_message",
+      "src": "N009",
+      "dest": "N005"
+    },
+    {
+      "at_ms": 580000,
+      "type": "send_message",
+      "src": "N010",
+      "dest": "N006"
+    }
+  ]
+}

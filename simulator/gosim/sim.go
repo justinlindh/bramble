@@ -703,8 +703,12 @@ func (s *Sim) complete() {
 		"crypto_encrypted":   uint64(s.metrics.crypto_encrypted),
 		"crypto_decrypted":   uint64(s.metrics.crypto_decrypted),
 		"crypto_auth_failed": uint64(s.metrics.crypto_auth_failed),
+		"beacons_sent":       uint64(s.metrics.beacons_sent),
+		"rreqs_sent":         uint64(s.metrics.rreqs_sent),
+		"rreps_sent":         uint64(s.metrics.rreps_sent),
 		"avg_latency_ms": metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":  metricsDeliveryRate(&s.metrics),
+		"control_airtime_pct": metricsControlAirtimePct(&s.metrics),
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ended"})
 }

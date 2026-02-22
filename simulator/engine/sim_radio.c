@@ -115,6 +115,15 @@ void sim_radio_broadcast(
                            pkt->len, pkt->pkt_type);
     metrics_record_packet_sent(metrics);
     tx_node->packets_sent++;
+    
+    /* Record control packet metrics */
+    if (pkt->pkt_type == PKT_TYPE_BEACON) {
+        metrics_record_beacon_sent(metrics);
+    } else if (pkt->pkt_type == PKT_TYPE_RREQ) {
+        metrics_record_rreq_sent(metrics);
+    } else if (pkt->pkt_type == PKT_TYPE_RREP) {
+        metrics_record_rrep_sent(metrics);
+    }
 
     /* Deliver to all nodes in range */
     for (int i = 0; i < nodes->count; i++) {

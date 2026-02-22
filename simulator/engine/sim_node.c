@@ -75,6 +75,13 @@ void node_activate(sim_node_t *node) {
     }
     node->crypto_counter = 0;
     node->packets_forwarded = 0;
+    
+    /* Initialize adaptive beacon controller */
+    node->adaptive_beacon_interval_us = NODE_BEACON_INTERVAL_BASE_US;
+    memset(node->neighbor_history, 0, sizeof(node->neighbor_history));
+    node->neighbor_history_idx = 0;
+    node->last_mode_transition_us = 0;
+    node->adaptive_enabled = true;  /* Enable by default for simulation */
 }
 
 void node_deactivate(sim_node_t *node) {
@@ -87,6 +94,64 @@ void node_move(sim_node_t *node, float x, float y) {
 }
 
 /*
+ * Adaptive beacon controller — computes beacon interval based on local mesh conditions.
+ * Policy:
+ *  - Small/stable mesh (neighbor_count < 10, low churn) → 60s interval (conservative airtime)
+ *  - Dense mesh (neighbor_count >= 10) → 60s interval (backoff to reduce collisions)
+ *  - High churn detected → 15s interval (fast discovery)
+ * Returns: beacon_interval_us
+ */
+static uint64_t adaptive_beacon_interval(sim_node_t *node, uint64_t now_us) {
+    if (!node->adaptive_enabled) {
+        return NODE_BEACON_INTERVAL_BASE_US;
+    }
+
+    uint8_t num_neighbors = (uint8_t)neighbor_count(&node->neighbors);
+    
+    /* Update neighbor history for churn detection */
+    node->neighbor_history[node->neighbor_history_idx] = num_neighbors;
+    node->neighbor_history_idx = (node->neighbor_history_idx + 1) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
+    
+    /* Detect churn: count significant neighbor changes in rolling window */
+    uint8_t churn_events = 0;
+    for (int i = 1; i < ADAPTIVE_NEIGHBOR_CHURN_WINDOW; i++) {
+        int prev_idx = (node->neighbor_history_idx - i + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
+        int curr_idx = (node->neighbor_history_idx - i + 1 + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
+        uint8_t prev = node->neighbor_history[prev_idx];
+        uint8_t curr = node->neighbor_history[curr_idx];
+        if (prev > curr ? (prev - curr) >= 2 : (curr - prev) >= 2) {
+            churn_events++;
+        }
+    }
+    
+    bool dense = (num_neighbors >= ADAPTIVE_NEIGHBOR_DENSE_THRESHOLD);
+    bool high_churn = (churn_events >= ADAPTIVE_CHURN_THRESHOLD);
+    
+    /* Apply hysteresis with cooldown */
+    uint64_t new_interval;
+    if (high_churn) {
+        /* Churn detected → fast beacons for rapid discovery */
+        new_interval = NODE_BEACON_INTERVAL_BASE_US;
+    } else if (dense || num_neighbors >= 5) {
+        /* Dense or moderate mesh → conservative airtime */
+        new_interval = NODE_BEACON_INTERVAL_STABLE_US;
+    } else {
+        /* Small mesh → also use stable interval (matches current 60s default in firmware) */
+        new_interval = NODE_BEACON_INTERVAL_STABLE_US;
+    }
+    
+    /* Only transition if cooldown elapsed */
+    if (new_interval != node->adaptive_beacon_interval_us) {
+        if (now_us - node->last_mode_transition_us >= ADAPTIVE_MODE_COOLDOWN_US) {
+            node->last_mode_transition_us = now_us;
+            node->adaptive_beacon_interval_us = new_interval;
+        }
+    }
+    
+    return node->adaptive_beacon_interval_us;
+}
+
+/*
  * node_tick — called every NODE_TICK_INTERVAL_US for each active node.
  * Performs: beacon TX, neighbor purge, route maintenance, discovery retry.
  * Produces outbound packets in `result` for the caller to radio-broadcast.
@@ -95,8 +160,9 @@ void node_tick(sim_node_t *node, uint64_t now_us, node_tick_result_t *result) {
     result->count = 0;
     uint32_t now_ms = (uint32_t)(now_us / 1000);
 
-    /* 1. Beacon transmission */
-    if (now_us - node->last_beacon_us >= NODE_BEACON_INTERVAL_US) {
+    /* 1. Beacon transmission with adaptive interval */
+    uint64_t beacon_interval = adaptive_beacon_interval(node, now_us);
+    if (now_us - node->last_beacon_us >= beacon_interval) {
         node->last_beacon_us = now_us;
         node->uptime_min++;
 
