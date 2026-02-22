@@ -454,3 +454,12 @@ add_executable(test_msg_store_spiffs
 target_include_directories(test_msg_store_spiffs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
+
+# Probe v2 invariant/spec tests
+add_executable(test_probe_v2_spec
+    test_probe_v2_spec.c
+    unity/unity.c
+)
+target_include_directories(test_probe_v2_spec PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/bramble_probe/include
+)
