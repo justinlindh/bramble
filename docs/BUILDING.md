@@ -113,3 +113,15 @@ for t in test_*; do ./$t; done
 ```
 
 200 tests across 36 test suites.
+
+## Running Webapp Tests
+
+Run the webapp unit test suite locally:
+
+```bash
+cd webapp
+npm ci
+npm test
+```
+
+The webapp CI job uses the same command (`npm test`) in `webapp/` via `.github/workflows/webapp-tests.yml`.
