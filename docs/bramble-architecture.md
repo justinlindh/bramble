@@ -283,6 +283,33 @@ Stratum-based mesh time synchronization inspired by NTP:
 
 ---
 
+### `traffic_debug` (v0.3 — 2026-02-22)
+
+**Files:** `components/traffic_debug/traffic_debug.{h,c}`
+
+Runtime traffic observability and airtime analysis telemetry:
+
+- **Event capture:** Records TX/RX packet metadata (packet type, length, RSSI, airtime tier, timestamp) into a 512-event ring buffer.
+- **Classification:** Categorizes packets into `beacon`, `timesync`, `routing`, `ack`, `chat`, `maintenance`, or `other` based on packet type.
+- **Airtime attribution:** Maps each packet to its airtime bucket (`broadcast`, `normal`, `critical`) for efficiency analysis.
+- **Serial JSONL sink:** Emits one JSON line per event to UART for offline capture and analysis.
+- **Runtime config:** Enable/disable via RPC (`bramble.setTrafficDebug`), with configurable TX/RX inclusion and sampling rate (0-100%).
+- **RPC/WebSocket API:**
+  - `bramble.setTrafficDebug` — configure debug mode (persisted to NVS)
+  - `bramble.getTrafficDebug` — query config + buffer state (capacity, count, dropped)
+  - `bramble.getTrafficEvents` — pull events from ring buffer (incremental via `since_seq`)
+  - `bramble.onTrafficEvent` — real-time WebSocket notifications (live stream)
+
+**Use case:** Measure airtime usage by category (e.g., "beacons consume 40% of broadcast budget"), identify retry storms, tune beacon intervals, and explain broadcast-budget drain in field deployments.
+
+**Design notes:**
+- Event emission never blocks the radio critical path (drop events before blocking).
+- Default mode: disabled (no overhead when not in use).
+- Sampling: configurable 0-100% sampling rate for high-traffic environments.
+- Privacy: captures metadata only (no payloads, addresses, or message content in v1).
+
+---
+
 ## New Components (v0.2 — 2026-02-17)
 
 The following seven components were added as part of the simulator component integration milestone. All are implemented, unit-tested, and included in the test suite.
