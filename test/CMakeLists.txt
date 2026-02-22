@@ -158,9 +158,30 @@ target_include_directories(test_tx_queue PRIVATE
 add_executable(test_timesync
     test_timesync.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/timesync.c
 )
 target_include_directories(test_timesync PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/include
+)
+
+# Frequency plan tests
+add_executable(test_freq_plan
+    test_freq_plan.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
+)
+target_include_directories(test_freq_plan PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+)
+
+# Airtime budget math tests
+add_executable(test_airtime
+    test_airtime.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_airtime PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
 # Anti-replay tests
@@ -408,6 +429,22 @@ target_include_directories(test_rpc_dispatcher PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
 )
 target_compile_definitions(test_rpc_dispatcher PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=16
+)
+
+# RPC method parameter/error behavior tests
+add_executable(test_rpc_methods
+    test_rpc_methods.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+)
+target_include_directories(test_rpc_methods PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+)
+target_compile_definitions(test_rpc_methods PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=16
 )
 
