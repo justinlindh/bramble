@@ -50,6 +50,7 @@ export default function App() {
   const setActiveTab = useStore(s => s.setActiveTab);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
+  const config = useStore(s => s.config);
   const isConnected = connectionState === 'connected';
   const prevState = useRef(connectionState);
   const errorToastId = useRef<string | null>(null);
@@ -120,6 +121,22 @@ export default function App() {
     }
   };
 
+  // Get node identifier: name if set, otherwise hex address
+  const getNodeIdentifier = (): string | null => {
+    if (!config?.identity) return null;
+    const name = config.identity.name?.trim();
+    if (name && name !== '' && name !== '(unnamed)') {
+      return name;
+    }
+    // Fallback to hex address
+    if (config.identity.address) {
+      return `0x${config.identity.address.toString(16).toUpperCase().padStart(8, '0')}`;
+    }
+    return null;
+  };
+
+  const nodeIdentifier = getNodeIdentifier();
+
   return (
     <div className={styles.app}>
       {/* Topbar */}
@@ -136,6 +153,14 @@ export default function App() {
              : connectionState === 'error' ? 'Reconnecting…'
              : connectionState}
           </span>
+          {isConnected && nodeIdentifier && (
+            <>
+              <span className={styles.statusDivider}>•</span>
+              <span className={styles.nodeLabel} title={nodeIdentifier}>
+                {nodeIdentifier}
+              </span>
+            </>
+          )}
         </span>
 
         {(isConnected || connectionState === 'error') && (
