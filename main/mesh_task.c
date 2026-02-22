@@ -44,6 +44,9 @@
 
 static const char *TAG = "mesh";
 
+/* Forward declarations */
+static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
+
 /* ── Configuration ──────────────────────────────────────────────────── */
 
 #define BEACON_INTERVAL_MS      30000   /* 30 seconds between beacons */
@@ -1476,6 +1479,8 @@ void mesh_task_start(bramble_identity_t *identity) {
     pending_ack_init(&s_pending_acks);
     airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
+    mesh_traffic_debug_load_config();  /* Restore persisted debug config */
+    traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
@@ -1988,4 +1993,122 @@ int mesh_get_channel_info(int *default_idx) {
     }
     xSemaphoreGive(s_state_mutex);
     return count;
+}
+
+/* ── Traffic debug access ───────────────────────────────────────────── */
+
+static void traffic_event_notify(const traffic_event_t *evt, void *ctx) {
+    (void)ctx;
+    
+    /* Only send notifications if debug is enabled */
+    if (!traffic_debug_is_enabled(&s_traffic_debug)) {
+        return;
+    }
+    
+    /* Build notification payload */
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddNumberToObject(params, "seq", evt->seq);
+    cJSON_AddNumberToObject(params, "timestamp_ms", evt->timestamp_ms);
+    cJSON_AddNumberToObject(params, "pkt_type", evt->pkt_type);
+    
+    /* Category as string */
+    static const char *cat_names[] = {
+        "beacon", "timesync", "routing", "ack", "chat", "maintenance", "other"
+    };
+    if (evt->category < 7) {
+        cJSON_AddStringToObject(params, "category", cat_names[evt->category]);
+    } else {
+        cJSON_AddStringToObject(params, "category", "unknown");
+    }
+    
+    /* Airtime tier as string */
+    static const char *tier_names[] = { "none", "normal", "critical", "broadcast" };
+    if (evt->airtime_tier <= 3) {
+        cJSON_AddStringToObject(params, "airtime_tier", tier_names[evt->airtime_tier]);
+    } else {
+        cJSON_AddStringToObject(params, "airtime_tier", "unknown");
+    }
+    
+    cJSON_AddNumberToObject(params, "packet_len", evt->packet_len);
+    cJSON_AddNumberToObject(params, "rssi", evt->rssi);
+    cJSON_AddBoolToObject(params, "is_tx", evt->is_tx);
+    
+    /* Send notification via RPC notify system (which forwards to WebSocket) */
+    rpc_notify("bramble.onTrafficEvent", params);
+    
+    cJSON_Delete(params);
+}
+
+traffic_debug_t *mesh_get_traffic_debug(void) {
+    return &s_traffic_debug;
+}
+
+void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx, uint8_t sample_rate) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    
+    /* For now, we only support enabled/disabled.
+     * include_tx, include_rx, sample_rate are placeholders for future filtering */
+    traffic_debug_enable(&s_traffic_debug, enabled);
+    
+    /* Persist config to NVS */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_tdbg", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "enabled", enabled ? 1 : 0);
+        nvs_set_u8(nvs, "inc_tx", include_tx ? 1 : 0);
+        nvs_set_u8(nvs, "inc_rx", include_rx ? 1 : 0);
+        nvs_set_u8(nvs, "sample", sample_rate);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    
+    xSemaphoreGive(s_state_mutex);
+    ESP_LOGI(TAG, "Traffic debug %s", enabled ? "enabled" : "disabled");
+}
+
+void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *include_rx, uint8_t *sample_rate) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    
+    if (enabled) *enabled = traffic_debug_is_enabled(&s_traffic_debug);
+    
+    /* Load other config from NVS (not yet used in filtering logic) */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_tdbg", NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t val = 0;
+        if (include_tx && nvs_get_u8(nvs, "inc_tx", &val) == ESP_OK)
+            *include_tx = (val != 0);
+        else if (include_tx)
+            *include_tx = true;  /* default */
+            
+        if (include_rx && nvs_get_u8(nvs, "inc_rx", &val) == ESP_OK)
+            *include_rx = (val != 0);
+        else if (include_rx)
+            *include_rx = true;  /* default */
+            
+        if (sample_rate && nvs_get_u8(nvs, "sample", &val) == ESP_OK)
+            *sample_rate = val;
+        else if (sample_rate)
+            *sample_rate = 100;  /* default: no sampling */
+            
+        nvs_close(nvs);
+    } else {
+        /* NVS read failed, return defaults */
+        if (include_tx) *include_tx = true;
+        if (include_rx) *include_rx = true;
+        if (sample_rate) *sample_rate = 100;
+    }
+    
+    xSemaphoreGive(s_state_mutex);
+}
+
+void mesh_traffic_debug_load_config(void) {
+    /* Called at startup to restore persisted config */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_tdbg", NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t enabled = 0;
+        if (nvs_get_u8(nvs, "enabled", &enabled) == ESP_OK) {
+            traffic_debug_enable(&s_traffic_debug, enabled != 0);
+            ESP_LOGI(TAG, "Loaded traffic debug config: enabled=%d", enabled);
+        }
+        nvs_close(nvs);
+    }
 }
