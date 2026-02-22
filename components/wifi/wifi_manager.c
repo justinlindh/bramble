@@ -19,6 +19,10 @@ static const char *TAG = "wifi_mgr";
 #define NVS_KEY_PASSWORD   "password"
 
 static EventGroupHandle_t s_wifi_event_group = NULL;
+static esp_event_handler_instance_t s_sta_any_id;
+static esp_event_handler_instance_t s_sta_got_ip;
+static bool s_sta_handlers_registered = false;
+
 static wifi_status_t s_status = {
     .mode    = BRAMBLE_WIFI_OFF,
     .ip_addr = "",
@@ -86,15 +90,31 @@ static void sta_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "Station disconnected — not retrying during initial connect");
-        xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        const wifi_event_sta_disconnected_t *disc = (const wifi_event_sta_disconnected_t *)event_data;
+        if (disc) {
+            ESP_LOGW(TAG, "Station disconnected (reason=%d) — reconnecting", disc->reason);
+        } else {
+            ESP_LOGW(TAG, "Station disconnected — reconnecting");
+        }
+
+        /* Invalidate stale IP immediately so status reflects reality. */
+        s_status.ip_addr[0] = '\0';
+
+        if (s_wifi_event_group) {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+
+        /* Keep station alive as first-class transport: always retry. */
+        esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         snprintf(s_status.ip_addr, sizeof(s_status.ip_addr),
                  IPSTR, IP2STR(&event->ip_info.ip));
         s_status.mode = BRAMBLE_WIFI_STATION;
         ESP_LOGI(TAG, "Got IP: %s", s_status.ip_addr);
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        if (s_wifi_event_group) {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        }
     }
 }
 
@@ -107,20 +127,23 @@ static int try_station_mode(const char *ssid, const char *password)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    s_wifi_event_group = xEventGroupCreate();
+    if (!s_wifi_event_group) {
+        s_wifi_event_group = xEventGroupCreate();
+    }
 
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &sta_event_handler,
-                                                        NULL,
-                                                        &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &sta_event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
+    if (!s_sta_handlers_registered) {
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                            ESP_EVENT_ANY_ID,
+                                                            &sta_event_handler,
+                                                            NULL,
+                                                            &s_sta_any_id));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                            IP_EVENT_STA_GOT_IP,
+                                                            &sta_event_handler,
+                                                            NULL,
+                                                            &s_sta_got_ip));
+        s_sta_handlers_registered = true;
+    }
 
     wifi_config_t wifi_cfg = {0};
     strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid) - 1);
@@ -140,11 +163,6 @@ static int try_station_mode(const char *ssid, const char *password)
         pdFALSE, pdFALSE,
         pdMS_TO_TICKS(CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S * 1000));
 
-    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip);
-    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id);
-    vEventGroupDelete(s_wifi_event_group);
-    s_wifi_event_group = NULL;
-
     if (bits & WIFI_CONNECTED_BIT) {
         strncpy(s_status.ssid, ssid, sizeof(s_status.ssid) - 1);
         ESP_LOGI(TAG, "Station mode connected: SSID=%s IP=%s",
@@ -153,6 +171,17 @@ static int try_station_mode(const char *ssid, const char *password)
     }
 
     ESP_LOGW(TAG, "Station connect failed or timed out");
+
+    if (s_sta_handlers_registered) {
+        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_sta_got_ip);
+        esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_sta_any_id);
+        s_sta_handlers_registered = false;
+    }
+    if (s_wifi_event_group) {
+        vEventGroupDelete(s_wifi_event_group);
+        s_wifi_event_group = NULL;
+    }
+
     esp_wifi_stop();
     esp_wifi_deinit();
     return -1;

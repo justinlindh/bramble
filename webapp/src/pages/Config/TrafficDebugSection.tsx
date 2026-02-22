@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../../store/index';
 import { loadTrafficDebugStatus, setTrafficDebugConfig } from '../../store/actions';
-import styles from './Config.module.css';
+import styles from './TrafficDebugSection.module.css';
 
 export function TrafficDebugSection() {
   const trafficDebugStatus = useStore((s) => s.trafficDebugStatus);
@@ -54,58 +54,62 @@ export function TrafficDebugSection() {
   const usagePct = ringSize > 0 ? Math.round((100 * ringUsed) / ringSize) : 0;
 
   return (
-    <div>
-      <div className={styles.formRow}>
-        <label>
+    <div className={styles.section}>
+      <div className={styles.row}>
+        <span className={styles.label}>Status</span>
+        <label className={styles.toggle}>
           <input
             type="checkbox"
             checked={config.enabled}
             onChange={(e) => handleToggle('enabled', e.target.checked)}
             disabled={loading}
           />
-          <span>Enable Traffic Debug</span>
+          <span>{config.enabled ? 'Enabled' : 'Disabled'}</span>
         </label>
       </div>
 
       {config.enabled && (
         <>
-          <div className={styles.formRow}>
-            <label>
+          <div className={styles.row}>
+            <span className={styles.label}>Capture TX</span>
+            <label className={styles.toggle}>
               <input
                 type="checkbox"
                 checked={config.includeTx}
                 onChange={(e) => handleToggle('includeTx', e.target.checked)}
                 disabled={loading}
               />
-              <span>Include TX</span>
+              <span>{config.includeTx ? 'On' : 'Off'}</span>
             </label>
           </div>
 
-          <div className={styles.formRow}>
-            <label>
+          <div className={styles.row}>
+            <span className={styles.label}>Capture RX</span>
+            <label className={styles.toggle}>
               <input
                 type="checkbox"
                 checked={config.includeRx}
                 onChange={(e) => handleToggle('includeRx', e.target.checked)}
                 disabled={loading}
               />
-              <span>Include RX</span>
+              <span>{config.includeRx ? 'On' : 'Off'}</span>
             </label>
           </div>
 
-          <div className={styles.formRow}>
-            <label>
-              Sample Rate: {config.sampleRate}%
+          <div className={styles.row}>
+            <span className={styles.label}>Sample Rate</span>
+            <div className={styles.sliderWrap}>
               <input
+                className={styles.slider}
                 type="range"
                 min="1"
                 max="100"
                 value={config.sampleRate}
                 onChange={(e) => handleSampleRateChange(Number(e.target.value))}
                 disabled={loading}
-                style={{ width: '100%' }}
               />
-            </label>
+              <span className={styles.sliderValue}>{config.sampleRate}%</span>
+            </div>
           </div>
 
           <div className={styles.hint}>
