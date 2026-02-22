@@ -468,6 +468,7 @@ target_include_directories(test_probe_v2_spec PRIVATE
 add_executable(test_traffic_debug
     test_traffic_debug.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/traffic_debug.c
 )
 target_include_directories(test_traffic_debug PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include

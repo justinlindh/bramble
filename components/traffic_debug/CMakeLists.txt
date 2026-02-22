@@ -1,0 +1,1 @@
+idf_component_register(SRCS "traffic_debug.c" INCLUDE_DIRS "include")
