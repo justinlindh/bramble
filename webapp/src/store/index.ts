@@ -166,7 +166,8 @@ export const useStore = create<AppState & Actions>((set) => ({
       // Determine conversation ID
       // Broadcasts (to === 0xFFFFFFFF) always file under 'broadcast', not a DM,
       // to avoid double-showing them in both the broadcast view and sender's DM.
-      const isBroadcast = msg.to === 0xffffffff || msg.channelIndex === -1;
+      // channelIndex === -1 means "not a channel message", not "broadcast".
+      const isBroadcast = msg.to === 0xffffffff;
       const convId =
         msg.channelIndex !== undefined && msg.channelIndex >= 0
           ? `ch:${msg.channelIndex}`
@@ -252,7 +253,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       // Rebuild conversations from cached messages
       const convs = new Map(state.conversations);
       for (const msg of msgs) {
-        const isBroadcast = msg.to === 0xffffffff || msg.channelIndex === -1;
+        const isBroadcast = msg.to === 0xffffffff;
         const convId =
           msg.channelIndex !== undefined && msg.channelIndex >= 0
             ? `ch:${msg.channelIndex}`

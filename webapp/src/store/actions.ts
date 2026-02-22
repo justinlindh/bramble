@@ -386,11 +386,17 @@ export async function sendMessage(
   messageDb.saveMessage(msg).catch(() => {});
 
   try {
-    const isBroadcast = dest === 0xFFFFFFFF;
+    const isChannelScoped = channelIndex !== undefined && channelIndex >= 0;
+    const isBroadcast = dest === 0xFFFFFFFF && !isChannelScoped;
     const method = isBroadcast ? 'bramble.sendBroadcast' : 'bramble.sendMessage';
+    const wireDest = (dest === 0xFFFFFFFE) ? 0xFFFFFFFF : dest;
     const params = isBroadcast
       ? { text }
-      : { dest: dest.toString(16).toUpperCase().padStart(8, '0'), text };
+      : {
+          dest: wireDest.toString(16).toUpperCase().padStart(8, '0'),
+          text,
+          ...(isChannelScoped ? { channel: channelIndex } : {}),
+        };
     const result = await client.rpc<{
       message_id?: string;
       status?: string;
@@ -445,16 +451,18 @@ function handleIncomingMessage(params: unknown): void {
   const fromAddr = typeof p.from === 'string' ? parseInt(p.from, 16) : (p.from ?? 0);
   const toAddr = typeof p.to === 'string' ? parseInt(p.to, 16) : (p.to ?? 0);
   const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
-  const isBroadcast = p.broadcast === true || rawChannel === -1 || toAddr === 0xFFFFFFFF;
+  // A message is a broadcast only if toAddr is 0xFFFFFFFF.
+  // rawChannel === -1 just means "not a channel message" (could be DM or broadcast).
+  const isBroadcast = p.broadcast === true || toAddr === 0xFFFFFFFF;
   const store = useStore.getState();
   const msg = {
     id: p.msgId ?? `rt-${Date.now()}`,
     direction: 'incoming' as const,
     from: fromAddr,
-    to: isBroadcast ? 0xFFFFFFFF : toAddr,
+    to: toAddr,
     text: p.text,
     tier: p.tier,
-    channelIndex: isBroadcast ? undefined : rawChannel,
+    channelIndex: rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined,
     timestampMs: Date.now(),
     status: 'delivered' as const,
   };

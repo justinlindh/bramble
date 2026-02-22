@@ -178,4 +178,61 @@ describe('Zustand store — message state transitions', () => {
     expect(state.connectionState).toBe('error');
     expect(state.connectionError).toBe('Port not found');
   });
+
+  it('incoming DM creates dm: conversation (not broadcast)', () => {
+    // Simulate an incoming DM with channelIndex undefined (as received from firmware)
+    const msg = makeMsg({
+      direction: 'incoming',
+      from: 0x5678,
+      to: 0x1234, // specific recipient (not 0xFFFFFFFF)
+      channelIndex: undefined,
+      status: 'delivered',
+    });
+    useStore.getState().addMessage(msg);
+
+    const state = useStore.getState();
+    // Should create a DM conversation, not broadcast
+    expect(state.conversations.has(`dm:${0x5678}`)).toBe(true);
+    expect(state.conversations.has('broadcast')).toBe(false);
+    
+    const conv = state.conversations.get(`dm:${0x5678}`);
+    expect(conv?.unreadCount).toBe(1);
+    expect(conv?.peerAddr).toBe(0x5678);
+  });
+
+  it('incoming DM with channelIndex -1 creates dm: conversation', () => {
+    // Some firmware versions may send channelIndex: -1 for DMs
+    const msg = makeMsg({
+      direction: 'incoming',
+      from: 0xABCD,
+      to: 0x1234, // specific recipient
+      channelIndex: -1, // explicitly -1 (not a channel)
+      status: 'delivered',
+    });
+    useStore.getState().addMessage(msg);
+
+    const state = useStore.getState();
+    // Should create a DM conversation, not broadcast
+    expect(state.conversations.has(`dm:${0xABCD}`)).toBe(true);
+    expect(state.conversations.has('broadcast')).toBe(false);
+    
+    const conv = state.conversations.get(`dm:${0xABCD}`);
+    expect(conv?.unreadCount).toBe(1);
+  });
+
+  it('broadcast message creates broadcast conversation', () => {
+    const msg = makeMsg({
+      direction: 'incoming',
+      from: 0x5678,
+      to: 0xFFFFFFFF, // broadcast address
+      channelIndex: undefined,
+      status: 'delivered',
+    });
+    useStore.getState().addMessage(msg);
+
+    const state = useStore.getState();
+    // Should create broadcast conversation, not DM
+    expect(state.conversations.has('broadcast')).toBe(true);
+    expect(state.conversations.has(`dm:${0x5678}`)).toBe(false);
+  });
 });
