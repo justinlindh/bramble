@@ -49,7 +49,7 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
-#define BEACON_INTERVAL_MS      30000   /* 30 seconds between beacons */
+#define BEACON_INTERVAL_MS      60000   /* 60 seconds between beacons (A/B test) */
 #define BEACON_JITTER_MS        5000    /* ±5s random jitter */
 #define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH          16
