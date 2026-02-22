@@ -732,25 +732,62 @@ export async function setTrafficDebugConfig(config: {
   await loadTrafficDebugStatus();
 }
 
+function decodePacketType(pktType: number | string | undefined): string {
+  if (typeof pktType === 'string') return pktType;
+  switch (pktType) {
+    case 0x01: return 'data';
+    case 0x02: return 'ack';
+    case 0x03: return 'rreq';
+    case 0x04: return 'rrep';
+    case 0x05: return 'beacon';
+    case 0x06: return 'rerr';
+    case 0x07: return 'key_exchange';
+    case 0x08: return 'congestion';
+    case 0x09: return 'timesync';
+    case 0x0A: return 'channel_data';
+    case 0x0B: return 'channel_ack';
+    case 0x0C: return 'probe';
+    case 0x0D: return 'probe_ack';
+    case 0x0E: return 'location';
+    case 0x0F: return 'mailbox_offer';
+    case 0x10: return 'mailbox_fetch';
+    case 0x11: return 'mailbox_data';
+    case 0x12: return 'broadcast_probe';
+    case 0x13: return 'broadcast_ack';
+    default: return 'unknown';
+  }
+}
+
+function estimateAirtimeUs(packetLen: number | undefined): number {
+  if (!packetLen || packetLen <= 0) return 0;
+  // Coarse fallback until firmware reports explicit airtime_debit_us.
+  return Math.round(packetLen * 4300);
+}
+
+function normalizeTrafficEvent(e: any): any {
+  const ts = e.timestamp_ms ?? e.timestampMs;
+  return {
+    seq: e.seq,
+    timestampMs: ts && ts > 0 ? ts : Date.now(),
+    direction: e.direction ?? (e.is_tx ? 'tx' : 'rx'),
+    category: e.category ?? 'other',
+    packetType: decodePacketType(e.packet_type ?? e.packetType ?? e.pkt_type),
+    tier: e.tier ?? e.airtime_tier ?? 'normal',
+    airtimeBucket: e.airtime_bucket ?? e.airtimeBucket ?? e.airtime_tier ?? 'normal',
+    airtimeDebitUs: e.airtime_debit_us ?? e.airtimeDebitUs ?? estimateAirtimeUs(e.packet_len ?? e.packet_len_bytes ?? e.packetLen),
+    queueDepth: e.queue_depth ?? e.queueDepth,
+    rssi: e.rssi,
+    snr: e.snr,
+  };
+}
+
 export async function loadTrafficEvents(sinceSeq?: number): Promise<void> {
   if (!client) return;
   try {
     const params: Record<string, unknown> = { limit: 500 };
     if (sinceSeq !== undefined) params.since_seq = sinceSeq;
     const result = await client.rpc<{ events: any[] }>('bramble.getTrafficEvents', params);
-    const events = (result.events ?? []).map((e: any): any => ({
-      seq: e.seq,
-      timestampMs: e.timestamp_ms ?? e.timestampMs ?? Date.now(),
-      direction: e.direction ?? 'tx',
-      category: e.category ?? 'other',
-      packetType: e.packet_type ?? e.packetType ?? 'unknown',
-      tier: e.tier ?? 'normal',
-      airtimeBucket: e.airtime_bucket ?? e.airtimeBucket ?? 'normal',
-      airtimeDebitUs: e.airtime_debit_us ?? e.airtimeDebitUs ?? 0,
-      queueDepth: e.queue_depth ?? e.queueDepth,
-      rssi: e.rssi,
-      snr: e.snr,
-    }));
+    const events = (result.events ?? []).map(normalizeTrafficEvent);
     useStore.getState().addTrafficEvents(events);
   } catch (e) {
     console.warn('[loadTrafficEvents] failed:', (e as Error).message);
@@ -758,20 +795,7 @@ export async function loadTrafficEvents(sinceSeq?: number): Promise<void> {
 }
 
 function handleTrafficEvent(params: unknown): void {
-  const e = params as any;
-  const event: any = {
-    seq: e.seq,
-    timestampMs: e.timestamp_ms ?? e.timestampMs ?? Date.now(),
-    direction: e.direction ?? 'tx',
-    category: e.category ?? 'other',
-    packetType: e.packet_type ?? e.packetType ?? 'unknown',
-    tier: e.tier ?? 'normal',
-    airtimeBucket: e.airtime_bucket ?? e.airtimeBucket ?? 'normal',
-    airtimeDebitUs: e.airtime_debit_us ?? e.airtimeDebitUs ?? 0,
-    queueDepth: e.queue_depth ?? e.queueDepth,
-    rssi: e.rssi,
-    snr: e.snr,
-  };
+  const event = normalizeTrafficEvent(params as any);
   useStore.getState().addTrafficEvent(event);
 }
 
