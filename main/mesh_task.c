@@ -16,6 +16,7 @@
 #include "discovery.h"
 #include "reliability.h"
 #include "battery.h"
+#include "traffic_debug.h"
 #include "cJSON.h"
 
 #include "esp_random.h"
@@ -92,6 +93,11 @@ static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 /* Reliability — ACK tracking for outgoing unicast messages */
 static pending_ack_table_t s_pending_acks;
 static airtime_budget_t    s_airtime;
+
+/* Traffic debug telemetry */
+#define TRAFFIC_DEBUG_CAPACITY 512
+static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
+static traffic_debug_t     s_traffic_debug;
 
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
@@ -569,8 +575,19 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 /* ── Routing packet handlers ────────────────────────────────────────── */
 
 static int transmit_packet(const uint8_t *buf, uint8_t len) {
+    /* Extract packet type for telemetry (assumes header is already serialized) */
+    uint8_t pkt_type = (len >= 2) ? buf[1] : 0xFF;
+    
+    /* Extract tier from flags (bits 6-7) */
+    uint8_t flags = (len >= 3) ? buf[2] : 0;
+    uint8_t tier = ((flags >> FLAG_TIER_SHIFT) & 0x03);
+    if (tier == 0) tier = 0x01; /* default to normal if not set */
+    
     int ret = radio_transmit(buf, len);
     if (ret == 0) {
+        /* Record successful TX */
+        traffic_debug_record_tx(&s_traffic_debug, pkt_type, len, tier);
+        
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
         xSemaphoreGive(s_state_mutex);
@@ -832,6 +849,9 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         return;
     }
 
+    /* Record raw RX event */
+    traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi);
+
     /* Dedup check:
      * - include packet type to avoid PROBE vs PROBE_ACK collisions
      * - for PROBE_ACK, include responder addr so multiple peers can respond
@@ -851,6 +871,7 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
+        /* Note: dedup drop already recorded in initial RX event - no separate event needed */
         return;
     }
 
@@ -1056,9 +1077,16 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
             pending_ack_t *pa = &s_pending_acks.entries[i];
             if (!pa->active) continue;
             if (t >= pa->next_retry_ms) {
+                /* Extract packet type from stored packet data for telemetry */
+                uint8_t pkt_type = (pa->packet_len >= 2) ? pa->packet_data[1] : 0xFF;
+                
                 if (pa->attempt >= pa->max_attempts) {
                     ESP_LOGW(TAG, "Message %08" PRIX32 " to %08" PRIX32 " failed after %u attempts",
                              pa->packet_id, pa->dest_addr, pa->attempt);
+                    
+                    /* Record timeout event - TX fail represents final timeout */
+                    traffic_debug_record_tx(&s_traffic_debug, pkt_type, pa->packet_len, pa->tier);
+                    
                     msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
                     /* Notify webapp of failure */
                     cJSON *params = cJSON_CreateObject();
@@ -1073,6 +1101,10 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                     ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
                              pa->packet_id, pa->dest_addr,
                              pa->attempt + 1, pa->max_attempts);
+                    
+                    /* Record retry attempt */
+                    traffic_debug_record_tx(&s_traffic_debug, pkt_type, pa->packet_len, pa->tier);
+                    
                     radio_transmit(pa->packet_data, pa->packet_len);
                     pa->attempt++;
                     pa->next_retry_ms = t + tier_base_delay_ms(pa->tier) * pa->attempt;
@@ -1443,6 +1475,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     discovery_init(&s_pending_disc);
     pending_ack_init(&s_pending_acks);
     airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
+    traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
