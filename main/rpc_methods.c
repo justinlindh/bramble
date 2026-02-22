@@ -189,6 +189,16 @@ static int handle_ping(const cJSON *params, cJSON *result) {
 
 /* ── Action handlers ────────────────────────────────────────────────── */
 
+/* ── Fragmentation constants (aligned with components/fragment) ──────── */
+/* Single-packet DATA max: 255 - 52 bytes overhead = 203 bytes plaintext */
+#define SINGLE_PACKET_MAX_BYTES    203
+/* Fragment payload per packet: 154 bytes (from fragment.h FRAG_MAX_PLAINTEXT) */
+#define FRAGMENT_PAYLOAD_BYTES     154
+/* Max fragments per message: 4 (from fragment.h FRAG_MAX_FRAGMENTS) */
+#define MAX_FRAGMENTS              4
+/* True max with fragmentation: 154 * 4 = 616 bytes */
+#define FRAGMENTED_MAX_BYTES       (FRAGMENT_PAYLOAD_BYTES * MAX_FRAGMENTS)
+
 /* bramble.sendMessage — params: {"dest":"HEXADDR", "text":"..."} */
 static int handle_send_message(const cJSON *params, cJSON *result) {
     const char *dest_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dest"));
@@ -198,12 +208,13 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
     }
 
     size_t text_len = strlen(text);
-    /* Max DATA packet is 255 bytes; overhead is header(12)+src(4)+nonce(12)+tag(16)+channel(8)=52 */
-    const size_t max_text_len = 203;
-    if (text_len > max_text_len) {
+    
+    /* Enforce true fragmented maximum */
+    if (text_len > FRAGMENTED_MAX_BYTES) {
         cJSON_AddStringToObject(result, "error", "message too long");
-        cJSON_AddNumberToObject(result, "max_bytes", (double)max_text_len);
+        cJSON_AddNumberToObject(result, "max_bytes", (double)FRAGMENTED_MAX_BYTES);
         cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
+        cJSON_AddBoolToObject(result, "fragmented", false);
         return RPC_ERR_INVALID_PARAMS;
     }
 
@@ -219,6 +230,17 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
     snprintf(pkt_id_str, sizeof(pkt_id_str), "%08" PRIX32, pkt_id);
     cJSON_AddStringToObject(result, "packetId", pkt_id_str);
     cJSON_AddStringToObject(result, "status", "sent");
+    
+    /* Add fragmentation metadata */
+    bool will_fragment = text_len > SINGLE_PACKET_MAX_BYTES;
+    cJSON_AddBoolToObject(result, "fragmented", will_fragment);
+    if (will_fragment) {
+        int frag_count = (int)((text_len + FRAGMENT_PAYLOAD_BYTES - 1) / FRAGMENT_PAYLOAD_BYTES);
+        cJSON_AddNumberToObject(result, "fragments_total", frag_count);
+    }
+    cJSON_AddNumberToObject(result, "max_bytes", (double)FRAGMENTED_MAX_BYTES);
+    cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
+    
     return 0;
 }
 
@@ -230,12 +252,13 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
     }
 
     size_t text_len = strlen(text);
-    /* Max DATA packet is 255 bytes; overhead is header(12)+src(4)+nonce(12)+tag(16)+channel(8)=52 */
-    const size_t max_text_len = 203;
-    if (text_len > max_text_len) {
+    
+    /* Enforce true fragmented maximum */
+    if (text_len > FRAGMENTED_MAX_BYTES) {
         cJSON_AddStringToObject(result, "error", "message too long");
-        cJSON_AddNumberToObject(result, "max_bytes", (double)max_text_len);
+        cJSON_AddNumberToObject(result, "max_bytes", (double)FRAGMENTED_MAX_BYTES);
         cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
+        cJSON_AddBoolToObject(result, "fragmented", false);
         return RPC_ERR_INVALID_PARAMS;
     }
 
@@ -258,6 +281,17 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
     cJSON_AddStringToObject(result, "status", "sent");
     cJSON_AddBoolToObject(result, "broadcast", true);
     cJSON_AddNumberToObject(result, "channel", -1);
+    
+    /* Add fragmentation metadata */
+    bool will_fragment = text_len > SINGLE_PACKET_MAX_BYTES;
+    cJSON_AddBoolToObject(result, "fragmented", will_fragment);
+    if (will_fragment) {
+        int frag_count = (int)((text_len + FRAGMENT_PAYLOAD_BYTES - 1) / FRAGMENT_PAYLOAD_BYTES);
+        cJSON_AddNumberToObject(result, "fragments_total", frag_count);
+    }
+    cJSON_AddNumberToObject(result, "max_bytes", (double)FRAGMENTED_MAX_BYTES);
+    cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
+    
     return 0;
 }
 

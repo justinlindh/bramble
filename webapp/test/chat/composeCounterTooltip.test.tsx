@@ -17,6 +17,6 @@ describe('ComposeBar counter tooltip', () => {
     const counter = screen.getByLabelText('Message size and fragmentation info');
     expect(counter).toBeInTheDocument();
     expect(counter).toHaveAttribute('title');
-    expect(counter.getAttribute('title')).toContain('split into multiple LoRa packets');
+    expect(counter.getAttribute('title')).toContain('automatically split into fragments');
   });
 });

@@ -1119,7 +1119,7 @@ components:
 
     SendMessageResponse:
       type: object
-      required: [packetId, status]
+      required: [packetId, status, fragmented, max_bytes, actual_bytes]
       properties:
         packetId:
           type: string
@@ -1127,6 +1127,18 @@ components:
         status:
           type: string
           enum: [sent]
+        fragmented:
+          type: boolean
+          description: Whether this message will be sent as multiple fragments.
+        fragments_total:
+          type: integer
+          description: Total number of fragments (only present if fragmented=true).
+        max_bytes:
+          type: integer
+          description: Maximum message size in bytes (616 with fragmentation).
+        actual_bytes:
+          type: integer
+          description: Actual message size in bytes.
 
     SendBroadcastParams:
       type: object
@@ -1137,7 +1149,7 @@ components:
 
     SendBroadcastResponse:
       type: object
-      required: [message_id, status, broadcast, channel]
+      required: [message_id, status, broadcast, channel, fragmented, max_bytes, actual_bytes]
       properties:
         message_id:
           type: string
@@ -1148,6 +1160,18 @@ components:
           type: boolean
         channel:
           type: integer
+        fragmented:
+          type: boolean
+          description: Whether this message will be sent as multiple fragments.
+        fragments_total:
+          type: integer
+          description: Total number of fragments (only present if fragmented=true).
+        max_bytes:
+          type: integer
+          description: Maximum message size in bytes (616 with fragmentation).
+        actual_bytes:
+          type: integer
+          description: Actual message size in bytes.
 
     SendProbeResponse:
       type: object

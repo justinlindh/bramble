@@ -212,6 +212,15 @@ export interface SendParams {
   channelIndex?: number;    // set for channel messages
 }
 
+export interface SendMessageResult {
+  packetId: string;
+  status: 'sent';
+  fragmented: boolean;
+  fragments_total?: number;  // only present if fragmented=true
+  max_bytes: number;
+  actual_bytes: number;
+}
+
 export interface IncomingMessage {
   from: number;
   to: number;
