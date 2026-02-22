@@ -343,7 +343,14 @@ export async function loadMessages(sinceId?: number): Promise<void> {
 // ─── Messaging ────────────────────────────────────────────────────────────
 
 const packetIdToMsgId = new Map<string, string>();
-const MAX_MESSAGE_BYTES = 203;
+
+// Fragmentation limits (aligned with firmware components/fragment):
+// - Single packet max: 203 bytes
+// - Fragment payload: 154 bytes/fragment
+// - Max fragments: 4
+// - True fragmented max: 154 × 4 = 616 bytes
+const SINGLE_PACKET_MAX_BYTES = 203;
+const FRAGMENTED_MAX_BYTES = 616;
 
 function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length;
@@ -359,8 +366,8 @@ export async function sendMessage(
   const store = useStore.getState();
 
   const messageBytes = utf8ByteLength(text);
-  if (messageBytes > MAX_MESSAGE_BYTES) {
-    throw new Error(`Message too long (${messageBytes} bytes). Max is ${MAX_MESSAGE_BYTES} bytes.`);
+  if (messageBytes > FRAGMENTED_MAX_BYTES) {
+    throw new Error(`Message too long (${messageBytes} bytes). Max is ${FRAGMENTED_MAX_BYTES} bytes.`);
   }
 
   const msg = {
@@ -384,7 +391,19 @@ export async function sendMessage(
     const params = isBroadcast
       ? { text }
       : { dest: dest.toString(16).toUpperCase().padStart(8, '0'), text };
-    const result = await client.rpc<{ message_id?: string; status?: string; packetId?: string }>(method, params);
+    const result = await client.rpc<{
+      message_id?: string;
+      status?: string;
+      packetId?: string;
+      fragmented?: boolean;
+      fragments_total?: number;
+    }>(method, params);
+    
+    // Log fragmentation info for debugging
+    if (result?.fragmented && result?.fragments_total) {
+      console.info(`[send] Message fragmented into ${result.fragments_total} packets`);
+    }
+    
     store.updateMessageStatus(msg.id, 'sent');
     messageDb.updateMessageStatus(msg.id, 'sent').catch(() => {});
     if (result?.packetId) {
