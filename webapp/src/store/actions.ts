@@ -500,6 +500,27 @@ export function showOnMap(addr: number): void {
 
 // ─── Probe / Network Reach ────────────────────────────────────────────────
 
+export function upsertProbeResponse(responses: ProbeResponse[], next: ProbeResponse): ProbeResponse[] {
+  const idx = responses.findIndex(r => r.responderAddr === next.responderAddr);
+  if (idx < 0) return [...responses, next];
+
+  const prev = responses[idx];
+  const merged: ProbeResponse = {
+    ...prev,
+    ...next,
+    // keep best quality samples
+    rssi: Math.max(prev.rssi ?? -999, next.rssi ?? -999),
+    snr: Math.max(prev.snr ?? -999, next.snr ?? -999),
+    // keep latest receive timestamp/latency if present in next
+    receivedAt: next.receivedAt ?? prev.receivedAt,
+    latencyMs: next.latencyMs ?? prev.latencyMs,
+  };
+
+  const out = [...responses];
+  out[idx] = merged;
+  return out;
+}
+
 export async function sendProbe(): Promise<void> {
   if (!client) throw new Error('Not connected');
   const store = useStore.getState();
@@ -550,9 +571,13 @@ function handleProbeAck(params: unknown): void {
   const store = useStore.getState();
   const prev = store.probeResult;
   if (!prev || prev.complete) return;
+
+  const selfAddr = store.config?.identity?.address;
+  if (selfAddr !== undefined && ack.responderAddr === selfAddr) return;
+
   store.setProbeResult({
     ...prev,
-    responses: [...prev.responses, { ...ack, receivedAt: Date.now() }],
+    responses: upsertProbeResponse(prev.responses, { ...ack, receivedAt: Date.now() }),
   });
 }
 
