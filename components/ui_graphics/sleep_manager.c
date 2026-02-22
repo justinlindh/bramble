@@ -6,6 +6,7 @@
 
 #include "sleep_manager.h"
 #include "display.h"
+#include "keyboard.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
@@ -29,6 +30,9 @@ static struct {
     uint16_t timeout_sec;
     int64_t last_activity_us;
     esp_timer_handle_t timer;
+    /* Saved backlight levels for wake restore */
+    uint8_t saved_kbd_backlight;
+    uint8_t saved_disp_backlight;
 } s_sleep = {
     .initialized = false,
     .enabled = true,
@@ -36,6 +40,8 @@ static struct {
     .timeout_sec = DEFAULT_TIMEOUT_SEC,
     .last_activity_us = 0,
     .timer = NULL,
+    .saved_kbd_backlight = 0,
+    .saved_disp_backlight = 0,
 };
 
 /* ── NVS helpers ────────────────────────────────────────────────────── */
@@ -86,7 +92,18 @@ static void sleep_timer_cb(void *arg) {
 
     if (elapsed_us >= timeout_us) {
         ESP_LOGI(TAG, "Entering sleep mode (timeout=%us)", s_sleep.timeout_sec);
+        
+        /* Save current backlight levels before turning off */
+        s_sleep.saved_kbd_backlight = keyboard_get_backlight_percent();
+        /* Note: display backlight is controlled by LEDC PWM but we don't have
+         * a get_backlight() API yet. For now, we assume it's at max (255). */
+        s_sleep.saved_disp_backlight = 255;
+        
+        /* Turn off display panel and both backlights */
         display_power(false);
+        display_set_backlight(0);
+        keyboard_set_backlight(0);  /* Raw 0-255 value */
+        
         s_sleep.asleep = true;
     }
 }
@@ -152,8 +169,17 @@ void sleep_manager_activity(void) {
 
     /* Wake up if asleep */
     if (s_sleep.asleep) {
-        ESP_LOGI(TAG, "Waking from sleep");
+        ESP_LOGI(TAG, "Waking from sleep (restoring backlights: kbd=%u%%, disp=%u)",
+                 s_sleep.saved_kbd_backlight, s_sleep.saved_disp_backlight);
+        
+        /* Turn display panel back on */
         display_power(true);
+        
+        /* Restore saved backlight levels */
+        display_set_backlight(s_sleep.saved_disp_backlight);
+        uint8_t kbd_hw = (uint8_t)(s_sleep.saved_kbd_backlight * 255 / 100);
+        keyboard_set_backlight(kbd_hw);
+        
         s_sleep.asleep = false;
     }
 }
@@ -167,9 +193,13 @@ void sleep_manager_set_enabled(bool enabled) {
     nvs_save_enabled(enabled);
     ESP_LOGI(TAG, "Sleep mode %s", enabled ? "enabled" : "disabled");
 
-    /* If disabling and currently asleep, wake up */
+    /* If disabling and currently asleep, wake up and restore backlights */
     if (!enabled && s_sleep.asleep) {
+        ESP_LOGI(TAG, "Waking from sleep (sleep disabled)");
         display_power(true);
+        display_set_backlight(s_sleep.saved_disp_backlight);
+        uint8_t kbd_hw = (uint8_t)(s_sleep.saved_kbd_backlight * 255 / 100);
+        keyboard_set_backlight(kbd_hw);
         s_sleep.asleep = false;
     }
 }
