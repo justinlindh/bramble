@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useStore } from '../../store/index';
@@ -19,7 +19,7 @@ L.Icon.Default.mergeOptions({
 });
 
 /** Convert coarse grid square (e.g. "AB12cd") to approximate center lat/lon */
-function gridSquareToLatLon(grid: string): [number, number] | null {
+export function gridSquareToLatLon(grid: string): [number, number] | null {
   if (!grid || grid.length < 4) return null;
   const A = grid.charCodeAt(0) - 65;
   const B = grid.charCodeAt(1) - 65;
@@ -37,7 +37,7 @@ function gridSquareToLatLon(grid: string): [number, number] | null {
 }
 
 /** ~1km grid rectangle bounds for a 6-char grid square */
-function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null {
+export function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null {
   if (!grid || grid.length < 6) return null;
   const A = grid.charCodeAt(0) - 65;
   const B = grid.charCodeAt(1) - 65;
@@ -56,7 +56,7 @@ function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null {
 }
 
 /** Format address as hex */
-function fmtAddr(addr: number): string {
+export function fmtAddr(addr: number): string {
   return `0x${addr.toString(16).toUpperCase()}`;
 }
 
@@ -96,12 +96,13 @@ export function Map() {
   const leafletMap = useRef<L.Map | null>(null);
   const markerLayer = useRef<L.LayerGroup | null>(null);
   const routeLayer = useRef<L.LayerGroup | null>(null);
-  const [showRoutes, setShowRoutes] = useState(true);
 
   const config = useStore(s => s.config);
   const peerLocations = useStore(s => s.peerLocations);
   const status = useStore(s => s.status);
   const routes = useStore(s => s.routes);
+  const showRoutes = useStore(s => s.showRoutes);
+  const setShowRoutes = useStore(s => s.setShowRoutes);
   const mapFocusAddr = useStore(s => s.mapFocusAddr);
   const setMapFocusAddr = useStore(s => s.setMapFocusAddr);
 
@@ -257,9 +258,29 @@ export function Map() {
         <span className={styles.legendItem}>
           <span className={`${styles.dot} ${styles.dotYellow}`} /> Zone peer
         </span>
+
+        <span className={styles.legendItem}>
+          <span className={styles.routeLineDirect} /> Direct (1 hop)
+        </span>
+        <span className={styles.legendItem}>
+          <span className={styles.routeLineMultiHop} /> Multi-hop
+        </span>
+        <span className={styles.legendItem}>
+          <span className={styles.routeStateActive}>■</span> Active
+        </span>
+        <span className={styles.legendItem}>
+          <span className={styles.routeStateStale}>■</span> Stale
+        </span>
+        <span className={styles.legendItem}>
+          <span className={styles.routeStateBroken}>■</span> Broken
+        </span>
+        <span className={styles.legendItem}>
+          <span className={styles.routeStateDiscovering}>■</span> Discovering
+        </span>
+
         <button
           className={`${styles.routeToggle} ${showRoutes ? styles.routeToggleActive : ''}`}
-          onClick={() => setShowRoutes(v => !v)}
+          onClick={() => setShowRoutes(!showRoutes)}
           title="Show/hide route lines between you and known destinations"
         >
           <IconRoutes size={14} /> Routes

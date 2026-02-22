@@ -15,6 +15,34 @@ interface ConversationListProps {
 // Broadcast address constant
 const BROADCAST_ADDR = 0xffffffff;
 
+type ChannelItem = { id: string; label: string; unreadCount: number };
+
+export function buildChannelItems(config: any, conversations: Map<string, Conversation>): ChannelItem[] {
+  return (config?.channels ?? [])
+    .filter((ch: any) => ch.index > 0)
+    .map((ch: any): ChannelItem => {
+      const id = `ch:${ch.index}`;
+      const existing = conversations.get(id);
+      return {
+        id,
+        label: ch.name?.trim() || `ch-${ch.index}`,
+        unreadCount: existing?.unreadCount ?? 0,
+      };
+    });
+}
+
+export function filterDmConversations(conversations: Map<string, Conversation>) {
+  return [...conversations.values()].filter(
+    c => c.id.startsWith('dm:') && parseInt(c.id.slice(3), 10) !== BROADCAST_ADDR
+  );
+}
+
+export function parseDmHexAddress(input: string): number | null {
+  const raw = input.trim().replace(/^0x/i, '');
+  if (!/^[0-9a-fA-F]{1,8}$/.test(raw)) return null;
+  return parseInt(raw, 16);
+}
+
 function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolean; onSelect: (id: string) => void }) {
   const addr = conv.peerAddr ?? parseInt(conv.id.slice(3), 10);
   const { displayName, fullHex, status } = usePeerInfo(addr);
@@ -56,30 +84,17 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   const broadcastUnread = conversations.get('broadcast')?.unreadCount ?? 0;
 
   // Show channels from config even before first message arrives.
-  const channels = (config?.channels ?? [])
-    .filter(ch => ch.index > 0)
-    .map(ch => {
-      const id = `ch:${ch.index}`;
-      const existing = conversations.get(id);
-      return {
-        id,
-        label: ch.name?.trim() || `ch-${ch.index}`,
-        unreadCount: existing?.unreadCount ?? 0,
-      };
-    });
+  const channels = buildChannelItems(config, conversations);
 
-  const dms = [...conversations.values()].filter(
-    c => c.id.startsWith('dm:') && parseInt(c.id.slice(3), 10) !== BROADCAST_ADDR
-  );
+  const dms = filterDmConversations(conversations);
 
   const handleOpenDm = () => {
     setDmError('');
-    const raw = dmAddr.trim().replace(/^0x/i, '');
-    if (!/^[0-9a-fA-F]{1,8}$/.test(raw)) {
+    const addr = parseDmHexAddress(dmAddr);
+    if (addr === null) {
       setDmError('Enter a valid hex address (e.g. 0xABCD1234)');
       return;
     }
-    const addr = parseInt(raw, 16);
     onSelect(`dm:${addr}`);
     setShowDmDialog(false);
     setDmAddr('');

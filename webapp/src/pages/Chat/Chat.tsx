@@ -10,15 +10,22 @@ import { ComposeBar } from './ComposeBar';
 import { ChannelDetailPanel } from './ChannelDetailPanel';
 import styles from './Chat.module.css';
 
+export function isNearBottom(el: { scrollTop: number; clientHeight: number; scrollHeight: number }, threshold = 100): boolean {
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
+}
+
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
+export function getEmptyHint(convId: string): string {
+  return convId === 'broadcast'
+    ? 'Broadcast messages will appear here. All nodes in range will receive them.'
+    : convId.startsWith('ch:')
+    ? 'Channel messages will appear here.'
+    : 'Send a message to start this conversation.';
+}
+
 function EmptyMessages({ convId }: { convId: string }) {
-  const hint =
-    convId === 'broadcast'
-      ? 'Broadcast messages will appear here. All nodes in range will receive them.'
-      : convId.startsWith('ch:')
-      ? 'Channel messages will appear here.'
-      : 'Send a message to start this conversation.';
+  const hint = getEmptyHint(convId);
 
   return (
     <div className={styles.emptyPane}>
@@ -34,26 +41,63 @@ function MessageList({ conversationId }: { conversationId: string }) {
   const { messages } = useConversation(conversationId);
   const myAddr = useMyAddress();
   const listRef = useRef<HTMLDivElement>(null);
+  const [nearBottom, setNearBottom] = useState(true);
+  const [showJump, setShowJump] = useState(false);
 
-  // Auto-scroll to bottom when messages change (new message, status update, etc.)
+  const updateScrollState = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const atBottom = isNearBottom(el);
+    setNearBottom(atBottom);
+    if (atBottom) setShowJump(false);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    setNearBottom(true);
+    setShowJump(false);
+  }, []);
+
+  // Auto-scroll only when user is near bottom.
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    // Use requestAnimationFrame to ensure DOM has updated
+
     requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
+      if (nearBottom) {
+        el.scrollTop = el.scrollHeight;
+        setShowJump(false);
+      } else {
+        setShowJump(true);
+      }
     });
-  }, [messages.length, messages[messages.length - 1]?.status]);
+  }, [messages.length, messages[messages.length - 1]?.status, nearBottom]);
 
   if (messages.length === 0) {
     return <EmptyMessages convId={conversationId} />;
   }
 
   return (
-    <div ref={listRef} className={styles.messageList} aria-live="polite" aria-label="Messages">
-      {messages.map(msg => (
-        <MessageBubble key={msg.id} message={msg} myAddr={myAddr} />
-      ))}
+    <div className={styles.messageListWrap}>
+      <div
+        ref={listRef}
+        className={styles.messageList}
+        aria-live="polite"
+        aria-label="Messages"
+        onScroll={updateScrollState}
+      >
+        {messages.map(msg => (
+          <MessageBubble key={msg.id} message={msg} myAddr={myAddr} />
+        ))}
+      </div>
+
+      {showJump && (
+        <button className={styles.jumpToLatestBtn} onClick={scrollToBottom} aria-label="Scroll to latest messages">
+          ↓ New messages
+        </button>
+      )}
     </div>
   );
 }

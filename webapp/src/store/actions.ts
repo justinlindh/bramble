@@ -535,8 +535,12 @@ export async function sendProbe(): Promise<void> {
 
 function handleProbeAck(params: unknown): void {
   const raw = params as any;
+  const parsedAddr = typeof raw.address === 'string'
+    ? parseInt(raw.address.replace(/^0x/i, ''), 16)
+    : (raw.responderAddr ?? 0);
+
   const ack: ProbeResponse = {
-    responderAddr: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.responderAddr ?? 0),
+    responderAddr: Number.isFinite(parsedAddr) ? parsedAddr : 0,
     hopCount: raw.hops ?? raw.hopCount ?? 0,
     rssi: raw.rssi ?? 0,
     snr: raw.snr ?? 0,

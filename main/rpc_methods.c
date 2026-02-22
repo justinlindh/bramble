@@ -31,13 +31,20 @@
 
 #define BRAMBLE_VERSION_STR      "0.1.0-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.1.0"
-#define BRAMBLE_HARDWARE         "heltec_v3"
 
 #define NVS_NAMESPACE            "bramble"
 #define NVS_KEY_NODE_NAME        "node_name"
 
 static const char *TAG = "rpc_methods";
 static bramble_identity_t *s_identity;
+
+static const char *bramble_hardware(void) {
+    const bramble_board_config_t *board = board_get_config();
+    if (board && board->short_name && board->short_name[0] != '\0') {
+        return board->short_name;
+    }
+    return "unknown";
+}
 
 /* ── Utility ────────────────────────────────────────────────────────── */
 
@@ -58,7 +65,7 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
     cJSON_AddStringToObject(result, "firmware_version", BRAMBLE_VERSION_STR);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
-    cJSON_AddStringToObject(result, "hardware", BRAMBLE_HARDWARE);
+    cJSON_AddStringToObject(result, "hardware", bramble_hardware());
     cJSON_AddBoolToObject(result, "radio_ok", st.radio_ok);
     cJSON_AddNumberToObject(result, "peers", st.neighbors.count);
     cJSON_AddNumberToObject(result, "beacon_tx", st.beacon_tx_count);
@@ -91,7 +98,7 @@ static int handle_get_version(const cJSON *params, cJSON *result) {
     (void)params;
     cJSON_AddStringToObject(result, "firmware_version", BRAMBLE_VERSION_STR);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
-    cJSON_AddStringToObject(result, "hardware", BRAMBLE_HARDWARE);
+    cJSON_AddStringToObject(result, "hardware", bramble_hardware());
     return 0;
 }
 

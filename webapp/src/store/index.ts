@@ -16,6 +16,24 @@ import type {
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
+const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
+
+function loadShowRoutes(): boolean {
+  try {
+    return localStorage.getItem(ROUTE_VISIBILITY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveShowRoutes(show: boolean): void {
+  try {
+    localStorage.setItem(ROUTE_VISIBILITY_KEY, show ? '1' : '0');
+  } catch {
+    // noop
+  }
+}
+
 function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
   if (id === 'broadcast') return '📢 Broadcast';
   if (id.startsWith('ch:')) {
@@ -82,7 +100,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   conversations: new Map(),
   activeConversationId: 'broadcast',
   activeTab: 'chat',
-  showRoutes: false,
+  showRoutes: loadShowRoutes(),
   probeResult: null,
   peerNames: new Map(),
   probeCollecting: false,
@@ -179,7 +197,10 @@ export const useStore = create<AppState & Actions>((set) => ({
     })),
 
   setActiveTab: (tab: string) => set({ activeTab: tab }),
-  setShowRoutes: (show: boolean) => set({ showRoutes: show }),
+  setShowRoutes: (show: boolean) => {
+    saveShowRoutes(show);
+    set({ showRoutes: show });
+  },
 
   resetNodeData: () => set({
     messages: [],
