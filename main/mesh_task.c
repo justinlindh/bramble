@@ -102,6 +102,33 @@ static airtime_budget_t    s_airtime;
 static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t     s_traffic_debug;
 
+/* Adaptive beacon interval policy */
+static beacon_policy_config_t s_beacon_policy = {
+    .enabled = false,              /* Default: disabled (fixed 60s) */
+    .mode = BEACON_MODE_FIXED,
+    .base_interval_ms = 60000,
+    .min_interval_ms = 30000,
+    .max_interval_ms = 120000,
+    .dense_threshold = 10,
+    .churn_threshold = 3,
+    .churn_window_ms = 60000,
+};
+static beacon_policy_status_t s_beacon_status = {
+    .active_mode = BEACON_MODE_FIXED,
+    .current_interval_ms = 60000,
+    .neighbor_count = 0,
+    .churn_events = 0,
+    .last_transition_ms = 0,
+    .in_backoff = false,
+};
+#define MAX_CHURN_HISTORY 16
+typedef struct {
+    uint32_t timestamp;
+    uint8_t  neighbor_count;
+} churn_sample_t;
+static churn_sample_t s_churn_history[MAX_CHURN_HISTORY];
+static int s_churn_history_idx = 0;
+
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
 static char                s_channel_names[MAX_CHANNELS][20];
@@ -921,6 +948,190 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
     }
 }
 
+/* ── Adaptive beacon interval controller ────────────────────────────── */
+
+/**
+ * Record a churn event (neighbor count change) for adaptive beacon policy.
+ */
+static void record_churn_event(uint32_t t, uint8_t neighbor_count) {
+    s_churn_history[s_churn_history_idx].timestamp = t;
+    s_churn_history[s_churn_history_idx].neighbor_count = neighbor_count;
+    s_churn_history_idx = (s_churn_history_idx + 1) % MAX_CHURN_HISTORY;
+}
+
+/**
+ * Calculate churn events in the configured time window.
+ */
+static uint8_t calculate_churn_events(uint32_t t) {
+    uint8_t events = 0;
+    uint8_t last_count = 0xff;
+    bool first = true;
+    
+    /* Count neighbor count changes within the window */
+    for (int i = 0; i < MAX_CHURN_HISTORY; i++) {
+        if (s_churn_history[i].timestamp == 0) continue;
+        if ((t - s_churn_history[i].timestamp) > s_beacon_policy.churn_window_ms) continue;
+        
+        if (first) {
+            last_count = s_churn_history[i].neighbor_count;
+            first = false;
+        } else if (s_churn_history[i].neighbor_count != last_count) {
+            events++;
+            last_count = s_churn_history[i].neighbor_count;
+        }
+    }
+    return events;
+}
+
+/**
+ * Compute adaptive beacon interval based on current mesh conditions.
+ * Returns new interval in milliseconds.
+ */
+static uint32_t compute_adaptive_beacon_interval(uint32_t t, uint8_t neighbor_count) {
+    if (!s_beacon_policy.enabled || s_beacon_policy.mode != BEACON_MODE_ADAPTIVE) {
+        /* Fixed mode: return base interval */
+        s_beacon_status.in_backoff = false;
+        return s_beacon_policy.base_interval_ms;
+    }
+    
+    /* Calculate churn (neighbor changes) */
+    uint8_t churn = calculate_churn_events(t);
+    s_beacon_status.churn_events = churn;
+    s_beacon_status.neighbor_count = neighbor_count;
+    
+    beacon_policy_mode_t prev_mode = s_beacon_status.active_mode;
+    uint32_t interval = s_beacon_policy.base_interval_ms;
+    bool backoff = false;
+    
+    /* Dense mesh detection: increase interval to reduce airtime */
+    if (neighbor_count >= s_beacon_policy.dense_threshold) {
+        /* Dense mode: back off to max interval */
+        interval = s_beacon_policy.max_interval_ms;
+        backoff = true;
+        s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
+    }
+    /* Churn detection: temporarily increase beacon rate */
+    else if (churn >= s_beacon_policy.churn_threshold) {
+        /* Churn mode: increase beacon rate to help convergence */
+        interval = s_beacon_policy.min_interval_ms;
+        backoff = false;
+        s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
+    }
+    /* Stable small mesh: use baseline */
+    else {
+        interval = s_beacon_policy.base_interval_ms;
+        backoff = false;
+        s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
+    }
+    
+    s_beacon_status.in_backoff = backoff;
+    s_beacon_status.current_interval_ms = interval;
+    
+    /* Log mode transitions */
+    if (prev_mode != s_beacon_status.active_mode || 
+        (s_beacon_status.last_transition_ms == 0 && s_beacon_policy.enabled)) {
+        s_beacon_status.last_transition_ms = t;
+        ESP_LOGI(TAG, "Beacon policy: neighbors=%u churn=%u interval=%lums %s",
+                 neighbor_count, churn, (unsigned long)interval,
+                 backoff ? "DENSE" : (interval < s_beacon_policy.base_interval_ms ? "CHURN" : "STABLE"));
+    }
+    
+    return interval;
+}
+
+int mesh_set_beacon_policy(const beacon_policy_config_t *config) {
+    if (!config) return -1;
+    
+    /* Validate config */
+    if (config->min_interval_ms < 10000 || config->max_interval_ms > 300000) {
+        ESP_LOGE(TAG, "Invalid beacon interval range");
+        return -1;
+    }
+    if (config->min_interval_ms > config->max_interval_ms) {
+        ESP_LOGE(TAG, "Min interval must be <= max interval");
+        return -1;
+    }
+    
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_beacon_policy = *config;
+    xSemaphoreGive(s_state_mutex);
+    
+    /* Persist to NVS */
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_bp", NVS_READWRITE, &nvs) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for beacon policy");
+        return -1;
+    }
+    
+    nvs_set_u8(nvs, "enabled", config->enabled ? 1 : 0);
+    nvs_set_u8(nvs, "mode", (uint8_t)config->mode);
+    nvs_set_u32(nvs, "base_ms", config->base_interval_ms);
+    nvs_set_u32(nvs, "min_ms", config->min_interval_ms);
+    nvs_set_u32(nvs, "max_ms", config->max_interval_ms);
+    nvs_set_u8(nvs, "dense_th", config->dense_threshold);
+    nvs_set_u8(nvs, "churn_th", config->churn_threshold);
+    nvs_set_u32(nvs, "churn_win", config->churn_window_ms);
+    
+    esp_err_t err = nvs_commit(nvs);
+    nvs_close(nvs);
+    
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to persist beacon policy to NVS");
+        return -1;
+    }
+    
+    ESP_LOGI(TAG, "Beacon policy updated: enabled=%d mode=%d base=%lums",
+             config->enabled, config->mode, (unsigned long)config->base_interval_ms);
+    return 0;
+}
+
+void mesh_get_beacon_policy(beacon_policy_config_t *config) {
+    if (!config) return;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    *config = s_beacon_policy;
+    xSemaphoreGive(s_state_mutex);
+}
+
+void mesh_get_beacon_status(beacon_policy_status_t *status) {
+    if (!status) return;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    *status = s_beacon_status;
+    xSemaphoreGive(s_state_mutex);
+}
+
+void mesh_beacon_policy_load_config(void) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_bp", NVS_READONLY, &nvs) != ESP_OK) {
+        /* No saved config, use defaults */
+        return;
+    }
+    
+    uint8_t enabled = 0, mode = 0, dense_th = 10, churn_th = 3;
+    uint32_t base_ms = 60000, min_ms = 30000, max_ms = 120000, churn_win = 60000;
+    
+    nvs_get_u8(nvs, "enabled", &enabled);
+    nvs_get_u8(nvs, "mode", &mode);
+    nvs_get_u32(nvs, "base_ms", &base_ms);
+    nvs_get_u32(nvs, "min_ms", &min_ms);
+    nvs_get_u32(nvs, "max_ms", &max_ms);
+    nvs_get_u8(nvs, "dense_th", &dense_th);
+    nvs_get_u8(nvs, "churn_th", &churn_th);
+    nvs_get_u32(nvs, "churn_win", &churn_win);
+    nvs_close(nvs);
+    
+    s_beacon_policy.enabled = (enabled != 0);
+    s_beacon_policy.mode = (beacon_policy_mode_t)mode;
+    s_beacon_policy.base_interval_ms = base_ms;
+    s_beacon_policy.min_interval_ms = min_ms;
+    s_beacon_policy.max_interval_ms = max_ms;
+    s_beacon_policy.dense_threshold = dense_th;
+    s_beacon_policy.churn_threshold = churn_th;
+    s_beacon_policy.churn_window_ms = churn_win;
+    
+    ESP_LOGI(TAG, "Loaded beacon policy: enabled=%d mode=%d base=%lums",
+             enabled, mode, (unsigned long)base_ms);
+}
+
 /* ── Main mesh task ─────────────────────────────────────────────────── */
 
 /**
@@ -1001,6 +1212,19 @@ static uint32_t       s_probe_request_id;
 static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                                      uint32_t *beacon_interval,
                                      uint32_t *last_purge_ms) {
+    /* Update adaptive beacon interval based on mesh conditions */
+    static uint8_t last_neighbor_count = 0;
+    uint8_t current_neighbor_count = neighbor_count(&s_neighbors);
+    
+    /* Record churn event if neighbor count changed */
+    if (current_neighbor_count != last_neighbor_count) {
+        record_churn_event(t, current_neighbor_count);
+        last_neighbor_count = current_neighbor_count;
+    }
+    
+    /* Compute adaptive beacon interval */
+    uint32_t base_interval = compute_adaptive_beacon_interval(t, current_neighbor_count);
+    
     /* Periodic beacon TX */
     if ((t - *last_beacon_ms) >= *beacon_interval) {
         send_beacon();
@@ -1010,7 +1234,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         uint8_t j[2];
         crypto_random(j, 2);
         int32_t jitter = ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
-        *beacon_interval = BEACON_INTERVAL_MS + jitter;
+        *beacon_interval = base_interval + jitter;
     }
 
     /* Periodic neighbor purge + route maintenance */
@@ -1481,6 +1705,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
+    mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
