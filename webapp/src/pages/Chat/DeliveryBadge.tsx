@@ -6,25 +6,25 @@ interface DeliveryBadgeProps {
   tier: MessageTier;
 }
 
-const STATUS_META: Record<DeliveryStatus, { icon: string; label: string; cls: string }> = {
-  queued:    { icon: '●', label: 'Queued',               cls: 'pending'   },
-  sending:   { icon: '●', label: 'Sending…',             cls: 'sending'   },
-  sent:      { icon: '●', label: 'Sent to next hop',     cls: 'pending'   },
-  delivered: { icon: '●', label: 'Delivered',             cls: 'delivered' },
-  failed:    { icon: '●', label: 'Failed – not delivered', cls: 'failed'  },
-  timeout:   { icon: '●', label: 'No receipt (timeout)',  cls: 'warning'  },
+const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
+  queued:    { label: 'Queued',                 cls: 'pending'   },
+  sending:   { label: 'Sending…',               cls: 'sending'   },
+  sent:      { label: 'Sent to next hop',       cls: 'pending'   },
+  delivered: { label: 'Delivered',              cls: 'delivered' },
+  failed:    { label: 'Failed – not delivered', cls: 'failed'    },
+  timeout:   { label: 'No receipt (timeout)',   cls: 'warning'   },
 };
 
-export function DeliveryBadge({ status, tier }: DeliveryBadgeProps) {
+export function DeliveryBadge({ status, tier: _tier }: DeliveryBadgeProps) {
   const meta = STATUS_META[status];
 
   return (
+    // Clearer sent-status indicator dot shown next to message timestamp.
     <span
-      className={`${styles.badge} ${styles[meta.cls]}`}
+      className={`${styles.sentStatusIndicator} ${styles[meta.cls]}`}
       title={meta.label}
       aria-label={meta.label}
-    >
-      {meta.icon}
-    </span>
+      role="img"
+    />
   );
 }
