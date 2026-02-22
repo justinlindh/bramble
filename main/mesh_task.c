@@ -943,6 +943,13 @@ static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
 /**
  * Perform periodic maintenance: beacons, neighbor purge, route cleanup, etc.
  */
+#define PROBE_COLLECTION_WINDOW_MS 3000
+static uint32_t s_probe_id;
+static uint32_t s_probe_sent_ms;
+static bool s_probe_collecting;
+static bool s_probe_complete_emitted;
+static int s_probe_result_count;
+
 static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                                      uint32_t *beacon_interval,
                                      uint32_t *last_purge_ms) {
@@ -1048,6 +1055,22 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                 }
             }
         }
+    }
+
+    /* Probe completion event */
+    if (s_probe_collecting && !s_probe_complete_emitted && (t - s_probe_sent_ms) >= PROBE_COLLECTION_WINDOW_MS) {
+        cJSON *params = cJSON_CreateObject();
+        char pid_buf[12];
+        snprintf(pid_buf, sizeof(pid_buf), "%08" PRIX32, s_probe_id);
+        cJSON_AddStringToObject(params, "probe_id", pid_buf);
+        cJSON_AddNumberToObject(params, "unique_count", s_probe_result_count);
+        cJSON_AddNumberToObject(params, "duration_ms", t - s_probe_sent_ms);
+        rpc_notify("bramble.onProbeComplete", params);
+        cJSON_Delete(params);
+
+        s_probe_complete_emitted = true;
+        s_probe_collecting = false;
+        ESP_LOGI(TAG, "PROBE COMPLETE pid=%08" PRIX32 " unique=%d", s_probe_id, s_probe_result_count);
     }
 }
 
@@ -1612,6 +1635,8 @@ typedef struct {
 
 static uint32_t       s_probe_id = 0;
 static uint32_t       s_probe_sent_ms = 0;
+static bool           s_probe_collecting = false;
+static bool           s_probe_complete_emitted = false;
 static probe_result_t s_probe_results[MAX_PROBE_RESULTS];
 static int            s_probe_result_count = 0;
 
@@ -1620,6 +1645,8 @@ uint32_t mesh_send_probe(void) {
     s_probe_id = pid;
     s_probe_sent_ms = now_ms();
     s_probe_result_count = 0;
+    s_probe_collecting = true;
+    s_probe_complete_emitted = false;
 
     /* Build probe packet: header(12) + source_addr(4) */
     uint8_t buf[20];
@@ -1745,7 +1772,7 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     }
 
     /* Only process if this ACK is for our active probe */
-    if (header.packet_id != s_probe_id) {
+    if (!s_probe_collecting || header.packet_id != s_probe_id) {
         ESP_LOGI(TAG, "PROBE ACK RX ignored pid=%08" PRIX32 " expected=%08" PRIX32,
                  header.packet_id, s_probe_id);
         return;
@@ -1755,13 +1782,36 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     memcpy(&resp_addr, data + HEADER_SIZE, 4);
     uint8_t hops = data[HEADER_SIZE + 4];
 
-    if (s_probe_result_count < MAX_PROBE_RESULTS) {
+    /* Never include self in probe responders. */
+    if (resp_addr == s_identity->address) {
+        ESP_LOGI(TAG, "PROBE ACK RX ignored self responder pid=%08" PRIX32, header.packet_id);
+        return;
+    }
+
+    uint32_t latency = now_ms() - s_probe_sent_ms;
+
+    /* Upsert by responder addr: one logical row per responder. */
+    int idx = -1;
+    for (int i = 0; i < s_probe_result_count; i++) {
+        if (s_probe_results[i].addr == resp_addr) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx >= 0) {
+        probe_result_t *r = &s_probe_results[idx];
+        r->hops = hops;
+        r->latency_ms = latency; /* latest latency */
+        if (rssi > r->rssi) r->rssi = rssi; /* best RSSI */
+        if (snr > r->snr) r->snr = snr;      /* best SNR */
+    } else if (s_probe_result_count < MAX_PROBE_RESULTS) {
         probe_result_t *r = &s_probe_results[s_probe_result_count++];
         r->addr = resp_addr;
         r->hops = hops;
         r->rssi = rssi;
         r->snr = snr;
-        r->latency_ms = now_ms() - s_probe_sent_ms;
+        r->latency_ms = latency;
     }
 
     char buf[12];
@@ -1779,7 +1829,10 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     cJSON_AddNumberToObject(params, "hops", hops);
     cJSON_AddNumberToObject(params, "rssi", rssi);
     cJSON_AddNumberToObject(params, "snr", snr);
-    cJSON_AddNumberToObject(params, "latency_ms", now_ms() - s_probe_sent_ms);
+    cJSON_AddNumberToObject(params, "latency_ms", latency);
+    char pid_buf[12];
+    snprintf(pid_buf, sizeof(pid_buf), "%08" PRIX32, s_probe_id);
+    cJSON_AddStringToObject(params, "probe_id", pid_buf);
     rpc_notify("bramble.onProbeResult", params);
     cJSON_Delete(params);
 }

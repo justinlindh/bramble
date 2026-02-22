@@ -255,6 +255,7 @@ static int handle_send_probe(const cJSON *params, cJSON *result) {
     snprintf(buf, sizeof(buf), "%08" PRIX32, probe_id);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "probe_id", buf);
+    cJSON_AddNumberToObject(result, "ack_window", 3);
     return 0;
 }
 
