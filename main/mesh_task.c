@@ -28,6 +28,8 @@
 #include "freertos/timers.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+
+#include <stdlib.h>
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "nvs_flash.h"
@@ -1654,11 +1656,23 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Long message — split into fragments */
         uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
-        fragment_t frags[FRAG_MAX_FRAGMENTS];
+        fragment_t *frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
+        if (!frags) {
+            ESP_LOGE(TAG, "Fragment allocation failed");
+            return -1;
+        }
+
         int num_frags = fragment_split(data, len, msg_id, frags, FRAG_MAX_FRAGMENTS);
-        
         if (num_frags <= 0) {
+            free(frags);
             ESP_LOGE(TAG, "Fragment split failed for %u bytes", (unsigned)len);
+            return -1;
+        }
+
+        uint8_t *ciphertext = malloc(BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD);
+        if (!ciphertext) {
+            free(frags);
+            ESP_LOGE(TAG, "Ciphertext buffer allocation failed");
             return -1;
         }
 
@@ -1667,7 +1681,6 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
             uint8_t nonce[BRAMBLE_NONCE_SIZE];
-            uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
             uint8_t tag[BRAMBLE_TAG_SIZE];
 
             int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01,
@@ -1692,6 +1705,9 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
                 vTaskDelay(pdMS_TO_TICKS(50)); /* 50ms between fragments */
             }
         }
+
+        free(ciphertext);
+        free(frags);
 
         /* Store the full message in message store */
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
@@ -1732,11 +1748,23 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Long message — split into fragments */
         uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
-        fragment_t frags[FRAG_MAX_FRAGMENTS];
+        fragment_t *frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
+        if (!frags) {
+            ESP_LOGE(TAG, "Fragment allocation failed");
+            return 0;
+        }
+
         int num_frags = fragment_split(data, len, msg_id, frags, FRAG_MAX_FRAGMENTS);
-        
         if (num_frags <= 0) {
+            free(frags);
             ESP_LOGE(TAG, "Fragment split failed for %u bytes", (unsigned)len);
+            return 0;
+        }
+
+        uint8_t *ciphertext = malloc(BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD);
+        if (!ciphertext) {
+            free(frags);
+            ESP_LOGE(TAG, "Ciphertext buffer allocation failed");
             return 0;
         }
 
@@ -1746,7 +1774,6 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
             uint8_t nonce[BRAMBLE_NONCE_SIZE];
-            uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
             uint8_t tag[BRAMBLE_TAG_SIZE];
 
             int ret = channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, 0x01,
@@ -1772,6 +1799,9 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
                 vTaskDelay(pdMS_TO_TICKS(50)); /* 50ms between fragments */
             }
         }
+
+        free(ciphertext);
+        free(frags);
 
         /* Store the full message in message store */
         if (first_pkt_id != 0) {
