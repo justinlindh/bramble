@@ -568,9 +568,16 @@ function handleProbeAck(params: unknown): void {
     pathLen: raw.hops ?? raw.pathLen ?? 0,
     latencyMs: raw.latency_ms ?? raw.latencyMs ?? 0,
   };
+  const probeId = typeof raw.probeId === 'string'
+    ? parseInt(raw.probeId, 16)
+    : typeof raw.probe_id === 'string'
+    ? parseInt(raw.probe_id, 16)
+    : (raw.probeId ?? raw.probe_id ?? undefined);
+
   const store = useStore.getState();
   const prev = store.probeResult;
   if (!prev || prev.complete) return;
+  if (probeId !== undefined && probeId !== prev.probeId) return;
 
   const selfAddr = store.config?.identity?.address;
   if (selfAddr !== undefined && ack.responderAddr === selfAddr) return;
