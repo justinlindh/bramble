@@ -1,5 +1,6 @@
 #include "lv_port_keyboard.h"
 #include "keyboard.h"
+#include "sleep_manager.h"
 #include "esp_log.h"
 
 static uint32_t last_key = 0;
@@ -21,6 +22,8 @@ static void keyboard_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
             last_key = ch;
         }
         data->state = LV_INDEV_STATE_PRESSED;
+        /* Signal activity to reset sleep timer / wake display */
+        sleep_manager_activity();
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }

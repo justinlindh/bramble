@@ -3,9 +3,12 @@
 #include "lv_port_touch.h"
 #include "lv_port_trackball.h"
 #include "lv_port_keyboard.h"
+#include "sleep_manager.h"
 #include "theme/bramble_theme.h"
 #include "screens/scr_layout.h"
 #include "screens/scr_splash.h"
+#include "chat_unread.h"
+#include "msg_store.h"
 #include "lvgl.h"
 #include "esp_log.h"
 
@@ -15,6 +18,21 @@ bramble_layout_t *s_layout = NULL;  /* NOT static — screens need access */
 static lv_display_t *s_display = NULL;
 static volatile uint32_t s_pending_events = 0;
 static int s_unread_count = 0;
+static int s_last_msg_count = 0;
+
+static void process_new_message_unread(void) {
+    int count = msg_store_count();
+    if (count < s_last_msg_count) {
+        s_last_msg_count = count;
+    }
+
+    for (int i = s_last_msg_count; i < count; i++) {
+        const stored_msg_t *msg = msg_store_get(i);
+        chat_unread_mark_for_message(msg);
+    }
+
+    s_last_msg_count = count;
+}
 
 /* Timer callbacks for periodic refresh */
 static void status_refresh_timer_cb(lv_timer_t *timer) {
@@ -28,14 +46,16 @@ static void status_refresh_timer_cb(lv_timer_t *timer) {
     s_pending_events = 0;
     
     if (events & UI_EVT_MSG_RECEIVED) {
+        process_new_message_unread();
+
         if (s_layout) {
             if (s_layout->active_tab == TAB_CHAT) {
-                /* Chat is active - refresh it and clear unread */
+                /* Chat is active - refresh channel list/bubbles, keep global unread clear */
                 layout_set_tab(s_layout, TAB_CHAT);
                 s_unread_count = 0;
                 layout_set_unread(s_layout, 0);
             } else {
-                /* Chat is not active - increment unread and show badge */
+                /* Chat is not active - increment global chat tab unread */
                 s_unread_count++;
                 layout_set_unread(s_layout, s_unread_count);
             }
@@ -81,6 +101,9 @@ static void splash_timer_cb(lv_timer_t *timer) {
     lv_timer_create(status_refresh_timer_cb, 2000, NULL);  /* Status bar: 2s */
     lv_timer_create(tab_refresh_timer_cb, 5000, NULL);     /* Tab content: 5s */
     
+    /* Initialize sleep manager for automatic display power saving */
+    sleep_manager_init();
+    
     /* One-shot timer — delete itself */
     lv_timer_delete(timer);
 }
@@ -88,6 +111,10 @@ static void splash_timer_cb(lv_timer_t *timer) {
 int ui_graphics_init(void) {
     ESP_LOGI(TAG, "Initializing LVGL graphical UI");
     lv_init();
+
+    s_unread_count = 0;
+    s_last_msg_count = msg_store_count();
+    chat_unread_reset();
     
     lv_display_t *disp = lv_port_display_init();
     if (!disp) {

@@ -1,5 +1,6 @@
 #include "lv_port_touch.h"
 #include "touch.h"
+#include "sleep_manager.h"
 #include "esp_log.h"
 
 static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
@@ -9,6 +10,8 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
         data->point.x = pt.x;
         data->point.y = pt.y;
         data->state = LV_INDEV_STATE_PRESSED;
+        /* Signal activity to reset sleep timer / wake display */
+        sleep_manager_activity();
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }

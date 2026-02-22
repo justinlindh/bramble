@@ -15,6 +15,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include <string.h>
 
 static const char *TAG = "keyboard";
@@ -34,6 +36,35 @@ static volatile int key_tail = 0;
 /* Polling cooldown — avoid hammering I2C on every LVGL tick (~30ms) */
 static int64_t last_poll_us = 0;
 #define POLL_INTERVAL_US  20000  /* 20ms minimum between I2C reads */
+
+/* Backlight persistence */
+#define DEFAULT_BACKLIGHT 80     /* Sane default — not too bright */
+#define NVS_NAMESPACE     "bramble"
+#define NVS_KEY_BACKLIGHT "kb_backlight"
+static uint8_t s_backlight_brightness = DEFAULT_BACKLIGHT;
+
+/* ── NVS helpers ────────────────────────────────────────────────────── */
+
+static void nvs_load_backlight(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        s_backlight_brightness = DEFAULT_BACKLIGHT;
+        return;
+    }
+    uint8_t brightness = DEFAULT_BACKLIGHT;
+    nvs_get_u8(h, NVS_KEY_BACKLIGHT, &brightness);
+    nvs_close(h);
+    s_backlight_brightness = (brightness > 100) ? 100 : brightness;
+    ESP_LOGI(TAG, "Backlight brightness loaded: %u", s_backlight_brightness);
+}
+
+static void nvs_save_backlight(uint8_t brightness) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, NVS_KEY_BACKLIGHT, brightness);
+    nvs_commit(h);
+    nvs_close(h);
+}
 
 /* ── Circular Buffer Helpers ────────────────────────────────────────── */
 
@@ -144,7 +175,15 @@ int keyboard_init(void) {
              s_board->keyboard_int);
 
     initialized = true;
-    ESP_LOGI(TAG, "Keyboard initialized (I2C 0x55, polling mode)");
+
+    /* Load persisted backlight value and apply it */
+    nvs_load_backlight();
+    uint8_t brightness_hw = (uint8_t)(s_backlight_brightness * 255 / 100);
+    uint8_t cmd[2] = { 0x01, brightness_hw };
+    i2c_master_transmit(dev_handle, cmd, sizeof(cmd), 100);
+
+    ESP_LOGI(TAG, "Keyboard initialized (I2C 0x55, polling mode, backlight=%u%%)",
+             s_backlight_brightness);
     return 0;
 }
 
@@ -188,6 +227,20 @@ void keyboard_set_backlight(uint8_t brightness) {
     }
 }
 
+void keyboard_set_backlight_percent(uint8_t percent) {
+    if (percent > 100) percent = 100;
+    s_backlight_brightness = percent;
+    nvs_save_backlight(percent);
+    /* Map 0-100 → 0-255 for hardware */
+    uint8_t brightness_hw = (uint8_t)(percent * 255 / 100);
+    keyboard_set_backlight(brightness_hw);
+    ESP_LOGI(TAG, "Keyboard backlight set to %u%%", percent);
+}
+
+uint8_t keyboard_get_backlight_percent(void) {
+    return s_backlight_brightness;
+}
+
 #else  /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* Stub implementations for non-T-Deck boards */
@@ -207,6 +260,14 @@ bool keyboard_has_data(void) {
 
 void keyboard_set_backlight(uint8_t brightness) {
     (void)brightness;
+}
+
+void keyboard_set_backlight_percent(uint8_t percent) {
+    (void)percent;
+}
+
+uint8_t keyboard_get_backlight_percent(void) {
+    return 0;
 }
 
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */

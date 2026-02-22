@@ -5,6 +5,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "lv_port_touch.c"
         "lv_port_trackball.c"
         "lv_port_keyboard.c"
+        "sleep_manager.c"
         "theme/bramble_theme.c"
         "screens/scr_splash.c"
         "screens/scr_layout.c"
@@ -16,6 +17,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_stats.c"
         "screens/scr_settings.c"
         "chat_target.c"
+        "chat_unread.c"
         "assets/img_bramble_logo.c"
     )
 else()
