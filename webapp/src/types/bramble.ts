@@ -238,6 +238,50 @@ export type TransportType = 'serial' | 'ble' | 'websocket' | 'wifi';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+// ─── Traffic Debug ─────────────────────────────────────────────────────
+
+export type TrafficCategory = 
+  | 'beacon'
+  | 'timesync'
+  | 'routing'
+  | 'ack'
+  | 'chat'
+  | 'maintenance'
+  | 'other';
+
+export type TrafficDirection = 'tx' | 'rx';
+
+export type AirtimeBucket = 'broadcast' | 'normal' | 'critical';
+
+export interface TrafficEvent {
+  seq: number;
+  timestampMs: number;
+  direction: TrafficDirection;
+  category: TrafficCategory;
+  packetType: string;
+  tier: MessageTier;
+  airtimeBucket: AirtimeBucket;
+  airtimeDebitUs: number;
+  queueDepth?: number;
+  rssi?: number;
+  snr?: number;
+}
+
+export interface TrafficDebugConfig {
+  enabled: boolean;
+  includeTx: boolean;
+  includeRx: boolean;
+  sampleRate: number;  // 0-100%
+}
+
+export interface TrafficDebugStatus {
+  config: TrafficDebugConfig;
+  ringSize: number;
+  ringUsed: number;
+  droppedCount: number;
+  lastSeq: number;
+}
+
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
@@ -255,4 +299,6 @@ export interface AppState {
   probeCollecting: boolean;
   peerLocations: PeerLocation[];
   mapFocusAddr: number | null;
+  trafficDebugStatus: TrafficDebugStatus | null;
+  trafficEvents: TrafficEvent[];
 }

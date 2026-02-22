@@ -13,6 +13,8 @@ import type {
   Transport,
   ProbeResult,
   PeerLocation,
+  TrafficDebugStatus,
+  TrafficEvent,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
@@ -84,6 +86,10 @@ interface Actions {
   loadCachedMessages: (msgs: Message[]) => void;
   peerNames: Map<number, string>;
   resetNodeData: () => void;
+  setTrafficDebugStatus: (s: TrafficDebugStatus) => void;
+  addTrafficEvent: (e: TrafficEvent) => void;
+  addTrafficEvents: (events: TrafficEvent[]) => void;
+  clearTrafficEvents: () => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -106,6 +112,8 @@ export const useStore = create<AppState & Actions>((set) => ({
   probeCollecting: false,
   peerLocations: [],
   mapFocusAddr: null,
+  trafficDebugStatus: null,
+  trafficEvents: [],
 
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
@@ -272,4 +280,24 @@ export const useStore = create<AppState & Actions>((set) => ({
       
       return { activeConversationId: id, conversations: convs };
     }),
+
+  setTrafficDebugStatus: (s) => set({ trafficDebugStatus: s }),
+
+  addTrafficEvent: (e) =>
+    set(state => ({
+      trafficEvents: [...state.trafficEvents, e].slice(-1000), // Keep last 1000 events
+    })),
+
+  addTrafficEvents: (events) =>
+    set(state => {
+      // Merge by seq, keeping newest
+      const bySeq = new Map(state.trafficEvents.map(e => [e.seq, e]));
+      for (const e of events) {
+        bySeq.set(e.seq, e);
+      }
+      const merged = Array.from(bySeq.values()).sort((a, b) => a.seq - b.seq).slice(-1000);
+      return { trafficEvents: merged };
+    }),
+
+  clearTrafficEvents: () => set({ trafficEvents: [] }),
 }));

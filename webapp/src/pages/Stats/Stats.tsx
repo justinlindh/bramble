@@ -5,6 +5,7 @@ import { AirtimeCard } from './AirtimeCard';
 import { CounterGrid } from './CounterGrid';
 import { SystemInfo } from './SystemInfo';
 import { NetworkReach } from './NetworkReach';
+import { TrafficMonitor } from './TrafficMonitor';
 import styles from './Stats.module.css';
 
 const REFRESH_INTERVAL_MS = 5_000;
@@ -92,6 +93,9 @@ export function Stats() {
 
       {/* Network Reach probe */}
       <NetworkReach />
+
+      {/* Traffic Monitor */}
+      <TrafficMonitor />
     </div>
   );
 }
