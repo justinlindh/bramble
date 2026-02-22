@@ -3,6 +3,7 @@
 #include "display.h"
 #include "keyboard.h"
 #include "audio.h"
+#include "sleep_manager.h"
 #include "board_config.h"
 #include "ui.h"
 #include "esp_log.h"
@@ -20,11 +21,8 @@ extern const char *mesh_get_node_name(void);
 static void backlight_changed_cb(lv_event_t *e) {
     lv_obj_t *slider = lv_event_get_target(e);
     int val = lv_slider_get_value(slider);  /* 0..100 */
-    /* Map slider range 0-100 → PWM brightness 0-255.
-     * The keyboard MCU accepts the full 0-255 range; if it only supports
-     * on/off, any value >0 will enable the backlight. */
-    uint8_t brightness = (uint8_t)(val * 255 / 100);
-    keyboard_set_backlight(brightness);
+    /* Persist backlight value to NVS and apply to hardware */
+    keyboard_set_backlight_percent((uint8_t)val);
 }
 
 /* ── Volume ──────────────────────────────────────────────────────────── */
@@ -59,6 +57,27 @@ static void mute_changed_cb(lv_event_t *e) {
     if (s_volume_slider) {
         lv_obj_set_style_opa(s_volume_slider, muted ? LV_OPA_40 : LV_OPA_COVER, 0);
     }
+}
+
+/* ── Sleep mode ─────────────────────────────────────────────────────── */
+
+static lv_obj_t *s_sleep_timeout_slider = NULL;
+
+static void sleep_enabled_cb(lv_event_t *e) {
+    lv_obj_t *sw = lv_event_get_target(e);
+    bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    sleep_manager_set_enabled(enabled);
+
+    /* Dim the timeout slider when sleep is disabled */
+    if (s_sleep_timeout_slider) {
+        lv_obj_set_style_opa(s_sleep_timeout_slider, enabled ? LV_OPA_COVER : LV_OPA_40, 0);
+    }
+}
+
+static void sleep_timeout_changed_cb(lv_event_t *e) {
+    lv_obj_t *slider = lv_event_get_target(e);
+    int val = lv_slider_get_value(slider);  /* 10..300 seconds */
+    sleep_manager_set_timeout((uint16_t)val);
 }
 
 /* ── Connectivity mode toggle ────────────────────────────────────────── */
@@ -240,20 +259,20 @@ void scr_settings_create(bramble_layout_t *layout) {
     if (g) lv_group_add_obj(g, name_row);
 
     /* ── Keyboard Backlight slider ── */
+    uint8_t cur_backlight = keyboard_get_backlight_percent();
+
     lv_obj_t *bl_row = create_setting_row(cont, "Backlight");
     lv_obj_set_size(bl_row, 304, 48);
     lv_obj_t *bl_slider = lv_slider_create(bl_row);
     lv_obj_set_size(bl_slider, 140, 10);
     lv_obj_align(bl_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(bl_slider, 0, 100);
-    lv_slider_set_value(bl_slider, 80, LV_ANIM_OFF);
+    lv_slider_set_value(bl_slider, cur_backlight, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(bl_slider, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(bl_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(bl_slider, BR_COLOR_TEXT, LV_PART_KNOB);
     lv_obj_add_event_cb(bl_slider, backlight_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g) lv_group_add_obj(g, bl_slider);
-    /* Apply initial brightness — LV_EVENT_VALUE_CHANGED doesn't fire at creation */
-    keyboard_set_backlight(80 * 255 / 100);
 
     /* ── Volume slider ── */
     uint8_t cur_vol   = audio_get_volume();
@@ -290,6 +309,40 @@ void scr_settings_create(bramble_layout_t *layout) {
     }
     lv_obj_add_event_cb(s_mute_sw, mute_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g) lv_group_add_obj(g, s_mute_sw);
+
+    /* ── Sleep mode ── */
+    bool cur_sleep_enabled = sleep_manager_get_enabled();
+    uint16_t cur_sleep_timeout = sleep_manager_get_timeout();
+
+    lv_obj_t *sleep_row = create_setting_row(cont, LV_SYMBOL_EYE_CLOSE " Auto-Sleep");
+    lv_obj_t *sleep_sw = lv_switch_create(sleep_row);
+    lv_obj_align(sleep_sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(sleep_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sleep_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sleep_sw, BR_COLOR_TEXT, LV_PART_KNOB);
+    if (cur_sleep_enabled) {
+        lv_obj_add_state(sleep_sw, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(sleep_sw, sleep_enabled_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) lv_group_add_obj(g, sleep_sw);
+
+    /* Sleep timeout slider */
+    lv_obj_t *sleep_timeout_row = create_setting_row(cont, "Timeout (sec)");
+    lv_obj_set_size(sleep_timeout_row, 304, 48);
+    s_sleep_timeout_slider = lv_slider_create(sleep_timeout_row);
+    lv_obj_set_size(s_sleep_timeout_slider, 140, 10);
+    lv_obj_align(s_sleep_timeout_slider, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_slider_set_range(s_sleep_timeout_slider, 10, 300);
+    lv_slider_set_value(s_sleep_timeout_slider, cur_sleep_timeout, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(s_sleep_timeout_slider, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_sleep_timeout_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_sleep_timeout_slider, BR_COLOR_TEXT, LV_PART_KNOB);
+    lv_obj_add_event_cb(s_sleep_timeout_slider, sleep_timeout_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    /* Dim slider if sleep is disabled */
+    if (!cur_sleep_enabled) {
+        lv_obj_set_style_opa(s_sleep_timeout_slider, LV_OPA_40, 0);
+    }
+    if (g) lv_group_add_obj(g, s_sleep_timeout_slider);
 
     /* ── Connectivity Mode ── */
     {
