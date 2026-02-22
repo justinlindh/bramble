@@ -51,6 +51,23 @@
 .dotGreen { background: #4caf50; }
 .dotYellow { background: #ffc107; }
 
+.routeLineDirect,
+.routeLineMultiHop {
+  width: 18px;
+  height: 0;
+  border-top: 2px solid #3fb950;
+  display: inline-block;
+}
+
+.routeLineMultiHop {
+  border-top-style: dashed;
+}
+
+.routeStateActive { color: #3fb950; }
+.routeStateStale { color: #d29922; }
+.routeStateBroken { color: #d73a49; }
+.routeStateDiscovering { color: #8b949e; }
+
 .routeToggle {
   margin-left: auto;
   display: flex;

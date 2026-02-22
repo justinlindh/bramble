@@ -9,9 +9,9 @@ interface ShareLocationToggleProps {
 }
 
 const OPTIONS: { value: LocationAttach; label: string; title: string }[] = [
-  { value: 'off',   label: 'Off',   title: 'No location attached' },
-  { value: 'zone',  label: 'Zone',  title: 'Attach approximate location (~1km area)' },
-  { value: 'exact', label: 'Exact', title: 'Attach precise GPS coordinates' },
+  { value: 'off',   label: 'Off',   title: 'Off: no location shared' },
+  { value: 'zone',  label: 'Zone',  title: 'Coarse: grid square (~1km zone)' },
+  { value: 'exact', label: 'Exact', title: 'Exact: precise GPS coordinates' },
 ];
 
 export function ShareLocationToggle({ value, onChange }: ShareLocationToggleProps) {

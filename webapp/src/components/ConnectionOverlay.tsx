@@ -7,6 +7,19 @@ import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
 
+export function buildWifiUrl(ip: string, protocol: string, host: string): string {
+  if (ip.includes('://')) return ip;
+  if (protocol === 'https:') return `wss://${host}/proxy/${ip}`;
+  return `ws://${ip}/ws`;
+}
+
+export function connectingLabelFor(transportType: TransportType): string {
+  if (transportType === 'ble') return 'Scanning…';
+  if (transportType === 'serial') return 'Opening serial…';
+  if (transportType === 'wifi') return 'Handshaking…';
+  return 'Connecting…';
+}
+
 function loadSavedIp(): string {
   try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
 }
@@ -28,17 +41,7 @@ export function ConnectionOverlay() {
       const ip = wifiIp.trim();
       if (!ip) return;
       saveIp(ip);
-      let url: string;
-      if (ip.includes('://')) {
-        // User provided a full URL — use as-is
-        url = ip;
-      } else if (location.protocol === 'https:') {
-        // HTTPS page can't connect to plain ws:// (mixed content).
-        // Route through the WS proxy which bridges wss:// → ws://device.
-        url = `wss://${location.host}/proxy/${ip}`;
-      } else {
-        url = `ws://${ip}/ws`;
-      }
+      const url = buildWifiUrl(ip, location.protocol, location.host);
       connect(transportType, { url });
     } else {
       connect(transportType);
@@ -126,7 +129,7 @@ export function ConnectionOverlay() {
           disabled={isConnecting || (transportType === 'wifi' && !wifiIp.trim())}
         >
           {isConnecting ? (
-            <span className={styles.spinner}>Connecting…</span>
+            <span className={styles.spinner}>{connectingLabelFor(transportType)}</span>
           ) : (
             'Connect'
           )}

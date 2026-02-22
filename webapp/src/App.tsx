@@ -16,6 +16,15 @@ import styles from './styles/App.module.css';
 
 type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
 
+export function tabFromShortcut(key: string): Tab | null {
+  if (key === '1') return 'chat';
+  if (key === '2') return 'nodes';
+  if (key === '3') return 'map';
+  if (key === '4') return 'config';
+  if (key === '5') return 'stats';
+  return null;
+}
+
 const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
   { id: 'chat',   icon: <IconChat size={18} />,   label: 'Chat'   },
   { id: 'nodes',  icon: <IconNodes size={18} />,  label: 'Nodes'  },
@@ -67,6 +76,40 @@ export default function App() {
       showToast('Reconnected', 'success', 3000);
     }
   }, [connectionState, connectionError]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey) {
+        const tab = tabFromShortcut(e.key);
+        if (tab) {
+          e.preventDefault();
+          setActiveTab(tab);
+          return;
+        }
+      }
+
+      if (e.key === '/') {
+        const t = e.target as HTMLElement | null;
+        const tag = t?.tagName?.toLowerCase();
+        const editable = t?.getAttribute('contenteditable') === 'true';
+        if (tag === 'input' || tag === 'textarea' || editable) return;
+        const compose = document.querySelector('[aria-label="Message input"]') as HTMLTextAreaElement | null;
+        if (compose) {
+          e.preventDefault();
+          compose.focus();
+        }
+      }
+
+      if (e.key === 'Escape') {
+        const active = document.activeElement as HTMLElement | null;
+        active?.blur();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [setActiveTab]);
 
   // Show connection overlay for initial connect, not during auto-reconnect
   const showOverlay = connectionState !== 'connected' && connectionState !== 'error';

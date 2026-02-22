@@ -18,6 +18,7 @@
 #include "battery.h"
 #include "cJSON.h"
 
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -1633,13 +1634,18 @@ uint32_t mesh_send_probe(void) {
     bramble_header_serialize(&header, buf, HEADER_SIZE);
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
 
-    int rc = radio_transmit(buf, HEADER_SIZE + 4);
-    if (rc == 0) {
+    int sent_ok = 0;
+    for (int i = 0; i < 3; i++) {
+        int rc = radio_transmit(buf, HEADER_SIZE + 4);
+        if (rc == 0) sent_ok++;
+        if (i < 2) vTaskDelay(pdMS_TO_TICKS(90));
+    }
+    if (sent_ok > 0) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
         xSemaphoreGive(s_state_mutex);
     }
-    ESP_LOGI("mesh", "Probe sent: id=%08" PRIX32, pid);
+    ESP_LOGI("mesh", "Probe sent: id=%08" PRIX32 " tx=%d/3", pid, sent_ok);
     return pid;
 }
 
@@ -1661,6 +1667,12 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
              (int)rssi,
              (int)snr);
 
+    /* Ignore our own probe if it loops back through relays. */
+    if (src_addr == s_identity->address) {
+        ESP_LOGI(TAG, "PROBE RX ignored self-originated pid=%08" PRIX32, header.packet_id);
+        return;
+    }
+
     /* Send probe ACK back */
     uint8_t buf[20];
     bramble_header_t ack_header = {
@@ -1675,16 +1687,19 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
     buf[HEADER_SIZE + 4] = 1; /* hops = 1 for direct */
 
-    /* Stagger ACKs across nodes to reduce on-air collisions during probe fanout. */
-    uint32_t jitter_ms = 12 + (s_identity->address % 37);  /* 12..48 ms deterministic */
+    /* Stagger ACKs with a random jitter window (200..1400ms) so that two nearby nodes
+     * statistically avoid systematic collision (deterministic address-based jitter
+     * caused near-identical slots for adjacent nodes). */
+    uint32_t jitter_ms = 200 + (esp_random() % 1200);
     vTaskDelay(pdMS_TO_TICKS(jitter_ms));
 
-    /* Send ACK twice (with tiny spacing) to improve reliability under contention. */
-    radio_transmit(buf, HEADER_SIZE + 5);
-    vTaskDelay(pdMS_TO_TICKS(22));
-    radio_transmit(buf, HEADER_SIZE + 5);
+    /* Send ACK multiple times with spacing for better reliability on weak/asymmetric links. */
+    for (int i = 0; i < 5; i++) {
+        radio_transmit(buf, HEADER_SIZE + 5);
+        if (i < 4) vTaskDelay(pdMS_TO_TICKS(120));
+    }
 
-    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1 jitter=%" PRIu32 "ms x2",
+    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " to=%s from=%s hops=1 jitter=%" PRIu32 "ms x5",
              header.packet_id,
              addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
@@ -1708,19 +1723,31 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     bramble_header_t header;
     bramble_header_deserialize(&header, data, len);
 
-    char me_buf[12], dst_buf[12];
+    char dst_buf[12];
 
-    /* Only process if this ACK is for our probe */
+    /* If ACK is not for us, forward it (multi-hop probe result relay). */
+    if (header.dest_addr != s_identity->address) {
+        if (header.hop_limit > 1) {
+            bramble_header_t fwd = header;
+            fwd.hop_limit--;
+            uint8_t fwd_buf[BRAMBLE_MAX_PACKET_SIZE];
+            memcpy(fwd_buf, data, len);
+            bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
+            radio_transmit(fwd_buf, len);
+            ESP_LOGI(TAG, "PROBE ACK FWD pid=%08" PRIX32 " dest=%s hop=%u",
+                     header.packet_id,
+                     addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)),
+                     (unsigned)fwd.hop_limit);
+        } else {
+            ESP_LOGI(TAG, "PROBE ACK drop hop-limit pid=%08" PRIX32, header.packet_id);
+        }
+        return;
+    }
+
+    /* Only process if this ACK is for our active probe */
     if (header.packet_id != s_probe_id) {
         ESP_LOGI(TAG, "PROBE ACK RX ignored pid=%08" PRIX32 " expected=%08" PRIX32,
                  header.packet_id, s_probe_id);
-        return;
-    }
-    if (header.dest_addr != s_identity->address) {
-        ESP_LOGI(TAG, "PROBE ACK RX ignored wrong-dest=%s me=%s pid=%08" PRIX32,
-                 addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)),
-                 addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
-                 header.packet_id);
         return;
     }
 

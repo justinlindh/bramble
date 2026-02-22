@@ -151,7 +151,11 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
         )}
 
         {bytes > 0 && (
-          <div className={`${styles.counter} ${pkt.cls}`}>
+          <div
+            className={`${styles.counter} ${pkt.cls}`}
+            title="Messages over 200 bytes are split into multiple LoRa packets. They are reassembled automatically but may take longer on busy networks."
+            aria-label="Message size and fragmentation info"
+          >
             <span>{bytes}/{MAX_BYTES}</span>
             {pkt.label && <span className={styles.packetLabel}>{pkt.label}</span>}
           </div>
