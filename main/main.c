@@ -117,7 +117,7 @@ static void show_splash(void) {
     display_draw_text((DISPLAY_WIDTH - tag_w) / 2, div_y + 8, tag);
 
     /* Version centered */
-    const char *ver = "v0.1.0-dev";
+    const char *ver = "v0.2.0-dev";
     int ver_w = strlen(ver) * FONT_W;
     display_draw_text((DISPLAY_WIDTH - ver_w) / 2, div_y + 20, ver);
 
