@@ -2,8 +2,22 @@
 
 #include "packet.h"
 
+#define BROADCAST_RECEIPT_DELAY_BASE_MS      80u
+#define BROADCAST_RECEIPT_SLOT_SPACING_MS    45u
+#define BROADCAST_RECEIPT_SLOT_BUCKETS       7u
+#define BROADCAST_RECEIPT_RETRY_COUNT        2u
+
 bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr) {
     return dest_addr == 0xFFFFFFFFu;
+}
+
+uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id) {
+    uint32_t slot = (local_addr ^ original_packet_id) % BROADCAST_RECEIPT_SLOT_BUCKETS;
+    return BROADCAST_RECEIPT_DELAY_BASE_MS + (slot * BROADCAST_RECEIPT_SLOT_SPACING_MS);
+}
+
+uint8_t mesh_broadcast_receipt_retry_count(void) {
+    return BROADCAST_RECEIPT_RETRY_COUNT;
 }
 
 esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,

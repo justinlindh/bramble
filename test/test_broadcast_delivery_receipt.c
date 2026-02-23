@@ -13,6 +13,21 @@ void test_should_emit_only_for_broadcast_dest(void) {
     TEST_ASSERT_FALSE(mesh_should_emit_broadcast_delivery_receipt(0x01020304u));
 }
 
+void test_slot_delay_is_bounded_and_identity_sensitive(void) {
+    uint32_t d1 = mesh_broadcast_receipt_slot_delay_ms(0x01020304u, 0xCAFEBABEu);
+    uint32_t d2 = mesh_broadcast_receipt_slot_delay_ms(0x0A0B0C0Du, 0xCAFEBABEu);
+
+    TEST_ASSERT_TRUE(d1 >= 80u);
+    TEST_ASSERT_TRUE(d1 <= (80u + 45u * 6u));
+    TEST_ASSERT_TRUE(d2 >= 80u);
+    TEST_ASSERT_TRUE(d2 <= (80u + 45u * 6u));
+    TEST_ASSERT_NOT_EQUAL(d1, d2);
+}
+
+void test_retry_count_default_two_attempts(void) {
+    TEST_ASSERT_EQUAL_UINT8(2u, mesh_broadcast_receipt_retry_count());
+}
+
 void test_build_delivery_receipt_targets_original_sender_with_expected_fields(void) {
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     size_t wire_len = 0;
@@ -43,6 +58,8 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_should_emit_only_for_broadcast_dest);
+    RUN_TEST(test_slot_delay_is_bounded_and_identity_sensitive);
+    RUN_TEST(test_retry_count_default_two_attempts);
     RUN_TEST(test_build_delivery_receipt_targets_original_sender_with_expected_fields);
     return UNITY_END();
 }
