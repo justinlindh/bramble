@@ -36,6 +36,17 @@ Expected: node still appears (typically `1/3` confidence), no parsing failures.
 
 Expected: bounded, predictable airtime and completion timing.
 
+### E) Heltec V4 GNSS bring-up gate (when origin or responders include Heltec V4)
+1. Run the board bring-up flow in `docs/heltec-v4-gnss-bringup.md` (build/flash/monitor + status checks).
+2. Confirm `bramble.getStatus` returns `"hardware":"heltec_v4"` on V4 node(s).
+3. Confirm sweep probe behavior remains stable with V4 in the mesh (no panics, completion observed).
+4. If GNSS UART mapping is still pending in board config, record GNSS validation as pending (do not claim fix acquisition pass).
+5. If GNSS UART mapping is enabled and validated, run `bramble.getGpsPosition` checks from the bring-up doc and record first-fix timing.
+
+Expected:
+- Network reach sweep behavior remains valid with Heltec V4 present.
+- GNSS claims are marked according to actual hardware validation state.
+
 ## Evidence to attach in wrap-up
 - Trace artifacts (`tmp/probe-trace-*.jsonl`)
 - Before/after table for N runs:
@@ -43,6 +54,7 @@ Expected: bounded, predictable airtime and completion timing.
   - min/max responders
   - % runs with full expected set
 - Example per-origin output for all 3 nodes.
+- If Heltec V4 used: attach bring-up evidence per `docs/heltec-v4-gnss-bringup.md`.
 
 ## Pass criteria
 - No self responders.
@@ -50,3 +62,5 @@ Expected: bounded, predictable airtime and completion timing.
 - Completion always observed.
 - Confidence rendered and coherent with trace evidence.
 - Consistency metrics improve vs single-shot baseline.
+- If Heltec V4 participates: `"hardware":"heltec_v4"` observed in status evidence.
+- GNSS acceptance marked pass only when hardware-validated; otherwise explicitly marked pending.
