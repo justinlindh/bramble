@@ -18,6 +18,7 @@ typedef enum {
     EVT_GENERATE_MESSAGE,
     EVT_METRICS_TICK,
     EVT_TICK_NODE,          /* per-node periodic tick */
+    EVT_BROADCAST_DELIVERY, /* synthetic bramble.onBroadcastDelivery notification */
 } event_type_t;
 
 /* Packet event data */
@@ -52,6 +53,13 @@ typedef struct {
     uint32_t tick_seq;      /* monotonically increasing per-node */
 } tick_event_data_t;
 
+/* Synthetic broadcast delivery telemetry event data */
+typedef struct {
+    char packet_id[16];
+    char recipient[16];
+    uint8_t hop_count;
+} broadcast_delivery_event_data_t;
+
 /* Event structure */
 typedef struct {
     uint64_t timestamp_us;
@@ -61,6 +69,7 @@ typedef struct {
         node_event_data_t     node;
         interference_event_data_t interference;
         tick_event_data_t     tick;
+        broadcast_delivery_event_data_t broadcast_delivery;
         uint32_t              timer_id;
     } data;
 } sim_event_t;

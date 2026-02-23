@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"bramble-sim/websocket"
 )
 
 // SimState represents the simulation state machine.
@@ -51,15 +53,16 @@ func (s SimState) String() string {
 
 // Command is a message from the WebSocket handler (or CLI) to the sim goroutine.
 type Command struct {
-	Type     string  `json:"type"`
-	Scenario string  `json:"scenario,omitempty"`
-	Value    float64 `json:"value,omitempty"`
-	NodeID   string  `json:"node_id,omitempty"`
-	X        float32 `json:"x,omitempty"`
-	Y        float32 `json:"y,omitempty"`
-	Src      string  `json:"src,omitempty"`
-	Dest     string  `json:"dest,omitempty"`
-	Radius   float32 `json:"radius,omitempty"`
+	Type          string  `json:"type"`
+	Scenario      string  `json:"scenario,omitempty"`
+	Value         float64 `json:"value,omitempty"`
+	NodeID        string  `json:"node_id,omitempty"`
+	X             float32 `json:"x,omitempty"`
+	Y             float32 `json:"y,omitempty"`
+	Src           string  `json:"src,omitempty"`
+	Dest          string  `json:"dest,omitempty"`
+	Radius        float32 `json:"radius,omitempty"`
+	TelemetryMode string  `json:"telemetry_mode,omitempty"`
 }
 
 // Sim is the core simulation engine.
@@ -84,31 +87,33 @@ type Sim struct {
 	simAtStart uint64
 
 	// Pipe for capturing C stdout output
-	pipeR       *os.File
-	pipeW       *os.File
-	origStdout  int // saved original stdout fd
+	pipeR      *os.File
+	pipeW      *os.File
+	origStdout int // saved original stdout fd
 
 	nextAddr uint32
 
-	cmdCh       chan Command
-	stopCh      chan struct{}
-	broadcast   func([]byte)
-	scenarioDir  string
-	lastScenario string
-	headless    bool
+	cmdCh                  chan Command
+	stopCh                 chan struct{}
+	broadcast              func([]byte)
+	scenarioDir            string
+	lastScenario           string
+	headless               bool
+	broadcastTelemetryMode string
 }
 
 // NewSim creates a new simulation engine.
 func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, error) {
 	s := &Sim{
-		state:       StateIdle,
-		speed:       1.0,
-		nextAddr:    0x1000,
-		cmdCh:       make(chan Command, 64),
-		stopCh:      make(chan struct{}),
-		broadcast:   broadcast,
-		scenarioDir: scenarioDir,
-		headless:    headless,
+		state:                  StateIdle,
+		speed:                  1.0,
+		nextAddr:               0x1000,
+		cmdCh:                  make(chan Command, 64),
+		stopCh:                 make(chan struct{}),
+		broadcast:              broadcast,
+		scenarioDir:            scenarioDir,
+		headless:               headless,
+		broadcastTelemetryMode: "full",
 	}
 
 	// Initialize bridge-level state
@@ -214,6 +219,8 @@ func (s *Sim) handleCommand(cmd Command) {
 		s.cmdSendMessage(cmd)
 	case "interference":
 		s.cmdInterference(cmd)
+	case "set_broadcast_telemetry_mode":
+		s.cmdSetBroadcastTelemetryMode(cmd)
 	default:
 		log.Printf("unknown command: %s", cmd.Type)
 	}
@@ -408,25 +415,25 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 	metricsUpdateActiveNodes(&s.metrics, active)
 
 	s.emitJSON(map[string]interface{}{
-		"type":          "metrics",
-		"timestamp_us":  ts,
-		"active_nodes":  active,
-		"total_packets": uint64(s.metrics.total_packets),
-		"messages_sent":      uint64(s.metrics.messages_sent),
-		"delivered":          uint64(s.metrics.delivered_packets),
-		"dropped":            uint64(s.metrics.dropped_packets),
-		"retried":            uint64(s.metrics.messages_retried),
-		"delivered_on_retry": uint64(s.metrics.messages_delivered_retry),
-		"dedup_dropped":      uint64(s.metrics.dedup_dropped),
-		"airtime_deferred":   uint64(s.metrics.airtime_deferred),
-		"fragments_sent":     uint64(s.metrics.fragments_sent),
+		"type":                  "metrics",
+		"timestamp_us":          ts,
+		"active_nodes":          active,
+		"total_packets":         uint64(s.metrics.total_packets),
+		"messages_sent":         uint64(s.metrics.messages_sent),
+		"delivered":             uint64(s.metrics.delivered_packets),
+		"dropped":               uint64(s.metrics.dropped_packets),
+		"retried":               uint64(s.metrics.messages_retried),
+		"delivered_on_retry":    uint64(s.metrics.messages_delivered_retry),
+		"dedup_dropped":         uint64(s.metrics.dedup_dropped),
+		"airtime_deferred":      uint64(s.metrics.airtime_deferred),
+		"fragments_sent":        uint64(s.metrics.fragments_sent),
 		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
-		"reassembly_timeout": uint64(s.metrics.reassembly_timeout),
-		"crypto_encrypted":   uint64(s.metrics.crypto_encrypted),
-		"crypto_decrypted":   uint64(s.metrics.crypto_decrypted),
-		"crypto_auth_failed": uint64(s.metrics.crypto_auth_failed),
-		"avg_latency_ms": metricsAvgLatencyMs(&s.metrics),
-		"delivery_rate":  metricsDeliveryRate(&s.metrics),
+		"reassembly_timeout":    uint64(s.metrics.reassembly_timeout),
+		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
+		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
+		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
+		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
+		"delivery_rate":         metricsDeliveryRate(&s.metrics),
 	})
 
 	// Check black holes
@@ -497,7 +504,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 			"type": "node_joined", "timestamp_us": 0,
 			"node": C.GoString(&node.id[0]),
 			"addr": fmt.Sprintf("0x%08X", node.addr),
-			"x": node.x, "y": node.y,
+			"x":    node.x, "y": node.y,
 		})
 	}
 
@@ -506,7 +513,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 
 	// Broadcast config + sim_ready
 	s.emitJSON(map[string]interface{}{
-		"type": "config",
+		"type":        "config",
 		"radio_range": s.radio._range,
 		"duration_us": s.duration,
 	})
@@ -675,6 +682,20 @@ func (s *Sim) cmdInterference(cmd Command) {
 	eventQueuePush(&s.events, &evt)
 }
 
+func (s *Sim) cmdSetBroadcastTelemetryMode(cmd Command) {
+	mode := strings.ToLower(strings.TrimSpace(cmd.TelemetryMode))
+	switch mode {
+	case "", "full", "recipient_only", "off":
+		if mode == "" {
+			s.broadcastTelemetryMode = "full"
+		} else {
+			s.broadcastTelemetryMode = mode
+		}
+	default:
+		log.Printf("invalid broadcast telemetry mode: %q", cmd.TelemetryMode)
+	}
+}
+
 func (s *Sim) complete() {
 	s.state = StateCompleted
 
@@ -687,28 +708,28 @@ func (s *Sim) complete() {
 	}
 
 	s.emitJSON(map[string]interface{}{
-		"type":           "final_metrics",
-		"total_packets":  uint64(s.metrics.total_packets),
-		"messages_sent":      sent,
-		"delivered":          delivered,
-		"dropped":            dropped,
-		"undelivered":        undelivered,
-		"retried":            uint64(s.metrics.messages_retried),
-		"delivered_on_retry": uint64(s.metrics.messages_delivered_retry),
-		"dedup_dropped":      uint64(s.metrics.dedup_dropped),
-		"airtime_deferred":   uint64(s.metrics.airtime_deferred),
-		"fragments_sent":     uint64(s.metrics.fragments_sent),
+		"type":                  "final_metrics",
+		"total_packets":         uint64(s.metrics.total_packets),
+		"messages_sent":         sent,
+		"delivered":             delivered,
+		"dropped":               dropped,
+		"undelivered":           undelivered,
+		"retried":               uint64(s.metrics.messages_retried),
+		"delivered_on_retry":    uint64(s.metrics.messages_delivered_retry),
+		"dedup_dropped":         uint64(s.metrics.dedup_dropped),
+		"airtime_deferred":      uint64(s.metrics.airtime_deferred),
+		"fragments_sent":        uint64(s.metrics.fragments_sent),
 		"fragments_reassembled": uint64(s.metrics.fragments_reassembled),
-		"reassembly_timeout": uint64(s.metrics.reassembly_timeout),
-		"crypto_encrypted":   uint64(s.metrics.crypto_encrypted),
-		"crypto_decrypted":   uint64(s.metrics.crypto_decrypted),
-		"crypto_auth_failed": uint64(s.metrics.crypto_auth_failed),
-		"beacons_sent":       uint64(s.metrics.beacons_sent),
-		"rreqs_sent":         uint64(s.metrics.rreqs_sent),
-		"rreps_sent":         uint64(s.metrics.rreps_sent),
-		"avg_latency_ms": metricsAvgLatencyMs(&s.metrics),
-		"delivery_rate":  metricsDeliveryRate(&s.metrics),
-		"control_airtime_pct": metricsControlAirtimePct(&s.metrics),
+		"reassembly_timeout":    uint64(s.metrics.reassembly_timeout),
+		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
+		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
+		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
+		"beacons_sent":          uint64(s.metrics.beacons_sent),
+		"rreqs_sent":            uint64(s.metrics.rreqs_sent),
+		"rreps_sent":            uint64(s.metrics.rreps_sent),
+		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
+		"delivery_rate":         metricsDeliveryRate(&s.metrics),
+		"control_airtime_pct":   metricsControlAirtimePct(&s.metrics),
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ended"})
 }
@@ -754,6 +775,16 @@ func (s *Sim) readPipe() {
 		}
 		if s.headless {
 			syscall.Write(s.origStdout, out)
+		}
+
+		if delivery, ok := websocket.BuildBroadcastDeliveryNotification(line, s.broadcastTelemetryMode); ok {
+			delivery = append(delivery, '\n')
+			if s.broadcast != nil {
+				s.broadcast(delivery)
+			}
+			if s.headless {
+				syscall.Write(s.origStdout, delivery)
+			}
 		}
 	}
 }
