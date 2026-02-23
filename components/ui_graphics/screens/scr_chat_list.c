@@ -1,5 +1,6 @@
 #include "scr_chat_list.h"
 #include "theme/bramble_theme.h"
+#include "chat_unread.h"
 #include "msg_store.h"
 #include "esp_log.h"
 #include <stdio.h>
@@ -9,8 +10,10 @@ static const char *TAG = "scr_chat";
 
 /* Forward declare — message view and new screens */
 extern void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx);
+extern void scr_chat_messages_open_dm(bramble_layout_t *layout, uint32_t peer_addr);
 extern int mesh_get_channel_count(void);
 extern const char *mesh_get_channel_name(int index);
+extern const char *mesh_get_peer_name(uint32_t addr);
 extern void scr_chat_compose_open(bramble_layout_t *layout);
 extern void scr_channel_create_open(bramble_layout_t *layout);
 
@@ -34,6 +37,13 @@ static void msg_item_click_cb(lv_event_t *e) {
     extern bramble_layout_t *s_layout;
     scr_chat_messages_open(s_layout, channel_idx);
 }
+
+static void dm_item_click_cb(lv_event_t *e) {
+    uint32_t peer_addr = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    extern bramble_layout_t *s_layout;
+    scr_chat_messages_open_dm(s_layout, peer_addr);
+}
+
 
 void scr_chat_list_create(bramble_layout_t *layout) {
     lv_obj_t *cont = layout_get_content(layout);
@@ -132,7 +142,71 @@ void scr_chat_list_create(bramble_layout_t *layout) {
         lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
+        int unread = chat_unread_count_for_channel(ch);
+        if (unread > 0) {
+            lv_obj_t *badge = lv_obj_create(card);
+            lv_obj_set_size(badge, 26, 18);
+            lv_obj_align(badge, LV_ALIGN_RIGHT_MID, 0, 0);
+            lv_obj_set_style_bg_color(badge, BR_COLOR_PRIMARY, 0);
+            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(badge, 9, 0);
+            lv_obj_set_style_border_width(badge, 0, 0);
+            lv_obj_set_style_pad_all(badge, 0, 0);
+            lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_obj_t *badge_lbl = lv_label_create(badge);
+            lv_label_set_text_fmt(badge_lbl, "%d", unread);
+            lv_obj_set_style_text_font(badge_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(badge_lbl, lv_color_white(), 0);
+            lv_obj_center(badge_lbl);
+        }
+
         lv_obj_add_event_cb(card, msg_item_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ch);
+    }
+
+    /* DM conversations (peer-based) */
+    uint32_t dm_peers[6];
+    int dm_count = 0;
+    int msg_count = msg_store_count();
+    for (int i = 0; i < msg_count && dm_count < 6; i++) {
+        const stored_msg_t *m = msg_store_get(i);
+        if (!m) continue;
+        if (m->direction != MSG_DIR_INCOMING && m->direction != MSG_DIR_OUTGOING) continue;
+
+        bool exists = false;
+        for (int j = 0; j < dm_count; j++) {
+            if (dm_peers[j] == m->peer_addr) { exists = true; break; }
+        }
+        if (!exists) dm_peers[dm_count++] = m->peer_addr;
+    }
+
+    for (int i = 0; i < dm_count; i++) {
+        lv_obj_t *card = lv_obj_create(list);
+        lv_obj_set_width(card, LV_PCT(100));
+        lv_obj_set_height(card, 36);
+        lv_obj_set_style_bg_color(card, BR_COLOR_SURFACE, 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(card, BR_RADIUS, 0);
+        lv_obj_set_style_border_width(card, 0, 0);
+        lv_obj_set_style_pad_all(card, 6, 0);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+        lv_obj_t *lbl = lv_label_create(card);
+        const char *peer_name = mesh_get_peer_name(dm_peers[i]);
+        static char dm_buf[48];
+        if (peer_name && peer_name[0]) {
+            snprintf(dm_buf, sizeof(dm_buf), "@ %s", peer_name);
+        } else {
+            snprintf(dm_buf, sizeof(dm_buf), "@ %08lX", (unsigned long)dm_peers[i]);
+        }
+        lv_label_set_text(lbl, dm_buf);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+        lv_obj_add_event_cb(card, dm_item_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)dm_peers[i]);
+        if (g) lv_group_add_obj(g, card);
     }
 
     lv_obj_t *hint = lv_label_create(list);

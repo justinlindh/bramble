@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
+import { IconLock } from '../../components/Icons';
 import { encodeChannelShare } from '../../utils/channelShare';
+import { removeChannel } from '../../store/actions';
 import styles from './ChannelDetailPanel.module.css';
 
 interface ChannelDetailPanelProps {
@@ -11,6 +13,7 @@ interface ChannelDetailPanelProps {
 
 export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanelProps) {
   const channels = useStore(s => s.config?.channels ?? []);
+  const setActiveConversation = useStore(s => s.setActiveConversation);
   const ch = channels.find(c => c.index === channelIndex);
 
   const [showShare, setShowShare] = useState(false);
@@ -43,6 +46,14 @@ export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanel
     setPsk('');
   };
 
+  const handleLeaveChannel = async () => {
+    if (ch.index === 0) return;
+    if (!confirm(`Leave channel "${ch.name}"?`)) return;
+    await removeChannel(ch.index);
+    setActiveConversation('broadcast');
+    onClose();
+  };
+
   return (
     <div className={styles.panel}>
       <button className={styles.backBtn} onClick={onClose}>← Back to chat</button>
@@ -60,7 +71,7 @@ export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanel
         <div className={styles.row}>
           <span className={styles.label}>Security</span>
           <span className={styles.value}>
-            {ch.hasPsk ? '🔒 Pre-shared key (PSK)' : '🔓 Open (no PSK)'}
+            {ch.hasPsk ? <><IconLock size={14} /> Pre-shared key (PSK)</> : 'Open (no PSK)'}
           </span>
         </div>
         <div className={styles.row}>
@@ -73,6 +84,11 @@ export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanel
         <button className={styles.shareBtn} onClick={handleShare}>
           Share Channel
         </button>
+        {ch.index > 0 && (
+          <button className={styles.cancelBtn} onClick={handleLeaveChannel}>
+            Leave Channel
+          </button>
+        )}
       </div>
 
       {/* PSK prompt */}

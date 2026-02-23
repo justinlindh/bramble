@@ -199,16 +199,17 @@ static int handle_ping(const cJSON *params, cJSON *result) {
 /* True max with fragmentation: 154 * 4 = 616 bytes */
 #define FRAGMENTED_MAX_BYTES       (FRAGMENT_PAYLOAD_BYTES * MAX_FRAGMENTS)
 
-/* bramble.sendMessage — params: {"dest":"HEXADDR", "text":"..."} */
+/* bramble.sendMessage — params: {"dest":"HEXADDR", "text":"...", "channel"?:N} */
 static int handle_send_message(const cJSON *params, cJSON *result) {
     const char *dest_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dest"));
     const char *text     = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
+    cJSON *channel_j     = cJSON_GetObjectItem(params, "channel");
     if (!dest_str || !text) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
     size_t text_len = strlen(text);
-    
+
     /* Enforce true fragmented maximum */
     if (text_len > FRAGMENTED_MAX_BYTES) {
         cJSON_AddStringToObject(result, "error", "message too long");
@@ -219,18 +220,41 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
     }
 
     uint32_t dest = (uint32_t)strtoul(dest_str, NULL, 16);
-    uint32_t pkt_id = mesh_send_message(dest, (const uint8_t *)text, text_len);
-    if (pkt_id == 0) {
-        ESP_LOGW(TAG, "mesh_send_message to %08" PRIX32 " failed", dest);
-        cJSON_AddStringToObject(result, "error", "send failed");
-        return RPC_ERR_RADIO;
+    uint32_t pkt_id = 0;
+
+    if (channel_j && cJSON_IsNumber(channel_j)) {
+        int ch = channel_j->valueint;
+        if (ch < 0 || ch >= mesh_get_channel_count()) {
+            cJSON_AddStringToObject(result, "error", "invalid channel");
+            return RPC_ERR_INVALID_PARAMS;
+        }
+
+        /* Backward compatibility alias used by webapp channel conversations. */
+        if (dest == 0xFFFFFFFE) {
+            dest = 0xFFFFFFFF;
+        }
+
+        pkt_id = mesh_send_channel(ch, dest, (const uint8_t *)text, text_len);
+        if (pkt_id == 0) {
+            ESP_LOGW(TAG, "mesh_send_channel ch=%d to %08" PRIX32 " failed", ch, dest);
+            cJSON_AddStringToObject(result, "error", "send failed");
+            return RPC_ERR_RADIO;
+        }
+        cJSON_AddNumberToObject(result, "channel", ch);
+    } else {
+        pkt_id = mesh_send_message(dest, (const uint8_t *)text, text_len);
+        if (pkt_id == 0) {
+            ESP_LOGW(TAG, "mesh_send_message to %08" PRIX32 " failed", dest);
+            cJSON_AddStringToObject(result, "error", "send failed");
+            return RPC_ERR_RADIO;
+        }
     }
 
     char pkt_id_str[12];
     snprintf(pkt_id_str, sizeof(pkt_id_str), "%08" PRIX32, pkt_id);
     cJSON_AddStringToObject(result, "packetId", pkt_id_str);
     cJSON_AddStringToObject(result, "status", "sent");
-    
+
     /* Add fragmentation metadata */
     bool will_fragment = text_len > SINGLE_PACKET_MAX_BYTES;
     cJSON_AddBoolToObject(result, "fragmented", will_fragment);
@@ -240,7 +264,7 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
     }
     cJSON_AddNumberToObject(result, "max_bytes", (double)FRAGMENTED_MAX_BYTES);
     cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
-    
+
     return 0;
 }
 
@@ -759,32 +783,32 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     cJSON_AddStringToObject(radio, "profile", "custom");
     cJSON_AddItemToObject(result, "radio", radio);
 
-    /* Channel list — read from mesh task */
-    int ch_count = mesh_get_channel_count();
+    /* Channel list — read from mesh runtime state */
+    int default_channel = 0;
+    int ch_count = mesh_get_channel_info(&default_channel);
     cJSON *channels = cJSON_CreateArray();
-
-    /* Read channel names from NVS */
-    nvs_handle_t ch_nvs;
-    bool ch_nvs_open = (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) == ESP_OK);
 
     for (int i = 0; i < ch_count; i++) {
         cJSON *ch = cJSON_CreateObject();
-        char ch_name[20] = "";
-        if (i == 0) {
-            strcpy(ch_name, "public");
-        } else if (ch_nvs_open) {
-            char key[20];
-            snprintf(key, sizeof(key), "ch%d_name", i);
-            size_t len = sizeof(ch_name);
-            if (nvs_get_str(ch_nvs, key, ch_name, &len) != ESP_OK)
-                snprintf(ch_name, sizeof(ch_name), "channel_%d", i);
+        const char *ch_name = mesh_get_channel_name(i);
+        bool has_psk = false;
+        uint16_t epoch = 0;
+        mesh_get_channel_security(i, &has_psk, &epoch);
+
+        char fallback[20];
+        if (!ch_name || ch_name[0] == '\0') {
+            snprintf(fallback, sizeof(fallback), "channel_%d", i);
+            ch_name = fallback;
         }
+
         cJSON_AddStringToObject(ch, "name", ch_name);
         cJSON_AddNumberToObject(ch, "id", i);
-        cJSON_AddBoolToObject(ch, "is_default", i == 0);
+        cJSON_AddBoolToObject(ch, "is_default", i == default_channel);
+        cJSON_AddBoolToObject(ch, "hasPsk", has_psk);
+        cJSON_AddNumberToObject(ch, "epoch", epoch);
         cJSON_AddItemToArray(channels, ch);
     }
-    if (ch_nvs_open) nvs_close(ch_nvs);
+
     cJSON_AddItemToObject(result, "channels", channels);
 
     return 0;

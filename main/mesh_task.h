@@ -87,6 +87,12 @@ int mesh_get_channel_count(void);
 const char *mesh_get_channel_name(int index);
 
 /**
+ * Returns whether channel is PSK-protected and current key epoch.
+ * Returns 0 on success, -1 for invalid index.
+ */
+int mesh_get_channel_security(int index, bool *has_psk, uint16_t *epoch);
+
+/**
  * Set default channel index for unicast send routing.
  * Broadcast always uses the public channel (index 0).
  * Returns 0 on success.

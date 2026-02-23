@@ -1,0 +1,31 @@
+Bramble
+Connected
+•
+Node2
+Disconnect
+Chat
+Nodes
+Map
+Config
+Stats
+Broadcast
+
+CHANNELS
+
+butts
+channel_2
+channel_3
+channel_4
+channel_5
+
+DIRECT MESSAGES
+
+No conversations yet
+
+ Broadcast
+All nodes in range
+⇆
+
+Broadcast messages will appear here. All nodes in range will receive them.
+
+ Broadcast

@@ -16,22 +16,24 @@ static const char *TAG = "ui_gfx";
 bramble_layout_t *s_layout = NULL;  /* NOT static — screens need access */
 
 static lv_display_t *s_display = NULL;
-static volatile uint32_t s_pending_events = 0;
+static uint32_t s_pending_events = 0;
+static uint32_t s_pending_msg_received = 0;
 static int s_unread_count = 0;
-static int s_last_msg_count = 0;
 
-static void process_new_message_unread(void) {
+static void process_new_message_unread(uint32_t arrivals) {
     int count = msg_store_count();
-    if (count < s_last_msg_count) {
-        s_last_msg_count = count;
+    if (count <= 0 || arrivals == 0) {
+        return;
     }
 
-    for (int i = s_last_msg_count; i < count; i++) {
+    /* Process newest N messages, clamped to store depth for ring-buffer safety. */
+    int to_process = (arrivals > (uint32_t)count) ? count : (int)arrivals;
+    int start = count - to_process;
+
+    for (int i = start; i < count; i++) {
         const stored_msg_t *msg = msg_store_get(i);
         chat_unread_mark_for_message(msg);
     }
-
-    s_last_msg_count = count;
 }
 
 /* Timer callbacks for periodic refresh */
@@ -42,11 +44,11 @@ static void status_refresh_timer_cb(lv_timer_t *timer) {
     }
     
     /* Check for pending notifications from other tasks */
-    uint32_t events = s_pending_events;
-    s_pending_events = 0;
-    
-    if (events & UI_EVT_MSG_RECEIVED) {
-        process_new_message_unread();
+    uint32_t events = __atomic_exchange_n(&s_pending_events, 0, __ATOMIC_ACQ_REL);
+    uint32_t msg_received = __atomic_exchange_n(&s_pending_msg_received, 0, __ATOMIC_ACQ_REL);
+
+    if ((events & UI_EVT_MSG_RECEIVED) && msg_received > 0) {
+        process_new_message_unread(msg_received);
 
         if (s_layout) {
             if (s_layout->active_tab == TAB_CHAT) {
@@ -113,7 +115,8 @@ int ui_graphics_init(void) {
     lv_init();
 
     s_unread_count = 0;
-    s_last_msg_count = msg_store_count();
+    __atomic_store_n(&s_pending_events, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_pending_msg_received, 0, __ATOMIC_RELEASE);
     chat_unread_reset();
     
     lv_display_t *disp = lv_port_display_init();
@@ -139,7 +142,11 @@ uint32_t ui_graphics_tick(void) {
 }
 
 void ui_graphics_notify(uint32_t event_mask) {
-    s_pending_events |= event_mask;  /* Atomic on ESP32 */
+    __atomic_fetch_or(&s_pending_events, event_mask, __ATOMIC_RELEASE);
+
+    if (event_mask & UI_EVT_MSG_RECEIVED) {
+        __atomic_add_fetch(&s_pending_msg_received, 1, __ATOMIC_RELEASE);
+    }
 }
 
 void ui_graphics_clear_unread(void) {

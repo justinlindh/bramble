@@ -448,12 +448,14 @@ function handleAck(params: unknown): void {
 
 function handleIncomingMessage(params: unknown): void {
   const p = params as any;
+  console.log('[handleIncomingMessage] Raw params:', JSON.stringify(p, null, 2));
   const fromAddr = typeof p.from === 'string' ? parseInt(p.from, 16) : (p.from ?? 0);
   const toAddr = typeof p.to === 'string' ? parseInt(p.to, 16) : (p.to ?? 0);
   const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
   // A message is a broadcast only if toAddr is 0xFFFFFFFF.
   // rawChannel === -1 just means "not a channel message" (could be DM or broadcast).
   const isBroadcast = p.broadcast === true || toAddr === 0xFFFFFFFF;
+  console.log('[handleIncomingMessage] Parsed:', { fromAddr, toAddr, rawChannel, isBroadcast });
   const store = useStore.getState();
   const msg = {
     id: p.msgId ?? `rt-${Date.now()}`,
@@ -466,6 +468,7 @@ function handleIncomingMessage(params: unknown): void {
     timestampMs: Date.now(),
     status: 'delivered' as const,
   };
+  console.log('[handleIncomingMessage] Message object:', msg);
   store.addMessage(msg);
   messageDb.saveMessage(msg).catch(() => {});
 }
