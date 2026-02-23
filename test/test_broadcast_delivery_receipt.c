@@ -17,10 +17,10 @@ void test_slot_delay_is_bounded_and_identity_sensitive(void) {
     uint32_t d1 = mesh_broadcast_receipt_slot_delay_ms(0x01020304u, 0xCAFEBABEu);
     uint32_t d2 = mesh_broadcast_receipt_slot_delay_ms(0x0A0B0C0Du, 0xCAFEBABEu);
 
-    TEST_ASSERT_TRUE(d1 >= 120u);
-    TEST_ASSERT_TRUE(d1 <= (120u + 70u * 8u));
-    TEST_ASSERT_TRUE(d2 >= 120u);
-    TEST_ASSERT_TRUE(d2 <= (120u + 70u * 8u));
+    TEST_ASSERT_TRUE(d1 >= 180u);
+    TEST_ASSERT_TRUE(d1 <= (180u + 140u * 15u));
+    TEST_ASSERT_TRUE(d2 >= 180u);
+    TEST_ASSERT_TRUE(d2 <= (180u + 140u * 15u));
     TEST_ASSERT_NOT_EQUAL(d1, d2);
 }
 
