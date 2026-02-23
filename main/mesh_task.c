@@ -52,12 +52,6 @@ static const char *TAG = "mesh";
 /* Forward declarations */
 static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 
-/* location.c internal helpers used by policy TX path */
-int location_serialize_for_tier(const bramble_position_t *pos,
-                                uint8_t tier,
-                                uint8_t *buf,
-                                size_t buf_len);
-
 /* ── Configuration ──────────────────────────────────────────────────── */
 
 #define BEACON_INTERVAL_MS      60000   /* 60 seconds between beacons (A/B test) */

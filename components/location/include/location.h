@@ -85,6 +85,11 @@ int location_serialize_full(const bramble_position_t *pos, uint8_t *buf, size_t 
 int location_deserialize_full(const uint8_t *buf, size_t len, bramble_position_t *pos);
 int location_serialize_coarse(const bramble_position_t *pos, uint8_t *buf, size_t buf_len);
 int location_deserialize_coarse(const uint8_t *buf, size_t len, bramble_position_t *pos);
+int location_serialize_presence(const bramble_position_t *pos, uint8_t *buf, size_t buf_len);
+int location_serialize_for_tier(const bramble_position_t *pos,
+                                uint8_t tier,
+                                uint8_t *buf,
+                                size_t buf_len);
 
 /* Cache */
 int location_cache_update(location_manager_t *mgr, uint32_t peer_addr,
