@@ -4,6 +4,7 @@
 #include <math.h>
 
 static location_manager_t mgr;
+extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 void setUp(void) { location_init(&mgr); }
 void tearDown(void) {}
@@ -235,6 +236,42 @@ void test_location_policy_should_send_allowed_send(void) {
     TEST_ASSERT_TRUE(location_policy_should_send(&policy, true, true, 61000, 1000));
 }
 
+void test_location_deserialize_for_tier_full_coarse_presence(void) {
+    bramble_position_t full = {
+        .latitude_e7 = 374220000,
+        .longitude_e7 = -1220840000,
+        .altitude_m = 9,
+        .accuracy_m = 7,
+        .speed_kmh = 3,
+        .heading_deg2 = 30,
+        .timestamp = 1234,
+        .valid = true,
+    };
+
+    uint8_t full_buf[LOCATION_FULL_SIZE];
+    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE, location_serialize_full(&full, full_buf, sizeof(full_buf)));
+
+    bramble_position_t out = {0};
+    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE,
+                      location_deserialize_for_tier(full_buf, sizeof(full_buf), LOCATION_TIER_FULL, &out));
+    TEST_ASSERT_EQUAL(full.latitude_e7, out.latitude_e7);
+    TEST_ASSERT_EQUAL(full.longitude_e7, out.longitude_e7);
+
+    uint8_t coarse_buf[LOCATION_COARSE_SIZE];
+    TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE, location_serialize_coarse(&full, coarse_buf, sizeof(coarse_buf)));
+    memset(&out, 0, sizeof(out));
+    TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE,
+                      location_deserialize_for_tier(coarse_buf, sizeof(coarse_buf), LOCATION_TIER_COARSE, &out));
+    TEST_ASSERT_TRUE(out.valid);
+
+    uint8_t presence_buf[LOCATION_PRESENCE_SIZE];
+    TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE, location_serialize_presence(&full, presence_buf, sizeof(presence_buf)));
+    memset(&out, 0, sizeof(out));
+    TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE,
+                      location_deserialize_for_tier(presence_buf, sizeof(presence_buf), LOCATION_TIER_PRESENCE, &out));
+    TEST_ASSERT_TRUE(out.valid);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_location_serialize_full_roundtrip);
@@ -251,5 +288,6 @@ int main(void) {
     RUN_TEST(test_location_policy_should_send_no_target);
     RUN_TEST(test_location_policy_should_send_interval_not_reached);
     RUN_TEST(test_location_policy_should_send_allowed_send);
+    RUN_TEST(test_location_deserialize_for_tier_full_coarse_presence);
     return UNITY_END();
 }

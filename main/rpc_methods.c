@@ -48,6 +48,18 @@ static const char *bramble_hardware(void) {
     return "unknown";
 }
 
+typedef struct __attribute__((packed)) {
+    int32_t latitude_e7;
+    int32_t longitude_e7;
+    int16_t altitude_m;
+    uint8_t accuracy_m;
+    uint8_t speed_kmh;
+    uint8_t heading_deg2;
+    uint32_t timestamp;
+    uint32_t received_ms;
+    uint8_t tier;
+} persisted_peer_location_t;
+
 /* ── Utility ────────────────────────────────────────────────────────── */
 
 static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
@@ -834,10 +846,38 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
         nvs_close(nvs);
     }
 
-    /* TODO: add received peer locations — pending peer location protocol integration.
-     * Location component (components/location) exists with cache API, but mesh_task.c
-     * does not yet handle PKT_TYPE_LOCATION packets or maintain a location_manager_t.
-     * Once integrated, use location_cache_get() to retrieve peer positions here. */
+    /* Include received peer locations persisted by mesh location RX path. */
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
+        while (it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+
+            if (strncmp(info.key, "lp_", 3) == 0) {
+                persisted_peer_location_t stored = {0};
+                size_t len = sizeof(stored);
+                if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK && len == sizeof(stored)) {
+                    cJSON *peer = cJSON_CreateObject();
+                    cJSON_AddStringToObject(peer, "address", info.key + 3);
+                    cJSON_AddNumberToObject(peer, "lat", stored.latitude_e7 / 1e7);
+                    cJSON_AddNumberToObject(peer, "lon", stored.longitude_e7 / 1e7);
+                    cJSON_AddStringToObject(peer, "tier", location_tier_to_string(stored.tier));
+                    cJSON_AddBoolToObject(peer, "is_self", false);
+                    cJSON_AddNumberToObject(peer, "timestamp", stored.timestamp);
+                    cJSON_AddNumberToObject(peer, "freshness_ms",
+                        (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0);
+                    cJSON_AddItemToArray(peers, peer);
+                }
+            }
+
+            it = nvs_entry_next(it);
+        }
+
+        nvs_close(nvs);
+    }
+
     return 0;
 }
 

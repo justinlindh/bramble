@@ -163,6 +163,19 @@ static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
 /* Location policy engine tick state */
 static uint32_t s_location_last_policy_tick_ms = 0;
 static uint32_t s_location_last_send_ms = 0;
+static location_manager_t s_location_mgr;
+
+typedef struct __attribute__((packed)) {
+    int32_t latitude_e7;
+    int32_t longitude_e7;
+    int16_t altitude_m;
+    uint8_t accuracy_m;
+    uint8_t speed_kmh;
+    uint8_t heading_deg2;
+    uint32_t timestamp;
+    uint32_t received_ms;
+    uint8_t tier;
+} persisted_peer_location_t;
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
@@ -177,6 +190,7 @@ static int transmit_packet(const uint8_t *buf, uint8_t len);
 static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
+extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
     snprintf(buf, len, "%08" PRIX32, addr);
@@ -298,6 +312,70 @@ static void mesh_send_location_updates(uint32_t t,
     }
 
     nvs_close(nvs);
+}
+
+static void mesh_persist_peer_location(uint32_t peer_addr,
+                                       const bramble_position_t *pos,
+                                       uint8_t tier,
+                                       uint32_t now_ms) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+
+    char key[16];
+    snprintf(key, sizeof(key), "lp_%08" PRIX32, peer_addr);
+
+    persisted_peer_location_t stored = {
+        .latitude_e7 = pos->latitude_e7,
+        .longitude_e7 = pos->longitude_e7,
+        .altitude_m = pos->altitude_m,
+        .accuracy_m = pos->accuracy_m,
+        .speed_kmh = pos->speed_kmh,
+        .heading_deg2 = pos->heading_deg2,
+        .timestamp = pos->timestamp,
+        .received_ms = now_ms,
+        .tier = tier,
+    };
+
+    nvs_set_blob(nvs, key, &stored, sizeof(stored));
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    if (len < HEADER_SIZE + 4 + LOCATION_PRESENCE_SIZE) {
+        ESP_LOGW(TAG, "Location packet too short: %u", len);
+        return;
+    }
+
+    bramble_header_t header;
+    if (bramble_header_deserialize(&header, data, len) != ESP_OK) {
+        return;
+    }
+
+    uint32_t src_addr = 0;
+    memcpy(&src_addr, data + HEADER_SIZE, 4);
+    if (src_addr == s_identity->address) {
+        return;
+    }
+
+    uint8_t tier = (uint8_t)((header.flags >> FLAG_TIER_SHIFT) & 0x03);
+    const uint8_t *payload = data + HEADER_SIZE + 4;
+    size_t payload_len = len - HEADER_SIZE - 4;
+
+    bramble_position_t pos = {0};
+    if (location_deserialize_for_tier(payload, payload_len, tier, &pos) <= 0) {
+        ESP_LOGW(TAG, "Failed to parse location payload from %08" PRIX32 " tier=%u", src_addr, tier);
+        return;
+    }
+
+    uint32_t t = now_ms();
+    location_cache_update(&s_location_mgr, src_addr, &pos, t);
+    mesh_persist_peer_location(src_addr, &pos, tier, t);
+
+    ESP_LOGI(TAG, "RX location from %08" PRIX32 " tier=%u RSSI:%d SNR:%d", src_addr, tier, rssi, snr);
+    rpc_notify("bramble.onPeerLocation", NULL);
 }
 
 static void mesh_location_policy_tick(uint32_t t) {
@@ -1325,6 +1403,11 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
         break;
+    case PKT_TYPE_LOCATION:
+        if (header.dest_addr == s_identity->address || header.dest_addr == 0xFFFFFFFF) {
+            handle_location(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        }
+        break;
     case PKT_TYPE_PROBE:
         handle_probe(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
@@ -2288,6 +2371,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
     reassembly_init(&s_reassembly);
+    location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
