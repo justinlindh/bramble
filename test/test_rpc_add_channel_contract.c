@@ -2,6 +2,7 @@
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
+#include <string.h>
 
 extern char g_last_channel_name[64];
 extern unsigned char g_last_channel_psk[128];
@@ -25,17 +26,17 @@ void setUp(void) {
 
 void tearDown(void) {}
 
-void test_add_channel_forwards_name_and_psk_to_mesh_add_channel(void) {
+void test_add_channel_forwards_name_and_passphrase_psk_to_mesh_add_channel(void) {
     char response[512];
-    const char *req = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.addChannel\",\"params\":{\"name\":\"ops-room\",\"psk\":\"00112233445566778899AABBCCDDEEFF\"}}";
+    const char *req = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.addChannel\",\"params\":{\"name\":\"ops-room\",\"psk\":\"meshpass42\"}}";
 
     int len = rpc_dispatch(req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
     TEST_ASSERT_EQUAL(1, g_mesh_add_channel_calls);
     TEST_ASSERT_EQUAL_STRING("ops-room", g_last_channel_name);
-    TEST_ASSERT_EQUAL_UINT32(16, g_last_channel_psk_len);
-    TEST_ASSERT_EQUAL_UINT8(0x00, g_last_channel_psk[0]);
-    TEST_ASSERT_EQUAL_UINT8(0x11, g_last_channel_psk[1]);
+    TEST_ASSERT_EQUAL_UINT32(strlen("meshpass42"), g_last_channel_psk_len);
+    TEST_ASSERT_EQUAL_UINT8('m', g_last_channel_psk[0]);
+    TEST_ASSERT_EQUAL_UINT8('e', g_last_channel_psk[1]);
 
     cJSON *j = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(j);
@@ -47,6 +48,6 @@ void test_add_channel_forwards_name_and_psk_to_mesh_add_channel(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_add_channel_forwards_name_and_psk_to_mesh_add_channel);
+    RUN_TEST(test_add_channel_forwards_name_and_passphrase_psk_to_mesh_add_channel);
     return UNITY_END();
 }
