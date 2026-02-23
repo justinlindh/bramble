@@ -142,6 +142,27 @@ int location_deserialize_coarse(const uint8_t *buf, size_t len, bramble_position
     return LOCATION_COARSE_SIZE;
 }
 
+int location_serialize_presence(const bramble_position_t *pos, uint8_t *buf, size_t buf_len) {
+    if (buf_len < LOCATION_PRESENCE_SIZE) return -1;
+    buf[0] = (pos && pos->valid) ? 1 : 0;
+    return LOCATION_PRESENCE_SIZE;
+}
+
+int location_serialize_for_tier(const bramble_position_t *pos,
+                                uint8_t tier,
+                                uint8_t *buf,
+                                size_t buf_len) {
+    switch (tier) {
+        case LOCATION_TIER_FULL:
+            return location_serialize_full(pos, buf, buf_len);
+        case LOCATION_TIER_PRESENCE:
+            return location_serialize_presence(pos, buf, buf_len);
+        case LOCATION_TIER_COARSE:
+        default:
+            return location_serialize_coarse(pos, buf, buf_len);
+    }
+}
+
 int location_cache_update(location_manager_t *mgr, uint32_t peer_addr,
                           const bramble_position_t *pos, uint32_t now_ms) {
     /* Update existing */
