@@ -19,6 +19,7 @@
 #include "battery.h"
 #include "traffic_debug.h"
 #include "fragment.h"
+#include "location.h"
 #include "cJSON.h"
 
 #include "esp_random.h"
@@ -159,6 +160,10 @@ typedef struct {
 } mailbox_entry_t;
 static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
 
+/* Location policy engine tick state */
+static uint32_t s_location_last_policy_tick_ms = 0;
+static uint32_t s_location_last_send_ms = 0;
+
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
 /* Forward declarations */
@@ -190,6 +195,73 @@ static uint32_t next_packet_id(void) {
         counter = (uint32_t)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
     }
     return counter++;
+}
+
+static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t *policy) {
+    location_policy_set_defaults(policy);
+
+    uint8_t enabled = 0;
+    if (nvs_get_u8(nvs, "enabled", &enabled) == ESP_OK) {
+        policy->enabled = (enabled != 0);
+    }
+
+    uint16_t interval_s = 0;
+    if (nvs_get_u16(nvs, "interval_s", &interval_s) == ESP_OK) {
+        policy->interval_s = interval_s;
+    }
+
+    char tier[16] = {0};
+    size_t tier_len = sizeof(tier);
+    if (nvs_get_str(nvs, "def_tier", tier, &tier_len) == ESP_OK) {
+        policy->default_tier = location_tier_from_string(tier);
+    }
+
+    location_policy_normalize(policy);
+}
+
+static bool location_policy_has_targets(void) {
+    nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
+    while (it != NULL) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        if (strncmp(info.key, "lc_", 3) == 0) {
+            nvs_release_iterator(it);
+            return true;
+        }
+        it = nvs_entry_next(it);
+    }
+    return false;
+}
+
+static void mesh_location_policy_tick(uint32_t t) {
+    const uint32_t tick_ms = 1000;
+    if ((t - s_location_last_policy_tick_ms) < tick_ms) {
+        return;
+    }
+    s_location_last_policy_tick_ms = t;
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+
+    location_policy_t policy;
+    location_policy_load_or_defaults(nvs, &policy);
+
+    int32_t lat_e6 = 0;
+    int32_t lon_e6 = 0;
+    bool has_source = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
+                      (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
+                      !(lat_e6 == 0 && lon_e6 == 0);
+    nvs_close(nvs);
+
+    bool has_targets = location_policy_has_targets();
+
+    if (location_policy_should_send(&policy, has_source, has_targets, t, s_location_last_send_ms)) {
+        /* TX wiring is added in later task; this gate is now centralized and exercised periodically. */
+        s_location_last_send_ms = t;
+        ESP_LOGI(TAG, "Location policy tick: eligible to send (tx path pending integration)");
+    }
 }
 
 static void mesh_persist_channel_psk_flags(void) {
@@ -1727,6 +1799,8 @@ static void mesh_task(void *param) {
         if (queued_pid != 0) {
             mesh_start_probe_sweep(queued_pid);
         }
+
+        mesh_location_policy_tick(t);
 
         /* Perform all periodic maintenance tasks */
         mesh_periodic_maintenance(t, &last_beacon_ms, &beacon_interval, &last_purge_ms);

@@ -222,6 +222,22 @@ void location_policy_normalize(location_policy_t *policy) {
     policy->interval_s = location_policy_clamp_interval_s(policy->interval_s);
 }
 
+bool location_policy_should_send(const location_policy_t *policy,
+                                 bool has_source,
+                                 bool has_targets,
+                                 uint32_t now_ms,
+                                 uint32_t last_sent_ms) {
+    if (!policy || !policy->enabled) return false;
+    if (!has_source || !has_targets) return false;
+
+    uint32_t interval_ms = (uint32_t)location_policy_clamp_interval_s(policy->interval_s) * 1000U;
+    if (last_sent_ms != 0 && (now_ms - last_sent_ms) < interval_ms) {
+        return false;
+    }
+
+    return true;
+}
+
 bool location_should_send(const location_manager_t *mgr, uint32_t peer_addr, uint32_t now_ms) {
     for (int i = 0; i < mgr->contact_count; i++) {
         if (mgr->contacts[i].peer_addr == peer_addr && mgr->contacts[i].active) {

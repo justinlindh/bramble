@@ -185,6 +185,56 @@ void test_location_should_send_distance(void) {
     TEST_ASSERT_TRUE(location_should_send(&mgr, 0x20, 1500));
 }
 
+void test_location_policy_should_send_disabled(void) {
+    location_policy_t policy = {
+        .enabled = false,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, true, 1000, 0));
+}
+
+void test_location_policy_should_send_no_source(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, false, true, 1000, 0));
+}
+
+void test_location_policy_should_send_no_target(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, false, 1000, 0));
+}
+
+void test_location_policy_should_send_interval_not_reached(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = 60,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, true, 59000, 1000));
+}
+
+void test_location_policy_should_send_allowed_send(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = 60,
+    };
+
+    TEST_ASSERT_TRUE(location_policy_should_send(&policy, true, true, 61000, 1000));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_location_serialize_full_roundtrip);
@@ -196,5 +246,10 @@ int main(void) {
     RUN_TEST(test_location_policy_interval_floor);
     RUN_TEST(test_location_should_send_time);
     RUN_TEST(test_location_should_send_distance);
+    RUN_TEST(test_location_policy_should_send_disabled);
+    RUN_TEST(test_location_policy_should_send_no_source);
+    RUN_TEST(test_location_policy_should_send_no_target);
+    RUN_TEST(test_location_policy_should_send_interval_not_reached);
+    RUN_TEST(test_location_policy_should_send_allowed_send);
     return UNITY_END();
 }
