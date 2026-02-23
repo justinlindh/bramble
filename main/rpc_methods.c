@@ -453,18 +453,43 @@ static int handle_set_node_name(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-/* bramble.addChannel — stub: params {"name":"...", "psk":"hexkey"} */
+/* bramble.addChannel — params {"name":"...", "psk":"hexkey"} */
+static int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+}
+
 static int handle_add_channel(const cJSON *params, cJSON *result) {
     if (!params) return RPC_ERR_INVALID_PARAMS;
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
     const char *psk = cJSON_GetStringValue(cJSON_GetObjectItem(params, "psk"));
-    if (!name || strlen(name) == 0 || strlen(name) > 16) {
+    if (!name || strlen(name) == 0 || strlen(name) > 19) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
-    int idx = mesh_add_channel(name,
-                               psk ? (const uint8_t *)psk : NULL,
-                               psk ? strlen(psk) : 0);
+    uint8_t psk_bytes[32];
+    const uint8_t *psk_ptr = NULL;
+    size_t psk_len = 0;
+    if (psk && psk[0] != '\0') {
+        size_t hex_len = strlen(psk);
+        if ((hex_len % 2) != 0 || hex_len > sizeof(psk_bytes) * 2) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        for (size_t i = 0; i < hex_len; i += 2) {
+            int hi = hex_nibble(psk[i]);
+            int lo = hex_nibble(psk[i + 1]);
+            if (hi < 0 || lo < 0) {
+                return RPC_ERR_INVALID_PARAMS;
+            }
+            psk_bytes[i / 2] = (uint8_t)((hi << 4) | lo);
+        }
+        psk_ptr = psk_bytes;
+        psk_len = hex_len / 2;
+    }
+
+    int idx = mesh_add_channel(name, psk_ptr, psk_len);
     if (idx < 0) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "channel limit reached");
