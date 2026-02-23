@@ -137,6 +137,27 @@ void test_location_should_send_time(void) {
     TEST_ASSERT_TRUE(location_should_send(&mgr, 0x10, 1000 + LOCATION_DEFAULT_INTERVAL_MS));
 }
 
+void test_location_policy_defaults(void) {
+    location_policy_t policy;
+    location_policy_set_defaults(&policy);
+
+    TEST_ASSERT_FALSE(policy.enabled);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, policy.default_tier);
+    TEST_ASSERT_EQUAL(LOCATION_DEFAULT_INTERVAL_S, policy.interval_s);
+}
+
+void test_location_policy_interval_floor(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_FULL,
+        .interval_s = (uint16_t)(LOCATION_MIN_INTERVAL_S - 1)
+    };
+
+    location_policy_normalize(&policy);
+
+    TEST_ASSERT_EQUAL(LOCATION_MIN_INTERVAL_S, policy.interval_s);
+}
+
 void test_location_should_send_distance(void) {
     location_add_contact(&mgr, 0x20, LOCATION_TIER_FULL);
     location_contact_t *c = location_find_contact(&mgr, 0x20);
@@ -171,6 +192,8 @@ int main(void) {
     RUN_TEST(test_location_coarse_precision);
     RUN_TEST(test_location_contact_management);
     RUN_TEST(test_location_cache);
+    RUN_TEST(test_location_policy_defaults);
+    RUN_TEST(test_location_policy_interval_floor);
     RUN_TEST(test_location_should_send_time);
     RUN_TEST(test_location_should_send_distance);
     return UNITY_END();
