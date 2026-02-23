@@ -88,8 +88,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ret;
     }
 
-    if (rx_frame.len == 0) {
-        /* Ping or empty frame */
+    if (rx_frame.len == 0 && rx_frame.type == HTTPD_WS_TYPE_TEXT) {
         return ESP_OK;
     }
 
@@ -120,9 +119,30 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    if (rx_frame.type == HTTPD_WS_TYPE_PING) {
+        httpd_ws_frame_t pong = {
+            .final = true,
+            .fragmented = false,
+            .type = HTTPD_WS_TYPE_PONG,
+            .payload = rx_frame.payload,
+            .len = rx_frame.len,
+        };
+        ret = httpd_ws_send_frame(req, &pong);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "ws_send_pong failed: %d", ret);
+        }
+        free(buf);
+        return ret;
+    }
+
+    if (rx_frame.type == HTTPD_WS_TYPE_PONG) {
+        free(buf);
+        return ESP_OK;
+    }
+
     if (rx_frame.type != HTTPD_WS_TYPE_TEXT) {
         free(buf);
-        return ESP_OK; /* ignore binary / ping frames */
+        return ESP_OK; /* ignore binary/other control frames */
     }
 
     ESP_LOGD(TAG, "WS RX: %s", (char *)buf);

@@ -324,12 +324,16 @@ add_executable(test_dummy_traffic
     test_dummy_traffic.c
     unity/unity.c
     stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_dummy_traffic PRIVATE
     stubs
+    ${OPENSSL_ROOT}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
+target_link_libraries(test_dummy_traffic ssl crypto)
 
 # Beacon routes tests
 add_executable(test_beacon_routes
