@@ -6,9 +6,14 @@
 #include "sleep_manager.h"
 #include "board_config.h"
 #include "ui.h"
+#include "location_settings_ui.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 static const char *TAG = "scr_settings";
 
@@ -89,6 +94,143 @@ static void sleep_timeout_changed_cb(lv_event_t *e) {
         snprintf(buf, sizeof(buf), "%ds", val);
         lv_label_set_text(s_sleep_timeout_label, buf);
     }
+}
+
+/* ── Location sharing controls ───────────────────────────────────────── */
+
+static lv_obj_t *s_loc_share_sw = NULL;
+static lv_obj_t *s_loc_tier_dd = NULL;
+static lv_obj_t *s_loc_interval_dd = NULL;
+static lv_obj_t *s_loc_source_lbl = NULL;
+static lv_obj_t *s_loc_last_share_lbl = NULL;
+static location_ui_state_t s_loc_state;
+
+static void location_ui_load_state(location_ui_state_t *st) {
+    if (!st) return;
+
+    st->sharing_enabled = false;
+    st->tier = LOCATION_UI_TIER_COARSE;
+    st->interval_s = LOCATION_UI_INTERVAL_5_MIN;
+    st->source = LOCATION_UI_SOURCE_HYBRID;
+    st->last_share_epoch_s = 0;
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) return;
+
+    uint8_t enabled = 0;
+    if (nvs_get_u8(nvs, "enabled", &enabled) == ESP_OK) st->sharing_enabled = (enabled != 0);
+
+    uint16_t interval_s = 0;
+    if (nvs_get_u16(nvs, "interval_s", &interval_s) == ESP_OK) {
+        if (interval_s == LOCATION_UI_INTERVAL_1_MIN || interval_s == LOCATION_UI_INTERVAL_5_MIN ||
+            interval_s == LOCATION_UI_INTERVAL_15_MIN || interval_s == LOCATION_UI_INTERVAL_60_MIN) {
+            st->interval_s = interval_s;
+        }
+    }
+
+    char tier[16] = {0};
+    size_t tier_len = sizeof(tier);
+    if (nvs_get_str(nvs, "def_tier", tier, &tier_len) == ESP_OK) {
+        if (strcmp(tier, "exact") == 0 || strcmp(tier, "full") == 0) st->tier = LOCATION_UI_TIER_FULL;
+        else if (strcmp(tier, "presence") == 0) st->tier = LOCATION_UI_TIER_PRESENCE;
+        else st->tier = LOCATION_UI_TIER_COARSE;
+    }
+
+    char source[16] = {0};
+    size_t source_len = sizeof(source);
+    if (nvs_get_str(nvs, "source", source, &source_len) == ESP_OK) {
+        if (strcmp(source, "gps") == 0) st->source = LOCATION_UI_SOURCE_GPS;
+        else if (strcmp(source, "manual") == 0) st->source = LOCATION_UI_SOURCE_MANUAL;
+        else st->source = LOCATION_UI_SOURCE_HYBRID;
+    }
+
+    uint32_t last_share = 0;
+    if (nvs_get_u32(nvs, "last_share_s", &last_share) == ESP_OK) st->last_share_epoch_s = last_share;
+
+    nvs_close(nvs);
+}
+
+static void location_ui_save_state(const location_ui_state_t *st) {
+    if (!st) return;
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) return;
+
+    nvs_set_u8(nvs, "enabled", st->sharing_enabled ? 1 : 0);
+    nvs_set_u16(nvs, "interval_s", st->interval_s);
+
+    const char *tier = "coarse";
+    if (st->tier == LOCATION_UI_TIER_FULL) tier = "exact";
+    else if (st->tier == LOCATION_UI_TIER_PRESENCE) tier = "presence";
+    nvs_set_str(nvs, "def_tier", tier);
+
+    const char *source = "hybrid";
+    if (st->source == LOCATION_UI_SOURCE_GPS) source = "gps";
+    else if (st->source == LOCATION_UI_SOURCE_MANUAL) source = "manual";
+    nvs_set_str(nvs, "source", source);
+
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+static uint16_t location_interval_from_dropdown(uint16_t selected) {
+    switch (selected) {
+        case 0: return LOCATION_UI_INTERVAL_1_MIN;
+        case 1: return LOCATION_UI_INTERVAL_5_MIN;
+        case 2: return LOCATION_UI_INTERVAL_15_MIN;
+        case 3: return LOCATION_UI_INTERVAL_60_MIN;
+        default: return LOCATION_UI_INTERVAL_5_MIN;
+    }
+}
+
+static uint16_t location_interval_to_dropdown(uint16_t interval_s) {
+    switch (interval_s) {
+        case LOCATION_UI_INTERVAL_1_MIN: return 0;
+        case LOCATION_UI_INTERVAL_5_MIN: return 1;
+        case LOCATION_UI_INTERVAL_15_MIN: return 2;
+        case LOCATION_UI_INTERVAL_60_MIN: return 3;
+        default: return 1;
+    }
+}
+
+static void location_refresh_status_labels(void) {
+    if (s_loc_source_lbl) {
+        lv_label_set_text_fmt(s_loc_source_lbl, "%s", location_ui_source_label(s_loc_state.source));
+    }
+    if (s_loc_last_share_lbl) {
+        char buf[24];
+        uint32_t now_s = (uint32_t)time(NULL);
+        location_ui_format_last_share(buf, sizeof(buf), s_loc_state.last_share_epoch_s, now_s);
+        lv_label_set_text(s_loc_last_share_lbl, buf);
+    }
+}
+
+static void location_share_changed_cb(lv_event_t *e) {
+    bool enabled = lv_obj_has_state(lv_event_get_target(e), LV_STATE_CHECKED);
+    location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_SET_SHARING, enabled ? 1 : 0);
+    location_ui_save_state(&s_loc_state);
+}
+
+static void location_tier_changed_cb(lv_event_t *e) {
+    uint16_t sel = lv_dropdown_get_selected(lv_event_get_target(e));
+    location_ui_tier_t tier = LOCATION_UI_TIER_COARSE;
+    if (sel == 0) tier = LOCATION_UI_TIER_COARSE;
+    else if (sel == 1) tier = LOCATION_UI_TIER_FULL;
+    else if (sel == 2) tier = LOCATION_UI_TIER_PRESENCE;
+    location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_SET_TIER, tier);
+    location_ui_save_state(&s_loc_state);
+}
+
+static void location_interval_changed_cb(lv_event_t *e) {
+    uint16_t interval_s = location_interval_from_dropdown(lv_dropdown_get_selected(lv_event_get_target(e)));
+    location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_SET_INTERVAL, interval_s);
+    location_ui_save_state(&s_loc_state);
+}
+
+static void location_panic_off_cb(lv_event_t *e) {
+    (void)e;
+    location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_PANIC_OFF, 0);
+    location_ui_save_state(&s_loc_state);
+    if (s_loc_share_sw) lv_obj_clear_state(s_loc_share_sw, LV_STATE_CHECKED);
 }
 
 /* ── Connectivity mode toggle ────────────────────────────────────────── */
@@ -365,6 +507,76 @@ void scr_settings_create(bramble_layout_t *layout) {
         lv_obj_set_style_opa(s_sleep_timeout_label, LV_OPA_40, 0);
     }
     if (g) lv_group_add_obj(g, s_sleep_timeout_slider);
+
+    /* ── Location Sharing ── */
+    location_ui_load_state(&s_loc_state);
+
+    lv_obj_t *sep_loc = lv_obj_create(cont);
+    lv_obj_set_size(sep_loc, 296, 1);
+    lv_obj_set_style_bg_color(sep_loc, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_bg_opa(sep_loc, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(sep_loc, 0, 0);
+
+    lv_obj_t *loc_section_lbl = lv_label_create(cont);
+    lv_label_set_text(loc_section_lbl, LV_SYMBOL_GPS " Location Sharing");
+    lv_obj_set_style_text_font(loc_section_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(loc_section_lbl, BR_COLOR_TEXT, 0);
+
+    lv_obj_t *loc_share_row = create_setting_row(cont, "Share Location");
+    s_loc_share_sw = lv_switch_create(loc_share_row);
+    lv_obj_align(s_loc_share_sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s_loc_share_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_loc_share_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_loc_share_sw, BR_COLOR_TEXT, LV_PART_KNOB);
+    if (s_loc_state.sharing_enabled) lv_obj_add_state(s_loc_share_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_loc_share_sw, location_share_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) lv_group_add_obj(g, s_loc_share_sw);
+
+    lv_obj_t *loc_tier_row = create_setting_row(cont, "Privacy Tier");
+    s_loc_tier_dd = lv_dropdown_create(loc_tier_row);
+    lv_dropdown_set_options(s_loc_tier_dd, "Coarse\nExact\nPresence");
+    lv_obj_set_size(s_loc_tier_dd, 130, 34);
+    lv_obj_align(s_loc_tier_dd, LV_ALIGN_RIGHT_MID, 0, 0);
+    uint16_t tier_idx = 0;
+    if (s_loc_state.tier == LOCATION_UI_TIER_FULL) tier_idx = 1;
+    else if (s_loc_state.tier == LOCATION_UI_TIER_PRESENCE) tier_idx = 2;
+    lv_dropdown_set_selected(s_loc_tier_dd, tier_idx);
+    lv_obj_add_event_cb(s_loc_tier_dd, location_tier_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) lv_group_add_obj(g, s_loc_tier_dd);
+
+    lv_obj_t *loc_interval_row = create_setting_row(cont, "Interval");
+    s_loc_interval_dd = lv_dropdown_create(loc_interval_row);
+    lv_dropdown_set_options(s_loc_interval_dd, "1 min\n5 min\n15 min\n60 min");
+    lv_obj_set_size(s_loc_interval_dd, 130, 34);
+    lv_obj_align(s_loc_interval_dd, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_dropdown_set_selected(s_loc_interval_dd, location_interval_to_dropdown(s_loc_state.interval_s));
+    lv_obj_add_event_cb(s_loc_interval_dd, location_interval_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g) lv_group_add_obj(g, s_loc_interval_dd);
+
+    lv_obj_t *loc_source_row = create_setting_row(cont, "Active Source");
+    s_loc_source_lbl = lv_label_create(loc_source_row);
+    lv_obj_set_style_text_color(s_loc_source_lbl, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(s_loc_source_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_align(s_loc_source_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    lv_obj_t *loc_last_row = create_setting_row(cont, "Last Share");
+    s_loc_last_share_lbl = lv_label_create(loc_last_row);
+    lv_obj_set_style_text_color(s_loc_last_share_lbl, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_font(s_loc_last_share_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_align(s_loc_last_share_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    location_refresh_status_labels();
+
+    lv_obj_t *panic_btn = lv_btn_create(cont);
+    lv_obj_set_size(panic_btn, 304, BR_TAP_TARGET_MIN);
+    lv_obj_set_style_bg_color(panic_btn, BR_COLOR_DANGER, 0);
+    lv_obj_set_style_radius(panic_btn, BR_RADIUS, 0);
+    lv_obj_t *panic_lbl = lv_label_create(panic_btn);
+    lv_label_set_text(panic_lbl, LV_SYMBOL_WARNING " Panic Off Location Sharing");
+    lv_obj_set_style_text_font(panic_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_center(panic_lbl);
+    lv_obj_add_event_cb(panic_btn, location_panic_off_cb, LV_EVENT_CLICKED, NULL);
+    if (g) lv_group_add_obj(g, panic_btn);
 
     /* ── Connectivity Mode ── */
     {

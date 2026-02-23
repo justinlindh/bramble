@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "../components/ui/ui_manager.c"
 #include "../components/ui/ui_format.c"
+#include "../components/ui_graphics/include/location_settings_ui.h"
 
 static ui_state_t state;
 
@@ -208,6 +209,55 @@ void test_conn_mode_resolve_boot_normalizes_legacy_both(void) {
     TEST_ASSERT_EQUAL(CONN_MODE_WIFI, conn_mode_resolve_boot(CONN_MODE_BOTH, true));
 }
 
+void test_location_ui_actions_toggle_tier_interval(void) {
+    location_ui_state_t st = {
+        .sharing_enabled = false,
+        .tier = LOCATION_UI_TIER_COARSE,
+        .interval_s = LOCATION_UI_INTERVAL_5_MIN,
+        .source = LOCATION_UI_SOURCE_HYBRID,
+        .last_share_epoch_s = 0,
+    };
+
+    location_ui_apply_action(&st, LOCATION_UI_ACTION_SET_SHARING, 1);
+    TEST_ASSERT_TRUE(st.sharing_enabled);
+
+    location_ui_apply_action(&st, LOCATION_UI_ACTION_SET_TIER, LOCATION_UI_TIER_FULL);
+    TEST_ASSERT_EQUAL(LOCATION_UI_TIER_FULL, st.tier);
+
+    location_ui_apply_action(&st, LOCATION_UI_ACTION_SET_INTERVAL, LOCATION_UI_INTERVAL_15_MIN);
+    TEST_ASSERT_EQUAL(LOCATION_UI_INTERVAL_15_MIN, st.interval_s);
+
+    location_ui_apply_action(&st, LOCATION_UI_ACTION_SET_SOURCE, LOCATION_UI_SOURCE_GPS);
+    TEST_ASSERT_EQUAL(LOCATION_UI_SOURCE_GPS, st.source);
+}
+
+void test_location_ui_panic_off_disables_sharing(void) {
+    location_ui_state_t st = {
+        .sharing_enabled = true,
+        .tier = LOCATION_UI_TIER_FULL,
+        .interval_s = LOCATION_UI_INTERVAL_1_MIN,
+        .source = LOCATION_UI_SOURCE_GPS,
+    };
+
+    location_ui_apply_action(&st, LOCATION_UI_ACTION_PANIC_OFF, 0);
+    TEST_ASSERT_FALSE(st.sharing_enabled);
+    TEST_ASSERT_EQUAL(LOCATION_UI_TIER_FULL, st.tier);
+    TEST_ASSERT_EQUAL(LOCATION_UI_INTERVAL_1_MIN, st.interval_s);
+}
+
+void test_location_ui_status_indicators(void) {
+    char last_share[32];
+    location_ui_format_last_share(last_share, sizeof(last_share), 1000, 1120);
+    TEST_ASSERT_EQUAL_STRING("2m ago", last_share);
+
+    location_ui_format_last_share(last_share, sizeof(last_share), 0, 1120);
+    TEST_ASSERT_EQUAL_STRING("never", last_share);
+
+    TEST_ASSERT_EQUAL_STRING("GPS", location_ui_source_label(LOCATION_UI_SOURCE_GPS));
+    TEST_ASSERT_EQUAL_STRING("Manual", location_ui_source_label(LOCATION_UI_SOURCE_MANUAL));
+    TEST_ASSERT_EQUAL_STRING("Hybrid", location_ui_source_label(LOCATION_UI_SOURCE_HYBRID));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -234,5 +284,8 @@ int main(void) {
     RUN_TEST(test_trackball_settings_edit_navigation);
     RUN_TEST(test_trackball_settings_edit_confirm_with_select);
     RUN_TEST(test_trackball_settings_edit_cancel_with_left);
+    RUN_TEST(test_location_ui_actions_toggle_tier_interval);
+    RUN_TEST(test_location_ui_panic_off_disables_sharing);
+    RUN_TEST(test_location_ui_status_indicators);
     return UNITY_END();
 }
