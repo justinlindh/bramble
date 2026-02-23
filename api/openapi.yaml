@@ -1181,10 +1181,16 @@ components:
 
     SendBroadcastResponse:
       type: object
-      required: [message_id, status, broadcast, channel, fragmented, max_bytes, actual_bytes]
+      required: [message_id, broadcastId, packetId, status, broadcast, channel, fragmented, max_bytes, actual_bytes]
       properties:
         message_id:
           type: string
+        broadcastId:
+          type: string
+          description: Broadcast identifier used to correlate broadcast delivery telemetry.
+        packetId:
+          type: string
+          description: Packet ID as uppercase hex string for the queued broadcast packet.
         status:
           type: string
           enum: [sent]
@@ -1363,6 +1369,34 @@ components:
           type: integer
           description: Minimum time (seconds) between mode transitions (hysteresis).
 
+    BroadcastDeliveryNotification:
+      type: object
+      description: Delivery telemetry notification for a previously queued broadcast packet.
+      required: [broadcastId, packetId, from, to, status, hopCount, deliveredAtMs]
+      properties:
+        broadcastId:
+          type: string
+          description: Broadcast identifier returned by bramble.sendBroadcast.
+        packetId:
+          type: string
+          description: Packet ID returned by bramble.sendBroadcast for correlation.
+        from:
+          type: string
+          description: Origin node address as 8-char uppercase hex.
+        to:
+          type: string
+          description: Broadcast destination address (typically FFFFFFFF).
+        status:
+          type: string
+          description: Delivery state for this telemetry event.
+          enum: [delivered, failed]
+        hopCount:
+          type: integer
+          description: Number of hops taken for delivery.
+        deliveredAtMs:
+          type: integer
+          description: Unix timestamp in milliseconds when the event was emitted.
+
     # ── Traffic Debug Types ────────────────────────────────────────────────
 
     SetTrafficDebugParams:
@@ -1521,6 +1555,14 @@ x-notifications:
       the packetId returned by bramble.sendMessage.
     payload:
       $ref: '#/components/schemas/OnAckPayload'
+
+  bramble.onBroadcastDelivery:
+    description: >
+      Broadcast delivery telemetry event emitted after bramble.sendBroadcast.
+      Correlate using both broadcastId and packetId from SendBroadcastResponse.
+      One broadcast may produce multiple delivery notifications.
+    payload:
+      $ref: '#/components/schemas/BroadcastDeliveryNotification'
 
   bramble.onNeighborChange:
     description: >
