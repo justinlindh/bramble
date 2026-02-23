@@ -423,7 +423,7 @@ static int handle_set_radio(const cJSON *params, cJSON *result) {
 /* bramble.setNodeName — params: {"name":"..."} — persists to NVS */
 static int handle_set_node_name(const cJSON *params, cJSON *result) {
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
-    if (!name || strlen(name) == 0 || strlen(name) > 32) {
+    if (!name || strlen(name) == 0 || strlen(name) > BRAMBLE_NODE_NAME_MAX) {
         return RPC_ERR_INVALID_PARAMS;
     }
 

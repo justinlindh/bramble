@@ -78,7 +78,7 @@ static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
-static char                s_node_name[17] = "";  /* loaded from NVS at startup */
+static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* loaded from NVS at startup */
 
 /* Routing state */
 static routing_table_t            s_routes;

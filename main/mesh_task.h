@@ -11,6 +11,8 @@
 #include "airtime_budget.h"
 #include "traffic_debug.h"
 
+#define BRAMBLE_NODE_NAME_MAX 32
+
 /* Shared mesh state — protected by mutex, read by UI task */
 typedef struct {
     neighbor_table_t neighbors;

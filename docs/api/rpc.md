@@ -1,30 +1,31 @@
 # Bramble RPC API Notes
 
-## `bramble.sendBroadcast` response telemetry fields
+## WebSocket RPC endpoint
 
-`bramble.sendBroadcast` returns `SendBroadcastResponse` with correlation fields for delivery telemetry:
+Bramble JSON-RPC over WebSocket uses the `/ws` endpoint.
 
-- `broadcastId` (string): stable broadcast identifier for the logical broadcast send.
-- `packetId` (string): packet identifier for the queued outbound broadcast packet.
+- Example: `ws://192.168.4.1/ws`
+- OpenAPI `/rpc/...` paths are documentation/codegen mappings, not a WebSocket URI.
 
-Clients should persist both values and use them to correlate subsequent broadcast delivery notifications.
+## `bramble.sendBroadcast` response fields
+
+Current firmware returns snake_case fields:
+
+- `broadcast_id` (string): broadcast correlation ID (8-char uppercase hex)
+- `status` (`sent`)
+- `broadcast` (boolean)
+- `channel` (integer)
+- `fragmented` (boolean)
+- `fragments_total` (integer, only when fragmented)
+- `max_bytes` (integer)
+- `actual_bytes` (integer)
 
 ## Notification channel: `bramble.onBroadcastDelivery`
 
-Firmware emits `bramble.onBroadcastDelivery` JSON-RPC notifications (`jsonrpc: "2.0"`, no `id`) when broadcast delivery telemetry is available.
+Current firmware emits `bramble.onBroadcastDelivery` notifications with:
 
-Payload schema: `BroadcastDeliveryNotification`
-
-- `broadcastId` (string): matches `SendBroadcastResponse.broadcastId`
-- `packetId` (string): matches `SendBroadcastResponse.packetId`
-- `from` (string): source node address (8-char uppercase hex)
-- `to` (string): destination address (typically `FFFFFFFF` for broadcast)
-- `status` (`delivered` | `failed`): delivery outcome for this event
-- `hopCount` (integer): number of hops observed for this delivery event
-- `deliveredAtMs` (integer): event timestamp (Unix ms)
-
-### Semantics
-
-- A single broadcast send may result in multiple `bramble.onBroadcastDelivery` notifications.
-- Correlation key is the tuple `(broadcastId, packetId)`.
-- Consumers should treat notifications as append-only telemetry events rather than overwriting prior state.
+- `recipient` (string): recipient node address (8-char uppercase hex)
+- `broadcast_id` (string): broadcast correlation ID
+- `status` (`delivered`)
+- `rssi_at_dest` (integer, dBm)
+- `relayPath` (optional array in path-sampled mode)
