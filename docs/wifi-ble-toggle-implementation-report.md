@@ -220,7 +220,7 @@ if (boot_mode == CONN_MODE_BLE || boot_mode == CONN_MODE_BOTH) {
 1. **Flash fresh firmware:**
    ```bash
    cd ~/src/bramble
-   ./scripts/flash-local.sh --erase-nvs
+   ./scripts/flash.sh local tdeck-plus flash /dev/ttyACM0 --erase-nvs
    ```
    - **Expected:** Boots in WiFi mode (default)
    - **Logs:** `Connectivity mode: WiFi`

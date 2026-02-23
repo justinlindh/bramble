@@ -30,7 +30,7 @@
 /* statvfs not available in ESP-IDF newlib */
 
 #define BRAMBLE_VERSION_STR      "0.2.0-dev"
-#define BRAMBLE_PROTOCOL_VERSION "0.2.0"
+#define BRAMBLE_PROTOCOL_VERSION "0.2.1"
 
 #define NVS_NAMESPACE            "bramble"
 #define NVS_KEY_NODE_NAME        "node_name"
