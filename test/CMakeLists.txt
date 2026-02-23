@@ -460,6 +460,8 @@ add_executable(test_rpc_add_channel_contract
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
 )
 add_executable(test_rpc_get_config_channel_export
@@ -469,6 +471,8 @@ add_executable(test_rpc_get_config_channel_export
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
 )
 add_executable(test_mesh_broadcast_delivery
@@ -478,6 +482,8 @@ add_executable(test_mesh_broadcast_delivery
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
 )
 
@@ -507,6 +513,8 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -516,6 +524,7 @@ target_compile_definitions(test_rpc_add_channel_contract PRIVATE
 target_compile_options(test_rpc_add_channel_contract PRIVATE
     -Wno-error=unused-parameter
 )
+target_link_libraries(test_rpc_add_channel_contract m)
 
 target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -536,6 +545,8 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -545,6 +556,7 @@ target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter
 )
+target_link_libraries(test_rpc_get_config_channel_export m)
 
 target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -565,6 +577,8 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -574,6 +588,7 @@ target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
 target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
 )
+target_link_libraries(test_mesh_broadcast_delivery m)
 
 target_include_directories(test_broadcast_delivery_receipt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs

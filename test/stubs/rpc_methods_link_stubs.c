@@ -144,4 +144,11 @@ esp_err_t nvs_get_u8(nvs_handle_t h,const char* k,uint8_t *o){
     if (o) *o = 0;
     return ESP_FAIL;
 }
+
+esp_err_t nvs_get_u16(nvs_handle_t h,const char* k,uint16_t *o){
+    (void)h; (void)k;
+    if (o) *o = 0;
+    return ESP_FAIL;
+}
+
 esp_err_t nvs_get_i32(nvs_handle_t h,const char* k,int32_t *o){(void)h;(void)k;if(o)*o=0;return ESP_FAIL;} esp_err_t nvs_erase_key(nvs_handle_t h,const char* k){(void)h;(void)k;return ESP_OK;} esp_err_t nvs_commit(nvs_handle_t h){(void)h;return ESP_OK;}
