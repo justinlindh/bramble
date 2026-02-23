@@ -52,6 +52,12 @@ static const char *TAG = "mesh";
 /* Forward declarations */
 static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 
+/* location.c internal helpers used by policy TX path */
+int location_serialize_for_tier(const bramble_position_t *pos,
+                                uint8_t tier,
+                                uint8_t *buf,
+                                size_t buf_len);
+
 /* ── Configuration ──────────────────────────────────────────────────── */
 
 #define BEACON_INTERVAL_MS      60000   /* 60 seconds between beacons (A/B test) */
@@ -233,6 +239,73 @@ static bool location_policy_has_targets(void) {
     return false;
 }
 
+static void mesh_send_location_updates(uint32_t t,
+                                       const location_policy_t *policy,
+                                       int32_t lat_e6,
+                                       int32_t lon_e6) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+
+    bramble_position_t pos = {
+        .latitude_e7 = lat_e6 * 10,
+        .longitude_e7 = lon_e6 * 10,
+        .altitude_m = 0,
+        .accuracy_m = 0,
+        .speed_kmh = 0,
+        .heading_deg2 = 0,
+        .timestamp = t / 1000,
+        .valid = true,
+    };
+
+    nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
+    while (it != NULL) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+
+        if (strncmp(info.key, "lc_", 3) == 0) {
+            uint8_t tier = policy->default_tier;
+            char tier_str[16] = {0};
+            size_t tier_len = sizeof(tier_str);
+            if (nvs_get_str(nvs, info.key, tier_str, &tier_len) == ESP_OK) {
+                tier = location_tier_from_string(tier_str);
+            }
+
+            uint8_t payload[LOCATION_FULL_SIZE];
+            int payload_len = location_serialize_for_tier(&pos, tier, payload, sizeof(payload));
+            if (payload_len > 0) {
+                uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
+                bramble_header_t header = {
+                    .version = BRAMBLE_VERSION,
+                    .type = PKT_TYPE_LOCATION,
+                    .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
+                    .hop_limit = 3,
+                    .dest_addr = (uint32_t)strtoul(info.key + 3, NULL, 16),
+                    .packet_id = next_packet_id(),
+                };
+
+                bramble_header_serialize(&header, pkt, HEADER_SIZE);
+                memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+                memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
+
+                size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
+                int rc = transmit_packet(pkt, (uint8_t)wire_len);
+                if (rc == 0) {
+                    ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
+                             header.dest_addr,
+                             tier,
+                             (unsigned)wire_len);
+                }
+            }
+        }
+
+        it = nvs_entry_next(it);
+    }
+
+    nvs_close(nvs);
+}
+
 static void mesh_location_policy_tick(uint32_t t) {
     const uint32_t tick_ms = 1000;
     if ((t - s_location_last_policy_tick_ms) < tick_ms) {
@@ -258,9 +331,8 @@ static void mesh_location_policy_tick(uint32_t t) {
     bool has_targets = location_policy_has_targets();
 
     if (location_policy_should_send(&policy, has_source, has_targets, t, s_location_last_send_ms)) {
-        /* TX wiring is added in later task; this gate is now centralized and exercised periodically. */
+        mesh_send_location_updates(t, &policy, lat_e6, lon_e6);
         s_location_last_send_ms = t;
-        ESP_LOGI(TAG, "Location policy tick: eligible to send (tx path pending integration)");
     }
 }
 
