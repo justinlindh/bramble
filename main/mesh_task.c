@@ -453,9 +453,28 @@ static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t
         return;
     }
 
-    if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
-        ESP_LOGI(TAG, "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32,
-                 original_packet_id, original_src_addr);
+    /* Stagger responders to reduce same-slot collisions at the sender. */
+    uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
+    uint32_t jitter_ms = slot_delay_ms + (esp_random() % 140u);   /* +0..139ms */
+    vTaskDelay(pdMS_TO_TICKS(jitter_ms));
+
+    uint8_t attempts = mesh_broadcast_receipt_retry_count();
+    for (uint8_t i = 0; i < attempts; i++) {
+        if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
+            ESP_LOGI(TAG,
+                     "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
+                     " attempt=%u/%u delay=%" PRIu32 "ms",
+                     original_packet_id,
+                     original_src_addr,
+                     (unsigned)(i + 1),
+                     (unsigned)attempts,
+                     jitter_ms);
+        }
+
+        if (i + 1u < attempts) {
+            uint32_t retry_delay_ms = 110u + (esp_random() % 90u); /* 110..199ms */
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
     }
 }
 
