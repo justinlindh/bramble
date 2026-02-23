@@ -1770,6 +1770,7 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
     snprintf(id_buf, sizeof(id_buf), "%08" PRIX32, broadcast_id);
     cJSON_AddStringToObject(params, "recipient", src_buf);
     cJSON_AddStringToObject(params, "broadcast_id", id_buf);
+    cJSON_AddStringToObject(params, "status", "delivered");
     cJSON_AddNumberToObject(params, "rssi_at_dest", rssi_at_dest);
 
     if (s_broadcast_telemetry_mode == BROADCAST_TELEMETRY_PATH_SAMPLED && hop_count > 0 && relay_path) {
