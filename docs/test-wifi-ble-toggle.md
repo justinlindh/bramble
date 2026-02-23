@@ -87,7 +87,7 @@ The WiFi/BLE connectivity mode toggle for T-Deck Plus has been fully implemented
 ```bash
 # Terminal 1: Serial monitor
 cd ~/src/bramble
-./scripts/flash-local.sh --monitor
+./scripts/flash.sh local tdeck-plus monitor
 
 # Look for these log lines during boot:
 # - "Connectivity mode: WiFi" (or BLE, or WiFi+BLE)

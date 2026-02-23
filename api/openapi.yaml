@@ -6,9 +6,16 @@ info:
     Methods are invoked via JSON-RPC over serial (UART), WebSocket, or BLE.
     Each method is mapped to a POST path for codegen and documentation purposes.
     The actual wire format is standard JSON-RPC 2.0.
-  version: 0.2.0
+  version: 0.2.1
   license:
     name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://bramble.local
+    description: Bramble RPC endpoint
+
+security: []
 
 paths:
   # ── Query Methods ──────────────────────────────────────────────────────────
@@ -27,6 +34,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Node status
           content:
@@ -46,6 +55,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Node identity
           content:
@@ -65,6 +76,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Version info
           content:
@@ -84,6 +97,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Neighbor list
           content:
@@ -103,6 +118,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Route table
           content:
@@ -122,6 +139,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Message list
           content:
@@ -141,6 +160,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Airtime stats
           content:
@@ -160,6 +181,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Peer locations
           content:
@@ -179,6 +202,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Pong response
           content:
@@ -200,6 +225,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Full configuration
           content:
@@ -222,6 +249,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SendMessageParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Message queued
           content:
@@ -241,6 +270,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SendBroadcastParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Broadcast queued
           content:
@@ -262,6 +293,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Probe initiated
           content:
@@ -281,6 +314,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetRadioParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Radio updated
           content:
@@ -300,6 +335,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetNodeNameParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Name updated
           content:
@@ -319,6 +356,8 @@ paths:
             schema:
               $ref: '#/components/schemas/AddChannelParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Channel added
           content:
@@ -338,6 +377,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RemoveChannelParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Channel removed
           content:
@@ -357,6 +398,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetDefaultChannelParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Default channel updated
           content:
@@ -376,6 +419,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetMailboxParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Mailbox setting updated
           content:
@@ -395,6 +440,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetLocationConfigParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Location config updated
           content:
@@ -414,6 +461,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetLocationContactParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Contact updated
           content:
@@ -433,6 +482,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RemoveLocationContactParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Contact removed
           content:
@@ -452,6 +503,8 @@ paths:
             schema:
               $ref: '#/components/schemas/ShareLocationOnceParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Location shared
           content:
@@ -471,6 +524,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Reboot initiated
           content:
@@ -495,6 +550,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Airtime policy configuration and status
           content:
@@ -516,6 +573,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetAirtimePolicyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Policy configuration updated
           content:
@@ -539,6 +598,8 @@ paths:
             schema:
               $ref: '#/components/schemas/SetTrafficDebugParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Traffic debug config updated
           content:
@@ -560,6 +621,8 @@ paths:
             schema:
               $ref: '#/components/schemas/EmptyParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Traffic debug status
           content:
@@ -582,6 +645,8 @@ paths:
             schema:
               $ref: '#/components/schemas/GetTrafficEventsParams'
       responses:
+        '400':
+          description: Bad request (invalid params or request body)
         '200':
           description: Traffic events
           content:
@@ -691,9 +756,9 @@ components:
     Channel:
       type: object
       description: A configured channel.
-      required: [index, name, hasPsk, epoch, isDefault]
+      required: [id, name, hasPsk, is_default]
       properties:
-        index:
+        id:
           type: integer
           description: Channel index.
         name:
@@ -705,7 +770,7 @@ components:
         epoch:
           type: integer
           description: Key epoch counter.
-        isDefault:
+        is_default:
           type: boolean
           description: Whether this is the default channel.
 
@@ -734,27 +799,6 @@ components:
           type: string
           description: Unique message identifier.
 
-    AirtimeTier:
-      type: object
-      description: Airtime budget for a single priority tier.
-      required: [name, remainingMs, maxMs, usedPct, refillAtMs]
-      properties:
-        name:
-          type: string
-          enum: [critical, normal, broadcast]
-          description: Tier name.
-        remainingMs:
-          type: integer
-          description: Remaining airtime budget in milliseconds.
-        maxMs:
-          type: integer
-          description: Maximum airtime budget in milliseconds.
-        usedPct:
-          type: integer
-          description: Percentage of budget used.
-        refillAtMs:
-          type: integer
-          description: Unix timestamp (ms) when budget refills.
 
     AirtimePolicyMode:
       type: string
@@ -870,18 +914,6 @@ components:
         lastUpdatedMs:
           type: integer
           description: Unix timestamp (ms) of last update.
-
-    RelayHop:
-      type: object
-      description: A hop in a relay path.
-      required: [addr, rssi]
-      properties:
-        addr:
-          type: integer
-          description: Relay node address (uint32).
-        rssi:
-          type: integer
-          description: RSSI at this hop (dBm).
 
     # ── Response Schemas ─────────────────────────────────────────────────────
 
@@ -1330,87 +1362,6 @@ components:
         cooldownSec:
           type: integer
           description: Minimum time (seconds) between mode transitions (hysteresis).
-
-    # ── Notification Payloads ────────────────────────────────────────────────
-
-    OnAckPayload:
-      type: object
-      description: Delivery acknowledgment for a sent message.
-      required: [packetId, status]
-      properties:
-        packetId:
-          type: integer
-          description: Packet ID from sendMessage response.
-        status:
-          type: string
-          enum: [delivered, failed]
-          description: Delivery status.
-        relayPath:
-          type: array
-          items:
-            $ref: '#/components/schemas/RelayHop'
-          description: Relay path taken (empty on failure).
-
-    ProbeAckPayload:
-      type: object
-      description: A single probe response from a peer.
-      required: [responderAddr, hopCount, rssi, snr, pathLen, receivedAt]
-      properties:
-        responderAddr:
-          type: integer
-          description: Address of the responding node.
-        hopCount:
-          type: integer
-          description: Number of hops.
-        rssi:
-          type: integer
-          description: RSSI of the response (dBm).
-        snr:
-          type: number
-          description: SNR of the response (dB).
-        pathLen:
-          type: integer
-          description: Path length.
-        relayPath:
-          type: array
-          items:
-            type: integer
-          description: Relay addresses in path.
-        receivedAt:
-          type: integer
-          description: Unix timestamp (ms) when received.
-
-    ProbeCompletePayload:
-      type: object
-      description: Sent when probe window closes.
-      required: [probeId]
-      properties:
-        probeId:
-          type: integer
-          description: Probe identifier.
-
-    LocationUpdatePayload:
-      type: object
-      description: A location update notification.
-      required: [addr, name, tier, online, lastUpdatedMs]
-      properties:
-        addr:
-          type: integer
-          description: Peer address.
-        name:
-          type: string
-          description: Peer display name.
-        tier:
-          type: string
-          enum: [full, coarse, presence]
-        position:
-          oneOf:
-            - $ref: '#/components/schemas/Position'
-            - type: 'null'
-        online:
-          type: boolean
-        lastUpdatedMs:
-          type: integer
 
     # ── Traffic Debug Types ────────────────────────────────────────────────
 
