@@ -1185,15 +1185,27 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
 
             if (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX, strlen(LOCATION_CONTACT_RULE_PREFIX)) == 0 ||
                 strncmp(info.key, LOCATION_LEGACY_CONTACT_PREFIX, strlen(LOCATION_LEGACY_CONTACT_PREFIX)) == 0) {
+                bool is_legacy = (strncmp(info.key, LOCATION_LEGACY_CONTACT_PREFIX, strlen(LOCATION_LEGACY_CONTACT_PREFIX)) == 0);
+                const char *addr_suffix = info.key + (is_legacy ? strlen(LOCATION_LEGACY_CONTACT_PREFIX) : strlen(LOCATION_CONTACT_RULE_PREFIX));
+
+                /* Avoid duplicate entries when both legacy lc_ and new lcr_ exist for same address. */
+                if (is_legacy) {
+                    char preferred_key[24];
+                    snprintf(preferred_key, sizeof(preferred_key), "%s%s", LOCATION_CONTACT_RULE_PREFIX, addr_suffix);
+                    size_t preferred_len = 0;
+                    if (nvs_get_str(nvs, preferred_key, NULL, &preferred_len) == ESP_OK) {
+                        it = nvs_entry_next(it);
+                        continue;
+                    }
+                }
+
                 char raw[64] = {0};
                 size_t raw_len = sizeof(raw);
                 if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
                     rpc_location_rule_t rule = { .enabled = true, .tier = LOCATION_TIER_COARSE, .interval_s = LOCATION_DEFAULT_INTERVAL_S };
                     rpc_location_parse_rule_string(raw, &rule);
                     cJSON *entry = cJSON_CreateObject();
-                    const char *prefix = (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX, strlen(LOCATION_CONTACT_RULE_PREFIX)) == 0)
-                        ? LOCATION_CONTACT_RULE_PREFIX : LOCATION_LEGACY_CONTACT_PREFIX;
-                    cJSON_AddStringToObject(entry, "address", info.key + strlen(prefix));
+                    cJSON_AddStringToObject(entry, "address", addr_suffix);
                     cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
                     cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
                     cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
