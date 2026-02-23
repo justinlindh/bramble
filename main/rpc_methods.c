@@ -40,6 +40,17 @@
 static const char *TAG = "rpc_methods";
 static bramble_identity_t *s_identity;
 
+#define LOCATION_SOURCE_KEY            "source"
+#define LOCATION_LEGACY_CONTACT_PREFIX "lc_"
+#define LOCATION_CONTACT_RULE_PREFIX   "lcr_"
+#define LOCATION_CHANNEL_RULE_PREFIX   "lch_"
+
+typedef struct {
+    bool enabled;
+    uint8_t tier;
+    uint16_t interval_s;
+} rpc_location_rule_t;
+
 static const char *bramble_hardware(void) {
     const bramble_board_config_t *board = board_get_config();
     if (board && board->short_name && board->short_name[0] != '\0') {
@@ -616,6 +627,50 @@ static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_
     return ESP_OK;
 }
 
+static const char *rpc_location_source_normalize(const char *source) {
+    if (!source || source[0] == '\0') return "hybrid";
+    if (strcmp(source, "gps") == 0) return "gps";
+    if (strcmp(source, "manual") == 0) return "manual";
+    if (strcmp(source, "hybrid") == 0) return "hybrid";
+    if (strcmp(source, "auto") == 0) return "hybrid"; /* backward-compatible alias */
+    return "hybrid";
+}
+
+#ifdef NVS_TYPE_ANY
+static bool rpc_location_parse_rule_string(const char *raw, rpc_location_rule_t *rule) {
+    if (!raw || !rule) return false;
+
+    int enabled = 1;
+    char tier[16] = {0};
+    int interval_s = LOCATION_DEFAULT_INTERVAL_S;
+    int scanned = sscanf(raw, "%d|%15[^|]|%d", &enabled, tier, &interval_s);
+    if (scanned >= 2) {
+        rule->enabled = (enabled != 0);
+        rule->tier = location_tier_from_string(tier);
+        if (scanned >= 3 && interval_s > 0) {
+            rule->interval_s = location_policy_clamp_interval_s((uint16_t)interval_s);
+        } else {
+            rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
+        }
+        return true;
+    }
+
+    /* Backward-compat value: tier-only string from lc_XXXXXXXX key. */
+    rule->enabled = true;
+    rule->tier = location_tier_from_string(raw);
+    rule->interval_s = LOCATION_DEFAULT_INTERVAL_S;
+    return true;
+}
+#endif
+
+static void rpc_location_write_rule_string(char *out, size_t out_len, const rpc_location_rule_t *rule) {
+    if (!out || out_len == 0 || !rule) return;
+    snprintf(out, out_len, "%d|%s|%u",
+             rule->enabled ? 1 : 0,
+             location_tier_to_string(rule->tier),
+             (unsigned)rule->interval_s);
+}
+
 static int handle_set_location_config(const cJSON *params, cJSON *result) {
     if (!params) return RPC_ERR_INVALID_PARAMS;
 
@@ -647,14 +702,89 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
     }
 
     cJSON *tier = cJSON_GetObjectItem(params, "default_tier");
+    if (!tier) tier = cJSON_GetObjectItem(params, "tier"); /* compatibility alias */
     if (tier && cJSON_IsString(tier)) {
         policy.default_tier = location_tier_from_string(tier->valuestring);
+    }
+
+    cJSON *source = cJSON_GetObjectItem(params, "source");
+    if (source && cJSON_IsString(source)) {
+        nvs_set_str(nvs, LOCATION_SOURCE_KEY, rpc_location_source_normalize(source->valuestring));
     }
 
     location_policy_normalize(&policy);
     nvs_set_u8(nvs, "enabled", policy.enabled ? 1 : 0);
     nvs_set_u16(nvs, "interval_s", policy.interval_s);
     nvs_set_str(nvs, "def_tier", location_tier_to_string(policy.default_tier));
+
+    cJSON *contact_rules = cJSON_GetObjectItem(params, "contact_rules");
+    if (contact_rules && cJSON_IsArray(contact_rules)) {
+        const cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, contact_rules) {
+            const cJSON *address = cJSON_GetObjectItem(entry, "address");
+            if (!cJSON_IsString(address) || !address->valuestring) continue;
+
+            rpc_location_rule_t rule = {
+                .enabled = true,
+                .tier = policy.default_tier,
+                .interval_s = policy.interval_s,
+            };
+
+            const cJSON *rule_enabled = cJSON_GetObjectItem(entry, "enabled");
+            if (rule_enabled && cJSON_IsBool(rule_enabled)) rule.enabled = cJSON_IsTrue(rule_enabled);
+
+            const cJSON *rule_tier = cJSON_GetObjectItem(entry, "tier");
+            if (rule_tier && cJSON_IsString(rule_tier)) rule.tier = location_tier_from_string(rule_tier->valuestring);
+
+            const cJSON *rule_interval = cJSON_GetObjectItem(entry, "interval_s");
+            if (rule_interval && cJSON_IsNumber(rule_interval)) {
+                int v = rule_interval->valueint;
+                if (v > 0) rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
+            }
+
+            char key[20];
+            char val[48];
+            snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", address->valuestring);
+            rpc_location_write_rule_string(val, sizeof(val), &rule);
+            nvs_set_str(nvs, key, val);
+            /* legacy per-contact tier key for backward compatibility */
+            snprintf(key, sizeof(key), LOCATION_LEGACY_CONTACT_PREFIX "%.8s", address->valuestring);
+            nvs_set_str(nvs, key, location_tier_to_string(rule.tier));
+        }
+    }
+
+    cJSON *channel_targets = cJSON_GetObjectItem(params, "channel_targets");
+    if (channel_targets && cJSON_IsArray(channel_targets)) {
+        const cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, channel_targets) {
+            const cJSON *channel = cJSON_GetObjectItem(entry, "channel");
+            if (!cJSON_IsNumber(channel)) continue;
+
+            rpc_location_rule_t rule = {
+                .enabled = true,
+                .tier = policy.default_tier,
+                .interval_s = policy.interval_s,
+            };
+
+            const cJSON *rule_enabled = cJSON_GetObjectItem(entry, "enabled");
+            if (rule_enabled && cJSON_IsBool(rule_enabled)) rule.enabled = cJSON_IsTrue(rule_enabled);
+
+            const cJSON *rule_tier = cJSON_GetObjectItem(entry, "tier");
+            if (rule_tier && cJSON_IsString(rule_tier)) rule.tier = location_tier_from_string(rule_tier->valuestring);
+
+            const cJSON *rule_interval = cJSON_GetObjectItem(entry, "interval_s");
+            if (rule_interval && cJSON_IsNumber(rule_interval)) {
+                int v = rule_interval->valueint;
+                if (v > 0) rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
+            }
+
+            char key[20];
+            char val[48];
+            snprintf(key, sizeof(key), LOCATION_CHANNEL_RULE_PREFIX "%02d", channel->valueint);
+            rpc_location_write_rule_string(val, sizeof(val), &rule);
+            nvs_set_str(nvs, key, val);
+        }
+    }
 
     /* Accept manual coordinates (no GPS hardware on Heltec V3) */
     cJSON *lat = cJSON_GetObjectItem(params, "lat");
@@ -683,10 +813,27 @@ static int handle_set_location_contact(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    /* Store contact tier: key = "lc_HEXADDR", value = tier string */
-    char key[16];
-    snprintf(key, sizeof(key), "lc_%.8s", addr_str);
-    nvs_set_str(nvs, key, tier ? tier : "zone");
+    rpc_location_rule_t rule = {
+        .enabled = true,
+        .tier = tier ? location_tier_from_string(tier) : LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    cJSON *interval_s = cJSON_GetObjectItem(params, "interval_s");
+    if (enabled && cJSON_IsBool(enabled)) rule.enabled = cJSON_IsTrue(enabled);
+    if (interval_s && cJSON_IsNumber(interval_s) && interval_s->valueint > 0) {
+        rule.interval_s = location_policy_clamp_interval_s((uint16_t)interval_s->valueint);
+    }
+
+    char key[20];
+    snprintf(key, sizeof(key), LOCATION_LEGACY_CONTACT_PREFIX "%.8s", addr_str);
+    nvs_set_str(nvs, key, location_tier_to_string(rule.tier));
+
+    char rule_buf[48];
+    rpc_location_write_rule_string(rule_buf, sizeof(rule_buf), &rule);
+    snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
+    nvs_set_str(nvs, key, rule_buf);
+
     nvs_commit(nvs);
     nvs_close(nvs);
 
@@ -705,8 +852,10 @@ static int handle_remove_location_contact(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    char key[16];
-    snprintf(key, sizeof(key), "lc_%.8s", addr_str);
+    char key[20];
+    snprintf(key, sizeof(key), LOCATION_LEGACY_CONTACT_PREFIX "%.8s", addr_str);
+    nvs_erase_key(nvs, key);
+    snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
     nvs_erase_key(nvs, key);
     nvs_commit(nvs);
     nvs_close(nvs);
@@ -848,6 +997,7 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
 
     /* Include received peer locations persisted by mesh location RX path. */
     if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
+#ifdef NVS_TYPE_ANY
         nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -874,7 +1024,7 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
 
             it = nvs_entry_next(it);
         }
-
+#endif
         nvs_close(nvs);
     }
 
@@ -995,6 +1145,95 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     }
 
     cJSON_AddItemToObject(result, "channels", channels);
+
+    /* Location sharing policy contract (hybrid privacy-first). */
+    cJSON *location = cJSON_CreateObject();
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
+        location_policy_t policy;
+        if (location_policy_load_or_init(nvs, &policy) == ESP_OK) {
+            cJSON_AddBoolToObject(location, "enabled", policy.enabled);
+            cJSON_AddStringToObject(location, "tier", location_tier_to_string(policy.default_tier));
+            cJSON_AddStringToObject(location, "default_tier", location_tier_to_string(policy.default_tier));
+            cJSON_AddNumberToObject(location, "interval_s", policy.interval_s);
+        } else {
+            cJSON_AddBoolToObject(location, "enabled", false);
+            cJSON_AddStringToObject(location, "tier", "coarse");
+            cJSON_AddStringToObject(location, "default_tier", "coarse");
+            cJSON_AddNumberToObject(location, "interval_s", LOCATION_DEFAULT_INTERVAL_S);
+        }
+
+        char source_buf[16] = {0};
+        size_t source_len = sizeof(source_buf);
+        if (nvs_get_str(nvs, LOCATION_SOURCE_KEY, source_buf, &source_len) == ESP_OK) {
+            cJSON_AddStringToObject(location, "source", rpc_location_source_normalize(source_buf));
+        } else {
+            cJSON_AddStringToObject(location, "source", "hybrid");
+        }
+
+        int32_t lat_e6 = 0, lon_e6 = 0;
+        if (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) cJSON_AddNumberToObject(location, "lat", lat_e6 / 1e6);
+        if (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) cJSON_AddNumberToObject(location, "lon", lon_e6 / 1e6);
+
+        cJSON *contact_rules = cJSON_AddArrayToObject(location, "contact_rules");
+        cJSON *channel_targets = cJSON_AddArrayToObject(location, "channel_targets");
+
+#ifdef NVS_TYPE_ANY
+        nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
+        while (it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+
+            if (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX, strlen(LOCATION_CONTACT_RULE_PREFIX)) == 0 ||
+                strncmp(info.key, LOCATION_LEGACY_CONTACT_PREFIX, strlen(LOCATION_LEGACY_CONTACT_PREFIX)) == 0) {
+                char raw[64] = {0};
+                size_t raw_len = sizeof(raw);
+                if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    rpc_location_rule_t rule = { .enabled = true, .tier = LOCATION_TIER_COARSE, .interval_s = LOCATION_DEFAULT_INTERVAL_S };
+                    rpc_location_parse_rule_string(raw, &rule);
+                    cJSON *entry = cJSON_CreateObject();
+                    const char *prefix = (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX, strlen(LOCATION_CONTACT_RULE_PREFIX)) == 0)
+                        ? LOCATION_CONTACT_RULE_PREFIX : LOCATION_LEGACY_CONTACT_PREFIX;
+                    cJSON_AddStringToObject(entry, "address", info.key + strlen(prefix));
+                    cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
+                    cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
+                    cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
+                    cJSON_AddItemToArray(contact_rules, entry);
+                }
+            }
+
+            if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX, strlen(LOCATION_CHANNEL_RULE_PREFIX)) == 0) {
+                char raw[64] = {0};
+                size_t raw_len = sizeof(raw);
+                if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    rpc_location_rule_t rule = { .enabled = true, .tier = LOCATION_TIER_COARSE, .interval_s = LOCATION_DEFAULT_INTERVAL_S };
+                    rpc_location_parse_rule_string(raw, &rule);
+                    cJSON *entry = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(entry, "channel", atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
+                    cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
+                    cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
+                    cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
+                    cJSON_AddItemToArray(channel_targets, entry);
+                }
+            }
+
+            it = nvs_entry_next(it);
+        }
+#else
+        (void)contact_rules;
+        (void)channel_targets;
+#endif
+
+        nvs_close(nvs);
+    } else {
+        cJSON_AddBoolToObject(location, "enabled", false);
+        cJSON_AddStringToObject(location, "tier", "coarse");
+        cJSON_AddStringToObject(location, "default_tier", "coarse");
+        cJSON_AddNumberToObject(location, "interval_s", LOCATION_DEFAULT_INTERVAL_S);
+        cJSON_AddStringToObject(location, "source", "hybrid");
+        cJSON_AddItemToObject(location, "contact_rules", cJSON_CreateArray());
+        cJSON_AddItemToObject(location, "channel_targets", cJSON_CreateArray());
+    }
+    cJSON_AddItemToObject(result, "location", location);
 
     const char *mode = "recipient_only";
     switch (mesh_get_broadcast_telemetry_mode()) {

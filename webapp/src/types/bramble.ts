@@ -184,6 +184,22 @@ export interface LocationContact {
   distanceTriggerM: number; // distance trigger meters
 }
 
+export type LocationSource = 'gps' | 'manual' | 'hybrid';
+
+export interface LocationContactRule {
+  address: string;          // 8-char uppercase hex node address
+  enabled: boolean;
+  tier: LocationTier;
+  interval_s: number;
+}
+
+export interface LocationChannelTarget {
+  channel: number;
+  enabled: boolean;
+  tier: LocationTier;
+  interval_s: number;
+}
+
 export interface PeerLocation {
   addr: number;
   name: string;
@@ -196,10 +212,20 @@ export interface PeerLocation {
 
 export interface LocationConfig {
   enabled: boolean;
-  contacts: LocationContact[];
-  defaultIntervalSec: number;
-  defaultDistanceTriggerM: number;
-  stationaryBackoff: number;
+  tier: LocationTier;
+  default_tier: LocationTier;
+  interval_s: number;
+  source: LocationSource;
+  lat?: number;
+  lon?: number;
+  contact_rules: LocationContactRule[];
+  channel_targets: LocationChannelTarget[];
+
+  // Legacy fields used by older UI paths.
+  contacts?: LocationContact[];
+  defaultIntervalSec?: number;
+  defaultDistanceTriggerM?: number;
+  stationaryBackoff?: number;
 }
 
 // ─── Config (full) ─────────────────────────────────────────────────────
