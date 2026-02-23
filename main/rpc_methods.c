@@ -777,6 +777,48 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+static bool rpc_get_persisted_channel_name(int index, char *name_out, size_t name_out_len) {
+    if (!name_out || name_out_len == 0 || index < 0) return false;
+
+    nvs_handle_t ch_nvs;
+    if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) != ESP_OK) {
+        return false;
+    }
+
+    char key_name[20];
+    size_t len = name_out_len;
+    snprintf(key_name, sizeof(key_name), "nm%d", index);
+    esp_err_t err = nvs_get_str(ch_nvs, key_name, name_out, &len);
+
+    if (err != ESP_OK || name_out[0] == '\0') {
+        len = name_out_len;
+        snprintf(key_name, sizeof(key_name), "ch%d_name", index);
+        err = nvs_get_str(ch_nvs, key_name, name_out, &len);
+    }
+
+    nvs_close(ch_nvs);
+    return (err == ESP_OK && name_out[0] != '\0');
+}
+
+static bool rpc_get_persisted_channel_has_psk(int index, bool *has_psk_out) {
+    if (!has_psk_out || index < 0) return false;
+
+    nvs_handle_t ch_nvs;
+    if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) != ESP_OK) {
+        return false;
+    }
+
+    char key[16];
+    uint8_t has_psk = 0;
+    snprintf(key, sizeof(key), "psk%d", index);
+    esp_err_t err = nvs_get_u8(ch_nvs, key, &has_psk);
+    nvs_close(ch_nvs);
+    if (err != ESP_OK) return false;
+
+    *has_psk_out = (has_psk != 0);
+    return true;
+}
+
 /* bramble.getConfig — returns node name + radio config + channel list */
 static int handle_get_config(const cJSON *params, cJSON *result) {
     (void)params;
@@ -819,6 +861,20 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
         bool has_psk = false;
         uint16_t epoch = 0;
         mesh_get_channel_security(i, &has_psk, &epoch);
+
+        char persisted_name[20] = {0};
+        if (!ch_name || ch_name[0] == '\0') {
+            if (rpc_get_persisted_channel_name(i, persisted_name, sizeof(persisted_name))) {
+                ch_name = persisted_name;
+            }
+        }
+
+        if (!has_psk) {
+            bool persisted_has_psk = false;
+            if (rpc_get_persisted_channel_has_psk(i, &persisted_has_psk)) {
+                has_psk = persisted_has_psk;
+            }
+        }
 
         char fallback[20];
         if (!ch_name || ch_name[0] == '\0') {
