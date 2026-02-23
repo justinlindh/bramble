@@ -95,6 +95,13 @@ void location_cache_purge(location_manager_t *mgr, uint32_t now_ms);
 /* Check if update needed (time or distance based) */
 bool location_should_send(const location_manager_t *mgr, uint32_t peer_addr, uint32_t now_ms);
 
+/* Policy engine send gating for periodic sharing */
+bool location_policy_should_send(const location_policy_t *policy,
+                                 bool has_source,
+                                 bool has_targets,
+                                 uint32_t now_ms,
+                                 uint32_t last_sent_ms);
+
 /* Persistent policy helpers */
 void location_policy_set_defaults(location_policy_t *policy);
 void location_policy_normalize(location_policy_t *policy);
