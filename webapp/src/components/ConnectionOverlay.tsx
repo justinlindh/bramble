@@ -20,11 +20,9 @@ export function connectingLabelFor(transportType: TransportType): string {
   return 'Connecting…';
 }
 
-export function shouldAutoConnect(savedIp: string, autoTried: boolean, connectionState: string, manualDisconnect: boolean): boolean {
-  if (autoTried) return false;
-  if (!savedIp) return false;
-  if (manualDisconnect) return false;
-  return connectionState === 'disconnected';
+export function shouldAutoConnect(_savedIp: string, _autoTried: boolean, _connectionState: string, _manualDisconnect: boolean): boolean {
+  // Explicit policy: never auto-connect. User must press Connect.
+  return false;
 }
 
 function loadSavedIp(): string {
