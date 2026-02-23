@@ -471,6 +471,15 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
 )
+add_executable(test_mesh_broadcast_delivery
+    test_mesh_broadcast_delivery.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    stubs/rpc_methods_link_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+)
 target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
@@ -526,6 +535,35 @@ target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
     CONFIG_BRAMBLE_RPC_MAX_METHODS=40
 )
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
+    -Wno-error=unused-parameter
+)
+
+target_include_directories(test_mesh_broadcast_delivery PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+)
+target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+)
+target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
 )
 
