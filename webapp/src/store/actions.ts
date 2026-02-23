@@ -373,6 +373,12 @@ interface BroadcastDeliveryNotification {
   status: 'delivered' | 'failed';
   hopCount: number;
   deliveredAtMs: number;
+  // firmware snake_case compatibility
+  broadcast_id?: string;
+  recipient?: string | number;
+  packet_id?: string;
+  hop_count?: number;
+  delivered_at_ms?: number;
 }
 
 // Fragmentation limits (aligned with firmware components/fragment):
@@ -434,14 +440,19 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
 
 export function handleBroadcastDelivery(params: unknown): void {
   const p = params as Partial<BroadcastDeliveryNotification>;
-  if (!p.broadcastId || !p.status || p.from === undefined) return;
+  const broadcastId = p.broadcastId ?? p.broadcast_id;
+  const from = p.from ?? p.recipient;
+  const packetId = p.packetId ?? p.packet_id;
+  const hopCount = p.hopCount ?? p.hop_count ?? 0;
+  const deliveredAtMs = p.deliveredAtMs ?? p.delivered_at_ms ?? Date.now();
+  if (!broadcastId || !p.status || from === undefined) return;
   applyBroadcastDelivery({
-    broadcastId: p.broadcastId,
-    packetId: p.packetId,
-    from: p.from,
+    broadcastId,
+    packetId,
+    from,
     status: p.status,
-    hopCount: p.hopCount ?? 0,
-    deliveredAtMs: p.deliveredAtMs ?? Date.now(),
+    hopCount,
+    deliveredAtMs,
   });
 }
 
@@ -490,7 +501,9 @@ export async function sendMessage(
       message_id?: string;
       status?: string;
       packetId?: string;
+      packet_id?: string;
       broadcastId?: string;
+      broadcast_id?: string;
       fragmented?: boolean;
       fragments_total?: number;
     }>(method, params);
@@ -503,8 +516,8 @@ export async function sendMessage(
     store.updateMessageStatus(msg.id, 'sent');
     messageDb.updateMessageStatus(msg.id, 'sent').catch(() => {});
     registerBroadcastSendTelemetry(msg.id, {
-      packetId: result?.packetId,
-      broadcastId: result?.broadcastId,
+      packetId: result?.packetId ?? result?.packet_id,
+      broadcastId: result?.broadcastId ?? result?.broadcast_id,
     });
   } catch (e) {
     store.updateMessageStatus(msg.id, 'failed');
