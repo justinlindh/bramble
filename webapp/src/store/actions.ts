@@ -181,10 +181,10 @@ export function normalizeConfig(raw: any): BrambleConfig {
     },
     channels: (raw.channels ?? []).map((ch: any) => ({
       index: ch.id ?? ch.index ?? 0,
-      name: ch.name ?? '',
-      hasPsk: ch.hasPsk ?? ch.has_psk ?? false,
-      epoch: ch.epoch ?? 0,
-      isDefault: ch.is_default ?? ch.isDefault ?? ch.default ?? false,
+      name: ch.name ?? ch.channel_name ?? ch.channelName ?? '',
+      hasPsk: ch.hasPsk ?? ch.has_psk ?? ch.psk_enabled ?? ch.pskEnabled ?? false,
+      epoch: ch.epoch ?? ch.key_epoch ?? ch.keyEpoch ?? 0,
+      isDefault: ch.is_default ?? ch.isDefault ?? ch.default ?? ch.default_channel ?? ch.defaultChannel ?? false,
     })),
     mailboxEnabled: raw.mailboxEnabled ?? false,
     location: raw.location ?? {
