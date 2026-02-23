@@ -323,6 +323,7 @@ export interface TrafficDebugStatus {
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
+  manualDisconnect: boolean;
   transport: Transport | null;
   config: BrambleConfig | null;
   status: NodeStatus | null;
