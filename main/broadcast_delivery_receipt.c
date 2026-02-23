@@ -2,10 +2,10 @@
 
 #include "packet.h"
 
-#define BROADCAST_RECEIPT_DELAY_BASE_MS      80u
-#define BROADCAST_RECEIPT_SLOT_SPACING_MS    45u
-#define BROADCAST_RECEIPT_SLOT_BUCKETS       7u
-#define BROADCAST_RECEIPT_RETRY_COUNT        2u
+#define BROADCAST_RECEIPT_DELAY_BASE_MS      120u
+#define BROADCAST_RECEIPT_SLOT_SPACING_MS    70u
+#define BROADCAST_RECEIPT_SLOT_BUCKETS       9u
+#define BROADCAST_RECEIPT_RETRY_COUNT        3u
 
 bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr) {
     return dest_addr == 0xFFFFFFFFu;

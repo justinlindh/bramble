@@ -472,7 +472,7 @@ static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t
         }
 
         if (i + 1u < attempts) {
-            uint32_t retry_delay_ms = 110u + (esp_random() % 90u); /* 110..199ms */
+            uint32_t retry_delay_ms = 220u + (esp_random() % 200u); /* 220..419ms */
             vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
         }
     }
