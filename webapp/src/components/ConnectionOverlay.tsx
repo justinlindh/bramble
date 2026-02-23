@@ -20,6 +20,13 @@ export function connectingLabelFor(transportType: TransportType): string {
   return 'Connecting…';
 }
 
+export function shouldAutoConnect(savedIp: string, autoTried: boolean, connectionState: string, manualDisconnect: boolean): boolean {
+  if (autoTried) return false;
+  if (!savedIp) return false;
+  if (manualDisconnect) return false;
+  return connectionState === 'disconnected';
+}
+
 function loadSavedIp(): string {
   try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
 }
@@ -35,6 +42,7 @@ export function ConnectionOverlay() {
   const [autoTried, setAutoTried] = useState(false);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
+  const manualDisconnect = useStore(s => s.manualDisconnect);
 
   const isConnecting = connectionState === 'connecting';
 
@@ -51,13 +59,11 @@ export function ConnectionOverlay() {
   };
 
   useEffect(() => {
-    if (autoTried) return;
-    if (!savedIp) return;
-    if (connectionState !== 'disconnected') return;
+    if (!shouldAutoConnect(savedIp, autoTried, connectionState, manualDisconnect)) return;
     setAutoTried(true);
     const url = buildWifiUrl(savedIp, location.protocol, location.host);
     connect('wifi', { url });
-  }, [autoTried, savedIp, connectionState]);
+  }, [autoTried, savedIp, connectionState, manualDisconnect]);
 
   // Check browser support
   const hasSerial = 'serial' in navigator;

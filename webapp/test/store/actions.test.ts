@@ -22,6 +22,7 @@ describe('Zustand store — message state transitions', () => {
     useStore.setState({
       connectionState: 'disconnected',
       connectionError: undefined,
+      manualDisconnect: false,
       transport: null,
       config: null,
       status: null,
@@ -177,6 +178,13 @@ describe('Zustand store — message state transitions', () => {
     const state = useStore.getState();
     expect(state.connectionState).toBe('error');
     expect(state.connectionError).toBe('Port not found');
+  });
+
+  it('setManualDisconnect toggles manual disconnect state', () => {
+    useStore.getState().setManualDisconnect(true);
+    expect(useStore.getState().manualDisconnect).toBe(true);
+    useStore.getState().setManualDisconnect(false);
+    expect(useStore.getState().manualDisconnect).toBe(false);
   });
 
   it('incoming DM creates dm: conversation (not broadcast)', () => {

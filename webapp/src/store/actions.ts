@@ -75,6 +75,7 @@ function uuid(): string {
 
 export async function connect(type: TransportType, options?: { url?: string }): Promise<void> {
   const store = useStore.getState();
+  store.setManualDisconnect(false);
   store.setConnectionState('connecting');
   try {
     const transport = createTransport(type, options);
@@ -151,6 +152,7 @@ export async function disconnect(): Promise<void> {
   client?.clearSubscriptions();
   await client?.disconnect();
   client = null;
+  useStore.getState().setManualDisconnect(true);
   useStore.getState().setConnectionState('disconnected');
   useStore.getState().setTransport(null);
 }
