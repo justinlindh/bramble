@@ -28,8 +28,9 @@
 #include "trackball.h"
 #include "location.h"
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "gps.h"
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
 #include "audio.h"
 #endif
@@ -57,14 +58,12 @@ static const char *TAG = "bramble";
 
 static location_manager_t g_location_mgr;
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
     location_manager_t *mgr = (location_manager_t *)ctx;
     location_set_position(mgr, pos);
     ESP_LOGI(TAG, "GPS position updated: lat=%.6f lon=%.6f alt=%d",
              pos->latitude_e7 / 1e7, pos->longitude_e7 / 1e7, pos->altitude_m);
 }
-#endif
 
 /* ── Connectivity mode (NVS-persisted) ──────────────────────────────── */
 
@@ -525,15 +524,19 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: location_init ===");
     location_init(&g_location_mgr);
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-    /* Init GPS (T-Deck Plus only) */
-    ESP_LOGI(TAG, "=== BOOT STAGE: gps_init ===");
-    if (gps_init(on_gps_fix, &g_location_mgr) == 0) {
-        ESP_LOGI(TAG, "GPS initialized (waiting for fix...)");
+    /* Init GPS on boards that advertise GPS capability */
+    if (board_has_cap(BOARD_CAP_GPS)) {
+        ESP_LOGI(TAG, "=== BOOT STAGE: gps_init ===");
+        if (gps_init(on_gps_fix, &g_location_mgr) == 0) {
+            ESP_LOGI(TAG, "GPS initialized (waiting for fix...)");
+        } else {
+            ESP_LOGW(TAG, "GPS init failed or not available");
+        }
     } else {
-        ESP_LOGW(TAG, "GPS init failed or not available");
+        ESP_LOGI(TAG, "GPS not supported on this board");
     }
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     /* Init SD card (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: sdcard_init ===");
     if (sdcard_init() == 0) {
