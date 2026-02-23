@@ -6,6 +6,7 @@
 #include "include/channel_storage.h"
 #include "include/channel_key.h"
 #include "include/channel_msg.h"
+#include <stdbool.h>
 #include <string.h>
 
 #ifdef ESP_PLATFORM
@@ -175,31 +176,65 @@ void channel_storage_clear(void) {
     }
 }
 
-#else /* Host stubs for unit tests */
+#else /* Host implementation for unit tests */
 
-int channel_storage_init(void) { 
-    return 0; 
+static bramble_channel_t s_channels[MAX_CHANNELS];
+static char s_names[MAX_CHANNELS][20];
+static int s_num_channels = 0;
+static int s_default_channel_idx = 0;
+static bool s_has_data = false;
+
+int channel_storage_init(void) {
+    return 0;
 }
 
 int channel_storage_save(const bramble_channel_t *channels, int num_channels,
                          const char names[][20], int default_channel_idx) {
-    (void)channels; 
-    (void)num_channels;
-    (void)names;
-    (void)default_channel_idx;
+    if (!channels || !names || num_channels < 0 || num_channels > MAX_CHANNELS) {
+        return -1;
+    }
+    if (default_channel_idx < 0 || default_channel_idx >= MAX_CHANNELS) {
+        return -1;
+    }
+
+    if (num_channels > 0) {
+        memcpy(s_channels, channels, (size_t)num_channels * sizeof(bramble_channel_t));
+        memcpy(s_names, names, (size_t)num_channels * sizeof(s_names[0]));
+    }
+    s_num_channels = num_channels;
+    s_default_channel_idx = default_channel_idx;
+    s_has_data = true;
     return 0;
 }
 
 int channel_storage_load(bramble_channel_t *channels, int *num_channels,
                          char names[][20], int *default_channel_idx) {
-    (void)channels;
-    (void)names;
-    if (num_channels) *num_channels = 0;
-    if (default_channel_idx) *default_channel_idx = 0;
-    return -1;
+    if (!channels || !num_channels || !names || !default_channel_idx) {
+        return -1;
+    }
+
+    if (!s_has_data) {
+        *num_channels = 0;
+        *default_channel_idx = 0;
+        return -1;
+    }
+
+    if (s_num_channels > 0) {
+        memcpy(channels, s_channels, (size_t)s_num_channels * sizeof(bramble_channel_t));
+        memcpy(names, s_names, (size_t)s_num_channels * sizeof(s_names[0]));
+    }
+    *num_channels = s_num_channels;
+    *default_channel_idx = s_default_channel_idx;
+
+    return (s_num_channels > 0) ? 0 : -1;
 }
 
 void channel_storage_clear(void) {
+    memset(s_channels, 0, sizeof(s_channels));
+    memset(s_names, 0, sizeof(s_names));
+    s_num_channels = 0;
+    s_default_channel_idx = 0;
+    s_has_data = false;
 }
 
 #endif /* ESP_PLATFORM */
