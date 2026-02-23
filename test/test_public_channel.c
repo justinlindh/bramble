@@ -32,7 +32,7 @@ void test_public_channel_init(void) {
     bramble_channel_t expected;
     TEST_ASSERT_EQUAL(0, channel_derive_key(BRAMBLE_PUBLIC_CHANNEL_PSK, &expected));
     TEST_ASSERT_EQUAL_MEMORY(expected.key, channels[0].key, BRAMBLE_KEY_SIZE);
-    TEST_ASSERT_EQUAL(expected.channel_id, channels[0].channel_id);
+    TEST_ASSERT_EQUAL(BRAMBLE_PUBLIC_CHANNEL_INDEX, channels[0].channel_id);
     TEST_ASSERT_EQUAL(0, channels[0].epoch);
 }
 

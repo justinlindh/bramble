@@ -3,50 +3,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Forward declarations for module under test */
-typedef enum {
-    TRAFFIC_CAT_BEACON = 0,
-    TRAFFIC_CAT_TIMESYNC,
-    TRAFFIC_CAT_ROUTING,
-    TRAFFIC_CAT_ACK,
-    TRAFFIC_CAT_CHAT,
-    TRAFFIC_CAT_MAINTENANCE,
-    TRAFFIC_CAT_OTHER
-} traffic_category_t;
+#include "traffic_debug.h"
 
-typedef struct {
-    uint32_t seq;
-    uint32_t timestamp_ms;
-    uint8_t pkt_type;
-    traffic_category_t category;
-    uint8_t airtime_tier;
-    uint16_t packet_len;
-    int8_t rssi;
-    bool is_tx;
-} traffic_event_t;
-
-typedef struct {
-    traffic_event_t *events;
-    uint16_t capacity;
-    uint16_t head;
-    uint16_t count;
-    uint32_t dropped_count;
-    uint32_t next_seq;
-    bool enabled;
-} traffic_debug_t;
-
-/* Module API (not yet implemented) */
-void traffic_debug_init(traffic_debug_t *td, traffic_event_t *buffer, uint16_t capacity);
-void traffic_debug_enable(traffic_debug_t *td, bool enabled);
-bool traffic_debug_is_enabled(traffic_debug_t *td);
-traffic_category_t traffic_debug_classify_packet(uint8_t pkt_type);
-uint8_t traffic_debug_get_airtime_tier(traffic_category_t category, uint8_t tier_hint);
-void traffic_debug_record_tx(traffic_debug_t *td, uint8_t pkt_type, uint16_t len, uint8_t tier);
-void traffic_debug_record_rx(traffic_debug_t *td, uint8_t pkt_type, uint16_t len, int8_t rssi);
-uint16_t traffic_debug_get_count(traffic_debug_t *td);
-uint32_t traffic_debug_get_dropped(traffic_debug_t *td);
-const traffic_event_t *traffic_debug_get_event(traffic_debug_t *td, uint16_t index);
-
+/* Module API from traffic_debug.h */
 /* Packet types from packet.h */
 #define PKT_TYPE_ACK              0x01
 #define PKT_TYPE_RREQ             0x02
