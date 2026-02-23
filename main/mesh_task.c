@@ -3,6 +3,7 @@
  */
 
 #include "mesh_task.h"
+#include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
 #include "packet.h"
@@ -77,7 +78,7 @@ static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
-static char                s_node_name[17] = "";  /* loaded from NVS at startup */
+static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* loaded from NVS at startup */
 
 /* Routing state */
 static routing_table_t            s_routes;
@@ -141,6 +142,8 @@ static char                s_channel_names[MAX_CHANNELS][20];
 static bool                s_channel_has_psk[MAX_CHANNELS];
 static int                 s_num_channels = 0;
 static int                 s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
+static uint32_t            s_last_broadcast_id = 0;
+static broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
 
 /* Mailbox — store-and-forward for offline neighbors */
 static bool s_mailbox_enabled = false;
@@ -161,10 +164,12 @@ static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
 /* Forward declarations */
 static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
 static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
+static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
 static int mesh_send_probe_round(uint32_t pid, uint8_t round);
 static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
 static int transmit_packet(const uint8_t *buf, uint8_t len);
+static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
 
@@ -432,6 +437,49 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
 /* ── ACK handling ────────────────────────────────────────────────────── */
 
+static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
+    uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
+    size_t wire_len = 0;
+
+    esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
+                                                                  next_packet_id(),
+                                                                  original_src_addr,
+                                                                  original_packet_id,
+                                                                  buf,
+                                                                  sizeof(buf),
+                                                                  &wire_len);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Delivery receipt build failed: %d", (int)err);
+        return;
+    }
+
+    /* Stagger responders to reduce same-slot collisions at the sender. */
+    uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
+    uint32_t jitter_ms = slot_delay_ms + (esp_random() % 140u);   /* +0..139ms */
+    vTaskDelay(pdMS_TO_TICKS(jitter_ms));
+
+    uint8_t attempts = mesh_broadcast_receipt_retry_count();
+    for (uint8_t i = 0; i < attempts; i++) {
+        if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
+            ESP_LOGI(TAG,
+                     "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
+                     " attempt=%u/%u delay=%" PRIu32 "ms",
+                     original_packet_id,
+                     original_src_addr,
+                     (unsigned)(i + 1),
+                     (unsigned)attempts,
+                     jitter_ms);
+        }
+
+        if (i + 1u < attempts) {
+            uint32_t retry_delay_ms = (i == 0u)
+                                      ? (420u + (esp_random() % 260u))  /* 420..679ms */
+                                      : (900u + (esp_random() % 450u)); /* 900..1349ms */
+            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        }
+    }
+}
+
 static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
     bramble_ack_t ack = {
         .header = {
@@ -555,6 +603,55 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     }
 }
 
+static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
+    if (!receipt) return;
+
+    if (receipt->hop_count < DELIVERY_RECEIPT_MAX_HOPS) {
+        receipt->relay_path[receipt->hop_count++] = s_identity->address;
+    }
+
+    if (receipt->header.hop_limit <= 1) {
+        ESP_LOGD(TAG, "Delivery receipt hop limit reached, dropping");
+        return;
+    }
+    receipt->header.hop_limit--;
+
+    route_entry_t *route = route_lookup(&s_routes, receipt->header.dest_addr);
+    if (!route || route->state == ROUTE_BROKEN) {
+        ESP_LOGW(TAG, "No route to forward delivery receipt to %08" PRIX32, receipt->header.dest_addr);
+        return;
+    }
+
+    uint8_t buf[96];
+    esp_err_t err = bramble_delivery_receipt_serialize(receipt, buf, sizeof(buf));
+    if (err != ESP_OK) return;
+
+    size_t wire_len = DELIVERY_RECEIPT_MIN_SIZE + ((size_t)receipt->hop_count * 4u);
+    ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
+             receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
+    transmit_packet(buf, (uint8_t)wire_len);
+}
+
+static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    (void)snr;
+    bramble_delivery_receipt_t receipt;
+    if (bramble_delivery_receipt_deserialize(&receipt, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Delivery receipt deserialize failed");
+        return;
+    }
+
+    if (receipt.header.dest_addr != s_identity->address) {
+        forward_delivery_receipt(&receipt);
+        return;
+    }
+
+    mesh_emit_broadcast_delivery_notification(receipt.src_addr,
+                                              receipt.orig_packet_id,
+                                              rssi,
+                                              receipt.hop_count,
+                                              receipt.relay_path);
+}
+
 static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
@@ -660,11 +757,14 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_Delete(params);
                         }
 
+                        bramble_header_t rx_hdr;
+                        bramble_header_deserialize(&rx_hdr, data, len);
+
                         /* Send ACK for unicast messages */
                         if (dir == MSG_DIR_INCOMING) {
-                            bramble_header_t rx_hdr;
-                            bramble_header_deserialize(&rx_hdr, data, len);
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
+                            send_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
                         }
 
                         /* Print to stdout */
@@ -732,12 +832,15 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             cJSON_Delete(params);
         }
 
+        /* Deserialize packet_id from header for response telemetry */
+        bramble_header_t rx_hdr;
+        bramble_header_deserialize(&rx_hdr, data, len);
+
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
-            /* Deserialize packet_id from header (big-endian at offset 8) */
-            bramble_header_t rx_hdr;
-            bramble_header_deserialize(&rx_hdr, data, len);
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
+            send_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
         /* Also print to stdout for CLI users */
@@ -1063,6 +1166,9 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         break;
     case PKT_TYPE_ACK:
         handle_ack(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
+    case PKT_TYPE_DELIVERY_RECEIPT:
+        handle_delivery_receipt(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
     case PKT_TYPE_RREQ:
         handle_rreq(pkt->data, pkt->len, pkt->rssi, pkt->snr);
@@ -1685,6 +1791,54 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     return 0;
 }
 
+uint32_t mesh_get_last_broadcast_id(void) {
+    return s_last_broadcast_id;
+}
+
+void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode) {
+    if (mode < BROADCAST_TELEMETRY_OFF || mode > BROADCAST_TELEMETRY_PATH_SAMPLED) {
+        mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
+    }
+    s_broadcast_telemetry_mode = mode;
+}
+
+broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
+    return s_broadcast_telemetry_mode;
+}
+
+void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
+                                               uint32_t broadcast_id,
+                                               int8_t rssi_at_dest,
+                                               uint8_t hop_count,
+                                               const uint32_t *relay_path) {
+    if (s_broadcast_telemetry_mode == BROADCAST_TELEMETRY_OFF) {
+        return;
+    }
+
+    char src_buf[12], id_buf[12], hop_buf[12];
+    cJSON *params = cJSON_CreateObject();
+    snprintf(src_buf, sizeof(src_buf), "%08" PRIX32, src_addr);
+    snprintf(id_buf, sizeof(id_buf), "%08" PRIX32, broadcast_id);
+    cJSON_AddStringToObject(params, "recipient", src_buf);
+    cJSON_AddStringToObject(params, "broadcast_id", id_buf);
+    cJSON_AddStringToObject(params, "status", "delivered");
+    cJSON_AddNumberToObject(params, "rssi_at_dest", rssi_at_dest);
+
+    if (s_broadcast_telemetry_mode == BROADCAST_TELEMETRY_PATH_SAMPLED && hop_count > 0 && relay_path) {
+        uint8_t bounded_hops = (hop_count > DELIVERY_RECEIPT_MAX_HOPS) ? DELIVERY_RECEIPT_MAX_HOPS : hop_count;
+        cJSON *path = cJSON_AddArrayToObject(params, "relayPath");
+        for (uint8_t i = 0; i < bounded_hops; i++) {
+            cJSON *hop = cJSON_CreateObject();
+            snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, relay_path[i]);
+            cJSON_AddStringToObject(hop, "addr", hop_buf);
+            cJSON_AddItemToArray(path, hop);
+        }
+    }
+
+    rpc_notify("bramble.onBroadcastDelivery", params);
+    cJSON_Delete(params);
+}
+
 int mesh_send_broadcast(const uint8_t *data, size_t len) {
     if (s_num_channels == 0) {
         ESP_LOGE(TAG, "No channels initialized");
@@ -1739,6 +1893,9 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
             size_t ct_len = CHANNEL_MSG_OVERHEAD + frags[i].len;
             uint32_t pkt_id = send_data_packet(0xFFFFFFFF, frags[i].data, frags[i].len,
                                               nonce, ciphertext, ct_len, tag);
+            if (i == 0 && pkt_id != 0) {
+                s_last_broadcast_id = pkt_id;
+            }
             if (pkt_id == 0) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
@@ -1776,6 +1933,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
     uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
     if (pkt_id != 0) {
+        s_last_broadcast_id = pkt_id;
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                           (const char *)data, len, 0, 0,
                           0, MSG_STATUS_NONE, 0);

@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c" "mesh_task.c" "cli.c" "rpc_methods.c" "ws_server.c" "board.c"
+    SRCS "main.c" "mesh_task.c" "broadcast_delivery_receipt.c" "cli.c" "rpc_methods.c" "ws_server.c" "board.c"
     INCLUDE_DIRS "."
     REQUIRES nvs_flash esp_wifi esp_event driver esp_timer
              display button ui crypto identity

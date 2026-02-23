@@ -4,6 +4,7 @@ import styles from './DeliveryBadge.module.css';
 interface DeliveryBadgeProps {
   status: DeliveryStatus;
   tier: MessageTier;
+  broadcastRecipientCount?: number;
 }
 
 const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
@@ -15,16 +16,23 @@ const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
   timeout:   { label: 'No receipt (timeout)',   cls: 'warning'   },
 };
 
-export function DeliveryBadge({ status, tier: _tier }: DeliveryBadgeProps) {
+export function DeliveryBadge({ status, tier: _tier, broadcastRecipientCount }: DeliveryBadgeProps) {
   const meta = STATUS_META[status];
 
   return (
-    // Clearer sent-status indicator dot shown next to message timestamp.
-    <span
-      className={`${styles.sentStatusIndicator} ${styles[meta.cls]}`}
-      title={meta.label}
-      aria-label={meta.label}
-      role="img"
-    />
+    <span className={styles.badgeWrap}>
+      {/* Clearer sent-status indicator dot shown next to message timestamp. */}
+      <span
+        className={`${styles.sentStatusIndicator} ${styles[meta.cls]}`}
+        title={meta.label}
+        aria-label={meta.label}
+        role="img"
+      />
+      {typeof broadcastRecipientCount === 'number' && (
+        <span className={styles.recipientCount} title="Recipients with telemetry">
+          {broadcastRecipientCount}
+        </span>
+      )}
+    </span>
   );
 }

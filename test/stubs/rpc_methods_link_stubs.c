@@ -11,6 +11,7 @@ typedef struct { const char *short_name; } bramble_board_config_t;
 typedef struct { int dummy; } mesh_shared_state_t;
 typedef struct { int dummy; } routing_table_t;
 typedef enum { BEACON_POLICY_ALWAYS=0, BEACON_POLICY_BALANCED=1, BEACON_POLICY_MINIMAL=2 } beacon_policy_mode_t;
+typedef enum { BROADCAST_TELEMETRY_OFF=0, BROADCAST_TELEMETRY_RECIPIENT_ONLY=1, BROADCAST_TELEMETRY_PATH_SAMPLED=2 } broadcast_telemetry_mode_t;
 typedef struct {
     float frequency_mhz;
     uint8_t sf;
@@ -76,7 +77,8 @@ int mesh_get_channel_security(int i, bool *h, uint16_t *e) {
 }
 void mesh_get_state(mesh_shared_state_t *o){memset(o,0,sizeof(*o));}
 void mesh_get_routes(routing_table_t *o){memset(o,0,sizeof(*o));}
-void mesh_set_mailbox(bool e){(void)e;} void mesh_set_node_name(const char *n){(void)n;} void mesh_reboot_delayed(uint32_t d){(void)d;} bool mesh_get_beacon_status(void){return true;} int mesh_set_beacon_policy(beacon_policy_mode_t m){(void)m;return 0;} int mesh_get_beacon_policy(beacon_policy_mode_t *m){if(m)*m=BEACON_POLICY_BALANCED;return 0;} int mesh_send_message(uint32_t d,const char *m){(void)d;(void)m;return 0;} int mesh_send_broadcast(const char *m){(void)m;return 0;} int mesh_send_channel(uint8_t c,const char *m){(void)c;(void)m;return 0;} int mesh_send_probe(uint32_t t,uint16_t c,bool p){(void)t;(void)c;(void)p;return 0;}
+void mesh_set_mailbox(bool e){(void)e;} void mesh_set_node_name(const char *n){(void)n;} void mesh_reboot_delayed(uint32_t d){(void)d;} bool mesh_get_beacon_status(void){return true;} int mesh_set_beacon_policy(beacon_policy_mode_t m){(void)m;return 0;} int mesh_get_beacon_policy(beacon_policy_mode_t *m){if(m)*m=BEACON_POLICY_BALANCED;return 0;} int mesh_send_message(uint32_t d,const char *m){(void)d;(void)m;return 0;} int mesh_send_broadcast(const uint8_t *m,size_t l){(void)m;(void)l;return 0;} int mesh_send_channel(uint8_t c,const char *m){(void)c;(void)m;return 0;} int mesh_send_probe(uint32_t t,uint16_t c,bool p){(void)t;(void)c;(void)p;return 0;}
+uint32_t mesh_get_last_broadcast_id(void){return 0xABCDEF01;} void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode){(void)mode;} broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void){return BROADCAST_TELEMETRY_RECIPIENT_ONLY;}
 uint32_t airtime_budget_remaining(void){return 0;} void airtime_budget_refill(uint32_t n){(void)n;} uint32_t airtime_budget_next_refill_ms(void){return 0;}
 int battery_read_mv(void){return 0;} int battery_read_pct(void){return 0;}
 const bramble_board_config_t *board_get_config(void){return 0;}

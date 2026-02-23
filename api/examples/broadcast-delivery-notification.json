@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onBroadcastDelivery",
+  "params": {
+    "broadcastId": "BCAST-20260222-0001",
+    "packetId": "A1B2C3D4",
+    "from": "04CAAAF8",
+    "to": "FFFFFFFF",
+    "status": "delivered",
+    "hopCount": 2,
+    "deliveredAtMs": 1768836000123
+  }
+}

@@ -32,10 +32,19 @@ export function useConversation(id: string): {
   const messages = useMemo(() => {
     const next = filterMessages(allMessages, id);
     // Return previous reference if contents haven't changed (avoids re-render)
+    // Include broadcast recipient telemetry so delivery count/panel updates render.
     const prev = prevRef.current;
+    const recSig = (m: Message) =>
+      (m.broadcastRecipients ?? [])
+        .map(r => `${r.addr}:${r.status}:${r.hopCount}:${r.deliveredAtMs}`)
+        .join('|');
     if (
       prev.length === next.length &&
-      next.every((m, i) => m.id === prev[i].id && m.status === prev[i].status)
+      next.every((m, i) =>
+        m.id === prev[i].id &&
+        m.status === prev[i].status &&
+        recSig(m) === recSig(prev[i])
+      )
     ) {
       return prev;
     }

@@ -61,6 +61,21 @@
   font-size: 0.72rem;
 }
 
+.deliveryToggle {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.85);
+  user-select: none;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+}
+
+.deliveryToggleActive {
+  background: rgba(255, 255, 255, 0.24);
+}
+
 .routeToggle {
   cursor: pointer;
   color: rgba(255, 255, 255, 0.4);
@@ -86,4 +101,10 @@
 .tierTag {
   font-size: 0.72rem;
   opacity: 0.85;
+}
+
+.broadcastTierTag {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
 }

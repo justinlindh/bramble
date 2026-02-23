@@ -77,6 +77,8 @@ interface Actions {
   setRoutes: (r: Route[]) => void;
   addMessage: (msg: Message) => void;
   updateMessageStatus: (id: string, status: DeliveryStatus, relayPath?: RelayHop[]) => void;
+  updateMessageBroadcastMeta: (id: string, patch: { packetId?: string | number; broadcastId?: string }) => void;
+  mergeBroadcastDeliveryRecipient: (broadcastId: string, recipient: { addr: number; status: 'delivered' | 'failed'; hopCount: number; deliveredAtMs: number }) => void;
   setActiveConversation: (id: string) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -225,6 +227,29 @@ export const useStore = create<AppState & Actions>((set) => ({
           ? { ...m, status, relayPath: relayPath ?? m.relayPath }
           : m
       ),
+    })),
+
+  updateMessageBroadcastMeta: (id, patch) =>
+    set(state => ({
+      messages: state.messages.map(m => (m.id === id ? { ...m, ...patch } : m)),
+    })),
+
+  mergeBroadcastDeliveryRecipient: (broadcastId, recipient) =>
+    set(state => ({
+      messages: state.messages.map(m => {
+        if (m.broadcastId !== broadcastId) return m;
+        const existing = m.broadcastRecipients ?? [];
+        const idx = existing.findIndex(r => r.addr === recipient.addr);
+        if (idx < 0) {
+          return { ...m, broadcastRecipients: [...existing, recipient] };
+        }
+        if (existing[idx].deliveredAtMs > recipient.deliveredAtMs) {
+          return m;
+        }
+        const next = [...existing];
+        next[idx] = { ...existing[idx], ...recipient };
+        return { ...m, broadcastRecipients: next };
+      }),
     })),
 
   setActiveTab: (tab: string) => set({ activeTab: tab }),

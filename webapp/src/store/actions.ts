@@ -113,6 +113,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
       handleIncomingMessage(params)
     );
     client.subscribe('bramble.onAck', (params) => handleAck(params));
+    client.subscribe('bramble.onBroadcastDelivery', (params) => handleBroadcastDelivery(params));
     client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
     client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
     client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
@@ -362,6 +363,23 @@ export async function loadMessages(sinceId?: number): Promise<void> {
 // ─── Messaging ────────────────────────────────────────────────────────────
 
 const packetIdToMsgId = new Map<string, string>();
+const broadcastIdToMsgId = new Map<string, string>();
+const pendingBroadcastTelemetry = new Map<string, BroadcastDeliveryNotification[]>();
+
+interface BroadcastDeliveryNotification {
+  broadcastId: string;
+  packetId?: string;
+  from: string | number;
+  status: 'delivered' | 'failed';
+  hopCount: number;
+  deliveredAtMs: number;
+  // firmware snake_case compatibility
+  broadcast_id?: string;
+  recipient?: string | number;
+  packet_id?: string;
+  hop_count?: number;
+  delivered_at_ms?: number;
+}
 
 // Fragmentation limits (aligned with firmware components/fragment):
 // - Single packet max: 203 bytes
@@ -373,6 +391,69 @@ const FRAGMENTED_MAX_BYTES = 616;
 
 function utf8ByteLength(s: string): number {
   return new TextEncoder().encode(s).length;
+}
+
+function parseHexAddr(addr: string | number | undefined): number {
+  if (typeof addr === 'number') return addr;
+  if (!addr) return 0;
+  return parseInt(addr.replace(/^0x/i, ''), 16);
+}
+
+export function registerBroadcastSendTelemetry(msgId: string, meta: { packetId?: string; broadcastId?: string }): void {
+  const { packetId, broadcastId } = meta;
+  if (packetId || broadcastId) {
+    useStore.getState().updateMessageBroadcastMeta(msgId, { packetId, broadcastId });
+  }
+  if (packetId) {
+    packetIdToMsgId.set(packetId, msgId);
+  }
+  if (broadcastId) {
+    broadcastIdToMsgId.set(broadcastId, msgId);
+    applyPendingBroadcastTelemetry(broadcastId);
+  }
+}
+
+function applyPendingBroadcastTelemetry(broadcastId: string): void {
+  const queued = pendingBroadcastTelemetry.get(broadcastId);
+  if (!queued || queued.length === 0) return;
+  pendingBroadcastTelemetry.delete(broadcastId);
+  for (const event of queued) {
+    applyBroadcastDelivery(event);
+  }
+}
+
+function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
+  const msgId = broadcastIdToMsgId.get(event.broadcastId);
+  if (!msgId) {
+    const existing = pendingBroadcastTelemetry.get(event.broadcastId) ?? [];
+    pendingBroadcastTelemetry.set(event.broadcastId, [...existing, event]);
+    return;
+  }
+
+  useStore.getState().mergeBroadcastDeliveryRecipient(event.broadcastId, {
+    addr: parseHexAddr(event.from),
+    status: event.status,
+    hopCount: event.hopCount ?? 0,
+    deliveredAtMs: event.deliveredAtMs ?? Date.now(),
+  });
+}
+
+export function handleBroadcastDelivery(params: unknown): void {
+  const p = params as Partial<BroadcastDeliveryNotification>;
+  const broadcastId = p.broadcastId ?? p.broadcast_id;
+  const from = p.from ?? p.recipient;
+  const packetId = p.packetId ?? p.packet_id;
+  const hopCount = p.hopCount ?? p.hop_count ?? 0;
+  const deliveredAtMs = p.deliveredAtMs ?? p.delivered_at_ms ?? Date.now();
+  if (!broadcastId || !p.status || from === undefined) return;
+  applyBroadcastDelivery({
+    broadcastId,
+    packetId,
+    from,
+    status: p.status,
+    hopCount,
+    deliveredAtMs,
+  });
 }
 
 export async function sendMessage(
@@ -420,6 +501,9 @@ export async function sendMessage(
       message_id?: string;
       status?: string;
       packetId?: string;
+      packet_id?: string;
+      broadcastId?: string;
+      broadcast_id?: string;
       fragmented?: boolean;
       fragments_total?: number;
     }>(method, params);
@@ -431,9 +515,10 @@ export async function sendMessage(
     
     store.updateMessageStatus(msg.id, 'sent');
     messageDb.updateMessageStatus(msg.id, 'sent').catch(() => {});
-    if (result?.packetId) {
-      packetIdToMsgId.set(result.packetId, msg.id);
-    }
+    registerBroadcastSendTelemetry(msg.id, {
+      packetId: result?.packetId ?? result?.packet_id,
+      broadcastId: result?.broadcastId ?? result?.broadcast_id,
+    });
   } catch (e) {
     store.updateMessageStatus(msg.id, 'failed');
     messageDb.updateMessageStatus(msg.id, 'failed').catch(() => {});
@@ -881,6 +966,12 @@ export async function loadTrafficEvents(sinceSeq?: number): Promise<void> {
 function handleTrafficEvent(params: unknown): void {
   const event = normalizeTrafficEvent(params as any);
   useStore.getState().addTrafficEvent(event);
+}
+
+export function __resetBroadcastTelemetryForTests(): void {
+  packetIdToMsgId.clear();
+  broadcastIdToMsgId.clear();
+  pendingBroadcastTelemetry.clear();
 }
 
 export function getClient(): BrambleClient | null {

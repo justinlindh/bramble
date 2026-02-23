@@ -6,14 +6,14 @@ info:
     Methods are invoked via JSON-RPC over serial (UART), WebSocket, or BLE.
     Each method is mapped to a POST path for codegen and documentation purposes.
     The actual wire format is standard JSON-RPC 2.0.
-  version: 0.2.1
+  version: 0.3.0
   license:
     name: MIT
     identifier: MIT
 
 servers:
   - url: https://bramble.local
-    description: Bramble RPC endpoint
+    description: Bramble node HTTP host (WebSocket JSON-RPC upgrades on /ws)
 
 security: []
 
@@ -327,7 +327,7 @@ paths:
     post:
       operationId: setNodeName
       summary: Set the node display name
-      description: Sets the node name (max 8 characters).
+      description: Sets the node name (max 32 characters).
       tags: [config]
       requestBody:
         content:
@@ -1181,10 +1181,12 @@ components:
 
     SendBroadcastResponse:
       type: object
-      required: [message_id, status, broadcast, channel, fragmented, max_bytes, actual_bytes]
+      description: Response fields currently emitted by firmware for bramble.sendBroadcast.
+      required: [broadcast_id, status, broadcast, channel, fragmented, max_bytes, actual_bytes]
       properties:
-        message_id:
+        broadcast_id:
           type: string
+          description: Broadcast identifier as uppercase hex string.
         status:
           type: string
           enum: [sent]
@@ -1242,8 +1244,8 @@ components:
       properties:
         name:
           type: string
-          description: Node display name (max 8 characters).
-          maxLength: 8
+          description: Node display name (max 32 characters).
+          maxLength: 32
 
     AddChannelParams:
       type: object
@@ -1362,6 +1364,35 @@ components:
         cooldownSec:
           type: integer
           description: Minimum time (seconds) between mode transitions (hysteresis).
+
+    BroadcastDeliveryNotification:
+      type: object
+      description: Delivery telemetry notification for a previously queued broadcast packet.
+      required: [recipient, broadcast_id, status, rssi_at_dest]
+      properties:
+        recipient:
+          type: string
+          description: Recipient node address as 8-char uppercase hex.
+        broadcast_id:
+          type: string
+          description: Broadcast identifier returned by bramble.sendBroadcast.
+        status:
+          type: string
+          description: Delivery state for this telemetry event.
+          enum: [delivered]
+        rssi_at_dest:
+          type: integer
+          description: RSSI measured at recipient, in dBm.
+        relayPath:
+          type: array
+          description: Optional sampled relay path when telemetry mode includes path sampling.
+          items:
+            type: object
+            required: [addr]
+            properties:
+              addr:
+                type: string
+                description: Relay node address as 8-char uppercase hex.
 
     # ── Traffic Debug Types ────────────────────────────────────────────────
 
@@ -1521,6 +1552,14 @@ x-notifications:
       the packetId returned by bramble.sendMessage.
     payload:
       $ref: '#/components/schemas/OnAckPayload'
+
+  bramble.onBroadcastDelivery:
+    description: >
+      Broadcast delivery telemetry event emitted after bramble.sendBroadcast.
+      Correlate using both broadcastId and packetId from SendBroadcastResponse.
+      One broadcast may produce multiple delivery notifications.
+    payload:
+      $ref: '#/components/schemas/BroadcastDeliveryNotification'
 
   bramble.onNeighborChange:
     description: >
