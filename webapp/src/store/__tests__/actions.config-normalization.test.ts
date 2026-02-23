@@ -39,4 +39,24 @@ describe('normalizeConfig channel metadata aliases', () => {
       },
     ]);
   });
+
+  it('falls back to alias name only when primary name is blank', () => {
+    const cfg = normalizeConfig({
+      channels: [
+        {
+          id: 2,
+          name: '   ',
+          channel_name: 'ops-net',
+        },
+        {
+          id: 3,
+          name: 'control',
+          channel_name: 'ignored-alias',
+        },
+      ],
+    });
+
+    expect(cfg.channels[0].name).toBe('ops-net');
+    expect(cfg.channels[1].name).toBe('control');
+  });
 });

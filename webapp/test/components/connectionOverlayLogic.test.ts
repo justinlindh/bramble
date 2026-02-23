@@ -14,8 +14,8 @@ describe('ConnectionOverlay URL logic', () => {
     expect(buildWifiUrl('192.168.4.1', 'http:', 'localhost:4173')).toBe('ws://192.168.4.1/ws');
   });
 
-  it('auto-connects only when disconnected with saved ip and no manual disconnect', () => {
-    expect(shouldAutoConnect('192.168.4.1', false, 'disconnected', false)).toBe(true);
+  it('never auto-connects; user must click Connect', () => {
+    expect(shouldAutoConnect('192.168.4.1', false, 'disconnected', false)).toBe(false);
     expect(shouldAutoConnect('', false, 'disconnected', false)).toBe(false);
     expect(shouldAutoConnect('192.168.4.1', true, 'disconnected', false)).toBe(false);
     expect(shouldAutoConnect('192.168.4.1', false, 'connecting', false)).toBe(false);
