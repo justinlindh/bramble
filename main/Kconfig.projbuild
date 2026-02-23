@@ -7,6 +7,9 @@ menu "Bramble Configuration"
         config BRAMBLE_BOARD_HELTEC_V3
             bool "Heltec WiFi LoRa 32 V3 (SX1262)"
 
+        config BRAMBLE_BOARD_HELTEC_V4
+            bool "Heltec WiFi LoRa 32 V4 (ESP32-S3 + SX1262 + optional GNSS)"
+
         config BRAMBLE_BOARD_TDECK_PLUS
             bool "LILYGO T-Deck Plus (ESP32-S3 + SX1262 + GPS + Keyboard)"
 
