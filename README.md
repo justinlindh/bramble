@@ -85,6 +85,7 @@ See [`simulator/README.md`](simulator/README.md) for details.
 - [`docs/COMPARISON.md`](docs/COMPARISON.md) — Comparison with Meshtastic and other protocols
 - [`docs/field-test-5node.md`](docs/field-test-5node.md) — 5-node field test plan
 - [`docs/field-test-20node.md`](docs/field-test-20node.md) — 20-node field test plan
+- [`docs/webapp/chat.md`](docs/webapp/chat.md) — Web app user guide (shortcuts, routing/table semantics, connection states, location tiers)
 
 ## API & SDK
 

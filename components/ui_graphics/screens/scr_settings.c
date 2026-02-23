@@ -211,7 +211,7 @@ static void name_edit_cb(lv_event_t *e) {
     s_name_edit_ta = lv_textarea_create(panel);
     lv_obj_set_size(s_name_edit_ta, 274, 36);
     lv_obj_align(s_name_edit_ta, LV_ALIGN_TOP_MID, 0, 30);
-    lv_textarea_set_max_length(s_name_edit_ta, 16);
+    lv_textarea_set_max_length(s_name_edit_ta, 32);
     lv_textarea_set_one_line(s_name_edit_ta, true);
     const char *node_name = mesh_get_node_name();
     lv_textarea_set_text(s_name_edit_ta, node_name ? node_name : "");

@@ -14,7 +14,7 @@ interface IdentitySectionProps {
 export function IdentitySection({ identity }: IdentitySectionProps) {
   const [name, setName] = useState(identity.name);
 
-  // Sync local name state when identity prop changes (e.g. after node truncates to 8 chars)
+  // Sync local name state when identity prop changes (e.g. after node applies validation/truncation)
   useEffect(() => {
     setName(identity.name);
   }, [identity.name]);
@@ -29,7 +29,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     setError('');
     setSaved(false);
     try {
-      await saveNodeName(name.trim().slice(0, 8));
+      await saveNodeName(name.trim().slice(0, 32));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -94,8 +94,8 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
             className={styles.nameInput}
             type="text"
             value={name}
-            maxLength={8}
-            placeholder="Up to 8 chars"
+            maxLength={32}
+            placeholder="Up to 32 chars"
             onChange={(e) => setName(e.target.value)}
             aria-label="Node name"
           />
