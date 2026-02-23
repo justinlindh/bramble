@@ -132,6 +132,7 @@ static const char *error_message_for_code(int code)
         case RPC_ERR_RADIO:          return "Radio error";
         case RPC_ERR_CHANNEL:        return "Channel error";
         case RPC_ERR_RATE_LIMIT:     return "Rate limited";
+        case RPC_ERR_NOT_SUPPORTED:  return "Not supported";
         default:                     return "Error";
     }
 }

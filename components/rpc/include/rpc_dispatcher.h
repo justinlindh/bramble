@@ -14,6 +14,7 @@
 #define RPC_ERR_RADIO        (-1001)
 #define RPC_ERR_CHANNEL      (-1002)
 #define RPC_ERR_RATE_LIMIT   (-1003)
+#define RPC_ERR_NOT_SUPPORTED (-1004)
 
 /**
  * RPC method handler. Receives params object, populates result object.
