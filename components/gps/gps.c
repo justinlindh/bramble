@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include <string.h>
+#include <ctype.h>
 
 static const char *TAG = "gps";
 
@@ -24,6 +25,56 @@ static gps_fix_cb_t s_callback = NULL;
 static void *s_callback_ctx = NULL;
 static bramble_position_t s_current_pos = {0};
 static bool s_has_fix = false;
+static uint32_t s_rx_bytes_total = 0;
+static uint32_t s_rx_lines_total = 0;
+
+static bool gps_probe_nmea_at_baud(int baud, uint32_t probe_ms) {
+    ESP_ERROR_CHECK(uart_set_baudrate(GPS_UART_NUM, baud));
+    uart_flush_input(GPS_UART_NUM);
+
+    uint32_t start_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    uint32_t good = 0;
+    uint32_t total = 0;
+    uint8_t data[128];
+
+    while (((uint32_t)(esp_timer_get_time() / 1000ULL) - start_ms) < probe_ms) {
+        int len = uart_read_bytes(GPS_UART_NUM, data, sizeof(data), pdMS_TO_TICKS(60));
+        if (len <= 0) continue;
+        for (int i = 0; i < len; i++) {
+            uint8_t c = data[i];
+            total++;
+            if (c == '$' || c == ',' || c == '*' || c == '\r' || c == '\n' || isalnum(c)) {
+                good++;
+            }
+        }
+    }
+
+    if (total < 40) return false;
+    float ratio = (float)good / (float)total;
+    ESP_LOGI(TAG, "GPS baud probe %d: total=%lu nmea_like=%.2f", baud,
+             (unsigned long)total, ratio);
+    return ratio > 0.85f;
+}
+
+static int gps_select_baud(int preferred_baud) {
+    const int candidates[] = {preferred_baud, 9600, 38400, 57600, 115200};
+    const size_t n = sizeof(candidates) / sizeof(candidates[0]);
+
+    for (size_t i = 0; i < n; i++) {
+        int baud = candidates[i];
+        bool seen = false;
+        for (size_t j = 0; j < i; j++) {
+            if (candidates[j] == baud) { seen = true; break; }
+        }
+        if (seen) continue;
+
+        if (gps_probe_nmea_at_baud(baud, 1200)) {
+            return baud;
+        }
+    }
+
+    return preferred_baud;
+}
 
 /* GPS background task */
 static void gps_task(void *arg) {
@@ -33,11 +84,11 @@ static void gps_task(void *arg) {
     uint8_t data[128];
     
     ESP_LOGI(TAG, "GPS task started");
-    
     while (1) {
         /* Read available data */
         int len = uart_read_bytes(GPS_UART_NUM, data, sizeof(data) - 1, pdMS_TO_TICKS(100));
         if (len <= 0) continue;
+        s_rx_bytes_total += (uint32_t)len;
         
         /* Process byte by byte to extract lines */
         for (int i = 0; i < len; i++) {
@@ -52,6 +103,7 @@ static void gps_task(void *arg) {
             else if (c == '\n' || c == '\r') {
                 if (line_pos > 0) {
                     line_buf[line_pos] = '\0';
+                    s_rx_lines_total++;
                     
                     /* Parse NMEA sentence */
                     nmea_position_t nmea_pos;
@@ -149,9 +201,15 @@ int gps_init(gps_fix_cb_t cb, void *ctx) {
     ESP_ERROR_CHECK(uart_param_config(GPS_UART_NUM, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(GPS_UART_NUM, board->gps.tx, board->gps.rx,
                                   UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    
-    ESP_LOGI(TAG, "GPS UART initialized (TX=%d, RX=%d, baud=%d)",
-             board->gps.tx, board->gps.rx, board->gps.baud);
+
+    int active_baud = gps_select_baud(board->gps.baud);
+    ESP_ERROR_CHECK(uart_set_baudrate(GPS_UART_NUM, active_baud));
+
+    s_rx_bytes_total = 0;
+    s_rx_lines_total = 0;
+
+    ESP_LOGI(TAG, "GPS UART initialized (TX=%d, RX=%d, baud=%d active=%d)",
+             board->gps.tx, board->gps.rx, board->gps.baud, active_baud);
     
     /* Create background task */
     BaseType_t res = xTaskCreate(gps_task, "gps_task", GPS_TASK_STACK_SIZE,
