@@ -75,6 +75,14 @@ function uuid(): string {
 
 export async function connect(type: TransportType, options?: { url?: string }): Promise<void> {
   const store = useStore.getState();
+
+  // Guard against duplicate/re-entrant connects creating multiple active WS clients.
+  if (client) {
+    try { client.clearSubscriptions(); } catch { /* noop */ }
+    try { await client.disconnect(); } catch { /* noop */ }
+    client = null;
+  }
+
   store.setManualDisconnect(false);
   store.setConnectionState('connecting');
   try {
