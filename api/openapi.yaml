@@ -6,7 +6,7 @@ info:
     Methods are invoked via JSON-RPC over serial (UART), WebSocket, or BLE.
     Each method is mapped to a POST path for codegen and documentation purposes.
     The actual wire format is standard JSON-RPC 2.0.
-  version: 0.2.1
+  version: 0.3.0
   license:
     name: MIT
     identifier: MIT
