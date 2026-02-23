@@ -181,6 +181,47 @@ void location_cache_purge(location_manager_t *mgr, uint32_t now_ms) {
     }
 }
 
+uint16_t location_policy_clamp_interval_s(uint16_t interval_s) {
+    if (interval_s < LOCATION_MIN_INTERVAL_S) {
+        return LOCATION_MIN_INTERVAL_S;
+    }
+    return interval_s;
+}
+
+uint8_t location_tier_from_string(const char *tier) {
+    if (!tier) return LOCATION_TIER_COARSE;
+    if (strcmp(tier, "full") == 0 || strcmp(tier, "exact") == 0) return LOCATION_TIER_FULL;
+    if (strcmp(tier, "presence") == 0) return LOCATION_TIER_PRESENCE;
+    return LOCATION_TIER_COARSE;
+}
+
+const char *location_tier_to_string(uint8_t tier) {
+    switch (tier) {
+        case LOCATION_TIER_FULL:
+            return "full";
+        case LOCATION_TIER_PRESENCE:
+            return "presence";
+        case LOCATION_TIER_COARSE:
+        default:
+            return "coarse";
+    }
+}
+
+void location_policy_set_defaults(location_policy_t *policy) {
+    if (!policy) return;
+    policy->enabled = false;
+    policy->default_tier = LOCATION_TIER_COARSE;
+    policy->interval_s = LOCATION_DEFAULT_INTERVAL_S;
+}
+
+void location_policy_normalize(location_policy_t *policy) {
+    if (!policy) return;
+    if (policy->default_tier > LOCATION_TIER_PRESENCE) {
+        policy->default_tier = LOCATION_TIER_COARSE;
+    }
+    policy->interval_s = location_policy_clamp_interval_s(policy->interval_s);
+}
+
 bool location_should_send(const location_manager_t *mgr, uint32_t peer_addr, uint32_t now_ms) {
     for (int i = 0; i < mgr->contact_count; i++) {
         if (mgr->contacts[i].peer_addr == peer_addr && mgr->contacts[i].active) {

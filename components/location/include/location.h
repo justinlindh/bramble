@@ -17,8 +17,17 @@
 
 #define LOCATION_MAX_CONTACTS  16
 #define LOCATION_DEFAULT_INTERVAL_MS  300000  /* 5 minutes */
-#define LOCATION_MIN_DISTANCE_M       100     /* distance trigger */
-#define LOCATION_CACHE_TTL_MS         3600000 /* 1 hour */
+#define LOCATION_DEFAULT_INTERVAL_S   300      /* 5 minutes */
+#define LOCATION_MIN_INTERVAL_S       30       /* floor for periodic sharing */
+#define LOCATION_MIN_DISTANCE_M       100      /* distance trigger */
+#define LOCATION_CACHE_TTL_MS         3600000  /* 1 hour */
+
+/* Persistent sharing policy */
+typedef struct {
+    bool enabled;
+    uint8_t default_tier;   /* LOCATION_TIER_* */
+    uint16_t interval_s;
+} location_policy_t;
 
 /* Position data */
 typedef struct {
@@ -85,5 +94,12 @@ void location_cache_purge(location_manager_t *mgr, uint32_t now_ms);
 
 /* Check if update needed (time or distance based) */
 bool location_should_send(const location_manager_t *mgr, uint32_t peer_addr, uint32_t now_ms);
+
+/* Persistent policy helpers */
+void location_policy_set_defaults(location_policy_t *policy);
+void location_policy_normalize(location_policy_t *policy);
+uint16_t location_policy_clamp_interval_s(uint16_t interval_s);
+uint8_t location_tier_from_string(const char *tier);
+const char *location_tier_to_string(uint8_t tier);
 
 #endif

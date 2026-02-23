@@ -20,6 +20,7 @@
 #include "board_config.h"
 #include "display.h"
 #include "gps.h"
+#include "location.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -548,6 +549,61 @@ static int handle_set_mailbox(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_t *policy) {
+    if (!policy) return ESP_ERR_INVALID_ARG;
+
+    location_policy_set_defaults(policy);
+
+    esp_err_t err;
+    bool write_back = false;
+
+    uint8_t enabled = 0;
+    err = nvs_get_u8(nvs, "enabled", &enabled);
+    if (err == ESP_OK) {
+        policy->enabled = (enabled != 0);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        write_back = true;
+    } else {
+        return err;
+    }
+
+    uint16_t interval_s = 0;
+    err = nvs_get_u16(nvs, "interval_s", &interval_s);
+    if (err == ESP_OK) {
+        policy->interval_s = interval_s;
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        write_back = true;
+    } else {
+        return err;
+    }
+
+    char tier[16] = {0};
+    size_t tier_len = sizeof(tier);
+    err = nvs_get_str(nvs, "def_tier", tier, &tier_len);
+    if (err == ESP_OK) {
+        policy->default_tier = location_tier_from_string(tier);
+    } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+        write_back = true;
+    } else {
+        return err;
+    }
+
+    uint16_t normalized_interval = policy->interval_s;
+    location_policy_normalize(policy);
+    if (normalized_interval != policy->interval_s) {
+        write_back = true;
+    }
+
+    if (write_back) {
+        nvs_set_u8(nvs, "enabled", policy->enabled ? 1 : 0);
+        nvs_set_u16(nvs, "interval_s", policy->interval_s);
+        nvs_set_str(nvs, "def_tier", location_tier_to_string(policy->default_tier));
+        return nvs_commit(nvs);
+    }
+
+    return ESP_OK;
+}
+
 static int handle_set_location_config(const cJSON *params, cJSON *result) {
     if (!params) return RPC_ERR_INVALID_PARAMS;
 
@@ -558,17 +614,35 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
         return 0;
     }
 
+    location_policy_t policy;
+    if (location_policy_load_or_init(nvs, &policy) != ESP_OK) {
+        nvs_close(nvs);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "NVS read failed");
+        return 0;
+    }
+
     cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
-    if (enabled && cJSON_IsBool(enabled))
-        nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
+    if (enabled && cJSON_IsBool(enabled)) {
+        policy.enabled = cJSON_IsTrue(enabled);
+    }
 
     cJSON *interval = cJSON_GetObjectItem(params, "interval_s");
-    if (interval && cJSON_IsNumber(interval))
-        nvs_set_u16(nvs, "interval_s", (uint16_t)interval->valueint);
+    if (interval && cJSON_IsNumber(interval)) {
+        int interval_val = interval->valueint;
+        if (interval_val < 0) interval_val = 0;
+        policy.interval_s = location_policy_clamp_interval_s((uint16_t)interval_val);
+    }
 
     cJSON *tier = cJSON_GetObjectItem(params, "default_tier");
-    if (tier && cJSON_IsString(tier))
-        nvs_set_str(nvs, "def_tier", tier->valuestring);
+    if (tier && cJSON_IsString(tier)) {
+        policy.default_tier = location_tier_from_string(tier->valuestring);
+    }
+
+    location_policy_normalize(&policy);
+    nvs_set_u8(nvs, "enabled", policy.enabled ? 1 : 0);
+    nvs_set_u16(nvs, "interval_s", policy.interval_s);
+    nvs_set_str(nvs, "def_tier", location_tier_to_string(policy.default_tier));
 
     /* Accept manual coordinates (no GPS hardware on Heltec V3) */
     cJSON *lat = cJSON_GetObjectItem(params, "lat");
@@ -636,11 +710,20 @@ static int handle_share_location_once(const cJSON *params, cJSON *result) {
 
     /* Read stored location from NVS */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "no location configured");
         return 0;
     }
+    location_policy_t policy;
+    if (location_policy_load_or_init(nvs, &policy) != ESP_OK) {
+        nvs_close(nvs);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "location policy read failed");
+        return 0;
+    }
+
+    (void)policy;
     int32_t lat_e6 = 0, lon_e6 = 0;
     nvs_get_i32(nvs, "lat_e6", &lat_e6);
     nvs_get_i32(nvs, "lon_e6", &lon_e6);
@@ -729,25 +812,26 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
 
     /* Include own location if set */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
-        int32_t lat_e6 = 0, lon_e6 = 0;
-        uint8_t enabled = 0;
-        nvs_get_u8(nvs, "enabled", &enabled);
-        nvs_get_i32(nvs, "lat_e6", &lat_e6);
-        nvs_get_i32(nvs, "lon_e6", &lon_e6);
-        nvs_close(nvs);
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) == ESP_OK) {
+        location_policy_t policy;
+        if (location_policy_load_or_init(nvs, &policy) == ESP_OK) {
+            int32_t lat_e6 = 0, lon_e6 = 0;
+            nvs_get_i32(nvs, "lat_e6", &lat_e6);
+            nvs_get_i32(nvs, "lon_e6", &lon_e6);
 
-        if (enabled && (lat_e6 != 0 || lon_e6 != 0)) {
-            cJSON *self = cJSON_CreateObject();
-            char buf[12];
-            cJSON_AddStringToObject(self, "address",
-                addr_hex(s_identity->address, buf, sizeof(buf)));
-            cJSON_AddNumberToObject(self, "lat", lat_e6 / 1e6);
-            cJSON_AddNumberToObject(self, "lon", lon_e6 / 1e6);
-            cJSON_AddStringToObject(self, "tier", "exact");
-            cJSON_AddBoolToObject(self, "is_self", true);
-            cJSON_AddItemToArray(peers, self);
+            if (policy.enabled && (lat_e6 != 0 || lon_e6 != 0)) {
+                cJSON *self = cJSON_CreateObject();
+                char buf[12];
+                cJSON_AddStringToObject(self, "address",
+                    addr_hex(s_identity->address, buf, sizeof(buf)));
+                cJSON_AddNumberToObject(self, "lat", lat_e6 / 1e6);
+                cJSON_AddNumberToObject(self, "lon", lon_e6 / 1e6);
+                cJSON_AddStringToObject(self, "tier", "exact");
+                cJSON_AddBoolToObject(self, "is_self", true);
+                cJSON_AddItemToArray(peers, self);
+            }
         }
+        nvs_close(nvs);
     }
 
     /* TODO: add received peer locations — pending peer location protocol integration.
