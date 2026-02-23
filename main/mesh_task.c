@@ -2114,6 +2114,7 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
 
     if (name && name[0]) {
         strncpy(s_channel_names[idx], name, sizeof(s_channel_names[idx]) - 1);
+        s_channel_names[idx][sizeof(s_channel_names[idx]) - 1] = '\0';
     } else {
         s_channel_names[idx][0] = '\0';
     }
