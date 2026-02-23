@@ -297,11 +297,14 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
         return RPC_ERR_RADIO;
     }
 
-    /* Generate message ID from incrementing counter (broadcast packets don't return packet_id) */
-    static uint32_t broadcast_msg_counter = 1;
-    char msg_id[12];
-    snprintf(msg_id, sizeof(msg_id), "B%07" PRIu32, broadcast_msg_counter++);
-    cJSON_AddStringToObject(result, "message_id", msg_id);
+    uint32_t broadcast_id = mesh_get_last_broadcast_id();
+    if (broadcast_id == 0) {
+        return RPC_ERR_RADIO;
+    }
+
+    char bcast_id_buf[12];
+    snprintf(bcast_id_buf, sizeof(bcast_id_buf), "%08" PRIX32, broadcast_id);
+    cJSON_AddStringToObject(result, "broadcast_id", bcast_id_buf);
     cJSON_AddStringToObject(result, "status", "sent");
     cJSON_AddBoolToObject(result, "broadcast", true);
     cJSON_AddNumberToObject(result, "channel", -1);
@@ -872,6 +875,37 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
 
     cJSON_AddItemToObject(result, "channels", channels);
 
+    const char *mode = "recipient_only";
+    switch (mesh_get_broadcast_telemetry_mode()) {
+        case BROADCAST_TELEMETRY_OFF: mode = "off"; break;
+        case BROADCAST_TELEMETRY_PATH_SAMPLED: mode = "path_sampled"; break;
+        case BROADCAST_TELEMETRY_RECIPIENT_ONLY:
+        default: mode = "recipient_only"; break;
+    }
+    cJSON_AddStringToObject(result, "broadcast_telemetry_mode", mode);
+
+    return 0;
+}
+
+static int handle_set_broadcast_telemetry_mode(const cJSON *params, cJSON *result) {
+    if (!params) return RPC_ERR_INVALID_PARAMS;
+    const char *mode = cJSON_GetStringValue(cJSON_GetObjectItem(params, "mode"));
+    if (!mode) return RPC_ERR_INVALID_PARAMS;
+
+    broadcast_telemetry_mode_t m;
+    if (strcmp(mode, "off") == 0) {
+        m = BROADCAST_TELEMETRY_OFF;
+    } else if (strcmp(mode, "recipient_only") == 0) {
+        m = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
+    } else if (strcmp(mode, "path_sampled") == 0) {
+        m = BROADCAST_TELEMETRY_PATH_SAMPLED;
+    } else {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    mesh_set_broadcast_telemetry_mode(m);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "broadcast_telemetry_mode", mode);
     return 0;
 }
 
@@ -1328,6 +1362,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.removeChannel",        handle_remove_channel);
     rpc_register("bramble.setDefaultChannel",    handle_set_default_channel);
     rpc_register("bramble.setMailbox",           handle_set_mailbox);
+    rpc_register("bramble.setBroadcastTelemetryMode", handle_set_broadcast_telemetry_mode);
     rpc_register("bramble.setLocationConfig",    handle_set_location_config);
     rpc_register("bramble.setLocationContact",   handle_set_location_contact);
     rpc_register("bramble.removeLocationContact",handle_remove_location_contact);
