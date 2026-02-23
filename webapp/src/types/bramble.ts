@@ -65,9 +65,18 @@ export interface RelayHop {
   rssi: number;
 }
 
+export interface BroadcastDeliveryRecipient {
+  addr: number;
+  status: 'delivered' | 'failed';
+  hopCount: number;
+  deliveredAtMs: number;
+}
+
 export interface Message {
   id: string;               // UUID (client-generated for outgoing, server msg_id for incoming)
-  packetId?: number;        // firmware packet_id, set on 'sent' status
+  packetId?: string | number; // firmware packet_id, set on 'sent' status
+  broadcastId?: string;     // correlation id for broadcast delivery telemetry
+  broadcastRecipients?: BroadcastDeliveryRecipient[];
   direction: MessageDirection;
   from: number;             // node address (0 = self)
   to: number;               // destination addr, 0xFFFFFFFF = broadcast
