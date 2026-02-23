@@ -19,6 +19,7 @@
 #include "driver/gpio.h"
 #include "board_config.h"
 #include "display.h"
+#include "gps.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -76,11 +77,7 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
     cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
-#ifdef CONFIG_BRAMBLE_HAS_GPS
-    cJSON_AddBoolToObject(result, "gps_available", true);
-#else
-    cJSON_AddBoolToObject(result, "gps_available", false);
-#endif
+    cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     return 0;
 }
 
@@ -1004,13 +1001,14 @@ static int handle_set_backlight(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-#include "gps.h"
-#include "sdcard.h"
-
 /* bramble.getGpsPosition — returns GPS position if available */
 static int handle_get_gps_position(const cJSON *params, cJSON *result) {
     (void)params;
+    if (!board_has_cap(BOARD_CAP_GPS)) {
+        cJSON_AddStringToObject(result, "error", "gps not supported on this board");
+        return RPC_ERR_NOT_SUPPORTED;
+    }
+
     bramble_position_t pos;
     if (gps_get_position(&pos)) {
         cJSON_AddNumberToObject(result, "lat", pos.latitude_e7 / 1e7);
@@ -1026,6 +1024,9 @@ static int handle_get_gps_position(const cJSON *params, cJSON *result) {
     }
     return 0;
 }
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "sdcard.h"
 
 /* bramble.getStorageInfo — returns SD card status */
 static int handle_get_storage_info(const cJSON *params, cJSON *result) {
@@ -1372,8 +1373,9 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setBacklight",         handle_set_backlight);
     rpc_register("bramble.sleep",               handle_sleep);
 
-#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     rpc_register("bramble.getGpsPosition",       handle_get_gps_position);
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     rpc_register("bramble.getStorageInfo",       handle_get_storage_info);
     rpc_register("bramble.playTone",             handle_play_tone);
     rpc_register("bramble.setVolume",            handle_set_volume);
