@@ -480,6 +480,14 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
 )
+
+add_executable(test_broadcast_delivery_receipt
+    test_broadcast_delivery_receipt.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/broadcast_delivery_receipt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
 target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
@@ -565,6 +573,15 @@ target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
 )
 target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
+)
+
+target_include_directories(test_broadcast_delivery_receipt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+target_compile_definitions(test_broadcast_delivery_receipt PRIVATE
+    UNIT_TEST=1
 )
 
 # NMEA parser tests (pure C, no ESP-IDF deps)

@@ -3,6 +3,7 @@
  */
 
 #include "mesh_task.h"
+#include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
 #include "packet.h"
@@ -168,6 +169,7 @@ static int mesh_send_probe_round(uint32_t pid, uint8_t round);
 static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
 static int transmit_packet(const uint8_t *buf, uint8_t len);
+static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
 
@@ -435,6 +437,28 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
 /* ── ACK handling ────────────────────────────────────────────────────── */
 
+static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
+    uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
+    size_t wire_len = 0;
+
+    esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
+                                                                  next_packet_id(),
+                                                                  original_src_addr,
+                                                                  original_packet_id,
+                                                                  buf,
+                                                                  sizeof(buf),
+                                                                  &wire_len);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Delivery receipt build failed: %d", (int)err);
+        return;
+    }
+
+    if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
+        ESP_LOGI(TAG, "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32,
+                 original_packet_id, original_src_addr);
+    }
+}
+
 static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
     bramble_ack_t ack = {
         .header = {
@@ -682,11 +706,14 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_Delete(params);
                         }
 
+                        bramble_header_t rx_hdr;
+                        bramble_header_deserialize(&rx_hdr, data, len);
+
                         /* Send ACK for unicast messages */
                         if (dir == MSG_DIR_INCOMING) {
-                            bramble_header_t rx_hdr;
-                            bramble_header_deserialize(&rx_hdr, data, len);
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
+                            send_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
                         }
 
                         /* Print to stdout */
@@ -754,12 +781,15 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             cJSON_Delete(params);
         }
 
+        /* Deserialize packet_id from header for response telemetry */
+        bramble_header_t rx_hdr;
+        bramble_header_deserialize(&rx_hdr, data, len);
+
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
-            /* Deserialize packet_id from header (big-endian at offset 8) */
-            bramble_header_t rx_hdr;
-            bramble_header_deserialize(&rx_hdr, data, len);
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
+            send_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
         /* Also print to stdout for CLI users */
