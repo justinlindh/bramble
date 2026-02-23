@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { connect } from '../store/actions';
 import { useStore } from '../store/index';
 import type { TransportType } from '../types/bramble';
@@ -29,8 +29,10 @@ function saveIp(ip: string) {
 }
 
 export function ConnectionOverlay() {
-  const [transportType, setTransportType] = useState<TransportType>('serial');
-  const [wifiIp, setWifiIp] = useState(loadSavedIp);
+  const savedIp = loadSavedIp();
+  const [transportType, setTransportType] = useState<TransportType>(savedIp ? 'wifi' : 'serial');
+  const [wifiIp, setWifiIp] = useState(savedIp);
+  const [autoTried, setAutoTried] = useState(false);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
 
@@ -47,6 +49,15 @@ export function ConnectionOverlay() {
       connect(transportType);
     }
   };
+
+  useEffect(() => {
+    if (autoTried) return;
+    if (!savedIp) return;
+    if (connectionState !== 'disconnected') return;
+    setAutoTried(true);
+    const url = buildWifiUrl(savedIp, location.protocol, location.host);
+    connect('wifi', { url });
+  }, [autoTried, savedIp, connectionState]);
 
   // Check browser support
   const hasSerial = 'serial' in navigator;
@@ -102,7 +113,7 @@ export function ConnectionOverlay() {
         {/* WiFi IP input */}
         {transportType === 'wifi' && (
           <div className={styles.wifiInput}>
-            <label className={styles.wifiLabel}>Node IP address</label>
+            <label className={styles.wifiLabel}>Node address (not web UI)</label>
             <input
               type="text"
               className={styles.wifiField}

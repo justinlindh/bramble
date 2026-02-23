@@ -138,6 +138,7 @@ static int s_churn_history_idx = 0;
 /* Channel state */
 static bramble_channel_t   s_channels[MAX_CHANNELS];
 static char                s_channel_names[MAX_CHANNELS][20];
+static bool                s_channel_has_psk[MAX_CHANNELS];
 static int                 s_num_channels = 0;
 static int                 s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
 
@@ -164,6 +165,8 @@ static int mesh_send_probe_round(uint32_t pid, uint8_t round);
 static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
 static int transmit_packet(const uint8_t *buf, uint8_t len);
+static void mesh_persist_channel_psk_flags(void);
+static void mesh_load_channel_psk_flags(void);
 
 static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
     snprintf(buf, len, "%08" PRIX32, addr);
@@ -182,6 +185,45 @@ static uint32_t next_packet_id(void) {
         counter = (uint32_t)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
     }
     return counter++;
+}
+
+static void mesh_persist_channel_psk_flags(void) {
+    nvs_handle_t h;
+    if (nvs_open("bramble_ch", NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "psk%d", i);
+        if (i < s_num_channels) {
+            nvs_set_u8(h, key, s_channel_has_psk[i] ? 1 : 0);
+        } else {
+            nvs_erase_key(h, key);
+        }
+    }
+
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void mesh_load_channel_psk_flags(void) {
+    nvs_handle_t h;
+    if (nvs_open("bramble_ch", NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+
+    for (int i = 0; i < s_num_channels; i++) {
+        uint8_t has_psk = (i == 0) ? 0 : 1;
+        char key[8];
+        snprintf(key, sizeof(key), "psk%d", i);
+        if (nvs_get_u8(h, key, &has_psk) != ESP_OK) {
+            has_psk = (i == 0) ? 0 : 1;
+        }
+        s_channel_has_psk[i] = (has_psk != 0);
+    }
+
+    nvs_close(h);
 }
 
 /* ── Reboot timer ───────────────────────────────────────────────────── */
@@ -586,7 +628,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                         memcpy(&hdr_dest, data + 4, 4);
                         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
                             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
-                        int16_t channel_index = (dir == MSG_DIR_BROADCAST_IN) ? -1 : (int16_t)info.channel_id;
+                        int16_t channel_index = (int16_t)info.channel_id;
                         msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
                                           0, MSG_STATUS_NONE, channel_index);
 
@@ -654,7 +696,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         memcpy(&hdr_dest, data + 4, 4);  /* dest_addr at offset 4 in header */
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
-        int16_t channel_index = (dir == MSG_DIR_BROADCAST_IN) ? -1 : (int16_t)info.channel_id;
+        int16_t channel_index = (int16_t)info.channel_id;
         msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
                           0, MSG_STATUS_NONE, channel_index);
 
@@ -1712,7 +1754,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         /* Store the full message in message store */
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                           (const char *)data, len, 0, 0,
-                          0, MSG_STATUS_NONE, -1);
+                          0, MSG_STATUS_NONE, 0);
         return 0;
     }
 
@@ -1733,7 +1775,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     if (pkt_id != 0) {
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                           (const char *)data, len, 0, 0,
-                          0, MSG_STATUS_NONE, -1);
+                          0, MSG_STATUS_NONE, 0);
     }
     return pkt_id ? 0 : -1;
 }
@@ -1810,7 +1852,7 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
                               (const char *)data, len, 0, 0,
                               first_pkt_id,
                               (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? -1 : (int16_t)channel_idx);
+                              (int16_t)channel_idx);
         }
         return first_pkt_id;
     }
@@ -1835,7 +1877,7 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
                           (const char *)data, len, 0, 0,
                           pkt_id,
                           (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
-                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? -1 : (int16_t)channel_idx);
+                          (int16_t)channel_idx);
     }
     return pkt_id;
 }
@@ -1951,7 +1993,9 @@ void mesh_task_start(bramble_identity_t *identity) {
     /* Initialize public channel (well-known PSK, no key exchange needed) */
     public_channel_init(s_channels, &s_num_channels);
     memset(s_channel_names, 0, sizeof(s_channel_names));
+    memset(s_channel_has_psk, 0, sizeof(s_channel_has_psk));
     strncpy(s_channel_names[0], "Broadcast", sizeof(s_channel_names[0]) - 1);
+    s_channel_has_psk[0] = false;
     ESP_LOGI(TAG, "Public channel initialized (%d channels)", s_num_channels);
 
     /* Load additional channels from NVS using channel_storage (Phase 1) */
@@ -1986,6 +2030,8 @@ void mesh_task_start(bramble_identity_t *identity) {
                            sizeof(s_channel_names[s_num_channels]) - 1);
                 }
                 
+                /* PSK lock state is loaded separately from NVS metadata. */
+                s_channel_has_psk[s_num_channels] = (s_num_channels != 0);
                 ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", s_num_channels, 
                         loaded_names[i][0] ? loaded_names[i] : "(unnamed)");
                 s_num_channels++;
@@ -1996,6 +2042,7 @@ void mesh_task_start(bramble_identity_t *identity) {
                 s_default_channel_idx = loaded_default;
             }
             
+            mesh_load_channel_psk_flags();
             ESP_LOGI(TAG, "Total channels after NVS load: %d (default=%d)", 
                     s_num_channels, s_default_channel_idx);
         }
@@ -2051,10 +2098,12 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
         memcpy(psk_str, psk, copy_len);
         psk_str[copy_len] = '\0';
         channel_derive_key(psk_str, ch);
+        s_channel_has_psk[s_num_channels] = true;
     } else {
         /* Generate random key */
         crypto_random(ch->key, BRAMBLE_KEY_SIZE);
         ch->epoch = 0;
+        s_channel_has_psk[s_num_channels] = false;
     }
     ch->channel_id = (uint8_t)s_num_channels;
 
@@ -2071,6 +2120,7 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
     if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS");
     }
+    mesh_persist_channel_psk_flags();
 
     xSemaphoreGive(s_state_mutex);
 
@@ -2091,8 +2141,10 @@ int mesh_remove_channel(int index) {
         s_channels[i].channel_id = (uint8_t)i;
         strncpy(s_channel_names[i], s_channel_names[i + 1], sizeof(s_channel_names[i]) - 1);
         s_channel_names[i][sizeof(s_channel_names[i]) - 1] = '\0';
+        s_channel_has_psk[i] = s_channel_has_psk[i + 1];
     }
     s_channel_names[s_num_channels - 1][0] = '\0';
+    s_channel_has_psk[s_num_channels - 1] = false;
     s_num_channels--;
 
     if (s_default_channel_idx == index) {
@@ -2108,6 +2160,7 @@ int mesh_remove_channel(int index) {
     if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS after removal");
     }
+    mesh_persist_channel_psk_flags();
 
     xSemaphoreGive(s_state_mutex);
 
@@ -2132,9 +2185,19 @@ const char *mesh_get_channel_name(int index) {
     }
 
     char key_name[20];
-    snprintf(key_name, sizeof(key_name), "ch%d_name", index);
     size_t len = sizeof(name_buf);
+
+    /* Current storage key */
+    snprintf(key_name, sizeof(key_name), "nm%d", index);
     esp_err_t err = nvs_get_str(ch_nvs, key_name, name_buf, &len);
+
+    /* Backward-compatible legacy key */
+    if (err != ESP_OK || name_buf[0] == '\0') {
+        len = sizeof(name_buf);
+        snprintf(key_name, sizeof(key_name), "ch%d_name", index);
+        err = nvs_get_str(ch_nvs, key_name, name_buf, &len);
+    }
+
     nvs_close(ch_nvs);
     if (err != ESP_OK || name_buf[0] == '\0') {
         return NULL;
@@ -2142,6 +2205,20 @@ const char *mesh_get_channel_name(int index) {
     strncpy(s_channel_names[index], name_buf, sizeof(s_channel_names[index]) - 1);
     s_channel_names[index][sizeof(s_channel_names[index]) - 1] = '\0';
     return s_channel_names[index];
+}
+
+int mesh_get_channel_security(int index, bool *has_psk, uint16_t *epoch) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (index < 0 || index >= s_num_channels) {
+        xSemaphoreGive(s_state_mutex);
+        return -1;
+    }
+
+    if (has_psk) *has_psk = s_channel_has_psk[index];
+    if (epoch) *epoch = s_channels[index].epoch;
+
+    xSemaphoreGive(s_state_mutex);
+    return 0;
 }
 
 void mesh_set_node_name(const char *name) {
@@ -2442,11 +2519,18 @@ const char *mesh_get_node_name(void) {
 }
 
 const char *mesh_get_peer_name(uint32_t addr) {
+    static char s_name_buf[17];
+
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, addr);
-    const char *name = (nb && nb->name[0] != '\0') ? nb->name : NULL;
+    if (nb && nb->name[0] != '\0') {
+        strncpy(s_name_buf, nb->name, sizeof(s_name_buf) - 1);
+        s_name_buf[sizeof(s_name_buf) - 1] = '\0';
+        xSemaphoreGive(s_state_mutex);
+        return s_name_buf;
+    }
     xSemaphoreGive(s_state_mutex);
-    return name;
+    return NULL;
 }
 
 int mesh_get_channel_info(int *default_idx) {

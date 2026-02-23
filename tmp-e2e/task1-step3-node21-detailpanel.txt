@@ -1,0 +1,38 @@
+Bramble
+Connected
+•
+Node2
+Disconnect
+Chat
+Nodes
+Map
+Config
+Stats
+Broadcast
+
+CHANNELS
+
+butts
+channel_2
+channel_3
+channel_4
+channel_5
+
+DIRECT MESSAGES
+
+No conversations yet
+
+ channel_4
+Channel 4
+⇆
+▸
+← Back to chat
+# channel_4
+Index
+4
+Security
+Open (no PSK)
+Key epoch
+0
+Share Channel
+Leave Channel

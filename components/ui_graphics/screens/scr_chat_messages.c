@@ -3,6 +3,7 @@
 #include "theme/bramble_theme.h"
 #include "msg_store.h"
 #include "chat_target.h"
+#include "chat_unread.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +20,7 @@ static void render_messages_for_target(void);
 /* Use extern for mesh_send — it's in main, not a component */
 extern int mesh_send_broadcast(const uint8_t *data, size_t len);
 extern uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len);
+extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
 extern int mesh_get_channel_count(void);
 extern const char *mesh_get_channel_name(int index);
 extern const char *mesh_get_peer_name(uint32_t addr);
@@ -27,7 +29,7 @@ static void update_title(void) {
     if (!s_title) return;
     if (s_target.kind == CHAT_TARGET_BROADCAST) {
         lv_label_set_text(s_title, "Broadcast");
-    } else {
+    } else if (s_target.kind == CHAT_TARGET_CHANNEL) {
         const char *name = mesh_get_channel_name((int)s_target.channel_index);
         if (name && name[0]) {
             lv_label_set_text(s_title, name);
@@ -36,6 +38,15 @@ static void update_title(void) {
             snprintf(buf, sizeof(buf), "Channel %d", (int)s_target.channel_index);
             lv_label_set_text(s_title, buf);
         }
+    } else {
+        const char *peer_name = mesh_get_peer_name(s_target.peer_addr);
+        static char buf[32];
+        if (peer_name && peer_name[0]) {
+            snprintf(buf, sizeof(buf), "DM: %s", peer_name);
+        } else {
+            snprintf(buf, sizeof(buf), "DM: %08lX", (unsigned long)s_target.peer_addr);
+        }
+        lv_label_set_text(s_title, buf);
     }
 }
 
@@ -80,8 +91,10 @@ static void send_current_message(void) {
     ESP_LOGI(TAG, "send_click target kind=%d ch=%d active=%d len=%u", (int)s_target.kind, (int)s_target.channel_index, s_active_channel, (unsigned)len);
     if (s_target.kind == CHAT_TARGET_BROADCAST) {
         rc = mesh_send_broadcast((const uint8_t *)text, len);
-    } else {
+    } else if (s_target.kind == CHAT_TARGET_CHANNEL) {
         rc = (mesh_send_channel((int)s_target.channel_index, 0xFFFFFFFF, (const uint8_t *)text, len) != 0) ? 0 : -1;
+    } else {
+        rc = (mesh_send_message(s_target.peer_addr, (const uint8_t *)text, len) != 0) ? 0 : -1;
     }
 
     if (rc == 0) {
@@ -176,11 +189,13 @@ static void render_messages_for_target(void) {
     lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
 }
 
-void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
-    s_active_channel = channel_idx;
-    s_target = (channel_idx > 0)
-        ? chat_target_normalize(CHAT_TARGET_CHANNEL, channel_idx, mesh_get_channel_count())
-        : chat_target_default();
+static void open_with_target(bramble_layout_t *layout, chat_target_t target, int clear_channel_idx) {
+    s_target = target;
+    s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
+
+    if (clear_channel_idx >= 0) {
+        chat_unread_clear_for_channel(clear_channel_idx);
+    }
 
     /* Hide tab bar */
     lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
@@ -219,7 +234,11 @@ void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
     lv_obj_align(target_btn, LV_ALIGN_RIGHT_MID, -4, 0);
     lv_obj_set_style_bg_color(target_btn, BR_COLOR_SURFACE, 0);
     lv_obj_add_event_cb(target_btn, channel_cycle_click_cb, LV_EVENT_CLICKED, NULL);
-    if (g) lv_group_add_obj(g, target_btn);
+    if (s_target.kind == CHAT_TARGET_DM) {
+        lv_obj_add_flag(target_btn, LV_OBJ_FLAG_HIDDEN);
+    } else if (g) {
+        lv_group_add_obj(g, target_btn);
+    }
 
     s_title = lv_label_create(target_btn);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_12, 0);
@@ -278,6 +297,18 @@ void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
     lv_obj_center(send_lbl);
     lv_obj_add_event_cb(send_btn, send_click_cb, LV_EVENT_CLICKED, NULL);
     if (g) lv_group_add_obj(g, send_btn);
+}
+
+
+void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx) {
+    chat_target_t target = (channel_idx > 0)
+        ? chat_target_normalize(CHAT_TARGET_CHANNEL, channel_idx, mesh_get_channel_count())
+        : chat_target_default();
+    open_with_target(layout, target, channel_idx);
+}
+
+void scr_chat_messages_open_dm(bramble_layout_t *layout, uint32_t peer_addr) {
+    open_with_target(layout, chat_target_dm(peer_addr), -1);
 }
 
 void scr_chat_messages_on_recv(void) {

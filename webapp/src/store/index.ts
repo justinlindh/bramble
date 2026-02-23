@@ -175,6 +175,9 @@ export const useStore = create<AppState & Actions>((set) => ({
           ? 'broadcast'
           : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
 
+      console.log('[addMessage] Message:', msg);
+      console.log('[addMessage] Determined convId:', convId, '| isBroadcast:', isBroadcast, '| activeConv:', state.activeConversationId);
+
       // Update conversation summary
       const convs = new Map(state.conversations);
       const prev = convs.get(convId);
@@ -185,7 +188,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       const isActive = state.activeConversationId === convId;
       const shouldIncrementUnread = msg.direction === 'incoming' && !isActive;
       
-      convs.set(convId, {
+      const newConv = {
         id: convId,
         label: formatAddr(convId, state.peerNames, state.config),
         peerAddr:
@@ -200,7 +203,10 @@ export const useStore = create<AppState & Actions>((set) => ({
         unreadCount:
           (prev?.unreadCount ?? 0) +
           (shouldIncrementUnread ? 1 : 0),
-      });
+      };
+      
+      console.log('[addMessage] Creating conversation:', newConv);
+      convs.set(convId, newConv);
 
       // Persist unread counts to localStorage
       persistUnreads(convs, state.config);

@@ -12,11 +12,13 @@ extern "C" {
 typedef enum {
     CHAT_TARGET_BROADCAST = 0,
     CHAT_TARGET_CHANNEL = 1,
+    CHAT_TARGET_DM = 2,
 } chat_target_kind_t;
 
 typedef struct {
     chat_target_kind_t kind;
-    int16_t channel_index; /* -1 when not applicable */
+    int16_t channel_index; /* valid for CHANNEL; -1 otherwise */
+    uint32_t peer_addr;    /* valid for DM; 0 otherwise */
 } chat_target_t;
 
 chat_target_t chat_target_default(void);
@@ -24,6 +26,8 @@ chat_target_t chat_target_default(void);
 chat_target_t chat_target_normalize(chat_target_kind_t kind,
                                     int channel_index,
                                     int channel_count);
+
+chat_target_t chat_target_dm(uint32_t peer_addr);
 
 bool chat_target_matches_message(chat_target_t target,
                                  const stored_msg_t *msg,

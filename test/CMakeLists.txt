@@ -471,6 +471,17 @@ target_include_directories(test_chat_target PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Chat unread helper tests
+add_executable(test_chat_unread
+    test_chat_unread.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/chat_unread.c
+)
+target_include_directories(test_chat_unread PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
 # Message store channel metadata tests
 add_executable(test_msg_store
     test_msg_store.c

@@ -7,6 +7,7 @@ import {
 } from '../../store/actions';
 import { QRShareModal } from '../../components/QRShareModal';
 import { QRScanModal } from '../../components/QRScanModal';
+import { IconLock } from '../../components/Icons';
 import type { ScanResult } from '../../components/QRScanModal';
 import { encodeChannelShare } from '../../utils/channelShare';
 import styles from './ChannelManager.module.css';
@@ -177,7 +178,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
             )}
             {ch.hasPsk && (
               <span className={`${styles.badge} ${styles.badgePsk}`}>
-                🔒 PSK
+                <IconLock size={12} /> PSK
               </span>
             )}
             <span className={styles.epoch} title="Key rotation epoch">

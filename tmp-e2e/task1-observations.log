@@ -1,0 +1,8 @@
+node21_create_has_task1_name=false
+node21_channels_excerpt=CHANNELS (6) | #0 | public | default | epoch 0 | ⬆ Share | ✕ | #1 | butts | epoch 0 | ⬆ Share | Set default | ✕ | #2 | channel_2 | epoch 0 | ⬆ Share | Set default | ✕ | #3 | channel_3 | epoch 0 | ⬆ Share | Set default | ✕ | #4 | channel_4 | epoch 0 | ⬆ Share | Set default | ✕ | #5 | channel_5 | epoch 0 | ⬆ Share | Set default | ✕ | + Add | ⬇ Import |  
+node21_sent_msg_visible=true
+node21_leave_action_present=true
+node21_lock_icon_present_in_detail=false
+node64_has_channel4=true
+node64_sees_msg_from21=false
+node64_sent_msg_visible=true
