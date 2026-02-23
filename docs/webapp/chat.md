@@ -1,39 +1,55 @@
-# Web App Chat
+# Web App User Guide
 
-## Broadcast delivery telemetry UX
+## Keyboard shortcuts
 
-The chat view uses broadcast delivery telemetry
-to show confidence and outcome for recently sent
-broadcast messages.
+- `Ctrl+1` Chat
+- `Ctrl+2` Nodes
+- `Ctrl+3` Map
+- `Ctrl+4` Config
+- `Ctrl+5` Stats
+- `/` focuses quick navigation/search
+- `Esc` clears search and closes quick-jump focus state
+- In compose box: `Enter` sends, `Shift+Enter` adds newline
 
-### UX behavior
+## New-message jump button
 
-- Compact view: shows a lightweight indicator
-  for recent delivery activity.
-- Expanded details: shows append-only timeline entries
-  keyed by `(broadcastId, packetId)`.
-- Failed outcomes remain visible long enough
-  for operator review.
+When you are scrolled up in a conversation and new messages arrive, a
+`↓ New messages` button appears. Click it to jump to latest and clear
+the indicator.
 
-### Scaling and operator guidance
+## Nodes route legend and route state semantics
 
-In active channels:
+Route table columns:
 
-- Coalesce repaint and update cycles
-  to avoid jitter during telemetry bursts.
-- Keep expanded timelines bounded by count
-  and time window.
-- Prefer summary counters in list views;
-  expand details on demand.
+- **Destination**: node this route reaches
+- **Next Hop**: neighbor used for forwarding
+- **Hops**: relay count (lower is generally better)
+- **Metric**: route quality score (lower is better)
+- **State**:
+  - `active`: currently usable
+  - `stale`: not recently confirmed
+  - `discovering`: route discovery in progress
 
-### Web example
+## Connection labels (staged states)
 
-```ts
-store.subscribeToRpc("bramble.onBroadcastDelivery", (evt) => {
-  const key = `${evt.broadcastId}:${evt.packetId}`;
-  store.broadcastTelemetry.append(key, evt);
+UI connection states:
 
-  // List row signal for compact mode
-  store.chat.bumpDeliveryIndicator(evt.broadcastId, evt.status);
-});
-```
+- `disconnected`: no active transport
+- `connecting`: transport handshake in progress
+- `connected`: RPC/session active
+- `error` (shown as `Reconnecting…` in header): transport dropped and auto-reconnect is running
+
+Transport-specific in overlay while connecting:
+
+- Wi‑Fi: `Connecting to Wi‑Fi node…`
+- BLE: `Connecting to BLE device…`
+
+## Location tiers
+
+Location sharing tiers used in Config/Map/Chat:
+
+- **Presence**: online status only
+- **Zone (coarse)**: grid-square level (~1 km)
+- **Exact (full)**: full GPS coordinates
+
+Map legend uses distinct markers for exact, zone, and self position.
