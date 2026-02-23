@@ -3,7 +3,7 @@
 export interface NodeIdentity {
   address: number;          // 32-bit node address
   pubkeyHash: number;       // 32-bit hash of public key
-  name: string;             // Short name, max 8 chars
+  name: string;             // Short name, max 32 chars
   pubkeyB64: string;        // Base64-encoded public key (display only)
 }
 
