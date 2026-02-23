@@ -43,6 +43,7 @@ Bramble is organized as ESP-IDF components, each self-contained with clean inter
 ## Hardware Targets
 
 - **Heltec WiFi LoRa 32 V3** (ESP32-S3 + SX1262) — primary target
+- **Heltec WiFi LoRa 32 V4** (ESP32-S3 + SX1262 + optional L76K GNSS) — bring-up in progress
 - **LILYGO T-Beam Supreme** (ESP32-S3 + SX1262) — secondary target
 
 ## Building
@@ -50,9 +51,21 @@ Bramble is organized as ESP-IDF components, each self-contained with clean inter
 Requires [ESP-IDF v5.4](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32s3/get-started/).
 
 ```bash
-. ~/esp-idf/export.sh
+export IDF_PATH=~/src/esp-idf
+IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1 || true)
+if [[ -n "${IDF_VENV:-}" ]]; then
+  export PATH="$IDF_VENV/bin:$PATH"
+fi
+source "$IDF_PATH/export.sh"
+
 idf.py set-target esp32s3
-idf.py build
+
+# Default (Heltec V3)
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build
+
+# Heltec V4 profile (in-progress support)
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
+
 idf.py flash monitor
 ```
 

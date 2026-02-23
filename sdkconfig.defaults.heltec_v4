@@ -1,0 +1,5 @@
+# Heltec WiFi LoRa 32 V4 board defaults
+# Layer with: sdkconfig.defaults;sdkconfig.defaults.heltec_v4
+
+CONFIG_BRAMBLE_BOARD_HELTEC_V4=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y

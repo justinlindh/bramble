@@ -41,14 +41,34 @@ export SSL_CERT_FILE=$(python3 -c "import certifi; print(certifi.where())")
 ```bash
 # Source ESP-IDF environment (required each shell session)
 export IDF_PATH=~/src/esp-idf
+IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1 || true)
+if [[ -n "${IDF_VENV:-}" ]]; then
+  export PATH="$IDF_VENV/bin:$PATH"
+fi
 source $IDF_PATH/export.sh
 
 # First time: set target chip
 cd /path/to/bramble
 idf.py set-target esp32s3
 
-# Build
+# Build (default profile)
 idf.py build
+```
+
+### Build using board defaults profiles
+
+```bash
+# Heltec WiFi LoRa 32 V3 (default)
+rm -f sdkconfig
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build
+
+# Heltec WiFi LoRa 32 V4 (in-progress support)
+rm -f sdkconfig
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
+
+# LILYGO T-Deck Plus
+rm -f sdkconfig
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tdeck_plus" build
 ```
 
 Build output: `build/bramble.bin` (~220KB)
@@ -87,6 +107,7 @@ s.close()
 | Board | Chip | LoRa | Status |
 |-------|------|------|--------|
 | **Heltec WiFi LoRa 32 V3** | ESP32-S3 (QFN56) | SX1262 | ✅ Primary target |
+| **Heltec WiFi LoRa 32 V4** | ESP32-S3 | SX1262 (+ optional L76K GNSS) | 🔧 Bring-up in progress |
 | LILYGO T-Beam Supreme | ESP32-S3 | SX1262 | 🔧 Needs pin config |
 | LILYGO T-Deck Plus | ESP32-S3 | SX1262 | 🔧 Different display driver |
 
