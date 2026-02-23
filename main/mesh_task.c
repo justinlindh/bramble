@@ -582,6 +582,35 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     }
 }
 
+static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
+    if (!receipt) return;
+
+    if (receipt->hop_count < DELIVERY_RECEIPT_MAX_HOPS) {
+        receipt->relay_path[receipt->hop_count++] = s_identity->address;
+    }
+
+    if (receipt->header.hop_limit <= 1) {
+        ESP_LOGD(TAG, "Delivery receipt hop limit reached, dropping");
+        return;
+    }
+    receipt->header.hop_limit--;
+
+    route_entry_t *route = route_lookup(&s_routes, receipt->header.dest_addr);
+    if (!route || route->state == ROUTE_BROKEN) {
+        ESP_LOGW(TAG, "No route to forward delivery receipt to %08" PRIX32, receipt->header.dest_addr);
+        return;
+    }
+
+    uint8_t buf[96];
+    esp_err_t err = bramble_delivery_receipt_serialize(receipt, buf, sizeof(buf));
+    if (err != ESP_OK) return;
+
+    size_t wire_len = DELIVERY_RECEIPT_MIN_SIZE + ((size_t)receipt->hop_count * 4u);
+    ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
+             receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
+    transmit_packet(buf, (uint8_t)wire_len);
+}
+
 static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
     (void)snr;
     bramble_delivery_receipt_t receipt;
@@ -591,6 +620,7 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
     }
 
     if (receipt.header.dest_addr != s_identity->address) {
+        forward_delivery_receipt(&receipt);
         return;
     }
 
