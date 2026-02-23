@@ -106,4 +106,22 @@ describe('broadcast delivery store plumbing', () => {
       deliveredAtMs: 200,
     });
   });
+
+  it('accepts firmware snake_case payload with recipient field', () => {
+    const msg = makeOutgoingBroadcast('m4');
+    useStore.setState({ messages: [msg] });
+    registerBroadcastSendTelemetry(msg.id, { broadcastId: 'BCAST-4' });
+
+    handleBroadcastDelivery({
+      broadcast_id: 'BCAST-4',
+      recipient: '63929F02',
+      status: 'delivered',
+      rssi_at_dest: -88,
+    } as unknown as Record<string, unknown>);
+
+    const stored = useStore.getState().messages.find(m => m.id === msg.id);
+    expect(stored?.broadcastRecipients).toHaveLength(1);
+    expect(stored?.broadcastRecipients?.[0]?.addr).toBe(0x63929f02);
+    expect(stored?.broadcastRecipients?.[0]?.status).toBe('delivered');
+  });
 });
