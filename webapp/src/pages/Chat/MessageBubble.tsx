@@ -102,7 +102,13 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
           <span className={styles.tierTag} title="Critical priority"><IconCritical size={14} /></span>
         )}
         {message.to === 0xFFFFFFFF && (
-          <span className={styles.tierTag} title="Broadcast"><IconBroadcast size={14} /></span>
+          <span
+            data-testid="broadcast-meta-icon"
+            className={`${styles.tierTag} ${styles.broadcastTierTag}`}
+            title="Broadcast"
+          >
+            <IconBroadcast size={14} />
+          </span>
         )}
       </div>
       {isOutgoingBroadcast && deliveryExpanded && (

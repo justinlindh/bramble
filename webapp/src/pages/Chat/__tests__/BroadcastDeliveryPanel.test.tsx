@@ -64,6 +64,13 @@ describe('BroadcastDeliveryPanel', () => {
     expect(screen.getByText(/failed 1/i)).toBeInTheDocument();
   });
 
+  it('applies broadcast icon alignment class in metadata row', () => {
+    render(<MessageBubble message={makeMessage()} myAddr={0x01} />);
+
+    const broadcastIcon = screen.getByTestId('broadcast-meta-icon');
+    expect(broadcastIcon.className).toMatch(/broadcastTierTag/);
+  });
+
   it('degrades gracefully with no telemetry', () => {
     render(<MessageBubble message={makeMessage({ broadcastRecipients: undefined })} myAddr={0x01} />);
 

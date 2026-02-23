@@ -102,3 +102,9 @@
   font-size: 0.72rem;
   opacity: 0.85;
 }
+
+.broadcastTierTag {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
