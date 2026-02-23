@@ -180,7 +180,7 @@ git commit -m "fix(webapp): unify PSK lock indicator rendering across channel su
 
 ---
 
-### Task 6: Full two-node E2E verification and deployment
+### Task 6: Full two-node E2E verification and deployment ✅ COMPLETED (2026-02-22)
 
 **Files:**
 - Modify: `docs/plans/evidence/2026-02-22-channel-e2e-failures.md`
@@ -220,7 +220,7 @@ git commit -m "docs(bramble): finalize channel E2E verification evidence on node
 
 ---
 
-### Task 7: Final regression pass
+### Task 7: Final regression pass ✅ COMPLETED (2026-02-22)
 
 **Files:**
 - Modify: `docs/plans/2026-02-22-channel-e2e-remaining-failures.md` (checklist completion)
@@ -250,3 +250,8 @@ git commit -m "chore(plan): mark remaining channel failure remediation complete"
 ---
 
 Plan complete and saved to `docs/plans/2026-02-22-channel-e2e-remaining-failures.md`.
+
+## Final completion status (2026-02-22)
+- Task 6 executed on nodes `.21` and `.64` with evidence captured in `docs/plans/evidence/2026-02-22-channel-e2e-failures.md` and screenshots under `docs/plans/evidence/screenshots/2026-02-22-e2e-final/`.
+- Task 7 regression/build pass executed; host test build blocker (`test_dummy_traffic` crypto linkage) fixed in `test/CMakeLists.txt`.
+- WebSocket stability root causes investigated and corrected in firmware (`main/ws_server.c`) with validated `.21` WS/HTTP startup recovery.
