@@ -6,24 +6,21 @@ Firmware emits `bramble.onBroadcastDelivery` as a JSON-RPC
 notification (`jsonrpc: "2.0"`, no `id`) when broadcast
 delivery telemetry is available.
 
-### Contract
+### Contract (current firmware)
 
 Fields:
 
-- `broadcastId` (string): matches `bramble.sendBroadcast` response
-- `packetId` (string): matches `bramble.sendBroadcast` response
-- `from` (string): source node address
-- `to` (string): destination (`FFFFFFFF` is common for broadcast)
-- `status` (`delivered` | `failed`)
-- `hopCount` (integer)
-- `deliveredAtMs` (integer, Unix epoch ms)
+- `recipient` (string): recipient node address
+- `broadcast_id` (string): matches `bramble.sendBroadcast` response
+- `status` (`delivered`)
+- `rssi_at_dest` (integer)
+- `relayPath` (optional array): sampled relay path hops (`{ addr }`)
 
 Semantics:
 
 - One broadcast can emit multiple delivery notifications.
-- Consumers should treat events as append-only telemetry,
-  not last-write-wins state.
-- Correlation key: `(broadcastId, packetId)`.
+- Consumers should treat events as append-only telemetry.
+- Correlation key: `broadcast_id` + `recipient`.
 
 ### JSON-RPC example (firmware to host)
 
@@ -32,27 +29,11 @@ Semantics:
   "jsonrpc": "2.0",
   "method": "bramble.onBroadcastDelivery",
   "params": {
-    "broadcastId": "bcast_7c912f",
-    "packetId": "pkt_0142",
-    "from": "A1B2C3D4",
-    "to": "FFFFFFFF",
+    "recipient": "A1B2C3D4",
+    "broadcast_id": "7C912F42",
     "status": "delivered",
-    "hopCount": 2,
-    "deliveredAtMs": 1771833505123
+    "rssi_at_dest": -97,
+    "relayPath": [{ "addr": "11223344" }]
   }
 }
 ```
-
-### SDK handling example
-
-```ts
-rpc.on("bramble.onBroadcastDelivery", (evt) => {
-  const key = `${evt.broadcastId}:${evt.packetId}`;
-  deliveryTimeline.push({ key, ...evt });
-});
-```
-
-## Related API
-
-See also `docs/api/rpc.md` for `bramble.sendBroadcast`
-response fields used for telemetry correlation.
