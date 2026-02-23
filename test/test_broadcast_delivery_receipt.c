@@ -24,8 +24,8 @@ void test_slot_delay_is_bounded_and_identity_sensitive(void) {
     TEST_ASSERT_NOT_EQUAL(d1, d2);
 }
 
-void test_retry_count_default_three_attempts(void) {
-    TEST_ASSERT_EQUAL_UINT8(3u, mesh_broadcast_receipt_retry_count());
+void test_retry_count_default_two_attempts(void) {
+    TEST_ASSERT_EQUAL_UINT8(2u, mesh_broadcast_receipt_retry_count());
 }
 
 void test_build_delivery_receipt_targets_original_sender_with_expected_fields(void) {
@@ -59,7 +59,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_should_emit_only_for_broadcast_dest);
     RUN_TEST(test_slot_delay_is_bounded_and_identity_sensitive);
-    RUN_TEST(test_retry_count_default_three_attempts);
+    RUN_TEST(test_retry_count_default_two_attempts);
     RUN_TEST(test_build_delivery_receipt_targets_original_sender_with_expected_fields);
     return UNITY_END();
 }
