@@ -11,8 +11,8 @@ describe('ConversationList logic', () => {
 
     const channels = buildChannelItems(config, conversations);
     expect(channels).toEqual([
-      { id: 'ch:1', label: 'Ops', unreadCount: 3 },
-      { id: 'ch:2', label: 'ch-2', unreadCount: 1 },
+      { id: 'ch:1', label: 'Ops', unreadCount: 3, hasPsk: false },
+      { id: 'ch:2', label: 'ch-2', unreadCount: 1, hasPsk: false },
     ]);
   });
 

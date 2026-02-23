@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Conversation } from '../../types/bramble';
-import { IconBroadcast, IconHash, IconUser, IconPlus } from '../../components/Icons';
+import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock } from '../../components/Icons';
 import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
 import { addChannel } from '../../store/actions';
 import { useStore } from '../../store/index';
@@ -15,7 +15,12 @@ interface ConversationListProps {
 // Broadcast address constant
 const BROADCAST_ADDR = 0xffffffff;
 
-type ChannelItem = { id: string; label: string; unreadCount: number };
+type ChannelItem = {
+  id: string;
+  label: string;
+  unreadCount: number;
+  hasPsk: boolean;
+};
 
 export function buildChannelItems(config: any, conversations: Map<string, Conversation>): ChannelItem[] {
   return (config?.channels ?? [])
@@ -23,10 +28,13 @@ export function buildChannelItems(config: any, conversations: Map<string, Conver
     .map((ch: any): ChannelItem => {
       const id = `ch:${ch.index}`;
       const existing = conversations.get(id);
+      const rawName = typeof ch.name === 'string' ? ch.name : '';
+      const trimmedName = rawName.trim();
       return {
         id,
-        label: ch.name?.trim() || `ch-${ch.index}`,
+        label: trimmedName.length > 0 ? trimmedName : `ch-${ch.index}`,
         unreadCount: existing?.unreadCount ?? 0,
+        hasPsk: Boolean(ch.hasPsk),
       };
     });
 }
@@ -163,6 +171,11 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
         >
           <span className={styles.icon}><IconHash size={16} /></span>
           <span className={styles.label}>{conv.label}</span>
+          {conv.hasPsk && (
+            <span title="PSK protected" aria-label="PSK protected">
+              <IconLock size={12} />
+            </span>
+          )}
           {conv.unreadCount > 0 && (
             <span className={styles.badge}>{conv.unreadCount}</span>
           )}
