@@ -234,7 +234,12 @@ static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t
 }
 
 static bool location_policy_has_targets(void) {
-    nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
+#ifdef NVS_TYPE_ANY
+    nvs_iterator_t it = NULL;
+    if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) != ESP_OK) {
+        return false;
+    }
+
     while (it != NULL) {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
@@ -242,8 +247,12 @@ static bool location_policy_has_targets(void) {
             nvs_release_iterator(it);
             return true;
         }
-        it = nvs_entry_next(it);
+        if (nvs_entry_next(&it) != ESP_OK) {
+            break;
+        }
     }
+    nvs_release_iterator(it);
+#endif
     return false;
 }
 
@@ -267,49 +276,56 @@ static void mesh_send_location_updates(uint32_t t,
         .valid = true,
     };
 
-    nvs_iterator_t it = nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY);
-    while (it != NULL) {
-        nvs_entry_info_t info;
-        nvs_entry_info(it, &info);
+#ifdef NVS_TYPE_ANY
+    nvs_iterator_t it = NULL;
+    if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
+        while (it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
 
-        if (strncmp(info.key, "lc_", 3) == 0) {
-            uint8_t tier = policy->default_tier;
-            char tier_str[16] = {0};
-            size_t tier_len = sizeof(tier_str);
-            if (nvs_get_str(nvs, info.key, tier_str, &tier_len) == ESP_OK) {
-                tier = location_tier_from_string(tier_str);
-            }
+            if (strncmp(info.key, "lc_", 3) == 0) {
+                uint8_t tier = policy->default_tier;
+                char tier_str[16] = {0};
+                size_t tier_len = sizeof(tier_str);
+                if (nvs_get_str(nvs, info.key, tier_str, &tier_len) == ESP_OK) {
+                    tier = location_tier_from_string(tier_str);
+                }
 
-            uint8_t payload[LOCATION_FULL_SIZE];
-            int payload_len = location_serialize_for_tier(&pos, tier, payload, sizeof(payload));
-            if (payload_len > 0) {
-                uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
-                bramble_header_t header = {
-                    .version = BRAMBLE_VERSION,
-                    .type = PKT_TYPE_LOCATION,
-                    .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
-                    .hop_limit = 3,
-                    .dest_addr = (uint32_t)strtoul(info.key + 3, NULL, 16),
-                    .packet_id = next_packet_id(),
-                };
+                uint8_t payload[LOCATION_FULL_SIZE];
+                int payload_len = location_serialize_for_tier(&pos, tier, payload, sizeof(payload));
+                if (payload_len > 0) {
+                    uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
+                    bramble_header_t header = {
+                        .version = BRAMBLE_VERSION,
+                        .type = PKT_TYPE_LOCATION,
+                        .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
+                        .hop_limit = 3,
+                        .dest_addr = (uint32_t)strtoul(info.key + 3, NULL, 16),
+                        .packet_id = next_packet_id(),
+                    };
 
-                bramble_header_serialize(&header, pkt, HEADER_SIZE);
-                memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-                memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
+                    bramble_header_serialize(&header, pkt, HEADER_SIZE);
+                    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+                    memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
 
-                size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
-                int rc = transmit_packet(pkt, (uint8_t)wire_len);
-                if (rc == 0) {
-                    ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
-                             header.dest_addr,
-                             tier,
-                             (unsigned)wire_len);
+                    size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
+                    int rc = transmit_packet(pkt, (uint8_t)wire_len);
+                    if (rc == 0) {
+                        ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
+                                 header.dest_addr,
+                                 tier,
+                                 (unsigned)wire_len);
+                    }
                 }
             }
-        }
 
-        it = nvs_entry_next(it);
+            if (nvs_entry_next(&it) != ESP_OK) {
+                break;
+            }
+        }
+        nvs_release_iterator(it);
     }
+#endif
 
     nvs_close(nvs);
 }
