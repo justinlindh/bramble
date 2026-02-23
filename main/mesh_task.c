@@ -214,11 +214,12 @@ static void mesh_load_channel_psk_flags(void) {
     }
 
     for (int i = 0; i < s_num_channels; i++) {
-        uint8_t has_psk = (i == 0) ? 0 : 1;
+        /* Missing metadata defaults to "no PSK lock" for deterministic export semantics. */
+        uint8_t has_psk = 0;
         char key[8];
         snprintf(key, sizeof(key), "psk%d", i);
         if (nvs_get_u8(h, key, &has_psk) != ESP_OK) {
-            has_psk = (i == 0) ? 0 : 1;
+            has_psk = 0;
         }
         s_channel_has_psk[i] = (has_psk != 0);
     }
@@ -2016,6 +2017,7 @@ void mesh_task_start(bramble_identity_t *identity) {
                     /* Copy the name if it exists */
                     if (loaded_names[i][0] != '\0') {
                         strncpy(s_channel_names[0], loaded_names[i], sizeof(s_channel_names[0]) - 1);
+                        s_channel_names[0][sizeof(s_channel_names[0]) - 1] = '\0';
                     }
                     continue;
                 }
@@ -2030,10 +2032,11 @@ void mesh_task_start(bramble_identity_t *identity) {
                 if (loaded_names[i][0] != '\0') {
                     strncpy(s_channel_names[s_num_channels], loaded_names[i], 
                            sizeof(s_channel_names[s_num_channels]) - 1);
+                    s_channel_names[s_num_channels][sizeof(s_channel_names[s_num_channels]) - 1] = '\0';
                 }
-                
+
                 /* PSK lock state is loaded separately from NVS metadata. */
-                s_channel_has_psk[s_num_channels] = (s_num_channels != 0);
+                s_channel_has_psk[s_num_channels] = false;
                 ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", s_num_channels, 
                         loaded_names[i][0] ? loaded_names[i] : "(unnamed)");
                 s_num_channels++;
