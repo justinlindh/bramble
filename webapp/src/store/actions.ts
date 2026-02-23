@@ -164,7 +164,7 @@ export async function disconnect(): Promise<void> {
  * Firmware returns flat structure; webapp expects nested identity/radio objects.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeConfig(raw: any): BrambleConfig {
+export function normalizeConfig(raw: any): BrambleConfig {
   return {
     identity: {
       address: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.identity?.address ?? 0),
@@ -182,9 +182,9 @@ function normalizeConfig(raw: any): BrambleConfig {
     channels: (raw.channels ?? []).map((ch: any) => ({
       index: ch.id ?? ch.index ?? 0,
       name: ch.name ?? '',
-      hasPsk: ch.hasPsk ?? false,
+      hasPsk: ch.hasPsk ?? ch.has_psk ?? false,
       epoch: ch.epoch ?? 0,
-      isDefault: ch.is_default ?? ch.isDefault ?? false,
+      isDefault: ch.is_default ?? ch.isDefault ?? ch.default ?? false,
     })),
     mailboxEnabled: raw.mailboxEnabled ?? false,
     location: raw.location ?? {
