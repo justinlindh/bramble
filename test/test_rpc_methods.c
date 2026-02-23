@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
+#include <stdbool.h>
 
 void setUp(void) { rpc_init(); }
 void tearDown(void) {}
@@ -40,6 +41,25 @@ static int h_radio_failure(const cJSON *params, cJSON *result) {
     (void)params;
     cJSON_AddStringToObject(result, "error", "send failed");
     return RPC_ERR_RADIO;
+}
+
+static int h_set_location_config(const cJSON *params, cJSON *result) {
+    const cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    const cJSON *tier = cJSON_GetObjectItem(params, "tier");
+    const cJSON *interval_s = cJSON_GetObjectItem(params, "interval_s");
+    const cJSON *source = cJSON_GetObjectItem(params, "source");
+    const cJSON *contact_rules = cJSON_GetObjectItem(params, "contact_rules");
+    const cJSON *channel_targets = cJSON_GetObjectItem(params, "channel_targets");
+
+    if (enabled && !cJSON_IsBool(enabled)) return RPC_ERR_INVALID_PARAMS;
+    if (tier && !cJSON_IsString(tier)) return RPC_ERR_INVALID_PARAMS;
+    if (interval_s && !cJSON_IsNumber(interval_s)) return RPC_ERR_INVALID_PARAMS;
+    if (source && !cJSON_IsString(source)) return RPC_ERR_INVALID_PARAMS;
+    if (contact_rules && !cJSON_IsArray(contact_rules)) return RPC_ERR_INVALID_PARAMS;
+    if (channel_targets && !cJSON_IsArray(channel_targets)) return RPC_ERR_INVALID_PARAMS;
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
 }
 
 void test_send_message_missing_params_returns_invalid_params(void) {
@@ -87,10 +107,47 @@ void test_handler_radio_error_bubbles_to_error_response(void) {
     cJSON_Delete(resp);
 }
 
+void test_set_location_config_accepts_hybrid_policy_fields(void) {
+    rpc_register("bramble.setLocationConfig", h_set_location_config);
+
+    char response[1024];
+    int len = rpc_dispatch(
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"bramble.setLocationConfig\",\"params\":{"
+        "\"enabled\":true,\"tier\":\"coarse\",\"interval_s\":300,\"source\":\"hybrid\","
+        "\"contact_rules\":[{\"address\":\"AABBCCDD\",\"enabled\":true,\"tier\":\"full\",\"interval_s\":120}],"
+        "\"channel_targets\":[{\"channel\":0,\"enabled\":true,\"tier\":\"coarse\",\"interval_s\":600}]}}",
+        response, sizeof(response));
+    TEST_ASSERT_GREATER_THAN(0, len);
+
+    cJSON *resp = parse_response(response);
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(resp, "error"));
+    cJSON_Delete(resp);
+}
+
+void test_set_location_config_rejects_invalid_hybrid_policy_shapes(void) {
+    rpc_register("bramble.setLocationConfig", h_set_location_config);
+
+    char response[1024];
+    int len = rpc_dispatch(
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"bramble.setLocationConfig\",\"params\":{"
+        "\"enabled\":\"yes\",\"contact_rules\":{},\"channel_targets\":\"bad\"}}",
+        response, sizeof(response));
+    TEST_ASSERT_GREATER_THAN(0, len);
+
+    cJSON *resp = parse_response(response);
+    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_INT(RPC_ERR_INVALID_PARAMS, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(resp);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_send_message_missing_params_returns_invalid_params);
     RUN_TEST(test_set_radio_out_of_range_returns_invalid_params);
     RUN_TEST(test_handler_radio_error_bubbles_to_error_response);
+    RUN_TEST(test_set_location_config_accepts_hybrid_policy_fields);
+    RUN_TEST(test_set_location_config_rejects_invalid_hybrid_policy_shapes);
     return UNITY_END();
 }
