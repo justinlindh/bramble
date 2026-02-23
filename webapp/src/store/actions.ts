@@ -179,13 +179,17 @@ export function normalizeConfig(raw: any): BrambleConfig {
       cr: raw.radio?.cr ?? 5,
       freqMhz: raw.radio?.frequency_mhz ?? raw.radio?.freqMhz ?? 915.0,
     },
-    channels: (raw.channels ?? []).map((ch: any) => ({
-      index: ch.id ?? ch.index ?? 0,
-      name: ch.name ?? ch.channel_name ?? ch.channelName ?? '',
-      hasPsk: ch.hasPsk ?? ch.has_psk ?? ch.psk_enabled ?? ch.pskEnabled ?? false,
-      epoch: ch.epoch ?? ch.key_epoch ?? ch.keyEpoch ?? 0,
-      isDefault: ch.is_default ?? ch.isDefault ?? ch.default ?? ch.default_channel ?? ch.defaultChannel ?? false,
-    })),
+    channels: (raw.channels ?? []).map((ch: any) => {
+      const candidates = [ch.name, ch.channel_name, ch.channelName];
+      const firstNonBlankName = candidates.find((v: unknown) => typeof v === 'string' && v.trim().length > 0) as string | undefined;
+      return {
+        index: ch.id ?? ch.index ?? 0,
+        name: firstNonBlankName ?? '',
+        hasPsk: ch.hasPsk ?? ch.has_psk ?? ch.psk_enabled ?? ch.pskEnabled ?? false,
+        epoch: ch.epoch ?? ch.key_epoch ?? ch.keyEpoch ?? 0,
+        isDefault: ch.is_default ?? ch.isDefault ?? ch.default ?? ch.default_channel ?? ch.defaultChannel ?? false,
+      };
+    }),
     mailboxEnabled: raw.mailboxEnabled ?? false,
     location: raw.location ?? {
       enabled: false,
@@ -312,7 +316,12 @@ export async function loadMessages(sinceId?: number): Promise<void> {
     const toAddr = typeof m.to === 'string' ? parseInt(m.to, 16) : (m.to ?? 0);
     const dir = (m as any).direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
-    const isBroadcast = dir === 'broadcast_in' || dir === 'broadcast_out';
+    const rawChannel = (m as any).channelIndex ?? (m as any).channel;
+    const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
+    const isBroadcast =
+      dir === 'broadcast_in' ||
+      dir === 'broadcast_out' ||
+      (channelIndex === undefined && toAddr === 0xFFFFFFFF);
     // Skip self-addressed messages (firmware bug: old messages stored with wrong dest)
     const myAddr = store.config?.identity?.address ?? 0;
     if (!isBroadcast && fromAddr === toAddr && fromAddr === myAddr) continue;
@@ -328,7 +337,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
       to: isBroadcast ? 0xFFFFFFFF : toAddr,
       text: m.text,
       tier: m.tier,
-      channelIndex: isBroadcast ? undefined : m.channelIndex,
+      channelIndex: isBroadcast ? undefined : channelIndex,
       timestampMs: wallMs,
       status: 'delivered',
     };
