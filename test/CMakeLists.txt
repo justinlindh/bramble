@@ -657,3 +657,18 @@ add_executable(test_traffic_debug
 target_include_directories(test_traffic_debug PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
+
+# Board profile contract tests (Heltec V4)
+add_executable(test_board_profiles
+    test_board_profiles.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/board.c
+)
+target_include_directories(test_board_profiles PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+)
+target_compile_definitions(test_board_profiles PRIVATE
+    CONFIG_BRAMBLE_BOARD_HELTEC_V4=1
+)
