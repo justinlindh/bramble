@@ -107,3 +107,63 @@ Task 1 failing baseline reproduced and captured for:
 - cross-node visibility/delivery
 - leave action behavior
 - lock visibility
+
+---
+
+## Task 3 implementation verification (cross-node channel routing)
+
+### Code/tests implemented
+- `main/mesh_task.c`
+  - RX classification now treats packet `dest=0xFFFFFFFF` as broadcast **only** for channel 0.
+  - Channel-scoped packets (`info.channel_id > 0`) are stored/notified as channel messages, not broadcast.
+  - RPC `bramble.onMessage` now reports `channel=N` for channel messages even when outer packet dest is broadcast.
+- `webapp/src/store/actions.ts`
+  - Added `normalizeIncomingRealtimeMessage()`.
+  - Realtime onMessage now normalizes `to=0xFFFFFFFF` for true broadcast notifications and preserves channel routing precedence.
+- `webapp/src/store/__tests__/actions.channel-routing.test.ts`
+  - Added routing tests for channel-vs-broadcast normalization behavior.
+
+### Targeted test commands + outcomes
+```bash
+cd /home/justin/src/bramble/webapp
+npm test -- src/store/__tests__/actions.channel-routing.test.ts
+```
+Outcome: **PASS** (2/2 tests)
+
+```bash
+cd /home/justin/src/bramble/test
+cmake --build build -j --target test_chat_target test_channel_msg test_routing
+./build/test_chat_target
+./build/test_channel_msg
+./build/test_routing
+```
+Outcome: **PASS** (all tests)
+
+### Webapp build + docker redeploy
+```bash
+cd /home/justin/src/bramble/webapp
+npm run build
+docker compose -f docker-compose.yml build bramble-webapp
+docker compose -f docker-compose.yml up -d bramble-webapp caddy
+```
+Outcome: **PASS**; rebuilt bundle now serves:
+- `dist/assets/index-chj1xDxP.js`
+- `dist/assets/index-T2TtSzvR.css`
+
+### Agent-browser E2E attempt (required path)
+```bash
+agent-browser open https://192.168.6.34:3443
+agent-browser snapshot
+agent-browser get url
+```
+Observed environment blocker:
+- Browser lands on Chromium certificate/interstitial (`chrome-error://chromewebdata/`) instead of app DOM.
+- OpenClaw browser tool itself is additionally blocked from private/internal hostname access.
+
+Captured artifact:
+- Screenshot: `/home/justin/src/bramble/tmp-e2e/task3-agent-browser-https-error.png`
+
+### Status
+- Routing fix implemented and covered by targeted tests.
+- Build/redeploy completed.
+- Full `.21 ↔ .64` agent-browser interactive E2E flow is **blocked in this session** by HTTPS interstitial/private-host restrictions; requires trusted cert or local browser session with cert exception to complete final acceptance screenshots.

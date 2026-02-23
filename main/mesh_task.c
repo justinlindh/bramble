@@ -626,7 +626,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                         /* Store and notify for reassembled message */
                         uint32_t hdr_dest;
                         memcpy(&hdr_dest, data + 4, 4);
-                        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
+                        bool is_channel_message = (info.channel_id > 0);
+                        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message)
                             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
                         int16_t channel_index = (int16_t)info.channel_id;
                         msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
@@ -652,8 +653,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_AddStringToObject(params, "text", text);
                             cJSON_AddNumberToObject(params, "rssi", rssi);
                             cJSON_AddNumberToObject(params, "snr", snr);
-                            cJSON_AddNumberToObject(params, "channel", (dir == MSG_DIR_BROADCAST_IN) ? -1 : info.channel_id);
-                            cJSON_AddBoolToObject(params, "broadcast", dir == MSG_DIR_BROADCAST_IN);
+                            cJSON_AddNumberToObject(params, "channel", (info.channel_id > 0) ? info.channel_id : -1);
+                            cJSON_AddBoolToObject(params, "broadcast", (dir == MSG_DIR_BROADCAST_IN));
                             rpc_notify("bramble.onMessage", params);
                             cJSON_Delete(params);
                         }
@@ -691,10 +692,11 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         ESP_LOGI(TAG, ">>> %s", text);
         ESP_LOGI(TAG, "*** (ch:%d RSSI:%d SNR:%d) ***", info.channel_id, rssi, snr);
 
-        /* Store in message store — check header dest for broadcast detection */
+        /* Store in message store — classify broadcast vs channel routing */
         uint32_t hdr_dest;
         memcpy(&hdr_dest, data + 4, 4);  /* dest_addr at offset 4 in header */
-        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF)
+        bool is_channel_message = (info.channel_id > 0);
+        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message)
             ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
         int16_t channel_index = (int16_t)info.channel_id;
         msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
@@ -722,7 +724,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             cJSON_AddStringToObject(params, "text", text);
             cJSON_AddNumberToObject(params, "rssi", rssi);
             cJSON_AddNumberToObject(params, "snr", snr);
-            cJSON_AddNumberToObject(params, "channel", (dir == MSG_DIR_BROADCAST_IN) ? -1 : info.channel_id);
+            cJSON_AddNumberToObject(params, "channel", (info.channel_id > 0) ? info.channel_id : -1);
             cJSON_AddBoolToObject(params, "broadcast",
                 dir == MSG_DIR_BROADCAST_IN);
             rpc_notify("bramble.onMessage", params);
