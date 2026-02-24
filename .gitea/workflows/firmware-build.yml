@@ -21,30 +21,16 @@ jobs:
           . /opt/esp/idf/export.sh
           bash scripts/ci-build-firmware.sh
 
-      - name: Publish OTA release to host /ota
+      - name: Publish OTA release to mounted /ota
         run: |
+          [ -d /ota ] || { echo '/ota directory is not mounted into runner job'; exit 1; }
           VERSION="$(git describe --tags --always --dirty)"
           if echo "$VERSION" | grep -Eq '^v[0-9]'; then CHANNEL=stable; else CHANNEL=dev; fi
-          tar -cf - \
-            scripts/publish-firmware-release.sh \
-            scripts/build-firmware-index.js \
-            scripts/validate-firmware-index.js \
-            build-artifacts/firmware-ci \
-          | docker run --rm -i \
-              -e CHANNEL="$CHANNEL" \
-              -e VERSION="$VERSION" \
-              -v /home/user/src/dockers/ota:/ota \
-              -w /work \
-              node:20-bookworm \
-              bash -lc '
-                mkdir -p /work && tar -xf - -C /work
-                chmod +x /work/scripts/publish-firmware-release.sh
-                /work/scripts/publish-firmware-release.sh /ota "$CHANNEL" "$VERSION" \
-                  heltec-v3=/work/build-artifacts/firmware-ci/bootloader.bin \
-                  heltec-v3=/work/build-artifacts/firmware-ci/partition-table.bin \
-                  heltec-v3=/work/build-artifacts/firmware-ci/bramble.bin
-                node /work/scripts/validate-firmware-index.js /ota/index.json
-              '
+          ./scripts/publish-firmware-release.sh /ota "$CHANNEL" "$VERSION" \
+            heltec-v3=build-artifacts/firmware-ci/bootloader.bin \
+            heltec-v3=build-artifacts/firmware-ci/partition-table.bin \
+            heltec-v3=build-artifacts/firmware-ci/bramble.bin
+          node scripts/validate-firmware-index.js /ota/index.json
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3
