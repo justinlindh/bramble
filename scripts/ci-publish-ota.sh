@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+is_valid_ota_semver() {
+  local candidate=${1:-}
+  [[ "$candidate" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+}
+
 normalize_version() {
   local version
+  local runtime_version_file=${RPC_VERSION_FILE:-main/rpc_methods.c}
+  local strict_source=${STRICT_VERSION_SOURCE:-}
 
   if [[ -n "${VERSION:-}" ]]; then
     version="$VERSION"
   else
     # Primary source: firmware runtime version constant
-    version=$(sed -n 's/^#define BRAMBLE_VERSION_STR[[:space:]]*"\([^"]\+\)".*/\1/p' main/rpc_methods.c | head -n1)
+    version=$(sed -n 's/^#define BRAMBLE_VERSION_STR[[:space:]]*"\([^"]\+\)".*/\1/p' "$runtime_version_file" 2>/dev/null | head -n1)
 
-    # Secondary source: git tag describe (when tags are available)
     if [[ -z "$version" ]]; then
+      if [[ -n "$strict_source" || -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "ERROR: BRAMBLE_VERSION_STR is missing or unreadable from $runtime_version_file" >&2
+        return 1
+      fi
+      # Non-CI fallback when tags are available
       version=$(git describe --tags --always --dirty 2>/dev/null || true)
     fi
   fi
@@ -21,7 +32,12 @@ normalize_version() {
     version="v${version}"
   fi
 
-  if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+  if ! is_valid_ota_semver "$version"; then
+    if [[ -z "${VERSION:-}" && ( -n "$strict_source" || -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ) ]]; then
+      echo "ERROR: Invalid BRAMBLE_VERSION_STR semver: '$version'" >&2
+      return 1
+    fi
+
     local short_sha
     short_sha=$(git rev-parse --short HEAD)
     version="v0.0.0-${short_sha}"
