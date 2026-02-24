@@ -46,26 +46,33 @@ jobs:
             scripts/ci-publish-ota.sh
           done
 
-      - name: Verify published release appears in index
+      - name: Verify published release completeness in index
         env:
           CHANNEL: dev
         run: |
-          VERSION=$(git describe --tags --always --dirty)
-          if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            VERSION="v0.0.0-$(git rev-parse --short HEAD)"
-          fi
+          VERSION=$(scripts/ci-publish-ota.sh --print-version)
           curl -fsSL https://bramblemesh.org/ota/index.json -o /tmp/ota-index.json
 
-          for board in heltec-v3 tdeck-plus heltec-v4; do
-            jq -e --arg version "$VERSION" --arg channel "$CHANNEL" --arg board "$board" '
-              any(.releases[];
-                .version == $version and
-                .channel == $channel and
-                any(.artifacts[]; .board == $board)
-              )
+          jq -e \
+            --arg version "$VERSION" \
+            --arg channel "$CHANNEL" \
+            --argjson boards '["heltec-v3","tdeck-plus","heltec-v4"]' \
+            '
+            def is_canonical($name):
+              ((.filename // "") == $name) or
+              ((.path // "") | endswith("/" + $name));
+
+            def has_required_for_board($board):
+              any(.artifacts[]?; .board == $board and is_canonical("bootloader.bin")) and
+              any(.artifacts[]?; .board == $board and is_canonical("partition-table.bin")) and
+              any(.artifacts[]?; .board == $board and is_canonical("bramble.bin"));
+
+            (.releases | map(select(.version == $version and .channel == $channel)) | first) as $release
+            | $release != null
+            and all($boards[]; $release | has_required_for_board(.))
             ' /tmp/ota-index.json >/dev/null
-            echo "Verified release in index: channel=$CHANNEL version=$VERSION board=$board"
-          done
+
+          echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3

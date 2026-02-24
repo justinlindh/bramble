@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+normalize_version() {
+  local version
+  version=${VERSION:-$(git describe --tags --always --dirty)}
+  if [[ ! "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+    local short_sha
+    short_sha=$(git rev-parse --short HEAD)
+    version="v0.0.0-${short_sha}"
+  fi
+  echo "$version"
+}
+
+if [[ "${1:-}" == "--print-version" ]]; then
+  normalize_version
+  exit 0
+fi
+
 OTA_PUBLISH_URL=${OTA_PUBLISH_URL:-https://bramblemesh.org/ota/publish}
 OTA_PUBLISH_KEY=${OTA_PUBLISH_KEY:-}
 CHANNEL=${CHANNEL:-dev}
 BOARD=${BOARD:-heltec-v3}
-VERSION=${VERSION:-$(git describe --tags --always --dirty)}
-if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-  short_sha=$(git rev-parse --short HEAD)
-  VERSION="v0.0.0-${short_sha}"
-fi
+VERSION=$(normalize_version)
 
 BOOTLOADER=${BOOTLOADER:-build-artifacts/firmware-ci/bootloader.bin}
 PARTITION=${PARTITION:-build-artifacts/firmware-ci/partition-table.bin}
