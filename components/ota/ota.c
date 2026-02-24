@@ -45,7 +45,7 @@ static int ota_http_start(const char *url)
 {
     esp_http_client_config_t config = {
         .url = url,
-        .timeout_ms = 30000,
+        .timeout_ms = 120000,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -60,6 +60,16 @@ static int ota_http_start(const char *url)
         esp_http_client_cleanup(client);
         return -1;
     }
+
+    int content_len = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (status != 200) {
+        ESP_LOGE(TAG, "HTTP OTA failed: status=%d", status);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+    ESP_LOGI(TAG, "HTTP OTA response: status=%d content_length=%d", status, content_len);
 
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
@@ -78,21 +88,41 @@ static int ota_http_start(const char *url)
         return -1;
     }
 
-    char buf[1024];
-    int read_len = 0;
-    while ((read_len = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
-        err = esp_ota_write(ota_handle, (const void *)buf, read_len);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "HTTP OTA failed: ota write: %s", esp_err_to_name(err));
-            esp_ota_abort(ota_handle);
-            esp_http_client_close(client);
-            esp_http_client_cleanup(client);
-            return -1;
+    char buf[4096];
+    int total = 0;
+    while (true) {
+        int read_len = esp_http_client_read(client, buf, sizeof(buf));
+        if (read_len > 0) {
+            err = esp_ota_write(ota_handle, (const void *)buf, read_len);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "HTTP OTA failed: ota write: %s", esp_err_to_name(err));
+                esp_ota_abort(ota_handle);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return -1;
+            }
+            total += read_len;
+            if (content_len > 0 && total >= content_len) {
+                break;
+            }
+            continue;
         }
-    }
+        if (read_len == 0) {
+            if (esp_http_client_is_complete_data_received(client)) {
+                break;
+            }
+            continue;
+        }
 
-    if (read_len < 0) {
-        ESP_LOGE(TAG, "HTTP OTA failed: read error");
+        ESP_LOGE(TAG, "HTTP OTA failed: read error len=%d", read_len);
+        esp_ota_abort(ota_handle);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+    ESP_LOGI(TAG, "HTTP OTA downloaded bytes=%d", total);
+    if (total <= 0) {
+        ESP_LOGE(TAG, "HTTP OTA failed: no payload downloaded");
         esp_ota_abort(ota_handle);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);

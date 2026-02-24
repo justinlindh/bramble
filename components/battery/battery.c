@@ -5,17 +5,19 @@
 #include "esp_adc/adc_cali_scheme.h"
 /* ESP32-S3 supports curve fitting calibration only (no line fitting) */
 #include "esp_log.h"
+#include "driver/gpio.h"
+#include <string.h>
 
 static const char *TAG = "battery";
 
-/* ADC unit and attenuation (fixed for all boards) */
+/* ADC unit */
 #define BATTERY_ADC_UNIT    ADC_UNIT_1
-#define BATTERY_ADC_ATTEN   ADC_ATTEN_DB_12
 
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static adc_cali_handle_t s_cali_handle = NULL;
 static bool s_initialized = false;
 static const bramble_board_config_t *s_board = NULL;
+static adc_atten_t s_batt_atten = ADC_ATTEN_DB_12;
 
 void battery_init(void)
 {
@@ -26,6 +28,18 @@ void battery_init(void)
     if (!(s_board->capabilities & BOARD_CAP_BATTERY_ADC)) {
         ESP_LOGI(TAG, "Board has no battery ADC support");
         return;
+    }
+
+    /* Heltec V4 requires ADC rail enable before battery reads are valid. */
+    if (s_board->short_name && strcmp(s_board->short_name, "heltec_v4") == 0) {
+        gpio_config_t adc_ctrl = {
+            .pin_bit_mask = (1ULL << 37),
+            .mode = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&adc_ctrl);
+        gpio_set_level(37, 1);
+        s_batt_atten = ADC_ATTEN_DB_2_5;
+        ESP_LOGI(TAG, "Heltec V4 battery ADC rail enabled (GPIO37 HIGH), atten=2.5dB");
     }
 
     /* Configure ADC unit */
@@ -40,7 +54,7 @@ void battery_init(void)
 
     /* Configure channel */
     adc_oneshot_chan_cfg_t chan_cfg = {
-        .atten = BATTERY_ADC_ATTEN,
+        .atten = s_batt_atten,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     err = adc_oneshot_config_channel(s_adc_handle, s_board->battery.adc_channel, &chan_cfg);
@@ -53,7 +67,7 @@ void battery_init(void)
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = BATTERY_ADC_UNIT,
         .chan = s_board->battery.adc_channel,
-        .atten = BATTERY_ADC_ATTEN,
+        .atten = s_batt_atten,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
     err = adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali_handle);

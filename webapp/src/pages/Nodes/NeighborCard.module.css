@@ -117,6 +117,18 @@
   background: #3fb95044;
 }
 
+.badgeLocationMuted {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
 .badgeMailbox {
   font-size: 0.7rem;
   padding: 0.1rem 0.4rem;

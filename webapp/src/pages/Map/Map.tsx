@@ -113,7 +113,10 @@ export function Map() {
   const setMapFocusAddr = useStore(s => s.setMapFocusAddr);
 
   const selfAddr = config?.identity?.address;
-  const selfName = config?.identity?.name?.trim() || undefined;
+  const configuredSelfName = config?.identity?.name?.trim();
+  const selfName = configuredSelfName && configuredSelfName !== '(unnamed)'
+    ? configuredSelfName
+    : (selfAddr !== undefined ? peerNames.get(selfAddr) : undefined);
   const selfPeerLocation = selfAddr === undefined
     ? undefined
     : peerLocations.find(p => p.addr === selfAddr && p.tier === 'full' && !!p.position);
@@ -157,6 +160,9 @@ export function Map() {
       }).bindPopup(
         `<b>${selfAddr !== undefined ? nodeLabel(selfAddr, selfName) : 'You'}</b><br/>` +
         `Accuracy: ${selfPos.accuracy.toFixed(0)}m`
+      ).bindTooltip(
+        selfAddr !== undefined ? nodeLabel(selfAddr, selfName) : 'You',
+        { permanent: true, direction: 'top', offset: [0, -10], className: styles.nodeLabelTooltip }
       ).addTo(ml);
       if (selfPos.accuracy > 0) {
         L.circle(ll, {
@@ -177,6 +183,9 @@ export function Map() {
           radius: 7, color: '#4caf50', fillColor: '#4caf50', fillOpacity: 0.8, weight: 2,
         }).bindPopup(
           `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: exact<br/>Accuracy: ${peer.position.accuracy.toFixed(0)}m`
+        ).bindTooltip(
+          nodeLabel(peer.addr, peerDisplayName),
+          { permanent: true, direction: 'top', offset: [0, -10], className: styles.nodeLabelTooltip }
         ).addTo(ml);
       } else if (peer.tier === 'coarse' && peer.gridSquare) {
         const rectBounds = gridSquareBounds(peer.gridSquare);
@@ -185,6 +194,9 @@ export function Map() {
             color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.25, weight: 2,
           }).bindPopup(
             `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: zone<br/>Grid: ${peer.gridSquare}`
+          ).bindTooltip(
+            nodeLabel(peer.addr, peerDisplayName),
+            { permanent: true, direction: 'center', className: styles.nodeLabelTooltip }
           ).addTo(ml);
           const center = gridSquareToLatLon(peer.gridSquare);
           if (center) bounds.push(L.latLng(center[0], center[1]));

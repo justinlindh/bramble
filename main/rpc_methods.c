@@ -31,7 +31,7 @@
 #include <string.h>
 /* statvfs not available in ESP-IDF newlib */
 
-#define BRAMBLE_VERSION_STR      "0.4.0-dev"
+#define BRAMBLE_VERSION_STR      "0.4.1-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.4.0"
 
 #define NVS_NAMESPACE            "bramble"

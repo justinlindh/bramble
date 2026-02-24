@@ -819,10 +819,37 @@ function handleProbeComplete(params: unknown): void {
 
 // ─── Location ─────────────────────────────────────────────────────────────
 
+function normalizePeerLocation(raw: any): PeerLocation {
+  const addr = parseHexAddr(raw?.addr ?? raw?.address);
+  const rawPos = raw?.position;
+  const position = rawPos
+    ? {
+        lat: Number(rawPos.lat ?? rawPos.latitude ?? 0),
+        lon: Number(rawPos.lon ?? rawPos.longitude ?? 0),
+        alt: Number(rawPos.alt ?? rawPos.altitude ?? 0),
+        accuracy: Number(rawPos.accuracy ?? 0),
+        speed: Number(rawPos.speed ?? 0),
+        heading: Number(rawPos.heading ?? 0),
+        timestampMs: Number(rawPos.timestampMs ?? rawPos.timestamp_ms ?? Date.now()),
+      }
+    : null;
+
+  return {
+    addr,
+    name: String(raw?.name ?? raw?.node_name ?? ''),
+    tier: (raw?.tier ?? 'presence') as PeerLocation['tier'],
+    position,
+    gridSquare: raw?.gridSquare ?? raw?.grid_square,
+    online: Boolean(raw?.online ?? true),
+    lastUpdatedMs: Number(raw?.lastUpdatedMs ?? raw?.last_updated_ms ?? Date.now()),
+  };
+}
+
 export async function loadPeerLocations(): Promise<void> {
   if (!client) return;
-  const result = await client.rpc<{ peerLocations: PeerLocation[] }>('bramble.getPeerLocations');
-  useStore.getState().setPeerLocations(result.peerLocations ?? []);
+  const result = await client.rpc<{ peerLocations: any[] }>('bramble.getPeerLocations');
+  const normalized = (result.peerLocations ?? []).map(normalizePeerLocation);
+  useStore.getState().setPeerLocations(normalized);
 }
 
 export async function setLocationConfig(config: Partial<LocationConfig>): Promise<void> {
@@ -864,7 +891,7 @@ export async function shareLocationOnce(addr: number, tier?: LocationTier): Prom
 }
 
 function handleLocationUpdate(params: unknown): void {
-  const update = params as PeerLocation;
+  const update = normalizePeerLocation(params as any);
   const store = useStore.getState();
   const existing = store.peerLocations;
   const idx = existing.findIndex(p => p.addr === update.addr);
