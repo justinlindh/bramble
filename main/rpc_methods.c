@@ -631,7 +631,6 @@ static const char *rpc_location_source_normalize(const char *source) {
     if (strcmp(source, "gps") == 0) return "gps";
     if (strcmp(source, "manual") == 0) return "manual";
     if (strcmp(source, "hybrid") == 0) return "hybrid";
-    if (strcmp(source, "auto") == 0) return "hybrid"; /* backward-compatible alias */
     return "hybrid";
 }
 
@@ -980,14 +979,19 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
             if (policy.enabled && (lat_e6 != 0 || lon_e6 != 0)) {
                 cJSON *self = cJSON_CreateObject();
                 char buf[12];
-                cJSON_AddStringToObject(self, "address",
-                    addr_hex(s_identity->address, buf, sizeof(buf)));
-                cJSON_AddNumberToObject(self, "lat", lat_e6 / 1e6);
-                cJSON_AddNumberToObject(self, "lon", lon_e6 / 1e6);
-                cJSON_AddStringToObject(self, "tier", "exact");
-                cJSON_AddBoolToObject(self, "is_self", true);
+                cJSON *position = cJSON_CreateObject();
+                cJSON_AddNumberToObject(position, "lat", lat_e6 / 1e6);
+                cJSON_AddNumberToObject(position, "lon", lon_e6 / 1e6);
+                cJSON_AddNumberToObject(position, "alt", 0);
+                cJSON_AddNumberToObject(position, "accuracy", 0);
+                cJSON_AddNumberToObject(position, "speed", 0);
+                cJSON_AddNumberToObject(position, "heading", 0);
+                cJSON_AddNumberToObject(position, "timestampMs", (double)(esp_timer_get_time() / 1000ULL));
+
                 cJSON_AddStringToObject(self, "addr", addr_hex(s_identity->address, buf, sizeof(buf)));
                 cJSON_AddStringToObject(self, "name", "self");
+                cJSON_AddStringToObject(self, "tier", "full");
+                cJSON_AddItemToObject(self, "position", position);
                 cJSON_AddBoolToObject(self, "online", true);
                 cJSON_AddNumberToObject(self, "lastUpdatedMs", (double)(esp_timer_get_time() / 1000ULL));
                 cJSON_AddItemToArray(peer_locations, self);
@@ -1012,7 +1016,6 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                     size_t len = sizeof(stored);
                     if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK && len == sizeof(stored)) {
                         cJSON *peer = cJSON_CreateObject();
-                        uint32_t addr = (uint32_t)strtoul(info.key + 3, NULL, 16);
                         uint32_t freshness_ms = (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0;
 
                         cJSON *position = cJSON_CreateObject();
@@ -1025,15 +1028,11 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                         cJSON_AddNumberToObject(position, "timestampMs", (double)stored.timestamp * 1000.0);
 
                         cJSON_AddStringToObject(peer, "addr", info.key + 3);
-                        cJSON_AddStringToObject(peer, "address", info.key + 3);
                         cJSON_AddStringToObject(peer, "name", "");
                         cJSON_AddStringToObject(peer, "tier", location_tier_to_string(stored.tier));
+                        cJSON_AddItemToObject(peer, "position", position);
                         cJSON_AddBoolToObject(peer, "online", freshness_ms < LOCATION_CACHE_TTL_MS);
                         cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
-                        cJSON_AddItemToObject(peer, "position", position);
-                        cJSON_AddBoolToObject(peer, "is_self", false);
-                        cJSON_AddNumberToObject(peer, "timestamp", stored.timestamp);
-                        cJSON_AddNumberToObject(peer, "freshness_ms", freshness_ms);
 
                         cJSON_AddItemToArray(peer_locations, peer);
                         cJSON_AddItemToArray(peers, cJSON_Duplicate(peer, 1));
@@ -1294,6 +1293,7 @@ static int handle_set_broadcast_telemetry_mode(const cJSON *params, cJSON *resul
 /* OTA task — runs in background after RPC response */
 static char s_ota_url[256];
 static void ota_task(void *arg) {
+    (void)arg;
     vTaskDelay(pdMS_TO_TICKS(500)); /* let RPC response flush */
     int rc = ota_wifi_start(s_ota_url);
     if (rc == 0) {

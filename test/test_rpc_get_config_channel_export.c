@@ -174,6 +174,25 @@ void test_get_config_ignores_legacy_location_contact_keys(void) {
     cJSON_Delete(cfg_root);
 }
 
+void test_get_config_location_includes_canonical_fields_shape(void) {
+    g_nvs_allow_open = false;
+
+    cJSON *cfg_root = dispatch_get_config();
+    cJSON *cfg_result = cJSON_GetObjectItem(cfg_root, "result");
+    cJSON *location = cJSON_GetObjectItem(cfg_result, "location");
+    TEST_ASSERT_NOT_NULL(location);
+
+    TEST_ASSERT_TRUE(cJSON_IsBool(cJSON_GetObjectItem(location, "enabled")));
+    TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItem(location, "tier")));
+    TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItem(location, "default_tier")));
+    TEST_ASSERT_TRUE(cJSON_IsNumber(cJSON_GetObjectItem(location, "interval_s")));
+    TEST_ASSERT_TRUE(cJSON_IsString(cJSON_GetObjectItem(location, "source")));
+    TEST_ASSERT_TRUE(cJSON_IsArray(cJSON_GetObjectItem(location, "contact_rules")));
+    TEST_ASSERT_TRUE(cJSON_IsArray(cJSON_GetObjectItem(location, "channel_targets")));
+
+    cJSON_Delete(cfg_root);
+}
+
 void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
     typedef struct __attribute__((packed)) {
         int32_t latitude_e7;
@@ -214,8 +233,9 @@ void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
     TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(peer_locations));
 
     cJSON *peer = cJSON_GetArrayItem(peer_locations, 0);
-    TEST_ASSERT_EQUAL_HEX32(0xA1B2C3D4u, (uint32_t)cJSON_GetObjectItem(peer, "addr")->valuedouble);
-    TEST_ASSERT_EQUAL_STRING("A1B2C3D4", cJSON_GetObjectItem(peer, "address")->valuestring);
+    cJSON *addr = cJSON_GetObjectItem(peer, "addr");
+    TEST_ASSERT_TRUE(cJSON_IsString(addr));
+    TEST_ASSERT_EQUAL_STRING("A1B2C3D4", addr->valuestring);
     TEST_ASSERT_EQUAL_STRING("full", cJSON_GetObjectItem(peer, "tier")->valuestring);
     TEST_ASSERT_EQUAL(4242, cJSON_GetObjectItem(peer, "lastUpdatedMs")->valueint);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(peer, "online")));
@@ -233,6 +253,7 @@ int main(void) {
     RUN_TEST(test_get_config_keeps_default_broadcast_semantics);
     RUN_TEST(test_location_contact_roundtrip_uses_canonical_rule_key);
     RUN_TEST(test_get_config_ignores_legacy_location_contact_keys);
+    RUN_TEST(test_get_config_location_includes_canonical_fields_shape);
     RUN_TEST(test_get_peer_locations_exports_peer_identity_and_timestamps);
     return UNITY_END();
 }

@@ -19,7 +19,7 @@ Accepted params (all optional for partial updates):
 - `tier` (string) — alias for `default_tier`
 - `default_tier` (string) — `full | coarse | presence | off`
 - `interval_s` (number)
-- `source` (string) — `gps | manual | hybrid` (`auto` accepted as alias of `hybrid`)
+- `source` (string) — `gps | manual | hybrid`
 - `lat` (number), `lon` (number) — manual fallback coordinates
 - `contact_rules` (array of objects):
   - `address` (8-char hex string)
@@ -56,6 +56,22 @@ Compatibility notes:
 - `lat` / `lon` (number, when manual coordinates are present)
 - `contact_rules` (array)
 - `channel_targets` (array)
+
+### `bramble.getPeerLocations`
+
+`bramble.getPeerLocations.result` includes:
+
+- `peerLocations` (array of canonical location peers)
+- `peers` (array, compatibility alias)
+
+Each peer object uses canonical fields:
+
+- `addr` (8-char uppercase hex string)
+- `name` (string)
+- `tier` (`full | coarse | presence | off`)
+- `position` (object or `null`)
+- `online` (bool)
+- `lastUpdatedMs` (number)
 
 ## `bramble.sendBroadcast` response fields
 
