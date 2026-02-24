@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { LocationSection } from '../../src/pages/Config/LocationSection';
 import type { LocationConfig, Neighbor, Channel } from '../../src/types/bramble';
 
@@ -49,13 +49,15 @@ describe('LocationSection hybrid policy controls', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save location policy' }));
 
-    expect(setLocationConfigMock).toHaveBeenCalledWith(expect.objectContaining({
-      enabled: true,
-      default_tier: 'presence',
-      tier: 'presence',
-      interval_s: 120,
-      source: 'manual',
-    }));
+    await waitFor(() => {
+      expect(setLocationConfigMock).toHaveBeenCalledWith(expect.objectContaining({
+        enabled: true,
+        default_tier: 'presence',
+        tier: 'presence',
+        interval_s: 120,
+        source: 'manual',
+      }));
+    });
   });
 
   it('edits both contact rules and channel targets before saving', async () => {
@@ -68,6 +70,10 @@ describe('LocationSection hybrid policy controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add channel target' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Save location policy' }));
+
+    await waitFor(() => {
+      expect(setLocationConfigMock).toHaveBeenCalled();
+    });
 
     const payload = setLocationConfigMock.mock.calls[0][0];
     expect(payload.contact_rules).toHaveLength(1);
