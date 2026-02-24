@@ -75,6 +75,38 @@ Build output: `build/bramble.bin` (~220KB)
 
 > Note: T-Deck Plus currently ships with BLE disabled in the default profile due to a reproducible AP WPA handshake regression when BLE is enabled. Use an explicit BLE-enabled profile only for targeted BLE testing.
 
+## Containerized CI Firmware Build (scaffold)
+
+A first-pass containerized CI scaffold is available for deterministic firmware build artifacts.
+
+- Docker image definition: `docker/firmware-builder/Dockerfile` (pinned to `espressif/idf:v5.4.1`)
+- Build script: `scripts/ci-build-firmware.sh`
+- Gitea workflow: `.gitea/workflows/firmware-build.yml` (manual trigger only)
+
+Run locally with Docker:
+
+```bash
+cd /path/to/bramble
+
+docker build \
+  -t bramble-firmware-builder:espidf-v5.4.1 \
+  -f docker/firmware-builder/Dockerfile \
+  .
+
+docker run --rm \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  bramble-firmware-builder:espidf-v5.4.1 \
+  bash scripts/ci-build-firmware.sh
+```
+
+Artifacts are written to a deterministic path:
+
+- `build-artifacts/firmware-ci/`
+- includes `bramble.bin`, `bramble.elf`, `bramble.map`, bootloader/partition/OTA data binaries, and `SHA256SUMS.txt`
+
+This scaffold is intentionally build-only; OTA publishing/release stages are not wired yet.
+
 ## Flash
 
 ```bash
