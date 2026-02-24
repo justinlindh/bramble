@@ -21,47 +21,7 @@ jobs:
           . /opt/esp/idf/export.sh
           bash scripts/ci-build-firmware.sh
 
-      - name: Publish OTA release to host /ota via Docker
-        run: |
-          set -euxo pipefail
-          apt-get update
-          apt-get install -y ca-certificates curl gnupg
-          install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-          chmod a+r /etc/apt/keyrings/docker.gpg
-          . /etc/os-release
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
-          apt-get update
-          apt-get install -y docker-ce-cli
-          docker version
-          ls -l /var/run/docker.sock || true
-
-          VERSION="$(git describe --tags --always --dirty)"
-          if echo "$VERSION" | grep -Eq '^v[0-9]'; then CHANNEL=stable; else CHANNEL=dev; fi
-
-          docker run --rm -v /home/user/src/dockers/ota:/ota alpine:3.20 sh -lc 'echo mount-test > /ota/.ci-mount-test && ls -la /ota'
-
-          tar -cf - \
-            scripts/publish-firmware-release.sh \
-            scripts/build-firmware-index.js \
-            scripts/validate-firmware-index.js \
-            build-artifacts/firmware-ci \
-          | docker run --rm -i \
-              -e CHANNEL="$CHANNEL" \
-              -e VERSION="$VERSION" \
-              -v /home/user/src/dockers/ota:/ota \
-              -w /work \
-              node:20-bookworm \
-              bash -lc '
-                mkdir -p /work && tar -xf - -C /work
-                chmod +x /work/scripts/publish-firmware-release.sh
-                /work/scripts/publish-firmware-release.sh /ota "$CHANNEL" "$VERSION" \
-                  heltec-v3=/work/build-artifacts/firmware-ci/bootloader.bin \
-                  heltec-v3=/work/build-artifacts/firmware-ci/partition-table.bin \
-                  heltec-v3=/work/build-artifacts/firmware-ci/bramble.bin
-                node /work/scripts/validate-firmware-index.js /ota/index.json
-              '
-
+      # OTA publish moved to firmware-publish-ota.yml workflow_run
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3
         with:
