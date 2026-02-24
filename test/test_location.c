@@ -4,6 +4,7 @@
 #include <math.h>
 
 static location_manager_t mgr;
+extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 void setUp(void) { location_init(&mgr); }
 void tearDown(void) {}
@@ -137,6 +138,27 @@ void test_location_should_send_time(void) {
     TEST_ASSERT_TRUE(location_should_send(&mgr, 0x10, 1000 + LOCATION_DEFAULT_INTERVAL_MS));
 }
 
+void test_location_policy_defaults(void) {
+    location_policy_t policy;
+    location_policy_set_defaults(&policy);
+
+    TEST_ASSERT_FALSE(policy.enabled);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, policy.default_tier);
+    TEST_ASSERT_EQUAL(LOCATION_DEFAULT_INTERVAL_S, policy.interval_s);
+}
+
+void test_location_policy_interval_floor(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_FULL,
+        .interval_s = (uint16_t)(LOCATION_MIN_INTERVAL_S - 1)
+    };
+
+    location_policy_normalize(&policy);
+
+    TEST_ASSERT_EQUAL(LOCATION_MIN_INTERVAL_S, policy.interval_s);
+}
+
 void test_location_should_send_distance(void) {
     location_add_contact(&mgr, 0x20, LOCATION_TIER_FULL);
     location_contact_t *c = location_find_contact(&mgr, 0x20);
@@ -164,6 +186,92 @@ void test_location_should_send_distance(void) {
     TEST_ASSERT_TRUE(location_should_send(&mgr, 0x20, 1500));
 }
 
+void test_location_policy_should_send_disabled(void) {
+    location_policy_t policy = {
+        .enabled = false,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, true, 1000, 0));
+}
+
+void test_location_policy_should_send_no_source(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, false, true, 1000, 0));
+}
+
+void test_location_policy_should_send_no_target(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = LOCATION_DEFAULT_INTERVAL_S,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, false, 1000, 0));
+}
+
+void test_location_policy_should_send_interval_not_reached(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = 60,
+    };
+
+    TEST_ASSERT_FALSE(location_policy_should_send(&policy, true, true, 59000, 1000));
+}
+
+void test_location_policy_should_send_allowed_send(void) {
+    location_policy_t policy = {
+        .enabled = true,
+        .default_tier = LOCATION_TIER_COARSE,
+        .interval_s = 60,
+    };
+
+    TEST_ASSERT_TRUE(location_policy_should_send(&policy, true, true, 61000, 1000));
+}
+
+void test_location_deserialize_for_tier_full_coarse_presence(void) {
+    bramble_position_t full = {
+        .latitude_e7 = 374220000,
+        .longitude_e7 = -1220840000,
+        .altitude_m = 9,
+        .accuracy_m = 7,
+        .speed_kmh = 3,
+        .heading_deg2 = 30,
+        .timestamp = 1234,
+        .valid = true,
+    };
+
+    uint8_t full_buf[LOCATION_FULL_SIZE];
+    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE, location_serialize_full(&full, full_buf, sizeof(full_buf)));
+
+    bramble_position_t out = {0};
+    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE,
+                      location_deserialize_for_tier(full_buf, sizeof(full_buf), LOCATION_TIER_FULL, &out));
+    TEST_ASSERT_EQUAL(full.latitude_e7, out.latitude_e7);
+    TEST_ASSERT_EQUAL(full.longitude_e7, out.longitude_e7);
+
+    uint8_t coarse_buf[LOCATION_COARSE_SIZE];
+    TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE, location_serialize_coarse(&full, coarse_buf, sizeof(coarse_buf)));
+    memset(&out, 0, sizeof(out));
+    TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE,
+                      location_deserialize_for_tier(coarse_buf, sizeof(coarse_buf), LOCATION_TIER_COARSE, &out));
+    TEST_ASSERT_TRUE(out.valid);
+
+    uint8_t presence_buf[LOCATION_PRESENCE_SIZE];
+    TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE, location_serialize_presence(&full, presence_buf, sizeof(presence_buf)));
+    memset(&out, 0, sizeof(out));
+    TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE,
+                      location_deserialize_for_tier(presence_buf, sizeof(presence_buf), LOCATION_TIER_PRESENCE, &out));
+    TEST_ASSERT_TRUE(out.valid);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_location_serialize_full_roundtrip);
@@ -171,7 +279,15 @@ int main(void) {
     RUN_TEST(test_location_coarse_precision);
     RUN_TEST(test_location_contact_management);
     RUN_TEST(test_location_cache);
+    RUN_TEST(test_location_policy_defaults);
+    RUN_TEST(test_location_policy_interval_floor);
     RUN_TEST(test_location_should_send_time);
     RUN_TEST(test_location_should_send_distance);
+    RUN_TEST(test_location_policy_should_send_disabled);
+    RUN_TEST(test_location_policy_should_send_no_source);
+    RUN_TEST(test_location_policy_should_send_no_target);
+    RUN_TEST(test_location_policy_should_send_interval_not_reached);
+    RUN_TEST(test_location_policy_should_send_allowed_send);
+    RUN_TEST(test_location_deserialize_for_tier_full_coarse_presence);
     return UNITY_END();
 }

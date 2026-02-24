@@ -15,7 +15,6 @@ import type {
   ProbeResponse,
   PeerLocation,
   LocationConfig,
-  LocationContact,
   LocationTier,
   Message,
 } from '../types/bramble';
@@ -174,6 +173,15 @@ export async function disconnect(): Promise<void> {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function normalizeConfig(raw: any): BrambleConfig {
+  const rawLocation = raw.location ?? {};
+  const legacyContacts = (rawLocation.contacts ?? []) as Array<{ addr: number; tier: LocationTier; intervalSec?: number }>;
+  const contactRules = (rawLocation.contact_rules ?? legacyContacts.map((c) => ({
+    address: c.addr.toString(16).toUpperCase().padStart(8, '0'),
+    enabled: c.tier !== 'off',
+    tier: c.tier,
+    interval_s: c.intervalSec ?? rawLocation.interval_s ?? 300,
+  }))) as LocationConfig['contact_rules'];
+
   return {
     identity: {
       address: typeof raw.address === 'string' ? parseInt(raw.address, 16) : (raw.identity?.address ?? 0),
@@ -200,12 +208,20 @@ export function normalizeConfig(raw: any): BrambleConfig {
       };
     }),
     mailboxEnabled: raw.mailboxEnabled ?? false,
-    location: raw.location ?? {
-      enabled: false,
-      contacts: [],
-      defaultIntervalSec: 60,
-      defaultDistanceTriggerM: 100,
-      stationaryBackoff: 3,
+    location: {
+      enabled: rawLocation.enabled ?? false,
+      tier: rawLocation.tier ?? rawLocation.default_tier ?? 'coarse',
+      default_tier: rawLocation.default_tier ?? rawLocation.tier ?? 'coarse',
+      interval_s: rawLocation.interval_s ?? 300,
+      source: rawLocation.source === 'auto' ? 'hybrid' : (rawLocation.source ?? 'hybrid'),
+      lat: rawLocation.lat,
+      lon: rawLocation.lon,
+      contact_rules: contactRules,
+      channel_targets: rawLocation.channel_targets ?? [],
+      contacts: legacyContacts,
+      defaultIntervalSec: rawLocation.defaultIntervalSec,
+      defaultDistanceTriggerM: rawLocation.defaultDistanceTriggerM,
+      stationaryBackoff: rawLocation.stationaryBackoff,
     },
   } as BrambleConfig;
 }
@@ -814,6 +830,7 @@ export async function setLocationConfig(config: Partial<LocationConfig>): Promis
   const result = await client.rpc('bramble.setLocationConfig', config as unknown as Record<string, unknown>);
   assertOk(result, 'Failed to save location config');
   await loadConfig();
+  await loadPeerLocations().catch(() => {});
 }
 
 export async function setLocationContact(

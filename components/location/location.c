@@ -142,6 +142,47 @@ int location_deserialize_coarse(const uint8_t *buf, size_t len, bramble_position
     return LOCATION_COARSE_SIZE;
 }
 
+int location_serialize_presence(const bramble_position_t *pos, uint8_t *buf, size_t buf_len) {
+    if (buf_len < LOCATION_PRESENCE_SIZE) return -1;
+    buf[0] = (pos && pos->valid) ? 1 : 0;
+    return LOCATION_PRESENCE_SIZE;
+}
+
+int location_serialize_for_tier(const bramble_position_t *pos,
+                                uint8_t tier,
+                                uint8_t *buf,
+                                size_t buf_len) {
+    switch (tier) {
+        case LOCATION_TIER_FULL:
+            return location_serialize_full(pos, buf, buf_len);
+        case LOCATION_TIER_PRESENCE:
+            return location_serialize_presence(pos, buf, buf_len);
+        case LOCATION_TIER_COARSE:
+        default:
+            return location_serialize_coarse(pos, buf, buf_len);
+    }
+}
+
+int location_deserialize_for_tier(const uint8_t *buf,
+                                  size_t len,
+                                  uint8_t tier,
+                                  bramble_position_t *pos) {
+    if (!buf || !pos) return -1;
+
+    switch (tier) {
+        case LOCATION_TIER_FULL:
+            return location_deserialize_full(buf, len, pos);
+        case LOCATION_TIER_PRESENCE:
+            if (len < LOCATION_PRESENCE_SIZE) return -1;
+            memset(pos, 0, sizeof(*pos));
+            pos->valid = (buf[0] != 0);
+            return LOCATION_PRESENCE_SIZE;
+        case LOCATION_TIER_COARSE:
+        default:
+            return location_deserialize_coarse(buf, len, pos);
+    }
+}
+
 int location_cache_update(location_manager_t *mgr, uint32_t peer_addr,
                           const bramble_position_t *pos, uint32_t now_ms) {
     /* Update existing */
@@ -179,6 +220,63 @@ void location_cache_purge(location_manager_t *mgr, uint32_t now_ms) {
             i++;
         }
     }
+}
+
+uint16_t location_policy_clamp_interval_s(uint16_t interval_s) {
+    if (interval_s < LOCATION_MIN_INTERVAL_S) {
+        return LOCATION_MIN_INTERVAL_S;
+    }
+    return interval_s;
+}
+
+uint8_t location_tier_from_string(const char *tier) {
+    if (!tier) return LOCATION_TIER_COARSE;
+    if (strcmp(tier, "full") == 0 || strcmp(tier, "exact") == 0) return LOCATION_TIER_FULL;
+    if (strcmp(tier, "presence") == 0) return LOCATION_TIER_PRESENCE;
+    return LOCATION_TIER_COARSE;
+}
+
+const char *location_tier_to_string(uint8_t tier) {
+    switch (tier) {
+        case LOCATION_TIER_FULL:
+            return "full";
+        case LOCATION_TIER_PRESENCE:
+            return "presence";
+        case LOCATION_TIER_COARSE:
+        default:
+            return "coarse";
+    }
+}
+
+void location_policy_set_defaults(location_policy_t *policy) {
+    if (!policy) return;
+    policy->enabled = false;
+    policy->default_tier = LOCATION_TIER_COARSE;
+    policy->interval_s = LOCATION_DEFAULT_INTERVAL_S;
+}
+
+void location_policy_normalize(location_policy_t *policy) {
+    if (!policy) return;
+    if (policy->default_tier > LOCATION_TIER_PRESENCE) {
+        policy->default_tier = LOCATION_TIER_COARSE;
+    }
+    policy->interval_s = location_policy_clamp_interval_s(policy->interval_s);
+}
+
+bool location_policy_should_send(const location_policy_t *policy,
+                                 bool has_source,
+                                 bool has_targets,
+                                 uint32_t now_ms,
+                                 uint32_t last_sent_ms) {
+    if (!policy || !policy->enabled) return false;
+    if (!has_source || !has_targets) return false;
+
+    uint32_t interval_ms = (uint32_t)location_policy_clamp_interval_s(policy->interval_s) * 1000U;
+    if (last_sent_ms != 0 && (now_ms - last_sent_ms) < interval_ms) {
+        return false;
+    }
+
+    return true;
 }
 
 bool location_should_send(const location_manager_t *mgr, uint32_t peer_addr, uint32_t now_ms) {

@@ -64,3 +64,38 @@ Expected:
 - Consistency metrics improve vs single-shot baseline.
 - If Heltec V4 participates: `"hardware":"heltec_v4"` observed in status evidence.
 - GNSS acceptance marked pass only when hardware-validated; otherwise explicitly marked pending.
+
+---
+
+## Location sharing hardware acceptance addendum (Task 9)
+
+Use this addendum for the privacy-first location sharing rollout verification.
+
+### Firmware + host verification (required before hardware)
+- [ ] `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build`
+- [ ] `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build`
+- [ ] `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tdeck_plus" build`
+- [ ] `bash test/run_all_tests.sh`
+- [ ] `cd webapp && npm test`
+
+### Hardware acceptance checks
+- [ ] T-Deck: GPS fix obtained and periodic `PKT_TYPE_LOCATION` sends observed only when sharing enabled.
+- [ ] Heltec/manual-source path: manual location source can be shared via dedicated location packet path.
+- [ ] Reboot persistence: sharing enabled state, tier, interval, and source persist across reboot.
+
+### Privacy acceptance checks
+- [ ] Fresh device default is sharing **OFF**.
+- [ ] First enable defaults to **coarse** tier unless explicitly changed.
+- [ ] Sharing disabled produces **no outbound location packets**.
+
+### Evidence requirements
+- Attach command outputs for all five firmware/host verification commands.
+- Attach packet/log evidence for each hardware check actually run.
+- If any hardware checks are not run, mark them explicitly as **Pending** (no inferred pass/fail).
+
+### CLI-only parity checks (required for protocol alignment)
+- [ ] `bramble location set-config` succeeds using canonical fields (`enabled`, `default_tier`, `interval_s`, `source`, `contact_rules`, `channel_targets`).
+- [ ] `bramble location get-config --json` returns canonical location block.
+- [ ] Receiver `bramble location status --json` shows sender with valid `addr` string and advancing `lastUpdatedMs` while enabled.
+- [ ] After `--enabled=false`, receiver `lastUpdatedMs` stops advancing across validation window.
+- [ ] `bramble monitor --topic wifi,gps,location --json` emits protocol-native topic events.

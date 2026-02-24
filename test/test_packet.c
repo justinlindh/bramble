@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "esp_stubs.h"
 #include "packet.h"
+#include "../components/location/include/location.h"
 #include "packet.c"
 
 void setUp(void) {}
@@ -308,6 +309,32 @@ void test_time_sync_wire_format(void) {
     TEST_ASSERT_EQUAL_HEX8(0x34, buf[21]);
 }
 
+void test_location_packet_header_roundtrip(void) {
+    bramble_header_t h = make_header(PKT_TYPE_LOCATION);
+    h.flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT);
+
+    uint8_t buf[HEADER_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&h, buf, sizeof(buf)));
+
+    bramble_header_t out;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out.type);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, (out.flags & FLAG_TIER_MASK) >> FLAG_TIER_SHIFT);
+}
+
+void test_location_packet_header_preserves_requested_tier(void) {
+    bramble_header_t h = make_header(PKT_TYPE_LOCATION);
+    h.flags = (uint8_t)(LOCATION_TIER_PRESENCE << FLAG_TIER_SHIFT);
+
+    uint8_t buf[HEADER_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&h, buf, sizeof(buf)));
+
+    bramble_header_t out;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out.type);
+    TEST_ASSERT_EQUAL(LOCATION_TIER_PRESENCE, (out.flags & FLAG_TIER_MASK) >> FLAG_TIER_SHIFT);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_header_roundtrip);
@@ -327,5 +354,7 @@ int main(void) {
     RUN_TEST(test_congestion_wire_format);
     RUN_TEST(test_time_sync_roundtrip);
     RUN_TEST(test_time_sync_wire_format);
+    RUN_TEST(test_location_packet_header_roundtrip);
+    RUN_TEST(test_location_packet_header_preserves_requested_tier);
     return UNITY_END();
 }

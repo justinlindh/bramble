@@ -149,6 +149,35 @@ void test_handler_error_code(void) {
     cJSON_Delete(resp);
 }
 
+static int mock_location_policy_shape(const cJSON *params, cJSON *result) {
+    cJSON *contact_rules = cJSON_GetObjectItem(params, "contact_rules");
+    cJSON *channel_targets = cJSON_GetObjectItem(params, "channel_targets");
+    if (!cJSON_IsArray(contact_rules) || !cJSON_IsArray(channel_targets)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    cJSON_AddNumberToObject(result, "contact_rules_count", cJSON_GetArraySize(contact_rules));
+    cJSON_AddNumberToObject(result, "channel_targets_count", cJSON_GetArraySize(channel_targets));
+    return 0;
+}
+
+void test_dispatch_preserves_nested_location_policy_arrays(void) {
+    rpc_register("bramble.setLocationConfig", mock_location_policy_shape);
+
+    char response[1024];
+    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"bramble.setLocationConfig\",\"params\":{"
+                          "\"contact_rules\":[{\"address\":\"01020304\",\"tier\":\"coarse\"}],"
+                          "\"channel_targets\":[{\"channel\":0,\"tier\":\"coarse\"}]}}";
+    int len = rpc_dispatch(request, response, sizeof(response));
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    cJSON *resp = parse_response(response);
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    TEST_ASSERT_NOT_NULL(result);
+    TEST_ASSERT_EQUAL(1, cJSON_GetObjectItem(result, "contact_rules_count")->valueint);
+    TEST_ASSERT_EQUAL(1, cJSON_GetObjectItem(result, "channel_targets_count")->valueint);
+    cJSON_Delete(resp);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dispatch_valid_request);
@@ -159,5 +188,6 @@ int main(void) {
     RUN_TEST(test_dispatch_no_params);
     RUN_TEST(test_register_max_methods);
     RUN_TEST(test_handler_error_code);
+    RUN_TEST(test_dispatch_preserves_nested_location_policy_arrays);
     return UNITY_END();
 }
