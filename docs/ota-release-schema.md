@@ -36,6 +36,28 @@
 - `size` (positive integer)
 - `notes` optional
 
+## Filename policy (canonical + semver-tagged)
+For each uploaded artifact, publisher writes both:
+
+1. **Canonical filename** (stable path for flasher/runtime compatibility)
+   - `bootloader.bin`
+   - `partition-table.bin`
+   - `bramble.bin`
+
+2. **Semver-tagged filename** (immutable release traceability)
+   - `bootloader-<version>.bin`
+   - `partition-table-<version>.bin`
+   - `bramble-<version>.bin`
+
+Under release directory:
+- `/ota/<channel>/<version>/<board>/`
+
+Example:
+- `/ota/stable/v0.4.0/heltec-v3/bramble.bin` (canonical)
+- `/ota/stable/v0.4.0/heltec-v3/bramble-v0.4.0.bin` (tagged copy)
+
+`index.json` should continue to reference canonical files for consumer stability; tagged copies are retained for provenance/debugging and may be required by tooling checks.
+
 ## Ordering
 Consumers must display newest first, sorted by:
 1. `published_at` descending
