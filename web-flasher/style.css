@@ -34,10 +34,13 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     margin-bottom: 0.35rem;
 }
 .brand-logo {
-    width: 40px;
-    height: 40px;
+    width: 34px !important;
+    height: 34px !important;
+    max-width: 34px !important;
+    max-height: 34px !important;
     object-fit: contain;
-    flex: 0 0 40px;
+    flex: 0 0 34px;
+    display: block;
 }
 .subtitle { color: var(--text-dim); margin-bottom: 2rem; }
 
