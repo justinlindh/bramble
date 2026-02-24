@@ -1,0 +1,46 @@
+name: Firmware Publish OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Firmware-build run id to publish (optional)"
+        required: false
+  workflow_run:
+    workflows: ["Firmware Build"]
+    types: [completed]
+
+jobs:
+  publish-ota:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Docker CLI
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y ca-certificates curl gnupg
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          chmod a+r /etc/apt/keyrings/docker.gpg
+          . /etc/os-release
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
+          apt-get update
+          apt-get install -y docker-ce-cli
+          docker version
+
+      - name: Publish latest successful firmware run to OTA
+        env:
+          RUN_ID: ${{ github.event.inputs.run_id || github.event.workflow_run.id }}
+          OTA_ROOT: /ota
+          GITEA_DATA_ROOT: /home/justin/src/dockers/gitea/data/gitea/actions_artifacts
+        run: |
+          chmod +x scripts/publish-latest-firmware-artifact-run.sh
+          scripts/publish-latest-firmware-artifact-run.sh "$RUN_ID"
+
+      - name: Show published index
+        run: |
+          cat /home/justin/src/dockers/ota/index.json | head -n 120
