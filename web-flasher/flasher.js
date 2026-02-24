@@ -411,23 +411,24 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 (function () {
     const flasher = new BrambleFlasher();
-    const connectBtn   = document.getElementById('connect-btn');
-    const flashBtn     = document.getElementById('flash-btn');
-    const boardSelect  = document.getElementById('board-select');
+    const connectBtn = document.getElementById('connect-btn');
+    const flashBtn = document.getElementById('flash-btn');
+    const boardSelect = document.getElementById('board-select');
+    const channelSelect = document.getElementById('channel-select');
     const releaseSelect = document.getElementById('release-select');
-    const refreshReleasesBtn = document.getElementById('refresh-releases-btn');
     const progressSection = document.querySelector('.progress-section');
     const progressFill = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
-    const logOutput    = document.getElementById('log-output');
     const releaseDetails = document.getElementById('release-details');
+    const statusText = document.getElementById('status-text');
 
     const OTA_INDEX_URL = '/ota/index.json';
+    const BOARD_STORAGE_KEY = 'bramble.webflasher.selectedBoard';
     let releases = [];
+    let filteredReleases = [];
 
-    function log(msg) {
-        logOutput.textContent += msg + '\n';
-        logOutput.scrollTop = logOutput.scrollHeight;
+    function setStatus(msg) {
+        if (statusText) statusText.textContent = msg;
     }
 
     function setProgress(pct, text) {
@@ -436,27 +437,36 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         if (text) progressText.textContent = text;
     }
 
+    function getSelectedChannel() {
+        return channelSelect?.value || 'stable';
+    }
+
     function currentRelease() {
         const idx = Number(releaseSelect?.value ?? -1);
-        if (Number.isInteger(idx) && idx >= 0 && idx < releases.length) return releases[idx];
+        if (Number.isInteger(idx) && idx >= 0 && idx < filteredReleases.length) return filteredReleases[idx];
         return null;
+    }
+
+    function applyChannelFilter() {
+        const channel = getSelectedChannel();
+        filteredReleases = releases.filter(r => (r.channel || 'stable') === channel);
     }
 
     function renderReleaseOptions() {
         if (!releaseSelect) return;
         releaseSelect.innerHTML = '';
-        if (!releases.length) {
+        if (!filteredReleases.length) {
             const o = document.createElement('option');
             o.value = '-1';
             o.textContent = 'No releases available';
             releaseSelect.appendChild(o);
             return;
         }
-        releases.forEach((r, i) => {
+        filteredReleases.forEach((r, i) => {
             const o = document.createElement('option');
             const ts = new Date(r.published_at).toLocaleString();
             o.value = String(i);
-            o.textContent = `${r.version} (${r.channel || 'unknown'}) — ${ts}`;
+            o.textContent = `${r.version} — ${ts}`;
             releaseSelect.appendChild(o);
         });
         releaseSelect.value = '0';
@@ -467,7 +477,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
         const selected = currentRelease();
         if (!selected) {
-            releaseDetails.innerHTML = '<h4>Release details</h4><div class="warn">No release selected.</div>';
+            releaseDetails.textContent = 'No matching complete release for this channel.';
             flashBtn.disabled = !flasher.connected;
             return;
         }
@@ -475,48 +485,50 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         try {
             const board = boardSelect.value;
             const boardCfg = BrambleFlasher.BOARDS[board];
-            const artifactsByFile = window.BrambleReleaseIndex
-                .resolveArtifactsForBoardRelease(board, selected, boardCfg);
-
-            const items = boardCfg.partitions.map((p) => {
-                const a = artifactsByFile[p.file];
-                const shortHash = a.sha256 ? a.sha256.slice(0, 12) : 'n/a';
-                return `<li><strong>${p.name}</strong>: ${p.file} (${a.size || 'n/a'} bytes, sha ${shortHash}…)</li>`;
-            }).join('');
-
-            releaseDetails.innerHTML = `
-                <h4>Release details</h4>
-                <div>Version <strong>${selected.version}</strong> • Channel <strong>${selected.channel || 'unknown'}</strong></div>
-                <ul>${items}</ul>
-            `;
-
+            window.BrambleReleaseIndex.resolveArtifactsForBoardRelease(board, selected, boardCfg);
+            releaseDetails.textContent = `Selected ${selected.version} (${selected.channel || 'stable'})`;
             flashBtn.disabled = !flasher.connected;
         } catch (e) {
-            releaseDetails.innerHTML = `<h4>Release details</h4><div class="warn">${e.message}</div>`;
+            releaseDetails.textContent = e.message;
             flashBtn.disabled = true;
         }
     }
 
     async function loadReleases() {
         try {
-            log('Loading releases...');
+            setStatus('Loading releases…');
             const resp = await fetch(OTA_INDEX_URL, { cache: 'no-store' });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
             releases = window.BrambleReleaseIndex.normalizeAndSortReleases(data);
+            applyChannelFilter();
             renderReleaseOptions();
             renderReleaseDetails();
-            log(`✓ Loaded ${releases.length} release(s)`);
-        } catch (e) {
+            setStatus(`Ready. ${filteredReleases.length} release(s) available.`);
+        } catch {
             releases = [];
+            filteredReleases = [];
             renderReleaseOptions();
             renderReleaseDetails();
-            log(`⚠ Release index unavailable: ${e.message}`);
+            setStatus('Release index unavailable.');
         }
     }
 
+    function loadBoardPreference() {
+        if (!boardSelect) return;
+        const saved = localStorage.getItem(BOARD_STORAGE_KEY);
+        if (saved && BrambleFlasher.BOARDS[saved]) {
+            boardSelect.value = saved;
+        }
+    }
+
+    function saveBoardPreference() {
+        if (!boardSelect) return;
+        localStorage.setItem(BOARD_STORAGE_KEY, boardSelect.value);
+    }
+
     if (!('serial' in navigator)) {
-        log('⚠ Web Serial not supported. Use Chrome or Edge.');
+        setStatus('Web Serial not supported. Use Chrome or Edge.');
         connectBtn.disabled = true;
         return;
     }
@@ -529,20 +541,20 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
             connectBtn.classList.add('primary');
             flashBtn.disabled = true;
             renderReleaseDetails();
-            log('Disconnected.');
+            setStatus('Disconnected.');
             return;
         }
         try {
-            log('Requesting serial port...');
+            setStatus('Requesting serial port…');
             await flasher.connect();
-            log('✓ Connected to serial port.');
             connectBtn.textContent = 'Disconnect';
             connectBtn.classList.remove('primary');
             connectBtn.classList.add('danger');
             flashBtn.disabled = false;
             renderReleaseDetails();
+            setStatus('Connected. Ready to flash.');
         } catch (e) {
-            log('✗ ' + e.message);
+            setStatus(e.message || 'Unable to connect.');
         }
     });
 
@@ -551,44 +563,48 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         const selectedRelease = currentRelease();
         flashBtn.disabled = true;
         connectBtn.disabled = true;
-        setProgress(0, 'Starting...');
+        setProgress(0, 'Starting…');
+        setStatus('Flashing in progress…');
 
         try {
-            let releaseCtx = null;
-            if (selectedRelease) {
-                const boardCfg = BrambleFlasher.BOARDS[board];
-                const artifactsByFile = window.BrambleReleaseIndex
-                    .resolveArtifactsForBoardRelease(board, selectedRelease, boardCfg);
-                releaseCtx = { release: selectedRelease, artifactsByFile };
-                log(`Using release ${selectedRelease.version} (${selectedRelease.channel || 'unknown'})`);
-            } else {
-                log('No release selected; falling back to local firmware/<board>/ files.');
+            if (!selectedRelease) {
+                throw new Error('No complete release selected. Open Advanced to choose one.');
             }
+            const boardCfg = BrambleFlasher.BOARDS[board];
+            const artifactsByFile = window.BrambleReleaseIndex
+                .resolveArtifactsForBoardRelease(board, selectedRelease, boardCfg);
+            const releaseCtx = { release: selectedRelease, artifactsByFile };
 
             await flasher.flashFirmware(
                 board,
                 releaseCtx,
-                msg => log(msg),
-                pct => setProgress(pct, `Flashing... ${pct}%`)
+                () => {},
+                pct => setProgress(pct, `Flashing… ${pct}%`)
             );
             setProgress(100, 'Done!');
+            setStatus('Flash complete.');
         } catch (e) {
-            log('✗ Error: ' + e.message);
             setProgress(0, 'Failed');
+            setStatus(`Flash failed: ${e.message || 'unknown error'}`);
         } finally {
             flashBtn.disabled = !flasher.connected;
             connectBtn.disabled = false;
         }
     });
 
-    if (refreshReleasesBtn) {
-        refreshReleasesBtn.addEventListener('click', () => {
-            loadReleases();
+    if (boardSelect) {
+        loadBoardPreference();
+        boardSelect.addEventListener('change', () => {
+            saveBoardPreference();
+            renderReleaseDetails();
         });
     }
-
-    if (boardSelect) {
-        boardSelect.addEventListener('change', () => renderReleaseDetails());
+    if (channelSelect) {
+        channelSelect.addEventListener('change', () => {
+            applyChannelFilter();
+            renderReleaseOptions();
+            renderReleaseDetails();
+        });
     }
     if (releaseSelect) {
         releaseSelect.addEventListener('change', () => renderReleaseDetails());
@@ -596,5 +612,5 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     loadReleases();
     renderReleaseDetails();
-    log('Bramble Web Flasher ready.');
+    setStatus('Ready.');
 })();
