@@ -696,10 +696,9 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
         policy.interval_s = location_policy_clamp_interval_s((uint16_t)interval_val);
     }
 
-    cJSON *tier = cJSON_GetObjectItem(params, "default_tier");
-    if (!tier) tier = cJSON_GetObjectItem(params, "tier"); /* compatibility alias */
-    if (tier && cJSON_IsString(tier)) {
-        policy.default_tier = location_tier_from_string(tier->valuestring);
+    cJSON *default_tier = cJSON_GetObjectItem(params, "default_tier");
+    if (default_tier && cJSON_IsString(default_tier)) {
+        policy.default_tier = location_tier_from_string(default_tier->valuestring);
     }
 
     cJSON *source = cJSON_GetObjectItem(params, "source");
@@ -965,7 +964,6 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
 static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     (void)params;
     cJSON *peer_locations = cJSON_AddArrayToObject(result, "peerLocations");
-    cJSON *peers = cJSON_AddArrayToObject(result, "peers"); /* backward-compatible alias */
 
     /* Include own location if set */
     nvs_handle_t nvs;
@@ -995,7 +993,6 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                 cJSON_AddBoolToObject(self, "online", true);
                 cJSON_AddNumberToObject(self, "lastUpdatedMs", (double)(esp_timer_get_time() / 1000ULL));
                 cJSON_AddItemToArray(peer_locations, self);
-                cJSON_AddItemToArray(peers, cJSON_Duplicate(self, 1));
             }
         }
         nvs_close(nvs);
@@ -1035,7 +1032,6 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                         cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
 
                         cJSON_AddItemToArray(peer_locations, peer);
-                        cJSON_AddItemToArray(peers, cJSON_Duplicate(peer, 1));
                     }
                 }
 
