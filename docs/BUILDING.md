@@ -66,12 +66,14 @@ idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build
 rm -f sdkconfig
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
 
-# LILYGO T-Deck Plus
+# LILYGO T-Deck Plus (WiFi-first profile; BLE disabled by default)
 rm -f sdkconfig
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tdeck_plus" build
 ```
 
 Build output: `build/bramble.bin` (~220KB)
+
+> Note: T-Deck Plus currently ships with BLE disabled in the default profile due to a reproducible AP WPA handshake regression when BLE is enabled. Use an explicit BLE-enabled profile only for targeted BLE testing.
 
 ## Flash
 

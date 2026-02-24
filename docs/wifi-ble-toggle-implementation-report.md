@@ -3,6 +3,8 @@
 **Date:** 2026-02-20  
 **Status:** ✅ COMPLETE
 
+> **Update (2026-02-23):** BLE is currently disabled in the default T-Deck shipping profile due to a confirmed AP WPA handshake regression when BLE is enabled concurrently. This document remains valid as implementation history, but default runtime policy is now WiFi-first until coexistence regression is fully resolved.
+
 ---
 
 ## Executive Summary
