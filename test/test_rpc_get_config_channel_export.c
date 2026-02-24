@@ -15,20 +15,29 @@ extern char g_nvs_node_name[64];
 extern char g_nvs_channel_names[8][20];
 extern uint8_t g_nvs_channel_psk_flags[8];
 extern bool g_nvs_channel_psk_present[8];
+extern int g_nvs_loc_kv_count;
+extern struct {
+    char key[16];
+    char value[64];
+    bool used;
+} g_nvs_loc_kv[16];
 
 static bramble_identity_t s_id = {
     .address = 0xAABBCCDD,
     .pubkey_hash = 0x11223344,
 };
 
-static cJSON *dispatch_get_config(void) {
+static cJSON *dispatch_request(const char *req) {
     char response[2048];
-    const char *req = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.getConfig\",\"params\":{}}";
     int len = rpc_dispatch(req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
     cJSON *root = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(root);
     return root;
+}
+
+static cJSON *dispatch_get_config(void) {
+    return dispatch_request("{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.getConfig\",\"params\":{}}");
 }
 
 void setUp(void) {
@@ -47,6 +56,9 @@ void setUp(void) {
     memset(g_nvs_channel_names, 0, sizeof(g_nvs_channel_names));
     memset(g_nvs_channel_psk_flags, 0, sizeof(g_nvs_channel_psk_flags));
     memset(g_nvs_channel_psk_present, 0, sizeof(g_nvs_channel_psk_present));
+
+    g_nvs_loc_kv_count = 0;
+    memset(g_nvs_loc_kv, 0, sizeof(g_nvs_loc_kv));
 }
 
 void tearDown(void) {}
@@ -99,9 +111,47 @@ void test_get_config_keeps_default_broadcast_semantics(void) {
     cJSON_Delete(root);
 }
 
+void test_location_contact_roundtrip_uses_canonical_rule_key(void) {
+    g_nvs_allow_open = true;
+
+    cJSON *set_root = dispatch_request(
+        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"bramble.setLocationContact\","
+        "\"params\":{\"address\":\"AABBCCDD\",\"tier\":\"full\",\"enabled\":true,\"interval_s\":120}}"
+    );
+    cJSON *set_result = cJSON_GetObjectItem(set_root, "result");
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(set_result, "ok")));
+    cJSON_Delete(set_root);
+
+    bool saw_lcr = false;
+    bool saw_lc = false;
+    for (int i = 0; i < 16; i++) {
+        if (!g_nvs_loc_kv[i].used) continue;
+        if (strcmp(g_nvs_loc_kv[i].key, "lcr_AABBCCDD") == 0) saw_lcr = true;
+        if (strcmp(g_nvs_loc_kv[i].key, "lc_AABBCCDD") == 0) saw_lc = true;
+    }
+    TEST_ASSERT_TRUE(saw_lcr);
+    TEST_ASSERT_FALSE(saw_lc);
+
+    cJSON *cfg_root = dispatch_get_config();
+    cJSON *cfg_result = cJSON_GetObjectItem(cfg_root, "result");
+    cJSON *location = cJSON_GetObjectItem(cfg_result, "location");
+    cJSON *contact_rules = cJSON_GetObjectItem(location, "contact_rules");
+    TEST_ASSERT_TRUE(cJSON_IsArray(contact_rules));
+    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(contact_rules));
+
+    cJSON *rule = cJSON_GetArrayItem(contact_rules, 0);
+    TEST_ASSERT_EQUAL_STRING("AABBCCDD", cJSON_GetObjectItem(rule, "address")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(rule, "enabled")));
+    TEST_ASSERT_EQUAL_STRING("full", cJSON_GetObjectItem(rule, "tier")->valuestring);
+    TEST_ASSERT_EQUAL(120, cJSON_GetObjectItem(rule, "interval_s")->valueint);
+
+    cJSON_Delete(cfg_root);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_config_uses_persisted_name_and_psk_when_runtime_cache_missing);
     RUN_TEST(test_get_config_keeps_default_broadcast_semantics);
+    RUN_TEST(test_location_contact_roundtrip_uses_canonical_rule_key);
     return UNITY_END();
 }
