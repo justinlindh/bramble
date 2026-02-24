@@ -299,6 +299,34 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
     return 0;
 }
 
+static void mesh_emit_location_event(const char *event,
+                                     uint32_t peer_addr,
+                                     uint8_t tier,
+                                     uint32_t timestamp_ms,
+                                     int16_t rssi,
+                                     int8_t snr,
+                                     uint32_t count) {
+    cJSON *params = cJSON_CreateObject();
+    if (!params) return;
+    cJSON_AddStringToObject(params, "event", event);
+    if (peer_addr != 0) {
+        char addr_buf[9];
+        snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, peer_addr);
+        cJSON_AddStringToObject(params, "peer", addr_buf);
+    }
+    cJSON_AddNumberToObject(params, "tier", tier);
+    cJSON_AddNumberToObject(params, "timestamp_ms", timestamp_ms);
+    if (rssi != 0 || snr != 0) {
+        cJSON_AddNumberToObject(params, "rssi", rssi);
+        cJSON_AddNumberToObject(params, "snr", snr);
+    }
+    if (count > 0) {
+        cJSON_AddNumberToObject(params, "count", count);
+    }
+    rpc_notify("bramble.onLocationEvent", params);
+    cJSON_Delete(params);
+}
+
 static void mesh_send_location_updates(uint32_t t,
                                        const location_policy_t *policy,
                                        const bramble_position_t *source_pos) {
@@ -311,6 +339,7 @@ static void mesh_send_location_updates(uint32_t t,
     pos.timestamp = t / 1000;
     pos.valid = true;
 
+    uint32_t sent_count = 0;
     nvs_iterator_t it = NULL;
     if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
         while (it != NULL) {
@@ -335,7 +364,10 @@ static void mesh_send_location_updates(uint32_t t,
                 }
 
                 if (enabled) {
-                    (void)mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
+                    uint32_t pkt_id = mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
+                    if (pkt_id != 0) {
+                        sent_count++;
+                    }
                 }
             }
 
@@ -347,6 +379,10 @@ static void mesh_send_location_updates(uint32_t t,
     }
 
     nvs_close(nvs);
+
+    if (sent_count > 0) {
+        mesh_emit_location_event("sent", 0, policy->default_tier, t, 0, 0, sent_count);
+    }
 }
 
 static void mesh_persist_peer_location(uint32_t peer_addr,
@@ -411,6 +447,7 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
 
     ESP_LOGI(TAG, "RX location from %08" PRIX32 " tier=%u RSSI:%d SNR:%d", src_addr, tier, rssi, snr);
     rpc_notify("bramble.onPeerLocation", NULL);
+    mesh_emit_location_event("received", src_addr, tier, t, rssi, snr, 0);
 }
 
 static void mesh_location_policy_tick(uint32_t t) {
