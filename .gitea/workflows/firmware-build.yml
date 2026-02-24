@@ -23,6 +23,7 @@ jobs:
 
       - name: Publish OTA release to host /ota via Docker
         run: |
+          set -euxo pipefail
           apt-get update
           apt-get install -y ca-certificates curl gnupg
           install -m 0755 -d /etc/apt/keyrings
@@ -33,9 +34,12 @@ jobs:
           apt-get update
           apt-get install -y docker-ce-cli
           docker version
+          ls -l /var/run/docker.sock || true
 
           VERSION="$(git describe --tags --always --dirty)"
           if echo "$VERSION" | grep -Eq '^v[0-9]'; then CHANNEL=stable; else CHANNEL=dev; fi
+
+          docker run --rm -v /home/user/src/dockers/ota:/ota alpine:3.20 sh -lc 'echo mount-test > /ota/.ci-mount-test && ls -la /ota'
 
           tar -cf - \
             scripts/publish-firmware-release.sh \
