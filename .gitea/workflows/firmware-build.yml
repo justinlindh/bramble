@@ -69,3 +69,4 @@ jobs:
           if-no-files-found: error
 
 # trigger: ota publish wiring 2026-02-24T17:05:00Z
+# debug trigger 2026-02-24T17:29:15Z
