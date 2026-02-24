@@ -6,6 +6,10 @@ OTA_PUBLISH_KEY=${OTA_PUBLISH_KEY:-}
 CHANNEL=${CHANNEL:-dev}
 BOARD=${BOARD:-heltec-v3}
 VERSION=${VERSION:-$(git describe --tags --always --dirty)}
+if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+  short_sha=$(git rev-parse --short HEAD)
+  VERSION="v0.0.0-${short_sha}"
+fi
 
 BOOTLOADER=${BOOTLOADER:-build-artifacts/firmware-ci/bootloader.bin}
 PARTITION=${PARTITION:-build-artifacts/firmware-ci/partition-table.bin}
