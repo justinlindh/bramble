@@ -1,9 +1,12 @@
 {
-  "channel": "stable",
-  "board": "heltec-v3",
+  "fixture_type": "normalized_multipart_request",
+  "form": {
+    "channel": "stable",
+    "board": "heltec-v3",
+    "run_id": "gitea-123456"
+  },
   "files": {
     "bootloader.bin": "bootloader.bin",
     "partition-table.bin": "partition-table.bin"
-  },
-  "run_id": "gitea-123456"
+  }
 }

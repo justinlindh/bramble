@@ -34,6 +34,13 @@ Authorization: Bearer OTA_PUBLISH_KEY
 - `run_id` — CI run identifier
 - `published_at` — ISO-8601 UTC timestamp override (otherwise server-generated)
 
+### Test fixture note (important)
+The JSON fixtures under `test/fixtures/ota-publish-request-*.json` represent the **normalized server-side request shape after multipart parsing**, not the raw HTTP wire format.
+
+Normalized fixture shape:
+- `form.version`, `form.channel`, `form.board`, optional metadata
+- `files.<filename>` entries mapping required upload fields
+
 ## Successful Response (`200`)
 
 ```json
@@ -73,6 +80,22 @@ Authorization: Bearer OTA_PUBLISH_KEY
   "indexPath": "/ota/index.json"
 }
 ```
+
+## Mapping to `index.json` schema
+
+The publish response includes per-file detail (`name`, `canonical_file`, `tagged_file`) for immediate CI visibility.
+
+Persisted `index.json` entries use the release schema in `docs/ota-release-schema.md`:
+- `board` comes from request form field
+- `file` maps to `canonical_file` only
+- `sha256` and `size` are copied from computed publish results
+
+Each board release contributes **three canonical artifact entries** in `index.json`:
+1. `bootloader.bin`
+2. `partition-table.bin`
+3. `bramble.bin`
+
+Semver-tagged copies are published and retained on disk, but are not the primary `file` targets for flasher consumers.
 
 ## Error Responses
 

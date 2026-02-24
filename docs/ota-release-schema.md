@@ -12,7 +12,7 @@
       "artifacts": [
         {
           "board": "heltec-v3",
-          "file": "/ota/stable/v0.4.0/heltec-v3/bramble-heltec.bin",
+          "file": "/ota/stable/v0.4.0/heltec-v3/bramble.bin",
           "sha256": "<64 hex>",
           "size": 1048576,
           "notes": "optional"
@@ -34,7 +34,9 @@
 - `file`
 - `sha256` (64 hex chars)
 - `size` (positive integer)
-- `notes` optional
+
+## Optional per artifact
+- `notes`
 
 ## Filename policy (canonical + semver-tagged)
 For each uploaded artifact, publisher writes both:
