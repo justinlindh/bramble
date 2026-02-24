@@ -20,7 +20,10 @@
 #include "traffic_debug.h"
 #include "fragment.h"
 #include "location.h"
+#include "gps.h"
 #include "cJSON.h"
+
+#include <stdio.h>
 
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
@@ -234,7 +237,6 @@ static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t
 }
 
 static bool location_policy_has_targets(void) {
-#ifdef NVS_TYPE_ANY
     nvs_iterator_t it = NULL;
     if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) != ESP_OK) {
         return false;
@@ -243,7 +245,7 @@ static bool location_policy_has_targets(void) {
     while (it != NULL) {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
-        if (strncmp(info.key, "lc_", 3) == 0) {
+        if (strncmp(info.key, "lc_", 3) == 0 || strncmp(info.key, "lcr_", 4) == 0) {
             nvs_release_iterator(it);
             return true;
         }
@@ -252,7 +254,6 @@ static bool location_policy_has_targets(void) {
         }
     }
     nvs_release_iterator(it);
-#endif
     return false;
 }
 
@@ -300,40 +301,47 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
 
 static void mesh_send_location_updates(uint32_t t,
                                        const location_policy_t *policy,
-                                       int32_t lat_e6,
-                                       int32_t lon_e6) {
+                                       const bramble_position_t *source_pos) {
     nvs_handle_t nvs;
     if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
         return;
     }
 
-    bramble_position_t pos = {
-        .latitude_e7 = lat_e6 * 10,
-        .longitude_e7 = lon_e6 * 10,
-        .altitude_m = 0,
-        .accuracy_m = 0,
-        .speed_kmh = 0,
-        .heading_deg2 = 0,
-        .timestamp = t / 1000,
-        .valid = true,
-    };
+    bramble_position_t pos = *source_pos;
+    pos.timestamp = t / 1000;
+    pos.valid = true;
 
-#ifdef NVS_TYPE_ANY
     nvs_iterator_t it = NULL;
     if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
         while (it != NULL) {
             nvs_entry_info_t info;
             nvs_entry_info(it, &info);
 
-            if (strncmp(info.key, "lc_", 3) == 0) {
+            if (strncmp(info.key, "lc_", 3) == 0 || strncmp(info.key, "lcr_", 4) == 0) {
+                bool is_rule = (strncmp(info.key, "lcr_", 4) == 0);
+                const char *addr = info.key + (is_rule ? 4 : 3);
+
+                bool enabled = true;
                 uint8_t tier = policy->default_tier;
-                char tier_str[16] = {0};
-                size_t tier_len = sizeof(tier_str);
-                if (nvs_get_str(nvs, info.key, tier_str, &tier_len) == ESP_OK) {
-                    tier = location_tier_from_string(tier_str);
+                char raw[48] = {0};
+                size_t raw_len = sizeof(raw);
+                if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    if (is_rule) {
+                        int en = 1;
+                        char tier_str[16] = {0};
+                        int interval_tmp = 0;
+                        if (sscanf(raw, "%d|%15[^|]|%d", &en, tier_str, &interval_tmp) >= 2) {
+                            enabled = (en != 0);
+                            tier = location_tier_from_string(tier_str);
+                        }
+                    } else {
+                        tier = location_tier_from_string(raw);
+                    }
                 }
 
-                (void)mesh_send_location_packet((uint32_t)strtoul(info.key + 3, NULL, 16), &pos, tier);
+                if (enabled) {
+                    (void)mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
+                }
             }
 
             if (nvs_entry_next(&it) != ESP_OK) {
@@ -342,7 +350,6 @@ static void mesh_send_location_updates(uint32_t t,
         }
         nvs_release_iterator(it);
     }
-#endif
 
     nvs_close(nvs);
 }
@@ -428,15 +435,33 @@ static void mesh_location_policy_tick(uint32_t t) {
 
     int32_t lat_e6 = 0;
     int32_t lon_e6 = 0;
-    bool has_source = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
-                      (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
-                      !(lat_e6 == 0 && lon_e6 == 0);
+    bool has_manual_source = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
+                             (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
+                             !(lat_e6 == 0 && lon_e6 == 0);
     nvs_close(nvs);
+
+    bramble_position_t source_pos = {0};
+    bool has_source = false;
+
+    bramble_position_t gps_pos;
+    if (gps_get_position(&gps_pos) && gps_pos.valid) {
+        source_pos = gps_pos;
+        has_source = true;
+    } else if (has_manual_source) {
+        source_pos.latitude_e7 = lat_e6 * 10;
+        source_pos.longitude_e7 = lon_e6 * 10;
+        source_pos.altitude_m = 0;
+        source_pos.accuracy_m = 0;
+        source_pos.speed_kmh = 0;
+        source_pos.heading_deg2 = 0;
+        source_pos.valid = true;
+        has_source = true;
+    }
 
     bool has_targets = location_policy_has_targets();
 
     if (location_policy_should_send(&policy, has_source, has_targets, t, s_location_last_send_ms)) {
-        mesh_send_location_updates(t, &policy, lat_e6, lon_e6);
+        mesh_send_location_updates(t, &policy, &source_pos);
         s_location_last_send_ms = t;
     }
 }

@@ -58,6 +58,15 @@ char g_nvs_channel_names[8][20] = {{0}};
 uint8_t g_nvs_channel_psk_flags[8] = {0};
 bool g_nvs_channel_psk_present[8] = {false};
 
+typedef struct {
+    char key[16];
+    char value[64];
+    bool used;
+} nvs_loc_kv_t;
+
+nvs_loc_kv_t g_nvs_loc_kv[16];
+int g_nvs_loc_kv_count = 0;
+
 int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
     g_mesh_add_channel_calls++;
     if (name) {
@@ -99,6 +108,31 @@ int msg_store_count(void){return 0;} bool msg_store_get(int i, bramble_message_t
 int traffic_debug_get_count(void){return 0;} int traffic_debug_get_dropped(void){return 0;} bool traffic_debug_get_event(int i, traffic_event_t *o){(void)i;(void)o;return false;} int mesh_traffic_debug_set_config(const traffic_debug_config_t *cfg){(void)cfg;return 0;} void mesh_traffic_debug_get_config(traffic_debug_config_t *cfg){memset(cfg,0,sizeof(*cfg));} bool mesh_get_traffic_debug(void){return false;}
 const esp_partition_t *ota_get_running_partition(void){return 0;} int ota_wifi_start(const char *url){(void)url;return -1;}
 
+struct nvs_iter_rec {
+    int index;
+};
+
+static int nvs_loc_find_index(const char *key) {
+    for (int i = 0; i < 16; i++) {
+        if (g_nvs_loc_kv[i].used && strcmp(g_nvs_loc_kv[i].key, key) == 0) return i;
+    }
+    return -1;
+}
+
+static int nvs_loc_alloc_index(void) {
+    for (int i = 0; i < 16; i++) {
+        if (!g_nvs_loc_kv[i].used) return i;
+    }
+    return -1;
+}
+
+static int nvs_loc_next_used_from(int start) {
+    for (int i = start; i < 16; i++) {
+        if (g_nvs_loc_kv[i].used) return i;
+    }
+    return -1;
+}
+
 esp_err_t nvs_open(const char* ns, int mode, nvs_handle_t* out_handle){
     (void)mode;
     if (!g_nvs_allow_open || !out_handle) return ESP_FAIL;
@@ -110,14 +144,22 @@ esp_err_t nvs_open(const char* ns, int mode, nvs_handle_t* out_handle){
         *out_handle = 2;
         return ESP_OK;
     }
+    if (strcmp(ns, "bramble_loc") == 0) {
+        *out_handle = 3;
+        return ESP_OK;
+    }
     return ESP_FAIL;
 }
 void nvs_close(nvs_handle_t h){(void)h;}
 
 esp_err_t nvs_get_str(nvs_handle_t h,const char* k,char* v,size_t* l){
-    if (!v || !l) return ESP_FAIL;
+    if (!l) return ESP_FAIL;
     if (h == 1 && strcmp(k, "node_name") == 0) {
         size_t need = strlen(g_nvs_node_name) + 1;
+        if (!v) {
+            *l = need;
+            return ESP_OK;
+        }
         if (*l < need) return ESP_FAIL;
         memcpy(v, g_nvs_node_name, need);
         *l = need;
@@ -127,8 +169,26 @@ esp_err_t nvs_get_str(nvs_handle_t h,const char* k,char* v,size_t* l){
         int idx = atoi(k + 2);
         if (idx >= 0 && idx < 8 && g_nvs_channel_names[idx][0]) {
             size_t need = strlen(g_nvs_channel_names[idx]) + 1;
+            if (!v) {
+                *l = need;
+                return ESP_OK;
+            }
             if (*l < need) return ESP_FAIL;
             memcpy(v, g_nvs_channel_names[idx], need);
+            *l = need;
+            return ESP_OK;
+        }
+    }
+    if (h == 3) {
+        int idx = nvs_loc_find_index(k);
+        if (idx >= 0) {
+            size_t need = strlen(g_nvs_loc_kv[idx].value) + 1;
+            if (!v) {
+                *l = need;
+                return ESP_OK;
+            }
+            if (*l < need) return ESP_FAIL;
+            memcpy(v, g_nvs_loc_kv[idx].value, need);
             *l = need;
             return ESP_OK;
         }
@@ -136,7 +196,21 @@ esp_err_t nvs_get_str(nvs_handle_t h,const char* k,char* v,size_t* l){
     return ESP_FAIL;
 }
 
-esp_err_t nvs_set_str(nvs_handle_t h,const char* k,const char* v){(void)h;(void)k;(void)v;return ESP_OK;}
+esp_err_t nvs_set_str(nvs_handle_t h,const char* k,const char* v){
+    if (h != 3 || !k || !v) return ESP_OK;
+    int idx = nvs_loc_find_index(k);
+    if (idx < 0) idx = nvs_loc_alloc_index();
+    if (idx < 0) return ESP_FAIL;
+    if (!g_nvs_loc_kv[idx].used) {
+        g_nvs_loc_kv[idx].used = true;
+        g_nvs_loc_kv_count++;
+    }
+    strncpy(g_nvs_loc_kv[idx].key, k, sizeof(g_nvs_loc_kv[idx].key) - 1);
+    g_nvs_loc_kv[idx].key[sizeof(g_nvs_loc_kv[idx].key) - 1] = '\0';
+    strncpy(g_nvs_loc_kv[idx].value, v, sizeof(g_nvs_loc_kv[idx].value) - 1);
+    g_nvs_loc_kv[idx].value[sizeof(g_nvs_loc_kv[idx].value) - 1] = '\0';
+    return ESP_OK;
+}
 esp_err_t nvs_set_u8(nvs_handle_t h,const char* k,uint8_t v){(void)h;(void)k;(void)v;return ESP_OK;}
 esp_err_t nvs_set_u16(nvs_handle_t h,const char* k,uint16_t v){(void)h;(void)k;(void)v;return ESP_OK;}
 esp_err_t nvs_set_u32(nvs_handle_t h,const char* k,uint32_t v){(void)h;(void)k;(void)v;return ESP_OK;}
@@ -161,7 +235,58 @@ esp_err_t nvs_get_u16(nvs_handle_t h,const char* k,uint16_t *o){
     return ESP_FAIL;
 }
 
-esp_err_t nvs_get_i32(nvs_handle_t h,const char* k,int32_t *o){(void)h;(void)k;if(o)*o=0;return ESP_FAIL;} esp_err_t nvs_erase_key(nvs_handle_t h,const char* k){(void)h;(void)k;return ESP_OK;} esp_err_t nvs_commit(nvs_handle_t h){(void)h;return ESP_OK;}
+esp_err_t nvs_get_i32(nvs_handle_t h,const char* k,int32_t *o){(void)h;(void)k;if(o)*o=0;return ESP_FAIL;}
+esp_err_t nvs_get_blob(nvs_handle_t h,const char* k,void *o,size_t *l){(void)h;(void)k;(void)o;(void)l;return ESP_FAIL;}
+esp_err_t nvs_erase_key(nvs_handle_t h,const char* k){
+    if (h == 3 && k) {
+        int idx = nvs_loc_find_index(k);
+        if (idx >= 0) {
+            g_nvs_loc_kv[idx].used = false;
+            g_nvs_loc_kv[idx].key[0] = '\0';
+            g_nvs_loc_kv[idx].value[0] = '\0';
+            if (g_nvs_loc_kv_count > 0) g_nvs_loc_kv_count--;
+        }
+    }
+    return ESP_OK;
+}
+esp_err_t nvs_commit(nvs_handle_t h){(void)h;return ESP_OK;}
+
+esp_err_t nvs_entry_find(const char *part_name, const char *namespace_name, nvs_type_t type, nvs_iterator_t *out_iterator) {
+    (void)part_name;
+    (void)namespace_name;
+    (void)type;
+    if (!out_iterator) return ESP_FAIL;
+    *out_iterator = NULL;
+    int idx = nvs_loc_next_used_from(0);
+    if (idx < 0) return ESP_FAIL;
+    nvs_iterator_t it = (nvs_iterator_t)malloc(sizeof(*it));
+    if (!it) return ESP_FAIL;
+    it->index = idx;
+    *out_iterator = it;
+    return ESP_OK;
+}
+
+esp_err_t nvs_entry_next(nvs_iterator_t *iterator) {
+    if (!iterator || !*iterator) return ESP_FAIL;
+    int idx = nvs_loc_next_used_from((*iterator)->index + 1);
+    if (idx < 0) {
+        free(*iterator);
+        *iterator = NULL;
+        return ESP_FAIL;
+    }
+    (*iterator)->index = idx;
+    return ESP_OK;
+}
+
+void nvs_entry_info(nvs_iterator_t iterator, nvs_entry_info_t *out_info) {
+    if (!iterator || !out_info) return;
+    memset(out_info, 0, sizeof(*out_info));
+    strncpy(out_info->key, g_nvs_loc_kv[iterator->index].key, sizeof(out_info->key) - 1);
+}
+
+void nvs_release_iterator(nvs_iterator_t iterator) {
+    if (iterator) free(iterator);
+}
 
 uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t *pos, uint8_t tier){
     (void)dest_addr; (void)pos; (void)tier;
