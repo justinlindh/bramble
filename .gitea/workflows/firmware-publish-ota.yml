@@ -6,13 +6,9 @@ on:
       run_id:
         description: "Firmware-build run id to publish (optional)"
         required: false
-  workflow_run:
-    workflows: ["Firmware Build"]
-    types: [completed]
 
 jobs:
   publish-ota:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: linux
     steps:
       - name: Checkout
