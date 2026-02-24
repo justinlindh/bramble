@@ -423,7 +423,6 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     const releaseDetails = document.getElementById('release-details');
 
     const OTA_INDEX_URL = '/ota/index.json';
-    const OTA_INDEX_LABEL = 'firmware index';
     let releases = [];
 
     function log(msg) {
@@ -500,7 +499,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     async function loadReleases() {
         try {
-            log(`Loading releases from ${OTA_INDEX_LABEL}...`);
+            log('Loading releases...');
             const resp = await fetch(OTA_INDEX_URL, { cache: 'no-store' });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
