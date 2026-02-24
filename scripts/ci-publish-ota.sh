@@ -3,12 +3,30 @@ set -euo pipefail
 
 normalize_version() {
   local version
-  version=${VERSION:-$(git describe --tags --always --dirty)}
-  if [[ ! "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+
+  if [[ -n "${VERSION:-}" ]]; then
+    version="$VERSION"
+  else
+    # Primary source: firmware runtime version constant
+    version=$(sed -n 's/^#define BRAMBLE_VERSION_STR[[:space:]]*"\([^"]\+\)".*/\1/p' main/rpc_methods.c | head -n1)
+
+    # Secondary source: git tag describe (when tags are available)
+    if [[ -z "$version" ]]; then
+      version=$(git describe --tags --always --dirty 2>/dev/null || true)
+    fi
+  fi
+
+  # Ensure leading v for OTA release identity
+  if [[ -n "$version" && ! "$version" =~ ^v ]]; then
+    version="v${version}"
+  fi
+
+  if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
     local short_sha
     short_sha=$(git rev-parse --short HEAD)
     version="v0.0.0-${short_sha}"
   fi
+
   echo "$version"
 }
 
