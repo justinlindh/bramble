@@ -1,0 +1,27 @@
+name: CI Smoke Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.gitea/workflows/ci-smoke-artifacts.yml'
+      - 'ci/smoke/**'
+
+jobs:
+  smoke:
+    runs-on: linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create smoke artifact
+        run: |
+          mkdir -p out
+          echo "smoke-run $(date -u +%Y-%m-%dT%H:%M:%SZ)" > out/smoke.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-smoke-artifact
+          path: out/smoke.txt
