@@ -27,6 +27,7 @@ static bramble_position_t s_current_pos = {0};
 static bool s_has_fix = false;
 static uint32_t s_rx_bytes_total = 0;
 static uint32_t s_rx_lines_total = 0;
+static uint32_t s_raw_log_lines = 0;
 
 static bool gps_probe_nmea_at_baud(int baud, uint32_t probe_ms) {
     ESP_ERROR_CHECK(uart_set_baudrate(GPS_UART_NUM, baud));
@@ -49,10 +50,10 @@ static bool gps_probe_nmea_at_baud(int baud, uint32_t probe_ms) {
         }
     }
 
-    if (total < 40) return false;
-    float ratio = (float)good / (float)total;
+    float ratio = total > 0 ? ((float)good / (float)total) : 0.0f;
     ESP_LOGI(TAG, "GPS baud probe %d: total=%lu nmea_like=%.2f", baud,
              (unsigned long)total, ratio);
+    if (total < 40) return false;
     return ratio > 0.85f;
 }
 
@@ -104,6 +105,10 @@ static void gps_task(void *arg) {
                 if (line_pos > 0) {
                     line_buf[line_pos] = '\0';
                     s_rx_lines_total++;
+                    if (s_raw_log_lines < 60) {
+                        ESP_LOGI(TAG, "NMEA raw: %s", line_buf);
+                        s_raw_log_lines++;
+                    }
                     
                     /* Parse NMEA sentence */
                     nmea_position_t nmea_pos;
@@ -186,6 +191,29 @@ int gps_init(gps_fix_cb_t cb, void *ctx) {
     
     s_callback = cb;
     s_callback_ctx = ctx;
+
+    /* Heltec V4 GNSS control lines (active-low enable, active-low reset). */
+    if (board->short_name && strcmp(board->short_name, "heltec_v4") == 0) {
+        const int pin_en = 34;      /* GPS_EN active LOW */
+        const int pin_reset = 42;   /* GPS_RESET active LOW */
+        const int pin_standby = 40; /* force wake when HIGH */
+
+        gpio_config_t gnss_ctrl = {
+            .pin_bit_mask = (1ULL << pin_en) | (1ULL << pin_reset) | (1ULL << pin_standby),
+            .mode = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&gnss_ctrl);
+
+        gpio_set_level(pin_reset, 0);
+        vTaskDelay(pdMS_TO_TICKS(120));
+        gpio_set_level(pin_reset, 1);
+
+        gpio_set_level(pin_standby, 1);
+        gpio_set_level(pin_en, 0);
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        ESP_LOGI(TAG, "Heltec V4 GNSS ctrl: EN=%d(LOW=on) RESET=%d STANDBY=%d", pin_en, pin_reset, pin_standby);
+    }
     
     /* Configure UART */
     uart_config_t uart_config = {

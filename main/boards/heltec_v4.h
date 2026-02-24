@@ -6,7 +6,7 @@
 static const bramble_board_config_t board_heltec_v4 = {
     .name = "Heltec WiFi LoRa 32 V4",
     .short_name = "heltec_v4",
-    .capabilities = BOARD_CAP_DISPLAY_SSD1306 | BOARD_CAP_BATTERY_ADC,
+    .capabilities = BOARD_CAP_DISPLAY_SSD1306 | BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS,
 
     .peripheral_power_pin = -1,
 
@@ -35,7 +35,8 @@ static const bramble_board_config_t board_heltec_v4 = {
     .button_gpio = 0,
 
     /* Pending schematic net-label verification for V4 battery ADC path. */
-    .battery = { .gpio = 1, .adc_channel = 0, .divider_factor = 2 },
+    /* Heltec V4 reference uses ~4.9x battery scaling; integer factor 5 is closest. */
+    .battery = { .gpio = 1, .adc_channel = 0, .divider_factor = 5 },
 
     .i2c_sda = -1,
     .i2c_scl = -1,
@@ -47,10 +48,10 @@ static const bramble_board_config_t board_heltec_v4 = {
     .touch = { .int_pin = -1, .rst_pin = -1, .i2c_addr = 0 },
 
     /*
-     * GNSS UART mapping is intentionally unset until V4 schematic/pinmap
-     * net labels are fully verified for L76K TX/RX routing.
+     * Heltec V4 GNSS mapping aligned to current field references:
+     * CPU RX=38 (GPS->CPU), CPU TX=39 (CPU->GPS).
      */
-    .gps = { .tx = -1, .rx = -1, .baud = 9600 },
+    .gps = { .tx = 38, .rx = 39, .baud = 9600 },
 
     .sdcard_cs = -1,
 
