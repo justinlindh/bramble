@@ -42,3 +42,5 @@ jobs:
             build-artifacts/firmware-ci/flasher_args.json
             build-artifacts/firmware-ci/SHA256SUMS.txt
           if-no-files-found: error
+
+# trigger: ota publish wiring 2026-02-24T11:35:53Z
