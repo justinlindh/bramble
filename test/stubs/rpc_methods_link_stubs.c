@@ -64,8 +64,17 @@ typedef struct {
     bool used;
 } nvs_loc_kv_t;
 
+typedef struct {
+    char key[16];
+    uint8_t value[64];
+    size_t len;
+    bool used;
+} nvs_loc_blob_t;
+
 nvs_loc_kv_t g_nvs_loc_kv[16];
 int g_nvs_loc_kv_count = 0;
+nvs_loc_blob_t g_nvs_loc_blob[16];
+int g_nvs_loc_blob_count = 0;
 
 int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
     g_mesh_add_channel_calls++;
@@ -109,6 +118,7 @@ int traffic_debug_get_count(void){return 0;} int traffic_debug_get_dropped(void)
 const esp_partition_t *ota_get_running_partition(void){return 0;} int ota_wifi_start(const char *url){(void)url;return -1;}
 
 struct nvs_iter_rec {
+    int source; /* 0 = kv, 1 = blob */
     int index;
 };
 
@@ -122,6 +132,13 @@ static int nvs_loc_find_index(const char *key) {
 static int nvs_loc_alloc_index(void) {
     for (int i = 0; i < 16; i++) {
         if (!g_nvs_loc_kv[i].used) return i;
+    }
+    return -1;
+}
+
+static int nvs_loc_blob_find_index(const char *key) {
+    for (int i = 0; i < 16; i++) {
+        if (g_nvs_loc_blob[i].used && strcmp(g_nvs_loc_blob[i].key, key) == 0) return i;
     }
     return -1;
 }
@@ -236,7 +253,19 @@ esp_err_t nvs_get_u16(nvs_handle_t h,const char* k,uint16_t *o){
 }
 
 esp_err_t nvs_get_i32(nvs_handle_t h,const char* k,int32_t *o){(void)h;(void)k;if(o)*o=0;return ESP_FAIL;}
-esp_err_t nvs_get_blob(nvs_handle_t h,const char* k,void *o,size_t *l){(void)h;(void)k;(void)o;(void)l;return ESP_FAIL;}
+esp_err_t nvs_get_blob(nvs_handle_t h,const char* k,void *o,size_t *l){
+    if (h != 3 || !k || !l) return ESP_FAIL;
+    int idx = nvs_loc_blob_find_index(k);
+    if (idx < 0) return ESP_FAIL;
+    if (!o) {
+        *l = g_nvs_loc_blob[idx].len;
+        return ESP_OK;
+    }
+    if (*l < g_nvs_loc_blob[idx].len) return ESP_FAIL;
+    memcpy(o, g_nvs_loc_blob[idx].value, g_nvs_loc_blob[idx].len);
+    *l = g_nvs_loc_blob[idx].len;
+    return ESP_OK;
+}
 esp_err_t nvs_erase_key(nvs_handle_t h,const char* k){
     if (h == 3 && k) {
         int idx = nvs_loc_find_index(k);
@@ -245,6 +274,13 @@ esp_err_t nvs_erase_key(nvs_handle_t h,const char* k){
             g_nvs_loc_kv[idx].key[0] = '\0';
             g_nvs_loc_kv[idx].value[0] = '\0';
             if (g_nvs_loc_kv_count > 0) g_nvs_loc_kv_count--;
+        }
+        int bidx = nvs_loc_blob_find_index(k);
+        if (bidx >= 0) {
+            g_nvs_loc_blob[bidx].used = false;
+            g_nvs_loc_blob[bidx].key[0] = '\0';
+            g_nvs_loc_blob[bidx].len = 0;
+            if (g_nvs_loc_blob_count > 0) g_nvs_loc_blob_count--;
         }
     }
     return ESP_OK;
@@ -257,31 +293,69 @@ esp_err_t nvs_entry_find(const char *part_name, const char *namespace_name, nvs_
     (void)type;
     if (!out_iterator) return ESP_FAIL;
     *out_iterator = NULL;
-    int idx = nvs_loc_next_used_from(0);
-    if (idx < 0) return ESP_FAIL;
+
     nvs_iterator_t it = (nvs_iterator_t)malloc(sizeof(*it));
     if (!it) return ESP_FAIL;
-    it->index = idx;
-    *out_iterator = it;
-    return ESP_OK;
+
+    int idx = nvs_loc_next_used_from(0);
+    if (idx >= 0) {
+        it->source = 0;
+        it->index = idx;
+        *out_iterator = it;
+        return ESP_OK;
+    }
+
+    for (int i = 0; i < 16; i++) {
+        if (g_nvs_loc_blob[i].used) {
+            it->source = 1;
+            it->index = i;
+            *out_iterator = it;
+            return ESP_OK;
+        }
+    }
+
+    free(it);
+    return ESP_FAIL;
 }
 
 esp_err_t nvs_entry_next(nvs_iterator_t *iterator) {
     if (!iterator || !*iterator) return ESP_FAIL;
-    int idx = nvs_loc_next_used_from((*iterator)->index + 1);
-    if (idx < 0) {
-        free(*iterator);
-        *iterator = NULL;
-        return ESP_FAIL;
+
+    if ((*iterator)->source == 0) {
+        int idx = nvs_loc_next_used_from((*iterator)->index + 1);
+        if (idx >= 0) {
+            (*iterator)->index = idx;
+            return ESP_OK;
+        }
+        for (int i = 0; i < 16; i++) {
+            if (g_nvs_loc_blob[i].used) {
+                (*iterator)->source = 1;
+                (*iterator)->index = i;
+                return ESP_OK;
+            }
+        }
+    } else {
+        for (int i = (*iterator)->index + 1; i < 16; i++) {
+            if (g_nvs_loc_blob[i].used) {
+                (*iterator)->index = i;
+                return ESP_OK;
+            }
+        }
     }
-    (*iterator)->index = idx;
-    return ESP_OK;
+
+    free(*iterator);
+    *iterator = NULL;
+    return ESP_FAIL;
 }
 
 void nvs_entry_info(nvs_iterator_t iterator, nvs_entry_info_t *out_info) {
     if (!iterator || !out_info) return;
     memset(out_info, 0, sizeof(*out_info));
-    strncpy(out_info->key, g_nvs_loc_kv[iterator->index].key, sizeof(out_info->key) - 1);
+    if (iterator->source == 0) {
+        strncpy(out_info->key, g_nvs_loc_kv[iterator->index].key, sizeof(out_info->key) - 1);
+    } else {
+        strncpy(out_info->key, g_nvs_loc_blob[iterator->index].key, sizeof(out_info->key) - 1);
+    }
 }
 
 void nvs_release_iterator(nvs_iterator_t iterator) {
