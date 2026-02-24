@@ -47,10 +47,20 @@ class BrambleFlasher {
                 { name: 'firmware',         offset: 0x10000, file: 'bramble.bin' }
             ]
         },
-        't-beam': {
-            name: 'LILYGO T-Beam Supreme',
+        'tdeck-plus': {
+            name: 'LILYGO T-Deck Plus',
             chipType: 'ESP32-S3',
             flashSize: '16MB',
+            partitions: [
+                { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
+                { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
+                { name: 'firmware',         offset: 0x10000, file: 'bramble.bin' }
+            ]
+        },
+        'heltec-v4': {
+            name: 'Heltec V4',
+            chipType: 'ESP32-S3',
+            flashSize: '8MB',
             partitions: [
                 { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
                 { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
