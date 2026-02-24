@@ -1,0 +1,10 @@
+{
+  "releases": [
+    {
+      "version": "v0.4.0",
+      "artifacts": [
+        { "board": "heltec-v3", "file": "bramble-heltec.bin" }
+      ]
+    }
+  ]
+}

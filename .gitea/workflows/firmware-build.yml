@@ -21,6 +21,18 @@ jobs:
           . /opt/esp/idf/export.sh
           bash scripts/ci-build-firmware.sh
 
+      - name: Publish OTA release to mounted /ota
+        env:
+          OTA_ROOT: /ota
+        run: |
+          VERSION="$(git describe --tags --always --dirty)"
+          if echo "$VERSION" | grep -Eq '^v[0-9]'; then CHANNEL=stable; else CHANNEL=dev; fi
+          ./scripts/publish-firmware-release.sh "$OTA_ROOT" "$CHANNEL" "$VERSION" \
+            heltec-v3=build-artifacts/firmware-ci/bootloader.bin \
+            heltec-v3=build-artifacts/firmware-ci/partition-table.bin \
+            heltec-v3=build-artifacts/firmware-ci/bramble.bin
+          node scripts/validate-firmware-index.js "$OTA_ROOT/index.json"
+
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3
         with:
