@@ -75,16 +75,18 @@ describe('LocationSection hybrid policy controls', () => {
       expect(setLocationConfigMock).toHaveBeenCalled();
     });
 
-    const payload = setLocationConfigMock.mock.calls[0][0];
+    const calls = setLocationConfigMock.mock.calls as unknown as Array<[LocationConfig]>;
+    expect(calls.length).toBeGreaterThan(0);
+    const payload = calls[0][0];
     expect(payload.contact_rules).toHaveLength(1);
-    expect(payload.contact_rules[0]).toEqual(expect.objectContaining({
+    expect(payload.contact_rules?.[0]).toEqual(expect.objectContaining({
       address: '1234ABCD',
       enabled: true,
       tier: 'coarse',
     }));
 
     expect(payload.channel_targets).toHaveLength(1);
-    expect(payload.channel_targets[0]).toEqual(expect.objectContaining({
+    expect(payload.channel_targets?.[0]).toEqual(expect.objectContaining({
       channel: 2,
       enabled: true,
       tier: 'coarse',
