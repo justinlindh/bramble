@@ -27,6 +27,16 @@ typedef struct { uint32_t ts_ms; uint32_t src; uint32_t dst; uint8_t type; uint8
 typedef struct { bool enabled; bool include_payload; uint16_t max_events; } traffic_debug_config_t;
 typedef struct { int dummy; } bramble_message_t;
 typedef struct esp_partition_t { int dummy; } esp_partition_t;
+typedef struct {
+    int32_t latitude_e7;
+    int32_t longitude_e7;
+    int16_t altitude_m;
+    uint8_t accuracy_m;
+    uint8_t speed_kmh;
+    uint8_t heading_deg2;
+    uint32_t timestamp;
+    bool valid;
+} bramble_position_t;
 
 char g_last_channel_name[64];
 uint8_t g_last_channel_psk[128];
@@ -152,3 +162,8 @@ esp_err_t nvs_get_u16(nvs_handle_t h,const char* k,uint16_t *o){
 }
 
 esp_err_t nvs_get_i32(nvs_handle_t h,const char* k,int32_t *o){(void)h;(void)k;if(o)*o=0;return ESP_FAIL;} esp_err_t nvs_erase_key(nvs_handle_t h,const char* k){(void)h;(void)k;return ESP_OK;} esp_err_t nvs_commit(nvs_handle_t h){(void)h;return ESP_OK;}
+
+uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t *pos, uint8_t tier){
+    (void)dest_addr; (void)pos; (void)tier;
+    return 0xABCDEF01u;
+}

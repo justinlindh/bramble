@@ -10,6 +10,7 @@
 #include "public_channel.h"
 #include "airtime_budget.h"
 #include "traffic_debug.h"
+#include "location.h"
 
 #define BRAMBLE_NODE_NAME_MAX 32
 
@@ -75,6 +76,14 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
  * Returns packet_id (>0) on success, 0 on failure.
  */
 uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
+
+/**
+ * Send a dedicated location packet (PKT_TYPE_LOCATION) to a single destination.
+ * Returns packet_id (>0) on success, 0 on failure.
+ */
+uint32_t mesh_send_location_packet(uint32_t dest_addr,
+                                   const bramble_position_t *pos,
+                                   uint8_t tier);
 
 /**
  * Schedule a system reboot after delay_ms milliseconds.

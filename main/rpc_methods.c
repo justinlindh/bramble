@@ -864,15 +864,6 @@ static int handle_remove_location_contact(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-__attribute__((weak)) uint32_t mesh_send_location_packet(uint32_t dest_addr,
-                                                         const bramble_position_t *pos,
-                                                         uint8_t tier) {
-    (void)dest_addr;
-    (void)pos;
-    (void)tier;
-    return 0;
-}
-
 static int handle_share_location_once(const cJSON *params, cJSON *result) {
     if (!params) return RPC_ERR_INVALID_PARAMS;
     const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
