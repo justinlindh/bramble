@@ -109,6 +109,11 @@ export function Map() {
   const selfPos = status?.position ?? null;
   const selfAddr = config?.identity?.address;
   const gpsEnabled = config?.location?.enabled ?? false;
+  const locationPolicyPreview = !config?.location
+    ? 'Location policy unavailable'
+    : !config.location.enabled
+      ? 'Location sharing is OFF'
+      : `Sharing ${config.location.default_tier} updates every ${config.location.interval_s}s via ${config.location.source}`;
 
   // Initialize map
   useEffect(() => {
@@ -249,6 +254,7 @@ export function Map() {
     <div className={styles.wrapper}>
       <div ref={mapRef} className={styles.mapContainer} />
       <div className={styles.legend}>
+        <span className={styles.legendItem}>{locationPolicyPreview}</span>
         <span className={styles.legendItem}>
           <span className={`${styles.dot} ${styles.dotBlue}`} /> You
         </span>

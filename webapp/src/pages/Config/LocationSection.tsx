@@ -1,213 +1,299 @@
-import { useState } from 'react';
-import type { LocationConfig, LocationTier, LocationContact } from '../../types/bramble';
-import type { Neighbor } from '../../types/bramble';
-import { setLocationConfig, setLocationContact, removeLocationContact } from '../../store/actions';
-import { IconLocation, IconLocationOff, IconWarning } from '../../components/Icons';
+import { useEffect, useMemo, useState } from 'react';
+import type {
+  LocationConfig,
+  LocationTier,
+  LocationSource,
+  LocationContactRule,
+  LocationChannelTarget,
+  Neighbor,
+  Channel,
+} from '../../types/bramble';
+import { setLocationConfig } from '../../store/actions';
+import { IconLocation, IconLocationOff } from '../../components/Icons';
 import styles from './LocationSection.module.css';
 
 interface LocationSectionProps {
   location: LocationConfig;
   neighbors: Neighbor[];
+  channels: Channel[];
   gpsAvailable?: boolean;
 }
 
-const TIER_LABELS: Record<LocationTier, { label: string; desc: string; cls: string }> = {
-  off:      { label: 'Off',      desc: 'No location shared',    cls: 'tierOff' },
-  presence: { label: 'Presence', desc: 'Online status only',    cls: 'tierPresence' },
-  coarse:   { label: 'Zone',     desc: '~1km grid square',      cls: 'tierCoarse' },
-  full:     { label: 'Exact',    desc: 'Full GPS coordinates',  cls: 'tierFull' },
-};
+const TIER_OPTIONS: Array<{ value: LocationTier; label: string }> = [
+  { value: 'off', label: 'Off (share nothing)' },
+  { value: 'presence', label: 'Presence only' },
+  { value: 'coarse', label: 'Zone (~1km grid)' },
+  { value: 'full', label: 'Exact coordinates' },
+];
 
-function shortAddr(addr: number): string {
-  return '0x' + addr.toString(16).toUpperCase().padStart(8, '0').slice(-4);
+const SOURCE_OPTIONS: Array<{ value: LocationSource; label: string }> = [
+  { value: 'hybrid', label: 'Hybrid (GPS + manual fallback)' },
+  { value: 'gps', label: 'GPS only' },
+  { value: 'manual', label: 'Manual only' },
+];
+
+const DEFAULT_INTERVAL = 300;
+
+function toHexAddress(addr: number): string {
+  return addr.toString(16).toUpperCase().padStart(8, '0');
 }
 
-export function LocationSection({ location, neighbors, gpsAvailable = false }: LocationSectionProps) {
+function normalizeAddress(raw: string): string | null {
+  const cleaned = raw.trim().replace(/^0x/i, '').toUpperCase();
+  if (!/^[0-9A-F]{1,8}$/.test(cleaned)) return null;
+  return cleaned.padStart(8, '0');
+}
+
+export function LocationSection({ location, neighbors, channels, gpsAvailable = false }: LocationSectionProps) {
   const [error, setError] = useState('');
-  const [showWarning, setShowWarning] = useState(false);
-  const [addingPeer, setAddingPeer] = useState(false);
-  const [newPeerAddr, setNewPeerAddr] = useState('');
-  const [newPeerTier, setNewPeerTier] = useState<LocationTier>('coarse');
+  const [saving, setSaving] = useState(false);
 
-  const handleGpsToggle = async (enabled: boolean) => {
-    if (enabled && !location.enabled) {
-      setShowWarning(true);
+  const [enabled, setEnabled] = useState(location.enabled ?? false);
+  const [tier, setTier] = useState<LocationTier>(location.default_tier ?? location.tier ?? 'coarse');
+  const [interval, setInterval] = useState(location.interval_s ?? DEFAULT_INTERVAL);
+  const [source, setSource] = useState<LocationSource>(location.source ?? 'hybrid');
+  const [contactRules, setContactRules] = useState<LocationContactRule[]>(location.contact_rules ?? []);
+  const [channelTargets, setChannelTargets] = useState<LocationChannelTarget[]>(location.channel_targets ?? []);
+
+  const [newContactAddress, setNewContactAddress] = useState('');
+  const [newChannelTarget, setNewChannelTarget] = useState<number>(channels[0]?.index ?? 0);
+
+  useEffect(() => {
+    setEnabled(location.enabled ?? false);
+    setTier(location.default_tier ?? location.tier ?? 'coarse');
+    setInterval(location.interval_s ?? DEFAULT_INTERVAL);
+    setSource(location.source ?? 'hybrid');
+    setContactRules(location.contact_rules ?? []);
+    setChannelTargets(location.channel_targets ?? []);
+  }, [location]);
+
+  const preview = useMemo(() => {
+    if (!enabled) {
+      return 'Sharing is OFF. Your node will not publish periodic location packets.';
+    }
+
+    const targetCount = contactRules.filter(r => r.enabled !== false).length + channelTargets.filter(c => c.enabled !== false).length;
+    return `Sharing ${tier === 'full' ? 'exact coordinates' : tier === 'coarse' ? 'coarse zone updates' : tier === 'presence' ? 'presence only' : 'off'} every ${interval}s using ${source}. Active targets: ${targetCount}.`;
+  }, [enabled, tier, interval, source, contactRules, channelTargets]);
+
+  const addContactRule = () => {
+    setError('');
+    const normalized = normalizeAddress(newContactAddress);
+    if (!normalized) {
+      setError('Contact address must be 1-8 hex characters.');
       return;
     }
-    try {
-      await setLocationConfig({ enabled });
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const confirmEnable = async () => {
-    setShowWarning(false);
-    try {
-      await setLocationConfig({ enabled: true });
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const handleAddContact = async () => {
-    const addr = parseInt(newPeerAddr.replace(/^0x/i, ''), 16);
-    if (isNaN(addr) || addr === 0) {
-      setError('Invalid address');
+    if (contactRules.some(r => r.address === normalized)) {
+      setError('Contact already exists.');
       return;
     }
-    try {
-      await setLocationContact(addr, newPeerTier);
-      setAddingPeer(false);
-      setNewPeerAddr('');
-    } catch (e) {
-      setError((e as Error).message);
-    }
+
+    setContactRules([
+      ...contactRules,
+      { address: normalized, enabled: true, tier: 'coarse', interval_s: interval },
+    ]);
+    setNewContactAddress('');
   };
 
-  const handleChangeTier = async (c: LocationContact, tier: LocationTier) => {
-    try {
-      await setLocationContact(c.addr, tier);
-    } catch (e) {
-      setError((e as Error).message);
+  const addChannelTarget = () => {
+    setError('');
+    if (channelTargets.some(c => c.channel === Number(newChannelTarget))) {
+      setError('Channel target already exists.');
+      return;
     }
+    setChannelTargets([
+      ...channelTargets,
+      { channel: Number(newChannelTarget), enabled: true, tier: 'coarse', interval_s: interval },
+    ]);
   };
 
-  const handleRemoveContact = async (addr: number) => {
+  const savePolicy = async () => {
+    setError('');
+    setSaving(true);
     try {
-      await removeLocationContact(addr);
+      const sanitizedInterval = Math.max(30, Number(interval) || DEFAULT_INTERVAL);
+      await setLocationConfig({
+        enabled,
+        default_tier: tier,
+        tier,
+        interval_s: sanitizedInterval,
+        source,
+        contact_rules: contactRules,
+        channel_targets: channelTargets,
+      });
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setSaving(false);
     }
   };
-
-  const sharedWith = location.contacts.filter(c => c.tier !== 'off');
 
   return (
     <div className={styles.section}>
       {error && <div className={styles.error}>{error}</div>}
 
-      {/* Warning dialog */}
-      {showWarning && (
-        <div className={styles.warning}>
-          <IconWarning size={16} />
-          <div>
-            <strong>Enable GPS?</strong>
-            <p>Your position will be available to share with selected peers.
-               No location is shared until you add contacts below.</p>
-          </div>
-          <div className={styles.warningActions}>
-            <button onClick={confirmEnable} className={styles.btnConfirm}>Enable</button>
-            <button onClick={() => setShowWarning(false)} className={styles.btnCancel}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {/* GPS toggle */}
       <div className={styles.row}>
-        <span className={styles.label}>GPS</span>
-        {gpsAvailable ? (
-          <label className={styles.toggle}
-                 title={location.enabled
-                   ? 'GPS is active — location can be shared with contacts'
-                   : 'GPS is off — no location data collected or shared'}>
-            <input
-              type="checkbox"
-              checked={location.enabled}
-              onChange={(e) => handleGpsToggle(e.target.checked)}
-            />
-            <span>{location.enabled ? 'Enabled' : 'Disabled'}</span>
-            {location.enabled
-              ? <IconLocation size={14} />
-              : <IconLocationOff size={14} />}
-          </label>
-        ) : (
-          <span className={styles.unavailable} title="This device has no GPS hardware. Boards with GPS (e.g. T-Beam) will show controls here.">
-            No GPS hardware
-            <IconLocationOff size={14} />
-          </span>
-        )}
+        <label className={styles.toggle}>
+          <input
+            aria-label="Enable location sharing"
+            type="checkbox"
+            checked={enabled}
+            onChange={e => setEnabled(e.target.checked)}
+          />
+          <span>{enabled ? 'Location sharing enabled' : 'Location sharing disabled'}</span>
+          {enabled ? <IconLocation size={14} /> : <IconLocationOff size={14} />}
+        </label>
       </div>
 
-      {/* Sharing summary */}
-      {location.enabled && (
-        <div className={styles.row}>
-          <span className={styles.label}>Sharing with</span>
-          <span className={sharedWith.length > 0 ? styles.shareActive : styles.shareNone}>
-            {sharedWith.length === 0
-              ? 'Nobody — add contacts below'
-              : `${sharedWith.length} peer${sharedWith.length > 1 ? 's' : ''}`}
-          </span>
-        </div>
-      )}
+      <div className={styles.row}>
+        <label className={styles.label} htmlFor="location-tier">Default tier</label>
+        <select id="location-tier" aria-label="Default tier" value={tier} onChange={e => setTier(e.target.value as LocationTier)}>
+          {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </div>
 
-      {/* Contact list */}
-      {location.enabled && (
-        <div className={styles.contacts}>
-          <div className={styles.contactsHeader}>
-            <strong>Location Contacts</strong>
-            <button className={styles.btnSmall} onClick={() => setAddingPeer(true)}>+ Add</button>
-          </div>
+      <div className={styles.row}>
+        <label className={styles.label} htmlFor="location-interval">Interval (seconds)</label>
+        <input
+          id="location-interval"
+          aria-label="Interval (seconds)"
+          type="number"
+          min={30}
+          value={interval}
+          onChange={e => setInterval(Number(e.target.value))}
+        />
+      </div>
 
-          {/* Add contact form */}
-          {addingPeer && (
-            <div className={styles.addForm}>
-              <select value={newPeerTier} onChange={e => setNewPeerTier(e.target.value as LocationTier)}>
-                <option value="presence">Presence (online only)</option>
-                <option value="coarse">Zone (~1km)</option>
-                <option value="full">Exact (full GPS)</option>
-              </select>
-              {/* Show neighbors as quick-add buttons */}
-              {neighbors.length > 0 && (
-                <div className={styles.quickAdd}>
-                  {neighbors.map(n => (
-                    <button key={n.addr} className={styles.quickAddBtn}
-                      onClick={() => setNewPeerAddr(n.addr.toString(16))}>
-                      {shortAddr(n.addr)}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className={styles.addRow}>
-                <input
-                  type="text"
-                  value={newPeerAddr}
-                  onChange={e => setNewPeerAddr(e.target.value)}
-                  placeholder="Address (hex)"
-                  className={styles.addrInput}
-                />
-                <button className={styles.btnConfirm} onClick={handleAddContact}>Add</button>
-                <button className={styles.btnCancel} onClick={() => setAddingPeer(false)}>Cancel</button>
-              </div>
-            </div>
-          )}
-
-          {/* Contact rows */}
-          {location.contacts.length === 0 && !addingPeer && (
-            <p className={styles.empty}>No location contacts. Add peers to share your position with.</p>
-          )}
-          {location.contacts.map(c => (
-            <div key={c.addr} className={styles.contactRow}>
-              <span className={styles.mono}>{shortAddr(c.addr)}</span>
-              <select
-                value={c.tier}
-                onChange={e => handleChangeTier(c, e.target.value as LocationTier)}
-                className={`${styles.tierSelect} ${styles[TIER_LABELS[c.tier].cls]}`}
-              >
-                <option value="off">Off</option>
-                <option value="presence">Presence</option>
-                <option value="coarse">Zone (~1km)</option>
-                <option value="full">Exact</option>
-              </select>
-              <button
-                className={styles.removeBtn}
-                onClick={() => handleRemoveContact(c.addr)}
-                title="Remove contact"
-              >✕</button>
-            </div>
+      <div className={styles.row}>
+        <label className={styles.label} htmlFor="location-source">Source</label>
+        <select
+          id="location-source"
+          aria-label="Source"
+          value={source}
+          onChange={e => setSource(e.target.value as LocationSource)}
+        >
+          {SOURCE_OPTIONS.map(s => (
+            <option key={s.value} value={s.value} disabled={!gpsAvailable && s.value !== 'manual'}>
+              {s.label}
+            </option>
           ))}
+        </select>
+      </div>
+
+      <div className={styles.block}>
+        <div className={styles.blockHeader}><strong>Contact targets</strong></div>
+        <div className={styles.addRow}>
+          <input
+            aria-label="Contact address (hex)"
+            value={newContactAddress}
+            onChange={e => setNewContactAddress(e.target.value)}
+            placeholder="e.g. 1A2B3C4D"
+          />
+          <button onClick={addContactRule}>Add contact target</button>
         </div>
-      )}
+        {neighbors.length > 0 && (
+          <div className={styles.quickAdd}>
+            {neighbors.map(n => (
+              <button key={n.addr} onClick={() => setNewContactAddress(toHexAddress(n.addr))}>
+                {toHexAddress(n.addr)}
+              </button>
+            ))}
+          </div>
+        )}
+        {contactRules.map((rule, idx) => (
+          <div key={rule.address} className={styles.contactRow}>
+            <span className={styles.mono}>{rule.address}</span>
+            <label>
+              <input
+                type="checkbox"
+                checked={rule.enabled !== false}
+                onChange={e => {
+                  const next = [...contactRules];
+                  next[idx] = { ...next[idx], enabled: e.target.checked };
+                  setContactRules(next);
+                }}
+              />
+              enabled
+            </label>
+            <select
+              value={rule.tier}
+              onChange={e => {
+                const next = [...contactRules];
+                next[idx] = { ...next[idx], tier: e.target.value as LocationTier };
+                setContactRules(next);
+              }}
+            >
+              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.value}</option>)}
+            </select>
+            <input
+              type="number"
+              min={30}
+              value={rule.interval_s}
+              onChange={e => {
+                const next = [...contactRules];
+                next[idx] = { ...next[idx], interval_s: Number(e.target.value) };
+                setContactRules(next);
+              }}
+            />
+            <button onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))}>Remove</button>
+          </div>
+        ))}
+      </div>
+
+      <div className={styles.block}>
+        <div className={styles.blockHeader}><strong>Channel targets</strong></div>
+        <div className={styles.addRow}>
+          <select aria-label="Channel target" value={newChannelTarget} onChange={e => setNewChannelTarget(Number(e.target.value))}>
+            {channels.map(ch => (
+              <option key={ch.index} value={ch.index}>#{ch.index} {ch.name || `channel-${ch.index}`}</option>
+            ))}
+          </select>
+          <button onClick={addChannelTarget}>Add channel target</button>
+        </div>
+
+        {channelTargets.map((target, idx) => (
+          <div key={target.channel} className={styles.contactRow}>
+            <span>#{target.channel}</span>
+            <label>
+              <input
+                type="checkbox"
+                checked={target.enabled !== false}
+                onChange={e => {
+                  const next = [...channelTargets];
+                  next[idx] = { ...next[idx], enabled: e.target.checked };
+                  setChannelTargets(next);
+                }}
+              />
+              enabled
+            </label>
+            <select
+              value={target.tier}
+              onChange={e => {
+                const next = [...channelTargets];
+                next[idx] = { ...next[idx], tier: e.target.value as LocationTier };
+                setChannelTargets(next);
+              }}
+            >
+              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.value}</option>)}
+            </select>
+            <input
+              type="number"
+              min={30}
+              value={target.interval_s}
+              onChange={e => {
+                const next = [...channelTargets];
+                next[idx] = { ...next[idx], interval_s: Number(e.target.value) };
+                setChannelTargets(next);
+              }}
+            />
+            <button onClick={() => setChannelTargets(channelTargets.filter(c => c.channel !== target.channel))}>Remove</button>
+          </div>
+        ))}
+      </div>
+
+      <div className={styles.preview} aria-label="Location policy preview">{preview}</div>
+
+      <button onClick={savePolicy} disabled={saving}>{saving ? 'Saving…' : 'Save location policy'}</button>
     </div>
   );
 }

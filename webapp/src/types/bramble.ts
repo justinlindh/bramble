@@ -212,8 +212,10 @@ export interface PeerLocation {
 
 export interface LocationConfig {
   enabled: boolean;
+  /** Current/default policy tier used for periodic sharing */
   tier: LocationTier;
   default_tier: LocationTier;
+  /** Periodic sharing interval in seconds */
   interval_s: number;
   source: LocationSource;
   lat?: number;
