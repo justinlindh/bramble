@@ -1,10 +1,19 @@
 #include "ota.h"
-#include "esp_ota_ops.h"
+
+#include <stdbool.h>
+#include <string.h>
+
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 
 static const char *TAG = "ota";
+
+static bool has_prefix(const char *s, const char *prefix)
+{
+    return strncmp(s, prefix, strlen(prefix)) == 0;
+}
 
 int ota_ble_start(void)
 {
@@ -12,15 +21,8 @@ int ota_ble_start(void)
     return -1;
 }
 
-int ota_wifi_start(const char *url)
+static int ota_https_start(const char *url)
 {
-    if (!url || strlen(url) == 0) {
-        ESP_LOGE(TAG, "No URL provided");
-        return -1;
-    }
-
-    ESP_LOGI(TAG, "Starting OTA from: %s", url);
-
     esp_http_client_config_t http_cfg = {
         .url = url,
         .timeout_ms = 30000,
@@ -33,7 +35,111 @@ int ota_wifi_start(const char *url)
 
     esp_err_t err = esp_https_ota(&ota_cfg);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "OTA failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "HTTPS OTA failed: %s", esp_err_to_name(err));
+        return -1;
+    }
+    return 0;
+}
+
+static int ota_http_start(const char *url)
+{
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 30000,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "HTTP OTA failed: client init");
+        return -1;
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP OTA failed: open: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if (!update_partition) {
+        ESP_LOGE(TAG, "HTTP OTA failed: no update partition");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    esp_ota_handle_t ota_handle = 0;
+    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP OTA failed: ota begin: %s", esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    char buf[1024];
+    int read_len = 0;
+    while ((read_len = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
+        err = esp_ota_write(ota_handle, (const void *)buf, read_len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "HTTP OTA failed: ota write: %s", esp_err_to_name(err));
+            esp_ota_abort(ota_handle);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            return -1;
+        }
+    }
+
+    if (read_len < 0) {
+        ESP_LOGE(TAG, "HTTP OTA failed: read error");
+        esp_ota_abort(ota_handle);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    err = esp_ota_end(ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP OTA failed: ota end: %s", esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP OTA failed: set boot partition: %s", esp_err_to_name(err));
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return -1;
+    }
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return 0;
+}
+
+int ota_wifi_start(const char *url)
+{
+    if (!url || strlen(url) == 0) {
+        ESP_LOGE(TAG, "No URL provided");
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "Starting OTA from: %s", url);
+
+    int rc = -1;
+    if (has_prefix(url, "https://")) {
+        rc = ota_https_start(url);
+    } else if (has_prefix(url, "http://")) {
+        rc = ota_http_start(url);
+    } else {
+        ESP_LOGE(TAG, "Unsupported OTA URL scheme (expected http:// or https://)");
+        return -1;
+    }
+
+    if (rc != 0) {
         return -1;
     }
 
