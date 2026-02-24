@@ -60,6 +60,7 @@ jobs:
             '
             def is_canonical($name):
               ((.filename // "") == $name) or
+              ((.file // "") | endswith("/" + $name)) or
               ((.path // "") | endswith("/" + $name));
 
             def has_required_for_board($board):
