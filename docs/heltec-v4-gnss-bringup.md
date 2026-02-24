@@ -18,6 +18,10 @@ cd /home/justin/src/bramble
 
 # One-time per shell session (adjust IDF_PATH for your machine)
 export IDF_PATH=~/src/esp-idf
+IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1 || true)
+if [[ -n "${IDF_VENV:-}" && -x "$IDF_VENV/bin/python3" ]]; then
+  export PATH="$IDF_VENV/bin:$PATH"
+fi
 source "$IDF_PATH/export.sh"
 
 # Clean board config and build using V4 defaults

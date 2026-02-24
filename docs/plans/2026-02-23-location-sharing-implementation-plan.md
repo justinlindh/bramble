@@ -246,14 +246,24 @@ git commit -m "refactor(location): route shareLocationOnce through location pack
 - Create: `docs/plans/evidence/2026-02-23-location-sharing-evidence.md`
 - Modify: `docs/testing/network-reach-e2e-checklist.md`
 
-**Step 1: Build matrix**
+**Step 1: Build matrix (use canonical Bramble ESP-IDF env pathing)**
 ```bash
+# Canonical env setup (same approach used by scripts/flash.sh)
+export IDF_PATH=~/src/esp-idf
+IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1 || true)
+if [[ -n "${IDF_VENV:-}" && -x "$IDF_VENV/bin/python3" ]]; then
+  export PATH="$IDF_VENV/bin:$PATH"
+fi
+source "$IDF_PATH/export.sh"
+
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
 idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tdeck_plus" build
 bash test/run_all_tests.sh
 cd webapp && npm test
 ```
+
+> Note: Do **not** assume/install a specific `python3.x-venv` package for this repo workflow. Use the existing `~/.espressif/python_env/idf*.4_py*_env` environment selected above.
 
 **Step 2: Hardware matrix**
 - T-Deck: GPS fix + periodic location sends when enabled.
