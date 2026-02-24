@@ -3,6 +3,19 @@
 ## Goal
 Ship a consumer-first web flasher UI with hidden advanced controls, strict all-or-nothing release visibility, and CI verification aligned to the same release-completeness contract.
 
+## Status (2026-02-24)
+- ✅ Plan complete (Task A + Task B delivered and live).
+- Web flasher is now simple-first with Advanced collapsed by default.
+- CI now enforces complete 3-board publish contract and verifies canonical artifacts.
+- OTA version source now maps to firmware semver constant (`BRAMBLE_VERSION_STR`) for accurate flasher versions.
+
+### Completion commits (high signal)
+- `3ba82cd`: simple-first web flasher redesign + advanced panel + completeness filtering
+- `89ba7d2`: CI completeness verification hardening
+- `95b885b`: stable→dev fallback when no complete stable releases
+- `706892e`: OTA publish version sourced from firmware semver constant
+- `a64f202`: CI index verifier fix for `.file` canonical artifact checks
+
 ## Product constraints (locked)
 - Simple mode first for normal consumers.
 - Advanced panel is optional/collapsed.
