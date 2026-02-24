@@ -184,17 +184,18 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
         <div className={styles.blockHeader}><strong>Contact targets</strong></div>
         <div className={styles.addRow}>
           <input
+            className={styles.addrInput}
             aria-label="Contact address (hex)"
             value={newContactAddress}
             onChange={e => setNewContactAddress(e.target.value)}
             placeholder="e.g. 1A2B3C4D"
           />
-          <button onClick={addContactRule}>Add contact target</button>
+          <button className={styles.btnCancel} onClick={addContactRule}>Add contact target</button>
         </div>
         {neighbors.length > 0 && (
           <div className={styles.quickAdd}>
             {neighbors.map(n => (
-              <button key={n.addr} onClick={() => setNewContactAddress(toHexAddress(n.addr))}>
+              <button className={styles.quickAddBtn} key={n.addr} onClick={() => setNewContactAddress(toHexAddress(n.addr))}>
                 {toHexAddress(n.addr)}
               </button>
             ))}
@@ -216,6 +217,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
               enabled
             </label>
             <select
+              className={styles.tierSelect}
               value={rule.tier}
               onChange={e => {
                 const next = [...contactRules];
@@ -235,7 +237,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                 setContactRules(next);
               }}
             />
-            <button onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))}>Remove</button>
+            <button className={styles.removeBtn} onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))}>Remove</button>
           </div>
         ))}
       </div>
@@ -248,7 +250,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
               <option key={ch.index} value={ch.index}>#{ch.index} {ch.name || `channel-${ch.index}`}</option>
             ))}
           </select>
-          <button onClick={addChannelTarget}>Add channel target</button>
+          <button className={styles.btnCancel} onClick={addChannelTarget}>Add channel target</button>
         </div>
 
         {channelTargets.map((target, idx) => (
@@ -267,6 +269,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
               enabled
             </label>
             <select
+              className={styles.tierSelect}
               value={target.tier}
               onChange={e => {
                 const next = [...channelTargets];
@@ -286,14 +289,14 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                 setChannelTargets(next);
               }}
             />
-            <button onClick={() => setChannelTargets(channelTargets.filter(c => c.channel !== target.channel))}>Remove</button>
+            <button className={styles.removeBtn} onClick={() => setChannelTargets(channelTargets.filter(c => c.channel !== target.channel))}>Remove</button>
           </div>
         ))}
       </div>
 
       <div className={styles.preview} aria-label="Location policy preview">{preview}</div>
 
-      <button onClick={savePolicy} disabled={saving}>{saving ? 'Saving…' : 'Save location policy'}</button>
+      <button className={styles.btnConfirm} onClick={savePolicy} disabled={saving}>{saving ? 'Saving…' : 'Save location policy'}</button>
     </div>
   );
 }

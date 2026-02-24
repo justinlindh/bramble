@@ -43,7 +43,7 @@ export function TrafficDebugSection() {
   if (!trafficDebugStatus) {
     return (
       <div>
-        <button onClick={handleRefresh} disabled={loading}>
+        <button className={styles.loadBtn} onClick={handleRefresh} disabled={loading}>
           Load Traffic Debug Status
         </button>
       </div>

@@ -55,9 +55,14 @@ export function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null 
   ];
 }
 
-/** Format address as hex */
+/** Format address as full hex */
 export function fmtAddr(addr: number): string {
-  return `0x${addr.toString(16).toUpperCase()}`;
+  return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+}
+
+function nodeLabel(addr: number, name?: string): string {
+  const hex = fmtAddr(addr);
+  return name ? `${name} (${hex})` : hex;
 }
 
 /** Resolve a node address to its map LatLng (if we know its position) */
@@ -100,14 +105,19 @@ export function Map() {
   const config = useStore(s => s.config);
   const peerLocations = useStore(s => s.peerLocations);
   const status = useStore(s => s.status);
+  const peerNames = useStore(s => s.peerNames);
   const routes = useStore(s => s.routes);
   const showRoutes = useStore(s => s.showRoutes);
   const setShowRoutes = useStore(s => s.setShowRoutes);
   const mapFocusAddr = useStore(s => s.mapFocusAddr);
   const setMapFocusAddr = useStore(s => s.setMapFocusAddr);
 
-  const selfPos = status?.position ?? null;
   const selfAddr = config?.identity?.address;
+  const selfName = config?.identity?.name?.trim() || undefined;
+  const selfPeerLocation = selfAddr === undefined
+    ? undefined
+    : peerLocations.find(p => p.addr === selfAddr && p.tier === 'full' && !!p.position);
+  const selfPos = status?.position ?? selfPeerLocation?.position ?? null;
   const gpsEnabled = config?.location?.enabled ?? false;
   const locationPolicyPreview = !config?.location
     ? 'Location policy unavailable'
@@ -144,7 +154,10 @@ export function Map() {
       bounds.push(ll);
       L.circleMarker(ll, {
         radius: 8, color: '#4a90d9', fillColor: '#4a90d9', fillOpacity: 0.8, weight: 2,
-      }).bindPopup(`<b>You</b><br/>Accuracy: ${selfPos.accuracy.toFixed(0)}m`).addTo(ml);
+      }).bindPopup(
+        `<b>${selfAddr !== undefined ? nodeLabel(selfAddr, selfName) : 'You'}</b><br/>` +
+        `Accuracy: ${selfPos.accuracy.toFixed(0)}m`
+      ).addTo(ml);
       if (selfPos.accuracy > 0) {
         L.circle(ll, {
           radius: selfPos.accuracy, color: '#4a90d9', fillColor: '#4a90d9', fillOpacity: 0.1, weight: 1,
@@ -154,13 +167,16 @@ export function Map() {
 
     // Peers
     for (const peer of peerLocations) {
+      if (selfAddr !== undefined && peer.addr === selfAddr) continue;
+      const peerDisplayName = peer.name || peerNames.get(peer.addr);
+
       if (peer.tier === 'full' && peer.position) {
         const ll = L.latLng(peer.position.lat, peer.position.lon);
         bounds.push(ll);
         L.circleMarker(ll, {
           radius: 7, color: '#4caf50', fillColor: '#4caf50', fillOpacity: 0.8, weight: 2,
         }).bindPopup(
-          `<b>${peer.name || fmtAddr(peer.addr)}</b><br/>Tier: exact<br/>Accuracy: ${peer.position.accuracy.toFixed(0)}m`
+          `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: exact<br/>Accuracy: ${peer.position.accuracy.toFixed(0)}m`
         ).addTo(ml);
       } else if (peer.tier === 'coarse' && peer.gridSquare) {
         const rectBounds = gridSquareBounds(peer.gridSquare);
@@ -168,7 +184,7 @@ export function Map() {
           L.rectangle(rectBounds, {
             color: '#ffc107', fillColor: '#ffc107', fillOpacity: 0.25, weight: 2,
           }).bindPopup(
-            `<b>${peer.name || fmtAddr(peer.addr)}</b><br/>Tier: zone<br/>Grid: ${peer.gridSquare}`
+            `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: zone<br/>Grid: ${peer.gridSquare}`
           ).addTo(ml);
           const center = gridSquareToLatLon(peer.gridSquare);
           if (center) bounds.push(L.latLng(center[0], center[1]));
@@ -179,7 +195,7 @@ export function Map() {
     if (bounds.length > 0) {
       map.fitBounds(L.latLngBounds(bounds).pad(0.2));
     }
-  }, [selfPos, peerLocations]);
+  }, [selfPos, selfAddr, selfName, peerLocations, peerNames]);
 
   // Draw route lines
   useEffect(() => {
@@ -208,14 +224,16 @@ export function Map() {
       // Tooltip with route details
       const hopLabel = route.hopCount === 1 ? '1 hop (direct)' : `${route.hopCount} hops`;
       const stateLabel = route.state.charAt(0).toUpperCase() + route.state.slice(1);
+      const destName = route.dest === selfAddr ? selfName : peerNames.get(route.dest);
+      const nextHopName = route.nextHop === selfAddr ? selfName : peerNames.get(route.nextHop);
       line.bindTooltip(
-        `<b>${fmtAddr(route.dest)}</b><br/>` +
-        `${hopLabel} · via ${fmtAddr(route.nextHop)}<br/>` +
+        `<b>${nodeLabel(route.dest, destName)}</b><br/>` +
+        `${hopLabel} · via ${nodeLabel(route.nextHop, nextHopName)}<br/>` +
         `Metric: ${route.metric} · ${stateLabel}`,
         { sticky: true, direction: 'top', className: styles.routeTooltip }
       );
     }
-  }, [routes, peerLocations, selfPos, selfAddr, showRoutes]);
+  }, [routes, peerLocations, selfPos, selfAddr, selfName, peerNames, showRoutes]);
 
   // Handle focus request from Nodes page
   useEffect(() => {
