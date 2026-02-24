@@ -42,4 +42,4 @@ jobs:
             build-artifacts/firmware-ci/SHA256SUMS.txt
           if-no-files-found: error
 
-# trigger: ota publish wiring 2026-02-24T16:36:00Z
+# trigger: ota publish wiring 2026-02-24T16:50:00Z
