@@ -1609,12 +1609,74 @@ components:
           oneOf:
             - $ref: '#/components/schemas/BroadcastDeliveryNotification'
             - $ref: '#/components/schemas/TrafficEvent'
+            - $ref: '#/components/schemas/WifiEvent'
+            - $ref: '#/components/schemas/GpsEvent'
+            - $ref: '#/components/schemas/LocationEvent'
           description: Notification payload for the emitted monitor event.
 
     MonitorEventMethod:
       type: string
       description: Canonical monitor/event-stream notification method names.
-      enum: [bramble.onBroadcastDelivery, bramble.onTrafficEvent]
+      enum: [bramble.onBroadcastDelivery, bramble.onTrafficEvent, bramble.onWifiEvent, bramble.onGpsEvent, bramble.onLocationEvent]
+
+    WifiEvent:
+      type: object
+      required: [event, mode, connected, ip]
+      properties:
+        event:
+          type: string
+          enum: [connected, disconnected, ip_changed]
+        mode:
+          type: string
+          enum: [off, sta, ap]
+        connected:
+          type: boolean
+        ssid:
+          type: string
+        ip:
+          type: string
+        rssi:
+          type: integer
+
+    GpsEvent:
+      type: object
+      required: [event]
+      properties:
+        event:
+          type: string
+          enum: [fix_acquired, fix_lost]
+        valid:
+          type: boolean
+        lat:
+          type: number
+        lon:
+          type: number
+        alt_m:
+          type: integer
+        sats:
+          type: integer
+
+    LocationEvent:
+      type: object
+      required: [event, tier, timestamp_ms]
+      properties:
+        event:
+          type: string
+          enum: [sent, received]
+        peer:
+          type: string
+          description: Hex peer address for received events.
+        tier:
+          type: integer
+        timestamp_ms:
+          type: integer
+        rssi:
+          type: integer
+        snr:
+          type: integer
+        count:
+          type: integer
+          description: Number of recipients in a location send cycle.
 
 # ── Notifications (extension) ──────────────────────────────────────────────
 
@@ -1686,5 +1748,26 @@ x-notifications:
       or reconnect backfill via bramble.getTrafficEvents(since_seq).
     payload:
       $ref: '#/components/schemas/TrafficEvent'
+    envelope:
+      $ref: '#/components/schemas/MonitorEventStreamNotification'
+
+  bramble.onWifiEvent:
+    description: WiFi state transition event (connect/disconnect/IP change).
+    payload:
+      $ref: '#/components/schemas/WifiEvent'
+    envelope:
+      $ref: '#/components/schemas/MonitorEventStreamNotification'
+
+  bramble.onGpsEvent:
+    description: GPS fix transition event.
+    payload:
+      $ref: '#/components/schemas/GpsEvent'
+    envelope:
+      $ref: '#/components/schemas/MonitorEventStreamNotification'
+
+  bramble.onLocationEvent:
+    description: Location sharing send/receive event.
+    payload:
+      $ref: '#/components/schemas/LocationEvent'
     envelope:
       $ref: '#/components/schemas/MonitorEventStreamNotification'

@@ -37,3 +37,30 @@ Semantics:
   }
 }
 ```
+
+## `bramble.onWifiEvent`
+
+WiFi lifecycle transition notifications for monitor/event streams.
+
+Fields include:
+- `event`: `connected` | `disconnected` | `ip_changed`
+- `mode`: `off` | `sta` | `ap`
+- `connected` (bool), `ssid`, `ip`, `rssi`
+
+## `bramble.onGpsEvent`
+
+GPS fix transition notifications.
+
+Fields include:
+- `event`: `fix_acquired` | `fix_lost`
+- Optional position details on acquire: `lat`, `lon`, `alt_m`, `sats`
+
+## `bramble.onLocationEvent`
+
+Location sharing activity notifications.
+
+Fields include:
+- `event`: `sent` | `received`
+- `tier`, `timestamp_ms`
+- `peer` for received events
+- `count` for batched sends
