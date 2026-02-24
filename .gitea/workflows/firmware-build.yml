@@ -21,7 +21,18 @@ jobs:
           . /opt/esp/idf/export.sh
           bash scripts/ci-build-firmware.sh
 
-      # OTA publish moved to firmware-publish-ota.yml workflow_run
+      - name: Publish OTA via authenticated endpoint
+        env:
+          OTA_PUBLISH_KEY: ${{ secrets.OTA_PUBLISH_KEY }}
+          OTA_PUBLISH_URL: https://bramblemesh.org/ota/publish
+          CHANNEL: dev
+          BOARD: heltec-v3
+        run: |
+          if ! command -v curl >/dev/null 2>&1; then apt-get update && apt-get install -y curl; fi
+          if ! command -v jq >/dev/null 2>&1; then apt-get update && apt-get install -y jq; fi
+          chmod +x scripts/ci-publish-ota.sh
+          scripts/ci-publish-ota.sh
+
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3
         with:
