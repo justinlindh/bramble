@@ -11,7 +11,7 @@ on:
 
 jobs:
   firmware-build:
-    runs-on: linux
+    runs-on: idf
     steps:
       - name: Checkout
         uses: actions/checkout@v4
