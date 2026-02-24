@@ -71,7 +71,7 @@ static void emit_gps_event(const char *event, const bramble_position_t *pos) {
         cJSON_AddNumberToObject(params, "lat", pos->latitude_e7 / 1e7);
         cJSON_AddNumberToObject(params, "lon", pos->longitude_e7 / 1e7);
         cJSON_AddNumberToObject(params, "alt_m", pos->altitude_m);
-        cJSON_AddNumberToObject(params, "sats", pos->satellites);
+        cJSON_AddNumberToObject(params, "accuracy_m", pos->accuracy_m);
     }
     rpc_notify("bramble.onGpsEvent", params);
     cJSON_Delete(params);
