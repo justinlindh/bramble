@@ -986,7 +986,7 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                 cJSON_AddNumberToObject(self, "lon", lon_e6 / 1e6);
                 cJSON_AddStringToObject(self, "tier", "exact");
                 cJSON_AddBoolToObject(self, "is_self", true);
-                cJSON_AddNumberToObject(self, "addr", (double)s_identity->address);
+                cJSON_AddStringToObject(self, "addr", addr_hex(s_identity->address, buf, sizeof(buf)));
                 cJSON_AddStringToObject(self, "name", "self");
                 cJSON_AddBoolToObject(self, "online", true);
                 cJSON_AddNumberToObject(self, "lastUpdatedMs", (double)(esp_timer_get_time() / 1000ULL));
@@ -1024,7 +1024,7 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                         cJSON_AddNumberToObject(position, "heading", stored.heading_deg2 * 2);
                         cJSON_AddNumberToObject(position, "timestampMs", (double)stored.timestamp * 1000.0);
 
-                        cJSON_AddNumberToObject(peer, "addr", (double)addr);
+                        cJSON_AddStringToObject(peer, "addr", info.key + 3);
                         cJSON_AddStringToObject(peer, "address", info.key + 3);
                         cJSON_AddStringToObject(peer, "name", "");
                         cJSON_AddStringToObject(peer, "tier", location_tier_to_string(stored.tier));
