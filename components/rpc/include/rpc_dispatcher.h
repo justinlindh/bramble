@@ -1,7 +1,8 @@
 #pragma once
 
-#include "cJSON.h"
 #include <stddef.h>
+
+typedef struct cJSON cJSON;
 
 /* JSON-RPC 2.0 standard error codes */
 #define RPC_ERR_PARSE        (-32700)

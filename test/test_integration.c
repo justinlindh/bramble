@@ -7,6 +7,7 @@
 #include "esp_stubs.h"
 
 /* Include implementations directly */
+#include "../components/location/include/location.h"
 #include "../components/routing/routing.c"
 #include "../components/routing/discovery.c"
 #include "../components/routing/forwarding.c"
@@ -223,11 +224,37 @@ void test_rerr_breaks_route(void) {
     TEST_ASSERT_EQUAL(ROUTE_BROKEN, r->state);
 }
 
+void test_location_tx_uses_dedicated_packet_type(void) {
+    /* Coarse/binary payload shape, intentionally not JSON text. */
+    uint8_t payload[LOCATION_COARSE_SIZE] = {0x11, 0x22, 0x33, 0x44, 0x55};
+    int payload_len = LOCATION_COARSE_SIZE;
+
+    uint8_t packet[HEADER_SIZE + 4 + LOCATION_FULL_SIZE] = {0};
+    bramble_header_t hdr = {
+        .version = BRAMBLE_VERSION,
+        .type = PKT_TYPE_LOCATION,
+        .flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT),
+        .hop_limit = 3,
+        .dest_addr = ADDR_B,
+        .packet_id = 0x01020304,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&hdr, packet, sizeof(packet)));
+    uint32_t src_addr = ADDR_A;
+    memcpy(packet + HEADER_SIZE, &src_addr, 4);
+    memcpy(packet + HEADER_SIZE + 4, payload, (size_t)payload_len);
+
+    bramble_header_t out_hdr;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out_hdr, packet, HEADER_SIZE + 4 + payload_len));
+    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out_hdr.type);
+    TEST_ASSERT_NOT_EQUAL('{', packet[HEADER_SIZE + 4]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_three_node_route_discovery);
     RUN_TEST(test_rreq_dedup_prevents_loops);
     RUN_TEST(test_route_error_on_missing_route);
     RUN_TEST(test_rerr_breaks_route);
+    RUN_TEST(test_location_tx_uses_dedicated_packet_type);
     return UNITY_END();
 }

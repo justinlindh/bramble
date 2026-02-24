@@ -29,6 +29,7 @@
 #include "location.h"
 
 #include "gps.h"
+#include "cJSON.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
@@ -57,10 +58,80 @@ static const char *TAG = "bramble";
 /* ── Location manager ───────────────────────────────────────────────── */
 
 static location_manager_t g_location_mgr;
+static bool s_last_gps_fix = false;
+static bool s_has_last_wifi_status = false;
+static wifi_status_t s_last_wifi_status = {0};
+
+static void emit_gps_event(const char *event, const bramble_position_t *pos) {
+    cJSON *params = cJSON_CreateObject();
+    if (!params) return;
+    cJSON_AddStringToObject(params, "event", event);
+    if (pos) {
+        cJSON_AddBoolToObject(params, "valid", pos->valid);
+        cJSON_AddNumberToObject(params, "lat", pos->latitude_e7 / 1e7);
+        cJSON_AddNumberToObject(params, "lon", pos->longitude_e7 / 1e7);
+        cJSON_AddNumberToObject(params, "alt_m", pos->altitude_m);
+        cJSON_AddNumberToObject(params, "accuracy_m", pos->accuracy_m);
+    }
+    rpc_notify("bramble.onGpsEvent", params);
+    cJSON_Delete(params);
+}
+
+static void emit_wifi_event(const wifi_status_t *st, const char *event) {
+    cJSON *params = cJSON_CreateObject();
+    if (!params) return;
+    const bool connected = st->ip_addr[0] != '\0';
+    const char *mode = "off";
+    if (st->mode == BRAMBLE_WIFI_STATION) mode = "sta";
+    else if (st->mode == BRAMBLE_WIFI_AP) mode = "ap";
+
+    cJSON_AddStringToObject(params, "event", event);
+    cJSON_AddStringToObject(params, "mode", mode);
+    cJSON_AddBoolToObject(params, "connected", connected);
+    if (st->ssid[0] != '\0') {
+        cJSON_AddStringToObject(params, "ssid", st->ssid);
+    }
+    cJSON_AddStringToObject(params, "ip", st->ip_addr);
+    cJSON_AddNumberToObject(params, "rssi", st->rssi);
+    rpc_notify("bramble.onWifiEvent", params);
+    cJSON_Delete(params);
+}
+
+static void poll_connectivity_events(void) {
+    if (board_has_cap(BOARD_CAP_GPS)) {
+        bool has_fix = gps_has_fix();
+        if (has_fix != s_last_gps_fix) {
+            s_last_gps_fix = has_fix;
+            if (!has_fix) {
+                emit_gps_event("fix_lost", NULL);
+            }
+        }
+    }
+
+    wifi_status_t st;
+    wifi_manager_get_status(&st);
+    if (!s_has_last_wifi_status) {
+        s_last_wifi_status = st;
+        s_has_last_wifi_status = true;
+        return;
+    }
+    bool connected = st.ip_addr[0] != '\0';
+    bool last_connected = s_last_wifi_status.ip_addr[0] != '\0';
+    if (connected != last_connected) {
+        emit_wifi_event(&st, connected ? "connected" : "disconnected");
+    } else if (strncmp(st.ip_addr, s_last_wifi_status.ip_addr, sizeof(st.ip_addr)) != 0 && connected) {
+        emit_wifi_event(&st, "ip_changed");
+    }
+    s_last_wifi_status = st;
+}
 
 static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
     location_manager_t *mgr = (location_manager_t *)ctx;
     location_set_position(mgr, pos);
+    if (pos && pos->valid) {
+        s_last_gps_fix = true;
+        emit_gps_event("fix_acquired", pos);
+    }
     ESP_LOGI(TAG, "GPS position updated: lat=%.6f lon=%.6f alt=%d",
              pos->latitude_e7 / 1e7, pos->longitude_e7 / 1e7, pos->altitude_m);
 }
@@ -676,10 +747,12 @@ void app_main(void)
     while (1) {
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
         /* LVGL runs in its own task — main loop just keeps watchdog happy */
+        poll_connectivity_events();
         vTaskDelay(pdMS_TO_TICKS(1000));
 #else
         /* Main loop — 50ms tick (20 Hz) */
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        poll_connectivity_events();
 
         /* Poll button / trackball */
         ui_button_t btn = BTN_NONE;

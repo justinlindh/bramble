@@ -19,7 +19,11 @@
 #include "battery.h"
 #include "traffic_debug.h"
 #include "fragment.h"
+#include "location.h"
+#include "gps.h"
 #include "cJSON.h"
+
+#include <stdio.h>
 
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
@@ -159,6 +163,23 @@ typedef struct {
 } mailbox_entry_t;
 static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
 
+/* Location policy engine tick state */
+static uint32_t s_location_last_policy_tick_ms = 0;
+static uint32_t s_location_last_send_ms = 0;
+static location_manager_t s_location_mgr;
+
+typedef struct __attribute__((packed)) {
+    int32_t latitude_e7;
+    int32_t longitude_e7;
+    int16_t altitude_m;
+    uint8_t accuracy_m;
+    uint8_t speed_kmh;
+    uint8_t heading_deg2;
+    uint32_t timestamp;
+    uint32_t received_ms;
+    uint8_t tier;
+} persisted_peer_location_t;
+
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
 /* Forward declarations */
@@ -172,6 +193,7 @@ static int transmit_packet(const uint8_t *buf, uint8_t len);
 static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
+extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
     snprintf(buf, len, "%08" PRIX32, addr);
@@ -190,6 +212,290 @@ static uint32_t next_packet_id(void) {
         counter = (uint32_t)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
     }
     return counter++;
+}
+
+static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t *policy) {
+    location_policy_set_defaults(policy);
+
+    uint8_t enabled = 0;
+    if (nvs_get_u8(nvs, "enabled", &enabled) == ESP_OK) {
+        policy->enabled = (enabled != 0);
+    }
+
+    uint16_t interval_s = 0;
+    if (nvs_get_u16(nvs, "interval_s", &interval_s) == ESP_OK) {
+        policy->interval_s = interval_s;
+    }
+
+    char tier[16] = {0};
+    size_t tier_len = sizeof(tier);
+    if (nvs_get_str(nvs, "def_tier", tier, &tier_len) == ESP_OK) {
+        policy->default_tier = location_tier_from_string(tier);
+    }
+
+    location_policy_normalize(policy);
+}
+
+static bool location_policy_has_targets(void) {
+    nvs_iterator_t it = NULL;
+    if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) != ESP_OK) {
+        return false;
+    }
+
+    while (it != NULL) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        if (strncmp(info.key, "lcr_", 4) == 0) {
+            nvs_release_iterator(it);
+            return true;
+        }
+        if (nvs_entry_next(&it) != ESP_OK) {
+            break;
+        }
+    }
+    nvs_release_iterator(it);
+    return false;
+}
+
+uint32_t mesh_send_location_packet(uint32_t dest_addr,
+                                  const bramble_position_t *pos,
+                                  uint8_t tier) {
+    if (!pos || !pos->valid) return 0;
+
+    if (tier > LOCATION_TIER_PRESENCE) {
+        tier = LOCATION_TIER_COARSE;
+    }
+
+    uint8_t payload[LOCATION_FULL_SIZE];
+    int payload_len = location_serialize_for_tier(pos, tier, payload, sizeof(payload));
+    if (payload_len <= 0) {
+        return 0;
+    }
+
+    uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
+    bramble_header_t header = {
+        .version = BRAMBLE_VERSION,
+        .type = PKT_TYPE_LOCATION,
+        .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
+        .hop_limit = 3,
+        .dest_addr = dest_addr,
+        .packet_id = next_packet_id(),
+    };
+
+    bramble_header_serialize(&header, pkt, HEADER_SIZE);
+    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+    memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
+
+    size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
+    int rc = transmit_packet(pkt, (uint8_t)wire_len);
+    if (rc == 0) {
+        ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
+                 header.dest_addr,
+                 tier,
+                 (unsigned)wire_len);
+        return header.packet_id;
+    }
+
+    return 0;
+}
+
+static void mesh_emit_location_event(const char *event,
+                                     uint32_t peer_addr,
+                                     uint8_t tier,
+                                     uint32_t timestamp_ms,
+                                     int16_t rssi,
+                                     int8_t snr,
+                                     uint32_t count) {
+    cJSON *params = cJSON_CreateObject();
+    if (!params) return;
+    cJSON_AddStringToObject(params, "event", event);
+    if (peer_addr != 0) {
+        char addr_buf[9];
+        snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, peer_addr);
+        cJSON_AddStringToObject(params, "peer", addr_buf);
+    }
+    cJSON_AddNumberToObject(params, "tier", tier);
+    cJSON_AddNumberToObject(params, "timestamp_ms", timestamp_ms);
+    if (rssi != 0 || snr != 0) {
+        cJSON_AddNumberToObject(params, "rssi", rssi);
+        cJSON_AddNumberToObject(params, "snr", snr);
+    }
+    if (count > 0) {
+        cJSON_AddNumberToObject(params, "count", count);
+    }
+    rpc_notify("bramble.onLocationEvent", params);
+    cJSON_Delete(params);
+}
+
+static void mesh_send_location_updates(uint32_t t,
+                                       const location_policy_t *policy,
+                                       const bramble_position_t *source_pos) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+
+    bramble_position_t pos = *source_pos;
+    pos.timestamp = t / 1000;
+    pos.valid = true;
+
+    uint32_t sent_count = 0;
+    nvs_iterator_t it = NULL;
+    if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
+        while (it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+
+            if (strncmp(info.key, "lcr_", 4) == 0) {
+                const char *addr = info.key + 4;
+
+                bool enabled = true;
+                uint8_t tier = policy->default_tier;
+                char raw[48] = {0};
+                size_t raw_len = sizeof(raw);
+                if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
+                    int en = 1;
+                    char tier_str[16] = {0};
+                    int interval_tmp = 0;
+                    if (sscanf(raw, "%d|%15[^|]|%d", &en, tier_str, &interval_tmp) >= 2) {
+                        enabled = (en != 0);
+                        tier = location_tier_from_string(tier_str);
+                    }
+                }
+
+                if (enabled) {
+                    uint32_t pkt_id = mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
+                    if (pkt_id != 0) {
+                        sent_count++;
+                    }
+                }
+            }
+
+            if (nvs_entry_next(&it) != ESP_OK) {
+                break;
+            }
+        }
+        nvs_release_iterator(it);
+    }
+
+    nvs_close(nvs);
+
+    if (sent_count > 0) {
+        mesh_emit_location_event("sent", 0, policy->default_tier, t, 0, 0, sent_count);
+    }
+}
+
+static void mesh_persist_peer_location(uint32_t peer_addr,
+                                       const bramble_position_t *pos,
+                                       uint8_t tier,
+                                       uint32_t now_ms) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+
+    char key[16];
+    snprintf(key, sizeof(key), "lp_%08" PRIX32, peer_addr);
+
+    persisted_peer_location_t stored = {
+        .latitude_e7 = pos->latitude_e7,
+        .longitude_e7 = pos->longitude_e7,
+        .altitude_m = pos->altitude_m,
+        .accuracy_m = pos->accuracy_m,
+        .speed_kmh = pos->speed_kmh,
+        .heading_deg2 = pos->heading_deg2,
+        .timestamp = pos->timestamp,
+        .received_ms = now_ms,
+        .tier = tier,
+    };
+
+    nvs_set_blob(nvs, key, &stored, sizeof(stored));
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    if (len < HEADER_SIZE + 4 + LOCATION_PRESENCE_SIZE) {
+        ESP_LOGW(TAG, "Location packet too short: %u", len);
+        return;
+    }
+
+    bramble_header_t header;
+    if (bramble_header_deserialize(&header, data, len) != ESP_OK) {
+        return;
+    }
+
+    uint32_t src_addr = 0;
+    memcpy(&src_addr, data + HEADER_SIZE, 4);
+    if (src_addr == s_identity->address) {
+        return;
+    }
+
+    uint8_t tier = (uint8_t)((header.flags >> FLAG_TIER_SHIFT) & 0x03);
+    const uint8_t *payload = data + HEADER_SIZE + 4;
+    size_t payload_len = len - HEADER_SIZE - 4;
+
+    bramble_position_t pos = {0};
+    if (location_deserialize_for_tier(payload, payload_len, tier, &pos) <= 0) {
+        ESP_LOGW(TAG, "Failed to parse location payload from %08" PRIX32 " tier=%u", src_addr, tier);
+        return;
+    }
+
+    uint32_t t = now_ms();
+    location_cache_update(&s_location_mgr, src_addr, &pos, t);
+    mesh_persist_peer_location(src_addr, &pos, tier, t);
+
+    ESP_LOGI(TAG, "RX location from %08" PRIX32 " tier=%u RSSI:%d SNR:%d", src_addr, tier, rssi, snr);
+    rpc_notify("bramble.onPeerLocation", NULL);
+    mesh_emit_location_event("received", src_addr, tier, t, rssi, snr, 0);
+}
+
+static void mesh_location_policy_tick(uint32_t t) {
+    const uint32_t tick_ms = 1000;
+    if ((t - s_location_last_policy_tick_ms) < tick_ms) {
+        return;
+    }
+    s_location_last_policy_tick_ms = t;
+
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+
+    location_policy_t policy;
+    location_policy_load_or_defaults(nvs, &policy);
+
+    int32_t lat_e6 = 0;
+    int32_t lon_e6 = 0;
+    bool has_manual_source = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
+                             (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
+                             !(lat_e6 == 0 && lon_e6 == 0);
+    nvs_close(nvs);
+
+    bramble_position_t source_pos = {0};
+    bool has_source = false;
+
+    bramble_position_t gps_pos;
+    if (gps_get_position(&gps_pos) && gps_pos.valid) {
+        source_pos = gps_pos;
+        has_source = true;
+    } else if (has_manual_source) {
+        source_pos.latitude_e7 = lat_e6 * 10;
+        source_pos.longitude_e7 = lon_e6 * 10;
+        source_pos.altitude_m = 0;
+        source_pos.accuracy_m = 0;
+        source_pos.speed_kmh = 0;
+        source_pos.heading_deg2 = 0;
+        source_pos.valid = true;
+        has_source = true;
+    }
+
+    bool has_targets = location_policy_has_targets();
+
+    if (location_policy_should_send(&policy, has_source, has_targets, t, s_location_last_send_ms)) {
+        mesh_send_location_updates(t, &policy, &source_pos);
+        s_location_last_send_ms = t;
+    }
 }
 
 static void mesh_persist_channel_psk_flags(void) {
@@ -1187,6 +1493,11 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
         break;
+    case PKT_TYPE_LOCATION:
+        if (header.dest_addr == s_identity->address || header.dest_addr == 0xFFFFFFFF) {
+            handle_location(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        }
+        break;
     case PKT_TYPE_PROBE:
         handle_probe(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         break;
@@ -1728,6 +2039,8 @@ static void mesh_task(void *param) {
             mesh_start_probe_sweep(queued_pid);
         }
 
+        mesh_location_policy_tick(t);
+
         /* Perform all periodic maintenance tasks */
         mesh_periodic_maintenance(t, &last_beacon_ms, &beacon_interval, &last_purge_ms);
 
@@ -2148,6 +2461,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
     reassembly_init(&s_reassembly);
+    location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(&s_shared, 0, sizeof(s_shared));
 
