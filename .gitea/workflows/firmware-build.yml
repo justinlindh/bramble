@@ -25,8 +25,10 @@ jobs:
         env:
           OTA_ROOT: /ota
         run: |
-          echo "[ota] mount check" && mount | grep ' /ota ' || true
-          echo "[ota] listing" && ls -la "$OTA_ROOT" || true
+          echo "[ota] mount check"
+          mount | grep ' /ota ' || { echo '/ota mount missing'; exit 1; }
+          echo "[ota] listing"
+          ls -la "$OTA_ROOT"
           VERSION="$(git describe --tags --always --dirty)"
           if echo "$VERSION" | grep -Eq '^v[0-9]'; then CHANNEL=stable; else CHANNEL=dev; fi
           ./scripts/publish-firmware-release.sh "$OTA_ROOT" "$CHANNEL" "$VERSION" \
