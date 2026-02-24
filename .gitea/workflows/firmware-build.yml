@@ -44,6 +44,9 @@ jobs:
           CHANNEL: dev
         run: |
           VERSION=$(git describe --tags --always --dirty)
+          if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            VERSION="v0.0.0-$(git rev-parse --short HEAD)"
+          fi
           curl -fsSL https://bramblemesh.org/ota/index.json -o /tmp/ota-index.json
           jq -e --arg version "$VERSION" --arg channel "$CHANNEL" '
             any(.releases[]; .version == $version and .channel == $channel)
