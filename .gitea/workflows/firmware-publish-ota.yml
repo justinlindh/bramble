@@ -35,7 +35,7 @@ jobs:
       - name: Publish latest successful firmware run to OTA
         env:
           RUN_ID: ${{ github.event.inputs.run_id || github.event.workflow_run.id }}
-          OTA_ROOT: /ota
+          OTA_ROOT: /home/justin/src/dockers/ota
           GITEA_DATA_ROOT: /home/justin/src/dockers/gitea/data/gitea/actions_artifacts
         run: |
           chmod +x scripts/publish-latest-firmware-artifact-run.sh
