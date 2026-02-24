@@ -62,6 +62,18 @@ static int h_set_location_config(const cJSON *params, cJSON *result) {
     return 0;
 }
 
+static int h_share_location_once(const cJSON *params, cJSON *result) {
+    const cJSON *address = cJSON_GetObjectItem(params, "address");
+    const cJSON *tier = cJSON_GetObjectItem(params, "tier");
+    if (!cJSON_IsString(address)) return RPC_ERR_INVALID_PARAMS;
+    if (tier && !cJSON_IsString(tier)) return RPC_ERR_INVALID_PARAMS;
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "packetType", "PKT_TYPE_LOCATION");
+    cJSON_AddStringToObject(result, "tier", tier && tier->valuestring ? tier->valuestring : "coarse");
+    return 0;
+}
+
 void test_send_message_missing_params_returns_invalid_params(void) {
     rpc_register("bramble.sendMessage", h_send_message);
 
@@ -142,6 +154,34 @@ void test_set_location_config_rejects_invalid_hybrid_policy_shapes(void) {
     cJSON_Delete(resp);
 }
 
+void test_share_location_once_reports_location_packet_type(void) {
+    rpc_register("bramble.shareLocationOnce", h_share_location_once);
+
+    char response[512];
+    int len = rpc_dispatch("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"bramble.shareLocationOnce\",\"params\":{\"address\":\"AABBCCDD\"}}",
+                           response, sizeof(response));
+    TEST_ASSERT_GREATER_THAN(0, len);
+
+    cJSON *resp = parse_response(response);
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    TEST_ASSERT_EQUAL_STRING("PKT_TYPE_LOCATION", cJSON_GetObjectItem(result, "packetType")->valuestring);
+    cJSON_Delete(resp);
+}
+
+void test_share_location_once_honors_requested_tier(void) {
+    rpc_register("bramble.shareLocationOnce", h_share_location_once);
+
+    char response[512];
+    int len = rpc_dispatch("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.shareLocationOnce\",\"params\":{\"address\":\"AABBCCDD\",\"tier\":\"presence\"}}",
+                           response, sizeof(response));
+    TEST_ASSERT_GREATER_THAN(0, len);
+
+    cJSON *resp = parse_response(response);
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    TEST_ASSERT_EQUAL_STRING("presence", cJSON_GetObjectItem(result, "tier")->valuestring);
+    cJSON_Delete(resp);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_send_message_missing_params_returns_invalid_params);
@@ -149,5 +189,7 @@ int main(void) {
     RUN_TEST(test_handler_radio_error_bubbles_to_error_response);
     RUN_TEST(test_set_location_config_accepts_hybrid_policy_fields);
     RUN_TEST(test_set_location_config_rejects_invalid_hybrid_policy_shapes);
+    RUN_TEST(test_share_location_once_reports_location_packet_type);
+    RUN_TEST(test_share_location_once_honors_requested_tier);
     return UNITY_END();
 }
