@@ -8,6 +8,19 @@
 
 **Tech Stack:** ESP-IDF firmware C, OpenAPI YAML, Go SDK (`bramble-go`), Go CLI (`bramble-cli`), Cobra commands, JSON-RPC.
 
+## Status — ✅ COMPLETE (2026-02-24)
+
+Verified complete against repo state + evidence:
+- Firmware/API alignment landed (OpenAPI + RPC canonicalization + monitor/location notifications).
+- Go SDK parity landed (`0.4.0` compatibility + location/monitor decoding updates).
+- CLI parity landed (`location set-config/get-config`, protocol-native monitor topic filters).
+- CLI-only 3-node validation evidence recorded in `docs/plans/evidence/2026-02-23-cli-only-location-validation.md`.
+
+Key commits present across repos include:
+- bramble: `c331ce3` (merge: location sharing + cli/sdk/openapi alignment), `84cc856`, `a995b2e`, `b35d32e`
+- bramble-go: `cf4394c`, `5fe4f98`, `d1bafe7`
+- bramble-cli: `0c52672`, `e4b3434`, `f348e32`, `6a5e6ee`
+
 ---
 
 ### Task 1: Lock canonical OpenAPI schemas for location + monitoring

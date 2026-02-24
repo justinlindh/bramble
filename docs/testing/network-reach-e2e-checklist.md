@@ -94,8 +94,10 @@ Use this addendum for the privacy-first location sharing rollout verification.
 - If any hardware checks are not run, mark them explicitly as **Pending** (no inferred pass/fail).
 
 ### CLI-only parity checks (required for protocol alignment)
-- [ ] `bramble location set-config` succeeds using canonical fields (`enabled`, `default_tier`, `interval_s`, `source`, `contact_rules`, `channel_targets`).
-- [ ] `bramble location get-config --json` returns canonical location block.
-- [ ] Receiver `bramble location status --json` shows sender with valid `addr` string and advancing `lastUpdatedMs` while enabled.
-- [ ] After `--enabled=false`, receiver `lastUpdatedMs` stops advancing across validation window.
-- [ ] `bramble monitor --topic wifi,gps,location --json` emits protocol-native topic events.
+- [x] `bramble location set-config` succeeds using canonical fields (`enabled`, `default_tier`, `interval_s`, `source`, `contact_rules`, `channel_targets`).
+- [x] `bramble location get-config --json` returns canonical location block.
+- [x] Receiver `bramble location status --json` shows sender with valid `addr` string and advancing `lastUpdatedMs` while enabled.
+- [x] After `--enabled=false`, receiver `lastUpdatedMs` stops advancing across validation window.
+- [x] `bramble monitor --topic wifi,gps,location --json` emits protocol-native topic events.
+
+Evidence: `docs/plans/evidence/2026-02-23-cli-only-location-validation.md`.
