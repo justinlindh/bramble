@@ -7,6 +7,13 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_BRAMBLE_BOARD_TDECK_PLUS=y
+
+# T-Deck default profile is WiFi-first (BLE disabled) to avoid AP auth instability
+# observed with BLE enabled on current ESP-IDF/board stack.
+# CONFIG_BT_ENABLED is not set
+# CONFIG_BT_NIMBLE_ENABLED is not set
+CONFIG_BT_CONTROLLER_DISABLED=y
+
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.tdeck_plus.csv"
 
