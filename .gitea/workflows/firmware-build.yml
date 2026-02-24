@@ -35,3 +35,4 @@ jobs:
 # trigger: ota publish wiring 2026-02-24T17:05:00Z
 # debug trigger 2026-02-24T17:29:15Z
 # ota retry 2026-02-24T17:43:57Z
+# post-build automation trigger 2026-02-24T18:00:15Z
