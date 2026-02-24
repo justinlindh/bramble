@@ -2,6 +2,12 @@ name: Firmware Build
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.gitea/workflows/firmware-build.yml'
+      - 'scripts/ci-build-firmware.sh'
+      - 'docker/firmware-builder/**'
 
 jobs:
   firmware-build:
@@ -22,7 +28,7 @@ jobs:
             bash scripts/ci-build-firmware.sh
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: firmware-build-artifacts
           path: build-artifacts/firmware-ci
