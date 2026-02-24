@@ -16,7 +16,6 @@ Sets persisted location policy and optional manual coordinates.
 Accepted params (all optional for partial updates):
 
 - `enabled` (bool)
-- `tier` (string) — alias for `default_tier`
 - `default_tier` (string) — `full | coarse | presence | off`
 - `interval_s` (number)
 - `source` (string) — `gps | manual | hybrid`
@@ -62,7 +61,6 @@ Compatibility notes:
 `bramble.getPeerLocations.result` includes:
 
 - `peerLocations` (array of canonical location peers)
-- `peers` (array, compatibility alias)
 
 Each peer object uses canonical fields:
 

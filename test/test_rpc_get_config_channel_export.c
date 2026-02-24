@@ -241,8 +241,7 @@ void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(peer, "online")));
 
     cJSON *legacy = cJSON_GetObjectItem(result, "peers");
-    TEST_ASSERT_TRUE(cJSON_IsArray(legacy));
-    TEST_ASSERT_EQUAL(1, cJSON_GetArraySize(legacy));
+    TEST_ASSERT_NULL(legacy);
 
     cJSON_Delete(root);
 }
