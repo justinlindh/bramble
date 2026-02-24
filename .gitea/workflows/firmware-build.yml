@@ -11,19 +11,10 @@ on:
 
 jobs:
   firmware-build:
-    runs-on: idf
+    runs-on: idf-node
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Node.js runtime for JavaScript actions
-        run: |
-          if ! command -v node >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y nodejs npm
-          fi
-          node --version
-          npm --version
 
       - name: Build firmware artifacts
         run: bash scripts/ci-build-firmware.sh
