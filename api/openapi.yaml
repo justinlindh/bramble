@@ -447,7 +447,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/SetLocationConfigResponse'
 
   /rpc/bramble.setLocationContact:
     post:
@@ -468,7 +468,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/SetLocationContactResponse'
 
   /rpc/bramble.removeLocationContact:
     post:
@@ -489,7 +489,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/RemoveLocationContactResponse'
 
   /rpc/bramble.shareLocationOnce:
     post:
@@ -510,7 +510,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/ShareLocationOnceResponse'
 
   /rpc/bramble.reboot:
     post:
@@ -866,48 +866,94 @@ components:
           type: integer
           description: Optional congestion score (0-100, future feature).
 
-    LocationContact:
+    LocationTier:
+      type: string
+      enum: [full, coarse, presence, off]
+      description: Location sharing tier.
+
+    LocationSource:
+      type: string
+      enum: [gps, manual, hybrid]
+      description: Source mode for location reporting.
+
+    LocationContactRule:
       type: object
-      description: A location sharing contact configuration.
-      required: [addr, tier, intervalSec, distanceTriggerM]
+      description: Per-peer location sharing rule.
+      required: [address]
       properties:
-        addr:
-          type: integer
-          description: Peer address (uint32).
-        tier:
+        address:
           type: string
-          enum: [full, coarse, presence]
-          description: Location sharing tier.
-        intervalSec:
+          description: Peer address as 8-char uppercase hex.
+        enabled:
+          type: boolean
+          description: Whether rule is enabled.
+        tier:
+          $ref: '#/components/schemas/LocationTier'
+        interval_s:
           type: integer
-          description: Update interval in seconds.
-        distanceTriggerM:
+          description: Override update interval in seconds.
+
+    LocationChannelTarget:
+      type: object
+      description: Per-channel location sharing rule.
+      required: [channel]
+      properties:
+        channel:
           type: integer
-          description: Minimum distance change (meters) to trigger update.
+          description: Channel index.
+        enabled:
+          type: boolean
+          description: Whether rule is enabled.
+        tier:
+          $ref: '#/components/schemas/LocationTier'
+        interval_s:
+          type: integer
+          description: Override update interval in seconds.
+
+    LocationConfig:
+      type: object
+      description: Canonical location configuration.
+      required: [enabled, tier, default_tier, interval_s, source, contact_rules, channel_targets]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether location sharing is enabled.
+        tier:
+          $ref: '#/components/schemas/LocationTier'
+        default_tier:
+          $ref: '#/components/schemas/LocationTier'
+        interval_s:
+          type: integer
+          description: Default update interval in seconds.
+        source:
+          $ref: '#/components/schemas/LocationSource'
+        contact_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/LocationContactRule'
+        channel_targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/LocationChannelTarget'
 
     LocationPeer:
       type: object
       description: Location data for a peer node.
-      required: [addr, name, tier, online, lastUpdatedMs]
+      required: [addr, name, tier, position, online, lastUpdatedMs]
       properties:
         addr:
-          type: integer
-          description: Peer address (uint32).
+          type: string
+          description: Peer address as 8-char uppercase hex.
         name:
           type: string
           description: Peer display name.
         tier:
-          type: string
-          enum: [full, coarse, presence]
-          description: Location sharing tier.
+          $ref: '#/components/schemas/LocationTier'
         position:
           oneOf:
             - $ref: '#/components/schemas/Position'
             - type: 'null'
-          description: Full position data (null if tier is coarse or presence).
-        gridSquare:
-          type: string
-          description: Maidenhead grid square (for coarse tier).
+          description: Position data for this peer (null when unavailable).
         online:
           type: boolean
           description: Whether the peer is currently online.
@@ -1060,10 +1106,15 @@ components:
 
     PeerLocationsResponse:
       type: object
-      required: [peers]
+      required: [peerLocations]
       properties:
+        peerLocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/LocationPeer'
         peers:
           type: array
+          description: Compatibility alias for legacy clients.
           items:
             $ref: '#/components/schemas/LocationPeer'
 
@@ -1115,25 +1166,7 @@ components:
           type: boolean
           description: Whether store-and-forward mailbox is enabled.
         location:
-          type: object
-          required: [enabled, contacts, defaultIntervalSec, defaultDistanceTriggerM, stationaryBackoff]
-          properties:
-            enabled:
-              type: boolean
-              description: Whether location sharing is enabled.
-            contacts:
-              type: array
-              items:
-                $ref: '#/components/schemas/LocationContact'
-            defaultIntervalSec:
-              type: integer
-              description: Default update interval in seconds.
-            defaultDistanceTriggerM:
-              type: integer
-              description: Default distance trigger in meters.
-            stationaryBackoff:
-              type: integer
-              description: Backoff multiplier when stationary.
+          $ref: '#/components/schemas/LocationConfig'
 
     # ── Request Params ───────────────────────────────────────────────────────
 
@@ -1292,33 +1325,60 @@ components:
 
     SetLocationConfigParams:
       type: object
+      description: Canonical location policy update. All fields optional for partial updates.
       properties:
         enabled:
           type: boolean
           description: Enable or disable location sharing.
+        tier:
+          $ref: '#/components/schemas/LocationTier'
+        default_tier:
+          $ref: '#/components/schemas/LocationTier'
         interval_s:
           type: integer
           description: Default update interval in seconds.
-        default_tier:
-          type: string
-          description: Default location sharing tier.
-        lat:
-          type: number
-          description: Optional manual latitude.
-        lon:
-          type: number
-          description: Optional manual longitude.
+        source:
+          $ref: '#/components/schemas/LocationSource'
+        contact_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/LocationContactRule'
+        channel_targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/LocationChannelTarget'
+
+    SetLocationConfigResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when the config update is accepted.
 
     SetLocationContactParams:
       type: object
-      required: [address, tier]
+      required: [address]
       properties:
         address:
           type: string
           description: Peer address as 8-char uppercase hex.
+        enabled:
+          type: boolean
+          description: Whether this contact rule is enabled.
         tier:
-          type: string
-          description: Location sharing tier.
+          $ref: '#/components/schemas/LocationTier'
+        interval_s:
+          type: integer
+          description: Contact-specific update interval in seconds.
+
+    SetLocationContactResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when the contact update is accepted.
 
     RemoveLocationContactParams:
       type: object
@@ -1328,6 +1388,14 @@ components:
           type: string
           description: Peer address as 8-char uppercase hex.
 
+    RemoveLocationContactResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when the contact removal is accepted.
+
     ShareLocationOnceParams:
       type: object
       required: [address]
@@ -1335,6 +1403,14 @@ components:
         address:
           type: string
           description: Peer address as 8-char uppercase hex.
+
+    ShareLocationOnceResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when one-time share request is accepted.
 
     SetAirtimePolicyParams:
       type: object
