@@ -85,6 +85,25 @@ Independent semver. Each release documents which bramble-go version it depends o
 7. Bump bramble-cli version (minor)
 8. Update compatibility matrix above
 
+## Component Release Commit Scopes (Phase 2)
+
+Component semantic-release jobs are scope-gated. To trigger a component release, commit messages must use a Conventional Commit scope for that component:
+
+- `protocol` → protocol release stream (`protocol-vX.Y.Z`)
+- `webapp` → webapp release stream (`webapp-vX.Y.Z`)
+
+Examples:
+
+- `feat(protocol): add bramble.setConfig RPC method`
+- `fix(webapp): handle reconnect after BLE adapter reset`
+
+Commits without one of the above scopes do **not** trigger protocol/webapp component releases.
+
+Planned (not yet enabled in workflow):
+
+- `firmware` → `firmware-vX.Y.Z`
+- `sim` → `sim-vX.Y.Z`
+
 ## Breaking Changes
 
 A **breaking change** is any modification to an existing method that could cause working clients to fail:
