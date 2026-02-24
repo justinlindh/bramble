@@ -373,7 +373,7 @@ class BrambleFlasher {
             if (releaseCtx && releaseCtx.artifactsByFile && releaseCtx.artifactsByFile[part.file]) {
                 url = releaseCtx.artifactsByFile[part.file].file;
             }
-            onLog(`\nFetching ${part.name} (${part.file}) from ${url}...`);
+            onLog(`\nFetching ${part.name} (${part.file})...`);
 
             let binData;
             try {
@@ -381,7 +381,7 @@ class BrambleFlasher {
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 binData = new Uint8Array(await resp.arrayBuffer());
             } catch (e) {
-                throw new Error(`Failed to fetch ${url}: ${e.message}`);
+                throw new Error(`Failed to fetch firmware artifact (${part.file}): ${e.message}`);
             }
 
             onLog(`  Size: ${binData.length} bytes → 0x${part.offset.toString(16)}`);
@@ -423,6 +423,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     const releaseDetails = document.getElementById('release-details');
 
     const OTA_INDEX_URL = '/ota/index.json';
+    const OTA_INDEX_LABEL = 'firmware index';
     let releases = [];
 
     function log(msg) {
@@ -499,7 +500,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     async function loadReleases() {
         try {
-            log(`Loading releases from ${OTA_INDEX_URL}...`);
+            log(`Loading releases from ${OTA_INDEX_LABEL}...`);
             const resp = await fetch(OTA_INDEX_URL, { cache: 'no-store' });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();

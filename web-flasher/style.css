@@ -27,6 +27,16 @@ body {
 }
 
 h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
+.brand-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.brand-logo {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+}
 .subtitle { color: var(--text-dim); margin-bottom: 2rem; }
 
 .board-select {
