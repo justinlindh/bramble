@@ -23,9 +23,7 @@ fi
 [[ -n "$RUN_ID" ]] || { echo "No successful firmware-build run with artifacts found" >&2; exit 1; }
 
 VERSION="ci-run-${RUN_ID}"
-[[ -f "$OTA_ROOT/index.json" ]] || { echo "OTA root not mounted/initialized at $OTA_ROOT" >&2; exit 1; }
-DEST="$OTA_ROOT/$CHANNEL/$VERSION/$BOARD"
-mkdir -p "$DEST"
+DEST_REL="$CHANNEL/$VERSION/$BOARD"
 
 for name in bootloader.bin partition-table.bin bramble.bin; do
   SP=$(run_sql "select storage_path from action_artifact where run_id=$RUN_ID and artifact_path='$name' limit 1;")
@@ -37,7 +35,8 @@ for name in bootloader.bin partition-table.bin bramble.bin; do
     alpine:3.20 sh -lc '
       set -eu
       src="/artifacts/'"$SP"'"
-      out="/ota/'"$CHANNEL/$VERSION/$BOARD/$name"'"
+      out="/ota/'"$DEST_REL/$name"'"
+      mkdir -p "$(dirname "$out")"
       [ -f "$src" ] || { echo "missing artifact blob: $src" >&2; exit 1; }
       gzip -dc "$src" > "$out"
       sha=$(sha256sum "$out" | awk "{print \$1}")
@@ -47,9 +46,48 @@ for name in bootloader.bin partition-table.bin bramble.bin; do
 done
 
 published_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-printf '{"published_at":"%s"}\n' "$published_at" > "$OTA_ROOT/$CHANNEL/$VERSION/release-meta.json"
+docker run --rm -v "$OTA_ROOT:/ota" alpine:3.20 sh -lc '
+  set -eu
+  mkdir -p "/ota/'"$CHANNEL/$VERSION"'"
+  printf "{\"published_at\":\"%s\"}\\n" '"$published_at"' > "/ota/'"$CHANNEL/$VERSION"'/release-meta.json"
+'
 
-node "$(dirname "$0")/build-firmware-index.js" "$OTA_ROOT" "$OTA_ROOT/index.json"
+# Build index.json in a container that can see /ota mount
+docker run --rm -v "$OTA_ROOT:/ota" python:3.12-alpine python - <<'PY'
+import json, pathlib
+root=pathlib.Path('/ota')
+releases=[]
+for ch in [p for p in root.iterdir() if p.is_dir()]:
+    for ver in [p for p in ch.iterdir() if p.is_dir()]:
+        meta=ver/'release-meta.json'
+        if not meta.exists():
+            continue
+        published_at=json.loads(meta.read_text()).get('published_at')
+        artifacts=[]
+        for board in [p for p in ver.iterdir() if p.is_dir()]:
+            for f in board.iterdir():
+                if (not f.is_file()) or f.name.endswith('.meta.json'):
+                    continue
+                mpath=pathlib.Path(str(f)+'.meta.json')
+                m=json.loads(mpath.read_text()) if mpath.exists() else {}
+                artifacts.append({
+                    'board': board.name,
+                    'file': f'/ota/{ch.name}/{ver.name}/{board.name}/{f.name}',
+                    'sha256': m.get('sha256',''),
+                    'size': m.get('size', f.stat().st_size),
+                })
+        releases.append({
+            'version': ver.name,
+            'published_at': published_at,
+            'channel': ch.name,
+            'artifacts': artifacts,
+        })
+releases.sort(key=lambda r:(r['published_at'], r['version']), reverse=True)
+(root/'index.json').write_text(json.dumps({'releases': releases}, indent=2))
+print(f'wrote index with {len(releases)} release(s)')
+PY
+
+# Validate generated index with repo validator
 node "$(dirname "$0")/validate-firmware-index.js" "$OTA_ROOT/index.json"
 
 echo "Published run $RUN_ID as $CHANNEL/$VERSION/$BOARD"
