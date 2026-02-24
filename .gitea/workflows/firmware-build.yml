@@ -1,0 +1,29 @@
+name: Firmware Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  firmware-build:
+    runs-on: linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build firmware builder container
+        run: docker build -t bramble-firmware-builder:espidf-v5.4.1 -f docker/firmware-builder/Dockerfile .
+
+      - name: Build firmware artifacts in container
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            bramble-firmware-builder:espidf-v5.4.1 \
+            bash scripts/ci-build-firmware.sh
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-build-artifacts
+          path: build-artifacts/firmware-ci
+          if-no-files-found: error
