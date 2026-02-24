@@ -245,7 +245,7 @@ static bool location_policy_has_targets(void) {
     while (it != NULL) {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
-        if (strncmp(info.key, "lc_", 3) == 0 || strncmp(info.key, "lcr_", 4) == 0) {
+        if (strncmp(info.key, "lcr_", 4) == 0) {
             nvs_release_iterator(it);
             return true;
         }
@@ -317,25 +317,20 @@ static void mesh_send_location_updates(uint32_t t,
             nvs_entry_info_t info;
             nvs_entry_info(it, &info);
 
-            if (strncmp(info.key, "lc_", 3) == 0 || strncmp(info.key, "lcr_", 4) == 0) {
-                bool is_rule = (strncmp(info.key, "lcr_", 4) == 0);
-                const char *addr = info.key + (is_rule ? 4 : 3);
+            if (strncmp(info.key, "lcr_", 4) == 0) {
+                const char *addr = info.key + 4;
 
                 bool enabled = true;
                 uint8_t tier = policy->default_tier;
                 char raw[48] = {0};
                 size_t raw_len = sizeof(raw);
                 if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
-                    if (is_rule) {
-                        int en = 1;
-                        char tier_str[16] = {0};
-                        int interval_tmp = 0;
-                        if (sscanf(raw, "%d|%15[^|]|%d", &en, tier_str, &interval_tmp) >= 2) {
-                            enabled = (en != 0);
-                            tier = location_tier_from_string(tier_str);
-                        }
-                    } else {
-                        tier = location_tier_from_string(raw);
+                    int en = 1;
+                    char tier_str[16] = {0};
+                    int interval_tmp = 0;
+                    if (sscanf(raw, "%d|%15[^|]|%d", &en, tier_str, &interval_tmp) >= 2) {
+                        enabled = (en != 0);
+                        tier = location_tier_from_string(tier_str);
                     }
                 }
 

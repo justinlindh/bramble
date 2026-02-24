@@ -38,10 +38,11 @@ Response:
 { "ok": true }
 ```
 
-Backward compatibility:
+Compatibility notes:
 
 - Existing `default_tier` and `interval_s` fields remain supported.
-- Existing contact tier keys are still written/read (`lc_XXXXXXXX`).
+- Contact rules are stored and read only from canonical `lcr_XXXXXXXX` keys.
+- Legacy `lc_XXXXXXXX` contact keys are no longer read or maintained.
 
 ### `bramble.getConfig` (location section)
 
