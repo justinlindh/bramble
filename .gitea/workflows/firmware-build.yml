@@ -7,6 +7,7 @@ on:
     paths:
       - '.gitea/workflows/firmware-build.yml'
       - 'scripts/ci-build-firmware.sh'
+      - 'scripts/ci-publish-ota.sh'
       - 'docker/firmware-builder/**'
 
 jobs:
@@ -28,10 +29,26 @@ jobs:
           CHANNEL: dev
           BOARD: heltec-v3
         run: |
-          if ! command -v curl >/dev/null 2>&1; then apt-get update && apt-get install -y curl; fi
-          if ! command -v jq >/dev/null 2>&1; then apt-get update && apt-get install -y jq; fi
+          missing=()
+          command -v curl >/dev/null 2>&1 || missing+=(curl)
+          command -v jq >/dev/null 2>&1 || missing+=(jq)
+          if [ ${#missing[@]} -gt 0 ]; then
+            apt-get update
+            apt-get install -y "${missing[@]}"
+          fi
           chmod +x scripts/ci-publish-ota.sh
           scripts/ci-publish-ota.sh
+
+      - name: Verify published release appears in index
+        env:
+          CHANNEL: dev
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          curl -fsSL https://bramblemesh.org/ota/index.json -o /tmp/ota-index.json
+          jq -e --arg version "$VERSION" --arg channel "$CHANNEL" '
+            any(.releases[]; .version == $version and .channel == $channel)
+          ' /tmp/ota-index.json >/dev/null
+          echo "Verified release in index: channel=$CHANNEL version=$VERSION"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3

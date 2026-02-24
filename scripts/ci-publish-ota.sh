@@ -17,6 +17,7 @@ for f in "$BOOTLOADER" "$PARTITION" "$FIRMWARE"; do
 done
 
 resp_file=$(mktemp)
+trap 'rm -f "$resp_file"' EXIT
 http_code=$(curl -sS -o "$resp_file" -w "%{http_code}" -X POST "$OTA_PUBLISH_URL" \
   -H "Authorization: Bearer $OTA_PUBLISH_KEY" \
   -F "version=$VERSION" \
@@ -28,7 +29,7 @@ http_code=$(curl -sS -o "$resp_file" -w "%{http_code}" -X POST "$OTA_PUBLISH_URL
   -F "partition-table.bin=@$PARTITION" \
   -F "bramble.bin=@$FIRMWARE")
 
-if [[ "$http_code" != "200" ]]; then
+if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
   echo "OTA publish failed (HTTP $http_code)" >&2
   cat "$resp_file" >&2
   exit 1
