@@ -92,3 +92,10 @@ Use this addendum for the privacy-first location sharing rollout verification.
 - Attach command outputs for all five firmware/host verification commands.
 - Attach packet/log evidence for each hardware check actually run.
 - If any hardware checks are not run, mark them explicitly as **Pending** (no inferred pass/fail).
+
+### CLI-only parity checks (required for protocol alignment)
+- [ ] `bramble location set-config` succeeds using canonical fields (`enabled`, `default_tier`, `interval_s`, `source`, `contact_rules`, `channel_targets`).
+- [ ] `bramble location get-config --json` returns canonical location block.
+- [ ] Receiver `bramble location status --json` shows sender with valid `addr` string and advancing `lastUpdatedMs` while enabled.
+- [ ] After `--enabled=false`, receiver `lastUpdatedMs` stops advancing across validation window.
+- [ ] `bramble monitor --topic wifi,gps,location --json` emits protocol-native topic events.
