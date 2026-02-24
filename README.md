@@ -91,8 +91,26 @@ Open http://localhost:3003 to see the mesh in action. Drag nodes to reposition t
 
 See [`simulator/README.md`](simulator/README.md) for details.
 
+## OTA rollout (single node)
+
+For operator steps to deploy firmware over WiFi, see [`docs/ota-rollout.md`](docs/ota-rollout.md).
+
+Quick path (build, host, trigger):
+
+```bash
+cd ~/src/bramble
+idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
+
+cd build
+python3 -m http.server 8088
+
+cd ~/src/bramble-cli
+./bramble --transport ws://192.168.1.179/ws ota --url http://192.168.6.34:8088/bramble.bin
+```
+
 ## Documentation
 
+- [`docs/ota-rollout.md`](docs/ota-rollout.md) — OTA operator guide (build, host, trigger, verify, rollback)
 - [`docs/plans/2026-02-15-lora-mesh-protocol-design.md`](docs/plans/2026-02-15-lora-mesh-protocol-design.md) — Full protocol design (~2400 lines)
 - [`docs/bramble-anomaly-detection.md`](docs/bramble-anomaly-detection.md) — Anomaly detection system
 - [`docs/COMPARISON.md`](docs/COMPARISON.md) — Comparison with Meshtastic and other protocols
