@@ -14,3 +14,4 @@ Workflow file: `.gitea/workflows/ci-smoke-artifacts.yml`
 - rerun2 2026-02-24T10:40:04Z
 - rerun3 2026-02-24T10:41:52Z
 - rerun4 2026-02-24T10:44:01Z
+- rerun5 2026-02-24T10:45:53Z
