@@ -42,5 +42,7 @@ jobs:
           scripts/publish-latest-firmware-artifact-run.sh "$RUN_ID"
 
       - name: Show published index
+        env:
+          OTA_ROOT: /home/justin/src/dockers/ota
         run: |
-          cat /home/justin/src/dockers/ota/index.json | head -n 120
+          docker run --rm -v "$OTA_ROOT:/ota" alpine:3.20 sh -lc 'cat /ota/index.json | head -n 120'
