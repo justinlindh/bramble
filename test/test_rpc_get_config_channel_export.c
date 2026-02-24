@@ -148,10 +148,27 @@ void test_location_contact_roundtrip_uses_canonical_rule_key(void) {
     cJSON_Delete(cfg_root);
 }
 
+void test_get_config_ignores_legacy_location_contact_keys(void) {
+    g_nvs_allow_open = true;
+    strcpy(g_nvs_loc_kv[0].key, "lc_DEADBEEF");
+    strcpy(g_nvs_loc_kv[0].value, "full");
+    g_nvs_loc_kv[0].used = true;
+    g_nvs_loc_kv_count = 1;
+
+    cJSON *cfg_root = dispatch_get_config();
+    cJSON *cfg_result = cJSON_GetObjectItem(cfg_root, "result");
+    cJSON *location = cJSON_GetObjectItem(cfg_result, "location");
+    cJSON *contact_rules = cJSON_GetObjectItem(location, "contact_rules");
+    TEST_ASSERT_TRUE(cJSON_IsArray(contact_rules));
+    TEST_ASSERT_EQUAL(0, cJSON_GetArraySize(contact_rules));
+    cJSON_Delete(cfg_root);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_config_uses_persisted_name_and_psk_when_runtime_cache_missing);
     RUN_TEST(test_get_config_keeps_default_broadcast_semantics);
     RUN_TEST(test_location_contact_roundtrip_uses_canonical_rule_key);
+    RUN_TEST(test_get_config_ignores_legacy_location_contact_keys);
     return UNITY_END();
 }
