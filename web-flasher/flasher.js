@@ -450,6 +450,14 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     function applyChannelFilter() {
         const channel = getSelectedChannel();
         filteredReleases = releases.filter(r => (r.channel || 'stable') === channel);
+
+        if (!filteredReleases.length && releases.length && channel === 'stable') {
+            const devReleases = releases.filter(r => (r.channel || 'stable') === 'dev');
+            if (devReleases.length) {
+                if (channelSelect) channelSelect.value = 'dev';
+                filteredReleases = devReleases;
+            }
+        }
     }
 
     function renderReleaseOptions() {
@@ -504,7 +512,11 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
             applyChannelFilter();
             renderReleaseOptions();
             renderReleaseDetails();
-            setStatus(`Ready. ${filteredReleases.length} release(s) available.`);
+            if (filteredReleases.length) {
+                setStatus(`Ready.`);
+            } else {
+                setStatus('No complete releases available yet.');
+            }
         } catch {
             releases = [];
             filteredReleases = [];
