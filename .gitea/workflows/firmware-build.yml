@@ -27,7 +27,6 @@ jobs:
           OTA_PUBLISH_KEY: ${{ secrets.OTA_PUBLISH_KEY }}
           OTA_PUBLISH_URL: https://bramblemesh.org/ota/publish
           CHANNEL: dev
-          BOARD: heltec-v3
         run: |
           missing=()
           command -v curl >/dev/null 2>&1 || missing+=(curl)
@@ -37,7 +36,15 @@ jobs:
             apt-get install -y "${missing[@]}"
           fi
           chmod +x scripts/ci-publish-ota.sh
-          scripts/ci-publish-ota.sh
+
+          for board in heltec-v3 tdeck-plus heltec-v4; do
+            echo "Publishing board: $board"
+            BOARD="$board" \
+            BOOTLOADER="build-artifacts/firmware-ci/$board/bootloader.bin" \
+            PARTITION="build-artifacts/firmware-ci/$board/partition-table.bin" \
+            FIRMWARE="build-artifacts/firmware-ci/$board/bramble.bin" \
+            scripts/ci-publish-ota.sh
+          done
 
       - name: Verify published release appears in index
         env:
@@ -48,19 +55,26 @@ jobs:
             VERSION="v0.0.0-$(git rev-parse --short HEAD)"
           fi
           curl -fsSL https://bramblemesh.org/ota/index.json -o /tmp/ota-index.json
-          jq -e --arg version "$VERSION" --arg channel "$CHANNEL" '
-            any(.releases[]; .version == $version and .channel == $channel)
-          ' /tmp/ota-index.json >/dev/null
-          echo "Verified release in index: channel=$CHANNEL version=$VERSION"
+
+          for board in heltec-v3 tdeck-plus heltec-v4; do
+            jq -e --arg version "$VERSION" --arg channel "$CHANNEL" --arg board "$board" '
+              any(.releases[];
+                .version == $version and
+                .channel == $channel and
+                any(.artifacts[]; .board == $board)
+              )
+            ' /tmp/ota-index.json >/dev/null
+            echo "Verified release in index: channel=$CHANNEL version=$VERSION board=$board"
+          done
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v3
         with:
           name: firmware-build-artifacts
           path: |
-            build-artifacts/firmware-ci/*.bin
-            build-artifacts/firmware-ci/flasher_args.json
-            build-artifacts/firmware-ci/SHA256SUMS.txt
+            build-artifacts/firmware-ci/**/*.bin
+            build-artifacts/firmware-ci/**/flasher_args.json
+            build-artifacts/firmware-ci/**/SHA256SUMS.txt
           if-no-files-found: error
 
 # trigger: ota publish wiring 2026-02-24T17:05:00Z
