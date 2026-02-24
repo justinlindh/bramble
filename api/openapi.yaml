@@ -1470,11 +1470,14 @@ components:
                 type: string
                 description: Relay node address as 8-char uppercase hex.
 
-    # ── Traffic Debug Types ────────────────────────────────────────────────
+    # ── Traffic Debug / Monitor Stream Types ──────────────────────────────
 
     SetTrafficDebugParams:
+      $ref: '#/components/schemas/TrafficDebugConfig'
+
+    TrafficDebugConfig:
       type: object
-      description: Parameters for bramble.setTrafficDebug.
+      description: Canonical traffic debug configuration used by monitor/event-stream APIs.
       properties:
         enabled:
           type: boolean
@@ -1497,53 +1500,38 @@ components:
           maximum: 100
           default: 100
 
+    TrafficDebugStatus:
+      allOf:
+        - $ref: '#/components/schemas/TrafficDebugConfig'
+        - type: object
+          required: [enabled, include_tx, include_rx, sample_rate, buffer_capacity, buffer_count, dropped_count]
+          properties:
+            buffer_capacity:
+              type: integer
+              description: Ring buffer capacity (max events that can be stored).
+            buffer_count:
+              type: integer
+              description: Number of events currently in buffer.
+            dropped_count:
+              type: integer
+              description: Total events dropped due to buffer wrap or backpressure.
+
     SetTrafficDebugResponse:
-      type: object
-      description: Response from bramble.setTrafficDebug.
-      required: [ok, enabled, include_tx, include_rx, sample_rate]
-      properties:
-        ok:
-          type: boolean
-          description: Always true on success.
-        enabled:
-          type: boolean
-          description: Current enabled state.
-        include_tx:
-          type: boolean
-          description: Current TX inclusion state.
-        include_rx:
-          type: boolean
-          description: Current RX inclusion state.
-        sample_rate:
-          type: integer
-          description: Current sample rate percentage.
+      allOf:
+        - type: object
+          description: Response from bramble.setTrafficDebug.
+          required: [ok]
+          properties:
+            ok:
+              type: boolean
+              description: Always true on success.
+        - $ref: '#/components/schemas/TrafficDebugConfig'
 
     GetTrafficDebugResponse:
-      type: object
-      description: Response from bramble.getTrafficDebug.
-      required: [enabled, include_tx, include_rx, sample_rate, buffer_capacity, buffer_count, dropped_count]
-      properties:
-        enabled:
-          type: boolean
-          description: Whether traffic debug is currently enabled.
-        include_tx:
-          type: boolean
-          description: Whether TX events are being recorded.
-        include_rx:
-          type: boolean
-          description: Whether RX events are being recorded.
-        sample_rate:
-          type: integer
-          description: Current sample rate percentage (0-100).
-        buffer_capacity:
-          type: integer
-          description: Ring buffer capacity (max events that can be stored).
-        buffer_count:
-          type: integer
-          description: Number of events currently in buffer.
-        dropped_count:
-          type: integer
-          description: Total events dropped due to buffer wrap or backpressure.
+      allOf:
+        - type: object
+          description: Response from bramble.getTrafficDebug.
+        - $ref: '#/components/schemas/TrafficDebugStatus'
 
     GetTrafficEventsParams:
       type: object
@@ -1612,6 +1600,27 @@ components:
           type: boolean
           description: true if this is a TX event, false for RX.
 
+    MonitorEventStreamNotification:
+      type: object
+      description: Canonical JSON-RPC notification envelope for monitor/event-stream events.
+      required: [jsonrpc, method, params]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        method:
+          $ref: '#/components/schemas/MonitorEventMethod'
+        params:
+          oneOf:
+            - $ref: '#/components/schemas/BroadcastDeliveryNotification'
+            - $ref: '#/components/schemas/TrafficEvent'
+          description: Notification payload for the emitted monitor event.
+
+    MonitorEventMethod:
+      type: string
+      description: Canonical monitor/event-stream notification method names.
+      enum: [bramble.onBroadcastDelivery, bramble.onTrafficEvent]
+
 # ── Notifications (extension) ──────────────────────────────────────────────
 
 x-notifications:
@@ -1636,6 +1645,8 @@ x-notifications:
       One broadcast may produce multiple delivery notifications.
     payload:
       $ref: '#/components/schemas/BroadcastDeliveryNotification'
+    envelope:
+      $ref: '#/components/schemas/MonitorEventStreamNotification'
 
   bramble.onNeighborChange:
     description: >
@@ -1680,3 +1691,5 @@ x-notifications:
       or reconnect backfill via bramble.getTrafficEvents(since_seq).
     payload:
       $ref: '#/components/schemas/TrafficEvent'
+    envelope:
+      $ref: '#/components/schemas/MonitorEventStreamNotification'
