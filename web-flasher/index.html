@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bramble Web Flasher</title>
-    <link rel="stylesheet" href="style.css?v=20260224c">
+    <link rel="stylesheet" href="style.css?v=20260224d">
 </head>
 <body>
     <div class="container">
@@ -15,7 +15,7 @@
         <p class="subtitle">Flash Bramble firmware to your ESP32-S3 device</p>
 
         <div class="board-select">
-            <label>Board:</label>
+            <label for="board-select">Board:</label>
             <select id="board-select">
                 <option value="heltec-v3">Heltec WiFi LoRa 32 V3</option>
                 <option value="tdeck-plus">LILYGO T-Deck Plus</option>
@@ -23,13 +23,25 @@
             </select>
         </div>
 
-        <div class="board-select">
-            <label>Release:</label>
-            <select id="release-select"></select>
-            <button id="refresh-releases-btn" class="btn">Refresh</button>
-        </div>
+        <details id="advanced-panel" class="advanced-panel">
+            <summary>Advanced</summary>
+            <div class="advanced-body">
+                <div class="board-select compact">
+                    <label for="channel-select">Channel:</label>
+                    <select id="channel-select">
+                        <option value="stable">stable</option>
+                        <option value="dev">dev</option>
+                    </select>
+                </div>
 
-        <div class="release-details" id="release-details"></div>
+                <div class="board-select compact">
+                    <label for="release-select">Release:</label>
+                    <select id="release-select"></select>
+                </div>
+
+                <div class="release-details" id="release-details"></div>
+            </div>
+        </details>
 
         <div class="actions">
             <button id="connect-btn" class="btn primary">Connect Device</button>
@@ -43,17 +55,14 @@
             <p class="progress-text" id="progress-text">Ready</p>
         </div>
 
-        <div class="log-section">
-            <h3>Log</h3>
-            <pre id="log-output"></pre>
-        </div>
+        <p id="status-text" class="status-text">Ready.</p>
 
         <div class="info">
             <p>Requires Chrome/Edge with Web Serial API support.</p>
             <p>Hold BOOT button while connecting if device isn't detected.</p>
         </div>
     </div>
-    <script src="release-index.js?v=20260224b"></script>
-    <script src="flasher.js?v=20260224b"></script>
+    <script src="release-index.js?v=20260224d"></script>
+    <script src="flasher.js?v=20260224d"></script>
 </body>
 </html>

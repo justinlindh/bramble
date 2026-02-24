@@ -9,7 +9,6 @@
     --primary: #4a9eff;
     --success: #4caf50;
     --danger: #e74c3c;
-    --accent: #7c4dff;
 }
 
 body {
@@ -48,7 +47,7 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.1rem;
 }
 
 .board-select label { font-weight: 600; white-space: nowrap; }
@@ -63,32 +62,41 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     font-size: 0.95rem;
 }
 
-.release-details {
-    margin-bottom: 1.25rem;
+.advanced-panel {
     border: 1px solid var(--border);
-    background: var(--surface);
     border-radius: 8px;
-    padding: 0.75rem 0.9rem;
-    font-size: 0.85rem;
+    background: var(--surface);
+    margin-bottom: 1.25rem;
 }
 
-.release-details h4 {
-    margin-bottom: 0.35rem;
-    font-size: 0.95rem;
+.advanced-panel > summary {
+    cursor: pointer;
+    padding: 0.65rem 0.85rem;
+    color: var(--text-dim);
+    user-select: none;
 }
 
-.release-details .warn {
-    color: #ffb454;
+.advanced-body {
+    border-top: 1px solid var(--border);
+    padding: 0.8rem 0.85rem 0.2rem;
 }
 
-.release-details ul {
-    margin: 0.35rem 0 0 1rem;
+.board-select.compact {
+    margin-bottom: 0.7rem;
+}
+
+.release-details {
+    border-top: 1px solid var(--border);
+    margin-top: 0.7rem;
+    padding-top: 0.7rem;
+    font-size: 0.83rem;
+    color: var(--text-dim);
 }
 
 .actions {
     display: flex;
     gap: 1rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
 }
 
 .btn {
@@ -106,7 +114,7 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
 .btn.success { background: var(--success); color: #fff; }
 .btn.danger { background: var(--danger); color: #fff; }
 
-.progress-section { margin-bottom: 1.5rem; }
+.progress-section { margin-bottom: 0.7rem; }
 
 .progress-bar {
     height: 8px;
@@ -125,22 +133,11 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
 }
 
 .progress-text { color: var(--text-dim); font-size: 0.9rem; }
-
-.log-section { margin-bottom: 1.5rem; }
-.log-section h3 { margin-bottom: 0.5rem; font-size: 1rem; }
-
-#log-output {
-    background: #0d1117;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1rem;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 0.8rem;
-    line-height: 1.5;
-    max-height: 300px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
+.status-text {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    min-height: 1.4rem;
 }
 
 .info {
