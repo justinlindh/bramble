@@ -1310,14 +1310,24 @@ static int handle_ota_update(const cJSON *params, cJSON *result) {
         return 0;
     }
 
+    if (!(strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0)) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "unsupported OTA URL scheme (expected http:// or https://)");
+        return 0;
+    }
+
     strncpy(s_ota_url, url, sizeof(s_ota_url) - 1);
     s_ota_url[sizeof(s_ota_url) - 1] = '\0';
 
-    cJSON_AddBoolToObject(result, "ok", true);
-    cJSON_AddStringToObject(result, "note", "OTA starting — device will reboot on success");
-    cJSON_AddStringToObject(result, "partition", ota_get_running_partition());
+    if (xTaskCreate(ota_task, "ota", 8192, NULL, 3, NULL) != pdPASS) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "failed to start OTA task");
+        return 0;
+    }
 
-    xTaskCreate(ota_task, "ota", 8192, NULL, 3, NULL);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "note", "OTA started; waiting for reboot confirms success");
+    cJSON_AddStringToObject(result, "partition", ota_get_running_partition());
     return 0;
 }
 
