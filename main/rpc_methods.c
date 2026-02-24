@@ -965,7 +965,8 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
 /* bramble.getPeerLocations — returns own location + any received peer locations */
 static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     (void)params;
-    cJSON *peers = cJSON_AddArrayToObject(result, "peers");
+    cJSON *peer_locations = cJSON_AddArrayToObject(result, "peerLocations");
+    cJSON *peers = cJSON_AddArrayToObject(result, "peers"); /* backward-compatible alias */
 
     /* Include own location if set */
     nvs_handle_t nvs;
@@ -985,7 +986,12 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                 cJSON_AddNumberToObject(self, "lon", lon_e6 / 1e6);
                 cJSON_AddStringToObject(self, "tier", "exact");
                 cJSON_AddBoolToObject(self, "is_self", true);
-                cJSON_AddItemToArray(peers, self);
+                cJSON_AddNumberToObject(self, "addr", (double)s_identity->address);
+                cJSON_AddStringToObject(self, "name", "self");
+                cJSON_AddBoolToObject(self, "online", true);
+                cJSON_AddNumberToObject(self, "lastUpdatedMs", (double)(esp_timer_get_time() / 1000ULL));
+                cJSON_AddItemToArray(peer_locations, self);
+                cJSON_AddItemToArray(peers, cJSON_Duplicate(self, 1));
             }
         }
         nvs_close(nvs);
@@ -1006,15 +1012,31 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                     size_t len = sizeof(stored);
                     if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK && len == sizeof(stored)) {
                         cJSON *peer = cJSON_CreateObject();
+                        uint32_t addr = (uint32_t)strtoul(info.key + 3, NULL, 16);
+                        uint32_t freshness_ms = (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0;
+
+                        cJSON *position = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(position, "lat", stored.latitude_e7 / 1e7);
+                        cJSON_AddNumberToObject(position, "lon", stored.longitude_e7 / 1e7);
+                        cJSON_AddNumberToObject(position, "alt", stored.altitude_m);
+                        cJSON_AddNumberToObject(position, "accuracy", stored.accuracy_m);
+                        cJSON_AddNumberToObject(position, "speed", stored.speed_kmh);
+                        cJSON_AddNumberToObject(position, "heading", stored.heading_deg2 * 2);
+                        cJSON_AddNumberToObject(position, "timestampMs", (double)stored.timestamp * 1000.0);
+
+                        cJSON_AddNumberToObject(peer, "addr", (double)addr);
                         cJSON_AddStringToObject(peer, "address", info.key + 3);
-                        cJSON_AddNumberToObject(peer, "lat", stored.latitude_e7 / 1e7);
-                        cJSON_AddNumberToObject(peer, "lon", stored.longitude_e7 / 1e7);
+                        cJSON_AddStringToObject(peer, "name", "");
                         cJSON_AddStringToObject(peer, "tier", location_tier_to_string(stored.tier));
+                        cJSON_AddBoolToObject(peer, "online", freshness_ms < LOCATION_CACHE_TTL_MS);
+                        cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
+                        cJSON_AddItemToObject(peer, "position", position);
                         cJSON_AddBoolToObject(peer, "is_self", false);
                         cJSON_AddNumberToObject(peer, "timestamp", stored.timestamp);
-                        cJSON_AddNumberToObject(peer, "freshness_ms",
-                            (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0);
-                        cJSON_AddItemToArray(peers, peer);
+                        cJSON_AddNumberToObject(peer, "freshness_ms", freshness_ms);
+
+                        cJSON_AddItemToArray(peer_locations, peer);
+                        cJSON_AddItemToArray(peers, cJSON_Duplicate(peer, 1));
                     }
                 }
 
