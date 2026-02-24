@@ -58,15 +58,14 @@ jobs:
             --arg channel "$CHANNEL" \
             --argjson boards '["heltec-v3","tdeck-plus","heltec-v4"]' \
             '
-            def is_canonical($name):
-              ((.filename // "") == $name) or
-              ((.file // "") | endswith("/" + $name)) or
-              ((.path // "") | endswith("/" + $name));
+            def matches_board_artifact($board; $name):
+              ((.file // "") | endswith("/" + $board + "/" + $name)) or
+              ((.path // "") | endswith("/" + $board + "/" + $name));
 
             def has_required_for_board($board):
-              any(.artifacts[]?; .board == $board and is_canonical("bootloader.bin")) and
-              any(.artifacts[]?; .board == $board and is_canonical("partition-table.bin")) and
-              any(.artifacts[]?; .board == $board and is_canonical("bramble.bin"));
+              any(.artifacts[]?; .board == $board and matches_board_artifact($board; "bootloader.bin")) and
+              any(.artifacts[]?; .board == $board and matches_board_artifact($board; "partition-table.bin")) and
+              any(.artifacts[]?; .board == $board and matches_board_artifact($board; "bramble.bin"));
 
             (.releases | map(select(.version == $version and .channel == $channel)) | first) as $release
             | $release != null

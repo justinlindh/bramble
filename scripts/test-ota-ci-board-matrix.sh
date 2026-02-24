@@ -15,13 +15,27 @@ rg -q 'scripts/ci-publish-ota.sh --print-version' "$wf" || {
   exit 1
 }
 
+# Verification must use real index artifact fields (.file/.path), not synthetic .filename.
+rg -q '\.file' "$wf" || { echo "missing .file-based artifact verification in workflow"; exit 1; }
+rg -q '\.path' "$wf" || { echo "missing .path-based artifact verification in workflow"; exit 1; }
+if rg -q '\.filename' "$wf"; then
+  echo "workflow must not rely on synthetic .filename field"
+  exit 1
+fi
+
+# Canonical artifacts must be enforced for each required board.
 for artifact in 'bootloader.bin' 'partition-table.bin' 'bramble.bin'; do
   rg -q "$artifact" "$wf" || { echo "missing canonical artifact check in workflow: $artifact"; exit 1; }
 done
+
+rg -q 'all\(\$boards\[\]; \$release \| has_required_for_board\(\.\)\)' "$wf" || {
+  echo "missing all-boards completeness gate in workflow"
+  exit 1
+}
 
 rg -q 'normalize_version\(\)' "$publish_script" || {
   echo "missing normalize_version helper in publish script"
   exit 1
 }
 
-echo "OK: board matrix + version normalization + canonical artifact checks present"
+echo "OK: board matrix + index-field checks + per-board canonical artifact completeness present"
