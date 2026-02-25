@@ -26,7 +26,7 @@ static int ota_https_start(const char *url)
     esp_http_client_config_t http_cfg = {
         .url = url,
         .timeout_ms = 30000,
-        .skip_cert_common_name_check = true,
+        .skip_cert_common_name_check = false,
     };
 
     esp_https_ota_config_t ota_cfg = {

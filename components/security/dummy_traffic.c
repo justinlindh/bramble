@@ -2,12 +2,12 @@
 #include "packet.h"
 #include "crypto.h"
 #include <string.h>
-#include <stdlib.h>
-
-// Simple deterministic random for non-crypto use (test-friendly via srand)
+// CSPRNG-based range helper — unpredictable scheduling defeats traffic analysis
 static uint32_t dummy_rand_range(uint32_t min, uint32_t max) {
     if (min >= max) return min;
-    return min + ((uint32_t)rand() % (max - min + 1));
+    uint32_t rnd;
+    crypto_random((uint8_t *)&rnd, sizeof(rnd));
+    return min + (rnd % (max - min + 1));
 }
 
 static uint32_t schedule_next(uint32_t now_ms) {
