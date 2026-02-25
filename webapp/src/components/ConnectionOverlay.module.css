@@ -41,6 +41,18 @@
   margin-top: -0.5rem;
 }
 
+.runtimeBadge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent-blue);
+  background: rgba(31, 111, 235, 0.12);
+  border: 1px solid rgba(31, 111, 235, 0.4);
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+}
+
 .transportSelect {
   display: flex;
   gap: 0.5rem;

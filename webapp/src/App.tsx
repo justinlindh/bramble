@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
-import { disconnect, loadNeighbors } from './store/actions';
+import { disconnect, loadConnectionCapabilities, loadNeighbors } from './store/actions';
 import { usePoll } from './hooks/usePoll';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { StatusDot } from './components/StatusDot';
@@ -59,6 +59,10 @@ export default function App() {
 
   // Global neighbor poll for presence status (works from any tab)
   usePoll(isConnected ? loadNeighbors : () => Promise.resolve(), 10_000);
+
+  useEffect(() => {
+    loadConnectionCapabilities();
+  }, []);
 
   // Toast notifications for connection state changes
   useEffect(() => {
