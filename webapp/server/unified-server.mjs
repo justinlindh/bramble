@@ -9,6 +9,7 @@ import { isAllowedTarget, parseAllowlist, splitTarget } from './target-policy.mj
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEFAULT_DIST_DIR = path.resolve(__dirname, '..', 'dist');
+const DEFAULT_OTA_BASE_URL = process.env.OTA_BASE_URL || 'https://bramblemesh.org';
 const WS_CONNECT_TIMEOUT_MS = 10_000;
 
 function json(res, status, body) {
@@ -80,8 +81,14 @@ function validateProxyRequest(url, { mode, allowlist }) {
   return { ok: true, parsed: check.parsed };
 }
 
-export function createUnifiedServer({ mode = resolveMode(), distDir = DEFAULT_DIST_DIR, allowlist = parseAllowlist() } = {}) {
+export function createUnifiedServer({
+  mode = resolveMode(),
+  distDir = DEFAULT_DIST_DIR,
+  allowlist = parseAllowlist(),
+  otaBaseUrl = DEFAULT_OTA_BASE_URL,
+} = {}) {
   mode = resolveMode(mode);
+  otaBaseUrl = String(otaBaseUrl).replace(/\/+$/, '');
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://localhost');
@@ -109,6 +116,40 @@ export function createUnifiedServer({ mode = resolveMode(), distDir = DEFAULT_DI
       }
 
       json(res, 426, { error: 'websocket upgrade required' });
+      return;
+    }
+
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/ota/')) {
+      const upstreamUrl = `${otaBaseUrl}${url.pathname}${url.search}`;
+      try {
+        const upstreamRes = await fetch(upstreamUrl, {
+          method: req.method,
+          headers: { Accept: req.headers.accept || '*/*' },
+          redirect: 'follow',
+        });
+
+        const outHeaders = { 'Cache-Control': 'no-store' };
+        const contentType = upstreamRes.headers.get('content-type');
+        const contentLength = upstreamRes.headers.get('content-length');
+        const etag = upstreamRes.headers.get('etag');
+        const lastModified = upstreamRes.headers.get('last-modified');
+
+        if (contentType) outHeaders['Content-Type'] = contentType;
+        if (contentLength) outHeaders['Content-Length'] = contentLength;
+        if (etag) outHeaders.ETag = etag;
+        if (lastModified) outHeaders['Last-Modified'] = lastModified;
+
+        res.writeHead(upstreamRes.status, outHeaders);
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+
+        const body = Buffer.from(await upstreamRes.arrayBuffer());
+        res.end(body);
+      } catch {
+        json(res, 502, { error: 'ota upstream unavailable' });
+      }
       return;
     }
 
