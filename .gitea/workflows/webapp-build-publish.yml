@@ -153,7 +153,13 @@ jobs:
 
           ok=0
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8085/api/healthz >/dev/null; then
+            if [ "$(docker inspect -f '{{.State.Running}}' bramble-web-client 2>/dev/null || true)" != "true" ]; then
+              sleep 2
+              continue
+            fi
+
+            if docker run --rm --network host curlimages/curl:8.12.1 \
+              -fsS http://127.0.0.1:8085/api/healthz >/dev/null; then
               ok=1
               break
             fi
