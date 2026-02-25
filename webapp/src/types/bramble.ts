@@ -357,11 +357,20 @@ export interface TrafficDebugStatus {
   lastSeq: number;
 }
 
+export type RuntimeMode = 'hosted' | 'local';
+
+export interface ConnectionCapabilities {
+  mode: RuntimeMode;
+  localLanAllowed: boolean;
+  localLanReason?: string;
+}
+
 export interface AppState {
   connectionState: ConnectionState;
   connectionError?: string;
   manualDisconnect: boolean;
   transport: Transport | null;
+  connectionCapabilities: ConnectionCapabilities;
   config: BrambleConfig | null;
   status: NodeStatus | null;
   airtime: AirtimeStatus | null;

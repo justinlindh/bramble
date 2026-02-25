@@ -16,6 +16,7 @@ import type {
   PeerLocation,
   TrafficDebugStatus,
   TrafficEvent,
+  ConnectionCapabilities,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
@@ -69,6 +70,7 @@ interface Actions {
   setConnectionState: (s: ConnectionState, err?: string) => void;
   setManualDisconnect: (manual: boolean) => void;
   setTransport: (t: Transport | null) => void;
+  setConnectionCapabilities: (c: ConnectionCapabilities) => void;
   setConfig: (c: BrambleConfig) => void;
   setStatus: (s: NodeStatus) => void;
   setAirtime: (a: AirtimeStatus) => void;
@@ -103,6 +105,11 @@ export const useStore = create<AppState & Actions>((set) => ({
   connectionError: undefined,
   manualDisconnect: false,
   transport: null,
+  connectionCapabilities: {
+    mode: 'hosted',
+    localLanAllowed: false,
+    localLanReason: 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.',
+  },
   config: null,
   status: null,
   airtime: null,
@@ -129,6 +136,8 @@ export const useStore = create<AppState & Actions>((set) => ({
   setManualDisconnect: (manual) => set({ manualDisconnect: manual }),
 
   setTransport: (t) => set({ transport: t }),
+
+  setConnectionCapabilities: (c) => set({ connectionCapabilities: c }),
 
   setConfig: (c) => set(state => {
     const names = new Map(state.peerNames);

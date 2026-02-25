@@ -41,6 +41,7 @@ export function ConnectionOverlay() {
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
   const manualDisconnect = useStore(s => s.manualDisconnect);
+  const connectionCapabilities = useStore(s => s.connectionCapabilities);
 
   const isConnecting = connectionState === 'connecting';
 
@@ -66,6 +67,15 @@ export function ConnectionOverlay() {
   // Check browser support
   const hasSerial = 'serial' in navigator;
   const hasBluetooth = 'bluetooth' in navigator;
+  const wifiAllowed = connectionCapabilities.localLanAllowed;
+  const wifiReason = connectionCapabilities.localLanReason || 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.';
+  const runtimeBadge = connectionCapabilities.mode === 'local' ? 'Local LAN' : 'Hosted';
+
+  useEffect(() => {
+    if (!wifiAllowed && transportType === 'wifi') {
+      setTransportType(hasSerial ? 'serial' : hasBluetooth ? 'ble' : 'websocket');
+    }
+  }, [wifiAllowed, transportType, hasSerial, hasBluetooth]);
 
   const hints: Record<TransportType, string> = {
     serial: 'Connect your Bramble node via USB cable, then click Connect.',
@@ -80,6 +90,7 @@ export function ConnectionOverlay() {
         <img src="/bramble-logo.png" alt="Bramble" className={styles.logoImg} />
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
+        <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
 
         <div className={styles.transportSelect}>
           <button
@@ -99,8 +110,10 @@ export function ConnectionOverlay() {
             <IconBluetooth size={16} /> Bluetooth
           </button>
           <button
-            className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''}`}
-            onClick={() => setTransportType('wifi')}
+            className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''} ${!wifiAllowed ? styles.unsupportedBtn : ''}`}
+            onClick={() => wifiAllowed && setTransportType('wifi')}
+            disabled={!wifiAllowed}
+            title={wifiAllowed ? 'Connect directly to your Bramble node over LAN WiFi' : wifiReason}
           >
             <IconWifi size={16} /> WiFi
           </button>

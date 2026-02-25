@@ -2,6 +2,7 @@ import { useStore } from './index';
 import { createTransport, BrambleClient } from '../transport';
 import { messageDb } from './messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventStore';
+import { fetchConnectionCapabilities } from '../lib/connectionMode';
 import type {
   TransportType,
   BrambleConfig,
@@ -44,6 +45,11 @@ function friendlyError(raw: string): string {
 }
 
 let client: BrambleClient | null = null;
+
+export async function loadConnectionCapabilities(): Promise<void> {
+  const capabilities = await fetchConnectionCapabilities();
+  useStore.getState().setConnectionCapabilities(capabilities);
+}
 
 // ─── Message persistence ─────────────────────────────────────────────────
 
