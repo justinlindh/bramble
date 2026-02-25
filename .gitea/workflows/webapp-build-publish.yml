@@ -98,15 +98,21 @@ jobs:
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITEA_API_BASE: ${{ vars.GITEA_API_BASE }}
+          DEPLOY_REPO_OWNER: ${{ vars.DEPLOY_REPO_OWNER }}
+          DEPLOY_REPO_NAME: ${{ vars.DEPLOY_REPO_NAME }}
+          DEPLOY_WORKFLOW_ID: ${{ vars.DEPLOY_WORKFLOW_ID }}
           IMAGE_REF: ghcr.io/example/justinlindh/bramble-web-client:sha-${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
           api_base="${GITEA_API_BASE:-http://172.17.0.1:3001}"
+          owner="${DEPLOY_REPO_OWNER:-justinlindh}"
+          repo="${DEPLOY_REPO_NAME:-dockers}"
+          workflow_id="${DEPLOY_WORKFLOW_ID:-deploy-bramble-web-client.yml}"
           payload="$(cat <<JSON
           {
-            "event_type": "deploy-bramble-web-client",
-            "client_payload": {
+            "ref": "refs/heads/master",
+            "inputs": {
               "image_ref": "${IMAGE_REF}",
               "dry_run": "false",
               "check_only": "false"
@@ -118,5 +124,5 @@ jobs:
           curl -fsS -X POST \
             -H "Authorization: token ${GITEA_TOKEN}" \
             -H "Content-Type: application/json" \
-            "${api_base}/api/v1/repos/justinlindh/dockers/dispatches" \
+            "${api_base}/api/v1/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches" \
             -d "${payload}"
