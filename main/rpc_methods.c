@@ -33,6 +33,7 @@
 
 #define BRAMBLE_VERSION_STR      "0.4.1-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.5.0"
+/* release-ci: semantic-release stable publish verification marker */
 
 #define NVS_NAMESPACE            "bramble"
 #define NVS_KEY_NODE_NAME        "node_name"
