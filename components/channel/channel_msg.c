@@ -1,6 +1,9 @@
 #include "include/channel_msg.h"
 #include <string.h>
 
+_Static_assert(CHANNEL_MSG_MAX_PLAINTEXT_SIZE >= BRAMBLE_MAX_PACKET_SIZE - (BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE),
+               "plaintext buffer too small for max packet minus wire overhead");
+
 int channel_msg_encrypt(const bramble_channel_t *ch, uint32_t src_addr, uint8_t app_type,
                         const uint8_t *data, size_t data_len,
                         uint8_t *nonce_out, uint8_t *ciphertext_out, uint8_t *tag_out) {
@@ -8,7 +11,7 @@ int channel_msg_encrypt(const bramble_channel_t *ch, uint32_t src_addr, uint8_t 
 
     /* Build inner plaintext: channel_id(1) + epoch(2) + app_type(1) + src_addr(4) + data */
     size_t pt_len = CHANNEL_MSG_OVERHEAD + data_len;
-    uint8_t pt[256];  /* Max channel payload is ~173 bytes; 256 provides margin */
+    uint8_t pt[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     if (pt_len > sizeof(pt)) return -1;
 
     pt[0] = ch->channel_id;
@@ -45,7 +48,7 @@ int channel_msg_decrypt(bramble_channel_t *channels, int num_channels,
     if (!channels || !nonce || !ciphertext || !tag || !info_out) return -1;
     if (ct_len < CHANNEL_MSG_OVERHEAD) return -1;
 
-    uint8_t pt[256];  /* Max channel payload is ~173 bytes; 256 provides margin */
+    uint8_t pt[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     if (ct_len > sizeof(pt)) return -1;
 
     /* Constant-time trial decryption: always try ALL channels to prevent
@@ -85,7 +88,7 @@ int channel_msg_decrypt(bramble_channel_t *channels, int num_channels,
         memcpy(saved_key, channels[i].key, BRAMBLE_KEY_SIZE);
 
         bool caught_up = false;
-        for (int j = 0; j < 256; j++) {
+        for (int j = 0; j < CHANNEL_EPOCH_CATCHUP_MAX; j++) {
             if (channel_advance_epoch(&channels[i]) != 0) break;
             if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, pt) == 0) {
                 caught_up = true;

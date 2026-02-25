@@ -1351,11 +1351,14 @@ static int handle_set_broadcast_telemetry_mode(const cJSON *params, cJSON *resul
 /* ── Registration ───────────────────────────────────────────────────── */
 
 /* OTA task — runs in background after RPC response */
-static char s_ota_url[256];
+static volatile bool s_ota_in_progress = false;
+
 static void ota_task(void *arg) {
-    (void)arg;
+    char *url = (char *)arg;
     vTaskDelay(pdMS_TO_TICKS(500)); /* let RPC response flush */
-    int rc = ota_wifi_start(s_ota_url);
+    int rc = ota_wifi_start(url);
+    free(url);
+    s_ota_in_progress = false;
     if (rc == 0) {
         ESP_LOGI("ota", "OTA complete — rebooting...");
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -1380,10 +1383,33 @@ static int handle_ota_update(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    strncpy(s_ota_url, url, sizeof(s_ota_url) - 1);
-    s_ota_url[sizeof(s_ota_url) - 1] = '\0';
+#ifndef CONFIG_BRAMBLE_OTA_ALLOW_HTTP
+    if (strncmp(url, "http://", 7) == 0) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "HTTP OTA disabled in release builds — use https://");
+        return 0;
+    }
+#endif
 
-    if (xTaskCreate(ota_task, "ota", 8192, NULL, 3, NULL) != pdPASS) {
+    if (s_ota_in_progress) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "OTA already in progress");
+        return 0;
+    }
+
+    /* Copy URL to heap so task owns it — prevents clobber from concurrent calls */
+    char *url_copy = strdup(url);
+    if (!url_copy) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "out of memory");
+        return 0;
+    }
+
+    s_ota_in_progress = true;
+
+    if (xTaskCreate(ota_task, "ota", 8192, url_copy, 3, NULL) != pdPASS) {
+        s_ota_in_progress = false;
+        free(url_copy);
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "failed to start OTA task");
         return 0;

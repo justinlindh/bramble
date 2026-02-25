@@ -7,6 +7,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "cJSON.h"
+#include "sdkconfig.h"
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE    2048
@@ -43,6 +45,63 @@ static void client_remove(int fd)
     }
 }
 
+/* ── Auth check ──────────────────────────────────────────────────────── */
+
+/**
+ * Check auth token from query param (?token=X) or Authorization: Bearer header.
+ * Returns true if auth passes (token matches or no token configured).
+ */
+static bool auth_check(httpd_req_t *req)
+{
+#ifdef CONFIG_BRAMBLE_WS_AUTH_TOKEN
+    const char *token = CONFIG_BRAMBLE_WS_AUTH_TOKEN;
+    if (token[0] == '\0') return true;  /* no token configured */
+
+    /* Check query parameter */
+    size_t query_len = httpd_req_get_url_query_len(req);
+    if (query_len > 0) {
+        char *query = malloc(query_len + 1);
+        if (query && httpd_req_get_url_query_str(req, query, query_len + 1) == ESP_OK) {
+            char val[128] = {0};
+            if (httpd_query_key_value(query, "token", val, sizeof(val)) == ESP_OK) {
+                if (strcmp(val, token) == 0) {
+                    free(query);
+                    return true;
+                }
+            }
+        }
+        free(query);
+    }
+
+    /* Check Authorization: Bearer header */
+    size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
+    if (hdr_len > 0) {
+        char *hdr = malloc(hdr_len + 1);
+        if (hdr && httpd_req_get_hdr_value_str(req, "Authorization", hdr, hdr_len + 1) == ESP_OK) {
+            const char *prefix = "Bearer ";
+            if (strncmp(hdr, prefix, 7) == 0 && strcmp(hdr + 7, token) == 0) {
+                free(hdr);
+                return true;
+            }
+        }
+        free(hdr);
+    }
+
+    return false;
+#else
+    return true;
+#endif
+}
+
+static esp_err_t send_401(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    const char *body = "{\"error\":\"unauthorized\",\"message\":\"Valid token required\"}";
+    httpd_resp_send(req, body, strlen(body));
+    return ESP_FAIL;
+}
+
 /* ── Notification transport ──────────────────────────────────────────── */
 
 static void ws_notify_cb(const char *json, size_t len, void *ctx)
@@ -70,6 +129,11 @@ static void ws_notify_cb(const char *json, size_t len, void *ctx)
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     if (req->method == HTTP_GET) {
+        /* Auth check on WebSocket upgrade */
+        if (!auth_check(req)) {
+            ESP_LOGW(TAG, "WS auth failed");
+            return send_401(req);
+        }
         /* Handshake: record the new client */
         int fd = httpd_req_to_sockfd(req);
         client_add(fd);
@@ -224,12 +288,22 @@ static esp_err_t config_status_handler(httpd_req_t *req)
     wifi_manager_get_status(&st);
     const char *mode_str = st.mode == BRAMBLE_WIFI_STATION ? "Station" :
                            st.mode == BRAMBLE_WIFI_AP ? "AP" : "Off";
-    char json[256];
-    snprintf(json, sizeof(json),
-             "{\"mode\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\"}",
-             mode_str, st.ssid, st.ip_addr);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "mode", mode_str);
+    cJSON_AddStringToObject(root, "ssid", st.ssid);
+    cJSON_AddStringToObject(root, "ip", st.ip_addr);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "JSON alloc failed");
+        return ESP_FAIL;
+    }
+
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json, strlen(json));
+    free(json);
     return ESP_OK;
 }
 
@@ -254,6 +328,11 @@ static int url_decode(char *dst, const char *src, int src_len)
 
 static esp_err_t config_post_handler(httpd_req_t *req)
 {
+    if (!auth_check(req)) {
+        ESP_LOGW(TAG, "Config POST auth failed");
+        return send_401(req);
+    }
+
     char body[256] = {0};
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
     if (len <= 0) {
