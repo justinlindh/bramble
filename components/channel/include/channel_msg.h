@@ -3,9 +3,23 @@
 
 #include "channel_key.h"
 #include "crypto.h"
+#include "packet.h"
 
 #define CHANNEL_MSG_OVERHEAD 8  /* channel_id(1) + epoch(2) + app_type(1) + src_addr(4) */
 #define MAX_CHANNELS 16
+
+/*
+ * Max plaintext buffer size for channel encrypt/decrypt.
+ * Must be >= BRAMBLE_MAX_PACKET_SIZE minus channel wire overhead (nonce + tag).
+ * 256 provides margin over the ~173 byte practical max.
+ */
+#define CHANNEL_MSG_MAX_PLAINTEXT_SIZE 256
+
+/*
+ * Max epoch drift to attempt during trial decryption.
+ * 256 covers the full uint8_t rollover range.
+ */
+#define CHANNEL_EPOCH_CATCHUP_MAX 256
 
 int channel_msg_encrypt(const bramble_channel_t *ch, uint32_t src_addr, uint8_t app_type,
                         const uint8_t *data, size_t data_len,

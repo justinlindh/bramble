@@ -200,11 +200,11 @@ int display_init(void) {
     /* Allocate framebuffer in PSRAM */
     fb = heap_caps_malloc(FB_SIZE, MALLOC_CAP_SPIRAM);
     if (!fb) {
-        ESP_LOGW(TAG, "PSRAM allocation failed, trying regular heap");
-        fb = malloc(FB_SIZE);
+        ESP_LOGW(TAG, "PSRAM allocation failed, trying default heap");
+        fb = heap_caps_malloc(FB_SIZE, MALLOC_CAP_DEFAULT);
     }
     if (!fb) {
-        ESP_LOGE(TAG, "Failed to allocate framebuffer");
+        ESP_LOGE(TAG, "ST7789: framebuffer allocation failed (%d bytes)", FB_SIZE);
         return -1;
     }
     memset(fb, 0, FB_SIZE);  /* Start with black screen */

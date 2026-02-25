@@ -43,6 +43,11 @@ static int ota_https_start(const char *url)
 
 static int ota_http_start(const char *url)
 {
+#ifndef CONFIG_BRAMBLE_OTA_ALLOW_HTTP
+    (void)url;
+    ESP_LOGE(TAG, "HTTP OTA disabled in release builds");
+    return -1;
+#else
     esp_http_client_config_t config = {
         .url = url,
         .timeout_ms = 120000,
@@ -148,6 +153,7 @@ static int ota_http_start(const char *url)
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return 0;
+#endif /* CONFIG_BRAMBLE_OTA_ALLOW_HTTP */
 }
 
 int ota_wifi_start(const char *url)

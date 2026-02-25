@@ -804,7 +804,8 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         }
     }
 
-    /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI */
+    /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI.
+     * Log-only for now; detection algorithm needs field validation before dropping beacons. */
     {
         int nc = neighbor_count(&s_neighbors);
         if (nc >= 3) {
@@ -813,7 +814,9 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
                 rssi_vals[i] = s_neighbors.entries[i].rssi;
             }
             if (sybil_check_rssi_cluster(rssi_vals, nc)) {
-                ESP_LOGW(TAG, "SYBIL WARNING: %d neighbors with suspiciously similar RSSI", nc);
+                ESP_LOGW(TAG, "SYBIL WARNING: beacon from %08" PRIX32
+                         " — %d neighbors with suspiciously similar RSSI (latest RSSI:%d)",
+                         beacon.src_addr, nc, rssi);
             }
         }
     }
@@ -2546,10 +2549,25 @@ void mesh_task_start(bramble_identity_t *identity) {
     nvs_handle_t nvs;
     if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_node_name);
-        if (nvs_get_str(nvs, "node_name", s_node_name, &len) != ESP_OK) {
-            s_node_name[0] = '\0';
+        esp_err_t name_err = nvs_get_str(nvs, "node_name", s_node_name, &len);
+        if (name_err != ESP_OK) {
+            if (name_err == ESP_ERR_NVS_INVALID_LENGTH) {
+                /* Stored string exceeds buffer — read truncated and force null-terminate */
+                len = sizeof(s_node_name);
+                nvs_get_str(nvs, "node_name", s_node_name, &len);
+                s_node_name[sizeof(s_node_name) - 1] = '\0';
+                ESP_LOGW(TAG, "NVS node_name truncated to %u bytes (buffer overflow prevented)",
+                         (unsigned)(sizeof(s_node_name) - 1));
+            } else {
+                s_node_name[0] = '\0';
+            }
         } else {
-            s_node_name[sizeof(s_node_name) - 1] = '\0';  /* Ensure null termination */
+            /* Defensive: ensure null termination even on successful read */
+            s_node_name[sizeof(s_node_name) - 1] = '\0';
+            if (len > sizeof(s_node_name)) {
+                ESP_LOGW(TAG, "NVS node_name length %u exceeds buffer, truncated",
+                         (unsigned)len);
+            }
         }
         nvs_close(nvs);
     }

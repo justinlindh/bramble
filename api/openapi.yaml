@@ -1769,7 +1769,7 @@ x-notifications:
   bramble.onBroadcastDelivery:
     description: >
       Broadcast delivery telemetry event emitted after bramble.sendBroadcast.
-      Correlate using both broadcastId and packetId from SendBroadcastResponse.
+      Correlate using broadcast_id from SendBroadcastResponse.
       One broadcast may produce multiple delivery notifications.
     payload:
       $ref: '#/components/schemas/BroadcastDeliveryNotification'

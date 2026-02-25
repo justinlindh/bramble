@@ -74,4 +74,13 @@ menu "Bramble Configuration"
             depends on BRAMBLE_MSG_PERSIST_ENABLED
     endmenu
 
+    config BRAMBLE_WS_AUTH_TOKEN
+        string "Auth token for /ws and /config POST endpoints"
+        default ""
+        help
+            If non-empty, WebSocket upgrade requests to /ws and POST
+            requests to /config will require this token via query
+            parameter (?token=VALUE) or Authorization: Bearer header.
+            Leave empty to allow unauthenticated access (default).
+
 endmenu
