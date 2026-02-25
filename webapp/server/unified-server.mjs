@@ -67,6 +67,19 @@ function writeUpgradeError(socket, statusCode, body) {
   socket.destroy();
 }
 
+function validateProxyRequest(url, { mode, allowlist }) {
+  if (mode !== 'local') {
+    return { ok: false, status: 403, error: 'ws proxy disabled in hosted mode' };
+  }
+
+  const check = isTargetAllowed(url.searchParams.get('target'), { mode, allowlist });
+  if (!check.ok) {
+    return { ok: false, status: 403, error: check.reason };
+  }
+
+  return { ok: true, parsed: check.parsed };
+}
+
 export function createUnifiedServer({ mode = resolveMode(), distDir = DEFAULT_DIST_DIR, allowlist = parseAllowlist() } = {}) {
   mode = resolveMode(mode);
 
@@ -89,14 +102,9 @@ export function createUnifiedServer({ mode = resolveMode(), distDir = DEFAULT_DI
     }
 
     if (req.method === 'GET' && url.pathname === '/ws-proxy') {
-      if (mode !== 'local') {
-        json(res, 403, { error: 'ws proxy disabled in hosted mode' });
-        return;
-      }
-
-      const check = isTargetAllowed(url.searchParams.get('target'), { mode, allowlist });
+      const check = validateProxyRequest(url, { mode, allowlist });
       if (!check.ok) {
-        json(res, 403, { error: check.reason });
+        json(res, check.status, { error: check.error });
         return;
       }
 
@@ -173,14 +181,9 @@ export function createUnifiedServer({ mode = resolveMode(), distDir = DEFAULT_DI
       return;
     }
 
-    if (mode !== 'local') {
-      writeUpgradeError(socket, 403, { error: 'ws proxy disabled in hosted mode' });
-      return;
-    }
-
-    const check = isTargetAllowed(url.searchParams.get('target'), { mode, allowlist });
+    const check = validateProxyRequest(url, { mode, allowlist });
     if (!check.ok) {
-      writeUpgradeError(socket, 403, { error: check.reason });
+      writeUpgradeError(socket, check.status, { error: check.error });
       return;
     }
 

@@ -55,4 +55,46 @@ describe('unified runtime api', () => {
     const res = await fetch(`${base}/%E0%A4%A`);
     expect(res.status).toBe(400);
   });
+
+  it('returns 403 for /ws-proxy in hosted mode', async () => {
+    const res = await fetch(`${base}/ws-proxy?target=192.0.2.0`);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'ws proxy disabled in hosted mode' });
+  });
+});
+
+describe('ws proxy behavior in local mode', () => {
+  let localServer;
+  let localBase;
+
+  beforeAll(async () => {
+    const { createUnifiedServer } = await import('./unified-server.mjs');
+    localServer = createUnifiedServer({ mode: 'local' });
+
+    await new Promise((resolve) => {
+      localServer.listen(0, '127.0.0.1', resolve);
+    });
+
+    const address = localServer.address();
+    localBase = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterAll(async () => {
+    if (!localServer) return;
+    await new Promise((resolve, reject) => {
+      localServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it('returns 403 for invalid target in local mode', async () => {
+    const res = await fetch(`${localBase}/ws-proxy?target=8.8.8.8`);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'target is not allowed by local policy' });
+  });
+
+  it('returns 426 for valid target without websocket upgrade', async () => {
+    const res = await fetch(`${localBase}/ws-proxy?target=192.0.2.0`);
+    expect(res.status).toBe(426);
+    expect(await res.json()).toEqual({ error: 'websocket upgrade required' });
+  });
 });
