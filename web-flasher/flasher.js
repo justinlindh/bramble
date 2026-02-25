@@ -34,6 +34,8 @@ class BrambleFlasher {
     static SYNC_TIMEOUT_MS  = 6000;
     static RESPONSE_TIMEOUT_MS = 5000;
     static WRITE_TIMEOUT_MS = 5000;
+    static SIGNAL_TIMEOUT_MS = 800;
+    static TOTAL_SYNC_TIMEOUT_MS = 45000;
     static MAX_SYNC_ATTEMPTS = 5;
 
     // Board configurations
@@ -144,6 +146,18 @@ class BrambleFlasher {
         ]);
     }
 
+    async setSignalsSafe(signals) {
+        if (!this.port || typeof this.port.setSignals !== 'function') return;
+        try {
+            await Promise.race([
+                this.port.setSignals(signals),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('Signal timeout')), BrambleFlasher.SIGNAL_TIMEOUT_MS))
+            ]);
+        } catch {
+            // Some USB serial stacks do not support DTR/RTS reliably; continue.
+        }
+    }
+
     async readRaw(timeoutMs = BrambleFlasher.RESPONSE_TIMEOUT_MS) {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
@@ -250,6 +264,8 @@ class BrambleFlasher {
     // ── Sync ────────────────────────────────────────────────────
 
     async sync() {
+        const syncDeadline = Date.now() + BrambleFlasher.TOTAL_SYNC_TIMEOUT_MS;
+
         // Sync payload: 0x07 0x07 0x12 0x20 + 32 × 0x55
         const syncData = new Uint8Array(36);
         syncData[0] = 0x07; syncData[1] = 0x07;
@@ -259,34 +275,37 @@ class BrambleFlasher {
         const resetSequences = [
             // Common ESP auto-reset sequence for many USB-UART adapters.
             async () => {
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true });
                 await sleep(120);
-                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+                await this.setSignalsSafe({ dataTerminalReady: true, requestToSend: false });
                 await sleep(120);
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false });
             },
             // Fallback for adapters/platforms with differing signal semantics.
             async () => {
-                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+                await this.setSignalsSafe({ dataTerminalReady: true, requestToSend: false });
                 await sleep(120);
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true });
                 await sleep(120);
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false });
             },
             // Mirrors esptool USB-JTAG/Serial sequence used by ESP32-S3 class devices.
             async () => {
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false }); // idle
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false }); // idle
                 await sleep(100);
-                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false }); // IO0 low
+                await this.setSignalsSafe({ dataTerminalReady: true, requestToSend: false }); // IO0 low
                 await sleep(100);
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true }); // through 1,1 edge
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true }); // through 1,1 edge
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true });
                 await sleep(100);
-                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false }); // out of reset
+                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false }); // out of reset
             }
         ];
 
         for (let attempt = 0; attempt < BrambleFlasher.MAX_SYNC_ATTEMPTS; attempt++) {
+            if (Date.now() >= syncDeadline) {
+                throw new Error('Failed to sync with bootloader (timed out). Hold BOOT button and try again.');
+            }
             for (const resetSeq of resetSequences) {
                 try {
                     await this.drainInput(80, 400);
@@ -296,6 +315,9 @@ class BrambleFlasher {
 
                     // Similar to esptool behavior: send several sync frames after reset.
                     for (let i = 0; i < 7; i++) {
+                        if (Date.now() >= syncDeadline) {
+                            throw new Error('Failed to sync with bootloader (timed out). Hold BOOT button and try again.');
+                        }
                         const resp = await this.sendCommand(
                             BrambleFlasher.CMD_SYNC, syncData, 0,
                             Math.max(600, Math.floor(BrambleFlasher.SYNC_TIMEOUT_MS / 7))
