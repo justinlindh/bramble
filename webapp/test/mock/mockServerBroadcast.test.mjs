@@ -1,0 +1,110 @@
+/**
+ * Test for mock server bramble.sendBroadcast RPC method.
+ * Validates that the mock node handles broadcast sends correctly.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import WebSocket from 'ws';
+
+const MOCK_SERVER_URL = process.env.MOCK_SERVER_URL || 'ws://localhost:3005';
+
+function sendRpc(ws, method, params = {}) {
+  const id = Date.now();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('RPC timeout')), 5000);
+
+    const handler = (data) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.id === id) {
+        clearTimeout(timeout);
+        ws.off('message', handler);
+        if (msg.error) {
+          reject(new Error(msg.error.message));
+        } else {
+          resolve(msg.result);
+        }
+      }
+    };
+
+    ws.on('message', handler);
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+  });
+}
+
+function collectNotifications(ws, method, count, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const collected = [];
+    const timeout = setTimeout(() => resolve(collected), timeoutMs);
+
+    const handler = (data) => {
+      const msg = JSON.parse(data.toString());
+      if (msg.method === method) {
+        collected.push(msg.params);
+        if (collected.length >= count) {
+          clearTimeout(timeout);
+          ws.off('message', handler);
+          resolve(collected);
+        }
+      }
+    };
+
+    ws.on('message', handler);
+  });
+}
+
+describe('Mock Server bramble.sendBroadcast', () => {
+  let ws;
+
+  beforeAll(async () => {
+    ws = new WebSocket(MOCK_SERVER_URL);
+    await new Promise((resolve, reject) => {
+      ws.on('open', resolve);
+      ws.on('error', reject);
+    });
+  });
+
+  afterAll(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+  });
+
+  it('should return packetId and broadcastId', async () => {
+    const result = await sendRpc(ws, 'bramble.sendBroadcast', { text: 'Test broadcast message' });
+    
+    expect(result).toBeDefined();
+    expect(typeof result.packetId).toBe('number');
+    expect(typeof result.broadcastId).toBe('string');
+    expect(result.broadcastId).toMatch(/^bcast-/);
+  });
+
+  it('should emit onBroadcastDelivery notifications', async () => {
+    // Start collecting notifications before sending
+    const notificationPromise = collectNotifications(ws, 'bramble.onBroadcastDelivery', 2, 6000);
+    
+    // Send broadcast
+    const result = await sendRpc(ws, 'bramble.sendBroadcast', { text: 'Hello mesh!' });
+    
+    // Wait for delivery notifications
+    const notifications = await notificationPromise;
+    
+    expect(notifications.length).toBeGreaterThan(0);
+    
+    // Verify notification structure
+    const firstNotification = notifications[0];
+    expect(firstNotification.broadcastId).toBe(result.broadcastId);
+    expect(typeof firstNotification.from).toBe('number');
+    expect(['delivered', 'failed']).toContain(firstNotification.status);
+    expect(typeof firstNotification.hopCount).toBe('number');
+    expect(typeof firstNotification.deliveredAtMs).toBe('number');
+  });
+
+  it('should NOT return Method not found error', async () => {
+    // This is the key test — verifying the fix works
+    const result = await sendRpc(ws, 'bramble.sendBroadcast', { text: 'Verify no method not found error' });
+    
+    // If we get here without error, the method exists
+    expect(result).toBeDefined();
+    expect(result.packetId).toBeDefined();
+  });
+});

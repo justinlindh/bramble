@@ -284,6 +284,58 @@ const handlers = {
     return { packetId };
   },
 
+  'bramble.sendBroadcast'(params) {
+    const packetId = ++packetIdCounter;
+    const broadcastId = `bcast-${Date.now().toString(36)}-${packetId}`;
+    txCount++;
+    airtimeUsedMs += 450 + Math.floor(Math.random() * 300);
+
+    console.log(`[mock-node] Broadcast: "${params?.text?.slice(0, 40)}..." (packetId=${packetId})`);
+
+    // Simulate broadcast delivery notifications from each reachable peer
+    // Broadcasts reach neighbors directly — simulate realistic delivery timing
+    const reachablePeers = neighbors.filter(n => n.rssi > -115); // Only peers with reasonable signal
+    
+    for (let i = 0; i < reachablePeers.length; i++) {
+      const peer = reachablePeers[i];
+      // Closer peers (better RSSI) respond faster
+      const rssiOffset = Math.abs(peer.rssi + 70); // -70 is excellent, -110 is marginal
+      const baseDelay = 500 + rssiOffset * 30;
+      const jitter = Math.floor(Math.random() * 1500);
+      const delayMs = baseDelay + jitter + i * 800;
+
+      // Delivery probability based on link quality
+      const deliveryChance = peer.rssi > -90 ? 0.95 : peer.rssi > -105 ? 0.7 : 0.4;
+      const delivered = Math.random() < deliveryChance;
+
+      setTimeout(() => {
+        notify('bramble.onBroadcastDelivery', {
+          broadcastId,
+          packetId,
+          from: peer.addr,
+          status: delivered ? 'delivered' : 'failed',
+          hopCount: 1,
+          deliveredAtMs: Date.now(),
+        });
+      }, delayMs);
+    }
+
+    // Also simulate 2-hop delivery to Anthem (via Hilltop) with longer delay
+    const anthemAddr = 0xAABBCC04;
+    setTimeout(() => {
+      notify('bramble.onBroadcastDelivery', {
+        broadcastId,
+        packetId,
+        from: anthemAddr,
+        status: Math.random() < 0.85 ? 'delivered' : 'failed',
+        hopCount: 2,
+        deliveredAtMs: Date.now(),
+      });
+    }, 3000 + Math.floor(Math.random() * 2000));
+
+    return { packetId, broadcastId };
+  },
+
   'bramble.setRadio'(params) {
     if (params) Object.assign(config.radio, params);
     return { ok: true };
