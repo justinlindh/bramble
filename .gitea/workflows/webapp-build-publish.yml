@@ -1,5 +1,4 @@
 name: Web Client Build Publish
-# no-op: retrigger workflow on main push
 
 on:
   workflow_dispatch:
@@ -9,6 +8,7 @@ on:
       - 'v*'
     paths:
       - 'webapp/**'
+      - 'web-flasher/**'
       - '.gitea/workflows/webapp-build-publish.yml'
 
 jobs:
@@ -25,6 +25,9 @@ jobs:
 
       - name: Build and test webapp
         run: |
+          rm -rf webapp/public/web-flasher
+          mkdir -p webapp/public/web-flasher
+          cp -a web-flasher/. webapp/public/web-flasher/
           cd webapp
           npm ci
           npm test
@@ -90,3 +93,30 @@ jobs:
             "${BUILD_CONTEXT}" \
             "${tag_args[@]}" \
             --push
+
+      - name: Trigger host deploy workflow
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_API_BASE: ${{ vars.GITEA_API_BASE }}
+          IMAGE_REF: ghcr.io/example/justinlindh/bramble-web-client:sha-${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_base="${GITEA_API_BASE:-http://172.17.0.1:3001}"
+          payload="$(cat <<JSON
+          {
+            "event_type": "deploy-bramble-web-client",
+            "client_payload": {
+              "image_ref": "${IMAGE_REF}",
+              "dry_run": "false",
+              "check_only": "false"
+            }
+          }
+          JSON
+          )"
+
+          curl -fsS -X POST \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${api_base}/api/v1/repos/justinlindh/dockers/dispatches" \
+            -d "${payload}"
