@@ -129,6 +129,15 @@ Bramble exposes a JSON-RPC 2.0 API for external control. The API spec, Go SDK, a
 | [bramble-cli](https://git.idiotica.org/dumbot/bramble-cli) | CLI tool built on bramble-go |
 | [VERSIONING.md](VERSIONING.md) | Version compatibility matrix |
 
+## CI/CD
+
+- **Web client image publish:** `.gitea/workflows/webapp-build-publish.yml`
+  - Triggers on `main` pushes affecting `webapp/**` or the workflow file itself, on `v*` tags, and manual dispatch.
+  - Runs `npm ci`, `npm test`, and `npm run build` in `webapp` before publishing.
+  - Publishes `registry.idiotica.org/bramble/web-client` tags:
+    - `main` and `sha-<shortsha>` for `main`
+    - `vX.Y.Z` plus rolling semver tags (`vX.Y`, `vX`) for version tags.
+
 ## Status
 
 The protocol layer is implemented and tested in software. Hardware-dependent work (SX1262 SPI driver, FreeRTOS tasks, OLED/BLE/OTA) is paused pending hardware availability.
