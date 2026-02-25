@@ -111,6 +111,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
           try {
             const opt = (p: Promise<void>) => p.catch(() => {});
             await Promise.all([loadConfig(), loadNeighbors(), loadRoutes(), opt(loadMessages()), loadAirtime()]);
+            await opt(syncDeliveryEventReplay());
           } catch { /* best effort */ }
         },
       });
@@ -151,6 +152,8 @@ export async function connect(type: TransportType, options?: { url?: string }): 
       opt(loadMessages()),
       opt(loadPeerLocations()),
     ]);
+
+    await opt(syncDeliveryEventReplay());
   } catch (e) {
     // Clean up any partially-initialised client so we start fresh on retry
     client?.clearSubscriptions();
@@ -393,12 +396,156 @@ const pendingBroadcastTelemetry = new Map<string, BroadcastDeliveryNotification[
 
 const DEFAULT_DELIVERY_EVENT_RETENTION_DAYS = 30;
 const DELIVERY_EVENT_RETENTION_DAYS = Number((import.meta as any).env?.VITE_DELIVERY_EVENT_RETENTION_DAYS ?? DEFAULT_DELIVERY_EVENT_RETENTION_DAYS);
+const DELIVERY_EVENT_SYNC_SEQ_KEY_PREFIX = 'bramble:delivery-event-sync:last-seq:';
+
+interface DeliveryReplayEventWire {
+  eventId?: string;
+  event_id?: string;
+  eventSeq?: number;
+  event_seq?: number;
+  messageId?: string | number;
+  message_id?: string | number;
+  eventType?: string;
+  event_type?: string;
+  ts?: number;
+  timestampMs?: number;
+  timestamp_ms?: number;
+  payload?: unknown;
+  data?: unknown;
+}
+
+interface DeliveryReplayResponse {
+  events?: DeliveryReplayEventWire[];
+  latestEventSeq?: number;
+  latest_event_seq?: number;
+}
 
 function retentionCutoffTs(nowMs = Date.now()): number {
   const days = Number.isFinite(DELIVERY_EVENT_RETENTION_DAYS) && DELIVERY_EVENT_RETENTION_DAYS > 0
     ? DELIVERY_EVENT_RETENTION_DAYS
     : DEFAULT_DELIVERY_EVENT_RETENTION_DAYS;
   return nowMs - days * 24 * 60 * 60 * 1000;
+}
+
+function currentNodeAddrHex(): string {
+  return useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default';
+}
+
+function lastDeliverySeqKey(nodeAddr: string): string {
+  return `${DELIVERY_EVENT_SYNC_SEQ_KEY_PREFIX}${nodeAddr}`;
+}
+
+function loadLastDeliveryEventSeq(nodeAddr: string): number {
+  try {
+    const raw = localStorage.getItem(lastDeliverySeqKey(nodeAddr));
+    const parsed = raw ? Number(raw) : 0;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveLastDeliveryEventSeq(nodeAddr: string, seq: number): void {
+  if (!Number.isFinite(seq) || seq < 0) return;
+  try {
+    localStorage.setItem(lastDeliverySeqKey(nodeAddr), String(Math.floor(seq)));
+  } catch {
+    // best effort
+  }
+}
+
+function asNumber(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+function normalizeReplayDeliveryEvent(raw: DeliveryReplayEventWire): DeliveryEventRecord | null {
+  const messageIdRaw = raw.messageId ?? raw.message_id;
+  const messageId = messageIdRaw !== undefined && messageIdRaw !== null ? String(messageIdRaw) : '';
+  if (!messageId) return null;
+
+  const seq = asNumber(raw.eventSeq ?? raw.event_seq);
+  const eventType = String(raw.eventType ?? raw.event_type ?? '').trim() || 'unknown';
+  const ts = asNumber(raw.ts ?? raw.timestampMs ?? raw.timestamp_ms) ?? Date.now();
+  const payload = raw.payload ?? raw.data;
+
+  const eventId = String(raw.eventId ?? raw.event_id ?? (seq !== undefined
+    ? `replay:${seq}:${messageId}`
+    : `replay:${eventType}:${messageId}:${ts}`));
+
+  return {
+    eventId,
+    messageId,
+    conversationKey: `msg:${messageId}`,
+    ts,
+    nodeAddr: currentNodeAddrHex(),
+    eventType,
+    payload,
+  };
+}
+
+async function syncDeliveryEventReplay(): Promise<void> {
+  if (!client) return;
+
+  let supportsDeliveryEventSync = false;
+  try {
+    const version = await client.rpc<Record<string, unknown>>('bramble.getVersion');
+    supportsDeliveryEventSync = Boolean(
+      version.supportsDeliveryEventSync ?? version.supports_delivery_event_sync,
+    );
+  } catch {
+    return;
+  }
+  if (!supportsDeliveryEventSync) return;
+
+  const nodeAddr = currentNodeAddrHex();
+  const sinceEventSeq = loadLastDeliveryEventSeq(nodeAddr);
+
+  let replay: DeliveryReplayResponse;
+  try {
+    replay = await client.rpc<DeliveryReplayResponse>('bramble.getDeliveryEvents', { sinceEventSeq });
+  } catch (error) {
+    const msg = (error as Error)?.message ?? '';
+    const unsupported = /not\s+found|unknown\s+method|method\s+not\s+found/i.test(msg);
+    if (unsupported) return;
+    replay = await client.rpc<DeliveryReplayResponse>('bramble.getDeliveryEvents', { since_event_seq: sinceEventSeq });
+  }
+
+  const events = (replay.events ?? [])
+    .map(normalizeReplayDeliveryEvent)
+    .filter((e): e is DeliveryEventRecord => Boolean(e))
+    .sort((a, b) => a.ts - b.ts);
+
+  if (events.length > 0) {
+    await deliveryEventStore.upsertDeliveryEvents(events);
+
+    const eventsByMessage = new Map<string, DeliveryEventRecord[]>();
+    for (const event of events) {
+      const list = eventsByMessage.get(event.messageId) ?? [];
+      list.push(event);
+      eventsByMessage.set(event.messageId, list);
+    }
+
+    useStore.setState((state) => ({
+      messages: state.messages.map((message) => {
+        const applicable = eventsByMessage.get(message.id);
+        if (!applicable || applicable.length === 0) return message;
+        return applicable.reduce((acc, event) => applyDeliveryEventToMessage(acc, event), message);
+      }),
+    }));
+  }
+
+  const replayLatest = asNumber(replay.latestEventSeq ?? replay.latest_event_seq);
+  const maxSeen = events.reduce((max, event) => {
+    const seqMatch = /replay:(\d+):/.exec(event.eventId);
+    const seq = seqMatch ? Number(seqMatch[1]) : undefined;
+    return seq !== undefined && Number.isFinite(seq) ? Math.max(max, seq) : max;
+  }, sinceEventSeq);
+  saveLastDeliveryEventSeq(nodeAddr, Math.max(sinceEventSeq, replayLatest ?? 0, maxSeen));
 }
 
 function hydrateCorrelationMaps(messages: Message[]): void {
@@ -1142,6 +1289,29 @@ export function __resetBroadcastTelemetryForTests(): void {
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
+}
+
+export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventWire): DeliveryEventRecord | null {
+  return normalizeReplayDeliveryEvent(raw);
+}
+
+export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
+  try {
+    if (nodeAddr) {
+      localStorage.removeItem(lastDeliverySeqKey(nodeAddr));
+      return;
+    }
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(DELIVERY_EVENT_SYNC_SEQ_KEY_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // noop
+  }
 }
 
 export function getClient(): BrambleClient | null {
