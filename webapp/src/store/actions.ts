@@ -1,6 +1,7 @@
 import { useStore } from './index';
 import { createTransport, BrambleClient } from '../transport';
 import { messageDb } from './messageDb';
+import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventStore';
 import type {
   TransportType,
   BrambleConfig,
@@ -48,10 +49,18 @@ let client: BrambleClient | null = null;
 
 export async function initMessageStore(nodeAddr?: string): Promise<void> {
   try {
-    await messageDb.open(nodeAddr);
+    await Promise.all([
+      messageDb.open(nodeAddr),
+      deliveryEventStore.open(nodeAddr),
+    ]);
+
+    await deliveryEventStore.pruneOldEvents(retentionCutoffTs());
+
     const cached = await messageDb.getMessages();
-    if (cached.length > 0) {
-      useStore.getState().loadCachedMessages(cached);
+    const hydrated = cached.length > 0 ? await hydrateMessagesWithDeliveryEvents(cached) : [];
+    hydrateCorrelationMaps(hydrated);
+    if (hydrated.length > 0) {
+      useStore.getState().loadCachedMessages(hydrated);
     }
   } catch {
     // IndexedDB unavailable (e.g. private browsing) — continue without persistence
@@ -240,10 +249,10 @@ function normalizeStatus(raw: any): NodeStatus {
     fwVersion: raw.firmware_version ?? raw.fwVersion ?? '',
     txCount: raw.packets_tx ?? raw.txCount ?? 0,
     rxCount: raw.packets_rx ?? raw.rxCount ?? 0,
-    droppedCount: raw.droppedCount ?? 0,
+    droppedCount: raw.dropped_count ?? raw.droppedCount ?? 0,
     neighborCount: raw.peers ?? raw.neighborCount ?? 0,
-    routeCount: raw.routeCount ?? 0,
-    airtimeUsedMs: raw.airtimeUsedMs ?? 0,
+    routeCount: raw.route_count ?? raw.routeCount ?? 0,
+    airtimeUsedMs: raw.airtime_used_ms ?? raw.air_used_ms ?? raw.airtimeUsedMs ?? 0,
     position: raw.position,
     gpsAvailable: raw.gps_available ?? raw.gpsAvailable ?? false,
     batteryMv: raw.battery_mv ?? raw.batteryMv,
@@ -382,6 +391,90 @@ const packetIdToMsgId = new Map<string, string>();
 const broadcastIdToMsgId = new Map<string, string>();
 const pendingBroadcastTelemetry = new Map<string, BroadcastDeliveryNotification[]>();
 
+const DEFAULT_DELIVERY_EVENT_RETENTION_DAYS = 30;
+const DELIVERY_EVENT_RETENTION_DAYS = Number((import.meta as any).env?.VITE_DELIVERY_EVENT_RETENTION_DAYS ?? DEFAULT_DELIVERY_EVENT_RETENTION_DAYS);
+
+function retentionCutoffTs(nowMs = Date.now()): number {
+  const days = Number.isFinite(DELIVERY_EVENT_RETENTION_DAYS) && DELIVERY_EVENT_RETENTION_DAYS > 0
+    ? DELIVERY_EVENT_RETENTION_DAYS
+    : DEFAULT_DELIVERY_EVENT_RETENTION_DAYS;
+  return nowMs - days * 24 * 60 * 60 * 1000;
+}
+
+function hydrateCorrelationMaps(messages: Message[]): void {
+  packetIdToMsgId.clear();
+  broadcastIdToMsgId.clear();
+  pendingBroadcastTelemetry.clear();
+  for (const msg of messages) {
+    if (msg.packetId) packetIdToMsgId.set(String(msg.packetId), msg.id);
+    if (msg.broadcastId) broadcastIdToMsgId.set(msg.broadcastId, msg.id);
+  }
+}
+
+function conversationKeyForMessage(message: Message): string {
+  if (message.channelIndex !== undefined && message.channelIndex >= 0) return `ch:${message.channelIndex}`;
+  if (message.to === 0xFFFFFFFF) return 'broadcast';
+  return `dm:${message.direction === 'outgoing' ? message.to : message.from}`;
+}
+
+function applyDeliveryEventToMessage(message: Message, event: DeliveryEventRecord): Message {
+  if (event.eventType === 'ack') {
+    const payload = (event.payload ?? {}) as { status?: DeliveryStatus; relayPath?: RelayHop[] };
+    return {
+      ...message,
+      status: payload.status ?? message.status,
+      relayPath: payload.relayPath ?? message.relayPath,
+    };
+  }
+
+  if (event.eventType === 'broadcast_delivery') {
+    const payload = (event.payload ?? {}) as {
+      addr?: number;
+      status?: 'delivered' | 'failed';
+      hopCount?: number;
+      deliveredAtMs?: number;
+    };
+    if (payload.addr === undefined || !payload.status) return message;
+    const existing = message.broadcastRecipients ?? [];
+    const idx = existing.findIndex(r => r.addr === payload.addr);
+    const incomingTs = payload.deliveredAtMs ?? event.ts;
+
+    if (idx < 0) {
+      return {
+        ...message,
+        broadcastRecipients: [...existing, {
+          addr: payload.addr,
+          status: payload.status,
+          hopCount: payload.hopCount ?? 0,
+          deliveredAtMs: incomingTs,
+        }],
+      };
+    }
+
+    if (existing[idx].deliveredAtMs > incomingTs) return message;
+
+    const merged = [...existing];
+    merged[idx] = {
+      ...existing[idx],
+      addr: payload.addr,
+      status: payload.status,
+      hopCount: payload.hopCount ?? existing[idx].hopCount,
+      deliveredAtMs: incomingTs,
+    };
+    return { ...message, broadcastRecipients: merged };
+  }
+
+  return message;
+}
+
+async function hydrateMessagesWithDeliveryEvents(messages: Message[]): Promise<Message[]> {
+  const hydrated = await Promise.all(messages.map(async (message) => {
+    const events = await deliveryEventStore.listByMessage(message.id);
+    return events.reduce((acc, event) => applyDeliveryEventToMessage(acc, event), message);
+  }));
+  return hydrated;
+}
+
 interface BroadcastDeliveryNotification {
   broadcastId: string;
   packetId?: string;
@@ -412,7 +505,14 @@ function utf8ByteLength(s: string): number {
 function parseHexAddr(addr: string | number | undefined): number {
   if (typeof addr === 'number') return addr;
   if (!addr) return 0;
-  return parseInt(addr.replace(/^0x/i, ''), 16);
+  const raw = addr.trim();
+  if (!raw) return 0;
+  const stripped = raw.replace(/^0x/i, '');
+  // If the string is plain decimal digits, treat as decimal.
+  if (/^[0-9]+$/.test(stripped) && !/[A-Fa-f]/.test(stripped)) {
+    return parseInt(stripped, 10);
+  }
+  return parseInt(stripped, 16);
 }
 
 export function registerBroadcastSendTelemetry(msgId: string, meta: { packetId?: string; broadcastId?: string }): void {
@@ -446,12 +546,25 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
     return;
   }
 
-  useStore.getState().mergeBroadcastDeliveryRecipient(event.broadcastId, {
+  const recipient = {
     addr: parseHexAddr(event.from),
     status: event.status,
     hopCount: event.hopCount ?? 0,
     deliveredAtMs: event.deliveredAtMs ?? Date.now(),
-  });
+  };
+
+  const message = useStore.getState().messages.find(m => m.id === msgId);
+  deliveryEventStore.upsertDeliveryEvent({
+    eventId: `broadcast:${event.broadcastId}:${recipient.addr}`,
+    messageId: msgId,
+    conversationKey: message ? conversationKeyForMessage(message) : 'broadcast',
+    ts: recipient.deliveredAtMs,
+    nodeAddr: useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default',
+    eventType: 'broadcast_delivery',
+    payload: recipient,
+  }).catch(() => {});
+
+  useStore.getState().mergeBroadcastDeliveryRecipient(event.broadcastId, recipient);
 }
 
 export function handleBroadcastDelivery(params: unknown): void {
@@ -544,7 +657,7 @@ export async function sendMessage(
 
 // ─── Notification handlers ────────────────────────────────────────────────
 
-function handleAck(params: unknown): void {
+export function handleAck(params: unknown): void {
   const p = params as Record<string, unknown>;
   /* Firmware sends snake_case (packet_id), webapp convention is camelCase */
   const packetId = (p.packetId ?? p.packet_id) as string | undefined;
@@ -561,6 +674,19 @@ function handleAck(params: unknown): void {
   if (msgId) {
     packetIdToMsgId.delete(packetId);
     const newStatus = status === 'delivered' ? 'delivered' : 'failed';
+    const nowTs = Date.now();
+
+    const message = useStore.getState().messages.find(m => m.id === msgId);
+    deliveryEventStore.upsertDeliveryEvent({
+      eventId: `ack:${packetId}:${newStatus}`,
+      messageId: msgId,
+      conversationKey: message ? conversationKeyForMessage(message) : `dm:${msgId}`,
+      ts: nowTs,
+      nodeAddr: useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default',
+      eventType: 'ack',
+      payload: { status: newStatus, relayPath },
+    }).catch(() => {});
+
     useStore.getState().updateMessageStatus(msgId, newStatus, relayPath);
     messageDb.updateMessageStatus(msgId, newStatus, relayPath).catch(() => {});
   }
@@ -748,8 +874,8 @@ function handleProbeAck(params: unknown): void {
     ? parseInt(raw.address.replace(/^0x/i, ''), 16)
     : (raw.responderAddr ?? 0);
 
-  const roundsTotal = 3;
-  const seenRounds = Math.max(1, Math.min(roundsTotal, raw.seen_rounds ?? 1));
+  const roundsTotal = Math.max(1, Number(raw.rounds_total ?? raw.roundsTotal ?? (raw.seen_rounds ? 3 : 1)));
+  const seenRounds = Math.max(1, Math.min(roundsTotal, raw.seen_rounds ?? raw.seenRounds ?? 1));
   const ack: ProbeResponse = {
     responderAddr: Number.isFinite(parsedAddr) ? parsedAddr : 0,
     hopCount: raw.hops ?? raw.hopCount ?? 0,
