@@ -19,5 +19,3 @@ module.exports = {
     '@semantic-release/release-notes-generator'
   ]
 };
-
-// TODO(phase-3): enable firmware semantic-release job after aligning with OTA publish pipeline.

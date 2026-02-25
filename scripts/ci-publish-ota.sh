@@ -51,6 +51,12 @@ if [[ "${1:-}" == "--print-version" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "--set-version" ]]; then
+  [[ -n "${2:-}" ]] || { echo "--set-version requires a value" >&2; exit 1; }
+  VERSION="$2"
+  shift 2
+fi
+
 OTA_PUBLISH_URL=${OTA_PUBLISH_URL:-https://bramblemesh.org/ota/publish}
 OTA_PUBLISH_KEY=${OTA_PUBLISH_KEY:-}
 CHANNEL=${CHANNEL:-dev}

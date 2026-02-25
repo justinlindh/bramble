@@ -9,6 +9,11 @@ on:
       - 'scripts/ci-build-firmware.sh'
       - 'scripts/ci-publish-ota.sh'
       - 'docker/firmware-builder/**'
+      - 'main/**'
+      - 'components/**'
+      - 'partitions.csv'
+      - 'sdkconfig.defaults'
+      - 'sdkconfig.defaults.*'
 
 jobs:
   firmware-build:
