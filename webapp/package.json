@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "start": "node server/unified-server.mjs",
     "test": "vitest run"
   },
   "dependencies": {
