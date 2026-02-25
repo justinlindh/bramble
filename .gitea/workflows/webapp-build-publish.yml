@@ -66,7 +66,7 @@ jobs:
 
       - name: Build and push web-client image
         env:
-          IMAGE_REPO: ghcr.io/example/bramble/web-client
+          IMAGE_REPO: ghcr.io/example/justinlindh/bramble-web-client
           IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
         shell: bash
         run: |
