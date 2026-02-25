@@ -34,4 +34,14 @@ rg -Fq 'if [[ "${1:-}" == "--set-version" ]]' "$publish_script" || {
   exit 1
 }
 
+# Verification step should retry index fetch/check to tolerate propagation/caching delays.
+rg -Fq 'for attempt in $(seq 1 12); do' "$release_wf" || {
+  echo "release-firmware index verification missing retry loop"
+  exit 1
+}
+rg -Fq 'sleep 5' "$release_wf" || {
+  echo "release-firmware index verification missing retry delay"
+  exit 1
+}
+
 echo "OK: firmware release CI contract satisfied"
