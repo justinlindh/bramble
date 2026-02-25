@@ -1,4 +1,5 @@
 name: Web Client Build Publish
+# no-op: retrigger workflow on main push
 
 on:
   workflow_dispatch:
