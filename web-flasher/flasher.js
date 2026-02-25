@@ -33,6 +33,7 @@ class BrambleFlasher {
     static FLASH_BLOCK_SIZE = 0x400; // 1KB per data packet
     static SYNC_TIMEOUT_MS  = 6000;
     static RESPONSE_TIMEOUT_MS = 5000;
+    static WRITE_TIMEOUT_MS = 5000;
     static MAX_SYNC_ATTEMPTS = 5;
 
     // Board configurations
@@ -137,7 +138,10 @@ class BrambleFlasher {
     // ── Low-level I/O ───────────────────────────────────────────
 
     async writeRaw(data) {
-        await this.writer.write(data);
+        await Promise.race([
+            this.writer.write(data),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Write timeout')), BrambleFlasher.WRITE_TIMEOUT_MS))
+        ]);
     }
 
     async readRaw(timeoutMs = BrambleFlasher.RESPONSE_TIMEOUT_MS) {
@@ -233,9 +237,14 @@ class BrambleFlasher {
 
     async sendCommand(opcode, data = new Uint8Array(0), checksum = 0, timeoutMs) {
         const pkt = this.buildCommand(opcode, data, checksum);
-        await this.writeRaw(this.slipEncode(pkt));
-        const resp = await this.readSlipPacket(timeoutMs);
-        return this.parseResponse(resp);
+        try {
+            await this.writeRaw(this.slipEncode(pkt));
+            const resp = await this.readSlipPacket(timeoutMs);
+            return this.parseResponse(resp);
+        } catch (e) {
+            const label = `0x${opcode.toString(16).padStart(2, '0')}`;
+            throw new Error(`Bootloader command ${label} failed: ${e.message || e}`);
+        }
     }
 
     // ── Sync ────────────────────────────────────────────────────
@@ -634,6 +643,18 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     flashBtn.addEventListener('click', async () => {
         const board = boardSelect.value;
         const selectedRelease = currentRelease();
+        const trace = [];
+        const startedAt = Date.now();
+        const logStep = (msg) => {
+            const line = `[${new Date().toISOString()}] ${msg}`;
+            trace.push(line);
+            if (trace.length > 300) trace.shift();
+            window.__brambleFlashTrace = trace;
+            window.__brambleFlashLastStep = msg;
+            console.log(line);
+            setStatus(`Flashing: ${msg}`);
+        };
+
         flashBtn.disabled = true;
         connectBtn.disabled = true;
         setProgress(0, 'Starting…');
@@ -651,14 +672,16 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
             await flasher.flashFirmware(
                 board,
                 releaseCtx,
-                () => {},
+                logStep,
                 pct => setProgress(pct, `Flashing… ${pct}%`)
             );
             setProgress(100, 'Done!');
             setStatus('Flash complete.');
         } catch (e) {
             setProgress(0, 'Failed');
-            setStatus(`Flash failed: ${e.message || 'unknown error'}`);
+            const lastStep = window.__brambleFlashLastStep || 'unknown step';
+            const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+            setStatus(`Flash failed (${elapsedSec}s, step: ${lastStep}): ${e.message || 'unknown error'}`);
         } finally {
             flashBtn.disabled = !flasher.connected;
             connectBtn.disabled = false;
