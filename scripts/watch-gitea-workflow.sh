@@ -110,6 +110,10 @@ print_run() {
     fi
   done < <(psql_tsv "$(job_rows_query "$run_id")")
 
+  # Some terminal outcomes (e.g. skipped) may not populate stopped timestamp.
+  if [[ "$run_status" == "1" || "$run_status" == "2" || "$run_status" == "3" || "$run_status" == "5" ]]; then
+    return 0
+  fi
   if [[ "$stopped" == "0" ]]; then
     return 10
   fi
