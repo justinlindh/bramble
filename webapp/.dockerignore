@@ -9,3 +9,5 @@ docker-compose*
 coverage
 .vscode
 .idea
+docs
+scripts
