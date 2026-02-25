@@ -33,6 +33,12 @@ interface Props {
   config: BrambleConfig;
 }
 
+function hasBattery(status: NodeStatus): boolean {
+  // Boards without a battery commonly report 0mV / 0%.
+  if (status.batteryMv === undefined && status.batteryPct === undefined) return false;
+  return (status.batteryMv ?? 0) > 1000;
+}
+
 export function SystemInfo({ status, config }: Props) {
   const { identity } = config;
 
@@ -51,10 +57,16 @@ export function SystemInfo({ status, config }: Props) {
       mono: true,
       color: heapDanger ? 'danger' : heapWarning ? 'warning' : undefined,
     },
-    ...(status.batteryPct !== undefined ? [{
+    ...((status.batteryPct !== undefined || status.batteryMv !== undefined) ? [{
       label: 'Battery',
-      value: `${status.batteryPct}% (${status.batteryMv ?? '?'} mV)`,
-      color: status.batteryPct < 10 ? 'danger' as const : status.batteryPct < 25 ? 'warning' as const : undefined,
+      value: hasBattery(status) ? `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)` : 'N/A',
+      color: hasBattery(status)
+        ? (status.batteryPct ?? 100) < 10
+          ? 'danger' as const
+          : (status.batteryPct ?? 100) < 25
+            ? 'warning' as const
+            : undefined
+        : 'muted' as const,
     }] : []),
     {
       label: 'Firmware',

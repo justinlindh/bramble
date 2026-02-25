@@ -179,6 +179,12 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
           ))}
         </select>
       </div>
+      {source === 'hybrid' && (
+        <div className={styles.preview}>
+          <strong>Hybrid explained:</strong> uses live GPS coordinates when available; if GPS is unavailable,
+          Bramble falls back to your saved manual location so location sharing keeps working.
+        </div>
+      )}
 
       <div className={styles.block}>
         <div className={styles.blockHeader}><strong>Contact targets</strong></div>
@@ -204,7 +210,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
         {contactRules.map((rule, idx) => (
           <div key={rule.address} className={styles.contactRow}>
             <span className={styles.mono}>{rule.address}</span>
-            <label>
+            <label className={styles.inlineToggle}>
               <input
                 type="checkbox"
                 checked={rule.enabled !== false}
@@ -214,7 +220,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                   setContactRules(next);
                 }}
               />
-              enabled
+              Enabled
             </label>
             <select
               className={styles.tierSelect}
@@ -225,7 +231,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                 setContactRules(next);
               }}
             >
-              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.value}</option>)}
+              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
             <input
               type="number"
@@ -256,7 +262,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
         {channelTargets.map((target, idx) => (
           <div key={target.channel} className={styles.contactRow}>
             <span>#{target.channel}</span>
-            <label>
+            <label className={styles.inlineToggle}>
               <input
                 type="checkbox"
                 checked={target.enabled !== false}
@@ -266,7 +272,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                   setChannelTargets(next);
                 }}
               />
-              enabled
+              Enabled
             </label>
             <select
               className={styles.tierSelect}
@@ -277,7 +283,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                 setChannelTargets(next);
               }}
             >
-              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.value}</option>)}
+              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
             <input
               type="number"

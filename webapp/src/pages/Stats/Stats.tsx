@@ -83,7 +83,7 @@ export function Stats() {
       </div>
 
       {/* Packet counters + delta indicators */}
-      <CounterGrid status={status} />
+      <CounterGrid status={status} airtime={airtime} />
 
       {/* Airtime budget bars */}
       {airtime && <AirtimeCard airtime={airtime} />}
