@@ -11,6 +11,7 @@
 #include "airtime_budget.h"
 #include "traffic_debug.h"
 #include "location.h"
+#include "delivery_event_ring.h"
 
 #define BRAMBLE_NODE_NAME_MAX 32
 
@@ -63,6 +64,13 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
                                                int8_t rssi_at_dest,
                                                uint8_t hop_count,
                                                const uint32_t *relay_path);
+
+/* Delivery-event replay sync support */
+bool mesh_supports_delivery_event_sync(void);
+uint32_t mesh_delivery_events_latest_seq(void);
+size_t mesh_delivery_events_list_since(uint32_t since_event_seq,
+                                       delivery_event_record_t *out,
+                                       size_t out_max);
 
 /**
  * Send an encrypted message on a specific channel index.

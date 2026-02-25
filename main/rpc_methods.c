@@ -32,7 +32,7 @@
 /* statvfs not available in ESP-IDF newlib */
 
 #define BRAMBLE_VERSION_STR      "0.4.1-dev"
-#define BRAMBLE_PROTOCOL_VERSION "0.4.0"
+#define BRAMBLE_PROTOCOL_VERSION "0.5.0"
 
 #define NVS_NAMESPACE            "bramble"
 #define NVS_KEY_NODE_NAME        "node_name"
@@ -101,6 +101,7 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
+    cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
     return 0;
 }
 
@@ -119,6 +120,74 @@ static int handle_get_version(const cJSON *params, cJSON *result) {
     cJSON_AddStringToObject(result, "firmware_version", BRAMBLE_VERSION_STR);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
     cJSON_AddStringToObject(result, "hardware", bramble_hardware());
+    cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
+    return 0;
+}
+
+/* bramble.getDeliveryEvents — params: {sinceEventSeq|since_event_seq, limit?} */
+static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
+    uint32_t since_seq = 0u;
+    uint32_t limit = 256u;
+
+    const cJSON *since = params ? cJSON_GetObjectItem(params, "sinceEventSeq") : NULL;
+    if (!since) since = params ? cJSON_GetObjectItem(params, "since_event_seq") : NULL;
+    if (cJSON_IsNumber(since) && since->valuedouble >= 0) {
+        since_seq = (uint32_t)since->valuedouble;
+    }
+
+    const cJSON *limit_json = params ? cJSON_GetObjectItem(params, "limit") : NULL;
+    if (cJSON_IsNumber(limit_json) && limit_json->valuedouble > 0) {
+        limit = (uint32_t)limit_json->valuedouble;
+    }
+    if (limit > 1024u) limit = 1024u;
+
+    delivery_event_record_t events[256];
+    size_t out_max = (size_t)((limit < 256u) ? limit : 256u);
+    size_t n = mesh_delivery_events_list_since(since_seq, events, out_max);
+
+    cJSON *arr = cJSON_AddArrayToObject(result, "events");
+    for (size_t i = 0; i < n; i++) {
+        const delivery_event_record_t *e = &events[i];
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddNumberToObject(obj, "event_seq", e->event_seq);
+        cJSON_AddNumberToObject(obj, "timestamp_ms", (double)e->timestamp_s * 1000.0);
+
+        char id_buf[24];
+        snprintf(id_buf, sizeof(id_buf), "fw:%" PRIu32, e->event_seq);
+        cJSON_AddStringToObject(obj, "event_id", id_buf);
+
+        char msg_buf[12];
+        snprintf(msg_buf, sizeof(msg_buf), "%08" PRIX32, e->message_id);
+
+        cJSON *payload = cJSON_CreateObject();
+        if (e->event_type == 2u) {
+            cJSON_AddStringToObject(obj, "event_type", "broadcast_delivery");
+            cJSON_AddStringToObject(obj, "broadcast_id", msg_buf);
+            cJSON_AddNumberToObject(payload, "addr", e->recipient_addr);
+            cJSON_AddStringToObject(payload, "status", "delivered");
+            cJSON_AddNumberToObject(payload, "hopCount", e->route_len);
+            cJSON_AddNumberToObject(payload, "deliveredAtMs", (double)e->timestamp_s * 1000.0);
+        } else {
+            cJSON_AddStringToObject(obj, "event_type", "ack");
+            cJSON_AddStringToObject(obj, "packet_id", msg_buf);
+            cJSON_AddStringToObject(payload, "status", "delivered");
+
+            cJSON *path = cJSON_AddArrayToObject(payload, "relayPath");
+            for (uint8_t h = 0; h < e->route_len && h < DELIVERY_EVENT_ROUTE_MAX_HOPS; h++) {
+                cJSON *hop = cJSON_CreateObject();
+                char hop_buf[12];
+                snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, e->route_hops[h]);
+                cJSON_AddStringToObject(hop, "addr", hop_buf);
+                cJSON_AddNumberToObject(hop, "rssi", 0);
+                cJSON_AddItemToArray(path, hop);
+            }
+        }
+
+        cJSON_AddItemToObject(obj, "payload", payload);
+        cJSON_AddItemToArray(arr, obj);
+    }
+
+    cJSON_AddNumberToObject(result, "latest_event_seq", mesh_delivery_events_latest_seq());
     return 0;
 }
 
@@ -1733,6 +1802,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.getStatus",    handle_get_status);
     rpc_register("bramble.getIdentity",  handle_get_identity);
     rpc_register("bramble.getVersion",   handle_get_version);
+    rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
     rpc_register("bramble.getRoutes",    handle_get_routes);
     rpc_register("bramble.getAirtime",   handle_get_airtime);

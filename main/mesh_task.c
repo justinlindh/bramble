@@ -21,6 +21,7 @@
 #include "fragment.h"
 #include "location.h"
 #include "gps.h"
+#include "delivery_event_ring.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -80,8 +81,16 @@ static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
 static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
+static SemaphoreHandle_t   s_delivery_event_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
+
+static delivery_event_ring_t s_delivery_event_ring;
+
+enum {
+    DELIVERY_EVENT_TYPE_ACK = 1,
+    DELIVERY_EVENT_TYPE_BROADCAST_DELIVERY = 2,
+};
 static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* loaded from NVS at startup */
 
 /* Routing state */
@@ -202,6 +211,58 @@ static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
+}
+
+static void delivery_event_ring_append_locked(const delivery_event_record_t *event) {
+    if (!event || !s_delivery_event_mutex) return;
+    xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
+    delivery_event_ring_append(&s_delivery_event_ring, event);
+    xSemaphoreGive(s_delivery_event_mutex);
+}
+
+static void record_ack_delivery_event(const bramble_ack_t *ack) {
+    if (!ack) return;
+
+    delivery_event_record_t evt = {0};
+    evt.message_id = ack->ack_packet_id;
+    evt.timestamp_s = now_ms() / 1000u;
+    evt.recipient_addr = ack->src_addr;
+    evt.source_addr = s_identity ? s_identity->address : 0u;
+    evt.event_type = DELIVERY_EVENT_TYPE_ACK;
+    evt.tier = MSG_TIER_NORMAL;
+
+    uint8_t hops = ack->hop_count;
+    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS) hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
+    evt.route_len = hops;
+    for (uint8_t i = 0; i < hops; i++) {
+        evt.route_hops[i] = ack->relay_path[i];
+    }
+
+    delivery_event_ring_append_locked(&evt);
+}
+
+static void record_broadcast_delivery_event(uint32_t recipient_addr,
+                                            uint32_t broadcast_id,
+                                            uint8_t hop_count,
+                                            const uint32_t *relay_path) {
+    delivery_event_record_t evt = {0};
+    evt.message_id = broadcast_id;
+    evt.timestamp_s = now_ms() / 1000u;
+    evt.recipient_addr = recipient_addr;
+    evt.source_addr = s_identity ? s_identity->address : 0u;
+    evt.event_type = DELIVERY_EVENT_TYPE_BROADCAST_DELIVERY;
+    evt.tier = MSG_TIER_BROADCAST;
+
+    uint8_t hops = hop_count;
+    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS) hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
+    evt.route_len = hops;
+    if (relay_path) {
+        for (uint8_t i = 0; i < hops; i++) {
+            evt.route_hops[i] = relay_path[i];
+        }
+    }
+
+    delivery_event_ring_append_locked(&evt);
 }
 
 static uint32_t next_packet_id(void) {
@@ -870,6 +931,7 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
 
     /* Update message store status */
     if (msg_store_update_status(ack.ack_packet_id, MSG_STATUS_DELIVERED)) {
+        record_ack_delivery_event(&ack);
         /* Notify webapp with full relay path from ACK */
         char addr_buf[12];
         snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, ack.src_addr);
@@ -2104,6 +2166,30 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     return 0;
 }
 
+bool mesh_supports_delivery_event_sync(void) {
+    return true;
+}
+
+uint32_t mesh_delivery_events_latest_seq(void) {
+    uint32_t latest = 0u;
+    if (!s_delivery_event_mutex) return 0u;
+    xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
+    latest = delivery_event_ring_latest_seq(&s_delivery_event_ring);
+    xSemaphoreGive(s_delivery_event_mutex);
+    return latest;
+}
+
+size_t mesh_delivery_events_list_since(uint32_t since_event_seq,
+                                       delivery_event_record_t *out,
+                                       size_t out_max) {
+    size_t count = 0u;
+    if (!s_delivery_event_mutex) return 0u;
+    xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
+    count = delivery_event_ring_list_since(&s_delivery_event_ring, since_event_seq, out, out_max);
+    xSemaphoreGive(s_delivery_event_mutex);
+    return count;
+}
+
 uint32_t mesh_get_last_broadcast_id(void) {
     return s_last_broadcast_id;
 }
@@ -2147,6 +2233,8 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
             cJSON_AddItemToArray(path, hop);
         }
     }
+
+    record_broadcast_delivery_event(src_addr, broadcast_id, hop_count, relay_path);
 
     rpc_notify("bramble.onBroadcastDelivery", params);
     cJSON_Delete(params);
@@ -2540,6 +2628,8 @@ void mesh_task_start(bramble_identity_t *identity) {
     }
 
     s_state_mutex = xSemaphoreCreateMutex();
+    s_delivery_event_mutex = xSemaphoreCreateMutex();
+    delivery_event_ring_init(&s_delivery_event_ring);
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
 
     /* Pin to CPU1 — leave CPU0 for UI/display */

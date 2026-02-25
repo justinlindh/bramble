@@ -6,7 +6,7 @@ info:
     Methods are invoked via JSON-RPC over serial (UART), WebSocket, or BLE.
     Each method is mapped to a POST path for codegen and documentation purposes.
     The actual wire format is standard JSON-RPC 2.0.
-  version: 0.3.0
+  version: 0.5.0
   license:
     name: MIT
     identifier: MIT
@@ -84,6 +84,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VersionResponse'
+
+  /rpc/bramble.getDeliveryEvents:
+    post:
+      operationId: getDeliveryEvents
+      summary: Get delivery replay events since a sequence number
+      description: >
+        Returns persisted delivery events for ACK and broadcast-delivery telemetry.
+        Use `sinceEventSeq` (or `since_event_seq`) for incremental replay.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sinceEventSeq:
+                  type: integer
+                  minimum: 0
+                since_event_seq:
+                  type: integer
+                  minimum: 0
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 1024
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Delivery replay window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryEventsResponse'
 
   /rpc/bramble.getNeighbors:
     post:
@@ -1024,6 +1058,9 @@ components:
         hardware:
           type: string
           description: Hardware platform identifier.
+        supports_delivery_event_sync:
+          type: boolean
+          description: True when bramble.getDeliveryEvents incremental replay is supported.
 
     PingResponse:
       type: object
@@ -1039,6 +1076,40 @@ components:
         protocol_version:
           type: string
           description: Protocol version string.
+
+    DeliveryEvent:
+      type: object
+      required: [event_seq, event_type, timestamp_ms, payload]
+      properties:
+        event_seq:
+          type: integer
+        event_id:
+          type: string
+        event_type:
+          type: string
+          enum: [ack, broadcast_delivery]
+        packet_id:
+          type: string
+          description: Packet id for ACK delivery events.
+        broadcast_id:
+          type: string
+          description: Broadcast id for broadcast delivery events.
+        timestamp_ms:
+          type: integer
+        payload:
+          type: object
+          additionalProperties: true
+
+    DeliveryEventsResponse:
+      type: object
+      required: [events, latest_event_seq]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryEvent'
+        latest_event_seq:
+          type: integer
 
     NeighborsResponse:
       type: object

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   __clearDeliveryEventSyncStateForTests,
   __normalizeReplayDeliveryEventForTests,
+  registerBroadcastSendTelemetry,
 } from '../actions';
 
 describe('delivery replay sync glue', () => {
@@ -37,6 +38,21 @@ describe('delivery replay sync glue', () => {
 
     expect(normalized).toBeTruthy();
     expect(normalized?.eventId).toBe('replay:7:abc');
+  });
+
+  it('resolves messageId from packet_id mapping when message_id is missing', () => {
+    registerBroadcastSendTelemetry('msg-ack-1', { packetId: 'AABBCCDD' });
+
+    const normalized = __normalizeReplayDeliveryEventForTests({
+      eventSeq: 9,
+      eventType: 'ack',
+      packet_id: 'AABBCCDD',
+      ts: 123,
+      payload: { status: 'delivered' },
+    });
+
+    expect(normalized).toBeTruthy();
+    expect(normalized?.messageId).toBe('msg-ack-1');
   });
 
   it('drops replay events missing message id', () => {

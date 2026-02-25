@@ -405,6 +405,10 @@ interface DeliveryReplayEventWire {
   event_seq?: number;
   messageId?: string | number;
   message_id?: string | number;
+  packetId?: string | number;
+  packet_id?: string | number;
+  broadcastId?: string | number;
+  broadcast_id?: string | number;
   eventType?: string;
   event_type?: string;
   ts?: number;
@@ -464,13 +468,26 @@ function asNumber(v: unknown): number | undefined {
 }
 
 function normalizeReplayDeliveryEvent(raw: DeliveryReplayEventWire): DeliveryEventRecord | null {
+  const eventType = String(raw.eventType ?? raw.event_type ?? '').trim() || 'unknown';
+  const ts = asNumber(raw.ts ?? raw.timestampMs ?? raw.timestamp_ms) ?? Date.now();
+
+  const packetIdRaw = raw.packetId ?? raw.packet_id;
+  const broadcastIdRaw = raw.broadcastId ?? raw.broadcast_id;
+  const packetId = packetIdRaw !== undefined && packetIdRaw !== null ? String(packetIdRaw) : '';
+  const broadcastId = broadcastIdRaw !== undefined && broadcastIdRaw !== null ? String(broadcastIdRaw) : '';
+
   const messageIdRaw = raw.messageId ?? raw.message_id;
-  const messageId = messageIdRaw !== undefined && messageIdRaw !== null ? String(messageIdRaw) : '';
+  let messageId = messageIdRaw !== undefined && messageIdRaw !== null ? String(messageIdRaw) : '';
+
+  if (!messageId && packetId) {
+    messageId = packetIdToMsgId.get(packetId) ?? '';
+  }
+  if (!messageId && broadcastId) {
+    messageId = broadcastIdToMsgId.get(broadcastId) ?? '';
+  }
   if (!messageId) return null;
 
   const seq = asNumber(raw.eventSeq ?? raw.event_seq);
-  const eventType = String(raw.eventType ?? raw.event_type ?? '').trim() || 'unknown';
-  const ts = asNumber(raw.ts ?? raw.timestampMs ?? raw.timestamp_ms) ?? Date.now();
   const payload = raw.payload ?? raw.data;
 
   const eventId = String(raw.eventId ?? raw.event_id ?? (seq !== undefined
@@ -566,7 +583,7 @@ function conversationKeyForMessage(message: Message): string {
 
 function applyDeliveryEventToMessage(message: Message, event: DeliveryEventRecord): Message {
   if (event.eventType === 'ack') {
-    const payload = (event.payload ?? {}) as { status?: DeliveryStatus; relayPath?: RelayHop[] };
+    const payload = (event.payload ?? {}) as { status?: 'delivered' | 'failed' | 'sent' | 'sending'; relayPath?: RelayHop[] };
     return {
       ...message,
       status: payload.status ?? message.status,
@@ -1296,6 +1313,10 @@ export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventW
 }
 
 export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
+  packetIdToMsgId.clear();
+  broadcastIdToMsgId.clear();
+  pendingBroadcastTelemetry.clear();
+
   try {
     if (nodeAddr) {
       localStorage.removeItem(lastDeliverySeqKey(nodeAddr));

@@ -654,6 +654,19 @@ target_include_directories(test_msg_store_spiffs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Delivery event ring persistence tests
+add_executable(test_delivery_event_ring
+    test_delivery_event_ring.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/delivery_event_ring.c
+)
+target_include_directories(test_delivery_event_ring PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+target_compile_definitions(test_delivery_event_ring PRIVATE
+    DELIVERY_EVENT_RING_CAPACITY=4
+)
+
 # Probe v2 invariant/spec tests
 add_executable(test_probe_v2_spec
     test_probe_v2_spec.c
