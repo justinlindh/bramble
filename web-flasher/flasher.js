@@ -31,7 +31,7 @@ class BrambleFlasher {
     static CMD_SPI_FLASH_MD5  = 0x13;
 
     static FLASH_BLOCK_SIZE = 0x400; // 1KB per data packet
-    static SYNC_TIMEOUT_MS  = 3000;
+    static SYNC_TIMEOUT_MS  = 6000;
     static RESPONSE_TIMEOUT_MS = 5000;
     static MAX_SYNC_ATTEMPTS = 5;
 
@@ -182,6 +182,17 @@ class BrambleFlasher {
         throw new Error('Timeout waiting for SLIP packet');
     }
 
+    async drainInput(idleMs = 120, maxDrainMs = 1200) {
+        const deadline = Date.now() + maxDrainMs;
+        while (Date.now() < deadline) {
+            try {
+                await this.readRaw(idleMs);
+            } catch {
+                return;
+            }
+        }
+    }
+
     // ── Command Building ────────────────────────────────────────
 
     buildCommand(opcode, data, checksum = 0) {
@@ -200,14 +211,17 @@ class BrambleFlasher {
     parseResponse(data) {
         if (data.length < 8) return null;
         const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        const size = view.getUint16(2, true);
+        const payloadEnd = Math.min(8 + size, data.length);
+        const payload = data.slice(8, payloadEnd);
         return {
             direction: view.getUint8(0),  // 1 = response
             command:   view.getUint8(1),
-            size:      view.getUint16(2, true),
+            size,
             value:     view.getUint32(4, true),
-            data:      data.slice(8),
-            status:    data.length > 8 ? data[8] : 0,
-            error:     data.length > 9 ? data[9] : 0,
+            data:      payload,
+            status:    payload.length >= 2 ? payload[payload.length - 2] : 0,
+            error:     payload.length >= 1 ? payload[payload.length - 1] : 0,
         };
     }
 
@@ -233,27 +247,57 @@ class BrambleFlasher {
         syncData[2] = 0x12; syncData[3] = 0x20;
         for (let i = 4; i < 36; i++) syncData[i] = 0x55;
 
-        for (let attempt = 0; attempt < BrambleFlasher.MAX_SYNC_ATTEMPTS; attempt++) {
-            try {
-                // Toggle DTR/RTS to enter bootloader
+        const resetSequences = [
+            // Common ESP auto-reset sequence for many USB-UART adapters.
+            async () => {
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+                await sleep(120);
+                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+                await sleep(120);
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+            },
+            // Fallback for adapters/platforms with differing signal semantics.
+            async () => {
+                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+                await sleep(120);
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+                await sleep(120);
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+            },
+            // Mirrors esptool USB-JTAG/Serial sequence used by ESP32-S3 class devices.
+            async () => {
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false }); // idle
+                await sleep(100);
+                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false }); // IO0 low
+                await sleep(100);
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: true }); // through 1,1 edge
                 await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
                 await sleep(100);
-                await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
-                await sleep(50);
-                await this.port.setSignals({ dataTerminalReady: false });
+                await this.port.setSignals({ dataTerminalReady: false, requestToSend: false }); // out of reset
+            }
+        ];
 
-                // Flush any pending data
-                await sleep(200);
+        for (let attempt = 0; attempt < BrambleFlasher.MAX_SYNC_ATTEMPTS; attempt++) {
+            for (const resetSeq of resetSequences) {
+                try {
+                    await this.drainInput(80, 400);
+                    await resetSeq();
+                    await sleep(120);
+                    await this.drainInput(100, 600);
 
-                const resp = await this.sendCommand(
-                    BrambleFlasher.CMD_SYNC, syncData, 0,
-                    BrambleFlasher.SYNC_TIMEOUT_MS
-                );
-                if (resp && resp.direction === 1) {
-                    return true;
+                    // Similar to esptool behavior: send several sync frames after reset.
+                    for (let i = 0; i < 7; i++) {
+                        const resp = await this.sendCommand(
+                            BrambleFlasher.CMD_SYNC, syncData, 0,
+                            Math.max(600, Math.floor(BrambleFlasher.SYNC_TIMEOUT_MS / 7))
+                        );
+                        if (resp && resp.direction === 1 && resp.command === BrambleFlasher.CMD_SYNC) {
+                            return true;
+                        }
+                    }
+                } catch {
+                    // Try next reset sequence or attempt.
                 }
-            } catch {
-                // Retry
             }
         }
         throw new Error('Failed to sync with bootloader. Hold BOOT button and try again.');
