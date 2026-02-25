@@ -173,7 +173,7 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t *p, uint8_t *buf, size
     buf[B + 13] = p->flags;
     put_be32(buf + B + 14, p->network_time);
     put_be16(buf + B + 18, p->time_confidence);
-    memcpy(buf + B + 20, p->auth_hmac, 12);
+    memcpy(buf + B + 20, p->auth_hmac, 16);
     if (nlen > 0) {
         buf[BEACON_SIZE] = nlen;
         memcpy(buf + BEACON_SIZE + 1, p->name, nlen);
@@ -199,7 +199,7 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t *p, const uint8_t *buf, si
     p->flags           = buf[B + 13];
     p->network_time    = get_be32(buf + B + 14);
     p->time_confidence = get_be16(buf + B + 18);
-    memcpy(p->auth_hmac, buf + B + 20, 12);
+    memcpy(p->auth_hmac, buf + B + 20, 16);
     /* Optional name after fixed fields */
     p->name_len = 0;
     p->name[0] = '\0';

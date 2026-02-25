@@ -3,6 +3,7 @@
  */
 
 #include "mesh_task.h"
+#include "util.h"
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
@@ -203,11 +204,6 @@ static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
 extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
-
-static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
-    snprintf(buf, len, "%08" PRIX32, addr);
-    return buf;
-}
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -725,6 +721,30 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
     /* Ignore our own beacons */
     if (beacon.src_addr == s_identity->address) return;
+
+    /* Verify beacon HMAC authenticity.
+     * Recompute HMAC the same way send_beacon() does: serialize the beacon,
+     * then HMAC over everything except the auth_hmac field itself. */
+    {
+        uint8_t hmac_input[BEACON_SIZE + 1 + BEACON_NAME_MAX];
+        bramble_beacon_t verify_beacon = beacon;
+        memset(verify_beacon.auth_hmac, 0, sizeof(verify_beacon.auth_hmac));
+        bramble_beacon_serialize(&verify_beacon, hmac_input, sizeof(hmac_input));
+        size_t hmac_len = BEACON_SIZE - sizeof(beacon.auth_hmac);
+        uint8_t expected_hmac[32];
+        /* Use the mesh network key (identity private key) — same as send_beacon() */
+        crypto_hmac_sha256(s_identity->private_key, 32, hmac_input, hmac_len, expected_hmac);
+        /* Constant-time comparison to prevent timing side channels */
+        uint8_t diff = 0;
+        for (size_t i = 0; i < sizeof(beacon.auth_hmac); i++) {
+            diff |= beacon.auth_hmac[i] ^ expected_hmac[i];
+        }
+        if (diff != 0) {
+            ESP_LOGW(TAG, "Beacon from %08" PRIX32 " failed HMAC verification, discarding",
+                     beacon.src_addr);
+            return;
+        }
+    }
 
     /* Check for address collision — different pubkey_hash but same address */
     if (identity_check_collision(s_identity, beacon.src_addr, beacon.pubkey_hash)) {

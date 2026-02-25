@@ -1,4 +1,5 @@
 #include "rpc_methods.h"
+#include "util.h"
 #include "rpc_dispatcher.h"
 #include "mesh_task.h"
 #include "msg_store.h"
@@ -70,13 +71,6 @@ typedef struct __attribute__((packed)) {
     uint32_t received_ms;
     uint8_t tier;
 } persisted_peer_location_t;
-
-/* ── Utility ────────────────────────────────────────────────────────── */
-
-static const char *addr_hex(uint32_t addr, char *buf, size_t len) {
-    snprintf(buf, len, "%08" PRIX32, addr);
-    return buf;
-}
 
 /* ── Query handlers (pre-existing) ─────────────────────────────────── */
 

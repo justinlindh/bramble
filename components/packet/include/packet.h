@@ -61,7 +61,7 @@
 #define RREQ_SIZE                30
 #define RREP_SIZE                34
 #define RERR_SIZE                24
-#define BEACON_SIZE              44
+#define BEACON_SIZE              48
 #define KEY_EXCHANGE_SIZE        101
 #define DELIVERY_RECEIPT_MIN_SIZE 22
 #define DELIVERY_RECEIPT_MAX_SIZE 54
@@ -130,7 +130,7 @@ typedef struct {
     uint8_t  flags;
     uint32_t network_time;
     uint16_t time_confidence;
-    uint8_t  auth_hmac[12];
+    uint8_t  auth_hmac[16];
     /* Optional: node name (appended after fixed fields) */
     uint8_t  name_len;
     char     name[BEACON_NAME_MAX + 1];
