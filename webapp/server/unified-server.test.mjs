@@ -39,4 +39,20 @@ describe('unified runtime api', () => {
     expect(json.mode).toBe('hosted');
     expect(json.proxyEnabled).toBe(false);
   });
+
+  it('returns ok=true from /api/healthz', async () => {
+    const res = await fetch(`${base}/api/healthz`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('returns 405 for unsupported method on API routes', async () => {
+    const res = await fetch(`${base}/api/mode`, { method: 'POST' });
+    expect(res.status).toBe(405);
+  });
+
+  it('returns 400 for malformed escaped path', async () => {
+    const res = await fetch(`${base}/%E0%A4%A`);
+    expect(res.status).toBe(400);
+  });
 });

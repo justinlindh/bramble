@@ -20,6 +20,8 @@ function getCapabilities(mode) {
     mode,
     proxyEnabled: isLocal,
     localLanAllowed: isLocal,
+    // Runtime/browser feature detection is handled client-side in later tasks.
+    // For now these are policy defaults from server mode only.
     usbEnabled: true,
     bleEnabled: true,
   };
@@ -67,13 +69,23 @@ export function createUnifiedServer({ mode = resolveMode(), distDir = DEFAULT_DI
       return;
     }
 
-    let requestPath = decodeURIComponent(url.pathname);
+    let requestPath;
+    try {
+      requestPath = decodeURIComponent(url.pathname);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad request');
+      return;
+    }
+
     if (requestPath === '/') requestPath = '/index.html';
 
     const safePath = path.normalize(requestPath).replace(/^([.][./\\])+/, '');
-    const filePath = path.resolve(distDir, `.${safePath}`);
+    const distRoot = path.resolve(distDir);
+    const filePath = path.resolve(distRoot, `.${safePath}`);
+    const relativeToRoot = path.relative(distRoot, filePath);
 
-    if (!filePath.startsWith(path.resolve(distDir))) {
+    if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Forbidden');
       return;
