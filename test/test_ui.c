@@ -155,31 +155,66 @@ void test_trackball_select_on_messages_opens_compose(void) {
     TEST_ASSERT_TRUE(state.compose_active);
 }
 
-void test_trackball_select_on_settings_enters_edit(void) {
-    // Navigate to settings
+void test_trackball_settings_row_navigation_when_not_editing(void) {
     state.current_screen = SCREEN_SETTINGS;
-    TEST_ASSERT_FALSE(state.settings_editing);
-    
-    ui_handle_button(&state, BTN_SELECT, 1000);
-    TEST_ASSERT_TRUE(state.settings_editing);
+    state.settings_editing = false;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_CONN_MODE;
+
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_OLED_ROTATION, state.settings_item_cursor);
+
+    ui_handle_button(&state, BTN_UP, 2000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_CONN_MODE, state.settings_item_cursor);
+
+    // Wrap up from first row -> last row
+    ui_handle_button(&state, BTN_UP, 3000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_OLED_ROTATION, state.settings_item_cursor);
 }
 
-void test_trackball_settings_edit_navigation(void) {
+void test_trackball_select_on_settings_enters_edit_for_selected_row(void) {
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = false;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_OLED_ROTATION;
+
+    ui_handle_button(&state, BTN_SELECT, 1000);
+    TEST_ASSERT_TRUE(state.settings_editing);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_OLED_ROTATION, state.settings_item_cursor);
+}
+
+void test_trackball_settings_edit_navigation_connectivity_row(void) {
     state.current_screen = SCREEN_SETTINGS;
     state.settings_editing = true;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_CONN_MODE;
     state.settings_cursor = 0;
-    
+
     // Down = next option
     ui_handle_button(&state, BTN_DOWN, 1000);
     TEST_ASSERT_EQUAL(1, state.settings_cursor);
-    
+
     // Up = previous option
     ui_handle_button(&state, BTN_UP, 2000);
     TEST_ASSERT_EQUAL(0, state.settings_cursor);
-    
+
     // Wrap-around test
     ui_handle_button(&state, BTN_UP, 3000);
     TEST_ASSERT_EQUAL(CONN_MODE_COUNT - 1, state.settings_cursor);
+}
+
+void test_trackball_settings_edit_navigation_oled_row(void) {
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = true;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_OLED_ROTATION;
+    state.settings_cursor = 0;
+
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(1, state.settings_cursor);
+
+    ui_handle_button(&state, BTN_DOWN, 2000);
+    TEST_ASSERT_EQUAL(0, state.settings_cursor);
+
+    ui_handle_button(&state, BTN_UP, 3000);
+    TEST_ASSERT_EQUAL(1, state.settings_cursor);
 }
 
 void test_trackball_settings_edit_confirm_with_select(void) {
@@ -280,8 +315,10 @@ int main(void) {
     RUN_TEST(test_trackball_select_on_messages_opens_compose);
     RUN_TEST(test_conn_mode_resolve_boot_keeps_supported_modes);
     RUN_TEST(test_conn_mode_resolve_boot_normalizes_legacy_both);
-    RUN_TEST(test_trackball_select_on_settings_enters_edit);
-    RUN_TEST(test_trackball_settings_edit_navigation);
+    RUN_TEST(test_trackball_settings_row_navigation_when_not_editing);
+    RUN_TEST(test_trackball_select_on_settings_enters_edit_for_selected_row);
+    RUN_TEST(test_trackball_settings_edit_navigation_connectivity_row);
+    RUN_TEST(test_trackball_settings_edit_navigation_oled_row);
     RUN_TEST(test_trackball_settings_edit_confirm_with_select);
     RUN_TEST(test_trackball_settings_edit_cancel_with_left);
     RUN_TEST(test_location_ui_actions_toggle_tier_interval);

@@ -25,6 +25,7 @@ static uint8_t fb[DISPLAY_WIDTH * (DISPLAY_HEIGHT / 8)];
 static i2c_master_bus_handle_t bus_handle;
 static i2c_master_dev_handle_t dev_handle;
 static bool initialized = false;
+static bool s_rotated_180 = false;
 
 /* ── I2C helpers ─────────────────────────────────────────────────────── */
 
@@ -36,6 +37,22 @@ static int ssd1306_cmd(uint8_t cmd) {
 static int ssd1306_cmd2(uint8_t cmd, uint8_t val) {
     uint8_t buf[3] = { 0x00, cmd, val };
     return i2c_master_transmit(dev_handle, buf, 3, 100) == ESP_OK ? 0 : -1;
+}
+
+static void ssd1306_apply_rotation(void) {
+    /*
+     * Normal orientation (existing behavior):
+     *   SEG remap = 0xA1, COM scan remap = 0xC8
+     * Rotated 180°:
+     *   SEG remap = 0xA0, COM scan normal = 0xC0
+     */
+    if (s_rotated_180) {
+        ssd1306_cmd(0xA0);
+        ssd1306_cmd(0xC0);
+    } else {
+        ssd1306_cmd(0xA1);
+        ssd1306_cmd(0xC8);
+    }
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -113,8 +130,7 @@ int display_init(void) {
     ssd1306_cmd(0x40);           /* Start line: 0 */
     ssd1306_cmd2(0x8D, 0x14);   /* Charge pump: enable */
     ssd1306_cmd2(0x20, 0x00);   /* Memory addressing: horizontal */
-    ssd1306_cmd(0xA1);           /* Segment remap: col 127 = SEG0 */
-    ssd1306_cmd(0xC8);           /* COM scan direction: remapped */
+    ssd1306_apply_rotation();    /* Segment/COM mapping for current orientation */
     ssd1306_cmd2(0xDA, 0x12);   /* COM pins config: alternative */
     ssd1306_cmd2(0x81, 0xCF);   /* Contrast: 207 */
     ssd1306_cmd2(0xD9, 0xF1);   /* Pre-charge period */
@@ -239,6 +255,17 @@ void display_set_contrast(uint8_t val) {
 
 void display_invert(bool invert) {
     ssd1306_cmd(invert ? 0xA7 : 0xA6);
+}
+
+void display_set_rotated_180(bool rotated) {
+    s_rotated_180 = rotated;
+    if (initialized) {
+        ssd1306_apply_rotation();
+    }
+}
+
+bool display_get_rotated_180(void) {
+    return s_rotated_180;
 }
 
 void display_set_backlight(uint8_t level) {

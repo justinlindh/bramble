@@ -28,6 +28,7 @@ static uint16_t *fb = NULL;  /* Allocated in PSRAM */
 /* SPI device handle */
 static spi_device_handle_t spi;
 static bool initialized = false;
+static bool s_rotated_180 = false;  /* API compatibility; no behavior change in Task 1 */
 
 /* Color constants (RGB565) */
 #define COLOR_BLACK  0x0000
@@ -502,6 +503,15 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
         };
         spi_device_transmit(spi, &t);
     }
+}
+
+void display_set_rotated_180(bool rotated) {
+    /* Task 1 compatibility shim: track state only, no ST7789 behavior change. */
+    s_rotated_180 = rotated;
+}
+
+bool display_get_rotated_180(void) {
+    return s_rotated_180;
 }
 
 int display_get_width(void) { return DISPLAY_WIDTH; }
