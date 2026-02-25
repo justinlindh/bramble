@@ -1,4 +1,4 @@
-name: Webapp Build Publish
+name: Web Client Build Publish
 
 on:
   workflow_dispatch:
@@ -36,10 +36,11 @@ jobs:
           set -euo pipefail
           tags=()
 
+          immutable_sha_tag="sha-${GITHUB_SHA}"
+
           if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "main" ]; then
-            short_sha="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
             tags+=("main")
-            tags+=("sha-${short_sha}")
+            tags+=("${immutable_sha_tag}")
           fi
 
           if [ "${GITHUB_REF_TYPE}" = "tag" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -47,6 +48,7 @@ jobs:
             tags+=("${version}")
             tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+\.[0-9]+)\.[0-9]+$/\1/')")
             tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+)\.[0-9]+\.[0-9]+$/\1/')")
+            tags+=("${immutable_sha_tag}")
           fi
 
           if [ "${#tags[@]}" -eq 0 ]; then
@@ -68,6 +70,8 @@ jobs:
         env:
           IMAGE_REPO: ghcr.io/example/justinlindh/bramble-web-client
           IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
+          DOCKERFILE_PATH: webapp/Dockerfile
+          BUILD_CONTEXT: webapp
         shell: bash
         run: |
           set -euo pipefail
@@ -81,7 +85,7 @@ jobs:
 
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
-            -f webapp/Dockerfile \
-            webapp \
+            -f "${DOCKERFILE_PATH}" \
+            "${BUILD_CONTEXT}" \
             "${tag_args[@]}" \
             --push
