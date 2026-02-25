@@ -44,7 +44,7 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
         <tr>
           <th>Node</th>
           <th title="Number of relay nodes between you and this node. 1 = direct neighbor.">Hops</th>
-          <th title="How many sweep rounds this node was seen in (out of 3).">Confidence</th>
+          <th title="How confidently this node appears reachable based on probe responses.">Confidence</th>
           <th title="Received Signal Strength (dBm). Closer to 0 is stronger. Above −90 is good, below −110 is weak.">RSSI</th>
           <th title="Signal-to-Noise Ratio (dB). Higher is better. Above 0 means signal is stronger than noise.">SNR</th>
           <th title="The chain of relay nodes this probe passed through to reach the destination.">Path</th>
@@ -70,7 +70,7 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
                 </span>
               ) : '—'}
             </td>
-            <td>{response ? `${response.seenRounds ?? 1}/3` : '0/3'}</td>
+            <td>{response ? `${Math.round((response.confidence ?? 1) * 100)}%` : '—'}</td>
             <td>{response ? `${response.rssi} dBm` : 'no response'}</td>
             <td>{response ? response.snr.toFixed(1) : '—'}</td>
             <td className={styles.pathCell}>{response ? formatPath(response) : '—'}</td>

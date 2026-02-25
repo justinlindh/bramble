@@ -427,8 +427,16 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     let releases = [];
     let filteredReleases = [];
 
+    function sanitizeStatusMessage(msg) {
+        return String(msg || '')
+            .replace(/https?:\/\/[^\s)]+/g, 'network endpoint')
+            .replace(/\/(?:[\w.-]+\/)*[\w.-]+\.[a-z0-9]+/ig, 'artifact')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     function setStatus(msg) {
-        if (statusText) statusText.textContent = msg;
+        if (statusText) statusText.textContent = sanitizeStatusMessage(msg);
     }
 
     function setProgress(pct, text) {
@@ -447,15 +455,22 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         return null;
     }
 
-    function applyChannelFilter() {
-        const channel = getSelectedChannel();
-        filteredReleases = releases.filter(r => (r.channel || 'stable') === channel);
+    function getKnownChannels() {
+        return Array.from(new Set(releases.map(r => r.channel || 'stable')));
+    }
 
-        if (!filteredReleases.length && releases.length && channel === 'stable') {
-            const devReleases = releases.filter(r => (r.channel || 'stable') === 'dev');
-            if (devReleases.length) {
-                if (channelSelect) channelSelect.value = 'dev';
-                filteredReleases = devReleases;
+    function applyChannelFilter() {
+        const selected = getSelectedChannel();
+        const known = getKnownChannels();
+        const fallbackOrder = [selected, 'stable', 'dev', ...known].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+        filteredReleases = [];
+        for (const channel of fallbackOrder) {
+            const matches = releases.filter(r => (r.channel || 'stable') === channel);
+            if (matches.length) {
+                filteredReleases = matches;
+                if (channelSelect) channelSelect.value = channel;
+                break;
             }
         }
     }
@@ -472,7 +487,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         }
         filteredReleases.forEach((r, i) => {
             const o = document.createElement('option');
-            const ts = new Date(r.published_at).toLocaleString();
+            const dt = new Date(r.published_at);
+            const ts = Number.isNaN(dt.getTime()) ? 'unknown date' : dt.toLocaleString();
             o.value = String(i);
             o.textContent = `${r.version} — ${ts}`;
             releaseSelect.appendChild(o);
@@ -485,8 +501,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
         const selected = currentRelease();
         if (!selected) {
-            releaseDetails.textContent = 'No matching complete release for this channel.';
-            flashBtn.disabled = !flasher.connected;
+            releaseDetails.textContent = 'No complete release is available yet.';
+            flashBtn.disabled = true;
             return;
         }
 
@@ -513,7 +529,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
             renderReleaseOptions();
             renderReleaseDetails();
             if (filteredReleases.length) {
-                setStatus(`Ready.`);
+                const activeChannel = getSelectedChannel();
+                setStatus(`Ready. ${filteredReleases.length} release(s) in ${activeChannel}.`);
             } else {
                 setStatus('No complete releases available yet.');
             }

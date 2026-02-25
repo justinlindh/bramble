@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { NodeStatus } from '../../types/bramble';
+import type { NodeStatus, AirtimeStatus } from '../../types/bramble';
 import { IconPackets } from '../../components/Icons';
 import styles from './CounterGrid.module.css';
 
@@ -9,7 +9,7 @@ interface CounterDelta {
   dropped: number;
 }
 
-export function CounterGrid({ status }: { status: NodeStatus }) {
+export function CounterGrid({ status, airtime }: { status: NodeStatus; airtime?: AirtimeStatus | null }) {
   const prevRef = useRef<NodeStatus | null>(null);
   const [delta, setDelta] = useState<CounterDelta>({ tx: 0, rx: 0, dropped: 0 });
 
@@ -24,6 +24,10 @@ export function CounterGrid({ status }: { status: NodeStatus }) {
     }
     prevRef.current = status;
   }, [status]);
+
+  const airtimeUsedMs = status.airtimeUsedMs > 0
+    ? status.airtimeUsedMs
+    : (airtime?.tiers?.reduce((sum, tier) => sum + Math.max(0, tier.maxMs - tier.remainingMs), 0) ?? 0);
 
   return (
     <section className={styles.card}>
@@ -57,7 +61,7 @@ export function CounterGrid({ status }: { status: NodeStatus }) {
         />
         <CounterCell
           label="Air Used"
-          value={status.airtimeUsedMs}
+          value={airtimeUsedMs}
           format={ms => ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`}
         />
       </div>
