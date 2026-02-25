@@ -73,6 +73,7 @@ Independent semver. Each release documents which bramble-go version it depends o
 | v0.1.0     | 0.1.0            | v0.1.0         |
 | v0.2.0     | 0.1.0-0.2.0      | v0.1.0         |
 | v0.2.1     | 0.1.0-0.2.1      | v0.2.0-dev     |
+| v0.4.2     | 0.1.0-0.5.0      | v0.4.1-dev     |
 
 ## Adding a New RPC Method
 
