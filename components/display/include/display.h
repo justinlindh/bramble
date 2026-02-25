@@ -68,6 +68,15 @@ void display_set_contrast(uint8_t val);
 void display_invert(bool invert);
 
 /**
+ * Rotate display output by 180 degrees at runtime.
+ * For SSD1306 this updates controller segment/COM scan mapping.
+ */
+void display_set_rotated_180(bool rotated);
+
+/** Return whether display is currently configured for 180-degree rotation. */
+bool display_get_rotated_180(void);
+
+/**
  * Flush a rectangular area of pixels to the display.
  * buf contains RGB565 pixels in row-major order.
  * Used by LVGL display driver.

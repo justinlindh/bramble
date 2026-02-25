@@ -35,6 +35,13 @@ typedef enum {
     BTN_SELECT,
 } ui_button_t;
 
+/* Settings rows for non-graphical UI */
+typedef enum {
+    UI_SETTINGS_ITEM_CONN_MODE = 0,
+    UI_SETTINGS_ITEM_OLED_ROTATION,
+    UI_SETTINGS_ITEM_COUNT
+} ui_settings_item_t;
+
 typedef struct {
     uint32_t my_addr;
     uint8_t battery_pct;
@@ -62,7 +69,8 @@ typedef struct {
     uint32_t screen_enter_time;
     uint32_t last_activity;
     bool screen_dirty;
-    int settings_cursor;        /* selected option on Settings screen */
+    ui_settings_item_t settings_item_cursor; /* selected settings row */
+    int settings_cursor;        /* selected value while editing current row */
     bool settings_editing;      /* true when in settings edit mode */
     bool settings_confirmed;    /* set true on long-press confirm */
     
