@@ -94,7 +94,7 @@ jobs:
             "${tag_args[@]}" \
             --push
 
-      - name: Trigger host deploy workflow
+      - name: Trigger host deploy workflow (with local fallback)
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITEA_API_BASE: ${{ vars.GITEA_API_BASE }}
@@ -121,8 +121,45 @@ jobs:
           JSON
           )"
 
-          curl -fsS -X POST \
-            -H "Authorization: token ${GITEA_TOKEN}" \
-            -H "Content-Type: application/json" \
-            "${api_base}/api/v1/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches" \
-            -d "${payload}"
+          http_code="$(
+            curl -sS -o /tmp/deploy-dispatch-response.json -w "%{http_code}" -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${api_base}/api/v1/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches" \
+              -d "${payload}" || true
+          )"
+
+          if [ "${http_code}" = "204" ]; then
+            echo "Remote deploy workflow dispatch accepted (${owner}/${repo}:${workflow_id})."
+            exit 0
+          fi
+
+          echo "Remote deploy dispatch failed with HTTP ${http_code}; falling back to local docker redeploy."
+
+          mode="$(docker inspect bramble-web-client --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^MODE=/{print $2; exit}')"
+          allowed_subnets="$(docker inspect bramble-web-client --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^ALLOWED_SUBNETS=/{sub(/^ALLOWED_SUBNETS=/,""); print; exit}')"
+          mode="${mode:-hosted}"
+          allowed_subnets="${allowed_subnets:-}"
+
+          docker pull "${IMAGE_REF}"
+          docker rm -f bramble-web-client >/dev/null 2>&1 || true
+          docker run -d \
+            --name bramble-web-client \
+            --restart unless-stopped \
+            -p 8085:8085 \
+            -e MODE="${mode}" \
+            -e ALLOWED_SUBNETS="${allowed_subnets}" \
+            "${IMAGE_REF}"
+
+          ok=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8085/api/healthz >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          [ "${ok}" -eq 1 ]
+
+          echo "Local fallback deploy completed and health check passed."

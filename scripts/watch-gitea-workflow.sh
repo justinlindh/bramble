@@ -46,9 +46,10 @@ status_name() {
   case "$1" in
     1) echo "success" ;;
     2) echo "failure" ;;
-    3) echo "cancelled" ;;
-    4) echo "running" ;;
-    5) echo "skipped" ;;
+    3) echo "skipped" ;;
+    4) echo "cancelled" ;;
+    5) echo "pending" ;;
+    6) echo "running" ;;
     *) echo "status_$1" ;;
   esac
 }
@@ -110,10 +111,6 @@ print_run() {
     fi
   done < <(psql_tsv "$(job_rows_query "$run_id")")
 
-  # Some terminal outcomes (e.g. skipped) may not populate stopped timestamp.
-  if [[ "$run_status" == "1" || "$run_status" == "2" || "$run_status" == "3" || "$run_status" == "5" ]]; then
-    return 0
-  fi
   if [[ "$stopped" == "0" ]]; then
     return 10
   fi
@@ -145,3 +142,8 @@ while true; do
   sleep "$INTERVAL"
   echo "--- polling ---"
 done
+
+run_status="$(echo "$row" | awk -F $'\t' '{print $4}')"
+if [[ "$run_status" == "2" ]]; then
+  exit 2
+fi
