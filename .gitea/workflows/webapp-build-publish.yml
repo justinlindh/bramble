@@ -1,0 +1,87 @@
+name: Webapp Build Publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+    paths:
+      - 'webapp/**'
+      - '.gitea/workflows/webapp-build-publish.yml'
+
+jobs:
+  build-test-publish:
+    runs-on: linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build and test webapp
+        run: |
+          cd webapp
+          npm ci
+          npm test
+          npm run build
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=()
+
+          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "main" ]; then
+            short_sha="$(printf '%s' "${GITHUB_SHA}" | cut -c1-7)"
+            tags+=("main")
+            tags+=("sha-${short_sha}")
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            version="${GITHUB_REF_NAME}"
+            tags+=("${version}")
+            tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+\.[0-9]+)\.[0-9]+$/\1/')")
+            tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+)\.[0-9]+\.[0-9]+$/\1/')")
+          fi
+
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No publishable tags for ref ${GITHUB_REF}; exiting."
+            exit 1
+          fi
+
+          printf 'tags=%s\n' "$(IFS=,; echo "${tags[*]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Login to registry
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
+        run: |
+          set -euo pipefail
+          echo "$REGISTRY_PAT" | docker login ghcr.io/example -u "$REGISTRY_USERNAME" --password-stdin
+
+      - name: Build and push web-client image
+        env:
+          IMAGE_REPO: ghcr.io/example/bramble/web-client
+          IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx create --use --name bramble-webapp-builder >/dev/null 2>&1 || docker buildx use bramble-webapp-builder
+
+          tag_args=()
+          IFS=',' read -r -a tags <<< "$IMAGE_TAGS"
+          for tag in "${tags[@]}"; do
+            tag_args+=("-t" "${IMAGE_REPO}:${tag}")
+          done
+
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -f webapp/Dockerfile \
+            webapp \
+            "${tag_args[@]}" \
+            --push
