@@ -485,9 +485,22 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // ── UI Controller ───────────────────────────────────────────
 
 (function () {
+    function detectAssetVersion(filename) {
+        const scripts = Array.from(document.querySelectorAll('script[src]'));
+        for (const s of scripts) {
+            const src = s.getAttribute('src') || '';
+            if (!src.includes(filename)) continue;
+            const m = src.match(/[?&]v=([^&#]+)/);
+            if (m && m[1]) return m[1];
+            return 'unversioned';
+        }
+        return 'missing';
+    }
+
     const flasher = new BrambleFlasher();
     const connectBtn = document.getElementById('connect-btn');
     const flashBtn = document.getElementById('flash-btn');
+    const buildInfoText = document.getElementById('build-info');
     const boardSelect = document.getElementById('board-select');
     const channelSelect = document.getElementById('channel-select');
     const releaseSelect = document.getElementById('release-select');
@@ -499,6 +512,17 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     const OTA_INDEX_URL = '/ota/index.json';
     const BOARD_STORAGE_KEY = 'bramble.webflasher.selectedBoard';
+    const FLASHER_ASSET_VERSION = detectAssetVersion('flasher.js');
+    const RELEASE_INDEX_ASSET_VERSION = detectAssetVersion('release-index.js');
+    const RUNTIME_BUILD_INFO = {
+        flasherAsset: FLASHER_ASSET_VERSION,
+        releaseIndexAsset: RELEASE_INDEX_ASSET_VERSION,
+        otaIndexUrl: OTA_INDEX_URL,
+        syncTimeoutMs: BrambleFlasher.SYNC_TIMEOUT_MS,
+        totalSyncTimeoutMs: BrambleFlasher.TOTAL_SYNC_TIMEOUT_MS,
+        maxSyncAttempts: BrambleFlasher.MAX_SYNC_ATTEMPTS
+    };
+    window.__brambleFlasherBuild = RUNTIME_BUILD_INFO;
     let releases = [];
     let filteredReleases = [];
 
@@ -512,6 +536,15 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     function setStatus(msg) {
         if (statusText) statusText.textContent = sanitizeStatusMessage(msg);
+    }
+
+    function setBuildInfo() {
+        if (!buildInfoText) return;
+        const i = RUNTIME_BUILD_INFO;
+        buildInfoText.textContent =
+            `Build flasher=${i.flasherAsset} release-index=${i.releaseIndexAsset} ` +
+            `sync=${i.syncTimeoutMs}ms totalSync=${i.totalSyncTimeoutMs}ms attempts=${i.maxSyncAttempts} ` +
+            `ota=${i.otaIndexUrl}`;
     }
 
     function setProgress(pct, text) {
@@ -728,6 +761,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         releaseSelect.addEventListener('change', () => renderReleaseDetails());
     }
 
+    setBuildInfo();
     loadReleases();
     renderReleaseDetails();
     setStatus('Ready.');

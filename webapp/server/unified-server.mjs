@@ -197,7 +197,13 @@ export function createUnifiedServer({
       return;
     }
 
-    res.writeHead(200, { 'Content-Type': contentType(candidatePath) });
+    const headers = { 'Content-Type': contentType(candidatePath) };
+    // Avoid stale flasher assets without manual query-string cache busting.
+    if (requestPath === '/web-flasher' || requestPath.startsWith('/web-flasher/')) {
+      headers['Cache-Control'] = 'no-store, max-age=0';
+    }
+
+    res.writeHead(200, headers);
     if (req.method === 'HEAD') {
       res.end();
       return;

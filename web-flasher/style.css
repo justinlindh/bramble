@@ -42,6 +42,15 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     display: block;
 }
 .subtitle { color: var(--text-dim); margin-bottom: 2rem; }
+.build-info {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    margin-top: -1.25rem;
+    margin-bottom: 1.25rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    border-left: 3px solid var(--border);
+    padding-left: 0.6rem;
+}
 
 .board-select {
     display: flex;

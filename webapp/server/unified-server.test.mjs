@@ -1,11 +1,17 @@
 // @vitest-environment node
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 let server;
 let base;
 let otaUpstream;
 let otaBase;
+let staticServer;
+let staticBase;
+let staticDistDir;
 
 beforeAll(async () => {
   otaUpstream = new ResponseServer();
@@ -30,6 +36,14 @@ afterAll(async () => {
   });
   if (otaUpstream) {
     await otaUpstream.stop();
+  }
+  if (staticServer) {
+    await new Promise((resolve, reject) => {
+      staticServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+  if (staticDistDir) {
+    await rm(staticDistDir, { recursive: true, force: true });
   }
 });
 
@@ -155,5 +169,28 @@ describe('ws proxy behavior in local mode', () => {
     const res = await fetch(`${localBase}/ws-proxy?target=192.168.1.20`);
     expect(res.status).toBe(426);
     expect(await res.json()).toEqual({ error: 'websocket upgrade required' });
+  });
+});
+
+describe('web flasher static asset caching', () => {
+  beforeAll(async () => {
+    const { createUnifiedServer } = await import('./unified-server.mjs');
+    staticDistDir = await mkdtemp(path.join(os.tmpdir(), 'bramble-static-'));
+    await mkdir(path.join(staticDistDir, 'web-flasher'), { recursive: true });
+    await writeFile(path.join(staticDistDir, 'index.html'), '<html><body>ok</body></html>');
+    await writeFile(path.join(staticDistDir, 'web-flasher', 'flasher.js'), 'console.log("ok");');
+
+    staticServer = createUnifiedServer({ distDir: staticDistDir, otaBaseUrl: otaBase });
+    await new Promise((resolve) => {
+      staticServer.listen(0, '127.0.0.1', resolve);
+    });
+    const address = staticServer.address();
+    staticBase = `http://127.0.0.1:${address.port}`;
+  });
+
+  it('sets no-store cache-control on /web-flasher assets', async () => {
+    const res = await fetch(`${staticBase}/web-flasher/flasher.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('no-store');
   });
 });
