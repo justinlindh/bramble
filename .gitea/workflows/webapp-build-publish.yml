@@ -58,14 +58,6 @@ jobs:
 
           printf 'tags=%s\n' "$(IFS=,; echo "${tags[*]}")" >> "$GITHUB_OUTPUT"
 
-      - name: Install Docker CLI
-        run: |
-          set -euo pipefail
-          if ! command -v docker >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends docker.io
-          fi
-
       - name: Login to registry
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
