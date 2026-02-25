@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { isAllowedTarget } from './target-policy.mjs';
+import { isAllowedTarget, parseAllowlist, splitTarget } from './target-policy.mjs';
 
 describe('target policy', () => {
   const cfg = { mode: 'local', allowlist: [] };
@@ -16,5 +16,16 @@ describe('target policy', () => {
 
   it('rejects hostname by default', () => {
     expect(isAllowedTarget('device.local', cfg)).toBe(false);
+  });
+
+  it('allows public target in explicit allowlist CIDR', () => {
+    const allowlist = parseAllowlist('8.8.8.0/24,10.1.0.0/16');
+    expect(isAllowedTarget('8.8.8.8', { mode: 'local', allowlist })).toBe(true);
+  });
+
+  it('parses host:port and rejects invalid port values', () => {
+    expect(splitTarget('192.168.1.20')).toEqual({ host: '192.168.1.20', port: null });
+    expect(splitTarget('192.168.1.20:3005')).toEqual({ host: '192.168.1.20', port: 3005 });
+    expect(splitTarget('192.168.1.20:70000')).toBeNull();
   });
 });
