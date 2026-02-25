@@ -4,10 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 let server;
 let base;
+let otaUpstream;
+let otaBase;
 
 beforeAll(async () => {
+  otaUpstream = new ResponseServer();
+  await otaUpstream.start();
+  otaBase = otaUpstream.baseUrl;
+
   const { createUnifiedServer } = await import('./unified-server.mjs');
-  server = createUnifiedServer();
+  server = createUnifiedServer({ otaBaseUrl: otaBase });
 
   await new Promise((resolve) => {
     server.listen(0, '127.0.0.1', resolve);
@@ -22,7 +28,45 @@ afterAll(async () => {
   await new Promise((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+  if (otaUpstream) {
+    await otaUpstream.stop();
+  }
 });
+
+class ResponseServer {
+  constructor() {
+    this.server = null;
+    this.baseUrl = '';
+  }
+
+  async start() {
+    const { createServer } = await import('node:http');
+    this.server = createServer((req, res) => {
+      if (req.url === '/ota/index.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ releases: [{ version: 'v1.2.3', channel: 'stable', artifacts: [] }] }));
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('missing');
+    });
+
+    await new Promise((resolve) => {
+      this.server.listen(0, '127.0.0.1', resolve);
+    });
+
+    const address = this.server.address();
+    this.baseUrl = `http://127.0.0.1:${address.port}`;
+  }
+
+  async stop() {
+    if (!this.server) return;
+    await new Promise((resolve, reject) => {
+      this.server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+}
 
 describe('unified runtime api', () => {
   it('returns mode from /api/mode', async () => {
@@ -60,6 +104,21 @@ describe('unified runtime api', () => {
     const res = await fetch(`${base}/ws-proxy?target=192.0.2.0`);
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'ws proxy disabled in hosted mode' });
+  });
+
+  it('proxies /ota/index.json to OTA upstream', async () => {
+    const res = await fetch(`${base}/ota/index.json`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(await res.json()).toEqual({
+      releases: [{ version: 'v1.2.3', channel: 'stable', artifacts: [] }],
+    });
+  });
+
+  it('passes through OTA upstream status codes', async () => {
+    const res = await fetch(`${base}/ota/not-found.json`);
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe('missing');
   });
 });
 
