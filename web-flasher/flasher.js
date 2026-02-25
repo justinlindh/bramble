@@ -8,6 +8,10 @@ class BrambleFlasher {
         this.writer = null;
         this.connected = false;
         this._readBuffer = new Uint8Array(0);
+        this._signalState = {
+            dataTerminalReady: false,
+            requestToSend: false
+        };
     }
 
     // SLIP framing constants
@@ -149,13 +153,22 @@ class BrambleFlasher {
     async setSignalsSafe(signals) {
         if (!this.port || typeof this.port.setSignals !== 'function') return;
         try {
+            this._signalState = { ...this._signalState, ...signals };
             await Promise.race([
-                this.port.setSignals(signals),
+                this.port.setSignals(this._signalState),
                 new Promise((_, rej) => setTimeout(() => rej(new Error('Signal timeout')), BrambleFlasher.SIGNAL_TIMEOUT_MS))
             ]);
         } catch {
             // Some USB serial stacks do not support DTR/RTS reliably; continue.
         }
+    }
+
+    async setDTR(state) {
+        await this.setSignalsSafe({ dataTerminalReady: !!state });
+    }
+
+    async setRTS(state) {
+        await this.setSignalsSafe({ requestToSend: !!state });
     }
 
     async readRaw(timeoutMs = BrambleFlasher.RESPONSE_TIMEOUT_MS) {
@@ -273,32 +286,35 @@ class BrambleFlasher {
         for (let i = 4; i < 36; i++) syncData[i] = 0x55;
 
         const resetSequences = [
-            // Common ESP auto-reset sequence for many USB-UART adapters.
+            // esptool ClassicReset
             async () => {
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true });
-                await sleep(120);
-                await this.setSignalsSafe({ dataTerminalReady: true, requestToSend: false });
-                await sleep(120);
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false });
+                await this.setDTR(false); // IO0 HIGH
+                await this.setRTS(true);  // EN LOW (reset)
+                await sleep(100);
+                await this.setDTR(true);  // IO0 LOW
+                await this.setRTS(false); // EN HIGH
+                await sleep(50);
+                await this.setDTR(false); // IO0 HIGH
             },
-            // Fallback for adapters/platforms with differing signal semantics.
+            // esptool USBJTAGSerialReset
             async () => {
-                await this.setSignalsSafe({ dataTerminalReady: true, requestToSend: false });
-                await sleep(120);
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true });
-                await sleep(120);
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false });
+                await this.setRTS(false);
+                await this.setDTR(false); // idle
+                await sleep(100);
+                await this.setDTR(true); // set IO0
+                await this.setRTS(false);
+                await sleep(100);
+                await this.setRTS(true); // reset, goes through (1,1)
+                await this.setDTR(false);
+                await this.setRTS(true); // repeated RTS edge needed on some stacks
+                await sleep(100);
+                await this.setDTR(false);
+                await this.setRTS(false); // out of reset
             },
-            // Mirrors esptool USB-JTAG/Serial sequence used by ESP32-S3 class devices.
+            // No-reset fallback: if user already forced bootloader manually.
             async () => {
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false }); // idle
-                await sleep(100);
-                await this.setSignalsSafe({ dataTerminalReady: true, requestToSend: false }); // IO0 low
-                await sleep(100);
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true }); // through 1,1 edge
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: true });
-                await sleep(100);
-                await this.setSignalsSafe({ dataTerminalReady: false, requestToSend: false }); // out of reset
+                await this.setDTR(false);
+                await this.setRTS(false);
             }
         ];
 
