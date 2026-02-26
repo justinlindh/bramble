@@ -90,6 +90,7 @@ export function ConnectionOverlay() {
         <img src="/bramble-logo.png" alt="Bramble" className={styles.logoImg} />
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
+        <span className={styles.version}>{__APP_VERSION__}</span>
         <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
 
         <div className={styles.transportSelect}>

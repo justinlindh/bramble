@@ -41,6 +41,13 @@
   margin-top: -0.5rem;
 }
 
+.version {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+  margin-top: -0.3rem;
+}
+
 .runtimeBadge {
   font-size: 0.75rem;
   font-weight: 700;
