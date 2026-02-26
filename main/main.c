@@ -168,6 +168,33 @@ void conn_mode_set(conn_mode_t mode) {
 
 /* ── Splash screen ──────────────────────────────────────────────────── */
 
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+/**
+ * Show a boot-progress status line on the OLED during initialization.
+ * Redraws the BRAMBLE header + divider and places msg below the divider.
+ * Only used on non-graphical boards (Heltec V3 SSD1306 OLED).
+ */
+static void show_boot_status(const char *msg) {
+    display_clear();
+
+    /* Redraw BRAMBLE header (same layout as show_splash) */
+    int title_w = 7 * FONT_W * 2;
+    int title_x = (DISPLAY_WIDTH - title_w) / 2;
+    int title_y = DISPLAY_HEIGHT / 4;
+    display_draw_text_large(title_x, title_y, "BRAMBLE");
+
+    int div_y = title_y + LARGE_FONT_H + 4;
+    display_hline(DISPLAY_WIDTH / 8, div_y, DISPLAY_WIDTH * 3 / 4);
+
+    /* Status line below divider — truncate to display width */
+    char buf[22]; /* 128px / 6px-per-char + NUL */
+    snprintf(buf, sizeof(buf), "%s", msg);
+    display_draw_text(2, div_y + 8, buf);
+
+    display_flush();
+}
+#endif /* CONFIG_BRAMBLE_UI_GRAPHICAL */
+
 static void show_splash(void) {
     display_clear();
 
@@ -707,8 +734,9 @@ void app_main(void)
 #else
         ESP_LOGI(TAG, "=== BOOT STAGE: show_splash ===");
         show_splash();
-        ESP_LOGI(TAG, "Splash screen displayed — waiting 2 s");
-        vTaskDelay(pdMS_TO_TICKS(2000)); /* Show splash for 2 seconds */
+        ESP_LOGI(TAG, "Splash screen displayed");
+        vTaskDelay(pdMS_TO_TICKS(500)); /* Brief pause so splash is visible */
+        show_boot_status("Initializing...");
 #endif
     }
 
@@ -736,10 +764,19 @@ void app_main(void)
     /* Init GPS on boards that advertise GPS capability */
     if (board_has_cap(BOARD_CAP_GPS)) {
         ESP_LOGI(TAG, "=== BOOT STAGE: gps_init ===");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+        show_boot_status("GPS: searching...");
+#endif
         if (gps_init(on_gps_fix, &g_location_mgr) == 0) {
             ESP_LOGI(TAG, "GPS initialized (waiting for fix...)");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+            show_boot_status("GPS: ok (no fix yet)");
+#endif
         } else {
             ESP_LOGW(TAG, "GPS init failed or not available");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+            show_boot_status("GPS: fail");
+#endif
         }
     } else {
         ESP_LOGI(TAG, "GPS not supported on this board");
@@ -806,10 +843,20 @@ void app_main(void)
     /* Init WiFi if selected */
     if (boot_mode == CONN_MODE_WIFI) {
         ESP_LOGI(TAG, "=== BOOT STAGE: wifi_init ===");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+        show_boot_status("WiFi: starting...");
+#endif
         if (wifi_manager_init() == 0) {
             const char *ip = wifi_manager_get_ip();
             if (ip[0] != '\0') {
                 ESP_LOGI(TAG, "WiFi ready: %s", ip);
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+                {
+                    char wifi_status_line[22];
+                    snprintf(wifi_status_line, sizeof(wifi_status_line), "WiFi: %s", ip);
+                    show_boot_status(wifi_status_line);
+                }
+#endif
 
                 ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
                 ws_server_start();
@@ -822,9 +869,16 @@ void app_main(void)
                 mdns_instance_name_set("Bramble Mesh Node");
                 mdns_service_add("Bramble", "_bramble", "_tcp", 80, NULL, 0);
                 ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+            } else {
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+                show_boot_status("WiFi: AP 192.168.4.1");
+#endif
             }
         } else {
             ESP_LOGW(TAG, "WiFi init failed");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+            show_boot_status("WiFi: fail");
+#endif
         }
     } else {
         ESP_LOGI(TAG, "WiFi disabled by connectivity mode");
@@ -834,16 +888,41 @@ void app_main(void)
      * NOTE: radio_init() runs inside mesh_task on CPU1 — if it hangs,
      * the task watchdog (CONFIG_ESP_TASK_WDT_TIMEOUT_S) will force a reset. */
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+    show_boot_status("Radio: SX1262...");
+#endif
     mesh_task_start(&g_identity);
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+    /* Radio init runs async in mesh_task — brief wait then check state */
+    vTaskDelay(pdMS_TO_TICKS(800));
+    {
+        static mesh_shared_state_t boot_mesh;
+        mesh_get_state(&boot_mesh);
+        if (boot_mesh.radio_ok) {
+            show_boot_status("Radio: OK  Mesh: active");
+        } else {
+            show_boot_status("Radio: init...  Mesh: wait");
+        }
+    }
+#endif
 
     /* Start BLE GATT server if selected */
     if (boot_mode == CONN_MODE_BLE) {
         ESP_LOGI(TAG, "=== BOOT STAGE: ble_init ===");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+        show_boot_status("BLE: starting...");
+#endif
         if (ble_server_init() == 0) {
             ble_server_start();
             ESP_LOGI(TAG, "BLE server started");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+            show_boot_status("BLE: advertising");
+#endif
         } else {
             ESP_LOGW(TAG, "BLE init failed");
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+            show_boot_status("BLE: fail");
+#endif
         }
     } else {
         ESP_LOGI(TAG, "BLE disabled by connectivity mode");

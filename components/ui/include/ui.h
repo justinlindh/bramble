@@ -39,6 +39,7 @@ typedef enum {
 typedef enum {
     UI_SETTINGS_ITEM_CONN_MODE = 0,
     UI_SETTINGS_ITEM_OLED_ROTATION,
+    UI_SETTINGS_ITEM_LOCATION,
     UI_SETTINGS_ITEM_COUNT
 } ui_settings_item_t;
 

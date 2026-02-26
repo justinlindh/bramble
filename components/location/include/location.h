@@ -69,6 +69,18 @@ typedef struct {
     uint16_t min_distance_m;
 } location_manager_t;
 
+/* Location sharing mode for Settings UI */
+typedef enum {
+    LOC_SHARE_OFF    = 0,  /* no location shared */
+    LOC_SHARE_COARSE = 1,  /* ~1km grid square */
+    LOC_SHARE_EXACT  = 2,  /* precise GPS */
+    LOC_SHARE_COUNT  = 3
+} loc_share_mode_t;
+
+/* NVS-backed getter/setter — persisted in namespace "bramble", key "loc_share" */
+loc_share_mode_t location_share_mode_get(void);
+void location_share_mode_set(loc_share_mode_t mode);
+
 /* Init */
 void location_init(location_manager_t *mgr);
 
