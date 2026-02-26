@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     tags:
       - 'v*'
+      - 'webapp-v*'
     paths:
       - 'webapp/**'
       - 'web-flasher/**'
