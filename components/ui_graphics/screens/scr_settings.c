@@ -7,6 +7,8 @@
 #include "board_config.h"
 #include "ui.h"
 #include "location_settings_ui.h"
+#include "location.h"
+#include "routing.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "nvs.h"
@@ -20,6 +22,19 @@ static const char *TAG = "scr_settings";
 /* Get/set node name from mesh — extern since it's in main */
 extern int mesh_set_node_name_persist(const char *name);
 extern const char *mesh_get_node_name(void);
+
+/* Mesh state snapshot — mirrored from mesh_task.h to avoid include cycle */
+typedef struct {
+    neighbor_table_t neighbors;
+    uint32_t         beacon_tx_count;
+    uint32_t         beacon_rx_count;
+    uint32_t         packets_tx;
+    uint32_t         packets_rx;
+    bool             radio_ok;
+    int16_t          last_rx_rssi;
+    int8_t           last_rx_snr;
+} settings_mesh_state_t;
+extern void mesh_get_state(settings_mesh_state_t *out);
 
 /* ── Backlight ───────────────────────────────────────────────────────── */
 
@@ -104,6 +119,83 @@ static lv_obj_t *s_loc_interval_dd = NULL;
 static lv_obj_t *s_loc_source_lbl = NULL;
 static lv_obj_t *s_loc_last_share_lbl = NULL;
 static location_ui_state_t s_loc_state;
+
+/* ── Location peer targets ───────────────────────────────────────────── */
+
+/* Per-peer contact record stored in NVS blob "ct_data" under "bramble_loc" */
+typedef struct {
+    uint32_t addr;
+    uint8_t  tier;     /* LOCATION_UI_TIER_* — 0xFF = use global */
+    uint8_t  enabled;
+} loc_contact_nvs_t;
+
+#define LOC_CONTACT_UI_MAX  LOCATION_MAX_CONTACTS  /* 16 */
+
+static loc_contact_nvs_t s_loc_contacts[LOC_CONTACT_UI_MAX];
+static int               s_loc_contact_count = 0;
+
+static int location_contacts_find(uint32_t addr) {
+    for (int i = 0; i < s_loc_contact_count; i++) {
+        if (s_loc_contacts[i].addr == addr) return i;
+    }
+    return -1;
+}
+
+static void location_contacts_load(void) {
+    s_loc_contact_count = 0;
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) return;
+    size_t len = sizeof(s_loc_contacts);
+    nvs_get_blob(nvs, "ct_data", s_loc_contacts, &len);
+    if (len > 0 && (len % sizeof(loc_contact_nvs_t)) == 0) {
+        s_loc_contact_count = (int)(len / sizeof(loc_contact_nvs_t));
+        if (s_loc_contact_count > LOC_CONTACT_UI_MAX)
+            s_loc_contact_count = LOC_CONTACT_UI_MAX;
+    }
+    nvs_close(nvs);
+}
+
+static void location_contacts_save(void) {
+    nvs_handle_t nvs;
+    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) return;
+    nvs_set_blob(nvs, "ct_data", s_loc_contacts,
+                 (size_t)(s_loc_contact_count) * sizeof(loc_contact_nvs_t));
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+/* Toggle callback — user_data encodes peer addr as uintptr_t */
+static void location_contact_toggle_cb(lv_event_t *e) {
+    lv_obj_t *sw = lv_event_get_target(e);
+    bool want_enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    uint32_t addr = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+
+    int idx = location_contacts_find(addr);
+    if (want_enabled) {
+        if (idx < 0) {
+            /* Add new entry if space available */
+            if (s_loc_contact_count < LOC_CONTACT_UI_MAX) {
+                s_loc_contacts[s_loc_contact_count].addr    = addr;
+                s_loc_contacts[s_loc_contact_count].tier    = 0xFF; /* use global */
+                s_loc_contacts[s_loc_contact_count].enabled = 1;
+                s_loc_contact_count++;
+            }
+        } else {
+            s_loc_contacts[idx].enabled = 1;
+        }
+    } else {
+        if (idx >= 0) {
+            /* Remove by shifting */
+            for (int i = idx; i < s_loc_contact_count - 1; i++) {
+                s_loc_contacts[i] = s_loc_contacts[i + 1];
+            }
+            s_loc_contact_count--;
+        }
+    }
+    location_contacts_save();
+    ESP_LOGI(TAG, "Peer target %08lX %s", (unsigned long)addr,
+             want_enabled ? "added" : "removed");
+}
 
 static void location_ui_load_state(location_ui_state_t *st) {
     if (!st) return;
@@ -231,6 +323,140 @@ static void location_panic_off_cb(lv_event_t *e) {
     location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_PANIC_OFF, 0);
     location_ui_save_state(&s_loc_state);
     if (s_loc_share_sw) lv_obj_clear_state(s_loc_share_sw, LV_STATE_CHECKED);
+}
+
+/* ── Peer targets section builder ───────────────────────────────────── */
+
+static void build_loc_peer_targets_section(lv_obj_t *cont, lv_group_t *g) {
+    /* Section separator */
+    lv_obj_t *sep = lv_obj_create(cont);
+    lv_obj_set_size(sep, 296, 1);
+    lv_obj_set_style_bg_color(sep, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_bg_opa(sep, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(sep, 0, 0);
+
+    lv_obj_t *section_lbl = lv_label_create(cont);
+    lv_label_set_text(section_lbl, LV_SYMBOL_CALL " Peer Targets");
+    lv_obj_set_style_text_font(section_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(section_lbl, BR_COLOR_TEXT, 0);
+
+    lv_obj_t *hint = lv_label_create(cont);
+    lv_label_set_text(hint, "Send location to specific peers.\n"
+                            "Uses global tier unless overridden.");
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(hint, BR_COLOR_TEXT_SEC, 0);
+
+    /* Get current neighbor snapshot */
+    settings_mesh_state_t mesh;
+    mesh_get_state(&mesh);
+    int n_count = neighbor_count(&mesh.neighbors);
+
+    if (n_count == 0) {
+        lv_obj_t *no_peers = lv_label_create(cont);
+        lv_label_set_text(no_peers, "(no peers visible)");
+        lv_obj_set_style_text_font(no_peers, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(no_peers, BR_COLOR_TEXT_SEC, 0);
+    }
+
+    /* Render one toggle row per neighbor entry */
+    for (int i = 0; i < MAX_NEIGHBORS; i++) {
+        const neighbor_entry_t *nb = &mesh.neighbors.entries[i];
+        if (nb->addr == 0) continue;  /* empty slot */
+
+        /* Row container */
+        lv_obj_t *row = lv_obj_create(cont);
+        lv_obj_set_size(row, 304, BR_TAP_TARGET_MIN);
+        lv_obj_set_style_bg_color(row, BR_COLOR_SURFACE, 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(row, BR_RADIUS, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 6, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        /* Label: name or hex addr */
+        lv_obj_t *lbl = lv_label_create(row);
+        if (nb->name[0]) {
+            lv_label_set_text(lbl, nb->name);
+        } else {
+            char hex[12];
+            snprintf(hex, sizeof(hex), "%08lX", (unsigned long)nb->addr);
+            lv_label_set_text(lbl, hex);
+        }
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
+        lv_obj_set_width(lbl, 200);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+        /* Toggle switch */
+        lv_obj_t *sw = lv_switch_create(row);
+        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_set_style_bg_color(sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(sw, BR_COLOR_TEXT, LV_PART_KNOB);
+
+        /* Pre-check if this peer is already a target */
+        if (location_contacts_find(nb->addr) >= 0) {
+            lv_obj_add_state(sw, LV_STATE_CHECKED);
+        }
+
+        lv_obj_add_event_cb(sw, location_contact_toggle_cb, LV_EVENT_VALUE_CHANGED,
+                            (void *)(uintptr_t)nb->addr);
+        if (g) lv_group_add_obj(g, sw);
+    }
+
+    /* Show persisted offline targets (not currently visible as neighbors) */
+    bool shown_offline_hdr = false;
+    for (int ci = 0; ci < s_loc_contact_count; ci++) {
+        const loc_contact_nvs_t *ct = &s_loc_contacts[ci];
+        /* Check if already shown as a neighbor */
+        bool is_neighbor = false;
+        for (int ni = 0; ni < MAX_NEIGHBORS; ni++) {
+            if (mesh.neighbors.entries[ni].addr == ct->addr) {
+                is_neighbor = true;
+                break;
+            }
+        }
+        if (is_neighbor) continue;
+
+        if (!shown_offline_hdr) {
+            lv_obj_t *off_lbl = lv_label_create(cont);
+            lv_label_set_text(off_lbl, "Saved (offline):");
+            lv_obj_set_style_text_font(off_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(off_lbl, BR_COLOR_TEXT_SEC, 0);
+            shown_offline_hdr = true;
+        }
+
+        lv_obj_t *row = lv_obj_create(cont);
+        lv_obj_set_size(row, 304, BR_TAP_TARGET_MIN);
+        lv_obj_set_style_bg_color(row, BR_COLOR_SURFACE, 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(row, BR_RADIUS, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 6, 0);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+        char hex[12];
+        snprintf(hex, sizeof(hex), "%08lX", (unsigned long)ct->addr);
+        lv_obj_t *lbl = lv_label_create(row);
+        lv_label_set_text(lbl, hex);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT_SEC, 0);
+        lv_obj_set_width(lbl, 200);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+        lv_obj_t *sw = lv_switch_create(row);
+        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_set_style_bg_color(sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(sw, BR_COLOR_TEXT, LV_PART_KNOB);
+        if (ct->enabled) lv_obj_add_state(sw, LV_STATE_CHECKED);
+
+        lv_obj_add_event_cb(sw, location_contact_toggle_cb, LV_EVENT_VALUE_CHANGED,
+                            (void *)(uintptr_t)ct->addr);
+        if (g) lv_group_add_obj(g, sw);
+    }
 }
 
 /* ── Connectivity mode toggle ────────────────────────────────────────── */
@@ -510,6 +736,7 @@ void scr_settings_create(bramble_layout_t *layout) {
 
     /* ── Location Sharing ── */
     location_ui_load_state(&s_loc_state);
+    location_contacts_load();
 
     lv_obj_t *sep_loc = lv_obj_create(cont);
     lv_obj_set_size(sep_loc, 296, 1);
@@ -577,6 +804,9 @@ void scr_settings_create(bramble_layout_t *layout) {
     lv_obj_center(panic_lbl);
     lv_obj_add_event_cb(panic_btn, location_panic_off_cb, LV_EVENT_CLICKED, NULL);
     if (g) lv_group_add_obj(g, panic_btn);
+
+    /* ── Peer Targets ── */
+    build_loc_peer_targets_section(cont, g);
 
     /* ── Connectivity Mode ── */
     {
