@@ -184,12 +184,6 @@
   justify-content: space-between;
 }
 
-.contactCardActions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .contactCardBody {
   display: flex;
   gap: 0.75rem;
@@ -272,21 +266,21 @@
   color: var(--danger, #d73a49);
 }
 
-.removeBtn {
-  padding: 0.1rem 0.35rem;
+.removeLink {
+  margin-left: auto;
+  padding: 0;
   background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border: none;
   color: var(--text-muted);
-  font-size: 0.8rem;
-  line-height: 1;
+  font-size: 0.75rem;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  opacity: 0.6;
+  transition: color 0.15s, opacity 0.15s;
 }
 
-.removeBtn:hover {
+.removeLink:hover {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  opacity: 1;
 }
 
 /* ── Add form ── */
