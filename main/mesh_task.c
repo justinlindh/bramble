@@ -27,6 +27,7 @@
 #include "mesh_dedup_state.h"
 #include "mesh_neighbor_state.h"
 #include "mesh_routing_state.h"
+#include "mesh_msg_state.h"
 
 #include <stdio.h>
 
@@ -96,17 +97,6 @@ static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* load
 
 /* Routing state managed by mesh_routing_state module */
 
-/* Queued messages waiting for route discovery */
-#define MAX_QUEUED_MSGS 8
-typedef struct {
-    uint32_t dest_addr;
-    uint8_t  data[BRAMBLE_MAX_PACKET_SIZE];
-    size_t   len;
-    uint32_t timestamp;
-    bool     used;
-} queued_msg_t;
-static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
-
 /* Originator pseudonym lookup table for RREQ privacy.
  * Maps ephemeral pseudonyms to real addresses so incoming RREPs can be correlated.
  * Uses circular replacement when full. */
@@ -121,17 +111,13 @@ typedef struct {
 static pseudonym_entry_t s_pseudonym_table[PSEUDONYM_TABLE_SIZE];
 static int s_pseudonym_next_slot = 0;
 
-/* Reliability — ACK tracking for outgoing unicast messages */
-static pending_ack_table_t s_pending_acks;
+/* Reliability — ACK tracking managed by mesh_msg_state module */
 static airtime_budget_t    s_airtime;
 
 /* Traffic debug telemetry */
 #define TRAFFIC_DEBUG_CAPACITY 512
 static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t     s_traffic_debug;
-
-/* Fragment reassembly context */
-static reassembly_ctx_t    s_reassembly;
 
 /* Adaptive beacon interval policy */
 static beacon_policy_config_t s_beacon_policy = {
@@ -960,7 +946,7 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
              ack.ack_packet_id, ack.src_addr, ack.rssi_at_dest, ack.hop_count);
 
     /* Remove from pending ACK table */
-    bool found = pending_ack_remove(&s_pending_acks, ack.ack_packet_id);
+    bool found = mesh_pending_ack_remove(ack.ack_packet_id);
 
     /* Update message store status */
     if (msg_store_update_status(ack.ack_packet_id, MSG_STATUS_DELIVERED)) {
@@ -1099,15 +1085,15 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                          frag_hdr.frag_index + 1, frag_hdr.frag_total,
                          frag_hdr.message_id, info.src_addr);
 
-                int ret = reassembly_add(&s_reassembly, &frag_hdr,
-                                        info.data + FRAG_HEADER_SIZE,
-                                        info.data_len - FRAG_HEADER_SIZE,
-                                        now_ms());
+                int ret = mesh_reassembly_add(&frag_hdr,
+                                             info.data + FRAG_HEADER_SIZE,
+                                             info.data_len - FRAG_HEADER_SIZE,
+                                             now_ms());
                 if (ret == 1) {
                     /* Reassembly complete — collect the full message */
                     uint8_t reassembled[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT];
-                    int total_len = reassembly_collect(&s_reassembly, frag_hdr.message_id,
-                                                       reassembled, sizeof(reassembled));
+                    int total_len = mesh_reassembly_collect(frag_hdr.message_id,
+                                                            reassembled, sizeof(reassembled));
                     if (total_len > 0) {
                         /* Process the reassembled message */
                         char text[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT + 1];
@@ -1393,15 +1379,14 @@ static void pseudonym_purge(uint32_t now) {
 
 /* ── End pseudonym helpers ─────────────────────────────────────────── */
 
+static void flush_send_cb(const uint8_t *data, size_t len, uint32_t dest_addr, void *ctx) {
+    (void)ctx;
+    ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)", dest_addr, (unsigned)len);
+    mesh_send_message(dest_addr, data, len);
+}
+
 static void flush_queued_messages(uint32_t dest_addr) {
-    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-        if (s_queued_msgs[i].used && s_queued_msgs[i].dest_addr == dest_addr) {
-            ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)",
-                     dest_addr, (unsigned)s_queued_msgs[i].len);
-            mesh_send_message(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len);
-            s_queued_msgs[i].used = false;
-        }
-    }
+    mesh_msg_flush_for(dest_addr, flush_send_cb, NULL);
 }
 
 static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -1980,7 +1965,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         mesh_dedup_purge(t);
         mesh_route_maintenance(t);
         mesh_reverse_route_purge(t);
-        reassembly_purge(&s_reassembly, t);
+        mesh_reassembly_purge(t);
         pseudonym_purge(t);  /* Clean up expired originator pseudonym mappings */
         *last_purge_ms = t;
 
@@ -1993,13 +1978,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         xSemaphoreGive(s_state_mutex);
 
         /* Expire queued messages older than 60s */
-        for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-            if (s_queued_msgs[i].used && (t - s_queued_msgs[i].timestamp) > 60000) {
-                ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
-                         s_queued_msgs[i].dest_addr);
-                s_queued_msgs[i].used = false;
-            }
-        }
+        mesh_msg_expire(t, 60000);
     }
 
     /* Discovery retries (check every 5s) */
@@ -2013,12 +1992,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                     ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
                              pd->dest_addr, pd->attempts);
                     /* Clear queued messages for this dest */
-                    for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
-                        if (s_queued_msgs[j].used &&
-                            s_queued_msgs[j].dest_addr == pd->dest_addr) {
-                            s_queued_msgs[j].used = false;
-                        }
-                    }
+                    mesh_msg_flush_for(pd->dest_addr, NULL, NULL);
                     mesh_discovery_remove(pd->dest_addr);
                     i--; /* re-check same index after remove */
                 } else {
@@ -2056,7 +2030,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     if ((t - last_ack_tick) >= 1000) {  /* Check every 1s */
         last_ack_tick = t;
         for (int i = 0; i < MAX_PENDING_ACKS; i++) {
-            pending_ack_t *pa = &s_pending_acks.entries[i];
+            pending_ack_t *pa = &mesh_msg_state_get_pending_acks()->entries[i];
             if (!pa->active) continue;
             if (t >= pa->next_retry_ms) {
                 /* Extract packet type from stored packet data for telemetry */
@@ -2288,8 +2262,8 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
 
         /* Register for ACK tracking (unicast only) */
         if (dest_addr != 0xFFFFFFFF) {
-            pending_ack_add(&s_pending_acks, pkt_id, dest_addr,
-                            MSG_TIER_NORMAL, buf, (uint16_t)total, now_ms());
+            mesh_pending_ack_add(pkt_id, dest_addr,
+                                 MSG_TIER_NORMAL, buf, (uint16_t)total, now_ms());
         }
         return pkt_id;
     }
@@ -2575,19 +2549,8 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
 }
 
 static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
-    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-        if (!s_queued_msgs[i].used) {
-            s_queued_msgs[i].dest_addr = dest_addr;
-            memcpy(s_queued_msgs[i].data, data, len);
-            s_queued_msgs[i].len = len;
-            s_queued_msgs[i].timestamp = now_ms();
-            s_queued_msgs[i].used = true;
-            ESP_LOGI(TAG, "Queued msg for %08" PRIX32 " (waiting for route)", dest_addr);
-            return 0;
-        }
-    }
-    ESP_LOGW(TAG, "Message queue full, dropping msg for %08" PRIX32, dest_addr);
-    return -3;
+    int rc = mesh_msg_queue(dest_addr, data, len, now_ms());
+    return rc == 0 ? 0 : -3;
 }
 
 static int initiate_discovery(uint32_t dest_addr) {
@@ -2693,15 +2656,13 @@ void mesh_task_start(bramble_identity_t *identity) {
     mesh_neighbor_state_init();
     mesh_dedup_state_init();
     mesh_routing_state_init();
-    pending_ack_init(&s_pending_acks);
+    mesh_msg_state_init();
     airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
-    reassembly_init(&s_reassembly);
     location_init(&s_location_mgr);
-    memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(s_pseudonym_table, 0, sizeof(s_pseudonym_table));  /* Init originator pseudonym table */
     s_pseudonym_next_slot = 0;
     memset(&s_shared, 0, sizeof(s_shared));
