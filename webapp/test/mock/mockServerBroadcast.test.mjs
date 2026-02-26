@@ -31,14 +31,14 @@ function sendRpc(ws, method, params = {}) {
   });
 }
 
-function collectNotifications(ws, method, count, timeoutMs = 8000) {
+function collectNotifications(ws, method, count, timeoutMs = 8000, filter = null) {
   return new Promise((resolve) => {
     const collected = [];
     const timeout = setTimeout(() => resolve(collected), timeoutMs);
 
     const handler = (data) => {
       const msg = JSON.parse(data.toString());
-      if (msg.method === method) {
+      if (msg.method === method && (!filter || filter(msg.params))) {
         collected.push(msg.params);
         if (collected.length >= count) {
           clearTimeout(timeout);
@@ -79,17 +79,20 @@ describe('Mock Server bramble.sendBroadcast', () => {
   });
 
   it('should emit onBroadcastDelivery notifications', async () => {
-    // Start collecting notifications before sending
-    const notificationPromise = collectNotifications(ws, 'bramble.onBroadcastDelivery', 2, 6000);
-    
-    // Send broadcast
+    // Send broadcast first so we have the broadcastId to filter on.
+    // Delivery notifications have 500ms+ delays, so starting collection after
+    // the RPC returns is safe and avoids collecting stale notifications from
+    // other tests that share the same WebSocket connection.
     const result = await sendRpc(ws, 'bramble.sendBroadcast', { text: 'Hello mesh!' });
-    
-    // Wait for delivery notifications
-    const notifications = await notificationPromise;
-    
+
+    // Collect only notifications for this specific broadcast
+    const notifications = await collectNotifications(
+      ws, 'bramble.onBroadcastDelivery', 2, 6000,
+      (params) => params.broadcastId === result.broadcastId,
+    );
+
     expect(notifications.length).toBeGreaterThan(0);
-    
+
     // Verify notification structure
     const firstNotification = notifications[0];
     expect(firstNotification.broadcastId).toBe(result.broadcastId);

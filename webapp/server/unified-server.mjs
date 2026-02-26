@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
 import { isAllowedTarget, parseAllowlist, splitTarget } from './target-policy.mjs';
+import { handleConnection as handleMockConnection } from '../mock/handler.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -213,6 +214,7 @@ export function createUnifiedServer({
   });
 
   const wss = new WebSocketServer({ noServer: true });
+  const mockWss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
     let url;
@@ -220,6 +222,13 @@ export function createUnifiedServer({
       url = new URL(req.url || '/', 'http://localhost');
     } catch {
       writeUpgradeError(socket, 400, { error: 'bad request' });
+      return;
+    }
+
+    if (url.pathname === '/ws') {
+      mockWss.handleUpgrade(req, socket, head, (ws) => {
+        handleMockConnection(ws, req);
+      });
       return;
     }
 
