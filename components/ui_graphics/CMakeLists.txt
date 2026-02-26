@@ -16,6 +16,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_nodes.c"
         "screens/scr_map.c"
         "screens/scr_stats.c"
+        "screens/scr_traffic.c"
         "screens/scr_settings.c"
         "chat_target.c"
         "chat_unread.c"
