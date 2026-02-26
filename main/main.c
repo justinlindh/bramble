@@ -433,19 +433,45 @@ static void render_screen(ui_state_t *ui) {
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         if (ui->settings_editing) {
-            /* Mode selection UI */
             int y = CONTENT_Y;
-            display_draw_text(2, y, "Connectivity Mode:");
-            y += LINE_H + 4;
-            static const char *mode_names[] = {"WiFi", "BLE"};
-            conn_mode_t current = conn_mode_get();
-            for (int i = 0; i < CONN_MODE_COUNT; i++) {
-                char ml[32];
-                const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
-                const char *mark = (i == (int)current) ? " *" : "";
-                snprintf(ml, sizeof(ml), "%s %s%s", arrow, mode_names[i], mark);
-                display_draw_text(2, y, ml);
-                y += LINE_H;
+            if (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
+                display_draw_text(2, y, "Connectivity Mode:");
+                y += LINE_H + 4;
+                static const char *mode_names[] = {"WiFi", "BLE"};
+                conn_mode_t current = conn_mode_get();
+                for (int i = 0; i < CONN_MODE_COUNT; i++) {
+                    char ml[32];
+                    const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char *mark = (i == (int)current) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, mode_names[i], mark);
+                    display_draw_text(2, y, ml);
+                    y += LINE_H;
+                }
+            } else if (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) {
+                display_draw_text(2, y, "Location Sharing:");
+                y += LINE_H + 4;
+                static const char *loc_names[] = {"Off", "Coarse", "Exact"};
+                loc_share_mode_t cur_loc = location_share_mode_get();
+                for (int i = 0; i < LOC_SHARE_COUNT; i++) {
+                    char ml[32];
+                    const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char *mark = (i == (int)cur_loc) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, loc_names[i], mark);
+                    display_draw_text(2, y, ml);
+                    y += LINE_H;
+                }
+            } else {
+                /* OLED rotation (placeholder) */
+                display_draw_text(2, y, "OLED Rotation:");
+                y += LINE_H + 4;
+                static const char *rot_names[] = {"Normal", "180 deg"};
+                for (int i = 0; i < 2; i++) {
+                    char ml[32];
+                    const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    snprintf(ml, sizeof(ml), "%s %s", arrow, rot_names[i]);
+                    display_draw_text(2, y, ml);
+                    y += LINE_H;
+                }
             }
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
             display_draw_text(2, FOOTER_Y, "^v choose  [o]OK  [<]cancel");
@@ -453,36 +479,43 @@ static void render_screen(ui_state_t *ui) {
             display_draw_text(2, FOOTER_Y, "[hold]OK [2x]cancel");
 #endif
         } else {
+            /* Non-edit: show settings rows with cursor + device info */
             char line[64];
             int y = CONTENT_Y;
-            snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
-            display_draw_text(2, y, line);
-            y += LINE_H;
 
             conn_mode_t cur_mode = conn_mode_get();
             static const char *mnames[] = {"WiFi", "BLE"};
-            snprintf(line, sizeof(line), "Mode: %s", mnames[cur_mode]);
-            display_draw_text(2, y, line);
-            y += LINE_H;
+            loc_share_mode_t cur_loc = location_share_mode_get();
+            static const char *loc_names[] = {"Off", "Coarse", "Exact"};
 
-            const char *ip = wifi_manager_get_ip();
-            if (ip && ip[0] != '\0') {
-                snprintf(line, sizeof(line), "IP: %s", ip);
+            /* Row 0: Connectivity */
+            {
+                const char *sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) ? ">" : " ";
+                snprintf(line, sizeof(line), "%sConn: %s", sel, mnames[cur_mode]);
                 display_draw_text(2, y, line);
-            } else {
-                display_draw_text(2, y, "IP: (no WiFi)");
+                y += LINE_H;
             }
-            y += LINE_H;
-
-            if (cur_mode == CONN_MODE_BLE) {
-                display_draw_text(2, y, "BLE: advertising");
-            } else {
-                display_draw_text(2, y, "BLE: off");
+            /* Row 1: OLED Rotation (placeholder) */
+            {
+                const char *sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_OLED_ROTATION) ? ">" : " ";
+                snprintf(line, sizeof(line), "%sRotation: 0", sel);
+                display_draw_text(2, y, line);
+                y += LINE_H;
             }
+            /* Row 2: Location Sharing */
+            {
+                const char *sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) ? ">" : " ";
+                snprintf(line, sizeof(line), "%sLocation: %s", sel, loc_names[cur_loc]);
+                display_draw_text(2, y, line);
+                y += LINE_H;
+            }
+            /* Device info row */
+            snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
+            display_draw_text(2, y, line);
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
             display_draw_text(2, FOOTER_Y, "[o] edit  < > navigate");
 #else
-            display_draw_text(2, FOOTER_Y, "[hold] change mode");
+            display_draw_text(2, FOOTER_Y, "[press]next [hold]edit");
 #endif
         }
         display_flush();
@@ -527,36 +560,61 @@ static void render_screen(ui_state_t *ui) {
         /* Footer */
         display_draw_text(2, FOOTER_Y, "[Enter] Send  [Esc/Left] Back");
 #else
-        /* Heltec: About screen (existing code) */
-        display_draw_text(2, HEADER_Y, "About");
+        /* Heltec: Stats screen */
+        display_draw_text(2, HEADER_Y, "Stats  v0.1");
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         char line[64];
         int y = CONTENT_Y;
-        display_draw_text(2, y, "Bramble Mesh v0.1");
-        y += LINE_H + 4;
 
-        uint8_t bpct = battery_read_pct();
-        uint32_t bmv = battery_read_mv();
-        if (bmv > 0) {
-            snprintf(line, sizeof(line), "Batt: %u%% (%"PRIu32"mV)", bpct, bmv);
-        } else {
-            snprintf(line, sizeof(line), "Power: USB");
+        /* Line 1: TX/RX counters */
+        static mesh_shared_state_t stats_mesh;
+        mesh_get_state(&stats_mesh);
+        snprintf(line, sizeof(line), "TX:%"PRIu32" RX:%"PRIu32,
+                 stats_mesh.packets_tx, stats_mesh.packets_rx);
+        display_draw_text(2, y, line);
+        y += LINE_H;
+
+        /* Line 2: Airtime TX budget used % (NORMAL tier) */
+        {
+            uint32_t used_ms = 0;
+            uint32_t max_ms  = stats_mesh.airtime.max_ms[0];
+            if (max_ms > 0 && stats_mesh.airtime.tokens_ms[0] <= max_ms) {
+                used_ms = max_ms - stats_mesh.airtime.tokens_ms[0];
+            }
+            uint32_t pct_tenths = (max_ms > 0) ? (used_ms * 1000 / max_ms) : 0;
+            snprintf(line, sizeof(line), "Air: %"PRIu32".%"PRIu32"%% TX",
+                     pct_tenths / 10, pct_tenths % 10);
         }
         display_draw_text(2, y, line);
         y += LINE_H;
 
-        snprintf(line, sizeof(line), "Heap: %uKB",
-                 (unsigned)(esp_get_free_heap_size() / 1024));
+        /* Line 3: Heap + Uptime */
+        {
+            uint32_t heap_kb = esp_get_free_heap_size() / 1024;
+            uint32_t up_sec = (uint32_t)((esp_timer_get_time() / 1000000ULL) -
+                                          (boot_time_ms / 1000));
+            char uptime[20];
+            ui_format_uptime(up_sec, uptime, sizeof(uptime));
+            snprintf(line, sizeof(line), "Heap:%"PRIu32"KB Up:%s", heap_kb, uptime);
+        }
         display_draw_text(2, y, line);
         y += LINE_H;
 
-        static mesh_shared_state_t about_mesh;
-        mesh_get_state(&about_mesh);
-        snprintf(line, sizeof(line), "TX:%"PRIu32" RX:%"PRIu32,
-                 about_mesh.packets_tx, about_mesh.packets_rx);
+        /* Line 4: Routes + Battery */
+        {
+            static routing_table_t stats_routes;
+            mesh_get_routes(&stats_routes);
+            int route_cnt = 0;
+            for (int i = 0; i < stats_routes.count; i++) {
+                route_state_t st = stats_routes.entries[i].state;
+                if (st != ROUTE_STALE && st != ROUTE_BROKEN) route_cnt++;
+            }
+            uint8_t bpct = battery_read_pct();
+            snprintf(line, sizeof(line), "Routes:%d Batt:%u%%", route_cnt, (unsigned)bpct);
+        }
         display_draw_text(2, y, line);
-        
+
         display_draw_text(2, FOOTER_Y, "[press] next screen");
 #endif
         
@@ -893,43 +951,53 @@ void app_main(void)
         }
 #endif
 
-        /* Handle connectivity mode change confirmation */
+        /* Handle settings confirmation */
         if (ui.settings_confirmed) {
             ui.settings_confirmed = false;
             ui.settings_editing = false;
-            conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
-            conn_mode_t old_mode = conn_mode_get();
-            if (new_mode != old_mode) {
-                conn_mode_set(new_mode);
-                ESP_LOGI(TAG, "Connectivity mode changed to %d, rebooting...", new_mode);
+            if (ui.settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
+                conn_mode_t new_mode = (conn_mode_t)ui.settings_cursor;
+                conn_mode_t old_mode = conn_mode_get();
+                if (new_mode != old_mode) {
+                    conn_mode_set(new_mode);
+                    ESP_LOGI(TAG, "Connectivity mode changed to %d, rebooting...", new_mode);
 
-                /* Show confirmation before reboot */
-                display_clear();
-                static const char *mnames[] = {"WiFi", "BLE"};
-                
-                /* Center the confirmation text */
-                const char *msg1 = "Mode changed:";
-                int msg1_x = (DISPLAY_WIDTH - strlen(msg1) * FONT_W) / 2;
-                int msg1_y = DISPLAY_HEIGHT / 4;
-                display_draw_text(msg1_x, msg1_y, msg1);
-                
-                /* Mode name in large text, centered */
-                int mode_w = strlen(mnames[new_mode]) * FONT_W * 2;
-                int mode_x = (DISPLAY_WIDTH - mode_w) / 2;
-                int mode_y = msg1_y + FONT_H + 8;
-                display_draw_text_large(mode_x, mode_y, mnames[new_mode]);
-                
-                /* Rebooting message */
-                const char *msg2 = "Rebooting...";
-                int msg2_x = (DISPLAY_WIDTH - strlen(msg2) * FONT_W) / 2;
-                int msg2_y = mode_y + LARGE_FONT_H + 8;
-                display_draw_text(msg2_x, msg2_y, msg2);
-                
-                display_flush();
-                vTaskDelay(pdMS_TO_TICKS(1500));
-                esp_restart();
+                    /* Show confirmation before reboot */
+                    display_clear();
+                    static const char *mnames[] = {"WiFi", "BLE"};
+                    
+                    const char *msg1 = "Mode changed:";
+                    int msg1_x = (DISPLAY_WIDTH - strlen(msg1) * FONT_W) / 2;
+                    int msg1_y = DISPLAY_HEIGHT / 4;
+                    display_draw_text(msg1_x, msg1_y, msg1);
+                    
+                    int mode_w = strlen(mnames[new_mode]) * FONT_W * 2;
+                    int mode_x = (DISPLAY_WIDTH - mode_w) / 2;
+                    int mode_y = msg1_y + FONT_H + 8;
+                    display_draw_text_large(mode_x, mode_y, mnames[new_mode]);
+                    
+                    const char *msg2 = "Rebooting...";
+                    int msg2_x = (DISPLAY_WIDTH - strlen(msg2) * FONT_W) / 2;
+                    int msg2_y = mode_y + LARGE_FONT_H + 8;
+                    display_draw_text(msg2_x, msg2_y, msg2);
+                    
+                    display_flush();
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    esp_restart();
+                } else {
+                    ui.screen_dirty = true;
+                }
+            } else if (ui.settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) {
+                loc_share_mode_t new_loc = (loc_share_mode_t)ui.settings_cursor;
+                loc_share_mode_t old_loc = location_share_mode_get();
+                if (new_loc != old_loc) {
+                    location_share_mode_set(new_loc);
+                    static const char *loc_names[] = {"Off", "Coarse", "Exact"};
+                    ESP_LOGI(TAG, "Location sharing set to %s", loc_names[new_loc]);
+                }
+                ui.screen_dirty = true;
             } else {
-                /* Same mode — just exit edit */
+                /* OLED rotation — placeholder, just exit edit */
                 ui.screen_dirty = true;
             }
         }
