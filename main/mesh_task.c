@@ -24,6 +24,7 @@
 #include "gps.h"
 #include "delivery_event_ring.h"
 #include "cJSON.h"
+#include "mesh_dedup_state.h"
 
 #include <stdio.h>
 
@@ -79,7 +80,6 @@ typedef struct {
 
 static bramble_identity_t *s_identity;
 static neighbor_table_t    s_neighbors;
-static dedup_buffer_t      s_dedup;
 static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
@@ -1631,7 +1631,7 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         }
     }
 
-    if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
+    if (mesh_dedup_check(dedup_key, now_ms())) {
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -1981,7 +1981,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     /* Periodic neighbor purge + route maintenance */
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
         neighbor_purge(&s_neighbors, t);
-        dedup_purge(&s_dedup, t);
+        mesh_dedup_purge(t);
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
         reassembly_purge(&s_reassembly, t);
@@ -2695,7 +2695,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     ESP_LOGI(TAG, "Node name: %s", s_node_name[0] ? s_node_name : "(none)");
 
     neighbor_init(&s_neighbors);
-    dedup_init(&s_dedup);
+    mesh_dedup_state_init();
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
     rreq_dedup_init(&s_rreq_dedup);
