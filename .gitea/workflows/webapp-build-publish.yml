@@ -71,12 +71,21 @@ jobs:
           set -euo pipefail
           echo "$REGISTRY_PAT" | docker login registry.idiotica.org -u "$REGISTRY_USERNAME" --password-stdin
 
+      - name: Resolve app version
+        id: appver
+        shell: bash
+        run: |
+          pkg_ver="$(node -p "require('./webapp/package.json').version")"
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          echo "version=${pkg_ver}+${short_sha}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push web-client image
         env:
           IMAGE_REPO: registry.idiotica.org/dumbot/bramble-web-client
           IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
           DOCKERFILE_PATH: webapp/Dockerfile
           BUILD_CONTEXT: webapp
+          APP_VERSION: ${{ steps.appver.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,6 +99,7 @@ jobs:
 
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
+            --build-arg APP_VERSION="${APP_VERSION}" \
             -f "${DOCKERFILE_PATH}" \
             "${BUILD_CONTEXT}" \
             "${tag_args[@]}" \

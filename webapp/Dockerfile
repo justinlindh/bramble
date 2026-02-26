@@ -1,6 +1,7 @@
 FROM node:22-slim AS build
 WORKDIR /app
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
