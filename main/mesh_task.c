@@ -25,6 +25,7 @@
 #include "delivery_event_ring.h"
 #include "cJSON.h"
 #include "mesh_dedup_state.h"
+#include "mesh_neighbor_state.h"
 
 #include <stdio.h>
 
@@ -79,7 +80,6 @@ typedef struct {
 /* ── State ──────────────────────────────────────────────────────────── */
 
 static bramble_identity_t *s_identity;
-static neighbor_table_t    s_neighbors;
 static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
@@ -671,7 +671,7 @@ static int send_beacon(void) {
     beacon.uptime_min = (uint16_t)(now_ms() / 60000);
     beacon.battery_pct = battery_read_pct();
     beacon.tx_queue_depth = 0;
-    beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
+    beacon.neighbor_count = (uint8_t)mesh_neighbor_count();
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
     /* TODO: timesync integration deferred — requires global timesync_state_t 
      * and bidirectional packet flow. See components/timesync for implementation. */
@@ -717,7 +717,7 @@ static int send_beacon(void) {
         s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
         ESP_LOGI(TAG, "Beacon TX #%" PRIu32 " (neighbors: %d)",
-                 s_shared.beacon_tx_count, neighbor_count(&s_neighbors));
+                 s_shared.beacon_tx_count, mesh_neighbor_count());
     } else {
         ESP_LOGE(TAG, "Beacon TX failed: %d", ret);
     }
@@ -779,30 +779,30 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
     /* Update neighbor table — track if this is a new neighbor */
     uint32_t t = now_ms();
-    int old_count = neighbor_count(&s_neighbors);
-    int idx = neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr,
-                              beacon.pubkey_hash, t);
-    int new_count = neighbor_count(&s_neighbors);
+    int old_count = mesh_neighbor_count();
+    int idx = mesh_neighbor_update(beacon.src_addr, (int8_t)rssi, snr,
+                                   beacon.pubkey_hash, t);
+    int new_count = mesh_neighbor_count();
     bool is_new_peer = (new_count > old_count);
-    
+
     /* Store peer name if present */
     if (idx >= 0 && beacon.name_len > 0) {
-        memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
-        s_neighbors.entries[idx].name[beacon.name_len] = '\0';
+        memcpy(mesh_neighbor_state_get()->entries[idx].name, beacon.name, beacon.name_len);
+        mesh_neighbor_state_get()->entries[idx].name[beacon.name_len] = '\0';
     } else if (idx >= 0) {
-        s_neighbors.entries[idx].name[0] = '\0';
+        mesh_neighbor_state_get()->entries[idx].name[0] = '\0';
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_shared.beacon_rx_count++;
     s_shared.last_rx_rssi = rssi;
     s_shared.last_rx_snr = snr;
-    s_shared.neighbors = s_neighbors;
+    mesh_neighbor_snapshot(&s_shared.neighbors);
     xSemaphoreGive(s_state_mutex);
 
     if (idx >= 0) {
         ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)%s",
-                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors),
+                 beacon.src_addr, rssi, snr, mesh_neighbor_count(),
                  is_new_peer ? " [NEW]" : "");
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -821,11 +821,11 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI.
      * Log-only for now; detection algorithm needs field validation before dropping beacons. */
     {
-        int nc = neighbor_count(&s_neighbors);
+        int nc = mesh_neighbor_count();
         if (nc >= 3) {
             int8_t rssi_vals[MAX_NEIGHBORS];
             for (int i = 0; i < nc && i < MAX_NEIGHBORS; i++) {
-                rssi_vals[i] = s_neighbors.entries[i].rssi;
+                rssi_vals[i] = mesh_neighbor_state_get()->entries[i].rssi;
             }
             if (sybil_check_rssi_cluster(rssi_vals, nc)) {
                 ESP_LOGW(TAG, "SYBIL WARNING: beacon from %08" PRIX32
@@ -1955,7 +1955,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                                      uint32_t *last_purge_ms) {
     /* Update adaptive beacon interval based on mesh conditions */
     static uint8_t last_neighbor_count = 0;
-    uint8_t current_neighbor_count = neighbor_count(&s_neighbors);
+    uint8_t current_neighbor_count = mesh_neighbor_count();
     
     /* Record churn event if neighbor count changed */
     if (current_neighbor_count != last_neighbor_count) {
@@ -1980,7 +1980,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
 
     /* Periodic neighbor purge + route maintenance */
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
-        neighbor_purge(&s_neighbors, t);
+        mesh_neighbor_purge(t);
         mesh_dedup_purge(t);
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
@@ -1993,7 +1993,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
 
         /* Update shared state */
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_shared.neighbors = s_neighbors;
+        mesh_neighbor_snapshot(&s_shared.neighbors);
         xSemaphoreGive(s_state_mutex);
 
         /* Expire queued messages older than 60s */
@@ -2637,7 +2637,7 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
     }
 
     /* For non-neighbor destinations, check route table */
-    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, dest_addr);
+    neighbor_entry_t *nb = mesh_neighbor_lookup(dest_addr);
     if (!nb) {
         /* Not a direct neighbor — need routing */
         route_entry_t *route = route_lookup(&s_routes, dest_addr);
@@ -2694,7 +2694,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     }
     ESP_LOGI(TAG, "Node name: %s", s_node_name[0] ? s_node_name : "(none)");
 
-    neighbor_init(&s_neighbors);
+    mesh_neighbor_state_init();
     mesh_dedup_state_init();
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
@@ -3251,7 +3251,7 @@ const char *mesh_get_peer_name(uint32_t addr) {
     static char s_name_buf[17];
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, addr);
+    neighbor_entry_t *nb = mesh_neighbor_lookup(addr);
     if (nb && nb->name[0] != '\0') {
         strncpy(s_name_buf, nb->name, sizeof(s_name_buf) - 1);
         s_name_buf[sizeof(s_name_buf) - 1] = '\0';
