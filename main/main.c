@@ -303,7 +303,21 @@ static void render_screen(ui_state_t *ui) {
                 const char *arrow = (m->direction == MSG_DIR_OUTGOING ||
                                      m->direction == MSG_DIR_BROADCAST_OUT)
                                     ? ">" : "<";
-                snprintf(line, sizeof(line), "%s %.*s", arrow, CHARS_PER_LINE - 3, m->text);
+                /* Delivery badge for outgoing messages (2 chars at end) */
+                const char *badge = "";
+                if (m->direction == MSG_DIR_OUTGOING) {
+                    switch (m->status) {
+                    case MSG_STATUS_SENT:      badge = " *";  break; /* pending */
+                    case MSG_STATUS_DELIVERED:
+                        badge = (m->route_hop_count > 1) ? "++" : " +"; break; /* acked */
+                    case MSG_STATUS_FAILED:    badge = " x";  break; /* failed */
+                    default:                   badge = "";    break;
+                    }
+                }
+                int badge_len = (int)strlen(badge);
+                int text_max = CHARS_PER_LINE - 2 /* arrow+space */ - badge_len;
+                if (text_max < 1) text_max = 1;
+                snprintf(line, sizeof(line), "%s %.*s%s", arrow, text_max, m->text, badge);
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
