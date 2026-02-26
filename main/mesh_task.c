@@ -24,10 +24,6 @@
 #include "gps.h"
 #include "delivery_event_ring.h"
 #include "cJSON.h"
-#include "mesh_dedup_state.h"
-#include "mesh_neighbor_state.h"
-#include "mesh_routing_state.h"
-#include "mesh_msg_state.h"
 
 #include <stdio.h>
 
@@ -82,6 +78,9 @@ typedef struct {
 /* ── State ──────────────────────────────────────────────────────────── */
 
 static bramble_identity_t *s_identity;
+static neighbor_table_t    s_neighbors;
+static dedup_buffer_t      s_dedup;
+static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
 static QueueHandle_t       s_rx_queue;
@@ -95,7 +94,22 @@ enum {
 };
 static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* loaded from NVS at startup */
 
-/* Routing state managed by mesh_routing_state module */
+/* Routing state */
+static routing_table_t            s_routes;
+static rreq_dedup_t               s_rreq_dedup;
+static reverse_route_table_t      s_reverse_routes;
+static pending_discovery_table_t  s_pending_disc;
+
+/* Queued messages waiting for route discovery */
+#define MAX_QUEUED_MSGS 8
+typedef struct {
+    uint32_t dest_addr;
+    uint8_t  data[BRAMBLE_MAX_PACKET_SIZE];
+    size_t   len;
+    uint32_t timestamp;
+    bool     used;
+} queued_msg_t;
+static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
 /* Originator pseudonym lookup table for RREQ privacy.
  * Maps ephemeral pseudonyms to real addresses so incoming RREPs can be correlated.
@@ -111,13 +125,17 @@ typedef struct {
 static pseudonym_entry_t s_pseudonym_table[PSEUDONYM_TABLE_SIZE];
 static int s_pseudonym_next_slot = 0;
 
-/* Reliability — ACK tracking managed by mesh_msg_state module */
+/* Reliability — ACK tracking for outgoing unicast messages */
+static pending_ack_table_t s_pending_acks;
 static airtime_budget_t    s_airtime;
 
 /* Traffic debug telemetry */
 #define TRAFFIC_DEBUG_CAPACITY 512
 static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t     s_traffic_debug;
+
+/* Fragment reassembly context */
+static reassembly_ctx_t    s_reassembly;
 
 /* Adaptive beacon interval policy */
 static beacon_policy_config_t s_beacon_policy = {
@@ -653,7 +671,7 @@ static int send_beacon(void) {
     beacon.uptime_min = (uint16_t)(now_ms() / 60000);
     beacon.battery_pct = battery_read_pct();
     beacon.tx_queue_depth = 0;
-    beacon.neighbor_count = (uint8_t)mesh_neighbor_count();
+    beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
     /* TODO: timesync integration deferred — requires global timesync_state_t 
      * and bidirectional packet flow. See components/timesync for implementation. */
@@ -699,7 +717,7 @@ static int send_beacon(void) {
         s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
         ESP_LOGI(TAG, "Beacon TX #%" PRIu32 " (neighbors: %d)",
-                 s_shared.beacon_tx_count, mesh_neighbor_count());
+                 s_shared.beacon_tx_count, neighbor_count(&s_neighbors));
     } else {
         ESP_LOGE(TAG, "Beacon TX failed: %d", ret);
     }
@@ -761,30 +779,30 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
     /* Update neighbor table — track if this is a new neighbor */
     uint32_t t = now_ms();
-    int old_count = mesh_neighbor_count();
-    int idx = mesh_neighbor_update(beacon.src_addr, (int8_t)rssi, snr,
-                                   beacon.pubkey_hash, t);
-    int new_count = mesh_neighbor_count();
+    int old_count = neighbor_count(&s_neighbors);
+    int idx = neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr,
+                              beacon.pubkey_hash, t);
+    int new_count = neighbor_count(&s_neighbors);
     bool is_new_peer = (new_count > old_count);
-
+    
     /* Store peer name if present */
     if (idx >= 0 && beacon.name_len > 0) {
-        memcpy(mesh_neighbor_state_get()->entries[idx].name, beacon.name, beacon.name_len);
-        mesh_neighbor_state_get()->entries[idx].name[beacon.name_len] = '\0';
+        memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
+        s_neighbors.entries[idx].name[beacon.name_len] = '\0';
     } else if (idx >= 0) {
-        mesh_neighbor_state_get()->entries[idx].name[0] = '\0';
+        s_neighbors.entries[idx].name[0] = '\0';
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_shared.beacon_rx_count++;
     s_shared.last_rx_rssi = rssi;
     s_shared.last_rx_snr = snr;
-    mesh_neighbor_snapshot(&s_shared.neighbors);
+    s_shared.neighbors = s_neighbors;
     xSemaphoreGive(s_state_mutex);
 
     if (idx >= 0) {
         ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)%s",
-                 beacon.src_addr, rssi, snr, mesh_neighbor_count(),
+                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors),
                  is_new_peer ? " [NEW]" : "");
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -803,11 +821,11 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI.
      * Log-only for now; detection algorithm needs field validation before dropping beacons. */
     {
-        int nc = mesh_neighbor_count();
+        int nc = neighbor_count(&s_neighbors);
         if (nc >= 3) {
             int8_t rssi_vals[MAX_NEIGHBORS];
             for (int i = 0; i < nc && i < MAX_NEIGHBORS; i++) {
-                rssi_vals[i] = mesh_neighbor_state_get()->entries[i].rssi;
+                rssi_vals[i] = s_neighbors.entries[i].rssi;
             }
             if (sybil_check_rssi_cluster(rssi_vals, nc)) {
                 ESP_LOGW(TAG, "SYBIL WARNING: beacon from %08" PRIX32
@@ -912,7 +930,7 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
     ack->header.hop_limit--;
 
     /* Look up route back to the original sender */
-    route_entry_t *route = mesh_route_lookup(ack->header.dest_addr);
+    route_entry_t *route = route_lookup(&s_routes, ack->header.dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
         ESP_LOGW(TAG, "No route to forward ACK to %08" PRIX32, ack->header.dest_addr);
         return;
@@ -946,7 +964,7 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
              ack.ack_packet_id, ack.src_addr, ack.rssi_at_dest, ack.hop_count);
 
     /* Remove from pending ACK table */
-    bool found = mesh_pending_ack_remove(ack.ack_packet_id);
+    bool found = pending_ack_remove(&s_pending_acks, ack.ack_packet_id);
 
     /* Update message store status */
     if (msg_store_update_status(ack.ack_packet_id, MSG_STATUS_DELIVERED)) {
@@ -1003,7 +1021,7 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
     }
     receipt->header.hop_limit--;
 
-    route_entry_t *route = mesh_route_lookup(receipt->header.dest_addr);
+    route_entry_t *route = route_lookup(&s_routes, receipt->header.dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
         ESP_LOGW(TAG, "No route to forward delivery receipt to %08" PRIX32, receipt->header.dest_addr);
         return;
@@ -1085,15 +1103,15 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                          frag_hdr.frag_index + 1, frag_hdr.frag_total,
                          frag_hdr.message_id, info.src_addr);
 
-                int ret = mesh_reassembly_add(&frag_hdr,
-                                             info.data + FRAG_HEADER_SIZE,
-                                             info.data_len - FRAG_HEADER_SIZE,
-                                             now_ms());
+                int ret = reassembly_add(&s_reassembly, &frag_hdr,
+                                        info.data + FRAG_HEADER_SIZE,
+                                        info.data_len - FRAG_HEADER_SIZE,
+                                        now_ms());
                 if (ret == 1) {
                     /* Reassembly complete — collect the full message */
                     uint8_t reassembled[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT];
-                    int total_len = mesh_reassembly_collect(frag_hdr.message_id,
-                                                            reassembled, sizeof(reassembled));
+                    int total_len = reassembly_collect(&s_reassembly, frag_hdr.message_id,
+                                                       reassembled, sizeof(reassembled));
                     if (total_len > 0) {
                         /* Process the reassembled message */
                         char text[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT + 1];
@@ -1379,14 +1397,15 @@ static void pseudonym_purge(uint32_t now) {
 
 /* ── End pseudonym helpers ─────────────────────────────────────────── */
 
-static void flush_send_cb(const uint8_t *data, size_t len, uint32_t dest_addr, void *ctx) {
-    (void)ctx;
-    ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)", dest_addr, (unsigned)len);
-    mesh_send_message(dest_addr, data, len);
-}
-
 static void flush_queued_messages(uint32_t dest_addr) {
-    mesh_msg_flush_for(dest_addr, flush_send_cb, NULL);
+    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+        if (s_queued_msgs[i].used && s_queued_msgs[i].dest_addr == dest_addr) {
+            ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)",
+                     dest_addr, (unsigned)s_queued_msgs[i].len);
+            mesh_send_message(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len);
+            s_queued_msgs[i].used = false;
+        }
+    }
 }
 
 static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -1400,13 +1419,13 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
              rreq.query_id, rreq.header.dest_addr, rreq.hop_count, rreq.metric);
 
     /* RREQ dedup — drop if already seen */
-    if (mesh_rreq_dedup_check_and_add(rreq.query_id, now_ms())) {
+    if (rreq_dedup_check_and_add(&s_rreq_dedup, rreq.query_id, now_ms())) {
         ESP_LOGD(TAG, "Duplicate RREQ query=%08" PRIX32, rreq.query_id);
         return;
     }
 
     /* Record reverse route (for RREP path back) */
-    mesh_reverse_route_add(rreq.query_id, rreq.prev_hop, now_ms());
+    reverse_route_add(&s_reverse_routes, rreq.query_id, rreq.prev_hop, now_ms());
 
     /* Is this RREQ for us? */
     if (rreq.header.dest_addr == s_identity->address) {
@@ -1414,7 +1433,7 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         bramble_rrep_t rrep = rrep_build_destination(&rreq, s_identity->address);
 
         /* Route RREP back toward the previous hop */
-        reverse_route_t *rev = mesh_reverse_route_lookup(rreq.query_id);
+        reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rreq.query_id);
         if (rev) {
             rrep.next_hop = rev->prev_hop;
         }
@@ -1422,8 +1441,8 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
         /* Install route to the source via prev_hop */
         uint8_t metric = rreq.metric + compute_link_penalty(rssi, snr);
-        mesh_route_install(rreq.prev_hop, rreq.prev_hop,
-                           rreq.hop_count, metric, ROUTE_ACTIVE, now_ms());
+        route_install(&s_routes, rreq.prev_hop, rreq.prev_hop,
+                      rreq.hop_count, metric, ROUTE_ACTIVE, now_ms());
         return;
     }
 
@@ -1446,16 +1465,16 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     /* Install route to the destination (RREP source) via the sender */
     uint8_t metric = rrep.route_metric + compute_link_penalty(rssi, snr);
-    mesh_route_install(rrep.src_addr, rrep.header.dest_addr == s_identity->address
-                       ? rrep.src_addr : rrep.next_hop,
-                       rrep.hop_count, metric, ROUTE_ACTIVE, now_ms());
+    route_install(&s_routes, rrep.src_addr, rrep.header.dest_addr == s_identity->address
+                  ? rrep.src_addr : rrep.next_hop,
+                  rrep.hop_count, metric, ROUTE_ACTIVE, now_ms());
 
     /* Is this RREP for us (we originated the RREQ)? */
-    pending_discovery_t *pd = mesh_discovery_lookup_by_query(rrep.query_id);
+    pending_discovery_t *pd = discovery_lookup_by_query(&s_pending_disc, rrep.query_id);
     if (pd) {
         ESP_LOGI(TAG, "Route discovered to %08" PRIX32 " (hops=%u, metric=%u)",
                  pd->dest_addr, rrep.hop_count, metric);
-        mesh_discovery_remove(pd->dest_addr);
+        discovery_remove(&s_pending_disc, pd->dest_addr);
 
         /* Flush queued messages waiting for this route */
         flush_queued_messages(pd->dest_addr);
@@ -1463,7 +1482,7 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     }
 
     /* Not for us — forward RREP toward the originator via reverse route */
-    reverse_route_t *rev = mesh_reverse_route_lookup(rrep.query_id);
+    reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rrep.query_id);
     if (rev) {
         bramble_rrep_t fwd = rrep_forward(&rrep, rev->prev_hop);
         send_rrep(&fwd);
@@ -1483,7 +1502,7 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
              rerr.broken_dest, rerr.broken_next_hop);
 
     /* Invalidate route if it uses the broken next hop */
-    route_entry_t *route = mesh_route_lookup(rerr.broken_dest);
+    route_entry_t *route = route_lookup(&s_routes, rerr.broken_dest);
     if (route && route->next_hop == rerr.broken_next_hop) {
         route->state = ROUTE_BROKEN;
         route->fail_count++;
@@ -1552,7 +1571,7 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     }
 
     /* Look up route to destination */
-    route_entry_t *route = mesh_route_lookup(header->dest_addr);
+    route_entry_t *route = route_lookup(&s_routes, header->dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
         /* If mailbox enabled, store for later delivery instead of dropping */
         if (s_mailbox_enabled && mailbox_store(header->dest_addr, data, len)) {
@@ -1612,7 +1631,7 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         }
     }
 
-    if (mesh_dedup_check(dedup_key, now_ms())) {
+    if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -1936,7 +1955,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                                      uint32_t *last_purge_ms) {
     /* Update adaptive beacon interval based on mesh conditions */
     static uint8_t last_neighbor_count = 0;
-    uint8_t current_neighbor_count = mesh_neighbor_count();
+    uint8_t current_neighbor_count = neighbor_count(&s_neighbors);
     
     /* Record churn event if neighbor count changed */
     if (current_neighbor_count != last_neighbor_count) {
@@ -1961,11 +1980,11 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
 
     /* Periodic neighbor purge + route maintenance */
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
-        mesh_neighbor_purge(t);
-        mesh_dedup_purge(t);
-        mesh_route_maintenance(t);
-        mesh_reverse_route_purge(t);
-        mesh_reassembly_purge(t);
+        neighbor_purge(&s_neighbors, t);
+        dedup_purge(&s_dedup, t);
+        route_maintenance(&s_routes, t);
+        reverse_route_purge(&s_reverse_routes, t);
+        reassembly_purge(&s_reassembly, t);
         pseudonym_purge(t);  /* Clean up expired originator pseudonym mappings */
         *last_purge_ms = t;
 
@@ -1974,31 +1993,42 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
 
         /* Update shared state */
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        mesh_neighbor_snapshot(&s_shared.neighbors);
+        s_shared.neighbors = s_neighbors;
         xSemaphoreGive(s_state_mutex);
 
         /* Expire queued messages older than 60s */
-        mesh_msg_expire(t, 60000);
+        for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+            if (s_queued_msgs[i].used && (t - s_queued_msgs[i].timestamp) > 60000) {
+                ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
+                         s_queued_msgs[i].dest_addr);
+                s_queued_msgs[i].used = false;
+            }
+        }
     }
 
     /* Discovery retries (check every 5s) */
     static uint32_t last_disc_check = 0;
     if ((t - last_disc_check) >= 5000) {
         last_disc_check = t;
-        for (int i = 0; i < mesh_routing_state_get_pending_disc()->count; i++) {
-            pending_discovery_t *pd = &mesh_routing_state_get_pending_disc()->entries[i];
-            if (mesh_discovery_should_retry(pd, t)) {
+        for (int i = 0; i < s_pending_disc.count; i++) {
+            pending_discovery_t *pd = &s_pending_disc.entries[i];
+            if (discovery_should_retry(pd, t)) {
                 if (pd->attempts >= MAX_RREQ_ATTEMPTS) {
                     ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
                              pd->dest_addr, pd->attempts);
                     /* Clear queued messages for this dest */
-                    mesh_msg_flush_for(pd->dest_addr, NULL, NULL);
-                    mesh_discovery_remove(pd->dest_addr);
+                    for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
+                        if (s_queued_msgs[j].used &&
+                            s_queued_msgs[j].dest_addr == pd->dest_addr) {
+                            s_queued_msgs[j].used = false;
+                        }
+                    }
+                    discovery_remove(&s_pending_disc, pd->dest_addr);
                     i--; /* re-check same index after remove */
                 } else {
                     ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32 " (attempt %u)",
                              pd->dest_addr, pd->attempts + 1);
-                    mesh_discovery_record_attempt(pd, t);
+                    discovery_record_attempt(pd, t);
 
                     /* Look up the stored pseudonym for this query_id.
                      * Retries must use the same pseudonym so RREPs can be correlated. */
@@ -2030,7 +2060,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     if ((t - last_ack_tick) >= 1000) {  /* Check every 1s */
         last_ack_tick = t;
         for (int i = 0; i < MAX_PENDING_ACKS; i++) {
-            pending_ack_t *pa = &mesh_msg_state_get_pending_acks()->entries[i];
+            pending_ack_t *pa = &s_pending_acks.entries[i];
             if (!pa->active) continue;
             if (t >= pa->next_retry_ms) {
                 /* Extract packet type from stored packet data for telemetry */
@@ -2262,8 +2292,8 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
 
         /* Register for ACK tracking (unicast only) */
         if (dest_addr != 0xFFFFFFFF) {
-            mesh_pending_ack_add(pkt_id, dest_addr,
-                                 MSG_TIER_NORMAL, buf, (uint16_t)total, now_ms());
+            pending_ack_add(&s_pending_acks, pkt_id, dest_addr,
+                            MSG_TIER_NORMAL, buf, (uint16_t)total, now_ms());
         }
         return pkt_id;
     }
@@ -2549,18 +2579,29 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
 }
 
 static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
-    int rc = mesh_msg_queue(dest_addr, data, len, now_ms());
-    return rc == 0 ? 0 : -3;
+    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+        if (!s_queued_msgs[i].used) {
+            s_queued_msgs[i].dest_addr = dest_addr;
+            memcpy(s_queued_msgs[i].data, data, len);
+            s_queued_msgs[i].len = len;
+            s_queued_msgs[i].timestamp = now_ms();
+            s_queued_msgs[i].used = true;
+            ESP_LOGI(TAG, "Queued msg for %08" PRIX32 " (waiting for route)", dest_addr);
+            return 0;
+        }
+    }
+    ESP_LOGW(TAG, "Message queue full, dropping msg for %08" PRIX32, dest_addr);
+    return -3;
 }
 
 static int initiate_discovery(uint32_t dest_addr) {
-    if (!mesh_rreq_rate_allow(s_identity->address, dest_addr, now_ms())) {
+    if (!rreq_rate_allow(&s_rreq_rl, s_identity->address, dest_addr, now_ms())) {
         ESP_LOGW(TAG, "RREQ rate limited");
         return -1;
     }
 
     uint32_t query_id = next_packet_id();
-    mesh_discovery_start(dest_addr, query_id, now_ms());
+    discovery_start(&s_pending_disc, dest_addr, query_id, now_ms());
 
     /* Generate ephemeral pseudonym for originator privacy.
      * Pseudonym = HMAC-SHA256(private_key, address || query_id)[0..3]
@@ -2596,13 +2637,13 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
     }
 
     /* For non-neighbor destinations, check route table */
-    neighbor_entry_t *nb = mesh_neighbor_lookup(dest_addr);
+    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, dest_addr);
     if (!nb) {
         /* Not a direct neighbor — need routing */
-        route_entry_t *route = mesh_route_lookup(dest_addr);
+        route_entry_t *route = route_lookup(&s_routes, dest_addr);
         if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
             /* No route — start discovery and queue the message */
-            if (!mesh_discovery_lookup(dest_addr)) {
+            if (!discovery_lookup(&s_pending_disc, dest_addr)) {
                 initiate_discovery(dest_addr);
             }
             queue_message(dest_addr, data, len);
@@ -2653,16 +2694,22 @@ void mesh_task_start(bramble_identity_t *identity) {
     }
     ESP_LOGI(TAG, "Node name: %s", s_node_name[0] ? s_node_name : "(none)");
 
-    mesh_neighbor_state_init();
-    mesh_dedup_state_init();
-    mesh_routing_state_init();
-    mesh_msg_state_init();
+    neighbor_init(&s_neighbors);
+    dedup_init(&s_dedup);
+    rreq_rate_init(&s_rreq_rl);
+    route_init(&s_routes);
+    rreq_dedup_init(&s_rreq_dedup);
+    reverse_route_init(&s_reverse_routes);
+    discovery_init(&s_pending_disc);
+    pending_ack_init(&s_pending_acks);
     airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
+    reassembly_init(&s_reassembly);
     location_init(&s_location_mgr);
+    memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(s_pseudonym_table, 0, sizeof(s_pseudonym_table));  /* Init originator pseudonym table */
     s_pseudonym_next_slot = 0;
     memset(&s_shared, 0, sizeof(s_shared));
@@ -2760,7 +2807,7 @@ void mesh_get_state(mesh_shared_state_t *out) {
 
 void mesh_get_routes(routing_table_t *out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    mesh_route_snapshot(out);
+    *out = s_routes;
     xSemaphoreGive(s_state_mutex);
 }
 
@@ -3204,7 +3251,7 @@ const char *mesh_get_peer_name(uint32_t addr) {
     static char s_name_buf[17];
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    neighbor_entry_t *nb = mesh_neighbor_lookup(addr);
+    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, addr);
     if (nb && nb->name[0] != '\0') {
         strncpy(s_name_buf, nb->name, sizeof(s_name_buf) - 1);
         s_name_buf[sizeof(s_name_buf) - 1] = '\0';
