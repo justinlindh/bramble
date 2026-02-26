@@ -40,8 +40,8 @@ void test_heltec_v4_profile_has_deterministic_optional_peripheral_defaults(void)
     TEST_ASSERT_EQUAL_INT(64, cfg->display_height);
     TEST_ASSERT_EQUAL_UINT8(0x3C, cfg->i2c_display.addr);
 
-    TEST_ASSERT_EQUAL_INT(-1, cfg->gps.tx);
-    TEST_ASSERT_EQUAL_INT(-1, cfg->gps.rx);
+    TEST_ASSERT_EQUAL_INT(38, cfg->gps.tx);
+    TEST_ASSERT_EQUAL_INT(39, cfg->gps.rx);
     TEST_ASSERT_EQUAL_INT(9600, cfg->gps.baud);
 }
 

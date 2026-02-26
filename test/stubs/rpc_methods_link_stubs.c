@@ -7,6 +7,7 @@
 #include "esp_stubs.h"
 #include "nvs.h"
 
+typedef struct { uint32_t event_seq; uint32_t broadcast_id; uint32_t timestamp; uint8_t event_type; uint8_t tier; uint8_t route_len; uint8_t reserved0; uint32_t route_hops[4]; } delivery_event_record_t;
 typedef struct { const char *short_name; } bramble_board_config_t;
 typedef struct { int dummy; } mesh_shared_state_t;
 typedef struct { int dummy; } routing_table_t;
@@ -105,7 +106,7 @@ int mesh_get_channel_security(int i, bool *h, uint16_t *e) {
 }
 void mesh_get_state(mesh_shared_state_t *o){memset(o,0,sizeof(*o));}
 void mesh_get_routes(routing_table_t *o){memset(o,0,sizeof(*o));}
-void mesh_set_mailbox(bool e){(void)e;} void mesh_set_node_name(const char *n){(void)n;} void mesh_reboot_delayed(uint32_t d){(void)d;} bool mesh_get_beacon_status(void){return true;} int mesh_set_beacon_policy(beacon_policy_mode_t m){(void)m;return 0;} int mesh_get_beacon_policy(beacon_policy_mode_t *m){if(m)*m=BEACON_POLICY_BALANCED;return 0;} int mesh_send_message(uint32_t d,const char *m){(void)d;(void)m;return 0;} int mesh_send_broadcast(const uint8_t *m,size_t l){(void)m;(void)l;return 0;} int mesh_send_channel(uint8_t c,const char *m){(void)c;(void)m;return 0;} int mesh_send_probe(uint32_t t,uint16_t c,bool p){(void)t;(void)c;(void)p;return 0;}
+void mesh_set_mailbox(bool e){(void)e;} void mesh_set_node_name(const char *n){(void)n;} void mesh_reboot_delayed(uint32_t d){(void)d;} bool mesh_get_beacon_status(void){return true;} int mesh_set_beacon_policy(beacon_policy_mode_t m){(void)m;return 0;} int mesh_get_beacon_policy(beacon_policy_mode_t *m){if(m)*m=BEACON_POLICY_BALANCED;return 0;} uint32_t mesh_send_message(uint32_t d,const uint8_t *data,size_t len){(void)d;(void)data;(void)len;return 0x12345678;} int mesh_send_broadcast(const uint8_t *m,size_t l){(void)m;(void)l;return 0;} uint32_t mesh_send_channel(int ch,uint32_t dest,const uint8_t *data,size_t len){(void)ch;(void)dest;(void)data;(void)len;return 0x12345678;} int mesh_send_probe(uint32_t t,uint16_t c,bool p){(void)t;(void)c;(void)p;return 0;}
 uint32_t mesh_get_last_broadcast_id(void){return 0xABCDEF01;} void mesh_set_broadcast_telemetry_mode(broadcast_telemetry_mode_t mode){(void)mode;} broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void){return BROADCAST_TELEMETRY_RECIPIENT_ONLY;}
 uint32_t airtime_budget_remaining(void){return 0;} void airtime_budget_refill(uint32_t n){(void)n;} uint32_t airtime_budget_next_refill_ms(void){return 0;}
 int battery_read_mv(void){return 0;} int battery_read_pct(void){return 0;}
@@ -115,7 +116,11 @@ bool freq_plan_valid_freq(uint32_t f){(void)f;return true;} int8_t freq_plan_cla
 void radio_get_config(radio_config_t *cfg){memset(cfg,0,sizeof(*cfg));} int radio_reconfigure(const radio_config_t *cfg){(void)cfg;return 0;}
 int msg_store_count(void){return 0;} bool msg_store_get(int i, bramble_message_t *o){(void)i;(void)o;return false;}
 int traffic_debug_get_count(void){return 0;} int traffic_debug_get_dropped(void){return 0;} bool traffic_debug_get_event(int i, traffic_event_t *o){(void)i;(void)o;return false;} int mesh_traffic_debug_set_config(const traffic_debug_config_t *cfg){(void)cfg;return 0;} void mesh_traffic_debug_get_config(traffic_debug_config_t *cfg){memset(cfg,0,sizeof(*cfg));} bool mesh_get_traffic_debug(void){return false;}
-const esp_partition_t *ota_get_running_partition(void){return 0;} int ota_wifi_start(const char *url){(void)url;return -1;}
+const char *ota_get_running_partition(void){return "factory";} int ota_wifi_start(const char *url){(void)url;return -1;}
+const char *addr_hex(uint32_t addr, char *buf, size_t len){snprintf(buf,len,"%08X",addr);return buf;}
+bool mesh_supports_delivery_event_sync(void){return false;}
+uint32_t mesh_delivery_events_latest_seq(void){return 0;}
+size_t mesh_delivery_events_list_since(uint32_t since_seq, delivery_event_record_t *out, size_t max){(void)since_seq;(void)out;(void)max;return 0;}
 
 struct nvs_iter_rec {
     int source; /* 0 = kv, 1 = blob */
