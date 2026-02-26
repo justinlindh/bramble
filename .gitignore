@@ -12,3 +12,4 @@ simulator/gosim/bramble-gosim
 webapp/node_modules/
 webapp/dist/
 webapp/.vite/
+build-*/
