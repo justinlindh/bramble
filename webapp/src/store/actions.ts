@@ -116,7 +116,11 @@ export async function connect(type: TransportType, options?: { url?: string }): 
           useStore.getState().setConnectionState('connected');
           try {
             const opt = (p: Promise<void>) => p.catch(() => {});
-            await Promise.all([loadConfig(), loadNeighbors(), loadRoutes(), opt(loadMessages()), loadAirtime()]);
+            await opt(loadConfig());
+            const nodeAddr = useStore.getState().config?.identity?.address;
+            const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+            await initMessageStore(addrHex);
+            await Promise.all([loadNeighbors(), loadRoutes(), opt(loadMessages()), loadAirtime()]);
             await opt(syncDeliveryEventReplay());
           } catch { /* best effort */ }
         },
@@ -145,10 +149,21 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
 
     // Load config first to get node address for IndexedDB namespacing
+    // Retry once if first attempt fails — node address is critical for correct DB namespace
     await opt(loadConfig());
-    const nodeAddr = store.config?.identity?.address;
+    let nodeAddr = store.config?.identity?.address;
+    if (!nodeAddr) {
+      await new Promise(r => setTimeout(r, 500));
+      await opt(loadConfig());
+      nodeAddr = store.config?.identity?.address;
+    }
     const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
-    await initMessageStore(addrHex);
+    // Persist last-known address so we can recover if config fails on next connect
+    if (addrHex) {
+      try { localStorage.setItem('bramble:last-node-addr', addrHex); } catch {}
+    }
+    const effectiveAddr = addrHex ?? (() => { try { return localStorage.getItem('bramble:last-node-addr') ?? undefined; } catch { return undefined; } })();
+    await initMessageStore(effectiveAddr);
 
     await Promise.all([
       opt(loadStatus()),
@@ -354,6 +369,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   // Get device uptime to convert uptime-based timestamps to wall clock
   const deviceUptime = store.status?.uptimeSec ?? 0;
   const now = Date.now();
+  const newFromFirmware: Message[] = [];
   for (const m of result.messages ?? []) {
     const fromAddr = typeof m.from === 'string' ? parseInt(m.from, 16) : (m.from ?? 0);
     const toAddr = typeof m.to === 'string' ? parseInt(m.to, 16) : (m.to ?? 0);
@@ -391,6 +407,11 @@ export async function loadMessages(sinceId?: number): Promise<void> {
       continue;
     }
     store.addMessage(fwMsg);
+    newFromFirmware.push(fwMsg);
+  }
+  // Persist newly fetched messages to IndexedDB so they survive reconnects
+  if (newFromFirmware.length > 0) {
+    messageDb.saveMessages(newFromFirmware).catch(() => {});
   }
 }
 
@@ -769,10 +790,11 @@ export async function sendMessage(
     throw new Error(`Message too long (${messageBytes} bytes). Max is ${FRAGMENTED_MAX_BYTES} bytes.`);
   }
 
+  const myAddr = store.config?.identity?.address ?? 0;
   const msg = {
     id: uuid(),
     direction: 'outgoing' as const,
-    from: 0,
+    from: myAddr,
     to: dest,
     text,
     tier,
