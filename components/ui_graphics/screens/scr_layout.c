@@ -1,6 +1,7 @@
 #include "scr_layout.h"
 #include "scr_chat_list.h"
 #include "scr_nodes.h"
+#include "scr_map.h"
 #include "scr_stats.h"
 #include "scr_settings.h"
 #include "theme/bramble_theme.h"
@@ -31,6 +32,7 @@ extern void mesh_get_state(ui_mesh_state_t *out);
 static const char *tab_labels[TAB_COUNT] = {
     LV_SYMBOL_ENVELOPE " Chat",
     LV_SYMBOL_WIFI " Nodes",
+    LV_SYMBOL_GPS " Map",
     LV_SYMBOL_BARS " Stats",
     LV_SYMBOL_SETTINGS " Set"
 };
@@ -111,7 +113,7 @@ bramble_layout_t *layout_create(void) {
 
     for (int i = 0; i < TAB_COUNT; i++) {
         lv_obj_t *btn = lv_btn_create(s_layout.tab_bar);
-        lv_obj_set_size(btn, 75, 36);
+        lv_obj_set_size(btn, 60, 36);
         lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(btn, 0, 0);
         lv_obj_set_style_shadow_width(btn, 0, 0);
@@ -165,6 +167,9 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
         break;
     case TAB_NODES:
         scr_nodes_create(layout);
+        break;
+    case TAB_MAP:
+        scr_map_create(layout);
         break;
     case TAB_STATS:
         scr_stats_create(layout);
