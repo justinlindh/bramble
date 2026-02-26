@@ -222,20 +222,17 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
             <div key={rule.address} className={styles.contactCard}>
               <div className={styles.contactCardHeader}>
                 <AddressLabel addr={parseInt(rule.address, 16)} name={name} />
-                <div className={styles.contactCardActions}>
-                  <label className={styles.inlineToggle}>
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled !== false}
-                      onChange={e => {
-                        const next = [...contactRules];
-                        next[idx] = { ...next[idx], enabled: e.target.checked };
-                        setContactRules(next);
-                      }}
-                    />
-                  </label>
-                  <button className={styles.removeBtn} onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))} title="Remove">✕</button>
-                </div>
+                <label className={styles.inlineToggle}>
+                  <input
+                    type="checkbox"
+                    checked={rule.enabled !== false}
+                    onChange={e => {
+                      const next = [...contactRules];
+                      next[idx] = { ...next[idx], enabled: e.target.checked };
+                      setContactRules(next);
+                    }}
+                  />
+                </label>
               </div>
               <div className={styles.contactCardBody}>
                 <label className={styles.contactCardField}>
@@ -269,6 +266,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                     <span className={styles.fieldUnit}>sec</span>
                   </div>
                 </label>
+                <button className={styles.removeLink} onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))}>Remove</button>
               </div>
             </div>
           );
