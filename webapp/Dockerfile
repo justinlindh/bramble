@@ -11,6 +11,7 @@ ENV NODE_ENV=production
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
+COPY --from=build /app/mock ./mock
 COPY --from=build /app/node_modules ./node_modules
 
 EXPOSE 8085
