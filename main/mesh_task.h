@@ -163,6 +163,12 @@ bool mesh_get_mailbox(void);
 const char *mesh_get_node_name(void);
 
 /**
+ * Get the local identity address and public key.
+ * Returns 0 on success, -1 if identity not ready.
+ */
+int mesh_get_identity(uint32_t *addr_out, uint8_t pubkey_out[32]);
+
+/**
  * Get a peer's name from the neighbor table (returns NULL if not found or no name).
  */
 const char *mesh_get_peer_name(uint32_t addr);

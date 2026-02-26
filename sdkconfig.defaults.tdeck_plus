@@ -28,6 +28,7 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # LVGL fonts for graphical UI
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_USE_QRCODE=y
 CONFIG_LV_FONT_MONTSERRAT_18=y
 
 # Message persistence defaults (T-Deck has much larger SPIFFS partition)
