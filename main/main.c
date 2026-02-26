@@ -735,7 +735,7 @@ void app_main(void)
      * failure mode on T-Deck Plus; if this fails, display stays blank. */
     TaskHandle_t ui_task_handle = NULL;
     BaseType_t ui_task_ret = xTaskCreatePinnedToCore(
-        ui_graphics_task, "ui_gfx", 8192, NULL, 5, &ui_task_handle, 1);
+        ui_graphics_task, "ui_gfx", 16384, NULL, 5, &ui_task_handle, 1);
     if (ui_task_ret != pdPASS) {
         ESP_LOGE(TAG, "FAILED to create ui_gfx task — internal RAM exhausted "
                  "(free: %lu bytes). Display will be blank.",
