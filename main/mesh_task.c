@@ -111,6 +111,20 @@ typedef struct {
 } queued_msg_t;
 static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
+/* Originator pseudonym lookup table for RREQ privacy.
+ * Maps ephemeral pseudonyms to real addresses so incoming RREPs can be correlated.
+ * Uses circular replacement when full. */
+#define PSEUDONYM_TABLE_SIZE 8
+typedef struct {
+    uint32_t pseudonym;     /* HMAC-derived pseudonym sent in RREQ */
+    uint32_t real_addr;     /* Our actual address */
+    uint32_t query_id;      /* RREQ query_id (used as nonce) */
+    uint32_t timestamp;     /* When this entry was created */
+    bool     used;
+} pseudonym_entry_t;
+static pseudonym_entry_t s_pseudonym_table[PSEUDONYM_TABLE_SIZE];
+static int s_pseudonym_next_slot = 0;
+
 /* Reliability — ACK tracking for outgoing unicast messages */
 static pending_ack_table_t s_pending_acks;
 static airtime_budget_t    s_airtime;
@@ -1303,6 +1317,86 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
     }
 }
 
+/* ── Originator pseudonym helpers for RREQ privacy ─────────────────── */
+
+/**
+ * Generate an ephemeral pseudonym for RREQ originator privacy.
+ * Pseudonym = HMAC-SHA256(private_key, address || query_id)[0..3]
+ * The query_id acts as a nonce, ensuring a different pseudonym per RREQ.
+ */
+static uint32_t pseudonym_generate(const uint8_t *private_key, uint32_t address, uint32_t query_id) {
+    uint8_t input[8];
+    memcpy(input, &address, 4);
+    memcpy(input + 4, &query_id, 4);
+
+    uint8_t hmac_out[32];
+    crypto_hmac_sha256(private_key, BRAMBLE_KEY_SIZE, input, sizeof(input), hmac_out);
+
+    /* Truncate to 4 bytes (same size as Bramble address) */
+    uint32_t pseudonym;
+    memcpy(&pseudonym, hmac_out, 4);
+    return pseudonym;
+}
+
+/**
+ * Store a pseudonym mapping in the lookup table.
+ * Uses circular replacement when table is full.
+ */
+static void pseudonym_store(uint32_t pseudonym, uint32_t real_addr, uint32_t query_id, uint32_t timestamp) {
+    pseudonym_entry_t *entry = &s_pseudonym_table[s_pseudonym_next_slot];
+    entry->pseudonym = pseudonym;
+    entry->real_addr = real_addr;
+    entry->query_id = query_id;
+    entry->timestamp = timestamp;
+    entry->used = true;
+
+    s_pseudonym_next_slot = (s_pseudonym_next_slot + 1) % PSEUDONYM_TABLE_SIZE;
+
+    ESP_LOGD(TAG, "Pseudonym stored: %08" PRIX32 " → addr=%08" PRIX32 " query=%08" PRIX32,
+             pseudonym, real_addr, query_id);
+}
+
+/**
+ * Look up a pseudonym in the table.
+ * Returns the entry if found, NULL otherwise.
+ */
+static pseudonym_entry_t *pseudonym_lookup(uint32_t pseudonym) {
+    for (int i = 0; i < PSEUDONYM_TABLE_SIZE; i++) {
+        if (s_pseudonym_table[i].used && s_pseudonym_table[i].pseudonym == pseudonym) {
+            return &s_pseudonym_table[i];
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Look up a pseudonym by query_id.
+ * Returns the entry if found, NULL otherwise.
+ */
+static pseudonym_entry_t *pseudonym_lookup_by_query(uint32_t query_id) {
+    for (int i = 0; i < PSEUDONYM_TABLE_SIZE; i++) {
+        if (s_pseudonym_table[i].used && s_pseudonym_table[i].query_id == query_id) {
+            return &s_pseudonym_table[i];
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Purge expired pseudonym entries (older than 60 seconds).
+ */
+static void pseudonym_purge(uint32_t now) {
+    const uint32_t PSEUDONYM_EXPIRY_MS = 60000;
+    for (int i = 0; i < PSEUDONYM_TABLE_SIZE; i++) {
+        if (s_pseudonym_table[i].used && (now - s_pseudonym_table[i].timestamp) > PSEUDONYM_EXPIRY_MS) {
+            ESP_LOGD(TAG, "Pseudonym expired: %08" PRIX32, s_pseudonym_table[i].pseudonym);
+            s_pseudonym_table[i].used = false;
+        }
+    }
+}
+
+/* ── End pseudonym helpers ─────────────────────────────────────────── */
+
 static void flush_queued_messages(uint32_t dest_addr) {
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (s_queued_msgs[i].used && s_queued_msgs[i].dest_addr == dest_addr) {
@@ -1891,6 +1985,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
         reassembly_purge(&s_reassembly, t);
+        pseudonym_purge(t);  /* Clean up expired originator pseudonym mappings */
         *last_purge_ms = t;
 
         /* Expire old mailbox entries */
@@ -1934,7 +2029,23 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                     ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32 " (attempt %u)",
                              pd->dest_addr, pd->attempts + 1);
                     discovery_record_attempt(pd, t);
-                    uint32_t enc_src = s_identity->address;
+
+                    /* Look up the stored pseudonym for this query_id.
+                     * Retries must use the same pseudonym so RREPs can be correlated. */
+                    pseudonym_entry_t *ps = pseudonym_lookup_by_query(pd->query_id);
+                    uint32_t enc_src;
+                    if (ps) {
+                        enc_src = ps->pseudonym;
+                        ESP_LOGD(TAG, "RREQ retry using stored pseudonym %08" PRIX32, enc_src);
+                    } else {
+                        /* Pseudonym expired or missing — regenerate (unlikely but safe) */
+                        enc_src = pseudonym_generate(s_identity->private_key,
+                                                     s_identity->address,
+                                                     pd->query_id);
+                        pseudonym_store(enc_src, s_identity->address, pd->query_id, t);
+                        ESP_LOGW(TAG, "RREQ retry regenerated pseudonym %08" PRIX32, enc_src);
+                    }
+
                     bramble_rreq_t rreq = rreq_build_originator(
                         s_identity->address, pd->dest_addr,
                         pd->query_id, enc_src);
@@ -2492,17 +2603,27 @@ static int initiate_discovery(uint32_t dest_addr) {
     uint32_t query_id = next_packet_id();
     discovery_start(&s_pending_disc, dest_addr, query_id, now_ms());
 
-    /* Encrypt originator address for privacy — intermediate nodes can't read it.
-     * Destination can decrypt by trying XOR with HMAC(shared_key, query_id).
-     * We use HMAC(private_key, query_id) as a deterministic mask. The destination,
-     * once it receives the RREQ, can try decryption with known peer keys. */
-    uint8_t salt_input[4];
-    memcpy(salt_input, &query_id, 4);
-    uint8_t mask_hash[32];
-    crypto_hmac_sha256(s_identity->private_key, 32, salt_input, 4, mask_hash);
-    uint32_t mask;
-    memcpy(&mask, mask_hash, 4);
-    uint32_t encrypted_source = s_identity->address ^ mask;
+    /* Generate ephemeral pseudonym for originator privacy.
+     * Pseudonym = HMAC-SHA256(private_key, address || query_id)[0..3]
+     *
+     * This provides unlinkability: each RREQ uses a different pseudonym
+     * (query_id acts as nonce), so observers cannot correlate multiple
+     * route requests from the same originator.
+     *
+     * The destination can identify the originator by:
+     * 1. Trying HMAC with known peer keys to reverse-map the pseudonym, OR
+     * 2. The originator reveals itself during the secure channel setup phase
+     *
+     * Store mapping locally so incoming RREPs can be correlated. */
+    uint32_t pseudonym = pseudonym_generate(s_identity->private_key,
+                                             s_identity->address,
+                                             query_id);
+    pseudonym_store(pseudonym, s_identity->address, query_id, now_ms());
+
+    ESP_LOGI(TAG, "RREQ privacy: addr=%08" PRIX32 " → pseudonym=%08" PRIX32 " (query=%08" PRIX32 ")",
+             s_identity->address, pseudonym, query_id);
+
+    uint32_t encrypted_source = pseudonym;
     bramble_rreq_t rreq = rreq_build_originator(s_identity->address, dest_addr,
                                                   query_id, encrypted_source);
     send_rreq(&rreq);
@@ -2589,6 +2710,8 @@ void mesh_task_start(bramble_identity_t *identity) {
     reassembly_init(&s_reassembly);
     location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
+    memset(s_pseudonym_table, 0, sizeof(s_pseudonym_table));  /* Init originator pseudonym table */
+    s_pseudonym_next_slot = 0;
     memset(&s_shared, 0, sizeof(s_shared));
 
     /* Initialize public channel (well-known PSK, no key exchange needed) */

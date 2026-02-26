@@ -2,7 +2,7 @@
 #include "../components/security/dummy_traffic.c"
 #include "../components/packet/packet.c"
 
-void setUp(void) { srand(12345); }
+void setUp(void) { }
 void tearDown(void) {}
 
 void test_init_disabled(void) {
@@ -99,12 +99,10 @@ void test_disable_stops_generating(void) {
 void test_random_intervals_vary(void) {
     // Run two enable cycles, check that intervals differ (probabilistic but very likely)
     dummy_traffic_ctx_t ctx;
-    srand(1);
     dummy_traffic_init(&ctx);
     dummy_traffic_enable(&ctx, true, 0);
     uint32_t interval1 = ctx.next_send_time;
 
-    srand(99999);
     dummy_traffic_init(&ctx);
     dummy_traffic_enable(&ctx, true, 0);
     uint32_t interval2 = ctx.next_send_time;
