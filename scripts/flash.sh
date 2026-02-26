@@ -106,13 +106,17 @@ set_board_vars() {
       ;;
   esac
 
+  BOARD_SDKCONFIG="sdkconfig.${BOARD}"
+
   IDF_BOARD_ARGS=(
     -B "$BOARD_BUILD_DIR"
+    -D "SDKCONFIG=$BOARD_SDKCONFIG"
     -D "SDKCONFIG_DEFAULTS=$BOARD_DEFAULTS"
   )
 
   echo "==> Target board: $BOARD_NAME"
   echo "==> Build dir: $BOARD_BUILD_DIR"
+  echo "==> SDKCONFIG: $BOARD_SDKCONFIG"
   echo "==> SDKCONFIG_DEFAULTS: $BOARD_DEFAULTS"
 }
 
@@ -152,6 +156,7 @@ run_local() {
   case "$ACTION" in
     build)
       echo "==> Building locally..."
+      [[ ! -d "$BOARD_BUILD_DIR" ]] && rm -f "$BOARD_SDKCONFIG"
       idf.py "${IDF_BOARD_ARGS[@]}" build
       ;;
     monitor)
@@ -160,6 +165,7 @@ run_local() {
       ;;
     flash)
       echo "==> Building locally..."
+      [[ ! -d "$BOARD_BUILD_DIR" ]] && rm -f "$BOARD_SDKCONFIG"
       idf.py "${IDF_BOARD_ARGS[@]}" build
       echo "==> Flashing to $PORT (serial)..."
       run_serial_cmd idf.py "${IDF_BOARD_ARGS[@]}" -p "$PORT" flash "${EXTRA_ARGS[@]}"
