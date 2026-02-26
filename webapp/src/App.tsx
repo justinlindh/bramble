@@ -148,7 +148,6 @@ export default function App() {
         <span className={styles.brand}>
           <img src="/bramble-logo.png" alt="" className={styles.brandLogo} />
           Bramble
-          <span className={styles.versionTag}>{__APP_VERSION__}</span>
         </span>
 
         <span className={styles.statusArea}>
