@@ -49,9 +49,13 @@ for board in "${BOARDS[@]}"; do
   log "Preparing clean build directory: $BUILD_DIR"
   rm -rf "$BUILD_DIR"
 
-  log "Building firmware for $board (SDKCONFIG_DEFAULTS=$DEFAULTS)"
+  BOARD_SDKCONFIG="$ROOT_DIR/sdkconfig.$board"
+  rm -f "$BOARD_SDKCONFIG"
+
+  log "Building firmware for $board (SDKCONFIG=$BOARD_SDKCONFIG DEFAULTS=$DEFAULTS)"
   idf.py \
     -B "$BUILD_DIR" \
+    -D SDKCONFIG="$BOARD_SDKCONFIG" \
     -D SDKCONFIG_DEFAULTS="$DEFAULTS" \
     build
 
