@@ -34,6 +34,15 @@
   width: auto;
 }
 
+.versionTag {
+  font-size: 0.6rem;
+  font-weight: 400;
+  opacity: 0.5;
+  margin-left: -0.2rem;
+  align-self: flex-end;
+  margin-bottom: 0.1rem;
+}
+
 .statusArea {
   display: flex;
   align-items: center;
