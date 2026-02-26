@@ -87,6 +87,12 @@ export function SystemInfo({ status, config }: Props) {
       value: formatAddr(identity.pubkeyHash),
       mono: true,
     },
+    {
+      label: 'Web App',
+      value: __APP_VERSION__,
+      mono: true,
+      color: 'muted',
+    },
   ];
 
   return (
