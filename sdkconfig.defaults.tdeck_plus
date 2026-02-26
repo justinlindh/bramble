@@ -36,7 +36,17 @@ CONFIG_BRAMBLE_MSG_PERSIST_MAX=300
 CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 
-# Use clib malloc for LVGL so memory goes to PSRAM via SPIRAM_USE_MALLOC
-# instead of a 64KB static BSS pool in internal DRAM
+# LVGL uses clib malloc (standard malloc/free), which is routed to PSRAM by
+# SPIRAM_USE_MALLOC=y above. HOWEVER: SPIRAM_MALLOC_ALWAYSINTERNAL defaults to
+# 16384, meaning ALL allocations ≤16KB go to internal RAM first. LVGL's object
+# tree consists of hundreds of small allocations, exhausting internal RAM and
+# silently preventing the ui_gfx task from starting (blank display).
+#
+# Setting ALWAYSINTERNAL=0 makes clib malloc prefer PSRAM for ALL allocations.
+# Code that truly needs internal/DMA RAM uses heap_caps_malloc(MALLOC_CAP_DMA)
+# explicitly and is unaffected by this setting.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
+
+# Use clib malloc for LVGL (routed to PSRAM via SPIRAM_USE_MALLOC above)
 CONFIG_LV_USE_BUILTIN_MALLOC=n
 CONFIG_LV_USE_CLIB_MALLOC=y
