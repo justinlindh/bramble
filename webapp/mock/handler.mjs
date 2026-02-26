@@ -63,22 +63,22 @@ let msgIdCounter = 1;
 // Neighbors — direct radio contacts (not all peers are direct neighbors)
 const neighbors = [
   {
-    addr: 0xAABBCC01, // Ridge — strong direct link (1.8km LOS)
+    addr: 0xAABBCC01, name: 'Ridge', // strong direct link (1.8km LOS)
     rssi: -68, snr: 9.5, deliveryRate: 245,
     lastHeardMs: 1200, isMailbox: true, airtimeRemaining: 88,
   },
   {
-    addr: 0xAABBCC02, // Trailhead — moderate link (3.5km, some obstruction)
+    addr: 0xAABBCC02, name: 'Trailhead', // moderate link (3.5km, some obstruction)
     rssi: -87, snr: 4.8, deliveryRate: 195,
     lastHeardMs: 8400, isMailbox: false, airtimeRemaining: 72,
   },
   {
-    addr: 0xAABBCC03, // Downtown — weak link (5km through buildings)
+    addr: 0xAABBCC03, name: 'Downtown', // weak link (5km through buildings)
     rssi: -102, snr: 2.1, deliveryRate: 130,
     lastHeardMs: 34000, isMailbox: false, airtimeRemaining: 45,
   },
   {
-    addr: 0xAABBCC05, // Ranger — mobile, marginal link
+    addr: 0xAABBCC05, name: 'Ranger', // mobile, marginal link
     rssi: -109, snr: 0.8, deliveryRate: 85,
     lastHeardMs: 62000, isMailbox: false, airtimeRemaining: 31,
   },

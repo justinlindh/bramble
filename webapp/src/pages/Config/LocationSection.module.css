@@ -167,14 +167,67 @@
   font-size: 0.85rem;
 }
 
-.contactRow {
+.contactCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+}
+
+.contactCardHeader {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+}
+
+.contactCardActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.contactCardBody {
+  display: flex;
   gap: 0.75rem;
-  padding: 0.35rem 0.5rem;
-  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+
+.contactCardField {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.fieldLabel {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.fieldUnit {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.intervalWrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.intervalInput {
+  width: 60px;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 0.85rem;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: var(--font-mono);
 }
 
 .inlineToggle {
@@ -183,6 +236,14 @@
   gap: 0.35rem;
   color: var(--text-muted);
   font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.inlineToggle input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .tierSelect {
@@ -212,20 +273,20 @@
 }
 
 .removeBtn {
-  margin-left: auto;
-  padding: 0.15rem 0.4rem;
+  padding: 0.1rem 0.35rem;
   background: none;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, background 0.15s;
 }
 
 .removeBtn:hover {
   color: var(--danger);
-  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 /* ── Add form ── */

@@ -216,45 +216,63 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
             ))}
           </div>
         )}
-        {contactRules.map((rule, idx) => (
-          <div key={rule.address} className={styles.contactRow}>
-            <AddressLabel addr={parseInt(rule.address, 16)} name={resolveLabel(rule.address)} />
-            <label className={styles.inlineToggle}>
-              <input
-                type="checkbox"
-                checked={rule.enabled !== false}
-                onChange={e => {
-                  const next = [...contactRules];
-                  next[idx] = { ...next[idx], enabled: e.target.checked };
-                  setContactRules(next);
-                }}
-              />
-              Enabled
-            </label>
-            <select
-              className={styles.tierSelect}
-              value={rule.tier}
-              onChange={e => {
-                const next = [...contactRules];
-                next[idx] = { ...next[idx], tier: e.target.value as LocationTier };
-                setContactRules(next);
-              }}
-            >
-              {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-            <input
-              type="number"
-              min={30}
-              value={rule.interval_s}
-              onChange={e => {
-                const next = [...contactRules];
-                next[idx] = { ...next[idx], interval_s: Number(e.target.value) };
-                setContactRules(next);
-              }}
-            />
-            <button className={styles.removeBtn} onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))}>Remove</button>
-          </div>
-        ))}
+        {contactRules.map((rule, idx) => {
+          const name = resolveLabel(rule.address);
+          return (
+            <div key={rule.address} className={styles.contactCard}>
+              <div className={styles.contactCardHeader}>
+                <AddressLabel addr={parseInt(rule.address, 16)} name={name} />
+                <div className={styles.contactCardActions}>
+                  <label className={styles.inlineToggle}>
+                    <input
+                      type="checkbox"
+                      checked={rule.enabled !== false}
+                      onChange={e => {
+                        const next = [...contactRules];
+                        next[idx] = { ...next[idx], enabled: e.target.checked };
+                        setContactRules(next);
+                      }}
+                    />
+                  </label>
+                  <button className={styles.removeBtn} onClick={() => setContactRules(contactRules.filter(r => r.address !== rule.address))} title="Remove">✕</button>
+                </div>
+              </div>
+              <div className={styles.contactCardBody}>
+                <label className={styles.contactCardField}>
+                  <span className={styles.fieldLabel}>Tier</span>
+                  <select
+                    className={styles.tierSelect}
+                    value={rule.tier}
+                    onChange={e => {
+                      const next = [...contactRules];
+                      next[idx] = { ...next[idx], tier: e.target.value as LocationTier };
+                      setContactRules(next);
+                    }}
+                  >
+                    {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </label>
+                <label className={styles.contactCardField}>
+                  <span className={styles.fieldLabel}>Interval</span>
+                  <div className={styles.intervalWrap}>
+                    <input
+                      type="number"
+                      min={30}
+                      className={styles.intervalInput}
+                      value={rule.interval_s}
+                      onChange={e => {
+                        const next = [...contactRules];
+                        next[idx] = { ...next[idx], interval_s: Number(e.target.value) };
+                        setContactRules(next);
+                      }}
+                    />
+                    <span className={styles.fieldUnit}>sec</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className={styles.block}>
