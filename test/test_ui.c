@@ -18,10 +18,10 @@ void test_short_press_cycles(void) {
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
 
     ui_handle_button(&state, BTN_SHORT_PRESS, 2000);
-    TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
 
     ui_handle_button(&state, BTN_SHORT_PRESS, 3000);
-    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
 
     ui_handle_button(&state, BTN_SHORT_PRESS, 4000);
     TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
@@ -35,7 +35,7 @@ void test_double_press_back(void) {
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
 
     ui_handle_button(&state, BTN_SHORT_PRESS, 2000);
-    TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
 
     ui_handle_button(&state, BTN_DOUBLE_PRESS, 3000);
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
@@ -169,7 +169,7 @@ void test_trackball_settings_row_navigation_when_not_editing(void) {
 
     // Wrap up from first row -> last row
     ui_handle_button(&state, BTN_UP, 3000);
-    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_OLED_ROTATION, state.settings_item_cursor);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_LOCATION, state.settings_item_cursor);
 }
 
 void test_trackball_select_on_settings_enters_edit_for_selected_row(void) {

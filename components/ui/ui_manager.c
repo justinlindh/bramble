@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "location.h"
 #include <string.h>
 
 void ui_init(ui_state_t *state) {
@@ -13,9 +14,12 @@ void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
 
     /* Settings screen editing */
     if (state->current_screen == SCREEN_SETTINGS && state->settings_editing) {
-        int value_count = (state->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE)
-                            ? CONN_MODE_COUNT
-                            : 2; /* OLED rotation: normal / 180 */
+        int value_count;
+        switch (state->settings_item_cursor) {
+        case UI_SETTINGS_ITEM_CONN_MODE: value_count = CONN_MODE_COUNT; break;
+        case UI_SETTINGS_ITEM_LOCATION:  value_count = LOC_SHARE_COUNT; break;
+        default:                         value_count = 2; break; /* OLED rotation */
+        }
         switch (btn) {
         case BTN_SHORT_PRESS:
         case BTN_UP:    /* trackball up = previous option */

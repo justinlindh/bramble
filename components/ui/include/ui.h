@@ -8,8 +8,8 @@
 typedef enum {
     SCREEN_MAIN = 0,
     SCREEN_MESSAGES,
-    SCREEN_COMPOSE,
     SCREEN_NODES,
+    SCREEN_COMPOSE,   /* T-Deck: compose; Heltec: Stats */
     SCREEN_SETTINGS,
     SCREEN_COUNT
 } ui_screen_t;
