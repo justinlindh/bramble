@@ -227,6 +227,11 @@ static bramble_identity_t g_identity;
 static uint32_t my_addr = 0;
 static uint32_t boot_time_ms = 0;
 
+/* Shared render-time snapshots — only one screen renders at a time,
+ * so a single static instance avoids ~8KB of duplicate BSS. */
+static mesh_shared_state_t s_render_mesh;
+static routing_table_t     s_render_routes;
+
 static void render_main_screen(void) {
     display_clear();
 
@@ -254,13 +259,12 @@ static void render_main_screen(void) {
     display_draw_text(2, y, line);
     y += LINE_H;
 
-    /* Get live mesh state (static to avoid stack overflow — neighbor_table_t is ~1.8KB) */
-    static mesh_shared_state_t mesh;
-    mesh_get_state(&mesh);
+    /* Get live mesh state */
+    mesh_get_state(&s_render_mesh);
 
     /* Neighbors + radio status */
-    int n = neighbor_count(&mesh.neighbors);
-    if (mesh.radio_ok) {
+    int n = neighbor_count(&s_render_mesh.neighbors);
+    if (s_render_mesh.radio_ok) {
         snprintf(line, sizeof(line), "Peers: %d", n);
     } else {
         snprintf(line, sizeof(line), "Radio: initializing...");
@@ -274,7 +278,7 @@ static void render_main_screen(void) {
         snprintf(line, sizeof(line), "IP: %s", ip);
     } else if (n > 0) {
         snprintf(line, sizeof(line), "RSSI:%d SNR:%d",
-                 mesh.last_rx_rssi, mesh.last_rx_snr);
+                 s_render_mesh.last_rx_rssi, s_render_mesh.last_rx_snr);
     } else {
         line[0] = '\0';
     }
@@ -294,18 +298,15 @@ static void render_main_screen(void) {
 
     /* Network reach: direct neighbors + unique routed destinations */
     {
-        static routing_table_t routes;
-        mesh_get_routes(&routes);
-        int direct = neighbor_count(&mesh.neighbors);
-        /* Count unique routed destinations (excluding stale/broken) */
+        mesh_get_routes(&s_render_routes);
+        int direct = neighbor_count(&s_render_mesh.neighbors);
         int routed = 0;
-        for (int i = 0; i < routes.count && i < (int)(sizeof(routes.entries)/sizeof(routes.entries[0])); i++) {
-            const route_entry_t *r = &routes.entries[i];
+        for (int i = 0; i < s_render_routes.count; i++) {
+            const route_entry_t *r = &s_render_routes.entries[i];
             if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN) continue;
-            /* Check not already counted as a direct neighbor */
             bool is_direct = false;
-            for (int j = 0; j < mesh.neighbors.count && j < (int)(sizeof(mesh.neighbors.entries)/sizeof(mesh.neighbors.entries[0])); j++) {
-                if (mesh.neighbors.entries[j].addr == r->dest_addr) { is_direct = true; break; }
+            for (int j = 0; j < s_render_mesh.neighbors.count; j++) {
+                if (s_render_mesh.neighbors.entries[j].addr == r->dest_addr) { is_direct = true; break; }
             }
             if (!is_direct) routed++;
         }
@@ -386,16 +387,14 @@ static void render_screen(ui_state_t *ui) {
     case SCREEN_NODES: {
         display_clear();
 
-        static mesh_shared_state_t mesh_n;
-        mesh_get_state(&mesh_n);
+        mesh_get_state(&s_render_mesh);
 
         /* Route summary (exclude stale/broken routes for a useful topology snapshot). */
-        routing_table_t routes;
-        mesh_get_routes(&routes);
+        mesh_get_routes(&s_render_routes);
         int route_count = 0;
         int hop_total = 0;
-        for (int i = 0; i < routes.count; i++) {
-            const route_entry_t *r = &routes.entries[i];
+        for (int i = 0; i < s_render_routes.count; i++) {
+            const route_entry_t *r = &s_render_routes.entries[i];
             if (r->dest_addr == 0) continue;
             if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN) continue;
             route_count++;
@@ -415,7 +414,7 @@ static void render_screen(ui_state_t *ui) {
         display_draw_text(2, y, summary);
         y += LINE_H;
 
-        int cnt = neighbor_count(&mesh_n.neighbors);
+        int cnt = neighbor_count(&s_render_mesh.neighbors);
         if (cnt == 0) {
             int no_nbr_y = y + ((FOOTER_Y - y - FONT_H) / 2);
             if (no_nbr_y < y) no_nbr_y = y;
@@ -425,8 +424,8 @@ static void render_screen(ui_state_t *ui) {
         } else {
             char nl[64];
             uint32_t now_ms_n = (uint32_t)(esp_timer_get_time() / 1000ULL);
-            for (int i = 0; i < mesh_n.neighbors.count && y < FOOTER_Y; i++) {
-                neighbor_entry_t *e = &mesh_n.neighbors.entries[i];
+            for (int i = 0; i < s_render_mesh.neighbors.count && y < FOOTER_Y; i++) {
+                neighbor_entry_t *e = &s_render_mesh.neighbors.entries[i];
                 if (e->addr == 0) continue;
                 /* Format last-seen age: seconds, minutes, or hours */
                 char age_str[8];
@@ -595,19 +594,18 @@ static void render_screen(ui_state_t *ui) {
         int y = CONTENT_Y;
 
         /* Line 1: TX/RX counters */
-        static mesh_shared_state_t stats_mesh;
-        mesh_get_state(&stats_mesh);
+        mesh_get_state(&s_render_mesh);
         snprintf(line, sizeof(line), "TX:%"PRIu32" RX:%"PRIu32,
-                 stats_mesh.packets_tx, stats_mesh.packets_rx);
+                 s_render_mesh.packets_tx, s_render_mesh.packets_rx);
         display_draw_text(2, y, line);
         y += LINE_H;
 
         /* Line 2: Airtime TX budget used % (NORMAL tier) */
         {
             uint32_t used_ms = 0;
-            uint32_t max_ms  = stats_mesh.airtime.max_ms[0];
-            if (max_ms > 0 && stats_mesh.airtime.tokens_ms[0] <= max_ms) {
-                used_ms = max_ms - stats_mesh.airtime.tokens_ms[0];
+            uint32_t max_ms  = s_render_mesh.airtime.max_ms[0];
+            if (max_ms > 0 && s_render_mesh.airtime.tokens_ms[0] <= max_ms) {
+                used_ms = max_ms - s_render_mesh.airtime.tokens_ms[0];
             }
             uint32_t pct_tenths = (max_ms > 0) ? (used_ms * 1000 / max_ms) : 0;
             snprintf(line, sizeof(line), "Air: %"PRIu32".%"PRIu32"%% TX",
@@ -630,11 +628,10 @@ static void render_screen(ui_state_t *ui) {
 
         /* Line 4: Routes + Battery */
         {
-            static routing_table_t stats_routes;
-            mesh_get_routes(&stats_routes);
+            mesh_get_routes(&s_render_routes);
             int route_cnt = 0;
-            for (int i = 0; i < stats_routes.count; i++) {
-                route_state_t st = stats_routes.entries[i].state;
+            for (int i = 0; i < s_render_routes.count; i++) {
+                route_state_t st = s_render_routes.entries[i].state;
                 if (st != ROUTE_STALE && st != ROUTE_BROKEN) route_cnt++;
             }
             uint8_t bpct = battery_read_pct();

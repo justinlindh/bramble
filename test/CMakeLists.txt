@@ -271,6 +271,7 @@ add_executable(test_ui
 )
 target_include_directories(test_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
 )
 
 # JSON-RPC parser tests
