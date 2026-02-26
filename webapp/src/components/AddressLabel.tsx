@@ -20,11 +20,32 @@ export function AddressLabel({ addr, name, short = false, className }: AddressLa
   const fullHex = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
   const display = name ?? fmtAddr(addr, short);
 
+  const [copyFailed, setCopyFailed] = useState(false);
+
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    await navigator.clipboard.writeText(fullHex);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(fullHex);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Fallback for contexts where clipboard API is denied
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = fullHex;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        setCopyFailed(true);
+        setTimeout(() => setCopyFailed(false), 2000);
+      }
+    }
   };
 
   return (
@@ -34,9 +55,9 @@ export function AddressLabel({ addr, name, short = false, className }: AddressLa
         className={styles.copy}
         onClick={handleCopy}
         aria-label={`Copy address ${fullHex}`}
-        title={copied ? 'Copied!' : 'Copy address'}
+        title={copyFailed ? 'Copy failed' : copied ? 'Copied!' : 'Copy address'}
       >
-        {copied ? '✓' : '⧉'}
+        {copyFailed ? '✗' : copied ? '✓' : '⧉'}
       </button>
     </span>
   );
