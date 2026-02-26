@@ -199,6 +199,11 @@ export function createUnifiedServer({
     }
 
     const headers = { 'Content-Type': contentType(candidatePath) };
+    // HTML files (especially index.html / SPA fallback) must not be cached
+    // so browsers always fetch the latest bundle references after deploys.
+    if (candidatePath.endsWith('.html')) {
+      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    }
     // Avoid stale flasher assets without manual query-string cache busting.
     if (requestPath === '/web-flasher' || requestPath.startsWith('/web-flasher/')) {
       headers['Cache-Control'] = 'no-store, max-age=0';
