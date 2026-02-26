@@ -116,7 +116,8 @@ static void compose_ready_cb(lv_event_t *e) {
 }
 
 static void add_message_bubble(lv_obj_t *parent, const char *sender,
-                                const char *text, bool is_mine) {
+                                const char *text, bool is_mine,
+                                msg_status_t status) {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, LV_SIZE_CONTENT);
@@ -156,6 +157,42 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
     lv_obj_set_style_text_color(msg_lbl, BR_COLOR_TEXT, 0);
     lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(msg_lbl, LV_PCT(100));
+
+    /* Delivery status badge — only on outgoing messages */
+    if (is_mine) {
+        const char *badge_sym;
+        lv_color_t  badge_color;
+
+        switch (status) {
+            case MSG_STATUS_SENT:
+                /* Single check — transmitted, awaiting ACK */
+                badge_sym   = LV_SYMBOL_OK;
+                badge_color = BR_COLOR_TEXT_SEC;   /* muted gray */
+                break;
+            case MSG_STATUS_DELIVERED:
+                /* Double check — ACK received */
+                badge_sym   = LV_SYMBOL_OK " " LV_SYMBOL_OK;
+                badge_color = lv_color_hex(0x4ade80);  /* green */
+                break;
+            case MSG_STATUS_FAILED:
+                /* X — max retries exhausted */
+                badge_sym   = LV_SYMBOL_CLOSE;
+                badge_color = BR_COLOR_DANGER;     /* red */
+                break;
+            default:
+                /* Bullet — queued / no ACK tracking (e.g. broadcast) */
+                badge_sym   = LV_SYMBOL_BULLET;
+                badge_color = BR_COLOR_TEXT_SEC;   /* muted gray */
+                break;
+        }
+
+        lv_obj_t *status_lbl = lv_label_create(bubble);
+        lv_label_set_text(status_lbl, badge_sym);
+        lv_obj_set_style_text_font(status_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(status_lbl, badge_color, 0);
+        lv_obj_set_style_text_align(status_lbl, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_width(status_lbl, LV_PCT(100));
+    }
 }
 
 static void render_messages_for_target(void) {
@@ -183,7 +220,7 @@ static void render_messages_for_target(void) {
             }
         }
 
-        add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg->text, is_mine);
+        add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg->text, is_mine, msg->status);
     }
 
     lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
