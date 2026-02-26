@@ -265,9 +265,26 @@ static void render_main_screen(void) {
     display_draw_text(2, y, line);
     y += LINE_H;
 
-    /* Beacon counts */
-    snprintf(line, sizeof(line), "TX:%" PRIu32 " RX:%" PRIu32,
-             mesh.beacon_tx_count, mesh.beacon_rx_count);
+    /* Network reach: direct neighbors + unique routed destinations */
+    {
+        static routing_table_t routes;
+        mesh_get_routes(&routes);
+        int direct = neighbor_count(&mesh.neighbors);
+        /* Count unique routed destinations (excluding stale/broken) */
+        int routed = 0;
+        for (int i = 0; i < routes.count && i < (int)(sizeof(routes.entries)/sizeof(routes.entries[0])); i++) {
+            const route_entry_t *r = &routes.entries[i];
+            if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN) continue;
+            /* Check not already counted as a direct neighbor */
+            bool is_direct = false;
+            for (int j = 0; j < mesh.neighbors.count && j < (int)(sizeof(mesh.neighbors.entries)/sizeof(mesh.neighbors.entries[0])); j++) {
+                if (mesh.neighbors.entries[j].addr == r->dest_addr) { is_direct = true; break; }
+            }
+            if (!is_direct) routed++;
+        }
+        int total = direct + routed;
+        snprintf(line, sizeof(line), "Reach:%d (%d direct)", total, direct);
+    }
     display_draw_text(2, y, line);
 
     display_flush();
@@ -300,9 +317,18 @@ static void render_screen(ui_state_t *ui) {
                 const stored_msg_t *m = msg_store_get(i);
                 if (!m) continue;
                 char line[CHARS_PER_LINE + 1];
-                const char *arrow = (m->direction == MSG_DIR_OUTGOING ||
-                                     m->direction == MSG_DIR_BROADCAST_OUT)
-                                    ? ">" : "<";
+                bool outgoing = (m->direction == MSG_DIR_OUTGOING ||
+                                 m->direction == MSG_DIR_BROADCAST_OUT);
+
+                char prefix[8];
+                if (m->channel_index > 0) {
+                    /* Non-default channel: include channel number with direction marker.
+                     * Outgoing: "1>", Incoming: "<1" */
+                    snprintf(prefix, sizeof(prefix), outgoing ? "%d>" : "<%d", (int)m->channel_index);
+                } else {
+                    snprintf(prefix, sizeof(prefix), "%s", outgoing ? ">" : "<");
+                }
+
                 /* Delivery badge for outgoing messages (2 chars at end) */
                 const char *badge = "";
                 if (m->direction == MSG_DIR_OUTGOING) {
@@ -315,9 +341,9 @@ static void render_screen(ui_state_t *ui) {
                     }
                 }
                 int badge_len = (int)strlen(badge);
-                int text_max = CHARS_PER_LINE - 2 /* arrow+space */ - badge_len;
+                int text_max = CHARS_PER_LINE - (int)strlen(prefix) - 1 /* space */ - badge_len;
                 if (text_max < 1) text_max = 1;
-                snprintf(line, sizeof(line), "%s %.*s%s", arrow, text_max, m->text, badge);
+                snprintf(line, sizeof(line), "%s %.*s%s", prefix, text_max, m->text, badge);
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -332,23 +358,63 @@ static void render_screen(ui_state_t *ui) {
     }
     case SCREEN_NODES: {
         display_clear();
-        display_draw_text(2, HEADER_Y, "Nodes");
-        display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
+
         static mesh_shared_state_t mesh_n;
         mesh_get_state(&mesh_n);
+
+        /* Route summary (exclude stale/broken routes for a useful topology snapshot). */
+        routing_table_t routes;
+        mesh_get_routes(&routes);
+        int route_count = 0;
+        int hop_total = 0;
+        for (int i = 0; i < routes.count; i++) {
+            const route_entry_t *r = &routes.entries[i];
+            if (r->dest_addr == 0) continue;
+            if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN) continue;
+            route_count++;
+            hop_total += r->hop_count;
+        }
+        int avg_hops_tenths = (route_count > 0) ? ((hop_total * 10) / route_count) : 0;
+
+        char hdr[32];
+        snprintf(hdr, sizeof(hdr), "Nodes (%d routes)", route_count);
+        display_draw_text(2, HEADER_Y, hdr);
+        display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
+
+        char summary[32];
+        snprintf(summary, sizeof(summary), "Avg: %d.%d hops",
+                 avg_hops_tenths / 10, avg_hops_tenths % 10);
+        int y = CONTENT_Y;
+        display_draw_text(2, y, summary);
+        y += LINE_H;
+
         int cnt = neighbor_count(&mesh_n.neighbors);
         if (cnt == 0) {
-            int no_nbr_y = (DISPLAY_HEIGHT - FONT_H) / 2;
+            int no_nbr_y = y + ((FOOTER_Y - y - FONT_H) / 2);
+            if (no_nbr_y < y) no_nbr_y = y;
             const char *no_nbr = "(no neighbors yet)";
             int no_nbr_x = (DISPLAY_WIDTH - strlen(no_nbr) * FONT_W) / 2;
             display_draw_text(no_nbr_x, no_nbr_y, no_nbr);
         } else {
             char nl[64];
-            int y = CONTENT_Y;
+            uint32_t now_ms_n = (uint32_t)(esp_timer_get_time() / 1000ULL);
             for (int i = 0; i < mesh_n.neighbors.count && y < FOOTER_Y; i++) {
                 neighbor_entry_t *e = &mesh_n.neighbors.entries[i];
                 if (e->addr == 0) continue;
-                snprintf(nl, sizeof(nl), "%08" PRIX32 " %ddBm", e->addr, e->rssi);
+                /* Format last-seen age: seconds, minutes, or hours */
+                char age_str[8];
+                uint32_t age_ms = (e->last_heard > 0 && now_ms_n >= e->last_heard)
+                                  ? (now_ms_n - e->last_heard) : 0;
+                uint32_t age_s = age_ms / 1000;
+                if (age_s < 60) {
+                    snprintf(age_str, sizeof(age_str), "%lus", (unsigned long)age_s);
+                } else if (age_s < 3600) {
+                    snprintf(age_str, sizeof(age_str), "%lum", (unsigned long)(age_s / 60));
+                } else {
+                    snprintf(age_str, sizeof(age_str), "%luh+", (unsigned long)(age_s / 3600));
+                }
+                /* Line: "AABBCCDD -70 12s" (~16 chars, fits 21-char display) */
+                snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s", e->addr, e->rssi, age_str);
                 display_draw_text(2, y, nl);
                 y += LINE_H;
             }
