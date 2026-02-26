@@ -88,14 +88,17 @@ set_board_vars() {
     tdeck-plus)
       BOARD_NAME="T-Deck Plus"
       BOARD_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tdeck_plus"
-      BOARD_SDKCONFIG="sdkconfig.tdeck-plus"
       BOARD_BUILD_DIR="build-tdeck-plus"
       ;;
     heltec-v3)
       BOARD_NAME="Heltec V3"
       BOARD_DEFAULTS="sdkconfig.defaults"
-      BOARD_SDKCONFIG="sdkconfig.heltec-v3"
       BOARD_BUILD_DIR="build-heltec-v3"
+      ;;
+    heltec-v4)
+      BOARD_NAME="Heltec V4"
+      BOARD_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4"
+      BOARD_BUILD_DIR="build-heltec-v4"
       ;;
     *)
       echo "Unsupported board: $BOARD"
@@ -105,13 +108,11 @@ set_board_vars() {
 
   IDF_BOARD_ARGS=(
     -B "$BOARD_BUILD_DIR"
-    -D "SDKCONFIG=$BOARD_SDKCONFIG"
     -D "SDKCONFIG_DEFAULTS=$BOARD_DEFAULTS"
   )
 
   echo "==> Target board: $BOARD_NAME"
   echo "==> Build dir: $BOARD_BUILD_DIR"
-  echo "==> SDKCONFIG: $BOARD_SDKCONFIG"
   echo "==> SDKCONFIG_DEFAULTS: $BOARD_DEFAULTS"
 }
 
