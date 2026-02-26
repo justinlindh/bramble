@@ -1,4 +1,5 @@
 #include "scr_stats.h"
+#include "scr_traffic.h"
 #include "theme/bramble_theme.h"
 #include "routing.h"
 #include "airtime_budget.h"
@@ -259,6 +260,16 @@ static void create_reach_row(lv_obj_t *parent,
     lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 }
 
+/* -------------------------------------------------------------------------
+ * Traffic Monitor navigation callback
+ * ------------------------------------------------------------------------- */
+static void traffic_click_cb(lv_event_t *e) {
+    bramble_layout_t *layout = (bramble_layout_t *)lv_event_get_user_data(e);
+    lv_refr_now(lv_display_get_default());
+    lv_obj_clean(layout->content_area);
+    scr_traffic_create(layout);
+}
+
 void scr_stats_create(bramble_layout_t *layout) {
     lv_obj_t *cont = layout_get_content(layout);
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
@@ -499,4 +510,44 @@ void scr_stats_create(bramble_layout_t *layout) {
                   " peers=%" PRId32 " routes=%" PRId32 " air=%" PRId32 " reach=%d",
              delta.tx, delta.rx, delta.dropped, delta.neighbors, delta.routes, delta.air_used_ms,
              reach_count);
+
+    /* ---- Traffic Monitor link ---- */
+    lv_obj_t *sep4 = lv_obj_create(cont);
+    lv_obj_set_size(sep4, 296, 1);
+    lv_obj_set_style_bg_color(sep4, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_bg_opa(sep4, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(sep4, 0, 0);
+
+    /* Get event count for the button label (td already declared above) */
+    bool td_on  = td ? traffic_debug_is_enabled(td) : false;
+    uint16_t td_cnt = td ? traffic_debug_get_count(td) : 0;
+
+    char traffic_lbl_buf[40];
+    if (td_on) {
+        snprintf(traffic_lbl_buf, sizeof(traffic_lbl_buf),
+                 LV_SYMBOL_LIST " Traffic Monitor  %u evts " LV_SYMBOL_RIGHT,
+                 td_cnt);
+    } else {
+        snprintf(traffic_lbl_buf, sizeof(traffic_lbl_buf),
+                 LV_SYMBOL_LIST " Traffic Monitor  [off] " LV_SYMBOL_RIGHT);
+    }
+
+    lv_obj_t *traffic_btn = lv_btn_create(cont);
+    lv_obj_set_size(traffic_btn, 296, 28);
+    lv_obj_set_style_bg_color(traffic_btn, BR_COLOR_SURFACE, 0);
+    lv_obj_set_style_bg_opa(traffic_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(traffic_btn, BR_RADIUS, 0);
+    lv_obj_set_style_border_width(traffic_btn, 0, 0);
+    lv_obj_set_style_shadow_width(traffic_btn, 0, 0);
+    lv_obj_set_style_pad_all(traffic_btn, 4, 0);
+    lv_obj_add_event_cb(traffic_btn, traffic_click_cb, LV_EVENT_CLICKED, layout);
+
+    lv_obj_t *traffic_lbl = lv_label_create(traffic_btn);
+    lv_label_set_text(traffic_lbl, traffic_lbl_buf);
+    lv_obj_set_style_text_font(traffic_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(traffic_lbl, BR_COLOR_TEXT, 0);
+    lv_obj_center(traffic_lbl);
+
+    lv_group_t *g = lv_group_get_default();
+    if (g) lv_group_add_obj(g, traffic_btn);
 }
