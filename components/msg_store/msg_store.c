@@ -33,6 +33,7 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir,
                        uint32_t packet_id, msg_status_t status,
                        int16_t channel_index) {
     stored_msg_t *m = &s_msgs[s_head];
+    memset(m, 0, sizeof(*m));
     m->peer_addr = peer_addr;
     m->direction = dir;
     m->status = status;
@@ -80,7 +81,10 @@ void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
     msg_store_add_ex(peer_addr, dir, text, text_len, rssi, snr, 0, MSG_STATUS_NONE);
 }
 
-bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
+bool msg_store_update_status_with_route(uint32_t packet_id,
+                                        msg_status_t status,
+                                        uint8_t route_hop_count,
+                                        const uint32_t *route_hops) {
     if (packet_id == 0) return false;
     int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
     /* Search newest first for faster match */
@@ -88,10 +92,21 @@ bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
         int idx = (start + i) % MSG_STORE_MAX;
         if (s_msgs[idx].packet_id == packet_id) {
             s_msgs[idx].status = status;
+            if (route_hops && route_hop_count > 0) {
+                uint8_t bounded = (route_hop_count > MSG_ROUTE_MAX_HOPS) ? MSG_ROUTE_MAX_HOPS : route_hop_count;
+                s_msgs[idx].route_hop_count = bounded;
+                for (uint8_t h = 0; h < bounded; h++) {
+                    s_msgs[idx].route_hops[h] = route_hops[h];
+                }
+            }
             return true;
         }
     }
     return false;
+}
+
+bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
+    return msg_store_update_status_with_route(packet_id, status, 0, NULL);
 }
 
 int msg_store_count(void) {

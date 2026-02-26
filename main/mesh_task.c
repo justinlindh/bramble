@@ -966,8 +966,19 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     /* Remove from pending ACK table */
     bool found = pending_ack_remove(&s_pending_acks, ack.ack_packet_id);
 
+    uint32_t route_hops[MSG_ROUTE_MAX_HOPS] = {0};
+    uint8_t route_hop_count = 0;
+
+    /* Relay path from ACK is dest→...→sender; normalize to sender→...→dest for UIs. */
+    if (s_identity) {
+        route_hops[route_hop_count++] = s_identity->address;
+    }
+    for (int i = ack.hop_count - 1; i >= 0 && route_hop_count < MSG_ROUTE_MAX_HOPS; i--) {
+        route_hops[route_hop_count++] = ack.relay_path[i];
+    }
+
     /* Update message store status */
-    if (msg_store_update_status(ack.ack_packet_id, MSG_STATUS_DELIVERED)) {
+    if (msg_store_update_status_with_route(ack.ack_packet_id, MSG_STATUS_DELIVERED, route_hop_count, route_hops)) {
         record_ack_delivery_event(&ack);
         /* Notify webapp with full relay path from ACK */
         char addr_buf[12];
@@ -980,22 +991,13 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
 
-        /* Relay path from ACK: [dest, relay1, relay2, ...] → prepend sender */
         cJSON *path = cJSON_AddArrayToObject(params, "relayPath");
         char hop_buf[12];
-        /* First hop: the sender (us) */
-        cJSON *self_hop = cJSON_CreateObject();
-        snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, s_identity->address);
-        cJSON_AddStringToObject(self_hop, "addr", hop_buf);
-        cJSON_AddNumberToObject(self_hop, "rssi", 0);
-        cJSON_AddItemToArray(path, self_hop);
-        /* Intermediate + destination hops from ACK (reversed: ACK records dest→sender) */
-        for (int i = ack.hop_count - 1; i >= 0; i--) {
+        for (uint8_t i = 0; i < route_hop_count; i++) {
             cJSON *hop = cJSON_CreateObject();
-            snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, ack.relay_path[i]);
+            snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, route_hops[i]);
             cJSON_AddStringToObject(hop, "addr", hop_buf);
-            /* RSSI: only meaningful for the destination hop */
-            cJSON_AddNumberToObject(hop, "rssi", (i == 0) ? ack.rssi_at_dest : 0);
+            cJSON_AddNumberToObject(hop, "rssi", (i == (route_hop_count - 1)) ? ack.rssi_at_dest : 0);
             cJSON_AddItemToArray(path, hop);
         }
 
@@ -3251,6 +3253,16 @@ int mesh_set_default_channel(int index) {
 const char *mesh_get_node_name(void) {
     if (s_node_name[0] == '\0') return NULL;
     return s_node_name;
+}
+
+int mesh_get_identity(uint32_t *addr_out, uint8_t pubkey_out[32]) {
+    if (!s_identity || !addr_out || !pubkey_out) return -1;
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    *addr_out = s_identity->address;
+    memcpy(pubkey_out, s_identity->public_key, 32);
+    xSemaphoreGive(s_state_mutex);
+    return 0;
 }
 
 const char *mesh_get_peer_name(uint32_t addr) {

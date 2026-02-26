@@ -11,6 +11,7 @@ extern "C" {
 
 #define MSG_STORE_MAX       20
 #define MSG_TEXT_MAX        640
+#define MSG_ROUTE_MAX_HOPS  10
 
 typedef enum {
     MSG_DIR_INCOMING = 0,
@@ -35,6 +36,8 @@ typedef struct {
     int8_t          rssi;           /* RX RSSI (0 for outgoing) */
     int8_t          snr;            /* RX SNR (0 for outgoing) */
     int16_t         channel_index;  /* -1 = none/broadcast, >=0 = channel */
+    uint8_t         route_hop_count; /* 0 = unavailable */
+    uint32_t        route_hops[MSG_ROUTE_MAX_HOPS]; /* source->...->destination */
     uint16_t        text_len;
     char            text[MSG_TEXT_MAX];
 } stored_msg_t;
@@ -71,6 +74,15 @@ void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
  * Returns true if found and updated.
  */
 bool msg_store_update_status(uint32_t packet_id, msg_status_t status);
+
+/**
+ * Update status and optional relay path (source->...->destination) by packet_id.
+ * Pass route_hops=NULL or route_hop_count=0 to only update status.
+ */
+bool msg_store_update_status_with_route(uint32_t packet_id,
+                                        msg_status_t status,
+                                        uint8_t route_hop_count,
+                                        const uint32_t *route_hops);
 
 /**
  * Get total number of stored messages.

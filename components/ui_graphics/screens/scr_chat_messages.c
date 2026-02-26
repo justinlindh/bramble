@@ -6,6 +6,7 @@
 #include "chat_unread.h"
 #include "esp_log.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 static const char *TAG = "scr_msg";
@@ -14,6 +15,7 @@ static chat_target_t s_target;
 static lv_obj_t *s_msg_list = NULL;
 static lv_obj_t *s_compose_ta = NULL;
 static lv_obj_t *s_title = NULL;
+static uint32_t s_selected_packet_id = 0;
 
 static void render_messages_for_target(void);
 
@@ -78,6 +80,7 @@ static void back_click_cb(lv_event_t *e) {
     s_msg_list = NULL;
     s_compose_ta = NULL;
     s_title = NULL;
+    s_selected_packet_id = 0;
     scr_chat_list_create(layout);
 }
 
@@ -115,9 +118,56 @@ static void compose_ready_cb(lv_event_t *e) {
     send_current_message();
 }
 
+static void msg_bubble_click_cb(lv_event_t *e) {
+    uint32_t packet_id = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
+    if (packet_id == 0) {
+        return;
+    }
+
+    if (s_selected_packet_id == packet_id) {
+        s_selected_packet_id = 0;
+    } else {
+        s_selected_packet_id = packet_id;
+    }
+    render_messages_for_target();
+}
+
+static void format_route_text(char *out,
+                              size_t out_len,
+                              uint8_t hop_count,
+                              const uint32_t *hops) {
+    if (!out || out_len == 0) return;
+    if (!hops || hop_count == 0) {
+        snprintf(out, out_len, "Route unavailable");
+        return;
+    }
+
+    size_t pos = 0;
+    for (uint8_t i = 0; i < hop_count; i++) {
+        const char *peer_name = mesh_get_peer_name(hops[i]);
+        char node_buf[16];
+        if (peer_name && peer_name[0]) {
+            snprintf(node_buf, sizeof(node_buf), "%s", peer_name);
+        } else {
+            snprintf(node_buf, sizeof(node_buf), "%08lX", (unsigned long)hops[i]);
+        }
+
+        int n = 0;
+        if (i == 0) {
+            n = snprintf(out + pos, out_len - pos, "%s", node_buf);
+        } else {
+            n = snprintf(out + pos, out_len - pos, " -> %s", node_buf);
+        }
+        if (n < 0 || (size_t)n >= (out_len - pos)) {
+            out[out_len - 1] = '\0';
+            return;
+        }
+        pos += (size_t)n;
+    }
+}
+
 static void add_message_bubble(lv_obj_t *parent, const char *sender,
-                                const char *text, bool is_mine,
-                                msg_status_t status) {
+                                const stored_msg_t *msg, bool is_mine) {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, LV_SIZE_CONTENT);
@@ -152,7 +202,7 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
     }
 
     lv_obj_t *msg_lbl = lv_label_create(bubble);
-    lv_label_set_text(msg_lbl, text);
+    lv_label_set_text(msg_lbl, msg->text);
     lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(msg_lbl, BR_COLOR_TEXT, 0);
     lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
@@ -163,7 +213,7 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
         const char *badge_sym;
         lv_color_t  badge_color;
 
-        switch (status) {
+        switch (msg->status) {
             case MSG_STATUS_SENT:
                 /* Single check — transmitted, awaiting ACK */
                 badge_sym   = LV_SYMBOL_OK;
@@ -172,7 +222,7 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
             case MSG_STATUS_DELIVERED:
                 /* Double check — ACK received */
                 badge_sym   = LV_SYMBOL_OK " " LV_SYMBOL_OK;
-                badge_color = lv_color_hex(0x4ade80);  /* green */
+                badge_color = BR_COLOR_PRIMARY;
                 break;
             case MSG_STATUS_FAILED:
                 /* X — max retries exhausted */
@@ -192,6 +242,42 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
         lv_obj_set_style_text_color(status_lbl, badge_color, 0);
         lv_obj_set_style_text_align(status_lbl, LV_TEXT_ALIGN_RIGHT, 0);
         lv_obj_set_width(status_lbl, LV_PCT(100));
+    }
+
+    bool can_show_route = is_mine && msg->status == MSG_STATUS_DELIVERED && msg->route_hop_count > 1;
+    if (can_show_route) {
+        bool expanded = (s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id);
+
+        lv_obj_t *hint_lbl = lv_label_create(bubble);
+        lv_label_set_text(hint_lbl, expanded ? "Hide route" : "Show route");
+        lv_obj_set_style_text_font(hint_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(hint_lbl, BR_COLOR_TEXT_SEC, 0);
+
+        if (expanded) {
+            char route_buf[200];
+            format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count, msg->route_hops);
+
+            lv_obj_t *route_box = lv_obj_create(bubble);
+            lv_obj_set_width(route_box, LV_PCT(100));
+            lv_obj_set_height(route_box, LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_color(route_box, BR_COLOR_SURFACE_2, 0);
+            lv_obj_set_style_bg_opa(route_box, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_width(route_box, 0, 0);
+            lv_obj_set_style_pad_all(route_box, 4, 0);
+            lv_obj_clear_flag(route_box, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_obj_t *route_lbl = lv_label_create(route_box);
+            lv_label_set_text(route_lbl, route_buf);
+            lv_label_set_long_mode(route_lbl, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(route_lbl, LV_PCT(100));
+            lv_obj_set_style_text_font(route_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(route_lbl, BR_COLOR_TEXT, 0);
+        }
+
+        if (msg->packet_id != 0) {
+            lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(bubble, msg_bubble_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)msg->packet_id);
+        }
     }
 }
 
@@ -220,7 +306,7 @@ static void render_messages_for_target(void) {
             }
         }
 
-        add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg->text, is_mine, msg->status);
+        add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg, is_mine);
     }
 
     lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
@@ -229,6 +315,7 @@ static void render_messages_for_target(void) {
 static void open_with_target(bramble_layout_t *layout, chat_target_t target, int clear_channel_idx) {
     s_target = target;
     s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
+    s_selected_packet_id = 0;
 
     if (clear_channel_idx >= 0) {
         chat_unread_clear_for_channel(clear_channel_idx);

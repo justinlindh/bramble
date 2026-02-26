@@ -2,12 +2,15 @@
 #include "theme/bramble_theme.h"
 #include "routing.h"
 #include "airtime_budget.h"
+#include "traffic_debug.h"
 #include "wifi_manager.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
 
 static const char *TAG = "scr_stats";
 
@@ -25,6 +28,113 @@ typedef struct {
 } ui_mesh_state_t;
 
 extern void mesh_get_state(ui_mesh_state_t *out);
+extern void mesh_get_routes(routing_table_t *out);
+extern traffic_debug_t *mesh_get_traffic_debug(void);
+
+typedef enum {
+    DELTA_GOOD_WHEN_UP,
+    DELTA_GOOD_WHEN_DOWN,
+} delta_polarity_t;
+
+typedef struct {
+    int32_t tx;
+    int32_t rx;
+    int32_t dropped;
+    int32_t neighbors;
+    int32_t routes;
+    int32_t air_used_ms;
+} stats_delta_t;
+
+typedef struct {
+    uint32_t tx;
+    uint32_t rx;
+    uint32_t dropped;
+    uint32_t neighbors;
+    uint32_t routes;
+    uint32_t air_used_ms;
+} stats_snapshot_t;
+
+static stats_snapshot_t s_prev_snapshot;
+static bool s_has_prev_snapshot = false;
+
+/* Format milliseconds as a short human-readable string */
+static void fmt_ms_short(char *buf, size_t sz, uint32_t ms) {
+    if (ms >= 60000) {
+        uint32_t m = ms / 60000;
+        uint32_t s = (ms % 60000) / 1000;
+        if (s > 0) {
+            snprintf(buf, sz, "%um%us", (unsigned)m, (unsigned)s);
+        } else {
+            snprintf(buf, sz, "%um", (unsigned)m);
+        }
+    } else if (ms >= 1000) {
+        snprintf(buf, sz, "%us", (unsigned)(ms / 1000));
+    } else {
+        snprintf(buf, sz, "%ums", (unsigned)ms);
+    }
+}
+
+/*
+ * Create one airtime tier row: label (with tier name and remaining/max),
+ * plus a filled progress bar beneath it.
+ */
+static void create_airtime_row(lv_obj_t *parent,
+                                const char *name,
+                                uint32_t remaining_ms, uint32_t max_ms,
+                                lv_color_t bar_color) {
+    /* Column container for the header + bar */
+    lv_obj_t *col = lv_obj_create(parent);
+    lv_obj_set_size(col, 296, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(col, 0, 0);
+    lv_obj_set_style_pad_all(col, 0, 0);
+    lv_obj_set_style_pad_row(col, 2, 0);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+
+    /* Compute percentage */
+    int pct = (max_ms > 0) ? (int)((remaining_ms * 100u) / max_ms) : 0;
+    if (pct > 100) pct = 100;
+
+    /* Header row: tier name (left) + "rem/max pct%" (right) */
+    lv_obj_t *hdr = lv_obj_create(col);
+    lv_obj_set_size(hdr, 296, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 0, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *name_lbl = lv_label_create(hdr);
+    lv_label_set_text(name_lbl, name);
+    lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(name_lbl, bar_color, 0);
+
+    char rem_str[10], max_str[10], val_buf[40];
+    fmt_ms_short(rem_str, sizeof(rem_str), remaining_ms);
+    fmt_ms_short(max_str, sizeof(max_str), max_ms);
+    snprintf(val_buf, sizeof(val_buf), "%s/%s %d%%", rem_str, max_str, pct);
+
+    lv_obj_t *val_lbl = lv_label_create(hdr);
+    lv_label_set_text(val_lbl, val_buf);
+    lv_obj_set_style_text_font(val_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(val_lbl, BR_COLOR_TEXT_SEC, 0);
+
+    /* Progress bar */
+    lv_obj_t *bar = lv_bar_create(col);
+    lv_obj_set_size(bar, 296, 6);
+    lv_obj_set_style_bg_color(bar, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(bar, 3, 0);
+    lv_obj_set_style_bg_color(bar, bar_color, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+}
 
 static void create_counter_card(lv_obj_t *parent, int value, const char *unit) {
     lv_obj_t *card = lv_obj_create(parent);
@@ -141,4 +251,34 @@ void scr_stats_create(bramble_layout_t *layout) {
     lv_label_set_text(sys_lbl, sys_buf);
     lv_obj_set_style_text_font(sys_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sys_lbl, BR_COLOR_TEXT, 0);
+
+    /* ---- Airtime Budget section ---- */
+    lv_obj_t *sep2 = lv_obj_create(cont);
+    lv_obj_set_size(sep2, 296, 1);
+    lv_obj_set_style_bg_color(sep2, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_bg_opa(sep2, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(sep2, 0, 0);
+
+    lv_obj_t *air_title = lv_label_create(cont);
+    lv_label_set_text(air_title, "Airtime Budget");
+    lv_obj_set_style_text_font(air_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(air_title, BR_COLOR_TEXT_SEC, 0);
+
+    /* Critical (tier 1) first — highest priority */
+    create_airtime_row(cont, "Critical",
+                       state.airtime.tokens_ms[1],
+                       state.airtime.max_ms[1],
+                       BR_COLOR_CRITICAL);
+
+    /* Normal (tier 0) */
+    create_airtime_row(cont, "Normal",
+                       state.airtime.tokens_ms[0],
+                       state.airtime.max_ms[0],
+                       BR_COLOR_PRIMARY);
+
+    /* Broadcast (tier 2) */
+    create_airtime_row(cont, "Broadcast",
+                       state.airtime.tokens_ms[2],
+                       state.airtime.max_ms[2],
+                       BR_COLOR_WARNING);
 }
