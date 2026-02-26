@@ -79,10 +79,9 @@ static void fmt_ms_short(char *buf, size_t sz, uint32_t ms) {
  * plus a filled progress bar beneath it.
  */
 static void create_airtime_row(lv_obj_t *parent,
-                                const char *name,
-                                uint32_t remaining_ms, uint32_t max_ms,
-                                lv_color_t bar_color) {
-    /* Column container for the header + bar */
+                               const char *name,
+                               uint32_t remaining_ms, uint32_t max_ms,
+                               lv_color_t bar_color) {
     lv_obj_t *col = lv_obj_create(parent);
     lv_obj_set_size(col, 296, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
@@ -94,11 +93,9 @@ static void create_airtime_row(lv_obj_t *parent,
     lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
 
-    /* Compute percentage */
     int pct = (max_ms > 0) ? (int)((remaining_ms * 100u) / max_ms) : 0;
     if (pct > 100) pct = 100;
 
-    /* Header row: tier name (left) + "rem/max pct%" (right) */
     lv_obj_t *hdr = lv_obj_create(col);
     lv_obj_set_size(hdr, 296, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
@@ -124,7 +121,6 @@ static void create_airtime_row(lv_obj_t *parent,
     lv_obj_set_style_text_font(val_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(val_lbl, BR_COLOR_TEXT_SEC, 0);
 
-    /* Progress bar */
     lv_obj_t *bar = lv_bar_create(col);
     lv_obj_set_size(bar, 296, 6);
     lv_obj_set_style_bg_color(bar, BR_COLOR_SURFACE_2, 0);
@@ -136,9 +132,41 @@ static void create_airtime_row(lv_obj_t *parent,
     lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 }
 
-static void create_counter_card(lv_obj_t *parent, int value, const char *unit) {
+static int32_t calc_monotonic_delta(uint32_t curr, uint32_t prev) {
+    if (curr >= prev) {
+        return (int32_t)(curr - prev);
+    }
+    return (int32_t)curr;
+}
+
+static int32_t calc_signed_delta(uint32_t curr, uint32_t prev) {
+    return (int32_t)curr - (int32_t)prev;
+}
+
+static void fmt_counter_value(char *buf, size_t sz, uint32_t value, bool as_ms) {
+    if (as_ms) {
+        if (value >= 1000) {
+            uint32_t whole = value / 1000;
+            uint32_t tenths = (value % 1000) / 100;
+            snprintf(buf, sz, "%" PRIu32 ".%" PRIu32 "s", whole, tenths);
+        } else {
+            snprintf(buf, sz, "%" PRIu32 "ms", value);
+        }
+    } else {
+        snprintf(buf, sz, "%" PRIu32, value);
+    }
+}
+
+static void create_counter_card(lv_obj_t *parent,
+                                uint32_t value,
+                                const char *label,
+                                int32_t delta,
+                                bool show_delta,
+                                delta_polarity_t polarity,
+                                bool as_ms,
+                                lv_color_t value_color) {
     lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_set_size(card, 96, 52);
+    lv_obj_set_size(card, 96, 64);
     lv_obj_set_style_bg_color(card, BR_COLOR_SURFACE, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, BR_RADIUS, 0);
@@ -148,19 +176,87 @@ static void create_counter_card(lv_obj_t *parent, int value, const char *unit) {
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    
-    char val_buf[16];
-    snprintf(val_buf, sizeof(val_buf), "%d", value);
-    
+
+    char val_buf[20];
+    fmt_counter_value(val_buf, sizeof(val_buf), value, as_ms);
+
     lv_obj_t *val_lbl = lv_label_create(card);
     lv_label_set_text(val_lbl, val_buf);
-    lv_obj_set_style_text_font(val_lbl, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(val_lbl, BR_COLOR_PRIMARY, 0);
-    
+    lv_obj_set_style_text_font(val_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(val_lbl, value_color, 0);
+
+    lv_obj_t *delta_lbl = lv_label_create(card);
+    if (show_delta && delta != 0) {
+        char delta_buf[20];
+        snprintf(delta_buf, sizeof(delta_buf), "%+" PRId32, delta);
+        lv_label_set_text(delta_lbl, delta_buf);
+
+        bool positive = (delta > 0);
+        bool good = (polarity == DELTA_GOOD_WHEN_UP) ? positive : !positive;
+        lv_obj_set_style_text_color(delta_lbl, good ? BR_COLOR_PRIMARY : BR_COLOR_DANGER, 0);
+    } else {
+        lv_label_set_text(delta_lbl, "-");
+        lv_obj_set_style_text_color(delta_lbl, BR_COLOR_TEXT_SEC, 0);
+    }
+    lv_obj_set_style_text_font(delta_lbl, &lv_font_montserrat_12, 0);
+
     lv_obj_t *name_lbl = lv_label_create(card);
-    lv_label_set_text(name_lbl, unit);
+    lv_label_set_text(name_lbl, label);
     lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(name_lbl, BR_COLOR_TEXT_SEC, 0);
+}
+
+static void create_reach_row(lv_obj_t *parent,
+                             const char *name,
+                             int count,
+                             int total,
+                             lv_color_t bar_color) {
+    lv_obj_t *col = lv_obj_create(parent);
+    lv_obj_set_size(col, 296, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(col, 0, 0);
+    lv_obj_set_style_pad_all(col, 0, 0);
+    lv_obj_set_style_pad_row(col, 2, 0);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+
+    int pct = (total > 0) ? (count * 100) / total : 0;
+    if (pct > 100) pct = 100;
+
+    lv_obj_t *hdr = lv_obj_create(col);
+    lv_obj_set_size(hdr, 296, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 0, 0);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *name_lbl = lv_label_create(hdr);
+    lv_label_set_text(name_lbl, name);
+    lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(name_lbl, bar_color, 0);
+
+    char val_buf[32];
+    snprintf(val_buf, sizeof(val_buf), "%d nodes (%d%%)", count, pct);
+
+    lv_obj_t *val_lbl = lv_label_create(hdr);
+    lv_label_set_text(val_lbl, val_buf);
+    lv_obj_set_style_text_font(val_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(val_lbl, BR_COLOR_TEXT_SEC, 0);
+
+    lv_obj_t *bar = lv_bar_create(col);
+    lv_obj_set_size(bar, 296, 6);
+    lv_obj_set_style_bg_color(bar, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(bar, 3, 0);
+    lv_obj_set_style_bg_color(bar, bar_color, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 }
 
 void scr_stats_create(bramble_layout_t *layout) {
@@ -168,61 +264,160 @@ void scr_stats_create(bramble_layout_t *layout) {
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, BR_PADDING, 0);
     lv_obj_set_style_pad_row(cont, 6, 0);
-    
-    /* Get mesh state */
+
     static ui_mesh_state_t state;
     mesh_get_state(&state);
-    
-    /* Title */
+
+    routing_table_t routes;
+    mesh_get_routes(&routes);
+
+    uint32_t reach_addrs[MAX_NEIGHBORS + MAX_ROUTES];
+    uint8_t reach_hops[MAX_NEIGHBORS + MAX_ROUTES];
+    int reach_count = 0;
+
+    for (int i = 0; i < state.neighbors.count && reach_count < (MAX_NEIGHBORS + MAX_ROUTES); i++) {
+        const neighbor_entry_t *n = &state.neighbors.entries[i];
+        reach_addrs[reach_count] = n->addr;
+        reach_hops[reach_count] = 1;
+        reach_count++;
+    }
+
+    for (int i = 0; i < routes.count; i++) {
+        const route_entry_t *r = &routes.entries[i];
+        if (r->state == ROUTE_BROKEN || r->state == ROUTE_STALE) continue;
+
+        int found = -1;
+        for (int j = 0; j < reach_count; j++) {
+            if (reach_addrs[j] == r->dest_addr) {
+                found = j;
+                break;
+            }
+        }
+
+        if (found >= 0) {
+            if (r->hop_count > 0 && r->hop_count < reach_hops[found]) {
+                reach_hops[found] = r->hop_count;
+            }
+            continue;
+        }
+
+        if (reach_count < (MAX_NEIGHBORS + MAX_ROUTES)) {
+            reach_addrs[reach_count] = r->dest_addr;
+            reach_hops[reach_count] = (r->hop_count > 0) ? r->hop_count : 1;
+            reach_count++;
+        }
+    }
+
+    int hop1_count = 0;
+    int hop2_count = 0;
+    int hop3plus_count = 0;
+    for (int i = 0; i < reach_count; i++) {
+        if (reach_hops[i] <= 1) hop1_count++;
+        else if (reach_hops[i] == 2) hop2_count++;
+        else hop3plus_count++;
+    }
+
+    traffic_debug_t *td = mesh_get_traffic_debug();
+    uint32_t dropped = td ? traffic_debug_get_dropped(td) : 0;
+
+    uint32_t air_used_ms = 0;
+    for (int i = 0; i < 3; i++) {
+        uint32_t max_ms = state.airtime.max_ms[i];
+        uint32_t remaining_ms = state.airtime.tokens_ms[i];
+        if (max_ms > remaining_ms) {
+            air_used_ms += (max_ms - remaining_ms);
+        }
+    }
+
+    stats_snapshot_t curr = {
+        .tx = state.packets_tx,
+        .rx = state.packets_rx,
+        .dropped = dropped,
+        .neighbors = (uint32_t)state.neighbors.count,
+        .routes = (uint32_t)route_count(&routes),
+        .air_used_ms = air_used_ms,
+    };
+
+    bool show_delta = s_has_prev_snapshot;
+    stats_delta_t delta = {0};
+    if (show_delta) {
+        delta.tx = calc_monotonic_delta(curr.tx, s_prev_snapshot.tx);
+        delta.rx = calc_monotonic_delta(curr.rx, s_prev_snapshot.rx);
+        delta.dropped = calc_monotonic_delta(curr.dropped, s_prev_snapshot.dropped);
+        delta.neighbors = calc_signed_delta(curr.neighbors, s_prev_snapshot.neighbors);
+        delta.routes = calc_signed_delta(curr.routes, s_prev_snapshot.routes);
+        delta.air_used_ms = calc_signed_delta(curr.air_used_ms, s_prev_snapshot.air_used_ms);
+    }
+    s_prev_snapshot = curr;
+    s_has_prev_snapshot = true;
+
     lv_obj_t *title = lv_label_create(cont);
     lv_label_set_text(title, "Stats");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
-    
-    /* Counter row */
-    lv_obj_t *row = lv_obj_create(cont);
-    lv_obj_set_size(row, 304, 56);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    lv_obj_set_style_pad_all(row, 0, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+
+    lv_obj_t *row1 = lv_obj_create(cont);
+    lv_obj_set_size(row1, 304, 68);
+    lv_obj_set_style_bg_opa(row1, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row1, 0, 0);
+    lv_obj_set_style_pad_all(row1, 0, 0);
+    lv_obj_clear_flag(row1, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(row1, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row1, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    
-    create_counter_card(row, (int)state.packets_tx, "TX pkts");
-    create_counter_card(row, (int)state.packets_rx, "RX pkts");
-    create_counter_card(row, state.neighbors.count, "peers");
-    
-    /* Radio status */
+
+    create_counter_card(row1, curr.tx, "Sent", delta.tx, show_delta,
+                        DELTA_GOOD_WHEN_UP, false, BR_COLOR_PRIMARY);
+    create_counter_card(row1, curr.rx, "Received", delta.rx, show_delta,
+                        DELTA_GOOD_WHEN_UP, false, BR_COLOR_PRIMARY);
+    create_counter_card(row1, curr.dropped, "Dropped", delta.dropped, show_delta,
+                        DELTA_GOOD_WHEN_DOWN, false,
+                        curr.dropped > 0 ? BR_COLOR_DANGER : BR_COLOR_PRIMARY);
+
+    lv_obj_t *row2 = lv_obj_create(cont);
+    lv_obj_set_size(row2, 304, 68);
+    lv_obj_set_style_bg_opa(row2, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row2, 0, 0);
+    lv_obj_set_style_pad_all(row2, 0, 0);
+    lv_obj_clear_flag(row2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(row2, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row2, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+
+    create_counter_card(row2, curr.neighbors, "Neighbors", delta.neighbors, show_delta,
+                        DELTA_GOOD_WHEN_UP, false, BR_COLOR_PRIMARY);
+    create_counter_card(row2, curr.routes, "Routes", delta.routes, show_delta,
+                        DELTA_GOOD_WHEN_UP, false, BR_COLOR_PRIMARY);
+    create_counter_card(row2, curr.air_used_ms, "Air Used", delta.air_used_ms, show_delta,
+                        DELTA_GOOD_WHEN_DOWN, true, BR_COLOR_WARNING);
+
     lv_obj_t *radio_lbl = lv_label_create(cont);
     char radio_buf[48];
     snprintf(radio_buf, sizeof(radio_buf), "Radio: %s  Last RSSI: %ddBm",
              state.radio_ok ? "OK" : "ERROR", state.last_rx_rssi);
     lv_label_set_text(radio_lbl, radio_buf);
     lv_obj_set_style_text_font(radio_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(radio_lbl, state.radio_ok ? BR_COLOR_TEXT_SEC : BR_COLOR_DANGER, 0);
-    
-    /* Separator */
+    lv_obj_set_style_text_color(radio_lbl,
+                                state.radio_ok ? BR_COLOR_TEXT_SEC : BR_COLOR_DANGER, 0);
+
     lv_obj_t *sep = lv_obj_create(cont);
     lv_obj_set_size(sep, 296, 1);
     lv_obj_set_style_bg_color(sep, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_bg_opa(sep, LV_OPA_30, 0);
     lv_obj_set_style_border_width(sep, 0, 0);
-    
-    /* System info */
+
     lv_obj_t *sys_title = lv_label_create(cont);
     lv_label_set_text(sys_title, "System");
     lv_obj_set_style_text_font(sys_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(sys_title, BR_COLOR_TEXT_SEC, 0);
-    
+
     size_t free_heap = esp_get_free_heap_size();
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     uint32_t uptime_us = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     uint32_t up_h = uptime_us / 3600;
     uint32_t up_m = (uptime_us % 3600) / 60;
     const char *ip = wifi_manager_get_ip();
-    
+
     char sys_buf[160];
     if (ip && ip[0] != '\0') {
         snprintf(sys_buf, sizeof(sys_buf),
@@ -246,13 +441,12 @@ void scr_stats_create(bramble_layout_t *layout) {
                  (unsigned long)up_h,
                  (unsigned long)up_m);
     }
-    
+
     lv_obj_t *sys_lbl = lv_label_create(cont);
     lv_label_set_text(sys_lbl, sys_buf);
     lv_obj_set_style_text_font(sys_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(sys_lbl, BR_COLOR_TEXT, 0);
 
-    /* ---- Airtime Budget section ---- */
     lv_obj_t *sep2 = lv_obj_create(cont);
     lv_obj_set_size(sep2, 296, 1);
     lv_obj_set_style_bg_color(sep2, BR_COLOR_TEXT_SEC, 0);
@@ -264,21 +458,45 @@ void scr_stats_create(bramble_layout_t *layout) {
     lv_obj_set_style_text_font(air_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(air_title, BR_COLOR_TEXT_SEC, 0);
 
-    /* Critical (tier 1) first — highest priority */
     create_airtime_row(cont, "Critical",
                        state.airtime.tokens_ms[1],
                        state.airtime.max_ms[1],
                        BR_COLOR_CRITICAL);
 
-    /* Normal (tier 0) */
     create_airtime_row(cont, "Normal",
                        state.airtime.tokens_ms[0],
                        state.airtime.max_ms[0],
                        BR_COLOR_PRIMARY);
 
-    /* Broadcast (tier 2) */
     create_airtime_row(cont, "Broadcast",
                        state.airtime.tokens_ms[2],
                        state.airtime.max_ms[2],
                        BR_COLOR_WARNING);
+
+    lv_obj_t *sep3 = lv_obj_create(cont);
+    lv_obj_set_size(sep3, 296, 1);
+    lv_obj_set_style_bg_color(sep3, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_bg_opa(sep3, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(sep3, 0, 0);
+
+    lv_obj_t *reach_title = lv_label_create(cont);
+    lv_label_set_text(reach_title, "Network Reach");
+    lv_obj_set_style_text_font(reach_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(reach_title, BR_COLOR_TEXT_SEC, 0);
+
+    char reach_total_buf[40];
+    snprintf(reach_total_buf, sizeof(reach_total_buf), "Reachable nodes: %d", reach_count);
+    lv_obj_t *reach_total = lv_label_create(cont);
+    lv_label_set_text(reach_total, reach_total_buf);
+    lv_obj_set_style_text_font(reach_total, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(reach_total, BR_COLOR_TEXT, 0);
+
+    create_reach_row(cont, "1-hop", hop1_count, reach_count, BR_COLOR_SUCCESS);
+    create_reach_row(cont, "2-hop", hop2_count, reach_count, BR_COLOR_PRIMARY);
+    create_reach_row(cont, "3+ hop", hop3plus_count, reach_count, BR_COLOR_WARNING);
+
+    ESP_LOGD(TAG, "stats deltas tx=%" PRId32 " rx=%" PRId32 " drop=%" PRId32
+                  " peers=%" PRId32 " routes=%" PRId32 " air=%" PRId32 " reach=%d",
+             delta.tx, delta.rx, delta.dropped, delta.neighbors, delta.routes, delta.air_used_ms,
+             reach_count);
 }
