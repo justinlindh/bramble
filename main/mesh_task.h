@@ -105,6 +105,11 @@ void mesh_reboot_delayed(int delay_ms);
 void mesh_get_routes(routing_table_t *out);
 
 /**
+ * Get a snapshot of the location manager state (thread-safe).
+ */
+void mesh_get_location_state(location_manager_t *out);
+
+/**
  * Add a channel to the mesh. Returns channel index or -1 on error.
  */
 int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len);

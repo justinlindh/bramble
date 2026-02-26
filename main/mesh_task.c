@@ -2811,6 +2811,12 @@ void mesh_get_routes(routing_table_t *out) {
     xSemaphoreGive(s_state_mutex);
 }
 
+void mesh_get_location_state(location_manager_t *out) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    *out = s_location_mgr;
+    xSemaphoreGive(s_state_mutex);
+}
+
 int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     if (s_num_channels >= MAX_CHANNELS) {

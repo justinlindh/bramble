@@ -6,6 +6,7 @@
 typedef enum {
     TAB_CHAT = 0,
     TAB_NODES,
+    TAB_MAP,
     TAB_STATS,
     TAB_SETTINGS,
     TAB_COUNT
