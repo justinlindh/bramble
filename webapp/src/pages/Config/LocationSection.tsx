@@ -9,7 +9,9 @@ import type {
   Channel,
 } from '../../types/bramble';
 import { setLocationConfig } from '../../store/actions';
+import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
+import { AddressLabel } from '../../components/AddressLabel';
 import styles from './LocationSection.module.css';
 
 interface LocationSectionProps {
@@ -57,6 +59,13 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
 
   const [newContactAddress, setNewContactAddress] = useState('');
   const [newChannelTarget, setNewChannelTarget] = useState<number>(channels[0]?.index ?? 0);
+
+  const peerNames = useStore(s => s.peerNames);
+
+  const resolveLabel = (hexAddr: string): string | undefined => {
+    const num = parseInt(hexAddr, 16);
+    return peerNames.get(num);
+  };
 
   useEffect(() => {
     setEnabled(location.enabled ?? false);
@@ -202,14 +211,14 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
           <div className={styles.quickAdd}>
             {neighbors.map(n => (
               <button className={styles.quickAddBtn} key={n.addr} onClick={() => setNewContactAddress(toHexAddress(n.addr))}>
-                {toHexAddress(n.addr)}
+                {peerNames.get(n.addr) || `0x${toHexAddress(n.addr).slice(-4)}`}
               </button>
             ))}
           </div>
         )}
         {contactRules.map((rule, idx) => (
           <div key={rule.address} className={styles.contactRow}>
-            <span className={styles.mono}>{rule.address}</span>
+            <AddressLabel addr={parseInt(rule.address, 16)} name={resolveLabel(rule.address)} />
             <label className={styles.inlineToggle}>
               <input
                 type="checkbox"
