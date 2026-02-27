@@ -7,6 +7,7 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_crt_bundle.h"
 
 static const char *TAG = "ota";
 
@@ -27,6 +28,7 @@ static int ota_https_start(const char *url)
         .url = url,
         .timeout_ms = 30000,
         .skip_cert_common_name_check = false,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
     esp_https_ota_config_t ota_cfg = {
