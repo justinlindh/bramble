@@ -35,7 +35,11 @@ CONFIG_LV_FONT_MONTSERRAT_18=y
 CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=y
 CONFIG_BRAMBLE_MSG_PERSIST_MAX=300
 CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
-CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+# NOTE: Do NOT enable CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY here.
+# It places .bss in PSRAM, causing hard abort() if PSRAM init fails on boot
+# (octal_psram: PSRAM ID read error). T-Deck Plus PSRAM is sensitive to reset
+# timing and occasionally fails to initialize. All PSRAM usage goes through
+# SPIRAM_USE_MALLOC + clib malloc instead, which gracefully falls back.
 
 # LVGL uses clib malloc (standard malloc/free), which is routed to PSRAM by
 # SPIRAM_USE_MALLOC=y above. HOWEVER: SPIRAM_MALLOC_ALWAYSINTERNAL defaults to
