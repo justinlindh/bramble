@@ -108,3 +108,37 @@
   align-items: center;
   line-height: 1;
 }
+
+/* ── IRC-style action line (* Nick does something) ──────────────── */
+.actionLine {
+  align-self: stretch;
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.actionText {
+  font-style: italic;
+  color: var(--accent-purple, #a78bfa);
+  font-size: 0.92rem;
+  flex: 1;
+}
+
+.actionAsterisk {
+  font-weight: 700;
+  color: var(--accent-purple, #a78bfa);
+}
+
+.actionActor {
+  font-weight: 600;
+  font-style: italic;
+}
+
+.actionTime {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}

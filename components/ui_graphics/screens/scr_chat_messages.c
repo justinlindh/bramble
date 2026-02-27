@@ -166,6 +166,47 @@ static void format_route_text(char *out,
     }
 }
 
+/* Detect CTCP ACTION: \x01ACTION text\x01 */
+static bool msg_is_action(const stored_msg_t *msg) {
+    return msg->text_len > 9 &&
+           msg->text[0] == '\x01' &&
+           strncmp(msg->text + 1, "ACTION ", 7) == 0;
+}
+
+static const char *msg_action_text(const stored_msg_t *msg) {
+    /* Skip \x01ACTION (8 bytes) */
+    return msg->text + 8;
+}
+
+static void add_action_line(lv_obj_t *parent, const char *sender,
+                            const stored_msg_t *msg, bool is_mine) {
+    const char *action = msg_action_text(msg);
+    /* Build "* sender action" string */
+    static char action_buf[MSG_TEXT_MAX + 32];
+    const char *name = is_mine ? "me" : (sender ? sender : "???");
+    /* Strip trailing \x01 from display */
+    size_t action_len = strlen(action);
+    if (action_len > 0 && action[action_len - 1] == '\x01') {
+        action_len--;
+    }
+    snprintf(action_buf, sizeof(action_buf), "* %s %.*s", name, (int)action_len, action);
+
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 2, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, action_buf);
+    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(0xDA77F2), 0); /* purple */
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(lbl, LV_PCT(100));
+}
+
 static void add_message_bubble(lv_obj_t *parent, const char *sender,
                                 const stored_msg_t *msg, bool is_mine) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -306,7 +347,11 @@ static void render_messages_for_target(void) {
             }
         }
 
-        add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg, is_mine);
+        if (msg_is_action(msg)) {
+            add_action_line(s_msg_list, sender, msg, is_mine);
+        } else {
+            add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg, is_mine);
+        }
     }
 
     lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
