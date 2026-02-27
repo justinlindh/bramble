@@ -10,4 +10,16 @@ idf_component_register(
              ble reliability battery ota board_config
              keyboard trackball location gps sdcard audio
              ui_graphics traffic_debug fragment
+
+    PRIV_REQUIRES lvgl__lvgl
 )
+
+if(CONFIG_BRAMBLE_BOARD_TDECK_PLUS)
+    target_sources(${COMPONENT_LIB} PRIVATE "lv_malloc_psram.c")
+    target_link_options(${COMPONENT_LIB} INTERFACE
+        -Wl,-u,lv_malloc_core
+        -Wl,-u,lv_free_core
+        -Wl,-u,lv_realloc_core
+        -Wl,-u,lv_mem_init
+    )
+endif()

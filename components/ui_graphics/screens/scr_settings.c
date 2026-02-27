@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include "airtime_budget.h"
 #include "scr_settings.h"
 #include "theme/bramble_theme.h"
 #include "display.h"
@@ -39,6 +41,7 @@ typedef struct {
     bool             radio_ok;
     int16_t          last_rx_rssi;
     int8_t           last_rx_snr;
+    airtime_budget_t airtime;
 } settings_mesh_state_t;
 extern void mesh_get_state(settings_mesh_state_t *out);
 
@@ -352,21 +355,27 @@ static void build_loc_peer_targets_section(lv_obj_t *cont, lv_group_t *g) {
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(hint, BR_COLOR_TEXT_SEC, 0);
 
-    /* Get current neighbor snapshot */
-    settings_mesh_state_t mesh;
-    mesh_get_state(&mesh);
-    int n_count = neighbor_count(&mesh.neighbors);
+    /* Get current neighbor snapshot (heap-allocated — too large for 8KB task stack) */
+    settings_mesh_state_t *mesh = malloc(sizeof(settings_mesh_state_t));
+    if (!mesh) {
+        ESP_LOGE("settings", "Failed to allocate mesh state for location peers");
+        return;
+    }
+    mesh_get_state(mesh);
+    int n_count = neighbor_count(&mesh->neighbors);
 
     if (n_count == 0) {
         lv_obj_t *no_peers = lv_label_create(cont);
         lv_label_set_text(no_peers, "(no peers visible)");
         lv_obj_set_style_text_font(no_peers, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(no_peers, BR_COLOR_TEXT_SEC, 0);
+        free(mesh);
+        return;
     }
 
     /* Render one toggle row per neighbor entry */
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
-        const neighbor_entry_t *nb = &mesh.neighbors.entries[i];
+        const neighbor_entry_t *nb = &mesh->neighbors.entries[i];
         if (nb->addr == 0) continue;  /* empty slot */
 
         /* Row container */
@@ -418,7 +427,7 @@ static void build_loc_peer_targets_section(lv_obj_t *cont, lv_group_t *g) {
         /* Check if already shown as a neighbor */
         bool is_neighbor = false;
         for (int ni = 0; ni < MAX_NEIGHBORS; ni++) {
-            if (mesh.neighbors.entries[ni].addr == ct->addr) {
+            if (mesh->neighbors.entries[ni].addr == ct->addr) {
                 is_neighbor = true;
                 break;
             }
@@ -463,6 +472,8 @@ static void build_loc_peer_targets_section(lv_obj_t *cont, lv_group_t *g) {
                             (void *)(uintptr_t)ct->addr);
         if (g) lv_group_add_obj(g, sw);
     }
+
+    free(mesh);
 }
 
 /* ── Connectivity mode toggle ────────────────────────────────────────── */
@@ -1192,20 +1203,25 @@ static void build_peer_manager_section(lv_obj_t *cont, lv_group_t *g) {
     lv_obj_set_style_text_font(section_lbl, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(section_lbl, BR_COLOR_TEXT, 0);
 
-    settings_mesh_state_t mesh;
-    mesh_get_state(&mesh);
-    int n_count = neighbor_count(&mesh.neighbors);
+    settings_mesh_state_t *mesh = malloc(sizeof(settings_mesh_state_t));
+    if (!mesh) {
+        ESP_LOGE("settings", "Failed to allocate mesh state for peer manager");
+        return;
+    }
+    mesh_get_state(mesh);
+    int n_count = neighbor_count(&mesh->neighbors);
 
     if (n_count == 0) {
         lv_obj_t *empty = lv_label_create(cont);
         lv_label_set_text(empty, "(no peers discovered)");
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(empty, BR_COLOR_TEXT_SEC, 0);
+        free(mesh);
         return;
     }
 
     for (int i = 0; i < MAX_NEIGHBORS; i++) {
-        const neighbor_entry_t *nb = &mesh.neighbors.entries[i];
+        const neighbor_entry_t *nb = &mesh->neighbors.entries[i];
         if (nb->addr == 0) continue;
 
         lv_obj_t *row = lv_obj_create(cont);
@@ -1243,6 +1259,7 @@ static void build_peer_manager_section(lv_obj_t *cont, lv_group_t *g) {
     }
 
     (void)g; /* peers are display-only for now */
+    free(mesh);
 }
 
 /* ── Screen entry point ──────────────────────────────────────────────── */
