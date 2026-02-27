@@ -22,6 +22,7 @@
 #include "fragment.h"
 #include "location.h"
 #include "gps.h"
+#include "beacon.h"
 #include "delivery_event_ring.h"
 #include "cJSON.h"
 
@@ -78,6 +79,7 @@ typedef struct {
 /* ── State ──────────────────────────────────────────────────────────── */
 
 static bramble_identity_t *s_identity;
+static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for beacon HMAC */
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
 static rreq_rate_limiter_t s_rreq_rl;
@@ -686,16 +688,8 @@ static int send_beacon(void) {
         beacon.name[beacon.name_len] = '\0';
     }
 
-    /* HMAC auth — covers ALL beacon fields (excluding auth_hmac itself) */
-    /* Serialize beacon to get canonical byte representation, then HMAC everything
-     * up to but not including the auth_hmac field at the end */
-    uint8_t hmac_input[BEACON_SIZE + 1 + BEACON_NAME_MAX];
-    bramble_beacon_serialize(&beacon, hmac_input, sizeof(hmac_input));
-    /* HMAC over header(12) + payload(20) = 32 bytes, excludes auth_hmac[12] at end */
-    size_t hmac_len = BEACON_SIZE - sizeof(beacon.auth_hmac);
-    uint8_t full_hmac[32];
-    crypto_hmac_sha256(s_identity->private_key, 32, hmac_input, hmac_len, full_hmac);
-    memcpy(beacon.auth_hmac, full_hmac, sizeof(beacon.auth_hmac));
+    /* HMAC auth — use shared beacon key (derived from public channel PSK) */
+    beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
 
     uint8_t buf[64];
     if (bramble_beacon_serialize(&beacon, buf, sizeof(buf)) != ESP_OK) {
@@ -736,28 +730,11 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     /* Ignore our own beacons */
     if (beacon.src_addr == s_identity->address) return;
 
-    /* Verify beacon HMAC authenticity.
-     * Recompute HMAC the same way send_beacon() does: serialize the beacon,
-     * then HMAC over everything except the auth_hmac field itself. */
-    {
-        uint8_t hmac_input[BEACON_SIZE + 1 + BEACON_NAME_MAX];
-        bramble_beacon_t verify_beacon = beacon;
-        memset(verify_beacon.auth_hmac, 0, sizeof(verify_beacon.auth_hmac));
-        bramble_beacon_serialize(&verify_beacon, hmac_input, sizeof(hmac_input));
-        size_t hmac_len = BEACON_SIZE - sizeof(beacon.auth_hmac);
-        uint8_t expected_hmac[32];
-        /* Use the mesh network key (identity private key) — same as send_beacon() */
-        crypto_hmac_sha256(s_identity->private_key, 32, hmac_input, hmac_len, expected_hmac);
-        /* Constant-time comparison to prevent timing side channels */
-        uint8_t diff = 0;
-        for (size_t i = 0; i < sizeof(beacon.auth_hmac); i++) {
-            diff |= beacon.auth_hmac[i] ^ expected_hmac[i];
-        }
-        if (diff != 0) {
-            ESP_LOGW(TAG, "Beacon from %08" PRIX32 " failed HMAC verification, discarding",
-                     beacon.src_addr);
-            return;
-        }
+    /* Verify beacon HMAC authenticity using shared beacon key */
+    if (!beacon_verify_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key))) {
+        ESP_LOGW(TAG, "Beacon from %08" PRIX32 " failed HMAC verification, discarding",
+                 beacon.src_addr);
+        return;
     }
 
     /* Check for address collision — different pubkey_hash but same address */
@@ -2697,6 +2674,15 @@ void mesh_task_start(bramble_identity_t *identity) {
     ESP_LOGI(TAG, "Node name: %s", s_node_name[0] ? s_node_name : "(none)");
 
     neighbor_init(&s_neighbors);
+
+    /* Derive shared beacon HMAC key from the public channel PSK */
+    {
+        bramble_channel_t beacon_ch;
+        channel_derive_key(BRAMBLE_PUBLIC_CHANNEL_PSK, &beacon_ch);
+        memcpy(s_beacon_key, beacon_ch.key, BRAMBLE_KEY_SIZE);
+        ESP_LOGI(TAG, "Beacon HMAC key derived from public channel PSK");
+    }
+
     dedup_init(&s_dedup);
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
