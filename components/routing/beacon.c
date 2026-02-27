@@ -28,10 +28,11 @@ bramble_beacon_t beacon_build(uint32_t my_addr, uint32_t pubkey_hash,
 }
 
 void beacon_compute_hmac(bramble_beacon_t *beacon, const uint8_t *shared_key, size_t key_len) {
-    /* Serialize beacon with zeroed HMAC, then compute over the pre-HMAC portion */
-    uint8_t buf[BEACON_SIZE];
+    /* Serialize beacon with zeroed HMAC, then compute over the pre-HMAC portion.
+     * Buffer must be large enough for name extension (BEACON_SIZE + 1 + BEACON_NAME_MAX). */
+    uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
     memset(beacon->auth_hmac, 0, sizeof(beacon->auth_hmac));
-    bramble_beacon_serialize(beacon, buf, BEACON_SIZE);
+    bramble_beacon_serialize(beacon, buf, sizeof(buf));
     /* HMAC over everything before auth_hmac: BEACON_SIZE - sizeof(auth_hmac) = 32 bytes */
     size_t hmac_len = BEACON_SIZE - sizeof(beacon->auth_hmac);
     uint8_t full_hmac[32];
