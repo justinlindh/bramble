@@ -388,11 +388,19 @@ static void render_screen(ui_state_t *ui) {
                         if (act_max < 1) act_max = 1;
                         snprintf(line, sizeof(line), "* me %.*s", act_max, act);
                     } else {
-                        /* "* XXXX <action>" — last 4 hex digits of peer_addr */
-                        int act_max = CHARS_PER_LINE - 7 /* "* XXXX " */;
-                        if (act_max < 1) act_max = 1;
-                        snprintf(line, sizeof(line), "* %04X %.*s",
-                                 (unsigned)(m->peer_addr & 0xFFFF), act_max, act);
+                        const char *peer_name = mesh_get_peer_name(m->peer_addr);
+                        if (peer_name && peer_name[0]) {
+                            /* "* <name> <action>" */
+                            int act_max = CHARS_PER_LINE - 3 - (int)strlen(peer_name);
+                            if (act_max < 1) act_max = 1;
+                            snprintf(line, sizeof(line), "* %s %.*s", peer_name, act_max, act);
+                        } else {
+                            /* "* XXXX <action>" — last 4 hex digits of peer_addr */
+                            int act_max = CHARS_PER_LINE - 7 /* "* XXXX " */;
+                            if (act_max < 1) act_max = 1;
+                            snprintf(line, sizeof(line), "* %04X %.*s",
+                                     (unsigned)(m->peer_addr & 0xFFFF), act_max, act);
+                        }
                     }
                 } else {
                     int text_max = CHARS_PER_LINE - (int)strlen(prefix) - 1 /* space */ - badge_len;
@@ -466,8 +474,14 @@ static void render_screen(ui_state_t *ui) {
                 } else {
                     snprintf(age_str, sizeof(age_str), "%luh+", (unsigned long)(age_s / 3600));
                 }
-                /* Line: "AABBCCDD -70 12s" (~16 chars, fits 21-char display) */
-                snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s", e->addr, e->rssi, age_str);
+                const char *peer_name = mesh_get_peer_name(e->addr);
+                if (peer_name && peer_name[0]) {
+                    /* Prefer friendly name, with compact fallback identity context. */
+                    snprintf(nl, sizeof(nl), "%-8.8s %d %s", peer_name, e->rssi, age_str);
+                } else {
+                    /* Line: "AABBCCDD -70 12s" (~16 chars, fits 21-char display) */
+                    snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s", e->addr, e->rssi, age_str);
+                }
                 display_draw_text(2, y, nl);
                 y += LINE_H;
             }
@@ -990,7 +1004,7 @@ void app_main(void)
      * failure mode on T-Deck Plus; if this fails, display stays blank. */
     TaskHandle_t ui_task_handle = NULL;
     BaseType_t ui_task_ret = xTaskCreatePinnedToCore(
-        ui_graphics_task, "ui_gfx", 16384, NULL, 5, &ui_task_handle, 1);
+        ui_graphics_task, "ui_gfx", 32768, NULL, 5, &ui_task_handle, 1);
     if (ui_task_ret != pdPASS) {
         ESP_LOGE(TAG, "FAILED to create ui_gfx task — internal RAM exhausted "
                  "(free: %lu bytes). Display will be blank.",
