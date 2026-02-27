@@ -1,0 +1,37 @@
+{
+  "network_nodes": [
+    {
+      "name": "Node 1",
+      "host": "192.168.1.21",
+      "board": "heltec-v3",
+      "ota_url": "https://example.com/firmware/heltec-v3/latest.bin"
+    },
+    {
+      "name": "TDeck Kitchen",
+      "host": "192.168.1.42",
+      "board": "tdeck-plus",
+      "ota_url": "https://example.com/firmware/tdeck-plus/latest.bin"
+    }
+  ],
+  "usb_nodes": [
+    {
+      "port": "/dev/ttyACM0",
+      "board": "tdeck-plus"
+    }
+  ],
+  "usb_detection": {
+    "psram_8mb": "tdeck-plus",
+    "psram_2mb": "heltec-v3"
+  },
+  "ota": {
+    "url": "",
+    "urls": {
+      "heltec-v3": "https://example.com/firmware/heltec-v3/latest.bin",
+      "tdeck-plus": "https://example.com/firmware/tdeck-plus/latest.bin"
+    }
+  },
+  "mdns": {
+    "enabled": false,
+    "default_board": "heltec-v3"
+  }
+}
