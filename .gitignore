@@ -15,3 +15,5 @@ webapp/.vite/
 sdkconfig
 sdkconfig.*
 !sdkconfig.defaults*
+build-heltec-v3/log/
+build-tdeck-plus/log/
