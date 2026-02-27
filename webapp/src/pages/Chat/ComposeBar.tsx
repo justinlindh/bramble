@@ -87,8 +87,13 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
 
     const { dest, channelIndex } = parseConversation(conversationId);
 
+    // Wrap /me commands as CTCP ACTION
+    const payload = trimmed.startsWith('/me ')
+      ? `\x01ACTION ${trimmed.slice(4)}\x01`
+      : trimmed;
+
     try {
-      await sendMessage(dest, trimmed, effectiveTier, channelIndex);
+      await sendMessage(dest, payload, effectiveTier, channelIndex);
       // Attach location if enabled (fire-and-forget)
       if (locAttach !== 'off' && dest !== 0xFFFFFFFF) {
         const locTier = locAttach === 'exact' ? 'full' : 'coarse';
@@ -96,7 +101,7 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
       }
     } catch (e) {
       showToast((e as Error).message ?? 'Send failed', 'error', 5000);
-      // restore text so user can retry
+      // restore original text so user can retry (preserve /me prefix, not encoded form)
       setText(trimmed);
     } finally {
       setSending(false);

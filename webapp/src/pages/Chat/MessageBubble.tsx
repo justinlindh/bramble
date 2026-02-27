@@ -6,6 +6,7 @@ import { BroadcastDeliveryPanel } from './BroadcastDeliveryPanel';
 import { IconCritical, IconBroadcast } from '../../components/Icons';
 import { useStore } from '../../store/index';
 import { usePeerInfo } from '../../hooks/usePeer';
+import { parseAction } from '../../utils/parseAction';
 import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
@@ -39,6 +40,25 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
 
   const { displayName, fullHex } = usePeerInfo(message.from);
   const showPath = hasRelayPath && (showRoutesGlobal || routeExpanded);
+
+  const { isAction, actionText } = parseAction(message.text);
+
+  // Action messages render as a full-width IRC-style line (* Nick text)
+  if (isAction) {
+    const actorName = isOut ? 'me' : displayName;
+    return (
+      <div className={styles.actionLine}>
+        <span className={styles.actionText}>
+          <span className={styles.actionAsterisk}>*</span>{' '}
+          <span className={styles.actionActor}>{actorName}</span>{' '}
+          {actionText}
+        </span>
+        <time className={styles.actionTime} dateTime={new Date(message.timestampMs).toISOString()}>
+          {formatTime(message.timestampMs)}
+        </time>
+      </div>
+    );
+  }
 
   return (
     <div
