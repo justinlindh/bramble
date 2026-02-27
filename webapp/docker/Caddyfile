@@ -22,7 +22,7 @@ https:// {
 	}
 
 	handle {
-		reverse_proxy bramble-webapp:80
+		reverse_proxy bramble-webapp:8085
 	}
 }
 
@@ -45,6 +45,6 @@ http:// {
 	}
 
 	handle {
-		reverse_proxy bramble-webapp:80
+		reverse_proxy bramble-webapp:8085
 	}
 }

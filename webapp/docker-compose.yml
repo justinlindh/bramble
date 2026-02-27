@@ -1,8 +1,10 @@
 services:
   bramble-webapp:
     build: .
+    environment:
+      - MODE=local
     expose:
-      - "80"
+      - "8085"
 
   mock-node:
     image: node:22-alpine
