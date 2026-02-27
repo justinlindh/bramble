@@ -97,29 +97,42 @@ def load_config(path: Path) -> dict[str, Any]:
     return cfg
 
 
+def find_esptool() -> str:
+    """Find esptool.py on PATH or in ESP-IDF venv."""
+    import shutil
+    found = shutil.which("esptool.py")
+    if found:
+        return found
+    # Check ESP-IDF python venv
+    venvs = sorted(glob.glob(os.path.expanduser("~/.espressif/python_env/idf*_env/bin/esptool.py")))
+    if venvs:
+        return venvs[-1]
+    return "esptool.py"  # fallback, will fail with clear error
+
+
 def detect_usb_ports() -> list[str]:
     ports = sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")))
     return [p for p in ports if os.path.exists(p)]
 
 
-def detect_usb_device(port: str, cfg: dict[str, Any]) -> UsbDevice:
-    cmd = ["esptool.py", "--port", port, "flash_id"]
+def detect_usb_device(port: str, cfg: dict[str, Any], esptool: str) -> UsbDevice:
+    cmd = [esptool, "--port", port, "flash_id"]
     cp = run_cmd(cmd, timeout=35)
     out = cp.stdout
 
     chip = None
     psram_mb = None
 
-    m_chip = re.search(r"Detecting chip type\.\.\.\s*(.+)", out)
+    # Chip type: "Chip is ESP32-S3 ..." or "Detecting chip type... ESP32-S3"
+    m_chip = re.search(r"(?:Chip is|Detecting chip type\.\.\.)\s*(.+?)(?:\s*\(|$)", out, re.MULTILINE)
     if m_chip:
         chip = m_chip.group(1).strip()
 
+    # PSRAM: "Embedded PSRAM 8MB" or "PSRAM size: 8MB"
     m_psram = re.search(r"(?:PSRAM size:?\s*|Embedded PSRAM\s*)([0-9]+)\s*MB", out, re.IGNORECASE)
     if m_psram:
         psram_mb = int(m_psram.group(1))
 
-    # Some esptool versions print: "Detected flash size: 16MB" but no PSRAM line.
-    # Keep board unknown if PSRAM isn't found.
     mapping = cfg.get("usb_detection", {})
     board = None
     if psram_mb is not None:
@@ -127,6 +140,12 @@ def detect_usb_device(port: str, cfg: dict[str, Any]) -> UsbDevice:
         mapped = mapping.get(board_key)
         if mapped:
             board = norm_board(mapped)
+    elif psram_mb is None:
+        # No PSRAM detected — check fallback rules:
+        # "no_psram" key in usb_detection, or "default" key
+        fallback = mapping.get("no_psram") or mapping.get("default")
+        if fallback:
+            board = norm_board(fallback)
 
     return UsbDevice(port=port, board=board, psram_mb=psram_mb, chip=chip, detection_log=out)
 
@@ -284,11 +303,12 @@ def main() -> int:
 
     cfg = load_config((REPO_ROOT / args.config).resolve() if not os.path.isabs(args.config) else Path(args.config))
 
+    esptool = find_esptool()
     usb_ports = detect_usb_ports() if not args.ota_only else []
     usb_devices: list[UsbDevice] = []
     for port in usb_ports:
         try:
-            dev = detect_usb_device(port, cfg)
+            dev = detect_usb_device(port, cfg, esptool)
             usb_devices.append(dev)
         except Exception as e:
             usb_devices.append(UsbDevice(port=port, board=None, psram_mb=None, chip=None, detection_log=f"detection failed: {e}"))

@@ -21,7 +21,8 @@
   ],
   "usb_detection": {
     "psram_8mb": "tdeck-plus",
-    "psram_2mb": "heltec-v3"
+    "psram_2mb": "heltec-v3",
+    "no_psram": "heltec-v3"
   },
   "ota": {
     "url": "",
