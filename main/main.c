@@ -514,14 +514,16 @@ static void render_screen(ui_state_t *ui) {
                     y += LINE_H;
                 }
             } else {
-                /* OLED rotation (placeholder) */
+                /* OLED rotation */
                 display_draw_text(2, y, "OLED Rotation:");
                 y += LINE_H + 4;
                 static const char *rot_names[] = {"Normal", "180 deg"};
+                bool cur_rot = display_get_rotated_180();
                 for (int i = 0; i < 2; i++) {
                     char ml[32];
                     const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
-                    snprintf(ml, sizeof(ml), "%s %s", arrow, rot_names[i]);
+                    const char *mark = (i == (int)cur_rot) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, rot_names[i], mark);
                     display_draw_text(2, y, ml);
                     y += LINE_H;
                 }
@@ -750,6 +752,18 @@ void app_main(void)
     if (display_init() != 0) {
         ESP_LOGE(TAG, "Display init failed!");
     } else {
+        /* Restore saved OLED rotation from NVS */
+        {
+            nvs_handle_t nvs;
+            if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+                uint8_t rot = 0;
+                if (nvs_get_u8(nvs, "oled_rot", &rot) == ESP_OK && rot) {
+                    display_set_rotated_180(true);
+                    ESP_LOGI(TAG, "OLED rotation restored: 180 deg");
+                }
+                nvs_close(nvs);
+            }
+        }
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
         /* LVGL will handle its own rendering — just clear the display */
         ESP_LOGI(TAG, "=== BOOT STAGE: clear display for LVGL ===");
@@ -1100,7 +1114,20 @@ void app_main(void)
                 }
                 ui.screen_dirty = true;
             } else {
-                /* OLED rotation — placeholder, just exit edit */
+                /* OLED rotation */
+                bool new_rot = (ui.settings_cursor == 1);
+                bool old_rot = display_get_rotated_180();
+                if (new_rot != old_rot) {
+                    display_set_rotated_180(new_rot);
+                    /* Persist to NVS */
+                    nvs_handle_t nvs;
+                    if (nvs_open("bramble", NVS_READWRITE, &nvs) == ESP_OK) {
+                        nvs_set_u8(nvs, "oled_rot", new_rot ? 1 : 0);
+                        nvs_commit(nvs);
+                        nvs_close(nvs);
+                    }
+                    ESP_LOGI(TAG, "OLED rotation set to %s", new_rot ? "180 deg" : "Normal");
+                }
                 ui.screen_dirty = true;
             }
         }
