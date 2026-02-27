@@ -4,6 +4,28 @@
   gap: 0.9rem;
 }
 
+.formHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.formTitle {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.dirtyBadge {
+  font-size: 0.72rem;
+  color: #111;
+  background: #f2cc60;
+  border: 1px solid #d0a941;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font-weight: 700;
+}
+
 .field {
   display: flex;
   align-items: center;
@@ -16,10 +38,28 @@
   font-size: 0.85rem;
   min-width: 150px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.changedPill {
+  font-size: 0.68rem;
+  color: var(--accent-yellow, #d29922);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.02rem 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .input {
   width: 120px;
+}
+
+.inputWarning {
+  border-color: var(--warning);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent);
 }
 
 .select {
@@ -60,6 +100,23 @@
   min-width: 50px;
 }
 
+.fieldHintWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-left: 150px;
+}
+
+.hintText {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.warningText {
+  font-size: 0.8rem;
+  color: var(--warning);
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -79,12 +136,25 @@
   transition: opacity 0.15s;
 }
 
-.saveBtn:disabled {
+.revertBtn {
+  padding: 0.4rem 0.85rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saveBtn:disabled,
+.revertBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.saveBtn:hover:not(:disabled) {
+.saveBtn:hover:not(:disabled),
+.revertBtn:hover:not(:disabled) {
   opacity: 0.85;
 }
 

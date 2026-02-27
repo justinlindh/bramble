@@ -63,6 +63,10 @@ function PskPromptModal({
   );
 }
 
+function confirmChannelAction(action: 'Remove' | 'Set default', name: string): boolean {
+  return confirm(`${action} channel \"${name}\"?`);
+}
+
 export function ChannelManager({ channels }: ChannelManagerProps) {
   const [newName, setNewName] = useState('');
   const [newPsk, setNewPsk] = useState('');
@@ -101,7 +105,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
 
   // ── Remove channel ────────────────────────────────────────────────────────
   const handleRemove = async (index: number, name: string) => {
-    if (!confirm(`Remove channel "${name}"?`)) return;
+    if (!confirmChannelAction('Remove', name)) return;
     setError('');
     try {
       await removeChannel(index);
@@ -111,7 +115,8 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
   };
 
   // ── Set default ───────────────────────────────────────────────────────────
-  const handleSetDefault = async (index: number) => {
+  const handleSetDefault = async (index: number, name: string) => {
+    if (!confirmChannelAction('Set default', name)) return;
     setError('');
     try {
       await setDefaultChannel(index);
@@ -196,7 +201,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
               {!ch.isDefault && (
                 <button
                   className={styles.setDefaultBtn}
-                  onClick={() => handleSetDefault(ch.index)}
+                  onClick={() => handleSetDefault(ch.index, ch.name)}
                   title="Set as default channel"
                 >
                   Set default

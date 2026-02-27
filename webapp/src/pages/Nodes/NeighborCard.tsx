@@ -54,6 +54,12 @@ function isLocationFresh(loc: PeerLocation): boolean {
   return Date.now() - loc.lastUpdatedMs < 30 * 60 * 1000;
 }
 
+const STALE_NEIGHBOR_THRESHOLD_MS = 10 * 60 * 1000;
+
+function isNeighborStale(lastHeardMs: number): boolean {
+  return lastHeardMs > STALE_NEIGHBOR_THRESHOLD_MS;
+}
+
 export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: NeighborCardProps) {
   const [expanded, setExpanded] = useState(false);
   const peerName = useStore(s => s.peerNames.get(neighbor.addr));
@@ -61,10 +67,11 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
   const pdr = pdrPercent(neighbor.deliveryRate);
   const barPct = rssiBarPct(neighbor.rssi);
   const hasFreshLocation = !!peerLocation && isLocationFresh(peerLocation);
+  const stale = isNeighborStale(neighbor.lastHeardMs);
 
   return (
     <article
-      className={`${styles.card} ${styles[health]}`}
+      className={`${styles.card} ${styles[health]} ${stale ? styles.staleCard : ''}`}
       onClick={() => setExpanded((e) => !e)}
       role="button"
       tabIndex={0}
@@ -99,6 +106,12 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
         <span title="Packet Delivery Rate">PDR: {pdr}%</span>
         <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr?.toFixed(1)} dB</span>
         <span title="Last heard"><IconClock size={13} /> {formatAgo(neighbor.lastHeardMs)}</span>
+        <span
+          className={stale ? styles.badgeStale : styles.badgeActive}
+          title={stale ? 'Neighbor not heard from in over 10 minutes' : 'Neighbor heard from recently'}
+        >
+          {stale ? 'Stale' : 'Active'}
+        </span>
         {hasFreshLocation ? (
           <button
             className={styles.badgeLocation}

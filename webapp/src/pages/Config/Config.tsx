@@ -5,7 +5,7 @@ import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
 import { LocationSection } from './LocationSection';
 import { TrafficDebugSection } from './TrafficDebugSection';
-import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning } from '../../components/Icons';
+import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase } from '../../components/Icons';
 import { messageDb } from '../../store/messageDb';
 import styles from './Config.module.css';
 
@@ -69,7 +69,7 @@ export function Config() {
 
       {/* ── Data ── */}
       <section className={styles.section}>
-        <h2><IconWarning size={18} /> Data</h2>
+        <h2><IconDatabase size={18} /> Data</h2>
         <button className={styles.dangerBtn} onClick={handleClearHistory}>Clear Message History</button>
         <p className={styles.hint}>Removes all cached messages from this browser. Does not affect the node.</p>
       </section>
