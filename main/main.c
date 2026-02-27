@@ -6,6 +6,7 @@
 #include "nvs_flash.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "display.h"
 #include "button.h"
 #include "ui.h"
@@ -985,16 +986,29 @@ void app_main(void)
     esp_timer_start_periodic(tick_timer, 1000);
     
     /* Create LVGL task on core 1 (core 0 runs mesh).
-     * NOTE: xTaskCreatePinnedToCore silently returns pdFAIL on OOM —
-     * always check the return value. Internal RAM exhaustion is the common
-     * failure mode on T-Deck Plus; if this fails, display stays blank. */
+     *
+     * CRITICAL: Allocate the task stack from PSRAM, not internal RAM.
+     * xTaskCreatePinnedToCore allocates the stack from internal RAM by default.
+     * With only ~22KB free internal RAM at this point, a 16KB stack allocation
+     * fails (needs contiguous block + TCB overhead). Using xTaskCreateStatic
+     * with a PSRAM-allocated stack avoids this entirely.
+     */
+    #define UI_GFX_STACK_SIZE 16384
+    static StaticTask_t ui_gfx_tcb;
+    StackType_t *ui_gfx_stack = heap_caps_malloc(UI_GFX_STACK_SIZE * sizeof(StackType_t),
+                                                  MALLOC_CAP_SPIRAM);
     TaskHandle_t ui_task_handle = NULL;
-    BaseType_t ui_task_ret = xTaskCreatePinnedToCore(
-        ui_graphics_task, "ui_gfx", 16384, NULL, 5, &ui_task_handle, 1);
-    if (ui_task_ret != pdPASS) {
-        ESP_LOGE(TAG, "FAILED to create ui_gfx task — internal RAM exhausted "
-                 "(free: %lu bytes). Display will be blank.",
-                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    if (ui_gfx_stack) {
+        ui_task_handle = xTaskCreateStaticPinnedToCore(
+            ui_graphics_task, "ui_gfx", UI_GFX_STACK_SIZE,
+            NULL, 5, ui_gfx_stack, &ui_gfx_tcb, 1);
+        if (!ui_task_handle) {
+            ESP_LOGE(TAG, "FAILED to create ui_gfx task (xTaskCreateStatic returned NULL)");
+        } else {
+            ESP_LOGI(TAG, "ui_gfx task created (stack in PSRAM, %d bytes)", UI_GFX_STACK_SIZE * (int)sizeof(StackType_t));
+        }
+    } else {
+        ESP_LOGE(TAG, "FAILED to allocate ui_gfx stack from PSRAM — display will be blank");
     }
 #else
     /* Init text UI state machine (Heltec and other non-graphical boards) */
