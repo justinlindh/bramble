@@ -5,12 +5,14 @@ import { NeighborCard } from './NeighborCard';
 import { RouteTable } from './RouteTable';
 import { IconNodes, IconRoutes } from '../../components/Icons';
 import styles from './Nodes.module.css';
+import { buildKnownPeers } from './knownPeers';
 
 export function Nodes() {
   const neighbors = useStore((s) => s.neighbors);
   const routes = useStore((s) => s.routes);
   const peerLocations = useStore((s) => s.peerLocations);
   const connected = useStore((s) => s.connectionState === 'connected');
+  const knownPeers = buildKnownPeers(neighbors, routes, peerLocations);
 
   // Auto-refresh: neighbors every 5s, routes every 10s, peer locations every 10s
   usePoll(loadNeighbors, 5000);
@@ -29,11 +31,16 @@ export function Nodes() {
       </header>
 
       {neighbors.length === 0 ? (
-        <p className={styles.empty}>
-          {connected
-            ? 'No neighbors discovered yet. Are other Bramble nodes nearby?'
-            : 'Connect to a node to see neighbors.'}
-        </p>
+        <div>
+          <p className={styles.empty}>
+            {connected
+              ? 'No direct radio neighbors discovered yet.'
+              : 'Connect to a node to see neighbors.'}
+          </p>
+          {connected && knownPeers.length > 0 && (
+            <p className={styles.empty}>Known nodes (from routes/location telemetry): {knownPeers.length}</p>
+          )}
+        </div>
       ) : (
         <div className={styles.cardGrid}>
           {neighbors.map((n) => (
