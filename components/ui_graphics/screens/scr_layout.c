@@ -125,6 +125,7 @@ bramble_layout_t *layout_create(void) {
 }
 
 void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
+    layout->in_dm_view = false;
     if (tab >= TAB_COUNT) return;
     
     for (int i = 0; i < TAB_COUNT; i++) {

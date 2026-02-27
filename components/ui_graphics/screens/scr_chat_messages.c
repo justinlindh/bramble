@@ -81,6 +81,7 @@ static void back_click_cb(lv_event_t *e) {
     s_compose_ta = NULL;
     s_title = NULL;
     s_selected_packet_id = 0;
+    layout->in_dm_view = false;
     scr_chat_list_create(layout);
 }
 
@@ -359,6 +360,7 @@ static void render_messages_for_target(void) {
 
 static void open_with_target(bramble_layout_t *layout, chat_target_t target, int clear_channel_idx) {
     s_target = target;
+    layout->in_dm_view = true;
     s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
     s_selected_packet_id = 0;
 
