@@ -1,29 +1,19 @@
 #include "scr_map.h"
+#include "ui_shared_state.h"
 #include "theme/bramble_theme.h"
 #include "location.h"
 #include "routing.h"
-#include "airtime_budget.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <math.h>
 
-/* Mesh shared state — same pattern as scr_nodes.c to avoid main dependency */
-typedef struct {
-    neighbor_table_t neighbors;
-    uint32_t         beacon_tx_count;
-    uint32_t         beacon_rx_count;
-    uint32_t         packets_tx;
-    uint32_t         packets_rx;
-    bool             radio_ok;
-    int16_t          last_rx_rssi;
-    int8_t           last_rx_snr;
-    airtime_budget_t airtime;
-} ui_map_mesh_state_t;
-
-extern void mesh_get_state(ui_map_mesh_state_t *out);
-extern void mesh_get_location_state(location_manager_t *out);
 
 static const char *TAG = "scr_map";
+static uint32_t s_focus_peer_addr = 0;
+
+void scr_map_set_focus_peer(uint32_t peer_addr) {
+    s_focus_peer_addr = peer_addr;
+}
 
 /* Simple Mercator-like projection helpers */
 static void lat_lon_to_pixel(double lat, double lon, 
@@ -85,12 +75,10 @@ void scr_map_create(bramble_layout_t *layout) {
     lv_obj_t *cont = layout_get_content(layout);
     
     /* Get location state */
-    static location_manager_t loc_state;
-    mesh_get_location_state(&loc_state);
+    const location_manager_t *loc_state = ui_shared_location_state();
     
     /* Get neighbor state for names */
-    static ui_map_mesh_state_t mesh_state;
-    mesh_get_state(&mesh_state);
+    const ui_mesh_state_t *mesh_state = ui_shared_mesh_state();
     
     /* Title */
     lv_obj_t *title = lv_label_create(cont);
@@ -101,7 +89,7 @@ void scr_map_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_top(title, 4, 0);
     
     /* Check if we have valid self position */
-    bramble_position_t *self_pos = &loc_state.my_position;
+    const bramble_position_t *self_pos = &loc_state->my_position;
     bool has_self = self_pos->valid;
     
     if (!has_self) {
@@ -164,8 +152,9 @@ void scr_map_create(bramble_layout_t *layout) {
     
     /* Draw peer positions from cache */
     int peer_count = 0;
-    for (int i = 0; i < loc_state.cache_count && i < LOCATION_MAX_CONTACTS; i++) {
-        const location_cache_entry_t *entry = &loc_state.cache[i];
+    bool focused_peer_visible = false;
+    for (int i = 0; i < loc_state->cache_count && i < LOCATION_MAX_CONTACTS; i++) {
+        const location_cache_entry_t *entry = &loc_state->cache[i];
         if (!entry->active || !entry->pos.valid) continue;
         
         double peer_lat = entry->pos.latitude_e7 / 1e7;
@@ -176,10 +165,10 @@ void scr_map_create(bramble_layout_t *layout) {
         
         /* Find peer name from neighbor table */
         const char *peer_name = NULL;
-        for (int j = 0; j < mesh_state.neighbors.count && j < MAX_NEIGHBORS; j++) {
-            if (mesh_state.neighbors.entries[j].addr == entry->peer_addr) {
-                if (mesh_state.neighbors.entries[j].name[0]) {
-                    peer_name = mesh_state.neighbors.entries[j].name;
+        for (int j = 0; j < mesh_state->neighbors.count && j < MAX_NEIGHBORS; j++) {
+            if (mesh_state->neighbors.entries[j].addr == entry->peer_addr) {
+                if (mesh_state->neighbors.entries[j].name[0]) {
+                    peer_name = mesh_state->neighbors.entries[j].name;
                 }
                 break;
             }
@@ -193,7 +182,11 @@ void scr_map_create(bramble_layout_t *layout) {
             snprintf(label, sizeof(label), "%04lX", (unsigned long)(entry->peer_addr & 0xFFFF));
         }
         
-        create_marker(map_cont, px + 4, py + 4, lv_color_hex(0x00CC00), label);
+        lv_color_t marker_color = (entry->peer_addr == s_focus_peer_addr) ? BR_COLOR_ACCENT : lv_color_hex(0x00CC00);
+        create_marker(map_cont, px + 4, py + 4, marker_color, label);
+        if (entry->peer_addr == s_focus_peer_addr) {
+            focused_peer_visible = true;
+        }
         peer_count++;
     }
     
@@ -208,6 +201,16 @@ void scr_map_create(bramble_layout_t *layout) {
     lv_obj_set_style_bg_opa(count_lbl, LV_OPA_70, 0);
     lv_obj_set_style_pad_all(count_lbl, 2, 0);
     lv_obj_align(count_lbl, LV_ALIGN_BOTTOM_LEFT, 2, -2);
+
+    if (s_focus_peer_addr != 0 && !focused_peer_visible) {
+        char focus_info[160];
+        snprintf(focus_info, sizeof(focus_info),
+                 "Lat: %.6f  Lon: %.6f  Acc: %um  |  %08lX no location",
+                 center_lat, center_lon, self_pos->accuracy_m,
+                 (unsigned long)s_focus_peer_addr);
+        lv_label_set_text(info_lbl, focus_info);
+        lv_obj_set_style_text_color(info_lbl, BR_COLOR_WARNING, 0);
+    }
     
     ESP_LOGI(TAG, "Map created: center=(%.6f, %.6f), peers=%d", center_lat, center_lon, peer_count);
 }

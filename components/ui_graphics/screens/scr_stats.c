@@ -1,4 +1,5 @@
 #include "scr_stats.h"
+#include "ui_shared_state.h"
 #include "scr_traffic.h"
 #include "theme/bramble_theme.h"
 #include "routing.h"
@@ -15,20 +16,6 @@
 
 static const char *TAG = "scr_stats";
 
-/* Duplicate mesh state struct (mesh_task.h is in main, not component) */
-typedef struct {
-    neighbor_table_t neighbors;
-    uint32_t         beacon_tx_count;
-    uint32_t         beacon_rx_count;
-    uint32_t         packets_tx;
-    uint32_t         packets_rx;
-    bool             radio_ok;
-    int16_t          last_rx_rssi;
-    int8_t           last_rx_snr;
-    airtime_budget_t airtime;
-} ui_mesh_state_t;
-
-extern void mesh_get_state(ui_mesh_state_t *out);
 extern void mesh_get_routes(routing_table_t *out);
 extern traffic_debug_t *mesh_get_traffic_debug(void);
 
@@ -276,8 +263,9 @@ void scr_stats_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_all(cont, BR_PADDING, 0);
     lv_obj_set_style_pad_row(cont, 6, 0);
 
-    static ui_mesh_state_t state;
-    mesh_get_state(&state);
+    const ui_mesh_state_t *state = ui_shared_mesh_state();
+
+
 
     routing_table_t routes;
     mesh_get_routes(&routes);
@@ -286,8 +274,8 @@ void scr_stats_create(bramble_layout_t *layout) {
     uint8_t reach_hops[MAX_NEIGHBORS + MAX_ROUTES];
     int reach_count = 0;
 
-    for (int i = 0; i < state.neighbors.count && reach_count < (MAX_NEIGHBORS + MAX_ROUTES); i++) {
-        const neighbor_entry_t *n = &state.neighbors.entries[i];
+    for (int i = 0; i < state->neighbors.count && reach_count < (MAX_NEIGHBORS + MAX_ROUTES); i++) {
+        const neighbor_entry_t *n = &state->neighbors.entries[i];
         reach_addrs[reach_count] = n->addr;
         reach_hops[reach_count] = 1;
         reach_count++;
@@ -333,18 +321,18 @@ void scr_stats_create(bramble_layout_t *layout) {
 
     uint32_t air_used_ms = 0;
     for (int i = 0; i < 3; i++) {
-        uint32_t max_ms = state.airtime.max_ms[i];
-        uint32_t remaining_ms = state.airtime.tokens_ms[i];
+        uint32_t max_ms = state->airtime.max_ms[i];
+        uint32_t remaining_ms = state->airtime.tokens_ms[i];
         if (max_ms > remaining_ms) {
             air_used_ms += (max_ms - remaining_ms);
         }
     }
 
     stats_snapshot_t curr = {
-        .tx = state.packets_tx,
-        .rx = state.packets_rx,
+        .tx = state->packets_tx,
+        .rx = state->packets_rx,
         .dropped = dropped,
-        .neighbors = (uint32_t)state.neighbors.count,
+        .neighbors = (uint32_t)state->neighbors.count,
         .routes = (uint32_t)route_count(&routes),
         .air_used_ms = air_used_ms,
     };
@@ -405,11 +393,11 @@ void scr_stats_create(bramble_layout_t *layout) {
     lv_obj_t *radio_lbl = lv_label_create(cont);
     char radio_buf[48];
     snprintf(radio_buf, sizeof(radio_buf), "Radio: %s  Last RSSI: %ddBm",
-             state.radio_ok ? "OK" : "ERROR", state.last_rx_rssi);
+             state->radio_ok ? "OK" : "ERROR", state->last_rx_rssi);
     lv_label_set_text(radio_lbl, radio_buf);
     lv_obj_set_style_text_font(radio_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(radio_lbl,
-                                state.radio_ok ? BR_COLOR_TEXT_SEC : BR_COLOR_DANGER, 0);
+                                state->radio_ok ? BR_COLOR_TEXT_SEC : BR_COLOR_DANGER, 0);
 
     lv_obj_t *sep = lv_obj_create(cont);
     lv_obj_set_size(sep, 296, 1);
@@ -470,18 +458,18 @@ void scr_stats_create(bramble_layout_t *layout) {
     lv_obj_set_style_text_color(air_title, BR_COLOR_TEXT_SEC, 0);
 
     create_airtime_row(cont, "Critical",
-                       state.airtime.tokens_ms[1],
-                       state.airtime.max_ms[1],
+                       state->airtime.tokens_ms[1],
+                       state->airtime.max_ms[1],
                        BR_COLOR_CRITICAL);
 
     create_airtime_row(cont, "Normal",
-                       state.airtime.tokens_ms[0],
-                       state.airtime.max_ms[0],
+                       state->airtime.tokens_ms[0],
+                       state->airtime.max_ms[0],
                        BR_COLOR_PRIMARY);
 
     create_airtime_row(cont, "Broadcast",
-                       state.airtime.tokens_ms[2],
-                       state.airtime.max_ms[2],
+                       state->airtime.tokens_ms[2],
+                       state->airtime.max_ms[2],
                        BR_COLOR_WARNING);
 
     lv_obj_t *sep3 = lv_obj_create(cont);

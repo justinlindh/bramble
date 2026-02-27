@@ -14,6 +14,8 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_chat_compose.c"
         "screens/scr_channel_create.c"
         "screens/scr_nodes.c"
+        "screens/scr_node_detail.c"
+        "screens/ui_shared_state.c"
         "screens/scr_map.c"
         "screens/scr_stats.c"
         "screens/scr_traffic.c"
