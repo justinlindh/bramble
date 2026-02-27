@@ -1,29 +1,51 @@
 #include "scr_nodes.h"
+#include "scr_node_detail.h"
+#include "ui_shared_state.h"
 #include "theme/bramble_theme.h"
-#include "routing.h"
-#include "airtime_budget.h"
+#include "location.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
 
 static const char *TAG = "scr_nodes";
 
-/* Mesh shared state — we need the full struct definition to call mesh_get_state */
+extern void mesh_get_location_state(location_manager_t *out);
+
+/* Per-card context for drill-down click handler */
 typedef struct {
-    neighbor_table_t neighbors;
-    uint32_t         beacon_tx_count;
-    uint32_t         beacon_rx_count;
-    uint32_t         packets_tx;
-    uint32_t         packets_rx;
-    bool             radio_ok;
-    int16_t          last_rx_rssi;
-    int8_t           last_rx_snr;
-    airtime_budget_t airtime;
-} ui_mesh_state_t;
+    bramble_layout_t *layout;
+    neighbor_entry_t  neighbor;
+    uint32_t          now_ms;
+} node_card_ctx_t;
 
-extern void mesh_get_state(ui_mesh_state_t *out);
+#define MAX_CARD_CTX 16
+static node_card_ctx_t s_card_ctx[MAX_CARD_CTX];
+static int s_card_ctx_count = 0;
 
-static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32_t now_ms) {
+static void node_open_cb(lv_event_t *e) {
+    node_card_ctx_t *ctx = (node_card_ctx_t *)lv_event_get_user_data(e);
+    if (!ctx || !ctx->layout) return;
+
+    /* Look up peer location from location cache */
+    static location_manager_t loc;
+    mesh_get_location_state(&loc);
+
+    bool has_loc = false;
+    location_cache_entry_t loc_entry = {0};
+    for (int i = 0; i < loc.cache_count && i < LOCATION_MAX_CONTACTS; i++) {
+        if (loc.cache[i].active && loc.cache[i].peer_addr == ctx->neighbor.addr) {
+            has_loc = true;
+            loc_entry = loc.cache[i];
+            break;
+        }
+    }
+
+    lv_obj_clean(layout_get_content(ctx->layout));
+    scr_node_detail_open(ctx->layout, &ctx->neighbor, has_loc, &loc_entry, ctx->now_ms);
+}
+
+static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n,
+                             uint32_t now_ms, bramble_layout_t *layout) {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_width(card, LV_PCT(100));
     lv_obj_set_height(card, 48);
@@ -33,13 +55,23 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     lv_obj_set_style_border_width(card, 0, 0);
     lv_obj_set_style_pad_all(card, 6, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    
+
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(card, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_opa(card, LV_OPA_30, LV_STATE_FOCUSED);
+
+    /* Set up drill-down click handler */
+    if (s_card_ctx_count < MAX_CARD_CTX) {
+        node_card_ctx_t *ctx = &s_card_ctx[s_card_ctx_count++];
+        ctx->layout = layout;
+        ctx->neighbor = *n;
+        ctx->now_ms = now_ms;
+        lv_obj_add_event_cb(card, node_open_cb, LV_EVENT_CLICKED, ctx);
+    }
+
     lv_group_t *g = lv_group_get_default();
     if (g) lv_group_add_obj(g, card);
-    
+
     /* Node name or address */
     lv_obj_t *name_lbl = lv_label_create(card);
     if (n->name[0]) {
@@ -55,9 +87,10 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(name_lbl, 0, 0);
 
-    /* Info line: rssi, last heard */
+    /* Info line */
     char info[48];
     uint32_t age_s = (now_ms - n->last_heard) / 1000;
+    (void)age_s;
     snprintf(info, sizeof(info), "%ddBm  SNR:%d", n->rssi, n->snr);
     lv_obj_t *info_lbl = lv_label_create(card);
     lv_label_set_text(info_lbl, info);
@@ -66,8 +99,8 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     lv_obj_set_width(info_lbl, LV_PCT(68));
     lv_label_set_long_mode(info_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(info_lbl, 0, 20);
-    
-    /* Signal strength bar */
+
+    /* Signal bar */
     lv_obj_t *bar = lv_bar_create(card);
     lv_obj_set_size(bar, 40, 8);
     lv_obj_align(bar, LV_ALIGN_TOP_RIGHT, -40, 4);
@@ -77,9 +110,9 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
     lv_bar_set_value(bar, pct, LV_ANIM_OFF);
-    
-    /* Online/stale dot */
-    bool online = age_s < 600;  /* 10 minutes */
+
+    /* Online dot */
+    bool online = age_s < 600;
     lv_obj_t *dot = lv_obj_create(card);
     lv_obj_set_size(dot, 8, 8);
     lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, 0, 6);
@@ -91,14 +124,15 @@ static void create_node_card(lv_obj_t *parent, const neighbor_entry_t *n, uint32
 
 void scr_nodes_create(bramble_layout_t *layout) {
     lv_obj_t *cont = layout_get_content(layout);
-    
-    /* Get mesh state snapshot */
-    static ui_mesh_state_t state;  /* static — 1.8KB, avoid stack */
-    mesh_get_state(&state);
-    
+
+    const ui_mesh_state_t *state = ui_shared_mesh_state();
+
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    int count = state.neighbors.count;
-    
+    int count = state->neighbors.count;
+
+    /* Reset card context pool */
+    s_card_ctx_count = 0;
+
     char title_buf[32];
     snprintf(title_buf, sizeof(title_buf), "Nodes (%d peer%s)", count, count != 1 ? "s" : "");
     lv_obj_t *title = lv_label_create(cont);
@@ -107,7 +141,7 @@ void scr_nodes_create(bramble_layout_t *layout) {
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
     lv_obj_set_style_pad_left(title, BR_PADDING, 0);
     lv_obj_set_style_pad_top(title, 4, 0);
-    
+
     lv_obj_t *list = lv_obj_create(cont);
     lv_obj_set_width(list, LV_PCT(100));
     lv_obj_set_height(list, BR_CONTENT_H - 24);
@@ -117,8 +151,8 @@ void scr_nodes_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_all(list, 4, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 4, 0);
-    lv_obj_set_scroll_dir(list, LV_DIR_VER);  /* Prevent horizontal scroll */
-    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);  /* Hide stray bars */
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
 
     if (count == 0) {
         lv_obj_t *empty = lv_label_create(list);
@@ -128,10 +162,10 @@ void scr_nodes_create(bramble_layout_t *layout) {
         lv_obj_center(empty);
         return;
     }
-    
+
     for (int i = 0; i < count && i < MAX_NEIGHBORS; i++) {
-        const neighbor_entry_t *n = &state.neighbors.entries[i];
+        const neighbor_entry_t *n = &state->neighbors.entries[i];
         if (n->addr == 0) continue;
-        create_node_card(list, n, now_ms);
+        create_node_card(list, n, now_ms, layout);
     }
 }

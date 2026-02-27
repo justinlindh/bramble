@@ -1,4 +1,5 @@
 #include "scr_layout.h"
+#include "ui_shared_state.h"
 #include "scr_chat_list.h"
 #include "scr_nodes.h"
 #include "scr_map.h"
@@ -14,20 +15,6 @@
 static const char *TAG = "layout";
 static bramble_layout_t s_layout;
 
-/* Duplicate mesh state struct (mesh_task.h is in main, not component) */
-typedef struct {
-    neighbor_table_t neighbors;
-    uint32_t         beacon_tx_count;
-    uint32_t         beacon_rx_count;
-    uint32_t         packets_tx;
-    uint32_t         packets_rx;
-    bool             radio_ok;
-    int16_t          last_rx_rssi;
-    int8_t           last_rx_snr;
-    airtime_budget_t airtime;
-} ui_mesh_state_t;
-
-extern void mesh_get_state(ui_mesh_state_t *out);
 
 static const char *tab_labels[TAB_COUNT] = {
     LV_SYMBOL_ENVELOPE " Chat",
@@ -202,9 +189,10 @@ void layout_update_status(bramble_layout_t *layout) {
     }
 
     /* Neighbor count (signal strength indicator) */
-    static ui_mesh_state_t state;
-    mesh_get_state(&state);
-    snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", state.neighbors.count);
+    const ui_mesh_state_t *state = ui_shared_mesh_state();
+
+
+    snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", state->neighbors.count);
     lv_label_set_text(layout->lbl_signal, buf);
 
     /* Node name - keeping static "BRAMBLE" for now */
