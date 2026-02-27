@@ -7,10 +7,15 @@ import { IconNodes, IconRoutes } from '../../components/Icons';
 import styles from './Nodes.module.css';
 import { buildKnownPeers } from './knownPeers';
 
+function formatAddr(addr: number): string {
+  return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+}
+
 export function Nodes() {
   const neighbors = useStore((s) => s.neighbors);
   const routes = useStore((s) => s.routes);
   const peerLocations = useStore((s) => s.peerLocations);
+  const peerNames = useStore((s) => s.peerNames);
   const connected = useStore((s) => s.connectionState === 'connected');
   const knownPeers = buildKnownPeers(neighbors, routes, peerLocations);
 
@@ -31,22 +36,59 @@ export function Nodes() {
       </header>
 
       {neighbors.length === 0 ? (
-        <div>
-          <p className={styles.empty}>
-            {connected
-              ? 'No direct radio neighbors discovered yet.'
-              : 'Connect to a node to see neighbors.'}
-          </p>
-          {connected && knownPeers.length > 0 && (
-            <p className={styles.empty}>Known nodes (from routes/location telemetry): {knownPeers.length}</p>
-          )}
-        </div>
+        <p className={styles.empty}>
+          {connected
+            ? 'No direct radio neighbors discovered yet.'
+            : 'Connect to a node to see neighbors.'}
+        </p>
       ) : (
         <div className={styles.cardGrid}>
           {neighbors.map((n) => (
             <NeighborCard key={n.addr} neighbor={n} peerLocation={peerLocations.find(l => l.addr === n.addr)} onOpenDM={openDM} onShowOnMap={showOnMap} />
           ))}
         </div>
+      )}
+
+      {connected && knownPeers.length > 0 && (
+        <section>
+          <header className={styles.sectionHeader}>
+            <h2>Known peers</h2>
+            <span className={styles.count}>{knownPeers.length}</span>
+          </header>
+          <p className={styles.empty}>Known from routing and location telemetry. Live neighbors are marked below.</p>
+          <ul className={styles.knownList}>
+            {knownPeers.map((peer) => {
+              const name = peer.peerLocation?.name?.trim() || peerNames.get(peer.addr);
+              const canShowOnMap = Boolean(peer.peerLocation?.position);
+              return (
+                <li key={peer.addr} className={styles.knownRow}>
+                  <div className={styles.knownIdentity}>
+                    <strong>{name || formatAddr(peer.addr)}</strong>
+                    <span className={styles.knownAddr}>{formatAddr(peer.addr)}</span>
+                  </div>
+                  <div className={styles.knownSource}>
+                    {peer.hasNeighbor ? (
+                      <span className={styles.liveBadge}>Live neighbor</span>
+                    ) : (
+                      <span className={styles.knownBadge}>Known only</span>
+                    )}
+                    <span className={styles.knownMeta}>
+                      {peer.hasRoute ? 'route' : ''}
+                      {peer.hasRoute && peer.peerLocation ? ' + ' : ''}
+                      {peer.peerLocation ? 'location' : ''}
+                    </span>
+                  </div>
+                  <div className={styles.knownActions}>
+                    <button type="button" className={styles.rowBtn} onClick={() => openDM(peer.addr)}>DM</button>
+                    {canShowOnMap && (
+                      <button type="button" className={styles.rowBtn} onClick={() => showOnMap(peer.addr)}>Show on map</button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
 
       {/* ── Route table ── */}

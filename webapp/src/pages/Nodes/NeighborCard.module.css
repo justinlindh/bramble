@@ -14,6 +14,11 @@
   background: var(--surface-2);
 }
 
+.staleCard {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+
 /* Health color coding — left accent border */
 .good {
   border-left: 3px solid #3fb950;
@@ -95,6 +100,26 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text-muted);
+}
+
+.badgeActive {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #3fb950;
+  border-radius: 4px;
+  background: #1f6f3b33;
+  color: #2ea043;
+  font-weight: 600;
+}
+
+.badgeStale {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #d29922;
+  border-radius: 4px;
+  background: #d2992233;
+  color: #f0b84f;
+  font-weight: 600;
 }
 
 .badgeLocation {

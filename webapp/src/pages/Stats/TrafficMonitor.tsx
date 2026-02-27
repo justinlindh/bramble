@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store/index';
 import { loadTrafficDebugStatus, loadTrafficEvents } from '../../store/actions';
+import { usePoll } from '../../hooks/usePoll';
 import type { TrafficEvent, TrafficCategory, TrafficDirection, AirtimeBucket } from '../../types/bramble';
 import styles from './TrafficMonitor.module.css';
 
@@ -9,6 +10,46 @@ interface RollingMetrics {
   categoryBreakdown: Record<TrafficCategory, number>;
   bucketBreakdown: Record<AirtimeBucket, number>;
   eventCount: number;
+}
+
+const TRAFFIC_FILTERS_KEY = 'bramble:traffic-monitor:filters';
+
+type TrafficFilterState = {
+  category: TrafficCategory | 'all';
+  direction: TrafficDirection | 'all';
+  bucket: AirtimeBucket | 'all';
+};
+
+const CATEGORY_FILTER_VALUES: TrafficFilterState['category'][] = ['all', 'beacon', 'timesync', 'routing', 'ack', 'chat', 'maintenance', 'other'];
+const DIRECTION_FILTER_VALUES: TrafficFilterState['direction'][] = ['all', 'tx', 'rx'];
+const BUCKET_FILTER_VALUES: TrafficFilterState['bucket'][] = ['all', 'broadcast', 'normal', 'critical'];
+
+function isValidFilterValue<T extends string>(value: unknown, allowed: readonly T[]): value is T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value);
+}
+
+function loadPersistedFilters(): TrafficFilterState {
+  const fallback: TrafficFilterState = { category: 'all', direction: 'all', bucket: 'all' };
+  try {
+    const raw = localStorage.getItem(TRAFFIC_FILTERS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<TrafficFilterState>;
+    return {
+      category: isValidFilterValue(parsed.category, CATEGORY_FILTER_VALUES) ? parsed.category : 'all',
+      direction: isValidFilterValue(parsed.direction, DIRECTION_FILTER_VALUES) ? parsed.direction : 'all',
+      bucket: isValidFilterValue(parsed.bucket, BUCKET_FILTER_VALUES) ? parsed.bucket : 'all',
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function savePersistedFilters(filters: TrafficFilterState): void {
+  try {
+    localStorage.setItem(TRAFFIC_FILTERS_KEY, JSON.stringify(filters));
+  } catch {
+    // noop
+  }
 }
 
 function computeMetrics(events: TrafficEvent[], windowMs: number): RollingMetrics {
@@ -94,17 +135,35 @@ export function TrafficMonitor() {
   const trafficEvents = useStore((s) => s.trafficEvents);
   const isConnected = useStore((s) => s.connectionState === 'connected');
 
-  const [categoryFilter, setCategoryFilter] = useState<TrafficCategory | 'all'>('all');
-  const [directionFilter, setDirectionFilter] = useState<TrafficDirection | 'all'>('all');
-  const [bucketFilter, setBucketFilter] = useState<AirtimeBucket | 'all'>('all');
+  const persistedFilters = useMemo(() => loadPersistedFilters(), []);
+  const [categoryFilter, setCategoryFilter] = useState<TrafficCategory | 'all'>(persistedFilters.category);
+  const [directionFilter, setDirectionFilter] = useState<TrafficDirection | 'all'>(persistedFilters.direction);
+  const [bucketFilter, setBucketFilter] = useState<AirtimeBucket | 'all'>(persistedFilters.bucket);
+
+  usePoll(
+    () => {
+      if (!isConnected) return;
+      return loadTrafficDebugStatus();
+    },
+    5000,
+  );
+
+  usePoll(
+    () => {
+      if (!isConnected) return;
+      const highestSeq = trafficEvents.length > 0 ? trafficEvents[trafficEvents.length - 1].seq : undefined;
+      return loadTrafficEvents(highestSeq);
+    },
+    2000,
+  );
 
   useEffect(() => {
-    if (!isConnected) return;
-    void loadTrafficDebugStatus();
-
-    const highestSeq = trafficEvents.length > 0 ? Math.max(...trafficEvents.map((e) => e.seq)) : undefined;
-    void loadTrafficEvents(highestSeq);
-  }, [isConnected]);
+    savePersistedFilters({
+      category: categoryFilter,
+      direction: directionFilter,
+      bucket: bucketFilter,
+    });
+  }, [categoryFilter, directionFilter, bucketFilter]);
 
   const filteredEvents = useMemo(
     () =>

@@ -319,6 +319,17 @@ export function IconMap({ size = 16, className }: IconProps) {
   );
 }
 
+/** 🗄️ Database / storage */
+export function IconDatabase({ size = 16, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <ellipse cx="12" cy="5" rx="8" ry="3" />
+      <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+      <path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" />
+    </Svg>
+  );
+}
+
 /** ⚠️ Warning / alert triangle */
 export function IconWarning({ size = 16, className }: IconProps) {
   return (
