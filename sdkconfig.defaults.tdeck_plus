@@ -52,6 +52,11 @@ CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
 # explicitly and is unaffected by this setting.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 
-# Use clib malloc for LVGL (routed to PSRAM via SPIRAM_USE_MALLOC above)
+# Use custom malloc for LVGL that explicitly targets PSRAM via heap_caps_malloc.
+# LV_USE_CLIB_MALLOC uses plain malloc() which can trigger TLSF assert when
+# internal RAM (~5KB) is nearly exhausted, even with SPIRAM_MALLOC_ALWAYSINTERNAL=0.
+# The custom allocator in lv_malloc_psram.c uses heap_caps_malloc(MALLOC_CAP_SPIRAM)
+# to guarantee LVGL widget allocations go to PSRAM, not internal RAM.
 CONFIG_LV_USE_BUILTIN_MALLOC=n
-CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_MALLOC=n
+CONFIG_LV_USE_CUSTOM_MALLOC=y

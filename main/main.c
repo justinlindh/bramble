@@ -987,28 +987,26 @@ void app_main(void)
     
     /* Create LVGL task on core 1 (core 0 runs mesh).
      *
-     * CRITICAL: Allocate the task stack from PSRAM, not internal RAM.
-     * xTaskCreatePinnedToCore allocates the stack from internal RAM by default.
-     * With only ~22KB free internal RAM at this point, a 16KB stack allocation
-     * fails (needs contiguous block + TCB overhead). Using xTaskCreateStatic
-     * with a PSRAM-allocated stack avoids this entirely.
+     * IMPORTANT constraints:
+     * 1. Stack MUST be in internal RAM — LVGL callbacks (Settings screen)
+     *    do NVS reads which trigger SPI flash operations. ESP-IDF asserts
+     *    the calling task's stack is cache-safe (internal RAM) before
+     *    disabling caches. PSRAM stack → assert crash.
+     * 2. Only ~22KB internal RAM free at this point after WiFi init.
+     *    8KB stack + TCB overhead fits. Large locals in Settings screen
+     *    (settings_mesh_state_t etc.) are heap-allocated to stay within budget.
      */
-    #define UI_GFX_STACK_SIZE 16384
-    static StaticTask_t ui_gfx_tcb;
-    StackType_t *ui_gfx_stack = heap_caps_malloc(UI_GFX_STACK_SIZE * sizeof(StackType_t),
-                                                  MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Internal RAM free before ui_gfx: %lu bytes",
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     TaskHandle_t ui_task_handle = NULL;
-    if (ui_gfx_stack) {
-        ui_task_handle = xTaskCreateStaticPinnedToCore(
-            ui_graphics_task, "ui_gfx", UI_GFX_STACK_SIZE,
-            NULL, 5, ui_gfx_stack, &ui_gfx_tcb, 1);
-        if (!ui_task_handle) {
-            ESP_LOGE(TAG, "FAILED to create ui_gfx task (xTaskCreateStatic returned NULL)");
-        } else {
-            ESP_LOGI(TAG, "ui_gfx task created (stack in PSRAM, %d bytes)", UI_GFX_STACK_SIZE * (int)sizeof(StackType_t));
-        }
+    BaseType_t ui_task_ret = xTaskCreatePinnedToCore(
+        ui_graphics_task, "ui_gfx", 12288, NULL, 5, &ui_task_handle, 1);
+    if (ui_task_ret != pdPASS) {
+        ESP_LOGE(TAG, "FAILED to create ui_gfx task — internal RAM exhausted "
+                 "(free: %lu bytes). Display will be blank.",
+                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     } else {
-        ESP_LOGE(TAG, "FAILED to allocate ui_gfx stack from PSRAM — display will be blank");
+        ESP_LOGI(TAG, "ui_gfx task created (12KB stack in internal RAM)");
     }
 #else
     /* Init text UI state machine (Heltec and other non-graphical boards) */
