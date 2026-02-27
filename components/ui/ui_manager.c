@@ -49,17 +49,23 @@ void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
     /* Settings screen row navigation (non-edit mode) */
     if (state->current_screen == SCREEN_SETTINGS && !state->settings_editing) {
         switch (btn) {
-        case BTN_UP:
-            state->settings_item_cursor = (ui_settings_item_t)((state->settings_item_cursor + UI_SETTINGS_ITEM_COUNT - 1) % UI_SETTINGS_ITEM_COUNT);
-            state->screen_dirty = true;
-            return;
+        case BTN_SHORT_PRESS:  /* single-button: cycle through settings items */
         case BTN_DOWN:
             state->settings_item_cursor = (ui_settings_item_t)((state->settings_item_cursor + 1) % UI_SETTINGS_ITEM_COUNT);
+            state->screen_dirty = true;
+            return;
+        case BTN_UP:
+            state->settings_item_cursor = (ui_settings_item_t)((state->settings_item_cursor + UI_SETTINGS_ITEM_COUNT - 1) % UI_SETTINGS_ITEM_COUNT);
             state->screen_dirty = true;
             return;
         case BTN_LONG_PRESS:
         case BTN_SELECT:
             state->settings_editing = true;
+            state->screen_dirty = true;
+            return;
+        case BTN_DOUBLE_PRESS: /* double-press exits settings screen */
+            state->prev_screen = state->current_screen;
+            state->current_screen = SCREEN_MAIN;
             state->screen_dirty = true;
             return;
         default:
