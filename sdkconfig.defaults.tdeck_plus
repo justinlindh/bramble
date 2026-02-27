@@ -51,6 +51,3 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 # Use clib malloc for LVGL (routed to PSRAM via SPIRAM_USE_MALLOC above)
 CONFIG_LV_USE_BUILTIN_MALLOC=n
 CONFIG_LV_USE_CLIB_MALLOC=y
-
-# Stack overflow detection (canary method — catches most overflows)
-CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
