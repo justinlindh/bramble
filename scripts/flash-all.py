@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""
+Flash Bramble firmware to multiple devices (USB + OTA) with board auto-detection.
+
+Features:
+- Detect USB ESP32-S3 devices on /dev/ttyACM* and /dev/ttyUSB*
+- Detect board type from PSRAM size (esptool flash_id)
+- Build required board targets once, concurrently
+- Flash USB devices in parallel via scripts/flash.sh wrapper
+- OTA network nodes in parallel via bramble.otaUpdate over WebSocket
+- Verify success using bramble.getStatus uptime checks (serial for USB, WS for OTA)
+
+Usage:
+  python3 scripts/flash-all.py [--config .flash-targets.json] [--dry-run]
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import glob
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+DEFAULT_CONFIG = ".flash-targets.json"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FLASH_SH = REPO_ROOT / "scripts" / "flash.sh"
+
+
+@dataclass
+class UsbDevice:
+    port: str
+    board: str | None
+    psram_mb: int | None
+    chip: str | None
+    detection_log: str
+
+
+@dataclass
+class Result:
+    name: str
+    kind: str
+    board: str
+    success: bool
+    phase: str
+    details: str
+
+
+def run_cmd(cmd: list[str], timeout: int = 180, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        check=check,
+    )
+
+
+def norm_board(board: str) -> str:
+    b = (board or "").strip().lower()
+    aliases = {
+        "heltec": "heltec-v3",
+        "heltec-v3": "heltec-v3",
+        "tdeck": "tdeck-plus",
+        "t-deck": "tdeck-plus",
+        "tdeck-plus": "tdeck-plus",
+    }
+    if b not in aliases:
+        raise ValueError(f"Unsupported board '{board}' (expected heltec-v3/heltec or tdeck-plus/tdeck)")
+    return aliases[b]
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Config file not found: {path}\n"
+            f"Create it from scripts/flash-targets.example.json"
+        )
+    with path.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    cfg.setdefault("network_nodes", [])
+    cfg.setdefault("usb_detection", {})
+    cfg.setdefault("ota", {})
+    cfg.setdefault("usb_nodes", [])
+    return cfg
+
+
+def detect_usb_ports() -> list[str]:
+    ports = sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")))
+    return [p for p in ports if os.path.exists(p)]
+
+
+def detect_usb_device(port: str, cfg: dict[str, Any]) -> UsbDevice:
+    cmd = ["esptool.py", "--port", port, "flash_id"]
+    cp = run_cmd(cmd, timeout=35)
+    out = cp.stdout
+
+    chip = None
+    psram_mb = None
+
+    m_chip = re.search(r"Detecting chip type\.\.\.\s*(.+)", out)
+    if m_chip:
+        chip = m_chip.group(1).strip()
+
+    m_psram = re.search(r"(?:PSRAM size:?\s*|Embedded PSRAM\s*)([0-9]+)\s*MB", out, re.IGNORECASE)
+    if m_psram:
+        psram_mb = int(m_psram.group(1))
+
+    # Some esptool versions print: "Detected flash size: 16MB" but no PSRAM line.
+    # Keep board unknown if PSRAM isn't found.
+    mapping = cfg.get("usb_detection", {})
+    board = None
+    if psram_mb is not None:
+        board_key = f"psram_{psram_mb}mb"
+        mapped = mapping.get(board_key)
+        if mapped:
+            board = norm_board(mapped)
+
+    return UsbDevice(port=port, board=board, psram_mb=psram_mb, chip=chip, detection_log=out)
+
+
+def build_board(board: str) -> tuple[bool, str]:
+    cmd = ["bash", str(FLASH_SH), "local", board, "build"]
+    cp = run_cmd(cmd, timeout=1800)
+    return cp.returncode == 0, cp.stdout
+
+
+def flash_usb(port: str, board: str) -> tuple[bool, str]:
+    cmd = ["bash", str(FLASH_SH), "local", board, "flash", port]
+    cp = run_cmd(cmd, timeout=900)
+    return cp.returncode == 0, cp.stdout
+
+
+class SerialRPC:
+    def __init__(self, port: str):
+        self.port = port
+        self.ser = None
+        self.req_id = 0
+
+    def __enter__(self):
+        import serial  # type: ignore
+        self.ser = serial.Serial(self.port, 115200, timeout=1)
+        self.ser.reset_input_buffer()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.ser:
+            self.ser.close()
+
+    def call(self, method: str, params: dict[str, Any] | None = None, timeout: float = 6.0) -> dict[str, Any]:
+        self.req_id += 1
+        req = {"jsonrpc": "2.0", "id": self.req_id, "method": method, "params": params or {}}
+        payload = json.dumps(req) + "\n"
+        assert self.ser is not None
+        self.ser.write(payload.encode("utf-8"))
+        self.ser.flush()
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            line = self.ser.readline().decode("utf-8", errors="replace").strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("id") == self.req_id:
+                return msg
+        raise TimeoutError(f"RPC timeout for {method} on {self.port}")
+
+
+def verify_usb_uptime(port: str, max_uptime_s: int = 30, wait_s: int = 40) -> tuple[bool, str]:
+    deadline = time.monotonic() + wait_s
+    last_err = ""
+    while time.monotonic() < deadline:
+        try:
+            with SerialRPC(port) as rpc:
+                resp = rpc.call("bramble.getStatus", timeout=5)
+                result = resp.get("result") or {}
+                uptime = result.get("uptime_s")
+                if isinstance(uptime, int):
+                    if uptime <= max_uptime_s:
+                        return True, f"uptime_s={uptime} via serial"
+                    return False, f"uptime_s={uptime} exceeds {max_uptime_s}s threshold"
+                last_err = f"unexpected response: {resp}"
+        except Exception as e:
+            last_err = str(e)
+            time.sleep(2)
+    return False, f"serial verification timed out: {last_err}"
+
+
+async def ws_call(host: str, method: str, params: dict[str, Any] | None = None, req_id: int = 1, timeout_s: float = 8.0) -> dict[str, Any]:
+    import websockets  # type: ignore
+
+    url = host if host.startswith("ws://") or host.startswith("wss://") else f"ws://{host}/ws"
+    async with websockets.connect(url, open_timeout=8, ping_interval=None) as ws:
+        req = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params or {}}
+        await ws.send(json.dumps(req))
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout_s))
+            if msg.get("id") == req_id:
+                return msg
+    raise TimeoutError(f"ws RPC timeout for {method} on {host}")
+
+
+async def ota_and_verify(node: dict[str, Any], ota_url: str, max_uptime_s: int = 60) -> Result:
+    name = node.get("name") or node.get("host")
+    host = node.get("host")
+    board = norm_board(node.get("board", ""))
+    if not host:
+        return Result(name=name or "<unknown>", kind="ota", board=board, success=False, phase="ota", details="missing host")
+
+    try:
+        start = await ws_call(host, "bramble.otaUpdate", {"url": ota_url}, req_id=100)
+        ok = ((start.get("result") or {}).get("ok") is True)
+        if not ok:
+            return Result(name=name, kind="ota", board=board, success=False, phase="ota", details=f"otaUpdate rejected: {start}")
+    except Exception as e:
+        return Result(name=name, kind="ota", board=board, success=False, phase="ota", details=f"ota start failed: {e}")
+
+    # Wait for reboot and uptime reset.
+    deadline = time.monotonic() + 90
+    last_err = ""
+    while time.monotonic() < deadline:
+        try:
+            status = await ws_call(host, "bramble.getStatus", {}, req_id=101)
+            uptime = (status.get("result") or {}).get("uptime_s")
+            if isinstance(uptime, int):
+                if uptime <= max_uptime_s:
+                    return Result(name=name, kind="ota", board=board, success=True, phase="verify", details=f"uptime_s={uptime}")
+                last_err = f"uptime_s={uptime} (> {max_uptime_s})"
+        except Exception as e:
+            last_err = str(e)
+        await asyncio.sleep(3)
+
+    return Result(name=name, kind="ota", board=board, success=False, phase="verify", details=f"verify timeout: {last_err}")
+
+
+def discover_mdns_nodes() -> list[str]:
+    # Best-effort discovery via avahi-browse, returns hostnames/IPs where available.
+    try:
+        cp = run_cmd(["avahi-browse", "-rt", "_http._tcp"], timeout=15)
+    except Exception:
+        return []
+    hosts: list[str] = []
+    for line in cp.stdout.splitlines():
+        if ";IPv4;" not in line:
+            continue
+        if "bramble" not in line.lower():
+            continue
+        parts = line.split(";")
+        if len(parts) >= 8:
+            host = parts[7].strip()
+            if host:
+                hosts.append(host)
+    return sorted(set(hosts))
+
+
+def fmt_cmd(parts: list[str]) -> str:
+    return " ".join(shlex.quote(p) for p in parts)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="Flash all Bramble nodes (USB + OTA)")
+    p.add_argument("--config", default=DEFAULT_CONFIG, help="Path to config JSON (default: .flash-targets.json)")
+    p.add_argument("--dry-run", action="store_true", help="Print planned actions, do not build/flash/ota")
+    p.add_argument("--usb-only", action="store_true")
+    p.add_argument("--ota-only", action="store_true")
+    p.add_argument("--max-workers", type=int, default=4)
+    args = p.parse_args()
+
+    cfg = load_config((REPO_ROOT / args.config).resolve() if not os.path.isabs(args.config) else Path(args.config))
+
+    usb_ports = detect_usb_ports() if not args.ota_only else []
+    usb_devices: list[UsbDevice] = []
+    for port in usb_ports:
+        try:
+            dev = detect_usb_device(port, cfg)
+            usb_devices.append(dev)
+        except Exception as e:
+            usb_devices.append(UsbDevice(port=port, board=None, psram_mb=None, chip=None, detection_log=f"detection failed: {e}"))
+
+    # Optional static overrides by port
+    overrides = {item.get("port"): item for item in cfg.get("usb_nodes", []) if item.get("port")}
+    for d in usb_devices:
+        ov = overrides.get(d.port)
+        if ov and ov.get("board"):
+            d.board = norm_board(ov["board"])
+
+    net_nodes = [] if args.usb_only else list(cfg.get("network_nodes", []))
+
+    if cfg.get("mdns", {}).get("enabled") and not args.usb_only:
+        discovered = discover_mdns_nodes()
+        known_hosts = {n.get("host") for n in net_nodes}
+        default_board = norm_board(cfg.get("mdns", {}).get("default_board", "heltec-v3"))
+        for host in discovered:
+            if host in known_hosts:
+                continue
+            net_nodes.append({"name": f"mDNS:{host}", "host": host, "board": default_board})
+
+    # Determine build matrix
+    boards_to_build: set[str] = set()
+    for d in usb_devices:
+        if d.board:
+            boards_to_build.add(d.board)
+    for n in net_nodes:
+        if n.get("board"):
+            boards_to_build.add(norm_board(n["board"]))
+
+    print("=== Bramble flash-all plan ===")
+    print(f"Config: {args.config}")
+    print(f"USB ports detected: {len(usb_devices)}")
+    for d in usb_devices:
+        print(f"  - {d.port}: board={d.board or 'UNKNOWN'} psram={d.psram_mb}MB chip={d.chip}")
+    print(f"Network nodes: {len(net_nodes)}")
+    for n in net_nodes:
+        print(f"  - {n.get('name', n.get('host'))}: host={n.get('host')} board={n.get('board')}")
+    print(f"Boards to build: {', '.join(sorted(boards_to_build)) if boards_to_build else '(none)'}")
+
+    if args.dry_run:
+        for b in sorted(boards_to_build):
+            print("BUILD:", fmt_cmd(["bash", str(FLASH_SH), "local", b, "build"]))
+        for d in usb_devices:
+            if d.board:
+                print("FLASH:", fmt_cmd(["bash", str(FLASH_SH), "local", d.board, "flash", d.port]))
+        for n in net_nodes:
+            board = norm_board(n.get("board", ""))
+            ota_url = (n.get("ota_url") or (cfg.get("ota", {}).get("urls", {}) or {}).get(board) or cfg.get("ota", {}).get("url"))
+            print(f"OTA: host={n.get('host')} board={board} url={ota_url}")
+        return 0
+
+    # 1) Concurrent builds
+    build_logs: dict[str, str] = {}
+    build_ok: dict[str, bool] = {}
+    if boards_to_build:
+        print("\n=== Building firmware (parallel by board target) ===")
+        with ThreadPoolExecutor(max_workers=min(args.max_workers, len(boards_to_build))) as ex:
+            fut_map = {ex.submit(build_board, b): b for b in boards_to_build}
+            for fut in as_completed(fut_map):
+                b = fut_map[fut]
+                ok, log = fut.result()
+                build_ok[b] = ok
+                build_logs[b] = log
+                print(f"[{b}] {'OK' if ok else 'FAIL'}")
+
+    # 2) USB flash in parallel
+    results: list[Result] = []
+    usb_candidates = [d for d in usb_devices if d.board and build_ok.get(d.board)]
+    if usb_candidates:
+        print("\n=== Flashing USB devices (parallel) ===")
+        with ThreadPoolExecutor(max_workers=min(args.max_workers, len(usb_candidates))) as ex:
+            fut_map = {ex.submit(flash_usb, d.port, d.board): d for d in usb_candidates}
+            for fut in as_completed(fut_map):
+                d = fut_map[fut]
+                ok, log = fut.result()
+                if not ok:
+                    results.append(Result(name=d.port, kind="usb", board=d.board or "unknown", success=False, phase="flash", details="flash failed"))
+                    continue
+                v_ok, v_msg = verify_usb_uptime(d.port, max_uptime_s=30, wait_s=45)
+                results.append(Result(name=d.port, kind="usb", board=d.board or "unknown", success=v_ok, phase="verify", details=v_msg))
+
+    for d in usb_devices:
+        if not d.board:
+            results.append(Result(name=d.port, kind="usb", board="unknown", success=False, phase="detect", details="board detection failed"))
+        elif not build_ok.get(d.board, False):
+            results.append(Result(name=d.port, kind="usb", board=d.board, success=False, phase="build", details=f"board build failed: {d.board}"))
+
+    # 3) OTA in parallel
+    ota_nodes = []
+    for node in net_nodes:
+        board = norm_board(node.get("board", ""))
+        if not build_ok.get(board):
+            results.append(Result(name=node.get("name") or node.get("host"), kind="ota", board=board, success=False, phase="build", details=f"board build failed: {board}"))
+            continue
+        ota_url = node.get("ota_url") or (cfg.get("ota", {}).get("urls", {}) or {}).get(board) or cfg.get("ota", {}).get("url")
+        if not ota_url:
+            results.append(Result(name=node.get("name") or node.get("host"), kind="ota", board=board, success=False, phase="ota", details="missing ota_url (node.ota_url or ota.urls[board] or ota.url)"))
+            continue
+        node2 = dict(node)
+        node2["board"] = board
+        node2["ota_url"] = ota_url
+        ota_nodes.append(node2)
+
+    if ota_nodes:
+        print("\n=== OTA updates (parallel) ===")
+
+        async def run_ota_all() -> list[Result]:
+            tasks = [ota_and_verify(n, n["ota_url"], max_uptime_s=60) for n in ota_nodes]
+            return await asyncio.gather(*tasks)
+
+        ota_results = asyncio.run(run_ota_all())
+        results.extend(ota_results)
+
+    # Summary
+    print("\n=== Summary ===")
+    ok_count = 0
+    for r in results:
+        mark = "✅" if r.success else "❌"
+        if r.success:
+            ok_count += 1
+        print(f"{mark} [{r.kind}] {r.name} ({r.board}) phase={r.phase} :: {r.details}")
+
+    print(f"\nSuccess: {ok_count}/{len(results)}")
+
+    # Show concise build evidence block for wrapper compliance
+    print("\n=== Build command evidence (scripts/flash.sh wrapper) ===")
+    for b in sorted(boards_to_build):
+        cmd = ["bash", str(FLASH_SH), "local", b, "build"]
+        print(f"Board target: {b}")
+        print(f"Build command: {fmt_cmd(cmd)}")
+        excerpt = "\n".join(build_logs.get(b, "").splitlines()[-12:])
+        print("Build output excerpt:")
+        print(excerpt if excerpt else "(no output captured)")
+        print("---")
+
+    return 0 if all(r.success for r in results) else 2
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        raise SystemExit(130)
