@@ -26,7 +26,12 @@ void test_short_press_cycles(void) {
     ui_handle_button(&state, BTN_SHORT_PRESS, 4000);
     TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
 
+    /* In settings (non-edit), short press cycles rows instead of leaving screen. */
     ui_handle_button(&state, BTN_SHORT_PRESS, 5000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+
+    /* Double-press exits settings back to main. */
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 6000);
     TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
 }
 
