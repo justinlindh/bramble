@@ -8,6 +8,7 @@
 #include "screens/scr_layout.h"
 #include "screens/scr_splash.h"
 #include "chat_unread.h"
+#include "screens/scr_chat_messages.h"
 #include "msg_store.h"
 #include "lvgl.h"
 #include "esp_log.h"
@@ -52,8 +53,12 @@ static void status_refresh_timer_cb(lv_timer_t *timer) {
 
         if (s_layout) {
             if (s_layout->active_tab == TAB_CHAT) {
-                /* Chat is active - refresh channel list/bubbles, keep global unread clear */
-                layout_set_tab(s_layout, TAB_CHAT);
+                /* Chat is active — refresh list/bubbles unless user is in a DM view */
+                if (s_layout->in_dm_view) {
+                    scr_chat_messages_on_recv();
+                } else {
+                    layout_set_tab(s_layout, TAB_CHAT);
+                }
                 s_unread_count = 0;
                 layout_set_unread(s_layout, 0);
             } else {
@@ -67,12 +72,9 @@ static void status_refresh_timer_cb(lv_timer_t *timer) {
 
 static void tab_refresh_timer_cb(lv_timer_t *timer) {
     (void)timer;
-    if (!s_layout) return;
-    
-    /* Only refresh Stats and Nodes tabs (not Chat or Settings) */
-    if (s_layout->active_tab == TAB_STATS || s_layout->active_tab == TAB_NODES) {
-        layout_set_tab(s_layout, s_layout->active_tab);
-    }
+    /* Intentionally empty — data screens show a snapshot; user switches
+     * tabs to refresh.  The old implementation called layout_set_tab()
+     * every 5 s, which destroyed scroll position and drill-down views. */
 }
 
 /* Timer callback to transition from splash to main UI */

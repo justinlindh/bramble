@@ -2,6 +2,7 @@
 #define SCR_LAYOUT_H
 
 #include "lvgl.h"
+#include <stdbool.h>
 
 typedef enum {
     TAB_CHAT = 0,
@@ -29,6 +30,9 @@ typedef struct {
 
     /* Unread badge on chat tab */
     lv_obj_t *chat_badge;
+
+    /* True while a DM or message view is open (prevents chat tab refresh) */
+    bool in_dm_view;
 } bramble_layout_t;
 
 bramble_layout_t *layout_create(void);
