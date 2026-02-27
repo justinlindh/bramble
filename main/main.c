@@ -369,9 +369,36 @@ static void render_screen(ui_state_t *ui) {
                     }
                 }
                 int badge_len = (int)strlen(badge);
-                int text_max = CHARS_PER_LINE - (int)strlen(prefix) - 1 /* space */ - badge_len;
-                if (text_max < 1) text_max = 1;
-                snprintf(line, sizeof(line), "%s %.*s%s", prefix, text_max, m->text, badge);
+
+                /* Detect CTCP ACTION: \x01ACTION text\x01 */
+                bool is_action = (m->text_len > 9 &&
+                                  m->text[0] == 0x01 &&
+                                  strncmp(m->text + 1, "ACTION ", 7) == 0);
+
+                if (is_action) {
+                    /* Extract action text: skip \x01ACTION  (8 bytes), strip trailing \x01 */
+                    const char *act = m->text + 8;
+                    int act_len = (int)m->text_len - 8;
+                    if (act_len > 0 && act[act_len - 1] == 0x01) act_len--;
+                    if (act_len < 0) act_len = 0;
+
+                    if (outgoing) {
+                        /* "* me <action>" */
+                        int act_max = CHARS_PER_LINE - 5 /* "* me " */;
+                        if (act_max < 1) act_max = 1;
+                        snprintf(line, sizeof(line), "* me %.*s", act_max, act);
+                    } else {
+                        /* "* XXXX <action>" — last 4 hex digits of peer_addr */
+                        int act_max = CHARS_PER_LINE - 7 /* "* XXXX " */;
+                        if (act_max < 1) act_max = 1;
+                        snprintf(line, sizeof(line), "* %04X %.*s",
+                                 (unsigned)(m->peer_addr & 0xFFFF), act_max, act);
+                    }
+                } else {
+                    int text_max = CHARS_PER_LINE - (int)strlen(prefix) - 1 /* space */ - badge_len;
+                    if (text_max < 1) text_max = 1;
+                    snprintf(line, sizeof(line), "%s %.*s%s", prefix, text_max, m->text, badge);
+                }
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
