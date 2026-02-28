@@ -17,12 +17,13 @@ static jmp_buf g_jmp;
 static int g_allow_jump = 0;
 static int g_in_task = 0;
 static size_t g_uart_pos = 0;
+static const char *g_uart_stream = NULL;
 
 /* Time stub */
 static int64_t g_time_us = 0;
 int64_t esp_timer_get_time(void) { return g_time_us; }
 
-/* RTOS task stubs: run task synchronously once */
+/* RTOS task stubs */
 void vTaskDelay(int ticks) { (void)ticks; g_time_us += 1000; }
 int xTaskCreate(void (*task)(void*), const char* name, int stack, void* arg, int pri, TaskHandle_t* out) {
     (void)name; (void)stack; (void)pri;
@@ -35,7 +36,6 @@ int xTaskCreate(void (*task)(void*), const char* name, int stack, void* arg, int
 void vTaskDelete(TaskHandle_t t) { (void)t; }
 
 /* UART stubs */
-static const char *g_uart_stream = NULL;
 static int g_uart_driver_deleted = 0;
 static int g_uart_set_baud_calls = 0;
 
@@ -50,7 +50,7 @@ esp_err_t uart_set_baudrate(uart_port_t uart_num, int baudrate) {(void)uart_num;
 esp_err_t uart_flush_input(uart_port_t uart_num) {(void)uart_num; return ESP_OK;}
 int uart_read_bytes(uart_port_t uart_num, void *buf, uint32_t length, uint32_t ticks_to_wait) {
     (void)uart_num; (void)ticks_to_wait;
-    g_time_us += 100000; /* advance 100ms per read */
+    g_time_us += 100000;
 
     if (!g_in_task) {
         return 0;
@@ -74,7 +74,7 @@ int uart_read_bytes(uart_port_t uart_num, void *buf, uint32_t length, uint32_t t
 }
 esp_err_t uart_driver_delete(uart_port_t uart_num) { (void)uart_num; g_uart_driver_deleted++; return ESP_OK; }
 
-/* GPIO stubs used by heltec_v4 path */
+/* GPIO stubs */
 esp_err_t gpio_config(const gpio_config_t *pGPIOConfig) { (void)pGPIOConfig; return ESP_OK; }
 esp_err_t gpio_set_level(gpio_num_t gpio_num, uint32_t level) { (void)gpio_num; (void)level; return ESP_OK; }
 
@@ -84,20 +84,20 @@ static void reset_state(void) {
     g_cfg.gps.tx = 17;
     g_cfg.gps.rx = 18;
     g_cfg.gps.baud = 9600;
-
     g_uart_stream = NULL;
     g_uart_pos = 0;
     g_uart_driver_deleted = 0;
     g_uart_set_baud_calls = 0;
     g_time_us = 0;
     g_allow_jump = 0;
+    g_in_task = 0;
 }
 
 void setUp(void) { reset_state(); }
 void tearDown(void) { gps_deinit(); }
 
 void test_gps_init_and_deinit_without_fix(void) {
-    g_uart_stream = "$GPXXX,1,2,3\r\n"; /* no data */
+    g_uart_stream = "$GPXXX,1,2,3\x0d\x0a";
     if (setjmp(g_jmp) == 0) {
         g_allow_jump = 1;
         TEST_ASSERT_EQUAL(0, gps_init(NULL, NULL));
@@ -106,28 +106,41 @@ void test_gps_init_and_deinit_without_fix(void) {
     TEST_ASSERT_FALSE(gps_has_fix());
     bramble_position_t out = {0};
     TEST_ASSERT_FALSE(gps_get_position(&out));
-
     gps_deinit();
     TEST_ASSERT_EQUAL(1, g_uart_driver_deleted);
 }
 
 void test_gps_invalid_or_unparsed_sentence_keeps_no_fix(void) {
-    g_uart_stream = "$GPXXX,1,2,3\r\n";
+    g_uart_stream = "$GPXXX,1,2,3\x0d\x0a";
     if (setjmp(g_jmp) == 0) {
         g_allow_jump = 1;
         (void)gps_init(NULL, NULL);
         TEST_FAIL_MESSAGE("expected jump out of gps task loop");
     }
-
     TEST_ASSERT_FALSE(gps_has_fix());
     bramble_position_t out = {0};
     TEST_ASSERT_FALSE(gps_get_position(&out));
 }
 
+void test_gps_parses_rmc_and_sets_fix(void) {
+    g_uart_stream = "$GPRMC,123519,A,4807.038,N,01131.000,E,010.0,084.4,230394,003.1,W*6A\x0d\x0a";
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        TEST_ASSERT_EQUAL(0, gps_init(NULL, NULL));
+        TEST_FAIL_MESSAGE("expected longjmp out of gps_task");
+    }
+    TEST_ASSERT_TRUE_MESSAGE(gps_has_fix(), "expected GPS fix after valid RMC");
+    bramble_position_t out = {0};
+    TEST_ASSERT_TRUE(gps_get_position(&out));
+    TEST_ASSERT_TRUE(out.valid);
+    TEST_ASSERT_INT_WITHIN(10000, 481173000, out.latitude_e7);
+    TEST_ASSERT_INT_WITHIN(10000, 115166667, out.longitude_e7);
+}
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gps_init_and_deinit_without_fix);
     RUN_TEST(test_gps_invalid_or_unparsed_sentence_keeps_no_fix);
+    RUN_TEST(test_gps_parses_rmc_and_sets_fix);
     return UNITY_END();
 }
