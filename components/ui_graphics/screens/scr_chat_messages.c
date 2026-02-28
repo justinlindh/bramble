@@ -4,6 +4,7 @@
 #include "msg_store.h"
 #include "chat_target.h"
 #include "chat_unread.h"
+#include "chat_message_ui.h"
 #include "esp_log.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -29,27 +30,18 @@ extern const char *mesh_get_peer_name(uint32_t addr);
 
 static void update_title(void) {
     if (!s_title) return;
-    if (s_target.kind == CHAT_TARGET_BROADCAST) {
-        lv_label_set_text(s_title, "Broadcast");
-    } else if (s_target.kind == CHAT_TARGET_CHANNEL) {
-        const char *name = mesh_get_channel_name((int)s_target.channel_index);
-        if (name && name[0]) {
-            lv_label_set_text(s_title, name);
-        } else {
-            static char buf[24];
-            snprintf(buf, sizeof(buf), "Channel %d", (int)s_target.channel_index);
-            lv_label_set_text(s_title, buf);
-        }
-    } else {
-        const char *peer_name = mesh_get_peer_name(s_target.peer_addr);
-        static char buf[32];
-        if (peer_name && peer_name[0]) {
-            snprintf(buf, sizeof(buf), "DM: %s", peer_name);
-        } else {
-            snprintf(buf, sizeof(buf), "DM: %08lX", (unsigned long)s_target.peer_addr);
-        }
-        lv_label_set_text(s_title, buf);
+
+    const char *channel_name = NULL;
+    const char *peer_name = NULL;
+    if (s_target.kind == CHAT_TARGET_CHANNEL) {
+        channel_name = mesh_get_channel_name((int)s_target.channel_index);
+    } else if (s_target.kind == CHAT_TARGET_DM) {
+        peer_name = mesh_get_peer_name(s_target.peer_addr);
     }
+
+    static char buf[48];
+    chat_target_format_title(s_target, channel_name, peer_name, buf, sizeof(buf));
+    lv_label_set_text(s_title, buf);
 }
 
 static bool message_matches_target(const stored_msg_t *msg) {
@@ -250,32 +242,34 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
     lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(msg_lbl, LV_PCT(100));
 
+    bool can_show_route = chat_message_has_inline_route_toggle(
+        is_mine, msg->status, msg->route_hop_count, msg->packet_id);
+
     /* Delivery status badge — only on outgoing messages */
     if (is_mine) {
-        const char *badge_sym;
-        lv_color_t  badge_color;
+        chat_delivery_badge_t badge = chat_message_delivery_badge(msg->status);
+        const char *badge_sym = LV_SYMBOL_BULLET;
+        lv_color_t badge_color = BR_COLOR_TEXT_SEC;
 
-        switch (msg->status) {
-            case MSG_STATUS_SENT:
-                /* Single check — transmitted, awaiting ACK */
-                badge_sym   = LV_SYMBOL_OK;
-                badge_color = BR_COLOR_TEXT_SEC;   /* muted gray */
-                break;
-            case MSG_STATUS_DELIVERED:
-                /* Double check — ACK received */
-                badge_sym   = LV_SYMBOL_OK " " LV_SYMBOL_OK;
-                badge_color = BR_COLOR_PRIMARY;
-                break;
-            case MSG_STATUS_FAILED:
-                /* X — max retries exhausted */
-                badge_sym   = LV_SYMBOL_CLOSE;
-                badge_color = BR_COLOR_DANGER;     /* red */
-                break;
-            default:
-                /* Bullet — queued / no ACK tracking (e.g. broadcast) */
-                badge_sym   = LV_SYMBOL_BULLET;
-                badge_color = BR_COLOR_TEXT_SEC;   /* muted gray */
-                break;
+        if (badge.kind == CHAT_DELIVERY_BADGE_SINGLE_CHECK) {
+            badge_sym = LV_SYMBOL_OK;
+        } else if (badge.kind == CHAT_DELIVERY_BADGE_DOUBLE_CHECK) {
+            badge_sym = LV_SYMBOL_OK " " LV_SYMBOL_OK;
+        } else if (badge.kind == CHAT_DELIVERY_BADGE_FAILED) {
+            badge_sym = LV_SYMBOL_CLOSE;
+        }
+
+        if (badge.color_role == CHAT_DELIVERY_COLOR_DELIVERED) {
+            badge_color = BR_COLOR_PRIMARY;
+        } else if (badge.color_role == CHAT_DELIVERY_COLOR_FAILED) {
+            badge_color = BR_COLOR_DANGER;
+        }
+
+        static char status_buf[24];
+        if (can_show_route) {
+            bool expanded = (s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id);
+            snprintf(status_buf, sizeof(status_buf), "%s %s", badge_sym, expanded ? LV_SYMBOL_DOWN : LV_SYMBOL_RIGHT);
+            badge_sym = status_buf;
         }
 
         lv_obj_t *status_lbl = lv_label_create(bubble);
@@ -286,14 +280,8 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
         lv_obj_set_width(status_lbl, LV_PCT(100));
     }
 
-    bool can_show_route = is_mine && msg->status == MSG_STATUS_DELIVERED && msg->route_hop_count > 1;
     if (can_show_route) {
         bool expanded = (s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id);
-
-        lv_obj_t *hint_lbl = lv_label_create(bubble);
-        lv_label_set_text(hint_lbl, expanded ? "Hide route" : "Show route");
-        lv_obj_set_style_text_font(hint_lbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(hint_lbl, BR_COLOR_TEXT_SEC, 0);
 
         if (expanded) {
             char route_buf[200];
@@ -411,10 +399,10 @@ static void open_with_target(bramble_layout_t *layout, chat_target_t target, int
         lv_group_add_obj(g, target_btn);
     }
 
-    s_title = lv_label_create(target_btn);
+    s_title = lv_label_create(header);
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_title, BR_COLOR_TEXT, 0);
-    lv_obj_center(s_title);
+    lv_obj_align_to(s_title, back_btn, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
     update_title();
     
     /* Message list area */

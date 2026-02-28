@@ -22,6 +22,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "screens/scr_settings.c"
         "chat_target.c"
         "chat_unread.c"
+        "chat_message_ui.c"
         "assets/img_bramble_logo.c"
     )
 else()
