@@ -746,3 +746,54 @@ target_compile_options(test_rpc_methods_firmware PRIVATE
     -Wno-error=unused-parameter
 )
 target_link_libraries(test_rpc_methods_firmware m)
+
+# Chat message UI helper tests
+add_executable(test_chat_message_ui
+    test_chat_message_ui.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/chat_message_ui.c
+)
+target_include_directories(test_chat_message_ui PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui_graphics/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
+# GPS module behavior tests (ESP path with host stubs)
+add_executable(test_gps
+    test_gps.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/nmea_parser.c
+)
+target_include_directories(test_gps PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+)
+target_compile_definitions(test_gps PRIVATE
+    ESP_PLATFORM=1
+    FREERTOS_TASK_CUSTOM_IMPL=1
+    ESP_TIMER_CUSTOM_IMPL=1
+)
+target_link_libraries(test_gps m)
+
+# Audio module behavior tests (NVS + I2S lifecycle with stubs)
+add_executable(test_audio
+    test_audio.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/audio/audio.c
+)
+target_include_directories(test_audio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/audio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+)
+target_compile_definitions(test_audio PRIVATE
+    FREERTOS_TASK_CUSTOM_IMPL=1
+)
+target_link_libraries(test_audio m)
+
+target_compile_options(test_audio PRIVATE
+    -Wno-error=unused-parameter
+)
