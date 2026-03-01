@@ -126,6 +126,30 @@ static void poll_connectivity_events(void) {
     s_last_wifi_status = st;
 }
 
+static void log_heap_diagnostics_periodic(void)
+{
+    static uint64_t s_last_log_us = 0;
+    uint64_t now_us = (uint64_t)esp_timer_get_time();
+    if (s_last_log_us != 0 && (now_us - s_last_log_us) < 30000000ULL) {
+        return;
+    }
+    s_last_log_us = now_us;
+
+    size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t min_internal = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t min_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+
+    ESP_LOGI(TAG,
+             "diag.heap internal_free=%u internal_min=%u internal_largest=%u psram_free=%u psram_min=%u",
+             (unsigned)free_internal,
+             (unsigned)min_internal,
+             (unsigned)largest_internal,
+             (unsigned)free_psram,
+             (unsigned)min_psram);
+}
+
 static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
     location_manager_t *mgr = (location_manager_t *)ctx;
     location_set_position(mgr, pos);
@@ -1028,6 +1052,7 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: main loop start ===");
 
     while (1) {
+        log_heap_diagnostics_periodic();
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
         /* LVGL runs in its own task — main loop just keeps watchdog happy */
         poll_connectivity_events();

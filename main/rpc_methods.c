@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "battery.h"
@@ -99,6 +100,52 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
+    return 0;
+}
+
+/* bramble.getDiagnostics */
+static int handle_get_diagnostics(const cJSON *params, cJSON *result) {
+    bool include_heap_dump = false;
+    if (params) {
+        const cJSON *dump = cJSON_GetObjectItem(params, "include_heap_dump");
+        include_heap_dump = cJSON_IsTrue(dump);
+    }
+
+    cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
+    cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
+
+    cJSON *heap = cJSON_AddObjectToObject(result, "heap");
+    cJSON_AddNumberToObject(heap, "internal_free", (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(heap, "internal_min_ever_free", (double)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(heap, "internal_largest_free_block", (double)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(heap, "dma_free", (double)heap_caps_get_free_size(MALLOC_CAP_DMA));
+    cJSON_AddNumberToObject(heap, "dma_largest_free_block", (double)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    cJSON_AddNumberToObject(heap, "psram_free", (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    cJSON_AddNumberToObject(heap, "psram_min_ever_free", (double)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+
+    static const char *task_names[] = {
+        "main", "mesh", "ui_gfx", "wifi", "sys_evt", "tiT", "Tmr Svc", "IDLE0", "IDLE1", "ipc0", "ipc1"
+    };
+    cJSON *tasks = cJSON_AddArrayToObject(result, "task_stack_hwm");
+    for (size_t i = 0; i < (sizeof(task_names) / sizeof(task_names[0])); i++) {
+        TaskHandle_t h = xTaskGetHandle(task_names[i]);
+        if (!h) {
+            continue;
+        }
+
+        UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(h);
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "task", task_names[i]);
+        cJSON_AddNumberToObject(obj, "hwm_words", (double)hwm_words);
+        cJSON_AddNumberToObject(obj, "hwm_bytes", (double)(hwm_words * sizeof(StackType_t)));
+        cJSON_AddItemToArray(tasks, obj);
+    }
+
+    if (include_heap_dump) {
+        ESP_LOGI(TAG, "bramble.getDiagnostics requested heap_caps_dump(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)");
+        heap_caps_dump(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+
     return 0;
 }
 
@@ -1867,6 +1914,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
 
     /* Query methods */
     rpc_register("bramble.getStatus",    handle_get_status);
+    rpc_register("bramble.getDiagnostics", handle_get_diagnostics);
     rpc_register("bramble.getWifiStatus", handle_get_wifi_status);
     rpc_register("bramble.getIdentity",  handle_get_identity);
     rpc_register("bramble.getVersion",   handle_get_version);
