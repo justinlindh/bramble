@@ -18,3 +18,4 @@ sdkconfig.*
 build-heltec-v3/log/
 build-tdeck-plus/log/
 .flash-targets.json
+build-heltec-v4/
