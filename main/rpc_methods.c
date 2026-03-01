@@ -22,6 +22,8 @@
 #include "display.h"
 #include "gps.h"
 #include "location.h"
+#include "wifi_manager.h"
+#include "esp_wifi.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -97,6 +99,50 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
+    return 0;
+}
+
+/* bramble.getWifiStatus */
+static int handle_get_wifi_status(const cJSON *params, cJSON *result) {
+    (void)params;
+
+    wifi_status_t status = {0};
+    wifi_manager_get_status(&status);
+
+    const char *mode = "off";
+    if (status.mode == BRAMBLE_WIFI_STATION) {
+        mode = "station";
+    } else if (status.mode == BRAMBLE_WIFI_AP) {
+        mode = "ap";
+    }
+
+    uint8_t mac[6] = {0};
+    esp_err_t mac_rc = esp_wifi_get_mac(
+        status.mode == BRAMBLE_WIFI_AP ? WIFI_IF_AP : WIFI_IF_STA,
+        mac
+    );
+
+    int clients = 0;
+    if (status.mode == BRAMBLE_WIFI_AP) {
+        wifi_sta_list_t sta_list = {0};
+        if (esp_wifi_ap_get_sta_list(&sta_list) == ESP_OK) {
+            clients = sta_list.num;
+        }
+    }
+
+    char mac_str[18] = {0};
+    if (mac_rc == ESP_OK) {
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+
+    cJSON_AddStringToObject(result, "mode", mode);
+    cJSON_AddStringToObject(result, "ssid", status.ssid);
+    cJSON_AddStringToObject(result, "ip", status.ip_addr);
+    cJSON_AddNumberToObject(result, "rssi", status.mode == BRAMBLE_WIFI_STATION ? status.rssi : 0);
+    cJSON_AddStringToObject(result, "mac", mac_str);
+    cJSON_AddNumberToObject(result, "clients", status.mode == BRAMBLE_WIFI_AP ? clients : 0);
+
     return 0;
 }
 
@@ -1821,6 +1867,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
 
     /* Query methods */
     rpc_register("bramble.getStatus",    handle_get_status);
+    rpc_register("bramble.getWifiStatus", handle_get_wifi_status);
     rpc_register("bramble.getIdentity",  handle_get_identity);
     rpc_register("bramble.getVersion",   handle_get_version);
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
