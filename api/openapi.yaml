@@ -65,6 +65,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/WifiStatusResponse'
 
+  /rpc/bramble.getDiagnostics:
+    post:
+      operationId: getDiagnostics
+      summary: Get node diagnostics
+      description: Returns runtime memory diagnostics and task stack high-water marks.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetDiagnosticsRequest'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Diagnostics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticsResponse'
+
   /rpc/bramble.getIdentity:
     post:
       operationId: getIdentity
@@ -1079,6 +1100,72 @@ components:
         clients:
           type: integer
           description: Connected AP client count; 0 in station mode.
+
+    GetDiagnosticsRequest:
+      type: object
+      description: Optional parameters for bramble.getDiagnostics.
+      properties:
+        include_heap_dump:
+          type: boolean
+          description: If true, triggers heap_caps_dump() to serial logs before returning diagnostics.
+
+    TaskStackHighWaterMark:
+      type: object
+      required: [task, hwm_words, hwm_bytes]
+      properties:
+        task:
+          type: string
+          description: FreeRTOS task name.
+        hwm_words:
+          type: number
+          description: Stack high-water mark in words.
+        hwm_bytes:
+          type: number
+          description: Stack high-water mark in bytes.
+
+    HeapDiagnostics:
+      type: object
+      required:
+        - internal_free
+        - internal_min_ever_free
+        - internal_largest_free_block
+        - dma_free
+        - dma_largest_free_block
+        - psram_free
+        - psram_min_ever_free
+      properties:
+        internal_free:
+          type: number
+        internal_min_ever_free:
+          type: number
+        internal_largest_free_block:
+          type: number
+        dma_free:
+          type: number
+        dma_largest_free_block:
+          type: number
+        psram_free:
+          type: number
+        psram_min_ever_free:
+          type: number
+
+    DiagnosticsResponse:
+      type: object
+      description: Runtime diagnostics returned by bramble.getDiagnostics.
+      required: [uptime_s, free_heap, heap, task_stack_hwm]
+      properties:
+        uptime_s:
+          type: number
+          description: Device uptime in seconds.
+        free_heap:
+          type: number
+          description: Total free heap bytes.
+        heap:
+          $ref: '#/components/schemas/HeapDiagnostics'
+        task_stack_hwm:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStackHighWaterMark'
 
     IdentityResponse:
       type: object
