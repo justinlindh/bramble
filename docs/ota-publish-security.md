@@ -1,5 +1,7 @@
 # OTA Publish Endpoint Security
 
+Last verified: 2026-03-01
+
 ## Endpoint exposure
 - Publish endpoint is `POST /ota/publish`.
 - Endpoint is intentionally unlinked from public UI and intended for CI automation only.

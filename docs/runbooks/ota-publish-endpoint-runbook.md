@@ -1,5 +1,7 @@
 # OTA Publish Endpoint Runbook
 
+Last verified: 2026-03-01
+
 ## Purpose
 Verify the endpoint-driven OTA publish flow works end-to-end and provide a fast rollback procedure.
 
@@ -18,7 +20,7 @@ Verify the endpoint-driven OTA publish flow works end-to-end and provide a fast 
 ### Expected result
 - Build step passes.
 - `Publish OTA via authenticated endpoint` step passes.
-- `Verify published release appears in index` step passes.
+- `Verify published release completeness in index` step passes.
 
 ### Optional CLI checks
 ```bash
@@ -44,15 +46,17 @@ curl -fsSL https://bramblemesh.org/ota/index.json \
   | jq -e --arg v "$VERSION" --arg c "$CHANNEL" 'any(.releases[]; .version==$v and .channel==$c)'
 ```
 
-### Confirm canonical + tagged artifacts exist
+### Confirm canonical + tagged artifacts exist (all CI boards)
 ```bash
-BASE="https://bramblemesh.org/ota/$CHANNEL/$VERSION/heltec-v3"
-for f in \
-  bootloader.bin partition-table.bin bramble.bin \
-  bootloader-${VERSION#v}.bin partition-table-${VERSION#v}.bin bramble-${VERSION#v}.bin
+for BOARD in heltec-v3 tdeck-plus heltec-v4; do
+  BASE="https://bramblemesh.org/ota/$CHANNEL/$VERSION/$BOARD"
+  for f in \
+    bootloader.bin partition-table.bin bramble.bin \
+    bootloader-${VERSION#v}.bin partition-table-${VERSION#v}.bin bramble-${VERSION#v}.bin
   do
-    curl -fsI "$BASE/$f" >/dev/null && echo "OK $f"
+    curl -fsI "$BASE/$f" >/dev/null && echo "OK $BOARD/$f"
   done
+done
 ```
 
 ---
@@ -62,7 +66,7 @@ for f in \
 1. Open web flasher.
 2. Refresh release list.
 3. Confirm newest release appears first.
-4. Select target board (`heltec-v3`) and verify it resolves canonical files:
+4. Select each target board (`heltec-v3`, `tdeck-plus`, `heltec-v4`) and verify it resolves canonical files:
    - `bootloader.bin`
    - `partition-table.bin`
    - `bramble.bin`
@@ -76,7 +80,7 @@ If release list is stale, hard refresh and re-check `/ota/index.json` directly.
 ### A) Disable publish step in CI (fastest containment)
 - In `.gitea/workflows/firmware-build.yml`, comment or gate:
   - `Publish OTA via authenticated endpoint`
-  - `Verify published release appears in index`
+  - `Verify published release completeness in index`
 
 ### B) Stop publisher service
 ```bash
