@@ -42,9 +42,12 @@ Bramble is organized as ESP-IDF components, each self-contained with clean inter
 
 ## Hardware Targets
 
-- **Heltec WiFi LoRa 32 V3** (ESP32-S3 + SX1262) — primary target
-- **Heltec WiFi LoRa 32 V4** (ESP32-S3 + SX1262 + optional L76K GNSS) — bring-up in progress
-- **LILYGO T-Beam Supreme** (ESP32-S3 + SX1262) — secondary target
+| Board | MCU | Display | Input | Radio | Audio | Status |
+|------|-----|---------|-------|-------|-------|--------|
+| Heltec WiFi LoRa 32 V3 | ESP32-S3 | 0.96" SSD1306 OLED (128x64) | Buttons | SX1262 | N/A | Primary target |
+| LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Full GUI support (4 tabs: Chat, Nodes, Stats, Settings) |
+| Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Bring-up in progress |
+| LILYGO T-Beam Supreme | ESP32-S3 | Minimal/board-specific | Buttons | SX1262 | N/A | Secondary target |
 
 ## Building
 
