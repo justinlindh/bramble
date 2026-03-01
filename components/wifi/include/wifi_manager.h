@@ -17,7 +17,7 @@ typedef struct {
 } wifi_status_t;
 
 /* Initialize WiFi. Checks NVS creds first, then Kconfig, then AP fallback. */
-int wifi_manager_init(void);
+int wifi_manager_init(uint32_t node_addr);
 
 /* Get current WiFi status */
 void wifi_manager_get_status(wifi_status_t *status);

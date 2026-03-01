@@ -885,7 +885,7 @@ void app_main(void)
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("WiFi: starting...");
 #endif
-        if (wifi_manager_init() == 0) {
+        if (wifi_manager_init(my_addr) == 0) {
             const char *ip = wifi_manager_get_ip();
             if (ip[0] != '\0') {
                 ESP_LOGI(TAG, "WiFi ready: %s", ip);
@@ -992,21 +992,27 @@ void app_main(void)
      *    do NVS reads which trigger SPI flash operations. ESP-IDF asserts
      *    the calling task's stack is cache-safe (internal RAM) before
      *    disabling caches. PSRAM stack → assert crash.
-     * 2. Only ~22KB internal RAM free at this point after WiFi init.
-     *    8KB stack + TCB overhead fits. Large locals in Settings screen
+     * 2. Internal RAM headroom can dip below ~24KB after connectivity init.
+     *    Keep ui_gfx stack conservative to ensure task creation succeeds.
      *    (settings_mesh_state_t etc.) are heap-allocated to stay within budget.
      */
     ESP_LOGI(TAG, "Internal RAM free before ui_gfx: %lu bytes",
              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    TaskHandle_t ui_task_handle = NULL;
-    BaseType_t ui_task_ret = xTaskCreatePinnedToCore(
-        ui_graphics_task, "ui_gfx", 12288, NULL, 5, &ui_task_handle, 1);
-    if (ui_task_ret != pdPASS) {
-        ESP_LOGE(TAG, "FAILED to create ui_gfx task — internal RAM exhausted "
-                 "(free: %lu bytes). Display will be blank.",
-                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    static StaticTask_t ui_task_tcb;
+    static StackType_t ui_task_stack[12288]; /* 12K words = 48KB internal stack */
+    TaskHandle_t ui_task_handle = xTaskCreateStaticPinnedToCore(
+        ui_graphics_task,
+        "ui_gfx",
+        12288,
+        NULL,
+        5,
+        ui_task_stack,
+        &ui_task_tcb,
+        1);
+    if (ui_task_handle == NULL) {
+        ESP_LOGE(TAG, "FAILED to create ui_gfx task (static alloc). Display will be blank.");
     } else {
-        ESP_LOGI(TAG, "ui_gfx task created (12KB stack in internal RAM)");
+        ESP_LOGI(TAG, "ui_gfx task created (12K words static stack in internal RAM)");
     }
 #else
     /* Init text UI state machine (Heltec and other non-graphical boards) */

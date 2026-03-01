@@ -8,6 +8,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include <string.h>
+#include <stdio.h>
+#include <inttypes.h>
 
 static const char *TAG = "wifi_mgr";
 
@@ -208,21 +210,23 @@ static int try_station_mode(const char *ssid, const char *password)
 
 /* ── AP mode ─────────────────────────────────────────────────────────── */
 
-static int start_ap_mode(void)
+static int start_ap_mode(uint32_t node_addr)
 {
     esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    /* Build unique AP SSID: Bramble-XXXX (last 4 hex of node address) */
+    char ap_ssid[33];
+    snprintf(ap_ssid, sizeof(ap_ssid), "Bramble-%04" PRIX32, node_addr & 0xFFFF);
+
     wifi_config_t ap_cfg = {0};
-    strncpy((char *)ap_cfg.ap.ssid,
-            CONFIG_BRAMBLE_WIFI_AP_SSID,
-            sizeof(ap_cfg.ap.ssid) - 1);
+    strncpy((char *)ap_cfg.ap.ssid, ap_ssid, sizeof(ap_cfg.ap.ssid) - 1);
     strncpy((char *)ap_cfg.ap.password,
             CONFIG_BRAMBLE_WIFI_AP_PASSWORD,
             sizeof(ap_cfg.ap.password) - 1);
-    ap_cfg.ap.ssid_len     = (uint8_t)strlen(CONFIG_BRAMBLE_WIFI_AP_SSID);
+    ap_cfg.ap.ssid_len     = (uint8_t)strlen(ap_ssid);
     ap_cfg.ap.channel      = 1;
     ap_cfg.ap.authmode     = WIFI_AUTH_WPA2_PSK;
     ap_cfg.ap.max_connection = 4;
@@ -232,16 +236,16 @@ static int start_ap_mode(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     strncpy(s_status.ip_addr, "192.168.4.1", sizeof(s_status.ip_addr) - 1);
-    strncpy(s_status.ssid, CONFIG_BRAMBLE_WIFI_AP_SSID, sizeof(s_status.ssid) - 1);
+    strncpy(s_status.ssid, ap_ssid, sizeof(s_status.ssid) - 1);
     s_status.mode = BRAMBLE_WIFI_AP;
 
-    ESP_LOGI(TAG, "AP mode: %s (%s)", CONFIG_BRAMBLE_WIFI_AP_SSID, s_status.ip_addr);
+    ESP_LOGI(TAG, "AP mode: %s (%s)", ap_ssid, s_status.ip_addr);
     return 0;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-int wifi_manager_init(void)
+int wifi_manager_init(uint32_t node_addr)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -269,7 +273,7 @@ int wifi_manager_init(void)
         ESP_LOGI(TAG, "No WiFi credentials — starting AP mode");
     }
 
-    return start_ap_mode();
+    return start_ap_mode(node_addr);
 }
 
 void wifi_manager_get_status(wifi_status_t *status)
