@@ -125,37 +125,111 @@ static void msg_bubble_click_cb(lv_event_t *e) {
     render_messages_for_target();
 }
 
+static void format_compact_hop_name(char *out, size_t out_len, uint32_t hop_addr) {
+    if (!out || out_len == 0) {
+        return;
+    }
+
+    const char *peer_name = mesh_get_peer_name(hop_addr);
+    if (peer_name && peer_name[0]) {
+        /* Compact route UI uses up to 4 chars per hop, no ellipsis. */
+        snprintf(out, out_len, "%.4s", peer_name);
+    } else {
+        snprintf(out, out_len, "%04lX", (unsigned long)(hop_addr & 0xFFFFUL));
+    }
+}
+
+static bool append_text(char *out, size_t out_len, size_t *pos, const char *text) {
+    if (!out || !pos || !text || *pos >= out_len) {
+        return false;
+    }
+
+    int n = snprintf(out + *pos, out_len - *pos, "%s", text);
+    if (n < 0 || (size_t)n >= (out_len - *pos)) {
+        out[out_len - 1] = '\0';
+        return false;
+    }
+
+    *pos += (size_t)n;
+    return true;
+}
+
+static bool format_route_compact_full(char *out,
+                                      size_t out_len,
+                                      uint8_t hop_count,
+                                      const uint32_t *hops,
+                                      size_t *char_len) {
+    if (!out || out_len == 0 || !char_len) {
+        return false;
+    }
+
+    out[0] = '\0';
+    *char_len = 0;
+
+    if (!hops || hop_count == 0) {
+        return append_text(out, out_len, char_len, "Route unavailable");
+    }
+
+    for (uint8_t i = 0; i < hop_count; i++) {
+        char hop_buf[8];
+        format_compact_hop_name(hop_buf, sizeof(hop_buf), hops[i]);
+
+        if (i > 0 && !append_text(out, out_len, char_len, " → ")) {
+            return false;
+        }
+
+        if (!append_text(out, out_len, char_len, hop_buf)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool format_route_compact_endpoints(char *out,
+                                           size_t out_len,
+                                           uint8_t hop_count,
+                                           const uint32_t *hops) {
+    if (!out || out_len == 0) {
+        return false;
+    }
+
+    out[0] = '\0';
+    if (!hops || hop_count == 0) {
+        return snprintf(out, out_len, "Route unavailable") > 0;
+    }
+
+    if (hop_count == 1) {
+        char hop_buf[8];
+        format_compact_hop_name(hop_buf, sizeof(hop_buf), hops[0]);
+        return snprintf(out, out_len, "%s", hop_buf) > 0;
+    }
+
+    char first_buf[8];
+    char last_buf[8];
+    format_compact_hop_name(first_buf, sizeof(first_buf), hops[0]);
+    format_compact_hop_name(last_buf, sizeof(last_buf), hops[hop_count - 1]);
+    return snprintf(out, out_len, "%s → … → %s", first_buf, last_buf) > 0;
+}
+
 static void format_route_text(char *out,
                               size_t out_len,
                               uint8_t hop_count,
                               const uint32_t *hops) {
-    if (!out || out_len == 0) return;
-    if (!hops || hop_count == 0) {
-        snprintf(out, out_len, "Route unavailable");
+    if (!out || out_len == 0) {
         return;
     }
 
-    size_t pos = 0;
-    for (uint8_t i = 0; i < hop_count; i++) {
-        const char *peer_name = mesh_get_peer_name(hops[i]);
-        char node_buf[16];
-        if (peer_name && peer_name[0]) {
-            snprintf(node_buf, sizeof(node_buf), "%s", peer_name);
-        } else {
-            snprintf(node_buf, sizeof(node_buf), "%08lX", (unsigned long)hops[i]);
-        }
+    /* Bubble width is fixed at 220 px; use compact fallback for long routes. */
+    const size_t compact_limit_chars = 28;
+    size_t full_char_len = 0;
+    if (format_route_compact_full(out, out_len, hop_count, hops, &full_char_len) &&
+        full_char_len <= compact_limit_chars) {
+        return;
+    }
 
-        int n = 0;
-        if (i == 0) {
-            n = snprintf(out + pos, out_len - pos, "%s", node_buf);
-        } else {
-            n = snprintf(out + pos, out_len - pos, " -> %s", node_buf);
-        }
-        if (n < 0 || (size_t)n >= (out_len - pos)) {
-            out[out_len - 1] = '\0';
-            return;
-        }
-        pos += (size_t)n;
+    if (!format_route_compact_endpoints(out, out_len, hop_count, hops)) {
+        snprintf(out, out_len, "Route unavailable");
     }
 }
 
@@ -266,9 +340,14 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
         }
 
         static char status_buf[24];
-        if (can_show_route) {
-            bool expanded = (s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id);
-            snprintf(status_buf, sizeof(status_buf), "%s %s", badge_sym, expanded ? LV_SYMBOL_DOWN : LV_SYMBOL_RIGHT);
+        bool has_route_meta = (msg->route_hop_count > 0);
+        if (has_route_meta) {
+            if (msg->route_hop_count > 1) {
+                snprintf(status_buf, sizeof(status_buf), "%s %u↗", badge_sym, (unsigned)msg->route_hop_count);
+            } else {
+                /* Single-hop direct route: keep existing badge uncluttered. */
+                snprintf(status_buf, sizeof(status_buf), "%s", badge_sym);
+            }
             badge_sym = status_buf;
         }
 
@@ -287,21 +366,12 @@ static void add_message_bubble(lv_obj_t *parent, const char *sender,
             char route_buf[200];
             format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count, msg->route_hops);
 
-            lv_obj_t *route_box = lv_obj_create(bubble);
-            lv_obj_set_width(route_box, LV_PCT(100));
-            lv_obj_set_height(route_box, LV_SIZE_CONTENT);
-            lv_obj_set_style_bg_color(route_box, BR_COLOR_SURFACE_2, 0);
-            lv_obj_set_style_bg_opa(route_box, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(route_box, 0, 0);
-            lv_obj_set_style_pad_all(route_box, 4, 0);
-            lv_obj_clear_flag(route_box, LV_OBJ_FLAG_SCROLLABLE);
-
-            lv_obj_t *route_lbl = lv_label_create(route_box);
+            lv_obj_t *route_lbl = lv_label_create(bubble);
             lv_label_set_text(route_lbl, route_buf);
-            lv_label_set_long_mode(route_lbl, LV_LABEL_LONG_WRAP);
+            lv_label_set_long_mode(route_lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_width(route_lbl, LV_PCT(100));
-            lv_obj_set_style_text_font(route_lbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(route_lbl, BR_COLOR_TEXT, 0);
+            lv_obj_set_style_text_font(route_lbl, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_color(route_lbl, BR_COLOR_TEXT_SEC, 0);
         }
 
         if (msg->packet_id != 0) {
