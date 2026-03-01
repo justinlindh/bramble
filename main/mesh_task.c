@@ -24,6 +24,7 @@
 #include "gps.h"
 #include "beacon.h"
 #include "delivery_event_ring.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -64,7 +65,7 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 #define BEACON_JITTER_MS        5000    /* ±5s random jitter */
 #define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH          16
-#define MESH_TASK_STACK         8192
+#define MESH_TASK_STACK         5120
 #define MESH_TASK_PRIORITY      5
 
 /* ── Received packet queue item ─────────────────────────────────────── */
@@ -88,7 +89,7 @@ static SemaphoreHandle_t   s_delivery_event_mutex;
 static QueueHandle_t       s_rx_queue;
 static mesh_shared_state_t s_shared;
 
-static delivery_event_ring_t s_delivery_event_ring;
+static delivery_event_ring_t *s_delivery_event_ring;
 
 enum {
     DELIVERY_EVENT_TYPE_ACK = 1,
@@ -226,9 +227,9 @@ static uint32_t now_ms(void) {
 }
 
 static void delivery_event_ring_append_locked(const delivery_event_record_t *event) {
-    if (!event || !s_delivery_event_mutex) return;
+    if (!event || !s_delivery_event_mutex || !s_delivery_event_ring) return;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
-    delivery_event_ring_append(&s_delivery_event_ring, event);
+    delivery_event_ring_append(s_delivery_event_ring, event);
     xSemaphoreGive(s_delivery_event_mutex);
 }
 
@@ -2287,7 +2288,7 @@ uint32_t mesh_delivery_events_latest_seq(void) {
     uint32_t latest = 0u;
     if (!s_delivery_event_mutex) return 0u;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
-    latest = delivery_event_ring_latest_seq(&s_delivery_event_ring);
+    latest = delivery_event_ring_latest_seq(s_delivery_event_ring);
     xSemaphoreGive(s_delivery_event_mutex);
     return latest;
 }
@@ -2298,7 +2299,7 @@ size_t mesh_delivery_events_list_since(uint32_t since_event_seq,
     size_t count = 0u;
     if (!s_delivery_event_mutex) return 0u;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
-    count = delivery_event_ring_list_since(&s_delivery_event_ring, since_event_seq, out, out_max);
+    count = delivery_event_ring_list_since(s_delivery_event_ring, since_event_seq, out, out_max);
     xSemaphoreGive(s_delivery_event_mutex);
     return count;
 }
@@ -2778,7 +2779,13 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     s_state_mutex = xSemaphoreCreateMutex();
     s_delivery_event_mutex = xSemaphoreCreateMutex();
-    delivery_event_ring_init(&s_delivery_event_ring);
+    s_delivery_event_ring = heap_caps_calloc(1, sizeof(delivery_event_ring_t), MALLOC_CAP_SPIRAM);
+    if (!s_delivery_event_ring) {
+        ESP_LOGE(TAG, "Failed to allocate delivery event ring in PSRAM (%u bytes)",
+                 (unsigned)sizeof(delivery_event_ring_t));
+        return;
+    }
+    delivery_event_ring_init(s_delivery_event_ring);
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
 
     /* Pin to CPU1 — leave CPU0 for UI/display */
