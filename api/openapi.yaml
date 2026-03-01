@@ -43,6 +43,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
 
+
+  /rpc/bramble.getWifiStatus:
+    post:
+      operationId: getWifiStatus
+      summary: Get WiFi interface status
+      description: Returns current WiFi mode and link information.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: WiFi status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WifiStatusResponse'
+
   /rpc/bramble.getIdentity:
     post:
       operationId: getIdentity
@@ -1031,6 +1053,32 @@ components:
           description: Total airtime used in milliseconds.
         position:
           $ref: '#/components/schemas/Position'
+
+
+    WifiStatusResponse:
+      type: object
+      description: Current WiFi status.
+      required: [mode, ssid, ip, rssi, mac, clients]
+      properties:
+        mode:
+          type: string
+          enum: [off, station, ap]
+          description: Active WiFi operating mode.
+        ssid:
+          type: string
+          description: Current SSID (AP SSID in AP mode, joined network in station mode).
+        ip:
+          type: string
+          description: Current IPv4 address.
+        rssi:
+          type: integer
+          description: Station RSSI; 0 in AP mode.
+        mac:
+          type: string
+          description: WiFi MAC address in colon-separated hex format.
+        clients:
+          type: integer
+          description: Connected AP client count; 0 in station mode.
 
     IdentityResponse:
       type: object

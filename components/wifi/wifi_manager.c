@@ -236,6 +236,7 @@ static int start_ap_mode(uint32_t node_addr)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
+    esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_ERROR_CHECK(esp_wifi_start());
 
     strncpy(s_status.ip_addr, "192.168.4.1", sizeof(s_status.ip_addr) - 1);
