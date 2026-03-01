@@ -1,5 +1,7 @@
 # OTA Rollout Guide (Single Node)
 
+Last verified: 2026-03-01
+
 Use this runbook to deploy a `bramble.bin` build to one WiFi-connected node without USB flashing.
 
 ## Prerequisites
@@ -7,20 +9,25 @@ Use this runbook to deploy a `bramble.bin` build to one WiFi-connected node with
 - Node reachable over JSON-RPC WebSocket (example: `ws://192.168.1.179/ws`)
 - Host machine IP reachable by the node (example: `192.168.6.34`)
 - `bramble-cli` with `ota` command available
+- Choose target board: `heltec-v3`, `heltec-v4`, or `tdeck-plus`
 
 ## 1) Build artifact
 
+Use the board-aware build wrapper:
+
 ```bash
 cd ~/src/bramble
-idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
+bash scripts/flash.sh local heltec-v4 build
 ```
 
-Expected artifact: `~/src/bramble/build/bramble.bin`
+Expected artifact: `~/src/bramble/build-heltec-v4/bramble.bin`
+
+> For other boards, switch the board name and build directory accordingly (for example `heltec-v3` -> `build-heltec-v3`, `tdeck-plus` -> `build-tdeck-plus`).
 
 ## 2) Host artifact over HTTP
 
 ```bash
-cd ~/src/bramble/build
+cd ~/src/bramble/build-heltec-v4
 python3 -m http.server 8088
 ```
 
@@ -66,6 +73,6 @@ If the node becomes unhealthy after OTA:
 2. If the node is unreachable over WiFi, recover via USB flash:
    ```bash
    cd ~/src/bramble
-   idf.py -p <serial-port> flash monitor
+   bash scripts/flash.sh local heltec-v4 flash /dev/ttyACM0
    ```
 3. Re-verify with `ping` and `status --json` after recovery.

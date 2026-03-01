@@ -1,5 +1,7 @@
 # OTA Release Index Schema
 
+Last verified: 2026-03-01
+
 `index.json` shape:
 
 ```json
@@ -47,16 +49,16 @@ For each uploaded artifact, publisher writes both:
    - `bramble.bin`
 
 2. **Semver-tagged filename** (immutable release traceability)
-   - `bootloader-<version>.bin`
-   - `partition-table-<version>.bin`
-   - `bramble-<version>.bin`
+   - `bootloader-<version-without-leading-v>.bin`
+   - `partition-table-<version-without-leading-v>.bin`
+   - `bramble-<version-without-leading-v>.bin`
 
 Under release directory:
 - `/ota/<channel>/<version>/<board>/`
 
 Example:
 - `/ota/stable/v0.4.0/heltec-v3/bramble.bin` (canonical)
-- `/ota/stable/v0.4.0/heltec-v3/bramble-v0.4.0.bin` (tagged copy)
+- `/ota/stable/v0.4.0/heltec-v3/bramble-0.4.0.bin` (tagged copy)
 
 `index.json` should continue to reference canonical files for consumer stability; tagged copies are retained for provenance/debugging and may be required by tooling checks.
 

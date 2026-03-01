@@ -1,5 +1,7 @@
 # OTA Dark URL
 
+Last verified: 2026-03-01
+
 OTA artifacts are served from the existing Bramble site stack under an unlinked path:
 
 - Base: `/ota/`

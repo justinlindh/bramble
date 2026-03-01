@@ -1,5 +1,7 @@
 # OTA Publish API (`POST /ota/publish`)
 
+Last verified: 2026-03-01
+
 This endpoint is used by CI to publish OTA artifacts and trigger `index.json` regeneration.
 
 ## Authentication
@@ -55,21 +57,21 @@ Normalized fixture shape:
       {
         "name": "bootloader.bin",
         "canonical_file": "/ota/stable/v0.4.0/heltec-v3/bootloader.bin",
-        "tagged_file": "/ota/stable/v0.4.0/heltec-v3/bootloader-v0.4.0.bin",
+        "tagged_file": "/ota/stable/v0.4.0/heltec-v3/bootloader-0.4.0.bin",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "size": 32768
       },
       {
         "name": "partition-table.bin",
         "canonical_file": "/ota/stable/v0.4.0/heltec-v3/partition-table.bin",
-        "tagged_file": "/ota/stable/v0.4.0/heltec-v3/partition-table-v0.4.0.bin",
+        "tagged_file": "/ota/stable/v0.4.0/heltec-v3/partition-table-0.4.0.bin",
         "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "size": 4096
       },
       {
         "name": "bramble.bin",
         "canonical_file": "/ota/stable/v0.4.0/heltec-v3/bramble.bin",
-        "tagged_file": "/ota/stable/v0.4.0/heltec-v3/bramble-v0.4.0.bin",
+        "tagged_file": "/ota/stable/v0.4.0/heltec-v3/bramble-0.4.0.bin",
         "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "size": 1048576
       }
