@@ -140,7 +140,7 @@ All messages are newline-terminated (`\n`). The firmware's existing `json_rpc.c`
 |--------|--------|---------|-------------|
 | `bramble.getConfig` | `{}` | `ConfigResult` | Full config: identity + radio + channels |
 | `bramble.setRadio` | `RadioParams` | `{}` | Set TX power, SF, BW, CR, frequency |
-| `bramble.setNodeName` | `{name: string}` | `{}` | Set short name (max 8 chars) |
+| `bramble.setNodeName` | `{name: string}` | `{}` | Set short name (max 32 chars) |
 
 #### Neighbors & Routes
 
@@ -210,7 +210,7 @@ All types go in `webapp/src/types/bramble.ts`.
 export interface NodeIdentity {
   address: number;          // 32-bit node address
   pubkeyHash: number;       // 32-bit hash of public key
-  name: string;             // Short name, max 8 chars
+  name: string;             // Short name, max 32 chars
   pubkeyB64: string;        // Base64-encoded public key (display only)
 }
 
