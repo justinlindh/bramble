@@ -110,6 +110,17 @@ void test_nmea_parse_rmc_truncated(void) {
     TEST_ASSERT_FALSE(result);
 }
 
+/* Reject malformed coordinate fields that can appear during startup garbage */
+void test_nmea_parse_rmc_rejects_short_longitude_field(void) {
+    char sentence[] = "$GPRMC,123519,A,3555.930,N,012.000,W,0.0,0.0,010122,,,A*00";
+    nmea_position_t pos = {0};
+
+    bool result = nmea_parse_rmc(sentence, &pos);
+
+    TEST_ASSERT_FALSE(result);
+    TEST_ASSERT_FALSE(pos.valid);
+}
+
 /* Test valid GGA sentence parsing */
 void test_nmea_parse_gga_valid(void) {
     char sentence[] = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47";
@@ -248,6 +259,7 @@ int main(void) {
     RUN_TEST(test_nmea_parse_rmc_invalid_status);
     RUN_TEST(test_nmea_parse_rmc_empty_fields);
     RUN_TEST(test_nmea_parse_rmc_truncated);
+    RUN_TEST(test_nmea_parse_rmc_rejects_short_longitude_field);
     RUN_TEST(test_nmea_parse_rmc_high_speed);
     RUN_TEST(test_nmea_parse_rmc_speed_clamp);
     

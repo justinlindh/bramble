@@ -4,10 +4,47 @@
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
+#include <ctype.h>
 
 /* Helper: check if field is empty */
 static bool field_empty(const char *field) {
     return !field || field[0] == '\0';
+}
+
+static bool valid_hemisphere(char dir, bool latitude) {
+    if (latitude) {
+        return dir == 'N' || dir == 'S';
+    }
+    return dir == 'E' || dir == 'W';
+}
+
+static bool validate_coord_field(const char *field, bool latitude) {
+    if (field_empty(field)) return false;
+
+    const size_t len = strlen(field);
+    const size_t min_digits_before_dot = latitude ? 4U : 5U;
+
+    const char *dot = strchr(field, '.');
+    if (!dot) return false;
+
+    size_t digits_before_dot = (size_t)(dot - field);
+    if (digits_before_dot < min_digits_before_dot) return false;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = field[i];
+        if (c == '.') continue;
+        if (!isdigit((unsigned char)c)) return false;
+    }
+
+    float raw = atof(field);
+    int degrees = (int)(raw / 100.0f);
+    float minutes = raw - (degrees * 100.0f);
+
+    if (minutes < 0.0f || minutes >= 60.0f) return false;
+    if (latitude && degrees > 90) return false;
+    if (!latitude && degrees > 180) return false;
+
+    return true;
 }
 
 /* Convert NMEA DDMM.MMMM to decimal degrees */
@@ -59,17 +96,23 @@ bool nmea_parse_rmc(char *sentence, nmea_position_t *pos) {
         return false;
     }
     
+    if (!valid_hemisphere(fields[4][0], true) || !valid_hemisphere(fields[6][0], false)) {
+        pos->valid = false;
+        return false;
+    }
+
+    if (!validate_coord_field(fields[3], true) || !validate_coord_field(fields[5], false)) {
+        pos->valid = false;
+        return false;
+    }
+
     /* Parse latitude */
-    if (!field_empty(fields[3]) && !field_empty(fields[4])) {
-        float lat = nmea_dm_to_degrees(fields[3], fields[4][0]);
-        pos->latitude_e7 = (int32_t)(lat * 1e7f);
-    }
-    
+    float lat = nmea_dm_to_degrees(fields[3], fields[4][0]);
+    pos->latitude_e7 = (int32_t)(lat * 1e7f);
+
     /* Parse longitude */
-    if (!field_empty(fields[5]) && !field_empty(fields[6])) {
-        float lon = nmea_dm_to_degrees(fields[5], fields[6][0]);
-        pos->longitude_e7 = (int32_t)(lon * 1e7f);
-    }
+    float lon = nmea_dm_to_degrees(fields[5], fields[6][0]);
+    pos->longitude_e7 = (int32_t)(lon * 1e7f);
     
     /* Parse speed (convert knots to km/h) */
     if (field_count > 7 && !field_empty(fields[7])) {
@@ -120,17 +163,23 @@ bool nmea_parse_gga(char *sentence, nmea_position_t *pos) {
         return false;
     }
     
+    if (!valid_hemisphere(fields[3][0], true) || !valid_hemisphere(fields[5][0], false)) {
+        pos->valid = false;
+        return false;
+    }
+
+    if (!validate_coord_field(fields[2], true) || !validate_coord_field(fields[4], false)) {
+        pos->valid = false;
+        return false;
+    }
+
     /* Parse latitude */
-    if (!field_empty(fields[2]) && !field_empty(fields[3])) {
-        float lat = nmea_dm_to_degrees(fields[2], fields[3][0]);
-        pos->latitude_e7 = (int32_t)(lat * 1e7f);
-    }
-    
+    float lat = nmea_dm_to_degrees(fields[2], fields[3][0]);
+    pos->latitude_e7 = (int32_t)(lat * 1e7f);
+
     /* Parse longitude */
-    if (!field_empty(fields[4]) && !field_empty(fields[5])) {
-        float lon = nmea_dm_to_degrees(fields[4], fields[5][0]);
-        pos->longitude_e7 = (int32_t)(lon * 1e7f);
-    }
+    float lon = nmea_dm_to_degrees(fields[4], fields[5][0]);
+    pos->longitude_e7 = (int32_t)(lon * 1e7f);
     
     /* Parse altitude */
     if (field_count > 9 && !field_empty(fields[9])) {
