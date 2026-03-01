@@ -143,7 +143,7 @@ static void sta_event_handler(void *arg, esp_event_base_t event_base,
 
 static int try_station_mode(const char *ssid, const char *password)
 {
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -205,6 +205,9 @@ static int try_station_mode(const char *ssid, const char *password)
 
     esp_wifi_stop();
     esp_wifi_deinit();
+    if (sta_netif) {
+        esp_netif_destroy(sta_netif);
+    }
     return -1;
 }
 
@@ -240,6 +243,10 @@ static int start_ap_mode(uint32_t node_addr)
     s_status.mode = BRAMBLE_WIFI_AP;
 
     ESP_LOGI(TAG, "AP mode: %s (%s)", ap_ssid, s_status.ip_addr);
+
+    /* Start WebSocket server on AP mode so webapp can connect */
+    extern int ws_server_start(void);
+    ws_server_start();
     return 0;
 }
 
