@@ -17,7 +17,7 @@ PORT=""
 EXTRA_ARGS=()
 
 is_mode() { [[ "$1" == "local" || "$1" == "gpu" ]]; }
-is_board() { [[ "$1" == "heltec-v3" || "$1" == "tdeck-plus" ]]; }
+is_board() { [[ "$1" == "heltec-v3" || "$1" == "heltec-v4" || "$1" == "tdeck-plus" ]]; }
 is_action() { [[ "$1" == "flash" || "$1" == "monitor" || "$1" == "build" ]]; }
 is_port() { [[ "$1" == /dev/* ]]; }
 

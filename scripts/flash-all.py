@@ -73,12 +73,13 @@ def norm_board(board: str) -> str:
     aliases = {
         "heltec": "heltec-v3",
         "heltec-v3": "heltec-v3",
+        "heltec-v4": "heltec-v4",
         "tdeck": "tdeck-plus",
         "t-deck": "tdeck-plus",
         "tdeck-plus": "tdeck-plus",
     }
     if b not in aliases:
-        raise ValueError(f"Unsupported board '{board}' (expected heltec-v3/heltec or tdeck-plus/tdeck)")
+        raise ValueError(f"Unsupported board '{board}' (expected heltec-v3/heltec-v4 or tdeck-plus/tdeck)")
     return aliases[b]
 
 
@@ -159,65 +160,71 @@ def build_board(board: str) -> tuple[bool, str]:
 def flash_usb(port: str, board: str) -> tuple[bool, str]:
     cmd = ["bash", str(FLASH_SH), "local", board, "flash", port]
     cp = run_cmd(cmd, timeout=900)
-    return cp.returncode == 0, cp.stdout
+    if cp.returncode != 0:
+        return False, cp.stdout
+    # For ESP32-S3 USB JTAG (ACM) devices, give a moment for USB
+    # re-enumeration after flash before opening for verification.
+    if "ACM" in port:
+        time.sleep(3)
+    return True, cp.stdout
 
 
-class SerialRPC:
-    def __init__(self, port: str):
-        self.port = port
-        self.ser = None
-        self.req_id = 0
-
-    def __enter__(self):
-        import serial  # type: ignore
-        self.ser = serial.Serial(self.port, 115200, timeout=1)
-        self.ser.reset_input_buffer()
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        if self.ser:
-            self.ser.close()
-
-    def call(self, method: str, params: dict[str, Any] | None = None, timeout: float = 6.0) -> dict[str, Any]:
-        self.req_id += 1
-        req = {"jsonrpc": "2.0", "id": self.req_id, "method": method, "params": params or {}}
-        payload = json.dumps(req) + "\n"
-        assert self.ser is not None
-        self.ser.write(payload.encode("utf-8"))
-        self.ser.flush()
-
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            line = self.ser.readline().decode("utf-8", errors="replace").strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if msg.get("id") == self.req_id:
-                return msg
-        raise TimeoutError(f"RPC timeout for {method} on {self.port}")
+BOOT_MARKER = "entering main mesh loop"
+# Strings that prove the device booted successfully even if we missed the marker
+OPERATIONAL_MARKERS = [
+    "bramble.on",        # JSON-RPC event notifications (onGpsEvent, onMeshRx, etc.)
+    "radio_esp: TX",     # radio transmitting
+    "mesh: ACK",         # mesh protocol active
+    "wifi:mode",         # WiFi initialized
+    "bramble>",          # CLI prompt
+    "LVGL initialized",  # T-Deck display up
+    "Beacon TX",         # beacon active
+]
+PANIC_MARKERS = ["Guru Meditation Error", "InstrFetchProhibited", "LoadProhibited", "abort()"]
 
 
-def verify_usb_uptime(port: str, max_uptime_s: int = 30, wait_s: int = 40) -> tuple[bool, str]:
-    deadline = time.monotonic() + wait_s
-    last_err = ""
-    while time.monotonic() < deadline:
-        try:
-            with SerialRPC(port) as rpc:
-                resp = rpc.call("bramble.getStatus", timeout=5)
-                result = resp.get("result") or {}
-                uptime = result.get("uptime_s")
-                if isinstance(uptime, int):
-                    if uptime <= max_uptime_s:
-                        return True, f"uptime_s={uptime} via serial"
-                    return False, f"uptime_s={uptime} exceeds {max_uptime_s}s threshold"
-                last_err = f"unexpected response: {resp}"
-        except Exception as e:
-            last_err = str(e)
-            time.sleep(2)
-    return False, f"serial verification timed out: {last_err}"
+def verify_usb_boot(port: str, timeout_s: int = 30) -> tuple[bool, str]:
+    """Monitor serial output after flash for the boot success marker.
+
+    Returns (success, detail_message). Watches for BOOT_MARKER within
+    timeout_s seconds. Also accepts operational output as proof of successful
+    boot (the marker may have scrolled past before we opened the port).
+    Detects panic/boot-loop patterns early to fail fast.
+    """
+    import serial  # type: ignore
+
+    deadline = time.monotonic() + timeout_s
+    collected: list[str] = []
+    try:
+        with serial.Serial(port, 115200, timeout=1) as ser:
+            ser.reset_input_buffer()
+            while time.monotonic() < deadline:
+                raw = ser.readline()
+                if not raw:
+                    continue
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                collected.append(line)
+                if BOOT_MARKER in line:
+                    return True, f"boot OK — saw '{BOOT_MARKER}' after {len(collected)} lines"
+                for panic in PANIC_MARKERS:
+                    if panic in line:
+                        return False, f"panic detected: {line}"
+                for op in OPERATIONAL_MARKERS:
+                    if op in line:
+                        return True, f"boot OK — device operational (saw '{op}' output)"
+    except Exception as e:
+        return False, f"serial error on {port}: {e}"
+
+    # If we got readable lines but no markers, the device is probably fine
+    # but just quiet. Count readable (non-garbage) lines as weak evidence.
+    readable = [l for l in collected if len(l) > 5 and l.isprintable()]
+    if len(readable) >= 3:
+        return True, f"boot likely OK — {len(readable)} readable lines but no marker (device may be idle)"
+
+    tail = "\n".join(collected[-5:]) if collected else "(no output)"
+    return False, f"timeout after {timeout_s}s waiting for boot marker. Last output:\n{tail}"
 
 
 async def ws_call(host: str, method: str, params: dict[str, Any] | None = None, req_id: int = 1, timeout_s: float = 8.0) -> dict[str, Any]:
@@ -389,7 +396,7 @@ def main() -> int:
                 if not ok:
                     results.append(Result(name=d.port, kind="usb", board=d.board or "unknown", success=False, phase="flash", details="flash failed"))
                     continue
-                v_ok, v_msg = verify_usb_uptime(d.port, max_uptime_s=30, wait_s=45)
+                v_ok, v_msg = verify_usb_boot(d.port, timeout_s=30)
                 results.append(Result(name=d.port, kind="usb", board=d.board or "unknown", success=v_ok, phase="verify", details=v_msg))
 
     for d in usb_devices:

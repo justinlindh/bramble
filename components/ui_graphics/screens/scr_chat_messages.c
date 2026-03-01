@@ -40,7 +40,14 @@ static void update_title(void) {
     }
 
     static char buf[48];
-    chat_target_format_title(s_target, channel_name, peer_name, buf, sizeof(buf));
+    /* TODO: implement chat_target_format_title in chat_target.c */
+    if (peer_name) {
+        snprintf(buf, sizeof(buf), "%s", peer_name);
+    } else if (channel_name) {
+        snprintf(buf, sizeof(buf), "#%s", channel_name);
+    } else {
+        snprintf(buf, sizeof(buf), "Chat");
+    }
     lv_label_set_text(s_title, buf);
 }
 
