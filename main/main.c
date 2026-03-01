@@ -1023,11 +1023,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Internal RAM free before ui_gfx: %lu bytes",
              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     static StaticTask_t ui_task_tcb;
-    static StackType_t ui_task_stack[12288]; /* 12K words = 48KB internal stack */
+    static StackType_t ui_task_stack[10240]; /* 10K words = 40KB internal stack */
     TaskHandle_t ui_task_handle = xTaskCreateStaticPinnedToCore(
         ui_graphics_task,
         "ui_gfx",
-        12288,
+        10240,
         NULL,
         5,
         ui_task_stack,
@@ -1036,7 +1036,7 @@ void app_main(void)
     if (ui_task_handle == NULL) {
         ESP_LOGE(TAG, "FAILED to create ui_gfx task (static alloc). Display will be blank.");
     } else {
-        ESP_LOGI(TAG, "ui_gfx task created (12K words static stack in internal RAM)");
+        ESP_LOGI(TAG, "ui_gfx task created (10K words static stack in internal RAM)");
     }
 #else
     /* Init text UI state machine (Heltec and other non-graphical boards) */
