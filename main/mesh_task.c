@@ -65,8 +65,11 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 #define BEACON_JITTER_MS        5000    /* ±5s random jitter */
 #define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH          16
+#define MESH_EVENT_QUEUE_DEPTH  8
 #define MESH_TASK_STACK         8192
 #define MESH_TASK_PRIORITY      5
+
+#define RECEIPT_QUEUE_CAPACITY  8
 
 /* ── Received packet queue item ─────────────────────────────────────── */
 
@@ -87,7 +90,26 @@ static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
 static QueueHandle_t       s_rx_queue;
+static QueueHandle_t       s_mesh_event_queue;
 static mesh_shared_state_t s_shared;
+
+typedef enum {
+    MESH_EVT_RECEIPT_TX = 1,
+} mesh_event_type_t;
+
+typedef struct {
+    bool used;
+    uint32_t original_src_addr;
+    uint32_t original_packet_id;
+    uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
+    uint8_t wire_len;
+    uint8_t attempts_total;
+    uint8_t attempts_sent;
+    uint32_t due_at_ms;
+} pending_receipt_t;
+
+static pending_receipt_t s_receipt_queue[RECEIPT_QUEUE_CAPACITY];
+static esp_timer_handle_t s_receipt_timer;
 
 static delivery_event_ring_t *s_delivery_event_ring;
 
@@ -217,7 +239,10 @@ static int mesh_send_probe_round(uint32_t pid, uint8_t round);
 static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
 static int transmit_packet(const uint8_t *buf, uint8_t len);
-static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
+static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
+static void mesh_schedule_next_receipt_timer(void);
+static void mesh_process_receipt_tx_event(void);
+static void mesh_receipt_timer_cb(void *arg);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
 extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
@@ -819,7 +844,35 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
 /* ── ACK handling ────────────────────────────────────────────────────── */
 
-static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
+static void mesh_schedule_next_receipt_timer(void) {
+    if (!s_receipt_timer) return;
+
+    uint32_t t = now_ms();
+    uint32_t earliest_due = 0;
+    bool have_pending = false;
+
+    for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
+        if (!s_receipt_queue[i].used) continue;
+        if (!have_pending || s_receipt_queue[i].due_at_ms < earliest_due) {
+            earliest_due = s_receipt_queue[i].due_at_ms;
+            have_pending = true;
+        }
+    }
+
+    if (!have_pending) {
+        esp_timer_stop(s_receipt_timer);
+        return;
+    }
+
+    uint32_t delay_ms = (earliest_due <= t) ? 1u : (earliest_due - t);
+    esp_timer_stop(s_receipt_timer);
+    esp_err_t err = esp_timer_start_once(s_receipt_timer, (uint64_t)delay_ms * 1000ULL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to arm receipt timer: %d", (int)err);
+    }
+}
+
+static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     size_t wire_len = 0;
 
@@ -835,33 +888,108 @@ static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t
         return;
     }
 
-    /* Stagger responders to reduce same-slot collisions at the sender. */
-    uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
-    uint32_t jitter_ms = slot_delay_ms + (esp_random() % 140u);   /* +0..139ms */
-    vTaskDelay(pdMS_TO_TICKS(jitter_ms));
+    int slot = -1;
+    for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
+        if (!s_receipt_queue[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        ESP_LOGW(TAG, "Delivery receipt queue full; dropping pkt=%08" PRIX32, original_packet_id);
+        return;
+    }
 
-    uint8_t attempts = mesh_broadcast_receipt_retry_count();
-    for (uint8_t i = 0; i < attempts; i++) {
-        if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
+    uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
+    uint32_t initial_delay_ms = slot_delay_ms + (esp_random() % 140u); /* +0..139ms */
+
+    pending_receipt_t *item = &s_receipt_queue[slot];
+    memset(item, 0, sizeof(*item));
+    item->used = true;
+    item->original_src_addr = original_src_addr;
+    item->original_packet_id = original_packet_id;
+    memcpy(item->buf, buf, wire_len);
+    item->wire_len = (uint8_t)wire_len;
+    item->attempts_total = mesh_broadcast_receipt_retry_count();
+    if (item->attempts_total == 0) {
+        item->attempts_total = 1;
+    }
+    item->attempts_sent = 0;
+    item->due_at_ms = now_ms() + initial_delay_ms;
+
+    mesh_schedule_next_receipt_timer();
+}
+
+static void mesh_process_receipt_tx_event(void) {
+    while (1) {
+        uint32_t t_now = now_ms();
+        int due_idx = -1;
+
+        for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
+            if (!s_receipt_queue[i].used) continue;
+            if (s_receipt_queue[i].due_at_ms <= t_now) {
+                due_idx = i;
+                break;
+            }
+        }
+
+        if (due_idx < 0) {
+            break;
+        }
+
+        pending_receipt_t *item = &s_receipt_queue[due_idx];
+        uint8_t attempt_no = (uint8_t)(item->attempts_sent + 1u);
+        uint32_t airtime_est = 30u + (uint32_t)(item->wire_len * 4u);
+
+        airtime_budget_refill(&s_airtime, t_now);
+        if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
+            ESP_LOGW(TAG,
+                     "Delivery receipt suppressed for pkt=%08" PRIX32 " (attempt=%u/%u): broadcast airtime budget exhausted",
+                     item->original_packet_id,
+                     (unsigned)attempt_no,
+                     (unsigned)item->attempts_total);
+            memset(item, 0, sizeof(*item));
+            continue;
+        }
+
+        if (transmit_packet(item->buf, item->wire_len) == 0) {
+            airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_shared.airtime = s_airtime;
+            xSemaphoreGive(s_state_mutex);
+
             ESP_LOGI(TAG,
                      "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
-                     " attempt=%u/%u delay=%" PRIu32 "ms",
-                     original_packet_id,
-                     original_src_addr,
-                     (unsigned)(i + 1),
-                     (unsigned)attempts,
-                     jitter_ms);
+                     " attempt=%u/%u",
+                     item->original_packet_id,
+                     item->original_src_addr,
+                     (unsigned)attempt_no,
+                     (unsigned)item->attempts_total);
         }
 
-        if (i + 1u < attempts) {
-            /* Exponential backoff with per-attempt randomization.
-             * attempt 0→1: 500-999ms
-             * attempt 1→2: 1200-2099ms */
-            uint32_t base_ms = 500u + (i * 700u);
-            uint32_t jitter_range = 500u + (i * 400u);
-            uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
-            vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
+        item->attempts_sent++;
+        if (item->attempts_sent >= item->attempts_total) {
+            memset(item, 0, sizeof(*item));
+            continue;
         }
+
+        uint8_t i = (uint8_t)(item->attempts_sent - 1u);
+        uint32_t base_ms = 500u + ((uint32_t)i * 700u);
+        uint32_t jitter_range = 500u + ((uint32_t)i * 400u);
+        uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
+        item->due_at_ms = now_ms() + retry_delay_ms;
+    }
+
+    mesh_schedule_next_receipt_timer();
+}
+
+static void mesh_receipt_timer_cb(void *arg) {
+    (void)arg;
+    if (!s_mesh_event_queue) return;
+
+    mesh_event_type_t evt = MESH_EVT_RECEIPT_TX;
+    if (xQueueSend(s_mesh_event_queue, &evt, 0) != pdTRUE) {
+        ESP_EARLY_LOGW(TAG, "mesh event queue full; dropped receipt timer event");
     }
 }
 
@@ -1015,9 +1143,24 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
     if (err != ESP_OK) return;
 
     size_t wire_len = DELIVERY_RECEIPT_MIN_SIZE + ((size_t)receipt->hop_count * 4u);
+    uint32_t airtime_est = 30u + (uint32_t)(wire_len * 4u);
+    uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    airtime_budget_refill(&s_airtime, t_now);
+    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
+        ESP_LOGW(TAG,
+                 "Forwarded delivery receipt suppressed for pkt=%08" PRIX32 ": broadcast airtime budget exhausted",
+                 receipt->orig_packet_id);
+        return;
+    }
+
     ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
              receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
-    transmit_packet(buf, (uint8_t)wire_len);
+    if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_shared.airtime = s_airtime;
+        xSemaphoreGive(s_state_mutex);
+    }
 }
 
 static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -1164,7 +1307,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                         if (dir == MSG_DIR_INCOMING) {
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
                         } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
-                            send_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
+                            queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
                         }
 
                         /* Print to stdout */
@@ -1242,7 +1385,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
         } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
-            send_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
+            queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
         /* Also print to stdout for CLI users */
