@@ -1251,20 +1251,42 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
 /* ── Routing packet handlers ────────────────────────────────────────── */
 
+#define LBT_MAX_ATTEMPTS     3u
+#define LBT_BACKOFF_BASE_MS  50u
+#define LBT_BACKOFF_MAX_MS   300u
+
 static int transmit_packet(const uint8_t *buf, uint8_t len) {
     /* Extract packet type for telemetry (assumes header is already serialized) */
     uint8_t pkt_type = (len >= 2) ? buf[1] : 0xFF;
-    
+
     /* Extract tier from flags (bits 6-7) */
     uint8_t flags = (len >= 3) ? buf[2] : 0;
     uint8_t tier = ((flags >> FLAG_TIER_SHIFT) & 0x03);
     if (tier == 0) tier = 0x01; /* default to normal if not set */
-    
+
+    /* Listen-Before-Talk: check channel before transmitting */
+    for (uint8_t attempt = 0; attempt < LBT_MAX_ATTEMPTS; attempt++) {
+        if (!radio_cad_check()) {
+            break; /* Channel is clear */
+        }
+
+        /* Channel busy — back off with randomized exponential delay */
+        uint32_t backoff_ms = LBT_BACKOFF_BASE_MS * (1u << attempt);
+        if (backoff_ms > LBT_BACKOFF_MAX_MS) {
+            backoff_ms = LBT_BACKOFF_MAX_MS;
+        }
+        backoff_ms += (esp_random() % backoff_ms);
+        ESP_LOGD(TAG, "LBT: channel busy (attempt %u/%u), backoff %" PRIu32 "ms",
+                 (unsigned)(attempt + 1), LBT_MAX_ATTEMPTS, backoff_ms);
+        vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+    }
+    /* After LBT_MAX_ATTEMPTS, transmit anyway to avoid starvation */
+
     int ret = radio_transmit(buf, len);
     if (ret == 0) {
         /* Record successful TX */
         traffic_debug_record_tx(&s_traffic_debug, pkt_type, len, tier);
-        
+
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
         xSemaphoreGive(s_state_mutex);
