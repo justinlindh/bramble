@@ -155,10 +155,17 @@ static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
     location_set_position(mgr, pos);
     if (pos && pos->valid) {
         s_last_gps_fix = true;
-        emit_gps_event("fix_acquired", pos);
+        /* Throttle RPC notifications + log to avoid ~60/min of GPS chatter.
+         * Internal position tracking (location_set_position above) stays real-time. */
+        static uint64_t s_last_gps_notify_us = 0;
+        uint64_t now_us = (uint64_t)esp_timer_get_time();
+        if (s_last_gps_notify_us == 0 || (now_us - s_last_gps_notify_us) >= 5000000ULL) {
+            s_last_gps_notify_us = now_us;
+            emit_gps_event("fix_acquired", pos);
+            ESP_LOGI(TAG, "GPS position updated: lat=%.6f lon=%.6f alt=%d",
+                     pos->latitude_e7 / 1e7, pos->longitude_e7 / 1e7, pos->altitude_m);
+        }
     }
-    ESP_LOGI(TAG, "GPS position updated: lat=%.6f lon=%.6f alt=%d",
-             pos->latitude_e7 / 1e7, pos->longitude_e7 / 1e7, pos->altitude_m);
 }
 
 /* ── Connectivity mode (NVS-persisted) ──────────────────────────────── */
