@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bramble Web Flasher</title>
-    <link rel="stylesheet" href="style.css?v=20260224d">
+    <link rel="stylesheet" href="style.css?v=20260302a">
 </head>
 <body>
     <div class="container">
@@ -15,46 +15,64 @@
         <p class="subtitle">Flash Bramble firmware to your ESP32-S3 device</p>
         <p id="build-info" class="build-info"></p>
 
-        <div class="board-select">
-            <label for="board-select">Board:</label>
-            <select id="board-select">
-                <option value="heltec-v3">Heltec WiFi LoRa 32 V3</option>
-                <option value="tdeck-plus">LILYGO T-Deck Plus</option>
-                <option value="heltec-v4">Heltec V4</option>
-            </select>
-        </div>
-
-        <details id="advanced-panel" class="advanced-panel">
-            <summary>Advanced</summary>
-            <div class="advanced-body">
-                <div class="board-select compact">
-                    <label for="channel-select">Channel:</label>
-                    <select id="channel-select">
-                        <option value="stable">stable (recommended)</option>
-                        <option value="dev">dev</option>
-                    </select>
-                </div>
-
-                <div class="board-select compact">
-                    <label for="release-select">Release:</label>
-                    <select id="release-select"></select>
-                </div>
-
-                <div class="release-details" id="release-details"></div>
+        <!-- Step 1: Flash -->
+        <div id="step-flash">
+            <div class="board-select">
+                <label for="board-select">Board:</label>
+                <select id="board-select">
+                    <option value="heltec-v3">Heltec WiFi LoRa 32 V3</option>
+                    <option value="tdeck-plus">LILYGO T-Deck Plus</option>
+                    <option value="heltec-v4">Heltec V4</option>
+                </select>
             </div>
-        </details>
 
-        <div class="actions">
-            <button id="connect-btn" class="btn primary">Connect Device</button>
-            <button id="flash-btn" class="btn success" disabled>Flash Firmware</button>
+            <details id="advanced-panel" class="advanced-panel">
+                <summary>Advanced</summary>
+                <div class="advanced-body">
+                    <div class="board-select compact">
+                        <label for="channel-select">Channel:</label>
+                        <select id="channel-select">
+                            <option value="stable">stable (recommended)</option>
+                            <option value="dev">dev</option>
+                        </select>
+                    </div>
+
+                    <div class="board-select compact">
+                        <label for="release-select">Release:</label>
+                        <select id="release-select"></select>
+                    </div>
+
+                    <div class="release-details" id="release-details"></div>
+                </div>
+            </details>
+
+            <div class="actions">
+                <button id="connect-btn" class="btn primary">Connect Device</button>
+                <button id="flash-btn" class="btn success" disabled>Flash Firmware</button>
+            </div>
+
+            <div class="progress-section" hidden>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <p class="progress-text" id="progress-text">Ready</p>
+            </div>
+
+            <p id="status-text" class="status-text">Ready.</p>
         </div>
 
-        <details id="wifi-setup-panel" class="wifi-setup-panel">
-            <summary>WiFi Setup (Optional)</summary>
-            <div class="wifi-setup-body">
+        <!-- Step 2: WiFi Setup (shown after successful flash) -->
+        <div id="step-wifi" class="step-wifi" hidden>
+            <div class="step-wifi-header">
+                <div class="step-wifi-icon">✅</div>
+                <h2>Flash Complete!</h2>
+                <p>Your device has been flashed successfully. Set up WiFi so your device can connect to the Bramble web app.</p>
+            </div>
+
+            <div class="wifi-form">
                 <div class="board-select compact">
-                    <label for="wifi-ssid">SSID:</label>
-                    <input id="wifi-ssid" type="text" autocomplete="off" placeholder="Your WiFi network name" />
+                    <label for="wifi-ssid">Network Name:</label>
+                    <input id="wifi-ssid" type="text" autocomplete="off" placeholder="Your WiFi SSID" />
                 </div>
 
                 <div class="board-select compact">
@@ -65,22 +83,26 @@
                     </div>
                 </div>
 
-                <label class="checkbox-row" for="wifi-enable">
-                    <input id="wifi-enable" type="checkbox" />
-                    <span>Configure WiFi after flashing</span>
-                </label>
-                <p class="wifi-note">This runs after firmware flashing completes successfully.</p>
-            </div>
-        </details>
+                <div class="actions">
+                    <button id="wifi-connect-btn" class="btn success">Connect to WiFi</button>
+                    <button id="wifi-skip-btn" class="btn secondary">Skip</button>
+                </div>
 
-        <div class="progress-section" hidden>
-            <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill"></div>
+                <p id="wifi-status-text" class="status-text"></p>
             </div>
-            <p class="progress-text" id="progress-text">Ready</p>
         </div>
 
-        <p id="status-text" class="status-text">Ready.</p>
+        <!-- Step 3: Done -->
+        <div id="step-done" class="step-done" hidden>
+            <div class="step-done-header">
+                <div class="step-done-icon">🎉</div>
+                <h2 id="done-title">You're all set!</h2>
+                <p id="done-message">Your Bramble device is ready to go.</p>
+            </div>
+            <div class="actions" style="justify-content: center;">
+                <button id="flash-another-btn" class="btn primary">Flash Another Device</button>
+            </div>
+        </div>
 
         <div class="info">
             <p>Requires Chrome/Edge with Web Serial API support.</p>

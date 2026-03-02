@@ -111,24 +111,42 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     margin-bottom: 1.25rem;
 }
 
-.wifi-setup-panel {
+/* Step 2: WiFi setup (post-flash) */
+.step-wifi, .step-done {
+    animation: fadeSlideIn 0.35s ease-out;
+}
+
+@keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.step-wifi-header, .step-done-header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.step-wifi-header h2, .step-done-header h2 {
+    font-size: 1.4rem;
+    margin-bottom: 0.4rem;
+}
+
+.step-wifi-header p, .step-done-header p {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+}
+
+.step-wifi-icon, .step-done-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.wifi-form {
     border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
     border-radius: 8px;
     background: color-mix(in srgb, var(--surface) 85%, #113018);
+    padding: 1.2rem 1rem 0.8rem;
     margin-bottom: 1.25rem;
-}
-
-.wifi-setup-panel > summary {
-    cursor: pointer;
-    padding: 0.65rem 0.85rem;
-    color: #b6e7b8;
-    user-select: none;
-    font-weight: 600;
-}
-
-.wifi-setup-body {
-    border-top: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
-    padding: 0.8rem 0.85rem 0.2rem;
 }
 
 .advanced-panel > summary {
