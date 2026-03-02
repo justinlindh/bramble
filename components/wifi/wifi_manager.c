@@ -215,7 +215,7 @@ static int try_station_mode(const char *ssid, const char *password)
 
 static int start_ap_mode(uint32_t node_addr)
 {
-    esp_netif_create_default_wifi_ap();
+    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -236,6 +236,28 @@ static int start_ap_mode(uint32_t node_addr)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
+
+    if (ap_netif) {
+        esp_netif_ip_info_t ip_info = {
+            .ip.addr = ESP_IP4TOADDR(192, 168, 4, 1),
+            .gw.addr = ESP_IP4TOADDR(192, 168, 4, 1),
+            .netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0),
+        };
+
+        /* Ensure deterministic AP DHCP server state before start. */
+        esp_err_t dhcps_err = esp_netif_dhcps_stop(ap_netif);
+        if (dhcps_err != ESP_OK && dhcps_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+            ESP_ERROR_CHECK(dhcps_err);
+        }
+
+        ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
+
+        dhcps_err = esp_netif_dhcps_start(ap_netif);
+        if (dhcps_err != ESP_OK && dhcps_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+            ESP_ERROR_CHECK(dhcps_err);
+        }
+    }
+
     esp_log_level_set("wifi", ESP_LOG_ERROR);
     ESP_ERROR_CHECK(esp_wifi_start());
 
