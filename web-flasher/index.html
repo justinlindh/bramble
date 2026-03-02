@@ -13,7 +13,7 @@
             <span>Bramble Web Flasher</span>
         </h1>
         <p class="subtitle">Flash Bramble firmware to your ESP32-S3 device</p>
-        <p id="build-info" class="build-info"></p>
+
 
         <!-- Step 1: Flash -->
         <div id="step-flash">
@@ -74,22 +74,29 @@
             <p class="wifi-note" style="text-align: center; margin-top: 0.75rem;">Click above once you see the Bramble splash screen on your device.</p>
         </div>
 
-        <!-- Step 3: WiFi Setup -->
+        <!-- Step 3: Device Setup (name + WiFi) -->
         <div id="step-wifi" class="step-wifi" hidden>
             <div class="step-wifi-header">
                 <div class="step-wifi-icon">📶</div>
-                <h2>WiFi Setup</h2>
-                <p>Connect your device to WiFi so you can manage it from the Bramble web app.</p>
+                <h2>Device Setup</h2>
+                <p>Give your node a name and connect it to WiFi. This lets you manage it wirelessly from the Bramble web app on your phone or computer.</p>
             </div>
 
             <div class="wifi-form">
                 <div class="board-select compact">
-                    <label for="wifi-ssid">Network Name:</label>
-                    <input id="wifi-ssid" type="text" autocomplete="off" placeholder="Your WiFi SSID" />
+                    <label for="device-name">Node Name:</label>
+                    <input id="device-name" type="text" autocomplete="off" placeholder="e.g. Base Camp, Trail Head" maxlength="32" />
+                </div>
+
+                <hr class="form-divider" />
+
+                <div class="board-select compact">
+                    <label for="wifi-ssid">WiFi Network:</label>
+                    <input id="wifi-ssid" type="text" autocomplete="off" placeholder="Your WiFi network name" />
                 </div>
 
                 <div class="board-select compact">
-                    <label for="wifi-password">Password:</label>
+                    <label for="wifi-password">WiFi Password:</label>
                     <div class="password-row">
                         <input id="wifi-password" type="password" autocomplete="off" placeholder="Leave blank for open network" />
                         <button id="wifi-password-toggle" class="btn secondary" type="button" aria-label="Show password">Show</button>
@@ -97,7 +104,7 @@
                 </div>
 
                 <div class="actions">
-                    <button id="wifi-connect-btn" class="btn success">Connect to WiFi</button>
+                    <button id="wifi-connect-btn" class="btn success">Save & Connect</button>
                     <button id="wifi-skip-btn" class="btn secondary">Skip</button>
                 </div>
 

@@ -50,7 +50,6 @@ const BOARDS = {
     const stepFlash      = document.getElementById('step-flash');
     const connectBtn     = document.getElementById('connect-btn');
     const flashBtn       = document.getElementById('flash-btn');
-    const buildInfoText  = document.getElementById('build-info');
     const boardSelect    = document.getElementById('board-select');
     const channelSelect  = document.getElementById('channel-select');
     const releaseSelect  = document.getElementById('release-select');
@@ -64,8 +63,9 @@ const BOARDS = {
     const stepReset         = document.getElementById('step-reset');
     const resetContinueBtn  = document.getElementById('reset-continue-btn');
 
-    // ── DOM refs: Step 3 (WiFi) ─────────────────────────────
+    // ── DOM refs: Step 3 (Device Setup) ────────────────────
     const stepWifi          = document.getElementById('step-wifi');
+    const deviceNameInput   = document.getElementById('device-name');
     const wifiSsidInput     = document.getElementById('wifi-ssid');
     const wifiPasswordInput = document.getElementById('wifi-password');
     const wifiPasswordToggle = document.getElementById('wifi-password-toggle');
@@ -263,25 +263,24 @@ const BOARDS = {
         throw new Error('Timed out waiting for firmware console prompt.');
     }
 
-    async function configureWifiOverSerial({ ssid, password }) {
+    async function sendSerialCommands(commands) {
         if (!device?.readable || !device?.writable) {
             throw new Error('Serial port unavailable. Try reconnecting the USB cable.');
         }
 
-        const commands = buildWifiConfigCommands({ ssid, password, rebootAfter: true });
         const encoder = new TextEncoder();
         const reader = device.readable.getReader();
         const writer = device.writable.getWriter();
 
         try {
-            // Device may still be booting after flash — wait for console
-            await new Promise((resolve) => setTimeout(resolve, 4000));
-            await readUntilPrompt(reader, { timeoutMs: 20000 });
+            // Wait for console prompt
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await readUntilPrompt(reader, { timeoutMs: 15000 });
 
             for (const command of commands) {
                 await writer.write(encoder.encode(`${command}\r\n`));
                 const response = await readUntilPrompt(reader, { timeoutMs: 10000 });
-                console.log(`[wifi-config] ${command}`, response);
+                console.log(`[serial-config] ${command}`, response);
             }
         } finally {
             writer.releaseLock();
@@ -460,13 +459,14 @@ const BOARDS = {
         showStep('wifi');
     });
 
-    // ── WiFi: Connect button ────────────────────────────────
+    // ── Setup: Save & Connect button ───────────────────────
     wifiConnectBtn.addEventListener('click', async () => {
+        const deviceName = String(deviceNameInput?.value || '').trim();
         const ssid = String(wifiSsidInput?.value || '').trim();
         const password = String(wifiPasswordInput?.value || '');
 
-        if (!ssid) {
-            setWifiStatus('Please enter a network name.');
+        if (!ssid && !deviceName) {
+            setWifiStatus('Enter at least a node name or WiFi network.');
             return;
         }
 
@@ -478,7 +478,6 @@ const BOARDS = {
         try {
             // Re-open the serial port for console access
             if (!device) {
-                // Port was closed — need user to grant access again
                 setWifiStatus('Reconnecting to serial port…');
                 device = await navigator.serial.requestPort({
                     filters: [
@@ -493,15 +492,32 @@ const BOARDS = {
                 await device.open({ baudRate: 115200 });
             }
 
-            setWifiStatus('Waiting for firmware to boot…');
-            await configureWifiOverSerial({ ssid, password });
+            // Build command list
+            const commands = [];
+            if (deviceName) {
+                commands.push(`name ${deviceName}`);
+            }
+            if (ssid) {
+                commands.push(...buildWifiConfigCommands({ ssid, password, rebootAfter: false }));
+            }
+            // Always reboot at the end if we sent any commands
+            if (commands.length > 0) {
+                commands.push('reboot');
+            }
+
+            setWifiStatus('Configuring device…');
+            await sendSerialCommands(commands);
+
+            const parts = [];
+            if (deviceName) parts.push(`Named "${deviceName}"`);
+            if (ssid) parts.push(`connecting to "${ssid}"`);
 
             showDone({
-                title: 'WiFi Configured!',
-                message: `Your device is connecting to "${ssid}". You can now close this page.`
+                title: 'Device Configured!',
+                message: `${parts.join(' and ')}. You can now close this page.`
             });
         } catch (err) {
-            setWifiStatus(`WiFi setup failed: ${err.message || 'unknown error'}. You can configure WiFi later from the Bramble web app.`);
+            setWifiStatus(`Setup failed: ${err.message || 'unknown error'}. You can configure these settings later from the Bramble web app.`);
             wifiConnectBtn.disabled = false;
             wifiSkipBtn.disabled = false;
         }
@@ -557,11 +573,6 @@ const BOARDS = {
     }
     if (releaseSelect) {
         releaseSelect.addEventListener('change', () => renderReleaseDetails());
-    }
-
-    // ── Build info ──────────────────────────────────────────
-    if (buildInfoText) {
-        buildInfoText.textContent = 'Powered by esptool-js v0.5.7';
     }
 
     loadReleases();

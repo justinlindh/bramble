@@ -191,6 +191,36 @@ static int cmd_wifi(int argc, char **argv) {
     return 0;
 }
 
+/* ── Command: name ──────────────────────────────────────────────────── */
+
+static int cmd_name(int argc, char **argv) {
+    if (argc < 2) {
+        const char *current = mesh_get_node_name();
+        if (current && current[0]) {
+            printf("Node name: %s\n", current);
+        } else {
+            printf("No name set. Usage: name <your-name>\n");
+        }
+        return 0;
+    }
+
+    /* Join all args as the name (allows spaces) */
+    static char name_buf[64];
+    name_buf[0] = '\0';
+    for (int i = 1; i < argc; i++) {
+        if (i > 1) strncat(name_buf, " ", sizeof(name_buf) - strlen(name_buf) - 1);
+        strncat(name_buf, argv[i], sizeof(name_buf) - strlen(name_buf) - 1);
+    }
+
+    int ret = mesh_set_node_name_persist(name_buf);
+    if (ret == 0) {
+        printf("Name set: %s\n", name_buf);
+    } else {
+        printf("Failed to set name: %d\n", ret);
+    }
+    return ret;
+}
+
 /* ── Command: reboot ────────────────────────────────────────────────── */
 
 static int cmd_reboot(int argc, char **argv) {
@@ -210,6 +240,7 @@ static int cmd_help(int argc, char **argv) {
     printf("  send <addr> <msg>      Send encrypted to address\n");
     printf("  peers                  List neighbors\n");
     printf("  status                 Node status\n");
+    printf("  name [name]            Show or set node name\n");
     printf("  wifi status|set|clear  WiFi management\n");
     printf("  reboot                 Restart device\n");
     printf("  help                   This help\n");
@@ -297,6 +328,7 @@ void cli_init(bramble_identity_t *identity) {
         { .command = "status",    .help = "Node status",             .func = cmd_status },
         { .command = "broadcast", .help = "Send on public channel",  .func = cmd_broadcast },
         { .command = "send",      .help = "Send to address",         .func = cmd_send },
+        { .command = "name",      .help = "Show or set node name",   .func = cmd_name },
         { .command = "wifi",      .help = "WiFi management",         .func = cmd_wifi },
         { .command = "reboot",    .help = "Restart device",          .func = cmd_reboot },
         { .command = "help",      .help = "Show commands",           .func = cmd_help },
