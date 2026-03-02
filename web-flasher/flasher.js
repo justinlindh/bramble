@@ -431,14 +431,9 @@ const BOARDS = {
                 }
             });
 
-            console.log('[flasher] Flash complete. Attempting hardReset()…');
-            setStatus('Resetting device…');
-            try {
-                await esploader.hardReset();
-                console.log('[flasher] hardReset() returned successfully');
-            } catch (e) {
-                console.warn('[flasher] hardReset() failed:', e.message || e);
-            }
+            console.log('[flasher] Flash complete.');
+            // hardReset() doesn't work on ESP32-S3 native USB-JTAG (no DTR/RTS wiring).
+            // The user must press the physical RST button.
 
             // Release esptool's hold on the serial port so we can reuse it
             // for WiFi provisioning
