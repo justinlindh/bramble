@@ -34,8 +34,12 @@ Compared to Meshtastic and MeshCore-style systems, Bramble prioritizes privacy a
 - **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`).
 - **AES-256-GCM with AEAD:** confidentiality and integrity are built in; this avoids CTR-only designs without authentication.
 - **Airtime budgeting:** token-bucket enforcement with per-tier sub-budgets keeps usage predictable and regulation-aware.
-- **3-tier reliability model:** fire-and-forget, acknowledged, and critical delivery with sliding-window flow control.
+- **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged), and Critical (reliable with sliding-window flow control).
 - **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable, verifiable identity primitives.
+- **Store-and-forward mailbox:** offline nodes receive queued messages when they rejoin the mesh.
+- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact — per-peer control over what you share and with whom.
+- **Emergency beacon:** dedicated priority channel for distress signaling.
+- **Browser-based flashing:** flash firmware to new devices directly from the web — no toolchain required.
 
 For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARISON.md).
 
@@ -43,12 +47,11 @@ For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARIS
 
 Bramble includes a web client for live network operation and monitoring. It provides real-time chat (including delivery badges), map-based peer location views, neighbor and route visualization, traffic monitoring, channel management, and radio configuration.
 
-Placeholder image references (to be populated):
-
-- `docs/images/webapp-chat.png` — chat timeline and delivery states
-- `docs/images/webapp-map.png` — peer map and location context
-- `docs/images/webapp-nodes.png` — neighbors and route visibility
-- `docs/images/webapp-stats.png` — packet/airtime/network health metrics
+<!-- Screenshots will be added here -->
+<!-- ![Chat](docs/images/webapp-chat.png) -->
+<!-- ![Nodes](docs/images/webapp-nodes.png) -->
+<!-- ![Map](docs/images/webapp-map.png) -->
+<!-- ![Stats](docs/images/webapp-stats.png) -->
 
 See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior and usage notes.
 
@@ -59,7 +62,6 @@ See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior a
 | Heltec WiFi LoRa 32 V3 | ESP32-S3 | 0.96" SSD1306 OLED (128x64) | Buttons | SX1262 | N/A | Running target |
 | Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Running target (active bring-up) |
 | LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Running target with full GUI |
-| LILYGO T-Beam Supreme | ESP32-S3 | Minimal/board-specific | Buttons | SX1262 | N/A | Secondary target |
 
 ## Simulator
 
@@ -123,8 +125,8 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 ## Status
 
-Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and host-side validation currently covers **169+ tests**. Development is ongoing, not paused.
+Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and host-side validation currently covers **59 test suites with 430+ individual test cases**. Development is ongoing.
 
 ## License
 
-Private — not yet licensed for distribution.
+MIT — see [LICENSE](LICENSE)
