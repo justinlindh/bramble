@@ -286,7 +286,10 @@ const BOARDS = {
                 setStatus(`Fetching ${part.name} (${part.file})…`);
                 const resp = await fetch(url);
                 if (!resp.ok) throw new Error(`Failed to fetch ${part.file}: HTTP ${resp.status}`);
-                const data = new Uint8Array(await resp.arrayBuffer());
+                const bin = new Uint8Array(await resp.arrayBuffer());
+                // esptool-js writeFlash expects binary strings, not Uint8Array
+                let data = '';
+                for (let i = 0; i < bin.length; i++) data += String.fromCharCode(bin[i]);
                 fileArray.push({ data, address: part.offset });
                 console.log(`[flasher] ${part.name}: ${data.length} bytes → 0x${part.offset.toString(16)}`);
             }
