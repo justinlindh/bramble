@@ -1,8 +1,10 @@
+// TODO: wire key_backup into ble_server.c when BLE pairing is implemented
 #include "key_backup.h"
 #include <string.h>
 
 #ifdef ESP_PLATFORM
 #include "esp_random.h"
+#include "crypto.h"
 #else
 #include <openssl/rand.h>
 #include <openssl/evp.h>
@@ -65,30 +67,40 @@ int key_backup_export(key_backup_ctx_t *ctx, const uint8_t *identity_privkey,
 
     // Generate random nonce
     uint8_t *nonce = out; // first 12 bytes of output
-    RAND_bytes(nonce, NONCE_SIZE);
-
-    // Encrypt with AES-256-GCM
     uint8_t *ciphertext = out + NONCE_SIZE;
     uint8_t *tag = out + NONCE_SIZE + BACKUP_KEY_MATERIAL_SIZE;
 
-    EVP_CIPHER_CTX *evp_ctx = EVP_CIPHER_CTX_new();
-    if (!evp_ctx) return -1;
+#ifdef ESP_PLATFORM
+    // Use project crypto component (works on ESP32 via mbedtls backend)
+    if (crypto_random(nonce, NONCE_SIZE) != 0) return -1;
+    if (crypto_aes256gcm_encrypt(encryption_key, nonce,
+                                  plaintext, BACKUP_KEY_MATERIAL_SIZE,
+                                  NULL, 0,
+                                  ciphertext, tag) != 0) return -1;
+#else
+    // Host path: use OpenSSL for tests
+    RAND_bytes(nonce, NONCE_SIZE);
 
     int ret = -1;
     int outl = 0;
+    EVP_CIPHER_CTX *evp_ctx = EVP_CIPHER_CTX_new();
+    if (!evp_ctx) return -1;
+
     if (EVP_EncryptInit_ex(evp_ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1) goto cleanup;
     if (EVP_EncryptInit_ex(evp_ctx, NULL, NULL, encryption_key, nonce) != 1) goto cleanup;
     if (EVP_EncryptUpdate(evp_ctx, ciphertext, &outl, plaintext, BACKUP_KEY_MATERIAL_SIZE) != 1) goto cleanup;
     if (EVP_EncryptFinal_ex(evp_ctx, ciphertext + outl, &outl) != 1) goto cleanup;
     if (EVP_CIPHER_CTX_ctrl(evp_ctx, EVP_CTRL_GCM_GET_TAG, TAG_SIZE, tag) != 1) goto cleanup;
 
-    ctx->state = BACKUP_SENDING;
-    *out_len = BACKUP_BLOB_SIZE;
     ret = 0;
-
 cleanup:
     EVP_CIPHER_CTX_free(evp_ctx);
-    return ret;
+    if (ret != 0) return ret;
+#endif
+
+    ctx->state = BACKUP_SENDING;
+    *out_len = BACKUP_BLOB_SIZE;
+    return 0;
 }
 
 int key_backup_import(const uint8_t *encrypted_backup, size_t backup_len,
@@ -102,23 +114,33 @@ int key_backup_import(const uint8_t *encrypted_backup, size_t backup_len,
 
     uint8_t plaintext[BACKUP_KEY_MATERIAL_SIZE];
 
+#ifdef ESP_PLATFORM
+    // Use project crypto component (works on ESP32 via mbedtls backend)
+    if (crypto_aes256gcm_decrypt(encryption_key, nonce,
+                                  ciphertext, BACKUP_KEY_MATERIAL_SIZE,
+                                  NULL, 0,
+                                  tag, plaintext) != 0) return -1;
+#else
+    // Host path: use OpenSSL for tests
+    int ret = -1;
+    int outl = 0;
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx) return -1;
 
-    int ret = -1;
-    int outl = 0;
     if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1) goto cleanup;
     if (EVP_DecryptInit_ex(ctx, NULL, NULL, encryption_key, nonce) != 1) goto cleanup;
     if (EVP_DecryptUpdate(ctx, plaintext, &outl, ciphertext, BACKUP_KEY_MATERIAL_SIZE) != 1) goto cleanup;
     if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_SIZE, (void *)tag) != 1) goto cleanup;
     if (EVP_DecryptFinal_ex(ctx, plaintext + outl, &outl) != 1) goto cleanup;
 
+    ret = 0;
+cleanup:
+    EVP_CIPHER_CTX_free(ctx);
+    if (ret != 0) return ret;
+#endif
+
     memcpy(privkey_out, plaintext, 32);
     memcpy(pubkey_out, plaintext + 32, 32);
     memcpy(addr_out, plaintext + 64, 4);
-    ret = 0;
-
-cleanup:
-    EVP_CIPHER_CTX_free(ctx);
-    return ret;
+    return 0;
 }
