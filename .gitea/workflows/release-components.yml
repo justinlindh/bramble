@@ -117,8 +117,12 @@ jobs:
 
       - name: Build firmware artifacts
         if: steps.release_version.outputs.released == 'true'
+        env:
+          BRAMBLE_BUILD_VERSION: ${{ steps.release_version.outputs.version }}
         run: |
           . /opt/esp/idf/export.sh
+          # Strip leading v for PROJECT_VER
+          export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
           bash scripts/ci-build-firmware.sh
 
       - name: Publish OTA via authenticated endpoint
