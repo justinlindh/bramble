@@ -778,6 +778,15 @@ target_compile_definitions(test_gps PRIVATE
 )
 target_link_libraries(test_gps m)
 
+# WS auth constant-time compare tests
+add_executable(test_ws_auth
+    test_ws_auth.c
+    unity/unity.c
+)
+target_include_directories(test_ws_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Audio module behavior tests (NVS + I2S lifecycle with stubs)
 add_executable(test_audio
     test_audio.c

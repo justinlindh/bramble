@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "cJSON.h"
 #include "sdkconfig.h"
+#include "ct_strcmp.h"
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE    2048
@@ -64,7 +65,7 @@ static bool auth_check(httpd_req_t *req)
         if (query && httpd_req_get_url_query_str(req, query, query_len + 1) == ESP_OK) {
             char val[128] = {0};
             if (httpd_query_key_value(query, "token", val, sizeof(val)) == ESP_OK) {
-                if (strcmp(val, token) == 0) {
+                if (ct_strcmp(val, token) == 0) {
                     free(query);
                     return true;
                 }
@@ -79,7 +80,7 @@ static bool auth_check(httpd_req_t *req)
         char *hdr = malloc(hdr_len + 1);
         if (hdr && httpd_req_get_hdr_value_str(req, "Authorization", hdr, hdr_len + 1) == ESP_OK) {
             const char *prefix = "Bearer ";
-            if (strncmp(hdr, prefix, 7) == 0 && strcmp(hdr + 7, token) == 0) {
+            if (strncmp(hdr, prefix, 7) == 0 && ct_strcmp(hdr + 7, token) == 0) {
                 free(hdr);
                 return true;
             }
