@@ -67,6 +67,9 @@ jobs:
         run: npx semantic-release --extends ./.releaserc.webapp.cjs
 
   release-firmware:
+    # Run firmware tagging intentionally (manual dispatch) so stable OTA releases
+    # are not created on every push to main.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: idf-node
     concurrency:
       group: release-firmware
@@ -90,102 +93,8 @@ jobs:
             @semantic-release/release-notes-generator \
             conventional-changelog-conventionalcommits
 
-      - name: Capture previous firmware tag
-        id: tags_before
-        run: |
-          prev=$(git tag --list 'firmware-v*' --sort=-version:refname | head -n1)
-          echo "prev=$prev" >> "$GITHUB_OUTPUT"
-
       - name: Run semantic-release (firmware)
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.firmware.cjs
-
-      - name: Resolve released firmware version
-        id: release_version
-        run: |
-          prev='${{ steps.tags_before.outputs.prev }}'
-          post=$(git tag --list 'firmware-v*' --sort=-version:refname | head -n1)
-          echo "post=$post"
-          if [ -z "$post" ] || [ "$post" = "$prev" ]; then
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "version=${post#firmware-}" >> "$GITHUB_OUTPUT"
-
-      - name: Build firmware artifacts
-        if: steps.release_version.outputs.released == 'true'
-        env:
-          BRAMBLE_BUILD_VERSION: ${{ steps.release_version.outputs.version }}
-        run: |
-          . /opt/esp/idf/export.sh
-          # Strip leading v for PROJECT_VER
-          export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
-          bash scripts/ci-build-firmware.sh
-
-      - name: Publish OTA via authenticated endpoint
-        if: steps.release_version.outputs.released == 'true'
-        env:
-          OTA_PUBLISH_KEY: ${{ secrets.OTA_PUBLISH_KEY }}
-          OTA_PUBLISH_URL: https://bramblemesh.org/ota/publish
-          CHANNEL: stable
-          VERSION: ${{ steps.release_version.outputs.version }}
-        run: |
-          missing=()
-          command -v curl >/dev/null 2>&1 || missing+=(curl)
-          command -v jq >/dev/null 2>&1 || missing+=(jq)
-          if [ ${#missing[@]} -gt 0 ]; then
-            apt-get update
-            apt-get install -y "${missing[@]}"
-          fi
-          chmod +x scripts/ci-publish-ota.sh
-
-          for board in heltec-v3 tdeck-plus heltec-v4; do
-            echo "Publishing board: $board"
-            BOARD="$board" \
-            BOOTLOADER="build-artifacts/firmware-ci/$board/bootloader.bin" \
-            PARTITION="build-artifacts/firmware-ci/$board/partition-table.bin" \
-            FIRMWARE="build-artifacts/firmware-ci/$board/bramble.bin" \
-            scripts/ci-publish-ota.sh --set-version "$VERSION"
-          done
-
-      - name: Verify published release completeness in index
-        if: steps.release_version.outputs.released == 'true'
-        env:
-          CHANNEL: stable
-          VERSION: ${{ steps.release_version.outputs.version }}
-        run: |
-          ok=0
-          for attempt in $(seq 1 12); do
-            curl -fsSL https://bramblemesh.org/ota/index.json -o /tmp/ota-index.json
-
-            if jq -e \
-              --arg version "$VERSION" \
-              --arg channel "$CHANNEL" \
-              --argjson boards '["heltec-v3","tdeck-plus","heltec-v4"]' \
-              '
-              def matches_board_artifact($board; $name):
-                ((.file // "") | endswith("/" + $board + "/" + $name)) or
-                ((.path // "") | endswith("/" + $board + "/" + $name));
-
-              def has_required_for_board($board):
-                any(.artifacts[]?; .board == $board and matches_board_artifact($board; "bootloader.bin")) and
-                any(.artifacts[]?; .board == $board and matches_board_artifact($board; "partition-table.bin")) and
-                any(.artifacts[]?; .board == $board and matches_board_artifact($board; "bramble.bin"));
-
-              (.releases | map(select(.version == $version and .channel == $channel)) | first) as $release
-              | $release != null
-              and ([$boards[] | . as $b | $release | has_required_for_board($b)] | all)
-              ' /tmp/ota-index.json >/dev/null; then
-              ok=1
-              break
-            fi
-
-            echo "Release not fully visible in index yet (attempt $attempt/12); waiting..."
-            sleep 5
-          done
-
-          [ "$ok" -eq 1 ]
-          echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4"
