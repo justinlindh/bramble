@@ -47,11 +47,11 @@ For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARIS
 
 Bramble includes a web client for live network operation and monitoring. It provides real-time chat (including delivery badges), map-based peer location views, neighbor and route visualization, traffic monitoring, channel management, and radio configuration.
 
-<!-- Screenshots will be added here -->
-<!-- ![Chat](docs/images/webapp-chat.png) -->
-<!-- ![Nodes](docs/images/webapp-nodes.png) -->
-<!-- ![Map](docs/images/webapp-map.png) -->
-<!-- ![Stats](docs/images/webapp-stats.png) -->
+![Chat](docs/images/webapp-chat.png)
+![Nodes](docs/images/webapp-nodes.png)
+![Map](docs/images/webapp-map.png)
+![Stats](docs/images/webapp-stats.png)
+![Config](docs/images/webapp-config.png)
 
 See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior and usage notes.
 
