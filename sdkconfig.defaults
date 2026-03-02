@@ -33,9 +33,7 @@ CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=y
 CONFIG_BRAMBLE_MSG_PERSIST_MAX=120
 CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
 
-# Console over USB-JTAG (all boards use native USB)
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
-CONFIG_ESP_CONSOLE_UART_DEFAULT=n
-CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
-
 # Default board (overridden by board-specific defaults files)
+# NOTE: Heltec V3 uses CP2102 UART bridge — console stays on UART (default).
+# T-Deck Plus and Heltec V4 use native USB-JTAG — console overridden in their
+# board-specific sdkconfig.defaults.* files.

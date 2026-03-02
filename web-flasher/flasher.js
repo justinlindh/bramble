@@ -10,6 +10,7 @@ const BOARDS = {
         name: 'Heltec WiFi LoRa 32 V3',
         chipType: 'ESP32-S3',
         flashSize: '8MB',
+        usbType: 'uart-bridge',  // CP2102 — DTR/RTS reset works, console on UART
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
@@ -20,6 +21,7 @@ const BOARDS = {
         name: 'LILYGO T-Deck Plus',
         chipType: 'ESP32-S3',
         flashSize: '16MB',
+        usbType: 'usb-jtag',    // Native USB-JTAG — no DTR/RTS, console over USB
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
@@ -30,6 +32,7 @@ const BOARDS = {
         name: 'Heltec V4',
         chipType: 'ESP32-S3',
         flashSize: '8MB',
+        usbType: 'usb-jtag',    // Native USB-JTAG — no DTR/RTS, console over USB
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
@@ -432,32 +435,68 @@ const BOARDS = {
             });
 
             console.log('[flasher] Flash complete.');
-            // hardReset() doesn't work on ESP32-S3 native USB-JTAG (no DTR/RTS wiring).
-            // The user must press the physical RST button.
+            const isUartBridge = boardCfg.usbType === 'uart-bridge';
+            console.log('[flasher] Board USB type:', boardCfg.usbType, 'isUartBridge:', isUartBridge);
 
-            // Release esptool's hold on the serial port so we can reuse it
-            // for WiFi provisioning
-            console.log('[flasher] Disconnecting esptool transport…');
-            try {
-                if (transport) await transport.disconnect();
-                console.log('[flasher] Transport disconnected');
-            } catch (e) {
-                console.warn('[flasher] transport.disconnect() failed:', e.message || e);
+            if (isUartBridge) {
+                // CP2102/CH340 boards: DTR/RTS can reset the device
+                console.log('[flasher] Attempting DTR/RTS reset via transport…');
+                try {
+                    await transport.setRTS(true);
+                    await new Promise(r => setTimeout(r, 100));
+                    await transport.setRTS(false);
+                    console.log('[flasher] DTR/RTS reset sent');
+                } catch (e) {
+                    console.warn('[flasher] DTR/RTS reset failed:', e.message || e);
+                }
+
+                // Disconnect esptool transport but keep the port object
+                console.log('[flasher] Disconnecting esptool transport (keeping port)…');
+                try {
+                    if (transport) await transport.disconnect();
+                    console.log('[flasher] Transport disconnected');
+                } catch (e) {
+                    console.warn('[flasher] transport.disconnect() failed:', e.message || e);
+                }
+
+                console.log('[flasher] Port object still exists:', !!device);
+                console.log('[flasher] Port readable:', !!device?.readable);
+                console.log('[flasher] Port writable:', !!device?.writable);
+
+                transport = null;
+                esploader = null;
+                chip = null;
+                connected = false;
+
+                // Wait for device to reboot, then go straight to setup
+                setProgress(100, 'Done!');
+                console.log('[flasher] UART bridge board — waiting for reboot then going to setup…');
+                await new Promise(r => setTimeout(r, 3000));
+                loadWifiPreference();
+                showStep('wifi');
+            } else {
+                // Native USB-JTAG boards: no DTR/RTS, user must press RST
+                console.log('[flasher] Disconnecting esptool transport…');
+                try {
+                    if (transport) await transport.disconnect();
+                    console.log('[flasher] Transport disconnected');
+                } catch (e) {
+                    console.warn('[flasher] transport.disconnect() failed:', e.message || e);
+                }
+
+                console.log('[flasher] Port object still exists:', !!device);
+                console.log('[flasher] Port readable:', !!device?.readable);
+                console.log('[flasher] Port writable:', !!device?.writable);
+
+                transport = null;
+                esploader = null;
+                chip = null;
+                connected = false;
+
+                setProgress(100, 'Done!');
+                console.log('[flasher] USB-JTAG board — user must press physical RST button.');
+                showStep('reset');
             }
-
-            console.log('[flasher] Port object still exists:', !!device);
-            console.log('[flasher] Port readable:', !!device?.readable);
-            console.log('[flasher] Port writable:', !!device?.writable);
-
-            transport = null;
-            esploader = null;
-            chip = null;
-            connected = false;
-
-            // Transition to reset prompt — user must physically reset the device
-            setProgress(100, 'Done!');
-            console.log('[flasher] Showing reset step. User must press physical RST button.');
-            showStep('reset');
 
         } catch (e) {
             setProgress(0, 'Failed');
@@ -491,36 +530,50 @@ const BOARDS = {
         setWifiStatus('Connecting to device console…');
 
         try {
-            // After physical reset, the USB-JTAG device re-enumerates at
-            // the USB level — the old port object is no longer valid.
-            // We must ask the user to re-select the port.
-            console.log('[provision] Starting device setup…');
+            const board = boardSelect.value;
+            const boardCfg = BOARDS[board];
+            const isUartBridge = boardCfg?.usbType === 'uart-bridge';
+
+            console.log('[provision] Starting device setup… board:', board, 'usbType:', boardCfg?.usbType);
             console.log('[provision] Current port state — device:', !!device, 'readable:', !!device?.readable, 'writable:', !!device?.writable);
-            setWifiStatus('Select your device in the browser prompt…');
-            try {
-                if (device?.readable || device?.writable) {
-                    console.log('[provision] Closing old port…');
-                    await device.close().catch(() => {});
+
+            if (isUartBridge && device) {
+                // UART bridge boards: port object survives reset, just re-open
+                console.log('[provision] UART bridge — reusing existing port object');
+                if (!device.readable) {
+                    await device.open({ baudRate: 115200 });
+                    console.log('[provision] Port re-opened at 115200');
+                } else {
+                    console.log('[provision] Port already open/readable');
                 }
-            } catch (e) {
-                console.warn('[provision] Old port close failed:', e.message || e);
-            }
-
-            console.log('[provision] Requesting new serial port from user…');
-            device = await navigator.serial.requestPort({
-                filters: [
-                    { usbVendorId: 0x303A },
-                    { usbVendorId: 0x10C4 },
-                    { usbVendorId: 0x1A86 },
-                ]
-            });
-            console.log('[provision] Port selected. Opening at 115200…');
-
-            if (!device.readable) {
-                await device.open({ baudRate: 115200 });
-                console.log('[provision] Port opened');
             } else {
-                console.log('[provision] Port already open/readable');
+                // USB-JTAG boards: device re-enumerates after reset, must re-select
+                setWifiStatus('Select your device in the browser prompt…');
+                try {
+                    if (device?.readable || device?.writable) {
+                        console.log('[provision] Closing old port…');
+                        await device.close().catch(() => {});
+                    }
+                } catch (e) {
+                    console.warn('[provision] Old port close failed:', e.message || e);
+                }
+
+                console.log('[provision] Requesting new serial port from user…');
+                device = await navigator.serial.requestPort({
+                    filters: [
+                        { usbVendorId: 0x303A },
+                        { usbVendorId: 0x10C4 },
+                        { usbVendorId: 0x1A86 },
+                    ]
+                });
+                console.log('[provision] Port selected. Opening at 115200…');
+
+                if (!device.readable) {
+                    await device.open({ baudRate: 115200 });
+                    console.log('[provision] Port opened');
+                } else {
+                    console.log('[provision] Port already open/readable');
+                }
             }
 
             // Build command list
