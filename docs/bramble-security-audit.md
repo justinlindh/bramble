@@ -778,6 +778,19 @@ bramble_rreq_t rreq_forward(const bramble_rreq_t *incoming, ...) {
 
 **Recommendation:** Standardize on ESP-IDF error codes throughout.
 
+### 5.6 Identity Key Storage
+
+**Current state:** Node identity private keys (X25519) are stored in plaintext NVS (`components/identity/identity.c`, keys "priv" and "pub" in the "identity" NVS namespace).
+
+**Risk:** An attacker with physical access to the flash chip can extract the private key using standard flash-reading tools. This allows node impersonation.
+
+**Mitigation for production deployments:**
+1. Enable ESP-IDF flash encryption (`CONFIG_SECURE_FLASH_ENC_ENABLED=y`) — encrypts the entire flash including NVS partitions
+2. Enable NVS encryption (`CONFIG_NVS_ENCRYPTION=y`) — adds an additional encryption layer specifically for NVS
+3. Note: Flash encryption uses eFuse-based keys and is a one-time operation on production hardware (development mode allows re-flashing)
+
+**Risk assessment:** Exploitation requires physical access to the device and flash-reading equipment. For most mesh networking use cases, this is an acceptable risk. For high-security deployments, enable flash encryption.
+
 ---
 
 ## 6. Privacy Analysis
@@ -1040,3 +1053,4 @@ void test_replay_boundary_conditions(void) {
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-02-17 | 1.0 | Initial security audit |
+| 2026-03-02 | 1.1 | Added §5.6: NVS encryption recommendation for identity key storage |
