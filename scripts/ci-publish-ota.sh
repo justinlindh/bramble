@@ -8,39 +8,40 @@ is_valid_ota_semver() {
 
 normalize_version() {
   local version
-  local runtime_version_file=${RPC_VERSION_FILE:-main/rpc_methods.c}
-  local strict_source=${STRICT_VERSION_SOURCE:-}
 
   if [[ -n "${VERSION:-}" ]]; then
     version="$VERSION"
   else
-    # Primary source: firmware runtime version constant
-    version=$(sed -n 's/^#define BRAMBLE_VERSION_STR[[:space:]]*"\([^"]\+\)".*/\1/p' "$runtime_version_file" 2>/dev/null | head -n1)
+    # Try latest firmware semver tag (set by semantic-release)
+    version=$(git describe --tags --match 'firmware-v*' --always 2>/dev/null || true)
+    # Strip the firmware- prefix: "firmware-v1.3.5-3-gabcdef" → "v1.3.5-3-gabcdef"
+    version="${version#firmware-}"
 
     if [[ -z "$version" ]]; then
-      if [[ -n "$strict_source" || -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
-        echo "ERROR: BRAMBLE_VERSION_STR is missing or unreadable from $runtime_version_file" >&2
-        return 1
-      fi
-      # Non-CI fallback when tags are available
       version=$(git describe --tags --always --dirty 2>/dev/null || true)
     fi
   fi
 
-  # Ensure leading v for OTA release identity
+  # Ensure leading v
   if [[ -n "$version" && ! "$version" =~ ^v ]]; then
     version="v${version}"
   fi
 
-  if ! is_valid_ota_semver "$version"; then
-    if [[ -z "${VERSION:-}" && ( -n "$strict_source" || -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ) ]]; then
-      echo "ERROR: Invalid BRAMBLE_VERSION_STR semver: '$version'" >&2
-      return 1
-    fi
+  # For dev channel, convert describe output to valid semver pre-release
+  # e.g. "v1.3.5-3-gabcdef" → "v1.3.6-dev.3.gabcdef"
+  if [[ "${CHANNEL:-dev}" == "dev" && "$version" =~ ^(v[0-9]+\.[0-9]+\.)([0-9]+)-([0-9]+)-g([0-9a-f]+)$ ]]; then
+    local prefix="${BASH_REMATCH[1]}"
+    local patch="${BASH_REMATCH[2]}"
+    local ahead="${BASH_REMATCH[3]}"
+    local sha="${BASH_REMATCH[4]}"
+    local next_patch=$((patch + 1))
+    version="${prefix}${next_patch}-dev.${ahead}.g${sha}"
+  fi
 
+  if ! is_valid_ota_semver "$version"; then
     local short_sha
     short_sha=$(git rev-parse --short HEAD)
-    version="v0.0.0-${short_sha}"
+    version="v0.0.0-dev.${short_sha}"
   fi
 
   echo "$version"

@@ -1,4 +1,5 @@
 #include "rpc_methods.h"
+#include "esp_app_desc.h"
 #include "util.h"
 #include "rpc_dispatcher.h"
 #include "mesh_task.h"
@@ -35,9 +36,7 @@
 #include <string.h>
 /* statvfs not available in ESP-IDF newlib */
 
-#define BRAMBLE_VERSION_STR      "0.4.1-dev"
 #define BRAMBLE_PROTOCOL_VERSION "0.5.0"
-/* release-ci: semantic-release stable publish verification marker */
 
 #define NVS_NAMESPACE            "bramble"
 #define NVS_KEY_NODE_NAME        "node_name"
@@ -85,7 +84,7 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     mesh_get_state(&st);
 
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
-    cJSON_AddStringToObject(result, "firmware_version", BRAMBLE_VERSION_STR);
+    cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
     cJSON_AddStringToObject(result, "hardware", bramble_hardware());
     cJSON_AddBoolToObject(result, "radio_ok", st.radio_ok);
@@ -205,7 +204,7 @@ static int handle_get_identity(const cJSON *params, cJSON *result) {
 /* bramble.getVersion */
 static int handle_get_version(const cJSON *params, cJSON *result) {
     (void)params;
-    cJSON_AddStringToObject(result, "firmware_version", BRAMBLE_VERSION_STR);
+    cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
     cJSON_AddStringToObject(result, "hardware", bramble_hardware());
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
