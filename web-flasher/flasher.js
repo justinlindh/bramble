@@ -60,7 +60,11 @@ const BOARDS = {
     const releaseDetails = document.getElementById('release-details');
     const statusText     = document.getElementById('status-text');
 
-    // ── DOM refs: Step 2 (WiFi) ─────────────────────────────
+    // ── DOM refs: Step 2 (Reset prompt) ────────────────────
+    const stepReset         = document.getElementById('step-reset');
+    const resetContinueBtn  = document.getElementById('reset-continue-btn');
+
+    // ── DOM refs: Step 3 (WiFi) ─────────────────────────────
     const stepWifi          = document.getElementById('step-wifi');
     const wifiSsidInput     = document.getElementById('wifi-ssid');
     const wifiPasswordInput = document.getElementById('wifi-password');
@@ -69,7 +73,7 @@ const BOARDS = {
     const wifiSkipBtn       = document.getElementById('wifi-skip-btn');
     const wifiStatusText    = document.getElementById('wifi-status-text');
 
-    // ── DOM refs: Step 3 (Done) ─────────────────────────────
+    // ── DOM refs: Step 4 (Done) ─────────────────────────────
     const stepDone          = document.getElementById('step-done');
     const doneTitle         = document.getElementById('done-title');
     const doneMessage       = document.getElementById('done-message');
@@ -91,9 +95,10 @@ const BOARDS = {
 
     // ── Step navigation ─────────────────────────────────────
     function showStep(step) {
-        stepFlash.hidden = step !== 'flash';
-        stepWifi.hidden  = step !== 'wifi';
-        stepDone.hidden  = step !== 'done';
+        stepFlash.hidden  = step !== 'flash';
+        stepReset.hidden  = step !== 'reset';
+        stepWifi.hidden   = step !== 'wifi';
+        stepDone.hidden   = step !== 'done';
     }
 
     // ── Helpers ─────────────────────────────────────────────
@@ -436,10 +441,9 @@ const BOARDS = {
             chip = null;
             connected = false;
 
-            // Transition to WiFi setup step
+            // Transition to reset prompt — user must physically reset the device
             setProgress(100, 'Done!');
-            loadWifiPreference();
-            showStep('wifi');
+            showStep('reset');
 
         } catch (e) {
             setProgress(0, 'Failed');
@@ -448,6 +452,12 @@ const BOARDS = {
             flashBtn.disabled = !connected;
             connectBtn.disabled = false;
         }
+    });
+
+    // ── Reset: Continue button ────────────────────────────
+    resetContinueBtn.addEventListener('click', () => {
+        loadWifiPreference();
+        showStep('wifi');
     });
 
     // ── WiFi: Connect button ────────────────────────────────
