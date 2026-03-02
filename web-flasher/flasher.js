@@ -476,17 +476,23 @@ const BOARDS = {
         setWifiStatus('Connecting to device console…');
 
         try {
-            // Re-open the serial port for console access
-            if (!device) {
-                setWifiStatus('Reconnecting to serial port…');
-                device = await navigator.serial.requestPort({
-                    filters: [
-                        { usbVendorId: 0x303A },
-                        { usbVendorId: 0x10C4 },
-                        { usbVendorId: 0x1A86 },
-                    ]
-                });
-            }
+            // After physical reset, the USB-JTAG device re-enumerates at
+            // the USB level — the old port object is no longer valid.
+            // We must ask the user to re-select the port.
+            setWifiStatus('Select your device in the browser prompt…');
+            try {
+                if (device?.readable || device?.writable) {
+                    await device.close().catch(() => {});
+                }
+            } catch { /* already closed */ }
+
+            device = await navigator.serial.requestPort({
+                filters: [
+                    { usbVendorId: 0x303A },
+                    { usbVendorId: 0x10C4 },
+                    { usbVendorId: 0x1A86 },
+                ]
+            });
 
             if (!device.readable) {
                 await device.open({ baudRate: 115200 });
