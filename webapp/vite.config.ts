@@ -10,6 +10,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./test/setup.ts'],
     globals: true,
+    exclude: ['**/node_modules/**', '**/web-flasher/**'],
   },
   build: {
     outDir: 'dist',
