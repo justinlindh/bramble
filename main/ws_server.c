@@ -49,7 +49,7 @@ static void client_remove(int fd)
 /* ── Auth check ──────────────────────────────────────────────────────── */
 
 /**
- * Check auth token from query param (?token=X) or Authorization: Bearer header.
+ * Check auth token from Authorization: Bearer header.
  * Returns true if auth passes (token matches or no token configured).
  */
 static bool auth_check(httpd_req_t *req)
@@ -57,22 +57,6 @@ static bool auth_check(httpd_req_t *req)
 #ifdef CONFIG_BRAMBLE_WS_AUTH_TOKEN
     const char *token = CONFIG_BRAMBLE_WS_AUTH_TOKEN;
     if (token[0] == '\0') return true;  /* no token configured */
-
-    /* Check query parameter */
-    size_t query_len = httpd_req_get_url_query_len(req);
-    if (query_len > 0) {
-        char *query = malloc(query_len + 1);
-        if (query && httpd_req_get_url_query_str(req, query, query_len + 1) == ESP_OK) {
-            char val[128] = {0};
-            if (httpd_query_key_value(query, "token", val, sizeof(val)) == ESP_OK) {
-                if (ct_strcmp(val, token) == 0) {
-                    free(query);
-                    return true;
-                }
-            }
-        }
-        free(query);
-    }
 
     /* Check Authorization: Bearer header */
     size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
