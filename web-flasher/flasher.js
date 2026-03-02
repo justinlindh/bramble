@@ -3,6 +3,7 @@ import { buildWifiConfigCommands } from './wifi-config.js';
 
 // Bramble Web Flasher — powered by esptool-js (Espressif official)
 // UI controller: connects to ESP32-S3 via Web Serial, flashes firmware from OTA releases
+// Wizard flow: Flash → WiFi Setup → Done
 
 const BOARDS = {
     'heltec-v3': {
@@ -45,7 +46,8 @@ const BOARDS = {
     let chip = null;        // detected chip name
     let connected = false;
 
-    // ── DOM refs ────────────────────────────────────────────
+    // ── DOM refs: Step 1 (Flash) ────────────────────────────
+    const stepFlash      = document.getElementById('step-flash');
     const connectBtn     = document.getElementById('connect-btn');
     const flashBtn       = document.getElementById('flash-btn');
     const buildInfoText  = document.getElementById('build-info');
@@ -57,11 +59,21 @@ const BOARDS = {
     const progressText   = document.getElementById('progress-text');
     const releaseDetails = document.getElementById('release-details');
     const statusText     = document.getElementById('status-text');
-    const wifiPanel      = document.getElementById('wifi-setup-panel');
-    const wifiSsidInput  = document.getElementById('wifi-ssid');
+
+    // ── DOM refs: Step 2 (WiFi) ─────────────────────────────
+    const stepWifi          = document.getElementById('step-wifi');
+    const wifiSsidInput     = document.getElementById('wifi-ssid');
     const wifiPasswordInput = document.getElementById('wifi-password');
     const wifiPasswordToggle = document.getElementById('wifi-password-toggle');
-    const wifiEnableCheckbox = document.getElementById('wifi-enable');
+    const wifiConnectBtn    = document.getElementById('wifi-connect-btn');
+    const wifiSkipBtn       = document.getElementById('wifi-skip-btn');
+    const wifiStatusText    = document.getElementById('wifi-status-text');
+
+    // ── DOM refs: Step 3 (Done) ─────────────────────────────
+    const stepDone          = document.getElementById('step-done');
+    const doneTitle         = document.getElementById('done-title');
+    const doneMessage       = document.getElementById('done-message');
+    const flashAnotherBtn   = document.getElementById('flash-another-btn');
 
     const OTA_INDEX_URL = '/ota/index.json';
     const BOARD_STORAGE_KEY = 'bramble.webflasher.selectedBoard';
@@ -71,17 +83,26 @@ const BOARDS = {
     let filteredReleases = [];
 
     // ── Terminal adapter for esptool-js ─────────────────────
-    // esptool-js wants a terminal object with clean/writeLine/write.
-    // We log to console and update status text.
     const espTerminal = {
         clean() { /* no-op */ },
         writeLine(data) { console.log('[esptool]', data); },
         write(data) { /* partial line, ignore for UI */ }
     };
 
+    // ── Step navigation ─────────────────────────────────────
+    function showStep(step) {
+        stepFlash.hidden = step !== 'flash';
+        stepWifi.hidden  = step !== 'wifi';
+        stepDone.hidden  = step !== 'done';
+    }
+
     // ── Helpers ─────────────────────────────────────────────
     function setStatus(msg) {
         if (statusText) statusText.textContent = String(msg || '');
+    }
+
+    function setWifiStatus(msg) {
+        if (wifiStatusText) wifiStatusText.textContent = String(msg || '');
     }
 
     function setProgress(pct, text) {
@@ -195,24 +216,10 @@ const BOARDS = {
         localStorage.setItem(BOARD_STORAGE_KEY, boardSelect.value);
     }
 
-    function getWifiConfigSelection() {
-        const ssid = String(wifiSsidInput?.value || '').trim();
-        const password = String(wifiPasswordInput?.value || '');
-        const enabled = Boolean(wifiEnableCheckbox?.checked);
-        const panelExpanded = Boolean(wifiPanel?.open);
-        return { ssid, password, enabled, panelExpanded };
-    }
-
-    function shouldConfigureWifi() {
-        const selection = getWifiConfigSelection();
-        return selection.enabled && selection.panelExpanded && Boolean(selection.ssid);
-    }
-
     function loadWifiPreference() {
-        if (!wifiSsidInput || !wifiEnableCheckbox) return;
+        if (!wifiSsidInput) return;
         const saved = localStorage.getItem(WIFI_SSID_STORAGE_KEY) || '';
         wifiSsidInput.value = saved;
-        wifiEnableCheckbox.checked = Boolean(saved.trim());
     }
 
     function saveWifiSsidPreference() {
@@ -220,13 +227,12 @@ const BOARDS = {
         const ssid = String(wifiSsidInput.value || '').trim();
         if (ssid) {
             localStorage.setItem(WIFI_SSID_STORAGE_KEY, ssid);
-            if (wifiEnableCheckbox) wifiEnableCheckbox.checked = true;
         } else {
             localStorage.removeItem(WIFI_SSID_STORAGE_KEY);
-            if (wifiEnableCheckbox) wifiEnableCheckbox.checked = false;
         }
     }
 
+    // ── Serial WiFi provisioning ────────────────────────────
     async function readUntilPrompt(reader, { timeoutMs = 12000, prompt = 'bramble>' } = {}) {
         const decoder = new TextDecoder();
         let buffer = '';
@@ -254,7 +260,7 @@ const BOARDS = {
 
     async function configureWifiOverSerial({ ssid, password }) {
         if (!device?.readable || !device?.writable) {
-            throw new Error('Serial transport unavailable for WiFi configuration.');
+            throw new Error('Serial port unavailable. Try reconnecting the USB cable.');
         }
 
         const commands = buildWifiConfigCommands({ ssid, password, rebootAfter: true });
@@ -263,8 +269,7 @@ const BOARDS = {
         const writer = device.writable.getWriter();
 
         try {
-            // After a fresh flash + reset, the device needs time to boot.
-            // ESP32-S3 boot + firmware init typically takes 3-5 seconds.
+            // Device may still be booting after flash — wait for console
             await new Promise((resolve) => setTimeout(resolve, 4000));
             await readUntilPrompt(reader, { timeoutMs: 20000 });
 
@@ -287,6 +292,12 @@ const BOARDS = {
         connected = false;
     }
 
+    function showDone({ title, message }) {
+        if (doneTitle) doneTitle.textContent = title || "You're all set!";
+        if (doneMessage) doneMessage.textContent = message || 'Your Bramble device is ready to go.';
+        showStep('done');
+    }
+
     // ── Web Serial check ────────────────────────────────────
     if (!('serial' in navigator)) {
         setStatus('Web Serial not supported. Use Chrome or Edge.');
@@ -297,7 +308,6 @@ const BOARDS = {
     // ── Connect / Disconnect ────────────────────────────────
     connectBtn.addEventListener('click', async () => {
         if (connected) {
-            // Disconnect
             try {
                 if (transport) await transport.disconnect();
             } catch {}
@@ -353,12 +363,6 @@ const BOARDS = {
         const selectedRelease = currentRelease();
         const startedAt = Date.now();
 
-        const wifiSelection = getWifiConfigSelection();
-        if (wifiSelection.panelExpanded && wifiSelection.enabled && !wifiSelection.ssid) {
-            setStatus('Enter a WiFi SSID or uncheck "Configure WiFi after flashing".');
-            return;
-        }
-
         flashBtn.disabled = true;
         connectBtn.disabled = true;
         setProgress(0, 'Starting…');
@@ -403,7 +407,6 @@ const BOARDS = {
                 eraseAll: false,
                 compress: true,
                 reportProgress: (fileIndex, written, total) => {
-                    // Calculate overall progress across all files
                     let bytesBeforeThisFile = 0;
                     for (let i = 0; i < fileIndex; i++) {
                         bytesBeforeThisFile += fileArray[i].data.length;
@@ -418,11 +421,11 @@ const BOARDS = {
             try {
                 await esploader.hardReset();
             } catch {
-                // Some boards don't support hard reset via serial signals; that's OK
+                // Some boards don't support hard reset via serial signals
             }
 
             // Release esptool's hold on the serial port so we can reuse it
-            // for WiFi provisioning or future connections.
+            // for WiFi provisioning
             try {
                 if (transport) await transport.disconnect();
             } catch {
@@ -433,29 +436,87 @@ const BOARDS = {
             chip = null;
             connected = false;
 
-            if (shouldConfigureWifi()) {
-                const { ssid, password } = getWifiConfigSelection();
-                setStatus('Configuring WiFi...');
-                try {
-                    await configureWifiOverSerial({ ssid, password });
-                    setProgress(100, 'Done!');
-                    setStatus(`✅ WiFi configured! Device is connecting to ${ssid}.`);
-                } catch (wifiErr) {
-                    setProgress(100, 'Flashed');
-                    setStatus(`✅ Flash complete, but WiFi setup failed: ${wifiErr.message || 'unknown error'}`);
-                }
-            } else {
-                setProgress(100, 'Done!');
-                setStatus('✅ Flash complete! Device is rebooting.');
-            }
+            // Transition to WiFi setup step
+            setProgress(100, 'Done!');
+            loadWifiPreference();
+            showStep('wifi');
+
         } catch (e) {
             setProgress(0, 'Failed');
             const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
             setStatus(`Flash failed (${elapsedSec}s): ${e.message || 'unknown error'}`);
-        } finally {
             flashBtn.disabled = !connected;
             connectBtn.disabled = false;
         }
+    });
+
+    // ── WiFi: Connect button ────────────────────────────────
+    wifiConnectBtn.addEventListener('click', async () => {
+        const ssid = String(wifiSsidInput?.value || '').trim();
+        const password = String(wifiPasswordInput?.value || '');
+
+        if (!ssid) {
+            setWifiStatus('Please enter a network name.');
+            return;
+        }
+
+        saveWifiSsidPreference();
+        wifiConnectBtn.disabled = true;
+        wifiSkipBtn.disabled = true;
+        setWifiStatus('Connecting to device console…');
+
+        try {
+            // Re-open the serial port for console access
+            if (!device) {
+                // Port was closed — need user to grant access again
+                setWifiStatus('Reconnecting to serial port…');
+                device = await navigator.serial.requestPort({
+                    filters: [
+                        { usbVendorId: 0x303A },
+                        { usbVendorId: 0x10C4 },
+                        { usbVendorId: 0x1A86 },
+                    ]
+                });
+            }
+
+            if (!device.readable) {
+                await device.open({ baudRate: 115200 });
+            }
+
+            setWifiStatus('Waiting for firmware to boot…');
+            await configureWifiOverSerial({ ssid, password });
+
+            showDone({
+                title: 'WiFi Configured!',
+                message: `Your device is connecting to "${ssid}". You can now close this page.`
+            });
+        } catch (err) {
+            setWifiStatus(`WiFi setup failed: ${err.message || 'unknown error'}. You can configure WiFi later from the Bramble web app.`);
+            wifiConnectBtn.disabled = false;
+            wifiSkipBtn.disabled = false;
+        }
+    });
+
+    // ── WiFi: Skip button ───────────────────────────────────
+    wifiSkipBtn.addEventListener('click', () => {
+        showDone({
+            title: "You're all set!",
+            message: 'Flash complete. You can configure WiFi later by connecting to the device with the Bramble web app.'
+        });
+    });
+
+    // ── Done: Flash Another ─────────────────────────────────
+    flashAnotherBtn.addEventListener('click', () => {
+        cleanup();
+        connectBtn.textContent = 'Connect Device';
+        connectBtn.classList.remove('danger');
+        connectBtn.classList.add('primary');
+        flashBtn.disabled = true;
+        connectBtn.disabled = false;
+        progressSection.hidden = true;
+        setStatus('Ready.');
+        showStep('flash');
+        loadReleases();
     });
 
     // ── Event wiring ────────────────────────────────────────
@@ -467,7 +528,6 @@ const BOARDS = {
         });
     }
     if (wifiSsidInput) {
-        loadWifiPreference();
         wifiSsidInput.addEventListener('input', () => saveWifiSsidPreference());
     }
     if (wifiPasswordToggle && wifiPasswordInput) {
