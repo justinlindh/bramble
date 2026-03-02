@@ -1,3 +1,5 @@
+import { ESPLoader, Transport } from 'esptool-js';
+
 // Bramble Web Flasher — powered by esptool-js (Espressif official)
 // UI controller: connects to ESP32-S3 via Web Serial, flashes firmware from OTA releases
 
@@ -228,10 +230,10 @@ const BOARDS = {
                 ]
             });
 
-            transport = new esptool.Transport(device, true);
+            transport = new Transport(device, true);
 
             setStatus('Connecting to bootloader…');
-            esploader = new esptool.ESPLoader({
+            esploader = new ESPLoader({
                 transport,
                 baudrate: 115200,
                 terminal: espTerminal,
