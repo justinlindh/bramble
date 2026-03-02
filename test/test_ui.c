@@ -298,6 +298,56 @@ void test_location_ui_status_indicators(void) {
     TEST_ASSERT_EQUAL_STRING("Hybrid", location_ui_source_label(LOCATION_UI_SOURCE_HYBRID));
 }
 
+void test_incoming_message_idle_auto_switches_to_messages(void) {
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 1000;
+
+    ui_on_message_received(&state, 12050);
+
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+    TEST_ASSERT_EQUAL(SCREEN_NODES, state.prev_screen);
+    TEST_ASSERT_FALSE(state.pending_message_notification);
+    TEST_ASSERT_TRUE(state.message_auto_switch_time > 0);
+}
+
+void test_incoming_message_while_active_sets_pending_flag_without_switch(void) {
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 5000;
+
+    ui_on_message_received(&state, 12000); /* 7s idle -> still active */
+
+    TEST_ASSERT_EQUAL(SCREEN_NODES, state.current_screen);
+    TEST_ASSERT_TRUE(state.pending_message_notification);
+    TEST_ASSERT_EQUAL(0, state.message_auto_switch_time);
+}
+
+void test_auto_restore_returns_to_previous_screen_after_timeout(void) {
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 1000;
+    ui_on_message_received(&state, 12050);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+
+    ui_check_timeout(&state, 42000); /* not enough */
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+
+    ui_check_timeout(&state, 43051); /* >30s after auto-switch */
+    TEST_ASSERT_EQUAL(SCREEN_NODES, state.current_screen);
+    TEST_ASSERT_EQUAL(0, state.message_auto_switch_time);
+}
+
+void test_user_interaction_on_messages_cancels_auto_restore(void) {
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 1000;
+    ui_on_message_received(&state, 12050);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 13000); /* interaction while on messages */
+    TEST_ASSERT_EQUAL(0, state.message_auto_switch_time);
+
+    ui_check_timeout(&state, 50000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -329,5 +379,9 @@ int main(void) {
     RUN_TEST(test_location_ui_actions_toggle_tier_interval);
     RUN_TEST(test_location_ui_panic_off_disables_sharing);
     RUN_TEST(test_location_ui_status_indicators);
+    RUN_TEST(test_incoming_message_idle_auto_switches_to_messages);
+    RUN_TEST(test_incoming_message_while_active_sets_pending_flag_without_switch);
+    RUN_TEST(test_auto_restore_returns_to_previous_screen_after_timeout);
+    RUN_TEST(test_user_interaction_on_messages_cancels_auto_restore);
     return UNITY_END();
 }
