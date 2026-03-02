@@ -27,15 +27,25 @@ normalize_version() {
     version="v${version}"
   fi
 
-  # For dev channel, convert describe output to valid semver pre-release
-  # e.g. "v1.3.5-3-gabcdef" → "v1.3.6-dev.3.gabcdef"
-  if [[ "${CHANNEL:-dev}" == "dev" && "$version" =~ ^(v[0-9]+\.[0-9]+\.)([0-9]+)-([0-9]+)-g([0-9a-f]+)$ ]]; then
-    local prefix="${BASH_REMATCH[1]}"
-    local patch="${BASH_REMATCH[2]}"
-    local ahead="${BASH_REMATCH[3]}"
-    local sha="${BASH_REMATCH[4]}"
-    local next_patch=$((patch + 1))
-    version="${prefix}${next_patch}-dev.${ahead}.g${sha}"
+  # For dev channel, always emit a dev pre-release version.
+  # - "v1.3.5-3-gabcdef" -> "v1.3.6-dev.3.gabcdef"
+  # - "v1.3.5" (exact tag) -> "v1.3.6-dev.0.g<HEAD_SHA>"
+  if [[ "${CHANNEL:-dev}" == "dev" ]]; then
+    if [[ "$version" =~ ^(v[0-9]+\.[0-9]+\.)([0-9]+)-([0-9]+)-g([0-9a-f]+)$ ]]; then
+      local prefix="${BASH_REMATCH[1]}"
+      local patch="${BASH_REMATCH[2]}"
+      local ahead="${BASH_REMATCH[3]}"
+      local sha="${BASH_REMATCH[4]}"
+      local next_patch=$((patch + 1))
+      version="${prefix}${next_patch}-dev.${ahead}.g${sha}"
+    elif [[ "$version" =~ ^(v[0-9]+\.[0-9]+\.)([0-9]+)$ ]]; then
+      local prefix="${BASH_REMATCH[1]}"
+      local patch="${BASH_REMATCH[2]}"
+      local next_patch=$((patch + 1))
+      local sha
+      sha=$(git rev-parse --short HEAD)
+      version="${prefix}${next_patch}-dev.0.g${sha}"
+    fi
   fi
 
   if ! is_valid_ota_semver "$version"; then
