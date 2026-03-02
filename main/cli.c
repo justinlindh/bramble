@@ -17,8 +17,10 @@
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_vfs_dev.h"
+#include "esp_vfs_usb_serial_jtag.h"
 #include "esp_task_wdt.h"
 #include "driver/uart.h"
+#include "driver/usb_serial_jtag.h"
 #include "linenoise/linenoise.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -315,6 +317,16 @@ static void cli_task(void *param) {
 
 void cli_init(bramble_identity_t *identity) {
     s_identity = identity;
+
+    /* Install USB Serial JTAG driver and connect it to VFS (stdin/stdout).
+     * This is required for linenoise and printf to work over the USB-JTAG
+     * console (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y). */
+    usb_serial_jtag_driver_config_t usj_cfg = {
+        .tx_buffer_size = 1024,
+        .rx_buffer_size = 1024,
+    };
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj_cfg));
+    esp_vfs_usb_serial_jtag_use_driver();
 
     esp_console_config_t console_config = {
         .max_cmdline_args = 16,
