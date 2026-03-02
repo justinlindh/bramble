@@ -288,7 +288,12 @@ static void cli_task(void *param) {
             continue;
         }
         if (strlen(line) > 0) {
-            linenoiseHistoryAdd(line);
+            /* Skip history for JSON-RPC commands — they have unique IDs
+             * and would fill the 100-entry history with unreusable entries,
+             * each leaking a strdup into PSRAM until rotation. */
+            if (line[0] != '{') {
+                linenoiseHistoryAdd(line);
+            }
 
             if (line[0] == '{') {
                 /* JSON-RPC mode */

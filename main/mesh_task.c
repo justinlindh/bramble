@@ -65,7 +65,7 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 #define BEACON_JITTER_MS        5000    /* ±5s random jitter */
 #define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH          16
-#define MESH_TASK_STACK         5120
+#define MESH_TASK_STACK         8192
 #define MESH_TASK_PRIORITY      5
 
 /* ── Received packet queue item ─────────────────────────────────────── */
@@ -1088,15 +1088,27 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                                         info.data_len - FRAG_HEADER_SIZE,
                                         now_ms());
                 if (ret == 1) {
-                    /* Reassembly complete — collect the full message */
-                    uint8_t reassembled[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT];
+                    /* Reassembly complete — collect the full message.
+                     * Buffers allocated on heap to avoid ~1.2KB stack pressure
+                     * in the mesh task (which has tight stack headroom). */
+                    size_t reasm_sz = FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT;
+                    uint8_t *reassembled = malloc(reasm_sz);
+                    if (!reassembled) {
+                        ESP_LOGE(TAG, "OOM for reassembly buffer");
+                        return;
+                    }
                     int total_len = reassembly_collect(&s_reassembly, frag_hdr.message_id,
-                                                       reassembled, sizeof(reassembled));
+                                                       reassembled, reasm_sz);
                     if (total_len > 0) {
                         /* Process the reassembled message */
-                        char text[FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT + 1];
+                        char *text = malloc(reasm_sz + 1);
+                        if (!text) {
+                            ESP_LOGE(TAG, "OOM for reassembly text buffer");
+                            free(reassembled);
+                            return;
+                        }
                         size_t tlen = (size_t)total_len;
-                        if (tlen >= sizeof(text)) tlen = sizeof(text) - 1;
+                        if (tlen >= reasm_sz + 1) tlen = reasm_sz;
                         memcpy(text, reassembled, tlen);
                         text[tlen] = '\0';
 
@@ -1156,9 +1168,11 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                         printf("\n[MSG from %08" PRIX32 "] %s\n", info.src_addr, text);
                         printf("bramble> ");
                         fflush(stdout);
+                        free(text);
                     } else {
                         ESP_LOGW(TAG, "Failed to collect reassembled message");
                     }
+                    free(reassembled);
                 } else if (ret < 0) {
                     ESP_LOGW(TAG, "Fragment reassembly failed");
                 }
