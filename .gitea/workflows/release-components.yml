@@ -173,7 +173,7 @@ jobs:
 
               (.releases | map(select(.version == $version and .channel == $channel)) | first) as $release
               | $release != null
-              and all($boards[]; $release | has_required_for_board(.))
+              and ([$boards[] | . as $b | $release | has_required_for_board($b)] | all)
               ' /tmp/ota-index.json >/dev/null; then
               ok=1
               break
