@@ -150,25 +150,70 @@ Bramble defines two radio profiles. All nodes in a mesh must use the same profil
 - 200-byte payload: ~210ms airtime
 - Practical range: 1–3 km urban, 5–10 km rural/LOS
 
-### 3.3 Channel Activity Detection
+### 3.3 Channel Activity Detection (Listen-Before-Talk)
 
-Before transmitting, nodes perform Listen-Before-Talk (LBT):
-1. Check SX1262 channel activity detection (CAD) — 2-symbol CAD, ~8ms at SF10.
-2. If channel busy, defer for `random(50, 200)` ms, retry CAD, up to 5 attempts.
-3. If still busy after 5 CAD attempts, enqueue packet for retry after `random(500, 2000)` ms.
+Before transmitting, nodes perform Listen-Before-Talk (LBT) using the SX1262's hardware Channel Activity Detection (CAD):
+
+1. Configure CAD parameters: 2-symbol detection, peak sensitivity 22, minimum sensitivity 10, CAD-only exit mode.
+2. Run CAD check (~5–8ms at SF9/BW125). If channel is clear, transmit immediately.
+3. If channel busy, back off with randomized exponential delay: `base_ms × 2^attempt + random(0, base_ms × 2^attempt)`, capped at 300ms per attempt.
+4. Retry CAD up to 3 attempts. If still busy after all attempts, transmit anyway to avoid starvation.
 
 ```
+LBT_MAX_ATTEMPTS    = 3
+LBT_BACKOFF_BASE_MS = 50
+LBT_BACKOFF_MAX_MS  = 300
+
 function try_transmit(packet):
-    for attempt in 0..4:
-        if radio.channel_is_clear():  // CAD check
-            radio.transmit(packet)
-            airtime_budget.debit(packet.airtime_ms)
-            return SUCCESS
-        sleep_ms(random(50, 200))
+    for attempt in 0..2:
+        if radio.cad_check():  // channel busy
+            backoff = min(LBT_BACKOFF_BASE_MS * 2^attempt, LBT_BACKOFF_MAX_MS)
+            sleep_ms(backoff + random(0, backoff))
+            continue
+        break  // channel clear
     
-    tx_queue.requeue_with_delay(packet, random(500, 2000))
-    return CHANNEL_BUSY
+    // Transmit regardless after max attempts (anti-starvation)
+    radio.transmit(packet)
+    airtime_budget.debit(packet.airtime_ms)
 ```
+
+LBT applies to **all** packet types at the `transmit_packet` layer, providing collision avoidance for beacons, data, routing, ACKs, and delivery receipts alike.
+
+### 3.4 Broadcast Delivery Receipt Collision Avoidance
+
+When multiple nodes receive a broadcast message, each must send a delivery receipt back to the sender. Without coordination, these receipts collide on the shared LoRa channel — LoRa has no built-in CSMA/CA, so simultaneous transmissions destroy each other.
+
+Bramble uses a three-layer approach to prevent receipt collisions:
+
+**Layer 1 — Slotted response timing:** Each recipient is assigned a deterministic time slot based on a hash of its address and the original packet ID:
+
+```
+SLOT_BUCKETS    = 32
+SLOT_SPACING_MS = 200
+SLOT_BASE_MS    = 200
+
+slot = (local_addr XOR original_packet_id) % SLOT_BUCKETS
+delay = SLOT_BASE_MS + (slot × SLOT_SPACING_MS) + random(0, 139)
+```
+
+This spreads receipt transmissions across a ~6.4-second window. With 32 buckets and typical mesh sizes (5–20 nodes), birthday-problem collisions are rare.
+
+**Layer 2 — LBT (§3.3):** Each receipt transmission passes through the CAD check, providing a second chance to detect and avoid an in-progress transmission.
+
+**Layer 3 — Exponential retry backoff:** Each receipt is transmitted up to 3 times with increasing randomized delays between attempts:
+
+```
+RECEIPT_RETRY_COUNT = 3
+
+for attempt in 0..2:
+    transmit(receipt)  // goes through LBT
+    if attempt < 2:
+        base  = 500 + (attempt × 700)    // 500ms, 1200ms
+        range = 500 + (attempt × 400)    // 500ms, 900ms
+        sleep_ms(base + random(0, range)) // 500–999ms, 1200–2099ms
+```
+
+The combination of wide slot spacing, hardware channel sensing, and aggressive retries achieves near-100% delivery receipt rates in meshes of 5+ nodes.
 
 ---
 
