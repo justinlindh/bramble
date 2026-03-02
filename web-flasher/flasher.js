@@ -242,6 +242,7 @@ const BOARDS = {
         const decoder = new TextDecoder();
         let buffer = '';
         const timeoutAt = Date.now() + timeoutMs;
+        console.log(`[serial] readUntilPrompt: waiting for "${prompt}" (timeout ${timeoutMs}ms)…`);
 
         while (Date.now() < timeoutAt) {
             const remaining = timeoutAt - Date.now();
@@ -251,19 +252,25 @@ const BOARDS = {
             ]);
 
             if (readResult.done) {
+                console.warn('[serial] Reader done/closed. Buffer so far:', JSON.stringify(buffer));
                 throw new Error('Serial console closed unexpectedly.');
             }
 
-            buffer += decoder.decode(readResult.value, { stream: true });
+            const chunk = decoder.decode(readResult.value, { stream: true });
+            buffer += chunk;
+            console.log('[serial] rx:', JSON.stringify(chunk));
             if (buffer.includes(prompt)) {
+                console.log('[serial] Prompt found!');
                 return buffer;
             }
         }
 
+        console.warn('[serial] Timed out. Buffer so far:', JSON.stringify(buffer));
         throw new Error('Timed out waiting for firmware console prompt.');
     }
 
     async function sendSerialCommands(commands) {
+        console.log('[serial] sendSerialCommands called. Port readable:', !!device?.readable, 'writable:', !!device?.writable);
         if (!device?.readable || !device?.writable) {
             throw new Error('Serial port unavailable. Try reconnecting the USB cable.');
         }
@@ -273,14 +280,17 @@ const BOARDS = {
         const writer = device.writable.getWriter();
 
         try {
-            // Wait for console prompt
+            // Send a newline to trigger prompt, then wait for it
+            console.log('[serial] Sending initial \\n to trigger prompt…');
+            await writer.write(encoder.encode('\n'));
             await new Promise((resolve) => setTimeout(resolve, 2000));
             await readUntilPrompt(reader, { timeoutMs: 15000 });
 
             for (const command of commands) {
+                console.log(`[serial] Sending command: "${command}"`);
                 await writer.write(encoder.encode(`${command}\r\n`));
                 const response = await readUntilPrompt(reader, { timeoutMs: 10000 });
-                console.log(`[serial-config] ${command}`, response);
+                console.log(`[serial] Response for "${command}":`, JSON.stringify(response));
             }
         } finally {
             writer.releaseLock();
@@ -421,20 +431,29 @@ const BOARDS = {
                 }
             });
 
+            console.log('[flasher] Flash complete. Attempting hardReset()…');
             setStatus('Resetting device…');
             try {
                 await esploader.hardReset();
-            } catch {
-                // Some boards don't support hard reset via serial signals
+                console.log('[flasher] hardReset() returned successfully');
+            } catch (e) {
+                console.warn('[flasher] hardReset() failed:', e.message || e);
             }
 
             // Release esptool's hold on the serial port so we can reuse it
             // for WiFi provisioning
+            console.log('[flasher] Disconnecting esptool transport…');
             try {
                 if (transport) await transport.disconnect();
-            } catch {
-                // Best-effort; port may already be released
+                console.log('[flasher] Transport disconnected');
+            } catch (e) {
+                console.warn('[flasher] transport.disconnect() failed:', e.message || e);
             }
+
+            console.log('[flasher] Port object still exists:', !!device);
+            console.log('[flasher] Port readable:', !!device?.readable);
+            console.log('[flasher] Port writable:', !!device?.writable);
+
             transport = null;
             esploader = null;
             chip = null;
@@ -442,6 +461,7 @@ const BOARDS = {
 
             // Transition to reset prompt — user must physically reset the device
             setProgress(100, 'Done!');
+            console.log('[flasher] Showing reset step. User must press physical RST button.');
             showStep('reset');
 
         } catch (e) {
@@ -479,13 +499,19 @@ const BOARDS = {
             // After physical reset, the USB-JTAG device re-enumerates at
             // the USB level — the old port object is no longer valid.
             // We must ask the user to re-select the port.
+            console.log('[provision] Starting device setup…');
+            console.log('[provision] Current port state — device:', !!device, 'readable:', !!device?.readable, 'writable:', !!device?.writable);
             setWifiStatus('Select your device in the browser prompt…');
             try {
                 if (device?.readable || device?.writable) {
+                    console.log('[provision] Closing old port…');
                     await device.close().catch(() => {});
                 }
-            } catch { /* already closed */ }
+            } catch (e) {
+                console.warn('[provision] Old port close failed:', e.message || e);
+            }
 
+            console.log('[provision] Requesting new serial port from user…');
             device = await navigator.serial.requestPort({
                 filters: [
                     { usbVendorId: 0x303A },
@@ -493,9 +519,13 @@ const BOARDS = {
                     { usbVendorId: 0x1A86 },
                 ]
             });
+            console.log('[provision] Port selected. Opening at 115200…');
 
             if (!device.readable) {
                 await device.open({ baudRate: 115200 });
+                console.log('[provision] Port opened');
+            } else {
+                console.log('[provision] Port already open/readable');
             }
 
             // Build command list
@@ -511,8 +541,10 @@ const BOARDS = {
                 commands.push('reboot');
             }
 
+            console.log('[provision] Sending commands:', commands);
             setWifiStatus('Configuring device…');
             await sendSerialCommands(commands);
+            console.log('[provision] All commands sent successfully');
 
             const parts = [];
             if (deviceName) parts.push(`Named "${deviceName}"`);
