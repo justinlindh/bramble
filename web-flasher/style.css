@@ -141,6 +141,12 @@ h1 { font-size: 1.8rem; margin-bottom: 0.25rem; }
     margin-bottom: 0.5rem;
 }
 
+.form-divider {
+    border: none;
+    border-top: 1px solid color-mix(in srgb, var(--success) 25%, var(--border));
+    margin: 0.6rem 0 0.8rem;
+}
+
 .wifi-form {
     border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
     border-radius: 8px;
