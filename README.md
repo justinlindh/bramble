@@ -1,149 +1,129 @@
 # Bramble
 
-A privacy-first LoRa mesh networking protocol for ESP32, built with ESP-IDF.
+Privacy-first LoRa mesh networking for ESP32-S3, built with ESP-IDF.
 
-Bramble enables encrypted, multi-hop communication between low-power LoRa devices without relying on any central infrastructure. Every packet is encrypted end-to-end, routing metadata is protected, and the protocol is designed to resist traffic analysis.
+Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-range, infrastructure-free communication. It is designed for resilient field use while minimizing metadata exposure: not just message contents, but key routing details are protected as well.
 
-## Features
+## Table of Contents
 
-- **End-to-end encryption** — AES-256-GCM with X25519 key exchange
-- **Multi-hop mesh routing** — AODV-inspired with encrypted route requests and salt rotation
-- **Privacy by design** — Encrypted RREQ source addresses, optional dummy traffic mode
-- **3-tier reliability** — Fire-and-forget, acknowledged, and reliable delivery modes
-- **Airtime budgeting** — Per-node duty cycle enforcement for regulatory compliance
-- **Fragmentation** — Large messages split and reassembled transparently
-- **Time synchronization** — Lightweight mesh-wide clock sync
-- **Key backup** — Physical button authentication for key recovery
-- **Channel support** — Named encrypted group channels with flood-based delivery
-- **OTA updates** — Over-the-air firmware updates via mesh
+- [What is Bramble?](#what-is-bramble)
+- [What Makes Bramble Different](#what-makes-bramble-different)
+- [Web Client](#web-client)
+- [Hardware Targets](#hardware-targets)
+- [Simulator](#simulator)
+- [Getting Started](#getting-started)
+- [Testing](#testing)
+- [Architecture](#architecture)
+- [Documentation](#documentation)
+- [API and SDK](#api-and-sdk)
+- [CI/CD](#cicd)
+- [Status](#status)
+- [License](#license)
 
-## Architecture
+## What is Bramble?
 
-Bramble is organized as ESP-IDF components, each self-contained with clean interfaces:
+Bramble is a secure LoRa mesh protocol and firmware implementation for ESP32-S3 devices with SX1262 radios. It focuses on practical private communications in constrained, lossy RF environments, with explicit handling for routing, retransmission, airtime limits, and node identity.
 
-| Component | Purpose |
-|-----------|---------|
-| `crypto` | AES-256-GCM, X25519, key derivation, anti-replay |
-| `routing` | AODV route discovery, forwarding tables, route maintenance |
-| `security` | Session management, key exchange, identity verification |
-| `packet` | Packet framing, serialization, type definitions |
-| `reliability` | ACKs, retransmission, delivery confirmation |
-| `fragment` | Message fragmentation and reassembly |
-| `channel` | Named group channels with flood routing |
-| `radio` | SX1262 LoRa driver abstraction |
-| `airtime` | Duty cycle tracking and TX budgeting |
-| `dedup` | Duplicate packet detection |
-| `identity` | Node identity and address management |
-| `timesync` | Mesh time synchronization |
-| `display` | OLED status display |
-| `ble` | BLE interface for mobile companion app |
-| `ota` | Over-the-air firmware updates |
-| `ui` | JSON-RPC interface for external control |
+The firmware currently runs on real hardware (including T-Deck Plus and Heltec V3/V4 targets), with host-side testing used to validate protocol behavior continuously during development.
+
+## What Makes Bramble Different
+
+Compared to Meshtastic and MeshCore-style systems, Bramble prioritizes privacy and scalability at the protocol level:
+
+- **Privacy-first routing:** route-request source addresses are encrypted to reduce metadata leakage.
+- **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`).
+- **AES-256-GCM with AEAD:** confidentiality and integrity are built in; this avoids CTR-only designs without authentication.
+- **Airtime budgeting:** token-bucket enforcement with per-tier sub-budgets keeps usage predictable and regulation-aware.
+- **3-tier reliability model:** fire-and-forget, acknowledged, and critical delivery with sliding-window flow control.
+- **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable, verifiable identity primitives.
+
+For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARISON.md).
+
+## Web Client
+
+Bramble includes a web client for live network operation and monitoring. It provides real-time chat (including delivery badges), map-based peer location views, neighbor and route visualization, traffic monitoring, channel management, and radio configuration.
+
+Placeholder image references (to be populated):
+
+- `docs/images/webapp-chat.png` — chat timeline and delivery states
+- `docs/images/webapp-map.png` — peer map and location context
+- `docs/images/webapp-nodes.png` — neighbors and route visibility
+- `docs/images/webapp-stats.png` — packet/airtime/network health metrics
+
+See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior and usage notes.
 
 ## Hardware Targets
 
 | Board | MCU | Display | Input | Radio | Audio | Status |
 |------|-----|---------|-------|-------|-------|--------|
-| Heltec WiFi LoRa 32 V3 | ESP32-S3 | 0.96" SSD1306 OLED (128x64) | Buttons | SX1262 | N/A | Primary target |
-| LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Full GUI support (4 tabs: Chat, Nodes, Stats, Settings) |
-| Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Bring-up in progress |
+| Heltec WiFi LoRa 32 V3 | ESP32-S3 | 0.96" SSD1306 OLED (128x64) | Buttons | SX1262 | N/A | Running target |
+| Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Running target (active bring-up) |
+| LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Running target with full GUI |
 | LILYGO T-Beam Supreme | ESP32-S3 | Minimal/board-specific | Buttons | SX1262 | N/A | Secondary target |
 
-## Building
+## Simulator
 
-Requires [ESP-IDF v5.4](https://docs.espressif.com/projects/esp-idf/en/v5.4/esp32s3/get-started/).
+Bramble ships with a mesh simulator that runs real protocol code against a virtual radio layer and renders topology/traffic in a browser. It is useful for repeatable scenario testing, failure injection, and behavior analysis before field deployment.
+
+See [simulator/README.md](simulator/README.md) for setup and scenarios.
+
+## Getting Started
+
+Full build/flash instructions (including board-specific profiles and USB-port notes) are in [docs/BUILDING.md](docs/BUILDING.md).
+
+Quick start:
 
 ```bash
-export IDF_PATH=~/src/esp-idf
-IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1 || true)
-if [[ -n "${IDF_VENV:-}" ]]; then
-  export PATH="$IDF_VENV/bin:$PATH"
-fi
-source "$IDF_PATH/export.sh"
-
-idf.py set-target esp32s3
-
-# Default (Heltec V3)
-idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build
-
-# Heltec V4 profile (in-progress support)
-idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
-
-idf.py flash monitor
+cd ~/src/bramble
+bash scripts/flash.sh local heltec-v3 build
+bash scripts/flash.sh local heltec-v3 flash /dev/ttyUSB0
 ```
+
+Use `tdeck-plus` instead of `heltec-v3` for T-Deck Plus builds.
 
 ## Testing
 
-29 test suites covering crypto, routing, security, integration, and more. Tests use the [Unity](https://github.com/ThrowTheSwitch/Unity) framework and run on the host (no hardware needed):
+Host-side tests cover crypto, routing, security, packet handling, reliability, and integration behavior.
 
 ```bash
 cd test
 ./run_all_tests.sh
 ```
 
-## Simulator
+## Architecture
 
-A full mesh network simulator with real-time web visualization. Runs actual Bramble C code against a virtual radio layer with configurable topology, packet loss, interference zones, and anomaly detection.
+Bramble is organized as ESP-IDF components with clear boundaries between protocol logic, radio abstraction, security, reliability, and UI/control layers. The architecture is designed so core protocol behavior can be validated on host and simulator environments before device rollout.
 
-```bash
-cd simulator
-docker compose up --build
-```
-
-Open http://localhost:3003 to see the mesh in action. Drag nodes to reposition them, add/remove nodes on the fly, control playback speed, and load different scenarios.
-
-See [`simulator/README.md`](simulator/README.md) for details.
-
-## OTA rollout (single node)
-
-For operator steps to deploy firmware over WiFi, see [`docs/ota-rollout.md`](docs/ota-rollout.md).
-
-Quick path (build, host, trigger):
-
-```bash
-cd ~/src/bramble
-idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
-
-cd build
-python3 -m http.server 8088
-
-cd ~/src/bramble-cli
-./bramble --transport ws://192.0.2.0/ws ota --url http://203.0.113.34:8088/bramble.bin
-```
+For the full component breakdown and interaction diagrams, see [docs/bramble-architecture.md](docs/bramble-architecture.md).
 
 ## Documentation
 
-- [`docs/ota-rollout.md`](docs/ota-rollout.md) — OTA operator guide (build, host, trigger, verify, rollback)
-- [`docs/plans/2026-02-15-lora-mesh-protocol-design.md`](docs/plans/2026-02-15-lora-mesh-protocol-design.md) — Full protocol design (~2400 lines)
-- [`docs/bramble-anomaly-detection.md`](docs/bramble-anomaly-detection.md) — Anomaly detection system
-- [`docs/COMPARISON.md`](docs/COMPARISON.md) — Comparison with Meshtastic and other protocols
-- [`docs/field-test-5node.md`](docs/field-test-5node.md) — 5-node field test plan
-- [`docs/field-test-20node.md`](docs/field-test-20node.md) — 20-node field test plan
-- [`docs/webapp/chat.md`](docs/webapp/chat.md) — Web app user guide (shortcuts, routing/table semantics, connection states, location tiers)
+- [docs/BUILDING.md](docs/BUILDING.md) — build, flash, monitor workflows
+- [docs/bramble-architecture.md](docs/bramble-architecture.md) — component-level architecture
+- [docs/COMPARISON.md](docs/COMPARISON.md) — comparison with other mesh systems
+- [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md) — protocol details
+- [docs/bramble-testing.md](docs/bramble-testing.md) — test strategy and coverage
+- [docs/ota-rollout.md](docs/ota-rollout.md) — OTA operator workflow
+- [simulator/README.md](simulator/README.md) — simulator usage
+- [docs/webapp/chat.md](docs/webapp/chat.md) — web client chat and UX notes
 
-## API & SDK
+## API and SDK
 
-Bramble exposes a JSON-RPC 2.0 API for external control. The API spec, Go SDK, and CLI are maintained in separate repos:
+Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
-| Repo | Description |
-|------|-------------|
-| [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI spec for the JSON-RPC interface |
-| [bramble-go](https://github.com/YOUR-ORG/bramble-go) | Go SDK — connect via Serial, WebSocket, or BLE |
-| [bramble-cli](https://github.com/YOUR-ORG/bramble-cli) | CLI tool built on bramble-go |
-| [VERSIONING.md](VERSIONING.md) | Version compatibility matrix |
+- [api/openapi.yaml](api/openapi.yaml) — OpenAPI source for the RPC surface
+- [bramble-go](https://github.com/justinlindh/bramble-go) — Go SDK (serial, WebSocket, BLE)
+- [bramble-cli](https://github.com/justinlindh/bramble-cli) — CLI/TUI built on bramble-go
+- [VERSIONING.md](VERSIONING.md) — compatibility matrix
 
 ## CI/CD
 
-- **Web client image publish:** `.gitea/workflows/webapp-build-publish.yml`
-  - Triggers on `main` pushes affecting `webapp/**` or the workflow file itself, on `v*` tags, and manual dispatch.
-  - Runs `npm ci`, `npm test`, and `npm run build` in `webapp` before publishing.
-  - Publishes `ghcr.io/example/bramble/web-client` tags:
-    - `main` and `sha-<shortsha>` for `main`
-    - `vX.Y.Z` plus rolling semver tags (`vX.Y`, `vX`) for version tags.
+- [.gitea/workflows/webapp-build-publish.yml](.gitea/workflows/webapp-build-publish.yml) builds/tests/publishes the web client image.
+- Additional workflow definitions live in [.gitea/workflows](.gitea/workflows).
 
 ## Status
 
-The protocol layer is implemented and tested in software. Hardware-dependent work (SX1262 SPI driver, FreeRTOS tasks, OLED/BLE/OTA) is paused pending hardware availability.
+Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and host-side validation currently covers **169+ tests**. Development is ongoing, not paused.
 
 ## License
 
