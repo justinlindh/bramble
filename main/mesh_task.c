@@ -2385,10 +2385,12 @@ static void mesh_task(void *param) {
             mesh_process_rx_packet(&pkt);
         }
 
-        mesh_event_type_t mesh_evt;
-        while (xQueueReceive(s_mesh_event_queue, &mesh_evt, 0) == pdTRUE) {
-            if (mesh_evt == MESH_EVT_RECEIPT_TX) {
-                mesh_process_receipt_tx_event();
+        if (s_mesh_event_queue) {
+            mesh_event_type_t mesh_evt;
+            while (xQueueReceive(s_mesh_event_queue, &mesh_evt, 0) == pdTRUE) {
+                if (mesh_evt == MESH_EVT_RECEIPT_TX) {
+                    mesh_process_receipt_tx_event();
+                }
             }
         }
 
@@ -2983,8 +2985,10 @@ void mesh_task_start(bramble_identity_t *identity) {
     delivery_event_ring_init(s_delivery_event_ring);
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
     s_mesh_event_queue = xQueueCreate(MESH_EVENT_QUEUE_DEPTH, sizeof(mesh_event_type_t));
-    if (!s_mesh_event_queue) {
-        ESP_LOGE(TAG, "Failed to create mesh event queue");
+    if (!s_rx_queue || !s_mesh_event_queue) {
+        ESP_LOGE(TAG, "Failed to create mesh queues (rx=%p evt=%p)",
+                 (void *)s_rx_queue,
+                 (void *)s_mesh_event_queue);
         return;
     }
 
@@ -2994,7 +2998,7 @@ void mesh_task_start(bramble_identity_t *identity) {
         .callback = mesh_receipt_timer_cb,
         .arg = NULL,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "receipt_tx",
+        .name = "receipt_timer",
         .skip_unhandled_events = true,
     };
     esp_err_t timer_err = esp_timer_create(&receipt_timer_args, &s_receipt_timer);
