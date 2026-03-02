@@ -318,15 +318,18 @@ static void cli_task(void *param) {
 void cli_init(bramble_identity_t *identity) {
     s_identity = identity;
 
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     /* Install USB Serial JTAG driver and connect it to VFS (stdin/stdout).
      * This is required for linenoise and printf to work over the USB-JTAG
-     * console (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y). */
+     * console. Only applies to boards with native USB-JTAG (T-Deck Plus,
+     * Heltec V4). Heltec V3 uses a CP2102 UART bridge instead. */
     usb_serial_jtag_driver_config_t usj_cfg = {
         .tx_buffer_size = 1024,
         .rx_buffer_size = 1024,
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj_cfg));
     esp_vfs_usb_serial_jtag_use_driver();
+#endif
 
     esp_console_config_t console_config = {
         .max_cmdline_args = 16,
