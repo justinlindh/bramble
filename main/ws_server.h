@@ -2,6 +2,9 @@
 
 #include <stdbool.h>
 
+void ws_server_load_token(void);
+const char *ws_server_get_token(void);
+
 /* Start the WebSocket server on port 80.
  * Incoming WS frames on /ws are routed to rpc_dispatch().
  * Registers as RPC notification transport to push to all clients.
