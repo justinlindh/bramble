@@ -49,6 +49,30 @@
             <button id="flash-btn" class="btn success" disabled>Flash Firmware</button>
         </div>
 
+        <details id="wifi-setup-panel" class="wifi-setup-panel">
+            <summary>WiFi Setup (Optional)</summary>
+            <div class="wifi-setup-body">
+                <div class="board-select compact">
+                    <label for="wifi-ssid">SSID:</label>
+                    <input id="wifi-ssid" type="text" autocomplete="off" placeholder="Your WiFi network name" />
+                </div>
+
+                <div class="board-select compact">
+                    <label for="wifi-password">Password:</label>
+                    <div class="password-row">
+                        <input id="wifi-password" type="password" autocomplete="off" placeholder="Leave blank for open network" />
+                        <button id="wifi-password-toggle" class="btn secondary" type="button" aria-label="Show password">Show</button>
+                    </div>
+                </div>
+
+                <label class="checkbox-row" for="wifi-enable">
+                    <input id="wifi-enable" type="checkbox" />
+                    <span>Configure WiFi after flashing</span>
+                </label>
+                <p class="wifi-note">This runs after firmware flashing completes successfully.</p>
+            </div>
+        </details>
+
         <div class="progress-section" hidden>
             <div class="progress-bar">
                 <div class="progress-fill" id="progress-fill"></div>
