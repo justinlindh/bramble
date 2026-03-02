@@ -35,6 +35,9 @@ static radio_cad_done_callback_t s_cad_done_cb;
 static TaskHandle_t  s_radio_task;
 static TaskHandle_t  s_tx_waiter;   /* task waiting for TX done */
 
+static volatile bool     s_cad_result;
+static SemaphoreHandle_t s_cad_sem;
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -99,7 +102,18 @@ static int configure_radio(const radio_config_t *cfg)
                         SX1262_IRQ_CRC_ERR | SX1262_IRQ_TIMEOUT |
                         SX1262_IRQ_CAD_DONE | SX1262_IRQ_CAD_DETECTED;
     rc = sx1262_set_dio_irq_params(irq_mask, irq_mask, 0x0000, 0x0000);
+    if (rc != 0) return rc;
+
+    rc = sx1262_set_cad_params(2, 22, 10, 0x00, 0);
     return rc;
+}
+
+static void cad_check_cb(bool detected)
+{
+    s_cad_result = detected;
+    if (s_cad_sem) {
+        xSemaphoreGive(s_cad_sem);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -366,6 +380,36 @@ void radio_cad(void)
     sx1262_clear_irq_status(0x03FF);
     atomic_store(&s_state, RADIO_STATE_CAD);
     sx1262_set_cad();
+}
+
+bool radio_cad_check(void)
+{
+    if (!s_cad_sem) {
+        s_cad_sem = xSemaphoreCreateBinary();
+        if (!s_cad_sem) {
+            return false;
+        }
+    }
+
+    radio_cad_done_callback_t prev_cb = s_cad_done_cb;
+    s_cad_done_cb = cad_check_cb;
+    s_cad_result = false;
+
+    radio_standby();
+    sx1262_clear_irq_status(0x03FF);
+    radio_cad();
+
+    bool got_result = xSemaphoreTake(s_cad_sem, pdMS_TO_TICKS(50));
+
+    s_cad_done_cb = prev_cb;
+    radio_start_rx();
+
+    if (!got_result) {
+        ESP_LOGW(TAG, "CAD check timed out");
+        return false;
+    }
+
+    return s_cad_result;
 }
 
 void radio_set_tx_power(int8_t power)
