@@ -1,21 +1,43 @@
+# ESP-IDF build artifacts
 build/
+build-*/
 test/build/
-*.o
-*.d
-sdkconfig
-sdkconfig.old
-managed_components/
-dependencies.lock
-simulator/gosim/bramble-gosim
 
-# webapp
-webapp/node_modules/
-webapp/dist/
-webapp/.vite/
+# Toolchain/object outputs
+*.o
+*.obj
+*.a
+*.d
+*.elf
+*.map
+*.bin
+
+# Local SDK config/state
 sdkconfig
 sdkconfig.*
 !sdkconfig.defaults*
-build-heltec-v3/log/
-build-tdeck-plus/log/
+sdkconfig.old
+
+# Dependency/build management
+managed_components/
+dependencies.lock
+
+# Temp/evidence artifacts
+tmp-e2e/
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Simulator artifacts
+simulator/gosim/bramble-gosim
+
+# webapp artifacts
+webapp/node_modules/
+webapp/dist/
+webapp/.vite/
+webapp/e2e-screenshots/
+
+# Local helper state
 .flash-targets.json
-build-heltec-v4/
