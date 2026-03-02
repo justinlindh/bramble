@@ -10,15 +10,19 @@
 #include "cJSON.h"
 #include "sdkconfig.h"
 #include "ct_strcmp.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE    2048
+#define AUTH_TOKEN_MAX 128
 
 static const char *TAG = "ws";
 static httpd_handle_t s_server = NULL;
 static int s_client_fds[MAX_WS_CLIENTS];
 static int s_client_count = 0;
 static bool s_server_running = false;
+static char s_auth_token[AUTH_TOKEN_MAX] = {0};
 
 /* ── Client tracking ─────────────────────────────────────────────────── */
 
@@ -54,9 +58,7 @@ static void client_remove(int fd)
  */
 static bool auth_check(httpd_req_t *req)
 {
-#ifdef CONFIG_BRAMBLE_WS_AUTH_TOKEN
-    const char *token = CONFIG_BRAMBLE_WS_AUTH_TOKEN;
-    if (token[0] == '\0') return true;  /* no token configured */
+    if (s_auth_token[0] == '\0') return true;  /* no token configured = open access */
 
     /* Check Authorization: Bearer header */
     size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
@@ -64,7 +66,7 @@ static bool auth_check(httpd_req_t *req)
         char *hdr = malloc(hdr_len + 1);
         if (hdr && httpd_req_get_hdr_value_str(req, "Authorization", hdr, hdr_len + 1) == ESP_OK) {
             const char *prefix = "Bearer ";
-            if (strncmp(hdr, prefix, 7) == 0 && ct_strcmp(hdr + 7, token) == 0) {
+            if (strncmp(hdr, prefix, 7) == 0 && ct_strcmp(hdr + 7, s_auth_token) == 0) {
                 free(hdr);
                 return true;
             }
@@ -73,9 +75,6 @@ static bool auth_check(httpd_req_t *req)
     }
 
     return false;
-#else
-    return true;
-#endif
 }
 
 static esp_err_t send_401(httpd_req_t *req)
@@ -411,8 +410,27 @@ static const httpd_uri_t ws_uri = {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+void ws_server_load_token(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("bramble", NVS_READONLY, &h) == ESP_OK) {
+        size_t len = AUTH_TOKEN_MAX;
+        if (nvs_get_str(h, "auth_token", s_auth_token, &len) != ESP_OK) {
+            s_auth_token[0] = '\0';
+        }
+        nvs_close(h);
+    }
+}
+
+const char *ws_server_get_token(void)
+{
+    return s_auth_token;
+}
+
 int ws_server_start(void)
 {
+    ws_server_load_token();
+
     /* Idempotent: no-op if already running */
     if (s_server_running) {
         ESP_LOGD(TAG, "WebSocket server already running");

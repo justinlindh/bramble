@@ -26,6 +26,7 @@
 #include "location.h"
 #include "wifi_manager.h"
 #include "esp_wifi.h"
+#include "ws_server.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -629,6 +630,34 @@ static int handle_set_node_name(const cJSON *params, cJSON *result) {
     ESP_LOGI(TAG, "Node name set to: %s", name);
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "name", name);
+    return 0;
+}
+
+static int rpc_set_auth_token(const cJSON *params, cJSON *result)
+{
+    const cJSON *token_j = cJSON_GetObjectItem(params, "token");
+    if (!token_j || !cJSON_IsString(token_j)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    const char *val = token_j->valuestring;
+    if (strlen(val) >= 128) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    nvs_handle_t h;
+    if (nvs_open("bramble", NVS_READWRITE, &h) != ESP_OK) {
+        return RPC_ERR_INTERNAL;
+    }
+    if (val[0] == '\0') {
+        nvs_erase_key(h, "auth_token");
+    } else {
+        nvs_set_str(h, "auth_token", val);
+    }
+    nvs_commit(h);
+    nvs_close(h);
+
+    ws_server_load_token();  /* reload immediately */
+    cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
@@ -1933,6 +1962,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.sendProbe",            handle_send_probe);
     rpc_register("bramble.setRadio",             handle_set_radio);
     rpc_register("bramble.setNodeName",          handle_set_node_name);
+    rpc_register("bramble.setAuthToken",         rpc_set_auth_token);
     rpc_register("bramble.addChannel",           handle_add_channel);
     rpc_register("bramble.removeChannel",        handle_remove_channel);
     rpc_register("bramble.setDefaultChannel",    handle_set_default_channel);
