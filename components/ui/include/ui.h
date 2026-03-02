@@ -74,7 +74,9 @@ typedef struct {
     int settings_cursor;        /* selected value while editing current row */
     bool settings_editing;      /* true when in settings edit mode */
     bool settings_confirmed;    /* set true on long-press confirm */
-    
+    bool pending_message_notification; /* set when a message arrives during active navigation */
+    uint32_t message_auto_switch_time; /* timestamp when idle auto-switch to messages happened */
+
     /* Compose state */
     char compose_buf[COMPOSE_BUF_SIZE];
     int compose_len;
@@ -93,7 +95,10 @@ conn_mode_t conn_mode_get(void);
 void conn_mode_set(conn_mode_t mode);
 
 #define UI_INACTIVITY_TIMEOUT_MS 60000
+#define UI_MESSAGE_IDLE_THRESHOLD_MS 10000
+#define UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS 30000
 void ui_check_timeout(ui_state_t *state, uint32_t now_ms);
+void ui_on_message_received(ui_state_t *state, uint32_t now_ms);
 
 // Display formatters
 int ui_format_main_line1(const ui_main_data_t *data, char *buf, size_t buf_len);

@@ -1043,6 +1043,7 @@ void app_main(void)
     ESP_LOGI(TAG, "=== BOOT STAGE: ui_init ===");
     ui_state_t ui;
     ui_init(&ui);
+    int last_message_count = msg_store_count();
 
     /* Render initial screen */
     ESP_LOGI(TAG, "=== BOOT STAGE: initial render ===");
@@ -1110,6 +1111,15 @@ void app_main(void)
             }
         }
 #endif
+
+        /* Incoming message detection for text UI boards. */
+        {
+            int current_message_count = msg_store_count();
+            if (current_message_count > last_message_count) {
+                ui_on_message_received(&ui, now_ms);
+            }
+            last_message_count = current_message_count;
+        }
 
         /* Handle settings confirmation */
         if (ui.settings_confirmed) {

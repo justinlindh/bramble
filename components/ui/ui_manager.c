@@ -12,6 +12,14 @@ void ui_init(ui_state_t *state) {
 void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms) {
     state->last_activity = now_ms;
 
+    if (state->current_screen == SCREEN_MESSAGES && state->message_auto_switch_time != 0) {
+        /* User took control while in auto-switched messages view; cancel timed restore. */
+        state->message_auto_switch_time = 0;
+    }
+    if (btn != BTN_NONE) {
+        state->pending_message_notification = false;
+    }
+
     /* Settings screen editing */
     if (state->current_screen == SCREEN_SETTINGS && state->settings_editing) {
         int value_count;
@@ -144,7 +152,34 @@ void ui_mark_drawn(ui_state_t *state) {
     state->screen_dirty = false;
 }
 
+void ui_on_message_received(ui_state_t *state, uint32_t now_ms) {
+    uint32_t idle_ms = now_ms - state->last_activity;
+
+    if (idle_ms >= UI_MESSAGE_IDLE_THRESHOLD_MS) {
+        if (state->current_screen != SCREEN_MESSAGES) {
+            state->prev_screen = state->current_screen;
+            state->current_screen = SCREEN_MESSAGES;
+            state->screen_enter_time = now_ms;
+            state->screen_dirty = true;
+        }
+        state->pending_message_notification = false;
+        state->message_auto_switch_time = now_ms;
+    } else {
+        state->pending_message_notification = true;
+    }
+}
+
 void ui_check_timeout(ui_state_t *state, uint32_t now_ms) {
+    if (state->message_auto_switch_time != 0 &&
+        state->current_screen == SCREEN_MESSAGES &&
+        (now_ms - state->message_auto_switch_time) >= UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS) {
+        state->current_screen = state->prev_screen;
+        state->screen_enter_time = now_ms;
+        state->screen_dirty = true;
+        state->message_auto_switch_time = 0;
+        return;
+    }
+
     if (state->current_screen != SCREEN_MAIN &&
         (now_ms - state->last_activity) >= UI_INACTIVITY_TIMEOUT_MS) {
         state->prev_screen = state->current_screen;
@@ -152,6 +187,7 @@ void ui_check_timeout(ui_state_t *state, uint32_t now_ms) {
         state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         state->last_activity = now_ms;
+        state->message_auto_switch_time = 0;
     }
 }
 
