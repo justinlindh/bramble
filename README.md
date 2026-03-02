@@ -128,8 +128,8 @@ Bramble exposes a JSON-RPC 2.0 API for external control. The API spec, Go SDK, a
 | Repo | Description |
 |------|-------------|
 | [`api/openapi.yaml`](api/openapi.yaml) | OpenAPI spec for the JSON-RPC interface |
-| [bramble-go](https://github.com/justinlindh/bramble-go) | Go SDK — connect via Serial, WebSocket, or BLE |
-| [bramble-cli](https://github.com/justinlindh/bramble-cli) | CLI tool built on bramble-go |
+| [bramble-go](https://github.com/YOUR-ORG/bramble-go) | Go SDK — connect via Serial, WebSocket, or BLE |
+| [bramble-cli](https://github.com/YOUR-ORG/bramble-cli) | CLI tool built on bramble-go |
 | [VERSIONING.md](VERSIONING.md) | Version compatibility matrix |
 
 ## CI/CD
