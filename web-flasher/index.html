@@ -61,12 +61,25 @@
             <p id="status-text" class="status-text">Ready.</p>
         </div>
 
-        <!-- Step 2: WiFi Setup (shown after successful flash) -->
-        <div id="step-wifi" class="step-wifi" hidden>
+        <!-- Step 2: Reset prompt (shown after successful flash) -->
+        <div id="step-reset" class="step-wifi" hidden>
             <div class="step-wifi-header">
                 <div class="step-wifi-icon">✅</div>
                 <h2>Flash Complete!</h2>
-                <p>Your device has been flashed successfully. Set up WiFi so your device can connect to the Bramble web app.</p>
+                <p>Press the <strong>RST</strong> (reset) button on your device to start the new firmware. The screen should light up within a few seconds.</p>
+            </div>
+            <div class="actions" style="justify-content: center;">
+                <button id="reset-continue-btn" class="btn success">Device is Running →</button>
+            </div>
+            <p class="wifi-note" style="text-align: center; margin-top: 0.75rem;">Click above once you see the Bramble splash screen on your device.</p>
+        </div>
+
+        <!-- Step 3: WiFi Setup -->
+        <div id="step-wifi" class="step-wifi" hidden>
+            <div class="step-wifi-header">
+                <div class="step-wifi-icon">📶</div>
+                <h2>WiFi Setup</h2>
+                <p>Connect your device to WiFi so you can manage it from the Bramble web app.</p>
             </div>
 
             <div class="wifi-form">
@@ -92,7 +105,7 @@
             </div>
         </div>
 
-        <!-- Step 3: Done -->
+        <!-- Step 4: Done -->
         <div id="step-done" class="step-done" hidden>
             <div class="step-done-header">
                 <div class="step-done-icon">🎉</div>
