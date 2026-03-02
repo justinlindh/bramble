@@ -263,8 +263,10 @@ const BOARDS = {
         const writer = device.writable.getWriter();
 
         try {
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            await readUntilPrompt(reader, { timeoutMs: 18000 });
+            // After a fresh flash + reset, the device needs time to boot.
+            // ESP32-S3 boot + firmware init typically takes 3-5 seconds.
+            await new Promise((resolve) => setTimeout(resolve, 4000));
+            await readUntilPrompt(reader, { timeoutMs: 20000 });
 
             for (const command of commands) {
                 await writer.write(encoder.encode(`${command}\r\n`));
@@ -418,6 +420,18 @@ const BOARDS = {
             } catch {
                 // Some boards don't support hard reset via serial signals; that's OK
             }
+
+            // Release esptool's hold on the serial port so we can reuse it
+            // for WiFi provisioning or future connections.
+            try {
+                if (transport) await transport.disconnect();
+            } catch {
+                // Best-effort; port may already be released
+            }
+            transport = null;
+            esploader = null;
+            chip = null;
+            connected = false;
 
             if (shouldConfigureWifi()) {
                 const { ssid, password } = getWifiConfigSelection();
