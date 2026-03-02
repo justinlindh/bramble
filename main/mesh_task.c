@@ -2779,9 +2779,15 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     s_state_mutex = xSemaphoreCreateMutex();
     s_delivery_event_mutex = xSemaphoreCreateMutex();
+    /* Try PSRAM first (T-Deck Plus), fall back to internal RAM (Heltec V3/V4) */
     s_delivery_event_ring = heap_caps_calloc(1, sizeof(delivery_event_ring_t), MALLOC_CAP_SPIRAM);
     if (!s_delivery_event_ring) {
-        ESP_LOGE(TAG, "Failed to allocate delivery event ring in PSRAM (%u bytes)",
+        ESP_LOGW(TAG, "No PSRAM for delivery ring, using internal RAM (%u bytes)",
+                 (unsigned)sizeof(delivery_event_ring_t));
+        s_delivery_event_ring = calloc(1, sizeof(delivery_event_ring_t));
+    }
+    if (!s_delivery_event_ring) {
+        ESP_LOGE(TAG, "Failed to allocate delivery event ring (%u bytes)",
                  (unsigned)sizeof(delivery_event_ring_t));
         return;
     }
