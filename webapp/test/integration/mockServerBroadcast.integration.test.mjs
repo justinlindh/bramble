@@ -5,8 +5,13 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import WebSocket from 'ws';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 const MOCK_SERVER_URL = process.env.MOCK_SERVER_URL || 'ws://localhost:3005';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const serverPath = resolve(__dirname, '../../mock/server.mjs');
 
 function sendRpc(ws, method, params = {}) {
   const id = Date.now();
@@ -54,8 +59,30 @@ function collectNotifications(ws, method, count, timeoutMs = 8000, filter = null
 
 describe('Mock Server bramble.sendBroadcast', () => {
   let ws;
+  let mockServer;
 
   beforeAll(async () => {
+    if (!process.env.MOCK_SERVER_URL) {
+      mockServer = spawn(process.execPath, [serverPath], {
+        stdio: 'ignore',
+        env: { ...process.env, PORT: '3005' },
+      });
+
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Mock server startup timeout')), 5000);
+        const tryConnect = () => {
+          const probe = new WebSocket(MOCK_SERVER_URL);
+          probe.once('open', () => {
+            clearTimeout(timeout);
+            probe.close();
+            resolve();
+          });
+          probe.once('error', () => setTimeout(tryConnect, 100));
+        };
+        tryConnect();
+      });
+    }
+
     ws = new WebSocket(MOCK_SERVER_URL);
     await new Promise((resolve, reject) => {
       ws.on('open', resolve);
@@ -66,6 +93,9 @@ describe('Mock Server bramble.sendBroadcast', () => {
   afterAll(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close();
+    }
+    if (mockServer && !mockServer.killed) {
+      mockServer.kill('SIGTERM');
     }
   });
 

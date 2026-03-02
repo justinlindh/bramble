@@ -14,7 +14,7 @@
 import { WebSocketServer } from 'ws';
 import { handleConnection } from './handler.mjs';
 
-const PORT = 3005;
+const PORT = Number(process.env.PORT || 3005);
 
 const wss = new WebSocketServer({ port: PORT });
 
