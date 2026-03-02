@@ -1,4 +1,5 @@
 import { ESPLoader, Transport } from 'esptool-js';
+import { buildWifiConfigCommands } from './wifi-config.js';
 
 // Bramble Web Flasher — powered by esptool-js (Espressif official)
 // UI controller: connects to ESP32-S3 via Web Serial, flashes firmware from OTA releases
@@ -56,9 +57,15 @@ const BOARDS = {
     const progressText   = document.getElementById('progress-text');
     const releaseDetails = document.getElementById('release-details');
     const statusText     = document.getElementById('status-text');
+    const wifiPanel      = document.getElementById('wifi-setup-panel');
+    const wifiSsidInput  = document.getElementById('wifi-ssid');
+    const wifiPasswordInput = document.getElementById('wifi-password');
+    const wifiPasswordToggle = document.getElementById('wifi-password-toggle');
+    const wifiEnableCheckbox = document.getElementById('wifi-enable');
 
     const OTA_INDEX_URL = '/ota/index.json';
     const BOARD_STORAGE_KEY = 'bramble.webflasher.selectedBoard';
+    const WIFI_SSID_STORAGE_KEY = 'bramble.webflasher.wifiSsid';
 
     let releases = [];
     let filteredReleases = [];
@@ -188,6 +195,88 @@ const BOARDS = {
         localStorage.setItem(BOARD_STORAGE_KEY, boardSelect.value);
     }
 
+    function getWifiConfigSelection() {
+        const ssid = String(wifiSsidInput?.value || '').trim();
+        const password = String(wifiPasswordInput?.value || '');
+        const enabled = Boolean(wifiEnableCheckbox?.checked);
+        const panelExpanded = Boolean(wifiPanel?.open);
+        return { ssid, password, enabled, panelExpanded };
+    }
+
+    function shouldConfigureWifi() {
+        const selection = getWifiConfigSelection();
+        return selection.enabled && selection.panelExpanded && Boolean(selection.ssid);
+    }
+
+    function loadWifiPreference() {
+        if (!wifiSsidInput || !wifiEnableCheckbox) return;
+        const saved = localStorage.getItem(WIFI_SSID_STORAGE_KEY) || '';
+        wifiSsidInput.value = saved;
+        wifiEnableCheckbox.checked = Boolean(saved.trim());
+    }
+
+    function saveWifiSsidPreference() {
+        if (!wifiSsidInput) return;
+        const ssid = String(wifiSsidInput.value || '').trim();
+        if (ssid) {
+            localStorage.setItem(WIFI_SSID_STORAGE_KEY, ssid);
+            if (wifiEnableCheckbox) wifiEnableCheckbox.checked = true;
+        } else {
+            localStorage.removeItem(WIFI_SSID_STORAGE_KEY);
+            if (wifiEnableCheckbox) wifiEnableCheckbox.checked = false;
+        }
+    }
+
+    async function readUntilPrompt(reader, { timeoutMs = 12000, prompt = 'bramble>' } = {}) {
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const timeoutAt = Date.now() + timeoutMs;
+
+        while (Date.now() < timeoutAt) {
+            const remaining = timeoutAt - Date.now();
+            const readResult = await Promise.race([
+                reader.read(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Timed out waiting for console output.')), Math.max(1, remaining))),
+            ]);
+
+            if (readResult.done) {
+                throw new Error('Serial console closed unexpectedly.');
+            }
+
+            buffer += decoder.decode(readResult.value, { stream: true });
+            if (buffer.includes(prompt)) {
+                return buffer;
+            }
+        }
+
+        throw new Error('Timed out waiting for firmware console prompt.');
+    }
+
+    async function configureWifiOverSerial({ ssid, password }) {
+        if (!device?.readable || !device?.writable) {
+            throw new Error('Serial transport unavailable for WiFi configuration.');
+        }
+
+        const commands = buildWifiConfigCommands({ ssid, password, rebootAfter: true });
+        const encoder = new TextEncoder();
+        const reader = device.readable.getReader();
+        const writer = device.writable.getWriter();
+
+        try {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            await readUntilPrompt(reader, { timeoutMs: 18000 });
+
+            for (const command of commands) {
+                await writer.write(encoder.encode(`${command}\r\n`));
+                const response = await readUntilPrompt(reader, { timeoutMs: 10000 });
+                console.log(`[wifi-config] ${command}`, response);
+            }
+        } finally {
+            writer.releaseLock();
+            reader.releaseLock();
+        }
+    }
+
     function cleanup() {
         device = null;
         transport = null;
@@ -262,6 +351,12 @@ const BOARDS = {
         const selectedRelease = currentRelease();
         const startedAt = Date.now();
 
+        const wifiSelection = getWifiConfigSelection();
+        if (wifiSelection.panelExpanded && wifiSelection.enabled && !wifiSelection.ssid) {
+            setStatus('Enter a WiFi SSID or uncheck "Configure WiFi after flashing".');
+            return;
+        }
+
         flashBtn.disabled = true;
         connectBtn.disabled = true;
         setProgress(0, 'Starting…');
@@ -324,8 +419,21 @@ const BOARDS = {
                 // Some boards don't support hard reset via serial signals; that's OK
             }
 
-            setProgress(100, 'Done!');
-            setStatus('✅ Flash complete! Device is rebooting.');
+            if (shouldConfigureWifi()) {
+                const { ssid, password } = getWifiConfigSelection();
+                setStatus('Configuring WiFi...');
+                try {
+                    await configureWifiOverSerial({ ssid, password });
+                    setProgress(100, 'Done!');
+                    setStatus(`✅ WiFi configured! Device is connecting to ${ssid}.`);
+                } catch (wifiErr) {
+                    setProgress(100, 'Flashed');
+                    setStatus(`✅ Flash complete, but WiFi setup failed: ${wifiErr.message || 'unknown error'}`);
+                }
+            } else {
+                setProgress(100, 'Done!');
+                setStatus('✅ Flash complete! Device is rebooting.');
+            }
         } catch (e) {
             setProgress(0, 'Failed');
             const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
@@ -342,6 +450,18 @@ const BOARDS = {
         boardSelect.addEventListener('change', () => {
             saveBoardPreference();
             renderReleaseDetails();
+        });
+    }
+    if (wifiSsidInput) {
+        loadWifiPreference();
+        wifiSsidInput.addEventListener('input', () => saveWifiSsidPreference());
+    }
+    if (wifiPasswordToggle && wifiPasswordInput) {
+        wifiPasswordToggle.addEventListener('click', () => {
+            const showing = wifiPasswordInput.type === 'text';
+            wifiPasswordInput.type = showing ? 'password' : 'text';
+            wifiPasswordToggle.textContent = showing ? 'Show' : 'Hide';
+            wifiPasswordToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
         });
     }
     if (channelSelect) {
