@@ -46,6 +46,7 @@ void radio_get_profile_config(radio_profile_t profile, radio_config_t *config);
 int  radio_transmit(const uint8_t *data, uint8_t len);
 void radio_start_rx(void);
 void radio_cad(void);
+bool radio_cad_check(void);
 void radio_set_tx_power(int8_t power);
 radio_state_t radio_get_state(void);
 void radio_set_rx_callback(radio_rx_callback_t cb);

@@ -32,6 +32,7 @@
 #define SX1262_CMD_CALIBRATE          0x89
 #define SX1262_CMD_CALIBRATE_IMAGE    0x98
 #define SX1262_CMD_SET_REGULATOR_MODE 0x96
+#define SX1262_CMD_SET_CAD_PARAMS     0x88
 
 /* ---------- IRQ flags ---------- */
 #define SX1262_IRQ_TX_DONE        (1 << 0)
@@ -80,6 +81,8 @@ uint16_t sx1262_get_irq_status(void);
 int sx1262_set_tx(uint32_t timeout_ms);
 int sx1262_set_rx(uint32_t timeout_ms);
 int sx1262_set_cad(void);
+int sx1262_set_cad_params(uint8_t symbol_num, uint8_t det_peak, uint8_t det_min,
+                          uint8_t exit_mode, uint32_t timeout);
 int sx1262_get_rx_buffer_status(uint8_t *payload_len, uint8_t *rx_start_offset);
 int sx1262_get_packet_status(int16_t *rssi, int8_t *snr);
 int sx1262_set_sleep(uint8_t config);

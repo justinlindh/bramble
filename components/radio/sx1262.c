@@ -380,6 +380,22 @@ int sx1262_set_cad(void)
     return sx1262_write_command(SX1262_CMD_SET_CAD, NULL, 0);
 }
 
+int sx1262_set_cad_params(uint8_t symbol_num, uint8_t det_peak, uint8_t det_min,
+                          uint8_t exit_mode, uint32_t timeout)
+{
+    uint32_t cad_timeout = timeout & 0x00FFFFFFu;
+    uint8_t data[7] = {
+        symbol_num,
+        det_peak,
+        det_min,
+        exit_mode,
+        (uint8_t)(cad_timeout >> 16),
+        (uint8_t)(cad_timeout >> 8),
+        (uint8_t)(cad_timeout),
+    };
+    return sx1262_write_command(SX1262_CMD_SET_CAD_PARAMS, data, 7);
+}
+
 int sx1262_get_rx_buffer_status(uint8_t *payload_len, uint8_t *rx_start_offset)
 {
     uint8_t data[2] = { 0 };
