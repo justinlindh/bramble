@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    tags: [ 'firmware-v*' ]
     paths:
       - '.gitea/workflows/firmware-build.yml'
       - 'scripts/ci-build-firmware.sh'
@@ -21,17 +22,39 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version and channel
+        id: version
+        run: |
+          REF_NAME="${GITHUB_REF_NAME:-}"
+          if [[ "$REF_NAME" =~ ^firmware-v(.+)$ ]]; then
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "version=v${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            CHANNEL="dev"
+            VERSION=$(CHANNEL=dev bash scripts/ci-publish-ota.sh --print-version)
+            echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Resolved: channel=$(grep channel "$GITHUB_OUTPUT" | tail -1) version=$(grep version "$GITHUB_OUTPUT" | tail -1)"
 
       - name: Build firmware artifacts
+        env:
+          BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
           . /opt/esp/idf/export.sh
+          # Strip leading v for PROJECT_VER
+          export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
           bash scripts/ci-build-firmware.sh
 
       - name: Publish OTA via authenticated endpoint
         env:
           OTA_PUBLISH_KEY: ${{ secrets.OTA_PUBLISH_KEY }}
           OTA_PUBLISH_URL: https://bramblemesh.org/ota/publish
-          CHANNEL: dev
+          CHANNEL: ${{ steps.version.outputs.channel }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           missing=()
           command -v curl >/dev/null 2>&1 || missing+=(curl)
@@ -53,9 +76,9 @@ jobs:
 
       - name: Verify published release completeness in index
         env:
-          CHANNEL: dev
+          CHANNEL: ${{ steps.version.outputs.channel }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=$(scripts/ci-publish-ota.sh --print-version)
           curl -fsSL https://bramblemesh.org/ota/index.json -o /tmp/ota-index.json
 
           jq -e \

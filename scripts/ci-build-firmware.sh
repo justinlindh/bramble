@@ -37,6 +37,16 @@ require_cmd sha256sum
 
 cd "$ROOT_DIR"
 
+# Resolve build version from CI or git tags
+if [[ -n "${BRAMBLE_BUILD_VERSION:-}" ]]; then
+  BUILD_VERSION="$BRAMBLE_BUILD_VERSION"
+else
+  BUILD_VERSION=$(VERSION="${VERSION:-}" CHANNEL="${CHANNEL:-dev}" bash scripts/ci-publish-ota.sh --print-version 2>/dev/null || echo "v0.0.0-local")
+  # Strip leading v for PROJECT_VER (ESP-IDF convention)
+  BUILD_VERSION="${BUILD_VERSION#v}"
+fi
+log "Build version: $BUILD_VERSION"
+
 log "Preparing deterministic output directory: $OUTPUT_DIR"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -52,11 +62,12 @@ for board in "${BOARDS[@]}"; do
   BOARD_SDKCONFIG="$ROOT_DIR/sdkconfig.$board"
   rm -f "$BOARD_SDKCONFIG"
 
-  log "Building firmware for $board (SDKCONFIG=$BOARD_SDKCONFIG DEFAULTS=$DEFAULTS)"
+  log "Building firmware for $board (SDKCONFIG=$BOARD_SDKCONFIG DEFAULTS=$DEFAULTS VERSION=$BUILD_VERSION)"
   idf.py \
     -B "$BUILD_DIR" \
     -D SDKCONFIG="$BOARD_SDKCONFIG" \
     -D SDKCONFIG_DEFAULTS="$DEFAULTS" \
+    -D PROJECT_VER="$BUILD_VERSION" \
     build
 
   require_file "$BUILD_DIR/bramble.bin"
