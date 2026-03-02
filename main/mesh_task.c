@@ -854,9 +854,12 @@ static void send_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t
         }
 
         if (i + 1u < attempts) {
-            uint32_t retry_delay_ms = (i == 0u)
-                                      ? (420u + (esp_random() % 260u))  /* 420..679ms */
-                                      : (900u + (esp_random() % 450u)); /* 900..1349ms */
+            /* Exponential backoff with per-attempt randomization.
+             * attempt 0→1: 500-999ms
+             * attempt 1→2: 1200-2099ms */
+            uint32_t base_ms = 500u + (i * 700u);
+            uint32_t jitter_range = 500u + (i * 400u);
+            uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
             vTaskDelay(pdMS_TO_TICKS(retry_delay_ms));
         }
     }
