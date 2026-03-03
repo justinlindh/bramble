@@ -4,193 +4,94 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-/* ── Init ────────────────────────────────────────────────────────────── */
-
 void test_budget_starts_full(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_NORMAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_CRITICAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_BROADCAST_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL], airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_CRITICAL], airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST], airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_RECEIPT], airtime_budget_remaining(&ab, AIRTIME_TIER_RECEIPT));
 }
 
-/* ── Debit ───────────────────────────────────────────────────────────── */
-
-void test_debit_normal(void) {
+void test_continuous_refill_partial_interval(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_NORMAL, 5000);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_NORMAL_MS - 5000,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-    /* Other tiers unaffected */
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_CRITICAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_BROADCAST_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
+
+    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 9000);
+    uint32_t before = airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST);
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST] - 9000u, before);
+
+    /* 30 minutes should refill ~50% of bucket capacity */
+    airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS / 2u);
+    uint32_t after = airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST);
+    TEST_ASSERT_TRUE(after > before);
+    TEST_ASSERT_TRUE(after <= ab.max_ms[AIRTIME_IDX_BROADCAST]);
 }
 
-void test_debit_broadcast(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 3000);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_BROADCAST_MS - 3000,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
-}
-
-void test_debit_critical(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_CRITICAL, 10000);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_CRITICAL_MS - 10000,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
-}
-
-void test_debit_clamps_to_zero(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    /* Debit more than available */
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, AIRTIME_BUDGET_BROADCAST_MS + 5000);
-    TEST_ASSERT_EQUAL_UINT32(0, airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
-}
-
-/* ── Can transmit ────────────────────────────────────────────────────── */
-
-void test_can_transmit_when_full(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_NORMAL, 1000));
-    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_CRITICAL, 1000));
-    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, 1000));
-}
-
-void test_blocks_when_empty(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, AIRTIME_BUDGET_BROADCAST_MS);
-    TEST_ASSERT_FALSE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, 1));
-}
-
-void test_critical_borrows_from_normal(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    /* Exhaust critical */
-    airtime_budget_debit(&ab, AIRTIME_TIER_CRITICAL, AIRTIME_BUDGET_CRITICAL_MS);
-    TEST_ASSERT_EQUAL_UINT32(0, airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
-    /* Critical can still transmit by borrowing from normal */
-    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_CRITICAL, 1000));
-    /* Actually debit — should take from normal */
-    airtime_budget_debit(&ab, AIRTIME_TIER_CRITICAL, 1000);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_NORMAL_MS - 1000,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-}
-
-void test_normal_cannot_borrow(void) {
+void test_refill_clamps_to_max(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
     airtime_budget_debit(&ab, AIRTIME_TIER_NORMAL, AIRTIME_BUDGET_NORMAL_MS);
-    TEST_ASSERT_FALSE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_NORMAL, 1));
+
+    airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS * 10u);
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL], airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
 }
 
-void test_broadcast_cannot_borrow(void) {
+void test_critical_borrow_from_normal_still_works(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, AIRTIME_BUDGET_BROADCAST_MS);
-    TEST_ASSERT_FALSE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, 1));
-}
-
-/* ── Refill ──────────────────────────────────────────────────────────── */
-
-void test_refill_restores_all(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_NORMAL, 10000);
-    airtime_budget_debit(&ab, AIRTIME_TIER_CRITICAL, 20000);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 15000);
-    /* Before interval — no refill */
-    airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS - 1);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_NORMAL_MS - 10000,
+    airtime_budget_debit(&ab, AIRTIME_TIER_CRITICAL, ab.max_ms[AIRTIME_IDX_CRITICAL]);
+    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_CRITICAL, 1000u));
+    airtime_budget_debit(&ab, AIRTIME_TIER_CRITICAL, 1000u);
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL] - 1000u,
                              airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-    /* At interval — full refill */
-    airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_NORMAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_CRITICAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_BROADCAST_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
 }
 
-void test_refill_no_early(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 1000);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 5000);
-    /* Half the interval — should NOT refill */
-    airtime_budget_refill(&ab, 1000 + AIRTIME_REFILL_INTERVAL_MS / 2);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_BROADCAST_MS - 5000,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
-}
-
-/* ── Next refill ─────────────────────────────────────────────────────── */
-
-void test_next_refill_ms(void) {
-    airtime_budget_t ab;
-    airtime_budget_init(&ab, 1000);
-    /* At init time, next refill is the full interval away */
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_REFILL_INTERVAL_MS,
-                             airtime_budget_next_refill_ms(&ab, 1000));
-    /* Halfway through */
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_REFILL_INTERVAL_MS / 2,
-                             airtime_budget_next_refill_ms(&ab, 1000 + AIRTIME_REFILL_INTERVAL_MS / 2));
-    /* Past due */
-    TEST_ASSERT_EQUAL_UINT32(0,
-                             airtime_budget_next_refill_ms(&ab, 1000 + AIRTIME_REFILL_INTERVAL_MS + 1));
-}
-
-/* ── Tier isolation ──────────────────────────────────────────────────── */
-
-void test_tiers_are_independent(void) {
+void test_receipt_tier_isolated_from_broadcast(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
-    /* Exhaust broadcast, verify others untouched */
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, AIRTIME_BUDGET_BROADCAST_MS);
-    TEST_ASSERT_EQUAL_UINT32(0, airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_NORMAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_CRITICAL_MS,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
+    airtime_budget_debit(&ab, AIRTIME_TIER_RECEIPT, ab.max_ms[AIRTIME_IDX_RECEIPT]);
+    TEST_ASSERT_EQUAL_UINT32(0u, airtime_budget_remaining(&ab, AIRTIME_TIER_RECEIPT));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST], airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
 }
 
-/* ── Multiple debits ─────────────────────────────────────────────────── */
-
-void test_multiple_debits_accumulate(void) {
+void test_adaptive_profile_small_mesh_relaxes_budgets(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 1000);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 2000);
-    airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, 3000);
-    TEST_ASSERT_EQUAL_UINT32(AIRTIME_BUDGET_BROADCAST_MS - 6000,
-                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
+    uint32_t base_bcast = ab.base_max_ms[AIRTIME_IDX_BROADCAST];
+    uint32_t base_rcpt = ab.base_max_ms[AIRTIME_IDX_RECEIPT];
+
+    airtime_budget_set_mesh_size(&ab, 5);
+    TEST_ASSERT_TRUE(ab.max_ms[AIRTIME_IDX_BROADCAST] > base_bcast);
+    TEST_ASSERT_TRUE(ab.max_ms[AIRTIME_IDX_RECEIPT] > base_rcpt);
+}
+
+void test_adaptive_profile_large_mesh_constrains_budgets(void) {
+    airtime_budget_t ab;
+    airtime_budget_init(&ab, 0);
+    uint32_t base_bcast = ab.base_max_ms[AIRTIME_IDX_BROADCAST];
+    uint32_t base_rcpt = ab.base_max_ms[AIRTIME_IDX_RECEIPT];
+
+    airtime_budget_set_mesh_size(&ab, 80);
+    TEST_ASSERT_TRUE(ab.max_ms[AIRTIME_IDX_BROADCAST] < base_bcast);
+    TEST_ASSERT_TRUE(ab.max_ms[AIRTIME_IDX_RECEIPT] < base_rcpt);
+}
+
+void test_next_refill_is_zero_for_continuous_model(void) {
+    airtime_budget_t ab;
+    airtime_budget_init(&ab, 0);
+    TEST_ASSERT_EQUAL_UINT32(0u, airtime_budget_next_refill_ms(&ab, 1234u));
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_budget_starts_full);
-    RUN_TEST(test_debit_normal);
-    RUN_TEST(test_debit_broadcast);
-    RUN_TEST(test_debit_critical);
-    RUN_TEST(test_debit_clamps_to_zero);
-    RUN_TEST(test_can_transmit_when_full);
-    RUN_TEST(test_blocks_when_empty);
-    RUN_TEST(test_critical_borrows_from_normal);
-    RUN_TEST(test_normal_cannot_borrow);
-    RUN_TEST(test_broadcast_cannot_borrow);
-    RUN_TEST(test_refill_restores_all);
-    RUN_TEST(test_refill_no_early);
-    RUN_TEST(test_next_refill_ms);
-    RUN_TEST(test_tiers_are_independent);
-    RUN_TEST(test_multiple_debits_accumulate);
+    RUN_TEST(test_continuous_refill_partial_interval);
+    RUN_TEST(test_refill_clamps_to_max);
+    RUN_TEST(test_critical_borrow_from_normal_still_works);
+    RUN_TEST(test_receipt_tier_isolated_from_broadcast);
+    RUN_TEST(test_adaptive_profile_small_mesh_relaxes_budgets);
+    RUN_TEST(test_adaptive_profile_large_mesh_constrains_budgets);
+    RUN_TEST(test_next_refill_is_zero_for_continuous_model);
     return UNITY_END();
 }

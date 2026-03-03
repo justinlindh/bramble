@@ -2063,6 +2063,25 @@ Regardless of legality, Bramble enforces a **self-imposed 10% airtime budget** p
 
 ### 8.2 Token Bucket Algorithm
 
+#### 8.2.1 Implementation Snapshot (current firmware)
+
+Current firmware uses a per-tier token bucket with **continuous refill** (not hourly cliff resets). Tokens are refilled proportionally to elapsed time and capped at per-tier maxima.
+
+Tier budgets (base):
+- `critical`: 36000 ms/hour
+- `normal`: 18000 ms/hour
+- `broadcast`: 18000 ms/hour
+- `receipt`: 12000 ms/hour
+
+Receipt traffic (broadcast delivery receipts + forwarded receipts) uses its own `receipt` tier so receipt storms do not directly consume broadcast-data tokens.
+
+Adaptive mesh-size profile (by peer count):
+- `<=15` peers (small mesh): relaxed budgets (normal +50%, broadcast/receipt +100%)
+- `16..40` peers: baseline budgets
+- `>40` peers (large mesh): conservative budgets (normal 75%, broadcast 60%, receipt 50%)
+
+This profile is applied at runtime via `airtime_budget_set_mesh_size(...)` and surfaced in airtime RPC output (`receipt_remaining_ms`, `receipt_max_ms`, etc.).
+
 ```
 struct airtime_budget {
     uint32_t tokens_us;          // Current tokens in microseconds

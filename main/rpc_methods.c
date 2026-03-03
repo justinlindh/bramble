@@ -347,9 +347,11 @@ static int handle_get_airtime(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "critical_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_CRITICAL));
     cJSON_AddNumberToObject(result, "normal_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_NORMAL));
     cJSON_AddNumberToObject(result, "broadcast_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_BROADCAST));
-    cJSON_AddNumberToObject(result, "critical_max_ms", AIRTIME_BUDGET_CRITICAL_MS);
-    cJSON_AddNumberToObject(result, "normal_max_ms", AIRTIME_BUDGET_NORMAL_MS);
-    cJSON_AddNumberToObject(result, "broadcast_max_ms", AIRTIME_BUDGET_BROADCAST_MS);
+    cJSON_AddNumberToObject(result, "receipt_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_RECEIPT));
+    cJSON_AddNumberToObject(result, "critical_max_ms", st.airtime.max_ms[AIRTIME_IDX_CRITICAL]);
+    cJSON_AddNumberToObject(result, "normal_max_ms", st.airtime.max_ms[AIRTIME_IDX_NORMAL]);
+    cJSON_AddNumberToObject(result, "broadcast_max_ms", st.airtime.max_ms[AIRTIME_IDX_BROADCAST]);
+    cJSON_AddNumberToObject(result, "receipt_max_ms", st.airtime.max_ms[AIRTIME_IDX_RECEIPT]);
     cJSON_AddNumberToObject(result, "next_refill_ms", airtime_budget_next_refill_ms(&st.airtime, now_ms));
     return 0;
 }
