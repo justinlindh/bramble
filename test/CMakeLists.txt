@@ -136,6 +136,18 @@ target_include_directories(test_reliability PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
 )
 
+# RERR ACK fast-fail tests
+add_executable(test_rerr_ack_fastfail
+    test_rerr_ack_fastfail.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_rerr_ack_fastfail PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Airtime budget tests
 add_executable(test_airtime_budget
     test_airtime_budget.c

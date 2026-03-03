@@ -17,6 +17,7 @@
 #include "msg_store.h"
 #include "discovery.h"
 #include "reliability.h"
+#include "rerr_ack_fastfail.h"
 #include "battery.h"
 #include "traffic_debug.h"
 #include "fragment.h"
@@ -58,6 +59,7 @@ static const char *TAG = "mesh";
 
 /* Forward declarations */
 static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
+static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -70,6 +72,7 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 #define MESH_TASK_PRIORITY      5
 
 #define RECEIPT_QUEUE_CAPACITY  8
+#define RECENT_BROADCAST_RING_SIZE 8
 
 /* ── Received packet queue item ─────────────────────────────────────── */
 
@@ -196,6 +199,9 @@ static bool                s_channel_has_psk[MAX_CHANNELS];
 static int                 s_num_channels = 0;
 static int                 s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
 static uint32_t            s_last_broadcast_id = 0;
+static uint16_t            s_last_broadcast_frag_msg_id = 0;
+static uint32_t            s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
+static int                 s_recent_broadcast_idx = 0;
 static broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
 
 /* Mailbox — store-and-forward for offline neighbors */
@@ -301,6 +307,46 @@ static void record_broadcast_delivery_event(uint32_t recipient_addr,
     }
 
     delivery_event_ring_append_locked(&evt);
+}
+
+static void recent_broadcast_record(uint32_t packet_id) {
+    if (packet_id == 0) return;
+    s_recent_broadcast_ids[s_recent_broadcast_idx] = packet_id;
+    s_recent_broadcast_idx = (s_recent_broadcast_idx + 1) % RECENT_BROADCAST_RING_SIZE;
+}
+
+static bool recent_broadcast_contains(uint32_t packet_id) {
+    if (packet_id == 0) return false;
+    for (int i = 0; i < RECENT_BROADCAST_RING_SIZE; i++) {
+        if (s_recent_broadcast_ids[i] == packet_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void maybe_emit_implicit_broadcast_delivery(const bramble_header_t *header,
+                                                   const rx_packet_t *pkt) {
+    if (!header || !pkt) return;
+    if (header->type != PKT_TYPE_DATA) return;
+    if (header->dest_addr != 0xFFFFFFFFu) return;
+    if (!recent_broadcast_contains(header->packet_id)) return;
+    if (pkt->len < HEADER_SIZE + sizeof(uint32_t)) return;
+
+    uint32_t relayer_addr = 0;
+    memcpy(&relayer_addr, pkt->data + HEADER_SIZE, sizeof(relayer_addr));
+    if (relayer_addr == 0) return;
+
+    uint32_t relay_path[1] = { relayer_addr };
+    mesh_emit_broadcast_delivery_notification(relayer_addr,
+                                              header->packet_id,
+                                              0,
+                                              1,
+                                              relay_path);
+    record_broadcast_delivery_event(relayer_addr,
+                                    header->packet_id,
+                                    1,
+                                    relay_path);
 }
 
 static uint32_t next_packet_id(void) {
@@ -879,7 +925,9 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
 
     /* Determine receipt policy based on mesh size */
     uint8_t policy = mesh_broadcast_receipt_policy(0xFFFFFFFFu,
-                         (uint8_t)neighbor_count(&s_neighbors));
+                         (uint8_t)neighbor_count(&s_neighbors),
+                         s_identity->address,
+                         original_packet_id);
     uint8_t hop_limit = (policy >= 2) ? 8 : 1;  /* full=8, neighbors-only=1 */
 
     esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
@@ -1247,6 +1295,9 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    bramble_header_t rx_hdr;
+    bramble_header_deserialize(&rx_hdr, data, len);
+
     /* Extract the text message from the decrypted payload */
     if (info.data_len > 0) {
         /* Check if this is a fragment */
@@ -1267,6 +1318,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                 int ret = reassembly_add(&s_reassembly, &frag_hdr,
                                         info.data + FRAG_HEADER_SIZE,
                                         info.data_len - FRAG_HEADER_SIZE,
+                                        rx_hdr.packet_id,
                                         now_ms());
                 if (ret == 1) {
                     /* Reassembly complete — collect the full message.
@@ -1335,15 +1387,19 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_Delete(params);
                         }
 
-                        bramble_header_t rx_hdr;
-                        bramble_header_deserialize(&rx_hdr, data, len);
-
                         /* Send ACK for unicast messages */
                         if (dir == MSG_DIR_INCOMING) {
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
                         } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
-                                       (uint8_t)neighbor_count(&s_neighbors))) {
-                            queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
+                                       (uint8_t)neighbor_count(&s_neighbors),
+                                       s_identity->address,
+                                       rx_hdr.packet_id)) {
+                            uint32_t receipt_packet_id = reassembly_get_first_packet_id(&s_reassembly,
+                                                                                         frag_hdr.message_id);
+                            if (receipt_packet_id == 0) {
+                                receipt_packet_id = rx_hdr.packet_id;
+                            }
+                            queue_broadcast_delivery_receipt(info.src_addr, receipt_packet_id);
                         }
 
                         /* Print to stdout */
@@ -1413,15 +1469,13 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             cJSON_Delete(params);
         }
 
-        /* Deserialize packet_id from header for response telemetry */
-        bramble_header_t rx_hdr;
-        bramble_header_deserialize(&rx_hdr, data, len);
-
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
         } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
-                       (uint8_t)neighbor_count(&s_neighbors))) {
+                       (uint8_t)neighbor_count(&s_neighbors),
+                       s_identity->address,
+                       rx_hdr.packet_id)) {
             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
@@ -1692,6 +1746,26 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     }
 }
 
+static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx) {
+    (void)ctx;
+
+    cJSON *params = cJSON_CreateObject();
+    if (!params) {
+        return;
+    }
+
+    char pkt_buf[12];
+    snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, packet_id);
+    cJSON_AddStringToObject(params, "packet_id", pkt_buf);
+    cJSON_AddStringToObject(params, "status", "failed");
+    if (reason) {
+        cJSON_AddStringToObject(params, "reason", reason);
+    }
+
+    rpc_notify("bramble.onAck", params);
+    cJSON_Delete(params);
+}
+
 static void handle_rerr(const uint8_t *data, uint8_t len) {
     bramble_rerr_t rerr;
     if (bramble_rerr_deserialize(&rerr, data, len) != ESP_OK) {
@@ -1704,15 +1778,31 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 
     /* Invalidate route if it uses the broken next hop */
     route_entry_t *route = route_lookup(&s_routes, rerr.broken_dest);
+    bool route_marked_broken = false;
     if (route && route->next_hop == rerr.broken_next_hop) {
         route->state = ROUTE_BROKEN;
         route->fail_count++;
+        route_marked_broken = true;
         ESP_LOGW(TAG, "Route to %08" PRIX32 " marked BROKEN", rerr.broken_dest);
 
         /* Forward RERR if hop limit allows */
         if (rerr.header.hop_limit > 1) {
             send_rerr(rerr.broken_dest, rerr.broken_next_hop);
         }
+    }
+
+    /* Fail fast for pending packets to the destination, even on forwarded RERRs */
+    size_t failed = rerr_ack_failfast_for_dest(&s_pending_acks,
+                                               rerr.broken_dest,
+                                               "route_broken",
+                                               rerr_fastfail_notify,
+                                               NULL);
+    if (failed > 0) {
+        ESP_LOGW(TAG,
+                 "RERR fast-failed %u pending ACK(s) for dest %08" PRIX32 "%s",
+                 (unsigned)failed,
+                 rerr.broken_dest,
+                 route_marked_broken ? "" : " (forwarded RERR/no local next-hop match)");
     }
 }
 
@@ -1833,6 +1923,7 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
     }
 
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
+        maybe_emit_implicit_broadcast_delivery(&header, pkt);
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -2543,6 +2634,7 @@ size_t mesh_delivery_events_list_since(uint32_t since_event_seq,
 }
 
 uint32_t mesh_get_last_broadcast_id(void) {
+    (void)s_last_broadcast_frag_msg_id;
     return s_last_broadcast_id;
 }
 
@@ -2630,6 +2722,8 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
 
         ESP_LOGI(TAG, "Sending broadcast message as %d fragments (msg_id=%04X)", num_frags, msg_id);
 
+        s_last_broadcast_frag_msg_id = 0;
+
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
             uint8_t nonce[BRAMBLE_NONCE_SIZE];
@@ -2648,10 +2742,12 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
                                               nonce, ciphertext, ct_len, tag);
             if (i == 0 && pkt_id != 0) {
                 s_last_broadcast_id = pkt_id;
+                s_last_broadcast_frag_msg_id = msg_id;
             }
             if (pkt_id == 0) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
+                recent_broadcast_record(pkt_id);
                 ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
             }
 
@@ -2687,6 +2783,8 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
     if (pkt_id != 0) {
         s_last_broadcast_id = pkt_id;
+        s_last_broadcast_frag_msg_id = 0;
+        recent_broadcast_record(pkt_id);
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                           (const char *)data, len, 0, 0,
                           0, MSG_STATUS_NONE, 0);
@@ -2726,6 +2824,10 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
 
         ESP_LOGI(TAG, "Sending channel message as %d fragments (msg_id=%04X)", num_frags, msg_id);
 
+        if (dest_addr == 0xFFFFFFFFu) {
+            s_last_broadcast_frag_msg_id = 0;
+        }
+
         uint32_t first_pkt_id = 0;
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
@@ -2746,7 +2848,16 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
             if (pkt_id == 0) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
-                if (i == 0) first_pkt_id = pkt_id;
+                if (i == 0) {
+                    first_pkt_id = pkt_id;
+                    if (dest_addr == 0xFFFFFFFFu) {
+                        s_last_broadcast_id = pkt_id;
+                        s_last_broadcast_frag_msg_id = msg_id;
+                    }
+                }
+                if (dest_addr == 0xFFFFFFFFu) {
+                    recent_broadcast_record(pkt_id);
+                }
                 ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
             }
 
@@ -2786,6 +2897,11 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
     size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
     uint32_t pkt_id = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
     if (pkt_id != 0) {
+        if (dest_addr == 0xFFFFFFFFu) {
+            s_last_broadcast_id = pkt_id;
+            s_last_broadcast_frag_msg_id = 0;
+            recent_broadcast_record(pkt_id);
+        }
         msg_store_add_ex2(dest_addr,
                           (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
                           (const char *)data, len, 0, 0,
