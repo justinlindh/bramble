@@ -622,7 +622,7 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
             if (fhdr.frag_total > 1 && fhdr.frag_total <= FRAG_MAX_FRAGMENTS) {
                 /* This is a fragment */
                 int result = reassembly_add(&rx->reassembly, &fhdr,
-                    decrypted_payload + FRAG_HEADER_SIZE, pt_len - FRAG_HEADER_SIZE, now_ms);
+                    decrypted_payload + FRAG_HEADER_SIZE, pt_len - FRAG_HEADER_SIZE, now_ms, hdr.packet_id);
                 if (result < 1) {
                     /* Not yet complete or error */
                     return;
@@ -647,7 +647,7 @@ static void _handle_data(sim_node_t *rx, const uint8_t *buf, uint16_t len,
 
             if (fhdr.frag_total > 1 && fhdr.frag_total <= FRAG_MAX_FRAGMENTS) {
                 int result = reassembly_add(&rx->reassembly, &fhdr,
-                    pl + FRAG_HEADER_SIZE, payload_len - FRAG_HEADER_SIZE, now_ms);
+                    pl + FRAG_HEADER_SIZE, payload_len - FRAG_HEADER_SIZE, now_ms, hdr.packet_id);
                 if (result < 1) return;
                 uint8_t reassembled[1024];
                 int rlen = reassembly_collect(&rx->reassembly, fhdr.message_id,

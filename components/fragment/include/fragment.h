@@ -35,6 +35,7 @@ typedef struct {
     uint8_t  data[FRAG_MAX_FRAGMENTS][FRAG_MAX_PLAINTEXT];
     size_t   frag_lens[FRAG_MAX_FRAGMENTS];
     uint32_t start_time;
+    uint32_t first_packet_id;   /* packet_id of the first fragment received */
     bool     active;
 } reassembly_slot_t;
 
@@ -44,9 +45,11 @@ typedef struct {
 
 void reassembly_init(reassembly_ctx_t *ctx);
 int  reassembly_add(reassembly_ctx_t *ctx, const frag_header_t *hdr,
-                    const uint8_t *frag_data, size_t frag_len, uint32_t now_ms);
+                    const uint8_t *frag_data, size_t frag_len,
+                    uint32_t now_ms, uint32_t packet_id);
 int  reassembly_collect(reassembly_ctx_t *ctx, uint16_t message_id,
                         uint8_t *out, size_t out_max);
+uint32_t reassembly_get_first_packet_id(reassembly_ctx_t *ctx, uint16_t message_id);
 void reassembly_purge(reassembly_ctx_t *ctx, uint32_t now_ms);
 
 #endif

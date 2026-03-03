@@ -109,8 +109,8 @@ reassembly_ctx_t *mesh_msg_state_get_reassembly(void) {
 }
 
 int mesh_reassembly_add(const frag_header_t *hdr, const uint8_t *payload,
-                        size_t payload_len, uint32_t now_ms) {
-    return reassembly_add(&s_reassembly, hdr, payload, payload_len, now_ms);
+                        size_t payload_len, uint32_t now_ms, uint32_t packet_id) {
+    return reassembly_add(&s_reassembly, hdr, payload, payload_len, now_ms, packet_id);
 }
 
 int mesh_reassembly_collect(uint16_t message_id, uint8_t *out, size_t out_max) {
