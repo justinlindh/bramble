@@ -728,8 +728,9 @@ static int send_beacon(void) {
     if (ret == 0) {
         uint32_t airtime_est = 30 + (uint32_t)(beacon_wire_len * 4);
         uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
         airtime_budget_refill(&s_airtime, t_now);
-        airtime_budget_debit(&s_airtime, 0x03, airtime_est);  /* broadcast tier */
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
 
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.beacon_tx_count++;
@@ -947,10 +948,11 @@ static void mesh_process_receipt_tx_event(void) {
     uint8_t attempt_no = (uint8_t)(item->attempts_sent + 1u);
     uint32_t airtime_est = 30u + (uint32_t)(item->wire_len * 4u);
 
+    airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
     airtime_budget_refill(&s_airtime, t_now);
-    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
+    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est)) {
         ESP_LOGW(TAG,
-                 "Delivery receipt suppressed for pkt=%08" PRIX32 " (attempt=%u/%u): broadcast airtime budget exhausted",
+                 "Delivery receipt suppressed for pkt=%08" PRIX32 " (attempt=%u/%u): receipt airtime budget exhausted",
                  item->original_packet_id,
                  (unsigned)attempt_no,
                  (unsigned)item->attempts_total);
@@ -963,7 +965,7 @@ static void mesh_process_receipt_tx_event(void) {
     esp_task_wdt_reset();
 
     if (transmit_packet(item->buf, item->wire_len) == 0) {
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est);
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
@@ -1155,10 +1157,11 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
     size_t wire_len = DELIVERY_RECEIPT_MIN_SIZE + ((size_t)receipt->hop_count * 4u);
     uint32_t airtime_est = 30u + (uint32_t)(wire_len * 4u);
     uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
     airtime_budget_refill(&s_airtime, t_now);
-    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
+    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est)) {
         ESP_LOGW(TAG,
-                 "Forwarded delivery receipt suppressed for pkt=%08" PRIX32 ": broadcast airtime budget exhausted",
+                 "Forwarded delivery receipt suppressed for pkt=%08" PRIX32 ": receipt airtime budget exhausted",
                  receipt->orig_packet_id);
         return;
     }
@@ -1166,7 +1169,7 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
     ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
              receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
     if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est);
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
@@ -2469,8 +2472,9 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
         /* Estimate airtime: SF9 BW125kHz ≈ 3.7ms/byte + 30ms preamble */
         uint32_t airtime_est = 30 + (uint32_t)(total * 4);
         uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
         airtime_budget_refill(&s_airtime, t_now);
-        airtime_budget_debit(&s_airtime, 0x01, airtime_est);  /* normal tier */
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_NORMAL, airtime_est);
 
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
