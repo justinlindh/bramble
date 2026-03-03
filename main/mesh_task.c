@@ -925,9 +925,7 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
 
     /* Determine receipt policy based on mesh size */
     uint8_t policy = mesh_broadcast_receipt_policy(0xFFFFFFFFu,
-                         (uint8_t)neighbor_count(&s_neighbors),
-                         s_identity->address,
-                         original_packet_id);
+                         (uint8_t)neighbor_count(&s_neighbors));
     uint8_t hop_limit = (policy >= 2) ? 8 : 1;  /* full=8, neighbors-only=1 */
 
     esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
