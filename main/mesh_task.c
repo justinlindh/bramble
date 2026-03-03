@@ -908,7 +908,7 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
     }
 
     uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
-    uint32_t initial_delay_ms = slot_delay_ms + (esp_random() % 140u); /* +0..139ms */
+    uint32_t initial_delay_ms = slot_delay_ms + (esp_random() % 400u); /* +0..399ms jitter */
 
     pending_receipt_t *item = &s_receipt_queue[slot];
     memset(item, 0, sizeof(*item));
@@ -951,12 +951,26 @@ static void mesh_process_receipt_tx_event(void) {
     airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
     airtime_budget_refill(&s_airtime, t_now);
     if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est)) {
-        ESP_LOGW(TAG,
-                 "Delivery receipt suppressed for pkt=%08" PRIX32 " (attempt=%u/%u): receipt airtime budget exhausted",
-                 item->original_packet_id,
-                 (unsigned)attempt_no,
-                 (unsigned)item->attempts_total);
-        memset(item, 0, sizeof(*item));
+        /* Don't drop — reschedule with exponential backoff so the receipt
+         * can be sent once airtime tokens refill.  Only drop if we've
+         * exhausted all retry attempts. */
+        item->attempts_sent++;
+        if (item->attempts_sent >= item->attempts_total) {
+            ESP_LOGW(TAG,
+                     "Delivery receipt DROPPED for pkt=%08" PRIX32 " (all %u attempts airtime-exhausted)",
+                     item->original_packet_id,
+                     (unsigned)item->attempts_total);
+            memset(item, 0, sizeof(*item));
+        } else {
+            uint32_t backoff_ms = 1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
+            item->due_at_ms = t_now + backoff_ms;
+            ESP_LOGW(TAG,
+                     "Delivery receipt deferred for pkt=%08" PRIX32 " (attempt=%u/%u): airtime exhausted, retry in %" PRIu32 "ms",
+                     item->original_packet_id,
+                     (unsigned)(item->attempts_sent),
+                     (unsigned)item->attempts_total,
+                     backoff_ms);
+        }
         mesh_schedule_next_receipt_timer();
         return;
     }

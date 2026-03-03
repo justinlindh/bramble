@@ -2,8 +2,13 @@
 
 #include "packet.h"
 
-#define BROADCAST_RECEIPT_DELAY_BASE_MS      200u
-#define BROADCAST_RECEIPT_SLOT_SPACING_MS    200u
+/* Receipt slot timing — controls how delivery receipts from multiple nodes
+ * spread out in time after receiving the same broadcast.  Wider spacing
+ * reduces collision probability when many nodes try to TX receipts
+ * simultaneously.  At SF10/125kHz a receipt packet takes ~150-200ms
+ * airtime, so slots need to be wider than that. */
+#define BROADCAST_RECEIPT_DELAY_BASE_MS      300u
+#define BROADCAST_RECEIPT_SLOT_SPACING_MS    500u
 #define BROADCAST_RECEIPT_SLOT_BUCKETS       32u
 #define BROADCAST_RECEIPT_RETRY_COUNT        3u
 
