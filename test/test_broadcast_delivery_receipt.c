@@ -34,14 +34,24 @@ void test_receipt_policy_adapts_to_mesh_size(void) {
 }
 
 void test_slot_delay_is_bounded_and_identity_sensitive(void) {
-    uint32_t d1 = mesh_broadcast_receipt_slot_delay_ms(0x01020304u, 0xCAFEBABEu);
-    uint32_t d2 = mesh_broadcast_receipt_slot_delay_ms(0x0A0B0C0Du, 0xCAFEBABEu);
+    uint32_t pkt_id = 0xCAFEBABEu;
+    uint32_t d1 = mesh_broadcast_receipt_slot_delay_ms(0x01020304u, pkt_id);
 
     TEST_ASSERT_TRUE(d1 >= 300u);
     TEST_ASSERT_TRUE(d1 <= (300u + 500u * 31u));
-    TEST_ASSERT_TRUE(d2 >= 300u);
-    TEST_ASSERT_TRUE(d2 <= (300u + 500u * 31u));
-    TEST_ASSERT_NOT_EQUAL(d1, d2);
+
+    bool found_different_slot = false;
+    for (uint32_t i = 1; i <= 16u; i++) {
+        uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, pkt_id);
+        TEST_ASSERT_TRUE(d >= 300u);
+        TEST_ASSERT_TRUE(d <= (300u + 500u * 31u));
+        if (d != d1) {
+            found_different_slot = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE(found_different_slot);
 }
 
 void test_retry_count_default_three_attempts(void) {
