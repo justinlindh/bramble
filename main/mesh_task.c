@@ -1472,10 +1472,9 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
-                       (uint8_t)neighbor_count(&s_neighbors),
-                       s_identity->address,
-                       rx_hdr.packet_id)) {
+        } else if (mesh_should_emit_broadcast_delivery_receipt(
+                       rx_hdr.dest_addr,
+                       (uint8_t)neighbor_count(&s_neighbors))) {
             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
