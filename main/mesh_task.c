@@ -927,64 +927,68 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
 }
 
 static void mesh_process_receipt_tx_event(void) {
-    while (1) {
-        uint32_t t_now = now_ms();
-        int due_idx = -1;
+    uint32_t t_now = now_ms();
+    int due_idx = -1;
 
-        for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
-            if (!s_receipt_queue[i].used) continue;
-            if (s_receipt_queue[i].due_at_ms <= t_now) {
-                due_idx = i;
-                break;
-            }
-        }
-
-        if (due_idx < 0) {
+    for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
+        if (!s_receipt_queue[i].used) continue;
+        if (s_receipt_queue[i].due_at_ms <= t_now) {
+            due_idx = i;
             break;
         }
-
-        pending_receipt_t *item = &s_receipt_queue[due_idx];
-        uint8_t attempt_no = (uint8_t)(item->attempts_sent + 1u);
-        uint32_t airtime_est = 30u + (uint32_t)(item->wire_len * 4u);
-
-        airtime_budget_refill(&s_airtime, t_now);
-        if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
-            ESP_LOGW(TAG,
-                     "Delivery receipt suppressed for pkt=%08" PRIX32 " (attempt=%u/%u): broadcast airtime budget exhausted",
-                     item->original_packet_id,
-                     (unsigned)attempt_no,
-                     (unsigned)item->attempts_total);
-            memset(item, 0, sizeof(*item));
-            continue;
-        }
-
-        if (transmit_packet(item->buf, item->wire_len) == 0) {
-            airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
-            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-            s_shared.airtime = s_airtime;
-            xSemaphoreGive(s_state_mutex);
-
-            ESP_LOGI(TAG,
-                     "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
-                     " attempt=%u/%u",
-                     item->original_packet_id,
-                     item->original_src_addr,
-                     (unsigned)attempt_no,
-                     (unsigned)item->attempts_total);
-        }
-
-        item->attempts_sent++;
-        if (item->attempts_sent >= item->attempts_total) {
-            memset(item, 0, sizeof(*item));
-            continue;
-        }
-
-        uint8_t i = (uint8_t)(item->attempts_sent - 1u);
-        uint32_t base_ms = 500u + ((uint32_t)i * 700u);
-        uint32_t jitter_range = 500u + ((uint32_t)i * 400u);
-        uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
-        item->due_at_ms = now_ms() + retry_delay_ms;
     }
+
+    if (due_idx < 0) {
+        mesh_schedule_next_receipt_timer();
+        return;
+    }
+
+    pending_receipt_t *item = &s_receipt_queue[due_idx];
+    uint8_t attempt_no = (uint8_t)(item->attempts_sent + 1u);
+    uint32_t airtime_est = 30u + (uint32_t)(item->wire_len * 4u);
+
+    airtime_budget_refill(&s_airtime, t_now);
+    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
+        ESP_LOGW(TAG,
+                 "Delivery receipt suppressed for pkt=%08" PRIX32 " (attempt=%u/%u): broadcast airtime budget exhausted",
+                 item->original_packet_id,
+                 (unsigned)attempt_no,
+                 (unsigned)item->attempts_total);
+        memset(item, 0, sizeof(*item));
+        mesh_schedule_next_receipt_timer();
+        return;
+    }
+
+    /* TX path can block for CAD/LBT + radio wait; feed task WDT just before entering it. */
+    esp_task_wdt_reset();
+
+    if (transmit_packet(item->buf, item->wire_len) == 0) {
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_shared.airtime = s_airtime;
+        xSemaphoreGive(s_state_mutex);
+
+        ESP_LOGI(TAG,
+                 "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
+                 " attempt=%u/%u",
+                 item->original_packet_id,
+                 item->original_src_addr,
+                 (unsigned)attempt_no,
+                 (unsigned)item->attempts_total);
+    }
+
+    item->attempts_sent++;
+    if (item->attempts_sent >= item->attempts_total) {
+        memset(item, 0, sizeof(*item));
+        mesh_schedule_next_receipt_timer();
+        return;
+    }
+
+    uint8_t i = (uint8_t)(item->attempts_sent - 1u);
+    uint32_t base_ms = 500u + ((uint32_t)i * 700u);
+    uint32_t jitter_range = 500u + ((uint32_t)i * 400u);
+    uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
+    item->due_at_ms = now_ms() + retry_delay_ms;
 
     mesh_schedule_next_receipt_timer();
 }
@@ -1420,6 +1424,7 @@ static int transmit_packet(const uint8_t *buf, uint8_t len) {
 
     /* Listen-Before-Talk: check channel before transmitting */
     for (uint8_t attempt = 0; attempt < LBT_MAX_ATTEMPTS; attempt++) {
+        esp_task_wdt_reset();
         if (!radio_cad_check()) {
             break; /* Channel is clear */
         }
@@ -1436,6 +1441,7 @@ static int transmit_packet(const uint8_t *buf, uint8_t len) {
     }
     /* After LBT_MAX_ATTEMPTS, transmit anyway to avoid starvation */
 
+    esp_task_wdt_reset();
     int ret = radio_transmit(buf, len);
     if (ret == 0) {
         /* Record successful TX */
@@ -2390,12 +2396,14 @@ static void mesh_task(void *param) {
         /* Process received packets */
         rx_packet_t pkt;
         while (xQueueReceive(s_rx_queue, &pkt, 0) == pdTRUE) {
+            esp_task_wdt_reset();
             mesh_process_rx_packet(&pkt);
         }
 
         if (s_mesh_event_queue) {
             mesh_event_type_t mesh_evt;
             while (xQueueReceive(s_mesh_event_queue, &mesh_evt, 0) == pdTRUE) {
+                esp_task_wdt_reset();
                 if (mesh_evt == MESH_EVT_RECEIPT_TX) {
                     mesh_process_receipt_tx_event();
                 }
