@@ -1,36 +1,13 @@
 /*
  * group.c — Group DM management for Bramble
  *
- * Key derivation uses FNV-1a for portability (no OpenSSL dependency).
- * Production deployments should replace with HKDF-SHA256 / BLAKE2s.
+ * Key derivation uses HKDF-SHA256 (via mbedTLS through crypto component).
+ * Invite packets encrypt the group key under X25519 + AES-256-GCM.
  */
 
 #include "group.h"
 #include <string.h>
 #include <stdlib.h>
-
-/* ---- FNV-1a helpers ---- */
-
-static uint64_t fnv1a_init(void) {
-    return 0xcbf29ce484222325ULL;
-}
-
-static uint64_t fnv1a_update(uint64_t h, const uint8_t *data, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        h ^= data[i];
-        h *= 0x100000001b3ULL;
-    }
-    return h;
-}
-
-/* Fill buf with deterministic bytes seeded from h */
-static void fnv1a_expand(uint64_t seed, uint8_t *buf, size_t len) {
-    uint64_t h = seed;
-    for (size_t i = 0; i < len; i++) {
-        h = fnv1a_update(h, (const uint8_t *)&i, sizeof(i));
-        buf[i] = (uint8_t)(h & 0xff);
-    }
-}
 
 /* ---- comparator for qsort ---- */
 
@@ -50,18 +27,27 @@ int group_derive_key(const char *name, const uint32_t *sorted_members, int count
                      uint8_t *key_out, uint8_t *id_out) {
     if (!name || !sorted_members || count <= 0) return -1;
 
-    uint64_t h = fnv1a_init();
-    h = fnv1a_update(h, (const uint8_t *)name, strlen(name));
-    h = fnv1a_update(h, (const uint8_t *)sorted_members, (size_t)count * sizeof(uint32_t));
+    /*
+     * HKDF-SHA256:
+     *   IKM  = sorted member addresses (concatenated raw bytes)
+     *   salt = "bramble-group-v1"
+     *   info = group name
+     *
+     * Derive 40 bytes: first 32 = group key, last 8 = group ID.
+     */
+    static const char *salt = "bramble-group-v1";
+    uint8_t okm[GROUP_KEY_SIZE + GROUP_ID_SIZE]; /* 40 bytes */
 
-    if (id_out) {
-        /* First 8 bytes from one expansion */
-        fnv1a_expand(h ^ 0x4944ULL, id_out, GROUP_ID_SIZE);  /* "ID" */
-    }
-    if (key_out) {
-        /* 32 bytes from different expansion */
-        fnv1a_expand(h ^ 0x4b4559ULL, key_out, GROUP_KEY_SIZE);  /* "KEY" */
-    }
+    int ret = crypto_hkdf_sha256(
+        (const uint8_t *)salt, strlen(salt),
+        (const uint8_t *)sorted_members, (size_t)count * sizeof(uint32_t),
+        (const uint8_t *)name, strlen(name),
+        okm, sizeof(okm));
+    if (ret != 0) return -1;
+
+    if (key_out) memcpy(key_out, okm, GROUP_KEY_SIZE);
+    if (id_out)  memcpy(id_out, okm + GROUP_KEY_SIZE, GROUP_ID_SIZE);
+
     return 0;
 }
 
@@ -177,11 +163,20 @@ int group_advance_epoch(bramble_group_t *group) {
     if (!group) return -1;
     group->epoch++;
 
-    /* Re-derive key: mix epoch into existing key via FNV-1a */
-    uint64_t h = fnv1a_init();
-    h = fnv1a_update(h, group->group_key, GROUP_KEY_SIZE);
-    h = fnv1a_update(h, (const uint8_t *)&group->epoch, sizeof(group->epoch));
-    fnv1a_expand(h, group->group_key, GROUP_KEY_SIZE);
+    /* Re-derive key via HKDF-SHA256: old key as IKM, epoch in info */
+    static const char *salt = "bramble-group-epoch";
+    uint8_t info[2];
+    info[0] = (uint8_t)(group->epoch >> 8);
+    info[1] = (uint8_t)(group->epoch & 0xFF);
+
+    uint8_t new_key[GROUP_KEY_SIZE];
+    if (crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt),
+                           group->group_key, GROUP_KEY_SIZE,
+                           info, 2,
+                           new_key, GROUP_KEY_SIZE) != 0) {
+        return -1;
+    }
+    memcpy(group->group_key, new_key, GROUP_KEY_SIZE);
 
     return 0;
 }
@@ -195,34 +190,125 @@ void group_record_message(bramble_group_t *group) {
     }
 }
 
-int group_invite_serialize(const bramble_group_t *group, uint8_t *buf, size_t buf_len) {
-    if (!group || !buf || buf_len < GROUP_INVITE_SIZE) return -1;
+int group_invite_serialize(const bramble_group_t *group,
+                           const uint8_t *sender_private_key,
+                           const uint8_t *recipient_public_key,
+                           uint8_t *buf, size_t buf_len) {
+    if (!group || !sender_private_key || !recipient_public_key ||
+        !buf || buf_len < GROUP_INVITE_SIZE) return -1;
 
+    /*
+     * Generate an ephemeral X25519 keypair, perform DH with recipient's
+     * public key, derive an encryption key via HKDF, and encrypt the
+     * group_key with AES-256-GCM.  AAD = group_id for binding.
+     *
+     * Layout:
+     *   [group_id: 8] [ephemeral_pub: 32] [encrypted_key: 32] [tag: 16]
+     *   [name: 32] [epoch: 2]
+     */
+
+    /* Generate ephemeral keypair */
+    bramble_identity_t eph;
+    if (crypto_generate_identity(&eph) != 0) return -1;
+
+    /* X25519 DH: ephemeral private × recipient public */
+    uint8_t shared_secret[BRAMBLE_KEY_SIZE];
+    if (crypto_x25519_dh(eph.private_key, recipient_public_key, shared_secret) != 0)
+        return -1;
+
+    /* Derive encryption key from shared secret */
+    static const char *hkdf_salt = "bramble-group-invite-v1";
+    uint8_t enc_key[BRAMBLE_KEY_SIZE];
+    if (crypto_hkdf_sha256((const uint8_t *)hkdf_salt, strlen(hkdf_salt),
+                           shared_secret, BRAMBLE_KEY_SIZE,
+                           group->group_id, GROUP_ID_SIZE,
+                           enc_key, BRAMBLE_KEY_SIZE) != 0)
+        return -1;
+
+    /* Build nonce from first 12 bytes of ephemeral pubkey */
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    memcpy(nonce, eph.public_key, BRAMBLE_NONCE_SIZE);
+
+    /* Encrypt group_key */
+    uint8_t encrypted_key[GROUP_KEY_SIZE];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+    if (crypto_aes256gcm_encrypt(enc_key, nonce,
+                                  group->group_key, GROUP_KEY_SIZE,
+                                  group->group_id, GROUP_ID_SIZE,
+                                  encrypted_key, tag) != 0)
+        return -1;
+
+    /* Serialize */
     size_t off = 0;
-    memcpy(buf + off, group->group_id, GROUP_ID_SIZE); off += GROUP_ID_SIZE;
-    memcpy(buf + off, group->group_key, GROUP_KEY_SIZE); off += GROUP_KEY_SIZE;
-    memcpy(buf + off, group->name, GROUP_NAME_MAX); off += GROUP_NAME_MAX;
+    memcpy(buf + off, group->group_id, GROUP_ID_SIZE);      off += GROUP_ID_SIZE;
+    memcpy(buf + off, eph.public_key, BRAMBLE_KEY_SIZE);     off += BRAMBLE_KEY_SIZE;
+    memcpy(buf + off, encrypted_key, GROUP_KEY_SIZE);        off += GROUP_KEY_SIZE;
+    memcpy(buf + off, tag, BRAMBLE_TAG_SIZE);                off += BRAMBLE_TAG_SIZE;
+    memcpy(buf + off, group->name, GROUP_NAME_MAX);          off += GROUP_NAME_MAX;
     buf[off++] = (uint8_t)(group->epoch >> 8);
     buf[off++] = (uint8_t)(group->epoch & 0xff);
+
+    /* Wipe sensitive intermediates */
+    memset(&eph, 0, sizeof(eph));
+    memset(shared_secret, 0, sizeof(shared_secret));
+    memset(enc_key, 0, sizeof(enc_key));
 
     return 0;
 }
 
-int group_invite_deserialize(const uint8_t *buf, size_t len, uint8_t *group_id_out,
+int group_invite_deserialize(const uint8_t *buf, size_t len,
+                             const uint8_t *recipient_private_key,
+                             uint8_t *group_id_out,
                              uint8_t *key_out, char *name_out, uint16_t *epoch_out) {
-    if (!buf || len < GROUP_INVITE_SIZE) return -1;
+    if (!buf || !recipient_private_key || len < GROUP_INVITE_SIZE) return -1;
 
     size_t off = 0;
-    if (group_id_out) memcpy(group_id_out, buf + off, GROUP_ID_SIZE);
-    off += GROUP_ID_SIZE;
-    if (key_out) memcpy(key_out, buf + off, GROUP_KEY_SIZE);
-    off += GROUP_KEY_SIZE;
+
+    /* Parse fields */
+    const uint8_t *group_id      = buf + off;  off += GROUP_ID_SIZE;
+    const uint8_t *ephemeral_pub = buf + off;   off += BRAMBLE_KEY_SIZE;
+    const uint8_t *encrypted_key = buf + off;   off += GROUP_KEY_SIZE;
+    const uint8_t *tag           = buf + off;   off += BRAMBLE_TAG_SIZE;
+    const uint8_t *name          = buf + off;   off += GROUP_NAME_MAX;
+
+    /* X25519 DH: recipient private × ephemeral public */
+    uint8_t shared_secret[BRAMBLE_KEY_SIZE];
+    if (crypto_x25519_dh(recipient_private_key, ephemeral_pub, shared_secret) != 0)
+        return -1;
+
+    /* Derive decryption key */
+    static const char *hkdf_salt = "bramble-group-invite-v1";
+    uint8_t dec_key[BRAMBLE_KEY_SIZE];
+    if (crypto_hkdf_sha256((const uint8_t *)hkdf_salt, strlen(hkdf_salt),
+                           shared_secret, BRAMBLE_KEY_SIZE,
+                           group_id, GROUP_ID_SIZE,
+                           dec_key, BRAMBLE_KEY_SIZE) != 0)
+        return -1;
+
+    /* Nonce = first 12 bytes of ephemeral pubkey */
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    memcpy(nonce, ephemeral_pub, BRAMBLE_NONCE_SIZE);
+
+    /* Decrypt group_key */
+    uint8_t decrypted_key[GROUP_KEY_SIZE];
+    if (crypto_aes256gcm_decrypt(dec_key, nonce,
+                                  encrypted_key, GROUP_KEY_SIZE,
+                                  group_id, GROUP_ID_SIZE,
+                                  tag, decrypted_key) != 0)
+        return -1;
+
+    /* Output */
+    if (group_id_out) memcpy(group_id_out, group_id, GROUP_ID_SIZE);
+    if (key_out)      memcpy(key_out, decrypted_key, GROUP_KEY_SIZE);
     if (name_out) {
-        memcpy(name_out, buf + off, GROUP_NAME_MAX);
+        memcpy(name_out, name, GROUP_NAME_MAX);
         name_out[GROUP_NAME_MAX - 1] = '\0';
     }
-    off += GROUP_NAME_MAX;
     if (epoch_out) *epoch_out = (uint16_t)((buf[off] << 8) | buf[off + 1]);
+
+    /* Wipe */
+    memset(shared_secret, 0, sizeof(shared_secret));
+    memset(dec_key, 0, sizeof(dec_key));
 
     return 0;
 }

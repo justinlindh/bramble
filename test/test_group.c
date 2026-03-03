@@ -3,6 +3,7 @@
  */
 
 #include "group.h"
+#include "crypto.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -160,13 +161,20 @@ TEST(test_group_invite_roundtrip) {
     bramble_group_t *g = group_find_by_name(&mgr, "invite-test");
     ASSERT(g != NULL);
 
+    /* Generate sender and recipient identities for invite encryption */
+    bramble_identity_t sender, recipient;
+    ASSERT(crypto_generate_identity(&sender) == 0);
+    ASSERT(crypto_generate_identity(&recipient) == 0);
+
     uint8_t buf[GROUP_INVITE_SIZE];
-    ASSERT(group_invite_serialize(g, buf, sizeof(buf)) == 0);
+    ASSERT(group_invite_serialize(g, sender.private_key, recipient.public_key,
+                                  buf, sizeof(buf)) == 0);
 
     uint8_t id_out[GROUP_ID_SIZE], key_out[GROUP_KEY_SIZE];
     char name_out[GROUP_NAME_MAX];
     uint16_t epoch_out;
-    ASSERT(group_invite_deserialize(buf, sizeof(buf), id_out, key_out, name_out, &epoch_out) == 0);
+    ASSERT(group_invite_deserialize(buf, sizeof(buf), recipient.private_key,
+                                    id_out, key_out, name_out, &epoch_out) == 0);
 
     ASSERT(memcmp(id_out, g->group_id, GROUP_ID_SIZE) == 0);
     ASSERT(memcmp(key_out, g->group_key, GROUP_KEY_SIZE) == 0);
@@ -174,8 +182,18 @@ TEST(test_group_invite_roundtrip) {
     ASSERT(epoch_out == 0);
 
     /* Too-small buffer */
-    ASSERT(group_invite_serialize(g, buf, 5) == -1);
-    ASSERT(group_invite_deserialize(buf, 5, id_out, key_out, name_out, &epoch_out) == -1);
+    ASSERT(group_invite_serialize(g, sender.private_key, recipient.public_key,
+                                  buf, 5) == -1);
+    ASSERT(group_invite_deserialize(buf, 5, recipient.private_key,
+                                    id_out, key_out, name_out, &epoch_out) == -1);
+
+    /* Wrong recipient key should fail decryption */
+    bramble_identity_t wrong;
+    ASSERT(crypto_generate_identity(&wrong) == 0);
+    ASSERT(group_invite_serialize(g, sender.private_key, recipient.public_key,
+                                  buf, sizeof(buf)) == 0);
+    ASSERT(group_invite_deserialize(buf, sizeof(buf), wrong.private_key,
+                                    id_out, key_out, name_out, &epoch_out) == -1);
 }
 
 TEST(test_group_delete) {
