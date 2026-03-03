@@ -446,4 +446,16 @@ void radio_sleep(void)
     atomic_store(&s_state, RADIO_STATE_SLEEP);
 }
 
+bool radio_check_and_clear_reinit(void)
+{
+    if (!sx1262_needs_reinit()) return false;
+    sx1262_clear_reinit();
+    ESP_LOGW(TAG, "Radio reinit after hard reset — reconfiguring");
+    int rc = radio_reconfigure(&s_config);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);
+    }
+    return true;
+}
+
 #endif /* ESP_PLATFORM */

@@ -8,6 +8,7 @@
 #include "include/font_6x8.h"
 #include "board_config.h"
 #include "driver/spi_master.h"
+#include "freertos/semphr.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -398,6 +399,8 @@ void display_draw_text_large(int x, int y, const char *text) {
 void display_flush(void) {
     if (!fb || !initialized) return;
 
+    if (g_spi_mutex) xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
+
     /* Set window to full screen (logical coordinates, MADCTL handles rotation) */
     st7789_write_cmd(ST7789_CASET);
     uint8_t caset[] = {0x00, 0x00, ((DISPLAY_WIDTH - 1) >> 8) & 0xFF, (DISPLAY_WIDTH - 1) & 0xFF};
@@ -436,6 +439,8 @@ void display_flush(void) {
     }
 
     spi_device_release_bus(spi);
+
+    if (g_spi_mutex) xSemaphoreGive(g_spi_mutex);
 }
 
 void display_power(bool on) {
@@ -468,6 +473,12 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
     int w = x2 - x1 + 1;
     int h = y2 - y1 + 1;
     if (w <= 0 || h <= 0) return;
+
+    /* On shared SPI buses, hold the bus mutex for the entire flush to prevent
+     * radio SPI commands from interleaving between display command sequences.
+     * This matches the proven Meshtastic approach: display and radio take
+     * clean, non-overlapping turns with the SPI bus. */
+    if (g_spi_mutex) xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
     
     /* Set column address */
     st7789_write_cmd(0x2A);  /* CASET */
@@ -503,6 +514,8 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
         };
         spi_device_transmit(spi, &t);
     }
+
+    if (g_spi_mutex) xSemaphoreGive(g_spi_mutex);
 }
 
 void display_set_rotated_180(bool rotated) {

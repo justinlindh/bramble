@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 /* ---------- SX1262 SPI op-codes ---------- */
 #define SX1262_CMD_SET_SLEEP          0x84
@@ -51,6 +52,9 @@
 /* Lifecycle */
 int sx1262_init(void);
 int sx1262_reset(void);
+void sx1262_hard_reset(void);
+bool sx1262_needs_reinit(void);
+void sx1262_clear_reinit(void);
 int sx1262_wait_busy(uint32_t timeout_ms);
 int sx1262_get_status(uint8_t *status);
 

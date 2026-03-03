@@ -18,6 +18,7 @@
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -26,16 +27,29 @@ static const char *TAG = "sx1262";
 static spi_device_handle_t s_spi;
 static const bramble_board_config_t *s_board = NULL;
 
+/* Consecutive BUSY timeout counter for stuck-BUSY recovery */
+static int s_busy_timeout_count = 0;
+#define BUSY_STUCK_THRESHOLD   3   /* consecutive timeouts before hard reset */
+
+/* Flag set after hard reset — checked by mesh task to trigger reconfigure */
+static volatile bool s_needs_reinit = false;
+
+bool sx1262_needs_reinit(void) { return s_needs_reinit; }
+void sx1262_clear_reinit(void) { s_needs_reinit = false; }
+
 /* ------------------------------------------------------------------ */
 /*  Helper: NSS control                                                */
 /* ------------------------------------------------------------------ */
 
-/* On the shared SPI bus (T-Deck Plus) the radio uses manual CS, but we must
- * hold the bus lock between asserting CS and completing the transfer.
- * Otherwise the display task can run its own SPI transaction while radio CS
- * is low, and the SX1262 receives the display data as part of its frame —
- * silently corrupting the command.  spi_device_acquire_bus / release_bus
- * serialises access so no other device can interleave. */
+/* On shared SPI buses (T-Deck Plus), we use a higher-level mutex
+ * (g_spi_mutex from board_config.h) to serialize radio and display
+ * access to the entire SPI bus.  The mutex is acquired BEFORE the
+ * BUSY wait and released AFTER the SPI transaction completes.
+ * This prevents display SPI traffic from interleaving with radio
+ * command sequences (BUSY wait → CS low → transfer → CS high).
+ *
+ * spi_device_acquire_bus / release_bus still provides per-device
+ * CS management within the mutex-protected region. */
 static void nss_low(void)
 {
     spi_device_acquire_bus(s_spi, portMAX_DELAY);
@@ -49,19 +63,67 @@ static void nss_high(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Hard reset — recover from stuck BUSY / wedged state machine        */
+/* ------------------------------------------------------------------ */
+
+void sx1262_hard_reset(void)
+{
+    if (!s_board || s_board->radio.rst < 0) {
+        ESP_LOGE(TAG, "Cannot hard reset: no RST pin configured");
+        return;
+    }
+    ESP_LOGW(TAG, "Hard-resetting SX1262 via RST pin (GPIO %d)", s_board->radio.rst);
+
+    /* Assert reset LOW for ≥100µs (datasheet minimum), use 1ms for margin */
+    gpio_set_level(s_board->radio.rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    /* Release reset */
+    gpio_set_level(s_board->radio.rst, 1);
+
+    /* SX1262 needs ~5ms after reset to become ready (BUSY goes LOW) */
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGW(TAG, "SX1262 hard reset complete, BUSY=%d",
+             gpio_get_level(s_board->radio.busy));
+
+    /* Signal that full radio reconfiguration is needed */
+    s_needs_reinit = true;
+}
+
+/* ------------------------------------------------------------------ */
 /*  BUSY                                                               */
 /* ------------------------------------------------------------------ */
 
 int sx1262_wait_busy(uint32_t timeout_ms)
 {
     uint32_t start = xTaskGetTickCount();
+    uint32_t wdt_fed = 0;
     while (gpio_get_level(s_board->radio.busy)) {
-        if ((xTaskGetTickCount() - start) * portTICK_PERIOD_MS >= timeout_ms) {
+        uint32_t elapsed = (xTaskGetTickCount() - start) * portTICK_PERIOD_MS;
+        if (elapsed >= timeout_ms) {
             ESP_LOGE(TAG, "BUSY timeout (%" PRIu32 " ms)", timeout_ms);
+            s_busy_timeout_count++;
+            if (s_busy_timeout_count >= BUSY_STUCK_THRESHOLD) {
+                ESP_LOGE(TAG, "BUSY stuck — %d consecutive timeouts, triggering hard reset",
+                         s_busy_timeout_count);
+                sx1262_hard_reset();
+                s_busy_timeout_count = 0;
+                /* Return success — caller should retry the command after reset */
+                return 0;
+            }
             return -1;
+        }
+        /* Feed task WDT every ~1s during long BUSY waits to prevent
+         * false WDT triggers when multiple SPI commands chain. */
+        if (elapsed - wdt_fed >= 1000) {
+            esp_task_wdt_reset();
+            wdt_fed = elapsed;
         }
         vTaskDelay(1);
     }
+    /* BUSY went low — reset consecutive timeout counter */
+    s_busy_timeout_count = 0;
     return 0;
 }
 
@@ -84,11 +146,30 @@ static int spi_transfer(const uint8_t *tx, uint8_t *rx, size_t len)
     return 0;
 }
 
+/* Shared SPI mutex helpers — on boards with BOARD_CAP_SHARED_SPI, we hold
+ * g_spi_mutex across the entire BUSY-wait + SPI-transfer sequence.  This
+ * prevents display flushes from interleaving between BUSY going LOW and
+ * our CS assertion, which can re-trigger BUSY on the SX1262. */
+static inline void spi_mutex_take(void)
+{
+    if (g_spi_mutex) xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
+}
+
+static inline void spi_mutex_give(void)
+{
+    if (g_spi_mutex) xSemaphoreGive(g_spi_mutex);
+}
+
 int sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
 {
+    spi_mutex_take();
+
     /* 2000ms: covers TCXO startup (≤32ms) + calibration overhead on TCXO
      * boards, while still detecting a genuinely stuck BUSY line. */
-    if (sx1262_wait_busy(2000) != 0) return -1;
+    if (sx1262_wait_busy(2000) != 0) {
+        spi_mutex_give();
+        return -1;
+    }
 
     uint8_t tx[1 + len];
     tx[0] = cmd;
@@ -97,12 +178,19 @@ int sx1262_write_command(uint8_t cmd, const uint8_t *data, size_t len)
     nss_low();
     int rc = spi_transfer(tx, NULL, 1 + len);
     nss_high();
+
+    spi_mutex_give();
     return rc;
 }
 
 int sx1262_read_command(uint8_t cmd, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(2000) != 0) return -1;
+    spi_mutex_take();
+
+    if (sx1262_wait_busy(2000) != 0) {
+        spi_mutex_give();
+        return -1;
+    }
 
     /* cmd + 1 NOP (status) + len data bytes */
     size_t total = 2 + len;
@@ -115,13 +203,16 @@ int sx1262_read_command(uint8_t cmd, uint8_t *data, size_t len)
     int rc = spi_transfer(tx, rx, total);
     nss_high();
 
+    spi_mutex_give();
+
     if (rc == 0 && data) memcpy(data, rx + 2, len);
     return rc;
 }
 
 int sx1262_write_register(uint16_t addr, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(2000) != 0) return -1;
+    spi_mutex_take();
+    if (sx1262_wait_busy(2000) != 0) { spi_mutex_give(); return -1; }
 
     size_t total = 3 + len; /* cmd + addr_hi + addr_lo + data */
     uint8_t tx[total];
@@ -133,12 +224,14 @@ int sx1262_write_register(uint16_t addr, const uint8_t *data, size_t len)
     nss_low();
     int rc = spi_transfer(tx, NULL, total);
     nss_high();
+    spi_mutex_give();
     return rc;
 }
 
 int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(2000) != 0) return -1;
+    spi_mutex_take();
+    if (sx1262_wait_busy(2000) != 0) { spi_mutex_give(); return -1; }
 
     /* cmd + addr_hi + addr_lo + 1 NOP + len data */
     size_t total = 4 + len;
@@ -152,6 +245,7 @@ int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
     nss_low();
     int rc = spi_transfer(tx, rx, total);
     nss_high();
+    spi_mutex_give();
 
     if (rc == 0 && data) memcpy(data, rx + 4, len);
     return rc;
@@ -159,7 +253,8 @@ int sx1262_read_register(uint16_t addr, uint8_t *data, size_t len)
 
 int sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(2000) != 0) return -1;
+    spi_mutex_take();
+    if (sx1262_wait_busy(2000) != 0) { spi_mutex_give(); return -1; }
 
     size_t total = 2 + len; /* cmd + offset + data */
     uint8_t tx[total];
@@ -170,12 +265,14 @@ int sx1262_write_buffer(uint8_t offset, const uint8_t *data, size_t len)
     nss_low();
     int rc = spi_transfer(tx, NULL, total);
     nss_high();
+    spi_mutex_give();
     return rc;
 }
 
 int sx1262_read_buffer(uint8_t offset, uint8_t *data, size_t len)
 {
-    if (sx1262_wait_busy(2000) != 0) return -1;
+    spi_mutex_take();
+    if (sx1262_wait_busy(2000) != 0) { spi_mutex_give(); return -1; }
 
     /* cmd + offset + 1 NOP + len data */
     size_t total = 3 + len;
@@ -188,6 +285,7 @@ int sx1262_read_buffer(uint8_t offset, uint8_t *data, size_t len)
     nss_low();
     int rc = spi_transfer(tx, rx, total);
     nss_high();
+    spi_mutex_give();
 
     if (rc == 0 && data) memcpy(data, rx + 3, len);
     return rc;

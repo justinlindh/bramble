@@ -1031,15 +1031,20 @@ void app_main(void)
              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     static StaticTask_t ui_task_tcb;
     static StackType_t ui_task_stack[10240]; /* 10K words = 40KB internal stack */
+    /* Pin ui_gfx to CPU0 at priority 2 (below mesh/radio at 5 on CPU1).
+     * On shared-SPI boards (T-Deck), running the display task on the same
+     * core as mesh at equal priority causes SPI bus contention that wedges
+     * the SX1262.  CPU0 + low priority matches the proven Meshtastic
+     * architecture: radio always preempts display. */
     TaskHandle_t ui_task_handle = xTaskCreateStaticPinnedToCore(
         ui_graphics_task,
         "ui_gfx",
         10240,
         NULL,
-        5,
+        2,
         ui_task_stack,
         &ui_task_tcb,
-        1);
+        0);
     if (ui_task_handle == NULL) {
         ESP_LOGE(TAG, "FAILED to create ui_gfx task (static alloc). Display will be blank.");
     } else {
