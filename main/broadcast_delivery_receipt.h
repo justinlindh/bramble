@@ -13,7 +13,18 @@
 extern "C" {
 #endif
 
-bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr);
+/**
+ * Receipt policy based on mesh size:
+ *   peer_count ≤ 15:  full receipts (multi-hop)
+ *   peer_count ≤ 40:  neighbors-only (hop_limit=1)
+ *   peer_count > 40:  receipts disabled for broadcast tier
+ *
+ * Returns: 0 = don't send, 1 = neighbors-only (hop_limit=1), 2 = full
+ */
+uint8_t mesh_broadcast_receipt_policy(uint32_t dest_addr, uint8_t peer_count);
+
+/* Convenience: returns true if any receipt should be sent */
+bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr, uint8_t peer_count);
 
 /* Deterministic responder slot base (ms) to spread receipt TX among recipients. */
 uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id);
@@ -25,6 +36,7 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
                                                        uint32_t receipt_packet_id,
                                                        uint32_t original_src_addr,
                                                        uint32_t original_packet_id,
+                                                       uint8_t hop_limit,
                                                        uint8_t *buf,
                                                        size_t buf_len,
                                                        size_t *out_len);

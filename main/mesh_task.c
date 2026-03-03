@@ -876,10 +876,16 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     size_t wire_len = 0;
 
+    /* Determine receipt policy based on mesh size */
+    uint8_t policy = mesh_broadcast_receipt_policy(0xFFFFFFFFu,
+                         (uint8_t)neighbor_count(&s_neighbors));
+    uint8_t hop_limit = (policy >= 2) ? 8 : 1;  /* full=8, neighbors-only=1 */
+
     esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
                                                                   next_packet_id(),
                                                                   original_src_addr,
                                                                   original_packet_id,
+                                                                  hop_limit,
                                                                   buf,
                                                                   sizeof(buf),
                                                                   &wire_len);
@@ -1306,7 +1312,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                         /* Send ACK for unicast messages */
                         if (dir == MSG_DIR_INCOMING) {
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
+                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
+                                       (uint8_t)neighbor_count(&s_neighbors))) {
                             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
                         }
 
@@ -1384,7 +1391,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr)) {
+        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
+                       (uint8_t)neighbor_count(&s_neighbors))) {
             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
