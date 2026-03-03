@@ -143,7 +143,7 @@ reassembly_ctx_t *mesh_msg_state_get_reassembly(void);
  * @return 1 if reassembly complete, 0 if more fragments needed, -1 on error
  */
 int mesh_reassembly_add(const frag_header_t *hdr, const uint8_t *payload,
-                        size_t payload_len, uint32_t now_ms);
+                        size_t payload_len, uint32_t now_ms, uint32_t packet_id);
 
 /**
  * Collect a fully reassembled message.

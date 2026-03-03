@@ -28,7 +28,8 @@ void reassembly_init(reassembly_ctx_t *ctx) {
 }
 
 int reassembly_add(reassembly_ctx_t *ctx, const frag_header_t *hdr,
-                   const uint8_t *frag_data, size_t frag_len, uint32_t now_ms) {
+                   const uint8_t *frag_data, size_t frag_len,
+                   uint32_t now_ms, uint32_t packet_id) {
     if (!ctx || !hdr || !frag_data) return -1;
     if (hdr->frag_index >= hdr->frag_total) return -1;
     if (hdr->frag_total > FRAG_MAX_FRAGMENTS) return -1;
@@ -63,6 +64,11 @@ int reassembly_add(reassembly_ctx_t *ctx, const frag_header_t *hdr,
     }
 
     if (!slot) return -1;
+
+    /* Track the packet_id of the first fragment received */
+    if (slot->received_mask == 0) {
+        slot->first_packet_id = packet_id;
+    }
 
     /* Duplicate check */
     uint8_t bit = (uint8_t)(1 << hdr->frag_index);
@@ -99,6 +105,15 @@ int reassembly_collect(reassembly_ctx_t *ctx, uint16_t message_id,
         }
     }
     return -1;
+}
+
+uint32_t reassembly_get_first_packet_id(reassembly_ctx_t *ctx, uint16_t message_id) {
+    for (int i = 0; i < FRAG_MAX_REASSEMBLIES; i++) {
+        if (ctx->slots[i].active && ctx->slots[i].message_id == message_id) {
+            return ctx->slots[i].first_packet_id;
+        }
+    }
+    return 0;
 }
 
 void reassembly_purge(reassembly_ctx_t *ctx, uint32_t now_ms) {

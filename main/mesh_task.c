@@ -1315,15 +1315,22 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                          frag_hdr.frag_index + 1, frag_hdr.frag_total,
                          frag_hdr.message_id, info.src_addr);
 
+                /* Deserialize header to get packet_id for reassembly tracking */
+                bramble_header_t rx_hdr_frag;
+                bramble_header_deserialize(&rx_hdr_frag, data, len);
+
                 int ret = reassembly_add(&s_reassembly, &frag_hdr,
                                         info.data + FRAG_HEADER_SIZE,
                                         info.data_len - FRAG_HEADER_SIZE,
-                                        rx_hdr.packet_id,
-                                        now_ms());
+                                        now_ms(), rx_hdr_frag.packet_id);
                 if (ret == 1) {
                     /* Reassembly complete — collect the full message.
                      * Buffers allocated on heap to avoid ~1.2KB stack pressure
                      * in the mesh task (which has tight stack headroom). */
+                    /* Get first-received fragment's packet_id before collect frees slot */
+                    uint32_t first_frag_pkt_id = reassembly_get_first_packet_id(
+                        &s_reassembly, frag_hdr.message_id);
+
                     size_t reasm_sz = FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT;
                     uint8_t *reassembled = malloc(reasm_sz);
                     if (!reassembled) {
@@ -1387,19 +1394,12 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                             cJSON_Delete(params);
                         }
 
-                        /* Send ACK for unicast messages */
+                        /* Send ACK/receipt: use first-received fragment's packet_id for broadcasts */
                         if (dir == MSG_DIR_INCOMING) {
-                            send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
-                                       (uint8_t)neighbor_count(&s_neighbors),
-                                       s_identity->address,
-                                       rx_hdr.packet_id)) {
-                            uint32_t receipt_packet_id = reassembly_get_first_packet_id(&s_reassembly,
-                                                                                         frag_hdr.message_id);
-                            if (receipt_packet_id == 0) {
-                                receipt_packet_id = rx_hdr.packet_id;
-                            }
-                            queue_broadcast_delivery_receipt(info.src_addr, receipt_packet_id);
+                            send_ack(info.src_addr, rx_hdr_frag.packet_id, rssi);
+                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr_frag.dest_addr,
+                                       (uint8_t)neighbor_count(&s_neighbors))) {
+                            queue_broadcast_delivery_receipt(info.src_addr, first_frag_pkt_id);
                         }
 
                         /* Print to stdout */
