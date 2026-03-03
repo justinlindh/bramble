@@ -42,6 +42,23 @@ int  neighbor_count(const neighbor_table_t *table);
 #define ROUTE_STALE_TIMEOUT_MS    600000
 #define ROUTE_HARD_TIMEOUT_MS     3600000
 
+/* Link-penalty normalization bounds and weights.
+ *
+ * These model practical LoRa receive quality around SX1262-class sensitivity
+ * floors (Semtech SX1261/2 datasheet). Actual minimum decodable RSSI depends
+ * on SF/BW (e.g., SF7/125kHz vs SF12/125kHz), so these are conservative,
+ * routing-oriented heuristics rather than PHY hard limits.
+ */
+#define PENALTY_RSSI_BEST   (-60)   /* dBm: strong link */
+#define PENALTY_RSSI_WORST  (-120)  /* dBm: near weak-link floor */
+#define PENALTY_RSSI_WEIGHT 30
+
+#define PENALTY_SNR_BEST    10      /* dB: strong margin */
+#define PENALTY_SNR_WORST   (-5)    /* dB: low/negative margin */
+#define PENALTY_SNR_WEIGHT  20
+
+#define PENALTY_MAX_TOTAL   (PENALTY_RSSI_WEIGHT + PENALTY_SNR_WEIGHT)
+
 typedef enum {
     ROUTE_DISCOVERING = 0, ROUTE_UNVERIFIED, ROUTE_ACTIVE, ROUTE_STALE, ROUTE_BROKEN,
 } route_state_t;
