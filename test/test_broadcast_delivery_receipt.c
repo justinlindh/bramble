@@ -9,8 +9,26 @@ void setUp(void) {}
 void tearDown(void) {}
 
 void test_should_emit_only_for_broadcast_dest(void) {
-    TEST_ASSERT_TRUE(mesh_should_emit_broadcast_delivery_receipt(0xFFFFFFFFu));
-    TEST_ASSERT_FALSE(mesh_should_emit_broadcast_delivery_receipt(0x01020304u));
+    /* Small mesh: full receipts for broadcast, none for unicast */
+    TEST_ASSERT_TRUE(mesh_should_emit_broadcast_delivery_receipt(0xFFFFFFFFu, 4));
+    TEST_ASSERT_FALSE(mesh_should_emit_broadcast_delivery_receipt(0x01020304u, 4));
+}
+
+void test_receipt_policy_adapts_to_mesh_size(void) {
+    /* Small mesh (≤15): full receipts */
+    TEST_ASSERT_EQUAL_UINT8(2, mesh_broadcast_receipt_policy(0xFFFFFFFFu, 5));
+    TEST_ASSERT_EQUAL_UINT8(2, mesh_broadcast_receipt_policy(0xFFFFFFFFu, 15));
+
+    /* Medium mesh (16-40): neighbors-only */
+    TEST_ASSERT_EQUAL_UINT8(1, mesh_broadcast_receipt_policy(0xFFFFFFFFu, 16));
+    TEST_ASSERT_EQUAL_UINT8(1, mesh_broadcast_receipt_policy(0xFFFFFFFFu, 40));
+
+    /* Large mesh (>40): off */
+    TEST_ASSERT_EQUAL_UINT8(0, mesh_broadcast_receipt_policy(0xFFFFFFFFu, 41));
+    TEST_ASSERT_EQUAL_UINT8(0, mesh_broadcast_receipt_policy(0xFFFFFFFFu, 200));
+
+    /* Non-broadcast: always off */
+    TEST_ASSERT_EQUAL_UINT8(0, mesh_broadcast_receipt_policy(0x01020304u, 4));
 }
 
 void test_slot_delay_is_bounded_and_identity_sensitive(void) {
@@ -60,6 +78,7 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
                                                                  0x11223344u,
                                                                  0x55667788u,
                                                                  0xCAFEBABEu,
+                                                                 8,
                                                                  buf,
                                                                  sizeof(buf),
                                                                  &wire_len);
@@ -82,6 +101,7 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_should_emit_only_for_broadcast_dest);
+    RUN_TEST(test_receipt_policy_adapts_to_mesh_size);
     RUN_TEST(test_slot_delay_is_bounded_and_identity_sensitive);
     RUN_TEST(test_retry_count_default_three_attempts);
     RUN_TEST(test_slot_distribution_no_collision_for_typical_mesh);

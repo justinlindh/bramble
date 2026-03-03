@@ -7,8 +7,18 @@
 #define BROADCAST_RECEIPT_SLOT_BUCKETS       32u
 #define BROADCAST_RECEIPT_RETRY_COUNT        3u
 
-bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr) {
-    return dest_addr == 0xFFFFFFFFu;
+#define RECEIPT_POLICY_FULL_MAX_PEERS       15u
+#define RECEIPT_POLICY_NEIGHBORS_MAX_PEERS  40u
+
+uint8_t mesh_broadcast_receipt_policy(uint32_t dest_addr, uint8_t peer_count) {
+    if (dest_addr != 0xFFFFFFFFu) return 0;
+    if (peer_count > RECEIPT_POLICY_NEIGHBORS_MAX_PEERS) return 0;  /* off */
+    if (peer_count > RECEIPT_POLICY_FULL_MAX_PEERS) return 1;       /* neighbors-only */
+    return 2;                                                        /* full */
+}
+
+bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr, uint8_t peer_count) {
+    return mesh_broadcast_receipt_policy(dest_addr, peer_count) > 0;
 }
 
 uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id) {
@@ -24,6 +34,7 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
                                                        uint32_t receipt_packet_id,
                                                        uint32_t original_src_addr,
                                                        uint32_t original_packet_id,
+                                                       uint8_t hop_limit,
                                                        uint8_t *buf,
                                                        size_t buf_len,
                                                        size_t *out_len) {
@@ -36,7 +47,7 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
             .version = BRAMBLE_VERSION,
             .type = PKT_TYPE_DELIVERY_RECEIPT,
             .flags = 0,
-            .hop_limit = 8,
+            .hop_limit = hop_limit,
             .dest_addr = original_src_addr,
             .packet_id = receipt_packet_id,
         },
