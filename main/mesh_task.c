@@ -2396,6 +2396,11 @@ static void mesh_task(void *param) {
         /* Reset task watchdog — if this stops being called, WDT resets device */
         esp_task_wdt_reset();
 
+        /* Check if radio was hard-reset and needs reconfiguration */
+        if (radio_check_and_clear_reinit()) {
+            ESP_LOGW(TAG, "Radio recovered from stuck BUSY — resuming RX");
+        }
+
         /* Process received packets */
         rx_packet_t pkt;
         while (xQueueReceive(s_rx_queue, &pkt, 0) == pdTRUE) {

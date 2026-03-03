@@ -188,4 +188,26 @@ static inline bool board_has_cap(uint32_t cap) {
     return (board_get_config()->capabilities & cap) != 0;
 }
 
+#ifdef ESP_PLATFORM
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
+/**
+ * Shared SPI bus mutex for boards with BOARD_CAP_SHARED_SPI.
+ *
+ * On boards where the radio (SX1262) and display (ST7789) share an SPI bus,
+ * this mutex prevents interleaving of multi-step SPI command sequences.
+ * Without it, display flush transactions can insert between radio command
+ * + BUSY-wait cycles, corrupting the SX1262 state machine.
+ *
+ * Usage pattern:
+ *   - Radio: acquire before each command group, release after
+ *   - Display: acquire before flush, release after all pixels sent
+ *
+ * On non-shared-SPI boards, this is NULL and callers must check before use.
+ * Created by board_init() when BOARD_CAP_SHARED_SPI is set.
+ */
+extern SemaphoreHandle_t g_spi_mutex;
+#endif
+
 #endif /* BRAMBLE_BOARD_CONFIG_H */

@@ -54,6 +54,13 @@ void radio_set_tx_done_callback(radio_tx_done_callback_t cb);
 void radio_set_cad_done_callback(radio_cad_done_callback_t cb);
 void radio_sleep(void);
 
+/**
+ * Check and clear the radio-needs-reinit flag.
+ * Returns true if the SX1262 was hard-reset due to stuck BUSY and
+ * needs full reconfiguration (radio_reconfigure).
+ */
+bool radio_check_and_clear_reinit(void);
+
 uint32_t bramble_calculate_airtime_us(uint16_t payload_bytes, uint8_t sf, uint32_t bw_hz, uint8_t cr);
 
 #endif

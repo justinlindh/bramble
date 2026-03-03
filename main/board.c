@@ -18,8 +18,13 @@
 #endif
 
 #ifdef ESP_PLATFORM
+#include "freertos/semphr.h"
+
 static const char *TAG = "board";
 static bool s_initialized = false;
+
+/* Shared SPI mutex — created for boards with BOARD_CAP_SHARED_SPI */
+SemaphoreHandle_t g_spi_mutex = NULL;
 #endif
 
 const bramble_board_config_t *board_get_config(void) {
@@ -88,6 +93,14 @@ int board_init(void) {
             return -1;
         }
         ESP_LOGI(TAG, "Shared SPI bus initialized");
+
+        /* Create SPI mutex for radio/display coordination */
+        g_spi_mutex = xSemaphoreCreateMutex();
+        if (!g_spi_mutex) {
+            ESP_LOGE(TAG, "Failed to create SPI mutex");
+            return -1;
+        }
+        ESP_LOGI(TAG, "Shared SPI mutex created");
     }
     /* Non-shared SPI boards: radio driver inits its own bus (existing behavior) */
 
