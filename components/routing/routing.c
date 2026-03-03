@@ -245,18 +245,28 @@ reverse_route_t *reverse_route_lookup(reverse_route_table_t *table, uint32_t que
 /* ── Link penalty ── */
 
 uint8_t compute_link_penalty(int8_t rssi, int8_t snr) {
-    /* RSSI: -60 → 0, -120 → 30, linear */
+    /* Linear RSSI penalty from strong to weak receive conditions.
+     *
+     * Note: SX1262 sensitivity floor varies by SF/BW combination, so
+     * PENALTY_RSSI_WORST is an approximate routing heuristic rather than
+     * a single PHY decode threshold.
+     */
     int rp = 0;
-    if (rssi <= -120) rp = 30;
-    else if (rssi >= -60) rp = 0;
-    else rp = (int)(-60 - rssi) * 30 / 60;
+    if (rssi <= PENALTY_RSSI_WORST) rp = PENALTY_RSSI_WEIGHT;
+    else if (rssi >= PENALTY_RSSI_BEST) rp = 0;
+    else rp = (int)(PENALTY_RSSI_BEST - rssi) * PENALTY_RSSI_WEIGHT /
+              (PENALTY_RSSI_BEST - PENALTY_RSSI_WORST);
 
-    /* SNR: 10 → 0, -5 → 20, linear */
+    /* Linear SNR penalty from healthy margin down to low/negative margin.
+     * SX1262 demod margin also varies with SF/BW, so these bounds are tuned
+     * for route scoring consistency, not absolute radio limits.
+     */
     int sp = 0;
-    if (snr <= -5) sp = 20;
-    else if (snr >= 10) sp = 0;
-    else sp = (10 - (int)snr) * 20 / 15;
+    if (snr <= PENALTY_SNR_WORST) sp = PENALTY_SNR_WEIGHT;
+    else if (snr >= PENALTY_SNR_BEST) sp = 0;
+    else sp = (PENALTY_SNR_BEST - (int)snr) * PENALTY_SNR_WEIGHT /
+              (PENALTY_SNR_BEST - PENALTY_SNR_WORST);
 
     int total = rp + sp;
-    return (uint8_t)(total > 50 ? 50 : total);
+    return (uint8_t)(total > PENALTY_MAX_TOTAL ? PENALTY_MAX_TOTAL : total);
 }

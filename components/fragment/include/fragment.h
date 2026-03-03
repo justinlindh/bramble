@@ -11,6 +11,9 @@
 #define FRAG_REASSEMBLY_TIMEOUT_MS 30000
 #define FRAG_HEADER_SIZE         4
 
+/* reassembly_slot_t.received_mask is uint8_t; keep fragment count <= bit width. */
+_Static_assert(FRAG_MAX_FRAGMENTS <= 8, "received_mask overflow");
+
 typedef struct {
     uint8_t  frag_index;
     uint8_t  frag_total;
