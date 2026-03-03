@@ -4,9 +4,11 @@
 #include "mesh_task.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <inttypes.h>
 #include "cJSON.h"
 #include "sdkconfig.h"
 #include "ct_strcmp.h"
@@ -88,9 +90,51 @@ static esp_err_t send_401(httpd_req_t *req)
 
 /* ── Notification transport ──────────────────────────────────────────── */
 
+/* Rate-limit outbound WS notifications to avoid saturating the Wi-Fi TX
+ * queue on boards with reduced buffer counts (T-Deck Plus: 16 TX buffers).
+ * Under sustained mesh traffic, delivery events + GPS + telemetry can
+ * generate 50+ notifications/sec, overwhelming the httpd async send path
+ * and causing AP disassociation.
+ *
+ * Strategy: allow bursts up to WS_NOTIFY_BURST_MAX, then enforce a
+ * minimum interval of WS_NOTIFY_MIN_INTERVAL_MS between sends.
+ * Dropped notifications are counted and logged periodically. */
+#define WS_NOTIFY_BURST_MAX        8
+#define WS_NOTIFY_MIN_INTERVAL_MS  50
+#define WS_NOTIFY_DROP_LOG_INTERVAL_MS  10000
+
+static uint32_t s_notify_burst_count = 0;
+static uint64_t s_notify_last_send_us = 0;
+static uint32_t s_notify_drops = 0;
+static uint64_t s_notify_last_drop_log_us = 0;
+
 static void ws_notify_cb(const char *json, size_t len, void *ctx)
 {
     if (!s_server || s_client_count == 0) return;
+
+    uint64_t now_us = (uint64_t)esp_timer_get_time();
+    uint64_t elapsed_us = now_us - s_notify_last_send_us;
+
+    if (elapsed_us >= (WS_NOTIFY_MIN_INTERVAL_MS * 1000ULL)) {
+        /* Enough time has passed — reset burst counter */
+        s_notify_burst_count = 0;
+    }
+
+    if (s_notify_burst_count >= WS_NOTIFY_BURST_MAX) {
+        /* Over burst limit and within the rate window — drop */
+        s_notify_drops++;
+        if (now_us - s_notify_last_drop_log_us >= (WS_NOTIFY_DROP_LOG_INTERVAL_MS * 1000ULL)) {
+            ESP_LOGW(TAG, "WS notify throttled: %" PRIu32 " dropped in last %.1fs",
+                     s_notify_drops,
+                     (float)(now_us - s_notify_last_drop_log_us) / 1000000.0f);
+            s_notify_drops = 0;
+            s_notify_last_drop_log_us = now_us;
+        }
+        return;
+    }
+
+    s_notify_burst_count++;
+    s_notify_last_send_us = now_us;
 
     httpd_ws_frame_t frame = {
         .type    = HTTPD_WS_TYPE_TEXT,

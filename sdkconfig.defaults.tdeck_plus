@@ -63,10 +63,16 @@ CONFIG_LV_USE_BUILTIN_MALLOC=n
 CONFIG_LV_USE_CLIB_MALLOC=n
 CONFIG_LV_USE_CUSTOM_MALLOC=y
 
-# Reduce WiFi dynamic buffer counts to conserve internal DRAM.
-# Default of 32 is aggressive for Bramble's low-throughput RPC/telemetry use.
-# Each buffer is ~1.6KB in internal DMA-capable RAM.
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+# WiFi buffer counts — compromise between internal DRAM savings and stability.
+# Original defaults (32/32/10) are too aggressive for T-Deck's tight internal RAM,
+# but 8/8/4 starved the Wi-Fi TX path under sustained mesh notification traffic,
+# causing AP disassociation and WS drops. 16/16/6 is the middle ground.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+
+# Extend WDT timeout for T-Deck: the shared SPI bus (display + radio) means
+# the mesh task can block on spi_device_acquire_bus() during display flushes.
+# 5s is too tight when LVGL does rapid redraws + LBT backoff stacks up.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 CONFIG_BRAMBLE_RPC_MAX_METHODS=64
