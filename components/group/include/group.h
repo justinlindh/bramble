@@ -4,10 +4,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "crypto.h"
 
 #define GROUP_MAX_MEMBERS    8
 #define GROUP_MAX_GROUPS     8
-#define GROUP_ID_SIZE        8    /* BLAKE2s truncated */
+#define GROUP_ID_SIZE        8    /* Truncated from HKDF-SHA256 output */
 #define GROUP_KEY_SIZE       32
 #define GROUP_NAME_MAX       32
 #define GROUP_EPOCH_ADVANCE_THRESHOLD 256  /* messages before epoch advance */
@@ -57,10 +58,25 @@ int group_advance_epoch(bramble_group_t *group);
 /* Message tracking */
 void group_record_message(bramble_group_t *group);
 
-/* Serialization — group invite packet */
-#define GROUP_INVITE_SIZE (GROUP_ID_SIZE + GROUP_KEY_SIZE + GROUP_NAME_MAX + 2)  /* +epoch */
-int group_invite_serialize(const bramble_group_t *group, uint8_t *buf, size_t buf_len);
-int group_invite_deserialize(const uint8_t *buf, size_t len, uint8_t *group_id_out,
+/*
+ * Serialization — group invite packet
+ *
+ * Invite layout:
+ *   [group_id: 8] [ephemeral_pubkey: 32] [encrypted_key: 32] [tag: 16]
+ *   [name: 32] [epoch: 2]
+ *
+ * The group_key is encrypted under X25519(ephemeral, recipient_pub) + AES-256-GCM.
+ * AAD = group_id.
+ */
+#define GROUP_INVITE_SIZE (GROUP_ID_SIZE + BRAMBLE_KEY_SIZE + GROUP_KEY_SIZE + BRAMBLE_TAG_SIZE + GROUP_NAME_MAX + 2)
+
+int group_invite_serialize(const bramble_group_t *group,
+                           const uint8_t *sender_private_key,
+                           const uint8_t *recipient_public_key,
+                           uint8_t *buf, size_t buf_len);
+int group_invite_deserialize(const uint8_t *buf, size_t len,
+                             const uint8_t *recipient_private_key,
+                             uint8_t *group_id_out,
                              uint8_t *key_out, char *name_out, uint16_t *epoch_out);
 
 #endif
