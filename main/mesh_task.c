@@ -962,7 +962,9 @@ static void mesh_process_receipt_tx_event(void) {
                      (unsigned)item->attempts_total);
             memset(item, 0, sizeof(*item));
         } else {
-            uint32_t backoff_ms = 1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
+            uint32_t remaining = airtime_budget_remaining(&s_airtime, AIRTIME_TIER_RECEIPT);
+            uint32_t raw_backoff_ms = 1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
+            uint32_t backoff_ms = mesh_broadcast_receipt_scale_delay_ms(raw_backoff_ms, remaining);
             item->due_at_ms = t_now + backoff_ms;
             ESP_LOGW(TAG,
                      "Delivery receipt deferred for pkt=%08" PRIX32 " (attempt=%u/%u): airtime exhausted, retry in %" PRIu32 "ms",
@@ -1001,8 +1003,14 @@ static void mesh_process_receipt_tx_event(void) {
     }
 
     uint8_t i = (uint8_t)(item->attempts_sent - 1u);
-    uint32_t base_ms = 500u + ((uint32_t)i * 700u);
-    uint32_t jitter_range = 500u + ((uint32_t)i * 400u);
+    uint32_t remaining = airtime_budget_remaining(&s_airtime, AIRTIME_TIER_RECEIPT);
+    uint32_t raw_base_ms = 500u + ((uint32_t)i * 700u);
+    uint32_t raw_jitter_range = 500u + ((uint32_t)i * 400u);
+    uint32_t base_ms = mesh_broadcast_receipt_scale_delay_ms(raw_base_ms, remaining);
+    uint32_t jitter_range = mesh_broadcast_receipt_scale_delay_ms(raw_jitter_range, remaining);
+    if (jitter_range == 0u) {
+        jitter_range = 1u;
+    }
     uint32_t retry_delay_ms = base_ms + (esp_random() % jitter_range);
     item->due_at_ms = now_ms() + retry_delay_ms;
 

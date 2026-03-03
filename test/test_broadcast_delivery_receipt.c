@@ -5,6 +5,8 @@
 
 #include <string.h>
 
+#define RECEIPT_BUDGET_MAX_MS 12000u
+
 void setUp(void) {}
 void tearDown(void) {}
 
@@ -35,10 +37,10 @@ void test_slot_delay_is_bounded_and_identity_sensitive(void) {
     uint32_t d1 = mesh_broadcast_receipt_slot_delay_ms(0x01020304u, 0xCAFEBABEu);
     uint32_t d2 = mesh_broadcast_receipt_slot_delay_ms(0x0A0B0C0Du, 0xCAFEBABEu);
 
-    TEST_ASSERT_TRUE(d1 >= 200u);
-    TEST_ASSERT_TRUE(d1 <= (200u + 200u * 31u));
-    TEST_ASSERT_TRUE(d2 >= 200u);
-    TEST_ASSERT_TRUE(d2 <= (200u + 200u * 31u));
+    TEST_ASSERT_TRUE(d1 >= 300u);
+    TEST_ASSERT_TRUE(d1 <= (300u + 500u * 31u));
+    TEST_ASSERT_TRUE(d2 >= 300u);
+    TEST_ASSERT_TRUE(d2 <= (300u + 500u * 31u));
     TEST_ASSERT_NOT_EQUAL(d1, d2);
 }
 
@@ -68,6 +70,23 @@ void test_slot_distribution_no_collision_for_typical_mesh(void) {
      * XOR-based hashing with these addresses may yield 0 collisions,
      * which is ideal. Upper bound ensures hash isn't degenerate. */
     TEST_ASSERT_TRUE(collision_count < 500);
+}
+
+void test_retry_delay_scaling_from_airtime_utilization(void) {
+    const uint32_t raw_base = 500u;
+
+    TEST_ASSERT_EQUAL_UINT32(raw_base / 2u,
+                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS));
+    TEST_ASSERT_EQUAL_UINT32(raw_base,
+                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 2u));
+    TEST_ASSERT_EQUAL_UINT32(raw_base * 2u,
+                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 10u));
+}
+
+void test_retry_delay_scaling_integer_math_bounds(void) {
+    uint32_t raw_delay = 7999u;
+    uint32_t scaled = mesh_broadcast_receipt_scale_delay_ms(raw_delay, RECEIPT_BUDGET_MAX_MS / 10u);
+    TEST_ASSERT_EQUAL_UINT32(15998u, scaled);
 }
 
 void test_build_delivery_receipt_targets_original_sender_with_expected_fields(void) {
@@ -105,6 +124,8 @@ int main(void) {
     RUN_TEST(test_slot_delay_is_bounded_and_identity_sensitive);
     RUN_TEST(test_retry_count_default_three_attempts);
     RUN_TEST(test_slot_distribution_no_collision_for_typical_mesh);
+    RUN_TEST(test_retry_delay_scaling_from_airtime_utilization);
+    RUN_TEST(test_retry_delay_scaling_integer_math_bounds);
     RUN_TEST(test_build_delivery_receipt_targets_original_sender_with_expected_fields);
     return UNITY_END();
 }

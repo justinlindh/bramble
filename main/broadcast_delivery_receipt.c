@@ -14,6 +14,7 @@
 
 #define RECEIPT_POLICY_FULL_MAX_PEERS       15u
 #define RECEIPT_POLICY_NEIGHBORS_MAX_PEERS  40u
+#define RECEIPT_BUDGET_MAX_MS               12000u
 
 uint8_t mesh_broadcast_receipt_policy(uint32_t dest_addr, uint8_t peer_count) {
     if (dest_addr != 0xFFFFFFFFu) return 0;
@@ -33,6 +34,42 @@ uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t orig
 
 uint8_t mesh_broadcast_receipt_retry_count(void) {
     return BROADCAST_RECEIPT_RETRY_COUNT;
+}
+
+void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms,
+                                        uint32_t *scale_num,
+                                        uint32_t *scale_den) {
+    if (!scale_num || !scale_den) {
+        return;
+    }
+
+    uint32_t remaining = receipt_budget_remaining_ms;
+    if (remaining > RECEIPT_BUDGET_MAX_MS) {
+        remaining = RECEIPT_BUDGET_MAX_MS;
+    }
+
+    uint32_t used = RECEIPT_BUDGET_MAX_MS - remaining;
+    uint32_t pct_used = (used * 100u) / RECEIPT_BUDGET_MAX_MS;
+
+    if (pct_used < 30u) {
+        *scale_num = 1u;
+        *scale_den = 2u;
+    } else if (pct_used > 70u) {
+        *scale_num = 2u;
+        *scale_den = 1u;
+    } else {
+        *scale_num = 1u;
+        *scale_den = 1u;
+    }
+}
+
+uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
+                                               uint32_t receipt_budget_remaining_ms) {
+    uint32_t scale_num = 1u;
+    uint32_t scale_den = 1u;
+
+    mesh_broadcast_receipt_retry_scale(receipt_budget_remaining_ms, &scale_num, &scale_den);
+    return (raw_delay_ms * scale_num) / scale_den;
 }
 
 esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,

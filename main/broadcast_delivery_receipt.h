@@ -32,6 +32,22 @@ uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t orig
 /* Number of on-air attempts for a broadcast delivery receipt. */
 uint8_t mesh_broadcast_receipt_retry_count(void);
 
+/*
+ * Adaptive retry timing scale derived from receipt airtime budget utilization.
+ *
+ * Scale mapping (by % budget used):
+ *   <30%   => 0.5x (num=1, den=2)
+ *   30-70% => 1.0x (num=1, den=1)
+ *   >70%   => 2.0x (num=2, den=1)
+ */
+void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms,
+                                        uint32_t *scale_num,
+                                        uint32_t *scale_den);
+
+/* Scale an arbitrary delay value by current receipt airtime utilization. */
+uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
+                                               uint32_t receipt_budget_remaining_ms);
+
 esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
                                                        uint32_t receipt_packet_id,
                                                        uint32_t original_src_addr,
