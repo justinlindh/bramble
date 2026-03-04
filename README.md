@@ -107,7 +107,8 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 - [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md) — protocol details
 - [docs/bramble-testing.md](docs/bramble-testing.md) — test strategy and coverage
 - [docs/ota-rollout.md](docs/ota-rollout.md) — OTA operator workflow
-- [docs/quality-policy.md](docs/quality-policy.md) — CI gates, promotion criteria, and rollback levers
+- [docs/quality-policy.md](docs/quality-policy.md) — repo-wide CI gates, promotion criteria, and rollback levers
+- [docs/quality-policy-firmware.md](docs/quality-policy-firmware.md) — firmware lint/static-analysis phased rollout and advisory CI mapping
 - [simulator/README.md](simulator/README.md) — simulator usage
 - [docs/webapp/chat.md](docs/webapp/chat.md) — web client chat and UX notes
 
@@ -123,6 +124,7 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 ## CI/CD
 
 - [.gitea/workflows/webapp-build-publish.yml](.gitea/workflows/webapp-build-publish.yml) builds/tests/publishes the web client image.
+- [.gitea/workflows/firmware-quality.yml](.gitea/workflows/firmware-quality.yml) runs advisory firmware quality checks (non-blocking in Phase 2.2).
 - Additional workflow definitions live in [.gitea/workflows](.gitea/workflows).
 
 ## Status
