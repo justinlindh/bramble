@@ -298,7 +298,7 @@ git commit -m "docs(bramble): record DM inbox + unread badge verification"
 ### Task 5: Regression/guardrail pass before merge
 
 **Files:**
-- Modify: `docs/plans/2026-02-22-tdeck-dm-channel-inbox-support.md` (checklist completion notes)
+- Modify: `docs/archive/plans/2026-02-22-tdeck-dm-channel-inbox-support.md` (checklist completion notes)
 
 **Step 1: Run full relevant tests**
 
@@ -325,7 +325,7 @@ Spot-check:
 **Step 4: Final commit (if checklist/doc updated)**
 
 ```bash
-git add docs/plans/2026-02-22-tdeck-dm-channel-inbox-support.md
+git add docs/archive/plans/2026-02-22-tdeck-dm-channel-inbox-support.md
 git commit -m "chore(plan): mark DM channel inbox implementation verification complete"
 ```
 
@@ -339,7 +339,7 @@ Include:
 
 ---
 
-Plan complete and saved to `docs/plans/2026-02-22-tdeck-dm-channel-inbox-support.md`. Two execution options:
+Plan complete and saved to `docs/archive/plans/2026-02-22-tdeck-dm-channel-inbox-support.md`. Two execution options:
 
 **1. Subagent-Driven (this session)** - I dispatch fresh subagent per task, review between tasks, fast iteration
 

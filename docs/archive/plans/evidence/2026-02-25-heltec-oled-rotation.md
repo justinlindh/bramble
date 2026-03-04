@@ -1,7 +1,7 @@
 # Heltec OLED Rotation — Task 4 Verification Evidence
 
 Date: 2026-02-24 (PST)
-Plan: `docs/plans/2026-02-25-heltec-oled-rotation-implementation-plan.md`
+Plan: `docs/archive/plans/2026-02-25-heltec-oled-rotation-implementation-plan.md`
 
 ## 1) Verification commands and outputs
 

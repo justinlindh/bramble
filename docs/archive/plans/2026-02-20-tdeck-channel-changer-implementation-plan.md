@@ -269,7 +269,7 @@ git -C /home/justin/src/bramble commit -m "feat(chat): route sends and message v
 
 **Files:**
 - Modify: `reports/t-deck-plus-ui-documentation.md` (or source doc in bramble if preferred)
-- Modify: `docs/plans/2026-02-20-tdeck-channel-changer-implementation-plan.md` (checkboxes/results)
+- Modify: `docs/archive/plans/2026-02-20-tdeck-channel-changer-implementation-plan.md` (checkboxes/results)
 
 **Step 1: Flash and smoke test**
 
@@ -309,7 +309,7 @@ Expected: all host tests + firmware build pass.
 **Step 5: Commit**
 
 ```bash
-git -C /home/justin/src/bramble add reports/t-deck-plus-ui-documentation.md docs/plans/2026-02-20-tdeck-channel-changer-implementation-plan.md
+git -C /home/justin/src/bramble add reports/t-deck-plus-ui-documentation.md docs/archive/plans/2026-02-20-tdeck-channel-changer-implementation-plan.md
 git -C /home/justin/src/bramble commit -m "docs: document T-Deck chat target channel changer behavior"
 ```
 

@@ -1,7 +1,7 @@
 # 2026-02-22 Channel E2E Evidence (.21/.64)
 
 ## Scope
-Final evidence for `docs/plans/2026-02-22-channel-e2e-remaining-failures.md` Task 6/7 closure.
+Final evidence for `docs/archive/plans/2026-02-22-channel-e2e-remaining-failures.md` Task 6/7 closure.
 
 ## Final E2E checklist results (web + CLI)
 
@@ -16,7 +16,7 @@ Final evidence for `docs/plans/2026-02-22-channel-e2e-remaining-failures.md` Tas
 
 ## Screenshots
 Stored under:
-`docs/plans/evidence/screenshots/2026-02-22-e2e-final/`
+`docs/archive/plans/evidence/screenshots/2026-02-22-e2e-final/`
 
 - `01-node21-channel-visible.png`
 - `02-node21-channel-messages.png`

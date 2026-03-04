@@ -2595,7 +2595,7 @@ See `scenarios/*.json` for examples. Format:
 
 ## Design
 
-See `docs/plans/2026-02-16-simulator-design.md` for full specification.
+See `docs/archive/plans/2026-02-16-simulator-design.md` for full specification.
 ```
 
 **Commit:** `git add README.md && git commit -m "simulator: add README with quick start guide"`

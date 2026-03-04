@@ -5,7 +5,7 @@ Repo: `/home/justin/src/bramble`
 
 ## Scope
 
-Task 6 validation matrix from `docs/plans/2026-02-24-delivery-event-persistence-implementation-plan.md`:
+Task 6 validation matrix from `docs/archive/plans/2026-02-24-delivery-event-persistence-implementation-plan.md`:
 1. Refresh
 2. Reboot
 3. Reconnect gap

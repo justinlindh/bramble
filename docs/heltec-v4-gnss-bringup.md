@@ -14,29 +14,20 @@ This document is an operator checklist for reproducible V4 firmware bring-up and
 ## 1) Build the Heltec V4 firmware
 
 ```bash
-cd /home/justin/src/bramble
+cd /path/to/bramble
 
-# One-time per shell session (adjust IDF_PATH for your machine)
-export IDF_PATH=~/src/esp-idf
-IDF_VENV=$(ls -d "$HOME/.espressif/python_env"/idf*.4_py*_env 2>/dev/null | sort -V | tail -1 || true)
-if [[ -n "${IDF_VENV:-}" && -x "$IDF_VENV/bin/python3" ]]; then
-  export PATH="$IDF_VENV/bin:$PATH"
-fi
-source "$IDF_PATH/export.sh"
-
-# Clean board config and build using V4 defaults
-rm -f sdkconfig
-idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build
+# Preferred board-aware build wrapper
+bash scripts/flash.sh local heltec-v4 build
 ```
 
 Expected:
 - Build succeeds
-- `sdkconfig` contains `CONFIG_BRAMBLE_BOARD_HELTEC_V4=y`
+- `sdkconfig.heltec-v4` contains `CONFIG_BRAMBLE_BOARD_HELTEC_V4=y`
 
 Quick check:
 
 ```bash
-rg "CONFIG_BRAMBLE_BOARD_HELTEC_V4=y" sdkconfig
+rg "CONFIG_BRAMBLE_BOARD_HELTEC_V4=y" sdkconfig.heltec-v4
 ```
 
 ---
@@ -45,8 +36,8 @@ rg "CONFIG_BRAMBLE_BOARD_HELTEC_V4=y" sdkconfig
 
 ```bash
 # Replace ttyUSB0 with your board port
-idf.py -p /dev/ttyUSB0 flash
-idf.py -p /dev/ttyUSB0 monitor
+bash scripts/flash.sh local heltec-v4 flash /dev/ttyUSB0
+bash scripts/flash.sh local heltec-v4 monitor /dev/ttyUSB0
 ```
 
 Expected boot evidence:

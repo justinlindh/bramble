@@ -14,7 +14,7 @@ Verified complete against repo state + evidence:
 - Firmware/API alignment landed (OpenAPI + RPC canonicalization + monitor/location notifications).
 - Go SDK parity landed (`0.4.0` compatibility + location/monitor decoding updates).
 - CLI parity landed (`location set-config/get-config`, protocol-native monitor topic filters).
-- CLI-only 3-node validation evidence recorded in `docs/plans/evidence/2026-02-23-cli-only-location-validation.md`.
+- CLI-only 3-node validation evidence recorded in `docs/archive/plans/evidence/2026-02-23-cli-only-location-validation.md`.
 
 Key commits present across repos include:
 - bramble: `c331ce3` (merge: location sharing + cli/sdk/openapi alignment), `84cc856`, `a995b2e`, `b35d32e`
@@ -186,7 +186,7 @@ git -C /home/justin/src/bramble-cli commit -m "feat(cli): add protocol-native mo
 ### Task 6: End-to-end CLI-only validation on 3-node hardware
 
 **Files:**
-- Create: `docs/plans/evidence/2026-02-23-cli-only-location-validation.md`
+- Create: `docs/archive/plans/evidence/2026-02-23-cli-only-location-validation.md`
 - Modify: `docs/testing/network-reach-e2e-checklist.md`
 
 **Step 1: Build + deploy firmware and CLI binaries**
@@ -208,7 +208,7 @@ git -C /home/justin/src/bramble-cli commit -m "feat(cli): add protocol-native mo
 
 **Step 5: Commit**
 ```bash
-git add docs/plans/evidence/2026-02-23-cli-only-location-validation.md docs/testing/network-reach-e2e-checklist.md
+git add docs/archive/plans/evidence/2026-02-23-cli-only-location-validation.md docs/testing/network-reach-e2e-checklist.md
 git commit -m "chore(verify): add CLI-only location and monitor validation evidence"
 ```
 

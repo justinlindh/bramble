@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.25, cgo, gorilla/websocket, existing C sim modules, React/TypeScript/Vite (unchanged)
 
-**Design doc:** `docs/plans/2026-02-17-go-simulation-server-design.md`
+**Design doc:** `docs/archive/plans/2026-02-17-go-simulation-server-design.md`
 
 ---
 

@@ -486,7 +486,7 @@ screen /dev/ttyUSB0 115200
 ```bash
 cd ~/src/bramble
 # Save test output to evidence file
-git add docs/plans/evidence/
+git add docs/archive/plans/evidence/
 git commit -m "docs: broadcast delivery reliability validation results"
 ```
 
