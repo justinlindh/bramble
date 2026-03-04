@@ -35,9 +35,21 @@ Local wrapper scripts:
 
 This allows adoption without blocking firmware builds.
 
-### Phase 2.2: CI advisory integration
+### Phase 2.2 (current): CI advisory integration
 
-Run wrappers in CI as non-blocking quality signals and collect trend data.
+Firmware advisory checks are wired via `.gitea/workflows/firmware-quality.yml`.
+
+CI mapping (all advisory / non-blocking):
+
+- `advisory-clang-format` → `bash scripts/lint/run-clang-format-check.sh`
+- `advisory-clang-tidy` (heltec-v3 compile DB) →
+  - `bash scripts/flash.sh local heltec-v3 build`
+  - `bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3`
+- `advisory-shellcheck` → `bash scripts/lint/run-shellcheck.sh`
+- `advisory-markdownlint` → `bash scripts/lint/run-markdownlint.sh`
+- `advisory-actionlint` → `actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/*.yml`
+
+All jobs in this phase use `continue-on-error: true` so results remain visible without blocking merges.
 
 ### Phase 2.3: selective required gates
 
@@ -51,10 +63,11 @@ Widen `clang-tidy` coverage and tighten checks incrementally with suppression st
 
 ```bash
 bash scripts/lint/run-clang-format-check.sh
-bash scripts/lint/run-clang-tidy-advisory.sh
+bash scripts/flash.sh local heltec-v3 build
+bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 bash scripts/lint/run-shellcheck.sh
 bash scripts/lint/run-markdownlint.sh
-bash scripts/flash.sh local heltec-v3 build
+actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/*.yml
 ```
 
 ## Scope and non-goals

@@ -1,0 +1,117 @@
+name: Firmware Quality (Advisory)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.gitea/workflows/firmware-quality.yml'
+      - '.actionlint.yaml'
+      - '.clang-format'
+      - '.clang-tidy'
+      - '.shellcheckrc'
+      - '.markdownlint-cli2.yaml'
+      - 'scripts/lint/**'
+      - 'scripts/*.sh'
+      - 'main/**'
+      - 'components/**'
+      - 'docs/**'
+      - 'README.md'
+  push:
+    branches: [ main ]
+    paths:
+      - '.gitea/workflows/firmware-quality.yml'
+      - '.actionlint.yaml'
+      - '.clang-format'
+      - '.clang-tidy'
+      - '.shellcheckrc'
+      - '.markdownlint-cli2.yaml'
+      - 'scripts/lint/**'
+      - 'scripts/*.sh'
+      - 'main/**'
+      - 'components/**'
+      - 'docs/**'
+      - 'README.md'
+
+concurrency:
+  group: firmware-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  advisory-clang-format:
+    name: Advisory clang-format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: Run clang-format advisory wrapper
+        continue-on-error: true
+        run: bash scripts/lint/run-clang-format-check.sh
+
+  advisory-clang-tidy:
+    name: Advisory clang-tidy (heltec-v3 compile DB)
+    runs-on: self-hosted
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build heltec-v3 via wrapper (compile_commands)
+        continue-on-error: true
+        run: |
+          . /opt/esp/idf/export.sh
+          bash scripts/flash.sh local heltec-v3 build
+      - name: Run clang-tidy advisory wrapper
+        continue-on-error: true
+        run: |
+          . /opt/esp/idf/export.sh
+          bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
+
+  advisory-shellcheck:
+    name: Advisory shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck advisory wrapper
+        continue-on-error: true
+        run: bash scripts/lint/run-shellcheck.sh
+
+  advisory-markdownlint:
+    name: Advisory markdownlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Node.js and markdownlint-cli2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nodejs npm
+          sudo npm install -g markdownlint-cli2
+      - name: Run markdownlint advisory wrapper
+        continue-on-error: true
+        run: bash scripts/lint/run-markdownlint.sh
+
+  advisory-actionlint:
+    name: Advisory actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Run actionlint on workflows
+        continue-on-error: true
+        run: actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/*.yml
