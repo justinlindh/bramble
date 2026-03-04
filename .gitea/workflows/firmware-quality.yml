@@ -89,11 +89,13 @@ jobs:
       - name: Build heltec-v3 via wrapper (compile_commands)
         continue-on-error: true
         run: |
+          # shellcheck disable=SC2317
           source scripts/ci-source-idf.sh
           bash scripts/flash.sh local heltec-v3 build
       - name: Run clang-tidy advisory wrapper
         continue-on-error: true
         run: |
+          # shellcheck disable=SC2317
           source scripts/ci-source-idf.sh
           bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
