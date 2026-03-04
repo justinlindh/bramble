@@ -72,9 +72,9 @@ Expected:
 Use this addendum for the privacy-first location sharing rollout verification.
 
 ### Firmware + host verification (required before hardware)
-- [ ] `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults" build`
-- [ ] `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4" build`
-- [ ] `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tdeck_plus" build`
+- [ ] `bash scripts/flash.sh local heltec-v3 build`
+- [ ] `bash scripts/flash.sh local heltec-v4 build`
+- [ ] `bash scripts/flash.sh local tdeck-plus build`
 - [ ] `bash test/run_all_tests.sh`
 - [ ] `cd webapp && npm test`
 
@@ -100,4 +100,4 @@ Use this addendum for the privacy-first location sharing rollout verification.
 - [x] After `--enabled=false`, receiver `lastUpdatedMs` stops advancing across validation window.
 - [x] `bramble monitor --topic wifi,gps,location --json` emits protocol-native topic events.
 
-Evidence: `docs/plans/evidence/2026-02-23-cli-only-location-validation.md`.
+Evidence: `docs/archive/plans/evidence/2026-02-23-cli-only-location-validation.md`.
