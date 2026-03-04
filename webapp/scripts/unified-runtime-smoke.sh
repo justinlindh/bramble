@@ -15,7 +15,12 @@ if [[ $# -ge 1 ]]; then
   BASE_URL="$1"
 fi
 
+SMOKE_HOST="$(node -e 'const u=new URL(process.argv[1]);process.stdout.write(u.hostname);' "${BASE_URL}")"
+SMOKE_PORT="$(node -e 'const u=new URL(process.argv[1]);process.stdout.write(String(u.port || (u.protocol === "https:" ? 443 : 80)));' "${BASE_URL}")"
+
 SERVER_PID=""
+LAST_HEALTH_HTTP_STATUS=""
+LAST_HEALTH_BODY=""
 
 fail() {
   echo "[smoke] ERROR: $*" >&2
@@ -36,17 +41,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+assert_port_free_for_managed_start() {
+  if [[ "${SMOKE_START_RUNTIME}" != "1" ]]; then
+    return
+  fi
+
+  if node -e 'const net=require("net");const host=process.argv[1];const port=Number(process.argv[2]);const socket=net.createConnection({host,port});socket.setTimeout(1000);socket.on("connect",()=>process.exit(0));socket.on("timeout",()=>process.exit(1));socket.on("error",()=>process.exit(1));' "${SMOKE_HOST}" "${SMOKE_PORT}" >/dev/null 2>&1; then
+    fail "port ${SMOKE_PORT} already accepts TCP connections at ${BASE_URL}; refusing managed start to avoid false-positive smoke pass"
+  fi
+}
+
 start_runtime_if_requested() {
   if [[ "${SMOKE_START_RUNTIME}" != "1" ]]; then
     echo "[smoke] SMOKE_START_RUNTIME=${SMOKE_START_RUNTIME}; expecting runtime to already be running at ${BASE_URL}"
     return
   fi
 
+  assert_port_free_for_managed_start
+
   echo "[smoke] Starting unified runtime"
   rm -f "${SMOKE_SERVER_LOG}" "${SMOKE_SERVER_PID_FILE}"
   (
     cd "${WEBAPP_DIR}"
-    npm run start >"${SMOKE_SERVER_LOG}" 2>&1
+    exec node server/unified-server.mjs >"${SMOKE_SERVER_LOG}" 2>&1
   ) &
   SERVER_PID="$!"
   echo "${SERVER_PID}" > "${SMOKE_SERVER_PID_FILE}"
@@ -68,6 +85,8 @@ wait_for_health() {
     if [[ ${curl_status} -eq 0 ]]; then
       http_status="${response##*__HTTP_STATUS__:}"
       body="${response%$'\n'__HTTP_STATUS__:*}"
+      LAST_HEALTH_HTTP_STATUS="${http_status}"
+      LAST_HEALTH_BODY="${body}"
       if [[ "${http_status}" == "200" ]] && printf '%s' "${body}" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{const j=JSON.parse(d);if(j.ok===true) process.exit(0);process.exit(1);});' 2>/dev/null; then
         echo "[smoke] Runtime healthy"
         return
@@ -77,6 +96,10 @@ wait_for_health() {
     sleep 1
   done
 
+  if [[ -n "${LAST_HEALTH_HTTP_STATUS}" ]]; then
+    echo "[smoke] last health status=${LAST_HEALTH_HTTP_STATUS}" >&2
+    echo "[smoke] last health body=${LAST_HEALTH_BODY}" >&2
+  fi
   fail "runtime did not become healthy within ${SMOKE_MAX_WAIT_SECONDS}s"
 }
 
