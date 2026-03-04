@@ -168,7 +168,7 @@ int keyboard_init(void) {
 
     /* GPIO 46 is the keyboard data-ready line on T-Deck Plus, but it is
      * unreliable as a hardware interrupt (strapping pin behaviour, pull
-     * direction, board-level noise).  Meshtastic likewise leaves it unused.
+     * direction, board-level noise).  Bramble likewise leaves it unused.
      * We use pure I2C polling instead: keyboard_poll() reads one byte every
      * POLL_INTERVAL_US microseconds; the MCU returns 0x00 when idle. */
     ESP_LOGD(TAG, "Keyboard running in polling mode (GPIO%d ISR skipped)",

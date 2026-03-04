@@ -1034,7 +1034,7 @@ void app_main(void)
     /* Pin ui_gfx to CPU0 at priority 2 (below mesh/radio at 5 on CPU1).
      * On shared-SPI boards (T-Deck), running the display task on the same
      * core as mesh at equal priority causes SPI bus contention that wedges
-     * the SX1262.  CPU0 + low priority matches the proven Meshtastic
+     * the SX1262.  CPU0 + low priority matches the proven Bramble
      * architecture: radio always preempts display. */
     TaskHandle_t ui_task_handle = xTaskCreateStaticPinnedToCore(
         ui_graphics_task,

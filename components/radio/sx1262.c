@@ -682,7 +682,7 @@ int sx1262_init(void)
         /* TCXO startup delay: 32ms covers worst-case startup for oscillators
          * used on T-Deck Plus and similar boards (5ms was too short — the SX1262
          * re-enables DIO3 at every TX/RX transition and must wait this long for
-         * the TCXO to stabilize.  Meshtastic / RadioLib use 1600ms in some
+         * the TCXO to stabilize.  Bramble / RadioLib use 1600ms in some
          * configs; 32ms is conservative but not wasteful for 915 MHz LoRa. */
         if (sx1262_set_dio3_as_tcxo(s_board->radio_tcxo_voltage, 32) != 0) return -1;
     } else {

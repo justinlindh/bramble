@@ -68,7 +68,7 @@ int board_init(void) {
         /* CRITICAL: Drive ALL SPI CS pins HIGH before bus init.
          * On shared SPI buses, floating CS pins cause peripherals to
          * receive each other's traffic — corrupting display GRAM, etc.
-         * (Learned from Meshtastic's earlyInitVariant pattern.) */
+         * (Learned from Bramble's earlyInitVariant pattern.) */
         const int cs_pins[] = {
             cfg->radio.cs,
             cfg->spi_display.cs,

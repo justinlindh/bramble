@@ -476,7 +476,7 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf) {
 
     /* On shared SPI buses, hold the bus mutex for the entire flush to prevent
      * radio SPI commands from interleaving between display command sequences.
-     * This matches the proven Meshtastic approach: display and radio take
+     * This matches the proven Bramble approach: display and radio take
      * clean, non-overlapping turns with the SPI bus. */
     if (g_spi_mutex) xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
     
