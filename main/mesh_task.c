@@ -1009,8 +1009,19 @@ static void mesh_process_receipt_tx_event(void) {
             memset(item, 0, sizeof(*item));
         } else {
             uint32_t remaining = airtime_budget_remaining(&s_airtime, AIRTIME_TIER_RECEIPT);
+            uint32_t scale_num = 1u;
+            uint32_t scale_den = 1u;
+            mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
+            if (!(scale_num == 1u && scale_den == 1u)) {
+                uint32_t utilized_pct = ((AIRTIME_BUDGET_RECEIPT_MS - (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) * 100u) / AIRTIME_BUDGET_RECEIPT_MS;
+                ESP_LOGD(TAG,
+                         "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32 "%%)",
+                         scale_num,
+                         scale_den,
+                         utilized_pct);
+            }
             uint32_t raw_backoff_ms = 1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
-            uint32_t backoff_ms = mesh_broadcast_receipt_scale_delay_ms(raw_backoff_ms, remaining);
+            uint32_t backoff_ms = (raw_backoff_ms * scale_num) / scale_den;
             item->due_at_ms = t_now + backoff_ms;
             ESP_LOGW(TAG,
                      "Delivery receipt deferred for pkt=%08" PRIX32 " (attempt=%u/%u): airtime exhausted, retry in %" PRIu32 "ms",
@@ -1050,10 +1061,22 @@ static void mesh_process_receipt_tx_event(void) {
 
     uint8_t i = (uint8_t)(item->attempts_sent - 1u);
     uint32_t remaining = airtime_budget_remaining(&s_airtime, AIRTIME_TIER_RECEIPT);
+    uint32_t scale_num = 1u;
+    uint32_t scale_den = 1u;
+    mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
+    if (!(scale_num == 1u && scale_den == 1u)) {
+        uint32_t utilized_pct = ((AIRTIME_BUDGET_RECEIPT_MS - (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) * 100u) / AIRTIME_BUDGET_RECEIPT_MS;
+        ESP_LOGD(TAG,
+                 "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32 "%%)",
+                 scale_num,
+                 scale_den,
+                 utilized_pct);
+    }
+
     uint32_t raw_base_ms = 500u + ((uint32_t)i * 700u);
     uint32_t raw_jitter_range = 500u + ((uint32_t)i * 400u);
-    uint32_t base_ms = mesh_broadcast_receipt_scale_delay_ms(raw_base_ms, remaining);
-    uint32_t jitter_range = mesh_broadcast_receipt_scale_delay_ms(raw_jitter_range, remaining);
+    uint32_t base_ms = (raw_base_ms * scale_num) / scale_den;
+    uint32_t jitter_range = (raw_jitter_range * scale_num) / scale_den;
     if (jitter_range == 0u) {
         jitter_range = 1u;
     }

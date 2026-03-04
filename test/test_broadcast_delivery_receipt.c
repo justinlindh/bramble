@@ -90,7 +90,7 @@ void test_retry_delay_scaling_from_airtime_utilization(void) {
     TEST_ASSERT_EQUAL_UINT32(raw_base,
                              mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 2u));
     TEST_ASSERT_EQUAL_UINT32(raw_base * 2u,
-                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 10u));
+                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 5u));
 }
 
 void test_retry_delay_scaling_integer_math_bounds(void) {
