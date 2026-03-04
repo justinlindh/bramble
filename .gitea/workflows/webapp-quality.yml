@@ -1,0 +1,143 @@
+name: Webapp Quality
+
+on:
+  pull_request:
+    paths:
+      - 'webapp/**'
+      - '.gitea/workflows/webapp-quality.yml'
+      - '.actionlint.yaml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'webapp/**'
+      - '.gitea/workflows/webapp-quality.yml'
+      - '.actionlint.yaml'
+
+concurrency:
+  group: webapp-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  npm_config_fund: false
+  npm_config_audit: false
+
+jobs:
+  required-lint:
+    name: Required lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run lint
+        run: npm run lint --prefix webapp
+
+  required-typecheck:
+    name: Required typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run typecheck
+        run: npm run typecheck --prefix webapp
+
+  required-unit-tests:
+    name: Required unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run unit tests
+        run: npm run test:unit --prefix webapp
+
+  required-build:
+    name: Required webapp build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Build webapp
+        run: npm run build --prefix webapp
+
+  advisory-e2e-smoke:
+    name: Advisory e2e smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Build webapp for smoke run
+        run: npm run build --prefix webapp
+      - name: Start unified runtime
+        run: |
+          nohup npm run start --prefix webapp > webapp/e2e-smoke-server.log 2>&1 &
+          echo $! > webapp/e2e-smoke-server.pid
+      - name: Wait for runtime health
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8085/api/healthz >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Runtime did not become healthy in time" >&2
+          exit 1
+      - name: Run smoke checks
+        run: npm run test:e2e:smoke --prefix webapp
+      - name: Capture runtime logs on failure
+        if: failure()
+        run: |
+          mkdir -p webapp/e2e-artifacts
+          cp -f webapp/e2e-smoke-server.log webapp/e2e-artifacts/server.log || true
+      - name: Upload smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-e2e-smoke-failure-artifacts
+          if-no-files-found: warn
+          path: |
+            webapp/e2e-artifacts/**
+            webapp/test-results/**
+            webapp/playwright-report/**
+            webapp/e2e-screenshots/**
+      - name: Stop unified runtime
+        if: always()
+        run: |
+          if [ -f webapp/e2e-smoke-server.pid ]; then
+            kill "$(cat webapp/e2e-smoke-server.pid)" >/dev/null 2>&1 || true
+          fi
