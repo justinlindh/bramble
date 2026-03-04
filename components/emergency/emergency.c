@@ -45,6 +45,7 @@ int emergency_activate(emergency_manager_t *mgr, int32_t lat_e7, int32_t lon_e7,
 
     mgr->state = EMERGENCY_STATE_ACTIVE;
     mgr->activated_at_ms = now_ms;
+    mgr->cooldown_start_ms = 0;
     mgr->last_beacon_ms = 0;  /* send immediately */
     mgr->last_activation_ms = now_ms;
 
@@ -71,7 +72,7 @@ int emergency_cancel(emergency_manager_t *mgr, uint32_t now_ms) {
         return -1;
     }
     mgr->state = EMERGENCY_STATE_COOLDOWN;
-    mgr->activated_at_ms = now_ms;  /* reuse as cooldown start */
+    mgr->cooldown_start_ms = now_ms;
     return 0;
 }
 
@@ -86,7 +87,7 @@ void emergency_tick(emergency_manager_t *mgr, uint32_t now_ms) {
             mgr->state = EMERGENCY_STATE_INACTIVE;
         }
     } else if (mgr->state == EMERGENCY_STATE_COOLDOWN) {
-        if ((now_ms - mgr->activated_at_ms) >= EMERGENCY_COOLDOWN_MS) {
+        if ((now_ms - mgr->cooldown_start_ms) >= EMERGENCY_COOLDOWN_MS) {
             mgr->state = EMERGENCY_STATE_INACTIVE;
         }
     }
@@ -183,9 +184,27 @@ int emergency_record_received(emergency_manager_t *mgr, const emergency_beacon_t
         }
     }
 
-    if (mgr->known_count >= 8) return -1;  /* table full */
+    int idx = -1;
 
-    int idx = mgr->known_count++;
+    if (mgr->known_count >= 8) {
+        /* Prefer evicting oldest inactive slot before dropping new emergency */
+        uint32_t oldest_received = 0;
+        for (int i = 0; i < mgr->known_count; i++) {
+            if (!mgr->known_emergencies[i].active) {
+                if (idx < 0 || mgr->known_emergencies[i].received_ms < oldest_received) {
+                    idx = i;
+                    oldest_received = mgr->known_emergencies[i].received_ms;
+                }
+            }
+        }
+
+        if (idx < 0) {
+            return -1;  /* table full with only active entries */
+        }
+    } else {
+        idx = mgr->known_count++;
+    }
+
     mgr->known_emergencies[idx].src_addr = beacon->src_addr;
     mgr->known_emergencies[idx].received_ms = now_ms;
     mgr->known_emergencies[idx].beacon = *beacon;
