@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -u
 
+strict=0
+if [[ "${1:-}" == "--strict" ]]; then
+  strict=1
+fi
+
 if ! command -v clang-format >/dev/null 2>&1; then
+  if (( strict )); then
+    echo "[clang-format] FAIL: clang-format not found. Install clang-format to run strict check."
+    exit 1
+  fi
   echo "[clang-format] SKIP: clang-format not found. Install clang-format to enable this advisory check."
   exit 0
 fi
@@ -21,6 +30,11 @@ tmp_out="$(mktemp)"
 trap 'rm -f "$tmp_out"' EXIT
 
 if ! clang-format --dry-run --Werror "${files[@]}" >"$tmp_out" 2>&1; then
+  if (( strict )); then
+    echo "[clang-format] FAIL: formatting differences detected (showing up to 200 lines)."
+    sed -n '1,200p' "$tmp_out"
+    exit 1
+  fi
   echo "[clang-format] ADVISORY: formatting differences detected (showing up to 200 lines)."
   sed -n '1,200p' "$tmp_out"
   echo "[clang-format] Note: advisory mode, returning success."

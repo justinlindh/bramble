@@ -1,4 +1,4 @@
-name: Firmware Quality (Advisory)
+name: Firmware Quality (Phase 2.3)
 
 on:
   workflow_dispatch:
@@ -37,20 +37,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  advisory-clang-format:
-    name: Advisory clang-format
+  required-clang-format:
+    name: Required clang-format
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install clang-format
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format
-      - name: Run clang-format advisory wrapper
-        continue-on-error: true
-        run: bash scripts/lint/run-clang-format-check.sh
+      - name: Run clang-format strict wrapper
+        run: bash scripts/lint/run-clang-format-check.sh --strict
+
+  required-shellcheck:
+    name: Required shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck strict wrapper
+        run: bash scripts/lint/run-shellcheck.sh --strict
+
+  required-actionlint:
+    name: Required actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Run actionlint on firmware-quality workflow
+        run: actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
 
   advisory-clang-tidy:
     name: Advisory clang-tidy (heltec-v3 compile DB)
@@ -70,21 +94,6 @@ jobs:
           . /opt/esp/idf/export.sh
           bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
-  advisory-shellcheck:
-    name: Advisory shellcheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-      - name: Run shellcheck advisory wrapper
-        continue-on-error: true
-        run: bash scripts/lint/run-shellcheck.sh
-
   advisory-markdownlint:
     name: Advisory markdownlint
     runs-on: ubuntu-latest
@@ -100,18 +109,3 @@ jobs:
       - name: Run markdownlint advisory wrapper
         continue-on-error: true
         run: bash scripts/lint/run-markdownlint.sh
-
-  advisory-actionlint:
-    name: Advisory actionlint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install actionlint
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
-          sudo mv ./actionlint /usr/local/bin/actionlint
-      - name: Run actionlint on workflows
-        continue-on-error: true
-        run: actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/*.yml

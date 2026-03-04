@@ -124,7 +124,7 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 ## CI/CD
 
 - [.gitea/workflows/webapp-build-publish.yml](.gitea/workflows/webapp-build-publish.yml) builds/tests/publishes the web client image.
-- [.gitea/workflows/firmware-quality.yml](.gitea/workflows/firmware-quality.yml) runs advisory firmware quality checks (non-blocking in Phase 2.2).
+- [.gitea/workflows/firmware-quality.yml](.gitea/workflows/firmware-quality.yml) runs firmware quality gates (Phase 2.3): required clang-format/shellcheck/actionlint plus advisory clang-tidy/markdownlint.
 - Additional workflow definitions live in [.gitea/workflows](.gitea/workflows).
 
 ## Status
