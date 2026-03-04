@@ -143,55 +143,32 @@ jobs:
       - name: Build heltec-v3 via wrapper
         run: |
           bash scripts/flash.sh local heltec-v3 build
-      - name: Package compile DB artifact for advisory clang-tidy
-        run: |
-          if [ ! -f build-heltec-v3/compile_commands.json ]; then
-            echo "[compile-db] compile_commands.json missing; skipping artifact pack"
-            exit 0
-          fi
-          tar -czf heltec-v3-compile-db.tgz \
-            build-heltec-v3/compile_commands.json \
-            build-heltec-v3/config
-      - name: Upload compile DB artifact
-        if: ${{ hashFiles('heltec-v3-compile-db.tgz') != '' }}
-        uses: actions/upload-artifact@v3
-        with:
-          name: heltec-v3-compile-db
-          path: heltec-v3-compile-db.tgz
-          if-no-files-found: ignore
-          retention-days: 1
 
   advisory-clang-tidy:
     name: Advisory clang-tidy (heltec-v3 compile DB)
     if: github.event_name != 'pull_request'
     runs-on: idf-node
-    timeout-minutes: 30
+    timeout-minutes: 20
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
-      - name: Download compile DB artifact from board build
-        uses: actions/download-artifact@v3
-        with:
-          name: heltec-v3-compile-db
-          path: .
-      - name: Unpack compile DB artifact
+      - name: Generate heltec-v3 compile DB (reconfigure only)
         run: |
-          if [ ! -f heltec-v3-compile-db.tgz ]; then
-            echo "[clang-tidy] compile DB artifact missing; skipping advisory run"
-            exit 0
-          fi
-          tar -xzf heltec-v3-compile-db.tgz
+          source "$IDF_PATH/export.sh"
+          idf.py -B build-heltec-v3 \
+            -D SDKCONFIG=sdkconfig.heltec-v3 \
+            -D SDKCONFIG_DEFAULTS=sdkconfig.defaults \
+            reconfigure
       - name: clang-tidy (advisory sample)
         run: |
           if [ ! -f build-heltec-v3/compile_commands.json ]; then
             echo "[clang-tidy] compile_commands.json missing; skipping advisory run"
             exit 0
           fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            files=$(git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}...HEAD" | grep -E '^(main|components)/.*\\.c$' | head -n 12 || true)
-          else
+          files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '^(main|components)/.*\.c$' | head -n 12 || true)
+          if [ -z "$files" ]; then
             files=$(git ls-files 'main/*.c' 'components/**/*.c' | head -n 12)
           fi
           if [ -z "$files" ]; then
