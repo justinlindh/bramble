@@ -40,6 +40,9 @@ jobs:
           fi
           echo "Resolved: channel=$(grep channel "$GITHUB_OUTPUT" | tail -1) version=$(grep version "$GITHUB_OUTPUT" | tail -1)"
 
+      - name: Ensure ESP-IDF toolchain
+        run: bash scripts/ci-ensure-idf.sh
+
       - name: Build firmware artifacts
         env:
           BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}

@@ -9,7 +9,6 @@ _ci_source_idf_finish() {
   exit "$code"
 }
 
-# If idf.py is already on PATH, no explicit export script is required.
 if command -v idf.py >/dev/null 2>&1; then
   echo "[ci-idf] idf.py already available on PATH"
   _ci_source_idf_finish 0
@@ -25,6 +24,7 @@ candidates+=(
   "/opt/esp/idf/export.sh"
   "/opt/esp-idf/export.sh"
   "$HOME/src/esp-idf/export.sh"
+  "$HOME/esp-idf/export.sh"
   "$HOME/esp/esp-idf/export.sh"
   "/usr/local/esp-idf/export.sh"
 )

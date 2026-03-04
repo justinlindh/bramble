@@ -83,6 +83,9 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure ESP-IDF toolchain
+        continue-on-error: true
+        run: bash scripts/ci-ensure-idf.sh
       - name: Build heltec-v3 via wrapper (compile_commands)
         continue-on-error: true
         run: |
