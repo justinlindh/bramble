@@ -10,7 +10,7 @@ This document defines the firmware lint/static-analysis rollout for Bramble in l
 
 ## Phase map
 
-### Phase 2.1 (this step): baseline + local wrappers (advisory)
+### Phase 2.1: baseline + local wrappers (advisory)
 
 Added baseline config and local commands:
 
@@ -18,7 +18,7 @@ Added baseline config and local commands:
 - `.clang-tidy` — low-noise C/C++ checks, no warnings-as-errors
 - `.shellcheckrc` — shell lint baseline
 - `.markdownlint-cli2.yaml` — docs lint baseline
-- `.actionlint.yaml` — workflow lint baseline (already present)
+- `.actionlint.yaml` — workflow lint baseline
 
 Local wrapper scripts:
 
@@ -27,33 +27,26 @@ Local wrapper scripts:
 - `scripts/lint/run-shellcheck.sh`
 - `scripts/lint/run-markdownlint.sh`
 
-**Behavior:** wrappers are advisory-first and deterministic:
+### Phase 2.2: CI advisory integration
 
-- Tool missing => clear `SKIP` message and success exit.
-- Findings => bounded output excerpt and success exit.
-- Clean run => `PASS` message and success exit.
+Firmware advisory checks were wired via `.gitea/workflows/firmware-quality.yml`.
 
-This allows adoption without blocking firmware builds.
+Jobs were non-blocking (`continue-on-error: true`) so results stayed visible without merge friction.
 
-### Phase 2.2 (current): CI advisory integration
+### Phase 2.3 (current): selective required gates
 
-Firmware advisory checks are wired via `.gitea/workflows/firmware-quality.yml`.
+Promoted to **required/blocking** in CI:
 
-CI mapping (all advisory / non-blocking):
+- `required-clang-format` → `bash scripts/lint/run-clang-format-check.sh --strict`
+- `required-shellcheck` → `bash scripts/lint/run-shellcheck.sh --strict`
+- `required-actionlint` → `actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml`
 
-- `advisory-clang-format` → `bash scripts/lint/run-clang-format-check.sh`
-- `advisory-clang-tidy` (heltec-v3 compile DB) →
-  - `bash scripts/flash.sh local heltec-v3 build`
-  - `bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3`
-- `advisory-shellcheck` → `bash scripts/lint/run-shellcheck.sh`
-- `advisory-markdownlint` → `bash scripts/lint/run-markdownlint.sh`
-- `advisory-actionlint` → `actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/*.yml`
+Held as **advisory/non-blocking** until noise is reduced:
 
-All jobs in this phase use `continue-on-error: true` so results remain visible without blocking merges.
+- `advisory-clang-tidy` (heltec-v3 compile DB)
+- `advisory-markdownlint`
 
-### Phase 2.3: selective required gates
-
-Promote proven low-noise checks (for example shellcheck, actionlint, formatting on changed files) to blocking status.
+Rationale: clang-format/shellcheck/actionlint are stable and reproducible locally with low false-positive rate; broad clang-tidy remains noisy and should not block firmware delivery yet.
 
 ### Phase 2.4: expanded static analysis
 
@@ -62,15 +55,31 @@ Widen `clang-tidy` coverage and tighten checks incrementally with suppression st
 ## Local verification commands
 
 ```bash
+# Required checks (strict / blocking behavior)
+bash scripts/lint/run-clang-format-check.sh --strict
+bash scripts/lint/run-shellcheck.sh --strict
+actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
+
+# Advisory checks (non-blocking behavior)
 bash scripts/lint/run-clang-format-check.sh
-bash scripts/flash.sh local heltec-v3 build
-bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 bash scripts/lint/run-shellcheck.sh
 bash scripts/lint/run-markdownlint.sh
-actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/*.yml
+bash scripts/flash.sh local heltec-v3 build
+bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 ```
+
+## Rollback levers (temporary de-escalation)
+
+If a required check becomes noisy or breaks developer throughput unexpectedly, temporarily de-escalate while remediation happens:
+
+1. In `.gitea/workflows/firmware-quality.yml`, move the check from `required-*` to `advisory-*` naming for clarity.
+2. Add `continue-on-error: true` to the affected job.
+3. For wrapper-based checks, remove `--strict` so wrappers return advisory success with findings.
+4. Document the reason and owner in the PR, plus a date to re-promote.
+
+Rollback is a short-term safety valve, not a permanent bypass.
 
 ## Scope and non-goals
 
 - This phase does **not** change firmware runtime behavior.
-- This phase does **not** enforce new blocking gates yet.
+- This phase does **not** promote broad clang-tidy/cppcheck to required gates yet.
