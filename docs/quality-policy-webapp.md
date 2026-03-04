@@ -20,12 +20,11 @@ These jobs must pass on PRs:
 - `required-typecheck` → `npm run typecheck --prefix webapp`
 - `required-unit-tests` → `npm run test:unit --prefix webapp`
 - `required-build` → `npm run build --prefix webapp`
+- `required-e2e-smoke` → `npm run test:e2e:smoke --prefix webapp` (script handles startup, bounded health wait, endpoint assertions, and fail-fast diagnostics)
 
 ### Advisory (non-blocking)
 
-These jobs report signal but do not block merge:
-
-- `advisory-e2e-smoke` (`continue-on-error: true`) → `npm run test:e2e:smoke --prefix webapp` after starting the local runtime and waiting for health.
+No advisory lanes are currently configured in this workflow.
 
 ## Local parity commands (match CI)
 
@@ -39,15 +38,17 @@ npm run test:unit --prefix webapp
 npm run build --prefix webapp
 ```
 
-Advisory smoke parity:
+Required e2e smoke parity:
 
 ```bash
 npm ci --prefix webapp
 npm run build --prefix webapp
-npm run start --prefix webapp
-# in a second shell after health is up:
 npm run test:e2e:smoke --prefix webapp
 ```
+
+Notes:
+- `test:e2e:smoke` starts/stops the unified runtime by default.
+- Set `SMOKE_START_RUNTIME=0` only when intentionally testing an already-running runtime.
 
 ## Rollback levers (required -> advisory, temporary)
 
