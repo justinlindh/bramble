@@ -118,17 +118,13 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Ensure ESP-IDF toolchain
+      - name: Ensure ESP-IDF toolchain and persist env
         continue-on-error: true
-        run: bash scripts/ci-ensure-idf.sh
+        run: bash scripts/ci-ensure-idf.sh --github-env
       - name: Build heltec-v3 via wrapper (compile_commands)
         continue-on-error: true
-        run: |
-          if [ -f "$HOME/esp-idf/export.sh" ]; then . "$HOME/esp-idf/export.sh"; fi
-          bash scripts/flash.sh local heltec-v3 build
+        run: bash scripts/flash.sh local heltec-v3 build
       - name: Run clang-tidy advisory wrapper
         continue-on-error: true
-        run: |
-          if [ -f "$HOME/esp-idf/export.sh" ]; then . "$HOME/esp-idf/export.sh"; fi
-          bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
+        run: bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
