@@ -20,7 +20,7 @@ These jobs must pass on PRs:
 - `required-typecheck` → `npm run typecheck --prefix webapp`
 - `required-unit-tests` → `npm run test:unit --prefix webapp`
 - `required-build` → `npm run build --prefix webapp`
-- `required-e2e-smoke` → `npm run test:e2e:smoke --prefix webapp` (script handles startup, bounded health wait, endpoint assertions, and fail-fast diagnostics)
+- `required-e2e-smoke` → `npm run test:e2e:smoke --prefix webapp` (script handles startup, bounded health wait, endpoint assertions, and fail-fast diagnostics; CI sets `SMOKE_MAX_WAIT_SECONDS=90` for deterministic startup budget)
 
 ### Advisory (non-blocking)
 
