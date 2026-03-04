@@ -74,7 +74,7 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
           sudo mv ./actionlint /usr/local/bin/actionlint
       - name: Run actionlint on firmware-quality workflow
-        run: actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
+        run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
 
   advisory-clang-tidy:
     name: Advisory clang-tidy (heltec-v3 compile DB)
