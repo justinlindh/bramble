@@ -154,7 +154,7 @@ jobs:
             build-heltec-v3/config
       - name: Upload compile DB artifact
         if: ${{ hashFiles('heltec-v3-compile-db.tgz') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: heltec-v3-compile-db
           path: heltec-v3-compile-db.tgz
@@ -172,7 +172,7 @@ jobs:
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
       - name: Download compile DB artifact from board build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           name: heltec-v3-compile-db
           path: .
