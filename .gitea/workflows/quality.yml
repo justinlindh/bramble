@@ -140,7 +140,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build heltec-v3 via wrapper
         run: |
-          . /opt/esp/idf/export.sh
+          source scripts/ci-source-idf.sh
           bash scripts/flash.sh local heltec-v3 build
 
   advisory-clang-tidy:
@@ -153,11 +153,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build heltec-v3 via wrapper (generate compile DB)
         run: |
-          . /opt/esp/idf/export.sh
+          source scripts/ci-source-idf.sh
           bash scripts/flash.sh local heltec-v3 build
       - name: clang-tidy (advisory sample)
         run: |
-          . /opt/esp/idf/export.sh
+          source scripts/ci-source-idf.sh
           if [ ! -f build-heltec-v3/compile_commands.json ]; then
             echo "[clang-tidy] compile_commands.json missing; skipping advisory run"
             exit 0
