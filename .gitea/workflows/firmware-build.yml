@@ -18,7 +18,7 @@ on:
 
 jobs:
   firmware-build:
-    runs-on: idf-node
+    runs-on: linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -103,7 +103,7 @@ jobs:
           echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4"
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: firmware-build-artifacts
           path: |

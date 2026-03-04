@@ -39,7 +39,7 @@ concurrency:
 jobs:
   required-clang-format:
     name: Required clang-format
-    runs-on: ubuntu-latest
+    runs-on: linux
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
 
   required-shellcheck:
     name: Required shellcheck
-    runs-on: ubuntu-latest
+    runs-on: linux
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
 
   required-actionlint:
     name: Required actionlint
-    runs-on: ubuntu-latest
+    runs-on: linux
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +78,7 @@ jobs:
 
   advisory-clang-tidy:
     name: Advisory clang-tidy (heltec-v3 compile DB)
-    runs-on: self-hosted
+    runs-on: linux
     timeout-minutes: 45
     continue-on-error: true
     steps:
@@ -96,7 +96,7 @@ jobs:
 
   advisory-markdownlint:
     name: Advisory markdownlint
-    runs-on: ubuntu-latest
+    runs-on: linux
     timeout-minutes: 10
     continue-on-error: true
     steps:

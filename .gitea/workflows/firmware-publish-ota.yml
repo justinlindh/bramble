@@ -5,7 +5,7 @@ on:
 
 jobs:
   publish-ota-legacy-disabled:
-    if: ${{ false }}
+    if: ${{ vars.ENABLE_LEGACY_OTA == 'true' }}
     runs-on: linux
     steps:
       - name: Legacy path disabled
