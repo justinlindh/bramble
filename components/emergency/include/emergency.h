@@ -45,6 +45,7 @@ typedef struct {
 typedef struct {
     uint8_t state;
     uint32_t activated_at_ms;
+    uint32_t cooldown_start_ms;
     uint32_t last_beacon_ms;
     uint32_t last_activation_ms;  /* for rate limiting */
     emergency_beacon_t beacon;

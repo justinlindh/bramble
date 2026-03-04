@@ -62,6 +62,9 @@ static void test_emergency_cooldown(void) {
     emergency_cancel(&mgr, 5000);
     assert(mgr.state == EMERGENCY_STATE_COOLDOWN);
 
+    /* activated_at_ms remains original activation timestamp */
+    assert(mgr.activated_at_ms == 1000);
+
     /* Before cooldown expires */
     emergency_tick(&mgr, 5000 + EMERGENCY_COOLDOWN_MS - 1);
     assert(mgr.state == EMERGENCY_STATE_COOLDOWN);
@@ -192,6 +195,34 @@ static void test_emergency_cancel_received(void) {
     assert(rc == -1);
 }
 
+static void test_emergency_received_eviction_prefers_oldest_inactive(void) {
+    emergency_manager_t mgr;
+    emergency_init(&mgr);
+
+    for (uint32_t i = 0; i < 8; i++) {
+        emergency_beacon_t b = {.src_addr = 100 + i};
+        assert(emergency_record_received(&mgr, &b, 1000 + i) == 0);
+    }
+
+    /* Mark two entries inactive; oldest inactive is src_addr=101 (received at 1001) */
+    assert(emergency_record_cancel(&mgr, 101) == 0);
+    assert(emergency_record_cancel(&mgr, 106) == 0);
+
+    emergency_beacon_t incoming = {.src_addr = 999};
+    assert(emergency_record_received(&mgr, &incoming, 5000) == 0);
+
+    /* New entry should be present and replaced slot should be the oldest inactive one */
+    bool found_new = false;
+    bool found_oldest_inactive = false;
+    for (int i = 0; i < mgr.known_count; i++) {
+        if (mgr.known_emergencies[i].src_addr == 999) found_new = true;
+        if (mgr.known_emergencies[i].src_addr == 101) found_oldest_inactive = true;
+    }
+    assert(found_new);
+    assert(!found_oldest_inactive);
+    assert(mgr.known_count == 8);
+}
+
 int main(void) {
     printf("Emergency beacon tests:\n");
 
@@ -203,6 +234,7 @@ int main(void) {
     TEST(test_emergency_should_beacon);
     TEST(test_emergency_track_received);
     TEST(test_emergency_cancel_received);
+    TEST(test_emergency_received_eviction_prefers_oldest_inactive);
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
