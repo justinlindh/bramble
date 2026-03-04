@@ -64,6 +64,6 @@ All added/moved nodes are full protocol participants (beaconing, routing, forwar
 
 ## Design Docs
 
-- Architecture: `docs/plans/2026-02-16-simulator-design.md`
-- Go server design: `docs/plans/2026-02-17-go-simulation-server-design.md`
+- Architecture: `docs/archive/plans/2026-02-16-simulator-design.md`
+- Go server design: `docs/archive/plans/2026-02-17-go-simulation-server-design.md`
 - Anomaly detection: `docs/bramble-anomaly-detection.md`

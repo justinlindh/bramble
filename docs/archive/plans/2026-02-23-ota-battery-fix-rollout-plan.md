@@ -150,7 +150,7 @@ git commit -m "docs: add OTA rollout guide for WiFi nodes"
 
 **Files:**
 - Use existing fix in: `/home/justin/src/bramble/components/battery/battery.c`
-- Validation notes: `/home/justin/src/bramble/docs/plans/evidence/2026-02-23-heltec-v4-ota-battery-fix-evidence.md`
+- Validation notes: `/home/justin/src/bramble/docs/archive/plans/evidence/2026-02-23-heltec-v4-ota-battery-fix-evidence.md`
 
 **Step 1: Write failing validation condition**
 
@@ -202,7 +202,7 @@ Expected:
 
 ```bash
 cd /home/justin/src/bramble
-git add docs/plans/evidence/2026-02-23-heltec-v4-ota-battery-fix-evidence.md
+git add docs/archive/plans/evidence/2026-02-23-heltec-v4-ota-battery-fix-evidence.md
 git commit -m "chore: capture OTA rollout evidence for heltec-v4 battery fix"
 ```
 

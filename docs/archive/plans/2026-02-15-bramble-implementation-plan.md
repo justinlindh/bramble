@@ -14,7 +14,7 @@
 
 > **2026-02-24 hygiene note:** Treat this as a historical mega-plan (`archived-mixed`).
 > Some sections below still contain unresolved `❌ TODO` markers while many phases are complete.
-> Use current dated plans + `docs/plans/STATUS.md` as the active source of truth.
+> Use current dated plans + `docs/archive/plans/STATUS.md` as the active source of truth.
 
 > **Legend:** ✅ Complete · ⚠️ HARDWARE REQUIRED · ❌ Not Started · 🚧 In Progress
 

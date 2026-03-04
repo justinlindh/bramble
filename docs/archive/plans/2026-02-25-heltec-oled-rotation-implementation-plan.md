@@ -109,7 +109,7 @@ Expected: both pass.
 ### Task 4: Final verification + evidence notes
 
 **Files:**
-- Modify/Create: `docs/plans/evidence/2026-02-25-heltec-oled-rotation.md`
+- Modify/Create: `docs/archive/plans/evidence/2026-02-25-heltec-oled-rotation.md`
 
 **Step 1: Record verification evidence**
 - Document exact commands run and outputs (build + tests).

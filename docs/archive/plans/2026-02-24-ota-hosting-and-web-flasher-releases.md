@@ -11,7 +11,7 @@
 ## Status (2026-02-24)
 - ✅ Completed through **Task 6**.
 - Task 5/6 were finalized using the focused implementation plan:
-  - `docs/plans/2026-02-24-ota-publish-endpoint-and-ci-upload.md`
+  - `docs/archive/plans/2026-02-24-ota-publish-endpoint-and-ci-upload.md`
 - Effective outcomes now in place:
   - Endpoint-driven CI publish (`POST /ota/publish`) is the source of truth.
   - Deterministic OTA index updates and release verification in workflow.

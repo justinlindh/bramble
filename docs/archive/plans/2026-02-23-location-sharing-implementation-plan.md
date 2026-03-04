@@ -243,7 +243,7 @@ git commit -m "refactor(location): route shareLocationOnce through location pack
 ### Task 9: Verification matrix + hardware acceptance
 
 **Files:**
-- Create: `docs/plans/evidence/2026-02-23-location-sharing-evidence.md`
+- Create: `docs/archive/plans/evidence/2026-02-23-location-sharing-evidence.md`
 - Modify: `docs/testing/network-reach-e2e-checklist.md`
 
 **Step 1: Build matrix (use canonical Bramble ESP-IDF env pathing)**
@@ -277,7 +277,7 @@ cd webapp && npm test
 
 **Step 4: Commit**
 ```bash
-git add docs/plans/evidence/2026-02-23-location-sharing-evidence.md docs/testing/network-reach-e2e-checklist.md
+git add docs/archive/plans/evidence/2026-02-23-location-sharing-evidence.md docs/testing/network-reach-e2e-checklist.md
 git commit -m "chore(verify): add location sharing verification evidence and checklist"
 ```
 

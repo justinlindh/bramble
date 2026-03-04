@@ -14,7 +14,7 @@
 
 **Files:**
 - Create: `docs/adaptive-airtime-policy.md`
-- Modify: `docs/plans/2026-02-22-adaptive-airtime-and-simulator-scaling.md`
+- Modify: `docs/archive/plans/2026-02-22-adaptive-airtime-and-simulator-scaling.md`
 
 **Step 1: Write failing acceptance checks in plan notes**
 - Define expected mode transitions:
@@ -35,7 +35,7 @@ Expected: non-empty output
 
 **Step 5: Commit**
 ```bash
-git add docs/adaptive-airtime-policy.md docs/plans/2026-02-22-adaptive-airtime-and-simulator-scaling.md
+git add docs/adaptive-airtime-policy.md docs/archive/plans/2026-02-22-adaptive-airtime-and-simulator-scaling.md
 git commit -m "docs: define adaptive airtime policy and acceptance criteria"
 ```
 
