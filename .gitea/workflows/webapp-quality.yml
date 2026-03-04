@@ -103,6 +103,9 @@ jobs:
       - name: Build webapp for smoke run
         run: npm run build --prefix webapp
       - name: Run smoke checks (includes startup + health wait)
+        env:
+          SMOKE_MAX_WAIT_SECONDS: '90'
+          SMOKE_START_RUNTIME: '1'
         run: npm run test:e2e:smoke --prefix webapp
       - name: Capture runtime logs on failure
         if: failure()
