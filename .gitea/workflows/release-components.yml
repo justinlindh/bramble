@@ -28,6 +28,7 @@ jobs:
             semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release (protocol)
@@ -58,6 +59,7 @@ jobs:
             semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release (webapp)
@@ -91,6 +93,7 @@ jobs:
             semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release (firmware)
