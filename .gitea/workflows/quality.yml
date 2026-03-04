@@ -105,7 +105,11 @@ jobs:
             git fetch origin "${{ github.base_ref }}"
             files=$(git diff --name-only --diff-filter=ACMR "$base_ref...HEAD" | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
           else
-            files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+            else
+              files=$(git ls-files | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+            fi
           fi
 
           if [ -z "$files" ]; then
@@ -115,18 +119,17 @@ jobs:
 
           echo "$files" | xargs clang-format --dry-run --Werror
 
-  advisory-cppcheck:
-    name: Advisory cppcheck
+  cppcheck:
+    name: cppcheck
     runs-on: linux
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install cppcheck
         run: |
           sudo apt-get update
           sudo apt-get install -y cppcheck
-      - name: cppcheck (advisory)
+      - name: cppcheck
         run: |
           cppcheck --enable=warning,performance,portability --std=c11 --quiet \
             main components
@@ -144,12 +147,11 @@ jobs:
         run: |
           bash scripts/flash.sh local heltec-v3 build
 
-  advisory-clang-tidy:
-    name: Advisory clang-tidy (heltec-v3 compile DB)
+  clang-tidy-sample:
+    name: clang-tidy (heltec-v3 sample)
     if: github.event_name != 'pull_request'
     runs-on: idf-node
     timeout-minutes: 20
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Ensure ESP-IDF toolchain
@@ -161,18 +163,37 @@ jobs:
             -D SDKCONFIG=sdkconfig.heltec-v3 \
             -D SDKCONFIG_DEFAULTS=sdkconfig.defaults \
             reconfigure
-      - name: clang-tidy (advisory sample)
+      - name: Ensure clang-tidy
+        run: |
+          if ! command -v clang-tidy >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y clang-tidy
+          fi
+          clang-tidy --version
+      - name: clang-tidy (sample)
         run: |
           if [ ! -f build-heltec-v3/compile_commands.json ]; then
-            echo "[clang-tidy] compile_commands.json missing; skipping advisory run"
-            exit 0
+            echo "[clang-tidy] compile_commands.json missing"
+            exit 1
           fi
-          files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '^(main|components)/.*\.c$' | head -n 12 || true)
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch origin "${{ github.base_ref }}"
+            files=$(git diff --name-only --diff-filter=ACMR "$base_ref...HEAD" | grep -E '^(main|components)/.*\.c$' | head -n 12 || true)
+          else
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '^(main|components)/.*\.c$' | head -n 12 || true)
+            else
+              files=""
+            fi
+          fi
+
           if [ -z "$files" ]; then
             files=$(git ls-files 'main/*.c' 'components/**/*.c' | head -n 12)
           fi
           if [ -z "$files" ]; then
-            echo "[clang-tidy] no C files found in advisory sample scope"
+            echo "[clang-tidy] no C files found in sample scope"
             exit 0
           fi
-          echo "$files" | xargs clang-tidy -p build-heltec-v3 || true
+          echo "$files" | xargs -r clang-tidy -p build-heltec-v3
