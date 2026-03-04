@@ -140,7 +140,7 @@ jobs:
           scripts/ci-register-gitea-release.sh
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: firmware-build-artifacts
           path: |
