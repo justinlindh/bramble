@@ -143,27 +143,57 @@ jobs:
       - name: Build heltec-v3 via wrapper
         run: |
           bash scripts/flash.sh local heltec-v3 build
+      - name: Package compile DB artifact for advisory clang-tidy
+        run: |
+          if [ ! -f build-heltec-v3/compile_commands.json ]; then
+            echo "[compile-db] compile_commands.json missing; skipping artifact pack"
+            exit 0
+          fi
+          tar -czf heltec-v3-compile-db.tgz \
+            build-heltec-v3/compile_commands.json \
+            build-heltec-v3/config
+      - name: Upload compile DB artifact
+        if: ${{ hashFiles('heltec-v3-compile-db.tgz') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: heltec-v3-compile-db
+          path: heltec-v3-compile-db.tgz
+          if-no-files-found: ignore
+          retention-days: 1
 
   advisory-clang-tidy:
     name: Advisory clang-tidy (heltec-v3 compile DB)
     if: github.event_name != 'pull_request'
     runs-on: idf-node
-    timeout-minutes: 45
+    timeout-minutes: 30
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
-      - name: Build heltec-v3 via wrapper (generate compile DB)
+      - name: Download compile DB artifact from board build
+        uses: actions/download-artifact@v4
+        with:
+          name: heltec-v3-compile-db
+          path: .
+      - name: Unpack compile DB artifact
         run: |
-          bash scripts/flash.sh local heltec-v3 build
+          if [ ! -f heltec-v3-compile-db.tgz ]; then
+            echo "[clang-tidy] compile DB artifact missing; skipping advisory run"
+            exit 0
+          fi
+          tar -xzf heltec-v3-compile-db.tgz
       - name: clang-tidy (advisory sample)
         run: |
           if [ ! -f build-heltec-v3/compile_commands.json ]; then
             echo "[clang-tidy] compile_commands.json missing; skipping advisory run"
             exit 0
           fi
-          files=$(git ls-files 'main/*.c' 'components/**/*.c' | head -n 25)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            files=$(git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}...HEAD" | grep -E '^(main|components)/.*\\.c$' | head -n 12 || true)
+          else
+            files=$(git ls-files 'main/*.c' 'components/**/*.c' | head -n 12)
+          fi
           if [ -z "$files" ]; then
             echo "[clang-tidy] no C files found in advisory sample scope"
             exit 0
