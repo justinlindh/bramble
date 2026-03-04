@@ -78,7 +78,7 @@ jobs:
 
   advisory-clang-tidy:
     name: Advisory clang-tidy (heltec-v3 compile DB)
-    runs-on: linux
+    runs-on: idf-node
     timeout-minutes: 45
     continue-on-error: true
     steps:
