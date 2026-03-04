@@ -100,4 +100,4 @@ Use this addendum for the privacy-first location sharing rollout verification.
 - [x] After `--enabled=false`, receiver `lastUpdatedMs` stops advancing across validation window.
 - [x] `bramble monitor --topic wifi,gps,location --json` emits protocol-native topic events.
 
-Evidence: `docs/plans/evidence/2026-02-23-cli-only-location-validation.md`.
+Evidence: `docs/archive/plans/evidence/2026-02-23-cli-only-location-validation.md`.

@@ -30,8 +30,9 @@ This index separates **operator/developer reference docs** from **historical pla
 
 - [testing/network-reach-e2e-checklist.md](testing/network-reach-e2e-checklist.md)
 
-## Historical plans and evidence
+## Historical plans and evidence (non-authoritative)
 
-- [plans/](plans/) — implementation plans, investigations, and evidence snapshots.
+- [archive/README.md](archive/README.md) — archive policy and historical index
+- [archive/plans/](archive/plans/) — implementation plans, investigations, and evidence snapshots
 
-> `docs/plans/**` is retained as project history and working notes. Treat it as archival context, not normative operator guidance.
+> `docs/archive/plans/**` is retained as project history and working notes. Treat it as archival context, not normative operator guidance.
