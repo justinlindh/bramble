@@ -1,0 +1,14 @@
+---
+Checks: >
+  -*,
+  bugprone-*,-bugprone-easily-swappable-parameters,
+  clang-analyzer-core.*,
+  clang-analyzer-unix.*,
+  clang-analyzer-security.*,
+  performance-*,-performance-avoid-endl,
+  readability-implicit-bool-conversion,
+  readability-misleading-indentation
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(main|components|test|simulator)/'
+FormatStyle: none
+...
