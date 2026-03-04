@@ -9,7 +9,7 @@ check_endpoint() {
 
   echo "==> GET ${url}"
   local response
-  response="$(curl -sS -i "$url")"
+  response="$(curl -sS --connect-timeout 2 --max-time 5 -i "$url")"
   printf '%s\n\n' "$response"
 }
 
