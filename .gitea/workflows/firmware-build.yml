@@ -47,7 +47,6 @@ jobs:
         env:
           BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          source scripts/ci-source-idf.sh
           # Strip leading v for PROJECT_VER
           export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
           bash scripts/ci-build-firmware.sh
@@ -140,6 +139,7 @@ jobs:
           scripts/ci-register-gitea-release.sh
 
       - name: Upload firmware artifacts
+        if: startsWith(github.server_url, 'https://github.com')
         uses: actions/upload-artifact@v3
         with:
           name: firmware-build-artifacts
