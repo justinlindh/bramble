@@ -121,8 +121,19 @@ set_board_vars() {
 }
 
 prepare_local_env() {
-  if [[ ! -f "$HOME/src/esp-idf/export.sh" ]]; then
-    echo "ERROR: ESP-IDF not found at ~/src/esp-idf"
+  local idf_root="${IDF_PATH:-}"
+
+  if [[ -z "$idf_root" ]]; then
+    for candidate in "$HOME/src/esp-idf" "$HOME/esp-idf" "/opt/esp/idf" "/opt/esp-idf"; do
+      if [[ -f "$candidate/export.sh" ]]; then
+        idf_root="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "$idf_root" || ! -f "$idf_root/export.sh" ]]; then
+    echo "ERROR: ESP-IDF not found (tried IDF_PATH, ~/src/esp-idf, ~/esp-idf, /opt/esp/idf, /opt/esp-idf)"
     exit 1
   fi
 
@@ -132,8 +143,9 @@ prepare_local_env() {
     echo "==> Using Python from $IDF_VENV ($($IDF_VENV/bin/python3 --version))"
   fi
 
+  export IDF_PATH="$idf_root"
   # shellcheck source=/dev/null
-  source "$HOME/src/esp-idf/export.sh"
+  source "$IDF_PATH/export.sh"
   cd "$LOCAL_DIR"
   set_board_vars
 }
