@@ -1,3 +1,5 @@
+const giteaUrl = process.env.GITEA_URL || 'https://git.idiotica.org';
+
 module.exports = {
   branches: ['main'],
   tagFormat: 'webapp-v${version}',
@@ -16,6 +18,10 @@ module.exports = {
         ]
       }
     ],
-    '@semantic-release/release-notes-generator'
+    '@semantic-release/release-notes-generator',
+    [
+      '@saithodev/semantic-release-gitea',
+      { giteaUrl }
+    ]
   ]
 };
