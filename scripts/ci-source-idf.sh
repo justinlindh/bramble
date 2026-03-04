@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-_ci_source_idf_finish() {
-  local code="$1"
-  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-    return "$code"
-  fi
-  exit "$code"
-}
+sourced=0
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  sourced=1
+fi
 
+# If idf.py is already on PATH, no explicit export script is required.
 if command -v idf.py >/dev/null 2>&1; then
   echo "[ci-idf] idf.py already available on PATH"
-  _ci_source_idf_finish 0
+  if (( sourced )); then return 0; else exit 0; fi
 fi
 
 candidates=()
@@ -35,7 +33,7 @@ for export_sh in "${candidates[@]}"; do
     source "$export_sh"
     if command -v idf.py >/dev/null 2>&1; then
       echo "[ci-idf] Loaded ESP-IDF from: $export_sh"
-      _ci_source_idf_finish 0
+      if (( sourced )); then return 0; else exit 0; fi
     fi
   fi
 done
@@ -44,4 +42,4 @@ echo "[ci-idf] ERROR: Unable to locate a working ESP-IDF export.sh; tried:" >&2
 for export_sh in "${candidates[@]}"; do
   echo "  - $export_sh" >&2
 done
-_ci_source_idf_finish 1
+if (( sourced )); then return 1; else exit 1; fi
