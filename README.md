@@ -100,6 +100,7 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 
 ## Documentation
 
+- [docs/README.md](docs/README.md) — documentation index (recommended entry point)
 - [docs/BUILDING.md](docs/BUILDING.md) — build, flash, monitor workflows
 - [docs/bramble-architecture.md](docs/bramble-architecture.md) — component-level architecture
 - [docs/COMPARISON.md](docs/COMPARISON.md) — comparison with other mesh systems
