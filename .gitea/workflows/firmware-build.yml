@@ -47,11 +47,7 @@ jobs:
         env:
           BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [ -f "$HOME/esp-idf/export.sh" ]; then
-            . "$HOME/esp-idf/export.sh"
-          elif [ -f "$HOME/src/esp-idf/export.sh" ]; then
-            . "$HOME/src/esp-idf/export.sh"
-          fi
+          source scripts/ci-source-idf.sh
           # Strip leading v for PROJECT_VER
           export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
           bash scripts/ci-build-firmware.sh
