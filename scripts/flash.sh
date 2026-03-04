@@ -144,8 +144,14 @@ prepare_local_env() {
   fi
 
   export IDF_PATH="$idf_root"
-  # shellcheck source=/dev/null
-  source "$IDF_PATH/export.sh"
+
+  if command -v idf.py >/dev/null 2>&1; then
+    echo "==> Reusing existing ESP-IDF environment (idf.py already on PATH)"
+  else
+    # shellcheck source=/dev/null
+    source "$IDF_PATH/export.sh"
+  fi
+
   cd "$LOCAL_DIR"
   set_board_vars
 }
