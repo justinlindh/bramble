@@ -37,6 +37,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  advisory-markdownlint:
+    name: Advisory markdownlint
+    runs-on: linux
+    timeout-minutes: 10
+    continue-on-error: true
+    env:
+      MARKDOWNLINT_VERSION: 0.45.0
+      MARKDOWNLINT_CACHE_DIR: ${{ runner.temp }}/markdownlint-tools
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Node.js and restore markdownlint cache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nodejs npm
+      - name: Restore markdownlint tool cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ${{ env.MARKDOWNLINT_CACHE_DIR }}
+          key: ${{ runner.os }}-markdownlint-${{ env.MARKDOWNLINT_VERSION }}-${{ hashFiles('.gitea/workflows/firmware-quality.yml', '.markdownlint-cli2.yaml') }}
+      - name: Install markdownlint-cli2 (cached)
+        run: |
+          set -euo pipefail
+          BIN_PATH="${MARKDOWNLINT_CACHE_DIR}/node_modules/.bin/markdownlint-cli2"
+          if [ ! -x "$BIN_PATH" ]; then
+            npm install --cache "$HOME/.npm" --prefix "$MARKDOWNLINT_CACHE_DIR" "markdownlint-cli2@${MARKDOWNLINT_VERSION}"
+          fi
+          "$BIN_PATH" --version
+      - name: Run markdownlint advisory wrapper
+        continue-on-error: true
+        env:
+          PATH: ${{ env.MARKDOWNLINT_CACHE_DIR }}/node_modules/.bin:${{ env.PATH }}
+        run: bash scripts/lint/run-markdownlint.sh
+
   required-clang-format:
     name: Required clang-format
     runs-on: linux
@@ -97,18 +132,3 @@ jobs:
           if [ -f "$HOME/esp-idf/export.sh" ]; then . "$HOME/esp-idf/export.sh"; fi
           bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
-  advisory-markdownlint:
-    name: Advisory markdownlint
-    runs-on: linux
-    timeout-minutes: 10
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Node.js and markdownlint-cli2
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nodejs npm
-          sudo npm install -g markdownlint-cli2
-      - name: Run markdownlint advisory wrapper
-        continue-on-error: true
-        run: bash scripts/lint/run-markdownlint.sh
