@@ -106,6 +106,7 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 - [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md) — protocol details
 - [docs/bramble-testing.md](docs/bramble-testing.md) — test strategy and coverage
 - [docs/ota-rollout.md](docs/ota-rollout.md) — OTA operator workflow
+- [docs/quality-policy.md](docs/quality-policy.md) — CI gates, promotion criteria, and rollback levers
 - [simulator/README.md](simulator/README.md) — simulator usage
 - [docs/webapp/chat.md](docs/webapp/chat.md) — web client chat and UX notes
 

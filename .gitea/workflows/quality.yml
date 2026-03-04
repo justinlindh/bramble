@@ -1,0 +1,170 @@
+name: Quality
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.gitea/workflows/quality.yml'
+      - 'scripts/**'
+      - 'test/**'
+      - 'main/**'
+      - 'components/**'
+      - 'docs/**'
+      - 'README.md'
+  push:
+    branches: [ main ]
+    paths:
+      - '.gitea/workflows/quality.yml'
+      - 'scripts/**'
+      - 'test/**'
+      - 'main/**'
+      - 'components/**'
+      - 'docs/**'
+      - 'README.md'
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host test deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake make gcc g++ libssl-dev
+      - name: Run host test suite
+        run: bash test/run_all_tests.sh
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: ShellCheck required baseline scope
+        run: |
+          shellcheck \
+            scripts/ci-build-firmware.sh \
+            scripts/ci-publish-ota.sh \
+            scripts/flash-all.sh \
+            scripts/publish-firmware-release.sh \
+            scripts/sha256-artifacts.sh \
+            scripts/test-ota-ci-board-matrix.sh \
+            scripts/traffic-capture.sh \
+            scripts/validate-broadcast-telemetry.sh
+
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Lint quality workflow
+        run: actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/quality.yml
+
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ruff
+        run: |
+          python3 -m pip install --user ruff
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Ruff required baseline profile
+        run: ruff check scripts --select E9,F63,F7,F82
+
+  clang-format:
+    name: Clang-format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: Clang-format check on changed C/C++ files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch origin "${{ github.base_ref }}"
+            files=$(git diff --name-only --diff-filter=ACMR "$base_ref...HEAD" | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+          else
+            files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+          fi
+
+          if [ -z "$files" ]; then
+            echo "[clang-format] No changed C/C++ files; skipping."
+            exit 0
+          fi
+
+          echo "$files" | xargs clang-format --dry-run --Werror
+
+  advisory-cppcheck:
+    name: Advisory cppcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+      - name: cppcheck (advisory)
+        run: |
+          cppcheck --enable=warning,performance,portability --std=c11 --quiet \
+            main components
+
+  board-build-smoke:
+    name: Board build smoke (heltec-v3)
+    if: github.event_name != 'pull_request'
+    runs-on: idf-node
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build heltec-v3 via wrapper
+        run: |
+          . /opt/esp/idf/export.sh
+          bash scripts/flash.sh local heltec-v3 build
+
+  advisory-clang-tidy:
+    name: Advisory clang-tidy (heltec-v3 compile DB)
+    if: github.event_name != 'pull_request'
+    runs-on: idf-node
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build heltec-v3 via wrapper (generate compile DB)
+        run: |
+          . /opt/esp/idf/export.sh
+          bash scripts/flash.sh local heltec-v3 build
+      - name: clang-tidy (advisory sample)
+        run: |
+          . /opt/esp/idf/export.sh
+          if [ ! -f build-heltec-v3/compile_commands.json ]; then
+            echo "[clang-tidy] compile_commands.json missing; skipping advisory run"
+            exit 0
+          fi
+          files=$(git ls-files 'main/*.c' 'components/**/*.c' | head -n 25)
+          if [ -z "$files" ]; then
+            echo "[clang-tidy] no C files found in advisory sample scope"
+            exit 0
+          fi
+          echo "$files" | xargs clang-tidy -p build-heltec-v3 || true
