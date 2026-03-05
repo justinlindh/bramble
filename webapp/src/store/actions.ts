@@ -22,6 +22,13 @@ import type {
 } from '../types/bramble';
 
 // Map technical error messages to human-friendly text
+const DEV_DIAGNOSTICS = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+
+function logSerialHandshakeDiagnostic(event: 'attempt' | 'success' | 'failure', details: Record<string, unknown>): void {
+  if (!DEV_DIAGNOSTICS) return;
+  console.debug('[serial-rpc:handshake]', { event, ...details });
+}
+
 const ERROR_MAP: Array<[RegExp, string]> = [
   [/cancelled.*requestDevice/i, 'Bluetooth pairing was cancelled.'],
   [/cancelled.*requestPort/i, 'Serial port selection was cancelled.'],
@@ -35,6 +42,7 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/NotFoundError/i, 'No device found. Make sure your node is powered on and in range.'],
   [/already.*connect/i, 'Already connected to a device.'],
   [/serial connected but rpc not ready/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
+  [/serial rpc handshake failed/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
 ];
 
 function friendlyError(raw: string): string {
@@ -111,11 +119,24 @@ async function probeRpcReadiness(): Promise<void> {
 async function ensureSerialRpcReady(): Promise<void> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= SERIAL_RPC_READY_ATTEMPTS; attempt += 1) {
+    logSerialHandshakeDiagnostic('attempt', {
+      attempt,
+      maxAttempts: SERIAL_RPC_READY_ATTEMPTS,
+    });
+
     try {
       await probeRpcReadiness();
+      logSerialHandshakeDiagnostic('success', {
+        attempt,
+      });
       return;
     } catch (error) {
       lastError = error;
+      const reason = (error as Error)?.message ?? 'unknown';
+      logSerialHandshakeDiagnostic('failure', {
+        attempt,
+        reason,
+      });
       if (attempt < SERIAL_RPC_READY_ATTEMPTS) {
         await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
       }
