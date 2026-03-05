@@ -120,8 +120,9 @@ jobs:
       - name: Build heltec-v3 via wrapper (compile_commands)
         env:
           HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
         run: |
-          mkdir -p "$HOME"
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           bash scripts/flash.sh local heltec-v3 build
       - name: Run clang-tidy wrapper
         run: bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
