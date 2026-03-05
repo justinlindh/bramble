@@ -14,6 +14,8 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+const DEV_DIAGNOSTICS = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+
 export class SerialTransport implements Transport {
   private port: SerialPort | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -26,6 +28,9 @@ export class SerialTransport implements Transport {
   private readonly decoder = new TextDecoder();
   private readonly encoder = new TextEncoder();
   private static readonly MAX_BUFFER_LENGTH = 64 * 1024;
+  private parsedJsonCount = 0;
+  private droppedMalformedFragmentCount = 0;
+  private nextDiagLogAt = 1;
 
   get connected() { return this._connected; }
 
@@ -59,9 +64,35 @@ export class SerialTransport implements Transport {
     })();
   }
 
+  private logDiagnostics(force = false): void {
+    if (!DEV_DIAGNOSTICS) return;
+    if (!force && this.parsedJsonCount < this.nextDiagLogAt) return;
+
+    console.debug('[serial-rpc:parser]', {
+      parsedJsonCount: this.parsedJsonCount,
+      droppedMalformedFragmentCount: this.droppedMalformedFragmentCount,
+      bufferedBytes: this.readBuf.length,
+    });
+
+    while (this.nextDiagLogAt <= this.parsedJsonCount) {
+      this.nextDiagLogAt *= 2;
+    }
+  }
+
+  private noteMalformedFragment(): void {
+    this.droppedMalformedFragmentCount += 1;
+    if (DEV_DIAGNOSTICS && this.droppedMalformedFragmentCount <= 3) {
+      this.logDiagnostics(true);
+    }
+  }
+
   private processLines(): void {
     const { messages, remainder } = this.extractJsonObjects(this.readBuf);
     this.readBuf = remainder;
+    if (messages.length > 0) {
+      this.parsedJsonCount += messages.length;
+      this.logDiagnostics();
+    }
 
     for (const msg of messages) {
       if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
@@ -125,9 +156,11 @@ export class SerialTransport implements Transport {
               messages.push(parsed as Record<string, unknown>);
               cursor = i + 1;
             } else {
+              this.noteMalformedFragment();
               cursor = objectStart + 1;
             }
           } catch {
+            this.noteMalformedFragment();
             cursor = objectStart + 1;
           }
 
