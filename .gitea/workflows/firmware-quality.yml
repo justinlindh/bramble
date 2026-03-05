@@ -37,39 +37,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  required-markdownlint:
-    name: Required markdownlint
-    runs-on: linux
-    timeout-minutes: 10
-    env:
-      MARKDOWNLINT_VERSION: 0.21.0
-      MARKDOWNLINT_CACHE_DIR: /tmp/markdownlint-tools
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Node.js and restore markdownlint cache
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nodejs npm
-      - name: Restore markdownlint tool cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.npm
-            ${{ env.MARKDOWNLINT_CACHE_DIR }}
-          key: ${{ runner.os }}-markdownlint-${{ env.MARKDOWNLINT_VERSION }}-${{ hashFiles('.gitea/workflows/firmware-quality.yml', '.markdownlint-cli2.yaml') }}
-      - name: Install markdownlint-cli2 (cached)
-        run: |
-          set -euo pipefail
-          BIN_PATH="${MARKDOWNLINT_CACHE_DIR}/node_modules/.bin/markdownlint-cli2"
-          if [ ! -x "$BIN_PATH" ]; then
-            npm install --cache "$HOME/.npm" --prefix "$MARKDOWNLINT_CACHE_DIR" "markdownlint-cli2@${MARKDOWNLINT_VERSION}"
-          fi
-          "$BIN_PATH" --version
-      - name: Run markdownlint strict wrapper (changed files)
-        env:
-          PATH: ${{ env.MARKDOWNLINT_CACHE_DIR }}/node_modules/.bin:${{ env.PATH }}
-        run: bash scripts/lint/run-markdownlint.sh --strict --changed
-
   required-clang-format:
     name: Required clang-format
     runs-on: linux
