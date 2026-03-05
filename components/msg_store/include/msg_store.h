@@ -9,9 +9,9 @@
 extern "C" {
 #endif
 
-#define MSG_STORE_MAX       20
-#define MSG_TEXT_MAX        640
-#define MSG_ROUTE_MAX_HOPS  10
+#define MSG_STORE_MAX 20
+#define MSG_TEXT_MAX 640
+#define MSG_ROUTE_MAX_HOPS 10
 
 typedef enum {
     MSG_DIR_INCOMING = 0,
@@ -21,25 +21,25 @@ typedef enum {
 } msg_direction_t;
 
 typedef enum {
-    MSG_STATUS_NONE = 0,       /* No delivery tracking (incoming/broadcast) */
-    MSG_STATUS_SENT = 1,       /* Transmitted over radio */
-    MSG_STATUS_DELIVERED = 2,  /* ACK received from recipient */
-    MSG_STATUS_FAILED = 3,     /* Max retries exhausted */
+    MSG_STATUS_NONE = 0,      /* No delivery tracking (incoming/broadcast) */
+    MSG_STATUS_SENT = 1,      /* Transmitted over radio */
+    MSG_STATUS_DELIVERED = 2, /* ACK received from recipient */
+    MSG_STATUS_FAILED = 3,    /* Max retries exhausted */
 } msg_status_t;
 
 typedef struct {
-    uint32_t        peer_addr;      /* Remote address (sender or recipient) */
+    uint32_t peer_addr; /* Remote address (sender or recipient) */
     msg_direction_t direction;
-    msg_status_t    status;         /* Delivery status (outgoing only) */
-    uint32_t        packet_id;      /* Packet ID for ACK correlation */
-    uint32_t        timestamp_s;    /* Uptime seconds when stored */
-    int8_t          rssi;           /* RX RSSI (0 for outgoing) */
-    int8_t          snr;            /* RX SNR (0 for outgoing) */
-    int16_t         channel_index;  /* -1 = none/broadcast, >=0 = channel */
-    uint8_t         route_hop_count; /* 0 = unavailable */
-    uint32_t        route_hops[MSG_ROUTE_MAX_HOPS]; /* source->...->destination */
-    uint16_t        text_len;
-    char            text[MSG_TEXT_MAX];
+    msg_status_t status;                     /* Delivery status (outgoing only) */
+    uint32_t packet_id;                      /* Packet ID for ACK correlation */
+    uint32_t timestamp_s;                    /* Uptime seconds when stored */
+    int8_t rssi;                             /* RX RSSI (0 for outgoing) */
+    int8_t snr;                              /* RX SNR (0 for outgoing) */
+    int16_t channel_index;                   /* -1 = none/broadcast, >=0 = channel */
+    uint8_t route_hop_count;                 /* 0 = unavailable */
+    uint32_t route_hops[MSG_ROUTE_MAX_HOPS]; /* source->...->destination */
+    uint16_t text_len;
+    char text[MSG_TEXT_MAX];
 } stored_msg_t;
 
 /**
@@ -52,21 +52,16 @@ void msg_store_init(void);
  * text is copied internally (truncated to MSG_TEXT_MAX-1).
  * packet_id is used for ACK correlation (0 = no tracking).
  */
-void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir,
-                      const char *text, size_t text_len,
-                      int8_t rssi, int8_t snr,
-                      uint32_t packet_id, msg_status_t status);
+void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
+                      int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status);
 
 /* Extended API with channel index metadata */
-void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir,
-                       const char *text, size_t text_len,
-                       int8_t rssi, int8_t snr,
-                       uint32_t packet_id, msg_status_t status,
+void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
+                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status,
                        int16_t channel_index);
 
 /* Convenience wrapper (no ACK tracking) */
-void msg_store_add(uint32_t peer_addr, msg_direction_t dir,
-                   const char *text, size_t text_len,
+void msg_store_add(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                    int8_t rssi, int8_t snr);
 
 /**
@@ -79,10 +74,8 @@ bool msg_store_update_status(uint32_t packet_id, msg_status_t status);
  * Update status and optional relay path (source->...->destination) by packet_id.
  * Pass route_hops=NULL or route_hop_count=0 to only update status.
  */
-bool msg_store_update_status_with_route(uint32_t packet_id,
-                                        msg_status_t status,
-                                        uint8_t route_hop_count,
-                                        const uint32_t *route_hops);
+bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
+                                        uint8_t route_hop_count, const uint32_t* route_hops);
 
 /**
  * Get total number of stored messages.
@@ -93,7 +86,7 @@ int msg_store_count(void);
  * Get message at index (0 = oldest).  Returns NULL if out of range.
  * Returned pointer is valid until next msg_store_add.
  */
-const stored_msg_t *msg_store_get(int index);
+const stored_msg_t* msg_store_get(int index);
 
 /**
  * Clear all stored messages.

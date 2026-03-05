@@ -8,19 +8,18 @@
 #include "driver/gpio.h"
 #include <string.h>
 
-static const char *TAG = "battery";
+static const char* TAG = "battery";
 
 /* ADC unit */
-#define BATTERY_ADC_UNIT    ADC_UNIT_1
+#define BATTERY_ADC_UNIT ADC_UNIT_1
 
 static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static adc_cali_handle_t s_cali_handle = NULL;
 static bool s_initialized = false;
-static const bramble_board_config_t *s_board = NULL;
+static const bramble_board_config_t* s_board = NULL;
 static adc_atten_t s_batt_atten = ADC_ATTEN_DB_12;
 
-void battery_init(void)
-{
+void battery_init(void) {
     /* Get board configuration */
     s_board = board_get_config();
 
@@ -81,9 +80,9 @@ void battery_init(void)
              s_board->battery.gpio, s_board->battery.adc_channel, s_board->battery.divider_factor);
 }
 
-uint32_t battery_read_mv(void)
-{
-    if (!s_initialized || !s_adc_handle || !s_board) return 0;
+uint32_t battery_read_mv(void) {
+    if (!s_initialized || !s_adc_handle || !s_board)
+        return 0;
 
     int raw = 0;
     esp_err_t err = adc_oneshot_read(s_adc_handle, s_board->battery.adc_channel, &raw);
@@ -104,33 +103,34 @@ uint32_t battery_read_mv(void)
     return (uint32_t)(voltage_mv * s_board->battery.divider_factor);
 }
 
-uint8_t battery_mv_to_pct(uint32_t mv)
-{
+uint8_t battery_mv_to_pct(uint32_t mv) {
     /* LiPo discharge curve approximation:
      * 4200 mV = 100%, 4060 mV = 90%, 3900 mV = 70%,
      * 3800 mV = 50%, 3700 mV = 30%, 3600 mV = 15%,
      * 3300 mV = 0% (cutoff) */
-    if (mv >= 4200) return 100;
-    if (mv <= 3300) return 0;
+    if (mv >= 4200)
+        return 100;
+    if (mv <= 3300)
+        return 0;
 
     /* Piecewise linear approximation */
-    static const struct { uint32_t mv; uint8_t pct; } curve[] = {
-        { 4200, 100 }, { 4060, 90 }, { 3900, 70 }, { 3800, 50 },
-        { 3700, 30 },  { 3600, 15 }, { 3300, 0 },
+    static const struct {
+        uint32_t mv;
+        uint8_t pct;
+    } curve[] = {
+        {4200, 100}, {4060, 90}, {3900, 70}, {3800, 50}, {3700, 30}, {3600, 15}, {3300, 0},
     };
     for (int i = 0; i < 6; i++) {
         if (mv >= curve[i + 1].mv) {
             uint32_t range_mv = curve[i].mv - curve[i + 1].mv;
             uint8_t range_pct = curve[i].pct - curve[i + 1].pct;
-            return curve[i + 1].pct +
-                   (uint8_t)((mv - curve[i + 1].mv) * range_pct / range_mv);
+            return curve[i + 1].pct + (uint8_t)((mv - curve[i + 1].mv) * range_pct / range_mv);
         }
     }
     return 0;
 }
 
-uint8_t battery_read_pct(void)
-{
+uint8_t battery_read_pct(void) {
     uint32_t mv = battery_read_mv();
     return battery_mv_to_pct(mv);
 }

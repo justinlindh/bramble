@@ -12,11 +12,12 @@ static uint32_t esp_random(void) { return (uint32_t)rand(); }
 #define JITTER_MIN_MS 50
 #define JITTER_MAX_MS 300
 
-flood_decision_t channel_flood_decide(uint8_t hop_limit, uint32_t packet_id, void *dedup_context) {
+flood_decision_t channel_flood_decide(uint8_t hop_limit, uint32_t packet_id, void* dedup_context) {
     flood_decision_t d = {false, 0, 0};
-    dedup_buffer_t *dedup = (dedup_buffer_t *)dedup_context;
+    dedup_buffer_t* dedup = (dedup_buffer_t*)dedup_context;
 
-    if (hop_limit <= 1) return d;
+    if (hop_limit <= 1)
+        return d;
 
     /* Check dedup — use 0 as timestamp since we just need presence check.
        Actually we need a real timestamp but for simplicity use a large value */

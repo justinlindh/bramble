@@ -42,73 +42,83 @@ typedef struct {
     uint32_t last_share_epoch_s;
 } location_ui_state_t;
 
-static inline const char *location_ui_tier_label(location_ui_tier_t tier) {
+static inline const char* location_ui_tier_label(location_ui_tier_t tier) {
     switch (tier) {
-        case LOCATION_UI_TIER_FULL: return "Exact";
-        case LOCATION_UI_TIER_PRESENCE: return "Presence";
-        case LOCATION_UI_TIER_COARSE:
-        default: return "Coarse";
+    case LOCATION_UI_TIER_FULL:
+        return "Exact";
+    case LOCATION_UI_TIER_PRESENCE:
+        return "Presence";
+    case LOCATION_UI_TIER_COARSE:
+    default:
+        return "Coarse";
     }
 }
 
-static inline const char *location_ui_source_label(location_ui_source_t source) {
+static inline const char* location_ui_source_label(location_ui_source_t source) {
     switch (source) {
-        case LOCATION_UI_SOURCE_GPS: return "GPS";
-        case LOCATION_UI_SOURCE_MANUAL: return "Manual";
-        case LOCATION_UI_SOURCE_HYBRID:
-        default: return "Hybrid";
+    case LOCATION_UI_SOURCE_GPS:
+        return "GPS";
+    case LOCATION_UI_SOURCE_MANUAL:
+        return "Manual";
+    case LOCATION_UI_SOURCE_HYBRID:
+    default:
+        return "Hybrid";
     }
 }
 
-static inline const char *location_ui_interval_label(uint16_t interval_s) {
+static inline const char* location_ui_interval_label(uint16_t interval_s) {
     switch (interval_s) {
-        case LOCATION_UI_INTERVAL_1_MIN: return "1 min";
-        case LOCATION_UI_INTERVAL_15_MIN: return "15 min";
-        case LOCATION_UI_INTERVAL_60_MIN: return "60 min";
-        case LOCATION_UI_INTERVAL_5_MIN:
-        default: return "5 min";
+    case LOCATION_UI_INTERVAL_1_MIN:
+        return "1 min";
+    case LOCATION_UI_INTERVAL_15_MIN:
+        return "15 min";
+    case LOCATION_UI_INTERVAL_60_MIN:
+        return "60 min";
+    case LOCATION_UI_INTERVAL_5_MIN:
+    default:
+        return "5 min";
     }
 }
 
-static inline void location_ui_apply_action(location_ui_state_t *st,
-                                            location_ui_action_t action,
+static inline void location_ui_apply_action(location_ui_state_t* st, location_ui_action_t action,
                                             int value) {
-    if (!st) return;
+    if (!st)
+        return;
     switch (action) {
-        case LOCATION_UI_ACTION_SET_SHARING:
-            st->sharing_enabled = (value != 0);
-            break;
-        case LOCATION_UI_ACTION_SET_TIER:
-            if (value == LOCATION_UI_TIER_FULL || value == LOCATION_UI_TIER_COARSE || value == LOCATION_UI_TIER_PRESENCE) {
-                st->tier = (location_ui_tier_t)value;
-            }
-            break;
-        case LOCATION_UI_ACTION_SET_INTERVAL:
-            if (value == LOCATION_UI_INTERVAL_1_MIN ||
-                value == LOCATION_UI_INTERVAL_5_MIN ||
-                value == LOCATION_UI_INTERVAL_15_MIN ||
-                value == LOCATION_UI_INTERVAL_60_MIN) {
-                st->interval_s = (uint16_t)value;
-            }
-            break;
-        case LOCATION_UI_ACTION_SET_SOURCE:
-            if (value == LOCATION_UI_SOURCE_HYBRID || value == LOCATION_UI_SOURCE_GPS || value == LOCATION_UI_SOURCE_MANUAL) {
-                st->source = (location_ui_source_t)value;
-            }
-            break;
-        case LOCATION_UI_ACTION_PANIC_OFF:
-            st->sharing_enabled = false;
-            break;
-        default:
-            break;
+    case LOCATION_UI_ACTION_SET_SHARING:
+        st->sharing_enabled = (value != 0);
+        break;
+    case LOCATION_UI_ACTION_SET_TIER:
+        if (value == LOCATION_UI_TIER_FULL || value == LOCATION_UI_TIER_COARSE ||
+            value == LOCATION_UI_TIER_PRESENCE) {
+            st->tier = (location_ui_tier_t)value;
+        }
+        break;
+    case LOCATION_UI_ACTION_SET_INTERVAL:
+        if (value == LOCATION_UI_INTERVAL_1_MIN || value == LOCATION_UI_INTERVAL_5_MIN ||
+            value == LOCATION_UI_INTERVAL_15_MIN || value == LOCATION_UI_INTERVAL_60_MIN) {
+            st->interval_s = (uint16_t)value;
+        }
+        break;
+    case LOCATION_UI_ACTION_SET_SOURCE:
+        if (value == LOCATION_UI_SOURCE_HYBRID || value == LOCATION_UI_SOURCE_GPS ||
+            value == LOCATION_UI_SOURCE_MANUAL) {
+            st->source = (location_ui_source_t)value;
+        }
+        break;
+    case LOCATION_UI_ACTION_PANIC_OFF:
+        st->sharing_enabled = false;
+        break;
+    default:
+        break;
     }
 }
 
-static inline void location_ui_format_last_share(char *out,
-                                                 size_t out_len,
+static inline void location_ui_format_last_share(char* out, size_t out_len,
                                                  uint32_t last_share_epoch_s,
                                                  uint32_t now_epoch_s) {
-    if (!out || out_len == 0) return;
+    if (!out || out_len == 0)
+        return;
     if (last_share_epoch_s == 0 || now_epoch_s <= last_share_epoch_s) {
         snprintf(out, out_len, "never");
         return;

@@ -9,7 +9,7 @@ typedef struct {
     char idf_ver[32];
 } esp_app_desc_t;
 
-static inline const esp_app_desc_t *esp_app_get_description(void) {
+static inline const esp_app_desc_t* esp_app_get_description(void) {
     static esp_app_desc_t desc = {
         .version = "0.0.0-test",
         .project_name = "bramble",

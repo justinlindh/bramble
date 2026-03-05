@@ -5,16 +5,12 @@
 
 /* ── Init ─────────────────────────────────────────────────────────────── */
 
-void anomaly_init(node_anomaly_tracker_t *t) {
-    memset(t, 0, sizeof(*t));
-}
+void anomaly_init(node_anomaly_tracker_t* t) { memset(t, 0, sizeof(*t)); }
 
 /* ── Route flap ──────────────────────────────────────────────────────── */
 
-bool anomaly_check_route_flap(route_flap_tracker_t *tracker,
-    uint32_t dest_addr, uint32_t next_hop,
-    uint64_t now_us, FILE *emit_out, const char *node_id)
-{
+bool anomaly_check_route_flap(route_flap_tracker_t* tracker, uint32_t dest_addr, uint32_t next_hop,
+                              uint64_t now_us, FILE* emit_out, const char* node_id) {
     int flap_count = 0;
     for (int i = 0; i < tracker->count; i++) {
         if (tracker->changes[i].dest_addr == dest_addr) {
@@ -35,8 +31,8 @@ bool anomaly_check_route_flap(route_flap_tracker_t *tracker,
                 idx = i;
         }
     }
-    tracker->changes[idx].dest_addr   = dest_addr;
-    tracker->changes[idx].next_hop    = next_hop;
+    tracker->changes[idx].dest_addr = dest_addr;
+    tracker->changes[idx].next_hop = next_hop;
     tracker->changes[idx].timestamp_us = now_us;
 
     if (flap_count >= ROUTE_FLAP_THRESHOLD) {
@@ -51,37 +47,39 @@ bool anomaly_check_route_flap(route_flap_tracker_t *tracker,
 
 /* ── Black hole ──────────────────────────────────────────────────────── */
 
-void anomaly_record_rx(blackhole_tracker_t *t, uint64_t now_us) {
+void anomaly_record_rx(blackhole_tracker_t* t, uint64_t now_us) {
     /* Roll window if needed */
     if (now_us - t->window_start_us >= BLACKHOLE_WINDOW_US) {
         t->window_start_us = now_us;
-        t->rx_count  = 0;
+        t->rx_count = 0;
         t->fwd_count = 0;
-        t->reported  = false;
+        t->reported = false;
     }
     t->rx_count++;
 }
 
-void anomaly_record_fwd(blackhole_tracker_t *t, uint64_t now_us) {
+void anomaly_record_fwd(blackhole_tracker_t* t, uint64_t now_us) {
     if (now_us - t->window_start_us >= BLACKHOLE_WINDOW_US) {
         t->window_start_us = now_us;
-        t->rx_count  = 0;
+        t->rx_count = 0;
         t->fwd_count = 0;
-        t->reported  = false;
+        t->reported = false;
     }
     t->fwd_count++;
 }
 
-bool anomaly_check_blackhole(blackhole_tracker_t *t,
-    uint64_t now_us, FILE *emit_out, const char *node_id)
-{
-    if (t->reported) return false;
-    if (now_us - t->window_start_us >= BLACKHOLE_WINDOW_US) return false;
-    if (t->rx_count < BLACKHOLE_THRESHOLD) return false;
+bool anomaly_check_blackhole(blackhole_tracker_t* t, uint64_t now_us, FILE* emit_out,
+                             const char* node_id) {
+    if (t->reported)
+        return false;
+    if (now_us - t->window_start_us >= BLACKHOLE_WINDOW_US)
+        return false;
+    if (t->rx_count < BLACKHOLE_THRESHOLD)
+        return false;
     if (t->fwd_count == 0) {
         char details[128];
-        snprintf(details, sizeof(details),
-                 "received %u packets, forwarded 0 in 10s window", t->rx_count);
+        snprintf(details, sizeof(details), "received %u packets, forwarded 0 in 10s window",
+                 t->rx_count);
         emit_anomaly(emit_out, now_us, "black_hole", node_id, 0, details);
         t->reported = true;
         return true;
@@ -91,10 +89,8 @@ bool anomaly_check_blackhole(blackhole_tracker_t *t,
 
 /* ── Route loop ──────────────────────────────────────────────────────── */
 
-bool anomaly_check_loop(loop_tracker_t *t,
-    uint32_t packet_id, uint64_t now_us,
-    FILE *emit_out, const char *node_id)
-{
+bool anomaly_check_loop(loop_tracker_t* t, uint32_t packet_id, uint64_t now_us, FILE* emit_out,
+                        const char* node_id) {
     /* Expire old entries */
     for (int i = 0; i < t->count; i++) {
         if (now_us - t->seen[i].first_seen_us > LOOP_TTL_US) {
@@ -108,8 +104,7 @@ bool anomaly_check_loop(loop_tracker_t *t,
     for (int i = 0; i < t->count; i++) {
         if (t->seen[i].packet_id == packet_id) {
             char details[128];
-            snprintf(details, sizeof(details),
-                     "packet 0x%08X visited this node twice", packet_id);
+            snprintf(details, sizeof(details), "packet 0x%08X visited this node twice", packet_id);
             emit_anomaly(emit_out, now_us, "route_loop", node_id, 0, details);
             return true;
         }
@@ -117,7 +112,7 @@ bool anomaly_check_loop(loop_tracker_t *t,
 
     /* Record this packet */
     if (t->count < MAX_LOOP_TRACK) {
-        t->seen[t->count].packet_id     = packet_id;
+        t->seen[t->count].packet_id = packet_id;
         t->seen[t->count].first_seen_us = now_us;
         t->count++;
     } else {
@@ -127,7 +122,7 @@ bool anomaly_check_loop(loop_tracker_t *t,
             if (t->seen[i].first_seen_us < t->seen[oldest].first_seen_us)
                 oldest = i;
         }
-        t->seen[oldest].packet_id     = packet_id;
+        t->seen[oldest].packet_id = packet_id;
         t->seen[oldest].first_seen_us = now_us;
     }
 
@@ -136,12 +131,10 @@ bool anomaly_check_loop(loop_tracker_t *t,
 
 /* ── Excessive RREQ retransmission ───────────────────────────────────── */
 
-bool anomaly_check_rreq_retx(rreq_retx_tracker_t *t,
-    uint32_t dest_addr, uint64_t now_us,
-    FILE *emit_out, const char *node_id)
-{
+bool anomaly_check_rreq_retx(rreq_retx_tracker_t* t, uint32_t dest_addr, uint64_t now_us,
+                             FILE* emit_out, const char* node_id) {
     /* Find or create entry for this destination */
-    rreq_retx_entry_t *entry = NULL;
+    rreq_retx_entry_t* entry = NULL;
     for (int i = 0; i < t->count; i++) {
         if (t->entries[i].dest_addr == dest_addr) {
             entry = &t->entries[i];
@@ -153,11 +146,11 @@ bool anomaly_check_rreq_retx(rreq_retx_tracker_t *t,
             /* Evict first (simple LRU not needed; just reuse slot 0) */
             entry = &t->entries[0];
             entry->dest_addr = dest_addr;
-            entry->count     = 0;
+            entry->count = 0;
         } else {
             entry = &t->entries[t->count++];
             entry->dest_addr = dest_addr;
-            entry->count     = 0;
+            entry->count = 0;
         }
     }
 
@@ -178,8 +171,7 @@ bool anomaly_check_rreq_retx(rreq_retx_tracker_t *t,
 
     if (entry->count >= RREQ_THRESHOLD) {
         char details[128];
-        snprintf(details, sizeof(details),
-                 "%d RREQ retransmits for dest 0x%08X in 10s",
+        snprintf(details, sizeof(details), "%d RREQ retransmits for dest 0x%08X in 10s",
                  entry->count, dest_addr);
         emit_anomaly(emit_out, now_us, "excessive_rreq", node_id, dest_addr, details);
         /* Reset to avoid spamming */
@@ -192,12 +184,11 @@ bool anomaly_check_rreq_retx(rreq_retx_tracker_t *t,
 
 /* ── Mesh partition ──────────────────────────────────────────────────── */
 
-void anomaly_check_partition(
-    node_array_t *nodes, float radio_range,
-    uint64_t now_us, FILE *emit_out)
-{
+void anomaly_check_partition(node_array_t* nodes, float radio_range, uint64_t now_us,
+                             FILE* emit_out) {
     int n = nodes->count;
-    if (n == 0) return;
+    if (n == 0)
+        return;
 
     /* Collect active node indices */
     int active[MAX_NODES];
@@ -206,24 +197,26 @@ void anomaly_check_partition(
         if (nodes->nodes[i].active)
             active[active_count++] = i;
     }
-    if (active_count <= 1) return;  /* 0 or 1 nodes — nothing to partition */
+    if (active_count <= 1)
+        return; /* 0 or 1 nodes — nothing to partition */
 
     /* BFS from first active node */
     bool visited[MAX_NODES] = {false};
-    int  queue[MAX_NODES];
-    int  head = 0, tail = 0;
+    int queue[MAX_NODES];
+    int head = 0, tail = 0;
 
     visited[active[0]] = true;
     queue[tail++] = active[0];
 
     while (head < tail) {
         int cur = queue[head++];
-        sim_node_t *a = &nodes->nodes[cur];
+        sim_node_t* a = &nodes->nodes[cur];
 
         for (int j = 0; j < active_count; j++) {
             int nb = active[j];
-            if (visited[nb]) continue;
-            sim_node_t *b = &nodes->nodes[nb];
+            if (visited[nb])
+                continue;
+            sim_node_t* b = &nodes->nodes[nb];
             float dx = a->x - b->x;
             float dy = a->y - b->y;
             float dist2 = dx * dx + dy * dy;
@@ -252,8 +245,7 @@ void anomaly_check_partition(
 
     if (unreachable > 0) {
         char details[384];
-        snprintf(details, sizeof(details),
-                 "mesh partitioned: %d nodes unreachable [%s]",
+        snprintf(details, sizeof(details), "mesh partitioned: %d nodes unreachable [%s]",
                  unreachable, unreachable_list);
         emit_anomaly(emit_out, now_us, "mesh_partition", "network", 0, details);
     }

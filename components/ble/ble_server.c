@@ -33,31 +33,28 @@
 #define TAG "ble"
 
 /* NUS UUIDs — must match webapp BLETransport.ts */
-static const ble_uuid128_t NUS_SERVICE_UUID =
-    BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-                     0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e);
+static const ble_uuid128_t NUS_SERVICE_UUID = BLE_UUID128_INIT(
+    0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e);
 
 /* TX char: app writes to device (we receive) */
-static const ble_uuid128_t NUS_TX_UUID =
-    BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-                     0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x40, 0x6e);
+static const ble_uuid128_t NUS_TX_UUID = BLE_UUID128_INIT(
+    0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x40, 0x6e);
 
 /* RX char: device notifies app (we send) */
-static const ble_uuid128_t NUS_RX_UUID =
-    BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0,
-                     0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e);
+static const ble_uuid128_t NUS_RX_UUID = BLE_UUID128_INIT(
+    0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e);
 
 #define BLE_RPC_BUF_SIZE 2048
-#define BLE_MTU_DEFAULT  20   /* ATT_MTU(23) - 3 byte ATT header */
+#define BLE_MTU_DEFAULT 20 /* ATT_MTU(23) - 3 byte ATT header */
 
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_rx_attr_handle; /* handle for RX characteristic (notify) */
-static bool     s_rx_notify_enabled = false;
+static bool s_rx_notify_enabled = false;
 static uint16_t s_mtu = BLE_MTU_DEFAULT + 3; /* negotiated ATT MTU */
-static char     s_line_buf[BLE_RPC_BUF_SIZE];
-static size_t   s_line_len = 0;
-static char     s_device_name[32] = "Bramble";
-static bool     s_ble_authenticated = false;
+static char s_line_buf[BLE_RPC_BUF_SIZE];
+static size_t s_line_len = 0;
+static char s_device_name[32] = "Bramble";
+static bool s_ble_authenticated = false;
 
 /* Deferred RPC processing — can't call notify from GATT access context */
 static QueueHandle_t s_rpc_queue = NULL;
@@ -66,14 +63,13 @@ typedef struct {
     size_t len;
 } ble_rpc_msg_t;
 
-static int rpc_ble_auth(const cJSON *params, cJSON *result)
-{
-    const cJSON *token_j = cJSON_GetObjectItem(params, "token");
+static int rpc_ble_auth(const cJSON* params, cJSON* result) {
+    const cJSON* token_j = cJSON_GetObjectItem(params, "token");
     if (!token_j || !cJSON_IsString(token_j)) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
-    const char *expected = ws_server_get_token();
+    const char* expected = ws_server_get_token();
     if (expected[0] == '\0' || ct_strcmp(token_j->valuestring, expected) == 0) {
         s_ble_authenticated = true;
         cJSON_AddBoolToObject(result, "ok", true);
@@ -83,28 +79,27 @@ static int rpc_ble_auth(const cJSON *params, cJSON *result)
     return RPC_ERR_INVALID_PARAMS;
 }
 
-static bool ble_is_auth_request(const char *json, int *request_id)
-{
-    cJSON *req = cJSON_Parse(json);
+static bool ble_is_auth_request(const char* json, int* request_id) {
+    cJSON* req = cJSON_Parse(json);
     if (!req) {
         return false;
     }
 
-    const cJSON *id = cJSON_GetObjectItem(req, "id");
+    const cJSON* id = cJSON_GetObjectItem(req, "id");
     if (request_id) {
         *request_id = (id && cJSON_IsNumber(id)) ? id->valueint : 0;
     }
 
-    const cJSON *method = cJSON_GetObjectItem(req, "method");
-    bool is_auth = method && cJSON_IsString(method) && strcmp(method->valuestring, "bramble.auth") == 0;
+    const cJSON* method = cJSON_GetObjectItem(req, "method");
+    bool is_auth =
+        method && cJSON_IsString(method) && strcmp(method->valuestring, "bramble.auth") == 0;
     cJSON_Delete(req);
     return is_auth;
 }
 
 /* ── RPC notification callback (registered with rpc_dispatcher) ────── */
 
-static void ble_notify_cb(const char *json, size_t len, void *ctx)
-{
+static void ble_notify_cb(const char* json, size_t len, void* ctx) {
     (void)ctx;
     if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE || !s_rx_notify_enabled) {
         ESP_LOGW(TAG, "Cannot notify: conn=%d notify=%d", s_conn_handle, s_rx_notify_enabled);
@@ -118,7 +113,7 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
      */
     ESP_LOGI(TAG, "Sending notify %u bytes (mtu=%u)", (unsigned)(len + 1), s_mtu);
 
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(json, len);
+    struct os_mbuf* om = ble_hs_mbuf_from_flat(json, len);
     if (!om) {
         ESP_LOGW(TAG, "Failed to allocate mbuf for notify");
         return;
@@ -136,8 +131,7 @@ static void ble_notify_cb(const char *json, size_t len, void *ctx)
 /* ── Process incoming data (JSON-RPC lines) ──────────────────────────── */
 
 /* BLE RPC processing task — runs in its own context, safe to call notify */
-static void ble_rpc_task(void *param)
-{
+static void ble_rpc_task(void* param) {
     (void)param;
     ble_rpc_msg_t msg;
     while (1) {
@@ -146,12 +140,13 @@ static void ble_rpc_task(void *param)
             ESP_LOGI(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)msg.len, msg.data);
 
             char resp[BLE_RPC_BUF_SIZE];
-            const char *token = ws_server_get_token();
+            const char* token = ws_server_get_token();
             if (token[0] != '\0' && !s_ble_authenticated) {
                 int req_id = 0;
                 if (!ble_is_auth_request(msg.data, &req_id)) {
                     int n = snprintf(resp, sizeof(resp),
-                                     "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"unauthorized: call bramble.auth first\"},\"id\":%d}",
+                                     "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":"
+                                     "\"unauthorized: call bramble.auth first\"},\"id\":%d}",
                                      req_id);
                     int resp_len = (n > 0 && n < (int)sizeof(resp)) ? n : (int)(sizeof(resp) - 1);
                     ESP_LOGW(TAG, "Rejected unauthenticated BLE RPC call");
@@ -169,8 +164,7 @@ static void ble_rpc_task(void *param)
     }
 }
 
-static void process_ble_data(const uint8_t *data, size_t len)
-{
+static void process_ble_data(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; i++) {
         char c = (char)data[i];
         if (c == '\n' || c == '\r') {
@@ -193,9 +187,10 @@ static void process_ble_data(const uint8_t *data, size_t len)
 /* ── GATT characteristic access callbacks ────────────────────────────── */
 
 static int nus_tx_access(uint16_t conn_handle, uint16_t attr_handle,
-                         struct ble_gatt_access_ctxt *ctxt, void *arg)
-{
-    (void)conn_handle; (void)attr_handle; (void)arg;
+                         struct ble_gatt_access_ctxt* ctxt, void* arg) {
+    (void)conn_handle;
+    (void)attr_handle;
+    (void)arg;
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
@@ -212,9 +207,11 @@ static int nus_tx_access(uint16_t conn_handle, uint16_t attr_handle,
 }
 
 static int nus_rx_access(uint16_t conn_handle, uint16_t attr_handle,
-                         struct ble_gatt_access_ctxt *ctxt, void *arg)
-{
-    (void)conn_handle; (void)attr_handle; (void)ctxt; (void)arg;
+                         struct ble_gatt_access_ctxt* ctxt, void* arg) {
+    (void)conn_handle;
+    (void)attr_handle;
+    (void)ctxt;
+    (void)arg;
     /* RX is notify-only, no read/write from client */
     return 0;
 }
@@ -225,42 +222,42 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
         .uuid = &NUS_SERVICE_UUID.u,
-        .characteristics = (struct ble_gatt_chr_def[]) {
-            {
-                /* TX: app writes to device */
-                .uuid = &NUS_TX_UUID.u,
-                .access_cb = nus_tx_access,
-                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+        .characteristics =
+            (struct ble_gatt_chr_def[]){
+                {
+                    /* TX: app writes to device */
+                    .uuid = &NUS_TX_UUID.u,
+                    .access_cb = nus_tx_access,
+                    .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+                },
+                {
+                    /* RX: device notifies app */
+                    .uuid = &NUS_RX_UUID.u,
+                    .access_cb = nus_rx_access,
+                    .val_handle = &s_rx_attr_handle,
+                    .flags = BLE_GATT_CHR_F_NOTIFY,
+                },
+                {0}, /* sentinel */
             },
-            {
-                /* RX: device notifies app */
-                .uuid = &NUS_RX_UUID.u,
-                .access_cb = nus_rx_access,
-                .val_handle = &s_rx_attr_handle,
-                .flags = BLE_GATT_CHR_F_NOTIFY,
-            },
-            { 0 }, /* sentinel */
-        },
     },
-    { 0 }, /* sentinel */
+    {0}, /* sentinel */
 };
 
 /* ── GAP event handler ───────────────────────────────────────────────── */
 
-static int gap_event_handler(struct ble_gap_event *event, void *arg);
+static int gap_event_handler(struct ble_gap_event* event, void* arg);
 
-static void start_advertising(void)
-{
+static void start_advertising(void) {
     struct ble_gap_adv_params adv_params = {
         .conn_mode = BLE_GAP_CONN_MODE_UND,
         .disc_mode = BLE_GAP_DISC_MODE_GEN,
-        .itvl_min = 0x20,   /* 20ms */
-        .itvl_max = 0x40,   /* 40ms */
+        .itvl_min = 0x20, /* 20ms */
+        .itvl_max = 0x40, /* 40ms */
     };
 
-    struct ble_hs_adv_fields fields = { 0 };
+    struct ble_hs_adv_fields fields = {0};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = (uint8_t *)s_device_name;
+    fields.name = (uint8_t*)s_device_name;
     fields.name_len = strlen(s_device_name);
     fields.name_is_complete = 1;
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
@@ -273,8 +270,8 @@ static void start_advertising(void)
     }
 
     /* Include NUS UUID in scan response so Web Bluetooth can filter */
-    struct ble_hs_adv_fields rsp_fields = { 0 };
-    rsp_fields.uuids128 = (ble_uuid128_t *)&NUS_SERVICE_UUID;
+    struct ble_hs_adv_fields rsp_fields = {0};
+    rsp_fields.uuids128 = (ble_uuid128_t*)&NUS_SERVICE_UUID;
     rsp_fields.num_uuids128 = 1;
     rsp_fields.uuids128_is_complete = 1;
 
@@ -284,8 +281,8 @@ static void start_advertising(void)
         return;
     }
 
-    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
-                           &adv_params, gap_event_handler, NULL);
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params,
+                           gap_event_handler, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_start failed: %d", rc);
     } else {
@@ -293,8 +290,7 @@ static void start_advertising(void)
     }
 }
 
-static int gap_event_handler(struct ble_gap_event *event, void *arg)
-{
+static int gap_event_handler(struct ble_gap_event* event, void* arg) {
     (void)arg;
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
@@ -313,8 +309,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
-        ESP_LOGI(TAG, "BLE client disconnected (reason=%d)",
-                 event->disconnect.reason);
+        ESP_LOGI(TAG, "BLE client disconnected (reason=%d)", event->disconnect.reason);
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         s_rx_notify_enabled = false;
         s_mtu = BLE_MTU_DEFAULT + 3;
@@ -325,15 +320,13 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (event->subscribe.attr_handle == s_rx_attr_handle) {
             s_rx_notify_enabled = event->subscribe.cur_notify;
-            ESP_LOGI(TAG, "RX notifications %s",
-                     s_rx_notify_enabled ? "enabled" : "disabled");
+            ESP_LOGI(TAG, "RX notifications %s", s_rx_notify_enabled ? "enabled" : "disabled");
         }
         break;
 
     case BLE_GAP_EVENT_MTU:
         s_mtu = event->mtu.value;
-        ESP_LOGI(TAG, "MTU updated: conn=%d, mtu=%d",
-                 event->mtu.conn_handle, event->mtu.value);
+        ESP_LOGI(TAG, "MTU updated: conn=%d, mtu=%d", event->mtu.conn_handle, event->mtu.value);
         break;
 
     default:
@@ -344,16 +337,14 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
 
 /* ── NimBLE host task ────────────────────────────────────────────────── */
 
-static void ble_host_task(void *param)
-{
+static void ble_host_task(void* param) {
     (void)param;
     ESP_LOGI(TAG, "NimBLE host task started");
     nimble_port_run(); /* blocks until nimble_port_stop() */
     nimble_port_freertos_deinit();
 }
 
-static void on_sync(void)
-{
+static void on_sync(void) {
     /* Use best address type available */
     int rc = ble_hs_util_ensure_addr(0);
     if (rc != 0) {
@@ -363,15 +354,11 @@ static void on_sync(void)
     start_advertising();
 }
 
-static void on_reset(int reason)
-{
-    ESP_LOGW(TAG, "BLE host reset: reason=%d", reason);
-}
+static void on_reset(int reason) { ESP_LOGW(TAG, "BLE host reset: reason=%d", reason); }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-int ble_server_init(void)
-{
+int ble_server_init(void) {
     /* Read node name for BLE device name */
     nvs_handle_t nvs;
     if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
@@ -427,15 +414,13 @@ int ble_server_init(void)
     return 0;
 }
 
-int ble_server_start(void)
-{
+int ble_server_start(void) {
     nimble_port_freertos_init(ble_host_task);
     ESP_LOGI(TAG, "BLE server started");
     return 0;
 }
 
-void ble_server_stop(void)
-{
+void ble_server_stop(void) {
     int rc = nimble_port_stop();
     if (rc == 0) {
         nimble_port_deinit();
@@ -443,13 +428,9 @@ void ble_server_stop(void)
     }
 }
 
-bool ble_server_connected(void)
-{
-    return s_conn_handle != BLE_HS_CONN_HANDLE_NONE;
-}
+bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }
 
-int ble_server_notify(const char *json, size_t len)
-{
+int ble_server_notify(const char* json, size_t len) {
     ble_notify_cb(json, len, NULL);
     return 0;
 }

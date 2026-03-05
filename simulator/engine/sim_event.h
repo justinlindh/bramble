@@ -25,18 +25,18 @@ typedef enum {
 typedef struct {
     uint32_t src_addr;
     uint32_t dest_addr;
-    int8_t   rssi;          /* RSSI at receiver (dBm) */
-    int8_t   snr;           /* SNR at receiver (dB, typical LoRa range 0-50) */
-    uint8_t  data[256];
+    int8_t rssi; /* RSSI at receiver (dBm) */
+    int8_t snr;  /* SNR at receiver (dB, typical LoRa range 0-50) */
+    uint8_t data[256];
     uint16_t len;
 } packet_event_data_t;
 
 /* Node event data */
 typedef struct {
-    char     node_id[16];
+    char node_id[16];
     uint32_t addr;
-    float    x;
-    float    y;
+    float x;
+    float y;
 } node_event_data_t;
 
 /* Interference event data */
@@ -49,8 +49,8 @@ typedef struct {
 
 /* Per-node tick event data */
 typedef struct {
-    char     node_id[16];
-    uint32_t tick_seq;      /* monotonically increasing per-node */
+    char node_id[16];
+    uint32_t tick_seq; /* monotonically increasing per-node */
 } tick_event_data_t;
 
 /* Synthetic broadcast delivery telemetry event data */
@@ -65,12 +65,12 @@ typedef struct {
     uint64_t timestamp_us;
     event_type_t type;
     union {
-        packet_event_data_t   packet;
-        node_event_data_t     node;
+        packet_event_data_t packet;
+        node_event_data_t node;
         interference_event_data_t interference;
-        tick_event_data_t     tick;
+        tick_event_data_t tick;
         broadcast_delivery_event_data_t broadcast_delivery;
-        uint32_t              timer_id;
+        uint32_t timer_id;
     } data;
 } sim_event_t;
 
@@ -80,10 +80,10 @@ typedef struct {
     int count;
 } event_queue_t;
 
-void event_queue_init(event_queue_t *queue);
-bool event_queue_push(event_queue_t *queue, const sim_event_t *event);
-bool event_queue_pop(event_queue_t *queue, sim_event_t *out);
-sim_event_t *event_queue_peek(event_queue_t *queue);
-int event_queue_count(const event_queue_t *queue);
+void event_queue_init(event_queue_t* queue);
+bool event_queue_push(event_queue_t* queue, const sim_event_t* event);
+bool event_queue_pop(event_queue_t* queue, sim_event_t* out);
+sim_event_t* event_queue_peek(event_queue_t* queue);
+int event_queue_count(const event_queue_t* queue);
 
 #endif /* SIM_EVENT_H */

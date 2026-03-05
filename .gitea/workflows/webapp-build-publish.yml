@@ -163,7 +163,7 @@ jobs:
             "${IMAGE_REF}"
 
           ok=0
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if [ "$(docker inspect -f '{{.State.Running}}' bramble-web-client 2>/dev/null || true)" != "true" ]; then
               sleep 2
               continue

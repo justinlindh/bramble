@@ -9,7 +9,7 @@ typedef struct {
     uint16_t epoch;
 } bramble_channel_t;
 
-int channel_derive_key(const char *psk, bramble_channel_t *ch);
-int channel_advance_epoch(bramble_channel_t *ch);
+int channel_derive_key(const char* psk, bramble_channel_t* ch);
+int channel_advance_epoch(bramble_channel_t* ch);
 
 #endif

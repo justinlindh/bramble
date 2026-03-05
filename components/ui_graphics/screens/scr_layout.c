@@ -12,25 +12,20 @@
 #include "esp_log.h"
 #include <stdio.h>
 
-static const char *TAG = "layout";
+static const char* TAG = "layout";
 static bramble_layout_t s_layout;
 
+static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBOL_WIFI " Nodes",
+                                            LV_SYMBOL_GPS " Map", LV_SYMBOL_BARS " Stats",
+                                            LV_SYMBOL_SETTINGS " Set"};
 
-static const char *tab_labels[TAB_COUNT] = {
-    LV_SYMBOL_ENVELOPE " Chat",
-    LV_SYMBOL_WIFI " Nodes",
-    LV_SYMBOL_GPS " Map",
-    LV_SYMBOL_BARS " Stats",
-    LV_SYMBOL_SETTINGS " Set"
-};
-
-static void tab_click_cb(lv_event_t *e) {
+static void tab_click_cb(lv_event_t* e) {
     bramble_tab_t tab = (bramble_tab_t)(intptr_t)lv_event_get_user_data(e);
     layout_set_tab(&s_layout, tab);
 }
 
-bramble_layout_t *layout_create(void) {
-    lv_obj_t *scr = lv_screen_active();
+bramble_layout_t* layout_create(void) {
+    lv_obj_t* scr = lv_screen_active();
     s_layout.screen = scr;
     lv_obj_set_style_bg_color(scr, BR_COLOR_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -46,8 +41,8 @@ bramble_layout_t *layout_create(void) {
     lv_obj_set_style_pad_all(s_layout.status_bar, 2, 0);
     lv_obj_clear_flag(s_layout.status_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(s_layout.status_bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_layout.status_bar, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(s_layout.status_bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
 
     s_layout.lbl_battery = lv_label_create(s_layout.status_bar);
     lv_label_set_text(s_layout.lbl_battery, LV_SYMBOL_BATTERY_FULL " 100%");
@@ -95,25 +90,24 @@ bramble_layout_t *layout_create(void) {
     lv_obj_set_style_pad_all(s_layout.tab_bar, 0, 0);
     lv_obj_clear_flag(s_layout.tab_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(s_layout.tab_bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_layout.tab_bar, LV_FLEX_ALIGN_SPACE_EVENLY,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(s_layout.tab_bar, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
 
     for (int i = 0; i < TAB_COUNT; i++) {
-        lv_obj_t *btn = lv_btn_create(s_layout.tab_bar);
+        lv_obj_t* btn = lv_btn_create(s_layout.tab_bar);
         lv_obj_set_size(btn, 60, 36);
         lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(btn, 0, 0);
         lv_obj_set_style_shadow_width(btn, 0, 0);
         lv_obj_set_style_radius(btn, 4, 0);
-        
-        lv_obj_t *lbl = lv_label_create(btn);
+
+        lv_obj_t* lbl = lv_label_create(btn);
         lv_label_set_text(lbl, tab_labels[i]);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
         lv_obj_center(lbl);
-        
-        lv_obj_add_event_cb(btn, tab_click_cb, LV_EVENT_CLICKED,
-                            (void *)(intptr_t)i);
-        
+
+        lv_obj_add_event_cb(btn, tab_click_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+
         s_layout.tab_btns[i] = btn;
     }
 
@@ -124,10 +118,11 @@ bramble_layout_t *layout_create(void) {
     return &s_layout;
 }
 
-void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
+void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
     layout->in_dm_view = false;
-    if (tab >= TAB_COUNT) return;
-    
+    if (tab >= TAB_COUNT)
+        return;
+
     for (int i = 0; i < TAB_COUNT; i++) {
         if (i == (int)tab) {
             lv_obj_set_style_bg_color(layout->tab_btns[i], BR_COLOR_PRIMARY, 0);
@@ -136,19 +131,19 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
             lv_obj_set_style_bg_opa(layout->tab_btns[i], LV_OPA_TRANSP, 0);
         }
     }
-    
+
     /* Flex/content-size screens can leave pending layout tasks; flush before clean. */
     lv_refr_now(lv_display_get_default());
     lv_obj_clean(layout->content_area);
     layout->active_tab = tab;
-    
+
     /* Clear unread badge when switching to Chat tab */
     if (tab == TAB_CHAT) {
         extern void ui_graphics_clear_unread(void);
         ui_graphics_clear_unread();
         layout_set_unread(layout, 0);
     }
-    
+
     switch (tab) {
     case TAB_CHAT:
         scr_chat_list_create(layout);
@@ -170,17 +165,17 @@ void layout_set_tab(bramble_layout_t *layout, bramble_tab_t tab) {
     }
 }
 
-void layout_update_status(bramble_layout_t *layout) {
+void layout_update_status(bramble_layout_t* layout) {
     /* Battery */
     int pct = battery_read_pct();
     char buf[32];
-    const char *batt_sym = pct > 75 ? LV_SYMBOL_BATTERY_FULL :
-                           pct > 50 ? LV_SYMBOL_BATTERY_3 :
-                           pct > 25 ? LV_SYMBOL_BATTERY_2 :
-                                      LV_SYMBOL_BATTERY_1;
+    const char* batt_sym = pct > 75   ? LV_SYMBOL_BATTERY_FULL
+                           : pct > 50 ? LV_SYMBOL_BATTERY_3
+                           : pct > 25 ? LV_SYMBOL_BATTERY_2
+                                      : LV_SYMBOL_BATTERY_1;
     snprintf(buf, sizeof(buf), "%s %d%%", batt_sym, pct);
     lv_label_set_text(layout->lbl_battery, buf);
-    
+
     if (pct <= 15) {
         lv_obj_set_style_text_color(layout->lbl_battery, BR_COLOR_DANGER, 0);
     } else if (pct <= 30) {
@@ -190,8 +185,7 @@ void layout_update_status(bramble_layout_t *layout) {
     }
 
     /* Neighbor count (signal strength indicator) */
-    const ui_mesh_state_t *state = ui_shared_mesh_state();
-
+    const ui_mesh_state_t* state = ui_shared_mesh_state();
 
     snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", state->neighbors.count);
     lv_label_set_text(layout->lbl_signal, buf);
@@ -200,7 +194,7 @@ void layout_update_status(bramble_layout_t *layout) {
     /* identity component doesn't provide a get_name() function yet */
 }
 
-void layout_set_unread(bramble_layout_t *layout, int count) {
+void layout_set_unread(bramble_layout_t* layout, int count) {
     if (count > 0) {
         /* Create or update badge */
         if (layout->chat_badge == NULL) {
@@ -209,21 +203,21 @@ void layout_set_unread(bramble_layout_t *layout, int count) {
             lv_obj_set_size(layout->chat_badge, 20, 20);
             lv_obj_set_style_bg_color(layout->chat_badge, BR_COLOR_DANGER, 0);
             lv_obj_set_style_bg_opa(layout->chat_badge, LV_OPA_COVER, 0);
-            lv_obj_set_style_radius(layout->chat_badge, 10, 0);  /* Circle */
+            lv_obj_set_style_radius(layout->chat_badge, 10, 0); /* Circle */
             lv_obj_set_style_border_width(layout->chat_badge, 0, 0);
             lv_obj_set_style_pad_all(layout->chat_badge, 0, 0);
             lv_obj_align(layout->chat_badge, LV_ALIGN_TOP_RIGHT, -2, 2);
             lv_obj_clear_flag(layout->chat_badge, LV_OBJ_FLAG_SCROLLABLE);
-            
+
             /* Add label with count */
-            lv_obj_t *lbl = lv_label_create(layout->chat_badge);
+            lv_obj_t* lbl = lv_label_create(layout->chat_badge);
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
             lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
             lv_obj_center(lbl);
         }
-        
+
         /* Update count text */
-        lv_obj_t *lbl = lv_obj_get_child(layout->chat_badge, 0);
+        lv_obj_t* lbl = lv_obj_get_child(layout->chat_badge, 0);
         char buf[8];
         snprintf(buf, sizeof(buf), "%d", count > 99 ? 99 : count);
         lv_label_set_text(lbl, buf);
@@ -236,6 +230,4 @@ void layout_set_unread(bramble_layout_t *layout, int count) {
     }
 }
 
-lv_obj_t *layout_get_content(bramble_layout_t *layout) {
-    return layout->content_area;
-}
+lv_obj_t* layout_get_content(bramble_layout_t* layout) { return layout->content_area; }

@@ -4,6 +4,6 @@
 #include "lvgl.h"
 #include "scr_layout.h"
 
-void scr_settings_create(bramble_layout_t *layout);
+void scr_settings_create(bramble_layout_t* layout);
 
 #endif

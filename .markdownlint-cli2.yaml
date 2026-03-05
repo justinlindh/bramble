@@ -1,0 +1,13 @@
+config:
+  default: true
+  MD013: false # line length handled by editor/review for now
+  MD033: false # allow inline HTML in ESP-IDF/docs tooling docs
+  MD041: false # many docs intentionally omit top-level heading
+globs:
+  - "**/*.md"
+ignores:
+  - "build/**"
+  - "managed_components/**"
+  - "node_modules/**"
+  - ".git/**"
+  - "docs/archive/**"

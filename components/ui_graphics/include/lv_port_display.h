@@ -3,6 +3,6 @@
 
 #include "lvgl.h"
 
-lv_display_t *lv_port_display_init(void);
+lv_display_t* lv_port_display_init(void);
 
 #endif
