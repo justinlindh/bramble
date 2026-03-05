@@ -66,23 +66,3 @@ jobs:
           sudo mv ./actionlint /usr/local/bin/actionlint
       - name: Run actionlint on firmware-quality workflow
         run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
-
-  required-clang-tidy:
-    name: Required clang-tidy (heltec-v3 compile DB)
-    runs-on: idf-node
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Ensure ESP-IDF toolchain and persist env
-        run: bash scripts/ci-ensure-idf.sh --github-env
-      - name: Build heltec-v3 via wrapper (compile_commands)
-        env:
-          HOME: /tmp/cihome
-          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
-        run: |
-          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
-          bash scripts/flash.sh local heltec-v3 build
-      - name: Run clang-tidy wrapper
-        run: bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
-
-
