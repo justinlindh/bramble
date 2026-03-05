@@ -86,4 +86,3 @@ jobs:
         run: bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
 
-# cancel-test-fw 1772674962
