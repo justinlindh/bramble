@@ -66,3 +66,5 @@ jobs:
           sudo mv ./actionlint /usr/local/bin/actionlint
       - name: Run actionlint on firmware-quality workflow
         run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
+
+# ci-sync-trigger 1772679720

@@ -146,3 +146,5 @@ jobs:
         run: |
           mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           bash scripts/flash.sh local heltec-v3 build
+
+# ci-sync-trigger 1772679720
