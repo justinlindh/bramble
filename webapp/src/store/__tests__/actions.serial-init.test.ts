@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const rpcMock = vi.fn<(method: string) => Promise<any>>();
+const rpcMock = vi.fn<(
+  method: string,
+  params?: Record<string, unknown>,
+  timeoutMs?: number,
+) => Promise<any>>();
 const transportConnectMock = vi.fn(async () => {});
 
 vi.mock('../../transport', () => {
