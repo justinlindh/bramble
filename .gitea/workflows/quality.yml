@@ -202,4 +202,3 @@ jobs:
           fi
           echo "$files" | xargs -r clang-tidy -p build-heltec-v3
 
-# cancel-test 1772674913
