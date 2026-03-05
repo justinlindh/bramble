@@ -37,14 +37,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  advisory-markdownlint:
-    name: Advisory markdownlint
+  required-markdownlint:
+    name: Required markdownlint
     runs-on: linux
     timeout-minutes: 10
-    continue-on-error: true
     env:
-      MARKDOWNLINT_VERSION: 0.45.0
-      MARKDOWNLINT_CACHE_DIR: ${{ runner.temp }}/markdownlint-tools
+      MARKDOWNLINT_VERSION: 0.21.0
+      MARKDOWNLINT_CACHE_DIR: /tmp/markdownlint-tools
     steps:
       - uses: actions/checkout@v4
       - name: Install Node.js and restore markdownlint cache
@@ -66,8 +65,7 @@ jobs:
             npm install --cache "$HOME/.npm" --prefix "$MARKDOWNLINT_CACHE_DIR" "markdownlint-cli2@${MARKDOWNLINT_VERSION}"
           fi
           "$BIN_PATH" --version
-      - name: Run markdownlint advisory wrapper
-        continue-on-error: true
+      - name: Run markdownlint wrapper
         env:
           PATH: ${{ env.MARKDOWNLINT_CACHE_DIR }}/node_modules/.bin:${{ env.PATH }}
         run: bash scripts/lint/run-markdownlint.sh
@@ -111,20 +109,16 @@ jobs:
       - name: Run actionlint on firmware-quality workflow
         run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
 
-  advisory-clang-tidy:
-    name: Advisory clang-tidy (heltec-v3 compile DB)
+  required-clang-tidy:
+    name: Required clang-tidy (heltec-v3 compile DB)
     runs-on: idf-node
     timeout-minutes: 45
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Ensure ESP-IDF toolchain and persist env
-        continue-on-error: true
         run: bash scripts/ci-ensure-idf.sh --github-env
       - name: Build heltec-v3 via wrapper (compile_commands)
-        continue-on-error: true
         run: bash scripts/flash.sh local heltec-v3 build
-      - name: Run clang-tidy advisory wrapper
-        continue-on-error: true
+      - name: Run clang-tidy wrapper
         run: bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
