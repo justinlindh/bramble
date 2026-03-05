@@ -1,13 +1,13 @@
 name: Webapp Quality
 
 on:
-  pull_request:
-    paths:
-      - 'webapp/**'
-      - '.gitea/workflows/webapp-quality.yml'
-      - '.actionlint.yaml'
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'fix/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'ci/**'
     paths:
       - 'webapp/**'
       - '.gitea/workflows/webapp-quality.yml'

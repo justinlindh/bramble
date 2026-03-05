@@ -2,17 +2,13 @@ name: Quality
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.gitea/workflows/quality.yml'
-      - 'scripts/**'
-      - 'test/**'
-      - 'main/**'
-      - 'components/**'
-      - 'docs/**'
-      - 'README.md'
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'fix/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'ci/**'
     paths:
       - '.gitea/workflows/quality.yml'
       - 'scripts/**'
