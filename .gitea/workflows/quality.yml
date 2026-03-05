@@ -170,8 +170,13 @@ jobs:
       - name: Ensure clang-tidy
         run: |
           if ! command -v clang-tidy >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y clang-tidy
+            if command -v sudo >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y clang-tidy
+            else
+              apt-get update
+              apt-get install -y clang-tidy
+            fi
           fi
           clang-tidy --version
       - name: clang-tidy (sample)
