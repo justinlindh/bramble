@@ -1,13 +1,20 @@
 #include "include/radio_mock.h"
 #include <string.h>
 
+static bool mock_radio_valid_node(const mock_radio_t *radio, int idx) {
+    return idx >= 0 && idx < radio->num_nodes && idx < MOCK_MAX_NODES;
+}
+
 void mock_radio_init(mock_radio_t *radio, int num_nodes) {
     memset(radio, 0, sizeof(*radio));
+    if (num_nodes < 0) {
+        num_nodes = 0;
+    }
     radio->num_nodes = (num_nodes > MOCK_MAX_NODES) ? MOCK_MAX_NODES : num_nodes;
 }
 
 void mock_radio_connect(mock_radio_t *radio, int a, int b, int8_t rssi, int8_t snr) {
-    if (a < 0 || a >= radio->num_nodes || b < 0 || b >= radio->num_nodes) return;
+    if (!mock_radio_valid_node(radio, a) || !mock_radio_valid_node(radio, b)) return;
     radio->connected[a][b] = true;
     radio->connected[b][a] = true;
     radio->rssi_matrix[a][b] = rssi;
@@ -17,7 +24,7 @@ void mock_radio_connect(mock_radio_t *radio, int a, int b, int8_t rssi, int8_t s
 }
 
 void mock_radio_send(mock_radio_t *radio, int from_node, const uint8_t *data, size_t len) {
-    if (from_node < 0 || from_node >= radio->num_nodes) return;
+    if (!mock_radio_valid_node(radio, from_node)) return;
     if (len > MOCK_MAX_PACKET_SIZE) len = MOCK_MAX_PACKET_SIZE;
 
     for (int i = 0; i < radio->num_nodes; i++) {
@@ -40,12 +47,12 @@ void mock_radio_send(mock_radio_t *radio, int from_node, const uint8_t *data, si
 }
 
 bool mock_radio_has_packet(mock_radio_t *radio, int node) {
-    if (node < 0 || node >= radio->num_nodes) return false;
+    if (!mock_radio_valid_node(radio, node)) return false;
     return radio->rx_queues[node].count > 0;
 }
 
 bool mock_radio_recv(mock_radio_t *radio, int node, mock_packet_t *pkt) {
-    if (node < 0 || node >= radio->num_nodes) return false;
+    if (!mock_radio_valid_node(radio, node)) return false;
     mock_rx_queue_t *q = &radio->rx_queues[node];
     if (q->count <= 0) return false;
 

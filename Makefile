@@ -45,7 +45,7 @@ ci-quality-clang-format:
 
 ci-quality-cppcheck:
 	command -v cppcheck >/dev/null
-	cppcheck --enable=warning,performance,portability --std=c11 --quiet main components
+	cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches main components
 
 ci-quality-board-build:
 	bash scripts/ci-ensure-idf.sh
