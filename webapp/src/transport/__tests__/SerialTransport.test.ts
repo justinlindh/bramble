@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SerialTransport } from '../SerialTransport';
 
 describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   function setupConnectedTransport() {
     const transport = new SerialTransport();
     const writer = { write: vi.fn().mockResolvedValue(undefined) };
@@ -27,7 +35,10 @@ describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
       'I (1204) serial: tx complete {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n',
     );
 
-    await expect(rpcPromise).resolves.toEqual({ ok: true });
+    void rpcPromise.catch(() => {});
+    const assertion = expect(rpcPromise).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(60);
+    await assertion;
   });
 
   it('should reconstruct and parse JSON-RPC response split across chunks with an internal newline', async () => {
@@ -38,6 +49,9 @@ describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
     feedChunk(transport, '{"jsonrpc":"2.0","id":1,\n');
     feedChunk(transport, '"result":{"ok":true}}\n');
 
-    await expect(rpcPromise).resolves.toEqual({ ok: true });
+    void rpcPromise.catch(() => {});
+    const assertion = expect(rpcPromise).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(60);
+    await assertion;
   });
 });
