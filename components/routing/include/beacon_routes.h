@@ -16,7 +16,7 @@ typedef struct {
     uint32_t dest_addr;
     uint8_t metric;
     uint8_t hop_count;
-    uint8_t flags;  // bit 0: bidirectional confirmed
+    uint8_t flags; // bit 0: bidirectional confirmed
 } beacon_route_ad_t;
 
 typedef struct {
@@ -26,19 +26,19 @@ typedef struct {
 
 // Select best routes to advertise from routing table
 // Picks top N by metric (lowest first), excludes BROKEN and DISCOVERING routes
-void beacon_select_route_ads(const routing_table_t *table, beacon_route_ads_t *ads);
+void beacon_select_route_ads(const routing_table_t* table, beacon_route_ads_t* ads);
 
 // Process received route advertisements
 // Installs/updates routes with state UNVERIFIED and hop_count+1
-void beacon_process_route_ads(routing_table_t *table, uint32_t beacon_src,
-                               const beacon_route_ads_t *ads, uint32_t now_ms);
+void beacon_process_route_ads(routing_table_t* table, uint32_t beacon_src,
+                              const beacon_route_ads_t* ads, uint32_t now_ms);
 
 // Serialize route ads to buffer (appended after base beacon)
 // Returns number of bytes written, or -1 on error
-int beacon_route_ads_serialize(const beacon_route_ads_t *ads, uint8_t *buf, size_t len);
+int beacon_route_ads_serialize(const beacon_route_ads_t* ads, uint8_t* buf, size_t len);
 
 // Deserialize route ads from buffer
 // Returns number of bytes consumed, or -1 on error
-int beacon_route_ads_deserialize(beacon_route_ads_t *ads, const uint8_t *buf, size_t len);
+int beacon_route_ads_deserialize(beacon_route_ads_t* ads, const uint8_t* buf, size_t len);
 
 #endif

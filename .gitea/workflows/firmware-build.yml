@@ -16,6 +16,10 @@ on:
       - 'sdkconfig.defaults'
       - 'sdkconfig.defaults.*'
 
+concurrency:
+  group: firmware-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   firmware-build:
     runs-on: idf-node
@@ -40,11 +44,14 @@ jobs:
           fi
           echo "Resolved: channel=$(grep channel "$GITHUB_OUTPUT" | tail -1) version=$(grep version "$GITHUB_OUTPUT" | tail -1)"
 
+      - name: Ensure ESP-IDF toolchain
+        run: bash scripts/ci-ensure-idf.sh
+
       - name: Build firmware artifacts
         env:
           BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          . /opt/esp/idf/export.sh
+          source scripts/ci-source-idf.sh
           # Strip leading v for PROJECT_VER
           export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
           bash scripts/ci-build-firmware.sh
@@ -102,8 +109,43 @@ jobs:
 
           echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4"
 
+      - name: Create or update Gitea Release (firmware tags)
+        if: startsWith(github.ref, 'refs/tags/firmware-v')
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_REPO: ${{ github.repository }}
+          GITEA_URL: ${{ github.server_url }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_NAME: Firmware ${{ steps.version.outputs.version }}
+          RELEASE_BODY_FILE: /tmp/firmware-release-notes.md
+          ASSET_GLOBS: |
+            build-artifacts/firmware-ci/*/bootloader.bin
+            build-artifacts/firmware-ci/*/partition-table.bin
+            build-artifacts/firmware-ci/*/bramble.bin
+            build-artifacts/firmware-ci/*/flasher_args.json
+            build-artifacts/firmware-ci/*/SHA256SUMS.txt
+        run: |
+          PREV_TAG=$(git tag --list 'firmware-v*' --sort=-version:refname | grep -v "^${RELEASE_TAG}$" | head -n1 || true)
+          {
+            echo "## Firmware release ${RELEASE_TAG}"
+            echo
+            echo "Channel: stable"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "### Changes since $PREV_TAG"
+              git log --pretty='- %s (%h)' "$PREV_TAG..$RELEASE_TAG"
+            else
+              echo "### Changes"
+              git log --pretty='- %s (%h)' -n 20 "$RELEASE_TAG"
+            fi
+          } > /tmp/firmware-release-notes.md
+
+          chmod +x scripts/ci-register-gitea-release.sh
+          scripts/ci-register-gitea-release.sh
+
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v3
+        if: startsWith(github.server_url, 'https://github.com')
+        uses: actions/upload-artifact@v4
         with:
           name: firmware-build-artifacts
           path: |

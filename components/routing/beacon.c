@@ -2,19 +2,17 @@
 #include "crypto.h"
 #include <string.h>
 
-bramble_beacon_t beacon_build(uint32_t my_addr, uint32_t pubkey_hash,
-    uint16_t uptime_min, uint8_t battery_pct, uint8_t tx_queue_depth,
-    uint8_t neighbor_count, uint8_t flags, uint32_t network_time,
-    uint16_t time_confidence)
-{
+bramble_beacon_t beacon_build(uint32_t my_addr, uint32_t pubkey_hash, uint16_t uptime_min,
+                              uint8_t battery_pct, uint8_t tx_queue_depth, uint8_t neighbor_count,
+                              uint8_t flags, uint32_t network_time, uint16_t time_confidence) {
     bramble_beacon_t b;
     memset(&b, 0, sizeof(b));
     b.header.version = BRAMBLE_VERSION;
     b.header.type = PKT_TYPE_BEACON;
     b.header.flags = 0;
-    b.header.hop_limit = 1; /* beacons are single-hop */
+    b.header.hop_limit = 1;          /* beacons are single-hop */
     b.header.dest_addr = 0xFFFFFFFF; /* broadcast */
-    b.header.packet_id = 0; /* caller should set */
+    b.header.packet_id = 0;          /* caller should set */
     b.src_addr = my_addr;
     b.pubkey_hash = pubkey_hash;
     b.uptime_min = uptime_min;
@@ -27,7 +25,7 @@ bramble_beacon_t beacon_build(uint32_t my_addr, uint32_t pubkey_hash,
     return b;
 }
 
-void beacon_compute_hmac(bramble_beacon_t *beacon, const uint8_t *shared_key, size_t key_len) {
+void beacon_compute_hmac(bramble_beacon_t* beacon, const uint8_t* shared_key, size_t key_len) {
     /* Serialize beacon with zeroed HMAC, then compute over the pre-HMAC portion.
      * Buffer must be large enough for name extension (BEACON_SIZE + 1 + BEACON_NAME_MAX). */
     uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
@@ -40,7 +38,7 @@ void beacon_compute_hmac(bramble_beacon_t *beacon, const uint8_t *shared_key, si
     memcpy(beacon->auth_hmac, full_hmac, sizeof(beacon->auth_hmac));
 }
 
-bool beacon_verify_hmac(const bramble_beacon_t *beacon, const uint8_t *shared_key, size_t key_len) {
+bool beacon_verify_hmac(const bramble_beacon_t* beacon, const uint8_t* shared_key, size_t key_len) {
     bramble_beacon_t copy = *beacon;
     uint8_t saved[sizeof(copy.auth_hmac)];
     memcpy(saved, copy.auth_hmac, sizeof(saved));

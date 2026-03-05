@@ -19,8 +19,8 @@
 #include "nvs.h"
 #include <string.h>
 
-static const char *TAG = "keyboard";
-static const bramble_board_config_t *s_board = NULL;
+static const char* TAG = "keyboard";
+static const bramble_board_config_t* s_board = NULL;
 
 /* I2C handles */
 static i2c_master_bus_handle_t bus_handle = NULL;
@@ -35,11 +35,11 @@ static volatile int key_tail = 0;
 
 /* Polling cooldown — avoid hammering I2C on every LVGL tick (~30ms) */
 static int64_t last_poll_us = 0;
-#define POLL_INTERVAL_US  20000  /* 20ms minimum between I2C reads */
+#define POLL_INTERVAL_US 20000 /* 20ms minimum between I2C reads */
 
 /* Backlight persistence */
-#define DEFAULT_BACKLIGHT 80     /* Sane default — not too bright */
-#define NVS_NAMESPACE     "bramble"
+#define DEFAULT_BACKLIGHT 80 /* Sane default — not too bright */
+#define NVS_NAMESPACE "bramble"
 #define NVS_KEY_BACKLIGHT "kb_backlight"
 static uint8_t s_backlight_brightness = DEFAULT_BACKLIGHT;
 
@@ -60,7 +60,8 @@ static void nvs_load_backlight(void) {
 
 static void nvs_save_backlight(uint8_t brightness) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return;
     nvs_set_u8(h, NVS_KEY_BACKLIGHT, brightness);
     nvs_commit(h);
     nvs_close(h);
@@ -68,17 +69,11 @@ static void nvs_save_backlight(uint8_t brightness) {
 
 /* ── Circular Buffer Helpers ────────────────────────────────────────── */
 
-static inline int next_index(int idx) {
-    return (idx + 1) % KEY_BUFFER_SIZE;
-}
+static inline int next_index(int idx) { return (idx + 1) % KEY_BUFFER_SIZE; }
 
-static inline bool buffer_full(void) {
-    return next_index(key_head) == key_tail;
-}
+static inline bool buffer_full(void) { return next_index(key_head) == key_tail; }
 
-static inline bool buffer_empty(void) {
-    return key_head == key_tail;
-}
+static inline bool buffer_empty(void) { return key_head == key_tail; }
 
 static inline void buffer_push(char c) {
     if (!buffer_full()) {
@@ -89,8 +84,9 @@ static inline void buffer_push(char c) {
     }
 }
 
-static inline bool buffer_pop(char *out) {
-    if (buffer_empty()) return false;
+static inline bool buffer_pop(char* out) {
+    if (buffer_empty())
+        return false;
     *out = key_buffer[key_tail];
     key_tail = next_index(key_tail);
     return true;
@@ -117,7 +113,6 @@ static void keyboard_read_key(void) {
         buffer_push(key);
     }
 }
-
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
@@ -155,7 +150,7 @@ int keyboard_init(void) {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = 0x55,
-        .scl_speed_hz = 100000,  /* 100 kHz */
+        .scl_speed_hz = 100000, /* 100 kHz */
     };
 
     ret = i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle);
@@ -171,15 +166,14 @@ int keyboard_init(void) {
      * direction, board-level noise).  Bramble likewise leaves it unused.
      * We use pure I2C polling instead: keyboard_poll() reads one byte every
      * POLL_INTERVAL_US microseconds; the MCU returns 0x00 when idle. */
-    ESP_LOGD(TAG, "Keyboard running in polling mode (GPIO%d ISR skipped)",
-             s_board->keyboard_int);
+    ESP_LOGD(TAG, "Keyboard running in polling mode (GPIO%d ISR skipped)", s_board->keyboard_int);
 
     initialized = true;
 
     /* Load persisted backlight value and apply it */
     nvs_load_backlight();
     uint8_t brightness_hw = (uint8_t)(s_backlight_brightness * 255 / 100);
-    uint8_t cmd[2] = { 0x01, brightness_hw };
+    uint8_t cmd[2] = {0x01, brightness_hw};
     i2c_master_transmit(dev_handle, cmd, sizeof(cmd), 100);
 
     ESP_LOGI(TAG, "Keyboard initialized (I2C 0x55, polling mode, backlight=%u%%)",
@@ -187,8 +181,9 @@ int keyboard_init(void) {
     return 0;
 }
 
-bool keyboard_poll(char *out) {
-    if (!initialized || !out) return false;
+bool keyboard_poll(char* out) {
+    if (!initialized || !out)
+        return false;
 
     /* Rate-limit I2C reads so we don't saturate the bus.
      * LVGL calls this every ~30ms; we read every 20ms max. */
@@ -203,22 +198,22 @@ bool keyboard_poll(char *out) {
 }
 
 bool keyboard_has_data(void) {
-    if (!initialized) return false;
+    if (!initialized)
+        return false;
     return !buffer_empty();
 }
 
-i2c_master_bus_handle_t keyboard_get_i2c_bus(void) {
-    return bus_handle;
-}
+i2c_master_bus_handle_t keyboard_get_i2c_bus(void) { return bus_handle; }
 
 void keyboard_set_backlight(uint8_t brightness) {
-    if (!initialized || !dev_handle) return;
+    if (!initialized || !dev_handle)
+        return;
     /* I2C command to keyboard MCU at 0x55:
      *   byte[0] = 0x01  (LILYGO_KB_BRIGHTNESS_CMD register)
      *   byte[1] = 0..255 (PWM duty; 0 = off, 255 = maximum brightness)
      * Note: the MCU may only implement on/off (treating any value >0 as on),
      * but sending the full range is safe and correct. */
-    uint8_t cmd[2] = { 0x01, brightness };
+    uint8_t cmd[2] = {0x01, brightness};
     esp_err_t ret = i2c_master_transmit(dev_handle, cmd, sizeof(cmd), 100);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Keyboard backlight set failed: %s", esp_err_to_name(ret));
@@ -228,7 +223,8 @@ void keyboard_set_backlight(uint8_t brightness) {
 }
 
 void keyboard_set_backlight_percent(uint8_t percent) {
-    if (percent > 100) percent = 100;
+    if (percent > 100)
+        percent = 100;
     s_backlight_brightness = percent;
     nvs_save_backlight(percent);
     /* Map 0-100 → 0-255 for hardware */
@@ -237,37 +233,25 @@ void keyboard_set_backlight_percent(uint8_t percent) {
     ESP_LOGI(TAG, "Keyboard backlight set to %u%%", percent);
 }
 
-uint8_t keyboard_get_backlight_percent(void) {
-    return s_backlight_brightness;
-}
+uint8_t keyboard_get_backlight_percent(void) { return s_backlight_brightness; }
 
-#else  /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
+#else /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* Stub implementations for non-T-Deck boards */
 
-int keyboard_init(void) {
-    return -1;  /* Not supported */
-}
+int keyboard_init(void) { return -1; /* Not supported */ }
 
-bool keyboard_poll(char *out) {
+bool keyboard_poll(char* out) {
     (void)out;
     return false;
 }
 
-bool keyboard_has_data(void) {
-    return false;
-}
+bool keyboard_has_data(void) { return false; }
 
-void keyboard_set_backlight(uint8_t brightness) {
-    (void)brightness;
-}
+void keyboard_set_backlight(uint8_t brightness) { (void)brightness; }
 
-void keyboard_set_backlight_percent(uint8_t percent) {
-    (void)percent;
-}
+void keyboard_set_backlight_percent(uint8_t percent) { (void)percent; }
 
-uint8_t keyboard_get_backlight_percent(void) {
-    return 0;
-}
+uint8_t keyboard_get_backlight_percent(void) { return 0; }
 
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */

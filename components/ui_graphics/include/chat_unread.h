@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-void chat_unread_mark_for_message(const stored_msg_t *msg);
+void chat_unread_mark_for_message(const stored_msg_t* msg);
 int chat_unread_count_for_channel(int channel_idx);
 void chat_unread_clear_for_channel(int channel_idx);
 void chat_unread_reset(void);

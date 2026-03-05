@@ -1,7 +1,7 @@
 #include "sim_event.h"
 #include <string.h>
 
-static void heap_bubble_up(event_queue_t *q, int idx) {
+static void heap_bubble_up(event_queue_t* q, int idx) {
     while (idx > 0) {
         int parent = (idx - 1) / 2;
         if (q->events[idx].timestamp_us >= q->events[parent].timestamp_us)
@@ -13,7 +13,7 @@ static void heap_bubble_up(event_queue_t *q, int idx) {
     }
 }
 
-static void heap_bubble_down(event_queue_t *q, int idx) {
+static void heap_bubble_down(event_queue_t* q, int idx) {
     int size = q->count;
     while (true) {
         int left = 2 * idx + 1;
@@ -25,7 +25,8 @@ static void heap_bubble_down(event_queue_t *q, int idx) {
         if (right < size && q->events[right].timestamp_us < q->events[smallest].timestamp_us)
             smallest = right;
 
-        if (smallest == idx) break;
+        if (smallest == idx)
+            break;
 
         sim_event_t tmp = q->events[idx];
         q->events[idx] = q->events[smallest];
@@ -34,11 +35,9 @@ static void heap_bubble_down(event_queue_t *q, int idx) {
     }
 }
 
-void event_queue_init(event_queue_t *queue) {
-    memset(queue, 0, sizeof(*queue));
-}
+void event_queue_init(event_queue_t* queue) { memset(queue, 0, sizeof(*queue)); }
 
-bool event_queue_push(event_queue_t *queue, const sim_event_t *event) {
+bool event_queue_push(event_queue_t* queue, const sim_event_t* event) {
     if (queue->count >= MAX_EVENT_QUEUE)
         return false;
     queue->events[queue->count] = *event;
@@ -47,7 +46,7 @@ bool event_queue_push(event_queue_t *queue, const sim_event_t *event) {
     return true;
 }
 
-bool event_queue_pop(event_queue_t *queue, sim_event_t *out) {
+bool event_queue_pop(event_queue_t* queue, sim_event_t* out) {
     if (queue->count == 0)
         return false;
     *out = queue->events[0];
@@ -59,10 +58,8 @@ bool event_queue_pop(event_queue_t *queue, sim_event_t *out) {
     return true;
 }
 
-sim_event_t *event_queue_peek(event_queue_t *queue) {
+sim_event_t* event_queue_peek(event_queue_t* queue) {
     return (queue->count > 0) ? &queue->events[0] : NULL;
 }
 
-int event_queue_count(const event_queue_t *queue) {
-    return queue->count;
-}
+int event_queue_count(const event_queue_t* queue) { return queue->count; }

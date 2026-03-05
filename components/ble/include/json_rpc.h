@@ -43,9 +43,9 @@ typedef struct {
     char result[JSON_RPC_MAX_RESPONSE_LEN];
 } rpc_response_t;
 
-int rpc_parse_request(const char *json, size_t len, rpc_request_t *req);
-int rpc_build_response(const rpc_response_t *resp, char *buf, size_t buf_len);
-int rpc_build_error(int id, int code, const char *message, char *buf, size_t buf_len);
-rpc_method_t rpc_method_from_string(const char *method);
+int rpc_parse_request(const char* json, size_t len, rpc_request_t* req);
+int rpc_build_response(const rpc_response_t* resp, char* buf, size_t buf_len);
+int rpc_build_error(int id, int code, const char* message, char* buf, size_t buf_len);
+rpc_method_t rpc_method_from_string(const char* method);
 
 #endif

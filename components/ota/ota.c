@@ -9,21 +9,18 @@
 #include "esp_ota_ops.h"
 #include "esp_crt_bundle.h"
 
-static const char *TAG = "ota";
+static const char* TAG = "ota";
 
-static bool has_prefix(const char *s, const char *prefix)
-{
+static bool has_prefix(const char* s, const char* prefix) {
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
-int ota_ble_start(void)
-{
+int ota_ble_start(void) {
     ESP_LOGW(TAG, "BLE OTA not implemented yet");
     return -1;
 }
 
-static int ota_https_start(const char *url)
-{
+static int ota_https_start(const char* url) {
     esp_http_client_config_t http_cfg = {
         .url = url,
         .timeout_ms = 30000,
@@ -43,8 +40,7 @@ static int ota_https_start(const char *url)
     return 0;
 }
 
-static int ota_http_start(const char *url)
-{
+static int ota_http_start(const char* url) {
 #ifndef CONFIG_BRAMBLE_OTA_ALLOW_HTTP
     (void)url;
     ESP_LOGE(TAG, "HTTP OTA disabled in release builds");
@@ -78,7 +74,7 @@ static int ota_http_start(const char *url)
     }
     ESP_LOGI(TAG, "HTTP OTA response: status=%d content_length=%d", status, content_len);
 
-    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    const esp_partition_t* update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
         ESP_LOGE(TAG, "HTTP OTA failed: no update partition");
         esp_http_client_close(client);
@@ -100,7 +96,7 @@ static int ota_http_start(const char *url)
     while (true) {
         int read_len = esp_http_client_read(client, buf, sizeof(buf));
         if (read_len > 0) {
-            err = esp_ota_write(ota_handle, (const void *)buf, read_len);
+            err = esp_ota_write(ota_handle, (const void*)buf, read_len);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "HTTP OTA failed: ota write: %s", esp_err_to_name(err));
                 esp_ota_abort(ota_handle);
@@ -158,8 +154,7 @@ static int ota_http_start(const char *url)
 #endif /* CONFIG_BRAMBLE_OTA_ALLOW_HTTP */
 }
 
-int ota_wifi_start(const char *url)
-{
+int ota_wifi_start(const char* url) {
     if (!url || strlen(url) == 0) {
         ESP_LOGE(TAG, "No URL provided");
         return -1;
@@ -185,14 +180,12 @@ int ota_wifi_start(const char *url)
     return 0;
 }
 
-const char *ota_get_running_partition(void)
-{
-    const esp_partition_t *running = esp_ota_get_running_partition();
+const char* ota_get_running_partition(void) {
+    const esp_partition_t* running = esp_ota_get_running_partition();
     return running ? running->label : "unknown";
 }
 
-const char *ota_get_app_version(void)
-{
-    const esp_app_desc_t *desc = esp_app_get_description();
+const char* ota_get_app_version(void) {
+    const esp_app_desc_t* desc = esp_app_get_description();
     return desc ? desc->version : "unknown";
 }

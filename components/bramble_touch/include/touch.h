@@ -21,6 +21,6 @@ int touch_init(void);
  * Read current touch state.
  * Returns true if a touch point was read, false if no touch or error.
  */
-bool touch_read(touch_point_t *point);
+bool touch_read(touch_point_t* point);
 
 #endif

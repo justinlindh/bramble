@@ -9,7 +9,7 @@
  * @param pos: pointer to position structure
  * @param ctx: user context pointer
  */
-typedef void (*gps_fix_cb_t)(const bramble_position_t *pos, void *ctx);
+typedef void (*gps_fix_cb_t)(const bramble_position_t* pos, void* ctx);
 
 /**
  * Initialize GPS UART and start background parsing task.
@@ -17,7 +17,7 @@ typedef void (*gps_fix_cb_t)(const bramble_position_t *pos, void *ctx);
  * @param ctx: user context pointer passed to callback
  * @return 0 on success, -1 on failure
  */
-int gps_init(gps_fix_cb_t cb, void *ctx);
+int gps_init(gps_fix_cb_t cb, void* ctx);
 
 /**
  * Check if GPS currently has a valid fix.
@@ -30,7 +30,7 @@ bool gps_has_fix(void);
  * @param out: pointer to position structure to fill
  * @return true if valid position copied, false if no fix
  */
-bool gps_get_position(bramble_position_t *out);
+bool gps_get_position(bramble_position_t* out);
 
 /**
  * Shutdown GPS and free resources.

@@ -4,11 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "lint": "npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "start": "node server/unified-server.mjs",
-    "test": "vitest run",
-    "test:integration": "vitest run -c vitest.integration.config.ts"
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "test:e2e:smoke": "bash scripts/unified-runtime-smoke.sh"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

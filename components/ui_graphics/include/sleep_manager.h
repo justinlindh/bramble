@@ -1,6 +1,6 @@
 /**
  * Sleep manager for display power saving
- * 
+ *
  * Automatically turns off display after inactivity timeout.
  * Mesh continues to operate normally while asleep.
  */

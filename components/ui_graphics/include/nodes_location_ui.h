@@ -6,16 +6,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
-static inline const char *nodes_location_action_label(bool has_peer_location) {
+static inline const char* nodes_location_action_label(bool has_peer_location) {
     return has_peer_location ? "View" : "Share";
 }
 
-static inline void nodes_location_format_status(char *out,
-                                                size_t out_len,
-                                                bool has_peer_location,
-                                                uint32_t received_ms,
-                                                uint32_t now_ms) {
-    if (!out || out_len == 0) return;
+static inline void nodes_location_format_status(char* out, size_t out_len, bool has_peer_location,
+                                                uint32_t received_ms, uint32_t now_ms) {
+    if (!out || out_len == 0)
+        return;
 
     if (!has_peer_location) {
         snprintf(out, out_len, "Loc unavailable");

@@ -1,0 +1,118 @@
+name: Webapp Quality
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'ci/**'
+    paths:
+      - 'webapp/**'
+      - '.gitea/workflows/webapp-quality.yml'
+      - '.actionlint.yaml'
+
+concurrency:
+  group: webapp-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  npm_config_fund: false
+  npm_config_audit: false
+
+jobs:
+  required-lint:
+    name: Required lint
+    runs-on: linux
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run lint
+        run: npm run lint --prefix webapp
+
+  required-typecheck:
+    name: Required typecheck
+    runs-on: linux
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run typecheck
+        run: npm run typecheck --prefix webapp
+
+  required-unit-tests:
+    name: Required unit tests
+    runs-on: linux
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run unit tests
+        run: npm run test:unit --prefix webapp
+
+  required-build:
+    name: Required webapp build
+    runs-on: linux
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Build webapp
+        run: npm run build --prefix webapp
+
+  required-e2e-smoke:
+    name: Required e2e smoke
+    runs-on: linux
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Build webapp for smoke run
+        run: npm run build --prefix webapp
+      - name: Run smoke checks (includes startup + health wait)
+        env:
+          SMOKE_MAX_WAIT_SECONDS: '90'
+          SMOKE_START_RUNTIME: '1'
+        run: npm run test:e2e:smoke --prefix webapp
+      - name: Capture runtime logs on failure
+        if: failure()
+        run: |
+          mkdir -p webapp/e2e-artifacts
+          cp -f webapp/e2e-smoke-server.log webapp/e2e-artifacts/server.log || true
+      - name: Upload smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-e2e-smoke-failure-artifacts
+          if-no-files-found: warn
+          path: |
+            webapp/e2e-artifacts/**
+            webapp/test-results/**
+            webapp/playwright-report/**
+            webapp/e2e-screenshots/**
+
+
+# ci-sync-trigger 1772679720

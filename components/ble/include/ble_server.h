@@ -32,6 +32,6 @@ bool ble_server_connected(void);
  * Send a JSON-RPC notification to the connected BLE client.
  * Data is chunked to fit BLE MTU.
  */
-int ble_server_notify(const char *json, size_t len);
+int ble_server_notify(const char* json, size_t len);
 
 #endif

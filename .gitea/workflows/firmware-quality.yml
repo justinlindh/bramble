@@ -1,0 +1,72 @@
+name: Firmware Quality (Phase 2.3)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'ci/**'
+    paths:
+      - '.gitea/workflows/firmware-quality.yml'
+      - '.actionlint.yaml'
+      - '.clang-format'
+      - '.clang-tidy'
+      - '.shellcheckrc'
+      - '.markdownlint-cli2.yaml'
+      - 'scripts/lint/**'
+      - 'scripts/*.sh'
+      - 'main/**'
+      - 'components/**'
+      - 'docs/**'
+      - 'README.md'
+
+concurrency:
+  group: firmware-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  required-clang-format:
+    name: Required clang-format
+    runs-on: linux
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: Run clang-format strict wrapper (full scope)
+        run: bash scripts/lint/run-clang-format-check.sh --strict
+
+  required-shellcheck:
+    name: Required shellcheck
+    runs-on: linux
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck strict wrapper
+        run: bash scripts/lint/run-shellcheck.sh --strict
+
+  required-actionlint:
+    name: Required actionlint
+    runs-on: linux
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Run actionlint on firmware-quality workflow
+        run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
+
+# ci-sync-trigger 1772679720
+
+# verify-clang-format-step 1772680440

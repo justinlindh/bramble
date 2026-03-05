@@ -28,6 +28,7 @@ jobs:
             semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release (protocol)
@@ -58,6 +59,7 @@ jobs:
             semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release (webapp)
@@ -70,7 +72,7 @@ jobs:
     # Run firmware tagging intentionally (manual dispatch) so stable OTA releases
     # are not created on every push to main.
     if: github.event_name == 'workflow_dispatch'
-    runs-on: idf-node
+    runs-on: linux
     concurrency:
       group: release-firmware
       cancel-in-progress: false
@@ -91,6 +93,7 @@ jobs:
             semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
             conventional-changelog-conventionalcommits
 
       - name: Run semantic-release (firmware)

@@ -1,11 +1,9 @@
 #include "dedup.h"
 #include <string.h>
 
-void dedup_init(dedup_buffer_t *buf) {
-    memset(buf, 0, sizeof(*buf));
-}
+void dedup_init(dedup_buffer_t* buf) { memset(buf, 0, sizeof(*buf)); }
 
-bool dedup_check_and_add(dedup_buffer_t *buf, uint32_t packet_id, uint32_t now_ms) {
+bool dedup_check_and_add(dedup_buffer_t* buf, uint32_t packet_id, uint32_t now_ms) {
     /* Purge expired entries first */
     dedup_purge(buf, now_ms);
 
@@ -36,7 +34,7 @@ bool dedup_check_and_add(dedup_buffer_t *buf, uint32_t packet_id, uint32_t now_m
     return false; /* not duplicate */
 }
 
-void dedup_purge(dedup_buffer_t *buf, uint32_t now_ms) {
+void dedup_purge(dedup_buffer_t* buf, uint32_t now_ms) {
     int dst = 0;
     for (int src = 0; src < buf->count; src++) {
         if ((now_ms - buf->entries[src].timestamp_ms) < DEDUP_EXPIRY_MS) {
@@ -49,6 +47,4 @@ void dedup_purge(dedup_buffer_t *buf, uint32_t now_ms) {
     buf->count = dst;
 }
 
-int dedup_count(const dedup_buffer_t *buf) {
-    return buf->count;
-}
+int dedup_count(const dedup_buffer_t* buf) { return buf->count; }

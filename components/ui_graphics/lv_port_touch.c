@@ -3,7 +3,7 @@
 #include "sleep_manager.h"
 #include "esp_log.h"
 
-static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
+static void touch_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     (void)indev;
     touch_point_t pt;
     if (touch_read(&pt) && pt.pressed) {
@@ -17,13 +17,13 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     }
 }
 
-lv_indev_t *lv_port_touch_init(void) {
+lv_indev_t* lv_port_touch_init(void) {
     if (touch_init() != 0) {
         ESP_LOGW("lv_port_touch", "Touch init failed - touch disabled");
         return NULL;
     }
 
-    lv_indev_t *indev = lv_indev_create();
+    lv_indev_t* indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, touch_read_cb);
 

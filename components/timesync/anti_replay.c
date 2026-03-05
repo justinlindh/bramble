@@ -2,16 +2,17 @@
 #include <string.h>
 #include <stdlib.h>
 
-void anti_replay_init(anti_replay_cache_t *cache) {
+void anti_replay_init(anti_replay_cache_t* cache) {
     memset(cache, 0, sizeof(*cache));
     cache->nonce_counter = 0;
 }
 
-bool anti_replay_check(anti_replay_cache_t *cache, uint32_t packet_id,
-                       uint32_t packet_time_ms, uint32_t now_ms) {
+bool anti_replay_check(anti_replay_cache_t* cache, uint32_t packet_id, uint32_t packet_time_ms,
+                       uint32_t now_ms) {
     // Reject if timestamp outside window
     int64_t diff = (int64_t)packet_time_ms - (int64_t)now_ms;
-    if (diff < 0) diff = -diff;
+    if (diff < 0)
+        diff = -diff;
     if (diff > ANTI_REPLAY_WINDOW_MS) {
         return false;
     }
@@ -26,7 +27,7 @@ bool anti_replay_check(anti_replay_cache_t *cache, uint32_t packet_id,
     return true;
 }
 
-void anti_replay_add(anti_replay_cache_t *cache, uint32_t packet_id, uint32_t now_ms) {
+void anti_replay_add(anti_replay_cache_t* cache, uint32_t packet_id, uint32_t now_ms) {
     if (cache->count >= ANTI_REPLAY_CACHE_SIZE) {
         // Evict oldest entry
         uint32_t oldest_idx = 0;
@@ -46,7 +47,7 @@ void anti_replay_add(anti_replay_cache_t *cache, uint32_t packet_id, uint32_t no
     }
 }
 
-void anti_replay_purge(anti_replay_cache_t *cache, uint32_t now_ms) {
+void anti_replay_purge(anti_replay_cache_t* cache, uint32_t now_ms) {
     int write = 0;
     for (int read = 0; read < cache->count; read++) {
         uint32_t age = now_ms - cache->entries[read].timestamp;
@@ -60,14 +61,12 @@ void anti_replay_purge(anti_replay_cache_t *cache, uint32_t now_ms) {
     cache->count = write;
 }
 
-uint32_t anti_replay_get_nonce_counter(const anti_replay_cache_t *cache) {
+uint32_t anti_replay_get_nonce_counter(const anti_replay_cache_t* cache) {
     return cache->nonce_counter;
 }
 
-void anti_replay_set_nonce_counter(anti_replay_cache_t *cache, uint32_t value) {
+void anti_replay_set_nonce_counter(anti_replay_cache_t* cache, uint32_t value) {
     cache->nonce_counter = value;
 }
 
-uint32_t anti_replay_next_nonce(anti_replay_cache_t *cache) {
-    return cache->nonce_counter++;
-}
+uint32_t anti_replay_next_nonce(anti_replay_cache_t* cache) { return cache->nonce_counter++; }
