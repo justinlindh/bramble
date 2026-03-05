@@ -68,3 +68,5 @@ jobs:
         run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
 
 # ci-sync-trigger 1772679720
+
+# verify-clang-format-step 1772680440
