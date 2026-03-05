@@ -21,7 +21,7 @@ describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
   }
 
   function feedChunk(transport: SerialTransport, chunk: string) {
-    (transport as any).lineBuf += chunk;
+    (transport as any).readBuf += chunk;
     (transport as any).processLines();
   }
 
@@ -53,5 +53,19 @@ describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
     const assertion = expect(rpcPromise).resolves.toEqual({ ok: true });
     await vi.advanceTimersByTimeAsync(60);
     await assertion;
+  });
+
+  it('should route notifications without id even when surrounded by serial log noise', () => {
+    const { transport } = setupConnectedTransport();
+    const onNotify = vi.fn();
+    transport.onNotification(onNotify);
+
+    feedChunk(
+      transport,
+      'D (99) dbg: start {"jsonrpc":"2.0","method":"mesh.event","params":{"node":7}} trailing bytes\n',
+    );
+
+    expect(onNotify).toHaveBeenCalledTimes(1);
+    expect(onNotify).toHaveBeenCalledWith('mesh.event', { node: 7 });
   });
 });
