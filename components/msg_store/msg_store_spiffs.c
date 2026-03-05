@@ -13,7 +13,7 @@
 
 #define TAG "msg_spiffs"
 #define MSG_FILE_PATH "/spiffs/messages.bin"
-#define MSG_FILE_MAGIC 0x4252414D  /* "BRAM" */
+#define MSG_FILE_MAGIC 0x4252414D /* "BRAM" */
 #define MSG_FILE_VERSION 1
 
 typedef struct {
@@ -24,7 +24,7 @@ typedef struct {
     uint32_t next_id;
 } __attribute__((packed)) msg_file_header_t;
 
-static FILE *s_msg_file = NULL;
+static FILE* s_msg_file = NULL;
 static msg_file_header_t s_header;
 static bool s_initialized = false;
 
@@ -41,8 +41,7 @@ int msg_store_spiffs_init(void) {
     if (s_msg_file) {
         /* Read and validate header */
         if (fread(&s_header, sizeof(s_header), 1, s_msg_file) != 1 ||
-            s_header.magic != MSG_FILE_MAGIC ||
-            s_header.version != MSG_FILE_VERSION ||
+            s_header.magic != MSG_FILE_MAGIC || s_header.version != MSG_FILE_VERSION ||
             s_header.record_size != sizeof(stored_msg_t)) {
             ESP_LOGW(TAG, "Corrupted message file, clearing");
             fclose(s_msg_file);
@@ -83,7 +82,7 @@ int msg_store_spiffs_init(void) {
     return 0;
 }
 
-int msg_store_spiffs_save(const stored_msg_t *msg) {
+int msg_store_spiffs_save(const stored_msg_t* msg) {
     if (!s_initialized || !s_msg_file || !msg) {
         return -1;
     }
@@ -118,11 +117,9 @@ int msg_store_spiffs_save(const stored_msg_t *msg) {
     return 0;
 }
 
-int msg_store_spiffs_get_count(void) {
-    return s_initialized ? s_header.record_count : 0;
-}
+int msg_store_spiffs_get_count(void) { return s_initialized ? s_header.record_count : 0; }
 
-int msg_store_spiffs_load_recent(stored_msg_t *msgs, int max_count) {
+int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count) {
     if (!s_initialized || !s_msg_file || !msgs || max_count <= 0) {
         return 0;
     }
@@ -130,7 +127,7 @@ int msg_store_spiffs_load_recent(stored_msg_t *msgs, int max_count) {
     /* Calculate how many messages to load (most recent ones) */
     int total = s_header.record_count;
     int to_load = (total < max_count) ? total : max_count;
-    
+
     if (to_load == 0) {
         return 0;
     }
@@ -148,18 +145,18 @@ int msg_store_spiffs_load_recent(stored_msg_t *msgs, int max_count) {
     /* Read messages */
     int loaded = fread(msgs, sizeof(stored_msg_t), to_load, s_msg_file);
 
-    ESP_LOGI(TAG, "Loaded %d recent messages (requested %d, available %" PRIu32 ")",
-             loaded, max_count, s_header.record_count);
+    ESP_LOGI(TAG, "Loaded %d recent messages (requested %d, available %" PRIu32 ")", loaded,
+             max_count, s_header.record_count);
     return loaded;
 }
 
 void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
     if (!s_initialized || !s_msg_file || s_header.record_count <= max_messages) {
-        return;  /* No rollover needed */
+        return; /* No rollover needed */
     }
 
-    ESP_LOGI(TAG, "Rolling over message file: %" PRIu32 " -> %d messages",
-             s_header.record_count, max_messages);
+    ESP_LOGI(TAG, "Rolling over message file: %" PRIu32 " -> %d messages", s_header.record_count,
+             max_messages);
 
     /* Validate keep percentage */
     if (keep_pct < 50 || keep_pct > 90) {
@@ -171,7 +168,7 @@ void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
     int skip_count = s_header.record_count - keep_count;
 
     /* Allocate temp buffer for messages to keep */
-    stored_msg_t *keep_msgs = malloc(keep_count * sizeof(stored_msg_t));
+    stored_msg_t* keep_msgs = malloc(keep_count * sizeof(stored_msg_t));
     if (!keep_msgs) {
         ESP_LOGE(TAG, "malloc failed for rollover");
         return;
@@ -234,13 +231,19 @@ void msg_store_spiffs_clear(void) {
 #else /* Host stubs for unit tests */
 
 int msg_store_spiffs_init(void) { return -1; }
-int msg_store_spiffs_save(const stored_msg_t *msg) { (void)msg; return -1; }
-int msg_store_spiffs_get_count(void) { return 0; }
-int msg_store_spiffs_load_recent(stored_msg_t *msgs, int max_count) {
-    (void)msgs; (void)max_count; return 0;
+int msg_store_spiffs_save(const stored_msg_t* msg) {
+    (void)msg;
+    return -1;
 }
-void msg_store_spiffs_rollover(int max_messages, int keep_pct) { 
-    (void)max_messages; (void)keep_pct;
+int msg_store_spiffs_get_count(void) { return 0; }
+int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count) {
+    (void)msgs;
+    (void)max_count;
+    return 0;
+}
+void msg_store_spiffs_rollover(int max_messages, int keep_pct) {
+    (void)max_messages;
+    (void)keep_pct;
 }
 void msg_store_spiffs_clear(void) {}
 

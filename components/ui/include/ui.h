@@ -9,7 +9,7 @@ typedef enum {
     SCREEN_MAIN = 0,
     SCREEN_MESSAGES,
     SCREEN_NODES,
-    SCREEN_COMPOSE,   /* T-Deck: compose; Heltec: Stats */
+    SCREEN_COMPOSE, /* T-Deck: compose; Heltec: Stats */
     SCREEN_SETTINGS,
     SCREEN_COUNT
 } ui_screen_t;
@@ -71,23 +71,23 @@ typedef struct {
     uint32_t last_activity;
     bool screen_dirty;
     ui_settings_item_t settings_item_cursor; /* selected settings row */
-    int settings_cursor;        /* selected value while editing current row */
-    bool settings_editing;      /* true when in settings edit mode */
-    bool settings_confirmed;    /* set true on long-press confirm */
+    int settings_cursor;                     /* selected value while editing current row */
+    bool settings_editing;                   /* true when in settings edit mode */
+    bool settings_confirmed;                 /* set true on long-press confirm */
     bool pending_message_notification; /* set when a message arrives during active navigation */
     uint32_t message_auto_switch_time; /* timestamp when idle auto-switch to messages happened */
 
     /* Compose state */
     char compose_buf[COMPOSE_BUF_SIZE];
     int compose_len;
-    bool compose_active;        /* true when in compose mode with cursor */
+    bool compose_active; /* true when in compose mode with cursor */
 } ui_state_t;
 
-void ui_init(ui_state_t *state);
-void ui_handle_button(ui_state_t *state, ui_button_t btn, uint32_t now_ms);
-ui_screen_t ui_get_screen(const ui_state_t *state);
-bool ui_needs_redraw(const ui_state_t *state);
-void ui_mark_drawn(ui_state_t *state);
+void ui_init(ui_state_t* state);
+void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms);
+ui_screen_t ui_get_screen(const ui_state_t* state);
+bool ui_needs_redraw(const ui_state_t* state);
+void ui_mark_drawn(ui_state_t* state);
 
 /* Connectivity mode — NVS-persisted, applied on next boot.
  * Implemented in main/main.c; declared here so any UI component can call them. */
@@ -97,14 +97,14 @@ void conn_mode_set(conn_mode_t mode);
 #define UI_INACTIVITY_TIMEOUT_MS 60000
 #define UI_MESSAGE_IDLE_THRESHOLD_MS 10000
 #define UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS 30000
-void ui_check_timeout(ui_state_t *state, uint32_t now_ms);
-void ui_on_message_received(ui_state_t *state, uint32_t now_ms);
+void ui_check_timeout(ui_state_t* state, uint32_t now_ms);
+void ui_on_message_received(ui_state_t* state, uint32_t now_ms);
 
 // Display formatters
-int ui_format_main_line1(const ui_main_data_t *data, char *buf, size_t buf_len);
-int ui_format_main_line2(const ui_main_data_t *data, char *buf, size_t buf_len);
-int ui_format_main_line3(const ui_main_data_t *data, char *buf, size_t buf_len);
-int ui_format_uptime(uint32_t uptime_sec, char *buf, size_t buf_len);
+int ui_format_main_line1(const ui_main_data_t* data, char* buf, size_t buf_len);
+int ui_format_main_line2(const ui_main_data_t* data, char* buf, size_t buf_len);
+int ui_format_main_line3(const ui_main_data_t* data, char* buf, size_t buf_len);
+int ui_format_uptime(uint32_t uptime_sec, char* buf, size_t buf_len);
 
 /* Normalize persisted connectivity mode at boot.
  * Legacy WiFi+BLE values are coerced to WiFi (exclusive mode policy).

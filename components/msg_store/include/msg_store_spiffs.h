@@ -18,7 +18,7 @@ int msg_store_spiffs_init(void);
  * Save a message to SPIFFS (append to file).
  * Returns 0 on success, -1 on error.
  */
-int msg_store_spiffs_save(const stored_msg_t *msg);
+int msg_store_spiffs_save(const stored_msg_t* msg);
 
 /**
  * Get total number of persisted messages.
@@ -30,7 +30,7 @@ int msg_store_spiffs_get_count(void);
  * Loads the most recent messages up to max_count.
  * Returns number of messages loaded (up to max_count).
  */
-int msg_store_spiffs_load_recent(stored_msg_t *msgs, int max_count);
+int msg_store_spiffs_load_recent(stored_msg_t* msgs, int max_count);
 
 /**
  * Trigger rollover if message count exceeds max_messages.

@@ -12,11 +12,11 @@ void ui_graphics_clear_unread(void);
 /** Call from 1ms timer — feeds LVGL tick. */
 void ui_graphics_tick_1ms(void);
 
-#define UI_EVT_MSG_RECEIVED     (1 << 0)
-#define UI_EVT_NODE_UPDATE      (1 << 1)
-#define UI_EVT_STATS_UPDATE     (1 << 2)
-#define UI_EVT_BATTERY_UPDATE   (1 << 3)
-#define UI_EVT_GPS_UPDATE       (1 << 4)
-#define UI_EVT_CONN_CHANGE      (1 << 5)
+#define UI_EVT_MSG_RECEIVED (1 << 0)
+#define UI_EVT_NODE_UPDATE (1 << 1)
+#define UI_EVT_STATS_UPDATE (1 << 2)
+#define UI_EVT_BATTERY_UPDATE (1 << 3)
+#define UI_EVT_GPS_UPDATE (1 << 4)
+#define UI_EVT_CONN_CHANGE (1 << 5)
 
 #endif

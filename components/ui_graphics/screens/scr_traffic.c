@@ -6,10 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *TAG = "scr_traffic";
+static const char* TAG = "scr_traffic";
 
 /* traffic_debug instance lives in main/mesh_task.c — access via extern */
-extern traffic_debug_t *mesh_get_traffic_debug(void);
+extern traffic_debug_t* mesh_get_traffic_debug(void);
 
 /* Maximum rows to render — keeps memory deterministic and scroll fast */
 #define TRAFFIC_DISPLAY_MAX 100
@@ -17,49 +17,77 @@ extern traffic_debug_t *mesh_get_traffic_debug(void);
 /* -------------------------------------------------------------------------
  * Packet type → short display name (max 5 chars)
  * ------------------------------------------------------------------------- */
-static const char *pkt_type_name(uint8_t pkt_type) {
+static const char* pkt_type_name(uint8_t pkt_type) {
     switch (pkt_type) {
-        case 0x01: return "ACK";
-        case 0x02: return "RREQ";
-        case 0x03: return "RREP";
-        case 0x04: return "RERR";
-        case 0x05: return "BCN";
-        case 0x06: return "KEY";
-        case 0x07: return "DLVR";
-        case 0x08: return "CONG";
-        case 0x09: return "TSYNC";
-        case 0x0A: return "DATA";
-        case 0x0B: return "SREQ";
-        case 0x0C: return "SACK";
-        case 0x0D: return "MBOX";
-        case 0x0E: return "MBQ";
-        case 0x0F: return "EMRG";
-        case 0x10: return "ECNX";
-        case 0x11: return "CODE";
-        case 0x12: return "PROB";
-        case 0x13: return "PACK";
-        case 0x14: return "LOC";
-        default: {
-            static char unk[6];
-            snprintf(unk, sizeof(unk), "%02X", pkt_type);
-            return unk;
-        }
+    case 0x01:
+        return "ACK";
+    case 0x02:
+        return "RREQ";
+    case 0x03:
+        return "RREP";
+    case 0x04:
+        return "RERR";
+    case 0x05:
+        return "BCN";
+    case 0x06:
+        return "KEY";
+    case 0x07:
+        return "DLVR";
+    case 0x08:
+        return "CONG";
+    case 0x09:
+        return "TSYNC";
+    case 0x0A:
+        return "DATA";
+    case 0x0B:
+        return "SREQ";
+    case 0x0C:
+        return "SACK";
+    case 0x0D:
+        return "MBOX";
+    case 0x0E:
+        return "MBQ";
+    case 0x0F:
+        return "EMRG";
+    case 0x10:
+        return "ECNX";
+    case 0x11:
+        return "CODE";
+    case 0x12:
+        return "PROB";
+    case 0x13:
+        return "PACK";
+    case 0x14:
+        return "LOC";
+    default: {
+        static char unk[6];
+        snprintf(unk, sizeof(unk), "%02X", pkt_type);
+        return unk;
+    }
     }
 }
 
 /* -------------------------------------------------------------------------
  * Category → short name (max 5 chars)
  * ------------------------------------------------------------------------- */
-static const char *cat_name(traffic_category_t cat) {
+static const char* cat_name(traffic_category_t cat) {
     switch (cat) {
-        case TRAFFIC_CAT_BEACON:      return "bcn";
-        case TRAFFIC_CAT_TIMESYNC:    return "time";
-        case TRAFFIC_CAT_ROUTING:     return "route";
-        case TRAFFIC_CAT_ACK:         return "ack";
-        case TRAFFIC_CAT_CHAT:        return "chat";
-        case TRAFFIC_CAT_MAINTENANCE: return "maint";
-        case TRAFFIC_CAT_OTHER:       return "other";
-        default:                      return "?";
+    case TRAFFIC_CAT_BEACON:
+        return "bcn";
+    case TRAFFIC_CAT_TIMESYNC:
+        return "time";
+    case TRAFFIC_CAT_ROUTING:
+        return "route";
+    case TRAFFIC_CAT_ACK:
+        return "ack";
+    case TRAFFIC_CAT_CHAT:
+        return "chat";
+    case TRAFFIC_CAT_MAINTENANCE:
+        return "maint";
+    case TRAFFIC_CAT_OTHER:
+        return "other";
+    default:
+        return "?";
     }
 }
 
@@ -68,14 +96,18 @@ static const char *cat_name(traffic_category_t cat) {
  * ------------------------------------------------------------------------- */
 static lv_color_t cat_color(traffic_category_t cat) {
     switch (cat) {
-        case TRAFFIC_CAT_CHAT:        return BR_COLOR_PRIMARY;     /* green */
-        case TRAFFIC_CAT_ROUTING:     return BR_COLOR_ACCENT;      /* blue  */
-        case TRAFFIC_CAT_MAINTENANCE: return BR_COLOR_WARNING;     /* amber */
-        case TRAFFIC_CAT_BEACON:
-        case TRAFFIC_CAT_TIMESYNC:
-        case TRAFFIC_CAT_ACK:
-        case TRAFFIC_CAT_OTHER:
-        default:                      return BR_COLOR_TEXT_SEC;    /* muted */
+    case TRAFFIC_CAT_CHAT:
+        return BR_COLOR_PRIMARY; /* green */
+    case TRAFFIC_CAT_ROUTING:
+        return BR_COLOR_ACCENT; /* blue  */
+    case TRAFFIC_CAT_MAINTENANCE:
+        return BR_COLOR_WARNING; /* amber */
+    case TRAFFIC_CAT_BEACON:
+    case TRAFFIC_CAT_TIMESYNC:
+    case TRAFFIC_CAT_ACK:
+    case TRAFFIC_CAT_OTHER:
+    default:
+        return BR_COLOR_TEXT_SEC; /* muted */
     }
 }
 
@@ -85,8 +117,8 @@ static lv_color_t cat_color(traffic_category_t cat) {
  * Layout (320px content width, 8px side pads → 304px):
  *   Dir  24px | Type  48px | Cat  54px | Size  38px | RSSI  fill
  * ------------------------------------------------------------------------- */
-static void create_event_row(lv_obj_t *parent, const traffic_event_t *evt) {
-    lv_obj_t *row = lv_obj_create(parent);
+static void create_event_row(lv_obj_t* parent, const traffic_event_t* evt) {
+    lv_obj_t* row = lv_obj_create(parent);
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, 18);
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
@@ -94,20 +126,18 @@ static void create_event_row(lv_obj_t *parent, const traffic_event_t *evt) {
     lv_obj_set_style_pad_all(row, 0, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, 4, 0);
 
     /* Dir — TX (green) or RX (blue) */
-    lv_obj_t *dir_lbl = lv_label_create(row);
+    lv_obj_t* dir_lbl = lv_label_create(row);
     lv_obj_set_width(dir_lbl, 24);
     lv_label_set_text(dir_lbl, evt->is_tx ? "TX" : "RX");
     lv_obj_set_style_text_font(dir_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(dir_lbl,
-        evt->is_tx ? BR_COLOR_PRIMARY : BR_COLOR_ACCENT, 0);
+    lv_obj_set_style_text_color(dir_lbl, evt->is_tx ? BR_COLOR_PRIMARY : BR_COLOR_ACCENT, 0);
 
     /* Type name */
-    lv_obj_t *type_lbl = lv_label_create(row);
+    lv_obj_t* type_lbl = lv_label_create(row);
     lv_obj_set_width(type_lbl, 48);
     lv_label_set_long_mode(type_lbl, LV_LABEL_LONG_DOT);
     lv_label_set_text(type_lbl, pkt_type_name(evt->pkt_type));
@@ -115,7 +145,7 @@ static void create_event_row(lv_obj_t *parent, const traffic_event_t *evt) {
     lv_obj_set_style_text_color(type_lbl, BR_COLOR_TEXT, 0);
 
     /* Category (color coded) */
-    lv_obj_t *cat_lbl = lv_label_create(row);
+    lv_obj_t* cat_lbl = lv_label_create(row);
     lv_obj_set_width(cat_lbl, 54);
     lv_label_set_long_mode(cat_lbl, LV_LABEL_LONG_DOT);
     lv_label_set_text(cat_lbl, cat_name(evt->category));
@@ -125,7 +155,7 @@ static void create_event_row(lv_obj_t *parent, const traffic_event_t *evt) {
     /* Packet size */
     char sz_buf[10];
     snprintf(sz_buf, sizeof(sz_buf), "%ub", evt->packet_len);
-    lv_obj_t *sz_lbl = lv_label_create(row);
+    lv_obj_t* sz_lbl = lv_label_create(row);
     lv_obj_set_width(sz_lbl, 38);
     lv_label_set_text(sz_lbl, sz_buf);
     lv_obj_set_style_text_font(sz_lbl, &lv_font_montserrat_12, 0);
@@ -138,18 +168,18 @@ static void create_event_row(lv_obj_t *parent, const traffic_event_t *evt) {
     } else {
         strcpy(rssi_buf, "--");
     }
-    lv_obj_t *rssi_lbl = lv_label_create(row);
+    lv_obj_t* rssi_lbl = lv_label_create(row);
     lv_label_set_text(rssi_lbl, rssi_buf);
     lv_obj_set_style_text_font(rssi_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(rssi_lbl,
-        (!evt->is_tx && evt->rssi != 0) ? BR_COLOR_TEXT : BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_color(
+        rssi_lbl, (!evt->is_tx && evt->rssi != 0) ? BR_COLOR_TEXT : BR_COLOR_TEXT_SEC, 0);
 }
 
 /* -------------------------------------------------------------------------
  * Back button callback — returns to Stats screen
  * ------------------------------------------------------------------------- */
-static void back_click_cb(lv_event_t *e) {
-    bramble_layout_t *layout = (bramble_layout_t *)lv_event_get_user_data(e);
+static void back_click_cb(lv_event_t* e) {
+    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
     lv_refr_now(lv_display_get_default());
     lv_obj_clean(layout->content_area);
     scr_stats_create(layout);
@@ -158,22 +188,22 @@ static void back_click_cb(lv_event_t *e) {
 /* -------------------------------------------------------------------------
  * Main screen builder
  * ------------------------------------------------------------------------- */
-void scr_traffic_create(bramble_layout_t *layout) {
-    lv_obj_t *cont = layout_get_content(layout);
+void scr_traffic_create(bramble_layout_t* layout) {
+    lv_obj_t* cont = layout_get_content(layout);
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 0, 0);
     lv_obj_set_style_pad_row(cont, 0, 0);
 
-    traffic_debug_t *td = mesh_get_traffic_debug();
+    traffic_debug_t* td = mesh_get_traffic_debug();
     uint16_t event_count = td ? traffic_debug_get_count(td) : 0;
     bool debug_on = td ? traffic_debug_is_enabled(td) : false;
     uint32_t dropped = td ? traffic_debug_get_dropped(td) : 0;
 
-    ESP_LOGI(TAG, "Traffic monitor: %u events, debug=%d, dropped=%lu",
-             event_count, debug_on, (unsigned long)dropped);
+    ESP_LOGI(TAG, "Traffic monitor: %u events, debug=%d, dropped=%lu", event_count, debug_on,
+             (unsigned long)dropped);
 
     /* ---- Header row: back button + title + event count ---- */
-    lv_obj_t *header = lv_obj_create(cont);
+    lv_obj_t* header = lv_obj_create(cont);
     lv_obj_set_size(header, 320, 28);
     lv_obj_set_style_bg_color(header, BR_COLOR_SURFACE, 0);
     lv_obj_set_style_bg_opa(header, LV_OPA_COVER, 0);
@@ -183,7 +213,7 @@ void scr_traffic_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_column(header, 4, 0);
 
     /* Back button */
-    lv_obj_t *back_btn = lv_btn_create(header);
+    lv_obj_t* back_btn = lv_btn_create(header);
     lv_obj_set_size(back_btn, 48, 20);
     lv_obj_align(back_btn, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_bg_color(back_btn, BR_COLOR_SURFACE_2, 0);
@@ -194,17 +224,18 @@ void scr_traffic_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_all(back_btn, 2, 0);
     lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
 
-    lv_obj_t *back_lbl = lv_label_create(back_btn);
+    lv_obj_t* back_lbl = lv_label_create(back_btn);
     lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Bk");
     lv_obj_set_style_text_font(back_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(back_lbl, BR_COLOR_TEXT, 0);
     lv_obj_center(back_lbl);
 
-    lv_group_t *g = lv_group_get_default();
-    if (g) lv_group_add_obj(g, back_btn);
+    lv_group_t* g = lv_group_get_default();
+    if (g)
+        lv_group_add_obj(g, back_btn);
 
     /* Title */
-    lv_obj_t *title = lv_label_create(header);
+    lv_obj_t* title = lv_label_create(header);
     lv_label_set_text(title, "Traffic");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
@@ -213,14 +244,14 @@ void scr_traffic_create(bramble_layout_t *layout) {
     /* Event count badge */
     char cnt_buf[16];
     snprintf(cnt_buf, sizeof(cnt_buf), "%u evts", event_count);
-    lv_obj_t *cnt_lbl = lv_label_create(header);
+    lv_obj_t* cnt_lbl = lv_label_create(header);
     lv_label_set_text(cnt_lbl, cnt_buf);
     lv_obj_set_style_text_font(cnt_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(cnt_lbl, BR_COLOR_TEXT_SEC, 0);
     lv_obj_align(cnt_lbl, LV_ALIGN_RIGHT_MID, -4, 0);
 
     /* ---- Status line ---- */
-    lv_obj_t *status_row = lv_obj_create(cont);
+    lv_obj_t* status_row = lv_obj_create(cont);
     lv_obj_set_size(status_row, 320, 18);
     lv_obj_set_style_bg_opa(status_row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(status_row, 0, 0);
@@ -228,11 +259,11 @@ void scr_traffic_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_ver(status_row, 1, 0);
     lv_obj_clear_flag(status_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(status_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
 
     /* Debug on/off indicator */
-    lv_obj_t *dbg_lbl = lv_label_create(status_row);
+    lv_obj_t* dbg_lbl = lv_label_create(status_row);
     lv_obj_set_style_text_font(dbg_lbl, &lv_font_montserrat_12, 0);
     if (debug_on) {
         lv_label_set_text(dbg_lbl, "● Debug ON");
@@ -246,14 +277,14 @@ void scr_traffic_create(bramble_layout_t *layout) {
     if (dropped > 0) {
         char drop_buf[24];
         snprintf(drop_buf, sizeof(drop_buf), "%lu dropped", (unsigned long)dropped);
-        lv_obj_t *drop_lbl = lv_label_create(status_row);
+        lv_obj_t* drop_lbl = lv_label_create(status_row);
         lv_label_set_text(drop_lbl, drop_buf);
         lv_obj_set_style_text_font(drop_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(drop_lbl, BR_COLOR_WARNING, 0);
     }
 
     /* ---- Column header ---- */
-    lv_obj_t *col_hdr = lv_obj_create(cont);
+    lv_obj_t* col_hdr = lv_obj_create(cont);
     lv_obj_set_size(col_hdr, 320, 16);
     lv_obj_set_style_bg_color(col_hdr, BR_COLOR_SURFACE_2, 0);
     lv_obj_set_style_bg_opa(col_hdr, LV_OPA_COVER, 0);
@@ -262,15 +293,15 @@ void scr_traffic_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_ver(col_hdr, 1, 0);
     lv_obj_clear_flag(col_hdr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(col_hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(col_hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(col_hdr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(col_hdr, 4, 0);
 
-    const char *hdr_labels[] = { "Dir", "Type", "Cat", "Size", "RSSI" };
-    int hdr_widths[]          = {  24,    48,    54,    38,      0    };
+    const char* hdr_labels[] = {"Dir", "Type", "Cat", "Size", "RSSI"};
+    int hdr_widths[] = {24, 48, 54, 38, 0};
     for (int i = 0; i < 5; i++) {
-        lv_obj_t *h = lv_label_create(col_hdr);
-        if (hdr_widths[i] > 0) lv_obj_set_width(h, hdr_widths[i]);
+        lv_obj_t* h = lv_label_create(col_hdr);
+        if (hdr_widths[i] > 0)
+            lv_obj_set_width(h, hdr_widths[i]);
         lv_label_set_text(h, hdr_labels[i]);
         lv_obj_set_style_text_font(h, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(h, BR_COLOR_TEXT_SEC, 0);
@@ -280,7 +311,7 @@ void scr_traffic_create(bramble_layout_t *layout) {
     /* Available height: BR_CONTENT_H (180) - 28 header - 18 status - 16 col_hdr = 118px */
     int list_h = BR_CONTENT_H - 28 - 18 - 16;
 
-    lv_obj_t *list = lv_obj_create(cont);
+    lv_obj_t* list = lv_obj_create(cont);
     lv_obj_set_size(list, 320, list_h);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(list, 0, 0);
@@ -288,19 +319,17 @@ void scr_traffic_create(bramble_layout_t *layout) {
     lv_obj_set_style_pad_ver(list, 2, 0);
     lv_obj_set_style_pad_row(list, 1, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START);
+    lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
 
     if (event_count == 0) {
-        lv_obj_t *empty = lv_label_create(list);
+        lv_obj_t* empty = lv_label_create(list);
         if (debug_on) {
-            lv_label_set_text(empty,
-                "No events yet.\nPackets will appear as they arrive.");
+            lv_label_set_text(empty, "No events yet.\nPackets will appear as they arrive.");
         } else {
             lv_label_set_text(empty,
-                "Traffic debug is disabled.\nEnable it in Config → Traffic Debug.");
+                              "Traffic debug is disabled.\nEnable it in Config → Traffic Debug.");
         }
         lv_obj_set_style_text_color(empty, BR_COLOR_TEXT_SEC, 0);
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_12, 0);
@@ -313,14 +342,14 @@ void scr_traffic_create(bramble_layout_t *layout) {
      * Render newest events first (reverse order).
      * Cap at TRAFFIC_DISPLAY_MAX rows to keep LVGL heap usage bounded.
      */
-    uint16_t start_idx = (event_count > TRAFFIC_DISPLAY_MAX)
-                         ? (event_count - TRAFFIC_DISPLAY_MAX) : 0;
+    uint16_t start_idx =
+        (event_count > TRAFFIC_DISPLAY_MAX) ? (event_count - TRAFFIC_DISPLAY_MAX) : 0;
     uint16_t render_count = event_count - start_idx;
 
     for (int i = (int)render_count - 1; i >= 0; i--) {
-        const traffic_event_t *evt = traffic_debug_get_event(td,
-                                        (uint16_t)(start_idx + i));
-        if (!evt) continue;
+        const traffic_event_t* evt = traffic_debug_get_event(td, (uint16_t)(start_idx + i));
+        if (!evt)
+            continue;
         create_event_row(list, evt);
     }
 }

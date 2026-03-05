@@ -9,16 +9,16 @@
 
 /* Display dimensions — board-specific */
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-#define DISPLAY_WIDTH       320
-#define DISPLAY_HEIGHT      240
+#define DISPLAY_WIDTH 320
+#define DISPLAY_HEIGHT 240
 #else
 /* Default: Heltec V3 and other SSD1306 boards */
-#define DISPLAY_WIDTH       128
-#define DISPLAY_HEIGHT      64
+#define DISPLAY_WIDTH 128
+#define DISPLAY_HEIGHT 64
 #endif
 
 /* I2C parameters (for SSD1306 boards) */
-#define DISPLAY_I2C_PORT    0
+#define DISPLAY_I2C_PORT 0
 #define DISPLAY_I2C_FREQ_HZ 400000
 
 /**
@@ -38,13 +38,13 @@ void display_fill(void);
  * Draw a string at pixel position (x, y).
  * Uses built-in 6x8 font. Clips at display boundaries.
  */
-void display_draw_text(int x, int y, const char *text);
+void display_draw_text(int x, int y, const char* text);
 
 /**
  * Draw a string with 2x scaling (12x16 effective).
  * Used for large text like the splash screen title.
  */
-void display_draw_text_large(int x, int y, const char *text);
+void display_draw_text_large(int x, int y, const char* text);
 
 /** Draw a horizontal line from (x, y) to (x+w, y). */
 void display_hline(int x, int y, int w);
@@ -81,7 +81,7 @@ bool display_get_rotated_180(void);
  * buf contains RGB565 pixels in row-major order.
  * Used by LVGL display driver.
  */
-void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t *buf);
+void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf);
 
 /**
  * Get display dimensions (for runtime queries).

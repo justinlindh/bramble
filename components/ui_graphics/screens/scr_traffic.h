@@ -12,6 +12,6 @@
  *
  * Call after lv_obj_clean(layout->content_area).
  */
-void scr_traffic_create(bramble_layout_t *layout);
+void scr_traffic_create(bramble_layout_t* layout);
 
 #endif /* SCR_TRAFFIC_H */

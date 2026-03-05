@@ -8,13 +8,13 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 
-static const char *TAG = "button";
+static const char* TAG = "button";
 
 static bool last_pressed = false;
 static uint32_t press_start_ms = 0;
 static uint32_t last_release_ms = 0;
 static bool waiting_double = false;
-static const bramble_board_config_t *s_board = NULL;
+static const bramble_board_config_t* s_board = NULL;
 
 void button_init(void) {
     s_board = board_get_config();
@@ -81,8 +81,7 @@ ui_button_t button_poll(uint32_t now_ms) {
     }
 
     /* Check double-press timeout */
-    if (waiting_double && !pressed &&
-        (now_ms - last_release_ms) > BUTTON_DOUBLE_GAP_MS) {
+    if (waiting_double && !pressed && (now_ms - last_release_ms) > BUTTON_DOUBLE_GAP_MS) {
         waiting_double = false;
         return BTN_SHORT_PRESS;
     }

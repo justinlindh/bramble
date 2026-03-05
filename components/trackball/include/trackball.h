@@ -6,7 +6,7 @@
 #ifndef BRAMBLE_TRACKBALL_H
 #define BRAMBLE_TRACKBALL_H
 
-#include "ui.h"  /* For ui_button_t */
+#include "ui.h" /* For ui_button_t */
 
 /**
  * Initialize trackball GPIOs and interrupts.

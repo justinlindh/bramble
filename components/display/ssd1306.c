@@ -13,8 +13,8 @@
 #include "freertos/task.h"
 #include <string.h>
 
-static const char *TAG = "display";
-static const bramble_board_config_t *s_board = NULL;
+static const char* TAG = "display";
+static const bramble_board_config_t* s_board = NULL;
 
 /* ── Framebuffer ─────────────────────────────────────────────────────── */
 
@@ -30,12 +30,12 @@ static bool s_rotated_180 = false;
 /* ── I2C helpers ─────────────────────────────────────────────────────── */
 
 static int ssd1306_cmd(uint8_t cmd) {
-    uint8_t buf[2] = { 0x00, cmd }; /* Co=0, D/C#=0 → command */
+    uint8_t buf[2] = {0x00, cmd}; /* Co=0, D/C#=0 → command */
     return i2c_master_transmit(dev_handle, buf, 2, 100) == ESP_OK ? 0 : -1;
 }
 
 static int ssd1306_cmd2(uint8_t cmd, uint8_t val) {
-    uint8_t buf[3] = { 0x00, cmd, val };
+    uint8_t buf[3] = {0x00, cmd, val};
     return i2c_master_transmit(dev_handle, buf, 3, 100) == ESP_OK ? 0 : -1;
 }
 
@@ -78,7 +78,7 @@ int display_init(void) {
         };
         gpio_config(&vext_conf);
         gpio_set_level(s_board->i2c_display.vext, 0); /* LOW = power on */
-        vTaskDelay(pdMS_TO_TICKS(50));       /* Let power stabilize */
+        vTaskDelay(pdMS_TO_TICKS(50));                /* Let power stabilize */
         ESP_LOGI(TAG, "Vext power enabled (GPIO%d LOW)", s_board->i2c_display.vext);
     }
 
@@ -123,21 +123,21 @@ int display_init(void) {
     }
 
     /* SSD1306 initialization sequence */
-    ssd1306_cmd(0xAE);           /* Display OFF */
-    ssd1306_cmd2(0xD5, 0x80);   /* Clock divide ratio */
-    ssd1306_cmd2(0xA8, 0x3F);   /* Multiplex ratio: 64 */
-    ssd1306_cmd2(0xD3, 0x00);   /* Display offset: 0 */
-    ssd1306_cmd(0x40);           /* Start line: 0 */
-    ssd1306_cmd2(0x8D, 0x14);   /* Charge pump: enable */
-    ssd1306_cmd2(0x20, 0x00);   /* Memory addressing: horizontal */
-    ssd1306_apply_rotation();    /* Segment/COM mapping for current orientation */
-    ssd1306_cmd2(0xDA, 0x12);   /* COM pins config: alternative */
-    ssd1306_cmd2(0x81, 0xCF);   /* Contrast: 207 */
-    ssd1306_cmd2(0xD9, 0xF1);   /* Pre-charge period */
-    ssd1306_cmd2(0xDB, 0x40);   /* VCOMH deselect level */
-    ssd1306_cmd(0xA4);           /* Display from RAM */
-    ssd1306_cmd(0xA6);           /* Normal (not inverted) */
-    ssd1306_cmd(0xAF);           /* Display ON */
+    ssd1306_cmd(0xAE);        /* Display OFF */
+    ssd1306_cmd2(0xD5, 0x80); /* Clock divide ratio */
+    ssd1306_cmd2(0xA8, 0x3F); /* Multiplex ratio: 64 */
+    ssd1306_cmd2(0xD3, 0x00); /* Display offset: 0 */
+    ssd1306_cmd(0x40);        /* Start line: 0 */
+    ssd1306_cmd2(0x8D, 0x14); /* Charge pump: enable */
+    ssd1306_cmd2(0x20, 0x00); /* Memory addressing: horizontal */
+    ssd1306_apply_rotation(); /* Segment/COM mapping for current orientation */
+    ssd1306_cmd2(0xDA, 0x12); /* COM pins config: alternative */
+    ssd1306_cmd2(0x81, 0xCF); /* Contrast: 207 */
+    ssd1306_cmd2(0xD9, 0xF1); /* Pre-charge period */
+    ssd1306_cmd2(0xDB, 0x40); /* VCOMH deselect level */
+    ssd1306_cmd(0xA4);        /* Display from RAM */
+    ssd1306_cmd(0xA6);        /* Normal (not inverted) */
+    ssd1306_cmd(0xAF);        /* Display ON */
 
     display_clear();
     display_flush();
@@ -147,16 +147,13 @@ int display_init(void) {
     return 0;
 }
 
-void display_clear(void) {
-    memset(fb, 0, sizeof(fb));
-}
+void display_clear(void) { memset(fb, 0, sizeof(fb)); }
 
-void display_fill(void) {
-    memset(fb, 0xFF, sizeof(fb));
-}
+void display_fill(void) { memset(fb, 0xFF, sizeof(fb)); }
 
 void display_pixel(int x, int y, bool on) {
-    if (x < 0 || x >= DISPLAY_WIDTH || y < 0 || y >= DISPLAY_HEIGHT) return;
+    if (x < 0 || x >= DISPLAY_WIDTH || y < 0 || y >= DISPLAY_HEIGHT)
+        return;
     int page = y / 8;
     int bit = y % 8;
     if (on)
@@ -170,11 +167,11 @@ void display_hline(int x, int y, int w) {
         display_pixel(x + i, y, true);
 }
 
-void display_draw_text(int x, int y, const char *text) {
+void display_draw_text(int x, int y, const char* text) {
     while (*text) {
         uint8_t c = (uint8_t)*text;
         if (c >= 0x20 && c <= 0x7E) {
-            const uint8_t *glyph = font6x8[c - 0x20];
+            const uint8_t* glyph = font6x8[c - 0x20];
             for (int col = 0; col < 6; col++) {
                 uint8_t bits = glyph[col];
                 for (int row = 0; row < 8; row++) {
@@ -184,40 +181,43 @@ void display_draw_text(int x, int y, const char *text) {
             }
         }
         x += 6;
-        if (x >= DISPLAY_WIDTH) break;
+        if (x >= DISPLAY_WIDTH)
+            break;
         text++;
     }
 }
 
-void display_draw_text_large(int x, int y, const char *text) {
+void display_draw_text_large(int x, int y, const char* text) {
     while (*text) {
         uint8_t c = (uint8_t)*text;
         if (c >= 0x20 && c <= 0x7E) {
-            const uint8_t *glyph = font6x8[c - 0x20];
+            const uint8_t* glyph = font6x8[c - 0x20];
             for (int col = 0; col < 6; col++) {
                 uint8_t bits = glyph[col];
                 for (int row = 0; row < 8; row++) {
                     if (bits & (1 << row)) {
                         /* 2x scale: each pixel becomes a 2x2 block */
-                        display_pixel(x + col * 2,     y + row * 2,     true);
-                        display_pixel(x + col * 2 + 1, y + row * 2,     true);
-                        display_pixel(x + col * 2,     y + row * 2 + 1, true);
+                        display_pixel(x + col * 2, y + row * 2, true);
+                        display_pixel(x + col * 2 + 1, y + row * 2, true);
+                        display_pixel(x + col * 2, y + row * 2 + 1, true);
                         display_pixel(x + col * 2 + 1, y + row * 2 + 1, true);
                     }
                 }
             }
         }
         x += 12;
-        if (x >= DISPLAY_WIDTH) break;
+        if (x >= DISPLAY_WIDTH)
+            break;
         text++;
     }
 }
 
 void display_flush(void) {
-    if (!initialized || !dev_handle) return;
+    if (!initialized || !dev_handle)
+        return;
 
     /* Set column address range: 0 to 127 */
-    uint8_t col_cmd[] = { 0x00, 0x21, 0x00, 0x7F };
+    uint8_t col_cmd[] = {0x00, 0x21, 0x00, 0x7F};
     esp_err_t err = i2c_master_transmit(dev_handle, col_cmd, 4, 100);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "display_flush col_cmd failed: %d", err);
@@ -225,7 +225,7 @@ void display_flush(void) {
     }
 
     /* Set page address range: 0 to 7 */
-    uint8_t page_cmd[] = { 0x00, 0x22, 0x00, 0x07 };
+    uint8_t page_cmd[] = {0x00, 0x22, 0x00, 0x07};
     err = i2c_master_transmit(dev_handle, page_cmd, 4, 100);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "display_flush page_cmd failed: %d", err);
@@ -245,17 +245,11 @@ void display_flush(void) {
     }
 }
 
-void display_power(bool on) {
-    ssd1306_cmd(on ? 0xAF : 0xAE);
-}
+void display_power(bool on) { ssd1306_cmd(on ? 0xAF : 0xAE); }
 
-void display_set_contrast(uint8_t val) {
-    ssd1306_cmd2(0x81, val);
-}
+void display_set_contrast(uint8_t val) { ssd1306_cmd2(0x81, val); }
 
-void display_invert(bool invert) {
-    ssd1306_cmd(invert ? 0xA7 : 0xA6);
-}
+void display_invert(bool invert) { ssd1306_cmd(invert ? 0xA7 : 0xA6); }
 
 void display_set_rotated_180(bool rotated) {
     s_rotated_180 = rotated;
@@ -264,9 +258,7 @@ void display_set_rotated_180(bool rotated) {
     }
 }
 
-bool display_get_rotated_180(void) {
-    return s_rotated_180;
-}
+bool display_get_rotated_180(void) { return s_rotated_180; }
 
 void display_set_backlight(uint8_t level) {
     (void)level;

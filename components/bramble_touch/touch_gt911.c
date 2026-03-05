@@ -9,11 +9,11 @@
 #include <string.h>
 #include <inttypes.h>
 
-static const char *TAG = "gt911";
+static const char* TAG = "gt911";
 
 /* GT911 registers */
-#define GT911_COORD_ADDR    0x814E
-#define GT911_PRODUCT_ID    0x8140
+#define GT911_COORD_ADDR 0x814E
+#define GT911_PRODUCT_ID 0x8140
 
 static i2c_master_dev_handle_t gt911_dev = NULL;
 static bool initialized = false;
@@ -22,14 +22,15 @@ static bool initialized = false;
 static uint16_t gt911_x_res = 320;
 static uint16_t gt911_y_res = 240;
 
-static esp_err_t gt911_read_reg(uint16_t reg, uint8_t *data, size_t len) {
-    uint8_t reg_buf[2] = { reg >> 8, reg & 0xFF };
+static esp_err_t gt911_read_reg(uint16_t reg, uint8_t* data, size_t len) {
+    uint8_t reg_buf[2] = {reg >> 8, reg & 0xFF};
     return i2c_master_transmit_receive(gt911_dev, reg_buf, 2, data, len, 100);
 }
 
-static esp_err_t gt911_write_reg(uint16_t reg, uint8_t *data, size_t len) {
-    uint8_t *buf = malloc(2 + len);
-    if (!buf) return ESP_ERR_NO_MEM;
+static esp_err_t gt911_write_reg(uint16_t reg, uint8_t* data, size_t len) {
+    uint8_t* buf = malloc(2 + len);
+    if (!buf)
+        return ESP_ERR_NO_MEM;
     buf[0] = reg >> 8;
     buf[1] = reg & 0xFF;
     memcpy(buf + 2, data, len);
@@ -50,7 +51,7 @@ static void gt911_read_config(void) {
 }
 
 int touch_init(void) {
-    const bramble_board_config_t *board = board_get_config();
+    const bramble_board_config_t* board = board_get_config();
     if (!(board->capabilities & BOARD_CAP_TOUCH)) {
         ESP_LOGI(TAG, "No touch capability - skipping");
         return 0;
@@ -67,8 +68,8 @@ int touch_init(void) {
      * Configuring it as input can interfere with touch detection. */
 
     /* Try both GT911 addresses (0x14 and 0x5D) */
-    uint8_t addrs[] = { board->touch.i2c_addr,
-                        board->touch.i2c_addr == 0x14 ? (uint8_t)0x5D : (uint8_t)0x14 };
+    uint8_t addrs[] = {board->touch.i2c_addr,
+                       board->touch.i2c_addr == 0x14 ? (uint8_t)0x5D : (uint8_t)0x14};
 
     for (int i = 0; i < 2; i++) {
         i2c_device_config_t dev_cfg = {
@@ -96,8 +97,9 @@ int touch_init(void) {
     return -1;
 }
 
-bool touch_read(touch_point_t *point) {
-    if (!initialized || !point) return false;
+bool touch_read(touch_point_t* point) {
+    if (!initialized || !point)
+        return false;
 
     uint8_t status = 0;
     if (gt911_read_reg(GT911_COORD_ADDR, &status, 1) != ESP_OK)
@@ -136,10 +138,14 @@ bool touch_read(touch_point_t *point) {
     }
 
     /* Clamp */
-    if (point->x >= 320) point->x = 319;
-    if (point->y >= 240) point->y = 239;
-    if (point->x < 0) point->x = 0;
-    if (point->y < 0) point->y = 0;
+    if (point->x >= 320)
+        point->x = 319;
+    if (point->y >= 240)
+        point->y = 239;
+    if (point->x < 0)
+        point->x = 0;
+    if (point->y < 0)
+        point->y = 0;
     point->pressed = true;
 
     static uint32_t touch_log_count = 0;

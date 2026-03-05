@@ -94,26 +94,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format
-      - name: Clang-format check on changed C/C++ files
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base_ref="origin/${{ github.base_ref }}"
-            git fetch origin "${{ github.base_ref }}"
-            files=$(git diff --name-only --diff-filter=ACMR "$base_ref...HEAD" | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
-          else
-            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-              files=$(git diff --name-only --diff-filter=ACMR HEAD~1..HEAD | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
-            else
-              files=$(git ls-files | grep -E '\\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
-            fi
-          fi
-
-          if [ -z "$files" ]; then
-            echo "[clang-format] No changed C/C++ files; skipping."
-            exit 0
-          fi
-
-          echo "$files" | xargs clang-format --dry-run --Werror
+      - name: Clang-format check (full strict scope)
+        run: bash scripts/lint/run-clang-format-check.sh --strict
 
   cppcheck:
     name: cppcheck

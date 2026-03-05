@@ -24,9 +24,7 @@ typedef struct {
 } chat_delivery_badge_t;
 
 chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status);
-bool chat_message_has_inline_route_toggle(bool is_outgoing,
-                                          msg_status_t status,
-                                          uint8_t route_hop_count,
-                                          uint32_t packet_id);
+bool chat_message_has_inline_route_toggle(bool is_outgoing, msg_status_t status,
+                                          uint8_t route_hop_count, uint32_t packet_id);
 
 #endif

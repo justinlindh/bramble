@@ -13,7 +13,7 @@ typedef struct {
 
 #define GPIO_MODE_OUTPUT 1
 
-esp_err_t gpio_config(const gpio_config_t *pGPIOConfig);
+esp_err_t gpio_config(const gpio_config_t* pGPIOConfig);
 esp_err_t gpio_set_level(gpio_num_t gpio_num, uint32_t level);
 
 #endif
