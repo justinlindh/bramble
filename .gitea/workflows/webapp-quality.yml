@@ -32,8 +32,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: webapp/package-lock.json
       - name: Install dependencies (lockfile-safe)
         run: npm ci --prefix webapp
       - name: Run lint
@@ -48,8 +46,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: webapp/package-lock.json
       - name: Install dependencies (lockfile-safe)
         run: npm ci --prefix webapp
       - name: Run typecheck
@@ -64,8 +60,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: webapp/package-lock.json
       - name: Install dependencies (lockfile-safe)
         run: npm ci --prefix webapp
       - name: Run unit tests
@@ -80,8 +74,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: webapp/package-lock.json
       - name: Install dependencies (lockfile-safe)
         run: npm ci --prefix webapp
       - name: Build webapp
@@ -96,8 +88,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: webapp/package-lock.json
       - name: Install dependencies (lockfile-safe)
         run: npm ci --prefix webapp
       - name: Build webapp for smoke run
