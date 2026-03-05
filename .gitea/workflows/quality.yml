@@ -144,7 +144,11 @@ jobs:
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
       - name: Build heltec-v3 via wrapper
+        env:
+          HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
         run: |
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           bash scripts/flash.sh local heltec-v3 build
 
   clang-tidy-sample:
@@ -157,7 +161,11 @@ jobs:
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
       - name: Generate heltec-v3 compile DB (reconfigure only)
+        env:
+          HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
         run: |
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           source "$IDF_PATH/export.sh"
           idf.py -B build-heltec-v3 \
             -D SDKCONFIG=sdkconfig.heltec-v3 \
