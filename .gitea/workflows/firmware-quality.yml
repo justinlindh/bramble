@@ -2,22 +2,13 @@ name: Firmware Quality (Phase 2.3)
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.gitea/workflows/firmware-quality.yml'
-      - '.actionlint.yaml'
-      - '.clang-format'
-      - '.clang-tidy'
-      - '.shellcheckrc'
-      - '.markdownlint-cli2.yaml'
-      - 'scripts/lint/**'
-      - 'scripts/*.sh'
-      - 'main/**'
-      - 'components/**'
-      - 'docs/**'
-      - 'README.md'
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - 'fix/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'ci/**'
     paths:
       - '.gitea/workflows/firmware-quality.yml'
       - '.actionlint.yaml'
