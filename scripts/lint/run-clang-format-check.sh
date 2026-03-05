@@ -25,11 +25,12 @@ if ! command -v clang-format >/dev/null 2>&1; then
 fi
 
 if [[ "$mode" == "changed" ]]; then
+  diff_range=""
   if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_BASE_REF:-}" ]]; then
     git fetch origin "${GITHUB_BASE_REF}" >/dev/null 2>&1 || true
     base_ref="origin/${GITHUB_BASE_REF}"
     diff_range="$base_ref...HEAD"
-  elif [[ "${GITHUB_REF_NAME:-}" == "main" ]]; then
+  elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
     diff_range="HEAD~1..HEAD"
   else
     git fetch origin main >/dev/null 2>&1 || true
@@ -37,12 +38,18 @@ if [[ "$mode" == "changed" ]]; then
     merge_base="$(git merge-base "$base_ref" HEAD 2>/dev/null || true)"
     if [[ -n "$merge_base" ]]; then
       diff_range="$merge_base...HEAD"
-    else
-      diff_range="HEAD~1..HEAD"
     fi
   fi
 
-  mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$diff_range" | grep -E '\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+  if [[ -n "$diff_range" ]]; then
+    mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$diff_range" 2>/dev/null | grep -E '\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+  else
+    mapfile -t files < <(git ls-files \
+      'main/**/*.c' 'main/**/*.h' \
+      'components/**/*.c' 'components/**/*.h' \
+      'test/**/*.c' 'test/**/*.h' \
+      'simulator/**/*.c' 'simulator/**/*.h')
+  fi
 else
   mapfile -t files < <(git ls-files \
     'main/**/*.c' 'main/**/*.h' \
