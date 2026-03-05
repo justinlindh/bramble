@@ -2,12 +2,10 @@
 # Unified Bramble build/flash helper (serial flashing only; no OTA)
 #
 # Preferred usage:
-#   bash scripts/flash.sh [local|gpu] [heltec-v3|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
+#   bash scripts/flash.sh [local] [heltec-v3|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 set -euo pipefail
 
-GPU_BOX="192.0.2.199"
-REMOTE_DIR="~/src/bramble"
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 MODE="local"
@@ -16,7 +14,7 @@ ACTION="flash"
 PORT=""
 EXTRA_ARGS=()
 
-is_mode() { [[ "$1" == "local" || "$1" == "gpu" ]]; }
+is_mode() { [[ "$1" == "local" ]]; }
 is_board() { [[ "$1" == "heltec-v3" || "$1" == "heltec-v4" || "$1" == "tdeck-plus" ]]; }
 is_action() { [[ "$1" == "flash" || "$1" == "monitor" || "$1" == "build" ]]; }
 is_port() { [[ "$1" == /dev/* ]]; }
@@ -24,7 +22,7 @@ is_port() { [[ "$1" == /dev/* ]]; }
 print_usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/flash.sh [local|gpu] [heltec-v3|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
+  bash scripts/flash.sh [local] [heltec-v3|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 Notes:
   - MODE defaults to: local
@@ -42,12 +40,6 @@ fi
 
 if [[ $# -gt 0 ]] && is_mode "$1"; then
   MODE="$1"
-  shift
-fi
-
-# Legacy compatibility: allow "bash scripts/flash.sh gpu /dev/ttyUSB0"
-if [[ "$MODE" == "gpu" && $# -gt 0 ]] && is_port "$1"; then
-  PORT="$1"
   shift
 fi
 
@@ -195,72 +187,9 @@ run_local() {
   esac
 }
 
-run_gpu() {
-  if [[ "$BOARD" != "heltec-v3" ]]; then
-    echo "ERROR: GPU mode currently supports heltec-v3 only (USB is on GPU box)."
-    echo "Use local mode for tdeck-plus: bash scripts/flash.sh local tdeck-plus"
-    exit 1
-  fi
-
-  local bundle_dir="$LOCAL_DIR/$BOARD_BUILD_DIR"
-  local bundle_tmp="/tmp/bramble-flash-${BOARD}-$$"
-  local bundle_tgz="/tmp/bramble-flash-${BOARD}-$$.tgz"
-
-  # Build artifacts locally (source of truth), then flash GPU-connected device from those binaries.
-  if [[ "$ACTION" == "build" || "$ACTION" == "flash" ]]; then
-    echo "==> Building locally for GPU flash artifacts..."
-    (cd "$LOCAL_DIR" && idf.py "${IDF_BOARD_ARGS[@]}" build)
-
-    if [[ ! -f "$bundle_dir/flash_args" ]]; then
-      echo "ERROR: Missing $bundle_dir/flash_args after local build"
-      exit 1
-    fi
-
-    echo "==> Packaging local flash artifacts..."
-    tar -C "$bundle_dir" -czf "$bundle_tgz" \
-      flash_args \
-      bramble.bin \
-      ota_data_initial.bin \
-      bootloader/bootloader.bin \
-      partition_table/partition-table.bin
-  fi
-
-  if [[ "$ACTION" == "build" ]]; then
-    rm -f "$bundle_tgz"
-    echo "==> Build complete (local artifacts prepared for heltec-v3)."
-    return
-  fi
-
-  if [[ "$ACTION" == "flash" ]]; then
-    echo "==> Uploading flash artifacts to GPU box..."
-    scp "$bundle_tgz" "$GPU_BOX:$bundle_tgz" >/dev/null
-
-    echo "==> Flashing GPU-connected device from uploaded binaries (no remote source build)..."
-    ssh "$GPU_BOX" "bash -lc '
-      set -euo pipefail
-      export IDF_PATH=~/src/esp-idf
-      source \$IDF_PATH/export.sh >/dev/null 2>&1
-      rm -rf "$bundle_tmp"
-      mkdir -p "$bundle_tmp"
-      tar -xzf "$bundle_tgz" -C "$bundle_tmp"
-      cd "$bundle_tmp"
-      python \$IDF_PATH/components/esptool_py/esptool/esptool.py --chip esp32s3 -p "$PORT" -b 460800 --before default_reset --after hard_reset write_flash @flash_args ${EXTRA_ARGS[*]-}
-      rm -rf "$bundle_tmp" "$bundle_tgz"
-    '"
-
-    rm -f "$bundle_tgz"
-  elif [[ "$ACTION" == "monitor" ]]; then
-    echo "==> Monitoring $PORT on GPU box..."
-    ssh "$GPU_BOX" "bash -lc 'export IDF_PATH=~/src/esp-idf && source \$IDF_PATH/export.sh >/dev/null 2>&1 && cd $REMOTE_DIR && idf.py -p $PORT monitor'"
-  fi
-}
-
 if [[ "$MODE" == "local" ]]; then
   prepare_local_env
   run_local
-elif [[ "$MODE" == "gpu" ]]; then
-  prepare_local_env
-  run_gpu
 else
   print_usage
   exit 1
