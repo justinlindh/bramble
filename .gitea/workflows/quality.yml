@@ -202,3 +202,5 @@ jobs:
           fi
           echo "$files" | xargs -r clang-tidy -p build-heltec-v3
 
+
+# quality-retrigger 1772675237
