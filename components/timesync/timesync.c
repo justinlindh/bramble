@@ -43,6 +43,11 @@ int timesync_handle_sync(timesync_state_t *ts, int64_t remote_time_ms,
         weighted_sum += ts->pending_offsets[i] * weight;
         total_weight += weight;
     }
+
+    if (total_weight <= 0) {
+        return -3;
+    }
+
     ts->offset_ms = weighted_sum / total_weight;
     ts->stratum = remote_stratum + 1;
     ts->last_sync_ms = local_now_ms;
