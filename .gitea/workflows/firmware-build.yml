@@ -16,6 +16,10 @@ on:
       - 'sdkconfig.defaults'
       - 'sdkconfig.defaults.*'
 
+concurrency:
+  group: firmware-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   firmware-build:
     runs-on: idf-node
