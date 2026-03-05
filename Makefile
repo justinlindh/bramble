@@ -60,8 +60,11 @@ ci-fw-shellcheck:
 	bash scripts/lint/run-shellcheck.sh --strict
 
 ci-fw-actionlint:
-	command -v actionlint >/dev/null
-	actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml
+	if command -v actionlint >/dev/null; then \
+		actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml; \
+	else \
+		go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml; \
+	fi
 
 ci-webapp-quality: ci-web-lint ci-web-typecheck ci-web-unit ci-web-build ci-web-smoke
 
