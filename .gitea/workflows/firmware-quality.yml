@@ -65,10 +65,10 @@ jobs:
             npm install --cache "$HOME/.npm" --prefix "$MARKDOWNLINT_CACHE_DIR" "markdownlint-cli2@${MARKDOWNLINT_VERSION}"
           fi
           "$BIN_PATH" --version
-      - name: Run markdownlint wrapper
+      - name: Run markdownlint strict wrapper (changed files)
         env:
           PATH: ${{ env.MARKDOWNLINT_CACHE_DIR }}/node_modules/.bin:${{ env.PATH }}
-        run: bash scripts/lint/run-markdownlint.sh
+        run: bash scripts/lint/run-markdownlint.sh --strict --changed
 
   required-clang-format:
     name: Required clang-format
@@ -118,7 +118,11 @@ jobs:
       - name: Ensure ESP-IDF toolchain and persist env
         run: bash scripts/ci-ensure-idf.sh --github-env
       - name: Build heltec-v3 via wrapper (compile_commands)
-        run: bash scripts/flash.sh local heltec-v3 build
+        env:
+          HOME: /tmp/cihome
+        run: |
+          mkdir -p "$HOME"
+          bash scripts/flash.sh local heltec-v3 build
       - name: Run clang-tidy wrapper
         run: bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 
