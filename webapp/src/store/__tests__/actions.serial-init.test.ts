@@ -1,0 +1,131 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const rpcMock = vi.fn<(method: string) => Promise<any>>();
+const transportConnectMock = vi.fn(async () => {});
+
+vi.mock('../../transport', () => {
+  class MockBrambleClient {
+    subscribe = vi.fn(() => () => {});
+    clearSubscriptions = vi.fn();
+    disconnect = vi.fn(async () => {});
+    rpc = vi.fn((method: string, params?: Record<string, unknown>, timeoutMs?: number) => rpcMock(method, params, timeoutMs));
+    constructor(_transport: unknown) {}
+  }
+
+  return {
+    createTransport: vi.fn(() => ({
+      connect: transportConnectMock,
+      disconnect: vi.fn(async () => {}),
+      connected: true,
+      onNotification: vi.fn(),
+      sendRPC: vi.fn(),
+    })),
+    BrambleClient: MockBrambleClient,
+  };
+});
+
+vi.mock('../messageDb', () => ({
+  messageDb: {
+    open: vi.fn(async () => {}),
+    getMessages: vi.fn(async () => []),
+    saveMessages: vi.fn(async () => {}),
+  },
+}));
+
+vi.mock('../deliveryEventStore', () => ({
+  deliveryEventStore: {
+    open: vi.fn(async () => {}),
+    pruneOldEvents: vi.fn(async () => {}),
+    listByMessage: vi.fn(async () => []),
+    upsertDeliveryEvents: vi.fn(async () => {}),
+  },
+}));
+
+function setDefaultRpcBehavior() {
+  rpcMock.mockImplementation(async (method: string) => {
+    switch (method) {
+      case 'bramble.ping':
+        return { ok: true };
+      case 'bramble.getConfig':
+        return { identity: { address: 0x1234 } };
+      case 'bramble.getStatus':
+        return {};
+      case 'bramble.getAirtime':
+        return {};
+      case 'bramble.getNeighbors':
+        return { neighbors: [] };
+      case 'bramble.getRoutes':
+        return { routes: [] };
+      case 'bramble.getMessages':
+        return { messages: [] };
+      case 'bramble.getPeerLocations':
+        return { peerLocations: [] };
+      case 'bramble.getVersion':
+        return { supportsDeliveryEventSync: false };
+      default:
+        return {};
+    }
+  });
+}
+
+describe('connect serial init readiness gate', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    setDefaultRpcBehavior();
+
+    const { useStore } = await import('../index');
+    useStore.setState({
+      connectionState: 'disconnected',
+      connectionError: undefined,
+      transport: null,
+      config: null,
+      status: null,
+      airtime: null,
+      neighbors: [],
+      routes: [],
+      messages: [],
+      conversations: new Map(),
+    } as any);
+  });
+
+  it('blocks bulk init when serial rpc readiness fails', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'bramble.ping') throw new Error('timeout waiting for rpc');
+      if (method === 'bramble.getConfig') throw new Error('should not run');
+      return {};
+    });
+
+    const { connect } = await import('../actions');
+    const { useStore } = await import('../index');
+
+    await connect('serial');
+
+    expect(rpcMock).toHaveBeenCalledWith('bramble.ping', undefined, expect.any(Number));
+    const calledMethods = rpcMock.mock.calls.map(([method]) => method);
+    expect(calledMethods).not.toContain('bramble.getConfig');
+    expect(useStore.getState().connectionState).toBe('disconnected');
+    expect(useStore.getState().connectionError).toMatch(/RPC is still starting/i);
+  });
+
+  it('runs init after serial readiness succeeds and starts with config load', async () => {
+    const { connect } = await import('../actions');
+
+    await connect('serial');
+
+    const calledMethods = rpcMock.mock.calls.map(([method]) => method);
+    expect(calledMethods[0]).toBe('bramble.ping');
+    expect(calledMethods).toContain('bramble.getConfig');
+    expect(calledMethods.indexOf('bramble.getConfig')).toBeLessThan(calledMethods.indexOf('bramble.getStatus'));
+  });
+
+  it('keeps non-serial connect path unchanged (no readiness probe)', async () => {
+    const { connect } = await import('../actions');
+
+    await connect('wifi', { url: 'ws://127.0.0.1/ws' });
+
+    const calledMethods = rpcMock.mock.calls.map(([method]) => method);
+    expect(calledMethods).not.toContain('bramble.ping');
+    expect(calledMethods).toContain('bramble.getConfig');
+  });
+});
