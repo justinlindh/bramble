@@ -22,6 +22,13 @@ import type {
 } from '../types/bramble';
 
 // Map technical error messages to human-friendly text
+const DEV_DIAGNOSTICS = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+
+function logSerialHandshakeDiagnostic(event: 'attempt' | 'success' | 'failure', details: Record<string, unknown>): void {
+  if (!DEV_DIAGNOSTICS) return;
+  console.debug('[serial-rpc:handshake]', { event, ...details });
+}
+
 const ERROR_MAP: Array<[RegExp, string]> = [
   [/cancelled.*requestDevice/i, 'Bluetooth pairing was cancelled.'],
   [/cancelled.*requestPort/i, 'Serial port selection was cancelled.'],
@@ -34,6 +41,8 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/AbortError/i, 'Connection timed out.'],
   [/NotFoundError/i, 'No device found. Make sure your node is powered on and in range.'],
   [/already.*connect/i, 'Already connected to a device.'],
+  [/serial connected but rpc not ready/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
+  [/serial rpc handshake failed/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
 ];
 
 function friendlyError(raw: string): string {
@@ -86,6 +95,55 @@ function uuid(): string {
 }
 
 // ─── Connection ─────────────────────────────────────────────────────────
+
+const SERIAL_RPC_READY_ATTEMPTS = 3;
+const SERIAL_RPC_READY_TIMEOUT_MS = 1200;
+const SERIAL_RPC_READY_RETRY_DELAY_MS = 150;
+
+function isUnknownMethodError(error: unknown): boolean {
+  const message = (error as Error)?.message ?? '';
+  return /not\s+found|unknown\s+method|method\s+not\s+found/i.test(message);
+}
+
+async function probeRpcReadiness(): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  try {
+    await client.rpc('bramble.ping', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+    return;
+  } catch (error) {
+    if (!isUnknownMethodError(error)) throw error;
+  }
+  await client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
+}
+
+async function ensureSerialRpcReady(): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SERIAL_RPC_READY_ATTEMPTS; attempt += 1) {
+    logSerialHandshakeDiagnostic('attempt', {
+      attempt,
+      maxAttempts: SERIAL_RPC_READY_ATTEMPTS,
+    });
+
+    try {
+      await probeRpcReadiness();
+      logSerialHandshakeDiagnostic('success', {
+        attempt,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      const reason = (error as Error)?.message ?? 'unknown';
+      logSerialHandshakeDiagnostic('failure', {
+        attempt,
+        reason,
+      });
+      if (attempt < SERIAL_RPC_READY_ATTEMPTS) {
+        await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
+      }
+    }
+  }
+  throw new Error(`Serial connected but RPC not ready: ${((lastError as Error)?.message ?? 'startup timeout')}`);
+}
 
 export async function connect(type: TransportType, options?: { url?: string }): Promise<void> {
   const store = useStore.getState();
@@ -148,6 +206,10 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     // Initial data load — all best-effort so a slow RPC doesn't kill the connection
     const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
 
+    if (type === 'serial') {
+      await ensureSerialRpcReady();
+    }
+
     // Load config first to get node address for IndexedDB namespacing
     // Retry once if first attempt fails — node address is critical for correct DB namespace
     await opt(loadConfig());
@@ -165,14 +227,27 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     const effectiveAddr = addrHex ?? (() => { try { return localStorage.getItem('bramble:last-node-addr') ?? undefined; } catch { return undefined; } })();
     await initMessageStore(effectiveAddr);
 
-    await Promise.all([
-      opt(loadStatus()),
-      opt(loadAirtime()),
-      opt(loadNeighbors()),
-      opt(loadRoutes()),
-      opt(loadMessages()),
-      opt(loadPeerLocations()),
-    ]);
+    if (type === 'serial') {
+      await opt(loadStatus());
+      await opt(loadAirtime());
+      await Promise.all([
+        opt(loadNeighbors()),
+        opt(loadRoutes()),
+      ]);
+      await Promise.all([
+        opt(loadMessages()),
+        opt(loadPeerLocations()),
+      ]);
+    } else {
+      await Promise.all([
+        opt(loadStatus()),
+        opt(loadAirtime()),
+        opt(loadNeighbors()),
+        opt(loadRoutes()),
+        opt(loadMessages()),
+        opt(loadPeerLocations()),
+      ]);
+    }
 
     await opt(syncDeliveryEventReplay());
   } catch (e) {

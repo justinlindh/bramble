@@ -14,6 +14,8 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+const DEV_DIAGNOSTICS = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+
 export class SerialTransport implements Transport {
   private port: SerialPort | null = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -22,9 +24,13 @@ export class SerialTransport implements Transport {
   private rpcId = 0;
   private pending = new Map<number, Pending>();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
-  private lineBuf = '';
+  private readBuf = '';
   private readonly decoder = new TextDecoder();
   private readonly encoder = new TextEncoder();
+  private static readonly MAX_BUFFER_LENGTH = 64 * 1024;
+  private parsedJsonCount = 0;
+  private droppedMalformedFragmentCount = 0;
+  private nextDiagLogAt = 1;
 
   get connected() { return this._connected; }
 
@@ -45,7 +51,7 @@ export class SerialTransport implements Transport {
         while (this._connected) {
           const { value, done } = await this.reader!.read();
           if (done) break;
-          this.lineBuf += this.decoder.decode(value, { stream: true });
+          this.readBuf += this.decoder.decode(value, { stream: true });
           this.processLines();
         }
       } catch {
@@ -58,25 +64,123 @@ export class SerialTransport implements Transport {
     })();
   }
 
-  private processLines(): void {
-    const lines = this.lineBuf.split('\n');
-    this.lineBuf = lines.pop() ?? '';
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) continue;
-      let msg: Record<string, unknown>;
-      try { msg = JSON.parse(line); } catch { continue; }
+  private logDiagnostics(force = false): void {
+    if (!DEV_DIAGNOSTICS) return;
+    if (!force && this.parsedJsonCount < this.nextDiagLogAt) return;
 
+    console.debug('[serial-rpc:parser]', {
+      parsedJsonCount: this.parsedJsonCount,
+      droppedMalformedFragmentCount: this.droppedMalformedFragmentCount,
+      bufferedBytes: this.readBuf.length,
+    });
+
+    while (this.nextDiagLogAt <= this.parsedJsonCount) {
+      this.nextDiagLogAt *= 2;
+    }
+  }
+
+  private noteMalformedFragment(): void {
+    this.droppedMalformedFragmentCount += 1;
+    if (DEV_DIAGNOSTICS && this.droppedMalformedFragmentCount <= 3) {
+      this.logDiagnostics(true);
+    }
+  }
+
+  private processLines(): void {
+    const { messages, remainder } = this.extractJsonObjects(this.readBuf);
+    this.readBuf = remainder;
+    if (messages.length > 0) {
+      this.parsedJsonCount += messages.length;
+      this.logDiagnostics();
+    }
+
+    for (const msg of messages) {
       if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
         const { resolve, reject, timer } = this.pending.get(msg.id)!;
         clearTimeout(timer);
         this.pending.delete(msg.id);
-        if (msg.error) reject(new Error((msg.error as { message: string }).message));
+        if (msg.error) reject(new Error((msg.error as { message?: string }).message ?? 'RPC error'));
         else resolve(msg.result);
-      } else if (msg.method && !('id' in msg)) {
-        this.notifyCb?.(msg.method as string, msg.params);
+      } else if (typeof msg.method === 'string' && !('id' in msg)) {
+        this.notifyCb?.(msg.method, msg.params);
       }
     }
+  }
+
+  private extractJsonObjects(input: string): { messages: Record<string, unknown>[]; remainder: string } {
+    const messages: Record<string, unknown>[] = [];
+    let cursor = 0;
+    let objectStart = -1;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+
+      if (objectStart < 0) {
+        if (ch === '{') {
+          objectStart = i;
+          depth = 1;
+          inString = false;
+          escaped = false;
+        }
+        continue;
+      }
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch === '\\') {
+          escaped = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === '{') {
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = input.slice(objectStart, i + 1);
+          try {
+            const parsed = JSON.parse(candidate) as unknown;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              messages.push(parsed as Record<string, unknown>);
+              cursor = i + 1;
+            } else {
+              this.noteMalformedFragment();
+              cursor = objectStart + 1;
+            }
+          } catch {
+            this.noteMalformedFragment();
+            cursor = objectStart + 1;
+          }
+
+          objectStart = -1;
+          depth = 0;
+          inString = false;
+          escaped = false;
+        }
+      }
+    }
+
+    let remainder = objectStart >= 0 ? input.slice(objectStart) : input.slice(cursor);
+
+    if (remainder.length > SerialTransport.MAX_BUFFER_LENGTH) {
+      const trimmed = remainder.slice(-SerialTransport.MAX_BUFFER_LENGTH);
+      const firstBrace = trimmed.indexOf('{');
+      remainder = firstBrace >= 0 ? trimmed.slice(firstBrace) : '';
+    }
+
+    return { messages, remainder };
   }
 
   async sendRPC<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<T> {
