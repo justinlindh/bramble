@@ -6,11 +6,10 @@
 #include <stdint.h>
 #include <stdio.h>
 
-static inline void node_detail_format_last_seen(char *out,
-                                                size_t out_len,
-                                                uint32_t last_seen_ms,
+static inline void node_detail_format_last_seen(char* out, size_t out_len, uint32_t last_seen_ms,
                                                 uint32_t now_ms) {
-    if (!out || out_len == 0) return;
+    if (!out || out_len == 0)
+        return;
 
     if (now_ms <= last_seen_ms) {
         snprintf(out, out_len, "Last seen now");
@@ -27,14 +26,11 @@ static inline void node_detail_format_last_seen(char *out,
     }
 }
 
-static inline void node_detail_format_location(char *out,
-                                               size_t out_len,
-                                               bool has_location,
-                                               int32_t latitude_e7,
-                                               int32_t longitude_e7,
-                                               uint32_t received_ms,
-                                               uint32_t now_ms) {
-    if (!out || out_len == 0) return;
+static inline void node_detail_format_location(char* out, size_t out_len, bool has_location,
+                                               int32_t latitude_e7, int32_t longitude_e7,
+                                               uint32_t received_ms, uint32_t now_ms) {
+    if (!out || out_len == 0)
+        return;
 
     if (!has_location) {
         snprintf(out, out_len, "No location shared");

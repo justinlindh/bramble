@@ -16,29 +16,29 @@ typedef int gpio_num_t;
 #endif
 
 /* Capability flags — boards set these to declare what they support */
-#define BOARD_CAP_DISPLAY_SSD1306   (1 << 0)
-#define BOARD_CAP_DISPLAY_ST7789    (1 << 1)
-#define BOARD_CAP_KEYBOARD          (1 << 2)
-#define BOARD_CAP_TRACKBALL         (1 << 3)
-#define BOARD_CAP_GPS               (1 << 4)
-#define BOARD_CAP_SDCARD            (1 << 5)
-#define BOARD_CAP_AUDIO             (1 << 6)
-#define BOARD_CAP_BATTERY_ADC       (1 << 7)
-#define BOARD_CAP_SHARED_SPI        (1 << 8)  /* SPI bus shared with display/SD */
-#define BOARD_CAP_PERIPHERAL_POWER  (1 << 9)  /* Needs power pin enabled first */
-#define BOARD_CAP_TOUCH             (1 << 10)  /* Capacitive touchscreen */
-#define BOARD_CAP_IO_EXPANDER       (1 << 11)  /* PCA9535 or similar */
+#define BOARD_CAP_DISPLAY_SSD1306 (1 << 0)
+#define BOARD_CAP_DISPLAY_ST7789 (1 << 1)
+#define BOARD_CAP_KEYBOARD (1 << 2)
+#define BOARD_CAP_TRACKBALL (1 << 3)
+#define BOARD_CAP_GPS (1 << 4)
+#define BOARD_CAP_SDCARD (1 << 5)
+#define BOARD_CAP_AUDIO (1 << 6)
+#define BOARD_CAP_BATTERY_ADC (1 << 7)
+#define BOARD_CAP_SHARED_SPI (1 << 8)       /* SPI bus shared with display/SD */
+#define BOARD_CAP_PERIPHERAL_POWER (1 << 9) /* Needs power pin enabled first */
+#define BOARD_CAP_TOUCH (1 << 10)           /* Capacitive touchscreen */
+#define BOARD_CAP_IO_EXPANDER (1 << 11)     /* PCA9535 or similar */
 
 /* Radio oscillator type */
 typedef enum {
-    RADIO_OSC_TCXO_DIO3 = 0,   /* TCXO controlled by DIO3 (e.g., Heltec V3) */
-    RADIO_OSC_CRYSTAL,          /* Crystal oscillator (e.g., T-Deck Plus) */
+    RADIO_OSC_TCXO_DIO3 = 0, /* TCXO controlled by DIO3 (e.g., Heltec V3) */
+    RADIO_OSC_CRYSTAL,       /* Crystal oscillator (e.g., T-Deck Plus) */
 } radio_osc_type_t;
 
 /* Radio regulator type */
 typedef enum {
-    RADIO_REG_DCDC = 0,     /* DC-DC converter */
-    RADIO_REG_LDO,          /* LDO regulator */
+    RADIO_REG_DCDC = 0, /* DC-DC converter */
+    RADIO_REG_LDO,      /* LDO regulator */
 } radio_reg_type_t;
 
 /* SPI pin config */
@@ -50,10 +50,10 @@ typedef struct {
 
 /* Radio pin config */
 typedef struct {
-    int cs;     /* NSS/chip select */
-    int rst;    /* Reset */
-    int busy;   /* Busy indicator */
-    int dio1;   /* DIO1 interrupt */
+    int cs;   /* NSS/chip select */
+    int rst;  /* Reset */
+    int busy; /* Busy indicator */
+    int dio1; /* DIO1 interrupt */
 } board_radio_pins_t;
 
 /* Display pin config (SPI displays) */
@@ -68,8 +68,8 @@ typedef struct {
     int sda;
     int scl;
     int rst;
-    int vext;       /* Power gate pin (-1 if none) */
-    uint8_t addr;   /* I2C address */
+    int vext;     /* Power gate pin (-1 if none) */
+    uint8_t addr; /* I2C address */
 } board_display_i2c_pins_t;
 
 /* Battery ADC config */
@@ -97,36 +97,36 @@ typedef struct {
 
 /* Audio I2S config */
 typedef struct {
-    int i2s_ws;     /* Word select (LRCK) */
-    int i2s_bck;    /* Bit clock */
-    int i2s_dout;   /* Data out to speaker */
+    int i2s_ws;   /* Word select (LRCK) */
+    int i2s_bck;  /* Bit clock */
+    int i2s_dout; /* Data out to speaker */
 } board_audio_config_t;
 
 /* Touch controller config */
 typedef struct {
-    int int_pin;        /* Interrupt GPIO */
-    int rst_pin;        /* Reset GPIO (-1 if shared/none) */
-    uint8_t i2c_addr;   /* I2C address (0x5D or 0x14 for GT911) */
+    int int_pin;      /* Interrupt GPIO */
+    int rst_pin;      /* Reset GPIO (-1 if shared/none) */
+    uint8_t i2c_addr; /* I2C address (0x5D or 0x14 for GT911) */
 } board_touch_config_t;
 
 /* Full board configuration */
 typedef struct {
-    const char *name;           /* Human-readable name */
-    const char *short_name;     /* For logs (e.g., "heltec_v3") */
-    uint32_t capabilities;      /* Bitmask of BOARD_CAP_* flags */
+    const char* name;       /* Human-readable name */
+    const char* short_name; /* For logs (e.g., "heltec_v3") */
+    uint32_t capabilities;  /* Bitmask of BOARD_CAP_* flags */
 
     /* Power */
-    int peripheral_power_pin;   /* GPIO to enable peripherals (-1 if none) */
+    int peripheral_power_pin; /* GPIO to enable peripherals (-1 if none) */
 
     /* SPI */
     board_spi_pins_t spi;
     spi_host_device_t spi_host;
-    int spi_max_transfer_sz;    /* Max DMA transfer size */
+    int spi_max_transfer_sz; /* Max DMA transfer size */
 
     /* Radio */
     board_radio_pins_t radio;
     radio_osc_type_t radio_osc;
-    float radio_tcxo_voltage;   /* Only used if radio_osc == TCXO_DIO3 */
+    float radio_tcxo_voltage; /* Only used if radio_osc == TCXO_DIO3 */
     radio_reg_type_t radio_reg;
 
     /* Display */
@@ -138,7 +138,7 @@ typedef struct {
     };
 
     /* Button */
-    int button_gpio;            /* Single button GPIO (-1 if none) */
+    int button_gpio; /* Single button GPIO (-1 if none) */
 
     /* Battery */
     board_battery_config_t battery;
@@ -148,7 +148,7 @@ typedef struct {
     int i2c_scl;
 
     /* Keyboard interrupt GPIO */
-    int keyboard_int;  /* Keyboard interrupt GPIO (-1 if none) */
+    int keyboard_int; /* Keyboard interrupt GPIO (-1 if none) */
 
     /* Trackball */
     board_trackball_pins_t trackball;
@@ -171,7 +171,7 @@ typedef struct {
  * Returns a pointer to a static const struct.
  * Implementation provided by main/board.c
  */
-const bramble_board_config_t *board_get_config(void);
+const bramble_board_config_t* board_get_config(void);
 
 /**
  * Board-level initialization: power pins, shared SPI bus, etc.

@@ -3,6 +3,6 @@
 
 #include "lvgl.h"
 
-void scr_splash_create(lv_display_t *disp);
+void scr_splash_create(lv_display_t* disp);
 
 #endif

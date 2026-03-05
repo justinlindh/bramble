@@ -3,6 +3,6 @@
 
 #include "lvgl.h"
 
-lv_indev_t *lv_port_trackball_init(void);
+lv_indev_t* lv_port_trackball_init(void);
 
 #endif

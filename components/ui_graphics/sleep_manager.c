@@ -12,15 +12,15 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 
-static const char *TAG = "sleep_mgr";
+static const char* TAG = "sleep_mgr";
 
 /* NVS persistence */
-#define NVS_NAMESPACE       "bramble"
-#define NVS_KEY_SLEEP_EN    "sleep_enabled"
-#define NVS_KEY_SLEEP_TOUT  "sleep_timeout"
+#define NVS_NAMESPACE "bramble"
+#define NVS_KEY_SLEEP_EN "sleep_enabled"
+#define NVS_KEY_SLEEP_TOUT "sleep_timeout"
 
 /* Default values */
-#define DEFAULT_TIMEOUT_SEC 60  /* 1 minute */
+#define DEFAULT_TIMEOUT_SEC 60 /* 1 minute */
 
 /* Sleep state */
 static struct {
@@ -60,13 +60,14 @@ static void nvs_load_prefs(void) {
     nvs_close(h);
     s_sleep.enabled = (enabled != 0);
     s_sleep.timeout_sec = (timeout > 0 && timeout <= 3600) ? timeout : DEFAULT_TIMEOUT_SEC;
-    ESP_LOGI(TAG, "Sleep prefs loaded: enabled=%d timeout=%us",
-             s_sleep.enabled, s_sleep.timeout_sec);
+    ESP_LOGI(TAG, "Sleep prefs loaded: enabled=%d timeout=%us", s_sleep.enabled,
+             s_sleep.timeout_sec);
 }
 
 static void nvs_save_enabled(bool enabled) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return;
     nvs_set_u8(h, NVS_KEY_SLEEP_EN, (uint8_t)enabled);
     nvs_commit(h);
     nvs_close(h);
@@ -74,7 +75,8 @@ static void nvs_save_enabled(bool enabled) {
 
 static void nvs_save_timeout(uint16_t timeout_sec) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return;
     nvs_set_u16(h, NVS_KEY_SLEEP_TOUT, timeout_sec);
     nvs_commit(h);
     nvs_close(h);
@@ -82,9 +84,10 @@ static void nvs_save_timeout(uint16_t timeout_sec) {
 
 /* ── Timer callback ─────────────────────────────────────────────────── */
 
-static void sleep_timer_cb(void *arg) {
+static void sleep_timer_cb(void* arg) {
     (void)arg;
-    if (!s_sleep.enabled || s_sleep.asleep) return;
+    if (!s_sleep.enabled || s_sleep.asleep)
+        return;
 
     int64_t now = esp_timer_get_time();
     int64_t elapsed_us = now - s_sleep.last_activity_us;
@@ -92,18 +95,18 @@ static void sleep_timer_cb(void *arg) {
 
     if (elapsed_us >= timeout_us) {
         ESP_LOGI(TAG, "Entering sleep mode (timeout=%us)", s_sleep.timeout_sec);
-        
+
         /* Save current backlight levels before turning off */
         s_sleep.saved_kbd_backlight = keyboard_get_backlight_percent();
         /* Note: display backlight is controlled by LEDC PWM but we don't have
          * a get_backlight() API yet. For now, we assume it's at max (255). */
         s_sleep.saved_disp_backlight = 255;
-        
+
         /* Turn off display panel and both backlights */
         display_power(false);
         display_set_backlight(0);
-        keyboard_set_backlight(0);  /* Raw 0-255 value */
-        
+        keyboard_set_backlight(0); /* Raw 0-255 value */
+
         s_sleep.asleep = true;
     }
 }
@@ -132,7 +135,7 @@ int sleep_manager_init(void) {
     }
 
     /* Start timer with 1-second period */
-    err = esp_timer_start_periodic(s_sleep.timer, 1000000);  /* 1 second */
+    err = esp_timer_start_periodic(s_sleep.timer, 1000000); /* 1 second */
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start timer: %s", esp_err_to_name(err));
         esp_timer_delete(s_sleep.timer);
@@ -144,13 +147,14 @@ int sleep_manager_init(void) {
     s_sleep.asleep = false;
     s_sleep.initialized = true;
 
-    ESP_LOGI(TAG, "Sleep manager initialized (enabled=%d, timeout=%us)",
-             s_sleep.enabled, s_sleep.timeout_sec);
+    ESP_LOGI(TAG, "Sleep manager initialized (enabled=%d, timeout=%us)", s_sleep.enabled,
+             s_sleep.timeout_sec);
     return 0;
 }
 
 void sleep_manager_deinit(void) {
-    if (!s_sleep.initialized) return;
+    if (!s_sleep.initialized)
+        return;
 
     if (s_sleep.timer) {
         esp_timer_stop(s_sleep.timer);
@@ -163,7 +167,8 @@ void sleep_manager_deinit(void) {
 }
 
 void sleep_manager_activity(void) {
-    if (!s_sleep.initialized) return;
+    if (!s_sleep.initialized)
+        return;
 
     s_sleep.last_activity_us = esp_timer_get_time();
 
@@ -171,22 +176,20 @@ void sleep_manager_activity(void) {
     if (s_sleep.asleep) {
         ESP_LOGI(TAG, "Waking from sleep (restoring backlights: kbd=%u%%, disp=%u)",
                  s_sleep.saved_kbd_backlight, s_sleep.saved_disp_backlight);
-        
+
         /* Turn display panel back on */
         display_power(true);
-        
+
         /* Restore saved backlight levels */
         display_set_backlight(s_sleep.saved_disp_backlight);
         uint8_t kbd_hw = (uint8_t)(s_sleep.saved_kbd_backlight * 255 / 100);
         keyboard_set_backlight(kbd_hw);
-        
+
         s_sleep.asleep = false;
     }
 }
 
-bool sleep_manager_is_asleep(void) {
-    return s_sleep.asleep;
-}
+bool sleep_manager_is_asleep(void) { return s_sleep.asleep; }
 
 void sleep_manager_set_enabled(bool enabled) {
     s_sleep.enabled = enabled;
@@ -204,9 +207,7 @@ void sleep_manager_set_enabled(bool enabled) {
     }
 }
 
-bool sleep_manager_get_enabled(void) {
-    return s_sleep.enabled;
-}
+bool sleep_manager_get_enabled(void) { return s_sleep.enabled; }
 
 void sleep_manager_set_timeout(uint16_t seconds) {
     if (seconds == 0 || seconds > 3600) {
@@ -218,6 +219,4 @@ void sleep_manager_set_timeout(uint16_t seconds) {
     ESP_LOGI(TAG, "Sleep timeout set to %us", seconds);
 }
 
-uint16_t sleep_manager_get_timeout(void) {
-    return s_sleep.timeout_sec;
-}
+uint16_t sleep_manager_get_timeout(void) { return s_sleep.timeout_sec; }

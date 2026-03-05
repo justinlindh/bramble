@@ -29,7 +29,7 @@ i2c_master_bus_handle_t keyboard_get_i2c_bus(void);
  * Returns true and writes the ASCII character to *out if a key is available.
  * Returns false if no key is pending.
  */
-bool keyboard_poll(char *out);
+bool keyboard_poll(char* out);
 
 /**
  * Check if keyboard has data pending.

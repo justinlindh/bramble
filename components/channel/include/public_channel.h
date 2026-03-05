@@ -12,7 +12,7 @@
 #define BRAMBLE_PUBLIC_CHANNEL_BURST 3
 
 /* Initialize Channel 0 with well-known PSK. Call on boot. */
-int public_channel_init(bramble_channel_t *channels, int *num_channels);
+int public_channel_init(bramble_channel_t* channels, int* num_channels);
 
 /* TX rate limiter — returns true if allowed to send, false if rate-limited */
 bool public_channel_can_send(uint32_t now_ms);

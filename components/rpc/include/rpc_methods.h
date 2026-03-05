@@ -7,6 +7,6 @@
  * Register all bramble.* RPC methods with the dispatcher.
  * Call after rpc_init() and mesh_task_start().
  */
-void rpc_methods_init(bramble_identity_t *identity);
+void rpc_methods_init(bramble_identity_t* identity);
 
 #endif

@@ -4,15 +4,13 @@
 #include "../../components/routing/include/discovery.h"
 #include <string.h>
 
-void node_array_init(node_array_t *array) {
-    memset(array, 0, sizeof(*array));
-}
+void node_array_init(node_array_t* array) { memset(array, 0, sizeof(*array)); }
 
-int node_array_add(node_array_t *array, const char *id, uint32_t addr, float x, float y) {
+int node_array_add(node_array_t* array, const char* id, uint32_t addr, float x, float y) {
     if (array->count >= MAX_NODES)
         return -1;
 
-    sim_node_t *node = &array->nodes[array->count];
+    sim_node_t* node = &array->nodes[array->count];
     memset(node, 0, sizeof(*node));
     strncpy(node->id, id, NODE_ID_LEN - 1);
     node->id[NODE_ID_LEN - 1] = '\0';
@@ -31,7 +29,7 @@ int node_array_add(node_array_t *array, const char *id, uint32_t addr, float x, 
     return array->count++;
 }
 
-sim_node_t *node_array_find_by_id(node_array_t *array, const char *id) {
+sim_node_t* node_array_find_by_id(node_array_t* array, const char* id) {
     for (int i = 0; i < array->count; i++) {
         if (strcmp(array->nodes[i].id, id) == 0)
             return &array->nodes[i];
@@ -39,7 +37,7 @@ sim_node_t *node_array_find_by_id(node_array_t *array, const char *id) {
     return NULL;
 }
 
-sim_node_t *node_array_find_by_addr(node_array_t *array, uint32_t addr) {
+sim_node_t* node_array_find_by_addr(node_array_t* array, uint32_t addr) {
     for (int i = 0; i < array->count; i++) {
         if (array->nodes[i].addr == addr)
             return &array->nodes[i];
@@ -47,13 +45,13 @@ sim_node_t *node_array_find_by_addr(node_array_t *array, uint32_t addr) {
     return NULL;
 }
 
-sim_node_t *node_array_get(node_array_t *array, int index) {
+sim_node_t* node_array_get(node_array_t* array, int index) {
     if (index < 0 || index >= array->count)
         return NULL;
     return &array->nodes[index];
 }
 
-void node_activate(sim_node_t *node) {
+void node_activate(sim_node_t* node) {
     node->active = true;
     /* Clear routing state — simulates fresh boot */
     route_init(&node->routes);
@@ -75,20 +73,18 @@ void node_activate(sim_node_t *node) {
     }
     node->crypto_counter = 0;
     node->packets_forwarded = 0;
-    
+
     /* Initialize adaptive beacon controller */
     node->adaptive_beacon_interval_us = NODE_BEACON_INTERVAL_BASE_US;
     memset(node->neighbor_history, 0, sizeof(node->neighbor_history));
     node->neighbor_history_idx = 0;
     node->last_mode_transition_us = 0;
-    node->adaptive_enabled = true;  /* Enable by default for simulation */
+    node->adaptive_enabled = true; /* Enable by default for simulation */
 }
 
-void node_deactivate(sim_node_t *node) {
-    node->active = false;
-}
+void node_deactivate(sim_node_t* node) { node->active = false; }
 
-void node_move(sim_node_t *node, float x, float y) {
+void node_move(sim_node_t* node, float x, float y) {
     node->x = x;
     node->y = y;
 }
@@ -101,32 +97,34 @@ void node_move(sim_node_t *node, float x, float y) {
  *  - High churn detected → 15s interval (fast discovery)
  * Returns: beacon_interval_us
  */
-static uint64_t adaptive_beacon_interval(sim_node_t *node, uint64_t now_us) {
+static uint64_t adaptive_beacon_interval(sim_node_t* node, uint64_t now_us) {
     if (!node->adaptive_enabled) {
         return NODE_BEACON_INTERVAL_BASE_US;
     }
 
     uint8_t num_neighbors = (uint8_t)neighbor_count(&node->neighbors);
-    
+
     /* Update neighbor history for churn detection */
     node->neighbor_history[node->neighbor_history_idx] = num_neighbors;
     node->neighbor_history_idx = (node->neighbor_history_idx + 1) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
-    
+
     /* Detect churn: count significant neighbor changes in rolling window */
     uint8_t churn_events = 0;
     for (int i = 1; i < ADAPTIVE_NEIGHBOR_CHURN_WINDOW; i++) {
-        int prev_idx = (node->neighbor_history_idx - i + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
-        int curr_idx = (node->neighbor_history_idx - i + 1 + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
+        int prev_idx = (node->neighbor_history_idx - i + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) %
+                       ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
+        int curr_idx = (node->neighbor_history_idx - i + 1 + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) %
+                       ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
         uint8_t prev = node->neighbor_history[prev_idx];
         uint8_t curr = node->neighbor_history[curr_idx];
         if (prev > curr ? (prev - curr) >= 2 : (curr - prev) >= 2) {
             churn_events++;
         }
     }
-    
+
     bool dense = (num_neighbors >= ADAPTIVE_NEIGHBOR_DENSE_THRESHOLD);
     bool high_churn = (churn_events >= ADAPTIVE_CHURN_THRESHOLD);
-    
+
     /* Apply hysteresis with cooldown */
     uint64_t new_interval;
     if (high_churn) {
@@ -139,7 +137,7 @@ static uint64_t adaptive_beacon_interval(sim_node_t *node, uint64_t now_us) {
         /* Small mesh → also use stable interval (matches current 60s default in firmware) */
         new_interval = NODE_BEACON_INTERVAL_STABLE_US;
     }
-    
+
     /* Only transition if cooldown elapsed */
     if (new_interval != node->adaptive_beacon_interval_us) {
         if (now_us - node->last_mode_transition_us >= ADAPTIVE_MODE_COOLDOWN_US) {
@@ -147,7 +145,7 @@ static uint64_t adaptive_beacon_interval(sim_node_t *node, uint64_t now_us) {
             node->adaptive_beacon_interval_us = new_interval;
         }
     }
-    
+
     return node->adaptive_beacon_interval_us;
 }
 
@@ -156,7 +154,7 @@ static uint64_t adaptive_beacon_interval(sim_node_t *node, uint64_t now_us) {
  * Performs: beacon TX, neighbor purge, route maintenance, discovery retry.
  * Produces outbound packets in `result` for the caller to radio-broadcast.
  */
-void node_tick(sim_node_t *node, uint64_t now_us, node_tick_result_t *result) {
+void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
     result->count = 0;
     uint32_t now_ms = (uint32_t)(now_us / 1000);
 
@@ -172,28 +170,28 @@ void node_tick(sim_node_t *node, uint64_t now_us, node_tick_result_t *result) {
          */
         bramble_beacon_t beacon;
         memset(&beacon, 0, sizeof(beacon));
-        beacon.header.version   = BRAMBLE_VERSION;
-        beacon.header.type      = PKT_TYPE_BEACON;
-        beacon.header.flags     = 0;
-        beacon.header.hop_limit = 1;               /* beacons are single-hop */
-        beacon.header.dest_addr = 0xFFFFFFFF;      /* broadcast */
+        beacon.header.version = BRAMBLE_VERSION;
+        beacon.header.type = PKT_TYPE_BEACON;
+        beacon.header.flags = 0;
+        beacon.header.hop_limit = 1;          /* beacons are single-hop */
+        beacon.header.dest_addr = 0xFFFFFFFF; /* broadcast */
         beacon.header.packet_id = 0;
-        beacon.src_addr         = node->addr;
-        beacon.pubkey_hash      = node->addr;      /* sim simplification */
-        beacon.uptime_min       = node->uptime_min;
-        beacon.battery_pct      = 100;
-        beacon.tx_queue_depth   = 0;
-        beacon.neighbor_count   = (uint8_t)neighbor_count(&node->neighbors);
-        beacon.flags            = 0;
-        beacon.network_time     = now_ms;
-        beacon.time_confidence  = 0;
+        beacon.src_addr = node->addr;
+        beacon.pubkey_hash = node->addr; /* sim simplification */
+        beacon.uptime_min = node->uptime_min;
+        beacon.battery_pct = 100;
+        beacon.tx_queue_depth = 0;
+        beacon.neighbor_count = (uint8_t)neighbor_count(&node->neighbors);
+        beacon.flags = 0;
+        beacon.network_time = now_ms;
+        beacon.time_confidence = 0;
 
-        outbound_packet_t *out = &result->pkts[result->count++];
+        outbound_packet_t* out = &result->pkts[result->count++];
         bramble_beacon_serialize(&beacon, out->data, BEACON_SIZE);
-        out->len          = BEACON_SIZE;
+        out->len = BEACON_SIZE;
         out->is_broadcast = true;
-        out->dest_addr    = 0xFFFFFFFF;
-        out->pkt_type     = PKT_TYPE_BEACON;
+        out->dest_addr = 0xFFFFFFFF;
+        out->pkt_type = PKT_TYPE_BEACON;
         node->beacons_sent++;
     }
 
@@ -213,21 +211,21 @@ void node_tick(sim_node_t *node, uint64_t now_us, node_tick_result_t *result) {
     if (now_us - node->last_discovery_check_us >= NODE_DISCOVERY_CHECK_US) {
         node->last_discovery_check_us = now_us;
 
-        for (int i = 0; i < node->pending_discoveries.count &&
-                        result->count < NODE_TICK_MAX_OUTBOUND; i++) {
-            pending_discovery_t *d = &node->pending_discoveries.entries[i];
+        for (int i = 0;
+             i < node->pending_discoveries.count && result->count < NODE_TICK_MAX_OUTBOUND; i++) {
+            pending_discovery_t* d = &node->pending_discoveries.entries[i];
             if (discovery_should_retry(d, now_ms)) {
                 uint32_t query_id = d->query_id;
-                bramble_rreq_t rreq = rreq_build_originator(
-                    node->addr, d->dest_addr, query_id, node->addr);
+                bramble_rreq_t rreq =
+                    rreq_build_originator(node->addr, d->dest_addr, query_id, node->addr);
                 discovery_record_attempt(d, now_ms);
 
-                outbound_packet_t *out = &result->pkts[result->count++];
+                outbound_packet_t* out = &result->pkts[result->count++];
                 bramble_rreq_serialize(&rreq, out->data, RREQ_SIZE);
-                out->len          = RREQ_SIZE;
+                out->len = RREQ_SIZE;
                 out->is_broadcast = true;
-                out->dest_addr    = 0xFFFFFFFF;
-                out->pkt_type     = PKT_TYPE_RREQ;
+                out->dest_addr = 0xFFFFFFFF;
+                out->pkt_type = PKT_TYPE_RREQ;
             }
         }
     }

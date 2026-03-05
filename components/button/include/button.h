@@ -5,9 +5,9 @@
 #include "ui.h"
 
 /* Timing thresholds (ms) */
-#define BUTTON_DEBOUNCE_MS      50
-#define BUTTON_LONG_PRESS_MS    800
-#define BUTTON_DOUBLE_GAP_MS    300
+#define BUTTON_DEBOUNCE_MS 50
+#define BUTTON_LONG_PRESS_MS 800
+#define BUTTON_DOUBLE_GAP_MS 300
 
 /**
  * Initialize button GPIO with internal pull-up and interrupt.

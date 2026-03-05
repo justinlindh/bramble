@@ -12,8 +12,8 @@
 #include "esp_log.h"
 #include <string.h>
 
-static const char *TAG = "trackball";
-static const bramble_board_config_t *s_board = NULL;
+static const char* TAG = "trackball";
+static const bramble_board_config_t* s_board = NULL;
 static bool initialized = false;
 
 /* Event counters (incremented by ISRs) */
@@ -25,25 +25,15 @@ static volatile int count_center = 0;
 
 /* ── ISR Handlers ───────────────────────────────────────────────────── */
 
-static void IRAM_ATTR trackball_up_isr(void *arg) {
-    count_up++;
-}
+static void IRAM_ATTR trackball_up_isr(void* arg) { count_up++; }
 
-static void IRAM_ATTR trackball_down_isr(void *arg) {
-    count_down++;
-}
+static void IRAM_ATTR trackball_down_isr(void* arg) { count_down++; }
 
-static void IRAM_ATTR trackball_left_isr(void *arg) {
-    count_left++;
-}
+static void IRAM_ATTR trackball_left_isr(void* arg) { count_left++; }
 
-static void IRAM_ATTR trackball_right_isr(void *arg) {
-    count_right++;
-}
+static void IRAM_ATTR trackball_right_isr(void* arg) { count_right++; }
 
-static void IRAM_ATTR trackball_center_isr(void *arg) {
-    count_center++;
-}
+static void IRAM_ATTR trackball_center_isr(void* arg) { count_center++; }
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
@@ -66,10 +56,8 @@ int trackball_init(void) {
 
     /* Configure all trackball GPIOs with NEGEDGE interrupts */
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << s_board->trackball.up) |
-                        (1ULL << s_board->trackball.down) |
-                        (1ULL << s_board->trackball.left) |
-                        (1ULL << s_board->trackball.right) |
+        .pin_bit_mask = (1ULL << s_board->trackball.up) | (1ULL << s_board->trackball.down) |
+                        (1ULL << s_board->trackball.left) | (1ULL << s_board->trackball.right) |
                         (1ULL << s_board->trackball.center),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
@@ -94,7 +82,8 @@ int trackball_init(void) {
 }
 
 ui_button_t trackball_poll(void) {
-    if (!initialized) return BTN_NONE;
+    if (!initialized)
+        return BTN_NONE;
 
     /* Priority: center > up > down > left > right */
     if (count_center > 0) {
@@ -121,16 +110,12 @@ ui_button_t trackball_poll(void) {
     return BTN_NONE;
 }
 
-#else  /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
+#else /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* Stub implementations for non-T-Deck boards */
 
-int trackball_init(void) {
-    return -1;  /* Not supported */
-}
+int trackball_init(void) { return -1; /* Not supported */ }
 
-ui_button_t trackball_poll(void) {
-    return BTN_NONE;
-}
+ui_button_t trackball_poll(void) { return BTN_NONE; }
 
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */

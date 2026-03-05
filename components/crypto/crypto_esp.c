@@ -13,78 +13,73 @@
 #include <string.h>
 
 /* RNG callback for mbedtls_ecp_mul (required for side-channel blinding) */
-static int crypto_rng_callback(void *ctx, unsigned char *buf, size_t len) {
+static int crypto_rng_callback(void* ctx, unsigned char* buf, size_t len) {
     (void)ctx;
     esp_fill_random(buf, len);
     return 0;
 }
 
-int crypto_sha256(const uint8_t *data, size_t data_len, uint8_t *hash) {
+int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash) {
     mbedtls_sha256(data, data_len, hash, 0);
     return 0;
 }
 
-uint32_t crypto_derive_address(const uint8_t *public_key) {
+uint32_t crypto_derive_address(const uint8_t* public_key) {
     uint8_t hash[32];
     crypto_sha256(public_key, 32, hash);
-    return ((uint32_t)hash[0] << 24) | ((uint32_t)hash[1] << 16) |
-           ((uint32_t)hash[2] << 8)  | (uint32_t)hash[3];
+    return ((uint32_t)hash[0] << 24) | ((uint32_t)hash[1] << 16) | ((uint32_t)hash[2] << 8) |
+           (uint32_t)hash[3];
 }
 
-uint32_t crypto_derive_pubkey_hash(const uint8_t *public_key) {
+uint32_t crypto_derive_pubkey_hash(const uint8_t* public_key) {
     return crypto_derive_address(public_key);
 }
 
-int crypto_aes256gcm_encrypt(const uint8_t *key, const uint8_t *nonce,
-                             const uint8_t *plaintext, size_t pt_len,
-                             const uint8_t *aad, size_t aad_len,
-                             uint8_t *ciphertext, uint8_t *tag) {
+int crypto_aes256gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* plaintext,
+                             size_t pt_len, const uint8_t* aad, size_t aad_len, uint8_t* ciphertext,
+                             uint8_t* tag) {
     mbedtls_gcm_context ctx;
     mbedtls_gcm_init(&ctx);
     mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, 256);
-    int ret = mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT,
-        pt_len, nonce, 12, aad, aad_len, plaintext, ciphertext, 16, tag);
+    int ret = mbedtls_gcm_crypt_and_tag(&ctx, MBEDTLS_GCM_ENCRYPT, pt_len, nonce, 12, aad, aad_len,
+                                        plaintext, ciphertext, 16, tag);
     mbedtls_gcm_free(&ctx);
     return (ret == 0) ? 0 : -1;
 }
 
-int crypto_aes256gcm_decrypt(const uint8_t *key, const uint8_t *nonce,
-                             const uint8_t *ciphertext, size_t ct_len,
-                             const uint8_t *aad, size_t aad_len,
-                             const uint8_t *tag, uint8_t *plaintext) {
+int crypto_aes256gcm_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* ciphertext,
+                             size_t ct_len, const uint8_t* aad, size_t aad_len, const uint8_t* tag,
+                             uint8_t* plaintext) {
     mbedtls_gcm_context ctx;
     mbedtls_gcm_init(&ctx);
     mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, key, 256);
-    int ret = mbedtls_gcm_auth_decrypt(&ctx, ct_len, nonce, 12,
-        aad, aad_len, tag, 16, ciphertext, plaintext);
+    int ret = mbedtls_gcm_auth_decrypt(&ctx, ct_len, nonce, 12, aad, aad_len, tag, 16, ciphertext,
+                                       plaintext);
     mbedtls_gcm_free(&ctx);
     return (ret == 0) ? 0 : -1;
 }
 
-int crypto_hmac_sha256(const uint8_t *key, size_t key_len,
-                       const uint8_t *data, size_t data_len,
-                       uint8_t *mac) {
-    const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+int crypto_hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* data, size_t data_len,
+                       uint8_t* mac) {
+    const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     return mbedtls_md_hmac(md_info, key, key_len, data, data_len, mac);
 }
 
-uint32_t crypto_hmac_sha256_trunc4(const uint8_t *key, size_t key_len,
-                                   const uint8_t *data, size_t data_len) {
+uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uint8_t* data,
+                                   size_t data_len) {
     uint8_t mac[32];
     crypto_hmac_sha256(key, key_len, data, data_len, mac);
-    return ((uint32_t)mac[0] << 24) | ((uint32_t)mac[1] << 16) |
-           ((uint32_t)mac[2] << 8)  | (uint32_t)mac[3];
+    return ((uint32_t)mac[0] << 24) | ((uint32_t)mac[1] << 16) | ((uint32_t)mac[2] << 8) |
+           (uint32_t)mac[3];
 }
 
-int crypto_hkdf_sha256(const uint8_t *salt, size_t salt_len,
-                       const uint8_t *ikm, size_t ikm_len,
-                       const uint8_t *info, size_t info_len,
-                       uint8_t *okm, size_t okm_len) {
-    const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len,
+                       const uint8_t* info, size_t info_len, uint8_t* okm, size_t okm_len) {
+    const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     return mbedtls_hkdf(md_info, salt, salt_len, ikm, ikm_len, info, info_len, okm, okm_len);
 }
 
-int crypto_random(uint8_t *buf, size_t len) {
+int crypto_random(uint8_t* buf, size_t len) {
     for (size_t i = 0; i < len; i += 4) {
         uint32_t r = esp_random();
         size_t remaining = len - i;
@@ -94,20 +89,20 @@ int crypto_random(uint8_t *buf, size_t len) {
     return 0;
 }
 
-void crypto_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t *nonce) {
+void crypto_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce) {
     nonce[0] = (src_addr >> 24) & 0xFF;
     nonce[1] = (src_addr >> 16) & 0xFF;
-    nonce[2] = (src_addr >> 8)  & 0xFF;
+    nonce[2] = (src_addr >> 8) & 0xFF;
     nonce[3] = src_addr & 0xFF;
     nonce[4] = (counter >> 24) & 0xFF;
     nonce[5] = (counter >> 16) & 0xFF;
-    nonce[6] = (counter >> 8)  & 0xFF;
+    nonce[6] = (counter >> 8) & 0xFF;
     nonce[7] = counter & 0xFF;
     crypto_random(&nonce[8], 4);
 }
 
-int crypto_x25519_dh(const uint8_t *private_key, const uint8_t *peer_public_key,
-                     uint8_t *shared_secret) {
+int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
+                     uint8_t* shared_secret) {
     int ret = -1;
     mbedtls_ecp_group grp;
     mbedtls_mpi d, z;
@@ -140,10 +135,10 @@ int crypto_x25519_dh(const uint8_t *private_key, const uint8_t *peer_public_key,
     return ret;
 }
 
-int crypto_generate_identity(bramble_identity_t *id) {
+int crypto_generate_identity(bramble_identity_t* id) {
     crypto_random(id->private_key, 32);
     // Clamp per X25519 spec
-    id->private_key[0]  &= 248;
+    id->private_key[0] &= 248;
     id->private_key[31] &= 127;
     id->private_key[31] |= 64;
 

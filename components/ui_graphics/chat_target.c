@@ -1,15 +1,15 @@
 #include "chat_target.h"
 
-static bool is_broadcast_msg(const stored_msg_t *msg) {
-    if (!msg) return false;
-    return msg->direction == MSG_DIR_BROADCAST_IN ||
-           msg->direction == MSG_DIR_BROADCAST_OUT;
+static bool is_broadcast_msg(const stored_msg_t* msg) {
+    if (!msg)
+        return false;
+    return msg->direction == MSG_DIR_BROADCAST_IN || msg->direction == MSG_DIR_BROADCAST_OUT;
 }
 
-static bool is_dm_msg(const stored_msg_t *msg) {
-    if (!msg) return false;
-    return msg->direction == MSG_DIR_INCOMING ||
-           msg->direction == MSG_DIR_OUTGOING;
+static bool is_dm_msg(const stored_msg_t* msg) {
+    if (!msg)
+        return false;
+    return msg->direction == MSG_DIR_INCOMING || msg->direction == MSG_DIR_OUTGOING;
 }
 
 chat_target_t chat_target_default(void) {
@@ -21,9 +21,7 @@ chat_target_t chat_target_default(void) {
     return t;
 }
 
-chat_target_t chat_target_normalize(chat_target_kind_t kind,
-                                    int channel_index,
-                                    int channel_count) {
+chat_target_t chat_target_normalize(chat_target_kind_t kind, int channel_index, int channel_count) {
     if (kind != CHAT_TARGET_CHANNEL) {
         return chat_target_default();
     }
@@ -49,10 +47,10 @@ chat_target_t chat_target_dm(uint32_t peer_addr) {
     return t;
 }
 
-bool chat_target_matches_message(chat_target_t target,
-                                 const stored_msg_t *msg,
+bool chat_target_matches_message(chat_target_t target, const stored_msg_t* msg,
                                  int message_channel_index) {
-    if (!msg) return false;
+    if (!msg)
+        return false;
 
     if (target.kind == CHAT_TARGET_BROADCAST) {
         return is_broadcast_msg(msg);

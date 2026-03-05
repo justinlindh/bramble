@@ -38,8 +38,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format
-      - name: Run clang-format strict wrapper (changed files)
-        run: bash scripts/lint/run-clang-format-check.sh --strict --changed
+      - name: Run clang-format strict wrapper (full scope)
+        run: bash scripts/lint/run-clang-format-check.sh --strict
 
   required-shellcheck:
     name: Required shellcheck

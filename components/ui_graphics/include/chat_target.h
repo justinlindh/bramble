@@ -23,14 +23,11 @@ typedef struct {
 
 chat_target_t chat_target_default(void);
 
-chat_target_t chat_target_normalize(chat_target_kind_t kind,
-                                    int channel_index,
-                                    int channel_count);
+chat_target_t chat_target_normalize(chat_target_kind_t kind, int channel_index, int channel_count);
 
 chat_target_t chat_target_dm(uint32_t peer_addr);
 
-bool chat_target_matches_message(chat_target_t target,
-                                 const stored_msg_t *msg,
+bool chat_target_matches_message(chat_target_t target, const stored_msg_t* msg,
                                  int message_channel_index);
 
 /* Cycle target: broadcast -> channel 1..N-1 -> broadcast */

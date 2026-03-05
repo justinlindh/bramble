@@ -22,11 +22,11 @@ int channel_storage_init(void) {
     return 0;
 }
 
-int channel_storage_save(const bramble_channel_t *channels, int num_channels,
+int channel_storage_save(const bramble_channel_t* channels, int num_channels,
                          const char names[][20], int default_channel_idx) {
     if (!channels || !names || num_channels < 0 || num_channels > MAX_CHANNELS) {
-        ESP_LOGE(TAG, "Invalid params: channels=%p, names=%p, num=%d", 
-                 channels, names, num_channels);
+        ESP_LOGE(TAG, "Invalid params: channels=%p, names=%p, num=%d", channels, names,
+                 num_channels);
         return -1;
     }
 
@@ -57,7 +57,7 @@ int channel_storage_save(const bramble_channel_t *channels, int num_channels,
     }
 
     /* Save each channel blob */
-    char key[16];  /* Increased size to avoid truncation warnings */
+    char key[16]; /* Increased size to avoid truncation warnings */
     for (int i = 0; i < num_channels; i++) {
         snprintf(key, sizeof(key), "ch%d", i);
         err = nvs_set_blob(h, key, &channels[i], sizeof(bramble_channel_t));
@@ -82,8 +82,7 @@ int channel_storage_save(const bramble_channel_t *channels, int num_channels,
     nvs_close(h);
 
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Saved %d channels to NVS (default=%d)", 
-                 num_channels, default_channel_idx);
+        ESP_LOGI(TAG, "Saved %d channels to NVS (default=%d)", num_channels, default_channel_idx);
         return 0;
     } else {
         ESP_LOGE(TAG, "nvs_commit failed: %s", esp_err_to_name(err));
@@ -91,11 +90,11 @@ int channel_storage_save(const bramble_channel_t *channels, int num_channels,
     }
 }
 
-int channel_storage_load(bramble_channel_t *channels, int *num_channels,
-                         char names[][20], int *default_channel_idx) {
+int channel_storage_load(bramble_channel_t* channels, int* num_channels, char names[][20],
+                         int* default_channel_idx) {
     if (!channels || !num_channels || !names || !default_channel_idx) {
-        ESP_LOGE(TAG, "Invalid params: channels=%p, num=%p, names=%p, default=%p",
-                 channels, num_channels, names, default_channel_idx);
+        ESP_LOGE(TAG, "Invalid params: channels=%p, num=%p, names=%p, default=%p", channels,
+                 num_channels, names, default_channel_idx);
         return -1;
     }
 
@@ -129,7 +128,7 @@ int channel_storage_load(bramble_channel_t *channels, int *num_channels,
     }
 
     /* Load each channel blob */
-    char key[16];  /* Increased size to avoid truncation warnings */
+    char key[16]; /* Increased size to avoid truncation warnings */
     int loaded = 0;
     for (int i = 0; i < count; i++) {
         snprintf(key, sizeof(key), "ch%d", i);
@@ -157,8 +156,7 @@ int channel_storage_load(bramble_channel_t *channels, int *num_channels,
     *num_channels = loaded;
 
     if (loaded > 0) {
-        ESP_LOGI(TAG, "Loaded %d channels from NVS (default=%d)", 
-                 loaded, *default_channel_idx);
+        ESP_LOGI(TAG, "Loaded %d channels from NVS (default=%d)", loaded, *default_channel_idx);
         return 0;
     } else {
         ESP_LOGW(TAG, "No channels loaded");
@@ -184,11 +182,9 @@ static int s_num_channels = 0;
 static int s_default_channel_idx = 0;
 static bool s_has_data = false;
 
-int channel_storage_init(void) {
-    return 0;
-}
+int channel_storage_init(void) { return 0; }
 
-int channel_storage_save(const bramble_channel_t *channels, int num_channels,
+int channel_storage_save(const bramble_channel_t* channels, int num_channels,
                          const char names[][20], int default_channel_idx) {
     if (!channels || !names || num_channels < 0 || num_channels > MAX_CHANNELS) {
         return -1;
@@ -207,8 +203,8 @@ int channel_storage_save(const bramble_channel_t *channels, int num_channels,
     return 0;
 }
 
-int channel_storage_load(bramble_channel_t *channels, int *num_channels,
-                         char names[][20], int *default_channel_idx) {
+int channel_storage_load(bramble_channel_t* channels, int* num_channels, char names[][20],
+                         int* default_channel_idx) {
     if (!channels || !num_channels || !names || !default_channel_idx) {
         return -1;
     }

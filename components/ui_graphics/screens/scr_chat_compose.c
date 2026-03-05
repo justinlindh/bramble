@@ -4,14 +4,14 @@
 #include "esp_log.h"
 #include <stdio.h>
 
-static const char *TAG = "scr_compose";
+static const char* TAG = "scr_compose";
 
-extern void scr_chat_messages_open(bramble_layout_t *layout, int channel_idx);
+extern void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx);
 extern int mesh_get_channel_count(void);
-extern const char *mesh_get_channel_name(int index);
+extern const char* mesh_get_channel_name(int index);
 
-static void back_click_cb(lv_event_t *e) {
-    bramble_layout_t *layout = (bramble_layout_t *)lv_event_get_user_data(e);
+static void back_click_cb(lv_event_t* e) {
+    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
     /* Show tab bar */
     lv_obj_clear_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
     /* Return to chat list */
@@ -19,24 +19,24 @@ static void back_click_cb(lv_event_t *e) {
     scr_chat_list_create(layout);
 }
 
-static void target_click_cb(lv_event_t *e) {
+static void target_click_cb(lv_event_t* e) {
     int channel_idx = (int)(intptr_t)lv_event_get_user_data(e);
-    extern bramble_layout_t *s_layout;
+    extern bramble_layout_t* s_layout;
     scr_chat_messages_open(s_layout, channel_idx);
 }
 
-void scr_chat_compose_open(bramble_layout_t *layout) {
+void scr_chat_compose_open(bramble_layout_t* layout) {
     /* Hide tab bar */
     lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
-    
+
     /* Expand content area to fill space left by hidden tab bar */
     lv_obj_clean(layout->content_area);
     lv_obj_set_size(layout->content_area, 320, 240 - BR_STATUS_BAR_H);
-    
+
     int content_h = 240 - BR_STATUS_BAR_H;
-    
+
     /* Header with back button + title */
-    lv_obj_t *header = lv_obj_create(layout->content_area);
+    lv_obj_t* header = lv_obj_create(layout->content_area);
     lv_obj_set_size(header, 320, 28);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_style_bg_color(header, BR_COLOR_SURFACE, 0);
@@ -46,26 +46,27 @@ void scr_chat_compose_open(bramble_layout_t *layout) {
     lv_obj_set_style_pad_all(header, 4, 0);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *back_btn = lv_btn_create(header);
+    lv_obj_t* back_btn = lv_btn_create(header);
     lv_obj_set_size(back_btn, 40, 24);
     lv_obj_set_style_bg_opa(back_btn, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(back_btn, 0, 0);
-    lv_obj_t *back_lbl = lv_label_create(back_btn);
+    lv_obj_t* back_lbl = lv_label_create(back_btn);
     lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
     lv_obj_center(back_lbl);
     lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
-    
-    lv_group_t *g = lv_group_get_default();
-    if (g) lv_group_add_obj(g, back_btn);
 
-    lv_obj_t *title = lv_label_create(header);
+    lv_group_t* g = lv_group_get_default();
+    if (g)
+        lv_group_add_obj(g, back_btn);
+
+    lv_obj_t* title = lv_label_create(header);
     lv_label_set_text(title, "New Message");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
 
     /* Scrollable target list */
-    lv_obj_t *list = lv_obj_create(layout->content_area);
+    lv_obj_t* list = lv_obj_create(layout->content_area);
     lv_obj_set_size(list, 320, content_h - 28);
     lv_obj_set_pos(list, 0, 28);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
@@ -78,9 +79,9 @@ void scr_chat_compose_open(bramble_layout_t *layout) {
 
     /* Add target cards */
     int channel_count = mesh_get_channel_count();
-    
+
     for (int ch = 0; ch < channel_count; ch++) {
-        lv_obj_t *card = lv_obj_create(list);
+        lv_obj_t* card = lv_obj_create(list);
         lv_obj_set_width(card, LV_PCT(100));
         lv_obj_set_height(card, 40);
         lv_obj_set_style_bg_color(card, BR_COLOR_SURFACE, 0);
@@ -92,10 +93,11 @@ void scr_chat_compose_open(bramble_layout_t *layout) {
         lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_bg_color(card, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
         lv_obj_set_style_bg_opa(card, LV_OPA_30, LV_STATE_FOCUSED);
-        if (g) lv_group_add_obj(g, card);
+        if (g)
+            lv_group_add_obj(g, card);
 
-        lv_obj_t *lbl = lv_label_create(card);
-        const char *ch_name = mesh_get_channel_name(ch);
+        lv_obj_t* lbl = lv_label_create(card);
+        const char* ch_name = mesh_get_channel_name(ch);
         if (ch_name && ch_name[0]) {
             lv_label_set_text(lbl, ch_name);
         } else if (ch == 0) {
@@ -109,10 +111,10 @@ void scr_chat_compose_open(bramble_layout_t *layout) {
         lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-        lv_obj_add_event_cb(card, target_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)ch);
+        lv_obj_add_event_cb(card, target_click_cb, LV_EVENT_CLICKED, (void*)(intptr_t)ch);
     }
 
-    lv_obj_t *hint = lv_label_create(list);
+    lv_obj_t* hint = lv_label_create(list);
     lv_label_set_text(hint, "Select a target for your message.");
     lv_obj_set_style_text_color(hint, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);

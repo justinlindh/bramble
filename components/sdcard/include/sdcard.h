@@ -20,7 +20,7 @@ bool sdcard_is_present(void);
  * Get SD card mount point.
  * @return mount point string (e.g., "/sdcard"), or NULL if not mounted
  */
-const char *sdcard_get_mount_point(void);
+const char* sdcard_get_mount_point(void);
 
 /**
  * Unmount SD card and free resources.

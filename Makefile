@@ -41,7 +41,7 @@ ci-quality-ruff:
 	uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
 
 ci-quality-clang-format:
-	bash scripts/lint/run-clang-format-check.sh --strict --changed
+	bash scripts/lint/run-clang-format-check.sh --strict
 
 ci-quality-cppcheck:
 	command -v cppcheck >/dev/null
@@ -54,7 +54,7 @@ ci-quality-board-build:
 ci-firmware-quality: ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint
 
 ci-fw-clang-format:
-	bash scripts/lint/run-clang-format-check.sh --strict --changed
+	bash scripts/lint/run-clang-format-check.sh --strict
 
 ci-fw-shellcheck:
 	bash scripts/lint/run-shellcheck.sh --strict
