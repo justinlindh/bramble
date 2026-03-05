@@ -48,8 +48,8 @@ ci-quality-cppcheck:
 	cppcheck --enable=warning,performance,portability --std=c11 --quiet main components
 
 ci-quality-board-build:
-	bash scripts/ci-ensure-idf.sh
-	bash scripts/flash.sh local heltec-v3 build
+	# Run board build on GPU box to avoid local build-dir ownership/toolchain drift.
+	ssh justin@192.168.1.199 'cd ~/src/bramble && git fetch origin && git checkout fix/ci-idf-prebake && git reset --hard origin/fix/ci-idf-prebake && bash scripts/flash.sh local heltec-v3 build'
 
 ci-firmware-quality: ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint
 
