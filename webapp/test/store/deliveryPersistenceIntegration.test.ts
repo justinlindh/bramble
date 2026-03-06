@@ -6,6 +6,7 @@ import {
   __resetBroadcastTelemetryForTests,
   handleAck,
   handleBroadcastDelivery,
+  handleDeliveryUpdate,
   initMessageStore,
   registerBroadcastSendTelemetry,
 } from '../../src/store/actions';
@@ -135,6 +136,44 @@ describe('delivery persistence hydration + live merge', () => {
     const updated = useStore.getState().messages.find(m => m.id === msg.id);
     expect(updated?.status).toBe('delivered');
     expect(updated?.broadcastRecipients?.some(r => r.addr === 0xC0DE)).toBe(true);
+  });
+
+  it('handles delivery.update notifications for ack and broadcast statuses', async () => {
+    const msg = makeMessage({
+      id: 'msg-update',
+      packetId: 'pkt-update',
+      broadcastId: 'bcast-update',
+      to: 0xFFFFFFFF,
+    });
+
+    useStore.getState().addMessage(msg);
+    registerBroadcastSendTelemetry(msg.id, { packetId: 'pkt-update', broadcastId: 'bcast-update' });
+
+    handleDeliveryUpdate({
+      kind: 'ack',
+      packet_id: 'pkt-update',
+      status: 'delivered',
+      relayPath: [{ addr: 'BEEF', rssi: -70 }],
+    });
+
+    handleDeliveryUpdate({
+      kind: 'broadcast_delivery',
+      broadcast_id: 'bcast-update',
+      recipient: 'CAFE',
+      status: 'delivered',
+      hop_count: 2,
+      delivered_at_ms: Date.now(),
+    });
+
+    await flushAsyncWrites();
+
+    const events = await deliveryEventStore.listByMessage(msg.id);
+    expect(events.some(e => e.eventType === 'ack')).toBe(true);
+    expect(events.some(e => e.eventType === 'broadcast_delivery')).toBe(true);
+
+    const updated = useStore.getState().messages.find(m => m.id === msg.id);
+    expect(updated?.status).toBe('delivered');
+    expect(updated?.broadcastRecipients?.some(r => r.addr === 0xCAFE)).toBe(true);
   });
 
   it('prunes expired delivery events on startup retention pass', async () => {

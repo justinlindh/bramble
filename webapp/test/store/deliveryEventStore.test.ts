@@ -46,6 +46,24 @@ describe('deliveryEventStore', () => {
     expect(events[0]?.payload).toEqual({ status: 'delivered' });
   });
 
+  it('lists events by packetId in chronological order', async () => {
+    await deliveryEventStore.upsertDeliveryEvent(makeEvent({
+      eventId: 'evt-pkt-2',
+      messageId: 'msg-2',
+      packetId: 'pkt-42',
+      ts: 2000,
+    }));
+    await deliveryEventStore.upsertDeliveryEvent(makeEvent({
+      eventId: 'evt-pkt-1',
+      messageId: 'msg-1',
+      packetId: 'pkt-42',
+      ts: 1000,
+    }));
+
+    const events = await deliveryEventStore.listByPacketId('pkt-42');
+    expect(events.map(e => e.eventId)).toEqual(['evt-pkt-1', 'evt-pkt-2']);
+  });
+
   it('prunes events older than cutoff timestamp', async () => {
     await deliveryEventStore.upsertDeliveryEvent(makeEvent({ eventId: 'evt-1', ts: 1000 }));
     await deliveryEventStore.upsertDeliveryEvent(makeEvent({ eventId: 'evt-2', ts: 3000 }));
