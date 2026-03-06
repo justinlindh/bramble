@@ -26,7 +26,6 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "nvs_flash.h"
 #include "ws_server.h"
-#include "cJSON.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -63,38 +62,20 @@ typedef struct {
     size_t len;
 } ble_rpc_msg_t;
 
-static int rpc_ble_auth(const cJSON* params, cJSON* result) {
-    const cJSON* token_j = cJSON_GetObjectItem(params, "token");
-    if (!token_j || !cJSON_IsString(token_j)) {
-        return RPC_ERR_INVALID_PARAMS;
-    }
-
+static bool ble_authenticate_first_write(const char* line) {
     const char* expected = ws_server_get_token();
-    if (expected[0] == '\0' || ct_strcmp(token_j->valuestring, expected) == 0) {
+    if (expected[0] == '\0') {
         s_ble_authenticated = true;
-        cJSON_AddBoolToObject(result, "ok", true);
-        return 0;
+        return true;
     }
 
-    return RPC_ERR_INVALID_PARAMS;
-}
-
-static bool ble_is_auth_request(const char* json, int* request_id) {
-    cJSON* req = cJSON_Parse(json);
-    if (!req) {
-        return false;
+    if (ct_strcmp(line, expected) == 0) {
+        s_ble_authenticated = true;
+        ESP_LOGI(TAG, "BLE auth handshake accepted");
+        return true;
     }
 
-    const cJSON* id = cJSON_GetObjectItem(req, "id");
-    if (request_id) {
-        *request_id = (id && cJSON_IsNumber(id)) ? id->valueint : 0;
-    }
-
-    const cJSON* method = cJSON_GetObjectItem(req, "method");
-    bool is_auth =
-        method && cJSON_IsString(method) && strcmp(method->valuestring, "bramble.auth") == 0;
-    cJSON_Delete(req);
-    return is_auth;
+    return false;
 }
 
 /* ── RPC notification callback (registered with rpc_dispatcher) ────── */
@@ -140,19 +121,22 @@ static void ble_rpc_task(void* param) {
             ESP_LOGI(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)msg.len, msg.data);
 
             char resp[BLE_RPC_BUF_SIZE];
-            const char* token = ws_server_get_token();
-            if (token[0] != '\0' && !s_ble_authenticated) {
-                int req_id = 0;
-                if (!ble_is_auth_request(msg.data, &req_id)) {
-                    int n = snprintf(resp, sizeof(resp),
-                                     "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":"
-                                     "\"unauthorized: call bramble.auth first\"},\"id\":%d}",
-                                     req_id);
-                    int resp_len = (n > 0 && n < (int)sizeof(resp)) ? n : (int)(sizeof(resp) - 1);
-                    ESP_LOGW(TAG, "Rejected unauthenticated BLE RPC call");
-                    ble_notify_cb(resp, (size_t)resp_len, NULL);
+            if (!s_ble_authenticated) {
+                if (!ble_authenticate_first_write(msg.data)) {
+                    const char* unauthorized =
+                        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":"
+                        "\"unauthorized: first BLE write must be auth token\"},\"id\":null}";
+                    ESP_LOGW(TAG, "Rejected unauthenticated BLE client (invalid first write)");
+                    ble_notify_cb(unauthorized, strlen(unauthorized), NULL);
+                    if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+                        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+                    }
                     continue;
                 }
+
+                const char* ok = "{\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true},\"id\":null}";
+                ble_notify_cb(ok, strlen(ok), NULL);
+                continue;
             }
 
             int resp_len = rpc_dispatch(msg.data, resp, sizeof(resp));
@@ -296,8 +280,9 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             s_conn_handle = event->connect.conn_handle;
-            s_ble_authenticated = false;
-            ESP_LOGI(TAG, "BLE client connected (handle=%d)", s_conn_handle);
+            s_ble_authenticated = (ws_server_get_token()[0] == '\0');
+            ESP_LOGI(TAG, "BLE client connected (handle=%d, auth=%s)", s_conn_handle,
+                     s_ble_authenticated ? "open" : "required");
 
             /* Request higher MTU for better throughput */
             ble_att_set_preferred_mtu(256);
@@ -312,6 +297,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
         ESP_LOGI(TAG, "BLE client disconnected (reason=%d)", event->disconnect.reason);
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         s_rx_notify_enabled = false;
+        s_ble_authenticated = false;
         s_mtu = BLE_MTU_DEFAULT + 3;
         s_line_len = 0;
         start_advertising();
@@ -408,7 +394,6 @@ int ble_server_init(void) {
 
     /* Register notification callback with RPC dispatcher */
     rpc_register_notify_transport(ble_notify_cb, NULL);
-    rpc_register("bramble.auth", rpc_ble_auth);
 
     ESP_LOGI(TAG, "BLE server initialized (name=%s)", s_device_name);
     return 0;
