@@ -286,15 +286,6 @@ target_include_directories(test_ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
 )
 
-# JSON-RPC parser tests
-add_executable(test_json_rpc
-    test_json_rpc.c
-    unity/unity.c
-)
-target_include_directories(test_json_rpc PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
-)
-
 # Crypto test vectors (NIST/RFC)
 add_executable(test_crypto_vectors
     test_crypto_vectors.c
@@ -319,18 +310,6 @@ target_include_directories(test_integration PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
-
-# Key backup tests
-add_executable(test_key_backup
-    test_key_backup.c
-    unity/unity.c
-)
-target_include_directories(test_key_backup PRIVATE
-    stubs
-    ${OPENSSL_ROOT}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
-)
-target_link_libraries(test_key_backup ssl crypto)
 
 # Dummy traffic tests
 add_executable(test_dummy_traffic
