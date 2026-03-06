@@ -3,11 +3,11 @@
 
 #include "FreeRTOS.h"
 
-typedef void *SemaphoreHandle_t;
+typedef void* SemaphoreHandle_t;
 
-#define xSemaphoreCreateMutex()           ((SemaphoreHandle_t)1)
-#define xSemaphoreTake(s, t)              (1)
-#define xSemaphoreGive(s)                 (1)
-#define vSemaphoreDelete(s)               ((void)(s))
+#define xSemaphoreCreateMutex() ((SemaphoreHandle_t)1)
+#define xSemaphoreTake(s, t) (1)
+#define xSemaphoreGive(s) (1)
+#define vSemaphoreDelete(s) ((void)(s))
 
 #endif
