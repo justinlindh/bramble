@@ -58,7 +58,8 @@ const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t* 
     (void)start_from;
     return NULL;
 }
-esp_err_t esp_ota_begin(const esp_partition_t* partition, int image_size, esp_ota_handle_t* out_handle) {
+esp_err_t esp_ota_begin(const esp_partition_t* partition, int image_size,
+                        esp_ota_handle_t* out_handle) {
     (void)partition;
     (void)image_size;
     (void)out_handle;

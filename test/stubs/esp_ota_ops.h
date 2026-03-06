@@ -12,7 +12,8 @@ typedef int esp_ota_handle_t;
 #define OTA_SIZE_UNKNOWN -1
 
 const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t* start_from);
-esp_err_t esp_ota_begin(const esp_partition_t* partition, int image_size, esp_ota_handle_t* out_handle);
+esp_err_t esp_ota_begin(const esp_partition_t* partition, int image_size,
+                        esp_ota_handle_t* out_handle);
 esp_err_t esp_ota_write(esp_ota_handle_t handle, const void* data, int size);
 esp_err_t esp_ota_end(esp_ota_handle_t handle);
 esp_err_t esp_ota_set_boot_partition(const esp_partition_t* partition);
