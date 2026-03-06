@@ -7,16 +7,12 @@ import { IconCritical, IconBroadcast } from '../../components/Icons';
 import { useStore } from '../../store/index';
 import { usePeerInfo } from '../../hooks/usePeer';
 import { parseAction } from '../../utils/parseAction';
+import { formatMessageTimestamp } from './chatDateFormatting';
 import styles from './MessageBubble.module.css';
 
 interface MessageBubbleProps {
   message: Message;
   myAddr: number;
-}
-
-function formatTime(ms: number): string {
-  const d = new Date(ms);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 const TIER_CLASS: Record<string, string> = {
@@ -54,7 +50,7 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
           {actionText}
         </span>
         <time className={styles.actionTime} dateTime={new Date(message.timestampMs).toISOString()}>
-          {formatTime(message.timestampMs)}
+          {formatMessageTimestamp(message.timestampMs)}
         </time>
       </div>
     );
@@ -87,7 +83,7 @@ export function MessageBubble({ message, myAddr }: MessageBubbleProps) {
       {/* Timestamp + delivery status */}
       <div className={styles.meta}>
         <time className={styles.time} dateTime={new Date(message.timestampMs).toISOString()}>
-          {formatTime(message.timestampMs)}
+          {formatMessageTimestamp(message.timestampMs)}
         </time>
         {isOut && (
           <DeliveryBadge

@@ -8,6 +8,7 @@ import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
 import { ChannelDetailPanel } from './ChannelDetailPanel';
+import { formatDaySeparatorLabel, shouldInsertDaySeparator } from './chatDateFormatting';
 import styles from './Chat.module.css';
 
 export function isNearBottom(el: { scrollTop: number; clientHeight: number; scrollHeight: number }, threshold = 100): boolean {
@@ -88,9 +89,21 @@ function MessageList({ conversationId }: { conversationId: string }) {
         aria-label="Messages"
         onScroll={updateScrollState}
       >
-        {messages.map(msg => (
-          <MessageBubble key={msg.id} message={msg} myAddr={myAddr} />
-        ))}
+        {messages.map((msg, index) => {
+          const previousTs = index > 0 ? messages[index - 1].timestampMs : undefined;
+          const showDaySeparator = shouldInsertDaySeparator(previousTs, msg.timestampMs);
+
+          return (
+            <div key={msg.id}>
+              {showDaySeparator && (
+                <div className={styles.daySeparator} role="separator" aria-label={`Messages from ${formatDaySeparatorLabel(msg.timestampMs)}`}>
+                  <span className={styles.daySeparatorText}>{formatDaySeparatorLabel(msg.timestampMs)}</span>
+                </div>
+              )}
+              <MessageBubble message={msg} myAddr={myAddr} />
+            </div>
+          );
+        })}
       </div>
 
       {showJump && (
