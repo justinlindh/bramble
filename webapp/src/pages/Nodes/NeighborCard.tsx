@@ -66,7 +66,7 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
   const health = neighborHealth(neighbor);
   const pdr = pdrPercent(neighbor.deliveryRate);
   const barPct = rssiBarPct(neighbor.rssi);
-  const hasFreshLocation = !!peerLocation && isLocationFresh(peerLocation);
+  const hasLocation = !!peerLocation;
   const stale = isNeighborStale(neighbor.lastHeardMs);
 
   return (
@@ -112,16 +112,16 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
         >
           {stale ? 'Stale' : 'Active'}
         </span>
-        {hasFreshLocation ? (
+        {hasLocation ? (
           <button
             className={styles.badgeLocation}
-            title="Show location on map"
+            title={peerLocation && isLocationFresh(peerLocation) ? 'Show location on map' : 'Show last known location on map'}
             onClick={(e) => { e.stopPropagation(); onShowOnMap?.(neighbor.addr); }}
           >
             <IconLocation size={13} /> Show Location: {peerLocation.tier === 'full' ? 'Exact' : peerLocation.tier === 'coarse' ? 'Zone' : 'Present'}
           </button>
         ) : (
-          <span className={styles.badgeLocationMuted} title="No recent location received for this neighbor">
+          <span className={styles.badgeLocationMuted} title="No location received for this neighbor">
             <IconLocation size={13} /> Location: unavailable
           </span>
         )}
