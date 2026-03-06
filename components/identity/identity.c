@@ -48,7 +48,7 @@ int identity_load(bramble_identity_t* id) {
     return 0;
 }
 
-int identity_ensure_ws_auth_token(char *token_out, size_t token_out_len) {
+int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     if (!token_out || token_out_len < 33) {
         return -1;
     }
@@ -100,7 +100,7 @@ int identity_load(bramble_identity_t* id) {
     return -1; /* no stored identity on host */
 }
 
-int identity_ensure_ws_auth_token(char *token_out, size_t token_out_len) {
+int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     (void)token_out;
     (void)token_out_len;
     return -1;
