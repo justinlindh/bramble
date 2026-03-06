@@ -68,6 +68,11 @@ static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *c
 #define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH          16
 #define MESH_EVENT_QUEUE_DEPTH  8
+
+#define DELIVERY_EVENTS_NVS_NAMESPACE "bramble_evt"
+#define DELIVERY_EVENTS_NVS_KEY       "ring"
+#define DELIVERY_EVENTS_FLUSH_EVERY_N 32u
+#define DELIVERY_EVENTS_FLUSH_MAX_MS  30000u
 #define MESH_TASK_STACK         8192
 #define MESH_TASK_PRIORITY      5
 
@@ -115,6 +120,8 @@ static pending_receipt_t s_receipt_queue[RECEIPT_QUEUE_CAPACITY];
 static esp_timer_handle_t s_receipt_timer;
 
 static delivery_event_ring_t *s_delivery_event_ring;
+static uint32_t s_delivery_events_dirty_count;
+static uint32_t s_delivery_events_last_flush_ms;
 
 enum {
     DELIVERY_EVENT_TYPE_ACK = 1,
@@ -251,16 +258,116 @@ static void mesh_process_receipt_tx_event(void);
 static void mesh_receipt_timer_cb(void *arg);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
+static bool delivery_events_persist_snapshot_locked(bool force);
+static bool delivery_events_load_persisted(void);
 extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
+static bool delivery_events_persist_snapshot_locked(bool force) {
+    if (!s_delivery_event_ring) return false;
+
+    uint32_t elapsed = now_ms() - s_delivery_events_last_flush_ms;
+    if (!force &&
+        s_delivery_events_dirty_count < DELIVERY_EVENTS_FLUSH_EVERY_N &&
+        elapsed < DELIVERY_EVENTS_FLUSH_MAX_MS) {
+        return true;
+    }
+
+    uint8_t *blob = malloc(sizeof(delivery_event_ring_t));
+    if (!blob) {
+        ESP_LOGW(TAG, "Delivery event persistence skipped: no RAM for snapshot (%u bytes)",
+                 (unsigned)sizeof(delivery_event_ring_t));
+        return false;
+    }
+
+    size_t encoded = delivery_event_ring_serialize(s_delivery_event_ring, blob, sizeof(delivery_event_ring_t));
+    if (encoded == 0u) {
+        free(blob);
+        ESP_LOGW(TAG, "Delivery event persistence serialize failed");
+        return false;
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(DELIVERY_EVENTS_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        free(blob);
+        ESP_LOGW(TAG, "Delivery event persistence nvs_open failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    err = nvs_set_blob(nvs, DELIVERY_EVENTS_NVS_KEY, blob, encoded);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    free(blob);
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Delivery event persistence write failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    s_delivery_events_dirty_count = 0u;
+    s_delivery_events_last_flush_ms = now_ms();
+    return true;
+}
+
+static bool delivery_events_load_persisted(void) {
+    if (!s_delivery_event_ring) return false;
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(DELIVERY_EVENTS_NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        return false;
+    }
+
+    size_t len = 0u;
+    err = nvs_get_blob(nvs, DELIVERY_EVENTS_NVS_KEY, NULL, &len);
+    if (err != ESP_OK || len == 0u || len > sizeof(delivery_event_ring_t)) {
+        nvs_close(nvs);
+        return false;
+    }
+
+    uint8_t *blob = malloc(len);
+    if (!blob) {
+        nvs_close(nvs);
+        ESP_LOGW(TAG, "Delivery event restore skipped: no RAM for blob (%u bytes)", (unsigned)len);
+        return false;
+    }
+
+    err = nvs_get_blob(nvs, DELIVERY_EVENTS_NVS_KEY, blob, &len);
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        free(blob);
+        return false;
+    }
+
+    size_t decoded = delivery_event_ring_deserialize(s_delivery_event_ring, blob, len);
+    free(blob);
+    if (decoded == 0u) {
+        ESP_LOGW(TAG, "Delivery event restore failed: invalid persisted blob");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Restored delivery event ring: count=%" PRIu32 " latest_seq=%" PRIu32,
+             delivery_event_ring_count(s_delivery_event_ring),
+             delivery_event_ring_latest_seq(s_delivery_event_ring));
+    s_delivery_events_dirty_count = 0u;
+    s_delivery_events_last_flush_ms = now_ms();
+    return true;
+}
+
 static void delivery_event_ring_append_locked(const delivery_event_record_t *event) {
     if (!event || !s_delivery_event_mutex || !s_delivery_event_ring) return;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
-    delivery_event_ring_append(s_delivery_event_ring, event);
+    uint32_t seq = delivery_event_ring_append(s_delivery_event_ring, event);
+    if (seq != 0u) {
+        s_delivery_events_dirty_count++;
+        (void)delivery_events_persist_snapshot_locked(false);
+    }
     xSemaphoreGive(s_delivery_event_mutex);
 }
 
@@ -3166,6 +3273,11 @@ void mesh_task_start(bramble_identity_t *identity) {
         return;
     }
     delivery_event_ring_init(s_delivery_event_ring);
+    s_delivery_events_dirty_count = 0u;
+    s_delivery_events_last_flush_ms = now_ms();
+    if (!delivery_events_load_persisted()) {
+        ESP_LOGI(TAG, "No persisted delivery event ring found; starting fresh");
+    }
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
     s_mesh_event_queue = xQueueCreate(MESH_EVENT_QUEUE_DEPTH, sizeof(mesh_event_type_t));
     if (!s_rx_queue || !s_mesh_event_queue) {
