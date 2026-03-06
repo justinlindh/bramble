@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { Conversation } from '../../types/bramble';
-import { ConversationList, buildChannelItems } from './ConversationList';
+import { ConversationList, buildChannelItems, filterDmConversations } from './ConversationList';
 
 vi.mock('../../store/actions', () => ({
   addChannel: vi.fn(),
@@ -15,6 +15,9 @@ vi.mock('../../store/index', () => ({
         { index: 2, name: 'beta', hasPsk: false },
       ],
     },
+    neighbors: [],
+    routes: [],
+    peerLocations: [],
   }),
 }));
 
@@ -37,6 +40,31 @@ describe('buildChannelItems', () => {
     );
 
     expect(items[0].label).toBe('ch-5');
+  });
+});
+
+describe('filterDmConversations', () => {
+  it('hides stale DMs when known peer set is provided', () => {
+    const conversations = new Map<string, Conversation>([
+      ['dm:1234', { id: 'dm:1234', label: 'A', peerAddr: 1234, unreadCount: 0 }],
+      ['dm:9999', { id: 'dm:9999', label: 'B', peerAddr: 9999, unreadCount: 1 }],
+      ['broadcast', { id: 'broadcast', label: 'Broadcast', unreadCount: 0 }],
+    ]);
+
+    const filtered = filterDmConversations(conversations, new Set([1234]));
+
+    expect(filtered.map(c => c.id)).toEqual(['dm:1234']);
+  });
+
+  it('keeps all DMs when known peer set is empty/unavailable', () => {
+    const conversations = new Map<string, Conversation>([
+      ['dm:1234', { id: 'dm:1234', label: 'A', peerAddr: 1234, unreadCount: 0 }],
+      ['dm:9999', { id: 'dm:9999', label: 'B', peerAddr: 9999, unreadCount: 1 }],
+    ]);
+
+    const filtered = filterDmConversations(conversations, new Set());
+
+    expect(filtered.map(c => c.id).sort()).toEqual(['dm:1234', 'dm:9999']);
   });
 });
 
