@@ -7,6 +7,14 @@ Bramble JSON-RPC over WebSocket uses the `/ws` endpoint.
 - Example: `ws://192.168.4.1/ws`
 - OpenAPI `/rpc/...` paths are documentation/codegen mappings, not a WebSocket URI.
 
+### Authentication
+
+When WS auth is enabled, clients should send:
+
+- `Authorization: Bearer <token>`
+
+Legacy `?token=<token>` query auth is still accepted for compatibility, but is deprecated and logs a warning because URLs can leak via logs/history.
+
 ## Location policy RPC contract (hybrid privacy-first)
 
 ### `bramble.setLocationConfig`
