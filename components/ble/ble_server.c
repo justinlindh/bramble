@@ -124,7 +124,8 @@ static void ble_rpc_task(void* param) {
             if (!s_ble_authenticated) {
                 if (!ble_authenticate_first_write(msg.data)) {
                     const char* unauthorized =
-                        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"unauthorized: first BLE write must be auth token\"},\"id\":null}";
+                        "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":"
+                        "\"unauthorized: first BLE write must be auth token\"},\"id\":null}";
                     ESP_LOGW(TAG, "Rejected unauthenticated BLE client (invalid first write)");
                     ble_notify_cb(unauthorized, strlen(unauthorized), NULL);
                     if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
