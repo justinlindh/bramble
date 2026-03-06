@@ -1,3 +1,6 @@
+/* Tell the wifi_manager.h stub to provide declarations only (no inline impls) */
+#define WIFI_MANAGER_TEST
+
 #include "unity.h"
 
 #include <stdbool.h>
@@ -5,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -210,10 +215,8 @@ esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t* list) {
     return ESP_OK;
 }
 
-void esp_log_level_set(const char* tag, int level) {
-    (void)tag;
-    (void)level;
-}
+/* esp_log_level_set is provided by the esp_log.h stub as static inline;
+   wifi_manager.c will use that version directly. */
 
 int ws_server_start(void) {
     g_ws_start_calls++;
@@ -252,8 +255,12 @@ void setUp(void) {
     g_create_sta_calls = 0;
     g_create_ap_calls = 0;
 
-    wifi_status_t status = {.mode = BRAMBLE_WIFI_OFF, .ip_addr = "", .ssid = "", .rssi = 0};
-    wifi_manager_get_status(&status);
+    /* Reset wifi_manager.c internal statics so each test starts clean */
+    s_wifi_event_group = NULL;
+    s_sta_handlers_registered = false;
+    s_sta_any_id = 0;
+    s_sta_got_ip = 0;
+    memset(&s_status, 0, sizeof(s_status));
 }
 
 void tearDown(void) {}
@@ -297,6 +304,13 @@ void test_init_prefers_station_with_saved_creds(void) {
     TEST_ASSERT_EQUAL_INT(WIFI_MODE_STA, g_wifi_set_mode);
     TEST_ASSERT_EQUAL_STRING("SavedNet", (char*)g_last_wifi_cfg.sta.ssid);
     TEST_ASSERT_EQUAL_INT(0, g_create_ap_calls);
+
+    /* In production, IP_EVENT_STA_GOT_IP fires before xEventGroupWaitBits returns BIT0.
+     * The mock returns BIT0 directly; fire the event explicitly to set status.mode. */
+    TEST_ASSERT_NOT_NULL(g_sta_handler);
+    ip_event_got_ip_t got_ip = {0};
+    got_ip.ip_info.ip.addr = ESP_IP4TOADDR(192, 168, 1, 100);
+    g_sta_handler(NULL, IP_EVENT, IP_EVENT_STA_GOT_IP, &got_ip);
 
     wifi_status_t status = {0};
     wifi_manager_get_status(&status);

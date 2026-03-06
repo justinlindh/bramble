@@ -9,9 +9,15 @@ typedef struct event_group_stub* EventGroupHandle_t;
 
 #define BIT0 (1U << 0)
 #define BIT1 (1U << 1)
+#ifndef pdFALSE
 #define pdFALSE 0
+#endif
 
+#ifndef pdMS_TO_TICKS
+#ifndef pdMS_TO_TICKS
 #define pdMS_TO_TICKS(ms) (ms)
+#endif
+#endif
 
 EventGroupHandle_t xEventGroupCreate(void);
 EventBits_t xEventGroupWaitBits(EventGroupHandle_t xEventGroup, const EventBits_t uxBitsToWaitFor,

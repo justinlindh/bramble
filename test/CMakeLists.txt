@@ -821,6 +821,10 @@ target_compile_definitions(test_wifi_manager PRIVATE
 )
 target_compile_options(test_wifi_manager PRIVATE
     -Wno-error=unused-parameter
+    -fno-sanitize=address
+)
+target_link_options(test_wifi_manager PRIVATE
+    -fno-sanitize=address
 )
 
 # OTA URL routing + security guardrail tests
