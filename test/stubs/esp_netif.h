@@ -25,8 +25,8 @@ typedef struct {
 
 #define ESP_IP4TOADDR(a, b, c, d) ((uint32_t)(((a) << 24) | ((b) << 16) | ((c) << 8) | (d)))
 #define IPSTR "%d.%d.%d.%d"
-#define IP2STR(ipaddr_ptr)                                                                        \
-    (int)((((ipaddr_ptr)->addr) >> 24) & 0xFF), (int)((((ipaddr_ptr)->addr) >> 16) & 0xFF),     \
+#define IP2STR(ipaddr_ptr)                                                                         \
+    (int)((((ipaddr_ptr)->addr) >> 24) & 0xFF), (int)((((ipaddr_ptr)->addr) >> 16) & 0xFF),        \
         (int)((((ipaddr_ptr)->addr) >> 8) & 0xFF), (int)(((ipaddr_ptr)->addr) & 0xFF)
 
 typedef struct {
