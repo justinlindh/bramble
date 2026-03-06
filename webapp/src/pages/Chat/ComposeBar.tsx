@@ -87,10 +87,12 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
 
     const { dest, channelIndex } = parseConversation(conversationId);
 
-    // Wrap /me commands as CTCP ACTION
+    // Wrap slash-action commands as CTCP ACTION
     const payload = trimmed.startsWith('/me ')
       ? `\x01ACTION ${trimmed.slice(4)}\x01`
-      : trimmed;
+      : trimmed.startsWith('/slap ')
+        ? `\x01ACTION slaps ${trimmed.slice(6).trim()} around a bit with a large trout\x01`
+        : trimmed;
 
     try {
       await sendMessage(dest, payload, effectiveTier, channelIndex);
