@@ -68,14 +68,6 @@ static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *c
 #define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH          16
 #define MESH_EVENT_QUEUE_DEPTH  8
-
-#define DELIVERY_EVENTS_NVS_NAMESPACE "bramble_evt"
-#define DELIVERY_EVENTS_NVS_KEY       "ring"
-#define DELIVERY_EVENTS_FLUSH_EVERY_N 32u
-#define DELIVERY_EVENTS_FLUSH_MAX_MS  30000u
-#define DELIVERY_EVENTS_PERSIST_WINDOW 128u
-#define DELIVERY_EVENTS_PERSIST_MAGIC   0x44565031u /* DVP1 */
-#define DELIVERY_EVENTS_PERSIST_VERSION 1u
 #define MESH_TASK_STACK         8192
 #define MESH_TASK_PRIORITY      5
 
@@ -123,22 +115,11 @@ static pending_receipt_t s_receipt_queue[RECEIPT_QUEUE_CAPACITY];
 static esp_timer_handle_t s_receipt_timer;
 
 static delivery_event_ring_t *s_delivery_event_ring;
-static uint32_t s_delivery_events_dirty_count;
-static uint32_t s_delivery_events_last_flush_ms;
 
 enum {
     DELIVERY_EVENT_TYPE_ACK = 1,
     DELIVERY_EVENT_TYPE_BROADCAST_DELIVERY = 2,
 };
-
-typedef struct {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t count;
-    uint32_t latest_seq;
-    delivery_event_record_t records[DELIVERY_EVENTS_PERSIST_WINDOW];
-} delivery_event_persist_blob_t;
-
 static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* loaded from NVS at startup */
 
 /* Routing state */
@@ -270,171 +251,16 @@ static void mesh_process_receipt_tx_event(void);
 static void mesh_receipt_timer_cb(void *arg);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
-static bool delivery_events_write_snapshot(const delivery_event_persist_blob_t *blob);
-static bool delivery_events_load_persisted(void);
 extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
-static bool delivery_events_write_snapshot(const delivery_event_persist_blob_t *blob) {
-    if (!blob) return false;
-
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(DELIVERY_EVENTS_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Delivery event persistence nvs_open failed: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    err = nvs_set_blob(nvs, DELIVERY_EVENTS_NVS_KEY, blob, sizeof(*blob));
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Delivery event persistence write failed: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    return true;
-}
-
-static bool delivery_events_load_persisted(void) {
-    if (!s_delivery_event_ring) return false;
-
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(DELIVERY_EVENTS_NVS_NAMESPACE, NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        return false;
-    }
-
-    size_t len = 0u;
-    err = nvs_get_blob(nvs, DELIVERY_EVENTS_NVS_KEY, NULL, &len);
-    if (err != ESP_OK || len != sizeof(delivery_event_persist_blob_t)) {
-        nvs_close(nvs);
-        return false;
-    }
-
-    delivery_event_persist_blob_t *blob = heap_caps_malloc(sizeof(*blob), MALLOC_CAP_SPIRAM);
-    if (!blob) {
-        nvs_close(nvs);
-        ESP_LOGW(TAG, "Delivery event restore skipped: no PSRAM for blob (%u bytes)",
-                 (unsigned)sizeof(*blob));
-        return false;
-    }
-
-    err = nvs_get_blob(nvs, DELIVERY_EVENTS_NVS_KEY, blob, &len);
-    nvs_close(nvs);
-    if (err != ESP_OK) {
-        free(blob);
-        return false;
-    }
-
-    if (blob->magic != DELIVERY_EVENTS_PERSIST_MAGIC ||
-        blob->version != DELIVERY_EVENTS_PERSIST_VERSION ||
-        blob->count > DELIVERY_EVENTS_PERSIST_WINDOW ||
-        blob->count > DELIVERY_EVENT_RING_CAPACITY ||
-        (blob->count > 0u && blob->latest_seq < blob->count)) {
-        free(blob);
-        ESP_LOGW(TAG, "Delivery event restore failed: invalid persisted blob");
-        return false;
-    }
-
-    delivery_event_ring_init(s_delivery_event_ring);
-    s_delivery_event_ring->header.count = blob->count;
-    s_delivery_event_ring->header.write_index = blob->count % DELIVERY_EVENT_RING_CAPACITY;
-    s_delivery_event_ring->header.next_seq = blob->latest_seq + 1u;
-
-    for (uint32_t i = 0; i < blob->count; i++) {
-        s_delivery_event_ring->records[i] = blob->records[i];
-    }
-
-    free(blob);
-
-    ESP_LOGI(TAG, "Restored delivery event ring window: count=%" PRIu32 " latest_seq=%" PRIu32,
-             delivery_event_ring_count(s_delivery_event_ring),
-             delivery_event_ring_latest_seq(s_delivery_event_ring));
-    s_delivery_events_dirty_count = 0u;
-    s_delivery_events_last_flush_ms = now_ms();
-    return true;
-}
-
 static void delivery_event_ring_append_locked(const delivery_event_record_t *event) {
     if (!event || !s_delivery_event_mutex || !s_delivery_event_ring) return;
-
-    bool should_flush = false;
-    uint32_t dirty_at_snapshot = 0u;
-    uint32_t latest_seq_at_snapshot = 0u;
-
-    delivery_event_persist_blob_t *snapshot = NULL;
-
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
-
-    uint32_t seq = delivery_event_ring_append(s_delivery_event_ring, event);
-    if (seq != 0u) {
-        s_delivery_events_dirty_count++;
-        uint32_t elapsed = now_ms() - s_delivery_events_last_flush_ms;
-        should_flush = (s_delivery_events_dirty_count >= DELIVERY_EVENTS_FLUSH_EVERY_N) ||
-                       (elapsed >= DELIVERY_EVENTS_FLUSH_MAX_MS);
-
-        if (should_flush) {
-            snapshot = heap_caps_malloc(sizeof(*snapshot), MALLOC_CAP_SPIRAM);
-            if (!snapshot) {
-                should_flush = false;
-                ESP_LOGW(TAG, "Delivery event persistence skipped: no PSRAM for snapshot (%u bytes)",
-                         (unsigned)sizeof(*snapshot));
-            }
-        }
-
-        if (should_flush && snapshot) {
-            memset(snapshot, 0, sizeof(*snapshot));
-            snapshot->magic = DELIVERY_EVENTS_PERSIST_MAGIC;
-            snapshot->version = DELIVERY_EVENTS_PERSIST_VERSION;
-
-            uint32_t count = delivery_event_ring_count(s_delivery_event_ring);
-            if (count > DELIVERY_EVENTS_PERSIST_WINDOW) {
-                count = DELIVERY_EVENTS_PERSIST_WINDOW;
-            }
-            snapshot->count = (uint16_t)count;
-            snapshot->latest_seq = delivery_event_ring_latest_seq(s_delivery_event_ring);
-
-            uint32_t since_seq = (count == 0u) ? 0u : (snapshot->latest_seq - count);
-            (void)delivery_event_ring_list_since(s_delivery_event_ring,
-                                                 since_seq,
-                                                 snapshot->records,
-                                                 count);
-
-            dirty_at_snapshot = s_delivery_events_dirty_count;
-            latest_seq_at_snapshot = snapshot->latest_seq;
-        }
-    }
-
-    xSemaphoreGive(s_delivery_event_mutex);
-
-    if (!should_flush || !snapshot) {
-        return;
-    }
-
-    bool persisted = delivery_events_write_snapshot(snapshot);
-    free(snapshot);
-
-    if (!persisted) {
-        return;
-    }
-
-    xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
-    if (s_delivery_events_dirty_count >= dirty_at_snapshot) {
-        s_delivery_events_dirty_count -= dirty_at_snapshot;
-    } else {
-        s_delivery_events_dirty_count = 0u;
-    }
-
-    if (delivery_event_ring_latest_seq(s_delivery_event_ring) >= latest_seq_at_snapshot) {
-        s_delivery_events_last_flush_ms = now_ms();
-    }
+    delivery_event_ring_append(s_delivery_event_ring, event);
     xSemaphoreGive(s_delivery_event_mutex);
 }
 
@@ -3340,11 +3166,6 @@ void mesh_task_start(bramble_identity_t *identity) {
         return;
     }
     delivery_event_ring_init(s_delivery_event_ring);
-    s_delivery_events_dirty_count = 0u;
-    s_delivery_events_last_flush_ms = now_ms();
-    if (!delivery_events_load_persisted()) {
-        ESP_LOGI(TAG, "No persisted delivery event ring found; starting fresh");
-    }
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
     s_mesh_event_queue = xQueueCreate(MESH_EVENT_QUEUE_DEPTH, sizeof(mesh_event_type_t));
     if (!s_rx_queue || !s_mesh_event_queue) {
