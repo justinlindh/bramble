@@ -600,3 +600,5 @@ void nvs_release_iterator(nvs_iterator_t it) {
     if (it)
         free(it);
 }
+
+void ws_server_load_token(void) {}

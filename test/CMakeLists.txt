@@ -362,12 +362,15 @@ target_include_directories(test_emergency PRIVATE
 add_executable(test_location
     test_location.c
     unity/unity.c
+    stubs/esp_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
 )
 target_include_directories(test_location PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
 )
+target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
 
 # Group DM tests (custom test harness)

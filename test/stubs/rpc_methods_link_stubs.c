@@ -586,3 +586,5 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
     (void)tier;
     return 0xABCDEF01u;
 }
+
+void ws_server_load_token(void) {}
