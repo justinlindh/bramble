@@ -3,7 +3,8 @@ WORKDIR /app
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
 COPY package.json package-lock.json ./
-RUN npm ci
+# BuildKit cache mount keeps npm tarballs between builds when cache backend is configured.
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 

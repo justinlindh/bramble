@@ -15,14 +15,23 @@ on:
 jobs:
   build-test-publish:
     runs-on: linux
+    container:
+      image: ghcr.io/catthehacker/ubuntu:full-22.04
+      options: --user 0:0 --group-add 959
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Verify docker daemon access
+        shell: bash
+        run: |
+          set -euo pipefail
+          id
+          ls -ln /var/run/docker.sock
+          docker version
 
       - name: Build and test webapp
         run: |
@@ -67,6 +76,7 @@ jobs:
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
+        shell: bash
         run: |
           set -euo pipefail
           echo "$REGISTRY_PAT" | docker login ghcr.io/example -u "$REGISTRY_USERNAME" --password-stdin
@@ -89,7 +99,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker buildx create --use --name bramble-webapp-builder >/dev/null 2>&1 || docker buildx use bramble-webapp-builder
+
+          # Registry-backed build cache persists npm/build layers across CI runs.
+          CACHE_REF="${IMAGE_REPO}:buildcache"
+
+          # Create a clean docker-container buildx builder each run.
+          # Required for multi-platform buildx builds.
+          docker buildx rm bramble-webapp-builder >/dev/null 2>&1 || true
+          docker buildx create --name bramble-webapp-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
 
           tag_args=()
           IFS=',' read -r -a tags <<< "$IMAGE_TAGS"
@@ -98,7 +116,10 @@ jobs:
           done
 
           docker buildx build \
+            --builder bramble-webapp-builder \
             --platform linux/amd64,linux/arm64 \
+            --cache-from "type=registry,ref=${CACHE_REF}" \
+            --cache-to "type=registry,ref=${CACHE_REF},mode=max" \
             --build-arg APP_VERSION="${APP_VERSION}" \
             -f "${DOCKERFILE_PATH}" \
             "${BUILD_CONTEXT}" \

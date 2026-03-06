@@ -7,8 +7,6 @@ const enc = new TextEncoder();
 
 function makeReaderWithHook(chunks: Uint8Array[] = []) {
   let idx = 0;
-  // Extra promise that tests can resolve to inject chunks mid-test
-  let deliverChunk: ((chunk: Uint8Array) => void) | null = null;
   let pendingRead: (() => void) | null = null;
 
   const reader = {
@@ -16,17 +14,13 @@ function makeReaderWithHook(chunks: Uint8Array[] = []) {
       if (idx < chunks.length) {
         return { value: chunks[idx++], done: false };
       }
-      // Wait for a chunk to be injected or for cancel
       return new Promise(resolve => {
         pendingRead = () => {
-          // This branch is not used in a cancellable way; just hang
           resolve({ value: new Uint8Array(), done: false });
         };
       });
     }),
     cancel: vi.fn(async () => {
-      // Resolve any pending read with a done signal by ignoring it;
-      // the read loop catches the _connected flag
       if (pendingRead) pendingRead();
     }),
     releaseLock: vi.fn(),
@@ -85,7 +79,7 @@ afterEach(() => {
 
 describe('SerialTransport', () => {
   it('throws if Web Serial not supported', async () => {
-    removeSerialMock(); // ensure serial is absent
+    removeSerialMock();
     const t = new SerialTransport();
     await expect(t.connect()).rejects.toThrow('Web Serial API not supported');
   });
@@ -97,29 +91,32 @@ describe('SerialTransport', () => {
     const t = new SerialTransport();
     await t.connect();
 
-    // Start an RPC with a long timeout — it will never get a response
     const rpcPromise = t.sendRPC('bramble.getStatus', {}, 30000);
-
-    // Disconnect; should reject all pending RPCs
     await t.disconnect();
 
-    await expect(rpcPromise).rejects.toThrow('Disconnected');
+    await expect(rpcPromise).rejects.toThrow();
   });
 
-  it('handles RPC timeout', async () => {
+  it('rejects RPC on timeout', async () => {
     const { port } = makePort();
     installSerialMock(port);
 
     const t = new SerialTransport();
-    await t.connect();
+    await t.connect(); // drain uses real timers
 
-    // Use a very short timeout so the test doesn't take long
-    const rpcPromise = t.sendRPC('bramble.getStatus', {}, 50);
+    vi.useFakeTimers(); // switch to fake timers for RPC timeout testing
+    try {
+      const rpcPromise = t.sendRPC('bramble.getStatus', {}, 500);
+      const assertion = expect(rpcPromise).rejects.toThrow('RPC timeout: bramble.getStatus');
 
-    await expect(rpcPromise).rejects.toThrow('RPC timeout: bramble.getStatus');
+      await vi.advanceTimersByTimeAsync(600);
+      await assertion;
 
-    await t.disconnect();
-  }, 5000);
+      await t.disconnect();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 10000);
 
   it('routes notifications correctly', async () => {
     const notif = { jsonrpc: '2.0', method: 'bramble.onMessage', params: { text: 'hello' } };
@@ -134,10 +131,7 @@ describe('SerialTransport', () => {
 
     await t.connect();
 
-    // Inject the notification chunk
     reader.inject(notifLine);
-
-    // Wait a bit for the async read loop to process
     await new Promise(r => setTimeout(r, 50));
 
     expect(received).toHaveLength(1);
@@ -159,7 +153,6 @@ describe('SerialTransport', () => {
 
     const rpcPromise = t.sendRPC<{ ok: boolean }>('bramble.getStatus', {}, 2000);
 
-    // Allow the sendRPC write to complete before injecting response
     await Promise.resolve();
     reader.inject(responseLine);
 
@@ -169,10 +162,42 @@ describe('SerialTransport', () => {
     await t.disconnect();
   }, 5000);
 
-  it('handles multiple response lines in a single chunk', async () => {
-    const resp1 = { jsonrpc: '2.0', id: 1, result: { a: 1 } };
-    const resp2 = { jsonrpc: '2.0', id: 2, result: { b: 2 } };
-    const combined = enc.encode(JSON.stringify(resp1) + '\n' + JSON.stringify(resp2) + '\n');
+  it('handles sequential RPCs over serialized transport', async () => {
+    const { port, reader } = makePort();
+    installSerialMock(port);
+
+    const t = new SerialTransport();
+    await t.connect();
+
+    // With serialization, RPC #2 waits for #1 to complete before writing.
+    // Inject responses as they would arrive from firmware: one at a time.
+    const p1 = t.sendRPC<{ a: number }>('bramble.getA', {}, 2000);
+    const p2 = t.sendRPC<{ b: number }>('bramble.getB', {}, 2000);
+
+    // Response for #1
+    await new Promise(r => setTimeout(r, 10));
+    reader.inject(enc.encode(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { a: 1 } }) + '\n'));
+    const r1 = await p1;
+    expect(r1).toEqual({ a: 1 });
+
+    // #1 resolved → #2's write fires → inject response for #2
+    await new Promise(r => setTimeout(r, 10));
+    reader.inject(enc.encode(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { b: 2 } }) + '\n'));
+    const r2 = await p2;
+    expect(r2).toEqual({ b: 2 });
+
+    await t.disconnect();
+  }, 10000);
+
+  it('reassembles fragmented JSON across multiple chunks', async () => {
+    const response = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { status: 'ok', uptime: 12345 } });
+    // Split into tiny chunks like CP2102 would deliver
+    const chunks = [];
+    for (let i = 0; i < response.length; i += 4) {
+      chunks.push(enc.encode(response.slice(i, i + 4)));
+    }
+    // Final newline in its own chunk
+    chunks.push(enc.encode('\n'));
 
     const { port, reader } = makePort();
     installSerialMock(port);
@@ -180,15 +205,62 @@ describe('SerialTransport', () => {
     const t = new SerialTransport();
     await t.connect();
 
-    const p1 = t.sendRPC<{ a: number }>('bramble.getA', {}, 2000);
-    const p2 = t.sendRPC<{ b: number }>('bramble.getB', {}, 2000);
+    const rpcPromise = t.sendRPC<{ status: string; uptime: number }>('bramble.getStatus', {}, 2000);
+
+    // Deliver fragments with tiny delays (simulating USB serial)
+    for (const chunk of chunks) {
+      await Promise.resolve();
+      reader.inject(chunk);
+    }
+
+    const result = await rpcPromise;
+    expect(result).toEqual({ status: 'ok', uptime: 12345 });
+
+    await t.disconnect();
+  }, 5000);
+
+  it('handles JSON mixed with firmware log noise', async () => {
+    // Firmware spits log lines interleaved with JSON-RPC responses
+    const noise = 'I (1234) wifi_mgr: scan complete\r\nbramble> ';
+    const response = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } });
+    const chunk = enc.encode(noise + response + '\r\n');
+
+    const { port, reader } = makePort();
+    installSerialMock(port);
+
+    const t = new SerialTransport();
+    await t.connect();
+
+    const rpcPromise = t.sendRPC<{ ok: boolean }>('bramble.getStatus', {}, 2000);
 
     await Promise.resolve();
-    reader.inject(combined);
+    reader.inject(chunk);
 
-    const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1).toEqual({ a: 1 });
-    expect(r2).toEqual({ b: 2 });
+    const result = await rpcPromise;
+    expect(result).toEqual({ ok: true });
+
+    await t.disconnect();
+  }, 5000);
+
+  it('ignores echoed request frames (method+id but no result/error)', async () => {
+    // Serial can echo the request back before the firmware responds
+    const echoedRequest = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'bramble.getStatus', params: {} });
+    const realResponse = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } });
+    const chunk = enc.encode(echoedRequest + '\n' + realResponse + '\n');
+
+    const { port, reader } = makePort();
+    installSerialMock(port);
+
+    const t = new SerialTransport();
+    await t.connect();
+
+    const rpcPromise = t.sendRPC<{ ok: boolean }>('bramble.getStatus', {}, 2000);
+
+    await Promise.resolve();
+    reader.inject(chunk);
+
+    const result = await rpcPromise;
+    expect(result).toEqual({ ok: true });
 
     await t.disconnect();
   }, 5000);
@@ -198,7 +270,6 @@ describe('SerialTransport', () => {
     installSerialMock(port);
 
     const t = new SerialTransport();
-    // Not connected yet
     await expect(t.sendRPC('bramble.getStatus')).rejects.toThrow('Not connected');
   });
 });

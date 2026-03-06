@@ -93,10 +93,10 @@ describe('connect serial init readiness gate', () => {
     } as any);
   });
 
-  it('blocks bulk init when serial rpc readiness fails', async () => {
+  it('continues with best-effort init when serial readiness probe fails', async () => {
     rpcMock.mockImplementation(async (method: string) => {
       if (method === 'bramble.ping') throw new Error('timeout waiting for rpc');
-      if (method === 'bramble.getConfig') throw new Error('should not run');
+      if (method === 'bramble.getConfig') return { identity: { address: 0x1234 } };
       return {};
     });
 
@@ -107,9 +107,8 @@ describe('connect serial init readiness gate', () => {
 
     expect(rpcMock).toHaveBeenCalledWith('bramble.ping', undefined, expect.any(Number));
     const calledMethods = rpcMock.mock.calls.map(([method]) => method);
-    expect(calledMethods).not.toContain('bramble.getConfig');
-    expect(useStore.getState().connectionState).toBe('disconnected');
-    expect(useStore.getState().connectionError).toMatch(/RPC is still starting/i);
+    expect(calledMethods).toContain('bramble.getConfig');
+    expect(useStore.getState().connectionState).toBe('connected');
   });
 
   it('runs init after serial readiness succeeds and starts with config load', async () => {
