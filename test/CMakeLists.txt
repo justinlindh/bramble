@@ -803,3 +803,35 @@ target_link_libraries(test_audio m)
 target_compile_options(test_audio PRIVATE
     -Wno-error=unused-parameter
 )
+
+# WiFi manager tests (NVS + station/AP state transitions)
+add_executable(test_wifi_manager
+    test_wifi_manager.c
+    unity/unity.c
+)
+target_include_directories(test_wifi_manager PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/include
+)
+target_compile_definitions(test_wifi_manager PRIVATE
+    CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S=1
+    CONFIG_BRAMBLE_WIFI_SSID=""
+    CONFIG_BRAMBLE_WIFI_PASSWORD=""
+    CONFIG_BRAMBLE_WIFI_AP_PASSWORD="testpass"
+)
+target_compile_options(test_wifi_manager PRIVATE
+    -Wno-error=unused-parameter
+)
+
+# OTA URL routing + security guardrail tests
+add_executable(test_ota
+    test_ota.c
+    unity/unity.c
+)
+target_include_directories(test_ota PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+)
+target_compile_options(test_ota PRIVATE
+    -Wno-error=unused-parameter
+)
