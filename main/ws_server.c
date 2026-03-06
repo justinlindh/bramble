@@ -11,7 +11,7 @@
 #include <inttypes.h>
 #include "cJSON.h"
 #include "sdkconfig.h"
-#include "ct_strcmp.h"
+#include "identity.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 
@@ -56,24 +56,60 @@ static void client_remove(int fd)
 
 /**
  * Check auth token from Authorization: Bearer header.
- * Returns true if auth passes (token matches or no token configured).
+ * Also accepts ?token=... for legacy clients (deprecated; logs warning).
  */
+static bool token_matches_constant_time(const char *provided, size_t provided_len)
+{
+    size_t expected_len = strnlen(s_auth_token, AUTH_TOKEN_MAX - 1);
+    volatile uint8_t diff = (uint8_t)(provided_len ^ expected_len);
+
+    for (size_t i = 0; i < AUTH_TOKEN_MAX - 1; i++) {
+        uint8_t a = (i < provided_len) ? (uint8_t)provided[i] : 0;
+        uint8_t b = (i < expected_len) ? (uint8_t)s_auth_token[i] : 0;
+        diff |= (uint8_t)(a ^ b);
+    }
+
+    return diff == 0;
+}
+
 static bool auth_check(httpd_req_t *req)
 {
     if (s_auth_token[0] == '\0') return true;  /* no token configured = open access */
 
-    /* Check Authorization: Bearer header */
+    /* Preferred path: Authorization: Bearer <token> */
     size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
-    if (hdr_len > 0) {
+    if (hdr_len > 0 && hdr_len < AUTH_TOKEN_MAX + 16) {
         char *hdr = malloc(hdr_len + 1);
         if (hdr && httpd_req_get_hdr_value_str(req, "Authorization", hdr, hdr_len + 1) == ESP_OK) {
             const char *prefix = "Bearer ";
-            if (strncmp(hdr, prefix, 7) == 0 && ct_strcmp(hdr + 7, s_auth_token) == 0) {
+            size_t prefix_len = strlen(prefix);
+            if (strncmp(hdr, prefix, prefix_len) == 0) {
+                const char *tok = hdr + prefix_len;
+                size_t tok_len = strnlen(tok, AUTH_TOKEN_MAX - 1);
+                bool ok = token_matches_constant_time(tok, tok_len);
                 free(hdr);
-                return true;
+                return ok;
             }
         }
         free(hdr);
+    }
+
+    /* Legacy compatibility: ?token=... (deprecated due to URL leakage) */
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen > 0 && qlen < 256) {
+        char *query = malloc(qlen + 1);
+        char token[AUTH_TOKEN_MAX] = {0};
+        if (query && httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK &&
+            httpd_query_key_value(query, "token", token, sizeof(token)) == ESP_OK) {
+            size_t tok_len = strnlen(token, AUTH_TOKEN_MAX - 1);
+            bool ok = token_matches_constant_time(token, tok_len);
+            if (ok) {
+                ESP_LOGW(TAG, "WS auth via query param is deprecated; use Authorization: Bearer header");
+            }
+            free(query);
+            return ok;
+        }
+        free(query);
     }
 
     return false;
@@ -456,13 +492,14 @@ static const httpd_uri_t ws_uri = {
 
 void ws_server_load_token(void)
 {
-    nvs_handle_t h;
-    if (nvs_open("bramble", NVS_READONLY, &h) == ESP_OK) {
-        size_t len = AUTH_TOKEN_MAX;
-        if (nvs_get_str(h, "auth_token", s_auth_token, &len) != ESP_OK) {
-            s_auth_token[0] = '\0';
-        }
-        nvs_close(h);
+    int rc = identity_ensure_ws_auth_token(s_auth_token, sizeof(s_auth_token));
+    if (rc < 0) {
+        s_auth_token[0] = '\0';
+        ESP_LOGW(TAG, "WS auth token unavailable; auth disabled");
+        return;
+    }
+    if (rc > 0) {
+        ESP_LOGW(TAG, "Pairing token: %s", s_auth_token);
     }
 }
 
