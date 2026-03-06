@@ -173,6 +173,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     );
     client.subscribe('bramble.onAck', (params) => handleAck(params));
     client.subscribe('bramble.onBroadcastDelivery', (params) => handleBroadcastDelivery(params));
+    client.subscribe('delivery.update', (params) => handleDeliveryUpdate(params));
     client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
     client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
     client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
@@ -585,6 +586,7 @@ function normalizeReplayDeliveryEvent(raw: DeliveryReplayEventWire): DeliveryEve
   return {
     eventId,
     messageId,
+    packetId: packetId || undefined,
     conversationKey: `msg:${messageId}`,
     ts,
     nodeAddr: currentNodeAddrHex(),
@@ -721,7 +723,10 @@ function applyDeliveryEventToMessage(message: Message, event: DeliveryEventRecor
 
 async function hydrateMessagesWithDeliveryEvents(messages: Message[]): Promise<Message[]> {
   const hydrated = await Promise.all(messages.map(async (message) => {
-    const events = await deliveryEventStore.listByMessage(message.id);
+    let events = await deliveryEventStore.listByMessage(message.id);
+    if (events.length === 0 && message.packetId !== undefined && message.packetId !== null) {
+      events = await deliveryEventStore.listByPacketId(String(message.packetId));
+    }
     return events.reduce((acc, event) => applyDeliveryEventToMessage(acc, event), message);
   }));
   return hydrated;
@@ -837,6 +842,30 @@ export function handleBroadcastDelivery(params: unknown): void {
   });
 }
 
+export function handleDeliveryUpdate(params: unknown): void {
+  const p = params as Record<string, unknown>;
+  const kind = String(p.kind ?? p.eventType ?? p.event_type ?? '').toLowerCase();
+
+  if (kind === 'ack' || kind === 'delivery_ack') {
+    handleAck(params);
+    return;
+  }
+
+  if (kind === 'broadcast_delivery' || kind === 'broadcast') {
+    handleBroadcastDelivery(params);
+    return;
+  }
+
+  if (p.packet_id || p.packetId) {
+    handleAck(params);
+    return;
+  }
+
+  if (p.broadcast_id || p.broadcastId) {
+    handleBroadcastDelivery(params);
+  }
+}
+
 export async function sendMessage(
   dest: number,
   text: string,
@@ -933,6 +962,7 @@ export function handleAck(params: unknown): void {
     deliveryEventStore.upsertDeliveryEvent({
       eventId: `ack:${packetId}:${newStatus}`,
       messageId: msgId,
+      packetId,
       conversationKey: message ? conversationKeyForMessage(message) : `dm:${msgId}`,
       ts: nowTs,
       nodeAddr: useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default',
