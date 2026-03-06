@@ -123,6 +123,29 @@
   scroll-behavior: smooth;
 }
 
+.daySeparator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 10px 0 6px;
+}
+
+.daySeparator::before,
+.daySeparator::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.daySeparatorText {
+  margin: 0 10px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .jumpToLatestBtn {
   position: absolute;
   right: 16px;

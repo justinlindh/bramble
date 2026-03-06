@@ -209,8 +209,7 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     if (addrHex) {
       try { localStorage.setItem('bramble:last-node-addr', addrHex); } catch {}
     }
-    const effectiveAddr = addrHex ?? (() => { try { return localStorage.getItem('bramble:last-node-addr') ?? undefined; } catch { return undefined; } })();
-    await initMessageStore(effectiveAddr);
+    await initMessageStore(addrHex);
 
     if (type === 'serial') {
       await opt(loadStatus());

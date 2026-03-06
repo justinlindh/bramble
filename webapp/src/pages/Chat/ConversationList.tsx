@@ -39,10 +39,15 @@ export function buildChannelItems(config: any, conversations: Map<string, Conver
     });
 }
 
-export function filterDmConversations(conversations: Map<string, Conversation>) {
-  return [...conversations.values()].filter(
-    c => c.id.startsWith('dm:') && parseInt(c.id.slice(3), 10) !== BROADCAST_ADDR
-  );
+export function filterDmConversations(conversations: Map<string, Conversation>, knownPeerAddrs?: Set<number>) {
+  const hasKnownPeers = (knownPeerAddrs?.size ?? 0) > 0;
+  return [...conversations.values()].filter(c => {
+    if (!c.id.startsWith('dm:')) return false;
+    const addr = c.peerAddr ?? parseInt(c.id.slice(3), 10);
+    if (addr === BROADCAST_ADDR) return false;
+    if (!hasKnownPeers) return true;
+    return knownPeerAddrs!.has(addr);
+  });
 }
 
 export function parseDmHexAddress(input: string): number | null {
@@ -86,6 +91,17 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   const [isCreating, setIsCreating] = useState(false);
 
   const config = useStore(s => s.config);
+  const neighbors = useStore(s => s.neighbors);
+  const routes = useStore(s => s.routes);
+  const peerLocations = useStore(s => s.peerLocations);
+
+  const knownPeerAddrs = new Set<number>();
+  for (const n of neighbors) knownPeerAddrs.add(n.addr);
+  for (const r of routes) {
+    if (r.dest !== BROADCAST_ADDR) knownPeerAddrs.add(r.dest);
+    if (r.nextHop !== BROADCAST_ADDR) knownPeerAddrs.add(r.nextHop);
+  }
+  for (const p of peerLocations) knownPeerAddrs.add(p.addr);
 
   // Separate out channels and DMs
   // Broadcasts are filed under 'broadcast' in the map, never as 'dm:0xFFFFFFFF'
@@ -94,7 +110,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   // Show channels from config even before first message arrives.
   const channels = buildChannelItems(config, conversations);
 
-  const dms = filterDmConversations(conversations);
+  const dms = filterDmConversations(conversations, knownPeerAddrs);
 
   const handleOpenDm = () => {
     setDmError('');
