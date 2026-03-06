@@ -22,13 +22,14 @@ describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
 
   function feedChunk(transport: SerialTransport, chunk: string) {
     (transport as any).readBuf += chunk;
-    (transport as any).processLines();
+    (transport as any).processBuffer();
   }
 
   it('should parse JSON-RPC response even when log prefix appears before JSON on the same line', async () => {
     const { transport } = setupConnectedTransport();
 
     const rpcPromise = transport.sendRPC<{ ok: boolean }>('ping', {}, 50);
+    await Promise.resolve();
 
     feedChunk(
       transport,
@@ -45,9 +46,31 @@ describe('SerialTransport serial JSON-RPC parsing (regressions)', () => {
     const { transport } = setupConnectedTransport();
 
     const rpcPromise = transport.sendRPC<{ ok: boolean }>('ping', {}, 50);
+    await Promise.resolve();
 
     feedChunk(transport, '{"jsonrpc":"2.0","id":1,\n');
     feedChunk(transport, '"result":{"ok":true}}\n');
+
+    void rpcPromise.catch(() => {});
+    const assertion = expect(rpcPromise).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(60);
+    await assertion;
+  });
+
+  it('should ignore echoed request-shaped json with id+method and wait for real result', async () => {
+    const { transport } = setupConnectedTransport();
+
+    const rpcPromise = transport.sendRPC<{ ok: boolean }>('ping', {}, 50);
+    await Promise.resolve();
+
+    feedChunk(
+      transport,
+      '{"jsonrpc":"2.0","id":1,"method":"bramble.getConfig","params":{}}\n',
+    );
+    feedChunk(
+      transport,
+      '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n',
+    );
 
     void rpcPromise.catch(() => {});
     const assertion = expect(rpcPromise).resolves.toEqual({ ok: true });

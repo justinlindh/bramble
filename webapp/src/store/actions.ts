@@ -22,13 +22,6 @@ import type {
 } from '../types/bramble';
 
 // Map technical error messages to human-friendly text
-const DEV_DIAGNOSTICS = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
-
-function logSerialHandshakeDiagnostic(event: 'attempt' | 'success' | 'failure', details: Record<string, unknown>): void {
-  if (!DEV_DIAGNOSTICS) return;
-  console.debug('[serial-rpc:handshake]', { event, ...details });
-}
-
 const ERROR_MAP: Array<[RegExp, string]> = [
   [/cancelled.*requestDevice/i, 'Bluetooth pairing was cancelled.'],
   [/cancelled.*requestPort/i, 'Serial port selection was cancelled.'],
@@ -41,7 +34,6 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/AbortError/i, 'Connection timed out.'],
   [/NotFoundError/i, 'No device found. Make sure your node is powered on and in range.'],
   [/already.*connect/i, 'Already connected to a device.'],
-  [/serial connected but rpc not ready/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
   [/serial rpc handshake failed/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
 ];
 
@@ -96,9 +88,9 @@ function uuid(): string {
 
 // ─── Connection ─────────────────────────────────────────────────────────
 
-const SERIAL_RPC_READY_ATTEMPTS = 3;
-const SERIAL_RPC_READY_TIMEOUT_MS = 1200;
-const SERIAL_RPC_READY_RETRY_DELAY_MS = 150;
+const SERIAL_RPC_READY_ATTEMPTS = 8;
+const SERIAL_RPC_READY_TIMEOUT_MS = 1500;
+const SERIAL_RPC_READY_RETRY_DELAY_MS = 350;
 
 function isUnknownMethodError(error: unknown): boolean {
   const message = (error as Error)?.message ?? '';
@@ -116,33 +108,22 @@ async function probeRpcReadiness(): Promise<void> {
   await client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
 }
 
-async function ensureSerialRpcReady(): Promise<void> {
+async function ensureSerialRpcReady(): Promise<boolean> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= SERIAL_RPC_READY_ATTEMPTS; attempt += 1) {
-    logSerialHandshakeDiagnostic('attempt', {
-      attempt,
-      maxAttempts: SERIAL_RPC_READY_ATTEMPTS,
-    });
-
     try {
       await probeRpcReadiness();
-      logSerialHandshakeDiagnostic('success', {
-        attempt,
-      });
-      return;
+      return true;
     } catch (error) {
       lastError = error;
-      const reason = (error as Error)?.message ?? 'unknown';
-      logSerialHandshakeDiagnostic('failure', {
-        attempt,
-        reason,
-      });
       if (attempt < SERIAL_RPC_READY_ATTEMPTS) {
         await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
       }
     }
   }
-  throw new Error(`Serial connected but RPC not ready: ${((lastError as Error)?.message ?? 'startup timeout')}`);
+
+  console.warn(`[serial-rpc] readiness probe exhausted: ${((lastError as Error)?.message ?? 'startup timeout')}`);
+  return false;
 }
 
 export async function connect(type: TransportType, options?: { url?: string }): Promise<void> {
@@ -161,8 +142,9 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     const transport = createTransport(type, options);
     await transport.connect();
     client = new BrambleClient(transport);
-    store.setConnectionState('connected');
     store.setTransport(transport);
+    // Unblock UI immediately after transport opens; init continues best-effort.
+    store.setConnectionState('connected');
 
     // Enable auto-reconnect for WiFi/WebSocket transports
     if ('enableAutoReconnect' in transport && typeof (transport as any).enableAutoReconnect === 'function') {
@@ -207,7 +189,10 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
 
     if (type === 'serial') {
-      await ensureSerialRpcReady();
+      const rpcReady = await ensureSerialRpcReady();
+      if (!rpcReady) {
+        console.warn('[serial-rpc] proceeding with best-effort init after readiness timeout');
+      }
     }
 
     // Load config first to get node address for IndexedDB namespacing
@@ -250,6 +235,8 @@ export async function connect(type: TransportType, options?: { url?: string }): 
     }
 
     await opt(syncDeliveryEventReplay());
+
+    store.setConnectionState('connected');
   } catch (e) {
     // Clean up any partially-initialised client so we start fresh on retry
     client?.clearSubscriptions();
