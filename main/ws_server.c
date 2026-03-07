@@ -114,11 +114,42 @@ static bool auth_check(httpd_req_t* req) {
     return false;
 }
 
-static esp_err_t send_401(httpd_req_t* req) {
+static esp_err_t send_401_http(httpd_req_t* req) {
     httpd_resp_set_status(req, "401 Unauthorized");
     httpd_resp_set_type(req, "application/json");
     const char* body = "{\"error\":\"unauthorized\",\"message\":\"Valid token required\"}";
     httpd_resp_send(req, body, strlen(body));
+    return ESP_FAIL;
+}
+
+/**
+ * Reject an already-upgraded WebSocket connection with a close frame.
+ * Must be used instead of send_401_http() inside ws_handler(), because
+ * ESP-IDF sends 101 Switching Protocols BEFORE invoking the handler —
+ * sending raw HTTP on an upgraded connection breaks the WS protocol.
+ */
+static esp_err_t send_ws_auth_reject(httpd_req_t* req) {
+    /* RFC 6455 §5.5.1: Close frame payload = 2-byte status code + optional reason.
+     * 1008 = Policy Violation (§7.4.1). */
+    const char* reason = "unauthorized";
+    size_t reason_len = strlen(reason);
+    uint8_t close_payload[2 + 64];
+    close_payload[0] = (uint8_t)(1008 >> 8);   /* status code high byte */
+    close_payload[1] = (uint8_t)(1008 & 0xFF); /* status code low byte */
+    if (reason_len > sizeof(close_payload) - 2)
+        reason_len = sizeof(close_payload) - 2;
+    memcpy(close_payload + 2, reason, reason_len);
+
+    httpd_ws_frame_t close_frame = {
+        .type = HTTPD_WS_TYPE_CLOSE,
+        .payload = close_payload,
+        .len = 2 + reason_len,
+        .final = true,
+    };
+    httpd_ws_send_frame(req, &close_frame);
+    /* Remove client tracking so we don't try to send notifications to it */
+    int fd = httpd_req_to_sockfd(req);
+    client_remove(fd);
     return ESP_FAIL;
 }
 
@@ -189,10 +220,12 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
 
 static esp_err_t ws_handler(httpd_req_t* req) {
     if (req->method == HTTP_GET) {
-        /* Auth check on WebSocket upgrade */
+        /* Auth check on WebSocket upgrade.
+         * Note: ESP-IDF has already sent 101 Switching Protocols at this
+         * point, so we must reject via WS close frame, not HTTP 401. */
         if (!auth_check(req)) {
-            ESP_LOGW(TAG, "WS auth failed");
-            return send_401(req);
+            ESP_LOGW(TAG, "WS auth failed — sending close frame");
+            return send_ws_auth_reject(req);
         }
         /* Handshake: record the new client */
         int fd = httpd_req_to_sockfd(req);
@@ -389,7 +422,7 @@ static int url_decode(char* dst, const char* src, int src_len) {
 static esp_err_t config_post_handler(httpd_req_t* req) {
     if (!auth_check(req)) {
         ESP_LOGW(TAG, "Config POST auth failed");
-        return send_401(req);
+        return send_401_http(req);
     }
 
     char body[256] = {0};
