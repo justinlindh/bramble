@@ -523,11 +523,11 @@ void ws_server_load_token(void) {
     int rc = identity_ensure_ws_auth_token(s_auth_token, sizeof(s_auth_token));
     if (rc < 0) {
         s_auth_token[0] = '\0';
-        ESP_LOGW(TAG, "WS auth token unavailable; auth disabled");
-        return;
     }
-    if (rc > 0) {
-        ESP_LOGW(TAG, "Pairing token: %s", s_auth_token);
+    if (s_auth_token[0] != '\0') {
+        ESP_LOGI(TAG, "WS auth enabled (token configured)");
+    } else {
+        ESP_LOGI(TAG, "WS auth disabled (open access — set token to enable)");
     }
 }
 

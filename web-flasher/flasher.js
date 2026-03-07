@@ -72,6 +72,9 @@ const BOARDS = {
     const wifiSsidInput     = document.getElementById('wifi-ssid');
     const wifiPasswordInput = document.getElementById('wifi-password');
     const wifiPasswordToggle = document.getElementById('wifi-password-toggle');
+    const authTokenInput    = document.getElementById('auth-token');
+    const authTokenToggle   = document.getElementById('auth-token-toggle');
+    const authTokenGenerate = document.getElementById('auth-token-generate');
     const wifiConnectBtn    = document.getElementById('wifi-connect-btn');
     const wifiSkipBtn       = document.getElementById('wifi-skip-btn');
     const wifiStatusText    = document.getElementById('wifi-status-text');
@@ -267,6 +270,66 @@ const BOARDS = {
         throw new Error('Timed out waiting for firmware console prompt.');
     }
 
+    async function sendSerialRPC(method, params = {}) {
+        if (!device?.readable || !device?.writable) {
+            throw new Error('Serial port unavailable. Try reconnecting the USB cable.');
+        }
+
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+        const reader = device.readable.getReader();
+        const writer = device.writable.getWriter();
+
+        try {
+            // Flush any pending output
+            await writer.write(encoder.encode('\n'));
+            await new Promise(r => setTimeout(r, 500));
+            // Drain
+            while (true) {
+                const { value, done } = await Promise.race([
+                    reader.read(),
+                    new Promise(r => setTimeout(() => r({ value: null, done: true }), 300))
+                ]);
+                if (done || !value) break;
+            }
+
+            const id = Math.floor(Math.random() * 100000);
+            const req = JSON.stringify({ jsonrpc: '2.0', id, method, params });
+            await writer.write(encoder.encode(req + '\r\n'));
+
+            // Read lines looking for JSON-RPC response
+            let buf = '';
+            const deadline = Date.now() + 5000;
+            while (Date.now() < deadline) {
+                const { value, done } = await Promise.race([
+                    reader.read(),
+                    new Promise(r => setTimeout(() => r({ value: null, done: true }), 500))
+                ]);
+                if (done && !value) continue;
+                if (value) buf += decoder.decode(value);
+
+                // Look for complete JSON lines
+                const lines = buf.split('\n');
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith('{')) continue;
+                    try {
+                        const msg = JSON.parse(trimmed);
+                        if (msg.id === id && 'result' in msg) return msg.result;
+                        if (msg.id === id && msg.error) throw new Error(msg.error.message || 'RPC error');
+                    } catch (e) {
+                        if (e.message && !e.message.includes('JSON')) throw e;
+                    }
+                }
+                buf = lines[lines.length - 1] || '';
+            }
+            throw new Error(`RPC timeout: ${method}`);
+        } finally {
+            writer.releaseLock();
+            reader.releaseLock();
+        }
+    }
+
     async function sendSerialCommands(commands) {
         if (!device?.readable || !device?.writable) {
             throw new Error('Serial port unavailable. Try reconnecting the USB cable.');
@@ -302,7 +365,7 @@ const BOARDS = {
 
     function showDone({ title, message }) {
         if (doneTitle) doneTitle.textContent = title || "You're all set!";
-        if (doneMessage) doneMessage.textContent = message || 'Your Bramble device is ready to go.';
+        if (doneMessage) doneMessage.innerHTML = (message || 'Your Bramble device is ready to go.').replace(/\n/g, '<br>');
         showStep('done');
     }
 
@@ -540,16 +603,30 @@ const BOARDS = {
                 commands.push('reboot');
             }
 
+            // Set auth token via JSON-RPC if user provided one
+            const authToken = String(authTokenInput?.value || '').trim();
+            if (authToken) {
+                setWifiStatus('Setting auth token…');
+                await sendSerialRPC('bramble.setAuthToken', { token: authToken });
+            }
+
             setWifiStatus('Configuring device…');
-            await sendSerialCommands(commands);
+            if (commands.length > 0) {
+                await sendSerialCommands(commands);
+            }
 
             const parts = [];
             if (deviceName) parts.push(`Named "${deviceName}"`);
             if (ssid) parts.push(`connecting to "${ssid}"`);
+            if (authToken) parts.push('auth token set');
+
+            const tokenNote = authToken
+                ? `\n\nYour auth token: ${authToken}\nSave this — you'll need it to connect wirelessly.`
+                : '';
 
             showDone({
                 title: 'Device Configured!',
-                message: `${parts.join(' and ')}. You can now close this page.`
+                message: `${parts.join(' and ')}. You can now close this page.${tokenNote}`
             });
         } catch (err) {
             setWifiStatus(`Setup failed: ${err.message || 'unknown error'}. You can configure these settings later from the Bramble web app.`);
@@ -597,6 +674,24 @@ const BOARDS = {
             wifiPasswordInput.type = showing ? 'password' : 'text';
             wifiPasswordToggle.textContent = showing ? 'Show' : 'Hide';
             wifiPasswordToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+        });
+    }
+    if (authTokenToggle && authTokenInput) {
+        authTokenToggle.addEventListener('click', () => {
+            const showing = authTokenInput.type === 'text';
+            authTokenInput.type = showing ? 'password' : 'text';
+            authTokenToggle.textContent = showing ? 'Show' : 'Hide';
+            authTokenToggle.setAttribute('aria-label', showing ? 'Show token' : 'Hide token');
+        });
+    }
+    if (authTokenGenerate && authTokenInput) {
+        authTokenGenerate.addEventListener('click', () => {
+            const bytes = new Uint8Array(16);
+            crypto.getRandomValues(bytes);
+            const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+            authTokenInput.value = hex;
+            authTokenInput.type = 'text';  // Show it so user can copy
+            if (authTokenToggle) authTokenToggle.textContent = 'Hide';
         });
     }
     if (channelSelect) {

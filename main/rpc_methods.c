@@ -651,12 +651,10 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
         return RPC_ERR_INTERNAL;
     }
     if (val[0] == '\0') {
-        /* Disable auth: set the auth_off flag and erase the token */
-        nvs_set_u8(h, "auth_off", 1);
+        /* Clear token → open access */
         nvs_erase_key(h, "auth_token");
     } else {
-        /* Enable auth with specified token; clear the disabled flag */
-        nvs_set_u8(h, "auth_off", 0);
+        /* Set token → auth enabled */
         nvs_set_str(h, "auth_token", val);
     }
     nvs_commit(h);
