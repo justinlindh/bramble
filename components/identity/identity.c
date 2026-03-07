@@ -58,42 +58,20 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
         return -1;
     }
 
-    /* Check if auth has been explicitly disabled */
-    uint8_t auth_disabled = 0;
-    nvs_get_u8(h, "auth_off", &auth_disabled);
-    if (auth_disabled) {
-        token_out[0] = '\0';
-        nvs_close(h);
-        return 0;  /* auth disabled — no token */
-    }
-
+    /* Default: open access (no token). Auth is opt-in — the user must
+     * explicitly set a token via bramble.setAuthToken, the web flasher,
+     * or the CLI `bramble auth enable` command. */
     size_t len = token_out_len;
     esp_err_t err = nvs_get_str(h, "auth_token", token_out, &len);
     if (err == ESP_OK && token_out[0] != '\0') {
+        /* User has set a token — auth is active */
         nvs_close(h);
         return 0;
     }
 
-    uint8_t rnd[16];
-    esp_fill_random(rnd, sizeof(rnd));
-    static const char hex[] = "0123456789ABCDEF";
-    for (size_t i = 0; i < sizeof(rnd); i++) {
-        token_out[i * 2] = hex[(rnd[i] >> 4) & 0x0F];
-        token_out[i * 2 + 1] = hex[rnd[i] & 0x0F];
-    }
-    token_out[32] = '\0';
-
-    err = nvs_set_str(h, "auth_token", token_out);
-    if (err == ESP_OK) {
-        err = nvs_commit(h);
-    }
+    /* No token configured — open access */
+    token_out[0] = '\0';
     nvs_close(h);
-
-    if (err != ESP_OK) {
-        return -1;
-    }
-
-    ESP_LOGW("identity", "Generated per-device WS auth token for pairing: %s", token_out);
     return 1;
 }
 
