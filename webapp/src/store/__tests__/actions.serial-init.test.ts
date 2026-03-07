@@ -6,6 +6,7 @@ const rpcMock = vi.fn<(
   timeoutMs?: number,
 ) => Promise<any>>();
 const transportConnectMock = vi.fn(async () => {});
+const transportDisconnectMock = vi.fn(async () => {});
 
 vi.mock('../../transport', () => {
   class MockBrambleClient {
@@ -19,7 +20,7 @@ vi.mock('../../transport', () => {
   return {
     createTransport: vi.fn(() => ({
       connect: transportConnectMock,
-      disconnect: vi.fn(async () => {}),
+      disconnect: transportDisconnectMock,
       connected: true,
       onNotification: vi.fn(),
       sendRPC: vi.fn(),
@@ -76,6 +77,8 @@ describe('connect serial init readiness gate', () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    transportConnectMock.mockResolvedValue(undefined);
+    transportDisconnectMock.mockResolvedValue(undefined);
     setDefaultRpcBehavior();
 
     const { useStore } = await import('../index');
@@ -146,5 +149,17 @@ describe('connect serial init readiness gate', () => {
     const calledMethods = rpcMock.mock.calls.map(([method]) => method);
     expect(calledMethods).not.toContain('bramble.ping');
     expect(calledMethods).toContain('bramble.getConfig');
+  });
+
+  it('maps auth transport failures to user-friendly error', async () => {
+    transportConnectMock.mockRejectedValueOnce(new Error('WebSocket close 1008 unauthorized'));
+
+    const { connect } = await import('../actions');
+    const { useStore } = await import('../index');
+
+    await connect('wifi', { url: 'ws://127.0.0.1/ws' });
+
+    expect(useStore.getState().connectionState).toBe('disconnected');
+    expect(useStore.getState().connectionError).toContain('Authentication required');
   });
 });

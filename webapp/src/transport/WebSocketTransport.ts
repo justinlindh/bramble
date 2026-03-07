@@ -83,10 +83,28 @@ export class WebSocketTransport implements Transport {
         this.handleMessage(ev.data);
       });
 
-      ws.addEventListener('close', () => {
+      ws.addEventListener('close', (event: CloseEvent) => {
         const wasConnected = this._connected;
+        const isAuthFailure = event.code === 1008;
         this.cleanup();
+
+        if (!wasConnected) {
+          clearTimeout(connectTimeout);
+          ws.removeEventListener('open', onOpen);
+          ws.removeEventListener('error', onInitError);
+          if (isAuthFailure) {
+            reject(new Error('Authentication required. Enter your device token.'));
+          } else {
+            reject(new Error(`WebSocket closed during connect: ${this.url}`));
+          }
+          return;
+        }
+
         if (wasConnected && !this.intentionalClose) {
+          if (isAuthFailure) {
+            console.warn('[WS] Authentication rejected (1008); not reconnecting');
+            return;
+          }
           this.reconnectCbs.onDisconnect?.();
           this.scheduleReconnect();
         }

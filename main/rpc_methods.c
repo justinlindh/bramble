@@ -651,8 +651,12 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
         return RPC_ERR_INTERNAL;
     }
     if (val[0] == '\0') {
+        /* Disable auth: set the auth_off flag and erase the token */
+        nvs_set_u8(h, "auth_off", 1);
         nvs_erase_key(h, "auth_token");
     } else {
+        /* Enable auth with specified token; clear the disabled flag */
+        nvs_set_u8(h, "auth_off", 0);
         nvs_set_str(h, "auth_token", val);
     }
     nvs_commit(h);
@@ -660,6 +664,15 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
 
     ws_server_load_token();  /* reload immediately */
     cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+static int rpc_get_auth_token(const cJSON *params, cJSON *result)
+{
+    (void)params;
+    const char *token = ws_server_get_token();
+    cJSON_AddStringToObject(result, "token", (token && token[0]) ? token : "");
+    cJSON_AddBoolToObject(result, "enabled", token && token[0] != '\0');
     return 0;
 }
 
@@ -1965,6 +1978,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setRadio",             handle_set_radio);
     rpc_register("bramble.setNodeName",          handle_set_node_name);
     rpc_register("bramble.setAuthToken",         rpc_set_auth_token);
+    rpc_register("bramble.getAuthToken",         rpc_get_auth_token);
     rpc_register("bramble.addChannel",           handle_add_channel);
     rpc_register("bramble.removeChannel",        handle_remove_channel);
     rpc_register("bramble.setDefaultChannel",    handle_set_default_channel);

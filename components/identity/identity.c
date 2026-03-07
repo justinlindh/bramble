@@ -58,6 +58,15 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
         return -1;
     }
 
+    /* Check if auth has been explicitly disabled */
+    uint8_t auth_disabled = 0;
+    nvs_get_u8(h, "auth_off", &auth_disabled);
+    if (auth_disabled) {
+        token_out[0] = '\0';
+        nvs_close(h);
+        return 0;  /* auth disabled — no token */
+    }
+
     size_t len = token_out_len;
     esp_err_t err = nvs_get_str(h, "auth_token", token_out, &len);
     if (err == ESP_OK && token_out[0] != '\0') {

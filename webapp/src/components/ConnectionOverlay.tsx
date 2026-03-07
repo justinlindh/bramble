@@ -6,11 +6,16 @@ import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Ic
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
+const WIFI_TOKEN_KEY = 'bramble_wifi_token';
 
-export function buildWifiUrl(ip: string, protocol: string, host: string): string {
-  if (ip.includes('://')) return ip;
-  if (protocol === 'https:') return `wss://${host}/proxy/${ip}`;
-  return `ws://${ip}/ws`;
+export function buildWifiUrl(ip: string, protocol: string, host: string, token?: string): string {
+  let url: string;
+  if (ip.includes('://')) url = ip;
+  else if (protocol === 'https:') url = `wss://${host}/proxy/${ip}`;
+  else url = `ws://${ip}/ws`;
+
+  if (token) url += `${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  return url;
 }
 
 export function connectingLabelFor(transportType: TransportType): string {
@@ -29,14 +34,27 @@ function loadSavedIp(): string {
   try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
 }
 
-function saveIp(ip: string) {
-  try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
+function loadSavedToken(): string {
+  try { return localStorage.getItem(WIFI_TOKEN_KEY) || ''; } catch { return ''; }
+}
+
+function saveWifiSettings(ip: string, token: string) {
+  try {
+    localStorage.setItem(WIFI_IP_KEY, ip);
+    localStorage.setItem(WIFI_TOKEN_KEY, token);
+  } catch {
+    /* noop */
+  }
 }
 
 export function ConnectionOverlay() {
   const savedIp = loadSavedIp();
+  const savedToken = loadSavedToken();
   const [transportType, setTransportType] = useState<TransportType>(savedIp ? 'wifi' : 'serial');
   const [wifiIp, setWifiIp] = useState(savedIp);
+  const [wifiToken, setWifiToken] = useState(savedToken);
+  const [showAuth, setShowAuth] = useState(Boolean(savedToken));
+  const [showToken, setShowToken] = useState(false);
   const [autoTried, setAutoTried] = useState(false);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
@@ -44,14 +62,16 @@ export function ConnectionOverlay() {
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
 
   const isConnecting = connectionState === 'connecting';
+  const authError = /1008|unauthorized|auth/i.test(connectionError ?? '');
 
   const handleConnect = () => {
     if (transportType === 'wifi') {
       const ip = wifiIp.trim();
+      const token = wifiToken.trim();
       if (!ip) return;
-      saveIp(ip);
-      const url = buildWifiUrl(ip, location.protocol, location.host);
-      connect(transportType, { url });
+      saveWifiSettings(ip, token);
+      const url = buildWifiUrl(ip, location.protocol, location.host, token || undefined);
+      connect(transportType, { url, token: token || undefined });
     } else {
       connect(transportType);
     }
@@ -60,9 +80,10 @@ export function ConnectionOverlay() {
   useEffect(() => {
     if (!shouldAutoConnect(savedIp, autoTried, connectionState, manualDisconnect)) return;
     setAutoTried(true);
-    const url = buildWifiUrl(savedIp, location.protocol, location.host);
-    connect('wifi', { url });
-  }, [autoTried, savedIp, connectionState, manualDisconnect]);
+    const token = savedToken.trim();
+    const url = buildWifiUrl(savedIp, location.protocol, location.host, token || undefined);
+    connect('wifi', { url, token: token || undefined });
+  }, [autoTried, savedIp, savedToken, connectionState, manualDisconnect]);
 
   // Check browser support
   const hasSerial = 'serial' in navigator;
@@ -128,11 +149,12 @@ export function ConnectionOverlay() {
           <IconMonitor size={16} /> Mock Node (WebSocket)
         </button>
 
-        {/* WiFi IP input */}
+        {/* WiFi connection settings */}
         {transportType === 'wifi' && (
           <div className={styles.wifiInput}>
-            <label className={styles.wifiLabel}>Node address (not web UI)</label>
+            <label htmlFor="wifi-ip" className={styles.wifiLabel}>Node address (not web UI)</label>
             <input
+              id="wifi-ip"
               type="text"
               className={styles.wifiField}
               value={wifiIp}
@@ -143,6 +165,44 @@ export function ConnectionOverlay() {
             <span className={styles.wifiHint}>
               AP mode: 192.168.4.1 · Station mode: check your router
             </span>
+
+            <button
+              type="button"
+              className={styles.authToggle}
+              onClick={() => setShowAuth(v => !v)}
+              aria-expanded={showAuth}
+            >
+              Authentication
+            </button>
+
+            {showAuth && (
+              <div className={styles.authPanel}>
+                <label htmlFor="wifi-token" className={styles.authLabel}>Auth Token (optional)</label>
+                <div className={styles.tokenRow}>
+                  <input
+                    id="wifi-token"
+                    aria-label="Auth Token (optional)"
+                    type={showToken ? 'text' : 'password'}
+                    className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
+                    value={wifiToken}
+                    onChange={e => setWifiToken(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleConnect()}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className={styles.showHideBtn}
+                    onClick={() => setShowToken(v => !v)}
+                    aria-label={showToken ? 'Hide token' : 'Show token'}
+                  >
+                    {showToken ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <span className={styles.wifiHint}>
+                  Required if device has auth enabled. Get token via: bramble pair
+                </span>
+              </div>
+            )}
           </div>
         )}
 

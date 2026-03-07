@@ -35,6 +35,7 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/NotFoundError/i, 'No device found. Make sure your node is powered on and in range.'],
   [/already.*connect/i, 'Already connected to a device.'],
   [/serial rpc handshake failed/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
+  [/1008|unauthorized|auth/i, 'Authentication required. Enter your device token in the WiFi connection settings.'],
 ];
 
 function friendlyError(raw: string): string {
@@ -126,7 +127,7 @@ async function ensureSerialRpcReady(): Promise<boolean> {
   return false;
 }
 
-export async function connect(type: TransportType, options?: { url?: string }): Promise<void> {
+export async function connect(type: TransportType, options?: { url?: string; token?: string }): Promise<void> {
   const store = useStore.getState();
 
   // Guard against duplicate/re-entrant connects creating multiple active WS clients.
