@@ -1,7 +1,19 @@
+const CHAT_TIME_ZONE = 'America/Los_Angeles';
+const DATE_KEY_LOCALE = 'en-CA'; // YYYY-MM-DD
+const DISPLAY_LOCALE = 'en-US';
+
+function pacificDateKey(date: Date): string {
+  return date.toLocaleDateString(DATE_KEY_LOCALE, {
+    timeZone: CHAT_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
 function startOfDay(d: Date): Date {
-  const copy = new Date(d);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
+  const dateKey = pacificDateKey(d);
+  return new Date(`${dateKey}T00:00:00`);
 }
 
 function dayDiffFromToday(messageDate: Date, now = new Date()): number {
@@ -11,7 +23,11 @@ function dayDiffFromToday(messageDate: Date, now = new Date()): number {
 }
 
 function formatTimeOnly(date: Date): string {
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString(DISPLAY_LOCALE, {
+    timeZone: CHAT_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 export function formatMessageTimestamp(timestampMs: number, now = new Date()): string {
@@ -26,7 +42,8 @@ export function formatMessageTimestamp(timestampMs: number, now = new Date()): s
     return `Yesterday ${formatTimeOnly(date)}`;
   }
 
-  return date.toLocaleString([], {
+  return date.toLocaleString(DISPLAY_LOCALE, {
+    timeZone: CHAT_TIME_ZONE,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -35,7 +52,8 @@ export function formatMessageTimestamp(timestampMs: number, now = new Date()): s
 }
 
 export function formatDaySeparatorLabel(timestampMs: number): string {
-  return new Date(timestampMs).toLocaleDateString([], {
+  return new Date(timestampMs).toLocaleDateString(DISPLAY_LOCALE, {
+    timeZone: CHAT_TIME_ZONE,
     month: 'long',
     day: 'numeric',
     year: 'numeric',
@@ -48,9 +66,5 @@ export function shouldInsertDaySeparator(previousTimestampMs: number | undefined
   const prev = new Date(previousTimestampMs);
   const curr = new Date(currentTimestampMs);
 
-  return !(
-    prev.getFullYear() === curr.getFullYear() &&
-    prev.getMonth() === curr.getMonth() &&
-    prev.getDate() === curr.getDate()
-  );
+  return pacificDateKey(prev) !== pacificDateKey(curr);
 }
