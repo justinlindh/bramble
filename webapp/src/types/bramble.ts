@@ -67,7 +67,7 @@ export interface RelayHop {
 
 export interface BroadcastDeliveryRecipient {
   addr: number;
-  status: 'delivered' | 'failed';
+  status: 'delivered' | 'pending' | 'failed';
   hopCount: number;
   deliveredAtMs: number;
 }
