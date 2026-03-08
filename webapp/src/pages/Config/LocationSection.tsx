@@ -205,7 +205,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
             onChange={e => setNewContactAddress(e.target.value)}
             placeholder="e.g. 1A2B3C4D"
           />
-          <button className={styles.btnCancel} onClick={addContactRule}>Add contact target</button>
+          <button className={styles.btnConfirm} onClick={addContactRule}>Add contact target</button>
         </div>
         {neighbors.length > 0 && (
           <div className={styles.quickAdd}>
@@ -281,7 +281,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
               <option key={ch.index} value={ch.index}>#{ch.index} {ch.name || `channel-${ch.index}`}</option>
             ))}
           </select>
-          <button className={styles.btnCancel} onClick={addChannelTarget}>Add channel target</button>
+          <button className={styles.btnConfirm} onClick={addChannelTarget}>Add channel target</button>
         </div>
 
         {channelTargets.map((target, idx) => (
