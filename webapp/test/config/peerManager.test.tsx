@@ -1,0 +1,59 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { PeerManager } from '../../src/pages/Config/PeerManager';
+import type { Neighbor, Route } from '../../src/types/bramble';
+
+describe('PeerManager contact import/export', () => {
+  const neighbors: Neighbor[] = [{ addr: 0x1234abcd, rssi: -70, snr: 10, deliveryRate: 200, lastHeardMs: 1200, airtimeRemaining: 100 }];
+  const routes: Route[] = [];
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('exports contacts from localStorage as JSON download', async () => {
+    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Alice' }));
+
+    const createObjectURL = vi.fn(() => 'blob:test');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, writable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, writable: true });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    render(<PeerManager neighbors={neighbors} routes={routes} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export Contacts' }));
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const createdBlob = (createObjectURL.mock.calls as unknown as Array<[Blob]>)[0][0];
+    expect(createdBlob).toBeInstanceOf(Blob);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
+  });
+
+  it('imports contacts and keeps existing names when conflicts are declined', async () => {
+    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Existing' }));
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<PeerManager neighbors={neighbors} routes={routes} />);
+
+    const input = screen.getByLabelText('Import contacts file') as HTMLInputElement;
+    const file = new File([
+      JSON.stringify({
+        version: 1,
+        contacts: {
+          '1234ABCD': { name: 'Imported' },
+          '89ABCDEF': { name: 'New Contact', note: 'added from backup' },
+        },
+      }),
+    ], 'contacts.json', { type: 'application/json' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem('bramble:peerNames') || '{}');
+      expect(stored[String(0x1234abcd)]).toBe('Existing');
+      expect(stored[String(0x89abcdef)]).toBe('New Contact');
+    });
+  });
+});
