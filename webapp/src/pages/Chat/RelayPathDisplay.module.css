@@ -46,8 +46,19 @@
 .rssi {
   font-family: var(--font-mono, monospace);
   font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.7);
   padding: 0 4px;
-  background: rgba(0, 0, 0, 0.2);
+  background: color-mix(in srgb, var(--bg, #0d1117) 35%, transparent);
   border-radius: 3px;
+}
+
+.rssiGood {
+  color: var(--success, #3fb950);
+}
+
+.rssiFair {
+  color: var(--warning, #e3b341);
+}
+
+.rssiPoor {
+  color: var(--danger, #da3633);
 }

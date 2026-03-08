@@ -12,6 +12,12 @@ function shortAddr(addr: number): string {
   return '0x' + addr.toString(16).toUpperCase().padStart(8, '0').slice(-4);
 }
 
+function rssiQualityClass(rssi: number): string {
+  if (rssi > -70) return styles.rssiGood;
+  if (rssi >= -90) return styles.rssiFair;
+  return styles.rssiPoor;
+}
+
 export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
   const peerNames = useStore(s => s.peerNames);
   if (path.length === 0) return null;
@@ -33,7 +39,7 @@ export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
               {peerNames.get(hop.addr) || shortAddr(hop.addr)}
             </span>
             {hop.rssi !== 0 && (
-              <span className={styles.rssi}>{hop.rssi}</span>
+              <span className={`${styles.rssi} ${rssiQualityClass(hop.rssi)}`}>{hop.rssi} dBm</span>
             )}
           </React.Fragment>
         );
