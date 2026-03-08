@@ -21,6 +21,8 @@ export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanel
   const [psk, setPsk] = useState('');
   const [showPskPrompt, setShowPskPrompt] = useState(false);
 
+  const keyEpochHelpText = 'Key epoch is the version counter for this channel encryption key. All members must be on the same epoch to decrypt messages. A mismatch usually means someone missed a key rotation and needs to resync.';
+
   if (!ch) {
     return (
       <div className={styles.panel}>
@@ -75,7 +77,16 @@ export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanel
           </span>
         </div>
         <div className={styles.row}>
-          <span className={styles.label}>Key epoch</span>
+          <span className={styles.labelWithHelp}>
+            Key epoch
+            <span
+              className={styles.infoIcon}
+              aria-label="Key epoch info"
+              title={keyEpochHelpText}
+            >
+              ⓘ
+            </span>
+          </span>
           <span className={styles.value}>{ch.epoch}</span>
         </div>
       </div>
