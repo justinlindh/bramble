@@ -737,7 +737,7 @@ interface BroadcastDeliveryNotification {
   broadcastId: string;
   packetId?: string;
   from: string | number;
-  status: 'delivered' | 'failed';
+  status: 'delivered' | 'pending' | 'failed';
   hopCount: number;
   deliveredAtMs: number;
   // firmware snake_case compatibility

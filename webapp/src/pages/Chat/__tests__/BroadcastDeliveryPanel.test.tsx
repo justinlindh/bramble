@@ -43,7 +43,7 @@ describe('BroadcastDeliveryPanel', () => {
     expect(screen.queryByText(/delivery telemetry/i)).not.toBeInTheDocument();
   });
 
-  it('shows recipient count and status chips', () => {
+  it('shows recipient count and status chips for confirmed, pending, and failed', () => {
     render(
       <MessageBubble
         message={makeMessage({
@@ -51,6 +51,7 @@ describe('BroadcastDeliveryPanel', () => {
             { addr: 0x1001, status: 'delivered', hopCount: 1, deliveredAtMs: Date.now() },
             { addr: 0x1002, status: 'failed', hopCount: 2, deliveredAtMs: Date.now() },
             { addr: 0x1003, status: 'delivered', hopCount: 1, deliveredAtMs: Date.now() },
+            { addr: 0x1004, status: 'pending', hopCount: 0, deliveredAtMs: Date.now() },
           ],
         })}
         myAddr={0x01}
@@ -59,8 +60,9 @@ describe('BroadcastDeliveryPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /show delivery details/i }));
 
-    expect(screen.getByText(/3 recipients/i)).toBeInTheDocument();
+    expect(screen.getByText(/4 recipients/i)).toBeInTheDocument();
     expect(screen.getByText(/delivered 2/i)).toBeInTheDocument();
+    expect(screen.getByText(/pending 1/i)).toBeInTheDocument();
     expect(screen.getByText(/failed 1/i)).toBeInTheDocument();
   });
 

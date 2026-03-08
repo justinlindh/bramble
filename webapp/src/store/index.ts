@@ -80,7 +80,7 @@ interface Actions {
   addMessage: (msg: Message) => void;
   updateMessageStatus: (id: string, status: DeliveryStatus, relayPath?: RelayHop[]) => void;
   updateMessageBroadcastMeta: (id: string, patch: { packetId?: string | number; broadcastId?: string }) => void;
-  mergeBroadcastDeliveryRecipient: (broadcastId: string, recipient: { addr: number; status: 'delivered' | 'failed'; hopCount: number; deliveredAtMs: number }) => void;
+  mergeBroadcastDeliveryRecipient: (broadcastId: string, recipient: { addr: number; status: 'delivered' | 'pending' | 'failed'; hopCount: number; deliveredAtMs: number }) => void;
   setActiveConversation: (id: string) => void;
   activeTab: string;
   setActiveTab: (tab: string) => void;

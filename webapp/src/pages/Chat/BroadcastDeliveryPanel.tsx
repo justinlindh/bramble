@@ -12,6 +12,7 @@ function formatAddr(addr: number): string {
 export function BroadcastDeliveryPanel({ recipients }: BroadcastDeliveryPanelProps) {
   const items = recipients ?? [];
   const delivered = items.filter((r) => r.status === 'delivered').length;
+  const pending = items.filter((r) => r.status === 'pending').length;
   const failed = items.filter((r) => r.status === 'failed').length;
 
   return (
@@ -25,13 +26,20 @@ export function BroadcastDeliveryPanel({ recipients }: BroadcastDeliveryPanelPro
           <div className={styles.summary}>{items.length} recipients</div>
           <div className={styles.chips}>
             <span className={`${styles.chip} ${styles.delivered}`}>Delivered {delivered}</span>
+            <span className={`${styles.chip} ${styles.pending}`}>Pending {pending}</span>
             <span className={`${styles.chip} ${styles.failed}`}>Failed {failed}</span>
           </div>
           <ul className={styles.list}>
             {items.map((recipient) => (
               <li key={recipient.addr} className={styles.row}>
                 <span>{formatAddr(recipient.addr)}</span>
-                <span className={recipient.status === 'delivered' ? styles.deliveredText : styles.failedText}>
+                <span className={
+                  recipient.status === 'delivered'
+                    ? styles.deliveredText
+                    : recipient.status === 'pending'
+                      ? styles.pendingText
+                      : styles.failedText
+                }>
                   {recipient.status}
                 </span>
               </li>
