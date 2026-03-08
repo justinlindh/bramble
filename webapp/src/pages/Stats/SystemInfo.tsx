@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { NodeStatus, BrambleConfig } from '../../types/bramble';
 import styles from './SystemInfo.module.css';
 
@@ -21,11 +22,40 @@ function formatAddr(addr: number): string {
   return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
 }
 
+async function copyWithFallback(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall back to legacy copy path below.
+  }
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    const copied = typeof document.execCommand === 'function' && document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return copied;
+  } catch {
+    return false;
+  }
+}
+
 interface Row {
   label: string;
   value: string;
   mono?: boolean;
   color?: 'muted' | 'warning' | 'danger';
+  copyValue?: string;
 }
 
 interface Props {
@@ -41,10 +71,34 @@ function hasBattery(status: NodeStatus): boolean {
 
 export function SystemInfo({ status, config }: Props) {
   const { identity } = config;
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null);
+  const copiedTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (copiedTimer.current !== null) {
+      window.clearTimeout(copiedTimer.current);
+    }
+  }, []);
+
+  const onCopy = async (label: string, text: string) => {
+    const ok = await copyWithFallback(text);
+    if (!ok) return;
+
+    setCopiedLabel(label);
+    if (copiedTimer.current !== null) {
+      window.clearTimeout(copiedTimer.current);
+    }
+    copiedTimer.current = window.setTimeout(() => {
+      setCopiedLabel(null);
+    }, 1200);
+  };
 
   // Heap health indicator
   const heapWarning = status.freeHeapBytes < 20_000;
-  const heapDanger  = status.freeHeapBytes < 8_000;
+  const heapDanger = status.freeHeapBytes < 8_000;
+
+  const address = formatAddr(identity.address);
+  const pubkeyHash = formatAddr(identity.pubkeyHash);
 
   const rows: Row[] = [
     {
@@ -57,17 +111,19 @@ export function SystemInfo({ status, config }: Props) {
       mono: true,
       color: heapDanger ? 'danger' : heapWarning ? 'warning' : undefined,
     },
-    ...((status.batteryPct !== undefined || status.batteryMv !== undefined) ? [{
-      label: 'Battery',
-      value: hasBattery(status) ? `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)` : 'N/A',
-      color: hasBattery(status)
-        ? (status.batteryPct ?? 100) < 10
-          ? 'danger' as const
-          : (status.batteryPct ?? 100) < 25
-            ? 'warning' as const
-            : undefined
-        : 'muted' as const,
-    }] : []),
+    ...((status.batteryPct !== undefined || status.batteryMv !== undefined)
+      ? [{
+          label: 'Battery',
+          value: hasBattery(status) ? `${status.batteryPct ?? '?'}% (${status.batteryMv ?? '?'} mV)` : 'N/A',
+          color: hasBattery(status)
+            ? (status.batteryPct ?? 100) < 10
+              ? ('danger' as const)
+              : (status.batteryPct ?? 100) < 25
+                ? ('warning' as const)
+                : undefined
+            : ('muted' as const),
+        }]
+      : []),
     {
       label: 'Firmware',
       value: status.fwVersion,
@@ -79,13 +135,15 @@ export function SystemInfo({ status, config }: Props) {
     },
     {
       label: 'Address',
-      value: formatAddr(identity.address),
+      value: address,
       mono: true,
+      copyValue: address,
     },
     {
       label: 'Pubkey Hash',
-      value: formatAddr(identity.pubkeyHash),
+      value: pubkeyHash,
       mono: true,
+      copyValue: pubkeyHash,
     },
     {
       label: 'Web App',
@@ -99,22 +157,38 @@ export function SystemInfo({ status, config }: Props) {
     <section className={styles.card}>
       <h2 className={styles.heading}>ℹ️ System Info</h2>
       <dl className={styles.list}>
-        {rows.map(({ label, value, mono, color }) => (
-          <div key={label} className={styles.row}>
-            <dt className={styles.dt}>{label}</dt>
-            <dd
-              className={[
-                styles.dd,
-                mono ? styles.mono : '',
-                color ? styles[color] : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              {value}
-            </dd>
-          </div>
-        ))}
+        {rows.map(({ label, value, mono, color, copyValue }) => {
+          const isCopied = copiedLabel === label;
+          return (
+            <div key={label} className={styles.row}>
+              <dt className={styles.dt}>{label}</dt>
+              <dd
+                className={[
+                  styles.dd,
+                  mono ? styles.mono : '',
+                  color ? styles[color] : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <span className={styles.valueWrap}>
+                  <span>{value}</span>
+                  {copyValue && (
+                    <button
+                      type="button"
+                      className={styles.copyBtn}
+                      onClick={() => onCopy(label, copyValue)}
+                      aria-label={`Copy ${label}`}
+                      title={isCopied ? 'Copied!' : `Copy ${label}`}
+                    >
+                      <span aria-hidden="true">{isCopied ? '✓' : '📋'}</span>
+                    </button>
+                  )}
+                </span>
+              </dd>
+            </div>
+          );
+        })}
       </dl>
     </section>
   );
