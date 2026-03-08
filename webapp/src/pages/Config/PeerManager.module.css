@@ -1,3 +1,40 @@
+.toolsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.toolsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.secondaryBtn {
+  padding: 0.3rem 0.65rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.secondaryBtn:hover {
+  background: var(--surface-2);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.importStatus {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .peerList {
   display: flex;
   flex-direction: column;

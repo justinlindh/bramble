@@ -2,7 +2,7 @@
  * PeerManager — lists known peers (union of neighbors + route destinations)
  * with client-side name assignment stored in localStorage.
  */
-import { useState, useMemo } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import type { Neighbor, Route } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
 import styles from './PeerManager.module.css';
@@ -10,26 +10,56 @@ import styles from './PeerManager.module.css';
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 
 const LS_KEY = 'bramble:peerNames';
+const LS_NOTES_KEY = 'bramble:peerNotes';
 
-function loadNames(): Map<number, string> {
+type ContactRecord = { name: string; note?: string };
+type ContactsExport = {
+  version: 1;
+  exportedAt: string;
+  contacts: Record<string, ContactRecord>;
+};
+
+function loadStringMap(key: string): Map<number, string> {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return new Map();
     const obj = JSON.parse(raw) as Record<string, string>;
-    return new Map(Object.entries(obj).map(([k, v]) => [Number(k), v]));
+    return new Map(Object.entries(obj).map(([k, v]) => [Number(k), String(v)]));
   } catch {
     return new Map();
   }
 }
 
-function saveNames(m: Map<number, string>): void {
+function saveStringMap(key: string, m: Map<number, string>): void {
   try {
     const obj: Record<string, string> = {};
-    m.forEach((v, k) => (obj[k] = v));
-    localStorage.setItem(LS_KEY, JSON.stringify(obj));
+    m.forEach((v, k) => {
+      if (v) obj[k] = v;
+    });
+    localStorage.setItem(key, JSON.stringify(obj));
   } catch {
     // ignore quota errors
   }
+}
+
+function loadNames(): Map<number, string> {
+  return loadStringMap(LS_KEY);
+}
+
+function saveNames(m: Map<number, string>): void {
+  saveStringMap(LS_KEY, m);
+}
+
+function loadNotes(): Map<number, string> {
+  return loadStringMap(LS_NOTES_KEY);
+}
+
+function saveNotes(m: Map<number, string>): void {
+  saveStringMap(LS_NOTES_KEY, m);
+}
+
+function toHex(addr: number): string {
+  return addr.toString(16).toUpperCase().padStart(8, '0');
 }
 
 function formatAgo(ms: number): string {
@@ -39,6 +69,52 @@ function formatAgo(ms: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
   return `${Math.floor(m / 60)}h ago`;
+}
+
+async function readFileText(file: File): Promise<string> {
+  if (typeof file.text === 'function') {
+    return file.text();
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.readAsText(file);
+  });
+}
+
+function parseImportedContacts(raw: unknown): Map<number, ContactRecord> {
+  if (!raw || typeof raw !== 'object') return new Map();
+
+  const contactsObj =
+    raw && typeof raw === 'object' && 'contacts' in raw && raw.contacts && typeof raw.contacts === 'object'
+      ? (raw.contacts as Record<string, unknown>)
+      : (raw as Record<string, unknown>);
+
+  const out = new Map<number, ContactRecord>();
+
+  for (const [key, value] of Object.entries(contactsObj)) {
+    const normalized = key.trim().replace(/^0x/i, '');
+    const addr = parseInt(normalized, 16);
+    if (Number.isNaN(addr) || addr < 0 || addr > 0xffffffff) continue;
+
+    if (typeof value === 'string') {
+      const name = value.trim();
+      if (name) out.set(addr, { name });
+      continue;
+    }
+
+    if (!value || typeof value !== 'object') continue;
+    const rec = value as Record<string, unknown>;
+    const name = typeof rec.name === 'string' ? rec.name.trim() : '';
+    if (!name) continue;
+
+    const note = typeof rec.note === 'string' ? rec.note.trim() : undefined;
+    out.set(addr, note ? { name, note } : { name });
+  }
+
+  return out;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -127,9 +203,12 @@ interface PeerManagerProps {
 
 export function PeerManager({ neighbors, routes }: PeerManagerProps) {
   const [names, setNames] = useState<Map<number, string>>(loadNames);
+  const [notes, setNotes] = useState<Map<number, string>>(loadNotes);
   const [addAddr, setAddAddr] = useState('');
   const [addName, setAddName] = useState('');
   const [addError, setAddError] = useState('');
+  const [importStatus, setImportStatus] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Build deduplicated peer list from neighbors + route destinations
   const peers = useMemo((): PeerEntry[] => {
@@ -176,8 +255,120 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     setAddName('');
   };
 
+  const handleExport = () => {
+    const contacts: Record<string, ContactRecord> = {};
+    names.forEach((name, addr) => {
+      if (!name) return;
+      const note = notes.get(addr)?.trim();
+      contacts[toHex(addr)] = note ? { name, note } : { name };
+    });
+
+    const payload: ContactsExport = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      contacts,
+    };
+
+    try {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateTag = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `bramble-contacts-${dateTag}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setImportStatus('Contacts exported.');
+    } catch {
+      setImportStatus('Could not export contacts.');
+    }
+  };
+
+  const handleImportClick = () => {
+    setImportStatus('');
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await readFileText(file);
+      const parsed = JSON.parse(text) as unknown;
+      const imported = parseImportedContacts(parsed);
+      if (imported.size === 0) {
+        setImportStatus('No valid contacts found in file.');
+        return;
+      }
+
+      const conflictCount = Array.from(imported.entries()).filter(([addr, record]) => {
+        const existing = names.get(addr);
+        return !!existing && existing !== record.name;
+      }).length;
+
+      const overwriteExisting = conflictCount > 0
+        ? window.confirm(`${conflictCount} contact(s) already have names. Click OK to overwrite existing names, or Cancel to keep existing names.`)
+        : false;
+
+      const nextNames = new Map(names);
+      const nextNotes = new Map(notes);
+      let importedCount = 0;
+
+      imported.forEach((record, addr) => {
+        const existing = nextNames.get(addr);
+        const canWrite = !existing || overwriteExisting;
+
+        if (canWrite) {
+          nextNames.set(addr, record.name);
+          importedCount += 1;
+        }
+
+        if (record.note) {
+          const existingNote = nextNotes.get(addr);
+          if (!existingNote || overwriteExisting) {
+            nextNotes.set(addr, record.note);
+          }
+        }
+      });
+
+      setNames(nextNames);
+      setNotes(nextNotes);
+      saveNames(nextNames);
+      saveNotes(nextNotes);
+      setImportStatus(`Imported ${importedCount} contact(s).`);
+    } catch {
+      setImportStatus('Could not import contacts file.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   return (
     <div>
+      <div className={styles.toolsRow}>
+        <div className={styles.addTitle}>Contacts backup</div>
+        <div className={styles.toolsActions}>
+          <button className={styles.secondaryBtn} type="button" onClick={handleExport}>
+            Export Contacts
+          </button>
+          <button className={styles.secondaryBtn} type="button" onClick={handleImportClick}>
+            Import Contacts
+          </button>
+          <input
+            ref={fileInputRef}
+            className={styles.hiddenInput}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleImportFile}
+            aria-label="Import contacts file"
+          />
+        </div>
+        {importStatus && <div className={styles.importStatus}>{importStatus}</div>}
+      </div>
+
       {/* ── Peer list ── */}
       <div className={styles.peerList}>
         {peers.length === 0 ? (
