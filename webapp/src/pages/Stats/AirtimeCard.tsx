@@ -19,6 +19,12 @@ function formatRefill(refillAtMs: number): string {
 
 const TIER_ORDER: AirtimeTier['name'][] = ['critical', 'normal', 'broadcast'];
 
+const TIER_TOOLTIPS: Record<AirtimeTier['name'], string> = {
+  critical: 'Critical: reliable delivery for emergency alerts and SOS location traffic',
+  normal: 'Normal: acknowledged direct messages and peer data',
+  broadcast: 'Broadcast: fire-and-forget channel messages and network announcements',
+};
+
 export function AirtimeCard({ airtime }: { airtime: AirtimeStatus }) {
   // Tick every second so refill countdowns stay live
   const [, tick] = useState(0);
@@ -42,7 +48,10 @@ export function AirtimeCard({ airtime }: { airtime: AirtimeStatus }) {
         return (
           <div key={tier.name} className={styles.tier}>
             <div className={styles.tierHeader}>
-              <span className={`${styles.tierLabel} ${styles[tier.name]}`}>
+              <span
+                className={`${styles.tierLabel} ${styles[tier.name]}`}
+                title={TIER_TOOLTIPS[tier.name]}
+              >
                 {tier.name.charAt(0).toUpperCase() + tier.name.slice(1)}
               </span>
               <span className={styles.tierMs}>
