@@ -93,6 +93,18 @@ describe('LocationSection hybrid policy controls', () => {
     }));
   });
 
+  it('uses primary action styling for add target buttons', () => {
+    render(<LocationSection location={makeLocation()} neighbors={[]} channels={channels} gpsAvailable />);
+
+    const addContact = screen.getByRole('button', { name: 'Add contact target' });
+    const addChannel = screen.getByRole('button', { name: 'Add channel target' });
+
+    expect(addContact.className).toContain('btnConfirm');
+    expect(addChannel.className).toContain('btnConfirm');
+    expect(addContact.className).not.toContain('btnCancel');
+    expect(addChannel.className).not.toContain('btnCancel');
+  });
+
   it('shows privacy-first defaults as opt-in in preview', () => {
     render(<LocationSection location={makeLocation()} neighbors={[]} channels={channels} gpsAvailable />);
 
