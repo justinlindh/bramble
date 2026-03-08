@@ -3,8 +3,45 @@ import { useStore } from '../../store/index';
 import { sendProbe } from '../../store/actions';
 import { IconProbe } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
-import type { ProbeResponse } from '../../types/bramble';
+import type { ProbeResponse, ProbeResult } from '../../types/bramble';
 import styles from './NetworkReach.module.css';
+
+const PROBE_RESULTS_SESSION_KEY = 'bramble:network-reach:probe-result';
+
+type PersistedProbePayload = {
+  probeResult: ProbeResult;
+  persistedAt: number;
+};
+
+function loadPersistedProbeResult(): PersistedProbePayload | null {
+  try {
+    const raw = sessionStorage.getItem(PROBE_RESULTS_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedProbePayload;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.probeResult || typeof parsed.persistedAt !== 'number') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedProbeResult(probeResult: ProbeResult): void {
+  try {
+    const payload: PersistedProbePayload = {
+      probeResult,
+      persistedAt: Date.now(),
+    };
+    sessionStorage.setItem(PROBE_RESULTS_SESSION_KEY, JSON.stringify(payload));
+  } catch {
+    // noop
+  }
+}
+
+function formatAgeMinutes(ageMs: number): string {
+  const mins = Math.max(1, Math.floor(ageMs / 60_000));
+  return `Results from ${mins} minute${mins === 1 ? '' : 's'} ago`;
+}
 
 function shortAddr(addr: number): string {
   return '0x' + (addr >>> 0).toString(16).toUpperCase().slice(-4);
@@ -87,6 +124,7 @@ export function NetworkReach() {
   const isConnected = useStore(s => s.connectionState === 'connected');
   const neighbors = useStore(s => s.neighbors);
   const selfAddr = useStore(s => s.config?.identity.address);
+  const setProbeResult = useStore(s => s.setProbeResult);
 
   const rows = useMemo(() => {
     const responseMap = new Map<number, ProbeResponse>();
@@ -104,6 +142,21 @@ export function NetworkReach() {
 
   const [remaining, setRemaining] = useState(0);
   const [sending, setSending] = useState(false);
+  const [persistedAt, setPersistedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (probeResult) return;
+    const persisted = loadPersistedProbeResult();
+    if (!persisted) return;
+    setProbeResult(persisted.probeResult);
+    setPersistedAt(persisted.persistedAt);
+  }, [probeResult, setProbeResult]);
+
+  useEffect(() => {
+    if (!probeResult) return;
+    savePersistedProbeResult(probeResult);
+    if (collecting) setPersistedAt(null);
+  }, [probeResult, collecting]);
 
   // Countdown timer during collection
   useEffect(() => {
@@ -120,6 +173,7 @@ export function NetworkReach() {
 
   const handleSend = useCallback(async () => {
     setSending(true);
+    setPersistedAt(null);
     try {
       await sendProbe();
     } finally {
@@ -138,6 +192,8 @@ export function NetworkReach() {
   const progress = probeResult && collecting
     ? Math.min(100, ((Date.now() - probeResult.sentAt) / (probeResult.ackWindow * 1000)) * 100)
     : 0;
+
+  const staleLabel = persistedAt ? formatAgeMinutes(Date.now() - persistedAt) : null;
 
   return (
     <div className={styles.card}>
@@ -183,6 +239,7 @@ export function NetworkReach() {
         <>
           <div className={styles.meta}>
             Sent: {sentTime} · Responses: {probeResult.responses.length} nodes
+            {staleLabel && ` · ${staleLabel}`}
           </div>
           <ResultsTable rows={rows} />
           <button
@@ -191,7 +248,7 @@ export function NetworkReach() {
             disabled={!isConnected || sending}
             style={{ marginTop: '0.75rem' }}
           >
-            Send Probe
+            Refresh
           </button>
         </>
       )}
