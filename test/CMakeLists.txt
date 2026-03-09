@@ -818,6 +818,18 @@ add_executable(test_wifi_manager
     test_wifi_manager.c
     unity/unity.c
 )
+
+# Button driver tests (debounce, short/long/double press timing)
+add_executable(test_button
+    host/test_button.c
+    unity/unity.c
+)
+target_include_directories(test_button PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/button/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+)
 target_include_directories(test_wifi_manager PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/include
