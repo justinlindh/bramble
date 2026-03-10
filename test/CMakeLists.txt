@@ -157,6 +157,17 @@ target_include_directories(test_airtime_budget PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
+# Broadcast airtime gate tests
+add_executable(test_broadcast_airtime_gate
+    test_broadcast_airtime_gate.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_broadcast_airtime_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+add_test(NAME test_broadcast_airtime_gate COMMAND test_broadcast_airtime_gate)
+
 # TX queue tests
 add_executable(test_tx_queue
     test_tx_queue.c
