@@ -168,6 +168,10 @@ export async function connect(type: TransportType, options?: { url?: string; tok
       });
     }
 
+    // Clear stale data from previous node connection BEFORE subscribing,
+    // so early push events aren't wiped by a late reset (BUG-02 fix).
+    store.resetNodeData();
+
     // Subscribe to push events
     client.subscribe('bramble.onMessage', (params) =>
       handleIncomingMessage(params)
@@ -183,9 +187,6 @@ export async function connect(type: TransportType, options?: { url?: string; tok
     client.subscribe('location.update', (params) => handleLocationUpdate(params));
     client.subscribe('bramble.onPeerLocation', (params) => handleLocationUpdate(params));
     client.subscribe('bramble.onTrafficEvent', (params) => handleTrafficEvent(params));
-
-    // Clear stale data from previous node connection
-    store.resetNodeData();
 
     // Initial data load — all best-effort so a slow RPC doesn't kill the connection
     const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
