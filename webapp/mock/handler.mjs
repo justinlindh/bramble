@@ -393,7 +393,7 @@ const handlers = {
       if (r.addr === 0xAABBCC05 && Math.random() > 0.6) continue;
 
       setTimeout(() => {
-        notify('probe.ack', {
+        notify('bramble.onProbeResult', {
           responderAddr: r.addr,
           hopCount: r.hopCount,
           rssi: r.baseRssi + Math.floor((Math.random() - 0.5) * 8),
@@ -405,7 +405,7 @@ const handlers = {
       }, delay);
     }
 
-    setTimeout(() => notify('probe.complete', { probeId }), ackWindow * 1000);
+    setTimeout(() => notify('bramble.onProbeComplete', { probeId }), ackWindow * 1000);
     return { probeId, ackWindow };
   },
 
@@ -443,6 +443,28 @@ const handlers = {
     const idx = locationContacts.findIndex(c => c.addr === params?.addr);
     if (idx !== -1) locationContacts.splice(idx, 1);
     return { ok: true };
+  },
+
+  'bramble.getTrafficDebug'(_params) {
+    return {
+      enabled: false,
+      include_tx: true,
+      include_rx: true,
+      sample_rate: 100,
+      ring_size: 512,
+      ring_used: 0,
+      dropped_count: 0,
+      last_seq: 0,
+    };
+  },
+
+  'bramble.setTrafficDebug'(params) {
+    // Accept params silently — mock doesn't persist debug state
+    return { ok: true };
+  },
+
+  'bramble.getTrafficEvents'(params) {
+    return { events: [] };
   },
 
   'bramble.shareLocationOnce'(params) {

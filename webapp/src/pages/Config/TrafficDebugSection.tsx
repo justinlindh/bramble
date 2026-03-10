@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useStore } from '../../store/index';
 import { loadTrafficDebugStatus, setTrafficDebugConfig } from '../../store/actions';
 import styles from './TrafficDebugSection.module.css';
@@ -6,6 +6,8 @@ import styles from './TrafficDebugSection.module.css';
 export function TrafficDebugSection() {
   const trafficDebugStatus = useStore((s) => s.trafficDebugStatus);
   const [loading, setLoading] = useState(false);
+  const [localRate, setLocalRate] = useState<number | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const handleToggle = async (field: 'enabled' | 'includeTx' | 'includeRx', value: boolean) => {
     setLoading(true);
@@ -20,16 +22,21 @@ export function TrafficDebugSection() {
     }
   };
 
-  const handleSampleRateChange = async (rate: number) => {
-    setLoading(true);
-    try {
-      await setTrafficDebugConfig({ sampleRate: rate });
-    } catch (e) {
-      alert(`Failed to update sample rate: ${(e as Error).message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleSampleRateChange = useCallback((rate: number) => {
+    setLocalRate(rate);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        await setTrafficDebugConfig({ sampleRate: rate });
+      } catch (e) {
+        alert(`Failed to update sample rate: ${(e as Error).message}`);
+      } finally {
+        setLoading(false);
+        setLocalRate(null);
+      }
+    }, 300);
+  }, []);
 
   const handleRefresh = async () => {
     setLoading(true);
@@ -104,11 +111,11 @@ export function TrafficDebugSection() {
                 type="range"
                 min="1"
                 max="100"
-                value={config.sampleRate}
+                value={localRate ?? config.sampleRate}
                 onChange={(e) => handleSampleRateChange(Number(e.target.value))}
                 disabled={loading}
               />
-              <span className={styles.sliderValue}>{config.sampleRate}%</span>
+              <span className={styles.sliderValue}>{localRate ?? config.sampleRate}%</span>
             </div>
           </div>
 
