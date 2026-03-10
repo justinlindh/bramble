@@ -4,6 +4,7 @@
  */
 import { useRef, useState, useMemo } from 'react';
 import type { Neighbor, Route } from '../../types/bramble';
+import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
 import styles from './PeerManager.module.css';
 
@@ -207,6 +208,7 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
   const [addAddr, setAddAddr] = useState('');
   const [addName, setAddName] = useState('');
   const [addError, setAddError] = useState('');
+  const [addSuccess, setAddSuccess] = useState('');
   const [importStatus, setImportStatus] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -237,11 +239,14 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
       saveNames(next);
       return next;
     });
+    // Sync to Zustand store so Chat/Map reflect the name immediately (BUG-09)
+    useStore.getState().setPeerName(addr, name);
   };
 
   const handleAddContact = (e: React.FormEvent) => {
     e.preventDefault();
     setAddError('');
+    setAddSuccess('');
     const raw = addAddr.trim().replace(/^0x/i, '');
     const addr = parseInt(raw, 16);
     if (isNaN(addr) || addr < 0 || addr > 0xffffffff) {
@@ -251,8 +256,12 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     if (addName.trim()) {
       handleSaveName(addr, addName.trim());
     }
+    const hex = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+    const label = addName.trim() || hex;
+    setAddSuccess(`Name saved for ${label} — will appear in chat when discovered on mesh.`);
     setAddAddr('');
     setAddName('');
+    setTimeout(() => setAddSuccess(''), 5000);
   };
 
   const handleExport = () => {
@@ -416,6 +425,7 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
             + Add
           </button>
           {addError && <span className={styles.error}>{addError}</span>}
+          {addSuccess && <span className={styles.success}>{addSuccess}</span>}
         </form>
       </div>
     </div>

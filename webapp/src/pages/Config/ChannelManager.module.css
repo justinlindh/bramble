@@ -105,6 +105,21 @@
   border-top: 1px solid var(--border);
 }
 
+.nameInputWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.charCount {
+  position: absolute;
+  right: 0.4rem;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  pointer-events: none;
+  font-family: var(--font-mono);
+}
+
 .addInput {
   width: 130px;
 }
@@ -262,4 +277,44 @@
 
 .promptBtn:hover {
   opacity: 0.85;
+}
+
+/* ── Confirmation dialog buttons ──────────────────────────── */
+.confirmActions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.confirmBtn {
+  padding: 0.35rem 0.9rem;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.confirmBtn:hover {
+  opacity: 0.85;
+}
+
+.cancelBtn {
+  padding: 0.35rem 0.9rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cancelBtn:hover {
+  background: var(--surface);
+  color: var(--text);
 }
