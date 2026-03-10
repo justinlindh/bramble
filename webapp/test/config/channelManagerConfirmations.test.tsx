@@ -28,42 +28,52 @@ describe('ChannelManager confirmations', () => {
   });
 
   it('does not set default when confirmation is cancelled', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
     render(<ChannelManager channels={channels} />);
     fireEvent.click(screen.getByRole('button', { name: /set default/i }));
 
-    expect(window.confirm).toHaveBeenCalledWith('Set default channel "ops"?');
+    // In-app confirmation dialog should appear
+    expect(screen.getByText(/Set "ops" as default channel\?/)).toBeTruthy();
+
+    // Click Cancel
+    fireEvent.click(screen.getByText('Cancel'));
+
     expect(setDefaultChannel).not.toHaveBeenCalled();
+    // Dialog should be dismissed
+    expect(screen.queryByText(/Set "ops" as default channel\?/)).toBeNull();
   });
 
   it('sets default when confirmation is accepted', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
     render(<ChannelManager channels={channels} />);
     fireEvent.click(screen.getByRole('button', { name: /set default/i }));
 
-    expect(window.confirm).toHaveBeenCalledWith('Set default channel "ops"?');
+    expect(screen.getByText(/Set "ops" as default channel\?/)).toBeTruthy();
+
+    // Click Confirm
+    fireEvent.click(screen.getByText('Confirm'));
+
     expect(setDefaultChannel).toHaveBeenCalledWith(1);
   });
 
   it('does not remove channel when confirmation is cancelled', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
     render(<ChannelManager channels={channels} />);
     fireEvent.click(screen.getByTitle('Remove channel ops'));
 
-    expect(window.confirm).toHaveBeenCalledWith('Remove channel "ops"?');
+    expect(screen.getByText(/Remove channel "ops"\?/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Cancel'));
+
     expect(removeChannel).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Remove channel "ops"\?/)).toBeNull();
   });
 
   it('removes channel when confirmation is accepted', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
     render(<ChannelManager channels={channels} />);
     fireEvent.click(screen.getByTitle('Remove channel ops'));
 
-    expect(window.confirm).toHaveBeenCalledWith('Remove channel "ops"?');
+    expect(screen.getByText(/Remove channel "ops"\?/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Confirm'));
+
     expect(removeChannel).toHaveBeenCalledWith(1);
   });
 });

@@ -92,6 +92,7 @@ interface Actions {
   setMapFocusAddr: (addr: number | null) => void;
   loadCachedMessages: (msgs: Message[]) => void;
   peerNames: Map<number, string>;
+  setPeerName: (addr: number, name: string) => void;
   resetNodeData: () => void;
   setTrafficDebugStatus: (s: TrafficDebugStatus) => void;
   addTrafficEvent: (e: TrafficEvent) => void;
@@ -145,14 +146,32 @@ export const useStore = create<AppState & Actions>((set) => ({
       names.set(c.identity.address, c.identity.name);
     }
 
+    // Build set of valid channel indexes from config
+    const validChannelIndexes = new Set(c.channels?.map(ch => ch.index) ?? []);
+
     const convs = new Map(state.conversations);
     for (const [id, conv] of convs) {
       if (id.startsWith('ch:')) {
-        convs.set(id, { ...conv, label: formatAddr(id, names, c) });
+        const chIdx = Number(id.slice(3));
+        if (!validChannelIndexes.has(chIdx)) {
+          // Channel was deleted — remove stale conversation (BUG-07 fix)
+          convs.delete(id);
+        } else {
+          convs.set(id, { ...conv, label: formatAddr(id, names, c) });
+        }
       }
     }
 
-    return { config: c, peerNames: names, conversations: convs };
+    // If active conversation was a deleted channel, fall back to broadcast
+    const activeId = state.activeConversationId;
+    const activeGone = activeId.startsWith('ch:') && !convs.has(activeId);
+
+    return {
+      config: c,
+      peerNames: names,
+      conversations: convs,
+      ...(activeGone ? { activeConversationId: 'broadcast' } : {}),
+    };
   }),
 
   setStatus: (s) => set({ status: s }),
@@ -266,6 +285,23 @@ export const useStore = create<AppState & Actions>((set) => ({
     saveShowRoutes(show);
     set({ showRoutes: show });
   },
+
+  setPeerName: (addr, name) => set(state => {
+    const names = new Map(state.peerNames);
+    if (name) {
+      names.set(addr, name);
+    } else {
+      names.delete(addr);
+    }
+    // Update labels on any DM conversation for this peer
+    const convs = new Map(state.conversations);
+    const dmKey = `dm:${addr}`;
+    const conv = convs.get(dmKey);
+    if (conv) {
+      convs.set(dmKey, { ...conv, label: name || `0x${addr.toString(16).toUpperCase()}` });
+    }
+    return { peerNames: names, conversations: convs };
+  }),
 
   resetNodeData: () => set({
     messages: [],

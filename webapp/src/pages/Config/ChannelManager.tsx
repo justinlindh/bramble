@@ -63,15 +63,17 @@ function PskPromptModal({
   );
 }
 
-function confirmChannelAction(action: 'Remove' | 'Set default', name: string): boolean {
-  return confirm(`${action} channel \"${name}\"?`);
-}
-
 export function ChannelManager({ channels }: ChannelManagerProps) {
   const [newName, setNewName] = useState('');
   const [newPsk, setNewPsk] = useState('');
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState('');
+
+  // In-app confirmation state (replaces native confirm())
+  const [confirmAction, setConfirmAction] = useState<{
+    label: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Share state
   const [shareChannel, setShareChannel] = useState<Channel | null>(null);
@@ -104,25 +106,35 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
   };
 
   // ── Remove channel ────────────────────────────────────────────────────────
-  const handleRemove = async (index: number, name: string) => {
-    if (!confirmChannelAction('Remove', name)) return;
-    setError('');
-    try {
-      await removeChannel(index);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const handleRemove = (index: number, name: string) => {
+    setConfirmAction({
+      label: `Remove channel "${name}"?`,
+      onConfirm: async () => {
+        setConfirmAction(null);
+        setError('');
+        try {
+          await removeChannel(index);
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      },
+    });
   };
 
   // ── Set default ───────────────────────────────────────────────────────────
-  const handleSetDefault = async (index: number, name: string) => {
-    if (!confirmChannelAction('Set default', name)) return;
-    setError('');
-    try {
-      await setDefaultChannel(index);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  const handleSetDefault = (index: number, name: string) => {
+    setConfirmAction({
+      label: `Set "${name}" as default channel?`,
+      onConfirm: async () => {
+        setConfirmAction(null);
+        setError('');
+        try {
+          await setDefaultChannel(index);
+        } catch (err) {
+          setError((err as Error).message);
+        }
+      },
+    });
   };
 
   // ── Share channel ─────────────────────────────────────────────────────────
@@ -222,15 +234,20 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
 
       {/* ── Add channel form ── */}
       <form className={styles.addForm} onSubmit={handleAdd}>
-        <input
-          className={styles.addInput}
-          type="text"
-          placeholder="Channel name"
-          value={newName}
-          maxLength={16}
-          onChange={(e) => setNewName(e.target.value)}
-          aria-label="New channel name"
-        />
+        <div className={styles.nameInputWrap}>
+          <input
+            className={styles.addInput}
+            type="text"
+            placeholder="Channel name"
+            value={newName}
+            maxLength={16}
+            onChange={(e) => setNewName(e.target.value)}
+            aria-label="New channel name"
+          />
+          {newName.length > 0 && (
+            <span className={styles.charCount}>{newName.length}/16</span>
+          )}
+        </div>
         <input
           className={styles.pskInput}
           type="password"
@@ -289,6 +306,30 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
           onResult={handleScanResult}
           onClose={() => setShowScan(false)}
         />
+      )}
+
+      {/* ── In-app confirmation dialog ── */}
+      {confirmAction && (
+        <div className={styles.backdrop} onClick={() => setConfirmAction(null)} role="dialog" aria-modal>
+          <div className={styles.promptModal}>
+            <p className={styles.promptTitle}>{confirmAction.label}</p>
+            <div className={styles.confirmActions}>
+              <button
+                className={styles.confirmBtn}
+                onClick={confirmAction.onConfirm}
+                autoFocus
+              >
+                Confirm
+              </button>
+              <button
+                className={styles.cancelBtn}
+                onClick={() => setConfirmAction(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
