@@ -75,10 +75,13 @@ void test_public_channel_encrypt_decrypt(void) {
 
     uint8_t data[] = "Hello public channel!";
     uint8_t nonce[12], ct[256], tag[16];
+    uint8_t aad[12] = {0};
+    uint8_t pt[256] = {0};
     uint32_t src = 0x12345678;
 
     TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&channels[0], src, 0x01,
                                               data, sizeof(data),
+                                              aad, sizeof(aad),
                                               nonce, ct, tag));
 
     channel_msg_info_t info;
@@ -90,7 +93,7 @@ void test_public_channel_encrypt_decrypt(void) {
     TEST_ASSERT_EQUAL(0, channel_msg_decrypt(dec_channels, dec_num,
                                               nonce, ct,
                                               CHANNEL_MSG_OVERHEAD + sizeof(data),
-                                              tag, &info));
+                                              tag, aad, sizeof(aad), pt, &info));
     TEST_ASSERT_EQUAL(src, info.src_addr);
     TEST_ASSERT_EQUAL(0x01, info.app_type);
     TEST_ASSERT_EQUAL(sizeof(data), info.data_len);
