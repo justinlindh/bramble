@@ -6,8 +6,8 @@ _Static_assert(CHANNEL_MSG_MAX_PLAINTEXT_SIZE >=
                "plaintext buffer too small for max packet minus wire overhead");
 
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
-                        const uint8_t* data, size_t data_len, uint8_t* nonce_out,
-                        uint8_t* ciphertext_out, uint8_t* tag_out) {
+                        const uint8_t* data, size_t data_len, const uint8_t* aad, size_t aad_len,
+                        uint8_t* nonce_out, uint8_t* ciphertext_out, uint8_t* tag_out) {
     if (!ch || !nonce_out || !ciphertext_out || !tag_out)
         return -1;
 
@@ -32,21 +32,24 @@ int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t 
     /* Generate random nonce */
     crypto_random(nonce_out, BRAMBLE_NONCE_SIZE);
 
-    /* Encrypt with no AAD */
-    return crypto_aes256gcm_encrypt(ch->key, nonce_out, pt, pt_len, NULL, 0, ciphertext_out,
+    /* Encrypt with header AAD binding */
+    return crypto_aes256gcm_encrypt(ch->key, nonce_out, pt, pt_len, aad, aad_len, ciphertext_out,
                                     tag_out);
 }
 
 /* Try decrypting with a single key. Returns 0 on success. */
 static int try_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* ciphertext,
-                       size_t ct_len, const uint8_t* tag, uint8_t* plaintext_out) {
-    return crypto_aes256gcm_decrypt(key, nonce, ciphertext, ct_len, NULL, 0, tag, plaintext_out);
+                       size_t ct_len, const uint8_t* tag, const uint8_t* aad, size_t aad_len,
+                       uint8_t* plaintext_out) {
+    return crypto_aes256gcm_decrypt(key, nonce, ciphertext, ct_len, aad, aad_len, tag,
+                                    plaintext_out);
 }
 
 int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uint8_t* nonce,
                         const uint8_t* ciphertext, size_t ct_len, const uint8_t* tag,
+                        const uint8_t* aad, size_t aad_len, uint8_t* plaintext_out,
                         channel_msg_info_t* info_out) {
-    if (!channels || !nonce || !ciphertext || !tag || !info_out)
+    if (!channels || !nonce || !ciphertext || !tag || !plaintext_out || !info_out)
         return -1;
     if (ct_len < CHANNEL_MSG_OVERHEAD)
         return -1;
@@ -71,7 +74,7 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
 
     for (int i = 0; i < limit; i++) {
         /* Try with current key */
-        if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, pt) == 0) {
+        if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, aad, aad_len, pt) == 0) {
             if (found_index < 0) {
                 found_index = i;
                 found_info.channel_id = pt[0];
@@ -79,7 +82,7 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
                 found_info.app_type = pt[3];
                 found_info.src_addr =
                     (uint32_t)(pt[4] | (pt[5] << 8) | (pt[6] << 16) | (pt[7] << 24));
-                found_info.data = ciphertext + CHANNEL_MSG_OVERHEAD;
+                found_info.data = NULL;
                 found_info.data_len = ct_len - CHANNEL_MSG_OVERHEAD;
                 found_info.channel_index = i;
             }
@@ -96,7 +99,8 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
         for (int j = 0; j < CHANNEL_EPOCH_CATCHUP_MAX; j++) {
             if (channel_advance_epoch(&channels[i]) != 0)
                 break;
-            if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, pt) == 0) {
+            if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, aad, aad_len, pt) ==
+                0) {
                 caught_up = true;
                 break;
             }
@@ -134,17 +138,15 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
     /* Re-decrypt the winning channel to recover plaintext data.
        The constant-time loop above may have overwritten pt with later attempts.
        We need to decrypt one more time to get the actual plaintext. */
-    if (found_info.data != NULL) {
-        /* Normal (non-catchup) case: re-decrypt with the channel's current key */
-        if (try_decrypt(channels[found_index].key, nonce, ciphertext, ct_len, tag, pt) == 0) {
-            /* Copy plaintext data portion into ciphertext buffer so caller can read it.
-               The caller owns the ciphertext buffer and expects info.data to be valid. */
-            if (ct_len > CHANNEL_MSG_OVERHEAD) {
-                memcpy((uint8_t*)ciphertext + CHANNEL_MSG_OVERHEAD, pt + CHANNEL_MSG_OVERHEAD,
-                       ct_len - CHANNEL_MSG_OVERHEAD);
-            }
-        }
+    if (try_decrypt(channels[found_index].key, nonce, ciphertext, ct_len, tag, aad, aad_len, pt) !=
+        0) {
+        return -1;
     }
+
+    if (ct_len > CHANNEL_MSG_OVERHEAD) {
+        memcpy(plaintext_out, pt + CHANNEL_MSG_OVERHEAD, ct_len - CHANNEL_MSG_OVERHEAD);
+    }
+    found_info.data = plaintext_out;
 
     *info_out = found_info;
     return 0;

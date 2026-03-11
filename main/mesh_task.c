@@ -1309,8 +1309,11 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE] = {0};
     int ret = channel_msg_decrypt(s_channels, s_num_channels,
-                                  nonce, ciphertext, ct_len, tag, &info);
+                                  nonce, ciphertext, ct_len, tag,
+                                  data, HEADER_SIZE,
+                                  plaintext, &info);
     if (ret != 0) {
         ESP_LOGW(TAG, "Failed to decrypt data from %08" PRIX32, src_addr);
         return;
@@ -2579,8 +2582,12 @@ static void mesh_task(void *param) {
  * Send a DATA packet. Returns packet_id on success, 0 on failure.
  */
 static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
-                                 const uint8_t *nonce, const uint8_t *ciphertext, size_t ct_len,
-                                 const uint8_t *tag) {
+                                 const bramble_channel_t *ch, uint8_t app_type) {
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
+
     /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
@@ -2600,6 +2607,16 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     };
 
     bramble_header_serialize(&header, buf, HEADER_SIZE);
+
+    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
+                                      payload, payload_len,
+                                      buf, HEADER_SIZE,
+                                      nonce, ciphertext, tag);
+    if (enc_ret != 0) {
+        ESP_LOGE(TAG, "Channel encrypt failed: %d", enc_ret);
+        return 0;
+    }
+
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
     memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
@@ -2733,33 +2750,14 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
             return -1;
         }
 
-        uint8_t *ciphertext = malloc(BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD);
-        if (!ciphertext) {
-            free(frags);
-            ESP_LOGE(TAG, "Ciphertext buffer allocation failed");
-            return -1;
-        }
-
         ESP_LOGI(TAG, "Sending broadcast message as %d fragments (msg_id=%04X)", num_frags, msg_id);
 
         s_last_broadcast_frag_msg_id = 0;
 
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
-            uint8_t nonce[BRAMBLE_NONCE_SIZE];
-            uint8_t tag[BRAMBLE_TAG_SIZE];
-
-            int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01,
-                                         frags[i].data, frags[i].len,
-                                         nonce, ciphertext, tag);
-            if (ret != 0) {
-                ESP_LOGE(TAG, "Fragment %d encrypt failed: %d", i, ret);
-                continue;
-            }
-
-            size_t ct_len = CHANNEL_MSG_OVERHEAD + frags[i].len;
             uint32_t pkt_id = send_data_packet(0xFFFFFFFF, frags[i].data, frags[i].len,
-                                              nonce, ciphertext, ct_len, tag);
+                                              &s_channels[0], 0x01);
             if (i == 0 && pkt_id != 0) {
                 s_last_broadcast_id = pkt_id;
                 s_last_broadcast_frag_msg_id = msg_id;
@@ -2777,7 +2775,6 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
             }
         }
 
-        free(ciphertext);
         free(frags);
 
         /* Store the full message in message store */
@@ -2788,19 +2785,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     }
 
     /* Short message — fast path (no fragmentation) */
-    uint8_t nonce[BRAMBLE_NONCE_SIZE];
-    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
-    uint8_t tag[BRAMBLE_TAG_SIZE];
-
-    int ret = channel_msg_encrypt(&s_channels[0], s_identity->address, 0x01, /* app_type: text */
-                                  data, len, nonce, ciphertext, tag);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
-        return ret;
-    }
-
-    size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, nonce, ciphertext, ct_len, tag);
+    uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, &s_channels[0], 0x01);
     if (pkt_id != 0) {
         s_last_broadcast_id = pkt_id;
         s_last_broadcast_frag_msg_id = 0;
@@ -2835,13 +2820,6 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
             return 0;
         }
 
-        uint8_t *ciphertext = malloc(BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD);
-        if (!ciphertext) {
-            free(frags);
-            ESP_LOGE(TAG, "Ciphertext buffer allocation failed");
-            return 0;
-        }
-
         ESP_LOGI(TAG, "Sending channel message as %d fragments (msg_id=%04X)", num_frags, msg_id);
 
         if (dest_addr == 0xFFFFFFFFu) {
@@ -2851,20 +2829,8 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
         uint32_t first_pkt_id = 0;
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
-            uint8_t nonce[BRAMBLE_NONCE_SIZE];
-            uint8_t tag[BRAMBLE_TAG_SIZE];
-
-            int ret = channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, 0x01,
-                                         frags[i].data, frags[i].len,
-                                         nonce, ciphertext, tag);
-            if (ret != 0) {
-                ESP_LOGE(TAG, "Fragment %d encrypt failed: %d", i, ret);
-                continue;
-            }
-
-            size_t ct_len = CHANNEL_MSG_OVERHEAD + frags[i].len;
             uint32_t pkt_id = send_data_packet(dest_addr, frags[i].data, frags[i].len,
-                                              nonce, ciphertext, ct_len, tag);
+                                              &s_channels[channel_idx], 0x01);
             if (pkt_id == 0) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
@@ -2887,7 +2853,6 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
             }
         }
 
-        free(ciphertext);
         free(frags);
 
         /* Store the full message in message store */
@@ -2903,19 +2868,7 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
     }
 
     /* Short message — fast path (no fragmentation) */
-    uint8_t nonce[BRAMBLE_NONCE_SIZE];
-    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
-    uint8_t tag[BRAMBLE_TAG_SIZE];
-
-    int ret = channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, 0x01,
-                                  data, len, nonce, ciphertext, tag);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Channel encrypt failed: %d", ret);
-        return 0;
-    }
-
-    size_t ct_len = CHANNEL_MSG_OVERHEAD + len;
-    uint32_t pkt_id = send_data_packet(dest_addr, data, len, nonce, ciphertext, ct_len, tag);
+    uint32_t pkt_id = send_data_packet(dest_addr, data, len, &s_channels[channel_idx], 0x01);
     if (pkt_id != 0) {
         if (dest_addr == 0xFFFFFFFFu) {
             s_last_broadcast_id = pkt_id;

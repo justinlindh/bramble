@@ -22,17 +22,20 @@ void test_encrypt_decrypt_single(void) {
 
     uint8_t data[] = "Hello Bramble!";
     uint8_t nonce[12], ct[256], tag[16];
+    uint8_t aad[12] = {0};
 
     TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xDEADBEEF, 0x01,
                                               data, sizeof(data),
+                                              aad, sizeof(aad),
                                               nonce, ct, tag));
 
     bramble_channel_t channels[1];
     make_channel("test-psk-1", &channels[0]);
 
     channel_msg_info_t info;
+    uint8_t pt[256] = {0};
     size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
-    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 1, nonce, ct, ct_len, tag, &info));
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 1, nonce, ct, ct_len, tag, aad, sizeof(aad), pt, &info));
 
     TEST_ASSERT_EQUAL(ch.channel_id, info.channel_id);
     TEST_ASSERT_EQUAL(0, info.epoch);
@@ -49,8 +52,10 @@ void test_trial_decryption(void) {
 
     uint8_t data[] = "secret";
     uint8_t nonce[12], ct[256], tag[16];
+    uint8_t aad[12] = {0};
     TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch_a, 0x12345678, 0x02,
                                               data, sizeof(data),
+                                              aad, sizeof(aad),
                                               nonce, ct, tag));
 
     bramble_channel_t channels[4];
@@ -60,8 +65,9 @@ void test_trial_decryption(void) {
     make_channel("channel-D", &channels[3]);
 
     channel_msg_info_t info;
+    uint8_t pt[256] = {0};
     size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
-    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 4, nonce, ct, ct_len, tag, &info));
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 4, nonce, ct, ct_len, tag, aad, sizeof(aad), pt, &info));
     TEST_ASSERT_EQUAL(2, info.channel_index);
     TEST_ASSERT_EQUAL(0x12345678, info.src_addr);
 }
@@ -73,15 +79,17 @@ void test_unknown_channel(void) {
 
     uint8_t data[] = "test";
     uint8_t nonce[12], ct[256], tag[16];
-    channel_msg_encrypt(&ch, 1, 0, data, sizeof(data), nonce, ct, tag);
+    uint8_t aad[12] = {0};
+    channel_msg_encrypt(&ch, 1, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
     bramble_channel_t channels[2];
     make_channel("other-1", &channels[0]);
     make_channel("other-2", &channels[1]);
 
     channel_msg_info_t info;
+    uint8_t pt[256] = {0};
     size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
-    TEST_ASSERT_EQUAL(-1, channel_msg_decrypt(channels, 2, nonce, ct, ct_len, tag, &info));
+    TEST_ASSERT_EQUAL(-1, channel_msg_decrypt(channels, 2, nonce, ct, ct_len, tag, aad, sizeof(aad), pt, &info));
 }
 
 /* Test 4: 16 channels, encrypt with channel 12 */
@@ -99,11 +107,13 @@ void test_16_channels(void) {
 
     uint8_t data[] = "from channel 12";
     uint8_t nonce[12], ct[256], tag[16];
-    channel_msg_encrypt(&ch12, 0xAABBCCDD, 0x05, data, sizeof(data), nonce, ct, tag);
+    uint8_t aad[12] = {0};
+    channel_msg_encrypt(&ch12, 0xAABBCCDD, 0x05, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
     channel_msg_info_t info;
+    uint8_t pt[256] = {0};
     size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
-    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 16, nonce, ct, ct_len, tag, &info));
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 16, nonce, ct, ct_len, tag, aad, sizeof(aad), pt, &info));
     TEST_ASSERT_EQUAL(12, info.channel_index);
     TEST_ASSERT_EQUAL(0xAABBCCDD, info.src_addr);
     TEST_ASSERT_EQUAL(0x05, info.app_type);
@@ -119,7 +129,8 @@ void test_epoch_catchup(void) {
 
     uint8_t data[] = "epoch5 msg";
     uint8_t nonce[12], ct[256], tag[16];
-    channel_msg_encrypt(&sender, 0x11111111, 0x03, data, sizeof(data), nonce, ct, tag);
+    uint8_t aad[12] = {0};
+    channel_msg_encrypt(&sender, 0x11111111, 0x03, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
     /* Receiver at epoch 3 */
     bramble_channel_t receiver;
@@ -128,8 +139,9 @@ void test_epoch_catchup(void) {
     TEST_ASSERT_EQUAL(3, receiver.epoch);
 
     channel_msg_info_t info;
+    uint8_t pt[256] = {0};
     size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
-    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce, ct, ct_len, tag, &info));
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce, ct, ct_len, tag, aad, sizeof(aad), pt, &info));
     TEST_ASSERT_EQUAL(5, info.epoch);
     TEST_ASSERT_EQUAL(0x11111111, info.src_addr);
     /* Receiver should have advanced to epoch 5 */
@@ -153,11 +165,13 @@ void test_constant_time_all_positions(void) {
 
         uint8_t data[] = "constant-time test";
         uint8_t nonce[12], ct[256], tag[16];
-        channel_msg_encrypt(&enc_ch, 0xBEEF0000 + target, 0x01, data, sizeof(data), nonce, ct, tag);
+    uint8_t aad[12] = {0};
+        channel_msg_encrypt(&enc_ch, 0xBEEF0000 + target, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
         channel_msg_info_t info;
+        uint8_t pt[256] = {0};
         size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
-        TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 16, nonce, ct, ct_len, tag, &info));
+        TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 16, nonce, ct, ct_len, tag, aad, sizeof(aad), pt, &info));
         TEST_ASSERT_EQUAL(target, info.channel_index);
         TEST_ASSERT_EQUAL((uint32_t)(0xBEEF0000 + target), info.src_addr);
     }
