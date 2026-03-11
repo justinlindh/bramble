@@ -37,6 +37,9 @@ void test_public_channel_init(void) {
 }
 
 /* Test 2: TX rate limiting — burst then throttle */
+/* NOTE: public_channel_can_send is no longer used for broadcast TX gating.
+   Broadcasts now go through airtime_budget (AIRTIME_TIER_BROADCAST).
+   This test validates the token bucket still works for any future callers. */
 void test_public_channel_rate_limit(void) {
     uint32_t t = 1000;
     /* Should allow BURST (3) sends */
