@@ -65,6 +65,7 @@ void dummy_traffic_record_send(dummy_traffic_ctx_t* ctx, uint32_t airtime_ms, ui
 }
 
 int dummy_traffic_build_packet(uint8_t* out, size_t size, uint32_t my_addr) {
+    (void)my_addr; /* Intentionally unused — cover traffic must not leak real address */
     if (size < HEADER_SIZE)
         return -1;
 
@@ -93,9 +94,12 @@ int dummy_traffic_build_packet(uint8_t* out, size_t size, uint32_t my_addr) {
     // Serialize header into the buffer
     bramble_header_serialize(&hdr, out, size);
 
-    // After header, write src_addr (like real DATA packets)
+    // After header, write random src_addr (like real DATA packets).
+    // MUST NOT embed real my_addr — that would leak identity in cover traffic.
+    // The crypto_random() fill at the top already randomized these bytes,
+    // but we re-randomize explicitly after header serialization overwrites them.
     if (size >= HEADER_SIZE + 4) {
-        memcpy(out + HEADER_SIZE, &my_addr, 4);
+        crypto_random(out + HEADER_SIZE, 4);
     }
 
     return 0;
