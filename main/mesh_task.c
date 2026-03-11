@@ -2711,8 +2711,14 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     }
     ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u", (unsigned)s_channels[0].channel_id);
 
-    if (!public_channel_can_send(now_ms())) {
-        ESP_LOGW(TAG, "Rate limited on public channel");
+    /* Estimate airtime for rate-limit check */
+    uint32_t airtime_est = 30u + (uint32_t)(len * 4u);
+    uint32_t t_now = now_ms();
+    airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
+    airtime_budget_refill(&s_airtime, t_now);
+    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
+        ESP_LOGW(TAG, "Broadcast rate limited by airtime budget (remaining=%" PRIu32 "ms, need=%" PRIu32 "ms)",
+                 airtime_budget_remaining(&s_airtime, AIRTIME_TIER_BROADCAST), airtime_est);
         return -2;
     }
 
@@ -2768,6 +2774,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
                 recent_broadcast_record(pkt_id);
+                airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, 30u + (uint32_t)(frags[i].len * 4u));
                 ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
             }
 
@@ -2808,6 +2815,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                           (const char *)data, len, 0, 0,
                           0, MSG_STATUS_NONE, 0);
+        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
     }
     return pkt_id ? 0 : -1;
 }
