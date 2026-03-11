@@ -79,10 +79,11 @@ void test_build_packet_valid_header(void) {
     TEST_ASSERT_NOT_EQUAL(0x00000000, hdr.dest_addr);
     TEST_ASSERT_NOT_EQUAL(0xFFFFFFFF, hdr.dest_addr);
 
-    // Check src_addr is written after header
+    // S14 fix: src_addr must NOT contain the real address — it should be random
     uint32_t src;
     memcpy(&src, pkt + HEADER_SIZE, 4);
-    TEST_ASSERT_EQUAL_UINT32(0xAABBCCDD, src);
+    // With CSPRNG the chance of matching 0xAABBCCDD is 1/2^32 — effectively impossible
+    TEST_ASSERT_NOT_EQUAL_UINT32(0xAABBCCDD, src);
 }
 
 void test_disable_stops_generating(void) {
