@@ -12,6 +12,7 @@ vi.mock('../../src/store/actions', () => ({
 describe('ConnectionOverlay auth token flow', () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     connectMock.mockReset();
     useStore.setState({
       connectionState: 'disconnected',
@@ -54,7 +55,9 @@ describe('ConnectionOverlay auth token flow', () => {
 
     expect(connectMock).toHaveBeenCalledWith('wifi', expect.objectContaining({ token: 'secret-token' }));
     expect(localStorage.getItem('bramble_wifi_ip')).toBe('192.168.4.1');
-    expect(localStorage.getItem('bramble_wifi_token')).toBe('secret-token');
+    // S19: token now stored in sessionStorage, not localStorage
+    expect(sessionStorage.getItem('bramble_wifi_token')).toBe('secret-token');
+    expect(localStorage.getItem('bramble_wifi_token')).toBeNull();
   });
 
   it('highlights token field on auth errors', () => {

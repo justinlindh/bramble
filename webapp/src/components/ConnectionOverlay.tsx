@@ -34,14 +34,25 @@ function loadSavedIp(): string {
   try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
 }
 
+// Migrate any token left in localStorage from before S19 fix
+try {
+  const legacyToken = localStorage.getItem(WIFI_TOKEN_KEY);
+  if (legacyToken) {
+    sessionStorage.setItem(WIFI_TOKEN_KEY, legacyToken);
+    localStorage.removeItem(WIFI_TOKEN_KEY);
+  }
+} catch { /* noop */ }
+
 function loadSavedToken(): string {
-  try { return localStorage.getItem(WIFI_TOKEN_KEY) || ''; } catch { return ''; }
+  // S19 fix: auth token uses sessionStorage (not localStorage) to limit
+  // persistence window and reduce XSS exfiltration risk
+  try { return sessionStorage.getItem(WIFI_TOKEN_KEY) || ''; } catch { return ''; }
 }
 
 function saveWifiSettings(ip: string, token: string) {
   try {
-    localStorage.setItem(WIFI_IP_KEY, ip);
-    localStorage.setItem(WIFI_TOKEN_KEY, token);
+    localStorage.setItem(WIFI_IP_KEY, ip); // IP is non-sensitive, keep persistent
+    sessionStorage.setItem(WIFI_TOKEN_KEY, token); // Token: session-only
   } catch {
     /* noop */
   }
