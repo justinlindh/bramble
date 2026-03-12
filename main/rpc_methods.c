@@ -1578,8 +1578,8 @@ static int handle_sleep(const cJSON *params, cJSON *result) {
         esp_sleep_enable_timer_wakeup((uint64_t)wake_sec * 1000000ULL);
     }
 
-    /* Wake on LoRa DIO1 (GPIO14 on Heltec V3) — any incoming packet */
-    esp_sleep_enable_ext0_wakeup(14, 1); /* wake on HIGH */
+    /* Wake on LoRa DIO1 (board-configured pin) — any incoming packet */
+    esp_sleep_enable_ext0_wakeup(board_get_config()->radio.dio1, 1); /* wake on HIGH */
 
     esp_deep_sleep_start();
     /* never reached */
