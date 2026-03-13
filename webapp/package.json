@@ -12,7 +12,13 @@
     "test": "npm run test:unit",
     "test:unit": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.ts",
-    "test:e2e:smoke": "bash scripts/unified-runtime-smoke.sh"
+    "test:e2e:smoke": "bash scripts/unified-runtime-smoke.sh",
+    "dev:electron": "electron-vite dev",
+    "build:electron": "electron-vite build",
+    "package": "electron-vite build && electron-builder --config electron-builder.yml",
+    "package:linux": "electron-vite build && electron-builder --linux --config electron-builder.yml",
+    "package:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml",
+    "package:win": "electron-vite build && electron-builder --win --config electron-builder.yml"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",
@@ -23,6 +29,8 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^16.0.0",
     "@types/leaflet": "^1.9.21",
@@ -32,6 +40,9 @@
     "@types/web-bluetooth": "^0.0.21",
     "@vitejs/plugin-react": "^4.0.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^24.0.0",
     "playwright": "^1.58.2",
