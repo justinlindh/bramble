@@ -1,7 +1,11 @@
 {
   "name": "bramble-webapp",
   "version": "0.2.0",
+  "description": "Bramble mesh networking desktop app",
+  "author": "Bramble Mesh <info@bramblemesh.org>",
+  "homepage": "https://bramblemesh.org",
   "private": true,
+  "main": "out/main/index.js",
   "scripts": {
     "dev": "vite",
     "lint": "npm run typecheck",
