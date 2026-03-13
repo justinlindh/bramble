@@ -77,7 +77,6 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
     },
   });
 
@@ -85,7 +84,7 @@ function createWindow(): void {
     if (permission === 'serial' || permission === 'bluetooth') {
       return true;
     }
-    return true;
+    return false;
   });
 
   session.defaultSession.on('select-serial-port', (event, portList, _webContents, callback) => {
@@ -111,11 +110,16 @@ function createWindow(): void {
     event.preventDefault();
     if (devices.length > 0) {
       callback(devices[0].deviceId);
+    } else {
+      callback('');
     }
   });
 
-  session.defaultSession.setDevicePermissionHandler((_details) => {
-    return true;
+  session.defaultSession.setDevicePermissionHandler((details) => {
+    if (details.deviceType === 'serial' || details.deviceType === 'usb' || details.deviceType === 'hid' || details.deviceType === 'bluetooth') {
+      return true;
+    }
+    return false;
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -150,5 +154,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  app.quit();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
 });
