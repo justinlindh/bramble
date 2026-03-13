@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "nvs_keys.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
@@ -154,7 +155,7 @@ static int location_contacts_find(uint32_t addr) {
 static void location_contacts_load(void) {
     s_loc_contact_count = 0;
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK)
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK)
         return;
     size_t len = sizeof(s_loc_contacts);
     nvs_get_blob(nvs, "ct_data", s_loc_contacts, &len);
@@ -168,7 +169,7 @@ static void location_contacts_load(void) {
 
 static void location_contacts_save(void) {
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK)
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK)
         return;
     nvs_set_blob(nvs, "ct_data", s_loc_contacts,
                  (size_t)(s_loc_contact_count) * sizeof(loc_contact_nvs_t));
@@ -219,7 +220,7 @@ static void location_ui_load_state(location_ui_state_t* st) {
     st->last_share_epoch_s = 0;
 
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK)
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK)
         return;
 
     uint8_t enabled = 0;
@@ -268,7 +269,7 @@ static void location_ui_save_state(const location_ui_state_t* st) {
     if (!st)
         return;
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK)
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK)
         return;
 
     nvs_set_u8(nvs, "enabled", st->sharing_enabled ? 1 : 0);
@@ -820,7 +821,7 @@ static void radio_load_nvs_config(radio_config_t* cfg) {
 
     /* Overlay any NVS overrides */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_radio", NVS_READONLY, &nvs) != ESP_OK)
+    if (nvs_open(NVS_NS_RADIO, NVS_READONLY, &nvs) != ESP_OK)
         return;
 
     uint32_t freq_khz = 0;
@@ -860,7 +861,7 @@ static void radio_save_and_apply(void) {
 
     /* Persist to NVS (mirrors rpc_methods.c) */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_radio", NVS_READWRITE, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_RADIO, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u32(nvs, "freq_khz", (uint32_t)(cfg.frequency_mhz * 1000));
         nvs_set_u8(nvs, "sf", cfg.sf);
         nvs_set_u32(nvs, "bw_hz", cfg.bw_hz);

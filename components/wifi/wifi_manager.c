@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include <string.h>
@@ -16,9 +17,10 @@ static const char* TAG = "wifi_mgr";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
 
-#define NVS_NAMESPACE "bramble_wifi"
-#define NVS_KEY_SSID "ssid"
-#define NVS_KEY_PASSWORD "password"
+/* NVS namespace and key names are defined in nvs_keys.h */
+#define NVS_NAMESPACE       NVS_NS_WIFI
+#define NVS_KEY_SSID        NVS_KEY_WIFI_SSID
+#define NVS_KEY_PASSWORD    NVS_KEY_WIFI_PASSWORD
 
 static EventGroupHandle_t s_wifi_event_group = NULL;
 static esp_event_handler_instance_t s_sta_any_id;
