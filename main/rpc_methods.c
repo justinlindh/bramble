@@ -229,8 +229,21 @@ static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
     }
     if (limit > 1024u) limit = 1024u;
 
-    delivery_event_record_t events[256];
     size_t out_max = (size_t)((limit < 256u) ? limit : 256u);
+    size_t events_bytes = out_max * sizeof(delivery_event_record_t);
+
+    delivery_event_record_t *events = NULL;
+    if (events_bytes > 0u) {
+        events = heap_caps_malloc(events_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!events) {
+            events = malloc(events_bytes);
+        }
+        if (!events) {
+            ESP_LOGE(TAG, "Failed to allocate delivery events buffer (%u bytes)", (unsigned)events_bytes);
+            return RPC_ERR_INTERNAL;
+        }
+    }
+
     size_t n = mesh_delivery_events_list_since(since_seq, events, out_max);
 
     cJSON *arr = cJSON_AddArrayToObject(result, "events");
@@ -274,6 +287,8 @@ static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
         cJSON_AddItemToObject(obj, "payload", payload);
         cJSON_AddItemToArray(arr, obj);
     }
+
+    free(events);
 
     cJSON_AddNumberToObject(result, "latest_event_seq", mesh_delivery_events_latest_seq());
     return 0;
