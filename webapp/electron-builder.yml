@@ -1,0 +1,57 @@
+appId: org.bramblemesh.app
+productName: Bramble
+copyright: Copyright © 2026 Bramble Mesh
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - out/**/*
+  - "!node_modules"
+
+extraResources:
+  - from: server/
+    to: server/
+    filter:
+      - "**/*.mjs"
+  - from: mock/
+    to: mock/
+    filter:
+      - "**/*.mjs"
+
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: public/bramble-logo.png
+  category: Utility
+  maintainer: bramblemesh.org
+
+mac:
+  target:
+    - dmg
+  icon: public/bramble-logo.png
+  category: public.app-category.utilities
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+win:
+  target:
+    - nsis
+  icon: public/bramble-logo.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: true
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
