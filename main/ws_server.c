@@ -14,6 +14,7 @@
 #include "identity.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "freertos/FreeRTOS.h"
 
 #define MAX_WS_CLIENTS 4
 #define WS_BUF_SIZE 2048
@@ -23,31 +24,58 @@ static const char* TAG = "ws";
 static httpd_handle_t s_server = NULL;
 static int s_client_fds[MAX_WS_CLIENTS];
 static int s_client_count = 0;
+static portMUX_TYPE s_client_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_server_running = false;
 static char s_auth_token[AUTH_TOKEN_MAX] = {0};
 
 /* ── Client tracking ─────────────────────────────────────────────────── */
 
 static void client_add(int fd) {
+    bool added = false;
+    bool full = false;
+    int total = 0;
+
+    taskENTER_CRITICAL(&s_client_lock);
     for (int i = 0; i < s_client_count; i++) {
-        if (s_client_fds[i] == fd)
+        if (s_client_fds[i] == fd) {
+            total = s_client_count;
+            taskEXIT_CRITICAL(&s_client_lock);
             return; /* already tracked */
+        }
     }
     if (s_client_count < MAX_WS_CLIENTS) {
         s_client_fds[s_client_count++] = fd;
-        ESP_LOGI(TAG, "WS client connected fd=%d (total=%d)", fd, s_client_count);
+        added = true;
+        total = s_client_count;
     } else {
+        full = true;
+    }
+    taskEXIT_CRITICAL(&s_client_lock);
+
+    if (added) {
+        ESP_LOGI(TAG, "WS client connected fd=%d (total=%d)", fd, total);
+    } else if (full) {
         ESP_LOGW(TAG, "WS client table full, dropping fd=%d", fd);
     }
 }
 
 static void client_remove(int fd) {
+    bool removed = false;
+    int total = 0;
+
+    taskENTER_CRITICAL(&s_client_lock);
     for (int i = 0; i < s_client_count; i++) {
         if (s_client_fds[i] == fd) {
             s_client_fds[i] = s_client_fds[--s_client_count];
-            ESP_LOGI(TAG, "WS client removed fd=%d (total=%d)", fd, s_client_count);
-            return;
+            removed = true;
+            total = s_client_count;
+            break;
         }
+    }
+    taskEXIT_CRITICAL(&s_client_lock);
+
+    if (removed) {
+        ESP_LOGI(TAG, "WS client removed fd=%d (total=%d)", fd, total);
     }
 }
 
@@ -174,8 +202,20 @@ static uint32_t s_notify_drops = 0;
 static uint64_t s_notify_last_drop_log_us = 0;
 
 static void ws_notify_cb(const char* json, size_t len, void* ctx) {
-    if (!s_server || s_client_count == 0)
+    int client_fds[MAX_WS_CLIENTS];
+    int client_count = 0;
+
+    taskENTER_CRITICAL(&s_client_lock);
+    if (!s_server || s_client_count == 0) {
+        taskEXIT_CRITICAL(&s_client_lock);
         return;
+    }
+
+    client_count = s_client_count;
+    for (int i = 0; i < client_count; i++) {
+        client_fds[i] = s_client_fds[i];
+    }
+    taskEXIT_CRITICAL(&s_client_lock);
 
     uint64_t now_us = (uint64_t)esp_timer_get_time();
     uint64_t elapsed_us = now_us - s_notify_last_send_us;
@@ -207,11 +247,11 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
         .final = true,
     };
 
-    for (int i = s_client_count - 1; i >= 0; i--) {
-        esp_err_t err = httpd_ws_send_frame_async(s_server, s_client_fds[i], &frame);
+    for (int i = client_count - 1; i >= 0; i--) {
+        esp_err_t err = httpd_ws_send_frame_async(s_server, client_fds[i], &frame);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Notify send failed fd=%d err=%d — removing", s_client_fds[i], err);
-            client_remove(s_client_fds[i]);
+            ESP_LOGW(TAG, "Notify send failed fd=%d err=%d — removing", client_fds[i], err);
+            client_remove(client_fds[i]);
         }
     }
 }
@@ -572,8 +612,10 @@ int ws_server_start(void) {
 void ws_server_stop(void) {
     if (s_server) {
         httpd_stop(s_server);
+        taskENTER_CRITICAL(&s_client_lock);
         s_server = NULL;
         s_client_count = 0;
+        taskEXIT_CRITICAL(&s_client_lock);
         s_server_running = false;
         ESP_LOGI(TAG, "WebSocket server stopped");
     }
