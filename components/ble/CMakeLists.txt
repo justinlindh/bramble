@@ -3,7 +3,7 @@ if(CONFIG_BT_NIMBLE_ENABLED)
       SRCS "ble_server.c"
       INCLUDE_DIRS "include"
       PRIV_INCLUDE_DIRS "../rpc/include"
-      REQUIRES bt nvs_flash freertos
+      REQUIRES nvs_keys bt nvs_flash freertos
       PRIV_REQUIRES rpc
   )
 else()

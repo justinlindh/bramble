@@ -12,10 +12,11 @@ bool identity_check_collision(const bramble_identity_t* my_id, uint32_t beacon_s
 #ifdef ESP_PLATFORM
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include "esp_random.h"
 #include "esp_log.h"
 
-static const char* NVS_NAMESPACE = "bramble_id";
+#define NVS_NAMESPACE NVS_NS_IDENTITY
 
 int identity_save(const bramble_identity_t* id) {
     nvs_handle_t h;
@@ -54,7 +55,7 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     }
 
     nvs_handle_t h;
-    if (nvs_open("bramble", NVS_READWRITE, &h) != ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK) {
         return -1;
     }
 
@@ -62,7 +63,7 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
      * explicitly set a token via bramble.setAuthToken, the web flasher,
      * or the CLI `bramble auth enable` command. */
     size_t len = token_out_len;
-    esp_err_t err = nvs_get_str(h, "auth_token", token_out, &len);
+    esp_err_t err = nvs_get_str(h, NVS_KEY_AUTH_TOKEN, token_out, &len);
     if (err == ESP_OK && token_out[0] != '\0') {
         /* User has set a token — auth is active */
         nvs_close(h);

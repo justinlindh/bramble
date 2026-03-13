@@ -1,5 +1,6 @@
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include "location.h"
 #include <string.h>
 #include <math.h>
@@ -28,7 +29,7 @@ static double approx_distance_m(int32_t lat1_e7, int32_t lon1_e7, int32_t lat2_e
 loc_share_mode_t location_share_mode_get(void) {
     nvs_handle_t nvs;
     uint8_t mode = LOC_SHARE_OFF;
-    if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
         nvs_get_u8(nvs, "loc_share", &mode);
         nvs_close(nvs);
     }
@@ -39,7 +40,7 @@ loc_share_mode_t location_share_mode_get(void) {
 
 void location_share_mode_set(loc_share_mode_t mode) {
     nvs_handle_t nvs;
-    if (nvs_open("bramble", NVS_READWRITE, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "loc_share", (uint8_t)mode);
         nvs_commit(nvs);
         nvs_close(nvs);

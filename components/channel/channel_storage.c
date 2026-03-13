@@ -13,8 +13,9 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 
-#define NVS_NAMESPACE "bramble_ch"
+#define NVS_NAMESPACE NVS_NS_CHANNEL
 #define TAG "ch_storage"
 
 int channel_storage_init(void) {

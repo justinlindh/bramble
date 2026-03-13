@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
+#include "nvs_keys.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -175,8 +176,8 @@ conn_mode_t conn_mode_get(void) {
     /* Default: WiFi only (same as Heltec boards). BLE can be enabled via
      * the Settings screen. Running both on ESP32-S3 exhausts internal SRAM. */
     uint8_t mode = CONN_MODE_WIFI;
-    if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, "conn_mode", &mode);
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, NVS_KEY_CONN_MODE, &mode);
         nvs_close(nvs);
     }
     if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT) mode = CONN_MODE_WIFI;
@@ -190,8 +191,8 @@ conn_mode_t conn_mode_get(void) {
 
 void conn_mode_set(conn_mode_t mode) {
     nvs_handle_t nvs;
-    if (nvs_open("bramble", NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "conn_mode", (uint8_t)mode);
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, NVS_KEY_CONN_MODE, (uint8_t)mode);
         nvs_commit(nvs);
         nvs_close(nvs);
         ESP_LOGI(TAG, "Connectivity mode saved: %d", (int)mode);
@@ -787,9 +788,9 @@ void app_main(void)
         /* Restore saved OLED rotation from NVS */
         {
             nvs_handle_t nvs;
-            if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+            if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
                 uint8_t rot = 0;
-                if (nvs_get_u8(nvs, "oled_rot", &rot) == ESP_OK && rot) {
+                if (nvs_get_u8(nvs, NVS_KEY_OLED_ROT, &rot) == ESP_OK && rot) {
                     display_set_rotated_180(true);
                     ESP_LOGI(TAG, "OLED rotation restored: 180 deg");
                 }
@@ -1186,8 +1187,8 @@ void app_main(void)
                     display_set_rotated_180(new_rot);
                     /* Persist to NVS */
                     nvs_handle_t nvs;
-                    if (nvs_open("bramble", NVS_READWRITE, &nvs) == ESP_OK) {
-                        nvs_set_u8(nvs, "oled_rot", new_rot ? 1 : 0);
+                    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) == ESP_OK) {
+                        nvs_set_u8(nvs, NVS_KEY_OLED_ROT, new_rot ? 1 : 0);
                         nvs_commit(nvs);
                         nvs_close(nvs);
                     }
