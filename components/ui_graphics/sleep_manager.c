@@ -11,11 +11,12 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 
 static const char* TAG = "sleep_mgr";
 
 /* NVS persistence */
-#define NVS_NAMESPACE "bramble"
+#define NVS_NAMESPACE NVS_NS_BRAMBLE
 #define NVS_KEY_SLEEP_EN "sleep_enabled"
 #define NVS_KEY_SLEEP_TOUT "sleep_timeout"
 

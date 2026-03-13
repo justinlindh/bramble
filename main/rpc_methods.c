@@ -14,6 +14,7 @@
 #include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include "battery.h"
 #include "ota.h"
 #include "esp_sleep.h"
@@ -39,8 +40,8 @@
 
 #define BRAMBLE_PROTOCOL_VERSION "0.5.0"
 
-#define NVS_NAMESPACE            "bramble"
-#define NVS_KEY_NODE_NAME        "node_name"
+/* NVS namespaces and keys are defined in nvs_keys.h */
+#define NVS_NAMESPACE            NVS_NS_BRAMBLE
 
 static const char *TAG = "rpc_methods";
 static bramble_identity_t *s_identity;
@@ -590,7 +591,7 @@ static int handle_set_radio(const cJSON *params, cJSON *result) {
 
     /* Persist to NVS */
     nvs_handle_t nvs;
-    esp_err_t err = nvs_open("bramble_radio", NVS_READWRITE, &nvs);
+    esp_err_t err = nvs_open(NVS_NS_RADIO, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         /* Store as integers to avoid float NVS issues */
         nvs_set_u32(nvs, "freq_khz", (uint32_t)(cfg.frequency_mhz * 1000));
@@ -662,15 +663,15 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
     }
 
     nvs_handle_t h;
-    if (nvs_open("bramble", NVS_READWRITE, &h) != ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK) {
         return RPC_ERR_INTERNAL;
     }
     if (val[0] == '\0') {
         /* Clear token → open access */
-        nvs_erase_key(h, "auth_token");
+        nvs_erase_key(h, NVS_KEY_AUTH_TOKEN);
     } else {
         /* Set token → auth enabled */
-        nvs_set_str(h, "auth_token", val);
+        nvs_set_str(h, NVS_KEY_AUTH_TOKEN, val);
     }
     nvs_commit(h);
     nvs_close(h);
@@ -769,7 +770,7 @@ static int handle_set_mailbox(const cJSON *params, cJSON *result) {
 
     /* Persist to NVS */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_mb", NVS_READWRITE, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_MAILBOX, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
         nvs_commit(nvs);
         nvs_close(nvs);
@@ -883,7 +884,7 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
     if (!params) return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "NVS open failed");
         return 0;
@@ -1012,7 +1013,7 @@ static int handle_set_location_contact(const cJSON *params, cJSON *result) {
     if (!addr_str) return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
         cJSON_AddBoolToObject(result, "ok", false);
         return 0;
     }
@@ -1048,7 +1049,7 @@ static int handle_remove_location_contact(const cJSON *params, cJSON *result) {
     if (!addr_str) return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
         cJSON_AddBoolToObject(result, "ok", false);
         return 0;
     }
@@ -1070,7 +1071,7 @@ static int handle_share_location_once(const cJSON *params, cJSON *result) {
 
     /* Read stored location from NVS */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "no location configured");
         return 0;
@@ -1180,7 +1181,7 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
 
     /* Include own location if set */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) == ESP_OK) {
         location_policy_t policy;
         if (location_policy_load_or_init(nvs, &policy) == ESP_OK) {
             int32_t lat_e6 = 0, lon_e6 = 0;
@@ -1212,11 +1213,11 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     }
 
     /* Include received peer locations persisted by mesh location RX path. */
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) == ESP_OK) {
         nvs_iterator_t it = NULL;
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-        if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
+        if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
             while (it != NULL) {
                 nvs_entry_info_t info;
                 nvs_entry_info(it, &info);
@@ -1264,7 +1265,7 @@ static bool rpc_get_persisted_channel_name(int index, char *name_out, size_t nam
     if (!name_out || name_out_len == 0 || index < 0) return false;
 
     nvs_handle_t ch_nvs;
-    if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &ch_nvs) != ESP_OK) {
         return false;
     }
 
@@ -1287,7 +1288,7 @@ static bool rpc_get_persisted_channel_has_psk(int index, bool *has_psk_out) {
     if (!has_psk_out || index < 0) return false;
 
     nvs_handle_t ch_nvs;
-    if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &ch_nvs) != ESP_OK) {
         return false;
     }
 
@@ -1377,7 +1378,7 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
 
     /* Location sharing policy contract (hybrid privacy-first). */
     cJSON *location = cJSON_CreateObject();
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) == ESP_OK) {
         location_policy_t policy;
         if (location_policy_load_or_init(nvs, &policy) == ESP_OK) {
             cJSON_AddBoolToObject(location, "enabled", policy.enabled);
@@ -1407,7 +1408,7 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
         cJSON *channel_targets = cJSON_AddArrayToObject(location, "channel_targets");
 
         nvs_iterator_t it = NULL;
-        if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
+        if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
             while (it != NULL) {
                 nvs_entry_info_t info;
                 nvs_entry_info(it, &info);

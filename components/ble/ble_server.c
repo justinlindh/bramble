@@ -25,6 +25,7 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "nvs_flash.h"
+#include "nvs_keys.h"
 #include "ws_server.h"
 #include <stdio.h>
 #include <string.h>
@@ -347,7 +348,7 @@ static void on_reset(int reason) { ESP_LOGW(TAG, "BLE host reset: reason=%d", re
 int ble_server_init(void) {
     /* Read node name for BLE device name */
     nvs_handle_t nvs;
-    if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_device_name);
         if (nvs_get_str(nvs, "node_name", s_device_name, &len) != ESP_OK) {
             strncpy(s_device_name, "Bramble", sizeof(s_device_name));

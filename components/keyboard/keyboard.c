@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include <string.h>
 
 static const char* TAG = "keyboard";
@@ -39,7 +40,7 @@ static int64_t last_poll_us = 0;
 
 /* Backlight persistence */
 #define DEFAULT_BACKLIGHT 80 /* Sane default — not too bright */
-#define NVS_NAMESPACE "bramble"
+#define NVS_NAMESPACE NVS_NS_BRAMBLE
 #define NVS_KEY_BACKLIGHT "kb_backlight"
 static uint8_t s_backlight_brightness = DEFAULT_BACKLIGHT;
 
