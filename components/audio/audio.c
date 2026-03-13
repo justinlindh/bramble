@@ -7,6 +7,7 @@
 #include "driver/i2s_std.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include <math.h>
 #include <string.h>
 
@@ -19,7 +20,7 @@ static const char* TAG = "audio";
 #define QUEUE_DEPTH 4
 
 #define DEFAULT_VOLUME 50 /* Sane default — not screaming loud */
-#define NVS_NAMESPACE "bramble"
+#define NVS_NAMESPACE NVS_NS_BRAMBLE
 #define NVS_KEY_VOLUME "audio_vol"
 #define NVS_KEY_MUTED "audio_mute"
 

@@ -44,6 +44,7 @@
 #include "esp_task_wdt.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include <string.h>
 #include <inttypes.h>
 
@@ -383,7 +384,7 @@ static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t
 
 static bool location_policy_has_targets(void) {
     nvs_iterator_t it = NULL;
-    if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) != ESP_OK) {
+    if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) != ESP_OK) {
         return false;
     }
 
@@ -476,7 +477,7 @@ static void mesh_send_location_updates(uint32_t t,
                                        const location_policy_t *policy,
                                        const bramble_position_t *source_pos) {
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
         return;
     }
 
@@ -486,7 +487,7 @@ static void mesh_send_location_updates(uint32_t t,
 
     uint32_t sent_count = 0;
     nvs_iterator_t it = NULL;
-    if (nvs_entry_find("nvs", "bramble_loc", NVS_TYPE_ANY, &it) == ESP_OK) {
+    if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
         while (it != NULL) {
             nvs_entry_info_t info;
             nvs_entry_info(it, &info);
@@ -535,7 +536,7 @@ static void mesh_persist_peer_location(uint32_t peer_addr,
                                        uint8_t tier,
                                        uint32_t now_ms) {
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
         return;
     }
 
@@ -603,7 +604,7 @@ static void mesh_location_policy_tick(uint32_t t) {
     s_location_last_policy_tick_ms = t;
 
     nvs_handle_t nvs;
-    if (nvs_open("bramble_loc", NVS_READONLY, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
         return;
     }
 
@@ -645,7 +646,7 @@ static void mesh_location_policy_tick(uint32_t t) {
 
 static void mesh_persist_channel_psk_flags(void) {
     nvs_handle_t h;
-    if (nvs_open("bramble_ch", NVS_READWRITE, &h) != ESP_OK) {
+    if (nvs_open(NVS_NS_CHANNEL, NVS_READWRITE, &h) != ESP_OK) {
         return;
     }
 
@@ -665,7 +666,7 @@ static void mesh_persist_channel_psk_flags(void) {
 
 static void mesh_load_channel_psk_flags(void) {
     nvs_handle_t h;
-    if (nvs_open("bramble_ch", NVS_READONLY, &h) != ESP_OK) {
+    if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &h) != ESP_OK) {
         return;
     }
 
@@ -2114,7 +2115,7 @@ int mesh_set_beacon_policy(const beacon_policy_config_t *config) {
     
     /* Persist to NVS */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_bp", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_BACKPRESSURE, NVS_READWRITE, &nvs) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS for beacon policy");
         return -1;
     }
@@ -2157,7 +2158,7 @@ void mesh_get_beacon_status(beacon_policy_status_t *status) {
 
 void mesh_beacon_policy_load_config(void) {
     nvs_handle_t nvs;
-    if (nvs_open("bramble_bp", NVS_READONLY, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_BACKPRESSURE, NVS_READONLY, &nvs) != ESP_OK) {
         /* No saved config, use defaults */
         return;
     }
@@ -2211,7 +2212,7 @@ static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
 
     /* Check NVS for user-saved radio config (overrides defaults) */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_radio", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_RADIO, NVS_READONLY, &nvs) == ESP_OK) {
         uint32_t freq_khz = 0;
         uint8_t sf = 0, cr = 0;
         uint32_t bw = 0;
@@ -2983,7 +2984,7 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     /* Load node name from NVS */
     nvs_handle_t nvs;
-    if (nvs_open("bramble", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(s_node_name);
         esp_err_t name_err = nvs_get_str(nvs, "node_name", s_node_name, &len);
         if (name_err != ESP_OK) {
@@ -3101,7 +3102,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     /* Load mailbox enabled state from NVS */
     {
         nvs_handle_t mb_nvs;
-        if (nvs_open("bramble_mb", NVS_READONLY, &mb_nvs) == ESP_OK) {
+        if (nvs_open(NVS_NS_MAILBOX, NVS_READONLY, &mb_nvs) == ESP_OK) {
             uint8_t enabled = 0;
             if (nvs_get_u8(mb_nvs, "enabled", &enabled) == ESP_OK) {
                 s_mailbox_enabled = (enabled != 0);
@@ -3273,7 +3274,7 @@ const char *mesh_get_channel_name(int index) {
     if (index == 0) return "Broadcast";
 
     nvs_handle_t ch_nvs;
-    if (nvs_open("bramble_ch", NVS_READONLY, &ch_nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &ch_nvs) != ESP_OK) {
         return NULL;
     }
 
@@ -3330,7 +3331,7 @@ int mesh_set_node_name_persist(const char *name) {
     }
 
     nvs_handle_t nvs;
-    if (nvs_open("bramble", NVS_READWRITE, &nvs) != ESP_OK) {
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) != ESP_OK) {
         return -1;
     }
     esp_err_t err = nvs_set_str(nvs, "node_name", name);
@@ -3703,7 +3704,7 @@ void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_r
     
     /* Persist config to NVS */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_tdbg", NVS_READWRITE, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "enabled", enabled ? 1 : 0);
         nvs_set_u8(nvs, "inc_tx", include_tx ? 1 : 0);
         nvs_set_u8(nvs, "inc_rx", include_rx ? 1 : 0);
@@ -3723,7 +3724,7 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
     
     /* Load other config from NVS (not yet used in filtering logic) */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_tdbg", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t val = 0;
         if (include_tx && nvs_get_u8(nvs, "inc_tx", &val) == ESP_OK)
             *include_tx = (val != 0);
@@ -3754,7 +3755,7 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
 void mesh_traffic_debug_load_config(void) {
     /* Called at startup to restore persisted config */
     nvs_handle_t nvs;
-    if (nvs_open("bramble_tdbg", NVS_READONLY, &nvs) == ESP_OK) {
+    if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t enabled = 0;
         if (nvs_get_u8(nvs, "enabled", &enabled) == ESP_OK) {
             traffic_debug_enable(&s_traffic_debug, enabled != 0);

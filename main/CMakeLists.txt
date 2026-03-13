@@ -2,7 +2,7 @@ idf_component_register(
     SRCS "main.c" "mesh_task.c" "broadcast_delivery_receipt.c" "delivery_event_ring.c" "cli.c" "rpc_methods.c" "ws_server.c" "board.c" "util.c"
          "mesh_neighbor_state.c" "mesh_routing_state.c" "mesh_dedup_state.c" "mesh_msg_state.c" "rerr_ack_fastfail.c"
     INCLUDE_DIRS "."
-    REQUIRES nvs_flash esp_wifi esp_event driver esp_timer
+    REQUIRES nvs_keys nvs_flash esp_wifi esp_event driver esp_timer
              display button ui crypto identity
              radio packet routing dedup security freq_plan
              channel console esp_vfs_console rpc airtime
