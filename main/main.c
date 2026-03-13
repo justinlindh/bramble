@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_app_desc.h"
 #include "display.h"
 #include "button.h"
 #include "ui.h"
@@ -247,7 +248,7 @@ static void show_splash(void) {
     display_draw_text((DISPLAY_WIDTH - tag_w) / 2, div_y + 8, tag);
 
     /* Version centered */
-    const char *ver = "v0.2.0-dev";
+    const char *ver = esp_app_get_description()->version;
     int ver_w = strlen(ver) * FONT_W;
     display_draw_text((DISPLAY_WIDTH - ver_w) / 2, div_y + 20, ver);
 
