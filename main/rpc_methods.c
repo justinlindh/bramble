@@ -1179,9 +1179,11 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     (void)params;
     cJSON *peer_locations = cJSON_AddArrayToObject(result, "peerLocations");
 
-    /* Include own location if set */
+    /* Open NVS once for both own location and peer entries.
+     * READWRITE needed because location_policy_load_or_init may write defaults. */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) == ESP_OK) {
+        /* Include own location if set */
         location_policy_t policy;
         if (location_policy_load_or_init(nvs, &policy) == ESP_OK) {
             int32_t lat_e6 = 0, lon_e6 = 0;
@@ -1209,11 +1211,9 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
                 cJSON_AddItemToArray(peer_locations, self);
             }
         }
-        nvs_close(nvs);
-    }
 
-    /* Include received peer locations persisted by mesh location RX path. */
-    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) == ESP_OK) {
+        /* Include received peer locations persisted by mesh location RX path. */
+        {
         nvs_iterator_t it = NULL;
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -1255,6 +1255,7 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
             }
             nvs_release_iterator(it);
         }
+        } /* end peer locations block */
         nvs_close(nvs);
     }
 
