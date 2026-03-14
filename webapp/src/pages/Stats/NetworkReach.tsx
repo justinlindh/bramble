@@ -59,6 +59,12 @@ function hopClass(hops: number): string {
   return styles.hop4;
 }
 
+function confidenceColor(confidence: number): string {
+  if (confidence >= 0.8) return '#3fb950';
+  if (confidence >= 0.5) return '#d29922';
+  return '#d73a49';
+}
+
 type ProbeRow = {
   responderAddr: number;
   response?: ProbeResponse;
@@ -107,7 +113,9 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
                 </span>
               ) : '—'}
             </td>
-            <td>{response ? `${Math.round((response.confidence ?? 1) * 100)}%` : '—'}</td>
+            <td style={response ? { color: confidenceColor(response.confidence ?? 1) } : undefined}>
+              {response ? `${Math.round((response.confidence ?? 1) * 100)}%` : '—'}
+            </td>
             <td>{response ? `${response.rssi} dBm` : 'no response'}</td>
             <td>{response ? response.snr.toFixed(1) : '—'}</td>
             <td className={styles.pathCell}>{response ? formatPath(response) : '—'}</td>
