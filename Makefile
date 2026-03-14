@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help ci ci-quality ci-firmware-quality ci-webapp-quality \
+.PHONY: help ci check-fast ci-quality ci-firmware-quality ci-webapp-quality \
 	ci-quality-host-tests ci-quality-shellcheck ci-quality-actionlint ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build \
 	ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint \
 	ci-web-lint ci-web-typecheck ci-web-unit ci-web-build ci-web-smoke
@@ -12,6 +12,9 @@ help:
 	@echo "  make ci-quality         # parity for .gitea/workflows/quality.yml"
 	@echo "  make ci-firmware-quality# parity for .gitea/workflows/firmware-quality.yml"
 	@echo "  make ci-webapp-quality  # parity for .gitea/workflows/webapp-quality.yml"
+
+# Fast pre-commit gate: typecheck + unit tests only (no build/lint/smoke)
+check-fast: ci-web-typecheck ci-web-unit
 
 ci: ci-quality ci-firmware-quality ci-webapp-quality
 
