@@ -131,7 +131,13 @@ export function Map() {
   // Initialize map
   useEffect(() => {
     if (!mapRef.current || leafletMap.current) return;
-    const map = L.map(mapRef.current).setView([37.7749, -122.4194], 10);
+
+    const initialCenter: L.LatLngExpression = selfPos
+      ? [selfPos.lat, selfPos.lon]
+      : [37.7749, -122.4194];
+    const initialZoom = selfPos ? 13 : 2;
+
+    const map = L.map(mapRef.current).setView(initialCenter, initialZoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
