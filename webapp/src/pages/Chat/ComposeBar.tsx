@@ -99,7 +99,9 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
       // Attach location if enabled (fire-and-forget)
       if (locAttach !== 'off' && dest !== 0xFFFFFFFF) {
         const locTier = locAttach === 'exact' ? 'full' : 'coarse';
-        shareLocationOnce(dest, locTier as import('../../types/bramble').LocationTier).catch(() => {});
+        shareLocationOnce(dest, locTier as import('../../types/bramble').LocationTier).catch((err) => {
+          showToast(`Location attach failed: ${(err as Error).message ?? 'unknown error'}`, 'error', 4000);
+        });
       }
     } catch (e) {
       showToast((e as Error).message ?? 'Send failed', 'error', 5000);
