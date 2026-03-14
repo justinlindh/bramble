@@ -10,25 +10,25 @@
 #pragma once
 
 /* ── NVS partition ───────────────────────────────────────────────────────── */
-#define NVS_PARTITION           "nvs"
+#define NVS_PARTITION "nvs"
 
 /* ── NVS namespaces ──────────────────────────────────────────────────────── */
-#define NVS_NS_BRAMBLE          "bramble"         /**< General device config   */
-#define NVS_NS_RADIO            "bramble_radio"   /**< Radio / LoRa settings   */
-#define NVS_NS_LOCATION         "bramble_loc"     /**< Location & contacts     */
-#define NVS_NS_CHANNEL          "bramble_ch"      /**< Channel storage         */
-#define NVS_NS_MAILBOX          "bramble_mb"      /**< Mailbox policy          */
-#define NVS_NS_WIFI             "bramble_wifi"    /**< Wi-Fi credentials       */
-#define NVS_NS_IDENTITY         "bramble_id"      /**< Node identity / keys    */
-#define NVS_NS_BACKPRESSURE     "bramble_bp"      /**< Backpressure state      */
-#define NVS_NS_TELEMETRY_DBG    "bramble_tdbg"    /**< Telemetry debug flags   */
+#define NVS_NS_BRAMBLE "bramble"            /**< General device config   */
+#define NVS_NS_RADIO "bramble_radio"        /**< Radio / LoRa settings   */
+#define NVS_NS_LOCATION "bramble_loc"       /**< Location & contacts     */
+#define NVS_NS_CHANNEL "bramble_ch"         /**< Channel storage         */
+#define NVS_NS_MAILBOX "bramble_mb"         /**< Mailbox policy          */
+#define NVS_NS_WIFI "bramble_wifi"          /**< Wi-Fi credentials       */
+#define NVS_NS_IDENTITY "bramble_id"        /**< Node identity / keys    */
+#define NVS_NS_BACKPRESSURE "bramble_bp"    /**< Backpressure state      */
+#define NVS_NS_TELEMETRY_DBG "bramble_tdbg" /**< Telemetry debug flags   */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
-#define NVS_KEY_NODE_NAME       "node_name"
-#define NVS_KEY_AUTH_TOKEN      "auth_token"
-#define NVS_KEY_CONN_MODE       "conn_mode"
-#define NVS_KEY_OLED_ROT        "oled_rot"
+#define NVS_KEY_NODE_NAME "node_name"
+#define NVS_KEY_AUTH_TOKEN "auth_token"
+#define NVS_KEY_CONN_MODE "conn_mode"
+#define NVS_KEY_OLED_ROT "oled_rot"
 
 /* ── NVS_NS_WIFI keys ────────────────────────────────────────────────────── */
-#define NVS_KEY_WIFI_SSID       "ssid"
-#define NVS_KEY_WIFI_PASSWORD   "password"
+#define NVS_KEY_WIFI_SSID "ssid"
+#define NVS_KEY_WIFI_PASSWORD "password"
