@@ -18,9 +18,9 @@ static const char* TAG = "wifi_mgr";
 #define WIFI_FAIL_BIT BIT1
 
 /* NVS namespace and key names are defined in nvs_keys.h */
-#define NVS_NAMESPACE       NVS_NS_WIFI
-#define NVS_KEY_SSID        NVS_KEY_WIFI_SSID
-#define NVS_KEY_PASSWORD    NVS_KEY_WIFI_PASSWORD
+#define NVS_NAMESPACE NVS_NS_WIFI
+#define NVS_KEY_SSID NVS_KEY_WIFI_SSID
+#define NVS_KEY_PASSWORD NVS_KEY_WIFI_PASSWORD
 
 static EventGroupHandle_t s_wifi_event_group = NULL;
 static esp_event_handler_instance_t s_sta_any_id;
