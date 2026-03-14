@@ -156,6 +156,47 @@
   font-family: var(--font-mono);
 }
 
+.knownPeerList {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.knownPeerBtn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.knownPeerBtn:last-child {
+  border-bottom: none;
+}
+
+.knownPeerBtn:hover {
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
+}
+
+.knownPeerName {
+  font-size: 0.84rem;
+}
+
+.knownPeerAddr {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .dialogError {
   font-size: 0.78rem;
   color: var(--danger);

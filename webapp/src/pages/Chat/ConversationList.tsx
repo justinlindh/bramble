@@ -79,6 +79,17 @@ function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolea
   );
 }
 
+function KnownPeerItem({ addr, onOpen }: { addr: number; onOpen: (addr: number) => void }) {
+  const { displayName, fullHex } = usePeerInfo(addr);
+
+  return (
+    <button className={styles.knownPeerBtn} onClick={() => onOpen(addr)} title={fullHex}>
+      <span className={styles.knownPeerName}>{displayName}</span>
+      <span className={styles.knownPeerAddr}>{fullHex}</span>
+    </button>
+  );
+}
+
 export function ConversationList({ conversations, activeId, onSelect }: ConversationListProps) {
   const [showDmDialog, setShowDmDialog] = useState(false);
   const [dmAddr, setDmAddr] = useState('');
@@ -103,6 +114,8 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   }
   for (const p of peerLocations) knownPeerAddrs.add(p.addr);
 
+  const knownPeers = [...knownPeerAddrs].filter(addr => addr !== BROADCAST_ADDR).sort((a, b) => a - b);
+
   // Separate out channels and DMs
   // Broadcasts are filed under 'broadcast' in the map, never as 'dm:0xFFFFFFFF'
   const broadcastUnread = conversations.get('broadcast')?.unreadCount ?? 0;
@@ -112,6 +125,13 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
   const dms = filterDmConversations(conversations, knownPeerAddrs);
 
+  const openDmByAddr = (addr: number) => {
+    onSelect(`dm:${addr}`);
+    setShowDmDialog(false);
+    setDmAddr('');
+    setDmError('');
+  };
+
   const handleOpenDm = () => {
     setDmError('');
     const addr = parseDmHexAddress(dmAddr);
@@ -119,10 +139,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
       setDmError('Enter a valid hex address (e.g. 0xABCD1234)');
       return;
     }
-    onSelect(`dm:${addr}`);
-    setShowDmDialog(false);
-    setDmAddr('');
-    setDmError('');
+    openDmByAddr(addr);
   };
 
   const handleCreateChannel = async () => {
@@ -228,7 +245,17 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
         <div className={styles.dialogBackdrop} onClick={() => setShowDmDialog(false)}>
           <div className={styles.dialog} onClick={e => e.stopPropagation()}>
             <h3 className={styles.dialogTitle}>New Direct Message</h3>
-            <p className={styles.dialogDesc}>Enter the node's hex address:</p>
+            {knownPeers.length > 0 && (
+              <>
+                <p className={styles.dialogDesc}>Known peers</p>
+                <div className={styles.knownPeerList}>
+                  {knownPeers.map(addr => (
+                    <KnownPeerItem key={addr} addr={addr} onOpen={openDmByAddr} />
+                  ))}
+                </div>
+              </>
+            )}
+            <p className={styles.dialogDesc}>Or enter a node hex address:</p>
             <input
               className={styles.dialogInput}
               value={dmAddr}
