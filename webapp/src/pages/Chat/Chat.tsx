@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useStore } from '../../store/index';
 import { useConversation, useMyAddress } from '../../store/selectors';
-import { IconChat, IconBroadcast, IconHash } from '../../components/Icons';
+import { IconChat, IconBroadcast, IconHash, IconRoutes } from '../../components/Icons';
 import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
 import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
@@ -60,6 +60,11 @@ function MessageList({ conversationId }: { conversationId: string }) {
     setNearBottom(true);
     setShowJump(false);
   }, []);
+
+  useEffect(() => {
+    setNearBottom(true);
+    setShowJump(false);
+  }, [conversationId]);
 
   // Auto-scroll only when user is near bottom.
   useEffect(() => {
@@ -189,7 +194,7 @@ function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conve
         title={showRoutes ? 'Hide all routes' : 'Show all routes'}
         aria-label={showRoutes ? 'Hide all routes' : 'Show all routes'}
       >
-        ⇆
+        <IconRoutes size={14} />
       </button>
       {isChannel && <span className={styles.chevron}>▸</span>}
     </div>
