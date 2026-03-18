@@ -3700,13 +3700,12 @@ traffic_debug_t *mesh_get_traffic_debug(void) {
 }
 
 void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx, uint8_t sample_rate) {
+    /* F26: Update in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    
-    /* For now, we only support enabled/disabled.
-     * include_tx, include_rx, sample_rate are placeholders for future filtering */
     traffic_debug_enable(&s_traffic_debug, enabled);
-    
-    /* Persist config to NVS */
+    xSemaphoreGive(s_state_mutex);
+
+    /* Persist config to NVS (flash I/O — do NOT hold mesh mutex) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "enabled", enabled ? 1 : 0);
@@ -3716,17 +3715,17 @@ void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_r
         nvs_commit(nvs);
         nvs_close(nvs);
     }
-    
-    xSemaphoreGive(s_state_mutex);
+
     ESP_LOGI(TAG, "Traffic debug %s", enabled ? "enabled" : "disabled");
 }
 
 void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *include_rx, uint8_t *sample_rate) {
+    /* F26: Read in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    
     if (enabled) *enabled = traffic_debug_is_enabled(&s_traffic_debug);
-    
-    /* Load other config from NVS (not yet used in filtering logic) */
+    xSemaphoreGive(s_state_mutex);
+
+    /* Load other config from NVS (flash I/O — do NOT hold mesh mutex) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t val = 0;
@@ -3734,17 +3733,17 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
             *include_tx = (val != 0);
         else if (include_tx)
             *include_tx = true;  /* default */
-            
+
         if (include_rx && nvs_get_u8(nvs, "inc_rx", &val) == ESP_OK)
             *include_rx = (val != 0);
         else if (include_rx)
             *include_rx = true;  /* default */
-            
+
         if (sample_rate && nvs_get_u8(nvs, "sample", &val) == ESP_OK)
             *sample_rate = val;
         else if (sample_rate)
             *sample_rate = 100;  /* default: no sampling */
-            
+
         nvs_close(nvs);
     } else {
         /* NVS read failed, return defaults */
@@ -3752,8 +3751,6 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
         if (include_rx) *include_rx = true;
         if (sample_rate) *sample_rate = 100;
     }
-    
-    xSemaphoreGive(s_state_mutex);
 }
 
 void mesh_traffic_debug_load_config(void) {
