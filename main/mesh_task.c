@@ -750,11 +750,10 @@ static int send_beacon(void) {
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
-    /* Timesync: populate network_time and confidence from local sync state */
+    /* Timesync: piggyback network time on beacon when synchronized */
     if (s_timesync.synchronized) {
         beacon.network_time = (uint32_t)timesync_get_network_time(&s_timesync, now_ms());
         beacon.time_confidence = timesync_get_stratum(&s_timesync);
-        timesync_mark_emitted(&s_timesync, now_ms());
     } else {
         beacon.network_time = 0;
         beacon.time_confidence = 0xFFFF;  /* no confidence */
@@ -851,10 +850,10 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         s_neighbors.entries[idx].name[0] = '\0';
     }
 
-    /* Feed timesync from beacon (F23: wire up timesync component) */
+    /* Feed timesync from beacon — requires corroboration from multiple sources */
     if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
         timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
-                             (uint8_t)beacon.time_confidence, t);
+                             (uint8_t)beacon.time_confidence, beacon.src_addr, t);
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
