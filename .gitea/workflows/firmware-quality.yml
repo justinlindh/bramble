@@ -1,4 +1,4 @@
-name: Firmware Quality (Phase 2.3)
+name: Firmware Quality
 
 on:
   workflow_dispatch:
