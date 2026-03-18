@@ -161,7 +161,9 @@ export async function connect(type: TransportType, options?: { url?: string; tok
             const nodeAddr = useStore.getState().config?.identity?.address;
             const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
             await initMessageStore(addrHex);
-            await Promise.all([loadNeighbors(), loadRoutes(), opt(loadMessages()), loadAirtime()]);
+            await Promise.all([loadNeighbors(), loadRoutes(), loadAirtime()]);
+            // Keep loadMessages after initMessageStore so reconnect fetches persist into the right DB namespace.
+            await opt(loadMessages());
             await opt(syncDeliveryEventReplay());
           } catch { /* best effort */ }
         },
