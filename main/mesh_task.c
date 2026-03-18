@@ -24,6 +24,7 @@
 #include "location.h"
 #include "gps.h"
 #include "beacon.h"
+#include "timesync.h"
 #include "delivery_event_ring.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
@@ -162,6 +163,7 @@ static airtime_budget_t    s_airtime;
 #define TRAFFIC_DEBUG_CAPACITY 512
 static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t     s_traffic_debug;
+static timesync_state_t    s_timesync;
 
 /* Fragment reassembly context */
 static reassembly_ctx_t    s_reassembly;
@@ -748,10 +750,15 @@ static int send_beacon(void) {
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
-    /* TODO: timesync integration deferred — requires global timesync_state_t 
-     * and bidirectional packet flow. See components/timesync for implementation. */
-    beacon.network_time = 0;
-    beacon.time_confidence = 0xFFFF;  /* no confidence */
+    /* Timesync: populate network_time and confidence from local sync state */
+    if (s_timesync.synchronized) {
+        beacon.network_time = (uint32_t)timesync_get_network_time(&s_timesync, now_ms());
+        beacon.time_confidence = timesync_get_stratum(&s_timesync);
+        timesync_mark_emitted(&s_timesync, now_ms());
+    } else {
+        beacon.network_time = 0;
+        beacon.time_confidence = 0xFFFF;  /* no confidence */
+    }
 
     /* Include node name in beacon (if set) */
     if (s_node_name[0] != '\0') {
@@ -842,6 +849,12 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         s_neighbors.entries[idx].name[beacon.name_len] = '\0';
     } else if (idx >= 0) {
         s_neighbors.entries[idx].name[0] = '\0';
+    }
+
+    /* Feed timesync from beacon (F23: wire up timesync component) */
+    if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
+        timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
+                             (uint8_t)beacon.time_confidence, t);
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -3039,6 +3052,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     pending_ack_init(&s_pending_acks);
     airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
+    timesync_init(&s_timesync);
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
