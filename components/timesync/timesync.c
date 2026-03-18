@@ -1,14 +1,14 @@
 #include "timesync.h"
 #include <string.h>
 
-void timesync_init(timesync_state_t *ts) {
+void timesync_init(timesync_state_t* ts) {
     memset(ts, 0, sizeof(*ts));
     ts->stratum = MAX_STRATUM;
     ts->synchronized = false;
 }
 
 /* Remove entries older than PENDING_MAX_AGE_MS */
-static void purge_stale(timesync_state_t *ts, uint32_t local_now_ms) {
+static void purge_stale(timesync_state_t* ts, uint32_t local_now_ms) {
     int write = 0;
     for (int i = 0; i < ts->pending_count; i++) {
         uint32_t age = local_now_ms - ts->pending[i].timestamp_ms;
@@ -22,7 +22,7 @@ static void purge_stale(timesync_state_t *ts, uint32_t local_now_ms) {
 }
 
 /* Count distinct source addresses in pending pool */
-static int count_distinct_sources(const timesync_state_t *ts) {
+static int count_distinct_sources(const timesync_state_t* ts) {
     uint32_t seen[PENDING_POOL_SIZE];
     int n = 0;
     for (int i = 0; i < ts->pending_count; i++) {
@@ -42,7 +42,7 @@ static int count_distinct_sources(const timesync_state_t *ts) {
 
 /* Compute weighted average offset from pending pool.
  * Lower stratum = higher weight (MAX_STRATUM - stratum, min 1). */
-static int64_t compute_weighted_offset(const timesync_state_t *ts, uint8_t *best_stratum) {
+static int64_t compute_weighted_offset(const timesync_state_t* ts, uint8_t* best_stratum) {
     int64_t weighted_sum = 0;
     int total_weight = 0;
     uint8_t best = MAX_STRATUM;
@@ -64,9 +64,8 @@ static int64_t compute_weighted_offset(const timesync_state_t *ts, uint8_t *best
     return weighted_sum / total_weight;
 }
 
-int timesync_handle_sync(timesync_state_t *ts, int64_t remote_time_ms,
-                         uint8_t remote_stratum, uint32_t source_addr,
-                         uint32_t local_now_ms) {
+int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t remote_stratum,
+                         uint32_t source_addr, uint32_t local_now_ms) {
     /* Reject if remote stratum is not better than ours (when synchronized) */
     if (ts->synchronized && remote_stratum >= ts->stratum) {
         return -1;
@@ -136,10 +135,8 @@ check_commit:;
     return 1; /* Accepted and committed */
 }
 
-int64_t timesync_get_network_time(const timesync_state_t *ts, uint32_t local_now_ms) {
+int64_t timesync_get_network_time(const timesync_state_t* ts, uint32_t local_now_ms) {
     return (int64_t)local_now_ms + ts->offset_ms;
 }
 
-uint8_t timesync_get_stratum(const timesync_state_t *ts) {
-    return ts->stratum;
-}
+uint8_t timesync_get_stratum(const timesync_state_t* ts) { return ts->stratum; }
