@@ -2404,12 +2404,16 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                              pa->packet_id, pa->dest_addr,
                              pa->attempt + 1, pa->max_attempts);
                     
-                    /* Record retry attempt */
-                    traffic_debug_record_tx(&s_traffic_debug, pkt_type, pa->packet_len, pa->tier);
-                    
-                    radio_transmit(pa->packet_data, pa->packet_len);
+                    /* Route through LBT path for regulatory compliance (F22) */
+                    transmit_packet(pa->packet_data, pa->packet_len);
                     pa->attempt++;
-                    pa->next_retry_ms = t + tier_base_delay_ms(pa->tier) * pa->attempt;
+                    /* Exponential backoff with ±25% jitter (F25) */
+                    uint32_t delay = tier_base_delay_ms(pa->tier) << pa->attempt;
+                    uint32_t quarter = delay / 4;
+                    if (quarter > 0) {
+                        delay = delay - quarter + (esp_random() % (2 * quarter + 1));
+                    }
+                    pa->next_retry_ms = t + delay;
                 }
             }
         }
