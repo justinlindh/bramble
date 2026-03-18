@@ -610,6 +610,322 @@ paths:
               schema:
                 $ref: '#/components/schemas/OkResponse'
 
+
+  /rpc/bramble.getBattery:
+    post:
+      operationId: getBattery
+      summary: Get battery status
+      description: Returns current battery voltage and percentage.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Battery status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryStatusResponse'
+
+  /rpc/bramble.getGpsPosition:
+    post:
+      operationId: getGpsPosition
+      summary: Get GPS position
+      description: Returns current GPS fix data when GPS hardware is available.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: GPS position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GpsPositionResponse'
+
+  /rpc/bramble.getAudioStatus:
+    post:
+      operationId: getAudioStatus
+      summary: Get audio subsystem status
+      description: Returns audio availability, volume, mute state, and playback status.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Audio status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioStatusResponse'
+
+  /rpc/bramble.getStorageInfo:
+    post:
+      operationId: getStorageInfo
+      summary: Get storage info
+      description: Returns SD card presence and mount-point information.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Storage status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageInfoResponse'
+
+  /rpc/bramble.getAuthToken:
+    post:
+      operationId: getAuthToken
+      summary: Get WebSocket auth token
+      description: Returns current WebSocket auth token and whether auth is enabled.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Auth token status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAuthTokenResponse'
+
+  /rpc/bramble.getBeaconPolicy:
+    post:
+      operationId: getBeaconPolicy
+      summary: Get beacon policy configuration and status
+      description: Returns adaptive beacon policy config and current runtime status.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Beacon policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetBeaconPolicyResponse'
+
+  /rpc/bramble.setAuthToken:
+    post:
+      operationId: setAuthToken
+      summary: Set or clear WebSocket auth token
+      description: Sets auth token when non-empty, or clears token when empty.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAuthTokenParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Auth token updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.setBeaconPolicy:
+    post:
+      operationId: setBeaconPolicy
+      summary: Configure beacon policy
+      description: Updates fixed/adaptive beacon policy parameters.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBeaconPolicyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Beacon policy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.setBroadcastTelemetryMode:
+    post:
+      operationId: setBroadcastTelemetryMode
+      summary: Set broadcast telemetry mode
+      description: Sets telemetry emission mode for broadcast delivery events.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBroadcastTelemetryModeParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Broadcast telemetry mode updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetBroadcastTelemetryModeResponse'
+
+  /rpc/bramble.setBacklight:
+    post:
+      operationId: setBacklight
+      summary: Set display backlight level
+      description: Sets display backlight level from 0 to 255.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBacklightParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Backlight updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacklightResponse'
+
+  /rpc/bramble.sleep:
+    post:
+      operationId: sleep
+      summary: Enter deep sleep
+      description: Enters deep sleep immediately, optionally with timer wake.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SleepParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Sleep initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SleepResponse'
+
+  /rpc/bramble.playTone:
+    post:
+      operationId: playTone
+      summary: Play a predefined tone
+      description: Plays one of the predefined audio tones.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayToneParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Tone playback requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyParams'
+
+  /rpc/bramble.setVolume:
+    post:
+      operationId: setVolume
+      summary: Set audio volume
+      description: Sets audio output volume from 0 to 100.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetVolumeParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Volume updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyParams'
+
+  /rpc/bramble.setMuted:
+    post:
+      operationId: setMuted
+      summary: Set audio mute state
+      description: Enables or disables audio mute.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMutedParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Mute state updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyParams'
+
+  /rpc/bramble.otaUpdate:
+    post:
+      operationId: otaUpdate
+      summary: Start OTA firmware update
+      description: Starts an OTA update task from an HTTP(S) URL.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTAUpdateParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: OTA started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OTAUpdateResponse'
+
   # ── Adaptive Airtime Policy Methods ────────────────────────────────────────
 
   /rpc/bramble.getAirtimePolicy:
@@ -1641,6 +1957,242 @@ components:
         cooldownSec:
           type: integer
           description: Minimum time (seconds) between mode transitions (hysteresis).
+
+
+    BatteryStatusResponse:
+      type: object
+      required: [voltage_mv, percentage]
+      properties:
+        voltage_mv:
+          type: integer
+        percentage:
+          type: integer
+
+    GpsPositionResponse:
+      type: object
+      required: [valid]
+      properties:
+        lat:
+          type: number
+        lon:
+          type: number
+        alt:
+          type: number
+        speed_kmh:
+          type: number
+        heading_deg:
+          type: number
+        accuracy_m:
+          type: number
+        timestamp:
+          type: integer
+        valid:
+          type: boolean
+
+    AudioStatusResponse:
+      type: object
+      required: [available, volume, muted, playing]
+      properties:
+        available:
+          type: boolean
+        volume:
+          type: integer
+        muted:
+          type: boolean
+        playing:
+          type: boolean
+
+    StorageInfoResponse:
+      type: object
+      required: [sd_present]
+      properties:
+        sd_present:
+          type: boolean
+        mount_point:
+          type: string
+
+    GetAuthTokenResponse:
+      type: object
+      required: [token, enabled]
+      properties:
+        token:
+          type: string
+        enabled:
+          type: boolean
+
+    BeaconPolicyConfig:
+      type: object
+      required: [enabled, mode, baseIntervalMs, minIntervalMs, maxIntervalMs, denseThreshold, churnThreshold, churnWindowMs]
+      properties:
+        enabled:
+          type: boolean
+        mode:
+          type: string
+          enum: [fixed, adaptive]
+        baseIntervalMs:
+          type: integer
+        minIntervalMs:
+          type: integer
+        maxIntervalMs:
+          type: integer
+        denseThreshold:
+          type: integer
+        churnThreshold:
+          type: integer
+        churnWindowMs:
+          type: integer
+
+    BeaconPolicyStatus:
+      type: object
+      required: [activeMode, currentIntervalMs, neighborCount, churnEvents, lastTransitionMs, inBackoff]
+      properties:
+        activeMode:
+          type: string
+          enum: [fixed, adaptive]
+        currentIntervalMs:
+          type: integer
+        neighborCount:
+          type: integer
+        churnEvents:
+          type: integer
+        lastTransitionMs:
+          type: integer
+        inBackoff:
+          type: boolean
+
+    GetBeaconPolicyResponse:
+      type: object
+      required: [config, status]
+      properties:
+        config:
+          $ref: '#/components/schemas/BeaconPolicyConfig'
+        status:
+          $ref: '#/components/schemas/BeaconPolicyStatus'
+
+    SetAuthTokenParams:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 127
+          description: Token string. Set empty string to clear.
+
+    SetBeaconPolicyParams:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        mode:
+          type: string
+          enum: [fixed, adaptive]
+        baseIntervalMs:
+          type: integer
+        minIntervalMs:
+          type: integer
+        maxIntervalMs:
+          type: integer
+        denseThreshold:
+          type: integer
+        churnThreshold:
+          type: integer
+        churnWindowMs:
+          type: integer
+
+    SetBroadcastTelemetryModeParams:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [off, recipient_only, path_sampled]
+
+    SetBroadcastTelemetryModeResponse:
+      type: object
+      required: [ok, broadcast_telemetry_mode]
+      properties:
+        ok:
+          type: boolean
+        broadcast_telemetry_mode:
+          type: string
+          enum: [off, recipient_only, path_sampled]
+
+    SetBacklightParams:
+      type: object
+      required: [level]
+      properties:
+        level:
+          type: integer
+          minimum: 0
+          maximum: 255
+
+    BacklightResponse:
+      type: object
+      required: [level]
+      properties:
+        level:
+          type: integer
+
+    SleepParams:
+      type: object
+      properties:
+        wake_after_s:
+          type: integer
+          minimum: 1
+
+    SleepResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        wake_after_s:
+          type: integer
+        note:
+          type: string
+
+    PlayToneParams:
+      type: object
+      required: [tone]
+      properties:
+        tone:
+          type: string
+          enum: [message_rx, message_tx, peer_join, peer_leave, error, boot, gps_fix]
+
+    SetVolumeParams:
+      type: object
+      required: [volume]
+      properties:
+        volume:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    SetMutedParams:
+      type: object
+      required: [muted]
+      properties:
+        muted:
+          type: boolean
+
+    OTAUpdateParams:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: HTTP or HTTPS URL to firmware image.
+
+    OTAUpdateResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        note:
+          type: string
+        partition:
+          type: string
 
     BroadcastDeliveryNotification:
       type: object
