@@ -1,6 +1,11 @@
 import '@testing-library/jest-dom';
 import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 
+// Suppress console.debug in tests — store debug logging is noisy
+const originalDebug = console.debug;
+console.debug = (..._args: unknown[]) => {}; // eslint-disable-line @typescript-eslint/no-unused-vars
+afterAll(() => { console.debug = originalDebug; });
+
 (globalThis as unknown as { indexedDB: IDBFactory }).indexedDB = indexedDB;
 (globalThis as unknown as { IDBKeyRange: typeof globalThis.IDBKeyRange }).IDBKeyRange = IDBKeyRange;
 
