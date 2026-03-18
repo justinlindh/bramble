@@ -47,6 +47,16 @@ function friendlyError(raw: string): string {
 }
 
 let client: BrambleClient | null = null;
+const LAST_NODE_ADDR_KEY = 'bramble:last-node-addr';
+
+function readLastKnownNodeAddrHex(): string | undefined {
+  try {
+    const raw = localStorage.getItem(LAST_NODE_ADDR_KEY);
+    return raw ? raw.toUpperCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function loadConnectionCapabilities(): Promise<void> {
   const capabilities = await fetchConnectionCapabilities();
@@ -159,9 +169,13 @@ export async function connect(type: TransportType, options?: { url?: string; tok
             const opt = (p: Promise<void>) => p.catch(() => {});
             await opt(loadConfig());
             const nodeAddr = useStore.getState().config?.identity?.address;
-            const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+            const addrHex = nodeAddr
+              ? nodeAddr.toString(16).toUpperCase().padStart(8, '0')
+              : readLastKnownNodeAddrHex();
             await initMessageStore(addrHex);
-            await Promise.all([loadNeighbors(), loadRoutes(), opt(loadMessages()), loadAirtime()]);
+            await Promise.all([loadNeighbors(), loadRoutes(), loadAirtime()]);
+            // Keep loadMessages after initMessageStore so reconnect fetches persist into the right DB namespace.
+            await opt(loadMessages());
             await opt(syncDeliveryEventReplay());
           } catch { /* best effort */ }
         },
@@ -207,11 +221,12 @@ export async function connect(type: TransportType, options?: { url?: string; tok
       await opt(loadConfig());
       nodeAddr = store.config?.identity?.address;
     }
-    const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+    const configAddrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
     // Persist last-known address so we can recover if config fails on next connect
-    if (addrHex) {
-      try { localStorage.setItem('bramble:last-node-addr', addrHex); } catch {}
+    if (configAddrHex) {
+      try { localStorage.setItem(LAST_NODE_ADDR_KEY, configAddrHex); } catch {}
     }
+    const addrHex = configAddrHex ?? readLastKnownNodeAddrHex();
     await initMessageStore(addrHex);
 
     if (type === 'serial') {
@@ -475,7 +490,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   }
   // Persist newly fetched messages to IndexedDB so they survive reconnects
   if (newFromFirmware.length > 0) {
-    messageDb.saveMessages(newFromFirmware).catch(() => {});
+    await messageDb.saveMessages(newFromFirmware).catch(() => {});
   }
 }
 
@@ -882,7 +897,17 @@ export async function sendMessage(
     throw new Error(`Message too long (${messageBytes} bytes). Max is ${FRAGMENTED_MAX_BYTES} bytes.`);
   }
 
-  const myAddr = store.config?.identity?.address ?? 0;
+  const fallbackAddr = (() => {
+    try {
+      const raw = localStorage.getItem(LAST_NODE_ADDR_KEY);
+      if (!raw) return undefined;
+      const parsed = parseInt(raw, 16);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const myAddr = store.config?.identity?.address ?? fallbackAddr ?? 0;
   const msg = {
     id: uuid(),
     direction: 'outgoing' as const,

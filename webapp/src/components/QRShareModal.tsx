@@ -18,6 +18,7 @@ export function QRShareModal({
 }: QRShareModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   // Render QR code into canvas
   useEffect(() => {
@@ -33,14 +34,30 @@ export function QRShareModal({
   }, [shareString]);
 
   const handleCopy = async () => {
+    setCopyError(null);
     try {
       await navigator.clipboard.writeText(shareString);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      return;
     } catch {
-      // Fallback: select the text field
-      const el = document.getElementById('qr-share-string') as HTMLInputElement;
-      el?.select();
+      // Fallback for older/locked-down clipboard APIs.
+      const el = document.getElementById('qr-share-string') as HTMLInputElement | null;
+      if (el) {
+        el.focus();
+        el.select();
+        try {
+          const ok = document.execCommand('copy');
+          if (ok) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+            return;
+          }
+        } catch {
+          // handled below
+        }
+      }
+      setCopyError('Could not copy automatically. Please select and copy manually.');
     }
   };
 
@@ -81,6 +98,11 @@ export function QRShareModal({
         <p className={styles.hint}>
           Scan the QR code or share the text string to add this on another device.
         </p>
+        {copyError && (
+          <p className={styles.hint} role="status" aria-live="polite">
+            {copyError}
+          </p>
+        )}
       </div>
     </div>
   );
