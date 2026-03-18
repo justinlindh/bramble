@@ -47,6 +47,16 @@ function friendlyError(raw: string): string {
 }
 
 let client: BrambleClient | null = null;
+const LAST_NODE_ADDR_KEY = 'bramble:last-node-addr';
+
+function readLastKnownNodeAddrHex(): string | undefined {
+  try {
+    const raw = localStorage.getItem(LAST_NODE_ADDR_KEY);
+    return raw ? raw.toUpperCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function loadConnectionCapabilities(): Promise<void> {
   const capabilities = await fetchConnectionCapabilities();
@@ -159,7 +169,9 @@ export async function connect(type: TransportType, options?: { url?: string; tok
             const opt = (p: Promise<void>) => p.catch(() => {});
             await opt(loadConfig());
             const nodeAddr = useStore.getState().config?.identity?.address;
-            const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+            const addrHex = nodeAddr
+              ? nodeAddr.toString(16).toUpperCase().padStart(8, '0')
+              : readLastKnownNodeAddrHex();
             await initMessageStore(addrHex);
             await Promise.all([loadNeighbors(), loadRoutes(), loadAirtime()]);
             // Keep loadMessages after initMessageStore so reconnect fetches persist into the right DB namespace.
@@ -209,11 +221,12 @@ export async function connect(type: TransportType, options?: { url?: string; tok
       await opt(loadConfig());
       nodeAddr = store.config?.identity?.address;
     }
-    const addrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+    const configAddrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
     // Persist last-known address so we can recover if config fails on next connect
-    if (addrHex) {
-      try { localStorage.setItem('bramble:last-node-addr', addrHex); } catch {}
+    if (configAddrHex) {
+      try { localStorage.setItem(LAST_NODE_ADDR_KEY, configAddrHex); } catch {}
     }
+    const addrHex = configAddrHex ?? readLastKnownNodeAddrHex();
     await initMessageStore(addrHex);
 
     if (type === 'serial') {
@@ -886,7 +899,7 @@ export async function sendMessage(
 
   const fallbackAddr = (() => {
     try {
-      const raw = localStorage.getItem('bramble:last-node-addr');
+      const raw = localStorage.getItem(LAST_NODE_ADDR_KEY);
       if (!raw) return undefined;
       const parsed = parseInt(raw, 16);
       return Number.isFinite(parsed) ? parsed : undefined;
