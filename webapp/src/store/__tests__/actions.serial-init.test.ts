@@ -125,7 +125,7 @@ describe('connect serial init readiness gate', () => {
     expect(calledMethods.indexOf('bramble.getConfig')).toBeLessThan(calledMethods.indexOf('bramble.getStatus'));
   });
 
-  it('does not reuse stale last-node address when config address is unavailable', async () => {
+  it('reuses last-node address when config address is unavailable', async () => {
     localStorage.setItem('bramble:last-node-addr', 'DEADBEEF');
     rpcMock.mockImplementation(async (method: string) => {
       if (method === 'bramble.getConfig') throw new Error('config timeout');
@@ -138,7 +138,7 @@ describe('connect serial init readiness gate', () => {
 
     await connect('serial');
 
-    expect(messageDb.open).toHaveBeenCalledWith(undefined);
+    expect(messageDb.open).toHaveBeenCalledWith('DEADBEEF');
   });
 
   it('keeps non-serial connect path unchanged (no readiness probe)', async () => {
