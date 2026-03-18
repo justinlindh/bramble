@@ -1356,7 +1356,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                     uint32_t first_frag_pkt_id = reassembly_get_first_packet_id(
                         &s_reassembly, frag_hdr.message_id);
 
-                    size_t reasm_sz = FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT;
+                    size_t reasm_sz = frag_hdr.frag_total * FRAG_MAX_PLAINTEXT;  /* F27: size to actual count */
                     uint8_t *reassembled = malloc(reasm_sz);
                     if (!reassembled) {
                         ESP_LOGE(TAG, "OOM for reassembly buffer");
