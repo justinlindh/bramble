@@ -475,7 +475,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   }
   // Persist newly fetched messages to IndexedDB so they survive reconnects
   if (newFromFirmware.length > 0) {
-    messageDb.saveMessages(newFromFirmware).catch(() => {});
+    await messageDb.saveMessages(newFromFirmware).catch(() => {});
   }
 }
 
