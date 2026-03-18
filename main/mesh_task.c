@@ -2731,6 +2731,12 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         ESP_LOGE(TAG, "No channels initialized");
         return -1;
     }
+    /* F24: Validate s_channels[0] is actually the public channel */
+    if (s_channels[0].channel_id != 0) {
+        ESP_LOGE(TAG, "mesh_send_broadcast: s_channels[0] is not the public channel (id=%u)",
+                 (unsigned)s_channels[0].channel_id);
+        return -1;
+    }
     ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u", (unsigned)s_channels[0].channel_id);
 
     /* Estimate airtime for rate-limit check */
