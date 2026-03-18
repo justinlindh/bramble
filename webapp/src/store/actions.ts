@@ -884,7 +884,17 @@ export async function sendMessage(
     throw new Error(`Message too long (${messageBytes} bytes). Max is ${FRAGMENTED_MAX_BYTES} bytes.`);
   }
 
-  const myAddr = store.config?.identity?.address ?? 0;
+  const fallbackAddr = (() => {
+    try {
+      const raw = localStorage.getItem('bramble:last-node-addr');
+      if (!raw) return undefined;
+      const parsed = parseInt(raw, 16);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const myAddr = store.config?.identity?.address ?? fallbackAddr ?? 0;
   const msg = {
     id: uuid(),
     direction: 'outgoing' as const,
