@@ -24,6 +24,7 @@
 #include "location.h"
 #include "gps.h"
 #include "beacon.h"
+#include "timesync.h"
 #include "delivery_event_ring.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
@@ -162,6 +163,7 @@ static airtime_budget_t    s_airtime;
 #define TRAFFIC_DEBUG_CAPACITY 512
 static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
 static traffic_debug_t     s_traffic_debug;
+static timesync_state_t    s_timesync;
 
 /* Fragment reassembly context */
 static reassembly_ctx_t    s_reassembly;
@@ -748,10 +750,14 @@ static int send_beacon(void) {
     beacon.tx_queue_depth = 0;
     beacon.neighbor_count = (uint8_t)neighbor_count(&s_neighbors);
     beacon.flags = s_mailbox_enabled ? MAILBOX_BEACON_FLAG : 0;
-    /* TODO: timesync integration deferred — requires global timesync_state_t 
-     * and bidirectional packet flow. See components/timesync for implementation. */
-    beacon.network_time = 0;
-    beacon.time_confidence = 0xFFFF;  /* no confidence */
+    /* Timesync: piggyback network time on beacon when synchronized */
+    if (s_timesync.synchronized) {
+        beacon.network_time = (uint32_t)timesync_get_network_time(&s_timesync, now_ms());
+        beacon.time_confidence = timesync_get_stratum(&s_timesync);
+    } else {
+        beacon.network_time = 0;
+        beacon.time_confidence = 0xFFFF;  /* no confidence */
+    }
 
     /* Include node name in beacon (if set) */
     if (s_node_name[0] != '\0') {
@@ -842,6 +848,12 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         s_neighbors.entries[idx].name[beacon.name_len] = '\0';
     } else if (idx >= 0) {
         s_neighbors.entries[idx].name[0] = '\0';
+    }
+
+    /* Feed timesync from beacon — requires corroboration from multiple sources */
+    if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
+        timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
+                             (uint8_t)beacon.time_confidence, beacon.src_addr, t);
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -1356,7 +1368,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                     uint32_t first_frag_pkt_id = reassembly_get_first_packet_id(
                         &s_reassembly, frag_hdr.message_id);
 
-                    size_t reasm_sz = FRAG_MAX_FRAGMENTS * FRAG_MAX_PLAINTEXT;
+                    size_t reasm_sz = frag_hdr.frag_total * FRAG_MAX_PLAINTEXT;  /* F27: size to actual count */
                     uint8_t *reassembled = malloc(reasm_sz);
                     if (!reassembled) {
                         ESP_LOGE(TAG, "OOM for reassembly buffer");
@@ -2404,12 +2416,16 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                              pa->packet_id, pa->dest_addr,
                              pa->attempt + 1, pa->max_attempts);
                     
-                    /* Record retry attempt */
-                    traffic_debug_record_tx(&s_traffic_debug, pkt_type, pa->packet_len, pa->tier);
-                    
-                    radio_transmit(pa->packet_data, pa->packet_len);
+                    /* Route through LBT path for regulatory compliance (F22) */
+                    transmit_packet(pa->packet_data, pa->packet_len);
                     pa->attempt++;
-                    pa->next_retry_ms = t + tier_base_delay_ms(pa->tier) * pa->attempt;
+                    /* Exponential backoff with ±25% jitter (F25) */
+                    uint32_t delay = tier_base_delay_ms(pa->tier) << pa->attempt;
+                    uint32_t quarter = delay / 4;
+                    if (quarter > 0) {
+                        delay = delay - quarter + (esp_random() % (2 * quarter + 1));
+                    }
+                    pa->next_retry_ms = t + delay;
                 }
             }
         }
@@ -2727,6 +2743,12 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         ESP_LOGE(TAG, "No channels initialized");
         return -1;
     }
+    /* F24: Validate s_channels[0] is actually the public channel */
+    if (s_channels[0].channel_id != 0) {
+        ESP_LOGE(TAG, "mesh_send_broadcast: s_channels[0] is not the public channel (id=%u)",
+                 (unsigned)s_channels[0].channel_id);
+        return -1;
+    }
     ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u", (unsigned)s_channels[0].channel_id);
 
     /* Estimate airtime for rate-limit check */
@@ -3029,6 +3051,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     pending_ack_init(&s_pending_acks);
     airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
+    timesync_init(&s_timesync);
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
     mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
@@ -3696,13 +3719,12 @@ traffic_debug_t *mesh_get_traffic_debug(void) {
 }
 
 void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx, uint8_t sample_rate) {
+    /* F26: Update in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    
-    /* For now, we only support enabled/disabled.
-     * include_tx, include_rx, sample_rate are placeholders for future filtering */
     traffic_debug_enable(&s_traffic_debug, enabled);
-    
-    /* Persist config to NVS */
+    xSemaphoreGive(s_state_mutex);
+
+    /* Persist config to NVS (flash I/O — do NOT hold mesh mutex) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "enabled", enabled ? 1 : 0);
@@ -3712,17 +3734,17 @@ void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_r
         nvs_commit(nvs);
         nvs_close(nvs);
     }
-    
-    xSemaphoreGive(s_state_mutex);
+
     ESP_LOGI(TAG, "Traffic debug %s", enabled ? "enabled" : "disabled");
 }
 
 void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *include_rx, uint8_t *sample_rate) {
+    /* F26: Read in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    
     if (enabled) *enabled = traffic_debug_is_enabled(&s_traffic_debug);
-    
-    /* Load other config from NVS (not yet used in filtering logic) */
+    xSemaphoreGive(s_state_mutex);
+
+    /* Load other config from NVS (flash I/O — do NOT hold mesh mutex) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t val = 0;
@@ -3730,17 +3752,17 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
             *include_tx = (val != 0);
         else if (include_tx)
             *include_tx = true;  /* default */
-            
+
         if (include_rx && nvs_get_u8(nvs, "inc_rx", &val) == ESP_OK)
             *include_rx = (val != 0);
         else if (include_rx)
             *include_rx = true;  /* default */
-            
+
         if (sample_rate && nvs_get_u8(nvs, "sample", &val) == ESP_OK)
             *sample_rate = val;
         else if (sample_rate)
             *sample_rate = 100;  /* default: no sampling */
-            
+
         nvs_close(nvs);
     } else {
         /* NVS read failed, return defaults */
@@ -3748,8 +3770,6 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
         if (include_rx) *include_rx = true;
         if (sample_rate) *sample_rate = 100;
     }
-    
-    xSemaphoreGive(s_state_mutex);
 }
 
 void mesh_traffic_debug_load_config(void) {
