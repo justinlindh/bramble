@@ -462,7 +462,7 @@ static void mesh_emit_location_event(const char *event,
         snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, peer_addr);
         cJSON_AddStringToObject(params, "peer", addr_buf);
     }
-    cJSON_AddNumberToObject(params, "tier", tier);
+    cJSON_AddStringToObject(params, "tier", location_tier_to_string(tier));
     cJSON_AddNumberToObject(params, "timestamp_ms", timestamp_ms);
     if (rssi != 0 || snr != 0) {
         cJSON_AddNumberToObject(params, "rssi", rssi);
