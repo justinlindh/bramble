@@ -55,6 +55,11 @@ static char s_line_buf[BLE_RPC_BUF_SIZE];
 static size_t s_line_len = 0;
 static char s_device_name[32] = "Bramble";
 static bool s_ble_authenticated = false;
+static uint8_t s_auth_fail_count = 0;
+
+/* S21: rate-limit BLE auth attempts */
+#define BLE_AUTH_MAX_FAILS 5
+#define BLE_AUTH_THROTTLE_MS 100
 
 /* Deferred RPC processing — can't call notify from GATT access context */
 static QueueHandle_t s_rpc_queue = NULL;
@@ -124,17 +129,26 @@ static void ble_rpc_task(void* param) {
             char resp[BLE_RPC_BUF_SIZE];
             if (!s_ble_authenticated) {
                 if (!ble_authenticate_first_write(msg.data)) {
+                    s_auth_fail_count++;
+                    ESP_LOGW(TAG, "BLE auth failed (attempt %u/%u)", s_auth_fail_count,
+                             BLE_AUTH_MAX_FAILS);
                     const char* unauthorized =
                         "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":"
                         "\"unauthorized: first BLE write must be auth token\"},\"id\":null}";
-                    ESP_LOGW(TAG, "Rejected unauthenticated BLE client (invalid first write)");
                     ble_notify_cb(unauthorized, strlen(unauthorized), NULL);
-                    if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-                        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+                    /* Throttle guessing: 100ms delay before next attempt */
+                    vTaskDelay(pdMS_TO_TICKS(BLE_AUTH_THROTTLE_MS));
+                    if (s_auth_fail_count >= BLE_AUTH_MAX_FAILS) {
+                        ESP_LOGW(TAG, "BLE auth: max failures reached, disconnecting client");
+                        if (s_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+                            ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+                        }
+                        s_auth_fail_count = 0;
                     }
                     continue;
                 }
 
+                s_auth_fail_count = 0; /* reset on successful auth */
                 const char* ok = "{\"jsonrpc\":\"2.0\",\"result\":{\"ok\":true},\"id\":null}";
                 ble_notify_cb(ok, strlen(ok), NULL);
                 continue;
@@ -266,12 +280,13 @@ static void start_advertising(void) {
         return;
     }
 
-    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params,
+    /* S22: advertise with random address, not permanent public MAC */
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params,
                            gap_event_handler, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_start failed: %d", rc);
     } else {
-        ESP_LOGI(TAG, "BLE advertising started as '%s'", s_device_name);
+        ESP_LOGI(TAG, "BLE advertising started as '%s' (random addr)", s_device_name);
     }
 }
 
@@ -299,6 +314,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         s_rx_notify_enabled = false;
         s_ble_authenticated = false;
+        s_auth_fail_count = 0;
         s_mtu = BLE_MTU_DEFAULT + 3;
         s_line_len = 0;
         start_advertising();
@@ -332,8 +348,17 @@ static void ble_host_task(void* param) {
 }
 
 static void on_sync(void) {
-    /* Use best address type available */
-    int rc = ble_hs_util_ensure_addr(0);
+    /*
+     * S22: prefer a static random address so we do not advertise with the
+     * permanent public MAC (which enables passive location tracking).
+     * prefer_random=1 generates a static random address if one isn't set.
+     *
+     * Full RPA (Resolvable Private Address) with periodic rotation requires
+     * bonding/IRK infrastructure that isn't implemented yet.  Static random
+     * is a meaningful improvement in the interim — it stops passive MAC-based
+     * tracking by scanners that never connect.
+     */
+    int rc = ble_hs_util_ensure_addr(1);
     if (rc != 0) {
         ESP_LOGE(TAG, "ensure_addr failed: %d", rc);
         return;
