@@ -112,4 +112,19 @@ describe('LocationSection hybrid policy controls', () => {
     expect((screen.getByLabelText('Enable location sharing') as HTMLInputElement).checked).toBe(false);
     expect((screen.getByLabelText('Default tier') as HTMLSelectElement).value).toBe('coarse');
   });
+
+  it('shows tier description for the selected default tier', () => {
+    render(<LocationSection location={makeLocation()} neighbors={[]} channels={channels} gpsAvailable />);
+
+    expect(screen.getByText('Approximate area (grid square ~1km).')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Default tier'), { target: { value: 'presence' } });
+    expect(screen.getByText('Online status only; no coordinates.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Default tier'), { target: { value: 'off' } });
+    expect(screen.getByText('Location not shared.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Default tier'), { target: { value: 'full' } });
+    expect(screen.getByText('Precise GPS coordinates.')).toBeInTheDocument();
+  });
 });

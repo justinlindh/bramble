@@ -50,6 +50,7 @@
 .dotBlue { background: #4a90d9; }
 .dotGreen { background: #4caf50; }
 .dotYellow { background: #ffc107; }
+.dotGray { background: #9aa4b2; }
 
 .routeLineDirect,
 .routeLineMultiHop {
