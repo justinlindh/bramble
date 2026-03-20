@@ -34,6 +34,13 @@ const SOURCE_OPTIONS: Array<{ value: LocationSource; label: string }> = [
   { value: 'manual', label: 'Manual only' },
 ];
 
+const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
+  off: 'Location not shared.',
+  presence: 'Online status only; no coordinates.',
+  coarse: 'Approximate area (grid square ~1km).',
+  full: 'Precise GPS coordinates.',
+};
+
 const DEFAULT_INTERVAL = 300;
 
 function toHexAddress(addr: number): string {
@@ -160,6 +167,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
           {TIER_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
       </div>
+      <div className={styles.dim} aria-label="Default tier description">{TIER_DESCRIPTIONS[tier]}</div>
 
       <div className={styles.row}>
         <label className={styles.label} htmlFor="location-interval">Interval (seconds)</label>
