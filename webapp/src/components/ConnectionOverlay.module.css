@@ -140,13 +140,23 @@
 }
 
 .spinner {
-  display: inline-block;
-  animation: pulse 1s ease-in-out infinite;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+.spinnerIcon {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--accent-blue) 35%, white);
+  border-top-color: #fff;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .mockDivider {

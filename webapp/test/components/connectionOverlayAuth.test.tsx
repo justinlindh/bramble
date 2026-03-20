@@ -70,4 +70,13 @@ describe('ConnectionOverlay auth token flow', () => {
     const tokenInput = screen.getByLabelText('Auth Token (optional)');
     expect(tokenInput.className).toMatch(/authErrorField/);
   });
+
+  it('shows a visual spinner while BLE scanning is in progress', () => {
+    useStore.setState({ connectionState: 'connecting' } as any);
+    vi.stubGlobal('navigator', { ...navigator, bluetooth: {} });
+    render(<ConnectionOverlay />);
+
+    fireEvent.click(screen.getByRole('button', { name: /bluetooth/i }));
+    expect(screen.getByLabelText('Scanning in progress')).toBeInTheDocument();
+  });
 });
