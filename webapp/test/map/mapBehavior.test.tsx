@@ -1,0 +1,98 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render } from '@testing-library/react';
+
+const fitBoundsMock = vi.fn();
+const circleMarkerMock = vi.fn();
+
+const mapMock = {
+  setView: vi.fn(function () { return mapMock; }),
+  fitBounds: fitBoundsMock,
+  remove: vi.fn(),
+  removeLayer: vi.fn(),
+};
+
+const markerLikeLayer = () => {
+  const layer: any = {
+    bindPopup: vi.fn(() => layer),
+    bindTooltip: vi.fn(() => layer),
+    addTo: vi.fn(() => layer),
+  };
+  return layer;
+};
+
+vi.mock('leaflet', () => {
+  const L = {
+    Icon: { Default: { prototype: {}, mergeOptions: vi.fn() } },
+    map: vi.fn(() => mapMock),
+    tileLayer: vi.fn(() => ({ addTo: vi.fn() })),
+    layerGroup: vi.fn(() => {
+      const group = { addTo: vi.fn(() => group), clearLayers: vi.fn() };
+      return group;
+    }),
+    latLng: vi.fn((lat: number, lon: number) => ({ lat, lng: lon })),
+    latLngBounds: vi.fn(() => ({ pad: vi.fn(() => ({ mockedBounds: true })) })),
+    circleMarker: vi.fn((...args: any[]) => {
+      circleMarkerMock(...args);
+      return markerLikeLayer();
+    }),
+    circle: vi.fn(() => markerLikeLayer()),
+    rectangle: vi.fn(() => markerLikeLayer()),
+    polyline: vi.fn(() => markerLikeLayer()),
+  };
+  return { __esModule: true, default: L };
+});
+
+let state: any;
+vi.mock('../../src/store/index', () => ({
+  useStore: (selector: any) => selector(state),
+}));
+
+import { Map as MapPage } from '../../src/pages/Map/Map';
+
+describe('Map behavior', () => {
+  beforeEach(() => {
+    fitBoundsMock.mockClear();
+    circleMarkerMock.mockClear();
+    state = {
+      config: { identity: { address: 0x11111111, name: 'Self' }, location: { enabled: true, default_tier: 'coarse', interval_s: 300, source: 'gps' } },
+      peerLocations: [
+        { addr: 0x22222222, tier: 'full', position: { lat: 10, lon: 20, accuracy: 15 } },
+      ],
+      status: null,
+      peerNames: new globalThis.Map<number, string>([[0x22222222, 'Peer 2']]),
+      routes: [],
+      showRoutes: false,
+      setShowRoutes: vi.fn(),
+      mapFocusAddr: null,
+      setMapFocusAddr: vi.fn(),
+    };
+  });
+
+  it('does not refit bounds when peer set is unchanged across polls', () => {
+    const { rerender } = render(<MapPage />);
+    expect(fitBoundsMock).toHaveBeenCalledTimes(1);
+
+    state = {
+      ...state,
+      peerLocations: [
+        { addr: 0x22222222, tier: 'full', position: { lat: 11, lon: 21, accuracy: 10 } },
+      ],
+    };
+
+    rerender(<MapPage />);
+    expect(fitBoundsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a fallback marker for presence-tier peers with grid square', () => {
+    state = {
+      ...state,
+      peerLocations: [
+        { addr: 0x33333333, tier: 'presence', gridSquare: 'CM87ss' },
+      ],
+      peerNames: new globalThis.Map<number, string>([[0x33333333, 'Presence Peer']]),
+    };
+
+    render(<MapPage />);
+    expect(circleMarkerMock).toHaveBeenCalledTimes(1);
+  });
+});

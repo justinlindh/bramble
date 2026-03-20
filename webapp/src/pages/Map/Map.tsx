@@ -101,6 +101,7 @@ export function Map() {
   const leafletMap = useRef<L.Map | null>(null);
   const markerLayer = useRef<L.LayerGroup | null>(null);
   const routeLayer = useRef<L.LayerGroup | null>(null);
+  const lastFitPeerKeyRef = useRef<string | null>(null);
 
   const config = useStore(s => s.config);
   const peerLocations = useStore(s => s.peerLocations);
@@ -156,6 +157,14 @@ export function Map() {
 
     ml.clearLayers();
     const bounds: L.LatLng[] = [];
+    const visiblePeerKey = peerLocations
+      .filter(peer => (selfAddr === undefined || peer.addr !== selfAddr) && (
+        (peer.tier === 'full' && !!peer.position) ||
+        ((peer.tier === 'coarse' || peer.tier === 'presence') && !!peer.gridSquare)
+      ))
+      .map(peer => peer.addr)
+      .sort((a, b) => a - b)
+      .join(',');
 
     // Self
     if (selfPos) {
@@ -207,11 +216,31 @@ export function Map() {
           const center = gridSquareToLatLon(peer.gridSquare);
           if (center) bounds.push(L.latLng(center[0], center[1]));
         }
+      } else if (peer.tier === 'presence' && peer.gridSquare) {
+        const center = gridSquareToLatLon(peer.gridSquare);
+        if (center) {
+          const ll = L.latLng(center[0], center[1]);
+          bounds.push(ll);
+          L.circleMarker(ll, {
+            radius: 6,
+            color: '#9aa4b2',
+            fillColor: '#9aa4b2',
+            fillOpacity: 0.35,
+            weight: 2,
+            dashArray: '3 3',
+          }).bindPopup(
+            `<b>${nodeLabel(peer.addr, peerDisplayName)}</b><br/>Tier: presence<br/>Approximate location (grid: ${peer.gridSquare})`
+          ).bindTooltip(
+            `${nodeLabel(peer.addr, peerDisplayName)} · approximate location`,
+            { permanent: true, direction: 'top', offset: [0, -10], className: styles.nodeLabelTooltip }
+          ).addTo(ml);
+        }
       }
     }
 
-    if (bounds.length > 0) {
+    if (bounds.length > 0 && lastFitPeerKeyRef.current !== visiblePeerKey) {
       map.fitBounds(L.latLngBounds(bounds).pad(0.2));
+      lastFitPeerKeyRef.current = visiblePeerKey;
     }
   }, [selfPos, selfAddr, selfName, peerLocations, peerNames]);
 
@@ -299,6 +328,9 @@ export function Map() {
         </span>
         <span className={styles.legendItem}>
           <span className={`${styles.dot} ${styles.dotYellow}`} /> Zone peer
+        </span>
+        <span className={styles.legendItem}>
+          <span className={`${styles.dot} ${styles.dotGray}`} /> Presence peer (approx.)
         </span>
 
         <span className={styles.legendItem}>
