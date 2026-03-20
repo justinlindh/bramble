@@ -229,7 +229,10 @@ export function ConnectionOverlay() {
           disabled={isConnecting || (transportType === 'wifi' && !wifiIp.trim())}
         >
           {isConnecting ? (
-            <span className={styles.spinner}>{connectingLabelFor(transportType)}</span>
+            <span className={styles.spinner}>
+              {transportType === 'ble' && <span className={styles.spinnerIcon} aria-label="Scanning in progress" />}
+              {connectingLabelFor(transportType)}
+            </span>
           ) : (
             'Connect'
           )}
