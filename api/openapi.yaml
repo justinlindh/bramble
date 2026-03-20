@@ -1047,6 +1047,337 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetTrafficEventsResponse'
 
+  # ── Auth Methods ──────────────────────────────────────────────────────────
+
+  /rpc/bramble.setAuthToken:
+    post:
+      operationId: setAuthToken
+      summary: Set WebSocket authentication token
+      description: >
+        Sets the token required to authenticate WebSocket connections.
+        Pass an empty string to disable authentication and allow open access.
+        Changes take effect immediately for new connections.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAuthTokenParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Auth token updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.getAuthToken:
+    post:
+      operationId: getAuthToken
+      summary: Get WebSocket authentication token
+      description: Returns the current authentication token and whether auth is enabled.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Auth token info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAuthTokenResponse'
+
+  # ── OTA ───────────────────────────────────────────────────────────────────
+
+  /rpc/bramble.otaUpdate:
+    post:
+      operationId: otaUpdate
+      summary: Start an OTA firmware update
+      description: >
+        Initiates a firmware OTA update from the given URL. Returns immediately;
+        the node reboots automatically on success. HTTP URLs are rejected in release
+        builds unless CONFIG_BRAMBLE_OTA_ALLOW_HTTP is set.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtaUpdateParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: OTA started or error details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaUpdateResponse'
+
+  # ── Hardware / Power ───────────────────────────────────────────────────────
+
+  /rpc/bramble.getBattery:
+    post:
+      operationId: getBattery
+      summary: Get battery status
+      description: Returns battery voltage in millivolts and estimated charge percentage.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Battery status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetBatteryResponse'
+
+  /rpc/bramble.setBacklight:
+    post:
+      operationId: setBacklight
+      summary: Set display backlight brightness
+      description: >
+        Sets the display backlight PWM duty cycle (0 = off, 255 = full brightness).
+        Returns an error if the board has no backlight control pin.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBacklightParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Backlight updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetBacklightResponse'
+
+  /rpc/bramble.sleep:
+    post:
+      operationId: sleep
+      summary: Enter deep sleep
+      description: >
+        Puts the node into ESP deep sleep. Wake sources are LoRa DIO1 (any incoming
+        radio packet) and optionally a timer. The RPC response is sent before sleep begins.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SleepParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Sleep acknowledged (node will enter deep sleep after response flushes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SleepResponse'
+
+  /rpc/bramble.getGpsPosition:
+    post:
+      operationId: getGpsPosition
+      summary: Get current GPS position
+      description: >
+        Returns the latest GPS fix. Returns valid=false on boards without GPS
+        capability or when no fix is currently available.
+        Use bramble.onGpsEvent notifications for fix transition events.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: GPS position (or not-supported indicator)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetGpsPositionResponse'
+
+  # ── Storage (T-Deck Plus only) ─────────────────────────────────────────────
+
+  /rpc/bramble.getStorageInfo:
+    post:
+      operationId: getStorageInfo
+      summary: Get SD card storage info (T-Deck Plus only)
+      description: >
+        Returns SD card presence and mount point.
+        Only registered on boards built with CONFIG_BRAMBLE_BOARD_TDECK_PLUS.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Storage status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetStorageInfoResponse'
+
+  # ── Audio (T-Deck Plus only) ───────────────────────────────────────────────
+
+  /rpc/bramble.playTone:
+    post:
+      operationId: playTone
+      summary: Play a predefined audio tone (T-Deck Plus only)
+      description: >
+        Plays a named alert tone on the T-Deck Plus audio hardware.
+        Only registered on boards built with CONFIG_BRAMBLE_BOARD_TDECK_PLUS.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayToneParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Tone queued for playback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyParams'
+
+  /rpc/bramble.setVolume:
+    post:
+      operationId: setVolume
+      summary: Set audio volume (T-Deck Plus only)
+      description: >
+        Sets audio output volume 0–100.
+        Only registered on boards built with CONFIG_BRAMBLE_BOARD_TDECK_PLUS.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetVolumeParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Volume updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyParams'
+
+  /rpc/bramble.setMuted:
+    post:
+      operationId: setMuted
+      summary: Mute or unmute audio (T-Deck Plus only)
+      description: >
+        Mutes or unmutes the audio output.
+        Only registered on boards built with CONFIG_BRAMBLE_BOARD_TDECK_PLUS.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMutedParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Mute state updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyParams'
+
+  /rpc/bramble.getAudioStatus:
+    post:
+      operationId: getAudioStatus
+      summary: Get audio status (T-Deck Plus only)
+      description: >
+        Returns audio hardware availability, volume level, mute state, and
+        playback status. Only registered on boards with CONFIG_BRAMBLE_BOARD_TDECK_PLUS.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Audio status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAudioStatusResponse'
+
+  # ── Beacon Policy ──────────────────────────────────────────────────────────
+
+  /rpc/bramble.setBeaconPolicy:
+    post:
+      operationId: setBeaconPolicy
+      summary: Configure beacon transmission policy
+      description: >
+        Sets beacon mode (fixed or adaptive) and timing parameters.
+        All fields are optional; omitted fields retain their current values.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetBeaconPolicyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Beacon policy updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.getBeaconPolicy:
+    post:
+      operationId: getBeaconPolicy
+      summary: Get beacon policy configuration and runtime status
+      description: Returns the current beacon policy configuration and live runtime status.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Beacon policy config and status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetBeaconPolicyResponse'
+
 components:
   schemas:
     # ── Primitives / Empty ───────────────────────────────────────────────────
@@ -2435,6 +2766,317 @@ components:
         count:
           type: integer
           description: Number of recipients in a location send cycle.
+
+    # ── Auth ─────────────────────────────────────────────────────────────────
+
+    SetAuthTokenParams:
+      type: object
+      description: Parameters for bramble.setAuthToken.
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: >
+            Auth token string (max 127 chars). Pass an empty string to disable
+            authentication and allow open access.
+          maxLength: 127
+
+    GetAuthTokenResponse:
+      type: object
+      description: Response from bramble.getAuthToken.
+      required: [token, enabled]
+      properties:
+        token:
+          type: string
+          description: Current token string (empty string when auth is disabled).
+        enabled:
+          type: boolean
+          description: True when a non-empty token is configured.
+
+    # ── OTA ──────────────────────────────────────────────────────────────────
+
+    OtaUpdateParams:
+      type: object
+      description: Parameters for bramble.otaUpdate.
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: >
+            Firmware binary URL (http:// or https://). HTTP URLs are rejected in
+            release builds unless CONFIG_BRAMBLE_OTA_ALLOW_HTTP is set.
+
+    OtaUpdateResponse:
+      type: object
+      description: Response from bramble.otaUpdate.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: True when the OTA task started successfully.
+        note:
+          type: string
+          description: Informational message about OTA status.
+        partition:
+          type: string
+          description: Name of the currently running partition.
+        error:
+          type: string
+          description: Error message when ok=false.
+
+    # ── Hardware / Power ──────────────────────────────────────────────────────
+
+    GetBatteryResponse:
+      type: object
+      description: Response from bramble.getBattery.
+      required: [voltage_mv, percentage]
+      properties:
+        voltage_mv:
+          type: integer
+          description: Battery voltage in millivolts.
+        percentage:
+          type: integer
+          description: Estimated battery charge percentage (0–100).
+
+    SetBacklightParams:
+      type: object
+      description: Parameters for bramble.setBacklight.
+      required: [level]
+      properties:
+        level:
+          type: integer
+          description: Backlight PWM duty cycle (0 = off, 255 = full brightness).
+          minimum: 0
+          maximum: 255
+
+    SetBacklightResponse:
+      type: object
+      description: Response from bramble.setBacklight.
+      required: [level]
+      properties:
+        level:
+          type: integer
+          description: Applied backlight duty cycle after range clamping.
+
+    SleepParams:
+      type: object
+      description: Parameters for bramble.sleep. All fields optional.
+      properties:
+        wake_after_s:
+          type: integer
+          description: >
+            Timer wake interval in seconds. If omitted or 0 the node wakes only
+            on LoRa DIO1 (incoming radio packet).
+          minimum: 1
+
+    SleepResponse:
+      type: object
+      description: Response from bramble.sleep.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          description: Always true when deep sleep is about to begin.
+        note:
+          type: string
+          description: Human-readable description of the configured wake source.
+        wake_after_s:
+          type: integer
+          description: Timer wake interval that was applied (present only when requested).
+
+    GetGpsPositionResponse:
+      type: object
+      description: Response from bramble.getGpsPosition.
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+          description: >
+            True when a GPS fix is available and all position fields are populated.
+            False when GPS is not available or no fix has been acquired.
+        lat:
+          type: number
+          description: Latitude in decimal degrees.
+        lon:
+          type: number
+          description: Longitude in decimal degrees.
+        alt:
+          type: number
+          description: Altitude in meters.
+        speed_kmh:
+          type: number
+          description: Ground speed in km/h.
+        heading_deg:
+          type: number
+          description: Heading in degrees (0–360, 0 = North).
+        accuracy_m:
+          type: integer
+          description: Horizontal accuracy estimate in meters.
+        timestamp:
+          type: integer
+          description: Unix timestamp of the GPS fix (seconds).
+
+    # ── Storage (T-Deck Plus only) ─────────────────────────────────────────
+
+    GetStorageInfoResponse:
+      type: object
+      description: Response from bramble.getStorageInfo (T-Deck Plus only).
+      required: [sd_present]
+      properties:
+        sd_present:
+          type: boolean
+          description: True when an SD card is inserted and mounted.
+        mount_point:
+          type: string
+          description: Filesystem mount path (present only when sd_present=true).
+
+    # ── Audio (T-Deck Plus only) ───────────────────────────────────────────
+
+    PlayToneParams:
+      type: object
+      description: Parameters for bramble.playTone (T-Deck Plus only).
+      required: [tone]
+      properties:
+        tone:
+          type: string
+          description: Predefined tone name to play.
+          enum: [message_rx, message_tx, peer_join, peer_leave, error, boot, gps_fix]
+
+    SetVolumeParams:
+      type: object
+      description: Parameters for bramble.setVolume (T-Deck Plus only).
+      required: [volume]
+      properties:
+        volume:
+          type: integer
+          description: Audio volume level (0 = silent, 100 = maximum).
+          minimum: 0
+          maximum: 100
+
+    SetMutedParams:
+      type: object
+      description: Parameters for bramble.setMuted (T-Deck Plus only).
+      required: [muted]
+      properties:
+        muted:
+          type: boolean
+          description: True to mute audio output; false to unmute.
+
+    GetAudioStatusResponse:
+      type: object
+      description: Response from bramble.getAudioStatus (T-Deck Plus only).
+      required: [available, volume, muted, playing]
+      properties:
+        available:
+          type: boolean
+          description: True when audio hardware is initialised and functional.
+        volume:
+          type: integer
+          description: Current volume level (0–100).
+        muted:
+          type: boolean
+          description: True when audio is muted.
+        playing:
+          type: boolean
+          description: True when a tone is currently playing.
+
+    # ── Beacon Policy ──────────────────────────────────────────────────────
+
+    BeaconPolicyConfig:
+      type: object
+      description: Beacon transmission policy configuration.
+      required: [enabled, mode, baseIntervalMs, minIntervalMs, maxIntervalMs, denseThreshold, churnThreshold, churnWindowMs]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether beacon transmission is enabled.
+        mode:
+          type: string
+          enum: [fixed, adaptive]
+          description: fixed = constant interval; adaptive = density/churn-driven.
+        baseIntervalMs:
+          type: integer
+          description: Baseline beacon interval in milliseconds (adaptive stable mode).
+        minIntervalMs:
+          type: integer
+          description: Minimum beacon interval in milliseconds (adaptive churn mode).
+        maxIntervalMs:
+          type: integer
+          description: Maximum beacon interval in milliseconds (adaptive dense mode).
+        denseThreshold:
+          type: integer
+          description: Neighbor count above which dense mode activates.
+        churnThreshold:
+          type: integer
+          description: Join/leave events within churnWindowMs that trigger churn mode.
+        churnWindowMs:
+          type: integer
+          description: Sliding window duration for churn event detection in milliseconds.
+
+    BeaconPolicyStatus:
+      type: object
+      description: Beacon policy runtime status.
+      required: [activeMode, currentIntervalMs, neighborCount, churnEvents, lastTransitionMs, inBackoff]
+      properties:
+        activeMode:
+          type: string
+          enum: [fixed, adaptive]
+          description: Currently active beacon mode.
+        currentIntervalMs:
+          type: integer
+          description: Current beacon interval in milliseconds.
+        neighborCount:
+          type: integer
+          description: Number of direct neighbors at last policy evaluation.
+        churnEvents:
+          type: integer
+          description: Number of churn events detected in the current window.
+        lastTransitionMs:
+          type: integer
+          description: Timestamp (ms since boot) of the last mode transition.
+        inBackoff:
+          type: boolean
+          description: True when the beacon timer is in a rate-limiting backoff period.
+
+    SetBeaconPolicyParams:
+      type: object
+      description: Parameters for bramble.setBeaconPolicy. All fields optional.
+      properties:
+        enabled:
+          type: boolean
+          description: Enable or disable beacon transmission.
+        mode:
+          type: string
+          enum: [fixed, adaptive]
+          description: Beacon timing mode.
+        baseIntervalMs:
+          type: integer
+          description: Baseline beacon interval in milliseconds.
+        minIntervalMs:
+          type: integer
+          description: Minimum beacon interval in milliseconds.
+        maxIntervalMs:
+          type: integer
+          description: Maximum beacon interval in milliseconds.
+        denseThreshold:
+          type: integer
+          description: Neighbor count threshold for dense mode.
+        churnThreshold:
+          type: integer
+          description: Churn event count to trigger churn mode.
+        churnWindowMs:
+          type: integer
+          description: Churn detection window in milliseconds.
+
+    GetBeaconPolicyResponse:
+      type: object
+      description: Response from bramble.getBeaconPolicy.
+      required: [config, status]
+      properties:
+        config:
+          $ref: '#/components/schemas/BeaconPolicyConfig'
+        status:
+          $ref: '#/components/schemas/BeaconPolicyStatus'
 
 # ── Notifications (extension) ──────────────────────────────────────────────
 
