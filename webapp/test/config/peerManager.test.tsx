@@ -56,4 +56,19 @@ describe('PeerManager contact import/export', () => {
       expect(stored[String(0x89abcdef)]).toBe('New Contact');
     });
   });
+
+  it('allows editing and persisting notes for a peer', async () => {
+    localStorage.setItem('bramble:peerNames', JSON.stringify({ [0x1234abcd]: 'Alice' }));
+
+    render(<PeerManager neighbors={neighbors} routes={routes} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText('Peer notes'), { target: { value: 'Met at meetup' } });
+    fireEvent.click(screen.getByRole('button', { name: '✓' }));
+
+    await waitFor(() => {
+      const storedNotes = JSON.parse(localStorage.getItem('bramble:peerNotes') || '{}');
+      expect(storedNotes[String(0x1234abcd)]).toBe('Met at meetup');
+    });
+  });
 });
