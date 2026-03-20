@@ -21,6 +21,7 @@ import type {
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
+const ACTIVE_TAB_KEY = 'bramble-active-tab';
 
 function loadShowRoutes(): boolean {
   try {
@@ -33,6 +34,22 @@ function loadShowRoutes(): boolean {
 function saveShowRoutes(show: boolean): void {
   try {
     localStorage.setItem(ROUTE_VISIBILITY_KEY, show ? '1' : '0');
+  } catch {
+    // noop
+  }
+}
+
+function loadActiveTab(): string {
+  try {
+    return localStorage.getItem(ACTIVE_TAB_KEY) || 'chat';
+  } catch {
+    return 'chat';
+  }
+}
+
+function saveActiveTab(tab: string): void {
+  try {
+    localStorage.setItem(ACTIVE_TAB_KEY, tab);
   } catch {
     // noop
   }
@@ -120,7 +137,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   messages: [],
   conversations: new Map(),
   activeConversationId: 'broadcast',
-  activeTab: 'chat',
+  activeTab: loadActiveTab(),
   showRoutes: loadShowRoutes(),
   probeResult: null,
   peerNames: new Map(),
@@ -280,7 +297,10 @@ export const useStore = create<AppState & Actions>((set) => ({
       }),
     })),
 
-  setActiveTab: (tab: string) => set({ activeTab: tab }),
+  setActiveTab: (tab: string) => {
+    saveActiveTab(tab);
+    set({ activeTab: tab });
+  },
   setShowRoutes: (show: boolean) => {
     saveShowRoutes(show);
     set({ showRoutes: show });

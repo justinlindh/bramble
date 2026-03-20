@@ -130,16 +130,20 @@ interface PeerEntry {
 interface PeerRowProps {
   peer: PeerEntry;
   name: string | undefined;
+  note: string | undefined;
   onSaveName: (addr: number, name: string) => void;
+  onSaveNote: (addr: number, note: string) => void;
 }
 
-function PeerRow({ peer, name, onSaveName }: PeerRowProps) {
+function PeerRow({ peer, name, note, onSaveName, onSaveNote }: PeerRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name ?? '');
+  const [draftNote, setDraftNote] = useState(note ?? '');
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onSaveName(peer.addr, draft.trim());
+    onSaveNote(peer.addr, draftNote.trim());
     setEditing(false);
   };
 
@@ -157,6 +161,14 @@ function PeerRow({ peer, name, onSaveName }: PeerRowProps) {
             placeholder="Enter name"
             onChange={(e) => setDraft(e.target.value)}
             aria-label="Peer name"
+          />
+          <textarea
+            className={styles.notesInput}
+            value={draftNote}
+            maxLength={256}
+            placeholder="Notes (optional)"
+            onChange={(e) => setDraftNote(e.target.value)}
+            aria-label="Peer notes"
           />
           <button className={styles.saveNameBtn} type="submit">
             ✓
@@ -176,6 +188,7 @@ function PeerRow({ peer, name, onSaveName }: PeerRowProps) {
           ) : (
             <span className={styles.noName}>—</span>
           )}
+          {note && <span className={styles.peerNote}>{note}</span>}
           {peer.lastHeardMs !== undefined && (
             <span className={styles.lastHeard}>{formatAgo(peer.lastHeardMs)}</span>
           )}
@@ -183,9 +196,10 @@ function PeerRow({ peer, name, onSaveName }: PeerRowProps) {
             className={styles.editBtn}
             onClick={() => {
               setDraft(name ?? '');
+              setDraftNote(note ?? '');
               setEditing(true);
             }}
-            title="Edit name"
+            title="Edit peer details"
           >
             ✏ Edit
           </button>
@@ -241,6 +255,19 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     });
     // Sync to Zustand store so Chat/Map reflect the name immediately (BUG-09)
     useStore.getState().setPeerName(addr, name);
+  };
+
+  const handleSaveNote = (addr: number, note: string) => {
+    setNotes((prev) => {
+      const next = new Map(prev);
+      if (note) {
+        next.set(addr, note);
+      } else {
+        next.delete(addr);
+      }
+      saveNotes(next);
+      return next;
+    });
   };
 
   const handleAddContact = (e: React.FormEvent) => {
@@ -390,7 +417,9 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
               key={p.addr}
               peer={p}
               name={names.get(p.addr)}
+              note={notes.get(p.addr)}
               onSaveName={handleSaveName}
+              onSaveNote={handleSaveNote}
             />
           ))
         )}
