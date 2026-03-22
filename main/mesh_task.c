@@ -26,6 +26,7 @@
 #include "beacon.h"
 #include "timesync.h"
 #include "delivery_event_ring.h"
+#include "mailbox.h"
 #include "esp_heap_caps.h"
 #include "cJSON.h"
 
@@ -207,19 +208,10 @@ static uint32_t            s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
 static int                 s_recent_broadcast_idx = 0;
 static broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
 
-/* Mailbox — store-and-forward for offline neighbors */
+/* Mailbox — store-and-forward for offline neighbors (backed by components/mailbox) */
 static bool s_mailbox_enabled = false;
 #define MAILBOX_BEACON_FLAG 0x01
-#define MAX_MAILBOX_MSGS 20
-#define MAILBOX_EXPIRY_MS (3600 * 1000)  /* 1 hour */
-typedef struct {
-    uint32_t dest_addr;
-    uint8_t  raw_pkt[BRAMBLE_MAX_PACKET_SIZE];
-    uint8_t  raw_len;
-    uint32_t timestamp;
-    bool     used;
-} mailbox_entry_t;
-static mailbox_entry_t s_mailbox[MAX_MAILBOX_MSGS];
+static mailbox_t s_mailbox;
 
 /* Location policy engine tick state */
 static uint32_t s_location_last_policy_tick_ms = 0;
@@ -1846,49 +1838,46 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 
 /* ── Mailbox helpers ─────────────────────────────────────────────────── */
 
-static bool mailbox_store(uint32_t dest_addr, const uint8_t *raw, uint8_t raw_len) {
+static bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr,
+                               const uint8_t *raw, uint8_t raw_len,
+                               uint32_t packet_id) {
     if (!s_mailbox_enabled) return false;
 
-    /* Find free slot (or oldest) */
-    int slot = -1;
-    uint32_t oldest_ts = UINT32_MAX;
-    int oldest_slot = 0;
-    for (int i = 0; i < MAX_MAILBOX_MSGS; i++) {
-        if (!s_mailbox[i].used) { slot = i; break; }
-        if (s_mailbox[i].timestamp < oldest_ts) {
-            oldest_ts = s_mailbox[i].timestamp;
-            oldest_slot = i;
-        }
+    /* Component payload is capped at MAILBOX_MAX_PAYLOAD (200) bytes.
+     * Raw packets that exceed this limit cannot be buffered — drop with a warning. */
+    if (raw_len > MAILBOX_MAX_PAYLOAD) {
+        ESP_LOGW(TAG, "Mailbox: packet too large to store (%u > %u bytes), dropping for %08" PRIX32,
+                 raw_len, (unsigned)MAILBOX_MAX_PAYLOAD, dest_addr);
+        return false;
     }
-    if (slot < 0) slot = oldest_slot; /* evict oldest */
 
-    s_mailbox[slot].dest_addr = dest_addr;
-    memcpy(s_mailbox[slot].raw_pkt, raw, raw_len);
-    s_mailbox[slot].raw_len = raw_len;
-    s_mailbox[slot].timestamp = now_ms();
-    s_mailbox[slot].used = true;
-
-    ESP_LOGI(TAG, "Mailbox: stored packet for %08" PRIX32 " (slot %d)", dest_addr, slot);
-    return true;
+    int rc = mailbox_store(&s_mailbox, src_addr, dest_addr,
+                           raw, raw_len, packet_id, now_ms());
+    if (rc == 0) {
+        ESP_LOGI(TAG, "Mailbox: stored packet for %08" PRIX32 " (id=%08" PRIX32 ")",
+                 dest_addr, packet_id);
+        return true;
+    } else if (rc == -2) {
+        ESP_LOGD(TAG, "Mailbox: duplicate packet id=%08" PRIX32 ", not stored", packet_id);
+    } else {
+        ESP_LOGW(TAG, "Mailbox: store failed (rc=%d) for %08" PRIX32, rc, dest_addr);
+    }
+    return false;
 }
 
 static void mailbox_flush_for(uint32_t dest_addr) {
-    for (int i = 0; i < MAX_MAILBOX_MSGS; i++) {
-        if (s_mailbox[i].used && s_mailbox[i].dest_addr == dest_addr) {
-            ESP_LOGI(TAG, "Mailbox: delivering stored packet to %08" PRIX32, dest_addr);
-            transmit_packet(s_mailbox[i].raw_pkt, s_mailbox[i].raw_len);
-            s_mailbox[i].used = false;
-        }
+    mailbox_entry_t entries[MAILBOX_MAX_PER_DEST];
+    int count = mailbox_retrieve(&s_mailbox, dest_addr, entries, MAILBOX_MAX_PER_DEST);
+    for (int i = 0; i < count; i++) {
+        ESP_LOGI(TAG, "Mailbox: delivering stored packet to %08" PRIX32
+                 " (id=%08" PRIX32 " len=%u)",
+                 dest_addr, entries[i].packet_id, entries[i].payload_len);
+        transmit_packet(entries[i].payload, (uint8_t)entries[i].payload_len);
     }
 }
 
 static void mailbox_expire(uint32_t t) {
-    for (int i = 0; i < MAX_MAILBOX_MSGS; i++) {
-        if (s_mailbox[i].used && (t - s_mailbox[i].timestamp) > MAILBOX_EXPIRY_MS) {
-            ESP_LOGW(TAG, "Mailbox: expired packet for %08" PRIX32, s_mailbox[i].dest_addr);
-            s_mailbox[i].used = false;
-        }
-    }
+    mailbox_purge_expired(&s_mailbox, t);
 }
 
 static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_header_t *header) {
@@ -1900,8 +1889,15 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     /* Look up route to destination */
     route_entry_t *route = route_lookup(&s_routes, header->dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
+        /* Extract src_addr from the data packet header area (offset HEADER_SIZE) */
+        uint32_t fwd_src_addr = 0;
+        if (len >= HEADER_SIZE + 4) {
+            memcpy(&fwd_src_addr, data + HEADER_SIZE, 4);
+        }
         /* If mailbox enabled, store for later delivery instead of dropping */
-        if (s_mailbox_enabled && mailbox_store(header->dest_addr, data, len)) {
+        if (s_mailbox_enabled &&
+            mesh_mailbox_store(fwd_src_addr, header->dest_addr,
+                               data, len, header->packet_id)) {
             ESP_LOGI(TAG, "No route to %08" PRIX32 " — stored in mailbox", header->dest_addr);
         } else {
             ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
@@ -3122,8 +3118,11 @@ void mesh_task_start(bramble_identity_t *identity) {
         }
     }
 
-    /* Load mailbox enabled state from NVS */
+    /* Initialize component mailbox and load enabled state from NVS */
     {
+        mailbox_init(&s_mailbox);
+        s_mailbox.enabled = true; /* component always ready; runtime gate is s_mailbox_enabled */
+
         nvs_handle_t mb_nvs;
         if (nvs_open(NVS_NS_MAILBOX, NVS_READONLY, &mb_nvs) == ESP_OK) {
             uint8_t enabled = 0;
@@ -3133,7 +3132,8 @@ void mesh_task_start(bramble_identity_t *identity) {
             }
             nvs_close(mb_nvs);
         }
-        memset(s_mailbox, 0, sizeof(s_mailbox));
+        ESP_LOGI(TAG, "Mailbox component initialized: max_entries=%d per_dest=%d per_src=%d ttl=24h",
+                 MAILBOX_MAX_ENTRIES, MAILBOX_MAX_PER_DEST, MAILBOX_MAX_PER_SOURCE);
     }
 
     s_state_mutex = xSemaphoreCreateMutex();
