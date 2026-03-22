@@ -1474,6 +1474,9 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     }
     cJSON_AddStringToObject(result, "broadcast_telemetry_mode", mode);
 
+    /* Mailbox enabled state */
+    cJSON_AddBoolToObject(result, "mailboxEnabled", mesh_get_mailbox());
+
     return 0;
 }
 
