@@ -380,6 +380,7 @@ target_include_directories(test_location PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
@@ -524,6 +525,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -556,6 +558,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -588,6 +591,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -726,6 +730,7 @@ add_executable(test_rpc_methods_firmware
     stubs/esp_stubs.c
     stubs/cJSON.c
     stubs/rpc_methods_test_stubs.c
+    stubs/wifi_ws_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
@@ -753,6 +758,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -814,6 +820,7 @@ target_include_directories(test_audio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/audio/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_compile_definitions(test_audio PRIVATE
     FREERTOS_TASK_CUSTOM_IMPL=1
@@ -844,6 +851,7 @@ target_include_directories(test_button PRIVATE
 target_include_directories(test_wifi_manager PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_compile_definitions(test_wifi_manager PRIVATE
     CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S=1
