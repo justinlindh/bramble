@@ -6,6 +6,7 @@
 #include <string.h>
 #include "esp_stubs.h"
 #include "nvs.h"
+#include "esp_wifi.h"
 
 typedef struct {
     uint32_t event_seq;
@@ -165,7 +166,9 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 }
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
-void mesh_set_mailbox(bool e) { (void)e; }
+bool g_stub_mailbox_enabled = false;
+void mesh_set_mailbox(bool e) { g_stub_mailbox_enabled = e; }
+bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
 void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
 bool mesh_get_beacon_status(void) { return true; }
@@ -588,3 +591,6 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
 }
 
 void ws_server_load_token(void) {}
+const char *ws_server_get_token(void) { return ""; }
+esp_err_t esp_wifi_get_mac(int ifx, uint8_t mac[6]) { (void)ifx; (void)mac; return 1; /* ESP_FAIL */ }
+esp_err_t esp_wifi_ap_get_sta_list(wifi_sta_list_t *list) { (void)list; return 1; /* ESP_FAIL */ }

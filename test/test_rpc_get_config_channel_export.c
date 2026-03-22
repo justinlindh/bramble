@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 
+extern bool g_stub_mailbox_enabled;
 extern int g_mesh_channel_count;
 extern int g_mesh_default_channel;
 extern char g_mesh_channel_names[8][20];
@@ -69,6 +70,8 @@ void setUp(void) {
     memset(g_nvs_loc_kv, 0, sizeof(g_nvs_loc_kv));
     g_nvs_loc_blob_count = 0;
     memset(g_nvs_loc_blob, 0, sizeof(g_nvs_loc_blob));
+
+    g_stub_mailbox_enabled = false;
 }
 
 void tearDown(void) {}
@@ -246,6 +249,36 @@ void test_get_peer_locations_exports_peer_identity_and_timestamps(void) {
     cJSON_Delete(root);
 }
 
+void test_get_config_returns_mailbox_enabled_false_by_default(void) {
+    g_stub_mailbox_enabled = false;
+
+    cJSON *root = dispatch_get_config();
+    cJSON *result = cJSON_GetObjectItem(root, "result");
+    TEST_ASSERT_NOT_NULL(result);
+
+    cJSON *mailbox_enabled = cJSON_GetObjectItem(result, "mailboxEnabled");
+    TEST_ASSERT_NOT_NULL_MESSAGE(mailbox_enabled, "mailboxEnabled field must be present in getConfig response");
+    TEST_ASSERT_TRUE(cJSON_IsBool(mailbox_enabled));
+    TEST_ASSERT_FALSE(cJSON_IsTrue(mailbox_enabled));
+
+    cJSON_Delete(root);
+}
+
+void test_get_config_returns_mailbox_enabled_true_when_set(void) {
+    g_stub_mailbox_enabled = true;
+
+    cJSON *root = dispatch_get_config();
+    cJSON *result = cJSON_GetObjectItem(root, "result");
+    TEST_ASSERT_NOT_NULL(result);
+
+    cJSON *mailbox_enabled = cJSON_GetObjectItem(result, "mailboxEnabled");
+    TEST_ASSERT_NOT_NULL_MESSAGE(mailbox_enabled, "mailboxEnabled field must be present in getConfig response");
+    TEST_ASSERT_TRUE(cJSON_IsBool(mailbox_enabled));
+    TEST_ASSERT_TRUE(cJSON_IsTrue(mailbox_enabled));
+
+    cJSON_Delete(root);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_config_uses_persisted_name_and_psk_when_runtime_cache_missing);
@@ -254,5 +287,7 @@ int main(void) {
     RUN_TEST(test_get_config_ignores_legacy_location_contact_keys);
     RUN_TEST(test_get_config_location_includes_canonical_fields_shape);
     RUN_TEST(test_get_peer_locations_exports_peer_identity_and_timestamps);
+    RUN_TEST(test_get_config_returns_mailbox_enabled_false_by_default);
+    RUN_TEST(test_get_config_returns_mailbox_enabled_true_when_set);
     return UNITY_END();
 }
