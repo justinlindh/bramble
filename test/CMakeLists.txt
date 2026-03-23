@@ -926,3 +926,14 @@ target_compile_options(test_host_rpc_methods PRIVATE
     -Wno-error=unused-parameter
 )
 target_link_libraries(test_host_rpc_methods m)
+
+# Mailbox integration wrapper tests (mesh_task.c wrapper logic, no ESP-IDF deps)
+# Tests: store-when-disabled, store-when-enabled, flush-for, expire/TTL
+add_executable(test_mailbox_wrappers
+    test_mailbox_wrappers.c
+    unity/unity.c
+)
+target_include_directories(test_mailbox_wrappers PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
+)
+add_test(NAME test_mailbox_wrappers COMMAND test_mailbox_wrappers)
