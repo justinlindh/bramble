@@ -9,7 +9,7 @@ idf_component_register(
              wifi esp_http_server mdns esp_netif msg_store spiffs
              ble reliability battery ota board_config
              keyboard trackball location gps sdcard audio
-             ui_graphics traffic_debug fragment timesync
+             ui_graphics traffic_debug fragment timesync mailbox
 
     PRIV_REQUIRES lvgl__lvgl
 )
