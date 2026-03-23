@@ -205,7 +205,9 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
-void mesh_set_mailbox(bool e) { (void)e; }
+bool g_stub_mailbox_enabled = false;
+void mesh_set_mailbox(bool e) { g_stub_mailbox_enabled = e; }
+bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
 void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
 bool mesh_get_beacon_status(void) { return true; }
