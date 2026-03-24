@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const MOCK_SERVER_URL = process.env.MOCK_SERVER_URL || 'ws://localhost:3005';
+const MOCK_SERVER_URL = process.env.MOCK_SERVER_URL || 'ws://localhost:3099';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serverPath = resolve(__dirname, '../../mock/server.mjs');
 
