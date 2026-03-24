@@ -48,10 +48,26 @@ See also:
 | `location` | `components/location/` | Private location sharing with tiered privacy |
 | `group` | `components/group/` | Group DM management and key derivation |
 | `coding` | `components/coding/` | XOR network coding for bidirectional relay |
+| `msg_store` | `components/msg_store/` | Message persistence (SPIFFS-backed message history) |
+| `audio` | `components/audio/` | Audio playback (tones, alerts) |
+| `battery` | `components/battery/` | Battery voltage monitoring and reporting |
+| `gps` | `components/gps/` | GPS/GNSS driver and NMEA parser |
+| `wifi` | `components/wifi/` | Wi-Fi station/AP mode management |
+| `sdcard` | `components/sdcard/` | SD card storage driver |
+| `bramble_probe` | `components/bramble_probe/` | Network reachability probe sweep |
+| `freq_plan` | `components/freq_plan/` | Regional frequency plan definitions |
+| `nvs_keys` | `components/nvs_keys/` | Central NVS namespace/key registry |
+| `rpc` | `components/rpc/` | JSON-RPC dispatcher and method registration |
+| `board_config` | `components/board_config/` | Per-board hardware capability definitions |
 | `display` | `components/display/` | OLED status display (hardware-dependent) |
 | `ble` | `components/ble/` | BLE interface + key backup (hardware-dependent) |
 | `ota` | `components/ota/` | Over-the-air firmware updates (hardware-dependent) |
 | `ui` | `components/ui/` | JSON-RPC control interface |
+| `ui_graphics` | `components/ui_graphics/` | LVGL-based GUI (T-Deck Plus: chat, nodes, settings screens) |
+| `keyboard` | `components/keyboard/` | T-Deck Plus I2C keyboard driver (ESP32-C3 sub-MCU) |
+| `trackball` | `components/trackball/` | T-Deck Plus hall-effect trackball driver |
+| `bramble_touch` | `components/bramble_touch/` | T-Deck Plus touchscreen driver |
+| `button` | `components/button/` | Physical button input handling |
 
 ---
 
