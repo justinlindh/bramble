@@ -391,6 +391,105 @@ Relay path object fields: `addr` (string).
 
 ---
 
+## `bramble.onGpsEvent`
+
+**Description**  
+GPS connectivity state change event.
+
+**Trigger conditions**
+- GPS fix acquired or lost (state transition).
+- Polled periodically by the connectivity event loop.
+
+**Params**
+
+| Field | Type | Present when | Description |
+|---|---|---|---|
+| `event` | string | always | `"fix_acquired"` or `"fix_lost"`. |
+| `valid` | boolean | fix_acquired | Whether the position is valid. |
+| `lat` | number | fix_acquired | Latitude in degrees. |
+| `lon` | number | fix_acquired | Longitude in degrees. |
+| `alt_m` | number | fix_acquired | Altitude in meters. |
+| `accuracy_m` | number | fix_acquired | Position accuracy in meters. |
+
+**Semantics notes**
+- Only emitted on state transitions (fix gained or lost), not on every GPS update.
+- `fix_lost` events have no position fields.
+
+**JSON-RPC example (fix acquired)**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onGpsEvent",
+  "params": {
+    "event": "fix_acquired",
+    "valid": true,
+    "lat": 40.0544,
+    "lon": -115.0523,
+    "alt_m": 570,
+    "accuracy_m": 3.2
+  }
+}
+```
+
+**JSON-RPC example (fix lost)**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onGpsEvent",
+  "params": {
+    "event": "fix_lost"
+  }
+}
+```
+
+---
+
+## `bramble.onWifiEvent`
+
+**Description**  
+Wi-Fi connectivity state change event.
+
+**Trigger conditions**
+- Wi-Fi connection or disconnection (state transition).
+- Wi-Fi mode change (off/station/AP).
+- Polled periodically by the connectivity event loop.
+
+**Params**
+
+| Field | Type | Description |
+|---|---|---|
+| `event` | string | Event type (`"connected"`, `"disconnected"`, `"mode_changed"`). |
+| `mode` | string | Wi-Fi mode: `"off"`, `"sta"`, or `"ap"`. |
+| `connected` | boolean | Whether an IP address is assigned. |
+| `ssid` | string | Connected SSID (omitted if empty). |
+| `ip` | string | IP address (empty string if not assigned). |
+| `rssi` | integer | Wi-Fi RSSI (dBm). |
+
+**Semantics notes**
+- Only emitted on state transitions, not on every poll cycle.
+- `ssid` is omitted when no SSID is available.
+
+**JSON-RPC example (connected)**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onWifiEvent",
+  "params": {
+    "event": "connected",
+    "mode": "sta",
+    "connected": true,
+    "ssid": "MyNetwork",
+    "ip": "192.0.2.0",
+    "rssi": -65
+  }
+}
+```
+
+---
+
 ## `bramble.onTrafficEvent`
 
 **Description**  

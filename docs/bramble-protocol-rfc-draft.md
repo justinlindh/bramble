@@ -182,8 +182,8 @@ For emergency packet classes, bit 2 is repurposed as `HEADER_FLAG_EMERGENCY`.
 | 0x0F | EMERGENCY |
 | 0x10 | EMERGENCY_CANCEL |
 | 0x11 | CODED |
-| 0x12 | BROADCAST_PROBE |
-| 0x13 | BROADCAST_ACK |
+| 0x12 | PKT_TYPE_PROBE |
+| 0x13 | PKT_TYPE_PROBE_ACK |
 | 0x14 | LOCATION |
 
 ## 6. Packet Formats
@@ -482,7 +482,7 @@ Emergency packets use emergency relay semantics (`HEADER_FLAG_EMERGENCY`).
 
 Current design uses two-component XOR coding.
 
-### 6.18 BROADCAST_PROBE (0x12)
+### 6.18 PKT_TYPE_PROBE (0x12)
 
 Probe/ACK formats are compact 12-byte-header-like structures.
 
@@ -496,7 +496,7 @@ Probe/ACK formats are compact 12-byte-header-like structures.
  +---------------------------------------------------------------+
 ```
 
-### 6.19 BROADCAST_ACK (0x13)
+### 6.19 PKT_TYPE_PROBE_ACK (0x13)
 
 ```
  +---------------+---------------+---------------+---------------+
