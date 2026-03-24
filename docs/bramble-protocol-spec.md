@@ -280,8 +280,8 @@ Value  Name               Description
 0x0F   EMERGENCY          Emergency beacon (see §4.19)
 0x10   EMERGENCY_CANCEL   Cancel active emergency (see §4.20)
 0x11   CODED              XOR network-coded packet (see §4.21)
-0x12   BROADCAST_PROBE    Broadcast delivery probe (see §4.22)
-0x13   BROADCAST_ACK      Broadcast probe acknowledgment (see §4.23)
+0x12   PKT_TYPE_PROBE    Broadcast delivery probe (see §4.22)
+0x13   PKT_TYPE_PROBE_ACK      Broadcast probe acknowledgment (see §4.23)
 ```
 
 ### 4.4 DATA Packet
@@ -712,7 +712,7 @@ Total: 25 + max(len_1, len_2) bytes
 
 **Queue timing:** Packets may wait up to 500ms (`CODING_OPPORTUNITY_WINDOW_MS`) for a coding partner before being sent uncoded.
 
-### 4.22 BROADCAST_PROBE Packet
+### 4.22 PKT_TYPE_PROBE Packet
 
 Probes broadcast reachability to discover network topology. Used for network health visualization and delivery confirmation.
 
@@ -739,7 +739,7 @@ Total: 12 bytes
 - `PROBE_RATE_LIMIT_REFILL_MS`: 60,000 (1 token per minute)
 - `PROBE_ACK_COOLDOWN_MS`: 10,000 (10s between ACKs to same probe)
 
-### 4.23 BROADCAST_ACK Packet
+### 4.23 PKT_TYPE_PROBE_ACK Packet
 
 Acknowledgment of a broadcast probe. Provides reachability and signal quality information.
 
@@ -3126,4 +3126,4 @@ Native mobile application (iOS/Android) for richer interaction beyond Web BLE ca
 |------|---------|
 | 2026-02-15 | Initial design document (v0.1-draft) |
 | 2026-02-16 | **Adversarial review fixes:** Dedup buffer 128→256 entries. RREP HMAC 4→8 bytes (RREP_SIZE 30→34). RREQ salt field added (RREQ_SIZE 26→30) to prevent temporal correlation. Max fragments 8→4 (max reassembled 616B). Long-term pubkey added to KEY_EXCHANGE (69→101 bytes). KEY_EXCHANGE now Critical-tier (8 retries). Nonce counter persistence for reboot safety. Constant-time channel trial decryption. TX power reduction removed from congestion response (replaced with increased backoff). **New features:** NVS key backup via BLE with physical button authorization. Dummy traffic generation (privacy mode). Route advertisements in beacons. |
-| 2026-02-17 | **Packet type renumbering:** Types renumbered to match implementation (ACK=0x01 through DATA=0x0A, see §4.3). **New packet types (§4.15–4.23):** STORE_REQUEST (0x0B), STORE_ACK (0x0C), MAILBOX_DELIVERY (0x0D), MAILBOX_QUERY (0x0E) for store-and-forward; EMERGENCY (0x0F), EMERGENCY_CANCEL (0x10) for distress signaling; CODED (0x11) for XOR network coding; BROADCAST_PROBE (0x12), BROADCAST_ACK (0x13) for delivery tracking. **Beacon flag extensions (§4.9):** BEACON_FLAG_MAILBOX (0x01), BEACON_FLAG_PROBE_ACK (0x02). **Header flag extension:** HEADER_FLAG_EMERGENCY (0x04) for emergency relay priority. **New channel features (§5.3):** Public channel "Bramble Common" with well-known PSK; Group DM key derivation with FNV-1a and epoch rotation. **Private location sharing (§4.24):** Three-tier privacy (full/coarse/presence), 17-byte full format, per-contact config. **Adaptive routing metrics (§6.8):** Composite metric with delivery rate, airtime, latency factors; EMA tracking; hysteresis. **Security analysis (§10.9):** New section covering security properties of all new features. **RAM budget update (§11.1):** Added ~13 KB for new components (mailbox 7KB, emergency 0.4KB, location 1KB, group 2.2KB, coding 1.5KB, probe 0.6KB). |
+| 2026-02-17 | **Packet type renumbering:** Types renumbered to match implementation (ACK=0x01 through DATA=0x0A, see §4.3). **New packet types (§4.15–4.23):** STORE_REQUEST (0x0B), STORE_ACK (0x0C), MAILBOX_DELIVERY (0x0D), MAILBOX_QUERY (0x0E) for store-and-forward; EMERGENCY (0x0F), EMERGENCY_CANCEL (0x10) for distress signaling; CODED (0x11) for XOR network coding; PKT_TYPE_PROBE (0x12), PKT_TYPE_PROBE_ACK (0x13) for delivery tracking. **Beacon flag extensions (§4.9):** BEACON_FLAG_MAILBOX (0x01), BEACON_FLAG_PROBE_ACK (0x02). **Header flag extension:** HEADER_FLAG_EMERGENCY (0x04) for emergency relay priority. **New channel features (§5.3):** Public channel "Bramble Common" with well-known PSK; Group DM key derivation with FNV-1a and epoch rotation. **Private location sharing (§4.24):** Three-tier privacy (full/coarse/presence), 17-byte full format, per-contact config. **Adaptive routing metrics (§6.8):** Composite metric with delivery rate, airtime, latency factors; EMA tracking; hysteresis. **Security analysis (§10.9):** New section covering security properties of all new features. **RAM budget update (§11.1):** Added ~13 KB for new components (mailbox 7KB, emergency 0.4KB, location 1KB, group 2.2KB, coding 1.5KB, probe 0.6KB). |

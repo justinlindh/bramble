@@ -20,9 +20,9 @@ MeshCore is a newer open-source project (emerged ~early 2025) created by "ripple
 
 ### Bramble
 
-Bramble is a from-scratch LoRa mesh protocol design (currently at v0.1-draft, design document phase — no implementation yet). It targets ESP32 + SX1262/SX1276 hardware and prioritizes privacy-first design, reactive routing, tiered reliability, and airtime management. Designed for 50–200+ node meshes.
+Bramble is a from-scratch LoRa mesh protocol and firmware (currently at firmware v1.3.11, protocol v1.4.0). It targets ESP32-S3 hardware (Heltec V3, T-Deck Plus, Heltec V4) and prioritizes privacy-first design, reactive routing, tiered reliability, and airtime management. Designed for 50–200+ node meshes. The project includes firmware, a Go SDK (`bramble-go`), a CLI (`bramble-cli`), and a web companion app.
 
-**Maturity:** Design document only. No code, no users, no ecosystem. Vaporware until implemented.
+**Maturity:** Active development. Running on 3+ boards, functional firmware with working mesh, RPC, BLE, Wi-Fi, GPS, location sharing, mailbox store-and-forward, and a web companion app. Small user base (solo developer project).
 
 ---
 
@@ -37,7 +37,7 @@ Bramble is a from-scratch LoRa mesh protocol design (currently at v0.1-draft, de
 | **Reliability model** | Optional ACKs. Basic retries. No flow control. No congestion awareness. | ACK mechanism. Basic retry logic. No formal congestion management. | Three tiers (Broadcast/Normal/Critical). Exponential backoff retries. Sliding window flow control. Congestion detection and response. |
 | **Airtime management** | None built-in. Nodes transmit freely. Some duty cycle awareness in EU regions. | Flood advert interval configurable (default 12h for repeaters). Companion nodes don't repeat. | Token-bucket airtime budget (10% self-imposed duty cycle) with per-tier sub-budgets and priority queuing. |
 | **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Not documented. Likely relies on GPS or companion device time. | Stratum-based mesh time sync via beacons + TIME_SYNC packets. GPS optional. ±1–2s convergence. |
-| **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Beam). Narrow focus by design. |
+| **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
 | **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte header. Compact binary. No protobuf/JSON. |
 | **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | X25519 public key → SHA-256 → 4-byte address. Cryptographic identity. |
 | **Max hops** | 7 (configurable) | 3–7 default, up to 64 theoretical | 8 (hard limit) |
@@ -203,11 +203,11 @@ DM traffic scales as O(path_length) after route discovery. A 5-hop DM generates 
 
 | Aspect | Meshtastic | MeshCore | Bramble |
 |---|---|---|---|
-| **Community size** | Very large (100k+ Discord, active subreddit, many YouTube creators) | Growing (active Discord, community contributors, emerging content creators) | None (solo design project) |
-| **Companion apps** | Android, iOS, Web, Python CLI, extensive third-party tools | Android, iOS, Web, NodeJS library, Python CLI | None (planned: BLE + web serial) |
-| **Hardware support** | Dozens of boards across multiple architectures | ~15+ boards, growing. Web flasher available. | 2 boards (Heltec V3, T-Beam) |
-| **Documentation** | Excellent. Official docs, community guides, YouTube tutorials. | Growing. FAQ, community site (meshcore.co.uk, localmesh.nl). No formal protocol spec. | One design document. |
-| **Production readiness** | Yes. Deployed in real emergencies, events, and daily use worldwide. | Early adopter stage. Functional for basic use. Evolving rapidly. | No. Design only. |
+| **Community size** | Very large (100k+ Discord, active subreddit, many YouTube creators) | Growing (active Discord, community contributors, emerging content creators) | Solo developer project |
+| **Companion apps** | Android, iOS, Web, Python CLI, extensive third-party tools | Android, iOS, Web, NodeJS library, Python CLI | Web companion app, Go SDK, CLI tool |
+| **Hardware support** | Dozens of boards across multiple architectures | ~15+ boards, growing. Web flasher available. | 3 boards (Heltec V3, T-Deck Plus, Heltec V4) |
+| **Documentation** | Excellent. Official docs, community guides, YouTube tutorials. | Growing. FAQ, community site (meshcore.co.uk, localmesh.nl). No formal protocol spec. | Protocol spec, architecture doc, RPC reference, API docs |
+| **Production readiness** | Yes. Deployed in real emergencies, events, and daily use worldwide. | Early adopter stage. Functional for basic use. Evolving rapidly. | Pre-production. Functional firmware on dev boards, not field-tested at scale. |
 | **Protocol spec** | Documented (mesh-algo page, protobuf definitions) | No formal spec. V2 spec on roadmap. Code is the reference. | Detailed design doc with packet formats, algorithms, pseudocode. |
 | **MQTT/Internet bridge** | Yes, built-in. MQTT integration for internet bridging. | Not documented as a core feature. | Not planned initially. |
 | **Web flasher** | Yes (flasher.meshtastic.org) | Yes (flasher.meshcore.co.uk) | Planned (Phase 6 of roadmap) |
@@ -230,13 +230,13 @@ DM traffic scales as O(path_length) after route discovery. A 5-hop DM generates 
 
 ### Where Bramble Is at a Disadvantage
 
-1. **It doesn't exist.** This cannot be overstated. Meshtastic has thousands of deployed nodes, years of real-world testing, and a thriving community. MeshCore is shipping firmware and has users. Bramble is a design document. The gap between design and working implementation is enormous, and many elegant designs fail on contact with reality.
+1. **It's early.** Meshtastic has thousands of deployed nodes, years of real-world testing, and a thriving community. MeshCore is shipping firmware with a growing user base. Bramble has working firmware on 3 boards but no field deployments or community yet. The gap between a working prototype and a production mesh network is substantial.
 
 2. **Reactive routing complexity.** AODV-style routing is well-understood in theory but tricky in practice over lossy LoRa links. Route discovery adds latency to the first message. Route maintenance (broken links, stale routes) adds implementation complexity. Meshtastic's managed flooding "just works" — it's stupid but robust.
 
-3. **Hardware breadth.** ESP32-S3 only. No nRF52 (which has the best battery life in the LoRa ecosystem). No Linux. Meshtastic runs on everything.
+3. **Hardware breadth.** ESP32-S3 only (3 boards). No nRF52 (which has the best battery life in the LoRa ecosystem). No Linux. Meshtastic runs on everything.
 
-4. **No ecosystem.** No apps. No community. No MQTT bridge. No integration with anything. Building an ecosystem from zero is arguably harder than building the protocol itself.
+4. **Small ecosystem.** Web app, Go SDK, and CLI exist, but no mobile apps, no MQTT bridge, no community contributors. Building an ecosystem from one developer is a significant challenge.
 
 5. **Single developer.** Both Meshtastic and MeshCore benefit from community contributions and diverse perspectives. A solo project carries bus-factor risk and limited testing capacity.
 
@@ -250,4 +250,4 @@ Bramble's design addresses real, well-understood limitations of flooding-based m
 
 But "if implemented correctly" is doing a lot of heavy lifting. Meshtastic's managed flooding has survived contact with reality in ways that a design document hasn't been tested against. MeshCore's simplicity is a feature, not a bug — simple systems fail in predictable ways.
 
-The most likely path to value: implement Bramble's core ideas (reactive routing, privacy-preserving RREQ, airtime budgets) and prove they work in a 20-node testbed. That empirical validation is worth more than any amount of design documentation.
+The most likely path to value: grow the testbed beyond 3 boards and prove the reactive routing, privacy-preserving RREQ, and airtime budgets work at scale in a 20+ node deployment. That empirical validation will close the gap between working firmware and a credible alternative.
