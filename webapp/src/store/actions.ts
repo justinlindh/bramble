@@ -1025,9 +1025,7 @@ export function normalizeIncomingRealtimeMessage(params: unknown) {
 
 function handleIncomingMessage(params: unknown): void {
   const p = params as any;
-  console.log('[handleIncomingMessage] Raw params:', JSON.stringify(p, null, 2));
   const msg = normalizeIncomingRealtimeMessage(p);
-  console.log('[handleIncomingMessage] Message object:', msg);
   const store = useStore.getState();
   store.addMessage(msg);
   messageDb.saveMessage(msg).catch(() => {});
@@ -1384,25 +1382,26 @@ export async function setTrafficDebugConfig(config: {
 function decodePacketType(pktType: number | string | undefined): string {
   if (typeof pktType === 'string') return pktType;
   switch (pktType) {
-    case 0x01: return 'data';
-    case 0x02: return 'ack';
-    case 0x03: return 'rreq';
-    case 0x04: return 'rrep';
+    case 0x01: return 'ack';
+    case 0x02: return 'rreq';
+    case 0x03: return 'rrep';
+    case 0x04: return 'rerr';
     case 0x05: return 'beacon';
-    case 0x06: return 'rerr';
-    case 0x07: return 'key_exchange';
+    case 0x06: return 'key_exchange';
+    case 0x07: return 'delivery_receipt';
     case 0x08: return 'congestion';
-    case 0x09: return 'timesync';
-    case 0x0A: return 'channel_data';
-    case 0x0B: return 'channel_ack';
-    case 0x0C: return 'probe';
-    case 0x0D: return 'probe_ack';
-    case 0x0E: return 'location';
-    case 0x0F: return 'mailbox_offer';
-    case 0x10: return 'mailbox_fetch';
-    case 0x11: return 'mailbox_data';
-    case 0x12: return 'broadcast_probe';
-    case 0x13: return 'broadcast_ack';
+    case 0x09: return 'time_sync';
+    case 0x0A: return 'data';
+    case 0x0B: return 'store_request';
+    case 0x0C: return 'store_ack';
+    case 0x0D: return 'mailbox_delivery';
+    case 0x0E: return 'mailbox_query';
+    case 0x0F: return 'emergency';
+    case 0x10: return 'emergency_cancel';
+    case 0x11: return 'coded';
+    case 0x12: return 'probe';
+    case 0x13: return 'probe_ack';
+    case 0x14: return 'location';
     default: return 'unknown';
   }
 }
