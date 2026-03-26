@@ -76,6 +76,27 @@ void test_key_exchange_critical_tier_retries(void) {
     TEST_ASSERT_GREATER_OR_EQUAL(1, retries);
 }
 
+void test_pending_ack_table_full(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+    uint8_t data[] = {0x01};
+
+    /* Fill all MAX_PENDING_ACKS slots */
+    for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+        int idx = pending_ack_add(&table, (uint32_t)i, 0x1111, MSG_TIER_NORMAL, data, 1, 1000);
+        TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+    }
+
+    /* Table is full — next add must fail */
+    int overflow = pending_ack_add(&table, 0xFF, 0x1111, MSG_TIER_NORMAL, data, 1, 1000);
+    TEST_ASSERT_EQUAL_INT(-1, overflow);
+
+    /* Remove one entry and verify a slot opens up */
+    TEST_ASSERT_TRUE(pending_ack_remove(&table, (uint32_t)(MAX_PENDING_ACKS - 1)));
+    int retry = pending_ack_add(&table, 0xFF, 0x1111, MSG_TIER_NORMAL, data, 1, 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, retry);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
@@ -83,5 +104,6 @@ int main(void) {
     RUN_TEST(test_flow_control_window);
     RUN_TEST(test_flow_control_failure_shrinks_window);
     RUN_TEST(test_key_exchange_critical_tier_retries);
+    RUN_TEST(test_pending_ack_table_full);
     return UNITY_END();
 }
