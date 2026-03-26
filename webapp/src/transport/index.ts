@@ -8,11 +8,11 @@ export { BLETransport } from './BLETransport';
 export { WebSocketTransport } from './WebSocketTransport';
 
 function resolveMockWsUrl(): string {
-  if (typeof location === 'undefined') return 'ws://localhost:3005';
+  if (typeof location === 'undefined') return 'ws://localhost:3099';
   const { hostname, protocol, port } = location;
   const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
   if (protocol === 'https:') return `${wsProtocol}//${hostname}:${port || '443'}/ws`;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'ws://localhost:3005';
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'ws://localhost:3099';
   return `ws://${hostname}:3005`;
 }
 
