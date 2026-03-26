@@ -42,3 +42,4 @@ webapp/e2e-screenshots/
 # Local helper state
 .flash-targets.json
 reports/
+webapp/node_modules
