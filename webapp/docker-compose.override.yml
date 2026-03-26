@@ -1,0 +1,5 @@
+# Override to expose mock-node on host port 3099 (3005 conflicts with Silverbullet)
+services:
+  mock-node:
+    ports:
+      - "3099:3005"
