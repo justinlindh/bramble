@@ -42,7 +42,6 @@ static void update_title(void) {
     }
 
     static char buf[48];
-    /* TODO: implement chat_target_format_title in chat_target.c */
     if (peer_name) {
         snprintf(buf, sizeof(buf), "%s", peer_name);
     } else if (channel_name) {
