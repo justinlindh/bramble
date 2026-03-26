@@ -1,4 +1,5 @@
 #include "traffic_debug.h"
+#include "esp_timer.h"
 #include <string.h>
 
 /* Packet type constants from packet.h */
@@ -129,7 +130,7 @@ static void record_event(traffic_debug_t* td, uint8_t pkt_type, uint16_t len, in
     /* Write event */
     traffic_event_t* evt = &td->events[write_idx];
     evt->seq = seq;
-    evt->timestamp_ms = 0; /* TODO: Add timestamp when ESP-IDF timer available */
+    evt->timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
     evt->pkt_type = pkt_type;
     evt->category = category;
     evt->airtime_tier = final_tier;
