@@ -266,6 +266,13 @@ int radio_init(const radio_config_t* config) {
         return -1;
     }
 
+    /* Calibrate image for the configured frequency band */
+    rc = sx1262_calibrate_image(config->frequency_mhz);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "calibrate_image failed");
+        return -1;
+    }
+
     /* Configure radio parameters */
     rc = configure_radio(config);
     if (rc != 0) {

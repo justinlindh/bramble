@@ -707,10 +707,6 @@ int sx1262_init(void) {
     if (sx1262_calibrate(0x7F) != 0)
         return -1;
 
-    /* --- Calibrate image for 915 MHz (TODO: use region config) --- */
-    if (sx1262_calibrate_image(915.0f) != 0)
-        return -1;
-
     /* Leave in STDBY_RC after init. The SX1262 automatically re-enables the
      * TCXO (via DIO3) when entering TX or RX, so there is no need to stay
      * in STDBY_XOSC between commands. */
