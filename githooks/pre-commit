@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -e
+
+# Clang-format: check staged C/H files (fast, catches formatting before CI does)
+staged_c=$(git diff --cached --name-only --diff-filter=ACMR -- '*.c' '*.h' | head -1)
+if [[ -n "$staged_c" ]] && command -v clang-format >/dev/null 2>&1; then
+    bash scripts/lint/run-clang-format-check.sh --changed
+fi
+
+# Typecheck + unit tests
+make -s check-fast
