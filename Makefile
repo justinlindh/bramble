@@ -6,6 +6,10 @@ SHELL := /usr/bin/env bash
 	ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint \
 	ci-web-lint ci-web-typecheck ci-web-unit ci-web-build ci-web-smoke
 
+setup-hooks:
+	git config core.hooksPath githooks
+	@echo "Git hooks configured (githooks/)"
+
 help:
 	@echo "CI parity targets"
 	@echo "  make ci                 # run all local CI parity checks"
