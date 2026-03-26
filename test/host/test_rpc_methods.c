@@ -269,38 +269,40 @@ extern bool g_stub_mailbox_enabled;
 
 void test_set_mailbox_enabled_true_calls_mesh_and_returns_ok(void) {
     g_stub_mailbox_enabled = false;
-    cJSON* resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"bramble.setMailbox\","
-        "\"params\":{\"enabled\":true}}");
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{\"enabled\":true}}");
     cJSON* r = assert_result(resp);
     TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")), "ok should be true");
-    TEST_ASSERT_TRUE_MESSAGE(g_stub_mailbox_enabled, "mesh_set_mailbox(true) should have been called");
+    TEST_ASSERT_TRUE_MESSAGE(g_stub_mailbox_enabled,
+                             "mesh_set_mailbox(true) should have been called");
     cJSON_Delete(resp);
 }
 
 void test_set_mailbox_enabled_false_calls_mesh_and_returns_ok(void) {
     g_stub_mailbox_enabled = true;
-    cJSON* resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"bramble.setMailbox\","
-        "\"params\":{\"enabled\":false}}");
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{\"enabled\":false}}");
     cJSON* r = assert_result(resp);
     TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")), "ok should be true");
-    TEST_ASSERT_FALSE_MESSAGE(g_stub_mailbox_enabled, "mesh_set_mailbox(false) should have been called");
+    TEST_ASSERT_FALSE_MESSAGE(g_stub_mailbox_enabled,
+                              "mesh_set_mailbox(false) should have been called");
     cJSON_Delete(resp);
 }
 
 void test_set_mailbox_missing_enabled_returns_invalid_params(void) {
-    cJSON* resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"bramble.setMailbox\","
-        "\"params\":{}}");
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{}}");
     TEST_ASSERT_EQUAL_INT(RPC_ERR_INVALID_PARAMS, assert_error_code(resp));
     cJSON_Delete(resp);
 }
 
 void test_set_mailbox_string_enabled_returns_invalid_params(void) {
-    cJSON* resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"bramble.setMailbox\","
-        "\"params\":{\"enabled\":\"yes\"}}");
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{\"enabled\":\"yes\"}}");
     TEST_ASSERT_EQUAL_INT(RPC_ERR_INVALID_PARAMS, assert_error_code(resp));
     cJSON_Delete(resp);
 }
@@ -308,9 +310,9 @@ void test_set_mailbox_string_enabled_returns_invalid_params(void) {
 void test_get_config_reflects_mailbox_enabled_after_set_mailbox_true(void) {
     g_stub_mailbox_enabled = false;
     /* Call setMailbox to enable */
-    cJSON* set_resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":54,\"method\":\"bramble.setMailbox\","
-        "\"params\":{\"enabled\":true}}");
+    cJSON* set_resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":54,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{\"enabled\":true}}");
     assert_result(set_resp);
     cJSON_Delete(set_resp);
 
@@ -320,16 +322,17 @@ void test_get_config_reflects_mailbox_enabled_after_set_mailbox_true(void) {
     cJSON* r = assert_result(get_resp);
     cJSON* mailbox_enabled = cJSON_GetObjectItem(r, "mailboxEnabled");
     TEST_ASSERT_NOT_NULL_MESSAGE(mailbox_enabled, "getConfig should include mailboxEnabled field");
-    TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(mailbox_enabled), "mailboxEnabled should be true after setMailbox(true)");
+    TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(mailbox_enabled),
+                             "mailboxEnabled should be true after setMailbox(true)");
     cJSON_Delete(get_resp);
 }
 
 void test_get_config_reflects_mailbox_disabled_after_set_mailbox_false(void) {
     g_stub_mailbox_enabled = true;
     /* Call setMailbox to disable */
-    cJSON* set_resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":56,\"method\":\"bramble.setMailbox\","
-        "\"params\":{\"enabled\":false}}");
+    cJSON* set_resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":56,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{\"enabled\":false}}");
     assert_result(set_resp);
     cJSON_Delete(set_resp);
 
@@ -339,7 +342,8 @@ void test_get_config_reflects_mailbox_disabled_after_set_mailbox_false(void) {
     cJSON* r = assert_result(get_resp);
     cJSON* mailbox_enabled = cJSON_GetObjectItem(r, "mailboxEnabled");
     TEST_ASSERT_NOT_NULL_MESSAGE(mailbox_enabled, "getConfig should include mailboxEnabled field");
-    TEST_ASSERT_FALSE_MESSAGE(cJSON_IsTrue(mailbox_enabled), "mailboxEnabled should be false after setMailbox(false)");
+    TEST_ASSERT_FALSE_MESSAGE(cJSON_IsTrue(mailbox_enabled),
+                              "mailboxEnabled should be false after setMailbox(false)");
     cJSON_Delete(get_resp);
 }
 
