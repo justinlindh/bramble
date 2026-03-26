@@ -1379,7 +1379,7 @@ export async function setTrafficDebugConfig(config: {
   await loadTrafficDebugStatus();
 }
 
-function decodePacketType(pktType: number | string | undefined): string {
+export function decodePacketType(pktType: number | string | undefined): string {
   if (typeof pktType === 'string') return pktType;
   switch (pktType) {
     case 0x01: return 'ack';
