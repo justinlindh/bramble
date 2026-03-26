@@ -1872,7 +1872,15 @@ static void mailbox_flush_for(uint32_t dest_addr) {
         ESP_LOGI(TAG, "Mailbox: delivering stored packet to %08" PRIX32
                  " (id=%08" PRIX32 " len=%u)",
                  dest_addr, entries[i].packet_id, entries[i].payload_len);
-        transmit_packet(entries[i].payload, (uint8_t)entries[i].payload_len);
+        int rc = transmit_packet(entries[i].payload, (uint8_t)entries[i].payload_len);
+        if (rc != 0) {
+            /* Transmit failed (LBT / radio busy) — re-store for retry on next flush */
+            ESP_LOGW(TAG, "Mailbox: transmit failed (rc=%d) for id=%08" PRIX32
+                     ", re-queuing", rc, entries[i].packet_id);
+            mailbox_store(&s_mailbox, entries[i].src_addr, entries[i].dest_addr,
+                          entries[i].payload, entries[i].payload_len,
+                          entries[i].packet_id, entries[i].stored_at_ms);
+        }
     }
 }
 
