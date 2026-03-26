@@ -16,7 +16,7 @@ export function TrafficDebugSection() {
       update[field] = value;
       await setTrafficDebugConfig(update);
     } catch (e) {
-      alert(`Failed to update: ${(e as Error).message}`);
+      console.error(`Failed to update: ${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
@@ -30,7 +30,7 @@ export function TrafficDebugSection() {
       try {
         await setTrafficDebugConfig({ sampleRate: rate });
       } catch (e) {
-        alert(`Failed to update sample rate: ${(e as Error).message}`);
+        console.error(`Failed to update sample rate: ${(e as Error).message}`);
       } finally {
         setLoading(false);
         setLocalRate(null);
