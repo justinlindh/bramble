@@ -26,7 +26,8 @@ Not defended against for most *metadata* and, today, not for location packets
 replaying captured frames, jamming. Partially defended against today.
 Encrypted payloads cannot be forged without a channel key, and the cleartext
 header is bound to the ciphertext as AEAD associated data. Routing control
-traffic, location packets, and mailbox triggers are forgeable (section 4).
+traffic, location packets, mailbox triggers, acknowledgements, and delivery
+receipts are forgeable (section 4).
 Jamming is not defendable at this layer and is accepted (section 5).
 
 **Malicious mesh member.** A node that legitimately holds one or more channel
@@ -133,13 +134,25 @@ What it does not hide: the 12-byte cleartext header (version, type, flags,
 hop limit, destination address, packet id), the 4-byte cleartext source
 address field, ciphertext length, and transmission timing.
 
-### AEAD header binding
+### AEAD header binding (currently breaks multi-hop unicast)
 
-The 12-byte cleartext header is passed as GCM associated data on both encrypt
-and decrypt (`main/mesh_task.c`, `send_data_packet` and `handle_data`), so a
-forwarder or injector cannot splice a captured ciphertext under a modified
-header (changed destination, flags, or packet id) without failing the tag
-check. The 4-byte cleartext `src_addr` field that follows the header is *not*
+The full 12-byte cleartext header, *including* the mutable `hop_limit` byte,
+is passed as GCM associated data on both encrypt and decrypt
+(`main/mesh_task.c`, `send_data_packet` and `handle_data`), so a forwarder or
+injector cannot splice a captured ciphertext under a modified header (changed
+destination, flags, or packet id) without failing the tag check.
+
+Binding `hop_limit` has a live consequence in the current code:
+`forward_data_packet` (`main/mesh_task.c`) decrements `hop_limit` and
+re-serializes the header before relaying, so the destination of a forwarded
+unicast DATA packet computes its AAD from a header that no longer matches the
+one the sender bound, and the tag check rejects the packet. Multi-hop unicast
+DATA delivery fails at the destination today (also listed in section 4).
+Single-hop unicast and broadcast are unaffected: broadcast DATA is handled
+locally and never re-flooded in firmware (`channel_flood_decide` in
+`components/routing/channel_flood.c` has no firmware callers).
+
+The 4-byte cleartext `src_addr` field that follows the header is *not*
 in the AAD, but an authenticated copy of the source address travels inside
 the encrypted payload (`components/channel/channel_msg.c`), and receivers use
 the inner copy. The outer field is unauthenticated bytes on the wire.
@@ -153,7 +166,9 @@ reboot; uniqueness rests entirely on RNG quality and the birthday bound. At
 LoRa data rates the collision probability is small but this is a
 probabilistic argument, not a structural one. A deterministic nonce helper
 (`crypto_build_nonce` in `components/crypto/crypto_esp.c`) exists but has no
-callers.
+callers in the firmware; the host simulator bridge does use it
+(`simulator/gosim/bridge.c`), so simulated nodes and real nodes generate
+nonces differently.
 
 ### Trial decryption across channels, constant-trial loop
 
@@ -185,15 +200,20 @@ against observers who hear the RREQ after at least one forward.
 
 ### Beacon integrity check (not authentication)
 
-Beacons carry a 16-byte truncated HMAC-SHA256 computed over the beacon body
-(`components/routing/beacon.c`), verified on receipt (`handle_beacon` in
-`main/mesh_task.c`). The key is derived from the *public, well-known* channel
-PSK (`BRAMBLE_PUBLIC_CHANNEL_PSK` = "bramble-default" in
-`components/crypto/include/crypto.h`; derivation at mesh init in
-`main/mesh_task.c`). Because anyone can derive this key, the HMAC proves only
-that the sender runs Bramble-compatible code; it rejects corruption and
-non-Bramble traffic, not attackers. It is an integrity check, not
-authentication, and nothing in the code treats it as more than that.
+Beacons carry a 16-byte truncated HMAC-SHA256 computed over the 32 fixed
+beacon fields only: header, source address, pubkey hash, telemetry, flags,
+and network time (`beacon_compute_hmac` in `components/routing/beacon.c`
+MACs the first `BEACON_SIZE - 16` bytes). The optional node name is
+serialized *after* the HMAC field (`bramble_beacon_serialize` in
+`components/packet/packet.c`) and is not covered by it, so the name is
+unauthenticated even in the integrity sense. Verification happens on receipt
+(`handle_beacon` in `main/mesh_task.c`). The key is derived from the
+*public, well-known* channel PSK (`BRAMBLE_PUBLIC_CHANNEL_PSK` =
+"bramble-default" in `components/crypto/include/crypto.h`; derivation at
+mesh init in `main/mesh_task.c`). Because anyone can derive this key, the
+HMAC proves only that the sender runs Bramble-compatible code; it rejects
+corruption and non-Bramble traffic, not attackers. It is an integrity check,
+not authentication, and nothing in the code treats it as more than that.
 
 ### RREQ origination rate limiting
 
@@ -266,6 +286,12 @@ destination, and expire.
 Facts of the code on `main` today. Each entry shrinks or disappears in the
 same PR that fixes it.
 
+- **Multi-hop unicast DATA packets fail decryption at the destination**: the
+  GCM AAD binds the full 12-byte header including `hop_limit`
+  (`send_data_packet` and `handle_data` in `main/mesh_task.c`), but
+  `forward_data_packet` decrements `hop_limit` and re-serializes the header
+  before relaying, so the destination's AAD never matches the sender's and
+  the tag check rejects every forwarded packet.
 - **Location packets are transmitted entirely in cleartext**, including
   coordinates, with the sharing tier readable in the cleartext header flags
   (`mesh_send_location_packet` and `handle_location` in `main/mesh_task.c`;
@@ -289,6 +315,12 @@ same PR that fixes it.
 - **RERR packets carry no authentication**, so any in-range transmitter can
   mark arbitrary routes broken and fast-fail pending messages (`handle_rerr`
   in `main/mesh_task.c`).
+- **ACKs and delivery receipts are forgeable**: `packet_id` is cleartext in
+  the DATA header, and `handle_ack` and `handle_delivery_receipt` in
+  `main/mesh_task.c` accept unauthenticated packets, so a forged ACK both
+  cancels retransmission (`pending_ack_remove`) and marks the message
+  `DELIVERED` in the store and UI, letting an in-range transmitter fake
+  delivery confirmation while suppressing the retry and mailbox fallback.
 - **RREQ forwarding is not rate-limited**; the 30-second limiter applies only
   to locally-originated discoveries, so a flood of foreign RREQs is forwarded
   without restriction (`handle_rreq` in `main/mesh_task.c`).
@@ -319,10 +351,11 @@ same PR that fixes it.
   since the beacon HMAC key is derived from the public PSK; a forged beacon
   for a victim address makes a mailbox transmit that victim's queued
   ciphertext (`handle_beacon` mailbox flush in `main/mesh_task.c`).
-- **Epoch catch-up burns up to 256 HKDF-plus-GCM attempts per configured
-  channel on every undecryptable packet**, an unauthenticated CPU
-  amplification lever (`channel_msg_decrypt` in
-  `components/channel/channel_msg.c`).
+- **Epoch catch-up burns up to 256 HKDF-plus-GCM attempts per non-matching
+  channel on every received data packet**, legitimate traffic included (a
+  packet for one channel triggers the full catch-up loop on every other
+  configured channel), an unauthenticated CPU amplification lever
+  (`channel_msg_decrypt` in `components/channel/channel_msg.c`).
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
   and mailbox capability in cleartext** (`mesh_send_beacon` in
   `main/mesh_task.c`).
@@ -382,16 +415,15 @@ Plain words, current state:
 - **Anyone nearby can tell your radio exists** and a motivated person can
   find it. If your safety depends on nobody knowing you transmit at all,
   no LoRa mesh is the right tool.
-- **Today, treat the physical device as the secret.** Until flash encryption
-  ships, anyone who takes your node can extract your keys and message
-  history with free tools in minutes. Losing the device means rotating
-  every channel it was on.
+- **Treat the physical device as the secret.** With flash unencrypted,
+  anyone who takes your node can extract your keys and message history with
+  free tools in minutes. Losing the device means rotating every channel it
+  was on.
 - **Put the node on a Wi-Fi network you trust, and set an auth token.** The
   control interface ships open; anyone on the same Wi-Fi can read and send
   your messages and reflash the device until you set a token (and the token
   then travels in plaintext on the LAN).
 
 The honest one-line summary of today's build: Bramble encrypts channel
-message content well, and does not yet deliver the rest of its privacy
-promises. This document is the checklist for closing that distance, and it
-must keep matching the code as it does.
+message content well, and most of its other privacy properties do not hold
+in the current code. This document must keep matching the code.
