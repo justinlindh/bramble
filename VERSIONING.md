@@ -4,9 +4,10 @@
 
 ```
 bramble (this repo)          bramble-go              bramble-cli
-├── firmware/                ├── transport/           ├── cmd/
-├── api/openapi.yaml         ├── client/              └── main.go
-├── simulator/               └── go.mod
+├── main/                    ├── transport/           ├── cmd/
+├── components/              ├── client/              └── main.go
+├── api/openapi.yaml         └── go.mod
+├── simulator/
 └── webapp/
         │                         │                        │
         │   ┌─────────────────────┘                        │
