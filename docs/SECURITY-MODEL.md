@@ -430,9 +430,8 @@ same PR that fixes it.
   to locally-originated discoveries, so a flood of foreign RREQs is forwarded
   without restriction (`handle_rreq` in `main/mesh_task.c`).
 - **There is no replay protection**: dedup keys on unauthenticated
-  `packet_id` and type inside a 60-second window, and the `anti_replay`
-  module exists with zero callers (`components/dedup/dedup.c`,
-  `components/timesync/anti_replay.c`).
+  `packet_id` and type inside a 60-second window
+  (`components/dedup/dedup.c`).
 - **The identity private key, all channel keys, and the RPC auth token are
   stored as plaintext NVS entries, and message history is plaintext SPIFFS**,
   with flash encryption, NVS encryption, and secure boot all disabled in the

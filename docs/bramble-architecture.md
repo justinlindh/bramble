@@ -31,7 +31,7 @@ See also:
 
 | Component | Path | Purpose |
 |-----------|------|---------|
-| `crypto` | `components/crypto/` | AES-256-GCM, X25519, HKDF, anti-replay window |
+| `crypto` | `components/crypto/` | AES-256-GCM, X25519, HKDF |
 | `packet` | `components/packet/` | Packet framing, serialization, type definitions |
 | `routing` | `components/routing/` | AODV route discovery, forwarding, beacon, route maintenance, route metrics |
 | `channel` | `components/channel/` | Named group channels (key derivation, message encrypt/decrypt, public channel) |
@@ -41,7 +41,7 @@ See also:
 | `airtime` | `components/airtime/` | Duty cycle tracking and TX priority queue |
 | `dedup` | `components/dedup/` | Duplicate packet detection (sliding-window bloom filter) |
 | `identity` | `components/identity/` | Node identity, X25519 keypair generation and storage |
-| `timesync` | `components/timesync/` | Stratum-based mesh time synchronization, anti-replay |
+| `timesync` | `components/timesync/` | Stratum-based mesh time synchronization |
 | `radio` | `components/radio/` | SX1262 driver, airtime math, and the budget-gated TX gate (single transmit path) |
 | `mailbox` | `components/mailbox/` | Store-and-forward buffer for offline destinations |
 | `emergency` | `components/emergency/` | Emergency beacon state machine and tracking |
@@ -171,7 +171,6 @@ Provides the cryptographic primitives used throughout the stack:
 - **X25519**: `crypto_x25519`: Diffie-Hellman key exchange
 - **HKDF-SHA256**: `crypto_hkdf`: Key derivation from shared secrets and context strings
 - **Random**: `crypto_random`: Cryptographically secure random bytes
-- **Anti-replay**: 64-bit sliding window in `timesync/anti_replay.c` (implemented and tested, but currently has no callers in the firmware; see SECURITY-MODEL.md known gaps)
 
 Key sizes: `BRAMBLE_KEY_SIZE` = 32 bytes, `BRAMBLE_NONCE_SIZE` = 12 bytes, `BRAMBLE_TAG_SIZE` = 16 bytes.
 
@@ -293,14 +292,12 @@ Generates and persists a node's X25519 keypair on first boot (stored in NVS). Th
 
 ### `timesync`
 
-**Files:** `timesync.c`, `anti_replay.c`
+**Files:** `timesync.c`
 
 Stratum-based mesh time synchronization inspired by NTP:
 - Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated `PKT_TYPE_TIME_SYNC` packet is defined but never sent or handled.
 - GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
 - Convergence to ±1–2s across the mesh.
-
-**Anti-replay** (`anti_replay.c`): 64-bit sliding window keyed on `(src_addr, packet_id)` to reject replayed packets.
 
 ---
 
