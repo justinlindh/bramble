@@ -1647,13 +1647,14 @@ static void process_rreq_forward_queue(uint32_t t) {
     for (int i = 0; i < RREQ_FWD_QUEUE_CAPACITY; i++) {
         if (s_rreq_fwd_queue[i].used &&
             (int32_t)(t - s_rreq_fwd_queue[i].due_at_ms) >= 0) {
-            s_rreq_fwd_queue[i].used = false;
             send_rreq(&s_rreq_fwd_queue[i].rreq);
+            s_rreq_fwd_queue[i].used = false;
         }
     }
 }
 
 /* ── End jittered RREQ forwarding ──────────────────────────────── */
+
 static void flush_queued_messages(uint32_t dest_addr) {
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (s_queued_msgs[i].used && s_queued_msgs[i].dest_addr == dest_addr) {
