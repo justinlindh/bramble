@@ -1520,6 +1520,11 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind) {
     uint8_t pkt_type = (len >= 2) ? buf[1] : 0xFF;
 
+    /* Relaxed read: neighbor_count(&s_neighbors) may run from the RPC/UI
+     * task without the mesh state mutex (pre-existing pattern; the old
+     * airtime_budget_set_mesh_size call sites did the same). Worst case
+     * is a momentarily stale peer count selecting an adjacent budget
+     * profile; the gate re-reads it on the next transmission. */
     tx_gate_set_peer_count((uint8_t)neighbor_count(&s_neighbors));
     int rc = tx_gate_send(buf, len, kind);
     if (rc == TX_GATE_OK) {
