@@ -109,55 +109,78 @@ demand up to 6.7 simultaneous transmissions. The old delivery numbers were
 physically impossible, not optimistic. Latency at realistic ToA is seconds,
 not the tens of milliseconds previously reported.
 
-### New model, full (collisions + capture + half-duplex + LBT)
+### New model, full (collisions + capture + half-duplex + LBT, firmware beacon cadence)
 
-| Nodes | Delivered / attempted | Got a route | Collision rate per reception | Half-duplex drops | LBT backoffs | Offered load | Collisions |
-|---|---|---|---|---|---|---|---|
-| 10 | 5/20 (25%) | 5 | 57% | 71 | 248 | 0.28 erlang | 452 |
-| 50 | 0/20 (0%) | 0 | 68% | 339 | 1,327 | 1.35 erlang | 3,394 |
-| 100 | 2/20 (10%) | 2 | 74% | 605 | 2,487 | 2.58 erlang | 7,421 |
-| 200 | 1/20 (5%) | 1 | 66% | 2,222 | 5,366 | 4.81 erlang | 12,575 |
+The beacon scheduler now matches the firmware: 60 s base / 30 s churn-min /
+120 s dense-max intervals with the firmware's +-5 s per-beacon jitter
+(`BEACON_JITTER_MS`), and each node's first beacon gets a random phase
+within one interval (real nodes boot at uncorrelated times). An earlier
+revision of this document used a 15 s jitter-free scheduler whose phase-
+locked beacon storms repeated identically every interval; that artifact
+dominated the small-mesh numbers (10-node delivery read 25% instead of 65%).
+
+| Nodes | Delivered / attempted | Collision rate per reception | Half-duplex drops | LBT backoffs | Offered load | Collisions |
+|---|---|---|---|---|---|---|
+| 10 (grid) | 13/20 (65%) | 16% | 2 | 13 | 0.18 erlang | 75 |
+| 10 (cluster) | 18/20 (90%) | 11% | 16 | 64 | 0.13 erlang | 110 |
+| 50 | 0/20 (0%) | 35% | 15 | 83 | 1.16 erlang | 1,540 |
+| 100 | 0/20 (0%) | 36% | 86 | 240 | 2.34 erlang | 3,442 |
+| 200 | 2/20 (10%) | 37% | 118 | 522 | 4.42 erlang | 6,778 |
 
 Collision rate = collisions / (collisions + half-duplex drops + successful
-receptions). Every message that obtained a route was delivered, at 0.6 s
-(10 nodes) to 5.0 s (200 nodes) average latency; the failures are all route
-discoveries that never completed.
+receptions). Delivered messages averaged 0.4 s (10 nodes) to 5.0 s
+(200 nodes) latency; the failures are route discoveries that never
+completed.
+
+The 10-node cluster row is the desk-deployment reconciliation: 10 nodes in
+a single collision domain (10 m spacing, every node audible to every other,
+`simulator/scenarios/cluster-10.json`) deliver 18/20 under gentle load.
+That matches field experience with small real deployments and shows the
+grid row's remaining failures are multi-hop discovery losses, not a claim
+that small real meshes do not work.
 
 Per-node transmit airtime over the 600 s run (real ToA):
 
 | Nodes | min | p50 | p95 | max |
 |---|---|---|---|---|
-| 10 | 14.3 s | 17.0 s | 18.3 s | 19.5 s |
-| 50 | 12.5 s | 15.9 s | 18.8 s | 19.3 s |
-| 100 | 12.5 s | 14.9 s | 19.8 s | 19.8 s |
-| 200 | 11.1 s | 14.0 s | 18.8 s | 19.8 s |
+| 10 | 8.7 s | 10.0 s | 13.4 s | 13.4 s |
+| 50 | 10.0 s | 13.8 s | 16.3 s | 17.2 s |
+| 100 | 10.0 s | 13.8 s | 16.3 s | 16.8 s |
+| 200 | 9.0 s | 13.4 s | 15.6 s | 18.4 s |
 
-Every node spends 2 to 3.3% of wall time transmitting, nearly all of it
-control traffic (control airtime is 97 to 100% of transmissions in every
-run). The EU868 duty-cycle limit is 1%; no run would be legal there.
+Every node spends 1.5 to 2.9% of wall time transmitting, nearly all of it
+control traffic (control airtime is 86 to 100% of transmissions per run).
+The EU868 duty-cycle limit is 1%; no run would be legal there (duty-cycle
+enforcement landed in the firmware TX gate, workstream 2.1, after these
+scenarios were defined; the simulator bridge does not yet model it).
 
 ## Where the knee is
 
 Between 10 and 50 nodes, and the mechanism is beacon saturation plus
 discovery fragility:
 
-1. **Beacons alone exceed channel capacity at 100+ nodes.** A beacon is
-   608 ms on air; with the adaptive beacon controller averaging one beacon
-   per node per ~40 s in these runs, 100 nodes offer 1.5 erlang and 200
-   nodes 3.0 erlang of pure beacon traffic on a channel that saturates at
-   1.0. Above ~100 nodes the medium is over capacity before any user
-   traffic exists.
-2. **Route discovery requires a multi-leg round trip through that storm.**
-   An RREQ flood must reach the destination and a unicast RREP must hop back
-   along the reverse path; with per-reception collision rates of 57 to 74%,
-   the probability of completing both legs across multiple hops is small.
-   The firmware retries a discovery twice (5 s, then 15 s, same query_id)
-   and then gives up.
-3. **Synchronized rebroadcasts make floods self-destructive.** Relays
-   forward RREQs immediately on receipt with no jitter, so same-hop relays
-   start transmissions at the same instant. LBT desyncs some of them (with
-   LBT modeling disabled, the 10-node run delivers 2/20 instead of 5/20)
-   but gives up after 3 attempts and transmits anyway.
+1. **Beacons alone exceed channel capacity at 50+ nodes.** A beacon is
+   608 ms on air; at the firmware's 60 s cadence, 50 nodes offer ~0.5
+   erlang of pure beacon traffic before any RREQ or user traffic, and the
+   RREQ floods triggered by failed discoveries push the 50-node run to 1.16
+   erlang on a channel that saturates at 1.0. At 100 and 200 nodes the
+   medium is over capacity from control traffic alone (2.3 and 4.4 erlang).
+2. **Route discovery requires a multi-leg round trip through that storm,
+   and the firmware's own retry behavior makes it worse (LEDGER DES-2).**
+   An RREQ flood must reach the destination and a unicast RREP must hop
+   back along the reverse path. The firmware retries a discovery at 5 s and
+   15 s with the SAME query_id, while the RREQ dedup window is 30 s, so
+   every node that heard attempt 1 (including, often, the destination)
+   silently drops both retries; the simulator faithfully reproduces this.
+   Discovery effectively gets one flood attempt per message, and with
+   per-reception collision rates of 16 to 37%, multi-hop round trips fail
+   often. Fixing DES-2 (fresh query_id per retry) is the single highest-
+   leverage routing change these runs point at.
+3. **Synchronized rebroadcasts make floods self-destructive (DES-3).**
+   Relays forward RREQs immediately on receipt with no jitter, so same-hop
+   relays start transmissions at the same instant. LBT desyncs some of them
+   (with LBT modeling disabled, the pre-jitter 10-node run dropped from
+   5/20 to 2/20) but gives up after 3 attempts and transmits anyway.
 
 Captures are zero in every grid run: the uniform 120-unit spacing puts every
 audible interferer at exactly the same distance (equal RSSI), so the 6 dB
@@ -188,7 +211,15 @@ Model limitations, stated plainly:
   effects.
 - No external interference from other networks or ISM users.
 - CAD is modeled as deterministic energy detection within the range disk;
-  real SX126x CAD is preamble-biased and probabilistic.
+  real SX126x CAD is preamble-biased and probabilistic. It is also evaluated
+  once against transmissions already decided at check time, so it cannot
+  sense transmissions decided later in the same instant; mildly pessimistic
+  under storm conditions.
+- The capture window spans the interferer's full 16.25-symbol preamble;
+  Bor et al. (2016) measured capture succeeding only in roughly the last 5
+  preamble symbols. No effect on these runs (capture never fired in the
+  equal-RSSI grids), but irregular topologies would see slightly less
+  capture benefit than modeled.
 - Overlap is computed on transmit windows; propagation offsets are ignored
   (microseconds against ToA of hundreds of milliseconds).
 - Single channel, single SF; no inter-SF interference modeling.
@@ -196,8 +227,10 @@ Model limitations, stated plainly:
   that flatter these results: it floods RREQs with hop limit 32 where the
   firmware caps at 4 (many scripted pairs in the 10/100/200-node grids are
   more than 4 hops apart, so the firmware as-built could not deliver them
-  even on a clean channel), and reliability/receipt logic is a parallel
-  implementation (convergence is workstream 2.5).
+  even on a clean channel); retry RREQs issued from the node tick use hop
+  limit 4, so initial and retry floods differ in reach; and
+  reliability/receipt logic is a parallel implementation (convergence is
+  workstream 2.5).
 
 ## Raw data
 
