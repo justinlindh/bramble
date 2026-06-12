@@ -142,8 +142,13 @@ static void derive_pair_key(uint32_t addr_a, uint32_t addr_b, uint8_t* key_out) 
     crypto_sha256(material, sizeof(material), key_out);
 }
 
-/* Airtime estimate: ~50ms per typical packet */
-#define AIRTIME_ESTIMATE_MS 50
+/* Real time-on-air for a frame, in ms, for airtime budget accounting.
+ * Matches what the radio model actually occupies the medium with. */
+static uint32_t frame_airtime_ms(const radio_config_t* radio, uint16_t frame_len) {
+    uint32_t us = radio_frame_airtime_us(radio, frame_len);
+    uint32_t ms = (us + 999u) / 1000u;
+    return ms ? ms : 1u;
+}
 
 /* ─── Global simulation time ───────────────────────────────────────────── */
 uint64_t g_bridge_sim_time_us = 0;
@@ -573,8 +578,12 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
 
             uint8_t key[BRAMBLE_KEY_SIZE];
             derive_pair_key(orig_sender, rx->addr, key);
-            if (crypto_aes256gcm_decrypt(key, nonce, ct, ct_len, NULL, 0, tag, decrypted_payload) ==
-                0) {
+            /* AAD binds the header (hop_limit masked, as firmware does since
+             * the PR #79 AAD binding); must match the originator's AAD. */
+            uint8_t aad[HEADER_SIZE];
+            bramble_header_build_aad(&hdr, aad, sizeof(aad));
+            if (crypto_aes256gcm_decrypt(key, nonce, ct, ct_len, aad, HEADER_SIZE, tag,
+                                         decrypted_payload) == 0) {
                 metrics->crypto_decrypted++;
             } else {
                 metrics->crypto_auth_failed++;
@@ -841,6 +850,29 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
     if (bramble_header_deserialize(&hdr, buf, len) != ESP_OK)
         return;
 
+    /* Collision model: evaluate the reception at delivery time, when every
+     * transmission that could overlap this packet's air window is in the
+     * channel log. */
+    radio_rx_outcome_t rx_outcome = radio_check_reception(radio, rx, &event->data.packet);
+    if (rx_outcome == RADIO_RX_COLLISION || rx_outcome == RADIO_RX_HALF_DUPLEX) {
+        if (rx_outcome == RADIO_RX_COLLISION) {
+            metrics->collisions++;
+        } else {
+            metrics->half_duplex_drops++;
+        }
+        /* Emit drops for unicast traffic only; broadcast collisions are
+         * metric-only (mirrors the radio_loss drop policy in sim_radio). */
+        if (hdr.type == PKT_TYPE_DATA || hdr.type == PKT_TYPE_RREP ||
+            hdr.type == PKT_TYPE_DELIVERY_RECEIPT) {
+            emit_packet_dropped(stdout, event->timestamp_us, rx->id,
+                                rx_outcome == RADIO_RX_COLLISION ? "collision" : "half_duplex");
+        }
+        return;
+    }
+    if (rx_outcome == RADIO_RX_CAPTURED)
+        metrics->capture_wins++;
+    metrics->receptions_ok++;
+
     /* Dedup check — only for broadcast packets (RREQ flood prevention).
      * Unicast packets (DATA, RREP, DELIVERY_RECEIPT) are forwarded hop-by-hop
      * with the same packet_id, so dedup would incorrectly drop them at relays. */
@@ -915,21 +947,25 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     route_entry_t* route = route_lookup(&src->routes, dest_addr);
 
     if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
+        /* Discovery cadence mirrors firmware (mesh_task discovery retries +
+         * discovery_should_retry): first RREQ immediately, retries after 5 s
+         * then 15 s reusing the same query_id, 3 attempts total, then the
+         * discovery is abandoned. The message-level retry below stands in
+         * for the firmware's queued-message store and can start a fresh
+         * discovery once the failed one is removed. */
         pending_discovery_t* pd = discovery_lookup(&src->pending_discoveries, dest_addr);
-        if (pd && (now_ms - pd->timestamp > 5000)) {
-            discovery_remove(&src->pending_discoveries, dest_addr);
-            pd = NULL;
-        }
         bool should_send_rreq = false;
         if (!pd) {
             uint32_t query_id = pcg32_random(rng);
             discovery_start(&src->pending_discoveries, dest_addr, query_id, now_ms);
             should_send_rreq = true;
-        } else if (pd->attempts < MAX_RREQ_ATTEMPTS && (now_ms - pd->timestamp) > 1000) {
-            pd->attempts++;
-            pd->query_id = pcg32_random(rng);
-            pd->timestamp = now_ms;
+        } else if (discovery_should_retry(pd, now_ms)) {
+            discovery_record_attempt(pd, now_ms);
             should_send_rreq = true;
+        } else if (pd->attempts >= MAX_RREQ_ATTEMPTS &&
+                   (now_ms - pd->timestamp) > RREQ_RETRY_INTERVAL_2_MS) {
+            /* Exhausted: abandon so a later send can start a fresh discovery */
+            discovery_remove(&src->pending_discoveries, dest_addr);
         }
 
         if (should_send_rreq) {
@@ -1039,11 +1075,14 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             derive_pair_key(src->addr, dest_addr, key);
             uint8_t nonce[BRAMBLE_NONCE_SIZE];
             crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+            /* AAD binds this fragment's header (hop_limit masked) */
+            uint8_t aad[HEADER_SIZE];
+            bramble_header_build_aad(&fhdr, aad, sizeof(aad));
             memcpy(enc_buf, data_buf, HEADER_SIZE);
             memcpy(enc_buf + enc_offset, nonce, BRAMBLE_NONCE_SIZE);
             enc_offset += BRAMBLE_NONCE_SIZE;
             uint8_t tag[BRAMBLE_TAG_SIZE];
-            if (crypto_aes256gcm_encrypt(key, nonce, frag_payload, frag_len, NULL, 0,
+            if (crypto_aes256gcm_encrypt(key, nonce, frag_payload, frag_len, aad, HEADER_SIZE,
                                          enc_buf + enc_offset + BRAMBLE_TAG_SIZE, tag) == 0) {
                 memcpy(enc_buf + enc_offset, tag, BRAMBLE_TAG_SIZE);
                 enc_offset += BRAMBLE_TAG_SIZE + frag_len;
@@ -1054,8 +1093,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
                 enc_offset = HEADER_SIZE + frag_len;
             }
 
-            /* Airtime check (Phase 3) */
-            if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS)) {
+            /* Airtime check (Phase 3): real time-on-air for this fragment */
+            uint32_t frag_toa_ms = frame_airtime_ms(radio, (uint16_t)enc_offset);
+            if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, frag_toa_ms)) {
                 metrics->airtime_deferred++;
                 fprintf(stdout,
                         "{\"type\":\"airtime_exceeded\",\"timestamp_us\":%llu,\"node\":\"%s\"}\n",
@@ -1072,7 +1112,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             pkt.dest_addr = fwd_res.next_hop;
             pkt.pkt_type = PKT_TYPE_DATA;
 
-            airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS);
+            airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, frag_toa_ms);
             sim_radio_broadcast(src, &pkt, nodes, radio, rng, events, metrics, event->timestamp_us);
             metrics->fragments_sent++;
         }
@@ -1105,14 +1145,17 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         derive_pair_key(src->addr, dest_addr, key);
         uint8_t nonce[BRAMBLE_NONCE_SIZE];
         crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+        /* AAD binds the header (hop_limit masked), matching firmware */
+        uint8_t aad[HEADER_SIZE];
+        bramble_header_build_aad(&hdr, aad, sizeof(aad));
 
         memcpy(data_buf + total_len, nonce, BRAMBLE_NONCE_SIZE);
         total_len += BRAMBLE_NONCE_SIZE;
 
         uint8_t tag[BRAMBLE_TAG_SIZE];
         uint8_t ciphertext[256];
-        if (crypto_aes256gcm_encrypt(key, nonce, payload_buf, (size_t)payload_size, NULL, 0,
-                                     ciphertext, tag) == 0) {
+        if (crypto_aes256gcm_encrypt(key, nonce, payload_buf, (size_t)payload_size, aad,
+                                     HEADER_SIZE, ciphertext, tag) == 0) {
             memcpy(data_buf + total_len, tag, BRAMBLE_TAG_SIZE);
             total_len += BRAMBLE_TAG_SIZE;
             memcpy(data_buf + total_len, ciphertext, (size_t)payload_size);
@@ -1126,8 +1169,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         }
     }
 
-    /* Airtime check (Phase 3) */
-    if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS)) {
+    /* Airtime check (Phase 3): real time-on-air for this frame */
+    uint32_t toa_ms = frame_airtime_ms(radio, total_len);
+    if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, toa_ms)) {
         metrics->airtime_deferred++;
         fprintf(stdout, "{\"type\":\"airtime_exceeded\",\"timestamp_us\":%llu,\"node\":\"%s\"}\n",
                 (unsigned long long)event->timestamp_us, src->id);
@@ -1156,7 +1200,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr, MSG_TIER_NORMAL, pkt.data,
                     pkt.len, now_ms);
     flow_on_send(&src->flow_control, dest_addr);
-    airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS);
+    airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, toa_ms);
 
     sim_radio_broadcast(src, &pkt, nodes, radio, rng, events, metrics, event->timestamp_us);
 
@@ -1233,8 +1277,9 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         if (!fwd_res.should_send)
             continue;
 
-        /* Airtime check */
-        if (!airtime_budget_can_transmit(&node->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS)) {
+        /* Airtime check: real time-on-air of the stored frame */
+        uint32_t retx_toa_ms = frame_airtime_ms(radio, pa->packet_len);
+        if (!airtime_budget_can_transmit(&node->airtime, MSG_TIER_NORMAL, retx_toa_ms)) {
             metrics->airtime_deferred++;
             continue;
         }
@@ -1248,7 +1293,7 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         pkt.dest_addr = fwd_res.next_hop;
         pkt.pkt_type = PKT_TYPE_DATA;
 
-        airtime_budget_debit(&node->airtime, MSG_TIER_NORMAL, AIRTIME_ESTIMATE_MS);
+        airtime_budget_debit(&node->airtime, MSG_TIER_NORMAL, retx_toa_ms);
         sim_radio_broadcast(node, &pkt, nodes, radio, rng, events, metrics, now_us);
         metrics->messages_retried++;
 
