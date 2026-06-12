@@ -33,12 +33,11 @@ Compared to Meshtastic and MeshCore-style systems, Bramble prioritizes privacy a
 - **Privacy-first routing:** route-request sources are pseudonymized per query, so forwarded route requests do not carry the originator's address.
 - **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`). Discovery uses expanding-ring search (4 hops first, 8 on retries) with jittered rebroadcasts, and every retry is a fresh, unlinkable query.
 - **AES-256-GCM with AEAD:** message payloads (direct and channel) are encrypted with shared channel keys, giving confidentiality and integrity in one pass; this avoids CTR-only designs without authentication. There are no pairwise end-to-end keys and no forward secrecy today; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) has the honest detail.
-- **Airtime budgeting:** token-bucket enforcement with per-tier sub-budgets keeps usage predictable and regulation-aware.
-- **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged), and Critical (reliable with sliding-window flow control).
+- **Airtime budgeting:** every transmission goes through one budget-gated TX path (`components/radio/tx_gate.c`) with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps enforced where the frequency plan requires them (for example EU 868 at 1%).
+- **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged, 3 retries with backoff), and Critical (8 retries plus delivery receipts carrying the relay path).
 - **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable, verifiable identity primitives.
 - **Store-and-forward mailbox:** offline nodes receive queued messages when they rejoin the mesh.
-- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact; per-peer control over what you share and with whom.
-- **Emergency beacon:** dedicated priority channel for distress signaling.
+- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact; per-peer control over what you share and with whom. Location packets are not yet encrypted on the air ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)); do not share sensitive locations today.
 - **Browser-based flashing:** flash firmware to new devices directly from the web, no toolchain required.
 
 For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARISON.md).
@@ -65,9 +64,9 @@ See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior a
 
 ## Simulator
 
-Bramble ships with a mesh simulator that runs real protocol code against a virtual radio layer and renders topology/traffic in a browser. It is useful for repeatable scenario testing, failure injection, and behavior analysis before field deployment.
+Bramble ships with a mesh simulator that runs real protocol code against a virtual radio layer and renders topology/traffic in a browser. The radio layer models the shared LoRa medium (real time-on-air, collisions, capture, half-duplex, listen-before-talk), making it the primary proving ground for scale and routing behavior before field deployment.
 
-See [simulator/README.md](simulator/README.md) for setup and scenarios.
+See [simulator/README.md](simulator/README.md) for setup and scenarios, and [docs/results/simulation-2026-06.md](docs/results/simulation-2026-06.md) for measured scale results under the collision model.
 
 ## Getting Started
 
@@ -104,6 +103,7 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 - [docs/BUILDING.md](docs/BUILDING.md): build, flash, monitor workflows
 - [docs/bramble-architecture.md](docs/bramble-architecture.md): component-level architecture
 - [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md): threat model, verified protections, and known gaps
+- [docs/auth.md](docs/auth.md): RPC authentication (on by default), pairing, and the browser origin allowlist
 - [docs/COMPARISON.md](docs/COMPARISON.md): comparison with other mesh systems
 - [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md): protocol details
 - [docs/bramble-testing.md](docs/bramble-testing.md): test strategy and coverage
@@ -132,7 +132,7 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 ## Status
 
-Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and host-side validation currently covers **66 test suites**, all passing as a required CI gate. Development is ongoing.
+Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and every change must pass the full host test suite as a required CI gate (`test/run_all_tests.sh`, which fails if any suite fails or none are found). Development is ongoing.
 
 ## License
 

@@ -6,24 +6,24 @@ A technical reference for the Bramble LoRa mesh networking protocol stack.
 
 ## Overview
 
-Bramble is a privacy-first LoRa mesh networking protocol targeting ESP32-S3 + SX1262 hardware. It provides encrypted, multi-hop communication without central infrastructure. Every packet is encrypted end-to-end, routing metadata is protected, and the protocol is designed to resist traffic analysis.
+Bramble is a privacy-first LoRa mesh networking protocol targeting ESP32-S3 + SX1262 hardware. It provides encrypted, multi-hop communication without central infrastructure. Message payloads on configured channels are encrypted with AES-256-GCM, route-request sources are pseudonymized, and the channel a message belongs to is hidden inside the ciphertext. There are no pairwise end-to-end keys today, and several control-plane packets are unauthenticated; [SECURITY-MODEL.md](SECURITY-MODEL.md) is the authoritative statement of what is and is not protected.
 
-The codebase is organized as ESP-IDF components. Each component is self-contained with a clean public API exposed through its `include/` header. Components depend on each other only through these interfaces — there are no circular dependencies.
+The codebase is organized as ESP-IDF components. Each component is self-contained with a clean public API exposed through its `include/` header. Components depend on each other only through these interfaces: there are no circular dependencies.
 
 See also:
-- [`docs/COMPARISON.md`](COMPARISON.md) — Comparison with Meshtastic and MeshCore
-- [`docs/bramble-anomaly-detection.md`](bramble-anomaly-detection.md) — Anomaly detection subsystem
-- [`simulator/README.md`](../simulator/README.md) — Network simulator
+- [`docs/COMPARISON.md`](COMPARISON.md): Comparison with Meshtastic and MeshCore
+- [`docs/bramble-anomaly-detection.md`](bramble-anomaly-detection.md): Anomaly detection subsystem
+- [`simulator/README.md`](../simulator/README.md): Network simulator
 
 ---
 
 ## Design Goals
 
-1. **Privacy by design** — Source addresses, channel IDs, and routing metadata are hidden from relay nodes and passive observers wherever possible.
-2. **Scalability** — Reactive (on-demand) routing for unicast DMs; controlled flood routing for channels. O(path_length) transmissions per DM after route discovery, not O(N).
-3. **Airtime discipline** — Token-bucket duty cycle enforcement prevents channel monopolization and ensures regulatory compliance.
-4. **Tiered reliability** — Applications choose between fire-and-forget, acknowledged, and critical delivery; each tier has appropriate retry and flow-control behavior.
-5. **Embedded constraints** — Integer-only arithmetic, static allocation, no heap after init, minimal RAM footprint (~127 KB total).
+1. **Privacy by design**: Source addresses, channel IDs, and routing metadata are hidden from relay nodes and passive observers wherever possible.
+2. **Scalability**: Reactive (on-demand) routing for unicast DMs; controlled flood routing for channels. O(path_length) transmissions per DM after route discovery, not O(N).
+3. **Airtime discipline**: Token-bucket duty cycle enforcement prevents channel monopolization and ensures regulatory compliance.
+4. **Tiered reliability**: Applications choose between fire-and-forget, acknowledged, and critical delivery; each tier has appropriate retry and flow-control behavior.
+5. **Embedded constraints**: Integer-only arithmetic, static allocation, no heap after init, minimal RAM footprint (~127 KB total).
 
 ---
 
@@ -42,7 +42,7 @@ See also:
 | `dedup` | `components/dedup/` | Duplicate packet detection (sliding-window bloom filter) |
 | `identity` | `components/identity/` | Node identity, X25519 keypair generation and storage |
 | `timesync` | `components/timesync/` | Stratum-based mesh time synchronization, anti-replay |
-| `radio` | `components/radio/` | SX1262 driver abstraction, airtime accounting |
+| `radio` | `components/radio/` | SX1262 driver, airtime math, and the budget-gated TX gate (single transmit path) |
 | `mailbox` | `components/mailbox/` | Store-and-forward buffer for offline destinations |
 | `emergency` | `components/emergency/` | Emergency beacon state machine and tracking |
 | `location` | `components/location/` | Private location sharing with tiered privacy |
@@ -57,11 +57,12 @@ See also:
 | `bramble_probe` | `components/bramble_probe/` | Network reachability probe sweep |
 | `freq_plan` | `components/freq_plan/` | Regional frequency plan definitions |
 | `nvs_keys` | `components/nvs_keys/` | Central NVS namespace/key registry |
-| `rpc` | `components/rpc/` | JSON-RPC dispatcher and method registration |
+| `rpc` | `components/rpc/` | JSON-RPC dispatcher, method registration, and auth policy (default-on token, unauthenticated allowlist, notification gating) |
+| `traffic_debug` | `components/traffic_debug/` | Runtime TX/RX traffic capture and airtime attribution telemetry |
 | `board_config` | `components/board_config/` | Per-board hardware capability definitions |
 | `display` | `components/display/` | OLED status display (hardware-dependent) |
 | `ble` | `components/ble/` | BLE interface + key backup (hardware-dependent) |
-| `ota` | `components/ota/` | Over-the-air firmware updates (hardware-dependent) |
+| `ota` | `components/ota/` | Signed OTA updates: image signature verification, origin allowlist, soft anti-rollback (hardware-dependent) |
 | `ui` | `components/ui/` | JSON-RPC control interface |
 | `ui_graphics` | `components/ui_graphics/` | LVGL-based GUI (T-Deck Plus: chat, nodes, settings screens) |
 | `keyboard` | `components/keyboard/` | T-Deck Plus I2C keyboard driver (ESP32-C3 sub-MCU) |
@@ -74,7 +75,13 @@ See also:
 ## JSON-RPC API Notes (Current Firmware)
 
 The runtime source of truth for available RPC methods is `main/rpc_methods.c`.
-The OpenAPI document (`api/openapi.yaml`) is kept in sync with that registry.
+The OpenAPI document (`api/openapi.yaml`) is kept in sync with that registry,
+enforced in CI by `scripts/check-rpc-contract.sh`.
+
+Access control (see [auth.md](auth.md) and [SECURITY-MODEL.md](SECURITY-MODEL.md)):
+- Auth is required by default on WebSocket and BLE; serial is the unauthenticated pairing bootstrap.
+- Unauthenticated connections may call only `bramble.ping` and `bramble.getVersion` (`components/rpc/rpc_auth.c`) and receive no server-push notifications.
+- Tokenless browser connections are subject to a WebSocket `Origin` allowlist (`main/ws_origin.c`, enforced in `main/ws_server.c`).
 
 Notable wire-format details clients must honor:
 - `bramble.getAirtime` returns flat fields (`critical_remaining_ms`, etc.)
@@ -96,11 +103,11 @@ Offset  Size  Field
 1       1     type      (PKT_TYPE_*)
 2       1     flags     (see Flag Bits below)
 3       1     hop_limit (decremented at each relay; drop at 0)
-4       4     dest_addr (destination node address; 0x00000000 = broadcast)
+4       4     dest_addr (destination node address; 0xFFFFFFFF = broadcast)
 8       4     packet_id (random ID for dedup and ACK matching)
 ```
 
-All multi-byte fields are **little-endian**.
+All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be32` in `components/packet/packet.c`).
 
 ### Flag Bits (header byte 2)
 
@@ -113,7 +120,7 @@ All multi-byte fields are **little-endian**.
 | 2 | `0x04` | `FLAG_ENCRYPT` | Payload is encrypted |
 | 1–0 | `0x03` | `FLAG_FRAG` | Fragment indicator (00=none, 01=first, 10=middle, 11=last) |
 
-Additionally, `HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) signals emergency relay priority and causes all relay nodes to forward the packet unconditionally regardless of airtime budget.
+`HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) is defined to signal emergency relay priority, but nothing in the firmware sets or checks it today; every transmission, emergency-flagged or not, goes through the budget-gated TX path.
 
 ### Packet Types
 
@@ -140,6 +147,8 @@ Additionally, `HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) signals emergen
 | `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, `CONGESTION`, `TIME_SYNC`, the four mailbox types, the two emergency types, and `CODED`) are not sent or handled by the firmware today; their components exist and are unit-tested, but they are not wired into the mesh task. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+
 ### Beacon Flags
 
 The `bramble_beacon_t.flags` field carries per-feature capability bits:
@@ -158,11 +167,11 @@ The `bramble_beacon_t.flags` field carries per-feature capability bits:
 
 Provides the cryptographic primitives used throughout the stack:
 
-- **AES-256-GCM** — `crypto_aes256gcm_encrypt` / `_decrypt`: AEAD with 12-byte nonce, 16-byte auth tag
-- **X25519** — `crypto_x25519`: Diffie-Hellman key exchange
-- **HKDF-SHA256** — `crypto_hkdf`: Key derivation from shared secrets and context strings
-- **Random** — `crypto_random`: Cryptographically secure random bytes
-- **Anti-replay** — 64-bit sliding window in `timesync/anti_replay.c`
+- **AES-256-GCM**: `crypto_aes256gcm_encrypt` / `_decrypt`: AEAD with 12-byte nonce, 16-byte auth tag
+- **X25519**: `crypto_x25519`: Diffie-Hellman key exchange
+- **HKDF-SHA256**: `crypto_hkdf`: Key derivation from shared secrets and context strings
+- **Random**: `crypto_random`: Cryptographically secure random bytes
+- **Anti-replay**: 64-bit sliding window in `timesync/anti_replay.c` (implemented and tested, but currently has no callers in the firmware; see SECURITY-MODEL.md known gaps)
 
 Key sizes: `BRAMBLE_KEY_SIZE` = 32 bytes, `BRAMBLE_NONCE_SIZE` = 12 bytes, `BRAMBLE_TAG_SIZE` = 16 bytes.
 
@@ -191,7 +200,7 @@ Implements AODV-inspired reactive unicast routing:
 5. **Channel flooding** (`channel_flood.c`): Hop-limited (default 3) re-broadcast for channel messages. Dedup prevents loops.
 6. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
 
-Privacy note: RREQ packets encrypt the source address — intermediate relay nodes cannot determine who initiated a route discovery.
+Privacy note: RREQ packets encrypt the source address: intermediate relay nodes cannot determine who initiated a route discovery.
 
 ---
 
@@ -215,11 +224,13 @@ Provides named encrypted group channels:
 
 Manages session keys and the 3-step key exchange:
 
-1. **Initiate** — Alice sends `PKT_TYPE_KEY_EXCHANGE` with ephemeral X25519 pubkey
-2. **Respond** — Bob sends his ephemeral + long-term pubkeys
-3. **Confirm** — Alice sends final auth tag proving she holds the derived session key
+1. **Initiate**: Alice sends `PKT_TYPE_KEY_EXCHANGE` with ephemeral X25519 pubkey
+2. **Respond**: Bob sends his ephemeral + long-term pubkeys
+3. **Confirm**: Alice sends final auth tag proving she holds the derived session key
 
 Session key = HKDF(ephemeral-DH ‖ static-DH, "bramble-session"). Keys rotate every 24h or 65,536 messages.
+
+Implementation status: the session/key-exchange machinery is component-level only. `PKT_TYPE_KEY_EXCHANGE` is never sent and never handled on the wire, and direct messages are encrypted with the shared channel key, not pairwise session keys (see SECURITY-MODEL.md).
 
 **Dummy traffic** (`dummy_traffic.c`): Optionally emits random-length encrypted packets to defend against traffic analysis (volume and timing correlation).
 
@@ -233,11 +244,13 @@ Three delivery tiers:
 
 | Tier | Retries | Timeout | Notes |
 |------|---------|---------|-------|
-| Broadcast | 0 | — | Fire-and-forget |
-| Normal | 3 | ~5s base, exponential backoff | End-to-end ACK required |
-| Critical | 8 | ~12s base, exponential backoff | Delivery receipt + full relay path |
+| Broadcast | 0 | none | Fire-and-forget |
+| Normal | 3 | 2s base, exponential backoff with ±25% jitter | End-to-end ACK required |
+| Critical | 8 | 3s base, exponential backoff with ±25% jitter | Delivery receipt + full relay path |
 
-Per-destination sliding window (max 4 unacknowledged packets). AIMD congestion response on `PKT_TYPE_CONGESTION` receipt.
+(Constants: `tier_max_retries` / `tier_base_delay_ms` in `components/reliability/reliability.c`; jitter applied in `main/mesh_task.c`.)
+
+A per-destination sliding window (max 4 unacknowledged packets) with AIMD adjustment is implemented and tested in `reliability.c`, but is not yet wired into the mesh task; `PKT_TYPE_CONGESTION` is never sent or received (see the packet-type implementation status note). The retry/ACK machinery above is live.
 
 ---
 
@@ -253,10 +266,12 @@ Splits messages larger than the LoRa MTU (~240 bytes usable after header and cry
 
 **Files:** `airtime_budget.c`, `tx_queue.c`
 
-Token-bucket airtime budget enforcing a self-imposed 10% duty cycle (~36s/hour):
+Per-tier token-bucket airtime budget with continuous (proportional) refill, consumed by the radio TX gate:
 
-- **Budget** (`airtime_budget.c`): Tracks on-air time per tier. Replenishes at the token-bucket rate. Returns `false` on `airtime_can_send()` when budget is exhausted (except for emergency-flagged packets, which bypass the check).
-- **TX queue** (`tx_queue.c`): Priority queue ordered by tier. Critical > Normal > Broadcast. Drains when the radio is available and the budget allows.
+- **Budget** (`airtime_budget.c`): Four lanes with hourly base budgets of 36 s critical, 18 s normal, 18 s broadcast, and 12 s receipt (`AIRTIME_BUDGET_*_MS`). An adaptive profile scales the maxima by mesh size (`airtime_budget_set_mesh_size`), CRITICAL may borrow a capped share of NORMAL (`AIRTIME_BORROW_CAP_PCT`, 25%), and a regulatory duty-cycle cap from the frequency plan scales everything down when the region enforces one (`airtime_budget_set_duty_cap`; EU868 = 1%). See [airtime-budget-v2.md](airtime-budget-v2.md).
+- **TX queue** (`tx_queue.c`): Priority queue ordered by tier. Currently exercised only by host tests; the live transmit path is the radio TX gate below.
+
+Every transmission is admitted and debited by the TX gate in `components/radio/tx_gate.c` (see the `radio` section); there is no budget-exempt transmit path.
 
 ---
 
@@ -281,8 +296,8 @@ Generates and persists a node's X25519 keypair on first boot (stored in NVS). Th
 **Files:** `timesync.c`, `anti_replay.c`
 
 Stratum-based mesh time synchronization inspired by NTP:
-- GPS-equipped nodes are stratum 0; they broadcast `PKT_TYPE_TIME_SYNC` packets.
-- Other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
+- Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated `PKT_TYPE_TIME_SYNC` packet is defined but never sent or handled.
+- GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
 - Convergence to ±1–2s across the mesh.
 
 **Anti-replay** (`anti_replay.c`): 64-bit sliding window keyed on `(src_addr, packet_id)` to reject replayed packets.
@@ -291,15 +306,19 @@ Stratum-based mesh time synchronization inspired by NTP:
 
 ### `radio`
 
-**Files:** `radio_airtime.c`, `radio_mock.c`
+**Files:** `radio_esp.c`, `sx1262.c`, `radio_airtime.c`, `tx_gate.c`, `tx_gate_esp.c`, `radio_mock.c`
 
-`radio_airtime.c`: Calculates on-air time for a packet given spreading factor, bandwidth, and coding rate. Used by `airtime_budget.c` to account for actual airtime.
+`radio_esp.c` / `sx1262.c`: SX1262 driver (SPI, IRQ handling, CAD). The raw transmit primitive `radio_transmit_raw` is declared only in `radio_internal.h`; nothing outside the component can transmit without going through the TX gate.
+
+`tx_gate.c` / `tx_gate_esp.c`: The single budget-gated transmit path. Every packet (data, retries, forwards, beacons, routing control, ACKs, receipts, probes) is classified into a `tx_kind_t`, mapped to a budget tier, costed with real time-on-air math, checked against the airtime budget, passed through listen-before-talk (up to 3 CAD attempts with randomized exponential backoff), transmitted, and debited. A beacon-sized reserve in the broadcast lane guarantees the next beacon's tokens cannot be drained by broadcast data.
+
+`radio_airtime.c`: Calculates on-air time for a packet given spreading factor, bandwidth, and coding rate (Semtech AN1200.13). Used by the TX gate to cost every transmission and by the simulator's radio model.
 
 `radio_mock.c`: Software radio stub for host-side unit tests and the network simulator. Accepts/delivers packets via callbacks rather than hardware SPI.
 
 ---
 
-### `traffic_debug` (v0.3 — 2026-02-22)
+### `traffic_debug` (v0.3: 2026-02-22)
 
 **Files:** `components/traffic_debug/traffic_debug.{h,c}`
 
@@ -311,10 +330,10 @@ Runtime traffic observability and airtime analysis telemetry:
 - **Serial JSONL sink:** Emits one JSON line per event to UART for offline capture and analysis.
 - **Runtime config:** Enable/disable via RPC (`bramble.setTrafficDebug`), with configurable TX/RX inclusion and sampling rate (0-100%).
 - **RPC/WebSocket API:**
-  - `bramble.setTrafficDebug` — configure debug mode (persisted to NVS)
-  - `bramble.getTrafficDebug` — query config + buffer state (capacity, count, dropped)
-  - `bramble.getTrafficEvents` — pull events from ring buffer (incremental via `since_seq`)
-  - `bramble.onTrafficEvent` — real-time WebSocket notifications (live stream)
+  - `bramble.setTrafficDebug`: configure debug mode (persisted to NVS)
+  - `bramble.getTrafficDebug`: query config + buffer state (capacity, count, dropped)
+  - `bramble.getTrafficEvents`: pull events from ring buffer (incremental via `since_seq`)
+  - `bramble.onTrafficEvent`: real-time WebSocket notifications (live stream)
 
 **Use case:** Measure airtime usage by category (e.g., "beacons consume 40% of broadcast budget"), identify retry storms, tune beacon intervals, and explain broadcast-budget drain in field deployments.
 
@@ -326,9 +345,9 @@ Runtime traffic observability and airtime analysis telemetry:
 
 ---
 
-## New Components (v0.2 — 2026-02-17)
+## New Components (v0.2: 2026-02-17)
 
-The following seven components were added as part of the simulator component integration milestone. All are implemented, unit-tested, and included in the test suite.
+The following seven components were added as part of the simulator component integration milestone. All are implemented, unit-tested, and included in the test suite. Not all are wired into the live mesh path: see the implementation-status note under Packet Types for which packet types the firmware actually sends and handles today.
 
 ---
 
@@ -365,10 +384,10 @@ Allows nodes to store messages destined for currently-offline peers and deliver 
 
 **Protocol integration:**
 - `BEACON_FLAG_MAILBOX` (`0x01`) in the beacon flags field advertises willingness to store
-- `PKT_TYPE_STORE_REQUEST` (`0x0B`) — sender asks a mailbox node to store a message
-- `PKT_TYPE_STORE_ACK` (`0x0C`) — mailbox confirms storage
-- `PKT_TYPE_MAILBOX_DELIVERY` (`0x0D`) — mailbox delivers stored message when destination returns
-- `PKT_TYPE_MAILBOX_QUERY` (`0x0E`) — destination queries a mailbox node for pending messages
+- `PKT_TYPE_STORE_REQUEST` (`0x0B`): sender asks a mailbox node to store a message
+- `PKT_TYPE_STORE_ACK` (`0x0C`): mailbox confirms storage
+- `PKT_TYPE_MAILBOX_DELIVERY` (`0x0D`): mailbox delivers stored message when destination returns
+- `PKT_TYPE_MAILBOX_QUERY` (`0x0E`): destination queries a mailbox node for pending messages
 
 **API:**
 ```c
@@ -391,9 +410,9 @@ INACTIVE ──activate──► ACTIVE ──cancel──► COOLDOWN ──tim
 ```
 
 **States:**
-- `EMERGENCY_STATE_INACTIVE` (0) — normal operation
-- `EMERGENCY_STATE_ACTIVE` (1) — transmitting emergency beacons every 30s
-- `EMERGENCY_STATE_COOLDOWN` (2) — 15-minute cool-down after cancel before re-activation
+- `EMERGENCY_STATE_INACTIVE` (0): normal operation
+- `EMERGENCY_STATE_ACTIVE` (1): transmitting emergency beacons every 30s
+- `EMERGENCY_STATE_COOLDOWN` (2): 15-minute cool-down after cancel before re-activation
 
 **Timing constants:**
 - Auto-timeout: 24 hours (`EMERGENCY_AUTO_TIMEOUT_MS`)
@@ -493,7 +512,7 @@ void group_record_message(group);   /* advances epoch after threshold */
 
 ### Network Coding (`components/coding/`)
 
-XOR-based network coding for bidirectional relay scenarios. When a relay node has two packets that need to travel in opposite directions to two neighbors who each already have one of the packets, it can XOR them together and send a single coded packet — both neighbors decode the packet they need using the one they already have.
+XOR-based network coding for bidirectional relay scenarios. When a relay node has two packets that need to travel in opposite directions to two neighbors who each already have one of the packets, it can XOR them together and send a single coded packet: both neighbors decode the packet they need using the one they already have.
 
 **Encoding:** `coding_encode(pkt_a, len_a, id_a, pkt_b, len_b, id_b, coded_out, coded_len_out)` pads the shorter packet to `max(len_a, len_b)` and XOR-combines them. The coded header is prepended.
 
@@ -546,19 +565,19 @@ void coding_flush_expired(engine, now_ms);
 
 ## Changelog
 
-### v0.2 — 2026-02-17 (`feature/sim-component-integration`)
+### v0.2: 2026-02-17 (`feature/sim-component-integration`)
 
-- **feat:** Added Public Channel (Bramble Common) — channel 0 with well-known PSK, TX/RX rate limiters
-- **feat:** Added Mailbox / Store-and-Forward — 32-entry buffer, TTL-based expiry, new packet types 0x0B–0x0E
-- **feat:** Added Emergency Beacon — 3-state FSM, 24h auto-timeout, `HEADER_FLAG_EMERGENCY` bypass, packet types 0x0F–0x10
-- **feat:** Added Private Location Sharing — 3 privacy tiers, 17-byte full / 5-byte coarse serialization, position cache
-- **feat:** Added Group DMs — FNV-1a key derivation, epoch rotation every 256 messages, max 8 members/8 groups
-- **feat:** Added Network Coding — XOR encode/decode, reception cache, coding opportunity detection, `PKT_TYPE_CODED` 0x11
-- **feat:** Added Adaptive Routing Metrics — composite metric with EMA filters, hysteresis, integer-only arithmetic
+- **feat:** Added Public Channel (Bramble Common): channel 0 with well-known PSK, TX/RX rate limiters
+- **feat:** Added Mailbox / Store-and-Forward: 32-entry buffer, TTL-based expiry, new packet types 0x0B–0x0E
+- **feat:** Added Emergency Beacon: 3-state FSM, 24h auto-timeout, `HEADER_FLAG_EMERGENCY` bypass, packet types 0x0F–0x10
+- **feat:** Added Private Location Sharing: 3 privacy tiers, 17-byte full / 5-byte coarse serialization, position cache
+- **feat:** Added Group DMs: FNV-1a key derivation, epoch rotation every 256 messages, max 8 members/8 groups
+- **feat:** Added Network Coding: XOR encode/decode, reception cache, coding opportunity detection, `PKT_TYPE_CODED` 0x11
+- **feat:** Added Adaptive Routing Metrics: composite metric with EMA filters, hysteresis, integer-only arithmetic
 - **fix:** `channel_msg_decrypt` data pointer pointed to ciphertext instead of decrypted plaintext
 - **feat:** Added 7 new CMake test targets (test\_public\_channel, test\_mailbox, test\_emergency, test\_location, test\_group, test\_coding, test\_route\_metric)
 
-### v0.1 — 2026-02-16 (`master` baseline)
+### v0.1: 2026-02-16 (`master` baseline)
 
 - Initial protocol stack: crypto, packet, routing, channel, security, reliability, fragment, airtime, dedup, identity, timesync, radio
 - Network simulator with web UI, anomaly detection, and scenario runner
