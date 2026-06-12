@@ -47,6 +47,9 @@ else
 fi
 log "Build version: $BUILD_VERSION"
 
+log "Ensuring OTA signing key"
+bash "$ROOT_DIR/scripts/ensure-ota-signing-key.sh"
+
 log "Preparing deterministic output directory: $OUTPUT_DIR"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"

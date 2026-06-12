@@ -38,3 +38,15 @@ CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
 # T-Deck Plus and Heltec V4 use native USB-JTAG — console overridden in their
 # board-specific sdkconfig.defaults.* files.
 CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+
+# OTA image signing: Secure Boot V2 RSA-3072 app signatures WITHOUT eFuses.
+# Every build appends a signature block to bramble.bin; OTA updates verify the
+# incoming image against the public key in the RUNNING app's signature block
+# and fail closed (esp_ota_end / esp_https_ota_finish). Boot-time enforcement
+# arrives later with hardware Secure Boot V2 (eFuse burn, human-gated); the
+# image format is already compatible.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/ota_signing_key.pem"

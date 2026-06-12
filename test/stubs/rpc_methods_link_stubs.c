@@ -259,9 +259,51 @@ int mesh_traffic_debug_set_config(const traffic_debug_config_t* cfg) {
 void mesh_traffic_debug_get_config(traffic_debug_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
 bool mesh_get_traffic_debug(void) { return false; }
 const char* ota_get_running_partition(void) { return "factory"; }
-int ota_wifi_start(const char* url) {
-    (void)url;
+/* ── OTA stubs (URL policy via real ota_url.c, linked into these bins) ── */
+#include "ota_origin.h"
+#include "ota_url.h"
+
+char g_ota_last_url[256];
+bool g_ota_last_allow_downgrade = false;
+int g_ota_wifi_start_calls = 0;
+char g_ota_origin_stub[256] = "https://bramblemesh.org/ota/";
+bool g_ota_origin_overridden_stub = false;
+
+int ota_wifi_start(const char* url, bool allow_downgrade) {
+    snprintf(g_ota_last_url, sizeof(g_ota_last_url), "%s", url);
+    g_ota_last_allow_downgrade = allow_downgrade;
+    g_ota_wifi_start_calls++;
     return -1;
+}
+const char* ota_get_last_error(void) { return NULL; }
+typedef struct {
+    const char* version;
+} stub_app_desc_t;
+static const stub_app_desc_t s_stub_app_desc = {.version = "1.2.3"};
+const void* esp_app_get_description(void) { return &s_stub_app_desc; }
+const char* ota_get_app_version(void) { return "1.2.3"; }
+void ota_origin_get(char* out, size_t out_len) { snprintf(out, out_len, "%s", g_ota_origin_stub); }
+int ota_origin_set(const char* origin) {
+    if (!ota_url_origin_valid(origin, false)) {
+        return -1;
+    }
+    snprintf(g_ota_origin_stub, sizeof(g_ota_origin_stub), "%s", origin);
+    g_ota_origin_overridden_stub = true;
+    return 0;
+}
+int ota_origin_reset(void) {
+    snprintf(g_ota_origin_stub, sizeof(g_ota_origin_stub), "%s", OTA_DEFAULT_ORIGIN);
+    g_ota_origin_overridden_stub = false;
+    return 0;
+}
+bool ota_origin_is_overridden(void) { return g_ota_origin_overridden_stub; }
+int ota_resolve_artifact(const char* rel_path, char* out, size_t out_len) {
+    return ota_url_resolve(g_ota_origin_stub, rel_path, false, out, out_len);
+}
+bool ota_rollback_get_floor(char* out, size_t out_len) {
+    (void)out;
+    (void)out_len;
+    return false;
 }
 const char* addr_hex(uint32_t addr, char* buf, size_t len) {
     snprintf(buf, len, "%08X", addr);
