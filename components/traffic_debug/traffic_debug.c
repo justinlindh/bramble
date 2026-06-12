@@ -10,8 +10,6 @@
 #define PKT_TYPE_BEACON 0x05
 #define PKT_TYPE_KEY_EXCHANGE 0x06
 #define PKT_TYPE_DELIVERY_RECEIPT 0x07
-#define PKT_TYPE_CONGESTION 0x08
-#define PKT_TYPE_TIME_SYNC 0x09
 #define PKT_TYPE_DATA 0x0A
 #define PKT_TYPE_STORE_REQUEST 0x0B
 #define PKT_TYPE_STORE_ACK 0x0C
@@ -47,9 +45,6 @@ traffic_category_t traffic_debug_classify_packet(uint8_t pkt_type) {
     case PKT_TYPE_BEACON:
         return TRAFFIC_CAT_BEACON;
 
-    case PKT_TYPE_TIME_SYNC:
-        return TRAFFIC_CAT_TIMESYNC;
-
     case PKT_TYPE_RREQ:
     case PKT_TYPE_RREP:
     case PKT_TYPE_RERR:
@@ -66,7 +61,6 @@ traffic_category_t traffic_debug_classify_packet(uint8_t pkt_type) {
         return TRAFFIC_CAT_CHAT;
 
     case PKT_TYPE_KEY_EXCHANGE:
-    case PKT_TYPE_CONGESTION:
     case PKT_TYPE_STORE_REQUEST:
     case PKT_TYPE_MAILBOX_DELIVERY:
     case PKT_TYPE_MAILBOX_QUERY:

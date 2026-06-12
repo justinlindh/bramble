@@ -133,8 +133,6 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 44+ bytes (name optional) |
 | `0x06` | `PKT_TYPE_KEY_EXCHANGE` | X25519 key exchange (3-step) | 101 bytes |
 | `0x07` | `PKT_TYPE_DELIVERY_RECEIPT` | Path-tracing delivery receipt | 22–54 bytes |
-| `0x08` | `PKT_TYPE_CONGESTION` | Congestion notification | 20 bytes |
-| `0x09` | `PKT_TYPE_TIME_SYNC` | Mesh time synchronization | 24 bytes |
 | `0x0A` | `PKT_TYPE_DATA` | Encrypted data payload | variable |
 | `0x0B` | `PKT_TYPE_STORE_REQUEST` | Request a mailbox node to store a message | variable |
 | `0x0C` | `PKT_TYPE_STORE_ACK` | Acknowledgement of successful mailbox storage | fixed |
@@ -147,7 +145,7 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 
-Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, `CONGESTION`, `TIME_SYNC`, the four mailbox types, the two emergency types, and `CODED`) are not sent or handled by the firmware today; their components exist and are unit-tested, but they are not wired into the mesh task. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, the four mailbox types, the two emergency types, and `CODED`) are not sent or handled by the firmware today; their components exist and are unit-tested, but they are not wired into the mesh task. Type codes `0x08` and `0x09` (formerly `CONGESTION` and `TIME_SYNC`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
 
 ### Beacon Flags
 
@@ -249,7 +247,7 @@ Three delivery tiers:
 
 (Constants: `tier_max_retries` / `tier_base_delay_ms` in `components/reliability/reliability.c`; jitter applied in `main/mesh_task.c`.)
 
-A per-destination sliding window (max 4 unacknowledged packets) with AIMD adjustment is implemented and tested in `reliability.c`, but is not yet wired into the mesh task; `PKT_TYPE_CONGESTION` is never sent or received (see the packet-type implementation status note). The retry/ACK machinery above is live.
+A per-destination sliding window (max 4 unacknowledged packets) with AIMD adjustment is implemented and tested in `reliability.c`, but is not yet wired into the mesh task; the CONGESTION packet type was removed unshipped. The retry/ACK machinery above is live.
 
 ---
 
@@ -295,7 +293,7 @@ Generates and persists a node's X25519 keypair on first boot (stored in NVS). Th
 **Files:** `timesync.c`
 
 Stratum-based mesh time synchronization inspired by NTP:
-- Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated `PKT_TYPE_TIME_SYNC` packet is defined but never sent or handled.
+- Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated TIME_SYNC packet type was removed unshipped; the beacon is the only sync transport.
 - GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
 - Convergence to ±1–2s across the mesh.
 
