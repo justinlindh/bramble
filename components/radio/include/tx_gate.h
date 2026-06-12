@@ -59,8 +59,26 @@ typedef struct {
 typedef struct {
     tx_gate_ops_t ops;
     airtime_budget_t budget;
-    uint32_t denied_count[AIRTIME_TIER_COUNT];
+    /* Wire size of this node's beacon (registered at each beacon TX).
+     * Funds the beacon reserve and the budget-derived minimum beacon
+     * interval; 0 = unknown (no reserve, no interval floor). */
+    uint8_t beacon_wire_len;
 } tx_gate_t;
+
+/* Share of the BROADCAST lane's hourly refill that beacon cadence may
+ * consume; the remainder stays available to broadcast data and probes.
+ * Beacons are the liveness backbone (neighbor tables live on them), so
+ * they get the larger share and broadcast data is the elastic party. */
+#define TX_GATE_BEACON_LANE_PCT 60u
+
+/* Liveness ceiling for the budget-derived beacon interval: 80% of
+ * routing.h NEIGHBOR_EXPIRY_MS (600000). When the 60% share would stretch
+ * the cadence past this, beacons may consume up to the FULL lane instead
+ * (broadcast data yields entirely): losing broadcast data beats vanishing
+ * from neighbor tables. Only if even the full lane cannot fund a beacon
+ * per ceiling (e.g. EU868 at SF11/12) does the interval exceed it; that
+ * is the physics of a 1% duty cycle, surfaced instead of silently denied. */
+#define TX_GATE_BEACON_LIVENESS_CEILING_MS 480000u
 
 /* ── Core API (host-testable, no RTOS deps) ─────────────────────────── */
 
@@ -84,12 +102,25 @@ bool tx_gate_can_transmit(tx_gate_t* g, uint8_t wire_len, tx_kind_t kind);
 
 void tx_gate_set_mesh_size(tx_gate_t* g, uint8_t peer_count);
 
+/* Register the node's beacon wire size (called at each beacon TX, so the
+ * reserve and the interval floor always track the live beacon and SF). */
+void tx_gate_set_beacon_profile(tx_gate_t* g, uint8_t beacon_wire_len);
+
+/* Minimum beacon interval such that beacon cadence ToA fits inside
+ * TX_GATE_BEACON_LANE_PCT of the BROADCAST lane's hourly refill at the
+ * live radio config. The beacon scheduler stretches its interval to at
+ * least this, so beacons fit the budget BY DESIGN instead of being denied
+ * at transmit time. Returns 0 while the beacon size is unknown. */
+uint32_t tx_gate_min_beacon_interval_ms(tx_gate_t* g);
+
 /* ── Firmware singleton (tx_gate_esp.c); thread-safe wrappers ───────── */
 
 void tx_gate_global_init(uint8_t max_duty_cycle_pct, bool duty_cycle_enforced);
 int tx_gate_send(const uint8_t* buf, uint8_t len, tx_kind_t kind);
 bool tx_gate_check(uint8_t wire_len, tx_kind_t kind);
 void tx_gate_set_peer_count(uint8_t peer_count);
+void tx_gate_set_beacon_size(uint8_t beacon_wire_len);
+uint32_t tx_gate_beacon_min_interval(void);
 uint32_t tx_gate_remaining(uint8_t tier);
 void tx_gate_snapshot(airtime_budget_t* out);
 

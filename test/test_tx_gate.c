@@ -115,7 +115,6 @@ void test_denied_when_budget_exhausted_radio_untouched(void) {
     /* Denial must short-circuit before LBT and before the radio. */
     TEST_ASSERT_EQUAL_INT(0, s_fake.tx_count);
     TEST_ASSERT_EQUAL_INT(0, s_fake.cad_calls);
-    TEST_ASSERT_EQUAL_UINT32(1u, s_gate.denied_count[AIRTIME_IDX_RECEIPT]);
 }
 
 void test_tiers_are_isolated(void) {

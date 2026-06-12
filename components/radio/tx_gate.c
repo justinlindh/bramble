@@ -23,8 +23,7 @@ void tx_gate_init(tx_gate_t* g, const tx_gate_ops_t* ops, uint8_t max_duty_cycle
     g->ops = *ops;
     airtime_budget_init(&g->budget, g->ops.now_ms());
     airtime_budget_set_duty_cap(&g->budget, max_duty_cycle_pct, duty_cycle_enforced);
-    for (int i = 0; i < AIRTIME_TIER_COUNT; i++)
-        g->denied_count[i] = 0u;
+    g->beacon_wire_len = 0u;
 }
 
 /*
@@ -81,17 +80,16 @@ uint32_t tx_gate_cost_ms(tx_gate_t* g, uint8_t wire_len) {
     return (us + 999u) / 1000u; /* ceil: never undercount airtime */
 }
 
-static int tier_stat_idx(uint8_t tier) {
-    switch (tier) {
-    case AIRTIME_TIER_CRITICAL:
-        return AIRTIME_IDX_CRITICAL;
-    case AIRTIME_TIER_BROADCAST:
-        return AIRTIME_IDX_BROADCAST;
-    case AIRTIME_TIER_RECEIPT:
-        return AIRTIME_IDX_RECEIPT;
-    default:
-        return AIRTIME_IDX_NORMAL;
-    }
+/* One beacon's ToA held back from non-beacon BROADCAST spenders, so a
+ * broadcast-data burst can never leave the lane too empty for the next
+ * beacon. Paired with the interval floor (tx_gate_min_beacon_interval_ms)
+ * this guarantees a beacon's tokens are present when its timer fires:
+ * the stretched cadence consumes at most TX_GATE_BEACON_LANE_PCT of the
+ * lane refill, and data can only drain the lane down to the reserve. */
+static uint32_t beacon_reserve_ms(tx_gate_t* g, uint8_t tier, tx_kind_t kind) {
+    if (tier != AIRTIME_TIER_BROADCAST || kind == TX_KIND_BEACON || g->beacon_wire_len == 0u)
+        return 0u;
+    return tx_gate_cost_ms(g, g->beacon_wire_len);
 }
 
 int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t kind) {
@@ -99,8 +97,8 @@ int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t ki
     uint32_t cost_ms = tx_gate_cost_ms(g, len);
 
     airtime_budget_refill(&g->budget, g->ops.now_ms());
-    if (!airtime_budget_can_transmit(&g->budget, tier, cost_ms)) {
-        g->denied_count[tier_stat_idx(tier)]++;
+    if (!airtime_budget_can_transmit(&g->budget, tier,
+                                     cost_ms + beacon_reserve_ms(g, tier, kind))) {
         return TX_GATE_ERR_BUDGET;
     }
 
@@ -132,9 +130,44 @@ bool tx_gate_can_transmit(tx_gate_t* g, uint8_t wire_len, tx_kind_t kind) {
     uint8_t tier = tx_gate_kind_tier(kind);
     uint32_t cost_ms = tx_gate_cost_ms(g, wire_len);
     airtime_budget_refill(&g->budget, g->ops.now_ms());
-    return airtime_budget_can_transmit(&g->budget, tier, cost_ms);
+    return airtime_budget_can_transmit(&g->budget, tier,
+                                       cost_ms + beacon_reserve_ms(g, tier, kind));
 }
 
 void tx_gate_set_mesh_size(tx_gate_t* g, uint8_t peer_count) {
     airtime_budget_set_mesh_size(&g->budget, peer_count);
+}
+
+void tx_gate_set_beacon_profile(tx_gate_t* g, uint8_t beacon_wire_len) {
+    g->beacon_wire_len = beacon_wire_len;
+}
+
+uint32_t tx_gate_min_beacon_interval_ms(tx_gate_t* g) {
+    if (g->beacon_wire_len == 0u)
+        return 0u;
+    uint32_t cost_ms = tx_gate_cost_ms(g, g->beacon_wire_len);
+    /* Hourly refill of the BROADCAST lane equals its capacity. */
+    uint64_t lane_per_hr = g->budget.max_ms[AIRTIME_IDX_BROADCAST];
+    uint64_t beacon_budget_per_hr = (lane_per_hr * TX_GATE_BEACON_LANE_PCT) / 100u;
+    if (beacon_budget_per_hr == 0u)
+        return AIRTIME_REFILL_INTERVAL_MS;
+    /* interval >= cost * hour / budget  (ceil), so that
+     * (hour / interval) beacons cost at most beacon_budget_per_hr. */
+    uint64_t interval =
+        ((uint64_t)cost_ms * AIRTIME_REFILL_INTERVAL_MS + beacon_budget_per_hr - 1u) /
+        beacon_budget_per_hr;
+
+    /* Liveness ceiling: rather than stretch past (and purge out of)
+     * neighbor tables, let beacons consume up to the full lane. */
+    if (interval > TX_GATE_BEACON_LIVENESS_CEILING_MS && lane_per_hr > 0u) {
+        uint64_t full_lane_floor =
+            ((uint64_t)cost_ms * AIRTIME_REFILL_INTERVAL_MS + lane_per_hr - 1u) / lane_per_hr;
+        interval = (full_lane_floor > TX_GATE_BEACON_LIVENESS_CEILING_MS)
+                       ? full_lane_floor
+                       : TX_GATE_BEACON_LIVENESS_CEILING_MS;
+    }
+
+    if (interval > AIRTIME_REFILL_INTERVAL_MS)
+        interval = AIRTIME_REFILL_INTERVAL_MS;
+    return (uint32_t)interval;
 }

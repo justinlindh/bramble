@@ -769,9 +769,12 @@ static int send_beacon(void) {
     }
 
     size_t beacon_wire_len = bramble_beacon_wire_size(&beacon);
-    /* Deny behavior: a beacon is periodic and purely advisory; when the
-     * BROADCAST budget denies it we skip this interval and let the next
-     * one try again. Nothing to queue, nothing to surface. */
+    /* Register the live beacon size with the gate: it funds the beacon
+     * reserve (one beacon ToA held back from broadcast-data spenders) and
+     * the budget-derived minimum interval used by the scheduler below. */
+    tx_gate_set_beacon_size((uint8_t)beacon_wire_len);
+    /* Beacons fit the budget by design (reserve + stretched interval);
+     * denial is the never-expected backstop and only logs. */
     int ret = mesh_tx(buf, (uint8_t)beacon_wire_len, TX_KIND_BEACON);
     if (ret == TX_GATE_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -2285,6 +2288,24 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     
     /* Compute adaptive beacon interval */
     uint32_t base_interval = compute_adaptive_beacon_interval(t, current_neighbor_count);
+
+    /* Budget floor: stretch the cadence so beacon ToA at the live SF fits
+     * its share of the BROADCAST lane (the duty-cycle cap shrinks that
+     * lane on EU868). Beacons must fit the budget by design; a cadence the
+     * budget cannot fund would otherwise be denied at transmit time and
+     * the node would intermittently vanish from neighbor tables. */
+    uint32_t budget_floor = tx_gate_beacon_min_interval();
+    if (budget_floor > base_interval) {
+        static uint32_t s_last_logged_floor = 0;
+        if (budget_floor != s_last_logged_floor) {
+            ESP_LOGI(TAG,
+                     "Beacon interval stretched to %" PRIu32 "ms by airtime budget "
+                     "(policy wanted %" PRIu32 "ms)",
+                     budget_floor, base_interval);
+            s_last_logged_floor = budget_floor;
+        }
+        base_interval = budget_floor;
+    }
     
     /* Periodic beacon TX */
     if ((t - *last_beacon_ms) >= *beacon_interval) {
