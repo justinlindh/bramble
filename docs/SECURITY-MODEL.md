@@ -215,10 +215,18 @@ window. That trade is accepted: the cap exists to bound CPU.
 Route requests do not carry the originator's address in the source field.
 `initiate_discovery` (`main/mesh_task.c`) computes
 `HMAC-SHA256(private_key, address || query_id)` truncated to 4 bytes and
-sends that as `encrypted_source`; a fresh `query_id` per request makes
-pseudonyms unlinkable across requests. The mapping is held locally so
-returning RREPs can be correlated (`pseudonym_store`, expiring after 60
-seconds).
+sends that as `encrypted_source`. Every attempt, including each retry of the
+same discovery, floods under a fresh `query_id` and therefore a fresh
+pseudonym, so the pseudonyms themselves are unlinkable to each other as
+well as across discoveries. The unlinkability is scoped to the identifier:
+the cleartext destination address plus the fixed +5s/+15s retry schedule
+still let a passive observer group the attempts of a single discovery by
+timing and target. Nothing stores a pseudonym-to-address map; returning RREPs are
+correlated by `query_id` against the pending-discovery table, which
+remembers every attempt's query_id. One reach trade-off: retries flood with
+hop limit 8 instead of the first attempt's 4 (expanding-ring discovery), so
+a retried discovery exposes its pseudonymized request to a wider set of
+relays and passive observers.
 
 What it does not hide: the *destination* address of the RREQ is cleartext in
 the header, request sizes and timing are observable, and on the first hop the

@@ -31,7 +31,7 @@ The firmware currently runs on real hardware (including T-Deck Plus and Heltec V
 Compared to Meshtastic and MeshCore-style systems, Bramble prioritizes privacy and scalability at the protocol level:
 
 - **Privacy-first routing:** route-request sources are pseudonymized per query, so forwarded route requests do not carry the originator's address.
-- **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`).
+- **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`). Discovery uses expanding-ring search (4 hops first, 8 on retries) with jittered rebroadcasts, and every retry is a fresh, unlinkable query.
 - **AES-256-GCM with AEAD:** message payloads (direct and channel) are encrypted with shared channel keys, giving confidentiality and integrity in one pass; this avoids CTR-only designs without authentication. There are no pairwise end-to-end keys and no forward secrecy today; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) has the honest detail.
 - **Airtime budgeting:** every transmission goes through one budget-gated TX path (`components/radio/tx_gate.c`) with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps enforced where the frequency plan requires them (for example EU 868 at 1%).
 - **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged, 3 retries with backoff), and Critical (8 retries plus delivery receipts carrying the relay path).

@@ -102,8 +102,8 @@ bool mesh_discovery_should_retry(const pending_discovery_t *d, uint32_t now_ms) 
     return discovery_should_retry(d, now_ms);
 }
 
-void mesh_discovery_record_attempt(pending_discovery_t *d, uint32_t now_ms) {
-    discovery_record_attempt(d, now_ms);
+void mesh_discovery_record_attempt(pending_discovery_t *d, uint32_t query_id, uint32_t now_ms) {
+    discovery_record_attempt(d, query_id, now_ms);
 }
 
 /* ── Rate limiter ───────────────────────────────────────────────────── */

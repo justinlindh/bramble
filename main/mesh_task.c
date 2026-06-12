@@ -143,19 +143,16 @@ typedef struct {
 } queued_msg_t;
 static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
-/* Originator pseudonym lookup table for RREQ privacy.
- * Maps ephemeral pseudonyms to real addresses so incoming RREPs can be correlated.
- * Uses circular replacement when full. */
-#define PSEUDONYM_TABLE_SIZE 8
+/* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
+ * random 50-300ms so same-hop relays do not key up at the same instant; the
+ * mesh task drains due entries from its main loop (10ms poll cadence). */
+#define RREQ_FWD_QUEUE_CAPACITY 8
 typedef struct {
-    uint32_t pseudonym;     /* HMAC-derived pseudonym sent in RREQ */
-    uint32_t real_addr;     /* Our actual address */
-    uint32_t query_id;      /* RREQ query_id (used as nonce) */
-    uint32_t timestamp;     /* When this entry was created */
-    bool     used;
-} pseudonym_entry_t;
-static pseudonym_entry_t s_pseudonym_table[PSEUDONYM_TABLE_SIZE];
-static int s_pseudonym_next_slot = 0;
+    bool used;
+    uint32_t due_at_ms;
+    bramble_rreq_t rreq;
+} pending_rreq_fwd_t;
+static pending_rreq_fwd_t s_rreq_fwd_queue[RREQ_FWD_QUEUE_CAPACITY];
 
 /* Reliability — ACK tracking for outgoing unicast messages */
 static pending_ack_table_t s_pending_acks;
@@ -1572,7 +1569,9 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
             .version = BRAMBLE_VERSION,
             .type = PKT_TYPE_RERR,
             .flags = 0,
-            .hop_limit = 3,
+            /* Per-hop budget; the route-match chain bounds teardown depth
+             * because matching relays re-originate with a fresh limit. */
+            .hop_limit = ROUTE_HOP_LIMIT_MAX,
             .dest_addr = 0xFFFFFFFF, /* broadcast */
             .packet_id = next_packet_id(),
         },
@@ -1610,64 +1609,53 @@ static uint32_t pseudonym_generate(const uint8_t *private_key, uint32_t address,
     return pseudonym;
 }
 
-/**
- * Store a pseudonym mapping in the lookup table.
- * Uses circular replacement when table is full.
- */
-static void pseudonym_store(uint32_t pseudonym, uint32_t real_addr, uint32_t query_id, uint32_t timestamp) {
-    pseudonym_entry_t *entry = &s_pseudonym_table[s_pseudonym_next_slot];
-    entry->pseudonym = pseudonym;
-    entry->real_addr = real_addr;
-    entry->query_id = query_id;
-    entry->timestamp = timestamp;
-    entry->used = true;
+/* No pseudonym lookup table exists: RREP correlation runs on query_ids in
+ * the pending-discovery table, and every attempt (first try or retry) gets a
+ * fresh query_id, so its pseudonym is re-derived on demand and never stored.
+ * Retries being unlinkable new queries is the intended privacy behavior. */
 
-    s_pseudonym_next_slot = (s_pseudonym_next_slot + 1) % PSEUDONYM_TABLE_SIZE;
+/* ── End pseudonym helpers ───────────────────────────────────── */
 
-    ESP_LOGD(TAG, "Pseudonym stored: %08" PRIX32 " → addr=%08" PRIX32 " query=%08" PRIX32,
-             pseudonym, real_addr, query_id);
-}
+/* ── Jittered RREQ forwarding (DES-3) ────────────────────────── */
 
 /**
- * Look up a pseudonym in the table.
- * Returns the entry if found, NULL otherwise.
+ * Queue an RREQ forward with random jitter so same-hop relays do not
+ * rebroadcast at the same instant. Falls back to immediate transmission when
+ * the queue is full (under a forward storm the jitter no longer matters, and
+ * dropping the forward could sever the only path).
  */
-static pseudonym_entry_t *pseudonym_lookup(uint32_t pseudonym) {
-    for (int i = 0; i < PSEUDONYM_TABLE_SIZE; i++) {
-        if (s_pseudonym_table[i].used && s_pseudonym_table[i].pseudonym == pseudonym) {
-            return &s_pseudonym_table[i];
+static void schedule_rreq_forward(const bramble_rreq_t *fwd) {
+    uint32_t jitter = discovery_forward_jitter_ms(esp_random());
+    for (int i = 0; i < RREQ_FWD_QUEUE_CAPACITY; i++) {
+        if (!s_rreq_fwd_queue[i].used) {
+            s_rreq_fwd_queue[i].used = true;
+            s_rreq_fwd_queue[i].due_at_ms = now_ms() + jitter;
+            s_rreq_fwd_queue[i].rreq = *fwd;
+            ESP_LOGD(TAG, "RREQ fwd query=%08" PRIX32 " jittered %" PRIu32 "ms",
+                     fwd->query_id, jitter);
+            return;
         }
     }
-    return NULL;
+    ESP_LOGW(TAG, "RREQ fwd queue full; forwarding query=%08" PRIX32 " immediately",
+             fwd->query_id);
+    send_rreq(fwd);
 }
 
 /**
- * Look up a pseudonym by query_id.
- * Returns the entry if found, NULL otherwise.
+ * Transmit any due jittered RREQ forwards. Called from the mesh task main
+ * loop, so forwards stay scheduled rather than blocking packet handling.
  */
-static pseudonym_entry_t *pseudonym_lookup_by_query(uint32_t query_id) {
-    for (int i = 0; i < PSEUDONYM_TABLE_SIZE; i++) {
-        if (s_pseudonym_table[i].used && s_pseudonym_table[i].query_id == query_id) {
-            return &s_pseudonym_table[i];
-        }
-    }
-    return NULL;
-}
-
-/**
- * Purge expired pseudonym entries (older than 60 seconds).
- */
-static void pseudonym_purge(uint32_t now) {
-    const uint32_t PSEUDONYM_EXPIRY_MS = 60000;
-    for (int i = 0; i < PSEUDONYM_TABLE_SIZE; i++) {
-        if (s_pseudonym_table[i].used && (now - s_pseudonym_table[i].timestamp) > PSEUDONYM_EXPIRY_MS) {
-            ESP_LOGD(TAG, "Pseudonym expired: %08" PRIX32, s_pseudonym_table[i].pseudonym);
-            s_pseudonym_table[i].used = false;
+static void process_rreq_forward_queue(uint32_t t) {
+    for (int i = 0; i < RREQ_FWD_QUEUE_CAPACITY; i++) {
+        if (s_rreq_fwd_queue[i].used &&
+            (int32_t)(t - s_rreq_fwd_queue[i].due_at_ms) >= 0) {
+            send_rreq(&s_rreq_fwd_queue[i].rreq);
+            s_rreq_fwd_queue[i].used = false;
         }
     }
 }
 
-/* ── End pseudonym helpers ─────────────────────────────────────────── */
+/* ── End jittered RREQ forwarding ──────────────────────────────── */
 
 static void flush_queued_messages(uint32_t dest_addr) {
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
@@ -1690,7 +1678,9 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     ESP_LOGI(TAG, "RX RREQ query=%08" PRIX32 " dest=%08" PRIX32 " hops=%u metric=%u",
              rreq.query_id, rreq.header.dest_addr, rreq.hop_count, rreq.metric);
 
-    /* RREQ dedup — drop if already seen */
+    /* First-arrival dedup: the first flood copy wins. Path quality still
+     * arbitrates at route_install time, between RREPs answering different
+     * discovery attempts (each attempt floods under a fresh query_id). */
     if (rreq_dedup_check_and_add(&s_rreq_dedup, rreq.query_id, now_ms())) {
         ESP_LOGD(TAG, "Duplicate RREQ query=%08" PRIX32, rreq.query_id);
         return;
@@ -1701,7 +1691,7 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     /* Is this RREQ for us? */
     if (rreq.header.dest_addr == s_identity->address) {
-        ESP_LOGI(TAG, "RREQ is for us — sending RREP");
+        ESP_LOGI(TAG, "RREQ is for us; sending RREP");
         bramble_rrep_t rrep = rrep_build_destination(&rreq, s_identity->address);
 
         /* Route RREP back toward the previous hop */
@@ -1711,17 +1701,20 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         }
         send_rrep(&rrep);
 
-        /* Install route to the source via prev_hop */
-        uint8_t metric = rreq.metric + compute_link_penalty(rssi, snr);
+        /* Install route to the source via prev_hop. The link penalty
+         * subtracts from the higher-is-better path metric. */
+        uint8_t metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop,
                       rreq.hop_count, metric, ROUTE_ACTIVE, now_ms());
         return;
     }
 
-    /* Not for us — forward the RREQ */
-    if (rreq.header.hop_limit > 0) {
-        bramble_rreq_t fwd = rreq_forward(&rreq, s_identity->address, rssi, snr);
-        send_rreq(&fwd);
+    /* Not for us: schedule a jittered forward while the hop budget lasts.
+     * The > 1 bound makes hop_limit N mean N-hop reach exactly (a relay
+     * receiving 1 does not forward), matching the spec and the simulator. */
+    if (rreq.header.hop_limit > 1) {
+        bramble_rreq_t fwd = rreq_forward(&rreq, s_identity->address, (int8_t)rssi, snr);
+        schedule_rreq_forward(&fwd);
     }
 }
 
@@ -1735,8 +1728,9 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
              rrep.query_id, rrep.src_addr, rrep.hop_count);
 
-    /* Install route to the destination (RREP source) via the sender */
-    uint8_t metric = rrep.route_metric + compute_link_penalty(rssi, snr);
+    /* Install route to the destination (RREP source) via the sender. The
+     * link penalty subtracts from the higher-is-better path metric. */
+    uint8_t metric = metric_apply_link_penalty(rrep.route_metric, (int8_t)rssi, snr);
     route_install(&s_routes, rrep.src_addr, rrep.header.dest_addr == s_identity->address
                   ? rrep.src_addr : rrep.next_hop,
                   rrep.hop_count, metric, ROUTE_ACTIVE, now_ms());
@@ -2331,7 +2325,6 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
         reassembly_purge(&s_reassembly, t);
-        pseudonym_purge(t);  /* Clean up expired originator pseudonym mappings */
         *last_purge_ms = t;
 
         /* Expire old mailbox entries */
@@ -2351,6 +2344,9 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
             }
         }
     }
+
+    /* Drain due jittered RREQ forwards every loop iteration (10ms cadence) */
+    process_rreq_forward_queue(t);
 
     /* Discovery retries (check every 5s) */
     static uint32_t last_disc_check = 0;
@@ -2372,29 +2368,27 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                     discovery_remove(&s_pending_disc, pd->dest_addr);
                     i--; /* re-check same index after remove */
                 } else {
-                    ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32 " (attempt %u)",
-                             pd->dest_addr, pd->attempts + 1);
-                    discovery_record_attempt(pd, t);
+                    /* Fresh query_id per retry (DES-2): nodes that heard an
+                     * earlier attempt would eat a same-query retry via the
+                     * 30s dedup window. A fresh query is a NEW query, so it
+                     * gets a fresh pseudonym; incoming RREPs match because
+                     * the pending discovery remembers every attempt's
+                     * query_id. Retries also widen the ring (DES-1). */
+                    uint32_t retry_query = next_packet_id();
+                    discovery_record_attempt(pd, retry_query, t);
+                    ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32
+                             " (attempt %u, query=%08" PRIX32 ", hop_limit=%u)",
+                             pd->dest_addr, pd->attempts, retry_query,
+                             discovery_hop_limit_for_attempt(pd->attempts));
 
-                    /* Look up the stored pseudonym for this query_id.
-                     * Retries must use the same pseudonym so RREPs can be correlated. */
-                    pseudonym_entry_t *ps = pseudonym_lookup_by_query(pd->query_id);
-                    uint32_t enc_src;
-                    if (ps) {
-                        enc_src = ps->pseudonym;
-                        ESP_LOGD(TAG, "RREQ retry using stored pseudonym %08" PRIX32, enc_src);
-                    } else {
-                        /* Pseudonym expired or missing — regenerate (unlikely but safe) */
-                        enc_src = pseudonym_generate(s_identity->private_key,
-                                                     s_identity->address,
-                                                     pd->query_id);
-                        pseudonym_store(enc_src, s_identity->address, pd->query_id, t);
-                        ESP_LOGW(TAG, "RREQ retry regenerated pseudonym %08" PRIX32, enc_src);
-                    }
+                    uint32_t enc_src = pseudonym_generate(s_identity->private_key,
+                                                          s_identity->address,
+                                                          retry_query);
 
                     bramble_rreq_t rreq = rreq_build_originator(
                         s_identity->address, pd->dest_addr,
-                        pd->query_id, enc_src);
+                        retry_query, enc_src,
+                        discovery_hop_limit_for_attempt(pd->attempts));
                     send_rreq(&rreq);
                 }
             }
@@ -2648,7 +2642,7 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_DATA,
         .flags = FLAG_ENCRYPT | FLAG_CHANNEL,
-        .hop_limit = 3,
+        .hop_limit = ROUTE_HOP_LIMIT_MAX, /* must traverse expanded-ring routes */
         .dest_addr = dest_addr,
         .packet_id = pkt_id,
     };
@@ -2973,26 +2967,27 @@ static int initiate_discovery(uint32_t dest_addr) {
     /* Generate ephemeral pseudonym for originator privacy.
      * Pseudonym = HMAC-SHA256(private_key, address || query_id)[0..3]
      *
-     * This provides unlinkability: each RREQ uses a different pseudonym
-     * (query_id acts as nonce), so observers cannot correlate multiple
-     * route requests from the same originator.
+     * This provides unlinkability: every attempt (first try or retry) is a
+     * new query with a fresh query_id acting as the nonce, so observers
+     * cannot correlate route requests from the same originator.
      *
-     * The destination can identify the originator by:
-     * 1. Trying HMAC with known peer keys to reverse-map the pseudonym, OR
-     * 2. The originator reveals itself during the secure channel setup phase
+     * The pseudonym is keyed with the originator's PRIVATE key, so nobody
+     * (including the destination) can reverse-map it; the originator
+     * identifies itself during the secure channel setup phase instead.
      *
-     * Store mapping locally so incoming RREPs can be correlated. */
+     * Nothing stores the pseudonym: RREPs are correlated by query_id via the
+     * pending-discovery table, which remembers every attempt's query_id. */
     uint32_t pseudonym = pseudonym_generate(s_identity->private_key,
                                              s_identity->address,
                                              query_id);
-    pseudonym_store(pseudonym, s_identity->address, query_id, now_ms());
 
     ESP_LOGI(TAG, "RREQ privacy: addr=%08" PRIX32 " → pseudonym=%08" PRIX32 " (query=%08" PRIX32 ")",
              s_identity->address, pseudonym, query_id);
 
     uint32_t encrypted_source = pseudonym;
     bramble_rreq_t rreq = rreq_build_originator(s_identity->address, dest_addr,
-                                                  query_id, encrypted_source);
+                                                  query_id, encrypted_source,
+                                                  discovery_hop_limit_for_attempt(1));
     send_rreq(&rreq);
     return 0;
 }
@@ -3092,8 +3087,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     reassembly_init(&s_reassembly);
     location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
-    memset(s_pseudonym_table, 0, sizeof(s_pseudonym_table));  /* Init originator pseudonym table */
-    s_pseudonym_next_slot = 0;
+    memset(s_rreq_fwd_queue, 0, sizeof(s_rreq_fwd_queue)); /* Init jittered RREQ forward queue */
     memset(&s_shared, 0, sizeof(s_shared));
     tx_gate_snapshot(&s_shared.airtime);
 

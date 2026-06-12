@@ -229,10 +229,13 @@ void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
              i < node->pending_discoveries.count && result->count < NODE_TICK_MAX_OUTBOUND; i++) {
             pending_discovery_t* d = &node->pending_discoveries.entries[i];
             if (discovery_should_retry(d, now_ms)) {
-                uint32_t query_id = d->query_id;
+                /* Fresh query_id per retry with an expanded hop ring,
+                 * mirroring firmware (DES-1/DES-2). */
+                uint32_t query_id = pcg32_random(&node->beacon_rng);
+                discovery_record_attempt(d, query_id, now_ms);
                 bramble_rreq_t rreq =
-                    rreq_build_originator(node->addr, d->dest_addr, query_id, node->addr);
-                discovery_record_attempt(d, now_ms);
+                    rreq_build_originator(node->addr, d->dest_addr, query_id, node->addr,
+                                          discovery_hop_limit_for_attempt(d->attempts));
 
                 outbound_packet_t* out = &result->pkts[result->count++];
                 bramble_rreq_serialize(&rreq, out->data, RREQ_SIZE);
