@@ -6,6 +6,7 @@
 #ifdef ESP_PLATFORM
 
 #include "radio.h"
+#include "radio_internal.h"
 #include "sx1262.h"
 #include "board_config.h"
 
@@ -300,8 +301,8 @@ int radio_init(const radio_config_t* config) {
     return 0;
 }
 
-int radio_transmit(const uint8_t* data, uint8_t len) {
-    ESP_LOGD(TAG, "radio_transmit: %u bytes", len);
+int radio_transmit_raw(const uint8_t* data, uint8_t len) {
+    ESP_LOGD(TAG, "radio_transmit_raw: %u bytes", len);
 
     atomic_store(&s_state, RADIO_STATE_TX);
     s_tx_waiter = xTaskGetCurrentTaskHandle();
