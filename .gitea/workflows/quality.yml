@@ -29,10 +29,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install host test deps
+      - name: Assert host test deps are pre-baked on the runner
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake make gcc g++ libssl-dev
+          for tool in cmake make gcc g++; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool missing from runner image"; exit 1; }
+          done
+          test -f /usr/include/openssl/ssl.h || { echo "::error::libssl-dev missing from runner image"; exit 1; }
       - name: Run host test suite
         run: bash test/run_all_tests.sh
 
@@ -42,10 +44,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+      - name: Assert shellcheck is pre-baked on the runner
+        run: command -v shellcheck >/dev/null || { echo "::error::shellcheck missing from runner image"; exit 1; }
       - name: ShellCheck required baseline scope
         run: |
           shellcheck \
@@ -90,10 +90,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
+      - name: Assert clang-format is pre-baked on the runner
+        run: command -v clang-format >/dev/null || { echo "::error::clang-format missing from runner image"; exit 1; }
       - name: Clang-format check (full strict scope)
         run: bash scripts/lint/run-clang-format-check.sh --strict
 
@@ -103,10 +101,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install cppcheck
+      - name: Install cppcheck (not pre-baked on the runner image)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cppcheck
+          # The runner image carries an arm64 foreign arch whose security
+          # mirror lacks arm64 indexes; apt-get update exits nonzero even
+          # though the amd64 indexes it needs are fetched. Tolerate that,
+          # then let the install fail honestly if cppcheck is unavailable.
+          sudo apt-get update || true
+          command -v cppcheck >/dev/null || sudo apt-get install -y cppcheck
       - name: cppcheck
         run: |
           cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches \
