@@ -2,7 +2,7 @@
 
 Privacy-first LoRa mesh networking for ESP32-S3, built with ESP-IDF.
 
-Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-range, infrastructure-free communication. It is designed for resilient field use while minimizing metadata exposure: not just message contents, but key routing details are protected as well.
+Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-range, infrastructure-free communication. It is designed for resilient field use while reducing metadata exposure; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) documents exactly what is and is not protected.
 
 ## Table of Contents
 
@@ -30,16 +30,16 @@ The firmware currently runs on real hardware (including T-Deck Plus and Heltec V
 
 Compared to Meshtastic and MeshCore-style systems, Bramble prioritizes privacy and scalability at the protocol level:
 
-- **Privacy-first routing:** route-request source addresses are encrypted to reduce metadata leakage.
+- **Privacy-first routing:** route-request sources are pseudonymized per query, so forwarded route requests do not carry the originator's address.
 - **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`).
-- **AES-256-GCM with AEAD:** confidentiality and integrity are built in; this avoids CTR-only designs without authentication.
+- **AES-256-GCM with AEAD:** message payloads (direct and channel) are encrypted with shared channel keys, giving confidentiality and integrity in one pass; this avoids CTR-only designs without authentication. There are no pairwise end-to-end keys and no forward secrecy today; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) has the honest detail.
 - **Airtime budgeting:** token-bucket enforcement with per-tier sub-budgets keeps usage predictable and regulation-aware.
 - **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged), and Critical (reliable with sliding-window flow control).
 - **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable, verifiable identity primitives.
 - **Store-and-forward mailbox:** offline nodes receive queued messages when they rejoin the mesh.
-- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact — per-peer control over what you share and with whom.
+- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact; per-peer control over what you share and with whom.
 - **Emergency beacon:** dedicated priority channel for distress signaling.
-- **Browser-based flashing:** flash firmware to new devices directly from the web — no toolchain required.
+- **Browser-based flashing:** flash firmware to new devices directly from the web, no toolchain required.
 
 For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARISON.md).
 
@@ -100,27 +100,28 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 
 ## Documentation
 
-- [docs/README.md](docs/README.md) — documentation index (recommended entry point)
-- [docs/BUILDING.md](docs/BUILDING.md) — build, flash, monitor workflows
-- [docs/bramble-architecture.md](docs/bramble-architecture.md) — component-level architecture
-- [docs/COMPARISON.md](docs/COMPARISON.md) — comparison with other mesh systems
-- [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md) — protocol details
-- [docs/bramble-testing.md](docs/bramble-testing.md) — test strategy and coverage
-- [docs/ota-rollout.md](docs/ota-rollout.md) — OTA operator workflow
-- [docs/quality-policy.md](docs/quality-policy.md) — repo-wide CI gates, promotion criteria, and rollback levers
-- [docs/quality-policy-firmware.md](docs/quality-policy-firmware.md) — firmware lint/static-analysis phased rollout and advisory CI mapping
-- [docs/quality-policy-webapp.md](docs/quality-policy-webapp.md) — webapp workflow required/advisory mapping, local parity commands, and rollback levers
-- [simulator/README.md](simulator/README.md) — simulator usage
-- [docs/webapp/chat.md](docs/webapp/chat.md) — web client chat and UX notes
+- [docs/README.md](docs/README.md): documentation index (recommended entry point)
+- [docs/BUILDING.md](docs/BUILDING.md): build, flash, monitor workflows
+- [docs/bramble-architecture.md](docs/bramble-architecture.md): component-level architecture
+- [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md): threat model, verified protections, and known gaps
+- [docs/COMPARISON.md](docs/COMPARISON.md): comparison with other mesh systems
+- [docs/bramble-protocol-spec.md](docs/bramble-protocol-spec.md): protocol details
+- [docs/bramble-testing.md](docs/bramble-testing.md): test strategy and coverage
+- [docs/ota-rollout.md](docs/ota-rollout.md): OTA operator workflow
+- [docs/quality-policy.md](docs/quality-policy.md): repo-wide CI gates, promotion criteria, and rollback levers
+- [docs/quality-policy-firmware.md](docs/quality-policy-firmware.md): firmware lint/static-analysis phased rollout and advisory CI mapping
+- [docs/quality-policy-webapp.md](docs/quality-policy-webapp.md): webapp workflow required/advisory mapping, local parity commands, and rollback levers
+- [simulator/README.md](simulator/README.md): simulator usage
+- [docs/webapp/chat.md](docs/webapp/chat.md): web client chat and UX notes
 
 ## API and SDK
 
 Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
-- [api/openapi.yaml](api/openapi.yaml) — OpenAPI source for the RPC surface
-- [bramble-go](https://github.com/justinlindh/bramble-go) — Go SDK (serial, WebSocket, BLE)
-- [bramble-cli](https://github.com/justinlindh/bramble-cli) — CLI/TUI built on bramble-go
-- [VERSIONING.md](VERSIONING.md) — compatibility matrix
+- [api/openapi.yaml](api/openapi.yaml): OpenAPI spec for the RPC surface (currently lags the firmware; see [VERSIONING.md](VERSIONING.md))
+- [bramble-go](https://github.com/justinlindh/bramble-go): Go SDK (serial, WebSocket, BLE)
+- [bramble-cli](https://github.com/justinlindh/bramble-cli): CLI/TUI built on bramble-go
+- [VERSIONING.md](VERSIONING.md): compatibility matrix
 
 ## CI/CD
 
@@ -131,8 +132,8 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 ## Status
 
-Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and host-side validation currently covers **59 test suites with 430+ individual test cases**. Development is ongoing.
+Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and host-side validation currently covers **66 test suites**, all passing as a required CI gate. Development is ongoing.
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT; see [LICENSE](LICENSE)
