@@ -80,6 +80,14 @@ void node_activate(sim_node_t* node) {
     node->neighbor_history_idx = 0;
     node->last_mode_transition_us = 0;
     node->adaptive_enabled = true; /* Enable by default for simulation */
+
+    /* Per-node jitter PRNG (deterministic per address) and first beacon due
+     * time: real nodes boot at uncorrelated times, so the first beacon gets
+     * a random phase within one base interval instead of the tick stagger. */
+    pcg32_seed(&node->beacon_rng, 0x9E3779B97F4A7C15ULL ^ node->addr);
+    node->next_beacon_due_us =
+        pcg32_range(&node->beacon_rng, 0, (uint32_t)(NODE_BEACON_INTERVAL_BASE_US / 1000ULL)) *
+        1000ULL;
 }
 
 void node_deactivate(sim_node_t* node) { node->active = false; }
@@ -125,17 +133,16 @@ static uint64_t adaptive_beacon_interval(sim_node_t* node, uint64_t now_us) {
     bool dense = (num_neighbors >= ADAPTIVE_NEIGHBOR_DENSE_THRESHOLD);
     bool high_churn = (churn_events >= ADAPTIVE_CHURN_THRESHOLD);
 
-    /* Apply hysteresis with cooldown */
+    /* Apply hysteresis with cooldown. Branch mapping mirrors the firmware
+     * policy (main/mesh_task.c beacon_policy): dense backs off to the max
+     * interval, churn speeds up to the min interval, otherwise base. */
     uint64_t new_interval;
-    if (high_churn) {
-        /* Churn detected → fast beacons for rapid discovery */
-        new_interval = NODE_BEACON_INTERVAL_BASE_US;
-    } else if (dense || num_neighbors >= 5) {
-        /* Dense or moderate mesh → conservative airtime */
-        new_interval = NODE_BEACON_INTERVAL_STABLE_US;
+    if (dense) {
+        new_interval = NODE_BEACON_INTERVAL_DENSE_US;
+    } else if (high_churn) {
+        new_interval = NODE_BEACON_INTERVAL_CHURN_US;
     } else {
-        /* Small mesh → also use stable interval (matches current 60s default in firmware) */
-        new_interval = NODE_BEACON_INTERVAL_STABLE_US;
+        new_interval = NODE_BEACON_INTERVAL_BASE_US;
     }
 
     /* Only transition if cooldown elapsed */
@@ -158,9 +165,16 @@ void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
     result->count = 0;
     uint32_t now_ms = (uint32_t)(now_us / 1000);
 
-    /* 1. Beacon transmission with adaptive interval */
+    /* 1. Beacon transmission with adaptive interval and firmware-style
+     * per-beacon jitter (+-5 s, BEACON_JITTER_MS). Without jitter, beacon
+     * phases lock to the deterministic tick stagger and identical collision
+     * storms repeat every interval, which real fleets do not exhibit. */
     uint64_t beacon_interval = adaptive_beacon_interval(node, now_us);
-    if (now_us - node->last_beacon_us >= beacon_interval) {
+    if (now_us >= node->next_beacon_due_us) {
+        uint64_t jitter_span_ms = (uint32_t)(2 * NODE_BEACON_JITTER_US / 1000ULL);
+        uint64_t jitter_us =
+            (uint64_t)pcg32_range(&node->beacon_rng, 0, (uint32_t)jitter_span_ms) * 1000ULL;
+        node->next_beacon_due_us = now_us + beacon_interval - NODE_BEACON_JITTER_US + jitter_us;
         node->last_beacon_us = now_us;
         node->uptime_min++;
 

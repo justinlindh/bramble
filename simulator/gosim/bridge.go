@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/emergency/include -I../../components/location/include -I../../components/group/include -I../../components/coding/include -I../../components/channel/include -I../../components/nvs_keys/include
+#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/emergency/include -I../../components/location/include -I../../components/group/include -I../../components/coding/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include
 #cgo LDFLAGS: -lm -lssl -lcrypto
 #include <stdlib.h>
 #include "bridge.h"
@@ -118,6 +118,27 @@ func radioAddInterference(config *C.radio_config_t, cx, cy, radius float32) int 
 
 func radioClearInterference(config *C.radio_config_t, index int) {
 	C.radio_clear_interference_zone(config, C.int(index))
+}
+
+// Reception outcomes under the collision model (mirror radio_rx_outcome_t).
+const (
+	rxOutcomeOK         = int(C.RADIO_RX_OK)
+	rxOutcomeCollision  = int(C.RADIO_RX_COLLISION)
+	rxOutcomeHalfDuplex = int(C.RADIO_RX_HALF_DUPLEX)
+	rxOutcomeCaptured   = int(C.RADIO_RX_CAPTURED)
+)
+
+func radioFrameAirtimeUs(config *C.radio_config_t, frameBytes int) uint32 {
+	return uint32(C.radio_frame_airtime_us(config, C.uint16_t(frameBytes)))
+}
+
+func radioPreambleUs(config *C.radio_config_t) uint64 {
+	return uint64(C.radio_preamble_us(config))
+}
+
+func radioCheckReception(config *C.radio_config_t, rx *C.sim_node_t, evt *C.sim_event_t) int {
+	pkt := C.bridge_get_packet_event(evt)
+	return int(C.radio_check_reception(config, rx, &pkt))
 }
 
 // --- Metrics ---
