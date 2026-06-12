@@ -67,11 +67,19 @@ static void apply_profile(airtime_budget_t* ab, uint8_t peer_count) {
     }
 
     /* Regulatory duty-cycle cap (DES-8): scale all tiers proportionally so
-     * the hourly refill (== sum of tier maxima) stays within the cap. */
-    if (ab->duty_enforced && ab->duty_cap_ms > 0u && total > ab->duty_cap_ms) {
+     * ANY 1-hour window stays within the cap, not just the steady state.
+     * In this bucket model the burst capacity equals the hourly refill
+     * (tokens_max == max_ms == refill per AIRTIME_REFILL_INTERVAL_MS), so
+     * the worst-case window (idle hour fills the bucket, then spend the
+     * bucket plus a full hour of refill) transmits capacity + refill =
+     * 2 * sum(max_ms). Targeting cap/2 makes that worst case exactly the
+     * regulatory cap. ETSI EN 300.220 evaluates any observation window,
+     * so capping the steady state alone would still allow a 2x burst hour. */
+    uint32_t window_target = ab->duty_cap_ms / 2u;
+    if (ab->duty_enforced && window_target > 0u && total > window_target) {
         for (int i = 0; i < AIRTIME_TIER_COUNT; i++) {
             uint32_t capped =
-                (uint32_t)(((uint64_t)ab->max_ms[i] * (uint64_t)ab->duty_cap_ms) / total);
+                (uint32_t)(((uint64_t)ab->max_ms[i] * (uint64_t)window_target) / total);
             ab->max_ms[i] = (capped == 0u) ? 1u : capped;
         }
     }

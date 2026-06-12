@@ -16,6 +16,9 @@ void setUp(void) {}
 void tearDown(void) {}
 
 #define EU868_CAP_MS ((AIRTIME_REFILL_INTERVAL_MS / 100u) * 1u) /* 36000 */
+/* Burst capacity equals hourly refill in this bucket model, so both must
+ * fit in half the cap for ANY 1-hour window to stay within the limit. */
+#define EU868_WINDOW_TARGET_MS (EU868_CAP_MS / 2u) /* 18000 */
 
 static uint32_t sum_max(const airtime_budget_t* ab) {
     uint32_t total = 0;
@@ -35,8 +38,9 @@ void test_eu868_cap_applies_at_init_profile(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
     airtime_budget_set_duty_cap(&ab, 1, true);
-    TEST_ASSERT_TRUE(sum_max(&ab) <= EU868_CAP_MS);
-    TEST_ASSERT_TRUE(sum_tokens(&ab) <= EU868_CAP_MS);
+    /* capacity + hourly refill = 2 * sum(max) must fit the cap */
+    TEST_ASSERT_TRUE(sum_max(&ab) <= EU868_WINDOW_TARGET_MS);
+    TEST_ASSERT_TRUE(sum_tokens(&ab) <= EU868_WINDOW_TARGET_MS);
 }
 
 void test_eu868_cap_holds_across_all_mesh_profiles(void) {
@@ -51,7 +55,7 @@ void test_eu868_cap_holds_across_all_mesh_profiles(void) {
         char msg[64];
         snprintf(msg, sizeof(msg), "peer_count=%u sum=%u", (unsigned)peer_counts[i],
                  (unsigned)sum_max(&ab));
-        TEST_ASSERT_TRUE_MESSAGE(sum_max(&ab) <= EU868_CAP_MS, msg);
+        TEST_ASSERT_TRUE_MESSAGE(sum_max(&ab) <= EU868_WINDOW_TARGET_MS, msg);
     }
 }
 
@@ -61,31 +65,36 @@ void test_eu868_hourly_refill_bounded_by_cap(void) {
     airtime_budget_set_duty_cap(&ab, 1, true);
 
     /* Drain everything, then refill a full hour: total tokens added must
-     * not exceed the regulatory cap. */
+     * fit the any-window budget alongside the burst capacity. */
     for (int i = 0; i < AIRTIME_TIER_COUNT; i++)
         ab.tokens_ms[i] = 0;
     airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS);
-    TEST_ASSERT_TRUE(sum_tokens(&ab) <= EU868_CAP_MS);
+    TEST_ASSERT_TRUE(sum_tokens(&ab) <= EU868_WINDOW_TARGET_MS);
 }
 
-void test_eu868_steady_state_spend_bounded(void) {
-    /* Spend-as-fast-as-allowed for one simulated hour in 1-minute steps:
-     * total debited airtime must stay within cap + the initial bucket. */
+void test_eu868_any_window_spend_bounded(void) {
+    /* ETSI evaluates ANY 1-hour window. Worst case for a token bucket:
+     * idle long enough to fill the bucket, then spend the full bucket at
+     * the window start and drain every refill for the rest of the hour.
+     * Total TX inside that window must still be <= 1% (36000 ms). */
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
     airtime_budget_set_duty_cap(&ab, 1, true);
 
-    uint32_t initial = sum_tokens(&ab);
+    /* Idle hour: bucket reaches capacity. */
+    airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS);
+
+    /* Hostile window: drain everything available, every minute. */
     uint64_t spent = 0;
-    const uint32_t step_ms = 60000u;
-    for (uint32_t t = step_ms; t <= AIRTIME_REFILL_INTERVAL_MS; t += step_ms) {
-        airtime_budget_refill(&ab, t);
+    const uint32_t t0 = AIRTIME_REFILL_INTERVAL_MS;
+    for (uint32_t dt = 0; dt <= AIRTIME_REFILL_INTERVAL_MS; dt += 60000u) {
+        airtime_budget_refill(&ab, t0 + dt);
         for (int i = 0; i < AIRTIME_TIER_COUNT; i++) {
             spent += ab.tokens_ms[i];
             ab.tokens_ms[i] = 0;
         }
     }
-    TEST_ASSERT_TRUE(spent <= (uint64_t)initial + EU868_CAP_MS);
+    TEST_ASSERT_TRUE(spent <= EU868_CAP_MS);
 }
 
 void test_us915_unenforced_unchanged(void) {
@@ -159,7 +168,7 @@ int main(void) {
     RUN_TEST(test_eu868_cap_applies_at_init_profile);
     RUN_TEST(test_eu868_cap_holds_across_all_mesh_profiles);
     RUN_TEST(test_eu868_hourly_refill_bounded_by_cap);
-    RUN_TEST(test_eu868_steady_state_spend_bounded);
+    RUN_TEST(test_eu868_any_window_spend_bounded);
     RUN_TEST(test_us915_unenforced_unchanged);
     RUN_TEST(test_enforced_100pct_is_a_noop_cap);
     RUN_TEST(test_cap_preserves_tier_proportions);
