@@ -57,17 +57,28 @@ static uint32_t profile_scale_pct(uint8_t peer_count, int idx) {
 
 static void apply_profile(airtime_budget_t* ab, uint8_t peer_count) {
     ab->profile_peer_count = peer_count;
+    uint32_t total = 0u;
     for (int i = 0; i < AIRTIME_TIER_COUNT; i++) {
         uint32_t scaled = (ab->base_max_ms[i] * profile_scale_pct(peer_count, i)) / 100u;
         if (scaled == 0u)
             scaled = 1u;
         ab->max_ms[i] = scaled;
-        if (ab->tokens_ms[i] > ab->max_ms[i]) {
-            ab->tokens_ms[i] = ab->max_ms[i];
-        } else if (ab->tokens_ms[i] < ab->max_ms[i]) {
-            /* Keep profile transitions simple/predictable: tokens follow new cap. */
-            ab->tokens_ms[i] = ab->max_ms[i];
+        total += scaled;
+    }
+
+    /* Regulatory duty-cycle cap (DES-8): scale all tiers proportionally so
+     * the hourly refill (== sum of tier maxima) stays within the cap. */
+    if (ab->duty_enforced && ab->duty_cap_ms > 0u && total > ab->duty_cap_ms) {
+        for (int i = 0; i < AIRTIME_TIER_COUNT; i++) {
+            uint32_t capped =
+                (uint32_t)(((uint64_t)ab->max_ms[i] * (uint64_t)ab->duty_cap_ms) / total);
+            ab->max_ms[i] = (capped == 0u) ? 1u : capped;
         }
+    }
+
+    for (int i = 0; i < AIRTIME_TIER_COUNT; i++) {
+        /* Keep profile transitions simple/predictable: tokens follow new cap. */
+        ab->tokens_ms[i] = ab->max_ms[i];
         /* reset fractional carry when max changes to avoid stale drift */
         ab->refill_remainder[i] = 0u;
     }
@@ -86,6 +97,8 @@ void airtime_budget_init(airtime_budget_t* ab, uint32_t now_ms) {
     }
     ab->profile_peer_count = 0u;
     ab->last_refill_ms = now_ms;
+    ab->duty_cap_ms = 0u;
+    ab->duty_enforced = false;
     apply_profile(ab, 0u);
 }
 
@@ -93,6 +106,15 @@ void airtime_budget_set_mesh_size(airtime_budget_t* ab, uint8_t peer_count) {
     if (ab->profile_peer_count == peer_count)
         return;
     apply_profile(ab, peer_count);
+}
+
+void airtime_budget_set_duty_cap(airtime_budget_t* ab, uint8_t max_duty_cycle_pct, bool enforced) {
+    if (max_duty_cycle_pct > 100u)
+        max_duty_cycle_pct = 100u;
+    ab->duty_cap_ms = (AIRTIME_REFILL_INTERVAL_MS / 100u) * (uint32_t)max_duty_cycle_pct;
+    ab->duty_enforced = enforced;
+    /* Re-derive the active profile under the new cap. */
+    apply_profile(ab, ab->profile_peer_count);
 }
 
 void airtime_budget_refill(airtime_budget_t* ab, uint32_t now_ms) {
