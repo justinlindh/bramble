@@ -13,7 +13,6 @@ int discovery_start(pending_discovery_table_t* table, uint32_t dest_addr, uint32
     e->query_ids[0] = query_id;
     e->timestamp = now_ms;
     e->attempts = 1;
-    e->queued_count = 0;
     return 0;
 }
 
