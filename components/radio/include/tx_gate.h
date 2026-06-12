@@ -75,9 +75,16 @@ typedef struct {
  * routing.h NEIGHBOR_EXPIRY_MS (600000). When the 60% share would stretch
  * the cadence past this, beacons may consume up to the FULL lane instead
  * (broadcast data yields entirely): losing broadcast data beats vanishing
- * from neighbor tables. Only if even the full lane cannot fund a beacon
- * per ceiling (e.g. EU868 at SF11/12) does the interval exceed it; that
- * is the physics of a 1% duty cycle, surfaced instead of silently denied. */
+ * from neighbor tables. Even the full lane cannot always fund a beacon per
+ * ceiling: the over-expiry regime includes EU868 at SF11/12, EU868 SF10
+ * above 40 peers (~697s), and US915 SF12 above 40 peers (~702s). In that
+ * regime peers purge this node between beacons (NEIGHBOR_EXPIRY_MS) and
+ * rediscover it on the next beacon; unicast still works via RREQ discovery
+ * with added latency. The bound comes from the BROADCAST lane allocation
+ * (16-32% of the duty-halved window target), not from the regulatory duty
+ * cycle itself: a 600s SF12 beacon cadence costs ~0.35% duty, so a beacon-
+ * first lane allocation could relax this without touching the regulatory
+ * cap. The stretch is deterministic, never a random denial. */
 #define TX_GATE_BEACON_LIVENESS_CEILING_MS 480000u
 
 /* ── Core API (host-testable, no RTOS deps) ─────────────────────────── */
