@@ -7,6 +7,7 @@
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
+#include "tx_gate.h"
 #include "packet.h"
 #include "crypto.h"
 #include "security.h"
@@ -158,7 +159,6 @@ static int s_pseudonym_next_slot = 0;
 
 /* Reliability — ACK tracking for outgoing unicast messages */
 static pending_ack_table_t s_pending_acks;
-static airtime_budget_t    s_airtime;
 
 /* Traffic debug telemetry */
 #define TRAFFIC_DEBUG_CAPACITY 512
@@ -239,7 +239,7 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
 static int mesh_send_probe_round(uint32_t pid, uint8_t round);
 static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
-static int transmit_packet(const uint8_t *buf, uint8_t len);
+static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind);
 static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
 static void mesh_schedule_next_receipt_timer(void);
 static void mesh_process_receipt_tx_event(void);
@@ -427,7 +427,7 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
     memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
 
     size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
-    int rc = transmit_packet(pkt, (uint8_t)wire_len);
+    int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
     if (rc == 0) {
         ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
                  header.dest_addr,
@@ -769,21 +769,21 @@ static int send_beacon(void) {
     }
 
     size_t beacon_wire_len = bramble_beacon_wire_size(&beacon);
-    int ret = transmit_packet(buf, (uint8_t)beacon_wire_len);
-    if (ret == 0) {
-        uint32_t airtime_est = 30 + (uint32_t)(beacon_wire_len * 4);
-        uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
-        airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
-        airtime_budget_refill(&s_airtime, t_now);
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
-
+    /* Register the live beacon size with the gate: it funds the beacon
+     * reserve (one beacon ToA held back from broadcast-data spenders) and
+     * the budget-derived minimum interval used by the scheduler below. */
+    tx_gate_set_beacon_size((uint8_t)beacon_wire_len);
+    /* Beacons fit the budget by design (reserve + stretched interval);
+     * denial is the never-expected backstop and only logs. */
+    int ret = mesh_tx(buf, (uint8_t)beacon_wire_len, TX_KIND_BEACON);
+    if (ret == TX_GATE_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.beacon_tx_count++;
-        s_shared.packets_tx++;
-        s_shared.airtime = s_airtime;
         xSemaphoreGive(s_state_mutex);
         ESP_LOGI(TAG, "Beacon TX #%" PRIu32 " (neighbors: %d)",
                  s_shared.beacon_tx_count, neighbor_count(&s_neighbors));
+    } else if (ret == TX_GATE_ERR_BUDGET) {
+        ESP_LOGD(TAG, "Beacon skipped this interval: airtime budget exhausted");
     } else {
         ESP_LOGE(TAG, "Beacon TX failed: %d", ret);
     }
@@ -997,14 +997,17 @@ static void mesh_process_receipt_tx_event(void) {
 
     pending_receipt_t *item = &s_receipt_queue[due_idx];
     uint8_t attempt_no = (uint8_t)(item->attempts_sent + 1u);
-    uint32_t airtime_est = 30u + (uint32_t)(item->wire_len * 4u);
 
-    airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
-    airtime_budget_refill(&s_airtime, t_now);
-    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est)) {
-        /* Don't drop — reschedule with exponential backoff so the receipt
-         * can be sent once airtime tokens refill.  Only drop if we've
-         * exhausted all retry attempts. */
+    /* TX path can block for CAD/LBT + radio wait; feed task WDT just before entering it. */
+    esp_task_wdt_reset();
+
+    int rc = mesh_tx(item->buf, item->wire_len, TX_KIND_RECEIPT);
+
+    /* Deny behavior: receipts are deferred, not dropped. Reschedule with
+     * exponential backoff (scaled by remaining receipt budget) so the
+     * receipt can go out once tokens refill; drop only when all attempts
+     * are exhausted. */
+    if (rc == TX_GATE_ERR_BUDGET) {
         item->attempts_sent++;
         if (item->attempts_sent >= item->attempts_total) {
             ESP_LOGW(TAG,
@@ -1013,7 +1016,7 @@ static void mesh_process_receipt_tx_event(void) {
                      (unsigned)item->attempts_total);
             memset(item, 0, sizeof(*item));
         } else {
-            uint32_t remaining = airtime_budget_remaining(&s_airtime, AIRTIME_TIER_RECEIPT);
+            uint32_t remaining = tx_gate_remaining(AIRTIME_TIER_RECEIPT);
             uint32_t scale_num = 1u;
             uint32_t scale_den = 1u;
             mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
@@ -1039,15 +1042,7 @@ static void mesh_process_receipt_tx_event(void) {
         return;
     }
 
-    /* TX path can block for CAD/LBT + radio wait; feed task WDT just before entering it. */
-    esp_task_wdt_reset();
-
-    if (transmit_packet(item->buf, item->wire_len) == 0) {
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est);
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_shared.airtime = s_airtime;
-        xSemaphoreGive(s_state_mutex);
-
+    if (rc == TX_GATE_OK) {
         ESP_LOGI(TAG,
                  "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
                  " attempt=%u/%u",
@@ -1065,7 +1060,7 @@ static void mesh_process_receipt_tx_event(void) {
     }
 
     uint8_t i = (uint8_t)(item->attempts_sent - 1u);
-    uint32_t remaining = airtime_budget_remaining(&s_airtime, AIRTIME_TIER_RECEIPT);
+    uint32_t remaining = tx_gate_remaining(AIRTIME_TIER_RECEIPT);
     uint32_t scale_num = 1u;
     uint32_t scale_den = 1u;
     mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
@@ -1126,8 +1121,11 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         return;
     }
     size_t wire_len = bramble_ack_wire_size(&ack);
-    int ret = transmit_packet(buf, (uint8_t)wire_len);
-    if (ret == 0) {
+    /* Deny behavior: nothing to queue; the sender's retry scheduler covers
+     * a lost ACK. CRITICAL can borrow from NORMAL, so denial here means
+     * the node is severely over budget. */
+    int ret = mesh_tx(buf, (uint8_t)wire_len, TX_KIND_ACK);
+    if (ret == TX_GATE_OK) {
         ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32 " (%u hops)",
                  ack_packet_id, dest_addr, ack.hop_count);
     }
@@ -1160,7 +1158,7 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
     size_t wire_len = bramble_ack_wire_size(ack);
     ESP_LOGI(TAG, "Forwarding ACK for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
              ack->ack_packet_id, ack->header.dest_addr, ack->hop_count);
-    transmit_packet(buf, (uint8_t)wire_len);
+    mesh_tx(buf, (uint8_t)wire_len, TX_KIND_ACK);
 }
 
 static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -1251,24 +1249,14 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
     if (err != ESP_OK) return;
 
     size_t wire_len = DELIVERY_RECEIPT_MIN_SIZE + ((size_t)receipt->hop_count * 4u);
-    uint32_t airtime_est = 30u + (uint32_t)(wire_len * 4u);
-    uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
-    airtime_budget_refill(&s_airtime, t_now);
-    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est)) {
+    ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
+             receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
+    /* Deny behavior: a forwarded receipt is best-effort on behalf of a
+     * remote sender; suppress when the RECEIPT lane is exhausted. */
+    if (mesh_tx(buf, (uint8_t)wire_len, TX_KIND_RECEIPT) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG,
                  "Forwarded delivery receipt suppressed for pkt=%08" PRIX32 ": receipt airtime budget exhausted",
                  receipt->orig_packet_id);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
-             receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
-    if (transmit_packet(buf, (uint8_t)wire_len) == 0) {
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_RECEIPT, airtime_est);
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_shared.airtime = s_airtime;
-        xSemaphoreGive(s_state_mutex);
     }
 }
 
@@ -1520,49 +1508,37 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
 /* ── Routing packet handlers ────────────────────────────────────────── */
 
-#define LBT_MAX_ATTEMPTS     3u
-#define LBT_BACKOFF_BASE_MS  50u
-#define LBT_BACKOFF_MAX_MS   300u
-
-static int transmit_packet(const uint8_t *buf, uint8_t len) {
-    /* Extract packet type for telemetry (assumes header is already serialized) */
+/**
+ * The only way mesh_task puts bytes on the air. Wraps the tx_gate
+ * chokepoint (budget check -> LBT/CAD -> transmit -> ToA debit) with
+ * mesh-side bookkeeping: TX telemetry, packet counters, and the shared
+ * airtime snapshot for the UI/RPC.
+ *
+ * Returns TX_GATE_OK, TX_GATE_ERR_BUDGET (denied, nothing transmitted)
+ * or TX_GATE_ERR_RADIO. Per-kind deny behavior lives at the call sites.
+ */
+static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind) {
     uint8_t pkt_type = (len >= 2) ? buf[1] : 0xFF;
 
-    /* Extract tier from flags (bits 6-7) */
-    uint8_t flags = (len >= 3) ? buf[2] : 0;
-    uint8_t tier = ((flags >> FLAG_TIER_SHIFT) & 0x03);
-    if (tier == 0) tier = 0x01; /* default to normal if not set */
-
-    /* Listen-Before-Talk: check channel before transmitting */
-    for (uint8_t attempt = 0; attempt < LBT_MAX_ATTEMPTS; attempt++) {
-        esp_task_wdt_reset();
-        if (!radio_cad_check()) {
-            break; /* Channel is clear */
-        }
-
-        /* Channel busy — back off with randomized exponential delay */
-        uint32_t backoff_ms = LBT_BACKOFF_BASE_MS * (1u << attempt);
-        if (backoff_ms > LBT_BACKOFF_MAX_MS) {
-            backoff_ms = LBT_BACKOFF_MAX_MS;
-        }
-        backoff_ms += (esp_random() % backoff_ms);
-        ESP_LOGD(TAG, "LBT: channel busy (attempt %u/%u), backoff %" PRIu32 "ms",
-                 (unsigned)(attempt + 1), LBT_MAX_ATTEMPTS, backoff_ms);
-        vTaskDelay(pdMS_TO_TICKS(backoff_ms));
-    }
-    /* After LBT_MAX_ATTEMPTS, transmit anyway to avoid starvation */
-
-    esp_task_wdt_reset();
-    int ret = radio_transmit(buf, len);
-    if (ret == 0) {
-        /* Record successful TX */
-        traffic_debug_record_tx(&s_traffic_debug, pkt_type, len, tier);
+    /* Relaxed read: neighbor_count(&s_neighbors) may run from the RPC/UI
+     * task without the mesh state mutex (pre-existing pattern; the old
+     * airtime_budget_set_mesh_size call sites did the same). Worst case
+     * is a momentarily stale peer count selecting an adjacent budget
+     * profile; the gate re-reads it on the next transmission. */
+    tx_gate_set_peer_count((uint8_t)neighbor_count(&s_neighbors));
+    int rc = tx_gate_send(buf, len, kind);
+    if (rc == TX_GATE_OK) {
+        traffic_debug_record_tx(&s_traffic_debug, pkt_type, len, tx_gate_kind_tier(kind));
 
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.packets_tx++;
+        tx_gate_snapshot(&s_shared.airtime);
         xSemaphoreGive(s_state_mutex);
+    } else if (rc == TX_GATE_ERR_BUDGET) {
+        ESP_LOGD(TAG, "TX denied by airtime budget (kind=%d type=0x%02X len=%u)",
+                 (int)kind, pkt_type, len);
     }
-    return ret;
+    return rc;
 }
 
 static void send_rreq(const bramble_rreq_t *rreq) {
@@ -1570,7 +1546,12 @@ static void send_rreq(const bramble_rreq_t *rreq) {
     if (bramble_rreq_serialize(rreq, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32,
                  rreq->query_id, rreq->header.dest_addr);
-        transmit_packet(buf, HEADER_SIZE + 18); /* RREQ payload = 18 bytes */
+        /* Deny behavior: routing control rides the reserved CRITICAL lane
+         * (can also borrow from NORMAL); if even that is exhausted the
+         * discovery retry scheduler will try again. Log loudly. */
+        if (mesh_tx(buf, HEADER_SIZE + 18, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+            ESP_LOGW(TAG, "RREQ denied by airtime budget");
+        }
     }
 }
 
@@ -1579,7 +1560,9 @@ static void send_rrep(const bramble_rrep_t *rrep) {
     if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32,
                  rrep->query_id, rrep->next_hop);
-        transmit_packet(buf, HEADER_SIZE + 19); /* RREP payload = 19 bytes */
+        if (mesh_tx(buf, HEADER_SIZE + 19, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+            ESP_LOGW(TAG, "RREP denied by airtime budget");
+        }
     }
 }
 
@@ -1600,7 +1583,9 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
     uint8_t buf[64];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
-        transmit_packet(buf, HEADER_SIZE + 12);
+        if (mesh_tx(buf, HEADER_SIZE + 12, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+            ESP_LOGW(TAG, "RERR denied by airtime budget");
+        }
     }
 }
 
@@ -1876,7 +1861,9 @@ static void mailbox_flush_for(uint32_t dest_addr) {
         ESP_LOGI(TAG, "Mailbox: delivering stored packet to %08" PRIX32
                  " (id=%08" PRIX32 " len=%u)",
                  dest_addr, entries[i].packet_id, entries[i].payload_len);
-        int rc = transmit_packet(entries[i].payload, (uint8_t)entries[i].payload_len);
+        /* Deny behavior: budget denial and radio failure both re-store the
+         * entry for the next flush; stored mail is never silently lost. */
+        int rc = mesh_tx(entries[i].payload, (uint8_t)entries[i].payload_len, TX_KIND_MAILBOX);
         if (rc != 0) {
             /* Transmit failed (LBT / radio busy) — re-store for retry on next flush */
             ESP_LOGW(TAG, "Mailbox: transmit failed (rc=%d) for id=%08" PRIX32
@@ -1928,7 +1915,12 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
 
     ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32,
              header->dest_addr, route->next_hop);
-    transmit_packet(buf, len);
+    /* Deny behavior: relayed traffic is dropped when the NORMAL lane is
+     * exhausted; the originator's ACK-driven retries cover recovery. */
+    if (mesh_tx(buf, len, TX_KIND_FORWARD) == TX_GATE_ERR_BUDGET) {
+        ESP_LOGW(TAG, "Forward denied by airtime budget for %08" PRIX32, header->dest_addr);
+        return;
+    }
 
     /* Update route usage */
     route->last_used = now_ms();
@@ -2301,6 +2293,24 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     
     /* Compute adaptive beacon interval */
     uint32_t base_interval = compute_adaptive_beacon_interval(t, current_neighbor_count);
+
+    /* Budget floor: stretch the cadence so beacon ToA at the live SF fits
+     * its share of the BROADCAST lane (the duty-cycle cap shrinks that
+     * lane on EU868). Beacons must fit the budget by design; a cadence the
+     * budget cannot fund would otherwise be denied at transmit time and
+     * the node would intermittently vanish from neighbor tables. */
+    uint32_t budget_floor = tx_gate_beacon_min_interval();
+    if (budget_floor > base_interval) {
+        static uint32_t s_last_logged_floor = 0;
+        if (budget_floor != s_last_logged_floor) {
+            ESP_LOGI(TAG,
+                     "Beacon interval stretched to %" PRIu32 "ms by airtime budget "
+                     "(policy wanted %" PRIu32 "ms)",
+                     budget_floor, base_interval);
+            s_last_logged_floor = budget_floor;
+        }
+        base_interval = budget_floor;
+    }
     
     /* Periodic beacon TX */
     if ((t - *last_beacon_ms) >= *beacon_interval) {
@@ -2424,8 +2434,20 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                              pa->packet_id, pa->dest_addr,
                              pa->attempt + 1, pa->max_attempts);
                     
-                    /* Route through LBT path for regulatory compliance (F22) */
-                    transmit_packet(pa->packet_data, pa->packet_len);
+                    /* Budget-gated retransmission (DES-6). Deny behavior:
+                     * a denied retry burns the attempt deliberately. The
+                     * original TX already went out once; retries are pure
+                     * redundancy, and burning the attempt bounds failure
+                     * latency so a saturated mesh yields a visible FAILED
+                     * status instead of a zombie pending message. The
+                     * exponential backoff below applies either way, so
+                     * denial cannot spin the retry tick. */
+                    int retry_rc = mesh_tx(pa->packet_data, pa->packet_len, TX_KIND_DATA_RETRY);
+                    if (retry_rc == TX_GATE_ERR_BUDGET) {
+                        ESP_LOGW(TAG,
+                                 "Retry of pkt %08" PRIX32 " denied by airtime budget (attempt %u/%u burned)",
+                                 pa->packet_id, pa->attempt + 1, pa->max_attempts);
+                    }
                     pa->attempt++;
                     /* Exponential backoff with ±25% jitter (F25) */
                     uint32_t delay = tier_base_delay_ms(pa->tier) << pa->attempt;
@@ -2652,20 +2674,13 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
     memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
 
-    int ret = transmit_packet(buf, (uint8_t)total);
-    if (ret == 0) {
-        /* Estimate airtime: SF9 BW125kHz ≈ 3.7ms/byte + 30ms preamble */
-        uint32_t airtime_est = 30 + (uint32_t)(total * 4);
-        uint32_t t_now = (uint32_t)(esp_timer_get_time() / 1000ULL);
-        airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
-        airtime_budget_refill(&s_airtime, t_now);
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_NORMAL, airtime_est);
-
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_shared.packets_tx++;
-        s_shared.airtime = s_airtime;
-        xSemaphoreGive(s_state_mutex);
-
+    /* Deny behavior: data sends fail visibly upward. A zero return tells
+     * every caller (mesh_send_channel, mesh_send_broadcast, RPC) that
+     * nothing was transmitted, so the message store and UI never show a
+     * phantom send. */
+    tx_kind_t kind = (dest_addr == 0xFFFFFFFF) ? TX_KIND_DATA_BROADCAST : TX_KIND_DATA;
+    int ret = mesh_tx(buf, (uint8_t)total, kind);
+    if (ret == TX_GATE_OK) {
         /* Register for ACK tracking (unicast only) */
         if (dest_addr != 0xFFFFFFFF) {
             pending_ack_add(&s_pending_acks, pkt_id, dest_addr,
@@ -2764,14 +2779,17 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     }
     ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u", (unsigned)s_channels[0].channel_id);
 
-    /* Estimate airtime for rate-limit check */
-    uint32_t airtime_est = 30u + (uint32_t)(len * 4u);
-    uint32_t t_now = now_ms();
-    airtime_budget_set_mesh_size(&s_airtime, (uint8_t)neighbor_count(&s_neighbors));
-    airtime_budget_refill(&s_airtime, t_now);
-    if (!airtime_budget_can_transmit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est)) {
-        ESP_LOGW(TAG, "Broadcast rate limited by airtime budget (remaining=%" PRIu32 "ms, need=%" PRIu32 "ms)",
-                 airtime_budget_remaining(&s_airtime, AIRTIME_TIER_BROADCAST), airtime_est);
+    /* Pre-check with the real ToA of the first packet that would hit the
+     * air, so RPC callers get a clean -2 before paying for encryption.
+     * The gate still checks and debits every individual transmission. */
+    size_t est_payload = (len > FRAG_MAX_PLAINTEXT) ? FRAG_MAX_PLAINTEXT : len;
+    size_t est_wire =
+        HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + CHANNEL_MSG_OVERHEAD + est_payload + BRAMBLE_TAG_SIZE;
+    if (est_wire > 255) est_wire = 255;
+    tx_gate_set_peer_count((uint8_t)neighbor_count(&s_neighbors));
+    if (!tx_gate_check((uint8_t)est_wire, TX_KIND_DATA_BROADCAST)) {
+        ESP_LOGW(TAG, "Broadcast rate limited by airtime budget (remaining=%" PRIu32 "ms)",
+                 tx_gate_remaining(AIRTIME_TIER_BROADCAST));
         return -2;
     }
 
@@ -2808,7 +2826,6 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
                 recent_broadcast_record(pkt_id);
-                airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, 30u + (uint32_t)(frags[i].len * 4u));
                 ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
             }
 
@@ -2836,7 +2853,6 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
                           (const char *)data, len, 0, 0,
                           0, MSG_STATUS_NONE, 0);
-        airtime_budget_debit(&s_airtime, AIRTIME_TIER_BROADCAST, airtime_est);
     }
     return pkt_id ? 0 : -1;
 }
@@ -3062,7 +3078,12 @@ void mesh_task_start(bramble_identity_t *identity) {
     reverse_route_init(&s_reverse_routes);
     discovery_init(&s_pending_disc);
     pending_ack_init(&s_pending_acks);
-    airtime_budget_init(&s_airtime, (uint32_t)(esp_timer_get_time() / 1000ULL));
+    {
+        /* One TX path: the gate owns the airtime budget and applies the
+         * regulatory duty-cycle cap from the frequency plan (DES-8). */
+        const bramble_freq_plan_t *plan = freq_plan_get_default();
+        tx_gate_global_init(plan->max_duty_cycle_pct, plan->duty_cycle_enforced);
+    }
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
     timesync_init(&s_timesync);
     mesh_traffic_debug_load_config();  /* Restore persisted debug config */
@@ -3074,6 +3095,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     memset(s_pseudonym_table, 0, sizeof(s_pseudonym_table));  /* Init originator pseudonym table */
     s_pseudonym_next_slot = 0;
     memset(&s_shared, 0, sizeof(s_shared));
+    tx_gate_snapshot(&s_shared.airtime);
 
     /* Initialize public channel (well-known PSK, no key exchange needed) */
     public_channel_init(s_channels, &s_num_channels);
@@ -3419,12 +3441,9 @@ static int mesh_send_probe_round(uint32_t pid, uint8_t round) {
     memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
     buf[HEADER_SIZE + 4] = round;
 
-    int rc = transmit_packet(buf, HEADER_SIZE + 5);
-    if (rc == 0) {
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_shared.packets_tx++;
-        xSemaphoreGive(s_state_mutex);
-    }
+    /* Deny behavior: a probe sweep is on-demand diagnostics; a denied
+     * round is simply skipped and reported via the per-round rc log. */
+    int rc = mesh_tx(buf, HEADER_SIZE + 5, TX_KIND_PROBE);
     ESP_LOGI(TAG, "PROBE SWEEP TX pid=%08" PRIX32 " round=%u rc=%d", pid, (unsigned)round, rc);
     return rc;
 }
@@ -3511,9 +3530,11 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     uint32_t jitter_ms = slot_ms + (esp_random() % 120);           /* +0..119 */
     vTaskDelay(pdMS_TO_TICKS(jitter_ms));
 
-    /* Controlled retries without long tail. */
+    /* Controlled retries without long tail. Deny behavior: stop the
+     * burst as soon as the budget denies; redundant replies are the
+     * first thing to shed under airtime pressure. */
     for (int i = 0; i < 3; i++) {
-        transmit_packet(buf, HEADER_SIZE + 6);
+        if (mesh_tx(buf, HEADER_SIZE + 6, TX_KIND_PROBE_REPLY) == TX_GATE_ERR_BUDGET) break;
         if (i < 2) vTaskDelay(pdMS_TO_TICKS(140));
     }
 
@@ -3531,7 +3552,7 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
         uint8_t fwd_buf[20];
         bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
         memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
-        transmit_packet(fwd_buf, HEADER_SIZE + 4);
+        mesh_tx(fwd_buf, HEADER_SIZE + 4, TX_KIND_PROBE);
         ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id, (unsigned)fwd.hop_limit);
     }
 }
@@ -3552,7 +3573,7 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
             uint8_t fwd_buf[BRAMBLE_MAX_PACKET_SIZE];
             memcpy(fwd_buf, data, len);
             bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
-            transmit_packet(fwd_buf, len);
+            mesh_tx(fwd_buf, len, TX_KIND_PROBE_REPLY);
             ESP_LOGI(TAG, "PROBE ACK FWD pid=%08" PRIX32 " dest=%s hop=%u",
                      header.packet_id,
                      addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)),
