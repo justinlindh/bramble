@@ -31,6 +31,9 @@ Open http://localhost:3000
 ./scripts/run-scenario.sh scenarios/ideal-10-node.json
 ```
 
+`--no-collisions` disables the collision model (ideal parallel channel) for
+baseline comparisons.
+
 ## Architecture
 
 Two-tier: **Go+C server** → **React UI**
@@ -39,6 +42,48 @@ Two-tier: **Go+C server** → **React UI**
 - **React UI** (`ui/`) — SVG mesh canvas, metrics dashboard, event log, playback controls, scenario loader
 
 The Go server includes all Bramble C components at compile time (same pattern as `test/test_integration.c`). No modifications to Bramble source code.
+
+## Radio model
+
+The shared LoRa medium is modeled in `engine/sim_radio.c`:
+
+- **Real time-on-air.** Every frame occupies the channel for its actual LoRa
+  ToA at the configured SF/BW/CR, computed by the firmware's own
+  `bramble_calculate_airtime_us` (Semtech AN1200.13). The default PHY mirrors
+  the firmware's `RADIO_PROFILE_LONG_RANGE`: SF10, 125 kHz, CR 4/5, 22 dBm.
+- **Collisions.** Two packets overlapping in time at a receiver, both audible
+  there (within the range disk), destroy each other.
+- **Capture effect.** The packet at least 6 dB stronger survives an overlap if
+  it started first or within the interferer's preamble window (the receiver
+  can re-sync during a preamble). The 6 dB co-SF threshold follows Bor,
+  Roedig, Voigt, Alonso, "Do LoRa Low-Power Wide-Area Networks Scale?"
+  (MSWiM 2016) and SX126x co-channel rejection figures.
+- **Half-duplex.** A node cannot receive while transmitting, and its own
+  transmissions are serialized (a queued TX starts when the current one ends).
+- **Listen-before-talk.** Mirrors `transmit_packet` in `main/mesh_task.c`:
+  up to 3 CAD checks, randomized exponential backoff (50 to 300 ms base plus
+  an equal random component), then transmit anyway. CAD is modeled as
+  deterministic energy detection within the range disk.
+- **RSSI.** Log-distance path loss: `RSSI(d) = tx_power - 52 dB - 29 log10(d)`
+  with d in grid units (1 unit = 10 m), exponent n = 2.9, 52 dB free-space
+  reference loss at 10 m / 915 MHz. Deliverability stays disk-range gated;
+  RSSI feeds capture comparisons and link metrics.
+
+Collision outcomes are evaluated at end-of-packet (delivery time), when every
+transmission that could overlap the packet's air window is known. Overlap is
+computed on transmit windows; propagation offsets are ignored (microseconds
+against ToA of hundreds of milliseconds).
+
+Per-scenario overrides in the `radio` JSON object: `sf`, `bw_hz`, `cr`,
+`tx_power_dbm`, `capture_db`, `path_loss_exp`, `collisions` (bool), `lbt`
+(bool), plus the existing `range`, `loss_pct`,
+`propagation_speed_ms_per_unit`.
+
+The model is validated by unit tests (overlap, capture timing, half-duplex,
+TX serialization, LBT) and an ALOHA calibration test that reproduces the
+analytic pure-ALOHA collision rate; see `gosim/collision_test.go` and
+`gosim/aloha_test.go`. Scale-scenario results live in
+`../docs/results/simulation-2026-06.md`.
 
 ## Scenarios
 
