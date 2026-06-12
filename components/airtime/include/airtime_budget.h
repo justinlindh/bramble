@@ -30,11 +30,30 @@ typedef struct {
     uint32_t refill_remainder[AIRTIME_TIER_COUNT];
     uint32_t last_refill_ms;
     uint8_t profile_peer_count;
+    /* Regulatory duty-cycle cap (DES-8): when enforced, the sum of tier
+     * maxima (and therefore the hourly refill) cannot exceed duty_cap_ms. */
+    uint32_t duty_cap_ms;
+    bool duty_enforced;
+    /* CRITICAL-borrows-NORMAL allowance: its own mini-bucket capped at
+     * AIRTIME_BORROW_CAP_PCT of NORMAL's capacity, refilled at the same
+     * proportional rate. Bounds how much relayed control traffic (RREQ
+     * floods land on CRITICAL) can drain the local user-data lane. */
+    uint32_t borrow_tokens_ms;
+    uint32_t borrow_max_ms;
+    uint32_t borrow_remainder;
 } airtime_budget_t;
+
+/* CRITICAL may borrow at most this share of NORMAL per refill window. */
+#define AIRTIME_BORROW_CAP_PCT 25u
 
 void airtime_budget_init(airtime_budget_t* ab, uint32_t now_ms);
 void airtime_budget_refill(airtime_budget_t* ab, uint32_t now_ms);
 void airtime_budget_set_mesh_size(airtime_budget_t* ab, uint8_t peer_count);
+/* Apply a regulatory duty-cycle limit (from freq_plan max_duty_cycle_pct /
+ * duty_cycle_enforced). When enforced, every mesh-size profile is scaled
+ * proportionally so the total TX budget stays within max_duty_cycle_pct of
+ * the refill interval (e.g. EU868: 1% of an hour = 36000 ms). */
+void airtime_budget_set_duty_cap(airtime_budget_t* ab, uint8_t max_duty_cycle_pct, bool enforced);
 bool airtime_budget_can_transmit(airtime_budget_t* ab, uint8_t tier, uint32_t airtime_ms);
 void airtime_budget_debit(airtime_budget_t* ab, uint8_t tier, uint32_t airtime_ms);
 uint32_t airtime_budget_remaining(const airtime_budget_t* ab, uint8_t tier);
