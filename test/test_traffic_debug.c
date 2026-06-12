@@ -14,8 +14,6 @@
 #define PKT_TYPE_BEACON           0x05
 #define PKT_TYPE_KEY_EXCHANGE     0x06
 #define PKT_TYPE_DELIVERY_RECEIPT 0x07
-#define PKT_TYPE_CONGESTION       0x08
-#define PKT_TYPE_TIME_SYNC        0x09
 #define PKT_TYPE_DATA             0x0A
 #define PKT_TYPE_STORE_REQUEST    0x0B
 #define PKT_TYPE_STORE_ACK        0x0C
@@ -50,11 +48,6 @@ void test_classify_beacon(void) {
                      traffic_debug_classify_packet(PKT_TYPE_BEACON));
 }
 
-void test_classify_timesync(void) {
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_TIMESYNC,
-                     traffic_debug_classify_packet(PKT_TYPE_TIME_SYNC));
-}
-
 void test_classify_routing_packets(void) {
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_ROUTING,
                      traffic_debug_classify_packet(PKT_TYPE_RREQ));
@@ -85,8 +78,6 @@ void test_classify_chat_packets(void) {
 void test_classify_maintenance_packets(void) {
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_KEY_EXCHANGE));
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
-                     traffic_debug_classify_packet(PKT_TYPE_CONGESTION));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_STORE_REQUEST));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
@@ -378,7 +369,6 @@ int main(void) {
     
     /* Packet type → category mapping */
     RUN_TEST(test_classify_beacon);
-    RUN_TEST(test_classify_timesync);
     RUN_TEST(test_classify_routing_packets);
     RUN_TEST(test_classify_ack_packets);
     RUN_TEST(test_classify_chat_packets);

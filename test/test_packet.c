@@ -251,72 +251,6 @@ void test_delivery_receipt_zero_hops(void) {
     TEST_ASSERT_EQUAL(0, out.hop_count);
 }
 
-/* ---- CONGESTION ---- */
-void test_congestion_roundtrip(void) {
-    bramble_congestion_t p = {
-        .header = make_header(PKT_TYPE_CONGESTION),
-        .src_addr = 0xDDEEFF00, .congestion_level = 3,
-        .queue_depth = 15, .est_clear_time = 0xABCD,
-    };
-    uint8_t buf[CONGESTION_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_congestion_serialize(&p, buf, sizeof(buf)));
-    bramble_congestion_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_congestion_deserialize(&out, buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL_HEX32(p.src_addr, out.src_addr);
-    TEST_ASSERT_EQUAL(p.congestion_level, out.congestion_level);
-    TEST_ASSERT_EQUAL(p.queue_depth, out.queue_depth);
-    TEST_ASSERT_EQUAL_HEX16(p.est_clear_time, out.est_clear_time);
-}
-
-void test_congestion_wire_format(void) {
-    bramble_congestion_t p = {
-        .header = make_header(PKT_TYPE_CONGESTION),
-        .src_addr = 0x01020304, .congestion_level = 3,
-        .queue_depth = 15, .est_clear_time = 0xABCD,
-    };
-    uint8_t buf[CONGESTION_SIZE];
-    bramble_congestion_serialize(&p, buf, sizeof(buf));
-    /* est_clear_time BE at offset 18 */
-    TEST_ASSERT_EQUAL_HEX8(0xAB, buf[18]);
-    TEST_ASSERT_EQUAL_HEX8(0xCD, buf[19]);
-}
-
-/* ---- TIME_SYNC ---- */
-void test_time_sync_roundtrip(void) {
-    bramble_time_sync_t p = {
-        .header = make_header(PKT_TYPE_TIME_SYNC),
-        .src_addr = 0xFACEFACE, .timestamp = 0xDEADCAFE,
-        .confidence_ms = 150, .stratum = 2, .sequence = 42,
-    };
-    uint8_t buf[TIME_SYNC_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_time_sync_serialize(&p, buf, sizeof(buf)));
-    bramble_time_sync_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_time_sync_deserialize(&out, buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL_HEX32(p.src_addr, out.src_addr);
-    TEST_ASSERT_EQUAL_HEX32(p.timestamp, out.timestamp);
-    TEST_ASSERT_EQUAL(p.confidence_ms, out.confidence_ms);
-    TEST_ASSERT_EQUAL(p.stratum, out.stratum);
-    TEST_ASSERT_EQUAL(p.sequence, out.sequence);
-}
-
-void test_time_sync_wire_format(void) {
-    bramble_time_sync_t p = {
-        .header = make_header(PKT_TYPE_TIME_SYNC),
-        .src_addr = 0x01020304, .timestamp = 0xCAFEBABE,
-        .confidence_ms = 0x1234,
-    };
-    uint8_t buf[TIME_SYNC_SIZE];
-    bramble_time_sync_serialize(&p, buf, sizeof(buf));
-    /* timestamp BE at offset 16 */
-    TEST_ASSERT_EQUAL_HEX8(0xCA, buf[16]);
-    TEST_ASSERT_EQUAL_HEX8(0xFE, buf[17]);
-    TEST_ASSERT_EQUAL_HEX8(0xBA, buf[18]);
-    TEST_ASSERT_EQUAL_HEX8(0xBE, buf[19]);
-    /* confidence_ms BE at offset 20 */
-    TEST_ASSERT_EQUAL_HEX8(0x12, buf[20]);
-    TEST_ASSERT_EQUAL_HEX8(0x34, buf[21]);
-}
-
 void test_location_packet_header_roundtrip(void) {
     bramble_header_t h = make_header(PKT_TYPE_LOCATION);
     h.flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT);
@@ -358,10 +292,6 @@ int main(void) {
     RUN_TEST(test_key_exchange_roundtrip);
     RUN_TEST(test_delivery_receipt_roundtrip);
     RUN_TEST(test_delivery_receipt_zero_hops);
-    RUN_TEST(test_congestion_roundtrip);
-    RUN_TEST(test_congestion_wire_format);
-    RUN_TEST(test_time_sync_roundtrip);
-    RUN_TEST(test_time_sync_wire_format);
     RUN_TEST(test_location_packet_header_roundtrip);
     RUN_TEST(test_location_packet_header_preserves_requested_tier);
     return UNITY_END();

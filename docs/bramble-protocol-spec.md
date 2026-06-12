@@ -272,8 +272,8 @@ Value  Name               Description
 0x05   BEACON             Periodic neighbor advertisement
 0x06   KEY_EXCHANGE       X25519 DH key exchange
 0x07   DELIVERY_RECEIPT   Delivery confirmation with relay path
-0x08   CONGESTION         Congestion notification
-0x09   TIME_SYNC          Time synchronization
+0x08   (retired)          Was CONGESTION; removed unshipped (see §4.12)
+0x09   (retired)          Was TIME_SYNC; removed unshipped (see §4.13)
 0x0A   DATA               Application data (text, telemetry, etc.)
 0x0B   STORE_REQUEST      Request mailbox node to store message (see §4.15)
 0x0C   STORE_ACK          Mailbox storage acknowledgment (see §4.16)
@@ -287,7 +287,7 @@ Value  Name               Description
 0x14   LOCATION           Location sharing packet
 ```
 
-> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. `KEY_EXCHANGE`, `CONGESTION`, `TIME_SYNC`, the mailbox types (`0x0B`-`0x0E`), the emergency types (`0x0F`-`0x10`), and `CODED` are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon.
+> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. `KEY_EXCHANGE` and the mailbox types (`0x0B`-`0x0E`) are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon. The retired codes (`0x08`, `0x09`, `0x0F`-`0x11`) belonged to machinery that was removed unshipped; they stay reserved so a future wire version can reassign them deliberately.
 
 ### 4.4 DATA Packet
 
@@ -495,36 +495,11 @@ Each relay node appends its own address to the relay_path as it forwards the rec
 
 ### 4.12 CONGESTION Packet
 
-Broadcast by a node experiencing congestion to warn neighbors.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x09, dest=0xFFFFFFFF)
-12      4     src_addr         Congested node's address
-16      1     congestion_level 0=clear, 1=moderate(>50% queue), 2=high(>75%), 3=critical(>90%)
-17      1     queue_depth      Current TX queue depth
-18      2     est_clear_time   Estimated time to clear queue (seconds)
-──────────────────────────────────────────────────────────
-Total: 20 bytes
-```
+Removed unshipped. The congestion-notification packet and its serializers were deleted without ever being transmitted or handled; airtime admission is enforced locally by the budget-gated TX path (section 8.2.1) instead of by neighbor congestion signaling.
 
 ### 4.13 TIME_SYNC Packet
 
-Used for network time synchronization (see §9).
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x0A, dest=0xFFFFFFFF)
-12      4     src_addr         Sync source address
-16      4     timestamp        Network time (epoch seconds, lower 32 bits)
-20      2     confidence_ms    Sender's time uncertainty (ms)
-22      1     stratum          Hop distance from best time source (0=GPS, 1=GPS-neighbor, etc.)
-23      1     sequence         Monotonic counter to detect stale sync packets
-──────────────────────────────────────────────────────────
-Total: 24 bytes
-```
+Removed unshipped. Time synchronization rides the beacon (`network_time`, `time_confidence`, stratum; see section 9); the dedicated TIME_SYNC packet and its serializers were deleted without ever being transmitted or handled.
 
 ### 4.14 Fragmentation
 
@@ -2168,47 +2143,7 @@ function calculate_airtime_us(payload_bytes, sf, bw_hz, cr):
 
 ### 8.4 Congestion Detection and Response
 
-```
-CONGESTION_NONE     = 0   // Queue ≤ 50% (≤ 8 packets)
-CONGESTION_MODERATE = 1   // Queue 50–75% (9–12 packets)
-CONGESTION_HIGH     = 2   // Queue 75–90% (13–14 packets)
-CONGESTION_CRITICAL = 3   // Queue > 90% (15–16 packets)
-
-function assess_congestion():
-    depth = tx_queue.depth()
-    if depth <= 8:  return CONGESTION_NONE
-    if depth <= 12: return CONGESTION_MODERATE
-    if depth <= 14: return CONGESTION_HIGH
-    return CONGESTION_CRITICAL
-
-function congestion_response(level):
-    match level:
-        CONGESTION_NONE:
-            // Normal operation
-            pass
-        
-        CONGESTION_MODERATE:
-            // Broadcast a CONGESTION packet so neighbors know
-            broadcast_congestion(level)
-            // Drop broadcast-tier packets older than 5 seconds from queue
-            tx_queue.purge(tier=BROADCAST, max_age_ms=5000)
-        
-        CONGESTION_HIGH:
-            broadcast_congestion(level)
-            // Drop all broadcast-tier from queue
-            tx_queue.purge(tier=BROADCAST, max_age_ms=0)
-            // Drop normal-tier packets older than 10 seconds
-            tx_queue.purge(tier=NORMAL, max_age_ms=10000)
-            // Increase backoff multiplier to reduce transmission rate
-            increase_backoff_multiplier(2)
-        
-        CONGESTION_CRITICAL:
-            broadcast_congestion(level)
-            // Drop everything except critical
-            tx_queue.purge(tier=BROADCAST, max_age_ms=0)
-            tx_queue.purge(tier=NORMAL, max_age_ms=0)
-            // Only critical packets transmitted
-```
+Removed unshipped. The queue-depth congestion assessment and CONGESTION broadcast designed here were deleted without ever being wired; the firmware's only admission control is the budget-gated TX chokepoint (section 8.2.1), which bounds every tier including retries.
 
 ### 8.5 TX Queue and Priority Scheduling
 
@@ -2286,7 +2221,7 @@ function tx_scheduler():  // Main TX loop, runs continuously
 
 Every node includes its current time estimate and confidence in its BEACON packet (§4.9). Additionally, dedicated TIME_SYNC packets provide higher-precision synchronization.
 
-> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); dedicated `TIME_SYNC` packets are never sent or handled.
+> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); the dedicated `TIME_SYNC` packet type was removed unshipped (section 4.13). No stratum-0 source is wired yet (no GPS or operator seed), so nodes exchange offsets but none can bootstrap the mesh to synchronized absolute time.
 
 **Stratum model:**
 - Stratum 0: GPS-equipped node with valid fix (confidence = 0 ms)
@@ -2388,24 +2323,7 @@ function process_beacon_time(beacon, rx_time_local_ms):
 
 ### 9.5 TIME_SYNC Packet Emission
 
-```
-SYNC_INTERVAL_S = 300       // Emit TIME_SYNC every 5 minutes
-SYNC_BEACON_INTERVAL_S = 60 // Beacons (which include time) every 60 seconds
-
-function time_sync_tick():
-    if my_time.stratum <= 2 and (now_local_ms() - last_sync_emit) > SYNC_INTERVAL_S * 1000:
-        // We're a good time source — share our time
-        sync_pkt = build_time_sync(
-            timestamp = get_network_time(),
-            confidence_ms = my_time.confidence_ms,
-            stratum = my_time.stratum,
-            sequence = ++sync_sequence
-        )
-        broadcast(sync_pkt)
-        last_sync_emit = now_local_ms()
-```
-
-Only nodes with stratum ≤ 2 proactively emit TIME_SYNC packets. Other nodes share their time passively via beacons. This prevents TIME_SYNC storms in large meshes.
+Removed unshipped. Proactive TIME_SYNC emission was deleted along with the packet type (section 4.13); every node shares time passively via its beacons, which is the only sync transport.
 
 ### 9.6 Anti-Replay Timestamp Windows
 

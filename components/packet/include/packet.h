@@ -22,8 +22,6 @@
 #define PKT_TYPE_BEACON 0x05
 #define PKT_TYPE_KEY_EXCHANGE 0x06
 #define PKT_TYPE_DELIVERY_RECEIPT 0x07
-#define PKT_TYPE_CONGESTION 0x08
-#define PKT_TYPE_TIME_SYNC 0x09
 #define PKT_TYPE_DATA 0x0A
 #define PKT_TYPE_STORE_REQUEST 0x0B
 #define PKT_TYPE_STORE_ACK 0x0C
@@ -66,8 +64,6 @@
 #define KEY_EXCHANGE_SIZE 101
 #define DELIVERY_RECEIPT_MIN_SIZE 22
 #define DELIVERY_RECEIPT_MAX_SIZE 54
-#define CONGESTION_SIZE 20
-#define TIME_SYNC_SIZE 24
 
 #define DELIVERY_RECEIPT_MAX_HOPS 8
 
@@ -156,23 +152,6 @@ typedef struct {
     uint32_t relay_path[DELIVERY_RECEIPT_MAX_HOPS];
 } bramble_delivery_receipt_t;
 
-typedef struct {
-    bramble_header_t header;
-    uint32_t src_addr;
-    uint8_t congestion_level;
-    uint8_t queue_depth;
-    uint16_t est_clear_time;
-} bramble_congestion_t;
-
-typedef struct {
-    bramble_header_t header;
-    uint32_t src_addr;
-    uint32_t timestamp;
-    uint16_t confidence_ms;
-    uint8_t stratum;
-    uint8_t sequence;
-} bramble_time_sync_t;
-
 /* Serialize/deserialize functions. Return ESP_OK or ESP_ERR_INVALID_SIZE. */
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len);
 esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, size_t len);
@@ -219,10 +198,6 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
 esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, const uint8_t* buf,
                                                size_t len);
 
-esp_err_t bramble_congestion_serialize(const bramble_congestion_t* p, uint8_t* buf, size_t len);
-esp_err_t bramble_congestion_deserialize(bramble_congestion_t* p, const uint8_t* buf, size_t len);
 
-esp_err_t bramble_time_sync_serialize(const bramble_time_sync_t* p, uint8_t* buf, size_t len);
-esp_err_t bramble_time_sync_deserialize(bramble_time_sync_t* p, const uint8_t* buf, size_t len);
 
 #endif /* BRAMBLE_PACKET_H */
