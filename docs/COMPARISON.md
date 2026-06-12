@@ -33,9 +33,9 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 | **Routing approach** | Managed flooding (all nodes rebroadcast). DMs getting next-hop routing in v2.6. | Flood-based route discovery, then data follows the learned direct path. Companion nodes don't repeat. | Reactive AODV-style routing with cached routes. Flooding only for channel/group messages (hop-limited). |
 | **Encryption: channels** | AES256-CTR with PSK. No integrity check (no AEAD: issue #4030 open). Known-plaintext attacks possible. | AES-256 with PSK (details sparse; encrypt-then-MAC with shared secret per the codebase). | AES-256-GCM (AEAD) with PSK. Channel ID encrypted inside ciphertext. |
 | **Encryption: DMs** | Since v2.5: X25519 PKC + AES-CCM. Prior: just channel PSK (no real DM privacy). | Ed25519 identity + ECDH key exchange → AES-128 encrypt-then-MAC. Signed adverts prevent spoofing. | Encrypted with the shared channel key (AES-256-GCM), not pairwise end-to-end keys; every holder of the channel key can read DMs on it (see [SECURITY-MODEL.md](SECURITY-MODEL.md)). |
-| **Scalability target** | ~80–100 nodes practical ceiling (flooding). Degrades above ~30 active senders. | Flood-based discovery with direct-path data delivery. Claims up to 64 hops theoretically. | Route-based forwarding scales O(path_length) per DM, not O(N). Scale validation is in progress in simulation (scenarios up to 200 nodes run the real protocol code). |
-| **Reliability model** | Optional ACKs. Basic retries. No flow control. No congestion awareness. | ACK mechanism. Basic retry logic. No formal congestion management. | Three tiers (Broadcast/Normal/Critical). Exponential backoff retries. Sliding window flow control. Congestion detection and response. |
-| **Airtime management** | None built-in. Nodes transmit freely. Some duty cycle awareness in EU regions. | Flood advert interval configurable (default 12h for repeaters). Companion nodes don't repeat. | Token-bucket airtime budget with per-tier sub-budgets and priority queuing. |
+| **Scalability target** | ~80–100 nodes practical ceiling (flooding). Degrades above ~30 active senders. | Flood-based discovery with direct-path data delivery. Claims up to 64 hops theoretically. | Route-based forwarding scales O(path_length) per DM, not O(N). Measured under a collision-model simulation, current scale results are honest and unflattering: multi-hop route discovery collapses between 10 and 50 nodes at SF10 defaults ([results/simulation-2026-06.md](results/simulation-2026-06.md)). |
+| **Reliability model** | Optional ACKs. Basic retries. No flow control. No congestion awareness. | ACK mechanism. Basic retry logic. No formal congestion management. | Three tiers (Broadcast/Normal/Critical). Exponential backoff retries with jitter, end-to-end ACKs, delivery receipts with relay path. Sliding-window flow control and congestion signaling are designed and component-tested but not yet wired into the live mesh path. |
+| **Airtime management** | None built-in. Nodes transmit freely. Some duty cycle awareness in EU regions. | Flood advert interval configurable (default 12h for repeaters). Companion nodes don't repeat. | Enforced: every transmission passes one budget-gated TX path with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps where the frequency plan requires them (EU868 1%). No transmit path bypasses the budget. |
 | **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Not documented. Likely relies on GPS or companion device time. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
 | **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
 | **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte header. Compact binary. No protobuf/JSON. |
@@ -154,10 +154,10 @@ Bramble's privacy design is significantly more ambitious than both Meshtastic an
 ### Bramble
 
 - **ACKs:** Three tiers: Broadcast (no ACK), Normal (end-to-end ACK), Critical (ACK + delivery receipt with full relay path).
-- **Retries:** Exponential backoff. Normal: 3 retries over ~15s. Critical: 8 retries over ~12–16 minutes. Jitter to avoid synchronization.
-- **Flow control:** Per-destination sliding window (max 4 unacknowledged packets). Additive increase, multiplicative decrease (AIMD). Prevents fast sender from overwhelming the mesh.
+- **Retries:** Exponential backoff with ±25% jitter. Normal: 3 retries from a 2 s base. Critical: 8 retries from a 3 s base. A retry denied by the airtime budget burns the attempt, so a saturated mesh produces a visible FAILED status instead of a zombie pending message.
+- **Flow control:** Designed and component-tested (per-destination sliding window with AIMD), but not yet wired into the live mesh path.
 - **Delivery confirmation:** Critical tier includes delivery receipts with complete relay path: sender passively learns network topology.
-- **Congestion handling:** Explicit CONGESTION packets broadcast by overwhelmed nodes. Four levels trigger progressive shedding (drop broadcast → drop normal → reduce TX power). Priority queue ensures critical traffic survives congestion.
+- **Congestion handling:** The dedicated CONGESTION packet type is defined but not yet transmitted or handled. What ships today is indirect: per-tier airtime budgets shed lower-tier traffic first, and control traffic (routing, ACKs) has a reserved budget lane that data load cannot starve.
 
 ---
 
@@ -179,7 +179,7 @@ MeshCore's role system (companions don't repeat) means the effective flooding fa
 
 DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. The current firmware fixes the hop limit at 4. The token-bucket airtime budget caps each node's transmission time per hour with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages still flood (hop-limited), but channels are explicitly a lower-tier service.
 
-**Validation status:** scale behavior has not been validated in a real-world deployment. The simulator runs the real protocol code in scenarios up to 200 nodes, and that is where scaling behavior is currently being tested.
+**Validation status:** scale behavior has not been validated in a real-world deployment. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT), and the published numbers are honest: a 10-node single-collision-domain cluster delivers 18/20 under gentle load, a 10-node multi-hop grid delivers 65%, and the 50/100/200-node scenarios collapse to 0 to 10% delivery because route-discovery floods at the SF10 default cannot complete on a channel already saturated by control traffic. Full numbers, methodology, and the failure analysis are in [results/simulation-2026-06.md](results/simulation-2026-06.md). The design's scaling argument is currently a goal under active investigation, not a demonstrated property.
 
 ---
 
@@ -201,11 +201,11 @@ DM traffic scales as O(path_length) after route discovery: one transmission per 
 | **Community size** | Very large (100k+ Discord, active subreddit, many YouTube creators) | Growing (active Discord, community contributors, emerging content creators) | Solo developer project |
 | **Companion apps** | Android, iOS, Web, Python CLI, extensive third-party tools | Android, iOS, Web, NodeJS library, Python CLI | Web companion app, Go SDK, CLI tool |
 | **Hardware support** | Dozens of boards across multiple architectures | ~15+ boards, growing. Web flasher available. | 3 boards (Heltec V3, T-Deck Plus, Heltec V4) |
-| **Documentation** | Excellent. Official docs, community guides, YouTube tutorials. | Growing. FAQ, community site (meshcore.co.uk, localmesh.nl). No formal protocol spec. | Protocol spec, architecture doc, RPC reference, API docs |
+| **Documentation** | Excellent. Official docs, community guides, YouTube tutorials. | Growing. FAQ, community site (meshcore.co.uk, localmesh.nl). No formal protocol spec. | Protocol spec, architecture doc, code-verified security model, RPC reference, API docs |
 | **Production readiness** | Yes. Deployed in real emergencies, events, and daily use worldwide. | Early adopter stage. Functional for basic use. Evolving rapidly. | Pre-production. Functional firmware on dev boards, not field-tested at scale. |
 | **Protocol spec** | Documented (mesh-algo page, protobuf definitions) | No formal spec. V2 spec on roadmap. Code is the reference. | Detailed design doc with packet formats, algorithms, pseudocode. |
 | **MQTT/Internet bridge** | Yes, built-in. MQTT integration for internet bridging. | Not documented as a core feature. | Not planned initially. |
-| **Web flasher** | Yes (flasher.meshtastic.org) | Yes (flasher.meshcore.co.uk) | Planned (Phase 6 of roadmap) |
+| **Web flasher** | Yes (flasher.meshtastic.org) | Yes (flasher.meshcore.co.uk) | Yes (browser-based flasher in `web-flasher/`, hosted at bramblemesh.org) |
 
 ---
 
@@ -217,9 +217,9 @@ DM traffic scales as O(path_length) after route discovery: one transmission per 
 
 2. **Privacy by design.** Bramble's pseudonymized RREQ sources and encrypted channel IDs represent a meaningfully different privacy posture; [SECURITY-MODEL.md](SECURITY-MODEL.md) documents exactly what is and is not hidden today. Meshtastic and MeshCore carry source and destination in plaintext headers.
 
-3. **Airtime economics.** The token-bucket airtime budget with per-tier sub-budgets is unique among the three. Neither Meshtastic nor MeshCore has any formal airtime management. In a large mesh, this is the difference between graceful degradation and chaotic congestion collapse.
+3. **Airtime economics.** The token-bucket airtime budget with per-tier sub-budgets, enforced at a single TX choke point with real time-on-air costing, is unique among the three. Neither Meshtastic nor MeshCore has any formal airtime management. In a large mesh, this is the difference between graceful degradation and chaotic congestion collapse.
 
-4. **Reliability tiers.** Three tiers with different retry strategies, plus sliding-window flow control and explicit congestion signaling, give applications fine-grained control. Meshtastic's "optional ACK with fixed retries" is a blunt instrument by comparison.
+4. **Reliability tiers.** Three tiers with different retry strategies, end-to-end ACKs, and path-tracing delivery receipts give applications fine-grained control (sliding-window flow control and explicit congestion signaling are designed but not yet wired in). Meshtastic's "optional ACK with fixed retries" is a blunt instrument by comparison.
 
 5. **AEAD for message payloads.** AES-256-GCM provides both confidentiality and integrity in a single pass. Meshtastic's channel encryption (AES256-CTR without MAC) is notably weaker: it lacks integrity checking entirely.
 
