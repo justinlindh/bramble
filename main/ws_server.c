@@ -570,15 +570,48 @@ static esp_err_t config_post_handler(httpd_req_t* req) {
 
     /* The setup portal form cannot send an Authorization header, so the
      * device token is accepted as a form field too. Same credential,
-     * same constant-time comparison. */
-    bool authed = (auth_eval(req) == WS_AUTH_OK);
-    if (!authed && form_token[0] != '\0' && !s_token_unavailable &&
+     * same constant-time comparison. token_proven means real credentials
+     * were presented; the auth-opt-out open state does NOT count. */
+    bool open_access = ws_server_auth_disabled();
+    bool token_proven = !open_access && (auth_eval(req) == WS_AUTH_OK);
+    if (!token_proven && form_token[0] != '\0' && !s_token_unavailable &&
         ct_strcmp(form_token, s_auth_token) == 0) {
-        authed = true;
+        token_proven = true;
     }
-    if (!authed) {
-        ESP_LOGW(TAG, "Config POST auth failed");
-        return send_401_http(req);
+
+    if (!token_proven) {
+        /* CSRF gate: /config is a CORS-simple form target, so without
+         * this a foreign page could auto-submit Wi-Fi credentials and
+         * reboot the device onto an attacker AP. Browser-originated
+         * posts must be same-origin (or allowlisted); header-free
+         * clients (curl) pass and are gated by the token below. This is
+         * the remaining defense on auth-opt-out devices. */
+        char origin[WS_ORIGINS_MAX] = {0};
+        char referer[WS_ORIGINS_MAX] = {0};
+        char host[96] = {0};
+        if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) ==
+            ESP_ERR_HTTPD_RESULT_TRUNC) {
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
+            return ESP_FAIL;
+        }
+        if (httpd_req_get_hdr_value_str(req, "Referer", referer, sizeof(referer)) ==
+            ESP_ERR_HTTPD_RESULT_TRUNC) {
+            /* oversized referer cannot be same-origin: treat as foreign */
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
+            return ESP_FAIL;
+        }
+        (void)httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+        if (!ws_config_post_allowed(origin, referer, host, s_extra_origins)) {
+            ESP_LOGW(TAG, "Config POST cross-origin (origin '%s' referer '%s'), rejecting",
+                     origin, referer);
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
+            return ESP_FAIL;
+        }
+
+        if (!open_access) {
+            ESP_LOGW(TAG, "Config POST auth failed");
+            return send_401_http(req);
+        }
     }
 
     if (ssid_start) {
