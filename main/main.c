@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "nvs_keys.h"
+#include "ota_rollback.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -758,6 +759,9 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
     ESP_LOGI(TAG, "NVS initialized");
+
+    /* Raise the OTA anti-rollback floor to the running version if higher */
+    ota_rollback_note_boot();
 
     /* Load or generate persistent identity */
     ESP_LOGI(TAG, "=== BOOT STAGE: identity_load ===");

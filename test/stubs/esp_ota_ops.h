@@ -10,6 +10,7 @@ typedef struct {
 typedef int esp_ota_handle_t;
 
 #define OTA_SIZE_UNKNOWN -1
+#define ESP_ERR_OTA_VALIDATE_FAILED 0x1503
 
 const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t* start_from);
 esp_err_t esp_ota_begin(const esp_partition_t* partition, int image_size,
@@ -27,5 +28,7 @@ typedef struct {
 } esp_app_desc_t;
 
 const esp_app_desc_t* esp_app_get_description(void);
+esp_err_t esp_ota_get_partition_description(const esp_partition_t* partition,
+                                            esp_app_desc_t* app_desc);
 
 #endif

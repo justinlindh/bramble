@@ -18,6 +18,9 @@
 #include "nvs_keys.h"
 #include "battery.h"
 #include "ota.h"
+#include "ota_origin.h"
+#include "ota_rollback.h"
+#include "ota_url.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -1609,46 +1612,64 @@ static int handle_set_broadcast_telemetry_mode(const cJSON *params, cJSON *resul
 
 /* ── Registration ───────────────────────────────────────────────────── */
 
-/* OTA task — runs in background after RPC response */
+/* OTA task: runs in background after RPC response */
 static volatile bool s_ota_in_progress = false;
 
-static void ota_task(void *arg) {
-    char *url = (char *)arg;
+typedef struct {
+    char* url;
+    bool allow_downgrade;
+} ota_task_args_t;
+
+static void ota_task(void* arg) {
+    ota_task_args_t* args = (ota_task_args_t*)arg;
     vTaskDelay(pdMS_TO_TICKS(500)); /* let RPC response flush */
-    int rc = ota_wifi_start(url);
-    free(url);
+    int rc = ota_wifi_start(args->url, args->allow_downgrade);
+    free(args->url);
+    free(args);
     s_ota_in_progress = false;
     if (rc == 0) {
-        ESP_LOGI("ota", "OTA complete — rebooting...");
+        ESP_LOGI("ota", "OTA complete; rebooting...");
         vTaskDelay(pdMS_TO_TICKS(2000));
         esp_restart();
     }
-    ESP_LOGE("ota", "OTA failed");
+    ESP_LOGE("ota", "OTA failed: %s",
+             ota_get_last_error() ? ota_get_last_error() : "unknown error");
     vTaskDelete(NULL);
 }
 
-/* bramble.otaUpdate — start OTA from URL */
-static int handle_ota_update(const cJSON *params, cJSON *result) {
-    const char *url = cJSON_GetStringValue(cJSON_GetObjectItem(params, "url"));
-    if (!url || strlen(url) == 0) {
+/* bramble.otaUpdate: start OTA from a relative artifact path resolved
+ * against the allowlisted origin. Raw URLs are not accepted. */
+static int handle_ota_update(const cJSON* params, cJSON* result) {
+    if (cJSON_GetObjectItem(params, "url")) {
         cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "url parameter required");
+        cJSON_AddStringToObject(result, "error",
+                                "raw URLs are not accepted; pass 'path' relative to the "
+                                "configured OTA origin (see bramble.otaGetOrigin)");
         return 0;
     }
 
-    if (!(strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0)) {
+    const char* path = cJSON_GetStringValue(cJSON_GetObjectItem(params, "path"));
+    if (!path || strlen(path) == 0) {
         cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "unsupported OTA URL scheme (expected http:// or https://)");
+        cJSON_AddStringToObject(result, "error",
+                                "path parameter required (artifact path relative to the OTA "
+                                "origin, e.g. stable/v1.4.0/heltec-v3/bramble.bin)");
         return 0;
     }
 
-#ifndef CONFIG_BRAMBLE_OTA_ALLOW_HTTP
-    if (strncmp(url, "http://", 7) == 0) {
+    bool allow_downgrade = cJSON_IsTrue(cJSON_GetObjectItem(params, "allow_downgrade"));
+
+    char url[OTA_URL_MAX];
+    int rc = ota_resolve_artifact(path, url, sizeof(url));
+    if (rc != OTA_URL_OK) {
         cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "HTTP OTA disabled in release builds — use https://");
+        cJSON_AddStringToObject(result, "error",
+                                rc == OTA_URL_ERR_PATH
+                                    ? "invalid artifact path (relative paths only: no absolute "
+                                      "URLs, no traversal, no special characters)"
+                                    : "OTA origin rejected by policy");
         return 0;
     }
-#endif
 
     if (s_ota_in_progress) {
         cJSON_AddBoolToObject(result, "ok", false);
@@ -1656,19 +1677,30 @@ static int handle_ota_update(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    /* Copy URL to heap so task owns it — prevents clobber from concurrent calls */
-    char *url_copy = strdup(url);
-    if (!url_copy) {
+    const char* last_error = ota_get_last_error();
+    if (last_error) {
+        cJSON_AddStringToObject(result, "last_error", last_error);
+    }
+
+    /* Copy args to heap so the task owns them */
+    ota_task_args_t* args = calloc(1, sizeof(*args));
+    char* url_copy = strdup(url);
+    if (!args || !url_copy) {
+        free(args);
+        free(url_copy);
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "out of memory");
         return 0;
     }
+    args->url = url_copy;
+    args->allow_downgrade = allow_downgrade;
 
     s_ota_in_progress = true;
 
-    if (xTaskCreate(ota_task, "ota", 8192, url_copy, 3, NULL) != pdPASS) {
+    if (xTaskCreate(ota_task, "ota", 8192, args, 3, NULL) != pdPASS) {
         s_ota_in_progress = false;
         free(url_copy);
+        free(args);
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "failed to start OTA task");
         return 0;
@@ -1676,7 +1708,63 @@ static int handle_ota_update(const cJSON *params, cJSON *result) {
 
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddStringToObject(result, "note", "OTA started; waiting for reboot confirms success");
+    cJSON_AddStringToObject(result, "url", url);
     cJSON_AddStringToObject(result, "partition", ota_get_running_partition());
+    return 0;
+}
+
+/* bramble.otaGetOrigin: report the effective OTA origin and rollback floor */
+static int handle_ota_get_origin(const cJSON* params, cJSON* result) {
+    (void)params;
+    char origin[OTA_URL_MAX];
+    ota_origin_get(origin, sizeof(origin));
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "origin", origin);
+    cJSON_AddStringToObject(result, "default_origin", OTA_DEFAULT_ORIGIN);
+    cJSON_AddBoolToObject(result, "overridden", ota_origin_is_overridden());
+    char floor_str[48];
+    if (ota_rollback_get_floor(floor_str, sizeof(floor_str))) {
+        cJSON_AddStringToObject(result, "version_floor", floor_str);
+    }
+    cJSON_AddStringToObject(result, "running_version", ota_get_app_version());
+    return 0;
+}
+
+/* bramble.otaSetOrigin: override (or reset) the allowlisted OTA origin */
+static int handle_ota_set_origin(const cJSON* params, cJSON* result) {
+    if (cJSON_IsTrue(cJSON_GetObjectItem(params, "reset"))) {
+        if (ota_origin_reset() != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to persist OTA origin");
+            return 0;
+        }
+    } else {
+        const char* origin = cJSON_GetStringValue(cJSON_GetObjectItem(params, "origin"));
+        if (!origin || strlen(origin) == 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "origin parameter required (or reset:true)");
+            return 0;
+        }
+        int rc = ota_origin_set(origin);
+        if (rc == -1) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error",
+                                    "origin rejected by policy (https:// host required; no "
+                                    "userinfo, query or fragment)");
+            return 0;
+        }
+        if (rc != 0) {
+            cJSON_AddBoolToObject(result, "ok", false);
+            cJSON_AddStringToObject(result, "error", "failed to persist OTA origin");
+            return 0;
+        }
+    }
+
+    char origin_now[OTA_URL_MAX];
+    ota_origin_get(origin_now, sizeof(origin_now));
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddStringToObject(result, "origin", origin_now);
+    cJSON_AddBoolToObject(result, "overridden", ota_origin_is_overridden());
     return 0;
 }
 
@@ -2114,6 +2202,8 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.removeLocationContact",handle_remove_location_contact);
     rpc_register("bramble.shareLocationOnce",    handle_share_location_once);
     rpc_register("bramble.otaUpdate",            handle_ota_update);
+    rpc_register("bramble.otaGetOrigin",         handle_ota_get_origin);
+    rpc_register("bramble.otaSetOrigin",         handle_ota_set_origin);
     rpc_register("bramble.getBattery",           handle_get_battery);
     rpc_register("bramble.setBacklight",         handle_set_backlight);
     rpc_register("bramble.sleep",               handle_sleep);
