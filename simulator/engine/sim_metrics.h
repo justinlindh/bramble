@@ -23,6 +23,12 @@ typedef struct {
     uint64_t beacons_sent;             /* total beacons transmitted (control airtime) */
     uint64_t rreqs_sent;               /* total RREQs transmitted (control airtime) */
     uint64_t rreps_sent;               /* total RREPs transmitted (control airtime) */
+    uint64_t collisions;               /* receptions destroyed by overlap */
+    uint64_t half_duplex_drops;        /* receptions missed while transmitting */
+    uint64_t capture_wins;             /* receptions that survived overlap via capture */
+    uint64_t lbt_backoffs;             /* listen-before-talk busy detections */
+    uint64_t receptions_ok;            /* receptions that passed the collision model */
+    uint64_t airtime_total_us;         /* sum of real time-on-air across all TX */
     int active_nodes;
 } metrics_state_t;
 

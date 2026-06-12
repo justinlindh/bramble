@@ -29,6 +29,12 @@ typedef struct {
     int8_t snr;  /* SNR at receiver (dB, typical LoRa range 0-50) */
     uint8_t data[256];
     uint16_t len;
+    /* On-air occupancy window of the transmission that produced this event.
+     * Used by the collision model to evaluate overlap at delivery time. */
+    uint64_t air_start_us;
+    uint64_t air_end_us;
+    float tx_x; /* transmitter position at TX time (capture-effect RSSI math) */
+    float tx_y;
 } packet_event_data_t;
 
 /* Node event data */

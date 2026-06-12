@@ -94,12 +94,16 @@ typedef struct {
     uint64_t last_mode_transition_us;                     /* When did we last change mode? */
     bool adaptive_enabled;                                /* Feature flag for adaptive policy */
 
+    /* Half-duplex radio state: end of this node's in-progress transmission */
+    uint64_t tx_busy_until_us;
+
     /* Statistics */
     uint64_t packets_sent;
     uint64_t packets_received;
     uint64_t packets_forwarded;
     uint64_t packets_originated;
     uint64_t beacons_sent;
+    uint64_t airtime_tx_us; /* cumulative real time-on-air transmitted */
 } sim_node_t;
 
 typedef struct {
