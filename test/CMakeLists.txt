@@ -487,6 +487,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_rpc_set_auth_token_contract
     test_rpc_set_auth_token_contract.c
@@ -499,6 +500,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_rpc_get_config_channel_export
     test_rpc_get_config_channel_export.c
@@ -511,6 +513,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_mesh_broadcast_delivery
     test_mesh_broadcast_delivery.c
@@ -523,6 +526,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 
 add_executable(test_broadcast_delivery_receipt
@@ -797,6 +801,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
 )
 target_include_directories(test_rpc_methods_firmware PRIVATE
@@ -967,6 +972,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
 )
 target_include_directories(test_host_rpc_methods PRIVATE
@@ -1012,3 +1018,23 @@ target_include_directories(test_mailbox_wrappers PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
 )
 add_test(NAME test_mailbox_wrappers COMMAND test_mailbox_wrappers)
+
+# OTA URL policy tests (pure, no ESP deps)
+add_executable(test_ota_url
+    test_ota_url.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
+)
+target_include_directories(test_ota_url PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+)
+
+# OTA semver / anti-rollback comparison tests (pure, no ESP deps)
+add_executable(test_ota_version
+    test_ota_version.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_version.c
+)
+target_include_directories(test_ota_version PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+)

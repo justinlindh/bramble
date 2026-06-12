@@ -1,8 +1,22 @@
 #ifndef BRAMBLE_OTA_H
 #define BRAMBLE_OTA_H
 
-/** Start OTA update from a URL (HTTP or HTTPS). Returns 0 on success. */
-int ota_wifi_start(const char* url);
+#include <stdbool.h>
+
+/**
+ * Start an OTA update from an already-resolved, policy-checked URL
+ * (see ota_origin.h / ota_url.h; RPC callers never pass raw URLs here).
+ *
+ * The image must carry a valid RSA-3072 signature block trusted by the
+ * running app (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT) and must pass
+ * the soft anti-rollback gate unless allow_downgrade is set.
+ *
+ * Returns 0 on success. On failure, ota_get_last_error() describes why.
+ */
+int ota_wifi_start(const char* url, bool allow_downgrade);
+
+/** Human-readable reason for the most recent OTA failure, or NULL. */
+const char* ota_get_last_error(void);
 
 /** Start OTA via BLE (not yet implemented). */
 int ota_ble_start(void);
