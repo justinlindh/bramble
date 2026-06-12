@@ -79,6 +79,19 @@ void tx_gate_set_peer_count(uint8_t peer_count) {
     xSemaphoreGive(s_gate_mutex);
 }
 
+void tx_gate_set_beacon_size(uint8_t beacon_wire_len) {
+    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    tx_gate_set_beacon_profile(&s_gate, beacon_wire_len);
+    xSemaphoreGive(s_gate_mutex);
+}
+
+uint32_t tx_gate_beacon_min_interval(void) {
+    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    uint32_t interval = tx_gate_min_beacon_interval_ms(&s_gate);
+    xSemaphoreGive(s_gate_mutex);
+    return interval;
+}
+
 uint32_t tx_gate_remaining(uint8_t tier) {
     xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
     airtime_budget_refill(&s_gate.budget, ops_now_ms());
