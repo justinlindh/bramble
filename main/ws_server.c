@@ -1,4 +1,5 @@
 #include "ws_server.h"
+#include "ct_strcmp.h"
 #include "rpc_dispatcher.h"
 #include "wifi_manager.h"
 #include "mesh_task.h"
@@ -108,22 +109,9 @@ static void client_remove(int fd) {
 
 /* ── Auth check ──────────────────────────────────────────────────────── */
 
-/**
- * Check auth token from Authorization: Bearer header.
- * Also accepts ?token=... for legacy clients (deprecated; logs warning).
- */
-static bool token_matches_constant_time(const char* provided, size_t provided_len) {
-    size_t expected_len = strnlen(s_auth_token, AUTH_TOKEN_MAX - 1);
-    volatile uint8_t diff = (uint8_t)(provided_len ^ expected_len);
+/* Token comparison delegates to ct_strcmp (fixed-bound, length-independent
+ * constant-time compare; see main/ct_strcmp.h). */
 
-    for (size_t i = 0; i < AUTH_TOKEN_MAX - 1; i++) {
-        uint8_t a = (i < provided_len) ? (uint8_t)provided[i] : 0;
-        uint8_t b = (i < expected_len) ? (uint8_t)s_auth_token[i] : 0;
-        diff |= (uint8_t)(a ^ b);
-    }
-
-    return diff == 0;
-}
 
 typedef enum {
     WS_AUTH_OK = 0,    /* valid credentials, or auth explicitly disabled */
@@ -147,8 +135,7 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
             size_t prefix_len = strlen(prefix);
             if (strncmp(hdr, prefix, prefix_len) == 0) {
                 const char* tok = hdr + prefix_len;
-                size_t tok_len = strnlen(tok, AUTH_TOKEN_MAX - 1);
-                bool ok = !s_token_unavailable && token_matches_constant_time(tok, tok_len);
+                bool ok = !s_token_unavailable && ct_strcmp(tok, s_auth_token) == 0;
                 free(hdr);
                 return ok ? WS_AUTH_OK : WS_AUTH_BAD;
             }
@@ -165,8 +152,7 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
         char token[AUTH_TOKEN_MAX] = {0};
         if (query && httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK &&
             httpd_query_key_value(query, "token", token, sizeof(token)) == ESP_OK) {
-            size_t tok_len = strnlen(token, AUTH_TOKEN_MAX - 1);
-            bool ok = !s_token_unavailable && token_matches_constant_time(token, tok_len);
+            bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
             if (ok) {
                 ESP_LOGW(TAG,
                          "WS auth via query param is deprecated; use Authorization: Bearer header");
