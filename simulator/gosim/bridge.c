@@ -7,8 +7,8 @@
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
 /* Note: mailbox.h, emergency.h, location.h, group.h, coding.h,
- * route_metric.h, channel_key.h, public_channel.h are all pulled in
- * transitively via bridge.h (Phase 6 headers). */
+ * channel_key.h, public_channel.h are all pulled in transitively via
+ * bridge.h (Phase 6 headers). */
 
 #include <string.h>
 #include <stdlib.h>
@@ -41,9 +41,6 @@ void bridge_node_ext_init_all(void) {
         group_init(&g_node_ext[i].group);
         coding_init(&g_node_ext[i].coding);
         g_node_ext[i].initialized = true;
-        g_node_ext[i].route_delivery_rate = 200;  /* start optimistic */
-        g_node_ext[i].route_avg_latency_ms = 100; /* ms */
-        g_node_ext[i].last_metric_switch_ms = 0;
     }
 }
 
@@ -287,20 +284,12 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
     route_entry_t* existing = route_lookup(&rx->routes, beacon.src_addr);
     bool new_or_broken = (!existing || existing->state == ROUTE_BROKEN);
 
-    /* Phase 6: Use composite route metric for better path selection */
+    /* Direct-neighbor route from the beacon, scored by link quality alone,
+     * matching the firmware's penalty-based metric (the composite scoring
+     * module was deleted as decorative; DES-4). */
     int node_idx = (int)(rx - nodes->nodes);
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
-    uint8_t penalty = compute_link_penalty(rssi, 0);
-    uint8_t link_quality = (penalty >= 255) ? 0 : (uint8_t)(255 - penalty);
-
-    /* Composite metric: link quality + delivery rate + airtime + latency */
-    uint8_t metric = link_quality; /* legacy fallback */
-    if (ext) {
-        uint8_t airtime_score = route_metric_airtime_score(
-            beacon.tx_queue_depth < 8 ? (8 - beacon.tx_queue_depth) * 1000 : 0, 8000);
-        metric = route_metric_compute(link_quality, ext->route_delivery_rate, airtime_score,
-                                      ext->route_avg_latency_ms);
-    }
+    uint8_t metric = metric_apply_link_penalty(255, rssi, 0);
 
     route_install(&rx->routes, beacon.src_addr, beacon.src_addr, 1, metric, ROUTE_ACTIVE, now_ms);
 
@@ -405,7 +394,10 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
                                     stdout, rx->id);
         }
 
-        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+        /* Jittered rebroadcast (DES-3), same 50-300ms window as firmware,
+         * so same-hop relays do not key up at the same instant. */
+        uint64_t jitter_us = (uint64_t)discovery_forward_jitter_ms(pcg32_random(rng)) * 1000ULL;
+        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us + jitter_us);
     }
 }
 
@@ -490,22 +482,6 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         /* Always clear pending ack and flow control on receipt */
         pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
         flow_on_ack(&rx->flow_control, receipt.src_addr);
-
-        /* Phase 6: Route metric — update delivery rate EMA on successful ACK */
-        {
-            int rx_idx = (int)(rx - nodes->nodes);
-            bridge_node_ext_t* ext = bridge_node_ext_get(rx_idx);
-            if (ext) {
-                ext->route_delivery_rate =
-                    route_metric_update_delivery(ext->route_delivery_rate, true);
-                if (receipt.hop_count > 0) {
-                    /* Crude latency estimate from hop count */
-                    uint16_t est_latency = (uint16_t)(receipt.hop_count * 50);
-                    ext->route_avg_latency_ms =
-                        route_metric_update_latency(ext->route_avg_latency_ms, est_latency);
-                }
-            }
-        }
 
         /* Emit delivered with path */
         fprintf(stdout,
@@ -660,7 +636,7 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
             receipt.header.version = BRAMBLE_VERSION;
             receipt.header.type = PKT_TYPE_DELIVERY_RECEIPT;
             receipt.header.flags = 0;
-            receipt.header.hop_limit = 32;
+            receipt.header.hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware receipt budget */
             receipt.header.dest_addr = orig_sender;
             receipt.header.packet_id = pcg32_random(rng);
             receipt.src_addr = rx->addr;
@@ -949,10 +925,11 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
         /* Discovery cadence mirrors firmware (mesh_task discovery retries +
          * discovery_should_retry): first RREQ immediately, retries after 5 s
-         * then 15 s reusing the same query_id, 3 attempts total, then the
-         * discovery is abandoned. The message-level retry below stands in
-         * for the firmware's queued-message store and can start a fresh
-         * discovery once the failed one is removed. */
+         * then 15 s, each retry under a FRESH query_id with an expanded hop
+         * ring (DES-1/DES-2), 3 attempts total, then the discovery is
+         * abandoned. The message-level retry below stands in for the
+         * firmware's queued-message store and can start a fresh discovery
+         * once the failed one is removed. */
         pending_discovery_t* pd = discovery_lookup(&src->pending_discoveries, dest_addr);
         bool should_send_rreq = false;
         if (!pd) {
@@ -960,7 +937,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             discovery_start(&src->pending_discoveries, dest_addr, query_id, now_ms);
             should_send_rreq = true;
         } else if (discovery_should_retry(pd, now_ms)) {
-            discovery_record_attempt(pd, now_ms);
+            discovery_record_attempt(pd, pcg32_random(rng), now_ms);
             should_send_rreq = true;
         } else if (pd->attempts >= MAX_RREQ_ATTEMPTS &&
                    (now_ms - pd->timestamp) > RREQ_RETRY_INTERVAL_2_MS) {
@@ -971,8 +948,8 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         if (should_send_rreq) {
             pd = discovery_lookup(&src->pending_discoveries, dest_addr);
             bramble_rreq_t rreq =
-                rreq_build_originator(src->addr, dest_addr, pd->query_id, src->addr);
-            rreq.header.hop_limit = 32;
+                rreq_build_originator(src->addr, dest_addr, discovery_current_query_id(pd),
+                                      src->addr, discovery_hop_limit_for_attempt(pd->attempts));
 
             outbound_packet_t pkt;
             memset(&pkt, 0, sizeof(pkt));
@@ -1009,7 +986,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         return;
     }
 
-    uint8_t hop_limit = 32;
+    uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
     forward_result_t fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
     if (!fwd_res.should_send)
         return;
@@ -1240,17 +1217,6 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
 
             /* Location: update sim position from node's current x/y coordinates */
             node_ext_set_sim_position(ext, node->x, node->y);
-
-            /* Route metric: penalize delivery rate if retransmits are happening */
-            for (int i = 0; i < MAX_PENDING_ACKS; i++) {
-                pending_ack_t* pa = &node->pending_acks.entries[i];
-                if (pa->active && pa->attempt > 2) {
-                    /* Multiple retries → signal delivery failure */
-                    ext->route_delivery_rate =
-                        route_metric_update_delivery(ext->route_delivery_rate, false);
-                    break;
-                }
-            }
         }
     }
 
@@ -1272,7 +1238,7 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         }
 
         /* Retransmit */
-        uint8_t hop_limit = 32;
+        uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
         forward_result_t fwd_res = forward_data(&node->routes, pa->dest_addr, &hop_limit, now_ms);
         if (!fwd_res.should_send)
             continue;

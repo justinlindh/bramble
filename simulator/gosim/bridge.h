@@ -21,7 +21,6 @@
 #include "../../components/location/include/location.h"
 #include "../../components/group/include/group.h"
 #include "../../components/coding/include/coding.h"
-#include "../../components/routing/include/route_metric.h"
 /* public_channel.h includes channel_key.h which includes crypto.h (via -I) */
 #include "../../components/channel/include/channel_key.h"
 #include "../../components/channel/include/public_channel.h"
@@ -35,9 +34,6 @@ typedef struct {
     coding_engine_t coding;        /* XOR network coding at relay */
     bool initialized;
     /* Adaptive route metric state */
-    uint8_t route_delivery_rate;    /* EMA delivery rate 0-255 */
-    uint16_t route_avg_latency_ms;  /* EMA round-trip latency */
-    uint32_t last_metric_switch_ms; /* cooldown for hysteresis */
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
