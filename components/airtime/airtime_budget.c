@@ -90,6 +90,10 @@ static void apply_profile(airtime_budget_t* ab, uint8_t peer_count) {
         /* reset fractional carry when max changes to avoid stale drift */
         ab->refill_remainder[i] = 0u;
     }
+
+    ab->borrow_max_ms = (ab->max_ms[AIRTIME_IDX_NORMAL] * AIRTIME_BORROW_CAP_PCT) / 100u;
+    ab->borrow_tokens_ms = ab->borrow_max_ms;
+    ab->borrow_remainder = 0u;
 }
 
 void airtime_budget_init(airtime_budget_t* ab, uint32_t now_ms) {
@@ -107,6 +111,9 @@ void airtime_budget_init(airtime_budget_t* ab, uint32_t now_ms) {
     ab->last_refill_ms = now_ms;
     ab->duty_cap_ms = 0u;
     ab->duty_enforced = false;
+    ab->borrow_tokens_ms = 0u;
+    ab->borrow_max_ms = 0u;
+    ab->borrow_remainder = 0u;
     apply_profile(ab, 0u);
 }
 
@@ -142,6 +149,18 @@ void airtime_budget_refill(airtime_budget_t* ab, uint32_t now_ms) {
         }
     }
 
+    {
+        uint64_t numer = (uint64_t)ab->borrow_remainder +
+                         ((uint64_t)ab->borrow_max_ms * (uint64_t)elapsed);
+        uint32_t add = (uint32_t)(numer / AIRTIME_REFILL_INTERVAL_MS);
+        ab->borrow_remainder = (uint32_t)(numer % AIRTIME_REFILL_INTERVAL_MS);
+        if (add > 0u) {
+            uint64_t next = (uint64_t)ab->borrow_tokens_ms + (uint64_t)add;
+            ab->borrow_tokens_ms =
+                (next >= ab->borrow_max_ms) ? ab->borrow_max_ms : (uint32_t)next;
+        }
+    }
+
     ab->last_refill_ms = now_ms;
 }
 
@@ -149,10 +168,11 @@ bool airtime_budget_can_transmit(airtime_budget_t* ab, uint8_t tier, uint32_t ai
     int idx = tier_idx(tier);
     if (ab->tokens_ms[idx] >= airtime_ms)
         return true;
-    /* Critical can borrow from normal */
+    /* Critical can borrow from normal, bounded by the borrow allowance
+     * so relayed control floods cannot exhaust the local data lane. */
     if (idx == AIRTIME_IDX_CRITICAL) {
         uint32_t deficit = airtime_ms - ab->tokens_ms[AIRTIME_IDX_CRITICAL];
-        if (ab->tokens_ms[AIRTIME_IDX_NORMAL] >= deficit)
+        if (ab->tokens_ms[AIRTIME_IDX_NORMAL] >= deficit && ab->borrow_tokens_ms >= deficit)
             return true;
     }
     return false;
@@ -163,7 +183,7 @@ void airtime_budget_debit(airtime_budget_t* ab, uint8_t tier, uint32_t airtime_m
     if (ab->tokens_ms[idx] >= airtime_ms) {
         ab->tokens_ms[idx] -= airtime_ms;
     } else if (idx == AIRTIME_IDX_CRITICAL) {
-        /* Critical borrows from normal */
+        /* Critical borrows from normal (spends the borrow allowance too) */
         uint32_t deficit = airtime_ms - ab->tokens_ms[AIRTIME_IDX_CRITICAL];
         ab->tokens_ms[AIRTIME_IDX_CRITICAL] = 0u;
         if (ab->tokens_ms[AIRTIME_IDX_NORMAL] >= deficit) {
@@ -171,6 +191,9 @@ void airtime_budget_debit(airtime_budget_t* ab, uint8_t tier, uint32_t airtime_m
         } else {
             ab->tokens_ms[AIRTIME_IDX_NORMAL] = 0u;
         }
+        ab->borrow_tokens_ms = (ab->borrow_tokens_ms >= deficit)
+                                   ? (ab->borrow_tokens_ms - deficit)
+                                   : 0u;
     } else {
         ab->tokens_ms[idx] = 0u;
     }

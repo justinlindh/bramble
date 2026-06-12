@@ -219,6 +219,24 @@ void test_denied_then_allowed_after_refill(void) {
     TEST_ASSERT_EQUAL_INT(TX_GATE_OK, tx_gate_transmit(&s_gate, pkt, sizeof(pkt), TX_KIND_DATA));
 }
 
+/* A remote RREQ flood (CRITICAL via TX_KIND_ROUTING) cannot exhaust the
+ * local data lane: borrow is capped, so NORMAL keeps >= 75% and user
+ * sends keep working. Forward-side RREQ rate limiting lands in
+ * workstream 1.3; this bound holds regardless. */
+void test_routing_flood_cannot_exhaust_data_lane(void) {
+    uint8_t rreq[30] = {0};
+    uint8_t data[120] = {0};
+    uint32_t normal_max = s_gate.budget.max_ms[AIRTIME_IDX_NORMAL];
+
+    for (int i = 0; i < 2000; i++)
+        (void)tx_gate_transmit(&s_gate, rreq, sizeof(rreq), TX_KIND_ROUTING);
+
+    TEST_ASSERT_TRUE(airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_NORMAL) >=
+                     (normal_max * 3u) / 4u);
+    TEST_ASSERT_EQUAL_INT(TX_GATE_OK,
+                          tx_gate_transmit(&s_gate, data, sizeof(data), TX_KIND_DATA));
+}
+
 void test_mesh_size_propagates_to_budget(void) {
     tx_gate_set_mesh_size(&s_gate, 50);
     TEST_ASSERT_EQUAL_UINT8(50, s_gate.budget.profile_peer_count);
@@ -238,6 +256,7 @@ int main(void) {
     RUN_TEST(test_lbt_gives_up_and_transmits_after_max_attempts);
     RUN_TEST(test_lbt_skipped_entirely_when_budget_denies);
     RUN_TEST(test_denied_then_allowed_after_refill);
+    RUN_TEST(test_routing_flood_cannot_exhaust_data_lane);
     RUN_TEST(test_mesh_size_propagates_to_budget);
     return UNITY_END();
 }
