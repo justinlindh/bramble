@@ -30,7 +30,7 @@ bramble (this repo)          bramble-go              bramble-cli
 
 The **protocol version** defines the JSON-RPC API contract between firmware and clients.
 
-- **Spec:** `api/openapi.yaml` (`info.version`). The spec currently lags the firmware's RPC surface; until a sync pass lands, the firmware (`main/rpc_methods.c`) is authoritative for what is actually served.
+- **Spec:** `api/openapi.yaml` (`info.version`). The spec is synced to the firmware's RPC registry (`main/rpc_methods.c`); the Quality CI workflow runs `scripts/check-rpc-contract.sh`, which fails the build on any method-name drift between the two.
 - **Runtime:** firmware returns it via `bramble.getVersion` → `protocol_version`
 - **Independent** from firmware version; they evolve separately
 
