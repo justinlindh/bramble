@@ -605,6 +605,11 @@ const BOARDS = {
 
             // Set auth token via JSON-RPC if user provided one
             const authToken = String(authTokenInput?.value || '').trim();
+            if (authToken && authToken.length < 16) {
+                // Firmware enforces a 16-byte entropy floor
+                setWifiStatus('Auth token must be at least 16 characters (or blank to auto-generate).');
+                return;
+            }
             if (authToken) {
                 setWifiStatus('Setting auth token…');
                 await sendSerialRPC('bramble.setAuthToken', { token: authToken });
@@ -621,8 +626,8 @@ const BOARDS = {
             if (authToken) parts.push('auth token set');
 
             const tokenNote = authToken
-                ? `\n\nYour auth token: ${authToken}\nSave this — you'll need it to connect wirelessly.`
-                : '';
+                ? `\n\nYour auth token: ${authToken}\nSave this: you'll need it to connect wirelessly.`
+                : `\n\nNo token entered: the device generates its own on first boot.\nRetrieve it with: bramble pair`;
 
             showDone({
                 title: 'Device Configured!',

@@ -59,20 +59,63 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
         return -1;
     }
 
-    /* Default: open access (no token). Auth is opt-in — the user must
-     * explicitly set a token via bramble.setAuthToken, the web flasher,
-     * or the CLI `bramble auth enable` command. */
+    /* Explicit opt-out: only an authenticated bramble.setAuthToken call
+     * with an empty token sets this flag. Default is auth required. */
+    uint8_t auth_disabled = 0;
+    nvs_get_u8(h, NVS_KEY_AUTH_OFF, &auth_disabled);
+    if (auth_disabled) {
+        token_out[0] = '\0';
+        nvs_close(h);
+        return 0; /* auth explicitly disabled, no token */
+    }
+
     size_t len = token_out_len;
     esp_err_t err = nvs_get_str(h, NVS_KEY_AUTH_TOKEN, token_out, &len);
     if (err == ESP_OK && token_out[0] != '\0') {
-        /* User has set a token — auth is active */
         nvs_close(h);
         return 0;
     }
 
-    /* No token configured — open access */
-    token_out[0] = '\0';
+    /* First boot: generate a per-device token so WS/BLE RPC is closed by
+     * default. 16 bytes from the hardware RNG, hex-encoded to 32 chars.
+     *
+     * ENTROPY ORDER CONTRACT: esp_fill_random() is only fully entropic
+     * once an RF subsystem (Wi-Fi or BT) is running. Every call path into
+     * this function runs after RF bring-up:
+     *   - ws_server_start() -> ws_server_load_token(): called after
+     *     esp_wifi_start() (wifi_manager AP/GOT_IP paths and app_main's
+     *     post-wifi_manager_init call).
+     *   - app_main BLE branch: ws_server_load_token() after
+     *     ble_server_start() (NimBLE controller running).
+     *   - rpc_set_auth_token(): runtime, transports already up.
+     * Do not add a call site that runs before RF init. */
+    uint8_t rnd[16];
+    esp_fill_random(rnd, sizeof(rnd));
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < sizeof(rnd); i++) {
+        token_out[i * 2] = hex[(rnd[i] >> 4) & 0x0F];
+        token_out[i * 2 + 1] = hex[rnd[i] & 0x0F];
+    }
+    token_out[32] = '\0';
+
+    err = nvs_set_str(h, NVS_KEY_AUTH_TOKEN, token_out);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
     nvs_close(h);
+
+    if (err != ESP_OK) {
+        /* Generation failed: report an error so callers fail CLOSED
+         * (no token != open access; see ws_server_load_token). */
+        token_out[0] = '\0';
+        return -1;
+    }
+
+    /* Log to the serial console on purpose: serial is the trusted pairing
+     * bootstrap (physical access = trust), and this is how users without
+     * the CLI can read the token; `bramble pair` is the scripted path. */
+    ESP_LOGW("identity", "Generated device auth token (retrieve with `bramble pair`): %s",
+             token_out);
     return 1;
 }
 

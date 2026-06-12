@@ -26,7 +26,7 @@
 #include "../components/channel/channel_key.c"
 #include "../components/channel/channel_msg.c"
 
-void setUp(void) {}
+void setUp(void) { channel_msg_catchup_reset(); }
 void tearDown(void) {}
 
 #define TEST_SRC_ADDR 0xA1B2C3D4u
@@ -98,7 +98,7 @@ static int destination_decrypt(bramble_channel_t* channels, int num_channels, co
     TEST_ASSERT_EQUAL(ESP_OK, bramble_header_build_aad(&rx_hdr, aad, sizeof(aad)));
 
     return channel_msg_decrypt(channels, num_channels, nonce, ciphertext, ct_len, tag, aad,
-                               HEADER_SIZE, plaintext, info);
+                               HEADER_SIZE, plaintext, info, 0);
 }
 
 /* Single hop, header untouched: decrypts (baseline sanity). */

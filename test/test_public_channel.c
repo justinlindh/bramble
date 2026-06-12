@@ -15,6 +15,7 @@ extern void public_channel_reset_tx(void);
 extern void public_channel_reset_rx(void);
 
 void setUp(void) {
+    channel_msg_catchup_reset();
     public_channel_reset_tx();
     public_channel_reset_rx();
 }
@@ -93,7 +94,7 @@ void test_public_channel_encrypt_decrypt(void) {
     TEST_ASSERT_EQUAL(0, channel_msg_decrypt(dec_channels, dec_num,
                                               nonce, ct,
                                               CHANNEL_MSG_OVERHEAD + sizeof(data),
-                                              tag, aad, sizeof(aad), pt, &info));
+                                              tag, aad, sizeof(aad), pt, &info, 0));
     TEST_ASSERT_EQUAL(src, info.src_addr);
     TEST_ASSERT_EQUAL(0x01, info.app_type);
     TEST_ASSERT_EQUAL(sizeof(data), info.data_len);

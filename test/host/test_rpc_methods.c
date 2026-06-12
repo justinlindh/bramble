@@ -391,11 +391,20 @@ void test_set_auth_token_128_char_token_returns_invalid_params(void) {
 }
 
 void test_set_auth_token_valid_returns_ok_true(void) {
+    /* Token must meet the 16-byte entropy floor (SEC-H3) */
     cJSON* resp =
         dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"bramble.setAuthToken\","
-                           "\"params\":{\"token\":\"s3cr3t\"}}");
+                           "\"params\":{\"token\":\"s3cr3t-s3cr3t-s3cr3t\"}}");
     cJSON* r = assert_result(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    cJSON_Delete(resp);
+}
+
+void test_set_auth_token_below_entropy_floor_rejected(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"bramble.setAuthToken\","
+                           "\"params\":{\"token\":\"s3cr3t\"}}");
+    TEST_ASSERT_EQUAL(-32602, assert_error_code(resp));
     cJSON_Delete(resp);
 }
 
@@ -464,6 +473,7 @@ int main(void) {
     RUN_TEST(test_set_auth_token_boolean_value_returns_invalid_params);
     RUN_TEST(test_set_auth_token_128_char_token_returns_invalid_params);
     RUN_TEST(test_set_auth_token_valid_returns_ok_true);
+    RUN_TEST(test_set_auth_token_below_entropy_floor_rejected);
     RUN_TEST(test_set_auth_token_empty_string_clears_token);
     RUN_TEST(test_set_auth_token_127_char_token_accepted);
 
