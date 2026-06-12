@@ -608,3 +608,5 @@ void nvs_release_iterator(nvs_iterator_t it) {
 }
 
 void ws_server_load_token(void) {}
+void ws_server_load_origins(void) {}
+const char* ws_server_get_extra_origins(void) { return ""; }

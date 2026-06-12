@@ -874,6 +874,16 @@ target_include_directories(test_ws_auth PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
 )
 
+# WS Origin allowlist policy tests (pure decision unit)
+add_executable(test_ws_origin
+    test_ws_origin.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_origin.c
+)
+target_include_directories(test_ws_origin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
 # Audio module behavior tests (NVS + I2S lifecycle with stubs)
 add_executable(test_audio
     test_audio.c

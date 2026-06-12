@@ -1,5 +1,6 @@
 #include "ws_server.h"
 #include "ct_strcmp.h"
+#include "ws_origin.h"
 #include "rpc_dispatcher.h"
 #include "wifi_manager.h"
 #include "mesh_task.h"
@@ -15,6 +16,7 @@
 #include "identity.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include "freertos/FreeRTOS.h"
 
 #define MAX_WS_CLIENTS 4
@@ -36,6 +38,10 @@ static char s_auth_token[AUTH_TOKEN_MAX] = {0};
  * RPC access is impossible until the token store recovers; only the
  * unauthenticated pairing allowlist is served. */
 static bool s_token_unavailable = false;
+/* Comma-separated extra allowed origins (NVS-backed, set via the
+ * authenticated bramble.setAllowedOrigins RPC). */
+#define WS_ORIGINS_MAX 256
+static char s_extra_origins[WS_ORIGINS_MAX] = {0};
 
 /* ── Client tracking ─────────────────────────────────────────────────── */
 
@@ -181,10 +187,9 @@ static esp_err_t send_401_http(httpd_req_t* req) {
  * ESP-IDF sends 101 Switching Protocols BEFORE invoking the handler —
  * sending raw HTTP on an upgraded connection breaks the WS protocol.
  */
-static esp_err_t send_ws_auth_reject(httpd_req_t* req) {
+static esp_err_t send_ws_policy_reject(httpd_req_t* req, const char* reason) {
     /* RFC 6455 §5.5.1: Close frame payload = 2-byte status code + optional reason.
      * 1008 = Policy Violation (§7.4.1). */
-    const char* reason = "unauthorized";
     size_t reason_len = strlen(reason);
     uint8_t close_payload[2 + 64];
     close_payload[0] = (uint8_t)(1008 >> 8);   /* status code high byte */
@@ -294,10 +299,31 @@ static esp_err_t ws_handler(httpd_req_t* req) {
          *   - no credentials: connection allowed but UNAUTHENTICATED;
          *     rpc_dispatch_authed() limits it to the pairing allowlist
          *   - valid credentials (or explicit auth opt-out): full access */
+        /* Origin allowlist (CSWSH defense) runs before auth: a browser
+         * page from a foreign origin is rejected even with valid creds.
+         * The HTTP-correct answer would be 403 before the upgrade, but
+         * ESP-IDF httpd completes the 101 handshake before invoking this
+         * handler, so the close frame is the only rejection channel. */
+        {
+            char origin[WS_ORIGINS_MAX] = {0};
+            char host[96] = {0};
+            if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) ==
+                ESP_ERR_HTTPD_RESULT_TRUNC) {
+                /* Oversized Origin cannot match anything we would allow */
+                ESP_LOGW(TAG, "WS Origin header oversized, rejecting");
+                return send_ws_policy_reject(req, "origin not allowed");
+            }
+            (void)httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+            if (!ws_origin_allowed(origin, host, s_extra_origins)) {
+                ESP_LOGW(TAG, "WS Origin '%s' not allowed (host '%s'), rejecting", origin, host);
+                return send_ws_policy_reject(req, "origin not allowed");
+            }
+        }
+
         ws_auth_result_t ar = auth_eval(req);
         if (ar == WS_AUTH_BAD) {
             ESP_LOGW(TAG, "WS auth failed (bad credentials), sending close frame");
-            return send_ws_auth_reject(req);
+            return send_ws_policy_reject(req, "unauthorized");
         }
         int fd = httpd_req_to_sockfd(req);
         client_add(fd, ar == WS_AUTH_OK);
@@ -612,12 +638,28 @@ void ws_server_load_token(void) {
 }
 
 
+void ws_server_load_origins(void) {
+    s_extra_origins[0] = '\0';
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    size_t len = sizeof(s_extra_origins);
+    if (nvs_get_str(h, NVS_KEY_WS_ORIGINS, s_extra_origins, &len) != ESP_OK) {
+        s_extra_origins[0] = '\0';
+    }
+    nvs_close(h);
+}
+
+const char* ws_server_get_extra_origins(void) { return s_extra_origins; }
+
 const char* ws_server_get_token(void) { return s_auth_token; }
 
 bool ws_server_auth_disabled(void) { return !s_token_unavailable && s_auth_token[0] == '\0'; }
 
 int ws_server_start(void) {
     ws_server_load_token();
+    ws_server_load_origins();
 
     /* Idempotent: no-op if already running */
     if (s_server_running) {
