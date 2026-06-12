@@ -34,6 +34,8 @@ The **protocol version** defines the JSON-RPC API contract between firmware and 
 - **Runtime:** firmware returns it via `bramble.getVersion` → `protocol_version`
 - **Independent** from firmware version; they evolve separately
 
+Current state: the method surface is synced and CI-enforced, but the version strings are not yet aligned. The spec declares `0.6.0` (`api/openapi.yaml` `info.version`) while the firmware constant reports `0.5.0` (`BRAMBLE_PROTOCOL_VERSION` in `main/rpc_methods.c`). The two are due a coordinated bump; the contract check enforces method names, not the version string.
+
 ### Semver Rules
 
 | Bump | When | Example |

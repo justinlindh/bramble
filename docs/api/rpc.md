@@ -19,6 +19,8 @@ should send:
 
 Connections without credentials may call only `bramble.ping` and `bramble.getVersion`; every other method returns error `-1005` (`Unauthorized`). Wrong credentials close the WebSocket with code 1008.
 
+Server-push notifications (`bramble.on*`) are delivered only to authenticated connections; an unauthenticated connection receives none. The single exception is a device whose owner has explicitly disabled auth, where every connection receives notifications (`rpc_auth_notify_filter` in `components/rpc/rpc_auth.c`). The same gating applies on BLE, where notifications are withheld until the token handshake succeeds.
+
 Browser connections without a valid token are additionally subject to an `Origin` allowlist: same-origin always passes; other origins must be added via `bramble.setAllowedOrigins`. Presenting the valid token bypasses the Origin check.
 
 ## Location policy RPC contract (hybrid privacy-first)
@@ -30,10 +32,10 @@ Sets persisted location policy and optional manual coordinates.
 Accepted params (all optional for partial updates):
 
 - `enabled` (bool)
-- `default_tier` (string) — `full | coarse | presence | off`
+- `default_tier` (string): `full | coarse | presence | off`
 - `interval_s` (number)
-- `source` (string) — `gps | manual | hybrid`
-- `lat` (number), `lon` (number) — manual fallback coordinates
+- `source` (string): `gps | manual | hybrid`
+- `lat` (number), `lon` (number): manual fallback coordinates
 - `contact_rules` (array of objects):
   - `address` (8-char hex string)
   - `enabled` (bool, optional)

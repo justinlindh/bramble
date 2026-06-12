@@ -5,6 +5,7 @@ This policy defines which CI checks are blocking vs advisory, plus how advisory 
 ## Required checks (blocking on PR)
 
 - Host tests (`bash test/run_all_tests.sh`)
+- RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
 - ShellCheck baseline scope (curated low-noise scripts)
 - Actionlint for `.gitea/workflows/quality.yml`
 - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
