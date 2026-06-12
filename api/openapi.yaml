@@ -1258,7 +1258,7 @@ components:
 
     LocationTier:
       type: string
-      enum: [full, coarse, presence, off]
+      enum: [full, coarse, presence, 'off']
       description: Location sharing tier.
 
     LocationSource:
@@ -1433,7 +1433,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [off, station, ap]
+          enum: ['off', station, ap]
           description: Active WiFi operating mode.
         ssid:
           type: string
@@ -1717,7 +1717,7 @@ components:
           $ref: '#/components/schemas/LocationConfig'
         broadcast_telemetry_mode:
           type: string
-          enum: [off, recipient_only, path_sampled]
+          enum: ['off', recipient_only, path_sampled]
           description: Telemetry emission mode for broadcast delivery events.
         mailboxEnabled:
           type: boolean
@@ -2076,7 +2076,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [off, recipient_only, path_sampled]
+          enum: ['off', recipient_only, path_sampled]
 
     SetBroadcastTelemetryModeResponse:
       type: object
@@ -2086,7 +2086,7 @@ components:
           type: boolean
         broadcast_telemetry_mode:
           type: string
-          enum: [off, recipient_only, path_sampled]
+          enum: ['off', recipient_only, path_sampled]
 
     BroadcastDeliveryNotification:
       type: object
@@ -2280,7 +2280,7 @@ components:
           enum: [connected, disconnected, ip_changed]
         mode:
           type: string
-          enum: [off, sta, ap]
+          enum: ['off', sta, ap]
         connected:
           type: boolean
         ssid:
