@@ -60,7 +60,8 @@ void test_three_node_route_discovery(void) {
     uint32_t query_id = 0x12345678;
 
     /* Step 1: A builds RREQ for C */
-    bramble_rreq_t rreq_a = rreq_build_originator(ADDR_A, ADDR_C, query_id, ADDR_A);
+    bramble_rreq_t rreq_a = rreq_build_originator(ADDR_A, ADDR_C, query_id, ADDR_A,
+                                                  discovery_hop_limit_for_attempt(1));
     TEST_ASSERT_EQUAL(PKT_TYPE_RREQ, rreq_a.header.type);
     TEST_ASSERT_EQUAL(ADDR_C, rreq_a.header.dest_addr);
     TEST_ASSERT_EQUAL(0, rreq_a.hop_count);

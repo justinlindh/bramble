@@ -48,7 +48,7 @@ bramble_rerr_t rerr_build(uint32_t my_addr, uint32_t broken_dest, uint32_t broke
     e.header.version = BRAMBLE_VERSION;
     e.header.type = PKT_TYPE_RERR;
     e.header.flags = 0;
-    e.header.hop_limit = 4;
+    e.header.hop_limit = ROUTE_HOP_LIMIT_MAX; /* teardown must reach as deep as routes exist */
     e.header.dest_addr = 0xFFFFFFFF;
     e.header.packet_id = 0;
     e.reporter_addr = my_addr;

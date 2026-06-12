@@ -9,9 +9,14 @@ static rreq_dedup_t dedup_b, dedup_c;
 
 void setUp(void) {
     discovery_init(&dtbl);
-    route_init(&rt_a); route_init(&rt_b); route_init(&rt_c);
-    reverse_route_init(&rev_a); reverse_route_init(&rev_b); reverse_route_init(&rev_c);
-    rreq_dedup_init(&dedup_b); rreq_dedup_init(&dedup_c);
+    route_init(&rt_a);
+    route_init(&rt_b);
+    route_init(&rt_c);
+    reverse_route_init(&rev_a);
+    reverse_route_init(&rev_b);
+    reverse_route_init(&rev_c);
+    rreq_dedup_init(&dedup_b);
+    rreq_dedup_init(&dedup_c);
 }
 void tearDown(void) {}
 
@@ -19,22 +24,24 @@ void tearDown(void) {}
 #define ADDR_A 0x0A0A0A0A
 #define ADDR_B 0x0B0B0B0B
 #define ADDR_C 0x0C0C0C0C
-#define QUERY  0xDEAD0001
+#define QUERY 0xDEAD0001
+#define QUERY2 0xDEAD0002
+#define QUERY3 0xDEAD0003
 
 /* --- Pending discovery table tests --- */
 
 void test_discovery_start_and_lookup(void) {
     TEST_ASSERT_EQUAL(0, discovery_start(&dtbl, ADDR_C, QUERY, 1000));
-    pending_discovery_t *d = discovery_lookup(&dtbl, ADDR_C);
+    pending_discovery_t* d = discovery_lookup(&dtbl, ADDR_C);
     TEST_ASSERT_NOT_NULL(d);
     TEST_ASSERT_EQUAL(ADDR_C, d->dest_addr);
-    TEST_ASSERT_EQUAL(QUERY, d->query_id);
+    TEST_ASSERT_EQUAL(QUERY, discovery_current_query_id(d));
     TEST_ASSERT_EQUAL(1, d->attempts);
 }
 
 void test_discovery_lookup_by_query(void) {
     discovery_start(&dtbl, ADDR_C, QUERY, 1000);
-    pending_discovery_t *d = discovery_lookup_by_query(&dtbl, QUERY);
+    pending_discovery_t* d = discovery_lookup_by_query(&dtbl, QUERY);
     TEST_ASSERT_NOT_NULL(d);
     TEST_ASSERT_EQUAL(ADDR_C, d->dest_addr);
 }
@@ -54,27 +61,114 @@ void test_discovery_table_full(void) {
 
 void test_discovery_should_retry(void) {
     discovery_start(&dtbl, ADDR_C, QUERY, 1000);
-    pending_discovery_t *d = discovery_lookup(&dtbl, ADDR_C);
+    pending_discovery_t* d = discovery_lookup(&dtbl, ADDR_C);
     /* Too early */
     TEST_ASSERT_FALSE(discovery_should_retry(d, 3000));
     /* After first interval */
     TEST_ASSERT_TRUE(discovery_should_retry(d, 7000));
     /* Record attempt */
-    discovery_record_attempt(d, 7000);
+    discovery_record_attempt(d, QUERY2, 7000);
     TEST_ASSERT_EQUAL(2, d->attempts);
     /* Too early for second retry */
     TEST_ASSERT_FALSE(discovery_should_retry(d, 10000));
     /* After second interval (15s) */
     TEST_ASSERT_TRUE(discovery_should_retry(d, 23000));
-    /* Record third attempt — no more retries */
-    discovery_record_attempt(d, 23000);
+    /* Record third attempt: no more retries after that */
+    discovery_record_attempt(d, QUERY3, 23000);
     TEST_ASSERT_FALSE(discovery_should_retry(d, 100000));
+}
+
+/* --- Fresh query_id per retry (DES-2) --- */
+
+void test_retry_uses_fresh_query_id(void) {
+    discovery_start(&dtbl, ADDR_C, QUERY, 1000);
+    pending_discovery_t* d = discovery_lookup(&dtbl, ADDR_C);
+    TEST_ASSERT_EQUAL(QUERY, discovery_current_query_id(d));
+
+    discovery_record_attempt(d, QUERY2, 6000);
+    TEST_ASSERT_EQUAL(QUERY2, discovery_current_query_id(d));
+
+    discovery_record_attempt(d, QUERY3, 21000);
+    TEST_ASSERT_EQUAL(QUERY3, discovery_current_query_id(d));
+}
+
+void test_rrep_for_any_outstanding_attempt_matches(void) {
+    discovery_start(&dtbl, ADDR_C, QUERY, 1000);
+    pending_discovery_t* d = discovery_lookup(&dtbl, ADDR_C);
+    discovery_record_attempt(d, QUERY2, 6000);
+    discovery_record_attempt(d, QUERY3, 21000);
+
+    /* An RREP answering ANY attempt's query_id completes the discovery. */
+    TEST_ASSERT_EQUAL_PTR(d, discovery_lookup_by_query(&dtbl, QUERY));
+    TEST_ASSERT_EQUAL_PTR(d, discovery_lookup_by_query(&dtbl, QUERY2));
+    TEST_ASSERT_EQUAL_PTR(d, discovery_lookup_by_query(&dtbl, QUERY3));
+    TEST_ASSERT_NULL(discovery_lookup_by_query(&dtbl, 0xBADBAD));
+}
+
+/* The DES-2 failure mode: a relay that heard attempt 1 silently ate the
+ * same-query retries because the 5s/15s retry schedule sits inside the 30s
+ * dedup window. Fresh query_ids must pass the relay's dedup. */
+void test_retry_passes_relay_dedup_within_window(void) {
+    uint32_t now = 1000;
+
+    /* Attempt 1 reaches relay B; B forwards it but the flood dies beyond B. */
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_b, QUERY, now));
+
+    /* Old behavior: retry at +5s with the SAME query_id is dropped by B. */
+    TEST_ASSERT_TRUE(rreq_dedup_check_and_add(&dedup_b, QUERY, now + 5000));
+
+    /* New behavior: retry carries a fresh query_id and B forwards it. */
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_b, QUERY2, now + 5000));
+
+    /* Second retry at +20s, still inside the 30s window, also passes. */
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_b, QUERY3, now + 20000));
+}
+
+/* --- Expanding ring (DES-1) --- */
+
+void test_hop_limit_expands_on_retry(void) {
+    TEST_ASSERT_EQUAL(RREQ_HOP_LIMIT_INITIAL, discovery_hop_limit_for_attempt(1));
+    TEST_ASSERT_EQUAL(RREQ_HOP_LIMIT_EXPANDED, discovery_hop_limit_for_attempt(2));
+    TEST_ASSERT_EQUAL(RREQ_HOP_LIMIT_EXPANDED, discovery_hop_limit_for_attempt(3));
+    TEST_ASSERT_EQUAL(4, RREQ_HOP_LIMIT_INITIAL);
+    TEST_ASSERT_EQUAL(8, RREQ_HOP_LIMIT_EXPANDED);
+}
+
+/* --- RREQ forward jitter (DES-3) --- */
+
+void test_forward_jitter_bounds(void) {
+    TEST_ASSERT_EQUAL(RREQ_FWD_JITTER_MIN_MS, discovery_forward_jitter_ms(0));
+    uint32_t span = RREQ_FWD_JITTER_MAX_MS - RREQ_FWD_JITTER_MIN_MS;
+    TEST_ASSERT_EQUAL(RREQ_FWD_JITTER_MAX_MS, discovery_forward_jitter_ms(span));
+    TEST_ASSERT_EQUAL(RREQ_FWD_JITTER_MIN_MS, discovery_forward_jitter_ms(span + 1));
+    for (uint32_t r = 0; r < 2000; r += 13) {
+        uint32_t j = discovery_forward_jitter_ms(r);
+        TEST_ASSERT_TRUE(j >= RREQ_FWD_JITTER_MIN_MS && j <= RREQ_FWD_JITTER_MAX_MS);
+    }
+}
+
+/* --- Link-metric helper (route metric bookkeeping) --- */
+
+void test_dedup_expires_with_window(void) {
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_c, QUERY, 1000));
+    /* Past the 30s window the query is forgotten entirely. */
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_c, QUERY, 1000 + RREQ_DEDUP_EXPIRY_MS));
+}
+
+void test_metric_apply_link_penalty_floors_at_zero(void) {
+    /* Perfect link: no penalty */
+    TEST_ASSERT_EQUAL(200, metric_apply_link_penalty(200, -50, 12));
+    /* Terrible link: full penalty, floored at zero for tiny metrics */
+    TEST_ASSERT_EQUAL(0, metric_apply_link_penalty(10, -125, -8));
+    /* Penalty subtracts, never adds */
+    TEST_ASSERT_TRUE(metric_apply_link_penalty(200, -100, 0) < 200);
 }
 
 /* --- RREQ/RREP building tests --- */
 
 void test_rreq_build_originator(void) {
-    bramble_rreq_t r = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE);
+    bramble_rreq_t r =
+        rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, discovery_hop_limit_for_attempt(1));
     TEST_ASSERT_EQUAL(PKT_TYPE_RREQ, r.header.type);
     TEST_ASSERT_EQUAL(ADDR_C, r.header.dest_addr);
     TEST_ASSERT_EQUAL(0, r.hop_count);
@@ -84,8 +178,14 @@ void test_rreq_build_originator(void) {
     TEST_ASSERT_EQUAL(0xEEEE, r.encrypted_source);
 }
 
+void test_rreq_build_originator_expanded_ring(void) {
+    bramble_rreq_t r =
+        rreq_build_originator(ADDR_A, ADDR_C, QUERY2, 0xEEEE, discovery_hop_limit_for_attempt(2));
+    TEST_ASSERT_EQUAL(8, r.header.hop_limit);
+}
+
 void test_rreq_forward(void) {
-    bramble_rreq_t orig = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE);
+    bramble_rreq_t orig = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, 4);
     bramble_rreq_t fwd = rreq_forward(&orig, ADDR_B, -80, 5);
     TEST_ASSERT_EQUAL(1, fwd.hop_count);
     TEST_ASSERT_EQUAL(3, fwd.header.hop_limit);
@@ -94,7 +194,7 @@ void test_rreq_forward(void) {
 }
 
 void test_rrep_build_destination(void) {
-    bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE);
+    bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, 4);
     bramble_rreq_t fwd = rreq_forward(&rreq, ADDR_B, -70, 8);
     bramble_rrep_t rrep = rrep_build_destination(&fwd, ADDR_C);
     TEST_ASSERT_EQUAL(PKT_TYPE_RREP, rrep.header.type);
@@ -103,6 +203,8 @@ void test_rrep_build_destination(void) {
     TEST_ASSERT_EQUAL(2, rrep.hop_count); /* fwd.hop_count(1) + 1 */
     TEST_ASSERT_EQUAL(fwd.metric, rrep.route_metric);
     TEST_ASSERT_EQUAL(ADDR_B, rrep.next_hop);
+    /* RREP must be able to return along an expanded-ring path */
+    TEST_ASSERT_EQUAL(ROUTE_HOP_LIMIT_MAX, rrep.header.hop_limit);
 }
 
 void test_rrep_forward(void) {
@@ -114,14 +216,15 @@ void test_rrep_forward(void) {
     TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr);
 }
 
-/* --- Integration: 3-node route discovery A → B → C --- */
+/* --- Integration: 3-node route discovery A -> B -> C --- */
 
 void test_three_node_discovery(void) {
     uint32_t now = 1000;
 
     /* Step 1: A starts discovery for C */
     discovery_start(&dtbl, ADDR_C, QUERY, now);
-    bramble_rreq_t rreq_a = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE);
+    bramble_rreq_t rreq_a =
+        rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEEE, discovery_hop_limit_for_attempt(1));
 
     /* Step 2: B receives RREQ from A */
     /* B checks dedup */
@@ -134,14 +237,14 @@ void test_three_node_discovery(void) {
     /* Step 3: C receives RREQ from B */
     TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_c, rreq_b.query_id, now));
     reverse_route_add(&rev_c, rreq_b.query_id, rreq_b.prev_hop, now);
-    /* C is destination — build RREP */
+    /* C is the destination: build RREP */
     bramble_rrep_t rrep_c = rrep_build_destination(&rreq_b, ADDR_C);
 
     /* Step 4: B receives RREP */
     /* B installs forward route to C (direct neighbor) */
     route_install(&rt_b, ADDR_C, ADDR_C, rrep_c.hop_count, rrep_c.route_metric, ROUTE_ACTIVE, now);
     /* B looks up reverse route to forward RREP toward A */
-    reverse_route_t *rev = reverse_route_lookup(&rev_b, rrep_c.query_id);
+    reverse_route_t* rev = reverse_route_lookup(&rev_b, rrep_c.query_id);
     TEST_ASSERT_NOT_NULL(rev);
     TEST_ASSERT_EQUAL(ADDR_A, rev->prev_hop);
     bramble_rrep_t rrep_b = rrep_forward(&rrep_c, rev->prev_hop);
@@ -151,12 +254,12 @@ void test_three_node_discovery(void) {
     discovery_remove(&dtbl, ADDR_C);
 
     /* Step 6: Verify */
-    route_entry_t *ra = route_lookup(&rt_a, ADDR_C);
+    route_entry_t* ra = route_lookup(&rt_a, ADDR_C);
     TEST_ASSERT_NOT_NULL(ra);
     TEST_ASSERT_EQUAL(ADDR_B, ra->next_hop);
     TEST_ASSERT_EQUAL(ROUTE_ACTIVE, ra->state);
 
-    route_entry_t *rb = route_lookup(&rt_b, ADDR_C);
+    route_entry_t* rb = route_lookup(&rt_b, ADDR_C);
     TEST_ASSERT_NOT_NULL(rb);
     TEST_ASSERT_EQUAL(ADDR_C, rb->next_hop); /* direct */
 
@@ -168,6 +271,42 @@ void test_three_node_discovery(void) {
     TEST_ASSERT_NULL(discovery_lookup(&dtbl, ADDR_C));
 }
 
+/* --- Integration: retry after the flood died, relay dedup still warm --- */
+
+void test_retry_discovery_succeeds_through_warm_dedup(void) {
+    uint32_t now = 1000;
+
+    /* Attempt 1: A floods QUERY. B forwards it, but C never hears it
+     * (collision). B's dedup is now warm for QUERY. */
+    discovery_start(&dtbl, ADDR_C, QUERY, now);
+    pending_discovery_t* d = discovery_lookup(&dtbl, ADDR_C);
+    bramble_rreq_t rreq1 = rreq_build_originator(ADDR_A, ADDR_C, QUERY, 0xEEE1,
+                                                 discovery_hop_limit_for_attempt(d->attempts));
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_b, rreq1.query_id, now));
+    reverse_route_add(&rev_b, rreq1.query_id, rreq1.prev_hop, now);
+
+    /* Attempt 2 at +5s: fresh query_id. B must forward it (old code: eaten). */
+    now += RREQ_RETRY_INTERVAL_1_MS;
+    TEST_ASSERT_TRUE(discovery_should_retry(d, now));
+    discovery_record_attempt(d, QUERY2, now);
+    bramble_rreq_t rreq2 = rreq_build_originator(ADDR_A, ADDR_C, QUERY2, 0xEEE2,
+                                                 discovery_hop_limit_for_attempt(d->attempts));
+    TEST_ASSERT_EQUAL(RREQ_HOP_LIMIT_EXPANDED, rreq2.header.hop_limit);
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_b, rreq2.query_id, now));
+    reverse_route_add(&rev_b, rreq2.query_id, rreq2.prev_hop, now);
+    bramble_rreq_t rreq2_fwd = rreq_forward(&rreq2, ADDR_B, -75, 7);
+
+    /* C hears the retry this time and answers. */
+    TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&dedup_c, rreq2_fwd.query_id, now));
+    reverse_route_add(&rev_c, rreq2_fwd.query_id, rreq2_fwd.prev_hop, now);
+    bramble_rrep_t rrep = rrep_build_destination(&rreq2_fwd, ADDR_C);
+
+    /* The RREP answers attempt 2; A's pending discovery must match it. */
+    TEST_ASSERT_EQUAL_PTR(d, discovery_lookup_by_query(&dtbl, rrep.query_id));
+    /* ...and would also have matched a late answer to attempt 1. */
+    TEST_ASSERT_EQUAL_PTR(d, discovery_lookup_by_query(&dtbl, QUERY));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_discovery_start_and_lookup);
@@ -175,10 +314,19 @@ int main(void) {
     RUN_TEST(test_discovery_remove);
     RUN_TEST(test_discovery_table_full);
     RUN_TEST(test_discovery_should_retry);
+    RUN_TEST(test_retry_uses_fresh_query_id);
+    RUN_TEST(test_rrep_for_any_outstanding_attempt_matches);
+    RUN_TEST(test_retry_passes_relay_dedup_within_window);
+    RUN_TEST(test_hop_limit_expands_on_retry);
+    RUN_TEST(test_forward_jitter_bounds);
+    RUN_TEST(test_dedup_expires_with_window);
+    RUN_TEST(test_metric_apply_link_penalty_floors_at_zero);
     RUN_TEST(test_rreq_build_originator);
+    RUN_TEST(test_rreq_build_originator_expanded_ring);
     RUN_TEST(test_rreq_forward);
     RUN_TEST(test_rrep_build_destination);
     RUN_TEST(test_rrep_forward);
     RUN_TEST(test_three_node_discovery);
+    RUN_TEST(test_retry_discovery_succeeds_through_warm_dedup);
     return UNITY_END();
 }

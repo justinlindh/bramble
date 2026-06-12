@@ -279,3 +279,8 @@ uint8_t compute_link_penalty(int8_t rssi, int8_t snr) {
     int total = rp + sp;
     return (uint8_t)(total > PENALTY_MAX_TOTAL ? PENALTY_MAX_TOTAL : total);
 }
+
+uint8_t metric_apply_link_penalty(uint8_t metric, int8_t rssi, int8_t snr) {
+    uint8_t penalty = compute_link_penalty(rssi, snr);
+    return (penalty >= metric) ? 0 : (uint8_t)(metric - penalty);
+}
