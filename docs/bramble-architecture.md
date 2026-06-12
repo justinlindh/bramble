@@ -180,16 +180,16 @@ The `bramble_header_t` struct maps directly onto the 12-byte on-wire format. Hig
 
 ### `routing`
 
-**Files:** `beacon.c`, `beacon_routes.c`, `channel_flood.c`, `discovery.c`, `forwarding.c`, `routing.c`, `route_metric.c`
+**Files:** `beacon.c`, `beacon_routes.c`, `channel_flood.c`, `discovery.c`, `forwarding.c`, `routing.c`
 
 Implements AODV-inspired reactive unicast routing:
 
-1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Cached routes have soft (30s inactivity) and hard (300s) timeouts.
+1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt, 8 on the retries at +5 s and +15 s, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes have soft (30s inactivity) and hard (300s) timeouts.
 2. **Forwarding** (`forwarding.c`): Looks up next-hop from route table; decrements `hop_limit`; emits RERR on unknown destination.
 3. **Beacons** (`beacon.c`): Periodic 60s neighbor discovery beacons carrying node status, public key hash, HMAC'd with pairwise session key for known peers.
 4. **Route maintenance** (`beacon_routes.c`): Processes RERR packets, invalidates stale routes, triggers re-discovery.
 5. **Channel flooding** (`channel_flood.c`): Hop-limited (default 3) re-broadcast for channel messages. Dedup prevents loops.
-6. **Adaptive routing metrics** (`route_metric.c`): See dedicated section below.
+6. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
 
 Privacy note: RREQ packets encrypt the source address — intermediate relay nodes cannot determine who initiated a route discovery.
 
@@ -527,38 +527,6 @@ int  coding_decode(coded_data, coded_len, header, known, known_len, known_id, ou
 bool coding_can_decode(engine, header, known_id_out);
 void coding_flush_expired(engine, now_ms);
 ```
-
----
-
-### Adaptive Routing Metrics (`components/routing/route_metric.{h,c}`)
-
-Composite route quality metric replacing the simple hop-count metric. Used by the AODV routing layer to select and maintain the best path to each destination.
-
-**Composite metric (0–255, higher = better):**
-```
-metric = (link_quality  × 102 +
-          delivery_rate ×  77 +
-          airtime_score ×  51 +
-          latency_score ×  26) / 256
-```
-
-Weights (must sum to 256 for integer-only arithmetic):
-- Link quality (RSSI/SNR derived): **40%** (weight 102)
-- Delivery rate (ACK success ratio, EMA-filtered): **30%** (weight 77)
-- Airtime remaining (normalized to 0–255): **20%** (weight 51)
-- Latency (RTT EMA, inverted): **10%** (weight 26)
-
-**EMA filters** (exponential moving average, α = 1/8):
-- `route_metric_update_delivery(current_rate, success)` — updates delivery rate on each ACK received or timeout
-- `route_metric_update_latency(current_avg, new_sample)` — updates latency EMA
-
-**Hysteresis:** Routes are only switched when the new metric exceeds the current by `METRIC_HYSTERESIS_THRESHOLD` (15 units) AND at least `METRIC_SWITCH_COOLDOWN_MS` (10 seconds) have elapsed since the last switch. This prevents oscillation on links of similar quality.
-
-`route_metric_should_switch(current_metric, new_metric, last_switch_ms, now_ms)` encapsulates both checks.
-
-**Airtime score:** `route_metric_airtime_score(remaining_ms, max_ms)` linearly maps remaining airtime budget to a 0–255 scale.
-
-All operations use integer-only arithmetic (no floating point), suitable for ESP32-S3 without FPU dependency.
 
 ---
 
