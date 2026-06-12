@@ -667,10 +667,16 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
         return RPC_ERR_INTERNAL;
     }
     if (val[0] == '\0') {
-        /* Clear token → open access */
+        /* Empty token = explicit opt-out: persist the auth_off flag so the
+         * first-boot generator does not re-create a token on next boot.
+         * Reaching this handler already required auth, so only a token
+         * holder (or serial/physical access) can open the device up. */
+        nvs_set_u8(h, NVS_KEY_AUTH_OFF, 1);
         nvs_erase_key(h, NVS_KEY_AUTH_TOKEN);
+        ESP_LOGW(TAG, "RPC auth explicitly disabled via setAuthToken; device is open access");
     } else {
-        /* Set token → auth enabled */
+        /* Set token and clear the opt-out flag */
+        nvs_set_u8(h, NVS_KEY_AUTH_OFF, 0);
         nvs_set_str(h, NVS_KEY_AUTH_TOKEN, val);
     }
     nvs_commit(h);

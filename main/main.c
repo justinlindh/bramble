@@ -986,6 +986,11 @@ void app_main(void)
 #endif
         if (ble_server_init() == 0) {
             ble_server_start();
+            /* Load (or first-boot generate) the auth token now that the BT
+             * controller is running: esp_random() needs an active RF
+             * subsystem for full entropy. In Wi-Fi mode ws_server_start()
+             * does this; in BLE mode nothing else would. */
+            ws_server_load_token();
             ESP_LOGI(TAG, "BLE server started");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
             show_boot_status("BLE: advertising");
