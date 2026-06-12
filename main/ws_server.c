@@ -152,7 +152,11 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
         return WS_AUTH_BAD;
     }
 
-    /* Legacy compatibility: ?token=... (deprecated due to URL leakage) */
+    /* Browser path: the browser WebSocket API cannot set request
+     * headers, so ?token= is the ONLY way a web page can authenticate.
+     * Non-browser clients should prefer the Authorization header because
+     * URLs leak via logs and history; for browsers this is the supported
+     * mechanism, not a deprecated one. */
     size_t qlen = httpd_req_get_url_query_len(req);
     if (qlen > 0 && qlen < 256) {
         char* query = malloc(qlen + 1);
@@ -160,10 +164,6 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
         if (query && httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK &&
             httpd_query_key_value(query, "token", token, sizeof(token)) == ESP_OK) {
             bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
-            if (ok) {
-                ESP_LOGW(TAG,
-                         "WS auth via query param is deprecated; use Authorization: Bearer header");
-            }
             free(query);
             return ok ? WS_AUTH_OK : WS_AUTH_BAD;
         }

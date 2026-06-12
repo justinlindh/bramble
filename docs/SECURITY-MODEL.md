@@ -56,9 +56,12 @@ it is not enabled today.
   `main/ws_server.c`) requires a per-device bearer token that the firmware
   generates on first boot (`identity_ensure_ws_auth_token` in
   `components/identity/identity.c`). Unauthenticated connections are limited
-  to a two-method identification allowlist (`components/rpc/rpc_auth.c`).
-  The transport is still plaintext HTTP, so an on-path attacker who captures
-  a legitimate session reads everything, token included (section 4).
+  to a two-method identification allowlist (`components/rpc/rpc_auth.c`) and
+  receive no server-push notifications (message content, GPS, peer
+  locations are pushed only to authenticated connections,
+  `rpc_auth_notify_filter`). The transport is still plaintext HTTP, so an
+  on-path attacker who captures a legitimate session reads everything,
+  token included (section 4).
 - *Malicious web page in a browser on the LAN.* Connections that do not
   present the valid token are subject to an `Origin` check: same-origin
   (the host the request was addressed to) and an allowlist managed via
@@ -72,7 +75,8 @@ it is not enabled today.
 - *BLE proximity.* The BLE RPC transport gates on the same default-on token
   as WS, with a first-write handshake and throttled retries
   (`components/ble/ble_server.c`); pre-handshake JSON-RPC is limited to the
-  same identification allowlist.
+  same identification allowlist, and dispatcher notifications are withheld
+  until the handshake succeeds.
 
 **Compromised OTA source.** An attacker who controls the firmware download
 server, the URL given to the device, or the TLS path. HTTPS with certificate
@@ -191,6 +195,11 @@ rate-limited per channel by a token bucket (capacity one full 256-attempt
 recovery, refilled every 10 seconds; constants and the legitimate-recovery
 argument in `channel_msg.h`), bounding the CPU an attacker can burn with
 undecryptable garbage to about 26 GCM attempts per second per channel.
+Successful recoveries are refunded, so only failed catch-up work is
+charged and legitimate deep-drift recovery never drains its own bucket;
+an attacker sustaining garbage can still hold a bucket near empty, which
+delays (not prevents) a concurrent deep rejoin until a quiet refill
+window. That trade is accepted: the cap exists to bound CPU.
 
 ### RREQ source pseudonymization
 
@@ -250,9 +259,16 @@ from the hardware RNG and persists it in NVS
 (`identity_ensure_ws_auth_token` in `components/identity/identity.c`; the
 generation call sites run only after Wi-Fi or BT RF init, when
 `esp_random` is fully entropic). The WebSocket upgrade accepts
-`Authorization: Bearer <token>` (or a deprecated `?token=` query
-parameter); the Wi-Fi config POST endpoint is gated by the same token,
-accepted as a form field so the AP-mode setup portal can submit it. BLE
+`Authorization: Bearer <token>`, or `?token=` as the query parameter that
+is the only mechanism available to browser WebSocket clients (header auth
+is preferred for everything else because URLs leak into logs and
+history). The Wi-Fi config POST endpoint is gated by the same token,
+accepted as a form field so the AP-mode setup portal can submit it, and
+posts that do not prove the token must additionally pass a CSRF check:
+an Origin header gets the full origin policy below, a Referer without an
+Origin gets a same-origin test, and posts carrying neither header (curl,
+scripts) pass through to the token gate, since they are not CSRF-able
+(`ws_config_post_allowed` in `main/ws_origin.c`). BLE
 requires the token as the first write on a new connection, throttled to one
 attempt per 100 ms after failures (`components/ble/ble_server.c`).
 Comparison is constant-time and length-independent: a fixed 128-iteration
@@ -262,7 +278,12 @@ Connections without credentials are accepted but may call only a
 two-method identification allowlist, `bramble.ping` and
 `bramble.getVersion`, enforced in the dispatcher before method lookup so
 the method table cannot be enumerated (`components/rpc/rpc_auth.c`,
-`rpc_dispatch_authed` in `components/rpc/rpc_dispatcher.c`). Wrong
+`rpc_dispatch_authed` in `components/rpc/rpc_dispatcher.c`). The same
+boundary holds on the read side: server-push notifications, which carry
+decrypted message content, GPS events, and peer locations, are delivered
+only to authenticated connections on both transports
+(`rpc_auth_notify_filter` feeding `ws_notify_cb` in `main/ws_server.c`;
+the gated dispatcher transport in `components/ble/ble_server.c`). Wrong
 credentials close the connection. User-supplied tokens shorter than 16
 bytes are rejected (`rpc_set_auth_token` in `main/rpc_methods.c`). If the
 token cannot be read or persisted (NVS failure), the device fails closed:
@@ -298,7 +319,9 @@ token-bearing cross-origin page is the owner's webapp (hosted or local
 dev), not an attack; gating it would force origin enrollment over serial
 before the webapp could ever connect. On a device whose owner explicitly
 disabled auth, no connection carries a token, so the Origin check applies
-to everything and remains the CSWSH defense.
+to every WS upgrade and, via the CSRF rule above, to every browser-borne
+config POST; those checks are the remaining CSWSH and CSRF defenses on an
+opted-out device.
 
 ### Wi-Fi setup AP
 
@@ -390,8 +413,8 @@ same PR that fixes it.
   `CONFIG_SECURE_BOOT` all unset).
 - **The WebSocket transport is plaintext HTTP on port 80**, so an on-path
   LAN attacker reads all RPC traffic including the bearer token; the
-  deprecated `?token=` query parameter additionally leaks via URL logs and
-  browser history (`main/ws_server.c`).
+  `?token=` query parameter that browser clients must use additionally
+  leaks via URL logs and browser history (`main/ws_server.c`).
 - **OTA installs unsigned images from an RPC-supplied URL with no
   anti-rollback** (`components/ota/ota.c`, `ota_task` in
   `main/rpc_methods.c`). RPC auth (on by default, section 3) now stands in

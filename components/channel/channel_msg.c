@@ -131,10 +131,12 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
 
         catchup_bucket_t* budget = catchup_bucket(i, now_ms);
         bool caught_up = false;
+        uint32_t consumed = 0;
         for (int j = 0; j < CHANNEL_EPOCH_CATCHUP_MAX; j++) {
             if (budget->tokens == 0)
                 break;
             budget->tokens--;
+            consumed++;
             if (channel_advance_epoch(&channels[i]) != 0)
                 break;
             if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, aad, aad_len, pt) ==
@@ -142,6 +144,16 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
                 caught_up = true;
                 break;
             }
+        }
+        if (caught_up) {
+            /* Refund successful recoveries: a catch-up that lands on a
+             * valid ciphertext is legitimate by definition (forging one
+             * requires the channel key), so only FAILED catch-up work,
+             * attacker garbage and cross-channel misses, is charged.
+             * Legitimate deep-drift recovery therefore never drains its
+             * own bucket. */
+            uint32_t headroom = CHANNEL_EPOCH_CATCHUP_BUDGET - budget->tokens;
+            budget->tokens += (consumed < headroom) ? consumed : headroom;
         }
 
         if (caught_up && found_index < 0) {

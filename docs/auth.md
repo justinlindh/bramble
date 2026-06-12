@@ -117,13 +117,16 @@ Enter the token in the **Auth Token** field of the WiFi connection dialog.
 
 ### Browser WebSocket API
 
-The browser's WebSocket API doesn't support custom HTTP headers, so the
-token is passed as a query parameter (deprecated for non-browser clients
-because URLs leak via logs and history):
+The browser's WebSocket API cannot set HTTP headers, so for web pages the
+query parameter is the supported authentication mechanism, not a
+deprecated one:
 
 ```
 ws://192.0.2.0/ws?token=<token>
 ```
+
+Non-browser clients should use the `Authorization` header instead, since
+URLs leak via logs and history.
 
 ### Other Clients (curl, Python, Go, etc.)
 
