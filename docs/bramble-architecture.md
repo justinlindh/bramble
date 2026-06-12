@@ -261,12 +261,11 @@ Splits messages larger than the LoRa MTU (~240 bytes usable after header and cry
 
 ### `airtime`
 
-**Files:** `airtime_budget.c`, `tx_queue.c`
+**Files:** `airtime_budget.c`
 
 Per-tier token-bucket airtime budget with continuous (proportional) refill, consumed by the radio TX gate:
 
 - **Budget** (`airtime_budget.c`): Four lanes with hourly base budgets of 36 s critical, 18 s normal, 18 s broadcast, and 12 s receipt (`AIRTIME_BUDGET_*_MS`). An adaptive profile scales the maxima by mesh size (`airtime_budget_set_mesh_size`), CRITICAL may borrow a capped share of NORMAL (`AIRTIME_BORROW_CAP_PCT`, 25%), and a regulatory duty-cycle cap from the frequency plan scales everything down when the region enforces one (`airtime_budget_set_duty_cap`; EU868 = 1%). See [airtime-budget-v2.md](airtime-budget-v2.md).
-- **TX queue** (`tx_queue.c`): Priority queue ordered by tier. Currently exercised only by host tests; the live transmit path is the radio TX gate below.
 
 Every transmission is admitted and debited by the TX gate in `components/radio/tx_gate.c` (see the `radio` section); there is no budget-exempt transmit path.
 
