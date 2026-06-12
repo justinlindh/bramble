@@ -448,6 +448,7 @@ add_executable(test_rpc_dispatcher
     stubs/esp_stubs.c
     stubs/cJSON.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )
 target_include_directories(test_rpc_dispatcher PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -464,6 +465,7 @@ add_executable(test_rpc_methods
     stubs/esp_stubs.c
     stubs/cJSON.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )
 target_include_directories(test_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -481,6 +483,19 @@ add_executable(test_rpc_add_channel_contract
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+)
+add_executable(test_rpc_set_auth_token_contract
+    test_rpc_set_auth_token_contract.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    stubs/rpc_methods_link_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -492,6 +507,7 @@ add_executable(test_rpc_get_config_channel_export
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -503,6 +519,7 @@ add_executable(test_mesh_broadcast_delivery
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -547,6 +564,39 @@ target_compile_options(test_rpc_add_channel_contract PRIVATE
     -Wno-error=unused-parameter
 )
 target_link_libraries(test_rpc_add_channel_contract m)
+
+target_include_directories(test_rpc_set_auth_token_contract PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+)
+target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+)
+target_compile_options(test_rpc_set_auth_token_contract PRIVATE
+    -Wno-error=unused-parameter
+)
+target_link_libraries(test_rpc_set_auth_token_contract m)
 
 target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -743,6 +793,7 @@ add_executable(test_rpc_methods_firmware
     stubs/rpc_methods_test_stubs.c
     stubs/wifi_ws_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -812,12 +863,24 @@ target_compile_definitions(test_gps PRIVATE
 )
 target_link_libraries(test_gps m)
 
-# WS auth constant-time compare tests
+# WS auth tests: constant-time compare + unauthenticated allowlist policy
 add_executable(test_ws_auth
     test_ws_auth.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )
 target_include_directories(test_ws_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+)
+
+# WS Origin allowlist policy tests (pure decision unit)
+add_executable(test_ws_origin
+    test_ws_origin.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_origin.c
+)
+target_include_directories(test_ws_origin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
 
@@ -900,6 +963,7 @@ add_executable(test_host_rpc_methods
     stubs/cJSON.c
     stubs/rpc_methods_test_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c

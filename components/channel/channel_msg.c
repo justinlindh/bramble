@@ -37,6 +37,39 @@ int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t 
                                     tag_out);
 }
 
+/* Per-channel epoch catch-up budget (SEC-I1; rationale in channel_msg.h).
+ * Indexed by position in the channels array. */
+typedef struct {
+    uint32_t tokens;
+    uint32_t last_refill_ms;
+    bool initialized;
+} catchup_bucket_t;
+
+static catchup_bucket_t s_catchup[MAX_CHANNELS];
+
+void channel_msg_catchup_reset(void) { memset(s_catchup, 0, sizeof(s_catchup)); }
+
+/* Refill and return the bucket for channel index i. */
+static catchup_bucket_t* catchup_bucket(int i, uint32_t now_ms) {
+    catchup_bucket_t* b = &s_catchup[i];
+    if (!b->initialized) {
+        b->tokens = CHANNEL_EPOCH_CATCHUP_BUDGET;
+        b->last_refill_ms = now_ms;
+        b->initialized = true;
+        return b;
+    }
+    /* Unsigned subtraction is wrap-safe across the 49.7-day rollover */
+    uint32_t elapsed = now_ms - b->last_refill_ms;
+    uint32_t add = (uint32_t)(((uint64_t)elapsed * CHANNEL_EPOCH_CATCHUP_BUDGET) /
+                              CHANNEL_EPOCH_CATCHUP_REFILL_MS);
+    if (add > 0) {
+        uint32_t headroom = CHANNEL_EPOCH_CATCHUP_BUDGET - b->tokens;
+        b->tokens += (add < headroom) ? add : headroom;
+        b->last_refill_ms = now_ms;
+    }
+    return b;
+}
+
 /* Try decrypting with a single key. Returns 0 on success. */
 static int try_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* ciphertext,
                        size_t ct_len, const uint8_t* tag, const uint8_t* aad, size_t aad_len,
@@ -48,7 +81,7 @@ static int try_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* 
 int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uint8_t* nonce,
                         const uint8_t* ciphertext, size_t ct_len, const uint8_t* tag,
                         const uint8_t* aad, size_t aad_len, uint8_t* plaintext_out,
-                        channel_msg_info_t* info_out) {
+                        channel_msg_info_t* info_out, uint32_t now_ms) {
     if (!channels || !nonce || !ciphertext || !tag || !plaintext_out || !info_out)
         return -1;
     if (ct_len < CHANNEL_MSG_OVERHEAD)
@@ -90,13 +123,20 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
             continue;
         }
 
-        /* Epoch catch-up: try advancing up to 256 times */
+        /* Epoch catch-up: try advancing up to 256 times, bounded by the
+         * per-channel rate budget (SEC-I1) */
         uint8_t saved_key[BRAMBLE_KEY_SIZE];
         uint16_t saved_epoch = channels[i].epoch;
         memcpy(saved_key, channels[i].key, BRAMBLE_KEY_SIZE);
 
+        catchup_bucket_t* budget = catchup_bucket(i, now_ms);
         bool caught_up = false;
+        uint32_t consumed = 0;
         for (int j = 0; j < CHANNEL_EPOCH_CATCHUP_MAX; j++) {
+            if (budget->tokens == 0)
+                break;
+            budget->tokens--;
+            consumed++;
             if (channel_advance_epoch(&channels[i]) != 0)
                 break;
             if (try_decrypt(channels[i].key, nonce, ciphertext, ct_len, tag, aad, aad_len, pt) ==
@@ -104,6 +144,16 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
                 caught_up = true;
                 break;
             }
+        }
+        if (caught_up) {
+            /* Refund successful recoveries: a catch-up that lands on a
+             * valid ciphertext is legitimate by definition (forging one
+             * requires the channel key), so only FAILED catch-up work,
+             * attacker garbage and cross-channel misses, is charged.
+             * Legitimate deep-drift recovery therefore never drains its
+             * own bucket. */
+            uint32_t headroom = CHANNEL_EPOCH_CATCHUP_BUDGET - budget->tokens;
+            budget->tokens += (consumed < headroom) ? consumed : headroom;
         }
 
         if (caught_up && found_index < 0) {

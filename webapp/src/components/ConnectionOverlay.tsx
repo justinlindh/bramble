@@ -188,11 +188,11 @@ export function ConnectionOverlay() {
 
             {showAuth && (
               <div className={styles.authPanel}>
-                <label htmlFor="wifi-token" className={styles.authLabel}>Auth Token (optional)</label>
+                <label htmlFor="wifi-token" className={styles.authLabel}>Auth Token</label>
                 <div className={styles.tokenRow}>
                   <input
                     id="wifi-token"
-                    aria-label="Auth Token (optional)"
+                    aria-label="Auth Token"
                     type={showToken ? 'text' : 'password'}
                     className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
                     value={wifiToken}
@@ -210,7 +210,7 @@ export function ConnectionOverlay() {
                   </button>
                 </div>
                 <span className={styles.wifiHint}>
-                  Required if device has auth enabled. Get token via: bramble pair
+                  Required by default. Get the token via: bramble pair
                 </span>
               </div>
             )}

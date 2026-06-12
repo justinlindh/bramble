@@ -1,5 +1,8 @@
 #include "ws_server.h"
+#include "ct_strcmp.h"
+#include "ws_origin.h"
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "wifi_manager.h"
 #include "mesh_task.h"
 #include "esp_http_server.h"
@@ -14,6 +17,7 @@
 #include "identity.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "nvs_keys.h"
 #include "freertos/FreeRTOS.h"
 
 #define MAX_WS_CLIENTS 4
@@ -22,29 +26,44 @@
 
 static const char* TAG = "ws";
 static httpd_handle_t s_server = NULL;
-static int s_client_fds[MAX_WS_CLIENTS];
+typedef struct {
+    int fd;
+    bool authed;
+} ws_client_t;
+static ws_client_t s_clients[MAX_WS_CLIENTS];
 static int s_client_count = 0;
 static portMUX_TYPE s_client_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_server_running = false;
 static char s_auth_token[AUTH_TOKEN_MAX] = {0};
+/* True when NVS could not provide or persist a token. Fail CLOSED: full
+ * RPC access is impossible until the token store recovers; only the
+ * unauthenticated pairing allowlist is served. */
+static bool s_token_unavailable = false;
+/* Comma-separated extra allowed origins (NVS-backed, set via the
+ * authenticated bramble.setAllowedOrigins RPC). */
+#define WS_ORIGINS_MAX 256
+static char s_extra_origins[WS_ORIGINS_MAX] = {0};
 
 /* ── Client tracking ─────────────────────────────────────────────────── */
 
-static void client_add(int fd) {
+static void client_add(int fd, bool authed) {
     bool added = false;
     bool full = false;
     int total = 0;
 
     taskENTER_CRITICAL(&s_client_lock);
     for (int i = 0; i < s_client_count; i++) {
-        if (s_client_fds[i] == fd) {
+        if (s_clients[i].fd == fd) {
+            s_clients[i].authed = authed;
             total = s_client_count;
             taskEXIT_CRITICAL(&s_client_lock);
             return; /* already tracked */
         }
     }
     if (s_client_count < MAX_WS_CLIENTS) {
-        s_client_fds[s_client_count++] = fd;
+        s_clients[s_client_count].fd = fd;
+        s_clients[s_client_count].authed = authed;
+        s_client_count++;
         added = true;
         total = s_client_count;
     } else {
@@ -53,10 +72,26 @@ static void client_add(int fd) {
     taskEXIT_CRITICAL(&s_client_lock);
 
     if (added) {
-        ESP_LOGI(TAG, "WS client connected fd=%d (total=%d)", fd, total);
+        ESP_LOGI(TAG, "WS client connected fd=%d authed=%d (total=%d)", fd, (int)authed, total);
     } else if (full) {
+        /* Untracked clients are treated as unauthenticated (fail closed)
+         * by client_is_authed() below. */
         ESP_LOGW(TAG, "WS client table full, dropping fd=%d", fd);
     }
+}
+
+/* Untracked fds report unauthenticated: fail closed. */
+static bool client_is_authed(int fd) {
+    bool authed = false;
+    taskENTER_CRITICAL(&s_client_lock);
+    for (int i = 0; i < s_client_count; i++) {
+        if (s_clients[i].fd == fd) {
+            authed = s_clients[i].authed;
+            break;
+        }
+    }
+    taskEXIT_CRITICAL(&s_client_lock);
+    return authed;
 }
 
 static void client_remove(int fd) {
@@ -65,8 +100,8 @@ static void client_remove(int fd) {
 
     taskENTER_CRITICAL(&s_client_lock);
     for (int i = 0; i < s_client_count; i++) {
-        if (s_client_fds[i] == fd) {
-            s_client_fds[i] = s_client_fds[--s_client_count];
+        if (s_clients[i].fd == fd) {
+            s_clients[i] = s_clients[--s_client_count];
             removed = true;
             total = s_client_count;
             break;
@@ -81,26 +116,22 @@ static void client_remove(int fd) {
 
 /* ── Auth check ──────────────────────────────────────────────────────── */
 
-/**
- * Check auth token from Authorization: Bearer header.
- * Also accepts ?token=... for legacy clients (deprecated; logs warning).
- */
-static bool token_matches_constant_time(const char* provided, size_t provided_len) {
-    size_t expected_len = strnlen(s_auth_token, AUTH_TOKEN_MAX - 1);
-    volatile uint8_t diff = (uint8_t)(provided_len ^ expected_len);
+/* Token comparison delegates to ct_strcmp (fixed-bound, length-independent
+ * constant-time compare; see main/ct_strcmp.h). */
 
-    for (size_t i = 0; i < AUTH_TOKEN_MAX - 1; i++) {
-        uint8_t a = (i < provided_len) ? (uint8_t)provided[i] : 0;
-        uint8_t b = (i < expected_len) ? (uint8_t)s_auth_token[i] : 0;
-        diff |= (uint8_t)(a ^ b);
-    }
 
-    return diff == 0;
-}
+typedef enum {
+    WS_AUTH_OK = 0,    /* valid credentials, or auth explicitly disabled */
+    WS_AUTH_NO_CREDS,  /* no credentials supplied */
+    WS_AUTH_BAD,       /* credentials supplied and wrong */
+} ws_auth_result_t;
 
-static bool auth_check(httpd_req_t* req) {
-    if (s_auth_token[0] == '\0')
-        return true; /* no token configured = open access */
+static ws_auth_result_t auth_eval(httpd_req_t* req) {
+    /* Explicit opt-out (auth_off in NVS) loads as an empty token. The
+     * token-unavailable failure mode does NOT take this branch: that
+     * state fails closed below. */
+    if (!s_token_unavailable && s_auth_token[0] == '\0')
+        return WS_AUTH_OK;
 
     /* Preferred path: Authorization: Bearer <token> */
     size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
@@ -111,36 +142,37 @@ static bool auth_check(httpd_req_t* req) {
             size_t prefix_len = strlen(prefix);
             if (strncmp(hdr, prefix, prefix_len) == 0) {
                 const char* tok = hdr + prefix_len;
-                size_t tok_len = strnlen(tok, AUTH_TOKEN_MAX - 1);
-                bool ok = token_matches_constant_time(tok, tok_len);
+                bool ok = !s_token_unavailable && ct_strcmp(tok, s_auth_token) == 0;
                 free(hdr);
-                return ok;
+                return ok ? WS_AUTH_OK : WS_AUTH_BAD;
             }
         }
         free(hdr);
+        /* An Authorization header that is not Bearer counts as bad creds */
+        return WS_AUTH_BAD;
     }
 
-    /* Legacy compatibility: ?token=... (deprecated due to URL leakage) */
+    /* Browser path: the browser WebSocket API cannot set request
+     * headers, so ?token= is the ONLY way a web page can authenticate.
+     * Non-browser clients should prefer the Authorization header because
+     * URLs leak via logs and history; for browsers this is the supported
+     * mechanism, not a deprecated one. */
     size_t qlen = httpd_req_get_url_query_len(req);
     if (qlen > 0 && qlen < 256) {
         char* query = malloc(qlen + 1);
         char token[AUTH_TOKEN_MAX] = {0};
         if (query && httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK &&
             httpd_query_key_value(query, "token", token, sizeof(token)) == ESP_OK) {
-            size_t tok_len = strnlen(token, AUTH_TOKEN_MAX - 1);
-            bool ok = token_matches_constant_time(token, tok_len);
-            if (ok) {
-                ESP_LOGW(TAG,
-                         "WS auth via query param is deprecated; use Authorization: Bearer header");
-            }
+            bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
             free(query);
-            return ok;
+            return ok ? WS_AUTH_OK : WS_AUTH_BAD;
         }
         free(query);
     }
 
-    return false;
+    return WS_AUTH_NO_CREDS;
 }
+
 
 static esp_err_t send_401_http(httpd_req_t* req) {
     httpd_resp_set_status(req, "401 Unauthorized");
@@ -156,10 +188,9 @@ static esp_err_t send_401_http(httpd_req_t* req) {
  * ESP-IDF sends 101 Switching Protocols BEFORE invoking the handler —
  * sending raw HTTP on an upgraded connection breaks the WS protocol.
  */
-static esp_err_t send_ws_auth_reject(httpd_req_t* req) {
+static esp_err_t send_ws_policy_reject(httpd_req_t* req, const char* reason) {
     /* RFC 6455 §5.5.1: Close frame payload = 2-byte status code + optional reason.
      * 1008 = Policy Violation (§7.4.1). */
-    const char* reason = "unauthorized";
     size_t reason_len = strlen(reason);
     uint8_t close_payload[2 + 64];
     close_payload[0] = (uint8_t)(1008 >> 8);   /* status code high byte */
@@ -205,17 +236,30 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
     int client_fds[MAX_WS_CLIENTS];
     int client_count = 0;
 
+    /* Notifications carry decrypted content; deliver ONLY to
+     * authenticated connections (all of them on an auth-opt-out device).
+     * Selection logic is the host-tested rpc_auth_notify_filter(). */
+    bool open_access = ws_server_auth_disabled();
+
     taskENTER_CRITICAL(&s_client_lock);
     if (!s_server || s_client_count == 0) {
         taskEXIT_CRITICAL(&s_client_lock);
         return;
     }
 
-    client_count = s_client_count;
-    for (int i = 0; i < client_count; i++) {
-        client_fds[i] = s_client_fds[i];
+    rpc_notify_client_t snapshot[MAX_WS_CLIENTS];
+    for (int i = 0; i < s_client_count; i++) {
+        snapshot[i].fd = s_clients[i].fd;
+        snapshot[i].authenticated = s_clients[i].authed;
     }
+    int snapshot_count = s_client_count;
     taskEXIT_CRITICAL(&s_client_lock);
+
+    client_count =
+        rpc_auth_notify_filter(snapshot, snapshot_count, open_access, client_fds, MAX_WS_CLIENTS);
+    if (client_count == 0) {
+        return;
+    }
 
     uint64_t now_us = (uint64_t)esp_timer_get_time();
     uint64_t elapsed_us = now_us - s_notify_last_send_us;
@@ -260,17 +304,52 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
 
 static esp_err_t ws_handler(httpd_req_t* req) {
     if (req->method == HTTP_GET) {
-        /* Auth check on WebSocket upgrade.
+        /* Auth + Origin evaluation on WebSocket upgrade.
          * Note: ESP-IDF has already sent 101 Switching Protocols at this
-         * point, so we must reject via WS close frame, not HTTP 401. */
-        if (!auth_check(req)) {
-            ESP_LOGW(TAG, "WS auth failed — sending close frame");
-            return send_ws_auth_reject(req);
+         * point, so rejections use a WS close frame (1008), not the
+         * HTTP 403 that would otherwise be correct.
+         *
+         * Policy (auth required by default):
+         *   - wrong credentials: reject
+         *   - presented, valid credentials: full access, Origin check
+         *     SKIPPED. The token is the stronger credential and a
+         *     cross-site attacker page cannot read it, so a token-bearing
+         *     cross-origin page is the user's own client, not CSWSH.
+         *     Requiring origin enrollment before a token-holding webapp
+         *     could ever connect would resurrect the onboarding friction
+         *     that led to the old open-by-default regression.
+         *   - no credentials (including devices with auth explicitly
+         *     disabled): browser Origin allowlist applies (same-origin or
+         *     configured extras; see main/ws_origin.h). On the opt-out
+         *     device this is the remaining CSWSH defense; otherwise it
+         *     keeps foreign pages off even the pairing allowlist. */
+        ws_auth_result_t ar = auth_eval(req);
+        if (ar == WS_AUTH_BAD) {
+            ESP_LOGW(TAG, "WS auth failed (bad credentials), sending close frame");
+            return send_ws_policy_reject(req, "unauthorized");
         }
-        /* Handshake: record the new client */
+
+        bool token_proven = (ar == WS_AUTH_OK) && !ws_server_auth_disabled();
+        if (!token_proven) {
+            char origin[WS_ORIGINS_MAX] = {0};
+            char host[96] = {0};
+            if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) ==
+                ESP_ERR_HTTPD_RESULT_TRUNC) {
+                /* Oversized Origin cannot match anything we would allow */
+                ESP_LOGW(TAG, "WS Origin header oversized, rejecting");
+                return send_ws_policy_reject(req, "origin not allowed");
+            }
+            (void)httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+            if (!ws_origin_allowed(origin, host, s_extra_origins)) {
+                ESP_LOGW(TAG, "WS Origin '%s' not allowed (host '%s'), rejecting", origin, host);
+                return send_ws_policy_reject(req, "origin not allowed");
+            }
+        }
+
         int fd = httpd_req_to_sockfd(req);
-        client_add(fd);
-        ESP_LOGI(TAG, "WS handshake fd=%d", fd);
+        client_add(fd, ar == WS_AUTH_OK);
+        ESP_LOGI(TAG, "WS handshake fd=%d %s", fd,
+                 ar == WS_AUTH_OK ? "(authenticated)" : "(unauthenticated, allowlist only)");
         return ESP_OK;
     }
 
@@ -352,7 +431,8 @@ static esp_err_t ws_handler(httpd_req_t* req) {
         return ESP_ERR_NO_MEM;
     }
 
-    int resp_len = rpc_dispatch((char*)buf, resp_buf, WS_BUF_SIZE);
+    int resp_len = rpc_dispatch_authed((char*)buf, resp_buf, WS_BUF_SIZE,
+                                       client_is_authed(httpd_req_to_sockfd(req)));
     free(buf);
 
     if (resp_len > 0) {
@@ -399,6 +479,8 @@ static const char* CONFIG_HTML =
     "<input name='ssid' required placeholder='Your WiFi name'>"
     "<label>Password</label>"
     "<input name='pass' type='password' placeholder='WiFi password'>"
+    "<label>Device Token</label>"
+    "<input name='token' type='password' placeholder='From boot log or: bramble pair'>"
     "<button type='submit'>Save &amp; Reboot</button>"
     "</form>"
     "<script>"
@@ -460,12 +542,7 @@ static int url_decode(char* dst, const char* src, int src_len) {
 }
 
 static esp_err_t config_post_handler(httpd_req_t* req) {
-    if (!auth_check(req)) {
-        ESP_LOGW(TAG, "Config POST auth failed");
-        return send_401_http(req);
-    }
-
-    char body[256] = {0};
+    char body[512] = {0};
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
     if (len <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty body");
@@ -473,12 +550,69 @@ static esp_err_t config_post_handler(httpd_req_t* req) {
     }
     body[len] = '\0';
 
-    /* Parse form: ssid=xxx&pass=xxx */
+    /* Parse form: ssid=xxx&pass=xxx&token=xxx */
     char ssid[33] = {0};
     char pass[65] = {0};
+    char form_token[AUTH_TOKEN_MAX] = {0};
 
     char* ssid_start = strstr(body, "ssid=");
     char* pass_start = strstr(body, "pass=");
+    char* token_start = strstr(body, "token=");
+
+    if (token_start) {
+        token_start += 6;
+        char* end = strchr(token_start, '&');
+        int tlen = end ? (int)(end - token_start) : (int)strlen(token_start);
+        if (tlen > (int)sizeof(form_token) - 1)
+            tlen = (int)sizeof(form_token) - 1;
+        url_decode(form_token, token_start, tlen);
+    }
+
+    /* The setup portal form cannot send an Authorization header, so the
+     * device token is accepted as a form field too. Same credential,
+     * same constant-time comparison. token_proven means real credentials
+     * were presented; the auth-opt-out open state does NOT count. */
+    bool open_access = ws_server_auth_disabled();
+    bool token_proven = !open_access && (auth_eval(req) == WS_AUTH_OK);
+    if (!token_proven && form_token[0] != '\0' && !s_token_unavailable &&
+        ct_strcmp(form_token, s_auth_token) == 0) {
+        token_proven = true;
+    }
+
+    if (!token_proven) {
+        /* CSRF gate: /config is a CORS-simple form target, so without
+         * this a foreign page could auto-submit Wi-Fi credentials and
+         * reboot the device onto an attacker AP. Browser-originated
+         * posts must be same-origin (or allowlisted); header-free
+         * clients (curl) pass and are gated by the token below. This is
+         * the remaining defense on auth-opt-out devices. */
+        char origin[WS_ORIGINS_MAX] = {0};
+        char referer[WS_ORIGINS_MAX] = {0};
+        char host[96] = {0};
+        if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) ==
+            ESP_ERR_HTTPD_RESULT_TRUNC) {
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
+            return ESP_FAIL;
+        }
+        if (httpd_req_get_hdr_value_str(req, "Referer", referer, sizeof(referer)) ==
+            ESP_ERR_HTTPD_RESULT_TRUNC) {
+            /* oversized referer cannot be same-origin: treat as foreign */
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
+            return ESP_FAIL;
+        }
+        (void)httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
+        if (!ws_config_post_allowed(origin, referer, host, s_extra_origins)) {
+            ESP_LOGW(TAG, "Config POST cross-origin (origin '%s' referer '%s'), rejecting",
+                     origin, referer);
+            httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
+            return ESP_FAIL;
+        }
+
+        if (!open_access) {
+            ESP_LOGW(TAG, "Config POST auth failed");
+            return send_401_http(req);
+        }
+    }
 
     if (ssid_start) {
         ssid_start += 5;
@@ -562,19 +696,45 @@ static const httpd_uri_t ws_uri = {
 void ws_server_load_token(void) {
     int rc = identity_ensure_ws_auth_token(s_auth_token, sizeof(s_auth_token));
     if (rc < 0) {
+        /* NVS could not provide or persist a token. Fail CLOSED: no
+         * credentials can match, so only the pairing allowlist is
+         * reachable until the token store recovers. */
         s_auth_token[0] = '\0';
+        s_token_unavailable = true;
+        ESP_LOGE(TAG, "Auth token unavailable (NVS error); RPC limited to pairing allowlist");
+        return;
     }
+    s_token_unavailable = false;
     if (s_auth_token[0] != '\0') {
-        ESP_LOGI(TAG, "WS auth enabled (token configured)");
+        ESP_LOGI(TAG, "RPC auth enabled (per-device token)");
     } else {
-        ESP_LOGI(TAG, "WS auth disabled (open access — set token to enable)");
+        ESP_LOGW(TAG, "RPC auth disabled by explicit opt-out (open access)");
     }
 }
 
+
+void ws_server_load_origins(void) {
+    s_extra_origins[0] = '\0';
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    size_t len = sizeof(s_extra_origins);
+    if (nvs_get_str(h, NVS_KEY_WS_ORIGINS, s_extra_origins, &len) != ESP_OK) {
+        s_extra_origins[0] = '\0';
+    }
+    nvs_close(h);
+}
+
+const char* ws_server_get_extra_origins(void) { return s_extra_origins; }
+
 const char* ws_server_get_token(void) { return s_auth_token; }
+
+bool ws_server_auth_disabled(void) { return !s_token_unavailable && s_auth_token[0] == '\0'; }
 
 int ws_server_start(void) {
     ws_server_load_token();
+    ws_server_load_origins();
 
     /* Idempotent: no-op if already running */
     if (s_server_running) {
