@@ -157,6 +157,36 @@ target_include_directories(test_airtime_budget PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
+# TX gate ToA cost tests (DES-7)
+add_executable(test_tx_gate_cost
+    test_tx_gate_cost.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_tx_gate_cost PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+target_link_libraries(test_tx_gate_cost m)
+add_test(NAME test_tx_gate_cost COMMAND test_tx_gate_cost)
+
+# TX gate chokepoint tests (DES-5, DES-6)
+add_executable(test_tx_gate
+    test_tx_gate.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_tx_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+target_link_libraries(test_tx_gate m)
+add_test(NAME test_tx_gate COMMAND test_tx_gate)
+
 # Duty-cycle cap tests (DES-8)
 add_executable(test_duty_cycle
     test_duty_cycle.c
