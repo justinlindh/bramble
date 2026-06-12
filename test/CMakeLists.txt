@@ -279,15 +279,6 @@ target_include_directories(test_airtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
-# Anti-replay tests
-add_executable(test_anti_replay
-    test_anti_replay.c
-    unity/unity.c
-)
-target_include_directories(test_anti_replay PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/include
-)
-
 # Beacon tests
 add_executable(test_beacon
     test_beacon.c

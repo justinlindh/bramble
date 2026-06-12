@@ -2409,6 +2409,8 @@ Only nodes with stratum ≤ 2 proactively emit TIME_SYNC packets. Other nodes sh
 
 ### 9.6 Anti-Replay Timestamp Windows
 
+> **Firmware reality.** Not implemented; the `anti_replay` module that implemented this design was deleted unshipped, and replay protection is being redesigned around dedup on authenticated fields. Today only the packet-id dedup buffer (section 7.6) ships.
+
 ```
 REPLAY_WINDOW_S = 30   // ±30 seconds
 
