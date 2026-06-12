@@ -5,8 +5,9 @@
 # Resolution order:
 #   1. keys/ota_signing_key.pem already present: keep it.
 #   2. $BRAMBLE_OTA_SIGNING_KEY set: copy that key into place.
-#   3. CI: fail. Release builds must be signed with the OTA_SIGNING_KEY repo
-#      secret, never a generated key.
+#   3. CI without BRAMBLE_OTA_ALLOW_GENERATED_KEY=1: fail. Release builds
+#      must be signed with the OTA_SIGNING_KEY repo secret, never a generated
+#      key. Smoke builds that discard their artifacts set the override.
 #   4. Otherwise: generate a throwaway RSA-3072 dev key and warn. Devices
 #      flashed over USB with the resulting build will only accept OTA images
 #      signed with this same key.
@@ -38,8 +39,11 @@ if [[ -n "${BRAMBLE_OTA_SIGNING_KEY:-}" ]]; then
 fi
 
 if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
-  echo "[ensure-ota-signing-key] ERROR: no signing key in CI. The workflow must write the OTA_SIGNING_KEY secret to $KEY_PATH before building." >&2
-  exit 1
+  if [[ "${BRAMBLE_OTA_ALLOW_GENERATED_KEY:-}" != "1" ]]; then
+    echo "[ensure-ota-signing-key] ERROR: no signing key in CI. The workflow must write the OTA_SIGNING_KEY secret to $KEY_PATH before building (or set BRAMBLE_OTA_ALLOW_GENERATED_KEY=1 for throwaway smoke builds)." >&2
+    exit 1
+  fi
+  log "CI smoke build: generating a throwaway signing key (artifacts must not be published)"
 fi
 
 log "WARNING: generating a throwaway dev signing key at $KEY_PATH"

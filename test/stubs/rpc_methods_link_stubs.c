@@ -276,9 +276,10 @@ int ota_wifi_start(const char* url, bool allow_downgrade) {
     return -1;
 }
 const char* ota_get_last_error(void) { return NULL; }
-static const struct {
+typedef struct {
     const char* version;
-} s_stub_app_desc = {.version = "1.2.3"};
+} stub_app_desc_t;
+static const stub_app_desc_t s_stub_app_desc = {.version = "1.2.3"};
 const void* esp_app_get_description(void) { return &s_stub_app_desc; }
 const char* ota_get_app_version(void) { return "1.2.3"; }
 void ota_origin_get(char* out, size_t out_len) { snprintf(out, out_len, "%s", g_ota_origin_stub); }

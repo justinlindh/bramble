@@ -128,6 +128,8 @@ jobs:
         env:
           HOME: /tmp/cihome
           ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
+          # Smoke artifacts are discarded; a throwaway signing key is fine here.
+          BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
         run: |
           mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           bash scripts/flash.sh local heltec-v3 build
