@@ -177,6 +177,22 @@ typedef struct {
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len);
 esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, size_t len);
 
+/*
+ * Build the AES-GCM AAD for an encrypted DATA packet: the serialized header
+ * with the hop_limit byte zeroed.
+ *
+ * Invariant: hop_limit is the only header field a relay mutates in flight
+ * (forward_data_packet decrements it before retransmitting), so it must be
+ * excluded from authentication or every forwarded packet fails the
+ * destination's tag check. All other fields (version, type, flags,
+ * dest_addr, packet_id) stay bound. If a relay ever needs to mutate another
+ * header field, mask it here so the encrypt and decrypt paths cannot diverge.
+ *
+ * Both endpoints MUST use this helper: the originator when encrypting
+ * (send_data_packet) and the destination when decrypting (handle_data).
+ */
+esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size_t len);
+
 esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len);
 esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t len);
 size_t bramble_ack_wire_size(const bramble_ack_t* p);

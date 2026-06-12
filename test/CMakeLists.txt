@@ -278,6 +278,17 @@ target_include_directories(test_channel_msg PRIVATE
 )
 target_link_libraries(test_channel_msg ssl crypto)
 
+# DATA relay AAD tests (hop_limit mutation vs GCM header binding)
+add_executable(test_data_relay_aad
+    test_data_relay_aad.c
+    unity/unity.c
+)
+target_include_directories(test_data_relay_aad PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+)
+target_link_libraries(test_data_relay_aad ssl crypto)
+
 # Security tests
 add_executable(test_security
     test_security.c

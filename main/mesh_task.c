@@ -1314,18 +1314,26 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    bramble_header_t rx_hdr;
+    if (bramble_header_deserialize(&rx_hdr, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Data packet header invalid");
+        return;
+    }
+
+    /* AAD excludes hop_limit (relays decrement it in flight); must match the
+     * masked AAD the originator built in send_data_packet. */
+    uint8_t aad[HEADER_SIZE];
+    bramble_header_build_aad(&rx_hdr, aad, sizeof(aad));
+
     uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE] = {0};
     int ret = channel_msg_decrypt(s_channels, s_num_channels,
                                   nonce, ciphertext, ct_len, tag,
-                                  data, HEADER_SIZE,
+                                  aad, HEADER_SIZE,
                                   plaintext, &info);
     if (ret != 0) {
         ESP_LOGW(TAG, "Failed to decrypt data from %08" PRIX32, src_addr);
         return;
     }
-
-    bramble_header_t rx_hdr;
-    bramble_header_deserialize(&rx_hdr, data, len);
 
     /* Extract the text message from the decrypted payload */
     if (info.data_len > 0) {
@@ -1344,14 +1352,10 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                          frag_hdr.frag_index + 1, frag_hdr.frag_total,
                          frag_hdr.message_id, info.src_addr);
 
-                /* Deserialize header to get packet_id for reassembly tracking */
-                bramble_header_t rx_hdr_frag;
-                bramble_header_deserialize(&rx_hdr_frag, data, len);
-
                 int ret = reassembly_add(&s_reassembly, &frag_hdr,
                                         info.data + FRAG_HEADER_SIZE,
                                         info.data_len - FRAG_HEADER_SIZE,
-                                        now_ms(), rx_hdr_frag.packet_id);
+                                        now_ms(), rx_hdr.packet_id);
                 if (ret == 1) {
                     /* Reassembly complete — collect the full message.
                      * Buffers allocated on heap to avoid ~1.2KB stack pressure
@@ -1425,8 +1429,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
                         /* Send ACK/receipt: use first-received fragment's packet_id for broadcasts */
                         if (dir == MSG_DIR_INCOMING) {
-                            send_ack(info.src_addr, rx_hdr_frag.packet_id, rssi);
-                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr_frag.dest_addr,
+                            send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
                                        (uint8_t)neighbor_count(&s_neighbors))) {
                             queue_broadcast_delivery_receipt(info.src_addr, first_frag_pkt_id);
                         }
@@ -2629,9 +2633,14 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
 
     bramble_header_serialize(&header, buf, HEADER_SIZE);
 
+    /* AAD excludes hop_limit (relays decrement it in flight); the destination
+     * builds the same masked AAD in handle_data. */
+    uint8_t aad[HEADER_SIZE];
+    bramble_header_build_aad(&header, aad, sizeof(aad));
+
     int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
                                       payload, payload_len,
-                                      buf, HEADER_SIZE,
+                                      aad, HEADER_SIZE,
                                       nonce, ciphertext, tag);
     if (enc_ret != 0) {
         ESP_LOGE(TAG, "Channel encrypt failed: %d", enc_ret);
