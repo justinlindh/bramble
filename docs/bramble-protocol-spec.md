@@ -3,7 +3,9 @@
 **Version:** 0.1-draft  
 **Date:** 2026-02-15  
 **Status:** Design Document  
-**Target Hardware:** ESP32 + Semtech SX1262/SX1276 (Heltec WiFi LoRa 32 V3, LILYGO T-Beam)
+**Target Hardware:** ESP32-S3 + Semtech SX1262. Running targets today are Heltec WiFi LoRa 32 V3/V4 and LilyGo T-Deck Plus; the T-Beam listed in the original draft was never brought up.
+
+> **Implementation status.** This is the founding design document. The firmware on `main` implements a subset of it and diverges in specifics; sections below carry short "Firmware reality" notes where the shipped code contradicts the design. For the current state, [bramble-architecture.md](bramble-architecture.md) describes the components as built, [SECURITY-MODEL.md](SECURITY-MODEL.md) is authoritative for the security posture, and `api/openapi.yaml` is the CI-enforced RPC contract.
 
 ---
 
@@ -282,7 +284,10 @@ Value  Name               Description
 0x11   CODED              XOR network-coded packet (see §4.21)
 0x12   PKT_TYPE_PROBE    Broadcast delivery probe (see §4.22)
 0x13   PKT_TYPE_PROBE_ACK      Broadcast probe acknowledgment (see §4.23)
+0x14   LOCATION           Location sharing packet
 ```
+
+> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. `KEY_EXCHANGE`, `CONGESTION`, `TIME_SYNC`, the mailbox types (`0x0B`-`0x0E`), the emergency types (`0x0F`-`0x10`), and `CODED` are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon.
 
 ### 4.4 DATA Packet
 
@@ -855,6 +860,8 @@ function on_beacon_received(beacon):
 ```
 
 ### 5.2 X25519 Key Exchange for DMs
+
+> **Firmware reality.** This exchange is not implemented on the wire: `PKT_TYPE_KEY_EXCHANGE` is never sent and never handled, and DMs are encrypted with the shared channel key, readable by every holder of that key ([SECURITY-MODEL.md](SECURITY-MODEL.md), section 4).
 
 When node A wants to send a DM to node B for the first time, they perform a key exchange:
 
@@ -2022,6 +2029,8 @@ Regardless of legality, Bramble enforces a **self-imposed 10% airtime budget** p
 
 Current firmware uses a per-tier token bucket with **continuous refill** (not hourly cliff resets). Tokens are refilled proportionally to elapsed time and capped at per-tier maxima.
 
+Every transmission is admitted through a single budget-gated TX path (`components/radio/tx_gate.c`): packets are classified by kind, costed with real time-on-air math, budget-checked, passed through listen-before-talk, then transmitted and debited. The raw radio transmit call is internal to the radio component, so no code path bypasses the budget. When the regional frequency plan enforces a regulatory duty-cycle limit (EU868: 1%), the tier maxima and refill are scaled to stay within it (`airtime_budget_set_duty_cap`); the US plan carries no enforced cap, and the self-imposed budgets below apply.
+
 Tier budgets (base):
 - `critical`: 36000 ms/hour
 - `normal`: 18000 ms/hour
@@ -2277,6 +2286,8 @@ function tx_scheduler():  // Main TX loop, runs continuously
 
 Every node includes its current time estimate and confidence in its BEACON packet (§4.9). Additionally, dedicated TIME_SYNC packets provide higher-precision synchronization.
 
+> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); dedicated `TIME_SYNC` packets are never sent or handled.
+
 **Stratum model:**
 - Stratum 0: GPS-equipped node with valid fix (confidence = 0 ms)
 - Stratum 1: Direct neighbor of stratum-0 node (confidence = estimated OTA delay)
@@ -2431,6 +2442,8 @@ Note: The ±30s window is deliberately large to accommodate:
 ---
 
 ## 10. Security Analysis
+
+> **Firmware reality.** This section analyzes the *design*. [SECURITY-MODEL.md](SECURITY-MODEL.md) is the authoritative, code-verified statement of the current security posture, including the gaps where the implementation does not yet deliver the properties analyzed here (no pairwise DM keys, unauthenticated routing control, no replay protection, plaintext location packets, and more).
 
 ### 10.1 Threat Model
 

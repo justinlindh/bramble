@@ -8,6 +8,8 @@ All events are sent as JSON-RPC 2.0 notifications over the WebSocket endpoint (`
 
 When firmware calls `rpc_notify(..., NULL)`, clients may see `"params": null` (or omitted by some transports) and should treat that as an empty payload.
 
+Notifications are delivered only to authenticated connections (WebSocket and BLE alike); a connection that has not presented the device token receives none. On a device whose owner has explicitly disabled auth, all connections receive notifications. See [../auth.md](../auth.md).
+
 ---
 
 ## `bramble.onMessage`

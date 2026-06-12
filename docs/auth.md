@@ -35,7 +35,10 @@ generated, so anyone watching the console during setup can copy it.
 A WS or BLE client without the token can connect, but may call only the
 identification allowlist: `bramble.ping` and `bramble.getVersion`. That is
 enough for a pairing UI to confirm it is talking to a Bramble device and
-prompt for the token. Every other method answers `Unauthorized` (-1005).
+prompt for the token. Every other method answers `Unauthorized` (-1005),
+and server-push notifications (message content, GPS, peer locations) are
+not delivered to unauthenticated connections. Only on a device whose owner
+has explicitly disabled auth do all connections receive notifications.
 
 ## Setting a Custom Token
 
