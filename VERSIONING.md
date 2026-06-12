@@ -23,16 +23,16 @@ bramble (this repo)          bramble-go              bramble-cli
 | Repo | Contains |
 |------|----------|
 | **bramble** | ESP32 firmware, OpenAPI spec (`api/openapi.yaml`), simulator, webapp |
-| **bramble-go** | Go SDK — transport layer (BLE/serial), JSON-RPC client |
+| **bramble-go** | Go SDK: transport layer (BLE/serial), JSON-RPC client |
 | **bramble-cli** | CLI tool built on bramble-go |
 
 ## Protocol Version
 
 The **protocol version** defines the JSON-RPC API contract between firmware and clients.
 
-- **Source of truth:** `api/openapi.yaml` → `info.version`
+- **Spec:** `api/openapi.yaml` (`info.version`). The spec currently lags the firmware's RPC surface; until a sync pass lands, the firmware (`main/rpc_methods.c`) is authoritative for what is actually served.
 - **Runtime:** firmware returns it via `bramble.getVersion` → `protocol_version`
-- **Independent** from firmware version — they evolve separately
+- **Independent** from firmware version; they evolve separately
 
 ### Semver Rules
 
@@ -79,8 +79,8 @@ Independent semver. Each release documents which bramble-go version it depends o
 
 ## Adding a New RPC Method
 
-1. Implement handler in firmware (`components/rpc/rpc_methods.c`)
-2. Update `api/openapi.yaml` — add method schema
+1. Implement handler in firmware (`main/rpc_methods.c`)
+2. Update `api/openapi.yaml`: add method schema
 3. Bump protocol version (minor)
 4. Implement in bramble-go client
 5. Bump bramble-go version (minor)
