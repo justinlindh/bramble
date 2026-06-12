@@ -29,6 +29,42 @@ void test_ct_strcmp_one_empty_b(void) {
     TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("", "a"));
 }
 
+void test_ct_strcmp_long_match(void) {
+    /* 64-char token, typical generated size x2 */
+    const char *t = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+    TEST_ASSERT_EQUAL(0, ct_strcmp(t, t));
+}
+
+void test_ct_strcmp_long_prefix_mismatch(void) {
+    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("0123456789ABCDEF", "0123456789ABCDEFX"));
+    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("0123456789ABCDEFX", "0123456789ABCDEF"));
+}
+
+void test_ct_strcmp_at_bound_match(void) {
+    /* exactly CT_STRCMP_BOUND chars on both sides */
+    char a[CT_STRCMP_BOUND + 1];
+    char b[CT_STRCMP_BOUND + 1];
+    memset(a, 'q', CT_STRCMP_BOUND);
+    memset(b, 'q', CT_STRCMP_BOUND);
+    a[CT_STRCMP_BOUND] = '\0';
+    b[CT_STRCMP_BOUND] = '\0';
+    TEST_ASSERT_EQUAL(0, ct_strcmp(a, b));
+    b[CT_STRCMP_BOUND - 1] = 'z';
+    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp(a, b));
+}
+
+void test_ct_strcmp_oversized_attacker_input_rejected(void) {
+    /* Attacker input longer than the bound vs an in-bounds secret must
+     * not match (documented truncation behavior). */
+    char attacker[CT_STRCMP_BOUND + 32];
+    memset(attacker, 'q', sizeof(attacker) - 1);
+    attacker[sizeof(attacker) - 1] = '\0';
+    char secret[32];
+    memset(secret, 'q', sizeof(secret) - 1);
+    secret[sizeof(secret) - 1] = '\0';
+    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp(attacker, secret));
+}
+
 /* ── Unauthenticated allowlist policy (auth required by default) ────── */
 
 void test_unauth_allows_ping(void) {
@@ -85,6 +121,10 @@ int main(void) {
     RUN_TEST(test_ct_strcmp_both_empty);
     RUN_TEST(test_ct_strcmp_one_empty_a);
     RUN_TEST(test_ct_strcmp_one_empty_b);
+    RUN_TEST(test_ct_strcmp_long_match);
+    RUN_TEST(test_ct_strcmp_long_prefix_mismatch);
+    RUN_TEST(test_ct_strcmp_at_bound_match);
+    RUN_TEST(test_ct_strcmp_oversized_attacker_input_rejected);
     RUN_TEST(test_unauth_allows_ping);
     RUN_TEST(test_unauth_allows_get_version);
     RUN_TEST(test_unauth_denies_get_auth_token);
