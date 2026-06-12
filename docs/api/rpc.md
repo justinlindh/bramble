@@ -15,7 +15,7 @@ should send:
 
 - `Authorization: Bearer <token>`
 
-Legacy `?token=<token>` query auth is still accepted for compatibility (and is the only option for browser WebSocket clients), but is deprecated for everything else because URLs can leak via logs/history.
+`?token=<token>` query auth is the supported mechanism for browser WebSocket clients, which cannot set request headers. Non-browser clients should use the `Authorization` header instead, because URLs can leak via logs/history.
 
 Connections without credentials may call only `bramble.ping` and `bramble.getVersion`; every other method returns error `-1005` (`Unauthorized`). Wrong credentials close the WebSocket with code 1008.
 

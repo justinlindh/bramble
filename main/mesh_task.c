@@ -3256,6 +3256,9 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
     }
     mesh_persist_channel_psk_flags();
 
+    /* Catch-up budget buckets are indexed by channel position */
+    channel_msg_catchup_reset();
+
     xSemaphoreGive(s_state_mutex);
 
     ESP_LOGI("mesh", "Channel added: idx=%d name=%s", idx, name ? name : "(unnamed)");
@@ -3295,6 +3298,9 @@ int mesh_remove_channel(int index) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS after removal");
     }
     mesh_persist_channel_psk_flags();
+
+    /* Indices shifted: stale per-index budgets would misattribute */
+    channel_msg_catchup_reset();
 
     xSemaphoreGive(s_state_mutex);
 

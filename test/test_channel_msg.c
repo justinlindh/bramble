@@ -262,6 +262,32 @@ void test_epoch_catchup_budget_exhaustion_and_refill(void) {
     TEST_ASSERT_EQUAL(0x33333333, info.src_addr);
 }
 
+/* Successful catch-up refunds its tokens: legit deep recovery does not
+ * self-drain, so back-to-back deep drifts both recover at the same
+ * timestamp (impossible without the refund: 200 + 200 > 256) */
+void test_epoch_catchup_success_refunds_budget(void) {
+    bramble_channel_t receiver;
+    make_channel("refund-test", &receiver);
+
+    bramble_channel_t sender;
+    make_channel("refund-test", &sender);
+    uint8_t aad[12] = {0};
+    channel_msg_info_t info;
+    uint8_t pt[256] = {0};
+
+    for (int round = 0; round < 2; round++) {
+        for (int i = 0; i < 200; i++) channel_advance_epoch(&sender);
+        uint8_t data[] = "deep";
+        uint8_t nonce[12], ct[256], tag[16];
+        channel_msg_encrypt(&sender, 0x77777777, 0x01, data, sizeof(data), aad, sizeof(aad),
+                            nonce, ct, tag);
+        TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce, ct,
+                                                 CHANNEL_MSG_OVERHEAD + sizeof(data), tag, aad,
+                                                 sizeof(aad), pt, &info, 0));
+    }
+    TEST_ASSERT_EQUAL(400, receiver.epoch);
+}
+
 /* Budgets are per channel: draining channel 0 leaves channel 1 intact */
 void test_epoch_catchup_budget_is_per_channel(void) {
     bramble_channel_t channels[2];
@@ -304,6 +330,7 @@ int main(void) {
     RUN_TEST(test_constant_time_all_positions);
     RUN_TEST(test_epoch_catchup_deep_recovery);
     RUN_TEST(test_epoch_catchup_budget_exhaustion_and_refill);
+    RUN_TEST(test_epoch_catchup_success_refunds_budget);
     RUN_TEST(test_epoch_catchup_budget_is_per_channel);
     return UNITY_END();
 }
