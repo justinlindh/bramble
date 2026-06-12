@@ -69,10 +69,16 @@ typedef struct {
 } ble_rpc_msg_t;
 
 static bool ble_authenticate_first_write(const char* line) {
-    const char* expected = ws_server_get_token();
-    if (expected[0] == '\0') {
+    if (ws_server_auth_disabled()) {
+        /* Explicit opt-out only; a missing token fails closed */
         s_ble_authenticated = true;
         return true;
+    }
+
+    const char* expected = ws_server_get_token();
+    if (expected[0] == '\0') {
+        /* Token unavailable (NVS failure): nothing can match */
+        return false;
     }
 
     if (ct_strcmp(line, expected) == 0) {
@@ -128,6 +134,17 @@ static void ble_rpc_task(void* param) {
 
             char resp[BLE_RPC_BUF_SIZE];
             if (!s_ble_authenticated) {
+                /* Pre-auth JSON-RPC lines are dispatched UNAUTHENTICATED:
+                 * rpc_dispatch_authed() limits them to the tiny pairing
+                 * allowlist (rpc_auth.c). Anything that is not JSON is
+                 * treated as a token handshake attempt. */
+                if (msg.data[0] == '{') {
+                    int resp_len = rpc_dispatch_authed(msg.data, resp, sizeof(resp), false);
+                    if (resp_len > 0) {
+                        ble_notify_cb(resp, (size_t)resp_len, NULL);
+                    }
+                    continue;
+                }
                 if (!ble_authenticate_first_write(msg.data)) {
                     s_auth_fail_count++;
                     ESP_LOGW(TAG, "BLE auth failed (attempt %u/%u)", s_auth_fail_count,
@@ -296,7 +313,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             s_conn_handle = event->connect.conn_handle;
-            s_ble_authenticated = (ws_server_get_token()[0] == '\0');
+            s_ble_authenticated = ws_server_auth_disabled();
             ESP_LOGI(TAG, "BLE client connected (handle=%d, auth=%s)", s_conn_handle,
                      s_ble_authenticated ? "open" : "required");
 

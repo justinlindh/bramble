@@ -22,29 +22,40 @@
 
 static const char* TAG = "ws";
 static httpd_handle_t s_server = NULL;
-static int s_client_fds[MAX_WS_CLIENTS];
+typedef struct {
+    int fd;
+    bool authed;
+} ws_client_t;
+static ws_client_t s_clients[MAX_WS_CLIENTS];
 static int s_client_count = 0;
 static portMUX_TYPE s_client_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_server_running = false;
 static char s_auth_token[AUTH_TOKEN_MAX] = {0};
+/* True when NVS could not provide or persist a token. Fail CLOSED: full
+ * RPC access is impossible until the token store recovers; only the
+ * unauthenticated pairing allowlist is served. */
+static bool s_token_unavailable = false;
 
 /* ── Client tracking ─────────────────────────────────────────────────── */
 
-static void client_add(int fd) {
+static void client_add(int fd, bool authed) {
     bool added = false;
     bool full = false;
     int total = 0;
 
     taskENTER_CRITICAL(&s_client_lock);
     for (int i = 0; i < s_client_count; i++) {
-        if (s_client_fds[i] == fd) {
+        if (s_clients[i].fd == fd) {
+            s_clients[i].authed = authed;
             total = s_client_count;
             taskEXIT_CRITICAL(&s_client_lock);
             return; /* already tracked */
         }
     }
     if (s_client_count < MAX_WS_CLIENTS) {
-        s_client_fds[s_client_count++] = fd;
+        s_clients[s_client_count].fd = fd;
+        s_clients[s_client_count].authed = authed;
+        s_client_count++;
         added = true;
         total = s_client_count;
     } else {
@@ -53,10 +64,26 @@ static void client_add(int fd) {
     taskEXIT_CRITICAL(&s_client_lock);
 
     if (added) {
-        ESP_LOGI(TAG, "WS client connected fd=%d (total=%d)", fd, total);
+        ESP_LOGI(TAG, "WS client connected fd=%d authed=%d (total=%d)", fd, (int)authed, total);
     } else if (full) {
+        /* Untracked clients are treated as unauthenticated (fail closed)
+         * by client_is_authed() below. */
         ESP_LOGW(TAG, "WS client table full, dropping fd=%d", fd);
     }
+}
+
+/* Untracked fds report unauthenticated: fail closed. */
+static bool client_is_authed(int fd) {
+    bool authed = false;
+    taskENTER_CRITICAL(&s_client_lock);
+    for (int i = 0; i < s_client_count; i++) {
+        if (s_clients[i].fd == fd) {
+            authed = s_clients[i].authed;
+            break;
+        }
+    }
+    taskEXIT_CRITICAL(&s_client_lock);
+    return authed;
 }
 
 static void client_remove(int fd) {
@@ -65,8 +92,8 @@ static void client_remove(int fd) {
 
     taskENTER_CRITICAL(&s_client_lock);
     for (int i = 0; i < s_client_count; i++) {
-        if (s_client_fds[i] == fd) {
-            s_client_fds[i] = s_client_fds[--s_client_count];
+        if (s_clients[i].fd == fd) {
+            s_clients[i] = s_clients[--s_client_count];
             removed = true;
             total = s_client_count;
             break;
@@ -98,9 +125,18 @@ static bool token_matches_constant_time(const char* provided, size_t provided_le
     return diff == 0;
 }
 
-static bool auth_check(httpd_req_t* req) {
-    if (s_auth_token[0] == '\0')
-        return true; /* no token configured = open access */
+typedef enum {
+    WS_AUTH_OK = 0,    /* valid credentials, or auth explicitly disabled */
+    WS_AUTH_NO_CREDS,  /* no credentials supplied */
+    WS_AUTH_BAD,       /* credentials supplied and wrong */
+} ws_auth_result_t;
+
+static ws_auth_result_t auth_eval(httpd_req_t* req) {
+    /* Explicit opt-out (auth_off in NVS) loads as an empty token. The
+     * token-unavailable failure mode does NOT take this branch: that
+     * state fails closed below. */
+    if (!s_token_unavailable && s_auth_token[0] == '\0')
+        return WS_AUTH_OK;
 
     /* Preferred path: Authorization: Bearer <token> */
     size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
@@ -112,12 +148,14 @@ static bool auth_check(httpd_req_t* req) {
             if (strncmp(hdr, prefix, prefix_len) == 0) {
                 const char* tok = hdr + prefix_len;
                 size_t tok_len = strnlen(tok, AUTH_TOKEN_MAX - 1);
-                bool ok = token_matches_constant_time(tok, tok_len);
+                bool ok = !s_token_unavailable && token_matches_constant_time(tok, tok_len);
                 free(hdr);
-                return ok;
+                return ok ? WS_AUTH_OK : WS_AUTH_BAD;
             }
         }
         free(hdr);
+        /* An Authorization header that is not Bearer counts as bad creds */
+        return WS_AUTH_BAD;
     }
 
     /* Legacy compatibility: ?token=... (deprecated due to URL leakage) */
@@ -128,19 +166,20 @@ static bool auth_check(httpd_req_t* req) {
         if (query && httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK &&
             httpd_query_key_value(query, "token", token, sizeof(token)) == ESP_OK) {
             size_t tok_len = strnlen(token, AUTH_TOKEN_MAX - 1);
-            bool ok = token_matches_constant_time(token, tok_len);
+            bool ok = !s_token_unavailable && token_matches_constant_time(token, tok_len);
             if (ok) {
                 ESP_LOGW(TAG,
                          "WS auth via query param is deprecated; use Authorization: Bearer header");
             }
             free(query);
-            return ok;
+            return ok ? WS_AUTH_OK : WS_AUTH_BAD;
         }
         free(query);
     }
 
-    return false;
+    return WS_AUTH_NO_CREDS;
 }
+
 
 static esp_err_t send_401_http(httpd_req_t* req) {
     httpd_resp_set_status(req, "401 Unauthorized");
@@ -213,7 +252,7 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
 
     client_count = s_client_count;
     for (int i = 0; i < client_count; i++) {
-        client_fds[i] = s_client_fds[i];
+        client_fds[i] = s_clients[i].fd;
     }
     taskEXIT_CRITICAL(&s_client_lock);
 
@@ -260,17 +299,24 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
 
 static esp_err_t ws_handler(httpd_req_t* req) {
     if (req->method == HTTP_GET) {
-        /* Auth check on WebSocket upgrade.
+        /* Auth evaluation on WebSocket upgrade.
          * Note: ESP-IDF has already sent 101 Switching Protocols at this
-         * point, so we must reject via WS close frame, not HTTP 401. */
-        if (!auth_check(req)) {
-            ESP_LOGW(TAG, "WS auth failed — sending close frame");
+         * point, so rejections use a WS close frame, not HTTP status.
+         *
+         * Policy (auth required by default):
+         *   - wrong credentials: reject (close 1008)
+         *   - no credentials: connection allowed but UNAUTHENTICATED;
+         *     rpc_dispatch_authed() limits it to the pairing allowlist
+         *   - valid credentials (or explicit auth opt-out): full access */
+        ws_auth_result_t ar = auth_eval(req);
+        if (ar == WS_AUTH_BAD) {
+            ESP_LOGW(TAG, "WS auth failed (bad credentials), sending close frame");
             return send_ws_auth_reject(req);
         }
-        /* Handshake: record the new client */
         int fd = httpd_req_to_sockfd(req);
-        client_add(fd);
-        ESP_LOGI(TAG, "WS handshake fd=%d", fd);
+        client_add(fd, ar == WS_AUTH_OK);
+        ESP_LOGI(TAG, "WS handshake fd=%d %s", fd,
+                 ar == WS_AUTH_OK ? "(authenticated)" : "(unauthenticated, allowlist only)");
         return ESP_OK;
     }
 
@@ -352,7 +398,8 @@ static esp_err_t ws_handler(httpd_req_t* req) {
         return ESP_ERR_NO_MEM;
     }
 
-    int resp_len = rpc_dispatch((char*)buf, resp_buf, WS_BUF_SIZE);
+    int resp_len = rpc_dispatch_authed((char*)buf, resp_buf, WS_BUF_SIZE,
+                                       client_is_authed(httpd_req_to_sockfd(req)));
     free(buf);
 
     if (resp_len > 0) {
@@ -460,7 +507,7 @@ static int url_decode(char* dst, const char* src, int src_len) {
 }
 
 static esp_err_t config_post_handler(httpd_req_t* req) {
-    if (!auth_check(req)) {
+    if (auth_eval(req) != WS_AUTH_OK) {
         ESP_LOGW(TAG, "Config POST auth failed");
         return send_401_http(req);
     }
@@ -562,16 +609,26 @@ static const httpd_uri_t ws_uri = {
 void ws_server_load_token(void) {
     int rc = identity_ensure_ws_auth_token(s_auth_token, sizeof(s_auth_token));
     if (rc < 0) {
+        /* NVS could not provide or persist a token. Fail CLOSED: no
+         * credentials can match, so only the pairing allowlist is
+         * reachable until the token store recovers. */
         s_auth_token[0] = '\0';
+        s_token_unavailable = true;
+        ESP_LOGE(TAG, "Auth token unavailable (NVS error); RPC limited to pairing allowlist");
+        return;
     }
+    s_token_unavailable = false;
     if (s_auth_token[0] != '\0') {
-        ESP_LOGI(TAG, "WS auth enabled (token configured)");
+        ESP_LOGI(TAG, "RPC auth enabled (per-device token)");
     } else {
-        ESP_LOGI(TAG, "WS auth disabled (open access — set token to enable)");
+        ESP_LOGW(TAG, "RPC auth disabled by explicit opt-out (open access)");
     }
 }
 
+
 const char* ws_server_get_token(void) { return s_auth_token; }
+
+bool ws_server_auth_disabled(void) { return !s_token_unavailable && s_auth_token[0] == '\0'; }
 
 int ws_server_start(void) {
     ws_server_load_token();

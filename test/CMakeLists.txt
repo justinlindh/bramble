@@ -448,6 +448,7 @@ add_executable(test_rpc_dispatcher
     stubs/esp_stubs.c
     stubs/cJSON.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )
 target_include_directories(test_rpc_dispatcher PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -464,6 +465,7 @@ add_executable(test_rpc_methods
     stubs/esp_stubs.c
     stubs/cJSON.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )
 target_include_directories(test_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -481,6 +483,7 @@ add_executable(test_rpc_add_channel_contract
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -492,6 +495,7 @@ add_executable(test_rpc_get_config_channel_export
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -503,6 +507,7 @@ add_executable(test_mesh_broadcast_delivery
     stubs/cJSON.c
     stubs/rpc_methods_link_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -743,6 +748,7 @@ add_executable(test_rpc_methods_firmware
     stubs/rpc_methods_test_stubs.c
     stubs/wifi_ws_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
@@ -812,13 +818,15 @@ target_compile_definitions(test_gps PRIVATE
 )
 target_link_libraries(test_gps m)
 
-# WS auth constant-time compare tests
+# WS auth tests: constant-time compare + unauthenticated allowlist policy
 add_executable(test_ws_auth
     test_ws_auth.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
 )
 target_include_directories(test_ws_auth PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
 )
 
 # Audio module behavior tests (NVS + I2S lifecycle with stubs)
@@ -900,6 +908,7 @@ add_executable(test_host_rpc_methods
     stubs/cJSON.c
     stubs/rpc_methods_test_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c

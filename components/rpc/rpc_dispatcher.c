@@ -1,4 +1,5 @@
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include <stdlib.h>
@@ -142,12 +143,18 @@ static const char* error_message_for_code(int code) {
         return "Rate limited";
     case RPC_ERR_NOT_SUPPORTED:
         return "Not supported";
+    case RPC_ERR_UNAUTHORIZED:
+        return "Unauthorized";
     default:
         return "Error";
     }
 }
 
 int rpc_dispatch(const char* json_in, char* json_out, size_t out_len) {
+    return rpc_dispatch_authed(json_in, json_out, out_len, true);
+}
+
+int rpc_dispatch_authed(const char* json_in, char* json_out, size_t out_len, bool authenticated) {
     cJSON* req = cJSON_Parse(json_in);
     if (!req) {
         ESP_LOGW(TAG, "Failed to parse JSON-RPC request");
@@ -176,6 +183,16 @@ int rpc_dispatch(const char* json_in, char* json_out, size_t out_len) {
 
     /* Extract id */
     cJSON* id = cJSON_GetObjectItem(req, "id");
+
+    /* Auth gate BEFORE the method lookup: an unauthenticated caller gets
+     * the same "Unauthorized" answer whether the method exists or not, so
+     * the method table cannot be enumerated without the token. */
+    if (!rpc_auth_method_allowed(method->valuestring, authenticated)) {
+        ESP_LOGW(TAG, "Unauthorized call to '%s' rejected", method->valuestring);
+        int ret = format_error(id, RPC_ERR_UNAUTHORIZED, "Unauthorized", json_out, out_len);
+        cJSON_Delete(req);
+        return ret;
+    }
 
     /* Extract params */
     cJSON* params = cJSON_GetObjectItem(req, "params");

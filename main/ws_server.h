@@ -5,6 +5,12 @@
 void ws_server_load_token(void);
 const char *ws_server_get_token(void);
 
+/* True only when auth was EXPLICITLY disabled (empty token set via an
+ * authenticated bramble.setAuthToken call). A missing or unreadable token
+ * is NOT open access; that state fails closed. Shared by the BLE transport
+ * so both network transports apply the same policy. */
+bool ws_server_auth_disabled(void);
+
 /* Start the WebSocket server on port 80.
  * Incoming WS frames on /ws are routed to rpc_dispatch().
  * Registers as RPC notification transport to push to all clients.
