@@ -19,5 +19,15 @@
  * mesh state or mutates anything.
  */
 
+/* Minimum auth token length in bytes (entropy floor, SEC-H3).
+ * Device-generated tokens are 32 hex chars (128 bits); user-supplied
+ * tokens must be at least 16 bytes. */
+#define RPC_AUTH_TOKEN_MIN_LEN 16
+
 /* True if `method` may be dispatched at this auth level. */
 bool rpc_auth_method_allowed(const char* method, bool authenticated);
+
+/* True if a user-supplied token length satisfies the entropy floor.
+ * Zero length is allowed because an empty token is the explicit
+ * "disable auth" opt-out, not a weak credential. */
+bool rpc_auth_token_len_ok(size_t len);
