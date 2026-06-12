@@ -38,6 +38,7 @@ webapp/node_modules/
 webapp/dist/
 webapp/.vite/
 webapp/e2e-screenshots/
+webapp/public/web-flasher/
 
 # Local helper state
 .flash-targets.json
