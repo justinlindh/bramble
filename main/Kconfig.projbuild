@@ -56,6 +56,15 @@ menu "Bramble Configuration"
 
     endchoice
 
+    config BRAMBLE_OTA_ALLOW_HTTP
+        bool "Allow plain-HTTP OTA downloads (dev only)"
+        default n
+        help
+            Compile in the plain-HTTP OTA download path so a LAN dev server
+            (python3 -m http.server) can feed the device. Image signature
+            verification still applies; only transport confidentiality and
+            server authentication are lost. Never enable on release builds.
+
     menu "Bramble Message Persistence"
         config BRAMBLE_MSG_PERSIST_ENABLED
             bool "Enable message persistence to SPIFFS"

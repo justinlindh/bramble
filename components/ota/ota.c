@@ -1,5 +1,7 @@
 #include "ota.h"
 
+#include "sdkconfig.h"
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>

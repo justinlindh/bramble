@@ -1,5 +1,7 @@
 #include "ota_origin.h"
 
+#include "sdkconfig.h"
+
 #include <string.h>
 
 #include "esp_log.h"
