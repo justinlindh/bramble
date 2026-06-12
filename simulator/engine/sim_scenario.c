@@ -67,6 +67,34 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
     if (speed && cJSON_IsNumber(speed))
         radio->propagation_speed_ms_per_unit = (float)speed->valuedouble;
 
+    /* LoRa PHY + collision model overrides (defaults mirror the firmware's
+     * long-range profile; see radio_config_init) */
+    cJSON* sf = cJSON_GetObjectItem(radio_json, "sf");
+    cJSON* bw = cJSON_GetObjectItem(radio_json, "bw_hz");
+    cJSON* cr = cJSON_GetObjectItem(radio_json, "cr");
+    cJSON* txp = cJSON_GetObjectItem(radio_json, "tx_power_dbm");
+    cJSON* cap = cJSON_GetObjectItem(radio_json, "capture_db");
+    cJSON* ple = cJSON_GetObjectItem(radio_json, "path_loss_exp");
+    cJSON* col = cJSON_GetObjectItem(radio_json, "collisions");
+    cJSON* lbt = cJSON_GetObjectItem(radio_json, "lbt");
+
+    if (sf && cJSON_IsNumber(sf))
+        radio->sf = (uint8_t)sf->valuedouble;
+    if (bw && cJSON_IsNumber(bw))
+        radio->bw_hz = (uint32_t)bw->valuedouble;
+    if (cr && cJSON_IsNumber(cr))
+        radio->cr = (uint8_t)cr->valuedouble;
+    if (txp && cJSON_IsNumber(txp))
+        radio->tx_power_dbm = (int8_t)txp->valuedouble;
+    if (cap && cJSON_IsNumber(cap))
+        radio->capture_db = (float)cap->valuedouble;
+    if (ple && cJSON_IsNumber(ple))
+        radio->path_loss_exp = (float)ple->valuedouble;
+    if (col && cJSON_IsBool(col))
+        radio->collisions_enabled = cJSON_IsTrue(col);
+    if (lbt && cJSON_IsBool(lbt))
+        radio->lbt_enabled = cJSON_IsTrue(lbt);
+
     return true;
 }
 
@@ -218,13 +246,9 @@ static bool load_stochastic(cJSON* root, scenario_t* scenario) {
         node_count = MAX_NODES;
 
     /* ── Radio config ──────────────────────────────────────────────────── */
-    radio_config_init(scenario->radio);
+    load_radio(radio_json, scenario->radio);
     if (radio_json && cJSON_IsObject(radio_json)) {
-        cJSON* range = cJSON_GetObjectItem(radio_json, "range");
         cJSON* loss_range = cJSON_GetObjectItem(radio_json, "loss_pct_range");
-
-        if (range && cJSON_IsNumber(range))
-            scenario->radio->range = (float)range->valuedouble;
 
         if (loss_range && cJSON_IsArray(loss_range)) {
             cJSON* lo = cJSON_GetArrayItem(loss_range, 0);

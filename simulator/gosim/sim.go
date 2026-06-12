@@ -14,6 +14,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,10 @@ import (
 
 	"bramble-sim/websocket"
 )
+
+// disableCollisionModel forces the collision/half-duplex model off for every
+// loaded scenario (set by the --no-collisions CLI flag).
+var disableCollisionModel bool
 
 // SimState represents the simulation state machine.
 type SimState int
@@ -432,6 +437,13 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
 		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
 		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
+		"collisions":            uint64(s.metrics.collisions),
+		"half_duplex_drops":     uint64(s.metrics.half_duplex_drops),
+		"capture_wins":          uint64(s.metrics.capture_wins),
+		"lbt_backoffs":          uint64(s.metrics.lbt_backoffs),
+		"receptions_ok":         uint64(s.metrics.receptions_ok),
+		"channel_log_overflow":  uint64(s.radio.channel.overflow_drops),
+		"airtime_total_ms":      uint64(s.metrics.airtime_total_us) / 1000,
 		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":         metricsDeliveryRate(&s.metrics),
 	})
@@ -477,6 +489,9 @@ func (s *Sim) cmdLoad(cmd Command) {
 
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)
+	if disableCollisionModel {
+		s.radio.collisions_enabled = C.bool(false)
+	}
 	s.duration = uint64(scenario.metadata.duration_us)
 	s.simTime = 0
 	s.speed = 1.0
@@ -516,6 +531,10 @@ func (s *Sim) cmdLoad(cmd Command) {
 		"type":        "config",
 		"radio_range": s.radio._range,
 		"duration_us": s.duration,
+		"collisions":  bool(s.radio.collisions_enabled),
+		"sf":          uint8(s.radio.sf),
+		"bw_hz":       uint32(s.radio.bw_hz),
+		"cr":          uint8(s.radio.cr),
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ready"})
 
@@ -707,6 +726,38 @@ func (s *Sim) complete() {
 		undelivered = sent - delivered
 	}
 
+	// Per-node airtime distribution (real time-on-air transmitted)
+	var perNodeMs []uint64
+	count := nodeCount(&s.nodes)
+	for i := 0; i < count; i++ {
+		node := C.node_array_get(&s.nodes, C.int(i))
+		if node != nil {
+			perNodeMs = append(perNodeMs, uint64(node.airtime_tx_us)/1000)
+		}
+	}
+	sort.Slice(perNodeMs, func(i, j int) bool { return perNodeMs[i] < perNodeMs[j] })
+	pct := func(p float64) uint64 {
+		if len(perNodeMs) == 0 {
+			return 0
+		}
+		idx := int(p * float64(len(perNodeMs)-1))
+		return perNodeMs[idx]
+	}
+	channelUtilPct := 0.0
+	if s.duration > 0 {
+		channelUtilPct = float64(s.metrics.airtime_total_us) / float64(s.duration) * 100.0
+	}
+	s.emitJSON(map[string]interface{}{
+		"type":             "airtime_distribution",
+		"per_node_ms":      perNodeMs,
+		"min_ms":           pct(0),
+		"p50_ms":           pct(0.5),
+		"p95_ms":           pct(0.95),
+		"max_ms":           pct(1),
+		"total_ms":         uint64(s.metrics.airtime_total_us) / 1000,
+		"channel_util_pct": channelUtilPct,
+	})
+
 	s.emitJSON(map[string]interface{}{
 		"type":                  "final_metrics",
 		"total_packets":         uint64(s.metrics.total_packets),
@@ -727,6 +778,14 @@ func (s *Sim) complete() {
 		"beacons_sent":          uint64(s.metrics.beacons_sent),
 		"rreqs_sent":            uint64(s.metrics.rreqs_sent),
 		"rreps_sent":            uint64(s.metrics.rreps_sent),
+		"collisions":            uint64(s.metrics.collisions),
+		"half_duplex_drops":     uint64(s.metrics.half_duplex_drops),
+		"capture_wins":          uint64(s.metrics.capture_wins),
+		"lbt_backoffs":          uint64(s.metrics.lbt_backoffs),
+		"receptions_ok":         uint64(s.metrics.receptions_ok),
+		"channel_log_overflow":  uint64(s.radio.channel.overflow_drops),
+		"airtime_total_ms":      uint64(s.metrics.airtime_total_us) / 1000,
+		"channel_util_pct":      channelUtilPct,
 		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":         metricsDeliveryRate(&s.metrics),
 		"control_airtime_pct":   metricsControlAirtimePct(&s.metrics),

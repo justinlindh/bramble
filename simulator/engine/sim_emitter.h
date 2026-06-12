@@ -3,8 +3,12 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* JSON event emitters - each writes a single JSON line and flushes */
+
+/* Suppress all emit_* output (used by unit tests driving the radio model) */
+void sim_emitter_set_quiet(bool quiet);
 
 void emit_packet_sent(FILE* out, uint64_t timestamp_us, const char* node_id, uint32_t dest_addr,
                       uint16_t size);

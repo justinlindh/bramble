@@ -10,13 +10,20 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
+#include "sim_random.h"
 
 #define MAX_NODES 256
 #define NODE_ID_LEN 16
 
-/* Tick intervals (microseconds) */
-#define NODE_BEACON_INTERVAL_BASE_US 15000000ULL   /* 15 s baseline */
-#define NODE_BEACON_INTERVAL_STABLE_US 60000000ULL /* 60 s for stable/large meshes */
+/* Tick intervals (microseconds). Beacon cadence mirrors the firmware's
+ * beacon policy defaults (main/mesh_task.c): base 60 s, churn min 30 s,
+ * dense max 120 s, +-5 s per-beacon jitter (BEACON_JITTER_MS). The firmware
+ * default is FIXED 60 s; the adaptive policy is opt-in there, and the sim
+ * keeps it enabled to exercise it, with firmware-matching constants. */
+#define NODE_BEACON_INTERVAL_BASE_US 60000000ULL   /* 60 s firmware base */
+#define NODE_BEACON_INTERVAL_CHURN_US 30000000ULL  /* 30 s firmware churn min */
+#define NODE_BEACON_INTERVAL_DENSE_US 120000000ULL /* 120 s firmware dense max */
+#define NODE_BEACON_JITTER_US 5000000ULL           /* +-5 s firmware BEACON_JITTER_MS */
 #define NODE_NEIGHBOR_PURGE_US 60000000ULL         /* 60 s */
 #define NODE_ROUTE_MAINT_US 60000000ULL            /* 60 s */
 #define NODE_DISCOVERY_CHECK_US 5000000ULL         /*  5 s */
@@ -93,6 +100,11 @@ typedef struct {
     uint8_t neighbor_history_idx;                         /* Current index in rolling window */
     uint64_t last_mode_transition_us;                     /* When did we last change mode? */
     bool adaptive_enabled;                                /* Feature flag for adaptive policy */
+    uint64_t next_beacon_due_us; /* Jittered absolute due time of the next beacon */
+    pcg32_state_t beacon_rng;    /* Per-node PRNG for beacon jitter (seeded from addr) */
+
+    /* Half-duplex radio state: end of this node's in-progress transmission */
+    uint64_t tx_busy_until_us;
 
     /* Statistics */
     uint64_t packets_sent;
@@ -100,6 +112,7 @@ typedef struct {
     uint64_t packets_forwarded;
     uint64_t packets_originated;
     uint64_t beacons_sent;
+    uint64_t airtime_tx_us; /* cumulative real time-on-air transmitted */
 } sim_node_t;
 
 typedef struct {
