@@ -97,6 +97,16 @@ void test_path_rejects_foreign_absolute_urls(void) {
     TEST_ASSERT_FALSE(ota_url_path_valid("HtTpS://evil.com/bramble.bin"));
 }
 
+void test_path_rejects_high_bit_and_utf8(void) {
+    /* The path charset is isalnum + ._+-/ so any high-bit byte (and thus any
+     * multi-byte UTF-8 sequence) must be rejected, not silently passed to
+     * the HTTP client. */
+    TEST_ASSERT_FALSE(ota_url_path_valid("stable/v1/brÃ¤mble.bin"));
+    TEST_ASSERT_FALSE(ota_url_path_valid("stable/â®/bramble.bin"));
+    TEST_ASSERT_FALSE(ota_url_path_valid("ÿ"));
+    TEST_ASSERT_FALSE(ota_url_path_valid("stable/v1/bin"));
+}
+
 void test_path_rejects_traversal(void) {
     TEST_ASSERT_FALSE(ota_url_path_valid(".."));
     TEST_ASSERT_FALSE(ota_url_path_valid("../secrets"));
@@ -203,6 +213,7 @@ int main(void) {
     RUN_TEST(test_path_rejects_absolute_and_protocol_relative);
     RUN_TEST(test_path_rejects_foreign_absolute_urls);
     RUN_TEST(test_path_rejects_traversal);
+    RUN_TEST(test_path_rejects_high_bit_and_utf8);
     RUN_TEST(test_path_allows_dotted_filenames_but_not_dot_segments);
     RUN_TEST(test_path_rejects_percent_encoding);
     RUN_TEST(test_path_rejects_query_fragment_userinfo_backslash);

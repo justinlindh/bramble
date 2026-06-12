@@ -95,20 +95,31 @@ a fleet-wide trust anchor.
 
 ## 4. Key rotation
 
-The Secure Boot V2 signature sector holds up to 3 signature blocks, and the
-running app trusts any key present in its own sector:
+In the current eFuse-less mode, the release key CANNOT be rotated over OTA.
+IDF verifies exactly one signature block in this mode: under
+`CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`,
+`esp_secure_boot_verify_sbv2_signature_block` reads only block 0 of both the
+running app (the trust anchor) and the candidate image
+(`secure_boot_signatures_app.c`, `secure_boot_num_blocks = 1`), and the IDF
+documentation states that multiple trusted keys require full Secure Boot.
+Appending a second signature block does nothing; a release signed with a new
+key in block 0 is rejected by every deployed device.
 
-1. Generate the new keypair offline.
-2. Ship a transitional release signed with the old key, with the new key's
-   signature appended (`espsecure.py sign_data --version 2
-   --append_signatures`). Old-key devices verify and install it; once
-   running, they trust both keys.
-3. Switch the `OTA_SIGNING_KEY` secret to the new key and replace
-   `keys/ota-release-pub.pem`. Subsequent releases are new-key-only.
-4. Retire the old key once the fleet has confirmed the transitional release.
+What that means operationally:
 
-Compromise response is the same flow on an emergency timeline; devices the
-attacker already reflashed need physical recovery.
+- **Routine rotation**: not available over OTA. Rotating the release key
+  means USB-reflashing every device with an image signed by the new key, or
+  doing the rotation as part of the hardware Secure Boot migration (whose
+  eFuse key-digest slots support revocation and multiple keys).
+- **Key compromise**: treat the fleet as USB-recovery-only. Generate a new
+  keypair offline, switch the `OTA_SIGNING_KEY` secret and
+  `keys/ota-release-pub.pem`, take the OTA origin offline so the attacker
+  cannot push signed-with-stolen-key images, and physically reflash each
+  device. Devices the attacker already reflashed need physical recovery in
+  any scheme.
+
+This is the sharpest operational limitation of the eFuse-less mode and a
+primary motivation for the hardware Secure Boot migration.
 
 ## 5. CI pipeline
 

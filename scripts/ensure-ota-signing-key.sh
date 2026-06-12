@@ -21,7 +21,19 @@ log() {
   echo "[ensure-ota-signing-key] $*"
 }
 
-if [[ -f "$KEY_PATH" ]]; then
+# In CI, never trust a pre-existing key file: a crashed prior run can leave
+# one behind (the workflow scrub step is if: always(), which a runner crash
+# skips). Reinstall from the secret when provided, refuse otherwise.
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+  if [[ -f "$KEY_PATH" && -z "${BRAMBLE_OTA_SIGNING_KEY:-}" ]]; then
+    if [[ "${BRAMBLE_OTA_ALLOW_GENERATED_KEY:-}" != "1" ]]; then
+      echo "[ensure-ota-signing-key] ERROR: unexpected pre-existing signing key in CI at $KEY_PATH (stale from a crashed run?). Remove it or provide BRAMBLE_OTA_SIGNING_KEY." >&2
+      exit 1
+    fi
+    log "CI smoke build: replacing unexpected pre-existing key with a fresh throwaway"
+    rm -f "$KEY_PATH"
+  fi
+elif [[ -f "$KEY_PATH" ]]; then
   log "Signing key present: $KEY_PATH"
   exit 0
 fi

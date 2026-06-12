@@ -97,7 +97,16 @@ int ota_rollback_gate(const char* new_version, bool allow_downgrade) {
     }
 
     /* Deliberate downgrade: lower the floor so the device is not stranded
-     * under the old floor after rebooting into the older firmware. */
+     * under the old floor after rebooting into the older firmware.
+     *
+     * Known window, accepted: this runs at gate time, BEFORE signature
+     * verification, against the unverified image descriptor. A failed
+     * downgrade therefore leaves the floor lowered until the next boot of
+     * the (unchanged) running image re-raises it via
+     * ota_rollback_note_boot. Reaching this path at all requires the
+     * device auth token (allow_downgrade rides an authenticated RPC), so
+     * the exposure is a token holder lowering their own floor, which they
+     * can do deliberately anyway. */
     if (write_floor(new_version) == 0) {
         ESP_LOGW(TAG, "Deliberate downgrade: floor lowered from %s to %s", floor_str, new_version);
     } else {
