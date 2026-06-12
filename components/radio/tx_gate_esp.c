@@ -6,6 +6,7 @@
  */
 #include "tx_gate.h"
 #include "radio.h"
+#include "radio_internal.h"
 
 #include <string.h>
 
@@ -21,7 +22,7 @@ static SemaphoreHandle_t s_gate_mutex;
 
 static bool ops_channel_busy(void) { return radio_cad_check(); }
 
-static int ops_transmit(const uint8_t* data, uint8_t len) { return radio_transmit(data, len); }
+static int ops_transmit(const uint8_t* data, uint8_t len) { return radio_transmit_raw(data, len); }
 
 static void ops_get_toa_params(uint8_t* sf, uint32_t* bw_hz, uint8_t* cr) {
     radio_config_t cfg;
