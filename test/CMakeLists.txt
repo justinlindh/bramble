@@ -187,6 +187,21 @@ target_include_directories(test_tx_gate PRIVATE
 target_link_libraries(test_tx_gate m)
 add_test(NAME test_tx_gate COMMAND test_tx_gate)
 
+# Retry-storm budget tests (DES-6)
+add_executable(test_tx_retry_budget
+    test_tx_retry_budget.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_tx_retry_budget PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+target_link_libraries(test_tx_retry_budget m)
+add_test(NAME test_tx_retry_budget COMMAND test_tx_retry_budget)
+
 # Duty-cycle cap tests (DES-8)
 add_executable(test_duty_cycle
     test_duty_cycle.c
