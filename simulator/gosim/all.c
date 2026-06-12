@@ -6,6 +6,10 @@
 /* ESP stubs first */
 #include "../../test/stubs/esp_stubs.h"
 
+/* No-op NVS stubs for components that persist settings (location.c) */
+#define NVS_STUBS_ENABLE 1
+#include "../../test/stubs/esp_stubs.c"
+
 /* Simulator modules */
 #include "../engine/sim_event.c"
 #include "../engine/sim_random.c"
