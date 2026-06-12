@@ -2,6 +2,7 @@
 #include "esp_app_desc.h"
 #include "util.h"
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "mesh_task.h"
 #include "msg_store.h"
 #include "airtime_budget.h"
@@ -661,16 +662,27 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
     if (strlen(val) >= 128) {
         return RPC_ERR_INVALID_PARAMS;
     }
+    /* Entropy floor (SEC-H3): a guessable token is worse than knowing you
+     * have none. Empty stays legal as the explicit opt-out. */
+    if (!rpc_auth_token_len_ok(strlen(val))) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
 
     nvs_handle_t h;
     if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK) {
         return RPC_ERR_INTERNAL;
     }
     if (val[0] == '\0') {
-        /* Clear token → open access */
+        /* Empty token = explicit opt-out: persist the auth_off flag so the
+         * first-boot generator does not re-create a token on next boot.
+         * Reaching this handler already required auth, so only a token
+         * holder (or serial/physical access) can open the device up. */
+        nvs_set_u8(h, NVS_KEY_AUTH_OFF, 1);
         nvs_erase_key(h, NVS_KEY_AUTH_TOKEN);
+        ESP_LOGW(TAG, "RPC auth explicitly disabled via setAuthToken; device is open access");
     } else {
-        /* Set token → auth enabled */
+        /* Set token and clear the opt-out flag */
+        nvs_set_u8(h, NVS_KEY_AUTH_OFF, 0);
         nvs_set_str(h, NVS_KEY_AUTH_TOKEN, val);
     }
     nvs_commit(h);
@@ -678,6 +690,99 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
 
     ws_server_load_token();  /* reload immediately */
     cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+/* bramble.setAllowedOrigins: params {"origins":["https://app.example.com", ...]}
+ * Persists the extra WS Origin allowlist (authenticated callers only; the
+ * dispatcher's unauth allowlist never includes this method). Origins are
+ * stored as a comma-separated list, so entries must not contain commas or
+ * spaces; full origins (scheme://host[:port]) never do. */
+static int rpc_set_allowed_origins(const cJSON *params, cJSON *result)
+{
+    const cJSON *origins_j = cJSON_GetObjectItem(params, "origins");
+    if (!origins_j || !cJSON_IsArray(origins_j)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    char joined[256] = {0};
+    size_t used = 0;
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, origins_j) {
+        if (!cJSON_IsString(entry) || entry->valuestring[0] == '\0') {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        const char *o = entry->valuestring;
+        size_t olen = strlen(o);
+        if (strchr(o, ',') || strchr(o, ' ')) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        /* Entries are full origins ("scheme://host[:port]") or the
+         * literal "null" opt-in for sandboxed/file pages. */
+        if (strcmp(o, "null") != 0 && strstr(o, "://") == NULL) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        if (used + olen + (used ? 1 : 0) >= sizeof(joined)) {
+            return RPC_ERR_INVALID_PARAMS; /* list too long for NVS slot */
+        }
+        if (used) {
+            joined[used++] = ',';
+        }
+        memcpy(joined + used, o, olen);
+        used += olen;
+    }
+    joined[used] = '\0';
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK) {
+        return RPC_ERR_INTERNAL;
+    }
+    esp_err_t err;
+    if (used == 0) {
+        err = nvs_erase_key(h, NVS_KEY_WS_ORIGINS);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+    } else {
+        err = nvs_set_str(h, NVS_KEY_WS_ORIGINS, joined);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    if (err != ESP_OK) {
+        return RPC_ERR_INTERNAL;
+    }
+
+    ws_server_load_origins(); /* apply immediately */
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+static int rpc_get_allowed_origins(const cJSON *params, cJSON *result)
+{
+    (void)params;
+    cJSON *arr = cJSON_AddArrayToObject(result, "origins");
+    const char *p = ws_server_get_extra_origins();
+    while (p && *p != '\0') {
+        while (*p == ',') {
+            p++;
+        }
+        size_t len = 0;
+        while (p[len] != '\0' && p[len] != ',') {
+            len++;
+        }
+        if (len > 0) {
+            char buf[256];
+            if (len >= sizeof(buf)) {
+                len = sizeof(buf) - 1;
+            }
+            memcpy(buf, p, len);
+            buf[len] = '\0';
+            cJSON_AddItemToArray(arr, cJSON_CreateString(buf));
+        }
+        p += len;
+    }
     return 0;
 }
 
@@ -1997,6 +2102,8 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setNodeName",          handle_set_node_name);
     rpc_register("bramble.setAuthToken",         rpc_set_auth_token);
     rpc_register("bramble.getAuthToken",         rpc_get_auth_token);
+    rpc_register("bramble.setAllowedOrigins",    rpc_set_allowed_origins);
+    rpc_register("bramble.getAllowedOrigins",    rpc_get_allowed_origins);
     rpc_register("bramble.addChannel",           handle_add_channel);
     rpc_register("bramble.removeChannel",        handle_remove_channel);
     rpc_register("bramble.setDefaultChannel",    handle_set_default_channel);

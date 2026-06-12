@@ -9,11 +9,17 @@ Bramble JSON-RPC over WebSocket uses the `/ws` endpoint.
 
 ### Authentication
 
-When WS auth is enabled, clients should send:
+Auth is required by default: each device generates a token on first boot
+(retrieve it with `bramble pair` over serial; see `docs/auth.md`). Clients
+should send:
 
 - `Authorization: Bearer <token>`
 
-Legacy `?token=<token>` query auth is still accepted for compatibility, but is deprecated and logs a warning because URLs can leak via logs/history.
+`?token=<token>` query auth is the supported mechanism for browser WebSocket clients, which cannot set request headers. Non-browser clients should use the `Authorization` header instead, because URLs can leak via logs/history.
+
+Connections without credentials may call only `bramble.ping` and `bramble.getVersion`; every other method returns error `-1005` (`Unauthorized`). Wrong credentials close the WebSocket with code 1008.
+
+Browser connections without a valid token are additionally subject to an `Origin` allowlist: same-origin always passes; other origins must be added via `bramble.setAllowedOrigins`. Presenting the valid token bypasses the Origin check.
 
 ## Location policy RPC contract (hybrid privacy-first)
 
@@ -355,21 +361,40 @@ All methods below are registered in firmware via `rpc_register(...)`.
 ### Auth
 
 #### `bramble.setAuthToken`
-- Description: Sets/clears WebSocket auth bearer token.
-- Params: `token` (string; empty to clear).
+- Description: Sets or clears the RPC auth bearer token (WS and BLE).
+- Params: `token` (string; minimum 16 bytes; empty to disable auth as a persisted explicit opt-out).
 - Response fields: `ok` (bool).
+- Errors: `-32602` for non-empty tokens shorter than 16 bytes or 128 bytes and longer.
 - Example:
 ```json
-{"jsonrpc":"2.0","id":50,"method":"bramble.setAuthToken","params":{"token":"my-secret-token"}}
+{"jsonrpc":"2.0","id":50,"method":"bramble.setAuthToken","params":{"token":"my-secret-token-16b"}}
 ```
 
 #### `bramble.getAuthToken`
 - Description: Returns currently configured auth token.
 - Params: none.
-- Response fields: `token` (string).
+- Response fields: `token` (string), `enabled` (bool).
 - Example:
 ```json
 {"jsonrpc":"2.0","id":51,"method":"bramble.getAuthToken","params":{}}
+```
+
+#### `bramble.setAllowedOrigins`
+- Description: Replaces the WebSocket `Origin` allowlist applied to tokenless connections (extra origins beyond same-origin, which always passes).
+- Params: `origins` (array of full-origin strings, e.g. `"https://app.example.com"`; empty array clears the list; entries must contain `://` or be the literal `"null"`).
+- Response fields: `ok` (bool).
+- Example:
+```json
+{"jsonrpc":"2.0","id":52,"method":"bramble.setAllowedOrigins","params":{"origins":["https://app.example.com"]}}
+```
+
+#### `bramble.getAllowedOrigins`
+- Description: Returns the configured extra origins.
+- Params: none.
+- Response fields: `origins` (array of strings).
+- Example:
+```json
+{"jsonrpc":"2.0","id":53,"method":"bramble.getAllowedOrigins","params":{}}
 ```
 
 ### Location

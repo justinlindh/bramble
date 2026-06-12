@@ -178,6 +178,84 @@ void test_dispatch_preserves_nested_location_policy_arrays(void) {
     cJSON_Delete(resp);
 }
 
+/* ── rpc_dispatch_authed: unauthenticated allowlist gating ──────────── */
+
+static int mock_version_handler(const cJSON *params, cJSON *result) {
+    (void)params;
+    cJSON_AddStringToObject(result, "firmware_version", "test");
+    return 0;
+}
+
+void test_unauth_dispatch_allowlisted_method_succeeds(void) {
+    rpc_register("bramble.getVersion", mock_version_handler);
+
+    char response[1024];
+    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.getVersion\"}";
+    int len = rpc_dispatch_authed(request, response, sizeof(response), false);
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    cJSON *resp = parse_response(response);
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
+    TEST_ASSERT_NULL(cJSON_GetObjectItem(resp, "error"));
+    cJSON_Delete(resp);
+}
+
+void test_unauth_dispatch_other_method_unauthorized(void) {
+    rpc_register("bramble.getMessages", mock_version_handler);
+
+    char response[1024];
+    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"bramble.getMessages\"}";
+    int len = rpc_dispatch_authed(request, response, sizeof(response), false);
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    cJSON *resp = parse_response(response);
+    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL(-1005, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(resp);
+}
+
+void test_unauth_dispatch_unknown_method_unauthorized_not_not_found(void) {
+    /* No method-table enumeration without auth: unknown methods answer
+     * Unauthorized (-1005), not Method-not-found (-32601). */
+    char response[1024];
+    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.nope\"}";
+    int len = rpc_dispatch_authed(request, response, sizeof(response), false);
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    cJSON *resp = parse_response(response);
+    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL(-1005, cJSON_GetObjectItem(err, "code")->valueint);
+    cJSON_Delete(resp);
+}
+
+void test_authed_dispatch_full_access(void) {
+    rpc_register("bramble.getMessages", mock_version_handler);
+
+    char response[1024];
+    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"bramble.getMessages\"}";
+    int len = rpc_dispatch_authed(request, response, sizeof(response), true);
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    cJSON *resp = parse_response(response);
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
+    cJSON_Delete(resp);
+}
+
+void test_legacy_dispatch_is_full_privilege(void) {
+    rpc_register("bramble.getMessages", mock_version_handler);
+
+    char response[1024];
+    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.getMessages\"}";
+    int len = rpc_dispatch(request, response, sizeof(response));
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    cJSON *resp = parse_response(response);
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
+    cJSON_Delete(resp);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dispatch_valid_request);
@@ -189,5 +267,10 @@ int main(void) {
     RUN_TEST(test_register_max_methods);
     RUN_TEST(test_handler_error_code);
     RUN_TEST(test_dispatch_preserves_nested_location_policy_arrays);
+    RUN_TEST(test_unauth_dispatch_allowlisted_method_succeeds);
+    RUN_TEST(test_unauth_dispatch_other_method_unauthorized);
+    RUN_TEST(test_unauth_dispatch_unknown_method_unauthorized_not_not_found);
+    RUN_TEST(test_authed_dispatch_full_access);
+    RUN_TEST(test_legacy_dispatch_is_full_privilege);
     return UNITY_END();
 }

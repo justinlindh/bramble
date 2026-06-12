@@ -26,6 +26,8 @@
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"
 #define NVS_KEY_AUTH_TOKEN "auth_token"
+#define NVS_KEY_AUTH_OFF "auth_off"
+#define NVS_KEY_WS_ORIGINS "ws_origins"
 #define NVS_KEY_CONN_MODE "conn_mode"
 #define NVS_KEY_OLED_ROT "oled_rot"
 

@@ -296,7 +296,10 @@ static void cli_task(void *param) {
             }
 
             if (line[0] == '{') {
-                /* JSON-RPC mode */
+                /* JSON-RPC mode. Serial dispatch is full-privilege BY
+                 * DESIGN: physical USB access is the pairing bootstrap
+                 * that retrieves the device auth token (`bramble pair`).
+                 * See docs/SECURITY-MODEL.md, device-as-secret posture. */
                 char response[2048];
                 int rpc_len = rpc_dispatch(line, response, sizeof(response));
                 if (rpc_len > 0) {

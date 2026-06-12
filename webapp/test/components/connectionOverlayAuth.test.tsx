@@ -40,7 +40,7 @@ describe('ConnectionOverlay auth token flow', () => {
     expect(screen.getByRole('button', { name: 'Authentication' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Authentication' }));
-    expect(screen.getByLabelText('Auth Token (optional)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Auth Token')).toBeInTheDocument();
   });
 
   it('passes token in connect flow and persists it', () => {
@@ -49,7 +49,7 @@ describe('ConnectionOverlay auth token flow', () => {
 
     fireEvent.change(screen.getByLabelText(/node address/i), { target: { value: '192.168.4.1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Authentication' }));
-    fireEvent.change(screen.getByLabelText('Auth Token (optional)'), { target: { value: 'secret-token' } });
+    fireEvent.change(screen.getByLabelText('Auth Token'), { target: { value: 'secret-token' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
@@ -67,7 +67,7 @@ describe('ConnectionOverlay auth token flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /wifi/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Authentication' }));
 
-    const tokenInput = screen.getByLabelText('Auth Token (optional)');
+    const tokenInput = screen.getByLabelText('Auth Token');
     expect(tokenInput.className).toMatch(/authErrorField/);
   });
 
