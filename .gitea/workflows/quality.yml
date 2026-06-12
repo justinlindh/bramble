@@ -10,6 +10,7 @@ on:
       - 'feature/**'
       - 'chore/**'
       - 'ci/**'
+      - 'docs/**'
     paths:
       - '.gitea/workflows/quality.yml'
       - 'api/**'
