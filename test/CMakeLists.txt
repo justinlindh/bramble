@@ -157,6 +157,16 @@ target_include_directories(test_airtime_budget PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
+# Duty-cycle cap tests (DES-8)
+add_executable(test_duty_cycle
+    test_duty_cycle.c
+    unity/unity.c
+)
+target_include_directories(test_duty_cycle PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+add_test(NAME test_duty_cycle COMMAND test_duty_cycle)
+
 # Broadcast airtime gate tests
 add_executable(test_broadcast_airtime_gate
     test_broadcast_airtime_gate.c
