@@ -18,6 +18,8 @@ static const char* const k_unauth_allowlist[] = {
     "bramble.getVersion",
 };
 
+bool rpc_auth_token_len_ok(size_t len) { return len == 0 || len >= RPC_AUTH_TOKEN_MIN_LEN; }
+
 bool rpc_auth_method_allowed(const char* method, bool authenticated) {
     if (!method) {
         return false;
@@ -32,4 +34,3 @@ bool rpc_auth_method_allowed(const char* method, bool authenticated) {
     }
     return false;
 }
-

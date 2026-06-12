@@ -2,6 +2,7 @@
 #include "esp_app_desc.h"
 #include "util.h"
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "mesh_task.h"
 #include "msg_store.h"
 #include "airtime_budget.h"
@@ -659,6 +660,11 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
     }
     const char *val = token_j->valuestring;
     if (strlen(val) >= 128) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    /* Entropy floor (SEC-H3): a guessable token is worse than knowing you
+     * have none. Empty stays legal as the explicit opt-out. */
+    if (!rpc_auth_token_len_ok(strlen(val))) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
