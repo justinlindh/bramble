@@ -34,7 +34,17 @@ typedef struct {
      * maxima (and therefore the hourly refill) cannot exceed duty_cap_ms. */
     uint32_t duty_cap_ms;
     bool duty_enforced;
+    /* CRITICAL-borrows-NORMAL allowance: its own mini-bucket capped at
+     * AIRTIME_BORROW_CAP_PCT of NORMAL's capacity, refilled at the same
+     * proportional rate. Bounds how much relayed control traffic (RREQ
+     * floods land on CRITICAL) can drain the local user-data lane. */
+    uint32_t borrow_tokens_ms;
+    uint32_t borrow_max_ms;
+    uint32_t borrow_remainder;
 } airtime_budget_t;
+
+/* CRITICAL may borrow at most this share of NORMAL per refill window. */
+#define AIRTIME_BORROW_CAP_PCT 25u
 
 void airtime_budget_init(airtime_budget_t* ab, uint32_t now_ms);
 void airtime_budget_refill(airtime_budget_t* ab, uint32_t now_ms);
