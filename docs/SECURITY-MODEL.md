@@ -53,22 +53,31 @@ it is not enabled today.
 **Network-adjacent attacker.** Three sub-cases:
 
 - *Same Wi-Fi network as the node.* The RPC interface (WebSocket on port 80,
-  `main/ws_server.c`) defaults to open access with no token configured. The
-  transport is plaintext HTTP. Anyone on the LAN can read messages, send
-  messages, rotate keys, and trigger OTA. Defense is opt-in today (section 4).
-- *Malicious web page in a browser on the LAN.* The WebSocket upgrade path
-  performs no `Origin` check, so any web page a LAN user visits can script
-  connections to the node's WS endpoint (section 4).
-- *BLE proximity.* The BLE RPC transport gates on the same token as WS, with a
-  first-write handshake and throttled retries (`components/ble/ble_server.c`),
-  but the token defaults to unset, which means open access (section 4).
+  `main/ws_server.c`) requires a per-device bearer token that the firmware
+  generates on first boot (`identity_ensure_ws_auth_token` in
+  `components/identity/identity.c`). Unauthenticated connections are limited
+  to a two-method identification allowlist (`components/rpc/rpc_auth.c`).
+  The transport is still plaintext HTTP, so an on-path attacker who captures
+  a legitimate session reads everything, token included (section 4).
+- *Malicious web page in a browser on the LAN.* The WebSocket upgrade
+  validates the `Origin` header when one is present: same-origin (the host
+  the request was addressed to) and an allowlist managed via authenticated
+  RPC pass; everything else, including the literal `null` origin, is
+  rejected with a 1008 close frame (`main/ws_origin.c`, enforced in
+  `main/ws_server.c`). Non-browser clients send no Origin and are not
+  subject to cross-site WebSocket hijacking.
+- *BLE proximity.* The BLE RPC transport gates on the same default-on token
+  as WS, with a first-write handshake and throttled retries
+  (`components/ble/ble_server.c`); pre-handshake JSON-RPC is limited to the
+  same identification allowlist.
 
 **Compromised OTA source.** An attacker who controls the firmware download
 server, the URL given to the device, or the TLS path. HTTPS with certificate
 bundle validation is enforced for `https://` URLs (`components/ota/ota.c`),
 but images are not signed, there is no secure boot, no anti-rollback, and the
-URL is supplied by the RPC caller. An attacker with RPC access (default-open,
-see above) installs arbitrary firmware (section 4).
+URL is supplied by the RPC caller. RPC access requires the device token, so
+this is no longer reachable by default; a token holder, or anyone at all if
+auth was explicitly disabled, still installs arbitrary firmware (section 4).
 
 ### Out of scope
 
@@ -174,8 +183,11 @@ Incoming data packets are trial-decrypted against all configured channels
 channel even after a match to flatten timing differences between "matched
 channel 0" and "matched channel 15". Epoch catch-up advances a channel's key
 up to 256 derivations to recover from missed rekeys (`CHANNEL_EPOCH_CATCHUP_MAX`
-in `components/channel/include/channel_msg.h`); see section 4 for the CPU
-cost this hands an attacker.
+in `components/channel/include/channel_msg.h`). Catch-up attempts are
+rate-limited per channel by a token bucket (capacity one full 256-attempt
+recovery, refilled every 10 seconds; constants and the legitimate-recovery
+argument in `channel_msg.h`), bounding the CPU an attacker can burn with
+undecryptable garbage to about 26 GCM attempts per second per channel.
 
 ### RREQ source pseudonymization
 
@@ -228,16 +240,52 @@ Received packets are deduplicated on `packet_id XOR (type << 24)` within a
 the flooding mesh. It is not replay protection: the fields are
 unauthenticated and the window is 60 seconds (section 4).
 
-### RPC auth token, when configured
+### RPC authentication, on by default
 
-If an auth token is set, the WebSocket upgrade requires
-`Authorization: Bearer <token>` (or a deprecated `?token=` query parameter),
-compared in constant time over a fixed-length loop
-(`token_matches_constant_time` in `main/ws_server.c`). The Wi-Fi config POST
-endpoint is gated by the same check. BLE requires the token as the first
-write on a new connection, throttled to one attempt per 100 ms after failures
-(`components/ble/ble_server.c`). The token is *unset by default*; see
-section 4.
+On first boot the firmware generates a 32-hex-char (128-bit) bearer token
+from the hardware RNG and persists it in NVS
+(`identity_ensure_ws_auth_token` in `components/identity/identity.c`; the
+generation call sites run only after Wi-Fi or BT RF init, when
+`esp_random` is fully entropic). The WebSocket upgrade accepts
+`Authorization: Bearer <token>` (or a deprecated `?token=` query
+parameter); the Wi-Fi config POST endpoint is gated by the same check. BLE
+requires the token as the first write on a new connection, throttled to one
+attempt per 100 ms after failures (`components/ble/ble_server.c`).
+Comparison is constant-time and length-independent: a fixed 128-iteration
+padded compare shared by both transports (`main/ct_strcmp.h`).
+
+Connections without credentials are accepted but may call only a
+two-method identification allowlist, `bramble.ping` and
+`bramble.getVersion`, enforced in the dispatcher before method lookup so
+the method table cannot be enumerated (`components/rpc/rpc_auth.c`,
+`rpc_dispatch_authed` in `components/rpc/rpc_dispatcher.c`). Wrong
+credentials close the connection. User-supplied tokens shorter than 16
+bytes are rejected (`rpc_set_auth_token` in `main/rpc_methods.c`). If the
+token cannot be read or persisted (NVS failure), the device fails closed:
+full access is unreachable rather than open.
+
+The serial CLI dispatches RPC without authentication *by design*: physical
+USB access is the pairing bootstrap. `bramble pair` reads the token over
+serial, and the token is printed to the serial boot log for the same
+reason. This is the device-as-secret posture (section 5): whoever holds
+the hardware owns it, and today plaintext flash (section 4) makes any
+stronger serial story moot.
+
+Auth can be explicitly disabled by an authenticated
+`bramble.setAuthToken` call with an empty token; the opt-out persists in
+NVS and is logged loudly at boot. The default posture is closed.
+
+### WebSocket Origin allowlist
+
+When a WS upgrade carries an `Origin` header (every browser sends one),
+the device allows same-origin requests (Origin host equals Host header
+host, any port or scheme, so the device's IP and mDNS names work), plus
+origins on an NVS-stored allowlist managed via the authenticated
+`bramble.setAllowedOrigins` / `bramble.getAllowedOrigins` RPCs. Everything
+else, including the literal `null` origin, is rejected at upgrade time
+with a 1008 close frame (decision logic in `main/ws_origin.c`, enforcement
+in `main/ws_server.c`). Requests without an Origin header pass: a client
+that is not a browser is not subject to cross-site WebSocket hijacking.
 
 ### Wi-Fi setup AP
 
@@ -327,35 +375,23 @@ same PR that fixes it.
   `components/msg_store/msg_store_spiffs.c`; `sdkconfig` has
   `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`, and
   `CONFIG_SECURE_BOOT` all unset).
-- **RPC defaults to open access on Wi-Fi and BLE**: no token exists until a
-  user sets one (`identity_ensure_ws_auth_token` in
-  `components/identity/identity.c`), and `bramble.getAuthToken` returns the
-  token in cleartext to any connected client (`main/rpc_methods.c`).
-- **The WebSocket endpoint performs no `Origin` check and runs plaintext
-  HTTP on port 80**, so LAN web pages can script connections and on-path LAN
-  attackers read everything including the bearer token
-  (`main/ws_server.c`).
+- **The WebSocket transport is plaintext HTTP on port 80**, so an on-path
+  LAN attacker reads all RPC traffic including the bearer token; the
+  deprecated `?token=` query parameter additionally leaks via URL logs and
+  browser history (`main/ws_server.c`).
 - **OTA installs unsigned images from an RPC-supplied URL with no
-  anti-rollback**, so RPC access (open by default, above) is firmware-flash
-  access (`components/ota/ota.c`, `ota_task` in `main/rpc_methods.c`).
+  anti-rollback** (`components/ota/ota.c`, `ota_task` in
+  `main/rpc_methods.c`). RPC auth (on by default, section 3) now stands in
+  front of this, but any token holder, or anyone at all on a device whose
+  owner explicitly disabled auth, is still firmware-flash access. Image
+  signing is the missing control.
 - **Mailbox flush is triggered by an effectively unauthenticated beacon**,
   since the beacon HMAC key is derived from the public PSK; a forged beacon
   for a victim address makes a mailbox transmit that victim's queued
   ciphertext (`handle_beacon` mailbox flush in `main/mesh_task.c`).
-- **Epoch catch-up burns up to 256 HKDF-plus-GCM attempts per non-matching
-  channel on every received data packet**, legitimate traffic included (a
-  packet for one channel triggers the full catch-up loop on every other
-  configured channel), an unauthenticated CPU amplification lever
-  (`channel_msg_decrypt` in `components/channel/channel_msg.c`).
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
   and mailbox capability in cleartext** (`mesh_send_beacon` in
   `main/mesh_task.c`).
-- **`ct_strcmp` leaks operand length through its loop bound** (`main/ct_strcmp.h`),
-  used on the BLE auth path; content comparison is constant-time, length is
-  not.
-- **The serial CLI is unauthenticated** (`main/cli.c`); anyone with USB
-  access has full RPC capability. With flash unencrypted this is currently
-  redundant with the line above it, but it remains true independently.
 
 ## 5. Residual risks that remain by design
 
@@ -376,6 +412,12 @@ These do not go away when section 4 empties out.
   that a node exists, and direction finding works on any transmitter.
   Bramble can hide what you say and largely who you say it to, never that a
   radio transmitted.
+- **Serial RPC is unauthenticated.** Physical USB access is the pairing
+  bootstrap: `bramble pair` retrieves the auth token over serial, and the
+  serial console dispatches RPC at full privilege (`main/cli.c`). This is
+  deliberate device-as-secret design, not an oversight: a stolen device
+  already yields its plaintext flash (section 4), and a forgotten token
+  must not brick the owner out of their own hardware.
 - **Cleartext routing headers.** Destination addresses must be readable by
   relays for multi-hop forwarding to work at this power and duty-cycle
   budget. Onion routing over LoRa airtime budgets is not a trade Bramble
@@ -410,10 +452,10 @@ Plain words, current state:
   anyone who takes your node can extract your keys and message history with
   free tools in minutes. Losing the device means rotating every channel it
   was on.
-- **Put the node on a Wi-Fi network you trust, and set an auth token.** The
-  control interface ships open; anyone on the same Wi-Fi can read and send
-  your messages and reflash the device until you set a token (and the token
-  then travels in plaintext on the LAN).
+- **Put the node on a Wi-Fi network you trust.** The control interface now
+  requires a per-device token by default (get it with `bramble pair` over
+  USB), but the connection itself is unencrypted HTTP: someone recording
+  traffic on your Wi-Fi can capture the token and your messages.
 
 The honest one-line summary of today's build: Bramble encrypts channel
 message content well, and most of its other privacy properties do not hold
