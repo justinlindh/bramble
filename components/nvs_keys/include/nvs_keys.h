@@ -22,6 +22,7 @@
 #define NVS_NS_IDENTITY "bramble_id"        /**< Node identity / keys    */
 #define NVS_NS_BACKPRESSURE "bramble_bp"    /**< Backpressure state      */
 #define NVS_NS_TELEMETRY_DBG "bramble_tdbg" /**< Telemetry debug flags   */
+#define NVS_NS_OTA "bramble_ota"            /**< OTA origin + rollback   */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"
@@ -30,6 +31,10 @@
 #define NVS_KEY_WS_ORIGINS "ws_origins"
 #define NVS_KEY_CONN_MODE "conn_mode"
 #define NVS_KEY_OLED_ROT "oled_rot"
+
+/* ── NVS_NS_OTA keys ─────────────────────────────────────────────────────── */
+#define NVS_KEY_OTA_ORIGIN "origin"
+#define NVS_KEY_OTA_VER_FLOOR "ver_floor"
 
 /* ── NVS_NS_WIFI keys ────────────────────────────────────────────────────── */
 #define NVS_KEY_WIFI_SSID "ssid"

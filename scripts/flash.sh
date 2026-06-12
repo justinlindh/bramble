@@ -145,6 +145,7 @@ prepare_local_env() {
   fi
 
   cd "$LOCAL_DIR"
+  bash scripts/ensure-ota-signing-key.sh
   set_board_vars
 }
 

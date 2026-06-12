@@ -180,60 +180,119 @@ void test_send_broadcast_valid(void) {
     cJSON_Delete(resp);
 }
 
-/* ── 5. otaUpdate ─────────────────────────────────────────────────── */
+/* ── 5. otaUpdate / otaGetOrigin / otaSetOrigin ───────────────────── */
 
-void test_ota_update_missing_url(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"bramble.otaUpdate\",\"params\":{}}");
-    cJSON *r = get_result(resp);
+extern char g_ota_last_url[256];
+extern bool g_ota_last_allow_downgrade;
+extern int g_ota_wifi_start_calls;
+extern char g_ota_origin_stub[256];
+extern bool g_ota_origin_overridden_stub;
+
+void test_ota_update_missing_path(void) {
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":"
+                                     "\"bramble.otaUpdate\",\"params\":{}}");
+    cJSON* r = get_result(resp);
     /* Returns ok:false in result, not a JSON-RPC error */
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
-    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "error"));
+    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(r, "error")->valuestring, "path"));
     cJSON_Delete(resp);
 }
 
-void test_ota_update_http_rejected(void) {
-    /* CONFIG_BRAMBLE_OTA_ALLOW_HTTP should NOT be defined in our test build */
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.otaUpdate\","
-        "\"params\":{\"url\":\"http://example.com/firmware.bin\"}}");
-    cJSON *r = get_result(resp);
+void test_ota_update_raw_url_rejected(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.otaUpdate\","
+                           "\"params\":{\"url\":\"https://evil.example/firmware.bin\"}}");
+    cJSON* r = get_result(resp);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
-    const char *err_msg = cJSON_GetObjectItem(r, "error")->valuestring;
-    TEST_ASSERT_NOT_NULL(strstr(err_msg, "HTTP"));
+    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(r, "error")->valuestring, "raw URLs"));
     cJSON_Delete(resp);
 }
 
-void test_ota_update_bad_scheme(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"bramble.otaUpdate\","
-        "\"params\":{\"url\":\"ftp://example.com/firmware.bin\"}}");
-    cJSON *r = get_result(resp);
+void test_ota_update_absolute_url_in_path_rejected(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"bramble.otaUpdate\","
+                           "\"params\":{\"path\":\"https://evil.example/firmware.bin\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(r, "error")->valuestring, "invalid"));
+    cJSON_Delete(resp);
+}
+
+void test_ota_update_traversal_path_rejected(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"bramble.otaUpdate\","
+                           "\"params\":{\"path\":\"stable/../../secrets\"}}");
+    cJSON* r = get_result(resp);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
     cJSON_Delete(resp);
 }
 
-void test_ota_update_already_in_progress(void) {
+void test_ota_update_resolves_against_origin_and_already_in_progress(void) {
     /* After a successful OTA start (xTaskCreate stub doesn't run the task),
      * s_ota_in_progress stays true, so a second call should be rejected. */
-    /* First: start OTA successfully */
-    cJSON *resp1 = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"bramble.otaUpdate\","
-        "\"params\":{\"url\":\"https://example.com/firmware.bin\"}}");
-    cJSON *r1 = get_result(resp1);
+    cJSON* resp1 =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"bramble.otaUpdate\","
+                           "\"params\":{\"path\":\"stable/v1.4.0/heltec-v3/bramble.bin\","
+                           "\"allow_downgrade\":true}}");
+    cJSON* r1 = get_result(resp1);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r1, "ok")));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r1, "partition"));
+    TEST_ASSERT_EQUAL_STRING("https://bramblemesh.org/ota/stable/v1.4.0/heltec-v3/bramble.bin",
+                             cJSON_GetObjectItem(r1, "url")->valuestring);
     cJSON_Delete(resp1);
 
     /* Second: should fail with "already in progress" */
-    cJSON *resp2 = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"bramble.otaUpdate\","
-        "\"params\":{\"url\":\"https://example.com/firmware2.bin\"}}");
-    cJSON *r2 = get_result(resp2);
+    cJSON* resp2 =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"bramble.otaUpdate\","
+                           "\"params\":{\"path\":\"stable/v1.4.0/heltec-v3/bramble.bin\"}}");
+    cJSON* r2 = get_result(resp2);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r2, "ok")));
-    TEST_ASSERT_NOT_NULL(strstr(cJSON_GetObjectItem(r2, "error")->valuestring, "already in progress"));
+    TEST_ASSERT_NOT_NULL(
+        strstr(cJSON_GetObjectItem(r2, "error")->valuestring, "already in progress"));
     cJSON_Delete(resp2);
 }
+
+void test_ota_get_origin_reports_default(void) {
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":"
+                                     "\"bramble.otaGetOrigin\",\"params\":{}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_STRING("https://bramblemesh.org/ota/",
+                             cJSON_GetObjectItem(r, "origin")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "overridden")));
+    cJSON_Delete(resp);
+}
+
+void test_ota_set_origin_validates_policy(void) {
+    /* Foreign scheme rejected */
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"bramble.otaSetOrigin\","
+                           "\"params\":{\"origin\":\"ftp://mirror.example/\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
+    cJSON_Delete(resp);
+
+    /* Valid https origin accepted */
+    resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"bramble.otaSetOrigin\","
+                              "\"params\":{\"origin\":\"https://mirror.example/ota/\"}}");
+    r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_STRING("https://mirror.example/ota/",
+                             cJSON_GetObjectItem(r, "origin")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "overridden")));
+    cJSON_Delete(resp);
+
+    /* Reset returns to default */
+    resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"bramble.otaSetOrigin\","
+                              "\"params\":{\"reset\":true}}");
+    r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_STRING("https://bramblemesh.org/ota/",
+                             cJSON_GetObjectItem(r, "origin")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "overridden")));
+    cJSON_Delete(resp);
+}
+
 
 /* ── 6. setNodeName ───────────────────────────────────────────────── */
 
@@ -309,11 +368,14 @@ int main(void) {
     RUN_TEST(test_send_broadcast_missing_text);
     RUN_TEST(test_send_broadcast_valid);
 
-    /* otaUpdate */
-    RUN_TEST(test_ota_update_missing_url);
-    RUN_TEST(test_ota_update_http_rejected);
-    RUN_TEST(test_ota_update_bad_scheme);
-    RUN_TEST(test_ota_update_already_in_progress);
+    /* otaUpdate / otaGetOrigin / otaSetOrigin */
+    RUN_TEST(test_ota_update_missing_path);
+    RUN_TEST(test_ota_update_raw_url_rejected);
+    RUN_TEST(test_ota_update_absolute_url_in_path_rejected);
+    RUN_TEST(test_ota_update_traversal_path_rejected);
+    RUN_TEST(test_ota_update_resolves_against_origin_and_already_in_progress);
+    RUN_TEST(test_ota_get_origin_reports_default);
+    RUN_TEST(test_ota_set_origin_validates_policy);
 
     /* setNodeName */
     RUN_TEST(test_set_node_name_too_long);

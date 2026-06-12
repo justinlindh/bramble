@@ -79,12 +79,21 @@ it is not enabled today.
   until the handshake succeeds.
 
 **Compromised OTA source.** An attacker who controls the firmware download
-server, the URL given to the device, or the TLS path. HTTPS with certificate
-bundle validation is enforced for `https://` URLs (`components/ota/ota.c`),
-but images are not signed, there is no secure boot, no anti-rollback, and the
-URL is supplied by the RPC caller. RPC access requires the device token, so
-this is no longer reachable by default; a token holder, or anyone at all if
-auth was explicitly disabled, still installs arbitrary firmware (section 4).
+server, the URL given to the device, or the TLS path. Three controls stack
+here: HTTPS with certificate bundle validation (`components/ota/ota.c`), an
+origin allowlist (the device only fetches from its NVS-configured OTA origin;
+`bramble.otaUpdate` takes a relative artifact path, never a raw URL;
+`components/ota/ota_url.c`, `ota_origin.c`), and mandatory image signature
+verification (RSA-3072 Secure Boot V2 app signatures, checked on every OTA
+write via `CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`). On a device
+already running signed firmware, a compromised server or MITM cannot install
+firmware without the signing key; devices still running pre-signing firmware
+perform no check and remain exposed until they take their first signed OTA.
+A soft
+anti-rollback floor (NVS-stored, `components/ota/ota_rollback.c`) rejects
+downgrades unless a token holder explicitly overrides. Residual: signature
+enforcement happens at OTA time, not at boot, until hardware Secure Boot V2
+is burned (section 4).
 
 ### Out of scope
 
@@ -330,12 +339,25 @@ The fallback configuration AP is WPA2-PSK, not open
 compiled in via Kconfig (`components/wifi/Kconfig`), so it gates against
 drive-by association only, not against anyone who has read the source.
 
-### OTA transport security
+### OTA image signing and transport security
 
-`https://` OTA URLs are fetched with certificate validation against the ESP
-x509 bundle, with hostname check enabled (`components/ota/ota.c`).
-Plain-`http://` OTA is compiled out unless `CONFIG_BRAMBLE_OTA_ALLOW_HTTP` is
-set. This authenticates the *server*, not the *image*: see section 4.
+Every firmware image is signed at build time with an RSA-3072 key
+(Secure Boot V2 signature block appended to `bramble.bin`;
+`CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT` in `sdkconfig.defaults`). On OTA,
+the device verifies the incoming image's signature against the public key
+embedded in the running app's own signature block and fails closed
+(`esp_https_ota_finish` / `esp_ota_end`); this holds on the dev-only HTTP
+path too. Release images are signed in CI with a key held only as a CI
+secret; the matching public key is committed at `keys/ota-release-pub.pem`
+and CI verifies every built artifact against it. See
+`docs/design/ota-signing.md` for the trust model and rotation.
+
+Transport: `https://` OTA URLs are fetched with certificate validation
+against the ESP x509 bundle, with hostname check enabled
+(`components/ota/ota.c`). Plain-`http://` OTA is compiled out unless
+`CONFIG_BRAMBLE_OTA_ALLOW_HTTP` is set. The device only fetches from its
+allowlisted OTA origin (default `https://bramblemesh.org/ota/`), changeable
+solely through the authenticated `bramble.otaSetOrigin` RPC.
 
 ### Identity generation
 
@@ -415,12 +437,15 @@ same PR that fixes it.
   LAN attacker reads all RPC traffic including the bearer token; the
   `?token=` query parameter that browser clients must use additionally
   leaks via URL logs and browser history (`main/ws_server.c`).
-- **OTA installs unsigned images from an RPC-supplied URL with no
-  anti-rollback** (`components/ota/ota.c`, `ota_task` in
-  `main/rpc_methods.c`). RPC auth (on by default, section 3) now stands in
-  front of this, but any token holder, or anyone at all on a device whose
-  owner explicitly disabled auth, is still firmware-flash access. Image
-  signing is the missing control.
+- **OTA signatures are enforced at update time, not at boot.** Images are
+  signed and verified on every OTA write, the update origin is allowlisted,
+  and a soft anti-rollback floor rejects downgrades, but without burned
+  eFuses the bootloader will still boot whatever sits in flash. An attacker
+  with physical flash access (USB, JTAG) can write unsigned firmware, and
+  can erase the NVS rollback floor. Hardware Secure Boot V2 plus eFuse
+  anti-rollback closes this; it is staged behind bench validation on a
+  sacrificial board (human-gated). Consistent with the device-as-secret
+  posture above, physical possession is already treated as compromise.
 - **Mailbox flush is triggered by an effectively unauthenticated beacon**,
   since the beacon HMAC key is derived from the public PSK; a forged beacon
   for a victim address makes a mailbox transmit that victim's queued
