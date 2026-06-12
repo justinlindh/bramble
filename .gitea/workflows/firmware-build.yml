@@ -47,6 +47,18 @@ jobs:
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
 
+      - name: Install OTA release signing key
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          if [ -z "$OTA_SIGNING_KEY" ]; then
+            echo "::error::OTA_SIGNING_KEY secret is not set; refusing to build unsigned release artifacts"
+            exit 1
+          fi
+          mkdir -p keys
+          umask 077
+          printf '%s\n' "$OTA_SIGNING_KEY" > keys/ota_signing_key.pem
+
       - name: Build firmware artifacts
         env:
           BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}
@@ -55,6 +67,16 @@ jobs:
           # Strip leading v for PROJECT_VER
           export BRAMBLE_BUILD_VERSION="${BRAMBLE_BUILD_VERSION#v}"
           bash scripts/ci-build-firmware.sh
+
+      - name: Verify artifact signatures against the committed release public key
+        run: |
+          source scripts/ci-source-idf.sh
+          for board in heltec-v3 tdeck-plus heltec-v4; do
+            echo "Verifying signature: $board"
+            espsecure.py verify_signature --version 2 \
+              --keyfile keys/ota-release-pub.pem \
+              "build-artifacts/firmware-ci/$board/bramble.bin"
+          done
 
       - name: Publish OTA via authenticated endpoint
         env:
@@ -142,6 +164,10 @@ jobs:
 
           chmod +x scripts/ci-register-gitea-release.sh
           scripts/ci-register-gitea-release.sh
+
+      - name: Remove signing key from workspace
+        if: always()
+        run: rm -f keys/ota_signing_key.pem
 
       - name: Upload firmware artifacts
         if: startsWith(github.server_url, 'https://github.com')

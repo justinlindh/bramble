@@ -44,3 +44,8 @@ webapp/public/web-flasher/
 .flash-targets.json
 reports/
 webapp/node_modules
+
+# OTA signing keys: private key must never be committed
+keys/*
+!keys/README.md
+!keys/ota-release-pub.pem
