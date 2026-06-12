@@ -34,10 +34,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
+      - name: Assert clang-format is pre-baked on the runner
+        run: command -v clang-format >/dev/null || { echo "::error::clang-format missing from runner image"; exit 1; }
       - name: Run clang-format strict wrapper (full scope)
         run: bash scripts/lint/run-clang-format-check.sh --strict
 
@@ -47,10 +45,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+      - name: Assert shellcheck is pre-baked on the runner
+        run: command -v shellcheck >/dev/null || { echo "::error::shellcheck missing from runner image"; exit 1; }
       - name: Run shellcheck strict wrapper
         run: bash scripts/lint/run-shellcheck.sh --strict
 
