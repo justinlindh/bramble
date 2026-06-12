@@ -1329,7 +1329,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     int ret = channel_msg_decrypt(s_channels, s_num_channels,
                                   nonce, ciphertext, ct_len, tag,
                                   aad, HEADER_SIZE,
-                                  plaintext, &info);
+                                  plaintext, &info, now_ms());
     if (ret != 0) {
         ESP_LOGW(TAG, "Failed to decrypt data from %08" PRIX32, src_addr);
         return;
