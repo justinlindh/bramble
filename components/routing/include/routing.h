@@ -43,6 +43,12 @@ int neighbor_count(const neighbor_table_t* table);
 #define ROUTE_STALE_TIMEOUT_MS 600000
 #define ROUTE_HARD_TIMEOUT_MS 3600000
 
+/* Maximum route depth the protocol supports end-to-end. Expanded RREQ
+ * attempts, RREP returns, DATA forwarding, and RERR teardown all build with
+ * this hop budget so a discovered route is usable at full depth
+ * (ACK_MAX_HOPS in packet.h matches). */
+#define ROUTE_HOP_LIMIT_MAX 8
+
 /* Link-penalty normalization bounds and weights.
  *
  * These model practical LoRa receive quality around SX1262-class sensitivity
@@ -106,6 +112,10 @@ typedef struct {
 } rreq_dedup_t;
 
 void rreq_dedup_init(rreq_dedup_t* cache);
+/* First-arrival dedup: the first copy of a flood wins; later copies of the
+ * same query are dropped regardless of path quality. Path metrics still
+ * arbitrate at route_install time among RREPs from different discovery
+ * attempts (each attempt floods under a fresh query_id). */
 bool rreq_dedup_check_and_add(rreq_dedup_t* cache, uint32_t query_id, uint32_t now_ms);
 
 #define MAX_REVERSE_ROUTES 32
@@ -128,4 +138,8 @@ reverse_route_t* reverse_route_lookup(reverse_route_table_t* table, uint32_t que
 void reverse_route_purge(reverse_route_table_t* table, uint32_t now_ms);
 
 uint8_t compute_link_penalty(int8_t rssi, int8_t snr);
+/* Subtracts the link penalty from a higher-is-better path metric, flooring at
+ * zero. Used wherever a received metric is extended across the receiving
+ * link (RREQ forward, route install at the destination and originator). */
+uint8_t metric_apply_link_penalty(uint8_t metric, int8_t rssi, int8_t snr);
 #endif
