@@ -112,6 +112,72 @@ void test_null_extras_rejects_cross_origin(void) {
     TEST_ASSERT_FALSE(ws_origin_allowed("https://app.example.com", "192.168.4.1", NULL));
 }
 
+/* ── Authority parsing hardening (userinfo, trailing dot, IPv6 case) ── */
+
+void test_userinfo_origin_never_accepted(void) {
+    /* '@' in the authority is malformed for an Origin; must not be
+       parsed as "userinfo before the real host" or vice versa */
+    TEST_ASSERT_FALSE(ws_origin_allowed("http://192.168.4.1@evil.com", "192.168.4.1", ""));
+    TEST_ASSERT_FALSE(ws_origin_allowed("http://evil.com@192.168.4.1", "192.168.4.1", ""));
+    TEST_ASSERT_FALSE(ws_origin_allowed("http://device@evil.com", "device", ""));
+}
+
+void test_trailing_dot_fqdn_equivalence(void) {
+    TEST_ASSERT_TRUE(ws_origin_allowed("http://bramble.local.", "bramble.local", ""));
+    TEST_ASSERT_TRUE(ws_origin_allowed("http://bramble.local", "bramble.local.", ""));
+    TEST_ASSERT_FALSE(ws_origin_allowed("http://bramble.local.evil.com", "bramble.local", ""));
+}
+
+void test_ipv6_case_insensitive(void) {
+    TEST_ASSERT_TRUE(ws_origin_allowed("http://[FE80::1]", "[fe80::1]:80", ""));
+}
+
+/* ── /config POST CSRF decision ──────────────────────────────────────── */
+
+void test_config_post_no_browser_headers_allowed(void) {
+    TEST_ASSERT_TRUE(ws_config_post_allowed(NULL, NULL, "192.168.4.1", ""));
+    TEST_ASSERT_TRUE(ws_config_post_allowed("", "", "192.168.4.1", ""));
+}
+
+void test_config_post_same_origin_allowed(void) {
+    TEST_ASSERT_TRUE(
+        ws_config_post_allowed("http://192.168.4.1", NULL, "192.168.4.1", ""));
+}
+
+void test_config_post_foreign_origin_rejected(void) {
+    TEST_ASSERT_FALSE(
+        ws_config_post_allowed("http://evil.example.com", NULL, "192.168.4.1", ""));
+    TEST_ASSERT_FALSE(ws_config_post_allowed("null", NULL, "192.168.4.1", ""));
+}
+
+void test_config_post_allowlisted_origin_allowed(void) {
+    TEST_ASSERT_TRUE(ws_config_post_allowed("https://app.example.com", NULL, "192.168.4.1",
+                                            "https://app.example.com"));
+}
+
+void test_config_post_same_origin_referer_allowed(void) {
+    /* Older browsers may omit Origin on same-origin POSTs but send Referer */
+    TEST_ASSERT_TRUE(
+        ws_config_post_allowed(NULL, "http://192.168.4.1/", "192.168.4.1", ""));
+    TEST_ASSERT_TRUE(
+        ws_config_post_allowed(NULL, "http://192.168.4.1/index.html", "192.168.4.1:80", ""));
+}
+
+void test_config_post_foreign_referer_rejected(void) {
+    TEST_ASSERT_FALSE(
+        ws_config_post_allowed(NULL, "http://evil.example.com/csrf.html", "192.168.4.1", ""));
+}
+
+void test_config_post_malformed_referer_rejected(void) {
+    TEST_ASSERT_FALSE(ws_config_post_allowed(NULL, "not-a-url", "192.168.4.1", ""));
+}
+
+void test_config_post_origin_takes_precedence_over_referer(void) {
+    /* A foreign Origin with a spoofed same-origin Referer must lose */
+    TEST_ASSERT_FALSE(ws_config_post_allowed("http://evil.example.com",
+                                             "http://192.168.4.1/", "192.168.4.1", ""));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_no_origin_header_allowed);
@@ -134,5 +200,16 @@ int main(void) {
     RUN_TEST(test_extra_origin_port_must_match);
     RUN_TEST(test_extra_origin_substring_not_enough);
     RUN_TEST(test_null_extras_rejects_cross_origin);
+    RUN_TEST(test_userinfo_origin_never_accepted);
+    RUN_TEST(test_trailing_dot_fqdn_equivalence);
+    RUN_TEST(test_ipv6_case_insensitive);
+    RUN_TEST(test_config_post_no_browser_headers_allowed);
+    RUN_TEST(test_config_post_same_origin_allowed);
+    RUN_TEST(test_config_post_foreign_origin_rejected);
+    RUN_TEST(test_config_post_allowlisted_origin_allowed);
+    RUN_TEST(test_config_post_same_origin_referer_allowed);
+    RUN_TEST(test_config_post_foreign_referer_rejected);
+    RUN_TEST(test_config_post_malformed_referer_rejected);
+    RUN_TEST(test_config_post_origin_takes_precedence_over_referer);
     return UNITY_END();
 }
