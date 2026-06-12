@@ -223,17 +223,83 @@ Model limitations, stated plainly:
 - Overlap is computed on transmit windows; propagation offsets are ignored
   (microseconds against ToA of hundreds of milliseconds).
 - Single channel, single SF; no inter-SF interference modeling.
-- The simulator bridge still diverges from firmware orchestration in ways
-  that flatter these results: it floods RREQs with hop limit 32 where the
-  firmware caps at 4 (many scripted pairs in the 10/100/200-node grids are
-  more than 4 hops apart, so the firmware as-built could not deliver them
-  even on a clean channel); retry RREQs issued from the node tick use hop
-  limit 4, so initial and retry floods differ in reach; and
-  reliability/receipt logic is a parallel implementation (convergence is
-  workstream 2.5).
+- The simulator bridge still diverges from firmware orchestration in one
+  structural way: reliability/receipt logic is a parallel implementation
+  (convergence is workstream 2.5). The hop-limit divergence this bullet
+  used to describe (bridge flooding at hop limit 32 against the firmware's
+  4) was fixed alongside the routing fixes measured in the addendum below;
+  the bridge now uses the firmware's expanding-ring hop budgets.
 
 ## Raw data
 
 All runs are deterministic (fixed topologies, scripted traffic, seeded RNG
 for SNR jitter and LBT backoff draws) and reproducible with the commands
 above. The old-model rows reproduce at commit `d2483b9f`.
+
+## Addendum (2026-06-12): routing fixes measured
+
+Workstream 2.2 changed discovery behavior (LEDGER DES-1 through DES-4).
+The simulator compiles the real protocol code, so the changes flow into
+these scenarios directly. Three configurations, same seeds, same scenarios:
+
+- **A, published above:** pre-fix protocol code, but with the bridge's
+  hop-limit-32 override, i.e. the numbers in the tables above. Kept for
+  continuity; it overstates the old firmware's reach.
+- **B, honest baseline:** pre-fix protocol code with the firmware's real
+  hop budgets (RREQ 4, DATA 3). This is what shipped firmware would do.
+- **C, routing fixes:** fresh query_id per retry (DES-2), 50-300 ms
+  jittered RREQ rebroadcast (DES-3), expanding-ring discovery, 4 hops then
+  8 on retries, with DATA/RREP/RERR budgets raised to the 8-hop route
+  depth (DES-1).
+
+| Scenario | A: published | B: honest old firmware | C: routing fixes |
+|---|---|---|---|
+| 10-node grid | 13/20 (65%) | 11/20 (55%) | **17/20 (85%)** |
+| 10-node cluster | 18/20 (90%) | 18/20 (90%) | 18/20 (90%) |
+| 50 | 0/20 (0%) | 0/20 (0%) | 1/20 (5%) |
+| 100 | 0/20 (0%) | 0/20 (0%) | 1/20 (5%) |
+| 200 | 2/20 (10%) | 0/20 (0%) | 0/20 (0%) |
+
+Seed robustness on the headline row: the 10-node grid delivers 11/11/11
+across seeds 42/7/1234 before the fixes and 17/17/19 after.
+
+What the columns say, honestly:
+
+1. **The fixes work where the channel has headroom.** On the 10-node grid
+   the discovery failures the June results blamed on DES-2 are mostly
+   gone: 55% to 85-95%. Average latency rose from 0.33 s to 0.65 s, the
+   expected price of rebroadcast jitter and of actually delivering the
+   multi-hop messages that previously failed.
+2. **The fixes do not rescue saturated meshes.** At 50/100 nodes the
+   channel is over capacity from control traffic before any discovery
+   begins (1.2 to 2.3 erlang offered). Fresh-query retries now actually
+   re-flood instead of being eaten, which roughly quadruples RREQ traffic
+   on a channel that was already saturated (50-node: 290 to 1,409 RREQ
+   transmissions, offered load 0.74 to 1.67 erlang). Delivery moved 0 to
+   1/20. The knee is a capacity problem (beacon and discovery ToA at SF10),
+   not a retry-semantics problem; profile and cadence work is outside this
+   change.
+3. **The 200-node scenario was never within protocol reach.** Every
+   scripted pair in the 200-node grid is 11 to 17 grid-hops apart, beyond
+   the protocol's 8-hop maximum route depth. The published "2/20" was an
+   artifact of the bridge's hop-limit-32 override (column A); honest
+   firmware delivers 0 at 200 nodes regardless of these fixes. A future
+   re-scoping of that scenario should either place pairs within 8 hops or
+   exist explicitly to measure out-of-reach behavior.
+4. **DES-4 (route metric): measured, then deleted.** An
+   accept-better-metric variant (destination re-answers a duplicate RREQ
+   copy carrying a strictly better path metric; relays update reverse
+   routes but do not re-flood) was implemented and measured against the
+   same scenarios: delivery and latency were identical to first-arrival
+   (17/18/1 on 10-grid/cluster/50, to the millisecond). The uniform grids
+   cannot produce metric differentiation (all audible links have equal
+   RSSI), and no other scenario exercises it either. Per the
+   no-decorative-machinery rule, the unwired composite scoring module
+   (`route_metric.c`) was deleted and first-arrival is now the documented
+   selection rule; the penalty-based metric still arbitrates between
+   discovery attempts at `route_install` (each attempt is a fresh flood
+   under DES-2, so retried discoveries genuinely produce competing RREPs).
+
+Reproduce column C with the commands in "Scenario setup" above at this
+commit; column B is this commit's protocol code with the pre-fix discovery
+semantics restored (same query_id on retry, no jitter, hop limit 4, DATA 3).

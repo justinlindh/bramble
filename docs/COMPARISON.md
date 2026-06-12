@@ -81,7 +81,7 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 
 **Privacy enhancement:** RREQ packets carry a per-query pseudonym instead of the originator's address, so forwarded route requests do not identify who is asking. The destination address stays cleartext, and the first hop can still infer the originator (a fresh RREQ has hop_count 0); see [SECURITY-MODEL.md](SECURITY-MODEL.md) for the precise scope.
 
-**Scalability implications:** Route discovery floods once. After that, DM traffic is O(path_length): one transmission per hop (the current firmware fixes the hop limit at 4) vs. potentially hundreds in a large flooded mesh. This is where Bramble's design most differs from both Meshtastic and MeshCore. The tradeoff is complexity: route maintenance, broken-link detection, and the RREQ/RREP exchange add protocol overhead and implementation complexity.
+**Scalability implications:** Route discovery floods once. After that, DM traffic is O(path_length): one transmission per hop (discovery uses an expanding ring: hop limit 4 on the first attempt, 8 on retries, and 8 is the protocol's maximum route depth) vs. potentially hundreds in a large flooded mesh. This is where Bramble's design most differs from both Meshtastic and MeshCore. The tradeoff is complexity: route maintenance, broken-link detection, and the RREQ/RREP exchange add protocol overhead and implementation complexity.
 
 ---
 
@@ -177,7 +177,7 @@ MeshCore's role system (companions don't repeat) means the effective flooding fa
 
 ### Bramble
 
-DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. The current firmware fixes the hop limit at 4. The token-bucket airtime budget caps each node's transmission time per hour with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages still flood (hop-limited), but channels are explicitly a lower-tier service.
+DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. Discovery uses an expanding ring (hop limit 4 first, 8 on retries); routes up to 8 hops deep are usable end-to-end. The token-bucket airtime budget caps each node's transmission time per hour with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages still flood (hop-limited), but channels are explicitly a lower-tier service.
 
 **Validation status:** scale behavior has not been validated in a real-world deployment. The simulator runs the real protocol code in scenarios up to 200 nodes, and that is where scaling behavior is currently being tested.
 
