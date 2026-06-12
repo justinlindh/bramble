@@ -727,7 +727,7 @@ Offset  Size  Field            Description
 0       1     version          Protocol version (0x01)
 1       1     type             Packet type (0x12)
 2       1     flags            Probe flags (see below)
-3       1     hop_limit        TTL (default 3)
+3       1     hop_limit        TTL (default 8, the max route depth)
 4       4     src_addr         Probe originator's address
 8       4     probe_id         Unique probe ID
 ──────────────────────────────────────────────────────────
@@ -1391,11 +1391,20 @@ function send_data(dest_addr, payload, tier):
     schedule_timer(RREQ_RETRY_1, 5000)  // 5 seconds
 ```
 
-**Retry schedule for route discovery:**
-- Attempt 1: immediate broadcast
-- Attempt 2: after 5 seconds, with hop_limit increased by 2
-- Attempt 3: after 15 seconds (10s after attempt 2), with max hop_limit (8)
+**Retry schedule for route discovery (expanding ring):**
+- Attempt 1: immediate broadcast, hop_limit 4
+- Attempt 2: after 5 seconds, hop_limit 8
+- Attempt 3: 15 seconds after attempt 2, hop_limit 8
 - After attempt 3: route discovery fails. Queued packets are dropped or returned to application.
+
+Every attempt carries a **fresh `query_id`** (and therefore a fresh originator
+pseudonym). Retries with the original query_id would be silently dropped by
+every node whose 30-second RREQ dedup window still remembers the first flood;
+a fresh query_id makes each retry a genuinely new flood. The originator's
+pending-discovery entry remembers the query_id of every attempt, so an RREP
+answering any outstanding attempt (including a late answer to an earlier one)
+completes the discovery. When multiple attempts are answered, `route_install`
+keeps the route with the better metric.
 
 **KEY_EXCHANGE reliability:** KEY_EXCHANGE packets are sent with Critical-tier reliability (8 retries with exponential backoff). This ensures key establishment completes even under adverse radio conditions, since a failed key exchange blocks all subsequent DM communication.
 
@@ -1432,8 +1441,10 @@ function handle_rreq(rreq, rx_rssi, rx_snr):
     rreq.header.hop_limit -= 1
     rreq.prev_hop = my_addr
     
-    // Jittered rebroadcast to reduce collisions
-    delay = random(20, 100)  // ms
+    // Jittered rebroadcast to reduce collisions: without it, every
+    // same-hop relay keys up at the same instant and the flood collides
+    // with itself
+    delay = random(50, 300)  // ms
     schedule_broadcast(rreq, delay)
 ```
 
@@ -1746,93 +1757,37 @@ function handle_channel_data_relay(pkt):
 
 Channel messages flood but are scoped: default max 3 hops (configurable per channel, max 6). This is an acceptable tradeoff since channels are "public" within their membership and typically used for less time-sensitive group communication.
 
-### 6.8 Adaptive Routing Metrics
+### 6.8 Route Metric and Selection
 
-The routing layer uses a composite metric to select optimal routes, replacing simple hop-count or RSSI-only metrics.
+Path quality is tracked with a single **penalty-accumulating metric**
+(0-255, higher = better). An RREQ starts at 255; every relay subtracts a
+link penalty derived from the RSSI and SNR it received the RREQ with
+(`compute_link_penalty`: 0-30 points for RSSI between -60 and -120 dBm,
+0-20 points for SNR between +10 and -5 dB). The destination echoes the
+accumulated metric back in the RREP, and the originator and each reverse
+relay subtract their own receive-link penalty when installing the route.
 
-#### Composite Metric Formula
+**Selection is first-arrival within a single flood.** Relays forward only
+the first copy of a query they hear (RREQ dedup, 30-second window), so one
+flood explores one path per relay and the first copy to reach the
+destination defines the candidate route. Duplicate copies arriving over
+other paths are dropped regardless of metric.
 
-```
-composite = clamp8(
-    (link_quality  × 102 +
-     delivery_rate ×  77 +
-     airtime_score ×  51 +
-     latency_score ×  26) / 256
-)
-```
+**The metric arbitrates between floods, not within one.** `route_install`
+replaces an existing route only when the candidate has a strictly better
+metric (or equal metric with fewer hops), or when the existing route is
+broken or stale. Because every discovery attempt floods under a fresh
+query_id, a discovery that needed a retry can produce multiple RREPs, and
+the best one wins.
 
-All sub-scores are normalized to 0–255. Output clamped to uint8_t (0–255, higher = better).
-
-**Weights (must sum to 256 for integer-only arithmetic):**
-| Factor | Weight | Percentage | Rationale |
-|--------|--------|------------|-----------|
-| `link_quality` | 102 | 40% | RSSI/SNR — RF conditions matter but don't dominate |
-| `delivery_rate` | 77 | 30% | ACK success ratio — strongest predictor of usable routes |
-| `airtime_score` | 51 | 20% | Remaining budget — avoid routing through exhausted nodes |
-| `latency_score` | 26 | 10% | RTT — tiebreaker for similar-quality routes |
-
-#### Delivery Rate Tracking
-
-Per-neighbor exponential moving average (EMA) of packet delivery success:
-
-```c
-// α = 1/8 for smooth tracking (shift-friendly)
-// success = 255 on ACK, 0 on timeout
-ema = ema - (ema >> 3) + (success >> 3);
-```
-
-**Confidence gating:** If fewer than 8 samples collected, fall back to `link_quality` only.
-
-**Decay:** If no packets sent to neighbor for 5 minutes, decay EMA toward `link_quality / 2`.
-
-#### Latency Estimation
-
-Per-route EMA of round-trip time (RTT) measured from DATA send to delivery receipt arrival:
-
-```c
-// α = 1/4 for faster response to congestion
-latency_ema_ms = latency_ema_ms - (latency_ema_ms >> 2) + (rtt_ms >> 2);
-```
-
-Normalized against `MAX_EXPECTED_LATENCY_MS` (default 10,000ms for multi-hop LoRa):
-```c
-latency_score = 255 - min(255, (latency_ema_ms * 255) / MAX_EXPECTED_LATENCY_MS);
-```
-
-#### Airtime Score
-
-Derived from beacon-advertised `airtime_remaining_pct`:
-```c
-airtime_score = (neighbor->airtime_remaining_pct * 255) / 100;
-```
-
-**Penalty cliff:** Below 10% remaining, score is quartered to strongly discourage routing through near-depleted nodes.
-
-#### Route Switch Hysteresis
-
-To prevent oscillation between similar-quality routes:
-
-```c
-#define METRIC_HYSTERESIS_THRESHOLD  15   // Minimum improvement to switch
-#define METRIC_SWITCH_COOLDOWN_MS    10000 // 10s between switches
-
-bool route_metric_should_switch(current, new, last_switch_ms, now_ms) {
-    if (new - current < METRIC_HYSTERESIS_THRESHOLD)
-        return false;
-    if (now_ms - last_switch_ms < METRIC_SWITCH_COOLDOWN_MS)
-        return false;
-    return true;
-}
-```
-
-#### Integer-Only Computation
-
-All metric calculations use integer arithmetic (no floating point), suitable for ESP32-S3 without FPU dependency:
-
-```c
-uint16_t raw = (102 * link + 77 * delivery + 51 * airtime + 26 * latency) / 256;
-uint8_t composite = (raw > 255) ? 255 : (uint8_t)raw;
-```
+A weighted composite metric (delivery-rate and latency EMAs, airtime
+score, switch hysteresis) was specified here previously and existed in the
+tree as `route_metric.c`, but it was never wired into route selection:
+first-arrival dedup decided routes alone. Simulation of the wired-up
+version against the collision model showed no measurable delivery or
+latency change on the 10- and 50-node scenarios
+(`docs/results/simulation-2026-06.md`, DES-4), so the module was deleted
+rather than shipped as decoration.
 
 ---
 

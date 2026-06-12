@@ -178,7 +178,7 @@ bool mesh_discovery_should_retry(const pending_discovery_t *d, uint32_t now_ms);
  * @param d Discovery entry
  * @param now_ms Current timestamp
  */
-void mesh_discovery_record_attempt(pending_discovery_t *d, uint32_t now_ms);
+void mesh_discovery_record_attempt(pending_discovery_t *d, uint32_t query_id, uint32_t now_ms);
 
 /* ── RREQ rate limiter APIs ───────────────────────────────────────────── */
 

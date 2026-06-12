@@ -491,17 +491,6 @@ target_include_directories(test_coding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
 )
 
-# Adaptive routing metric tests
-add_executable(test_route_metric
-    test_route_metric.c
-    unity/unity.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/route_metric.c
-)
-target_include_directories(test_route_metric PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-)
-
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel
     test_public_channel.c

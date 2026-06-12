@@ -38,6 +38,5 @@
 #include "../../components/location/location.c"
 #include "../../components/group/group.c"
 #include "../../components/coding/coding.c"
-#include "../../components/routing/route_metric.c"
 #include "../../components/channel/channel_key.c"
 #include "../../components/channel/public_channel.c"
