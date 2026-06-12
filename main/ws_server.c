@@ -465,6 +465,8 @@ static const char* CONFIG_HTML =
     "<input name='ssid' required placeholder='Your WiFi name'>"
     "<label>Password</label>"
     "<input name='pass' type='password' placeholder='WiFi password'>"
+    "<label>Device Token</label>"
+    "<input name='token' type='password' placeholder='From boot log or: bramble pair'>"
     "<button type='submit'>Save &amp; Reboot</button>"
     "</form>"
     "<script>"
@@ -526,12 +528,7 @@ static int url_decode(char* dst, const char* src, int src_len) {
 }
 
 static esp_err_t config_post_handler(httpd_req_t* req) {
-    if (auth_eval(req) != WS_AUTH_OK) {
-        ESP_LOGW(TAG, "Config POST auth failed");
-        return send_401_http(req);
-    }
-
-    char body[256] = {0};
+    char body[512] = {0};
     int len = httpd_req_recv(req, body, sizeof(body) - 1);
     if (len <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty body");
@@ -539,12 +536,36 @@ static esp_err_t config_post_handler(httpd_req_t* req) {
     }
     body[len] = '\0';
 
-    /* Parse form: ssid=xxx&pass=xxx */
+    /* Parse form: ssid=xxx&pass=xxx&token=xxx */
     char ssid[33] = {0};
     char pass[65] = {0};
+    char form_token[AUTH_TOKEN_MAX] = {0};
 
     char* ssid_start = strstr(body, "ssid=");
     char* pass_start = strstr(body, "pass=");
+    char* token_start = strstr(body, "token=");
+
+    if (token_start) {
+        token_start += 6;
+        char* end = strchr(token_start, '&');
+        int tlen = end ? (int)(end - token_start) : (int)strlen(token_start);
+        if (tlen > (int)sizeof(form_token) - 1)
+            tlen = (int)sizeof(form_token) - 1;
+        url_decode(form_token, token_start, tlen);
+    }
+
+    /* The setup portal form cannot send an Authorization header, so the
+     * device token is accepted as a form field too. Same credential,
+     * same constant-time comparison. */
+    bool authed = (auth_eval(req) == WS_AUTH_OK);
+    if (!authed && form_token[0] != '\0' && !s_token_unavailable &&
+        ct_strcmp(form_token, s_auth_token) == 0) {
+        authed = true;
+    }
+    if (!authed) {
+        ESP_LOGW(TAG, "Config POST auth failed");
+        return send_401_http(req);
+    }
 
     if (ssid_start) {
         ssid_start += 5;
