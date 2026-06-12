@@ -85,8 +85,11 @@ origin allowlist (the device only fetches from its NVS-configured OTA origin;
 `bramble.otaUpdate` takes a relative artifact path, never a raw URL;
 `components/ota/ota_url.c`, `ota_origin.c`), and mandatory image signature
 verification (RSA-3072 Secure Boot V2 app signatures, checked on every OTA
-write via `CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`). A compromised
-server or MITM cannot install firmware without the signing key. A soft
+write via `CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT`). On a device
+already running signed firmware, a compromised server or MITM cannot install
+firmware without the signing key; devices still running pre-signing firmware
+perform no check and remain exposed until they take their first signed OTA.
+A soft
 anti-rollback floor (NVS-stored, `components/ota/ota_rollback.c`) rejects
 downgrades unless a token holder explicitly overrides. Residual: signature
 enforcement happens at OTA time, not at boot, until hardware Secure Boot V2
