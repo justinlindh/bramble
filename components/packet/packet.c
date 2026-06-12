@@ -44,6 +44,14 @@ esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, si
     return ESP_OK;
 }
 
+esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size_t len) {
+    esp_err_t r = bramble_header_serialize(h, buf, len);
+    if (r != ESP_OK)
+        return r;
+    buf[3] = 0; /* hop_limit: relay-mutated in flight, excluded from authentication */
+    return ESP_OK;
+}
+
 /* Macro for body offset */
 #define B (HEADER_SIZE)
 

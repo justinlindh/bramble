@@ -134,23 +134,20 @@ What it does not hide: the 12-byte cleartext header (version, type, flags,
 hop limit, destination address, packet id), the 4-byte cleartext source
 address field, ciphertext length, and transmission timing.
 
-### AEAD header binding (currently breaks multi-hop unicast)
+### AEAD header binding
 
-The full 12-byte cleartext header, *including* the mutable `hop_limit` byte,
-is passed as GCM associated data on both encrypt and decrypt
-(`main/mesh_task.c`, `send_data_packet` and `handle_data`), so a forwarder or
-injector cannot splice a captured ciphertext under a modified header (changed
-destination, flags, or packet id) without failing the tag check.
-
-Binding `hop_limit` has a live consequence in the current code:
-`forward_data_packet` (`main/mesh_task.c`) decrements `hop_limit` and
-re-serializes the header before relaying, so the destination of a forwarded
-unicast DATA packet computes its AAD from a header that no longer matches the
-one the sender bound, and the tag check rejects the packet. Multi-hop unicast
-DATA delivery fails at the destination today (also listed in section 4).
-Single-hop unicast and broadcast are unaffected: broadcast DATA is handled
-locally and never re-flooded in firmware (`channel_flood_decide` in
-`components/routing/channel_flood.c` has no firmware callers).
+The AAD for encrypted DATA packets is the serialized 12-byte header with the
+`hop_limit` byte zeroed (`bramble_header_build_aad` in
+`components/packet/packet.c`), built identically by the originator
+(`send_data_packet` in `main/mesh_task.c`) and the destination
+(`handle_data`). A forwarder or injector cannot splice a captured ciphertext
+under a modified header (changed destination, flags, or packet id) without
+failing the tag check, while relays can decrement `hop_limit` in flight
+(`forward_data_packet`) without breaking authentication. The cost of that
+exclusion: `hop_limit` itself is unauthenticated, so an injector can rewrite
+it on a captured ciphertext; duplicate suppression keyed on the
+authenticated `packet_id` bounds what re-injection achieves while the dedup
+entry lives.
 
 The 4-byte cleartext `src_addr` field that follows the header is *not*
 in the AAD, but an authenticated copy of the source address travels inside
@@ -286,12 +283,6 @@ destination, and expire.
 Facts of the code on `main` today. Each entry shrinks or disappears in the
 same PR that fixes it.
 
-- **Multi-hop unicast DATA packets fail decryption at the destination**: the
-  GCM AAD binds the full 12-byte header including `hop_limit`
-  (`send_data_packet` and `handle_data` in `main/mesh_task.c`), but
-  `forward_data_packet` decrements `hop_limit` and re-serializes the header
-  before relaying, so the destination's AAD never matches the sender's and
-  the tag check rejects every forwarded packet.
 - **Location packets are transmitted entirely in cleartext**, including
   coordinates, with the sharing tier readable in the cleartext header flags
   (`mesh_send_location_packet` and `handle_location` in `main/mesh_task.c`;
