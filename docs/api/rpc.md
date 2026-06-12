@@ -485,12 +485,30 @@ All methods below are registered in firmware via `rpc_register(...)`.
 ```
 
 #### `bramble.otaUpdate`
-- Description: Starts OTA from URL.
-- Params: `url` (string), optional `sha256` (string).
-- Response fields: `ok` (bool), `status` (string).
+- Description: Starts OTA from an artifact path resolved against the device's allowlisted OTA origin. Raw URLs are rejected. The image must carry a valid signature trusted by the running firmware and pass the anti-rollback floor.
+- Params: `path` (string, relative artifact path), optional `allow_downgrade` (bool).
+- Response fields: `ok` (bool), `note` (string), `url` (string, resolved), `partition` (string), `error` (string when ok=false), `last_error` (string, failure reason from the previous attempt).
 - Example:
 ```json
-{"jsonrpc":"2.0","id":82,"method":"bramble.otaUpdate","params":{"url":"https://example.com/bramble.bin"}}
+{"jsonrpc":"2.0","id":82,"method":"bramble.otaUpdate","params":{"path":"stable/v1.4.0/heltec-v3/bramble.bin"}}
+```
+
+#### `bramble.otaGetOrigin`
+- Description: Reports the allowlisted OTA origin and anti-rollback state.
+- Params: none.
+- Response fields: `ok` (bool), `origin` (string), `default_origin` (string), `overridden` (bool), `version_floor` (string, when recorded), `running_version` (string).
+- Example:
+```json
+{"jsonrpc":"2.0","id":83,"method":"bramble.otaGetOrigin","params":{}}
+```
+
+#### `bramble.otaSetOrigin`
+- Description: Overrides or resets the allowlisted OTA origin (https base URL; http only on CONFIG_BRAMBLE_OTA_ALLOW_HTTP builds).
+- Params: `origin` (string) or `reset` (bool).
+- Response fields: `ok` (bool), `origin` (string), `overridden` (bool), `error` (string when ok=false).
+- Example:
+```json
+{"jsonrpc":"2.0","id":84,"method":"bramble.otaSetOrigin","params":{"origin":"https://mirror.example/ota/"}}
 ```
 
 #### `bramble.setTrafficDebug`

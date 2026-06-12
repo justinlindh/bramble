@@ -909,7 +909,9 @@ paths:
     post:
       operationId: otaUpdate
       summary: Start OTA firmware update
-      description: Starts an OTA update task from an HTTP(S) URL.
+      description: >
+        Starts an OTA update task from an artifact path resolved against the
+        device's allowlisted OTA origin. Raw URLs are rejected.
       tags: [action]
       requestBody:
         content:
@@ -1101,9 +1103,12 @@ paths:
       operationId: otaUpdate
       summary: Start an OTA firmware update
       description: >
-        Initiates a firmware OTA update from the given URL. Returns immediately;
-        the node reboots automatically on success. HTTP URLs are rejected in release
-        builds unless CONFIG_BRAMBLE_OTA_ALLOW_HTTP is set.
+        Initiates a firmware OTA update from an artifact path resolved against
+        the device's allowlisted OTA origin (see bramble.otaGetOrigin /
+        bramble.otaSetOrigin). Raw URLs are rejected. Returns immediately; the
+        node reboots automatically on success. The downloaded image must carry
+        a valid signature trusted by the running firmware and must pass the
+        soft anti-rollback floor unless allow_downgrade is set.
       tags: [action]
       requestBody:
         content:
@@ -1119,6 +1124,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OtaUpdateResponse'
+
+  /rpc/bramble.otaGetOrigin:
+    post:
+      operationId: otaGetOrigin
+      summary: Report the allowlisted OTA origin and anti-rollback floor
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '200':
+          description: Current OTA origin configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaGetOriginResponse'
+
+  /rpc/bramble.otaSetOrigin:
+    post:
+      operationId: otaSetOrigin
+      summary: Override or reset the allowlisted OTA origin
+      description: >
+        Persists an OTA origin override in NVS. The origin must be an
+        https:// base URL (http:// only on builds with
+        CONFIG_BRAMBLE_OTA_ALLOW_HTTP); userinfo, query, and fragment are
+        rejected. Pass reset=true to return to the default origin.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtaSetOriginParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Effective origin after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaSetOriginResponse'
 
   # ── Hardware / Power ───────────────────────────────────────────────────────
 
@@ -2508,11 +2556,18 @@ components:
 
     OTAUpdateParams:
       type: object
-      required: [url]
+      required: [path]
       properties:
-        url:
+        path:
           type: string
-          description: HTTP or HTTPS URL to firmware image.
+          description: >
+            Artifact path relative to the device's allowlisted OTA origin
+            (e.g. stable/v1.4.0/heltec-v3/bramble.bin). Raw URLs are rejected.
+        allow_downgrade:
+          type: boolean
+          description: >
+            Accept an image version below the anti-rollback floor and lower
+            the floor to it.
 
     OTAUpdateResponse:
       type: object
@@ -2798,13 +2853,19 @@ components:
     OtaUpdateParams:
       type: object
       description: Parameters for bramble.otaUpdate.
-      required: [url]
+      required: [path]
       properties:
-        url:
+        path:
           type: string
           description: >
-            Firmware binary URL (http:// or https://). HTTP URLs are rejected in
-            release builds unless CONFIG_BRAMBLE_OTA_ALLOW_HTTP is set.
+            Artifact path relative to the device's allowlisted OTA origin,
+            e.g. stable/v1.4.0/heltec-v3/bramble.bin. Absolute URLs, path
+            traversal, and special characters are rejected.
+        allow_downgrade:
+          type: boolean
+          description: >
+            Accept an image version below the anti-rollback floor and lower
+            the floor to it. Defaults to false.
 
     OtaUpdateResponse:
       type: object
@@ -2817,9 +2878,65 @@ components:
         note:
           type: string
           description: Informational message about OTA status.
+        url:
+          type: string
+          description: Fully resolved download URL (origin + path).
         partition:
           type: string
           description: Name of the currently running partition.
+        error:
+          type: string
+          description: Error message when ok=false.
+        last_error:
+          type: string
+          description: Failure reason from the previous OTA attempt, if any.
+
+    OtaGetOriginResponse:
+      type: object
+      description: Response from bramble.otaGetOrigin.
+      required: [ok, origin, default_origin, overridden, running_version]
+      properties:
+        ok:
+          type: boolean
+        origin:
+          type: string
+          description: Effective OTA origin used to resolve artifact paths.
+        default_origin:
+          type: string
+          description: Compiled-in default origin.
+        overridden:
+          type: boolean
+          description: True when an NVS override is stored.
+        version_floor:
+          type: string
+          description: Anti-rollback floor version, when one is recorded.
+        running_version:
+          type: string
+          description: Version of the running firmware.
+
+    OtaSetOriginParams:
+      type: object
+      description: Parameters for bramble.otaSetOrigin.
+      properties:
+        origin:
+          type: string
+          description: New OTA origin base URL (https required by policy).
+        reset:
+          type: boolean
+          description: Remove the override and return to the default origin.
+
+    OtaSetOriginResponse:
+      type: object
+      description: Response from bramble.otaSetOrigin.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        origin:
+          type: string
+          description: Effective origin after the change.
+        overridden:
+          type: boolean
         error:
           type: string
           description: Error message when ok=false.
