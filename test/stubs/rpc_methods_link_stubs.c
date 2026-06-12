@@ -591,6 +591,8 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
 }
 
 void ws_server_load_token(void) {}
+void ws_server_load_origins(void) {}
+const char* ws_server_get_extra_origins(void) { return ""; }
 const char* ws_server_get_token(void) { return ""; }
 esp_err_t esp_wifi_get_mac(int ifx, uint8_t mac[6]) {
     (void)ifx;
