@@ -17,6 +17,7 @@ sdkconfig
 sdkconfig.*
 !sdkconfig.defaults*
 sdkconfig.old
+!test/stubs/sdkconfig.h
 
 # Dependency/build management
 managed_components/
