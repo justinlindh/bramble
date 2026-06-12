@@ -118,7 +118,7 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 
 Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
-- [api/openapi.yaml](api/openapi.yaml): OpenAPI spec for the RPC surface (currently lags the firmware; see [VERSIONING.md](VERSIONING.md))
+- [api/openapi.yaml](api/openapi.yaml): OpenAPI spec for the RPC surface (synced to the firmware registry, CI-enforced by `scripts/check-rpc-contract.sh`; see [VERSIONING.md](VERSIONING.md))
 - [bramble-go](https://github.com/justinlindh/bramble-go): Go SDK (serial, WebSocket, BLE)
 - [bramble-cli](https://github.com/justinlindh/bramble-cli): CLI/TUI built on bramble-go
 - [VERSIONING.md](VERSIONING.md): compatibility matrix

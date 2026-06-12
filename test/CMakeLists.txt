@@ -157,6 +157,78 @@ target_include_directories(test_airtime_budget PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
 )
 
+# TX gate ToA cost tests (DES-7)
+add_executable(test_tx_gate_cost
+    test_tx_gate_cost.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_tx_gate_cost PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+target_link_libraries(test_tx_gate_cost m)
+add_test(NAME test_tx_gate_cost COMMAND test_tx_gate_cost)
+
+# TX gate chokepoint tests (DES-5, DES-6)
+add_executable(test_tx_gate
+    test_tx_gate.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_tx_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+target_link_libraries(test_tx_gate m)
+add_test(NAME test_tx_gate COMMAND test_tx_gate)
+
+# Beacon budget-fit tests (review BLOCKER on PR #82)
+add_executable(test_tx_beacon_fit
+    test_tx_beacon_fit.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/freq_plan.c
+)
+target_include_directories(test_tx_beacon_fit PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+)
+target_link_libraries(test_tx_beacon_fit m)
+add_test(NAME test_tx_beacon_fit COMMAND test_tx_beacon_fit)
+
+# Retry-storm budget tests (DES-6)
+add_executable(test_tx_retry_budget
+    test_tx_retry_budget.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/tx_gate.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/airtime_budget.c
+)
+target_include_directories(test_tx_retry_budget PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+target_link_libraries(test_tx_retry_budget m)
+add_test(NAME test_tx_retry_budget COMMAND test_tx_retry_budget)
+
+# Duty-cycle cap tests (DES-8)
+add_executable(test_duty_cycle
+    test_duty_cycle.c
+    unity/unity.c
+)
+target_include_directories(test_duty_cycle PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+)
+add_test(NAME test_duty_cycle COMMAND test_duty_cycle)
+
 # Broadcast airtime gate tests
 add_executable(test_broadcast_airtime_gate
     test_broadcast_airtime_gate.c

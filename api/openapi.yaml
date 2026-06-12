@@ -6,7 +6,11 @@ info:
     Methods are invoked via JSON-RPC over serial (UART), WebSocket, or BLE.
     Each method is mapped to a POST path for codegen and documentation purposes.
     The actual wire format is standard JSON-RPC 2.0.
-  version: 0.5.0
+    WebSocket and BLE connections require the per-device auth token by default;
+    serial is unauthenticated by design (physical access is the trust anchor).
+    Unauthenticated WS/BLE clients may call only bramble.ping and
+    bramble.getVersion; every other method answers Unauthorized (-1005).
+  version: 0.6.0
   license:
     name: MIT
     identifier: MIT
@@ -15,7 +19,8 @@ servers:
   - url: https://bramble.local
     description: Bramble node HTTP host (WebSocket JSON-RPC upgrades on /ws)
 
-security: []
+security:
+  - deviceToken: []
 
 paths:
   # ── Query Methods ──────────────────────────────────────────────────────────
@@ -25,8 +30,8 @@ paths:
       operationId: getStatus
       summary: Get node status
       description: >
-        Returns current node status including uptime, packet counters,
-        neighbor/route counts, airtime usage, and GPS position.
+        Returns current node status including identity, firmware/protocol
+        versions, radio health, packet counters, uptime, heap, and battery.
       tags: [query]
       requestBody:
         content:
@@ -42,7 +47,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusResponse'
-
 
   /rpc/bramble.getWifiStatus:
     post:
@@ -111,8 +115,12 @@ paths:
     post:
       operationId: getVersion
       summary: Get firmware version info
-      description: Returns firmware version, protocol version, and hardware identifier.
+      description: >
+        Returns firmware version, protocol version, and hardware identifier.
+        On the unauthenticated allowlist: callable without the device token,
+        so a pairing UI can identify the device before prompting for the token.
       tags: [query]
+      security: []
       requestBody:
         content:
           application/json:
@@ -271,8 +279,11 @@ paths:
     post:
       operationId: ping
       summary: Ping the node
-      description: Health check. Returns pong with node address and protocol version.
+      description: >
+        Health check. Returns pong with node address and protocol version.
+        On the unauthenticated allowlist: callable without the device token.
       tags: [query]
+      security: []
       requestBody:
         content:
           application/json:
@@ -398,7 +409,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/SetRadioResponse'
 
   /rpc/bramble.setNodeName:
     post:
@@ -419,7 +430,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/SetNodeNameResponse'
 
   /rpc/bramble.addChannel:
     post:
@@ -461,7 +472,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/RemoveChannelResponse'
 
   /rpc/bramble.setDefaultChannel:
     post:
@@ -503,7 +514,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/OkResponse'
+                $ref: '#/components/schemas/SetMailboxResponse'
 
   /rpc/bramble.setLocationConfig:
     post:
@@ -610,175 +621,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/OkResponse'
 
-
-  /rpc/bramble.getBattery:
-    post:
-      operationId: getBattery
-      summary: Get battery status
-      description: Returns current battery voltage and percentage.
-      tags: [query]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Battery status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BatteryStatusResponse'
-
-  /rpc/bramble.getGpsPosition:
-    post:
-      operationId: getGpsPosition
-      summary: Get GPS position
-      description: Returns current GPS fix data when GPS hardware is available.
-      tags: [query]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: GPS position
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GpsPositionResponse'
-
-  /rpc/bramble.getAudioStatus:
-    post:
-      operationId: getAudioStatus
-      summary: Get audio subsystem status
-      description: Returns audio availability, volume, mute state, and playback status.
-      tags: [query]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Audio status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AudioStatusResponse'
-
-  /rpc/bramble.getStorageInfo:
-    post:
-      operationId: getStorageInfo
-      summary: Get storage info
-      description: Returns SD card presence and mount-point information.
-      tags: [query]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Storage status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StorageInfoResponse'
-
-  /rpc/bramble.getAuthToken:
-    post:
-      operationId: getAuthToken
-      summary: Get WebSocket auth token
-      description: Returns current WebSocket auth token and whether auth is enabled.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Auth token status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetAuthTokenResponse'
-
-  /rpc/bramble.getBeaconPolicy:
-    post:
-      operationId: getBeaconPolicy
-      summary: Get beacon policy configuration and status
-      description: Returns adaptive beacon policy config and current runtime status.
-      tags: [query]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Beacon policy
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetBeaconPolicyResponse'
-
-  /rpc/bramble.setAuthToken:
-    post:
-      operationId: setAuthToken
-      summary: Set or clear WebSocket auth token
-      description: Sets auth token when non-empty, or clears token when empty.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetAuthTokenParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Auth token updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OkResponse'
-
-  /rpc/bramble.setBeaconPolicy:
-    post:
-      operationId: setBeaconPolicy
-      summary: Configure beacon policy
-      description: Updates fixed/adaptive beacon policy parameters.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetBeaconPolicyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Beacon policy updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OkResponse'
-
   /rpc/bramble.setBroadcastTelemetryMode:
     post:
       operationId: setBroadcastTelemetryMode
@@ -799,183 +641,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SetBroadcastTelemetryModeResponse'
-
-  /rpc/bramble.setBacklight:
-    post:
-      operationId: setBacklight
-      summary: Set display backlight level
-      description: Sets display backlight level from 0 to 255.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetBacklightParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Backlight updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BacklightResponse'
-
-  /rpc/bramble.sleep:
-    post:
-      operationId: sleep
-      summary: Enter deep sleep
-      description: Enters deep sleep immediately, optionally with timer wake.
-      tags: [action]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SleepParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Sleep initiated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SleepResponse'
-
-  /rpc/bramble.playTone:
-    post:
-      operationId: playTone
-      summary: Play a predefined tone
-      description: Plays one of the predefined audio tones.
-      tags: [action]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PlayToneParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Tone playback requested
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyParams'
-
-  /rpc/bramble.setVolume:
-    post:
-      operationId: setVolume
-      summary: Set audio volume
-      description: Sets audio output volume from 0 to 100.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetVolumeParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Volume updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyParams'
-
-  /rpc/bramble.setMuted:
-    post:
-      operationId: setMuted
-      summary: Set audio mute state
-      description: Enables or disables audio mute.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetMutedParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Mute state updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EmptyParams'
-
-  /rpc/bramble.otaUpdate:
-    post:
-      operationId: otaUpdate
-      summary: Start OTA firmware update
-      description: >
-        Starts an OTA update task from an artifact path resolved against the
-        device's allowlisted OTA origin. Raw URLs are rejected.
-      tags: [action]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OTAUpdateParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: OTA started
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OTAUpdateResponse'
-
-  # ── Adaptive Airtime Policy Methods ────────────────────────────────────────
-
-  /rpc/bramble.getAirtimePolicy:
-    post:
-      operationId: getAirtimePolicy
-      summary: Get adaptive airtime policy configuration and status
-      description: >
-        Returns the current adaptive airtime policy configuration, runtime status,
-        and historical metrics. The policy dynamically adjusts beacon intervals
-        based on mesh density, churn, and congestion conditions.
-      tags: [query]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EmptyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Airtime policy configuration and status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetAirtimePolicyResponse'
-
-  /rpc/bramble.setAirtimePolicy:
-    post:
-      operationId: setAirtimePolicy
-      summary: Configure adaptive airtime policy parameters
-      description: >
-        Updates adaptive airtime policy configuration. Settings are persisted
-        to NVS and take effect immediately. All parameters are optional.
-      tags: [config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetAirtimePolicyParams'
-      responses:
-        '400':
-          description: Bad request (invalid params or request body)
-        '200':
-          description: Policy configuration updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OkResponse'
 
   # ── Traffic Debug Methods ──────────────────────────────────────────────────
 
@@ -1095,6 +760,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GetAuthTokenResponse'
+
+  /rpc/bramble.setAllowedOrigins:
+    post:
+      operationId: setAllowedOrigins
+      summary: Set the extra WebSocket Origin allowlist
+      description: >
+        Persists the extra WS Origin allowlist for connections that do not
+        present the valid token. Entries are full origins
+        (scheme://host[:port]) or the literal "null" opt-in for sandboxed/file
+        pages; commas and spaces are rejected and the joined list must fit in
+        255 characters. An empty array clears the allowlist. Changes apply
+        immediately.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAllowedOriginsParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Origin allowlist updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.getAllowedOrigins:
+    post:
+      operationId: getAllowedOrigins
+      summary: Get the extra WebSocket Origin allowlist
+      description: Returns the persisted extra WS Origin allowlist entries.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Origin allowlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAllowedOriginsResponse'
 
   # ── OTA ───────────────────────────────────────────────────────────────────
 
@@ -1437,12 +1150,17 @@ components:
 
     OkResponse:
       type: object
-      description: Generic success response.
+      description: >
+        Generic acknowledgment response. Handlers that fail softly return
+        ok=false with an error message in the same shape.
       required: [ok]
       properties:
         ok:
           type: boolean
-          description: Always true on success.
+          description: True on success.
+        error:
+          type: string
+          description: Error message (present only when ok=false).
 
     # ── Reusable Types ───────────────────────────────────────────────────────
 
@@ -1476,11 +1194,11 @@ components:
     Neighbor:
       type: object
       description: A directly heard radio neighbor.
-      required: [addr, rssi, snr, lastHeardMs]
+      required: [address, rssi, snr, deliveryRate, airtimeRemaining, last_seen_ms]
       properties:
-        addr:
-          type: integer
-          description: Neighbor address (uint32).
+        address:
+          type: string
+          description: Neighbor address as 8-char uppercase hex.
         rssi:
           type: integer
           description: Received signal strength (dBm).
@@ -1490,28 +1208,28 @@ components:
         deliveryRate:
           type: integer
           description: Link delivery rate metric (0-255).
-        lastHeardMs:
-          type: integer
-          description: Milliseconds since last packet received.
-        isMailbox:
-          type: boolean
-          description: Whether this neighbor acts as a mailbox.
         airtimeRemaining:
           type: integer
-          description: Estimated airtime remaining (percentage).
+          description: Neighbor-advertised airtime budget remaining.
+        last_seen_ms:
+          type: integer
+          description: Milliseconds since last packet received.
+        name:
+          type: string
+          description: Neighbor display name (present only when known).
 
     Route:
       type: object
       description: A routing table entry.
-      required: [dest, nextHop, hopCount, metric, state, lastUsedMs]
+      required: [dest, next_hop, hop_count, metric, state, use_count]
       properties:
         dest:
-          type: integer
-          description: Destination address (uint32).
-        nextHop:
-          type: integer
-          description: Next-hop address (uint32).
-        hopCount:
+          type: string
+          description: Destination address as 8-char uppercase hex.
+        next_hop:
+          type: string
+          description: Next-hop address as 8-char uppercase hex.
+        hop_count:
           type: integer
           description: Number of hops to destination.
         metric:
@@ -1519,16 +1237,16 @@ components:
           description: Route cost metric (lower is better).
         state:
           type: string
-          enum: [active, stale, discovering]
+          enum: [discovering, unverified, active, stale, broken, unknown]
           description: Route state.
-        lastUsedMs:
+        use_count:
           type: integer
-          description: Milliseconds since route was last used.
+          description: Number of times this route has been used.
 
     Channel:
       type: object
       description: A configured channel.
-      required: [id, name, hasPsk, is_default]
+      required: [id, name, hasPsk, epoch, is_default]
       properties:
         id:
           type: integer
@@ -1548,99 +1266,45 @@ components:
 
     Message:
       type: object
-      description: A stored or incoming message.
-      required: [from, to, text, timestamp]
+      description: A stored message from the on-device ring buffer.
+      required: [from, to, direction, text, channel, broadcast, timestamp_s]
       properties:
         from:
-          type: integer
-          description: Sender address (uint32).
+          type: string
+          description: Sender address as 8-char uppercase hex.
         to:
-          type: integer
-          description: Destination address (uint32, 0xFFFFFFFF for broadcast).
+          type: string
+          description: Destination address as 8-char uppercase hex.
+        direction:
+          type: string
+          enum: [incoming, outgoing, broadcast_in, broadcast_out]
+          description: Message direction relative to this node.
         text:
           type: string
           description: Message text content.
-        tier:
-          type: string
-          enum: [critical, normal]
-          description: Message priority tier.
-        timestamp:
+        channel:
+          type: integer
+          description: Channel index the message was sent or received on.
+        broadcast:
+          type: boolean
+          description: True for broadcast messages.
+        timestamp_s:
           type: integer
           description: Message timestamp (Unix seconds).
-        msgId:
+        rssi:
+          type: integer
+          description: RSSI at receive time (omitted when 0/unknown).
+        snr:
+          type: integer
+          description: SNR at receive time (omitted when 0/unknown).
+        status:
           type: string
-          description: Unique message identifier.
-
-
-    AirtimePolicyMode:
-      type: string
-      enum: [disabled, stable, dense, churn]
-      description: >
-        Adaptive airtime policy mode:
-        - disabled: Policy inactive, using fixed beacon interval
-        - stable: Normal operation with baseline beacon interval
-        - dense: High neighbor count detected, increased beacon spacing
-        - churn: Neighbor churn detected, temporary fast beaconing
-
-    AirtimePolicyConfig:
-      type: object
-      description: Adaptive airtime policy configuration parameters.
-      required: [enabled, baseIntervalMs, minIntervalMs, maxIntervalMs, denseThreshold, churnWindowSec, cooldownSec]
-      properties:
-        enabled:
-          type: boolean
-          description: Whether the adaptive policy is enabled.
-        baseIntervalMs:
-          type: integer
-          description: Baseline beacon interval in milliseconds (stable mode).
-        minIntervalMs:
-          type: integer
-          description: Minimum allowed beacon interval (churn mode).
-        maxIntervalMs:
-          type: integer
-          description: Maximum allowed beacon interval (dense mode).
-        denseThreshold:
-          type: integer
-          description: Neighbor count threshold to trigger dense mode.
-        churnWindowSec:
-          type: integer
-          description: Time window (seconds) for detecting churn events.
-        churnThreshold:
-          type: integer
-          description: Number of join/leave events to trigger churn mode.
-        cooldownSec:
-          type: integer
-          description: Minimum time (seconds) between mode transitions (hysteresis).
-
-    AirtimePolicyStatus:
-      type: object
-      description: Current adaptive airtime policy runtime status.
-      required: [mode, currentIntervalMs, neighborCount, neighborDelta, churnEvents, lastTransitionMs]
-      properties:
-        mode:
-          $ref: '#/components/schemas/AirtimePolicyMode'
-        currentIntervalMs:
-          type: integer
-          description: Currently active beacon interval in milliseconds.
-        neighborCount:
-          type: integer
-          description: Current neighbor count.
-        neighborDelta:
-          type: integer
-          description: Change in neighbor count since last evaluation.
-        churnEvents:
-          type: integer
-          description: Number of churn events in the current window.
-        lastTransitionMs:
-          type: integer
-          description: Unix timestamp (ms) of last mode transition.
-        congestionScore:
-          type: integer
-          description: Optional congestion score (0-100, future feature).
+          enum: [sent, delivered, failed]
+          description: Delivery status for outgoing messages (omitted when none).
 
     LocationTier:
       type: string
-      enum: [full, coarse, presence, off]
+      enum: [full, coarse, presence, 'off']
       description: Location sharing tier.
 
     LocationSource:
@@ -1707,6 +1371,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LocationChannelTarget'
+        lat:
+          type: number
+          description: Configured manual latitude (present only when set).
+        lon:
+          type: number
+          description: Configured manual longitude (present only when set).
 
     LocationPeer:
       type: object
@@ -1722,10 +1392,7 @@ components:
         tier:
           $ref: '#/components/schemas/LocationTier'
         position:
-          oneOf:
-            - $ref: '#/components/schemas/Position'
-            - type: 'null'
-          description: Position data for this peer (null when unavailable).
+          $ref: '#/components/schemas/Position'
         online:
           type: boolean
           description: Whether the peer is currently online.
@@ -1738,38 +1405,72 @@ components:
     StatusResponse:
       type: object
       description: Node status information.
-      required: [uptimeSec, freeHeapBytes, fwVersion, txCount, rxCount, droppedCount, neighborCount, routeCount, airtimeUsedMs]
+      required:
+        - address
+        - firmware_version
+        - protocol_version
+        - hardware
+        - radio_ok
+        - peers
+        - beacon_tx
+        - beacon_rx
+        - packets_tx
+        - packets_rx
+        - uptime_s
+        - free_heap
+        - battery_mv
+        - battery_pct
+        - gps_available
+        - supports_delivery_event_sync
       properties:
-        uptimeSec:
-          type: integer
-          description: Seconds since boot.
-        freeHeapBytes:
-          type: integer
-          description: Free heap memory in bytes.
-        fwVersion:
+        address:
+          type: string
+          description: Node address as 8-char uppercase hex.
+        firmware_version:
           type: string
           description: Firmware version string.
-        txCount:
-          type: integer
-          description: Total packets transmitted.
-        rxCount:
-          type: integer
-          description: Total packets received.
-        droppedCount:
-          type: integer
-          description: Total packets dropped.
-        neighborCount:
+        protocol_version:
+          type: string
+          description: Protocol version string.
+        hardware:
+          type: string
+          description: Hardware platform identifier (board short name).
+        radio_ok:
+          type: boolean
+          description: Whether the LoRa radio initialised successfully.
+        peers:
           type: integer
           description: Number of direct neighbors.
-        routeCount:
+        beacon_tx:
           type: integer
-          description: Number of active routes.
-        airtimeUsedMs:
+          description: Total beacons transmitted.
+        beacon_rx:
           type: integer
-          description: Total airtime used in milliseconds.
-        position:
-          $ref: '#/components/schemas/Position'
-
+          description: Total beacons received.
+        packets_tx:
+          type: integer
+          description: Total packets transmitted.
+        packets_rx:
+          type: integer
+          description: Total packets received.
+        uptime_s:
+          type: integer
+          description: Seconds since boot.
+        free_heap:
+          type: integer
+          description: Free heap memory in bytes.
+        battery_mv:
+          type: integer
+          description: Battery voltage in millivolts.
+        battery_pct:
+          type: integer
+          description: Estimated battery charge percentage.
+        gps_available:
+          type: boolean
+          description: Whether this board has GPS hardware.
+        supports_delivery_event_sync:
+          type: boolean
+          description: True when bramble.getDeliveryEvents incremental replay is supported.
 
     WifiStatusResponse:
       type: object
@@ -1778,7 +1479,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [off, station, ap]
+          enum: ['off', station, ap]
           description: Active WiFi operating mode.
         ssid:
           type: string
@@ -1877,7 +1578,7 @@ components:
     VersionResponse:
       type: object
       description: Firmware version information.
-      required: [firmware_version, protocol_version, hardware]
+      required: [firmware_version, protocol_version, hardware, supports_delivery_event_sync]
       properties:
         firmware_version:
           type: string
@@ -1975,9 +1676,11 @@ components:
         - critical_remaining_ms
         - normal_remaining_ms
         - broadcast_remaining_ms
+        - receipt_remaining_ms
         - critical_max_ms
         - normal_max_ms
         - broadcast_max_ms
+        - receipt_max_ms
         - next_refill_ms
       properties:
         critical_remaining_ms:
@@ -1986,24 +1689,18 @@ components:
           type: integer
         broadcast_remaining_ms:
           type: integer
+        receipt_remaining_ms:
+          type: integer
         critical_max_ms:
           type: integer
         normal_max_ms:
           type: integer
         broadcast_max_ms:
           type: integer
+        receipt_max_ms:
+          type: integer
         next_refill_ms:
           type: integer
-
-    GetAirtimePolicyResponse:
-      type: object
-      description: Adaptive airtime policy configuration and runtime status.
-      required: [config, status]
-      properties:
-        config:
-          $ref: '#/components/schemas/AirtimePolicyConfig'
-        status:
-          $ref: '#/components/schemas/AirtimePolicyStatus'
 
     PeerLocationsResponse:
       type: object
@@ -2017,52 +1714,60 @@ components:
     ConfigResponse:
       type: object
       description: Full node configuration.
-      required: [identity, radio, channels, mailboxEnabled, location]
+      required:
+        - node_name
+        - address
+        - pubkey_hash
+        - radio
+        - channels
+        - location
+        - broadcast_telemetry_mode
+        - mailboxEnabled
       properties:
-        identity:
-          type: object
-          required: [address, pubkeyHash, name, pubkeyB64]
-          properties:
-            address:
-              type: integer
-              description: Node address (uint32).
-            pubkeyHash:
-              type: integer
-              description: Public key hash (uint32).
-            name:
-              type: string
-              description: Node display name.
-            pubkeyB64:
-              type: string
-              description: Base64-encoded public key.
+        node_name:
+          type: string
+          description: Node display name ("(unnamed)" when unset).
+        address:
+          type: string
+          description: Node address as 8-char uppercase hex.
+        pubkey_hash:
+          type: string
+          description: Public key hash as 8-char uppercase hex.
         radio:
           type: object
-          required: [txPowerDbm, sf, bwKhz, cr, freqMhz]
+          required: [frequency_mhz, sf, bw_hz, tx_power_dbm, coding_rate, profile]
           properties:
-            txPowerDbm:
-              type: integer
-              description: Transmit power in dBm.
-            sf:
-              type: integer
-              description: LoRa spreading factor (7-12).
-            bwKhz:
-              type: integer
-              description: Bandwidth in kHz (125, 250, or 500).
-            cr:
-              type: integer
-              description: Coding rate (5-8).
-            freqMhz:
+            frequency_mhz:
               type: number
               description: Frequency in MHz.
+            sf:
+              type: integer
+              description: LoRa spreading factor (6-12).
+            bw_hz:
+              type: integer
+              description: Bandwidth in Hz (125000, 250000, or 500000).
+            tx_power_dbm:
+              type: integer
+              description: Transmit power in dBm.
+            coding_rate:
+              type: integer
+              description: Coding rate denominator (5-8).
+            profile:
+              type: string
+              description: Radio profile name (currently always "custom").
         channels:
           type: array
           items:
             $ref: '#/components/schemas/Channel'
+        location:
+          $ref: '#/components/schemas/LocationConfig'
+        broadcast_telemetry_mode:
+          type: string
+          enum: ['off', recipient_only, path_sampled]
+          description: Telemetry emission mode for broadcast delivery events.
         mailboxEnabled:
           type: boolean
           description: Whether store-and-forward mailbox is enabled.
-        location:
-          $ref: '#/components/schemas/LocationConfig'
 
     # ── Request Params ───────────────────────────────────────────────────────
 
@@ -2077,6 +1782,11 @@ components:
         text:
           type: string
           description: Message text content.
+        channel:
+          type: integer
+          description: >
+            Optional channel index to send on. When set, dest "FFFFFFFE" is
+            accepted as a channel-broadcast alias for "FFFFFFFF".
 
     SendMessageResponse:
       type: object
@@ -2088,6 +1798,9 @@ components:
         status:
           type: string
           enum: [sent]
+        channel:
+          type: integer
+          description: Channel index used (present only for channel sends).
         fragmented:
           type: boolean
           description: Whether this message will be sent as multiple fragments.
@@ -2138,14 +1851,20 @@ components:
 
     SendProbeResponse:
       type: object
-      required: [probeId, ackWindow]
+      required: [ok, probe_id, ack_window, rounds_total]
       properties:
-        probeId:
-          type: integer
-          description: Probe identifier.
-        ackWindow:
+        ok:
+          type: boolean
+          description: True when the probe sweep started.
+        probe_id:
+          type: string
+          description: Probe identifier as 8-char uppercase hex.
+        ack_window:
           type: integer
           description: Seconds to wait for probe responses.
+        rounds_total:
+          type: integer
+          description: Number of probe rounds in the sweep.
 
     SetRadioParams:
       type: object
@@ -2167,6 +1886,34 @@ components:
           type: number
           description: Frequency in MHz.
 
+    SetRadioResponse:
+      type: object
+      description: >
+        Response from bramble.setRadio. On success echoes the applied
+        configuration; on validation failure returns ok=false with an error.
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        frequency_mhz:
+          type: number
+          description: Applied frequency in MHz (success only).
+        sf:
+          type: integer
+          description: Applied spreading factor (success only).
+        bw_hz:
+          type: integer
+          description: Applied bandwidth in Hz (success only).
+        tx_power_dbm:
+          type: integer
+          description: Applied TX power in dBm, clamped to the region plan (success only).
+        coding_rate:
+          type: integer
+          description: Applied coding rate denominator (success only).
+        error:
+          type: string
+          description: Error message when ok=false.
+
     SetNodeNameParams:
       type: object
       required: [name]
@@ -2175,6 +1922,16 @@ components:
           type: string
           description: Node display name (max 32 characters).
           maxLength: 32
+
+    SetNodeNameResponse:
+      type: object
+      required: [ok, name]
+      properties:
+        ok:
+          type: boolean
+        name:
+          type: string
+          description: The applied node name.
 
     AddChannelParams:
       type: object
@@ -2189,11 +1946,19 @@ components:
 
     AddChannelResponse:
       type: object
-      required: [index]
+      required: [ok]
       properties:
+        ok:
+          type: boolean
         index:
           type: integer
-          description: Index of the newly added channel.
+          description: Index of the newly added channel (success only).
+        name:
+          type: string
+          description: Channel display name (success only).
+        error:
+          type: string
+          description: Error message when ok=false.
 
     RemoveChannelParams:
       type: object
@@ -2202,6 +1967,19 @@ components:
         index:
           type: integer
           description: Channel index to remove.
+
+    RemoveChannelResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        channels:
+          type: integer
+          description: Remaining channel count (success only).
+        error:
+          type: string
+          description: Error message when ok=false.
 
     SetDefaultChannelParams:
       type: object
@@ -2219,6 +1997,16 @@ components:
           type: boolean
           description: Whether to enable mailbox mode.
 
+    SetMailboxResponse:
+      type: object
+      required: [ok, enabled]
+      properties:
+        ok:
+          type: boolean
+        enabled:
+          type: boolean
+          description: The applied mailbox state.
+
     SetLocationConfigParams:
       type: object
       description: Canonical location policy update. All fields optional for partial updates.
@@ -2226,8 +2014,6 @@ components:
         enabled:
           type: boolean
           description: Enable or disable location sharing.
-        tier:
-          $ref: '#/components/schemas/LocationTier'
         default_tier:
           $ref: '#/components/schemas/LocationTier'
         interval_s:
@@ -2243,6 +2029,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LocationChannelTarget'
+        lat:
+          type: number
+          description: Manual latitude in decimal degrees (boards without GPS).
+        lon:
+          type: number
+          description: Manual longitude in decimal degrees (boards without GPS).
 
     SetLocationConfigResponse:
       type: object
@@ -2299,6 +2091,8 @@ components:
         address:
           type: string
           description: Peer address as 8-char uppercase hex.
+        tier:
+          $ref: '#/components/schemas/LocationTier'
 
     ShareLocationOnceResponse:
       type: object
@@ -2306,177 +2100,21 @@ components:
       properties:
         ok:
           type: boolean
-          description: True when one-time share request is accepted.
-
-    SetAirtimePolicyParams:
-      type: object
-      description: Adaptive airtime policy configuration parameters. All fields optional.
-      properties:
-        enabled:
-          type: boolean
-          description: Whether to enable the adaptive policy.
-        baseIntervalMs:
-          type: integer
-          description: Baseline beacon interval in milliseconds (stable mode).
-        minIntervalMs:
-          type: integer
-          description: Minimum allowed beacon interval (churn mode).
-        maxIntervalMs:
-          type: integer
-          description: Maximum allowed beacon interval (dense mode).
-        denseThreshold:
-          type: integer
-          description: Neighbor count threshold to trigger dense mode.
-        churnWindowSec:
-          type: integer
-          description: Time window (seconds) for detecting churn events.
-        churnThreshold:
-          type: integer
-          description: Number of join/leave events to trigger churn mode.
-        cooldownSec:
-          type: integer
-          description: Minimum time (seconds) between mode transitions (hysteresis).
-
-
-    BatteryStatusResponse:
-      type: object
-      required: [voltage_mv, percentage]
-      properties:
-        voltage_mv:
-          type: integer
-        percentage:
-          type: integer
-
-    GpsPositionResponse:
-      type: object
-      required: [valid]
-      properties:
+          description: True when the one-time share was sent.
         lat:
           type: number
+          description: Latitude that was shared (success only).
         lon:
           type: number
-        alt:
-          type: number
-        speed_kmh:
-          type: number
-        heading_deg:
-          type: number
-        accuracy_m:
-          type: number
-        timestamp:
-          type: integer
-        valid:
-          type: boolean
-
-    AudioStatusResponse:
-      type: object
-      required: [available, volume, muted, playing]
-      properties:
-        available:
-          type: boolean
-        volume:
-          type: integer
-        muted:
-          type: boolean
-        playing:
-          type: boolean
-
-    StorageInfoResponse:
-      type: object
-      required: [sd_present]
-      properties:
-        sd_present:
-          type: boolean
-        mount_point:
+          description: Longitude that was shared (success only).
+        tier:
+          $ref: '#/components/schemas/LocationTier'
+        packetId:
           type: string
-
-    GetAuthTokenResponse:
-      type: object
-      required: [token, enabled]
-      properties:
-        token:
+          description: Packet ID as uppercase hex string (success only).
+        error:
           type: string
-        enabled:
-          type: boolean
-
-    BeaconPolicyConfig:
-      type: object
-      required: [enabled, mode, baseIntervalMs, minIntervalMs, maxIntervalMs, denseThreshold, churnThreshold, churnWindowMs]
-      properties:
-        enabled:
-          type: boolean
-        mode:
-          type: string
-          enum: [fixed, adaptive]
-        baseIntervalMs:
-          type: integer
-        minIntervalMs:
-          type: integer
-        maxIntervalMs:
-          type: integer
-        denseThreshold:
-          type: integer
-        churnThreshold:
-          type: integer
-        churnWindowMs:
-          type: integer
-
-    BeaconPolicyStatus:
-      type: object
-      required: [activeMode, currentIntervalMs, neighborCount, churnEvents, lastTransitionMs, inBackoff]
-      properties:
-        activeMode:
-          type: string
-          enum: [fixed, adaptive]
-        currentIntervalMs:
-          type: integer
-        neighborCount:
-          type: integer
-        churnEvents:
-          type: integer
-        lastTransitionMs:
-          type: integer
-        inBackoff:
-          type: boolean
-
-    GetBeaconPolicyResponse:
-      type: object
-      required: [config, status]
-      properties:
-        config:
-          $ref: '#/components/schemas/BeaconPolicyConfig'
-        status:
-          $ref: '#/components/schemas/BeaconPolicyStatus'
-
-    SetAuthTokenParams:
-      type: object
-      required: [token]
-      properties:
-        token:
-          type: string
-          maxLength: 127
-          description: Token string. Set empty string to clear.
-
-    SetBeaconPolicyParams:
-      type: object
-      properties:
-        enabled:
-          type: boolean
-        mode:
-          type: string
-          enum: [fixed, adaptive]
-        baseIntervalMs:
-          type: integer
-        minIntervalMs:
-          type: integer
-        maxIntervalMs:
-          type: integer
-        denseThreshold:
-          type: integer
-        churnThreshold:
-          type: integer
-        churnWindowMs:
-          type: integer
+          description: Error message when ok=false.
 
     SetBroadcastTelemetryModeParams:
       type: object
@@ -2484,7 +2122,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [off, recipient_only, path_sampled]
+          enum: ['off', recipient_only, path_sampled]
 
     SetBroadcastTelemetryModeResponse:
       type: object
@@ -2494,91 +2132,7 @@ components:
           type: boolean
         broadcast_telemetry_mode:
           type: string
-          enum: [off, recipient_only, path_sampled]
-
-    SetBacklightParams:
-      type: object
-      required: [level]
-      properties:
-        level:
-          type: integer
-          minimum: 0
-          maximum: 255
-
-    BacklightResponse:
-      type: object
-      required: [level]
-      properties:
-        level:
-          type: integer
-
-    SleepParams:
-      type: object
-      properties:
-        wake_after_s:
-          type: integer
-          minimum: 1
-
-    SleepResponse:
-      type: object
-      required: [ok]
-      properties:
-        ok:
-          type: boolean
-        wake_after_s:
-          type: integer
-        note:
-          type: string
-
-    PlayToneParams:
-      type: object
-      required: [tone]
-      properties:
-        tone:
-          type: string
-          enum: [message_rx, message_tx, peer_join, peer_leave, error, boot, gps_fix]
-
-    SetVolumeParams:
-      type: object
-      required: [volume]
-      properties:
-        volume:
-          type: integer
-          minimum: 0
-          maximum: 100
-
-    SetMutedParams:
-      type: object
-      required: [muted]
-      properties:
-        muted:
-          type: boolean
-
-    OTAUpdateParams:
-      type: object
-      required: [path]
-      properties:
-        path:
-          type: string
-          description: >
-            Artifact path relative to the device's allowlisted OTA origin
-            (e.g. stable/v1.4.0/heltec-v3/bramble.bin). Raw URLs are rejected.
-        allow_downgrade:
-          type: boolean
-          description: >
-            Accept an image version below the anti-rollback floor and lower
-            the floor to it.
-
-    OTAUpdateResponse:
-      type: object
-      required: [ok]
-      properties:
-        ok:
-          type: boolean
-        note:
-          type: string
-        partition:
-          type: string
+          enum: ['off', recipient_only, path_sampled]
 
     BroadcastDeliveryNotification:
       type: object
@@ -2772,7 +2326,7 @@ components:
           enum: [connected, disconnected, ip_changed]
         mode:
           type: string
-          enum: [off, sta, ap]
+          enum: ['off', sta, ap]
         connected:
           type: boolean
         ssid:
@@ -2797,7 +2351,7 @@ components:
           type: number
         alt_m:
           type: integer
-        sats:
+        accuracy_m:
           type: integer
 
     LocationEvent:
@@ -2847,6 +2401,31 @@ components:
         enabled:
           type: boolean
           description: True when a non-empty token is configured.
+
+    SetAllowedOriginsParams:
+      type: object
+      description: Parameters for bramble.setAllowedOrigins.
+      required: [origins]
+      properties:
+        origins:
+          type: array
+          description: >
+            Full origins (scheme://host[:port]) or the literal "null". Entries
+            must not contain commas or spaces; the comma-joined list must fit
+            in 255 characters. An empty array clears the allowlist.
+          items:
+            type: string
+
+    GetAllowedOriginsResponse:
+      type: object
+      description: Response from bramble.getAllowedOrigins.
+      required: [origins]
+      properties:
+        origins:
+          type: array
+          description: Persisted extra WS Origin allowlist entries.
+          items:
+            type: string
 
     # ── OTA ──────────────────────────────────────────────────────────────────
 
@@ -3195,6 +2774,158 @@ components:
         status:
           $ref: '#/components/schemas/BeaconPolicyStatus'
 
+    # ── Notification Payloads ──────────────────────────────────────────────
+
+    OnMessagePayload:
+      type: object
+      description: Params of the bramble.onMessage notification.
+      required: [from, text, rssi, snr, channel, broadcast]
+      properties:
+        from:
+          type: string
+          description: Sender address as 8-char uppercase hex.
+        text:
+          type: string
+          description: Message text content.
+        rssi:
+          type: integer
+          description: RSSI at receive time (dBm).
+        snr:
+          type: integer
+          description: SNR at receive time (dB).
+        channel:
+          type: integer
+          description: Channel index, or -1 for the default/public channel.
+        broadcast:
+          type: boolean
+          description: True for broadcast messages.
+
+    OnAckPayload:
+      type: object
+      description: >
+        Params of the bramble.onAck notification. status=delivered events
+        carry from, rssi_at_dest, and relayPath; status=failed events carry
+        only packet_id, status, and (for fast-fail) reason.
+      required: [packet_id, status]
+      properties:
+        packet_id:
+          type: string
+          description: Packet ID returned by bramble.sendMessage, uppercase hex.
+        status:
+          type: string
+          enum: [delivered, failed]
+        from:
+          type: string
+          description: Acking node address as 8-char uppercase hex (delivered only).
+        rssi_at_dest:
+          type: integer
+          description: RSSI measured at the destination in dBm (delivered only).
+        relayPath:
+          type: array
+          description: Relay path extracted from the ACK (delivered only).
+          items:
+            type: object
+            required: [addr, rssi]
+            properties:
+              addr:
+                type: string
+                description: Relay node address as 8-char uppercase hex.
+              rssi:
+                type: integer
+                description: RSSI at this hop (0 when unknown; final hop carries rssi_at_dest).
+        reason:
+          type: string
+          description: Failure reason for route-error fast-fails (failed only, optional).
+
+    OnProbeResultPayload:
+      type: object
+      description: Params of the bramble.onProbeResult notification.
+      required: [address, hops, rssi, snr, latency_ms, probe_round, probe_id]
+      properties:
+        address:
+          type: string
+          description: Responder address as 8-char uppercase hex.
+        hops:
+          type: integer
+          description: Hop count to the responder.
+        rssi:
+          type: integer
+          description: RSSI of the probe response (dBm).
+        snr:
+          type: integer
+          description: SNR of the probe response (dB).
+        latency_ms:
+          type: integer
+          description: Round-trip latency in milliseconds.
+        probe_round:
+          type: integer
+          description: Sweep round this response was heard in (1-based).
+        probe_id:
+          type: string
+          description: Probe identifier as 8-char uppercase hex.
+
+    OnProbeCompletePayload:
+      type: object
+      description: Params of the bramble.onProbeComplete notification.
+      required: [probe_id, unique_count, duration_ms, rounds_total, responders]
+      properties:
+        probe_id:
+          type: string
+          description: Probe identifier as 8-char uppercase hex.
+        unique_count:
+          type: integer
+          description: Number of unique responders.
+        duration_ms:
+          type: integer
+          description: Collection window duration in milliseconds.
+        rounds_total:
+          type: integer
+          description: Number of probe rounds in the sweep.
+        responders:
+          type: array
+          items:
+            type: object
+            required: [address, hops, rssi, snr, latency_ms, seen_rounds]
+            properties:
+              address:
+                type: string
+                description: Responder address as 8-char uppercase hex.
+              hops:
+                type: integer
+              rssi:
+                type: integer
+              snr:
+                type: integer
+              latency_ms:
+                type: integer
+              seen_rounds:
+                type: integer
+                description: Number of rounds this responder was heard in.
+
+    OnIdentityChangePayload:
+      type: object
+      description: Params of the bramble.onIdentityChange notification.
+      required: [new_address, reason]
+      properties:
+        new_address:
+          type: string
+          description: Regenerated node address as 8-char uppercase hex.
+        reason:
+          type: string
+          enum: [address_collision]
+          description: Why the identity changed.
+
+  securitySchemes:
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: >
+        Per-device auth token (generated on first boot, NVS-persisted).
+        WebSocket clients send "Authorization: Bearer <token>" or the ?token=
+        query parameter; BLE clients write the token as the first write on a
+        new connection; serial is unauthenticated by design. Without the token
+        only bramble.ping and bramble.getVersion are callable.
+
 # ── Notifications (extension) ──────────────────────────────────────────────
 
 x-notifications:
@@ -3203,12 +2934,12 @@ x-notifications:
       Incoming message received from the mesh. Delivered as a JSON-RPC
       notification (no id field).
     payload:
-      $ref: '#/components/schemas/Message'
+      $ref: '#/components/schemas/OnMessagePayload'
 
   bramble.onAck:
     description: >
-      Delivery acknowledgment for a previously sent message. Matches
-      the packetId returned by bramble.sendMessage.
+      Delivery acknowledgment or failure for a previously sent message.
+      Matches the packetId returned by bramble.sendMessage.
     payload:
       $ref: '#/components/schemas/OnAckPayload'
 
@@ -3225,38 +2956,34 @@ x-notifications:
   bramble.onNeighborChange:
     description: >
       Neighbor table has changed. Client should re-fetch via
-      bramble.getNeighbors for updated data.
-    payload:
-      $ref: '#/components/schemas/EmptyParams'
+      bramble.getNeighbors for updated data. Sent without a params field.
 
-  bramble.onRouteChange:
+  bramble.onPeerLocation:
     description: >
-      Routing table has changed. Client should re-fetch via
-      bramble.getRoutes for updated data.
+      A peer location update was received and cached. Client should re-fetch
+      via bramble.getPeerLocations for updated data. Sent without a params
+      field.
+
+  bramble.onIdentityChange:
+    description: >
+      This node detected an address collision and regenerated its identity.
+      Clients should refresh anything keyed on the node address.
     payload:
-      $ref: '#/components/schemas/EmptyParams'
+      $ref: '#/components/schemas/OnIdentityChangePayload'
 
   bramble.onProbeResult:
     description: >
       Probe response received from a peer node. Multiple notifications
-      may arrive for a single probe, followed by probe.complete.
+      may arrive for a single probe, followed by bramble.onProbeComplete.
     payload:
-      $ref: '#/components/schemas/ProbeAckPayload'
+      $ref: '#/components/schemas/OnProbeResultPayload'
 
-  probe.ack:
-    description: Individual probe response from a peer.
+  bramble.onProbeComplete:
+    description: >
+      Probe collection window has closed; no more responses expected.
+      Carries the aggregated responder list for the sweep.
     payload:
-      $ref: '#/components/schemas/ProbeAckPayload'
-
-  probe.complete:
-    description: Probe window has closed; no more responses expected.
-    payload:
-      $ref: '#/components/schemas/ProbeCompletePayload'
-
-  location.update:
-    description: Location update received from a peer.
-    payload:
-      $ref: '#/components/schemas/LocationUpdatePayload'
+      $ref: '#/components/schemas/OnProbeCompletePayload'
 
   bramble.onTrafficEvent:
     description: >
