@@ -53,9 +53,11 @@ were fixed because they distort collision results: DATA payloads are now
 encrypted with the header bound as AAD via `bramble_header_build_aad`
 (matching firmware since the PR #79 AAD binding; previously NULL AAD), and
 airtime-budget debits plus route-discovery retry cadence now use real ToA and
-the firmware's `discovery_should_retry` schedule (5 s, then 15 s, 3 attempts,
-same query_id) instead of a constant 50 ms estimate and 1.5 s re-floods with
-fresh query_ids.
+the firmware's `discovery_should_retry` schedule (5 s, then 15 s, 3 attempts;
+at the time of the original runs each retry reused the first attempt's
+query_id, which the addendum below changed to a fresh query_id per attempt,
+and the bridge mirrors whichever behavior the protocol code ships) instead of
+a constant 50 ms estimate and 1.5 s re-floods.
 
 At SF10/125 kHz the protocol's frames are large: a 30-byte RREQ is 485 ms on
 air, a 48-byte beacon 608 ms, a header-only DATA frame 322 ms. One RREQ

@@ -9,7 +9,6 @@
 #define RREQ_RETRY_INTERVAL_1_MS 5000
 #define RREQ_RETRY_INTERVAL_2_MS 15000
 #define MAX_RREQ_ATTEMPTS 3
-#define MAX_QUEUED_PER_DISCOVERY 4
 
 /* Expanding-ring discovery: the first attempt floods with a conservative hop
  * budget; retries widen to the protocol's maximum route depth. Each retry
@@ -29,7 +28,6 @@ typedef struct {
     uint32_t query_ids[MAX_RREQ_ATTEMPTS]; /* one fresh query_id per attempt */
     uint32_t timestamp;
     uint8_t attempts;
-    uint8_t queued_count;
 } pending_discovery_t;
 
 typedef struct {

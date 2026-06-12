@@ -33,7 +33,6 @@ typedef struct {
     group_manager_t group;         /* group messaging manager */
     coding_engine_t coding;        /* XOR network coding at relay */
     bool initialized;
-    /* Adaptive route metric state */
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */

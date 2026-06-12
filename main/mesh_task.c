@@ -1569,7 +1569,9 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
             .version = BRAMBLE_VERSION,
             .type = PKT_TYPE_RERR,
             .flags = 0,
-            .hop_limit = ROUTE_HOP_LIMIT_MAX, /* teardown must reach as deep as routes exist */
+            /* Per-hop budget; the route-match chain bounds teardown depth
+             * because matching relays re-originate with a fresh limit. */
+            .hop_limit = ROUTE_HOP_LIMIT_MAX,
             .dest_addr = 0xFFFFFFFF, /* broadcast */
             .packet_id = next_packet_id(),
         },
@@ -2969,9 +2971,9 @@ static int initiate_discovery(uint32_t dest_addr) {
      * new query with a fresh query_id acting as the nonce, so observers
      * cannot correlate route requests from the same originator.
      *
-     * The destination can identify the originator by:
-     * 1. Trying HMAC with known peer keys to reverse-map the pseudonym, OR
-     * 2. The originator reveals itself during the secure channel setup phase
+     * The pseudonym is keyed with the originator's PRIVATE key, so nobody
+     * (including the destination) can reverse-map it; the originator
+     * identifies itself during the secure channel setup phase instead.
      *
      * Nothing stores the pseudonym: RREPs are correlated by query_id via the
      * pending-discovery table, which remembers every attempt's query_id. */
