@@ -28,7 +28,11 @@ func main() {
 	scenarioDir := flag.String("scenarios", "", "Path to scenarios")
 	headless := flag.Bool("headless", false, "Run headless mode")
 	scenario := flag.String("scenario", "", "Scenario file (headless)")
+	noCollisions := flag.Bool("no-collisions", false,
+		"Disable the collision/half-duplex model (ideal parallel channel; for baseline comparisons)")
 	flag.Parse()
+
+	disableCollisionModel = *noCollisions
 
 	// Auto-detect scenarios dir
 	if *scenarioDir == "" {
