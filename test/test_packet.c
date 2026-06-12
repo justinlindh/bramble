@@ -80,8 +80,11 @@ void test_ack_roundtrip(void) {
 
 void test_ack_buffer_too_small(void) {
     bramble_ack_t p = { .header = make_header(PKT_TYPE_ACK) };
-    uint8_t buf[ACK_SIZE - 1];
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_ack_serialize(&p, buf, sizeof(buf)));
+    /* Full-size backing array, undersized length: same rejection contract,
+     * but GCC's -Warray-bounds path analysis cannot flag the (unreachable)
+     * serializer writes past a too-small array. */
+    uint8_t buf[ACK_SIZE] = {0};
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_ack_serialize(&p, buf, sizeof(buf) - 1));
 }
 
 /* ---- RREQ ---- */
@@ -173,8 +176,8 @@ void test_beacon_wire_format(void) {
         .uptime_min = 0x0A0B, .battery_pct = 85,
         .network_time = 0xCAFEBABE, .time_confidence = 0x1234,
     };
-    uint8_t buf[BEACON_SIZE];
-    bramble_beacon_serialize(&p, buf, sizeof(buf));
+    uint8_t buf[BEACON_SIZE] = {0};
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_serialize(&p, buf, sizeof(buf)));
     /* uptime_min BE at offset 20 */
     TEST_ASSERT_EQUAL_HEX8(0x0A, buf[20]);
     TEST_ASSERT_EQUAL_HEX8(0x0B, buf[21]);
@@ -236,10 +239,15 @@ void test_delivery_receipt_zero_hops(void) {
         .src_addr = 0x11223344, .orig_packet_id = 0x55667788,
         .hop_count = 0, .total_latency = 10,
     };
-    uint8_t buf[DELIVERY_RECEIPT_MIN_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_delivery_receipt_serialize(&p, buf, sizeof(buf)));
+    /* Max-size backing array, min-size length argument: still proves the
+     * zero-hop wire contract, without tripping GCC -Warray-bounds on the
+     * (unreachable) relay-path writes it cannot rule out at -O3. */
+    uint8_t buf[DELIVERY_RECEIPT_MIN_SIZE + DELIVERY_RECEIPT_MAX_HOPS * 4] = {0};
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      bramble_delivery_receipt_serialize(&p, buf, DELIVERY_RECEIPT_MIN_SIZE));
     bramble_delivery_receipt_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_delivery_receipt_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      bramble_delivery_receipt_deserialize(&out, buf, DELIVERY_RECEIPT_MIN_SIZE));
     TEST_ASSERT_EQUAL(0, out.hop_count);
 }
 
