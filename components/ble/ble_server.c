@@ -12,6 +12,7 @@
 
 #include "ble_server.h"
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "ct_strcmp.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -69,10 +70,16 @@ typedef struct {
 } ble_rpc_msg_t;
 
 static bool ble_authenticate_first_write(const char* line) {
-    const char* expected = ws_server_get_token();
-    if (expected[0] == '\0') {
+    if (ws_server_auth_disabled()) {
+        /* Explicit opt-out only; a missing token fails closed */
         s_ble_authenticated = true;
         return true;
+    }
+
+    const char* expected = ws_server_get_token();
+    if (expected[0] == '\0') {
+        /* Token unavailable (NVS failure): nothing can match */
+        return false;
     }
 
     if (ct_strcmp(line, expected) == 0) {
@@ -115,6 +122,18 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
     }
 }
 
+/* Registered with the RPC dispatcher for server-push notifications.
+ * Notifications carry decrypted content; an unauthenticated BLE client
+ * must not receive them (rpc_auth_notify_allowed, host-tested). Direct
+ * RPC responses bypass this wrapper via ble_notify_cb so the pairing
+ * allowlist and auth error replies still reach the caller. */
+static void ble_notify_transport_cb(const char* json, size_t len, void* ctx) {
+    if (!rpc_auth_notify_allowed(s_ble_authenticated, ws_server_auth_disabled())) {
+        return;
+    }
+    ble_notify_cb(json, len, ctx);
+}
+
 /* ── Process incoming data (JSON-RPC lines) ──────────────────────────── */
 
 /* BLE RPC processing task — runs in its own context, safe to call notify */
@@ -128,6 +147,17 @@ static void ble_rpc_task(void* param) {
 
             char resp[BLE_RPC_BUF_SIZE];
             if (!s_ble_authenticated) {
+                /* Pre-auth JSON-RPC lines are dispatched UNAUTHENTICATED:
+                 * rpc_dispatch_authed() limits them to the tiny pairing
+                 * allowlist (rpc_auth.c). Anything that is not JSON is
+                 * treated as a token handshake attempt. */
+                if (msg.data[0] == '{') {
+                    int resp_len = rpc_dispatch_authed(msg.data, resp, sizeof(resp), false);
+                    if (resp_len > 0) {
+                        ble_notify_cb(resp, (size_t)resp_len, NULL);
+                    }
+                    continue;
+                }
                 if (!ble_authenticate_first_write(msg.data)) {
                     s_auth_fail_count++;
                     ESP_LOGW(TAG, "BLE auth failed (attempt %u/%u)", s_auth_fail_count,
@@ -296,7 +326,7 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             s_conn_handle = event->connect.conn_handle;
-            s_ble_authenticated = (ws_server_get_token()[0] == '\0');
+            s_ble_authenticated = ws_server_auth_disabled();
             ESP_LOGI(TAG, "BLE client connected (handle=%d, auth=%s)", s_conn_handle,
                      s_ble_authenticated ? "open" : "required");
 
@@ -419,7 +449,7 @@ int ble_server_init(void) {
     ble_svc_gap_device_name_set(s_device_name);
 
     /* Register notification callback with RPC dispatcher */
-    rpc_register_notify_transport(ble_notify_cb, NULL);
+    rpc_register_notify_transport(ble_notify_transport_cb, NULL);
 
     ESP_LOGI(TAG, "BLE server initialized (name=%s)", s_device_name);
     return 0;
@@ -442,6 +472,7 @@ void ble_server_stop(void) {
 bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }
 
 int ble_server_notify(const char* json, size_t len) {
-    ble_notify_cb(json, len, NULL);
+    /* Public push API: same auth gating as dispatcher notifications */
+    ble_notify_transport_cb(json, len, NULL);
     return 0;
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef struct cJSON cJSON;
@@ -16,6 +17,7 @@ typedef struct cJSON cJSON;
 #define RPC_ERR_CHANNEL (-1002)
 #define RPC_ERR_RATE_LIMIT (-1003)
 #define RPC_ERR_NOT_SUPPORTED (-1004)
+#define RPC_ERR_UNAUTHORIZED (-1005)
 
 /**
  * RPC method handler. Receives params object, populates result object.
@@ -37,8 +39,21 @@ int rpc_register(const char* method, rpc_method_handler_t handler);
 /**
  * Parse JSON-RPC 2.0 request, dispatch to handler, write response.
  * Returns length of response written to json_out, or -1 on error.
+ *
+ * Full-privilege dispatch. Use only for callers that are authenticated or
+ * trusted by design (the serial CLI: physical access is the pairing
+ * bootstrap, see docs/SECURITY-MODEL.md). Network transports must use
+ * rpc_dispatch_authed() with the connection's auth state.
  */
 int rpc_dispatch(const char* json_in, char* json_out, size_t out_len);
+
+/**
+ * Same as rpc_dispatch(), but when `authenticated` is false only the
+ * unauthenticated allowlist (rpc_auth.h) is dispatchable; everything else
+ * gets an RPC_ERR_UNAUTHORIZED error response without the method table
+ * being consulted.
+ */
+int rpc_dispatch_authed(const char* json_in, char* json_out, size_t out_len, bool authenticated);
 
 /** Send a JSON-RPC notification to all registered transports. */
 void rpc_notify(const char* method, const cJSON* params);

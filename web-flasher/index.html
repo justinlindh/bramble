@@ -109,13 +109,14 @@
                 <details id="auth-panel" class="advanced-panel">
                     <summary>🔒 Security (optional)</summary>
                     <div class="advanced-body">
-                        <p class="wifi-note">Set an auth token to require a password for wireless connections.
-                        Without a token, anyone on your network can connect to this device.
-                        You can always change this later with the CLI or web app.</p>
+                        <p class="wifi-note">Wireless connections always require an auth token.
+                        Set your own here (16+ characters), or leave blank and the device will
+                        generate one on first boot; retrieve it later with <code>bramble pair</code>
+                        over USB.</p>
                         <div class="board-select compact">
                             <label for="auth-token">Auth Token:</label>
                             <div class="password-row">
-                                <input id="auth-token" type="password" autocomplete="off" placeholder="Leave blank to keep open access" />
+                                <input id="auth-token" type="password" autocomplete="off" placeholder="Blank = device generates its own" />
                                 <button id="auth-token-toggle" class="btn secondary" type="button" aria-label="Show token">Show</button>
                                 <button id="auth-token-generate" class="btn secondary" type="button" title="Generate random token">🎲</button>
                             </div>
