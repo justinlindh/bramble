@@ -9,7 +9,8 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 
 ### Security
 
-- RPC auth is required by default: devices generate a per-device token on first boot; WS and BLE require it, serial remains the unauthenticated pairing bootstrap by design. Unauthenticated WS/BLE clients are limited to `bramble.ping` and `bramble.getVersion`.
+- RPC auth is required by default: devices generate a per-device token on first boot; WS and BLE require it, serial remains the unauthenticated pairing bootstrap by design. Unauthenticated WS/BLE clients are limited to `bramble.ping` and `bramble.getVersion`, and server-push notifications are delivered only to authenticated connections.
+- The Wi-Fi config POST is CSRF-gated: browser-borne posts must be same-origin (or allowlisted) unless they prove the device token.
 - `bramble.setAuthToken` enforces a 16-byte minimum token length.
 - `ct_strcmp` no longer leaks the token length through its loop bound.
 - The WebSocket upgrade validates the browser `Origin` header (same-origin plus an allowlist managed via `bramble.setAllowedOrigins`/`bramble.getAllowedOrigins`).
