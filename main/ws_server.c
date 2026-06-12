@@ -2,6 +2,7 @@
 #include "ct_strcmp.h"
 #include "ws_origin.h"
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "wifi_manager.h"
 #include "mesh_task.h"
 #include "esp_http_server.h"
@@ -235,17 +236,30 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
     int client_fds[MAX_WS_CLIENTS];
     int client_count = 0;
 
+    /* Notifications carry decrypted content; deliver ONLY to
+     * authenticated connections (all of them on an auth-opt-out device).
+     * Selection logic is the host-tested rpc_auth_notify_filter(). */
+    bool open_access = ws_server_auth_disabled();
+
     taskENTER_CRITICAL(&s_client_lock);
     if (!s_server || s_client_count == 0) {
         taskEXIT_CRITICAL(&s_client_lock);
         return;
     }
 
-    client_count = s_client_count;
-    for (int i = 0; i < client_count; i++) {
-        client_fds[i] = s_clients[i].fd;
+    rpc_notify_client_t snapshot[MAX_WS_CLIENTS];
+    for (int i = 0; i < s_client_count; i++) {
+        snapshot[i].fd = s_clients[i].fd;
+        snapshot[i].authenticated = s_clients[i].authed;
     }
+    int snapshot_count = s_client_count;
     taskEXIT_CRITICAL(&s_client_lock);
+
+    client_count =
+        rpc_auth_notify_filter(snapshot, snapshot_count, open_access, client_fds, MAX_WS_CLIENTS);
+    if (client_count == 0) {
+        return;
+    }
 
     uint64_t now_us = (uint64_t)esp_timer_get_time();
     uint64_t elapsed_us = now_us - s_notify_last_send_us;

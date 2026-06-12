@@ -20,6 +20,24 @@ static const char* const k_unauth_allowlist[] = {
 
 bool rpc_auth_token_len_ok(size_t len) { return len == 0 || len >= RPC_AUTH_TOKEN_MIN_LEN; }
 
+bool rpc_auth_notify_allowed(bool conn_authenticated, bool auth_disabled) {
+    return conn_authenticated || auth_disabled;
+}
+
+int rpc_auth_notify_filter(const rpc_notify_client_t* clients, int count, bool auth_disabled,
+                           int* out_fds, int max_out) {
+    int n = 0;
+    if (!clients || !out_fds) {
+        return 0;
+    }
+    for (int i = 0; i < count && n < max_out; i++) {
+        if (rpc_auth_notify_allowed(clients[i].authenticated, auth_disabled)) {
+            out_fds[n++] = clients[i].fd;
+        }
+    }
+    return n;
+}
+
 bool rpc_auth_method_allowed(const char* method, bool authenticated) {
     if (!method) {
         return false;

@@ -31,3 +31,26 @@ bool rpc_auth_method_allowed(const char* method, bool authenticated);
  * Zero length is allowed because an empty token is the explicit
  * "disable auth" opt-out, not a weak credential. */
 bool rpc_auth_token_len_ok(size_t len);
+
+/*
+ * Server-push notification gating. Notifications carry decrypted message
+ * content (bramble.onMessage), GPS events, and peer locations: strictly
+ * more sensitive than anything on the call allowlist, so they go ONLY to
+ * authenticated connections. On a device whose owner explicitly disabled
+ * auth, every connection is authorized, consistent with opt-out
+ * semantics. Direct RPC *responses* are not notifications and are never
+ * filtered here (the unauthenticated allowlist and error replies must
+ * reach their caller).
+ */
+bool rpc_auth_notify_allowed(bool conn_authenticated, bool auth_disabled);
+
+/* Recipient filter over a connection table: writes the fds eligible to
+ * receive a notification into out_fds, returns the count. Pure and
+ * host-testable; the WS transport feeds it its client table. */
+typedef struct {
+    int fd;
+    bool authenticated;
+} rpc_notify_client_t;
+
+int rpc_auth_notify_filter(const rpc_notify_client_t* clients, int count, bool auth_disabled,
+                           int* out_fds, int max_out);
