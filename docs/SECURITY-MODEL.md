@@ -251,7 +251,8 @@ from the hardware RNG and persists it in NVS
 generation call sites run only after Wi-Fi or BT RF init, when
 `esp_random` is fully entropic). The WebSocket upgrade accepts
 `Authorization: Bearer <token>` (or a deprecated `?token=` query
-parameter); the Wi-Fi config POST endpoint is gated by the same check. BLE
+parameter); the Wi-Fi config POST endpoint is gated by the same token,
+accepted as a form field so the AP-mode setup portal can submit it. BLE
 requires the token as the first write on a new connection, throttled to one
 attempt per 100 ms after failures (`components/ble/ble_server.c`).
 Comparison is constant-time and length-independent: a fixed 128-iteration
