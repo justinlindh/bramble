@@ -113,6 +113,61 @@ void test_authed_allows_everything_registered(void) {
     TEST_ASSERT_TRUE(rpc_auth_method_allowed("bramble.ping", true));
 }
 
+/* ── Notification gating (server push goes only to authed clients) ──── */
+
+void test_notify_unauth_connection_receives_nothing(void) {
+    rpc_notify_client_t clients[] = {{.fd = 7, .authenticated = false}};
+    int out[4];
+    TEST_ASSERT_EQUAL(0, rpc_auth_notify_filter(clients, 1, false, out, 4));
+}
+
+void test_notify_mixed_clients_only_authed_selected(void) {
+    rpc_notify_client_t clients[] = {
+        {.fd = 3, .authenticated = true},
+        {.fd = 4, .authenticated = false},
+        {.fd = 5, .authenticated = true},
+        {.fd = 6, .authenticated = false},
+    };
+    int out[4];
+    int n = rpc_auth_notify_filter(clients, 4, false, out, 4);
+    TEST_ASSERT_EQUAL(2, n);
+    TEST_ASSERT_EQUAL(3, out[0]);
+    TEST_ASSERT_EQUAL(5, out[1]);
+}
+
+void test_notify_opt_out_device_broadcasts_to_all(void) {
+    rpc_notify_client_t clients[] = {
+        {.fd = 3, .authenticated = true},
+        {.fd = 4, .authenticated = false},
+    };
+    int out[4];
+    TEST_ASSERT_EQUAL(2, rpc_auth_notify_filter(clients, 2, true, out, 4));
+}
+
+void test_notify_allowed_truth_table(void) {
+    TEST_ASSERT_TRUE(rpc_auth_notify_allowed(true, false));
+    TEST_ASSERT_TRUE(rpc_auth_notify_allowed(true, true));
+    TEST_ASSERT_TRUE(rpc_auth_notify_allowed(false, true));
+    TEST_ASSERT_FALSE(rpc_auth_notify_allowed(false, false));
+}
+
+void test_notify_filter_respects_max_out(void) {
+    rpc_notify_client_t clients[] = {
+        {.fd = 1, .authenticated = true},
+        {.fd = 2, .authenticated = true},
+        {.fd = 3, .authenticated = true},
+    };
+    int out[2];
+    TEST_ASSERT_EQUAL(2, rpc_auth_notify_filter(clients, 3, false, out, 2));
+}
+
+void test_notify_filter_null_safe(void) {
+    int out[2];
+    rpc_notify_client_t clients[] = {{.fd = 1, .authenticated = true}};
+    TEST_ASSERT_EQUAL(0, rpc_auth_notify_filter(NULL, 1, false, out, 2));
+    TEST_ASSERT_EQUAL(0, rpc_auth_notify_filter(clients, 1, false, NULL, 2));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ct_strcmp_match);
@@ -135,5 +190,11 @@ int main(void) {
     RUN_TEST(test_unauth_denies_prefix_lookalike);
     RUN_TEST(test_unauth_denies_null_method);
     RUN_TEST(test_authed_allows_everything_registered);
+    RUN_TEST(test_notify_unauth_connection_receives_nothing);
+    RUN_TEST(test_notify_mixed_clients_only_authed_selected);
+    RUN_TEST(test_notify_opt_out_device_broadcasts_to_all);
+    RUN_TEST(test_notify_allowed_truth_table);
+    RUN_TEST(test_notify_filter_respects_max_out);
+    RUN_TEST(test_notify_filter_null_safe);
     return UNITY_END();
 }

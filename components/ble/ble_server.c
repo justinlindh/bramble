@@ -12,6 +12,7 @@
 
 #include "ble_server.h"
 #include "rpc_dispatcher.h"
+#include "rpc_auth.h"
 #include "ct_strcmp.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -119,6 +120,18 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
     if (rc != 0) {
         ESP_LOGW(TAG, "Notify failed: %d (%u bytes)", rc, (unsigned)(len + 1));
     }
+}
+
+/* Registered with the RPC dispatcher for server-push notifications.
+ * Notifications carry decrypted content; an unauthenticated BLE client
+ * must not receive them (rpc_auth_notify_allowed, host-tested). Direct
+ * RPC responses bypass this wrapper via ble_notify_cb so the pairing
+ * allowlist and auth error replies still reach the caller. */
+static void ble_notify_transport_cb(const char* json, size_t len, void* ctx) {
+    if (!rpc_auth_notify_allowed(s_ble_authenticated, ws_server_auth_disabled())) {
+        return;
+    }
+    ble_notify_cb(json, len, ctx);
 }
 
 /* ── Process incoming data (JSON-RPC lines) ──────────────────────────── */
@@ -436,7 +449,7 @@ int ble_server_init(void) {
     ble_svc_gap_device_name_set(s_device_name);
 
     /* Register notification callback with RPC dispatcher */
-    rpc_register_notify_transport(ble_notify_cb, NULL);
+    rpc_register_notify_transport(ble_notify_transport_cb, NULL);
 
     ESP_LOGI(TAG, "BLE server initialized (name=%s)", s_device_name);
     return 0;
@@ -459,6 +472,7 @@ void ble_server_stop(void) {
 bool ble_server_connected(void) { return s_conn_handle != BLE_HS_CONN_HANDLE_NONE; }
 
 int ble_server_notify(const char* json, size_t len) {
-    ble_notify_cb(json, len, NULL);
+    /* Public push API: same auth gating as dispatcher notifications */
+    ble_notify_transport_cb(json, len, NULL);
     return 0;
 }
