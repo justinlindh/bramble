@@ -290,21 +290,33 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
 
 static esp_err_t ws_handler(httpd_req_t* req) {
     if (req->method == HTTP_GET) {
-        /* Auth evaluation on WebSocket upgrade.
+        /* Auth + Origin evaluation on WebSocket upgrade.
          * Note: ESP-IDF has already sent 101 Switching Protocols at this
-         * point, so rejections use a WS close frame, not HTTP status.
+         * point, so rejections use a WS close frame (1008), not the
+         * HTTP 403 that would otherwise be correct.
          *
          * Policy (auth required by default):
-         *   - wrong credentials: reject (close 1008)
-         *   - no credentials: connection allowed but UNAUTHENTICATED;
-         *     rpc_dispatch_authed() limits it to the pairing allowlist
-         *   - valid credentials (or explicit auth opt-out): full access */
-        /* Origin allowlist (CSWSH defense) runs before auth: a browser
-         * page from a foreign origin is rejected even with valid creds.
-         * The HTTP-correct answer would be 403 before the upgrade, but
-         * ESP-IDF httpd completes the 101 handshake before invoking this
-         * handler, so the close frame is the only rejection channel. */
-        {
+         *   - wrong credentials: reject
+         *   - presented, valid credentials: full access, Origin check
+         *     SKIPPED. The token is the stronger credential and a
+         *     cross-site attacker page cannot read it, so a token-bearing
+         *     cross-origin page is the user's own client, not CSWSH.
+         *     Requiring origin enrollment before a token-holding webapp
+         *     could ever connect would resurrect the onboarding friction
+         *     that led to the old open-by-default regression.
+         *   - no credentials (including devices with auth explicitly
+         *     disabled): browser Origin allowlist applies (same-origin or
+         *     configured extras; see main/ws_origin.h). On the opt-out
+         *     device this is the remaining CSWSH defense; otherwise it
+         *     keeps foreign pages off even the pairing allowlist. */
+        ws_auth_result_t ar = auth_eval(req);
+        if (ar == WS_AUTH_BAD) {
+            ESP_LOGW(TAG, "WS auth failed (bad credentials), sending close frame");
+            return send_ws_policy_reject(req, "unauthorized");
+        }
+
+        bool token_proven = (ar == WS_AUTH_OK) && !ws_server_auth_disabled();
+        if (!token_proven) {
             char origin[WS_ORIGINS_MAX] = {0};
             char host[96] = {0};
             if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) ==
@@ -320,11 +332,6 @@ static esp_err_t ws_handler(httpd_req_t* req) {
             }
         }
 
-        ws_auth_result_t ar = auth_eval(req);
-        if (ar == WS_AUTH_BAD) {
-            ESP_LOGW(TAG, "WS auth failed (bad credentials), sending close frame");
-            return send_ws_policy_reject(req, "unauthorized");
-        }
         int fd = httpd_req_to_sockfd(req);
         client_add(fd, ar == WS_AUTH_OK);
         ESP_LOGI(TAG, "WS handshake fd=%d %s", fd,

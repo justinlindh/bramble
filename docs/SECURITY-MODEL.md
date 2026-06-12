@@ -59,13 +59,16 @@ it is not enabled today.
   to a two-method identification allowlist (`components/rpc/rpc_auth.c`).
   The transport is still plaintext HTTP, so an on-path attacker who captures
   a legitimate session reads everything, token included (section 4).
-- *Malicious web page in a browser on the LAN.* The WebSocket upgrade
-  validates the `Origin` header when one is present: same-origin (the host
-  the request was addressed to) and an allowlist managed via authenticated
-  RPC pass; everything else, including the literal `null` origin, is
-  rejected with a 1008 close frame (`main/ws_origin.c`, enforced in
-  `main/ws_server.c`). Non-browser clients send no Origin and are not
-  subject to cross-site WebSocket hijacking.
+- *Malicious web page in a browser on the LAN.* Connections that do not
+  present the valid token are subject to an `Origin` check: same-origin
+  (the host the request was addressed to) and an allowlist managed via
+  authenticated RPC pass; everything else, including the literal `null`
+  origin, is rejected with a 1008 close frame (`main/ws_origin.c`,
+  enforced in `main/ws_server.c`). A connection that presents the valid
+  token skips the Origin check: a cross-site page cannot read the token,
+  so a token-bearing client is the user's own, not hijacked. Non-browser
+  clients send no Origin and are not subject to cross-site WebSocket
+  hijacking.
 - *BLE proximity.* The BLE RPC transport gates on the same default-on token
   as WS, with a first-write handshake and throttled retries
   (`components/ble/ble_server.c`); pre-handshake JSON-RPC is limited to the
@@ -277,15 +280,24 @@ NVS and is logged loudly at boot. The default posture is closed.
 
 ### WebSocket Origin allowlist
 
-When a WS upgrade carries an `Origin` header (every browser sends one),
-the device allows same-origin requests (Origin host equals Host header
-host, any port or scheme, so the device's IP and mDNS names work), plus
-origins on an NVS-stored allowlist managed via the authenticated
+When a WS upgrade carries an `Origin` header (every browser sends one)
+and does not present the valid bearer token, the device allows
+same-origin requests (Origin host equals Host header host, any port or
+scheme, so the device's IP and mDNS names work), plus origins on an
+NVS-stored allowlist managed via the authenticated
 `bramble.setAllowedOrigins` / `bramble.getAllowedOrigins` RPCs. Everything
 else, including the literal `null` origin, is rejected at upgrade time
 with a 1008 close frame (decision logic in `main/ws_origin.c`, enforcement
 in `main/ws_server.c`). Requests without an Origin header pass: a client
 that is not a browser is not subject to cross-site WebSocket hijacking.
+
+A request that presents the valid token bypasses the Origin check. The
+token is the stronger credential and is unreadable cross-site, so a
+token-bearing cross-origin page is the owner's webapp (hosted or local
+dev), not an attack; gating it would force origin enrollment over serial
+before the webapp could ever connect. On a device whose owner explicitly
+disabled auth, no connection carries a token, so the Origin check applies
+to everything and remains the CSWSH defense.
 
 ### Wi-Fi setup AP
 
