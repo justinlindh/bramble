@@ -1,54 +1,106 @@
 # OTA Rollout Guide (Single Node)
 
-Last verified: 2026-03-01
+Last verified: 2026-06-12
 
-Use this runbook to deploy a `bramble.bin` build to one WiFi-connected node without USB flashing.
+Use this runbook to deploy a `bramble.bin` build to one WiFi-connected node
+without USB flashing.
+
+Two things changed with signed OTA (see `docs/design/ota-signing.md`):
+
+- **Images are signed and verified.** The node only installs images signed by
+  a key that also signed its running firmware. A node running CI-built
+  firmware accepts CI-signed images; a node USB-flashed with your local dev
+  build accepts images signed with that same dev key.
+- **URLs are gone from the OTA RPC.** The node downloads only from its
+  configured OTA origin; `bramble.otaUpdate` takes a relative artifact path.
 
 ## Prerequisites
 
 - Node reachable over JSON-RPC WebSocket (example: `ws://192.0.2.0/ws`)
-- Host machine IP reachable by the node (example: `203.0.113.34`)
-- `bramble-cli` with `ota` command available
+- RPC auth token for the node (all OTA methods are authenticated)
+- A JSON-RPC client. `bramble-cli`'s `ota --url` predates the path-based
+  contract (tracked as bramble-cli#36); until that lands, drive the RPCs
+  directly, e.g. with `websocat` as shown below (`TOKEN` is the device auth
+  token)
 - Choose target board: `heltec-v3`, `heltec-v4`, or `tdeck-plus`
 
-## 1) Build artifact
+## A) Production rollout (official origin)
 
-Use the board-aware build wrapper:
+The default origin is `https://bramblemesh.org/ota/`. CI publishes signed
+artifacts there for every release; the index at
+`https://bramblemesh.org/ota/index.json` lists artifact paths per release
+(`docs/ota-release-schema.md`).
 
-```bash
-cd ~/src/bramble
-bash scripts/flash.sh local heltec-v4 build
-```
-
-Expected artifact: `~/src/bramble/build-heltec-v4/bramble.bin`
-
-> For other boards, switch the board name and build directory accordingly (for example `heltec-v3` -> `build-heltec-v3`, `tdeck-plus` -> `build-tdeck-plus`).
-
-## 2) Host artifact over HTTP
+Trigger the update with the artifact path relative to the origin:
 
 ```bash
-cd ~/src/bramble/build-heltec-v4
-python3 -m http.server 8088
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.4.0/heltec-v3/bramble.bin"}}' \
+  | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
 ```
 
-Firmware URL used below:
+Expected: `ok=true` with the resolved URL echoed back, then device
+reboot/disconnect.
 
-```text
-http://203.0.113.34:8088/bramble.bin
-```
+## B) Dev-loop rollout (local origin, dev-signed build)
 
-## 3) Trigger OTA
+The node must already be running a build signed with YOUR dev key (USB-flash
+it once with `scripts/flash.sh`; the build signs with
+`$BRAMBLE_OTA_SIGNING_KEY` or a generated throwaway in `keys/`).
+
+1. Build the board artifact:
+
+   ```bash
+   cd ~/src/bramble
+   bash scripts/flash.sh local heltec-v4 build
+   ```
+
+2. Host the build directory over HTTP (requires firmware compiled with
+   `CONFIG_BRAMBLE_OTA_ALLOW_HTTP`; https origins work on any build):
+
+   ```bash
+   cd ~/src/bramble/build-heltec-v4
+   python3 -m http.server 8088
+   ```
+
+3. Point the node's OTA origin at your machine (persists in NVS until reset):
+
+   ```bash
+   printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaSetOrigin","params":{"origin":"http://203.0.113.34:8088/"}}' \
+     | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+   ```
+
+4. Trigger the update:
+
+   ```bash
+   printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"bramble.otaUpdate","params":{"path":"bramble.bin"}}' \
+     | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+   ```
+
+5. When done iterating, restore the official origin:
+
+   ```bash
+   printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"bramble.otaSetOrigin","params":{"reset":true}}' \
+     | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+   ```
+
+`bramble.otaGetOrigin` shows the effective origin, whether it is overridden,
+the anti-rollback floor, and the running version.
+
+## Downgrades
+
+The node refuses images whose version is below its anti-rollback floor (the
+highest version it has booted). For a deliberate downgrade:
 
 ```bash
-cd ~/src/bramble-cli
-./bramble --transport ws://192.0.2.0/ws ota --url http://203.0.113.34:8088/bramble.bin
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.9/heltec-v3/bramble.bin","allow_downgrade":true}}' \
+  | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
 ```
 
-Expected: OTA RPC acknowledgment (`ok=true`), then device reboot/disconnect.
+This also lowers the floor to the downgraded version.
 
-## 4) Verify reconnect + version/health
+## Verify reconnect + version/health
 
-After reboot, verify node reconnects and responds:
+After reboot, verify the node reconnects and responds:
 
 ```bash
 cd ~/src/bramble-cli
@@ -62,14 +114,21 @@ Optional post-checks:
 ./bramble --transport ws://192.0.2.0/ws monitor --topic gps --follow --since 2m
 ```
 
-## 5) Rollback guidance
+## Troubleshooting and rollback
+
+- **"image signature verification failed"** in the device log (`ota` tag):
+  the image is unsigned or signed with a key the running firmware does not
+  trust. Dev-signed node + CI image (or vice versa) requires a USB flash to
+  cross trust domains.
+- **"below the anti-rollback floor"**: intentional downgrade needs
+  `allow_downgrade:true`.
+- The most recent failure reason is also returned as `last_error` on the next
+  `bramble.otaUpdate` call.
 
 If the node becomes unhealthy after OTA:
 
-1. Re-run OTA with a known-good `bramble.bin` URL:
-   ```bash
-   ./bramble --transport ws://192.0.2.0/ws ota --url http://203.0.113.34:8088/bramble.bin
-   ```
+1. Re-run OTA with a known-good artifact path (add `allow_downgrade:true` if
+   stepping back a version).
 2. If the node is unreachable over WiFi, recover via USB flash:
    ```bash
    cd ~/src/bramble
