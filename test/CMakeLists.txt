@@ -240,15 +240,6 @@ target_include_directories(test_broadcast_airtime_gate PRIVATE
 )
 add_test(NAME test_broadcast_airtime_gate COMMAND test_broadcast_airtime_gate)
 
-# TX queue tests
-add_executable(test_tx_queue
-    test_tx_queue.c
-    unity/unity.c
-)
-target_include_directories(test_tx_queue PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
-)
-
 # Timesync tests
 add_executable(test_timesync
     test_timesync.c

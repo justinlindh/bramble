@@ -2147,64 +2147,7 @@ Removed unshipped. The queue-depth congestion assessment and CONGESTION broadcas
 
 ### 8.5 TX Queue and Priority Scheduling
 
-```
-struct tx_queue_entry {
-    uint8_t  priority;       // 0=highest (critical), 1=normal, 2=ack, 3=routing, 4=broadcast
-    uint8_t  packet_len;
-    uint16_t enqueue_time;   // Lower 16 bits of ms timestamp (wraps every ~65s, sufficient)
-    uint8_t  packet[222];
-};
-// Size: 226 bytes per entry
-// Max entries: 16
-// Total: 3,616 bytes
-
-// Priority levels (lower = higher priority):
-PRIORITY_CRITICAL = 0     // Critical-tier data
-PRIORITY_ACK      = 1     // ACKs and delivery receipts
-PRIORITY_ROUTING  = 2     // RREQ, RREP, RERR
-PRIORITY_NORMAL   = 3     // Normal-tier data
-PRIORITY_BROADCAST = 4    // Broadcast-tier data, beacons
-```
-
-```
-function enqueue_tx(packet, packet_len, priority):
-    if tx_queue.full():
-        // Try to make room by dropping lowest priority
-        dropped = tx_queue.drop_lowest_priority()
-        if dropped == NULL or dropped.priority <= priority:
-            // Can't drop anything less important — reject this packet
-            if dropped != NULL:
-                tx_queue.re_add(dropped)  // Put it back
-            return QUEUE_FULL
-    
-    tx_queue.insert_sorted(priority, packet, packet_len, now_ms())
-
-function tx_scheduler():  // Main TX loop, runs continuously
-    while true:
-        entry = tx_queue.peek_highest_priority()
-        if entry == NULL:
-            sleep_ms(50)
-            continue
-        
-        tier = tier_from_priority(entry.priority)
-        airtime = calculate_airtime_us(entry.packet_len, SF, BW, CR)
-        
-        if not can_transmit(airtime, tier):
-            // Out of airtime budget — sleep until we have enough
-            deficit = airtime - available_tokens(tier)
-            sleep_ms = deficit / refill_rate_for_tier(tier) * 1000
-            sleep_ms(min(sleep_ms, 5000))  // Cap at 5s to stay responsive
-            continue
-        
-        result = try_transmit(entry.packet, entry.packet_len)
-        
-        if result == SUCCESS:
-            debit_airtime(airtime, tier)
-            tx_queue.remove(entry)
-        elif result == CHANNEL_BUSY:
-            // try_transmit already requeued with delay
-            pass
-```
+Removed unshipped. The priority TX queue was deleted without ever being wired: the live transmit path is the budget-gated TX chokepoint (section 8.2.1), which performs admission and LBT inline and never queues. The beacon's `tx_queue_depth` wire field remains in the format and is always reported as 0; retiring the field is deferred to the next wire-version bump.
 
 ---
 
