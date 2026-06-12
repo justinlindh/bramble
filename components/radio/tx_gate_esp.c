@@ -20,6 +20,26 @@
 static tx_gate_t s_gate;
 static SemaphoreHandle_t s_gate_mutex;
 
+/*
+ * WDT-safe lock (review MAJOR on PR #82). Worst-case mutex hold by a
+ * sender inside the gate:
+ *   LBT: 3 backoffs of (50+<50) + (100+<100) + (300+<300) ms  < ~900 ms
+ *   radio_transmit_raw: standby/setup + TX-done wait bounded by the 4 s
+ *   FreeRTOS notify timeout (3 s SX1262 hardware timeout inside it)      ~4 s
+ *   total                                                                ~5 s
+ * The mesh task's TWDT window is 5 s, so a competing sender blocking in
+ * xSemaphoreTake(portMAX_DELAY) could starve its WDT and reset the node.
+ * Waiters therefore poll with a 500 ms timed take and feed the TWDT on
+ * every contention loop (a no-op error for tasks not subscribed). The
+ * holder feeds its own WDT via ops.wdt_feed inside the gate and inside
+ * radio_transmit_raw before the blocking wait.
+ */
+static void gate_lock(void) {
+    while (xSemaphoreTake(s_gate_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        (void)esp_task_wdt_reset();
+    }
+}
+
 static bool ops_channel_busy(void) { return radio_cad_check(); }
 
 static int ops_transmit(const uint8_t* data, uint8_t len) { return radio_transmit_raw(data, len); }
@@ -60,40 +80,40 @@ void tx_gate_global_init(uint8_t max_duty_cycle_pct, bool duty_cycle_enforced) {
 }
 
 int tx_gate_send(const uint8_t* buf, uint8_t len, tx_kind_t kind) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     int rc = tx_gate_transmit(&s_gate, buf, len, kind);
     xSemaphoreGive(s_gate_mutex);
     return rc;
 }
 
 bool tx_gate_check(uint8_t wire_len, tx_kind_t kind) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     bool ok = tx_gate_can_transmit(&s_gate, wire_len, kind);
     xSemaphoreGive(s_gate_mutex);
     return ok;
 }
 
 void tx_gate_set_peer_count(uint8_t peer_count) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     tx_gate_set_mesh_size(&s_gate, peer_count);
     xSemaphoreGive(s_gate_mutex);
 }
 
 void tx_gate_set_beacon_size(uint8_t beacon_wire_len) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     tx_gate_set_beacon_profile(&s_gate, beacon_wire_len);
     xSemaphoreGive(s_gate_mutex);
 }
 
 uint32_t tx_gate_beacon_min_interval(void) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     uint32_t interval = tx_gate_min_beacon_interval_ms(&s_gate);
     xSemaphoreGive(s_gate_mutex);
     return interval;
 }
 
 uint32_t tx_gate_remaining(uint8_t tier) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     airtime_budget_refill(&s_gate.budget, ops_now_ms());
     uint32_t left = airtime_budget_remaining(&s_gate.budget, tier);
     xSemaphoreGive(s_gate_mutex);
@@ -101,7 +121,7 @@ uint32_t tx_gate_remaining(uint8_t tier) {
 }
 
 void tx_gate_snapshot(airtime_budget_t* out) {
-    xSemaphoreTake(s_gate_mutex, portMAX_DELAY);
+    gate_lock();
     memcpy(out, &s_gate.budget, sizeof(*out));
     xSemaphoreGive(s_gate_mutex);
 }
