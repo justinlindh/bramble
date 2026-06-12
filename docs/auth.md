@@ -86,10 +86,12 @@ The firmware logs a warning at every boot while auth is disabled.
 
 ## Browser Origin Allowlist
 
-The WebSocket endpoint validates the `Origin` header browsers send:
-same-origin connections (the device's own IP or hostname, any port) are
-allowed, everything else is rejected unless added to the device's origin
-allowlist:
+For connections that do not present the valid token, the WebSocket
+endpoint validates the `Origin` header browsers send: same-origin
+connections (the device's own IP or hostname, any port) are allowed,
+everything else is rejected unless added to the device's origin
+allowlist. Connections that present the valid token skip the Origin
+check, so the web app works from any origin once you enter the token:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"bramble.setAllowedOrigins","params":{"origins":["https://app.example.com"]}}

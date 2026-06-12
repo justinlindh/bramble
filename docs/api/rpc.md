@@ -19,7 +19,7 @@ Legacy `?token=<token>` query auth is still accepted for compatibility (and is t
 
 Connections without credentials may call only `bramble.ping` and `bramble.getVersion`; every other method returns error `-1005` (`Unauthorized`). Wrong credentials close the WebSocket with code 1008.
 
-Browser connections are additionally subject to an `Origin` allowlist: same-origin always passes; other origins must be added via `bramble.setAllowedOrigins`.
+Browser connections without a valid token are additionally subject to an `Origin` allowlist: same-origin always passes; other origins must be added via `bramble.setAllowedOrigins`. Presenting the valid token bypasses the Origin check.
 
 ## Location policy RPC contract (hybrid privacy-first)
 
@@ -380,7 +380,7 @@ All methods below are registered in firmware via `rpc_register(...)`.
 ```
 
 #### `bramble.setAllowedOrigins`
-- Description: Replaces the WebSocket `Origin` allowlist (extra origins beyond same-origin, which always passes).
+- Description: Replaces the WebSocket `Origin` allowlist applied to tokenless connections (extra origins beyond same-origin, which always passes).
 - Params: `origins` (array of full-origin strings, e.g. `"https://app.example.com"`; empty array clears the list; entries must contain `://` or be the literal `"null"`).
 - Response fields: `ok` (bool).
 - Example:
