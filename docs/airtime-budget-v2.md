@@ -18,10 +18,12 @@ Base budgets (ms/hour):
 - receipt: 12000
 
 Tier semantics:
-- `critical`: urgent/unblockable class (can borrow from normal)
+- `critical`: routing control and ACKs (may borrow from normal, capped at 25% of normal's capacity per refill window, `AIRTIME_BORROW_CAP_PCT`)
 - `normal`: unicast data and routine traffic
-- `broadcast`: broadcast data traffic
+- `broadcast`: broadcast data traffic and beacons (a beacon-sized reserve is held back from broadcast data so the next beacon always has tokens)
 - `receipt`: broadcast delivery receipts (generated + forwarded)
+
+When the regional frequency plan enforces a regulatory duty-cycle limit (EU868: 1%), every profile's tier maxima and refill are scaled proportionally to stay within it (`airtime_budget_set_duty_cap`). All budget checks and debits happen at the single TX gate in `components/radio/tx_gate.c`; no transmit path bypasses them.
 
 ## Continuous refill model
 
@@ -78,6 +80,7 @@ Expected if receipt tier is exhausted while broadcast tier still has tokens. Thi
 ## Files
 
 - Core: `components/airtime/airtime_budget.c`
+- TX gate (admission + debit): `components/radio/tx_gate.c`, `components/radio/tx_gate_esp.c`
 - API/constants: `components/airtime/include/airtime_budget.h`
 - Receipt tier wiring: `main/mesh_task.c`
 - Airtime RPC fields: `main/rpc_methods.c`
