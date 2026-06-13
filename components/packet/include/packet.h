@@ -27,15 +27,11 @@
 #define PKT_TYPE_STORE_ACK 0x0C
 #define PKT_TYPE_MAILBOX_DELIVERY 0x0D
 #define PKT_TYPE_MAILBOX_QUERY 0x0E
-#define PKT_TYPE_EMERGENCY 0x0F
-#define PKT_TYPE_EMERGENCY_CANCEL 0x10
 #define PKT_TYPE_PROBE 0x12     /* Network reachability probe */
 #define PKT_TYPE_PROBE_ACK 0x13 /* Probe acknowledgement */
 #define PKT_TYPE_LOCATION 0x14  /* Location share */
 
 #define BEACON_FLAG_MAILBOX 0x01 /* Node willing to store messages */
-
-#define HEADER_FLAG_EMERGENCY 0x04 /* Emergency relay priority */
 
 /* Buffer sizes */
 #define BRAMBLE_MAX_PACKET_SIZE 256

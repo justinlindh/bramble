@@ -257,7 +257,7 @@ TIER1   TIER0   ACK_REQ RECEIPT CHANNEL  ENCRYP   FRAG1   FRAG0
 - `ACK_REQ`: Sender requests ACK from destination
 - `RECEIPT`: Sender requests delivery receipt with relay path
 - `CHANNEL`: 1=channel (group) message, 0=direct message
-- `ENCRYP`: 1=payload encrypted, 0=plaintext (only for beacons/control). **Note:** For `PKT_TYPE_EMERGENCY` and `PKT_TYPE_EMERGENCY_CANCEL` packets, this bit is repurposed as `HEADER_FLAG_EMERGENCY` (0x04) to signal emergency relay priority — all relay nodes forward emergency packets unconditionally, bypassing airtime budget checks.
+- `ENCRYP`: 1=payload encrypted, 0=plaintext (only for beacons/control). An earlier revision repurposed this bit as `HEADER_FLAG_EMERGENCY` for the (since removed, section 4.19) emergency packets; that collision is gone with them, and the bit means encryption only.
 - `FRAG[1:0]`: Fragment indicator — 00=not fragmented, 01=first fragment, 10=middle fragment, 11=last fragment
 
 ### 4.3 Packet Types
@@ -279,8 +279,8 @@ Value  Name               Description
 0x0C   STORE_ACK          Mailbox storage acknowledgment (see §4.16)
 0x0D   MAILBOX_DELIVERY   Delivery of stored message from mailbox (see §4.17)
 0x0E   MAILBOX_QUERY      Query mailbox for pending messages (see §4.18)
-0x0F   EMERGENCY          Emergency beacon (see §4.19)
-0x10   EMERGENCY_CANCEL   Cancel active emergency (see §4.20)
+0x0F   (retired)          Was EMERGENCY; removed unshipped (see §4.19)
+0x10   (retired)          Was EMERGENCY_CANCEL; removed unshipped (see §4.20)
 0x11   (retired)          Was CODED; removed unshipped (see §4.21)
 0x12   PKT_TYPE_PROBE    Broadcast delivery probe (see §4.22)
 0x13   PKT_TYPE_PROBE_ACK      Broadcast probe acknowledgment (see §4.23)
@@ -618,53 +618,11 @@ The mailbox responds with MAILBOX_DELIVERY packets for any stored messages, or a
 
 ### 4.19 EMERGENCY Packet
 
-Emergency beacon for distress signaling. Broadcast, plaintext, with maximum relay priority.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x0F, HEADER_FLAG_EMERGENCY=1)
-12      4     src_addr         Emergency beacon source
-16      4     latitude_e7      Latitude in degrees × 10⁷ (signed, 0 if no GPS)
-20      4     longitude_e7     Longitude in degrees × 10⁷ (signed, 0 if no GPS)
-24      2     altitude_m       Altitude in meters (signed, INT16_MIN if unknown)
-26      1     battery_pct      Battery percentage (0–100, 0xFF=unknown)
-27      4     timestamp        Activation timestamp (epoch seconds)
-31      1     msg_len          Short message length (0–32)
-32      N     short_msg        UTF-8 short message (optional, max 32 bytes)
-──────────────────────────────────────────────────────────
-Total: 32 bytes minimum, 64 bytes maximum (with 32-byte message)
-```
-
-**Emergency state machine:**
-- `INACTIVE` (0) → `ACTIVE` (1): On long-press (3s) or BLE command
-- `ACTIVE` (1) → `COOLDOWN` (2): On cancel command or 24-hour auto-timeout
-- `COOLDOWN` (2) → `INACTIVE` (0): After 15-minute cooldown period
-
-**Beacon timing:**
-- First beacon: immediately on activation
-- Subsequent: every 30 seconds (`EMERGENCY_BEACON_INTERVAL_MS`)
-- Auto-timeout: 24 hours (`EMERGENCY_AUTO_TIMEOUT_MS`)
-- Minimum re-activation interval: 1 hour (`EMERGENCY_MIN_ACTIVATION_MS`)
-
-**Relay behavior:** Packets with `HEADER_FLAG_EMERGENCY` set bypass airtime budget checks. All nodes relay emergency packets unconditionally with randomized 100–500ms jitter.
+Removed unshipped. The emergency-beacon state machine and packet were deleted without ever being transmitted or handled, and the `HEADER_FLAG_EMERGENCY` define collided with `FLAG_ENCRYPT` (both `0x04`), so the flag could never have been used on the v1 wire. A redesigned emergency facility (origin-set, AAD-bound flag) is specified for the next wire version in the cryptographic design RFC.
 
 ### 4.20 EMERGENCY_CANCEL Packet
 
-Cancels an active emergency. Must be authenticated to prevent spoofed cancellation.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x10, HEADER_FLAG_EMERGENCY=1)
-12      4     src_addr         Same source as the emergency being cancelled
-16      4     cancel_timestamp Timestamp of cancellation (epoch seconds)
-20      4     auth_tag         HMAC-SHA256 truncated to 4 bytes over bytes 0–19
-──────────────────────────────────────────────────────────
-Total: 24 bytes
-```
-
-The `auth_tag` is computed using the node's pairwise session key (if established with peers) or the node's identity-derived key. Only the originating node can cancel its own emergency.
+Removed unshipped, together with section 4.19.
 
 ### 4.21 CODED Packet
 
@@ -2440,15 +2398,7 @@ If a node is compromised:
 
 #### Emergency Beacon Security
 
-| Threat | Mitigation |
-|--------|-----------|
-| Spoofed emergency to waste resources | Emergency source is node address (identity-derived); social accountability in small meshes |
-| Spoofed cancel to endanger victim | Cancel requires 4-byte HMAC authentication; only originating node can cancel |
-| Emergency flooding DoS | Packets are broadcast, so flooding is inherent; mitigated by 30s beacon interval and auto-timeout |
-| Location tracking via emergency | Emergency beacons include GPS by design — privacy tradeoff accepted for safety |
-| Rate-limit bypass abuse | 15-minute cooldown after cancel prevents button-mashing; 1-hour minimum between activations |
-
-**Design decision:** Signing every emergency beacon was rejected (64 bytes + CPU cost per 30s beacon). Instead, only cancel packets are authenticated. False distress wastes attention; false cancel could be fatal — asymmetric risk profile.
+The emergency component was removed unshipped (section 4.19); there is no emergency traffic on the air.
 
 #### Private Location Sharing Security
 
@@ -2527,12 +2477,11 @@ Airtime budget state               32 B     Token bucket state
 Time sync state                    20 B     Sync state
 RREQ rate limit table             768 B     64 entries × 12 B
 Mailbox buffer                  7,040 B     32 entries × 220 B (204B payload + 16B metadata)
-Emergency tracker                 416 B     8 active emergencies × 52 B
 Location manager                1,088 B     16 contacts × 68 B (config + cache)
 Group manager                   2,240 B     8 groups × 280 B (members + key + name + state)
 Probe state                       648 B     32 responses × 20 B + control state
 ────────────────────────────────────────────────────────────────
-Protocol subtotal:             28,316 B     (~28 KB)
+Protocol subtotal:             27,900 B     (~27 KB)
 
 Application buffers:
   Display framebuffer           1,024 B     128×64 / 8

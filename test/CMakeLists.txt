@@ -424,16 +424,6 @@ target_include_directories(test_mailbox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
 )
 
-# Emergency beacon tests (custom test harness, links .c)
-add_executable(test_emergency
-    test_emergency.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emergency/emergency.c
-)
-target_include_directories(test_emergency PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emergency/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-)
-
 # Location sharing tests
 add_executable(test_location
     test_location.c

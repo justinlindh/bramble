@@ -19,8 +19,6 @@
 #define PKT_TYPE_STORE_ACK        0x0C
 #define PKT_TYPE_MAILBOX_DELIVERY 0x0D
 #define PKT_TYPE_MAILBOX_QUERY    0x0E
-#define PKT_TYPE_EMERGENCY        0x0F
-#define PKT_TYPE_EMERGENCY_CANCEL 0x10
 #define PKT_TYPE_PROBE            0x12
 #define PKT_TYPE_PROBE_ACK        0x13
 #define PKT_TYPE_LOCATION         0x14
@@ -88,11 +86,6 @@ void test_classify_maintenance_packets(void) {
 }
 
 void test_classify_other_packets(void) {
-    /* Emergency packets are "other" - they bypass normal classification */
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_OTHER,
-                     traffic_debug_classify_packet(PKT_TYPE_EMERGENCY));
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_OTHER,
-                     traffic_debug_classify_packet(PKT_TYPE_EMERGENCY_CANCEL));
     /* Unknown packet type */
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_OTHER,
                      traffic_debug_classify_packet(0xFF));

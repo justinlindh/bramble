@@ -15,8 +15,6 @@
 #define PKT_TYPE_STORE_ACK 0x0C
 #define PKT_TYPE_MAILBOX_DELIVERY 0x0D
 #define PKT_TYPE_MAILBOX_QUERY 0x0E
-#define PKT_TYPE_EMERGENCY 0x0F
-#define PKT_TYPE_EMERGENCY_CANCEL 0x10
 #define PKT_TYPE_PROBE 0x12
 #define PKT_TYPE_PROBE_ACK 0x13
 #define PKT_TYPE_LOCATION 0x14
@@ -66,8 +64,6 @@ traffic_category_t traffic_debug_classify_packet(uint8_t pkt_type) {
     case PKT_TYPE_LOCATION:
         return TRAFFIC_CAT_MAINTENANCE;
 
-    case PKT_TYPE_EMERGENCY:
-    case PKT_TYPE_EMERGENCY_CANCEL:
     default:
         return TRAFFIC_CAT_OTHER;
     }
