@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, Suspense, lazy, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
 import { disconnect, loadConnectionCapabilities, loadNeighbors } from './store/actions';
 import { usePoll } from './hooks/usePoll';
@@ -11,8 +11,12 @@ import { Chat } from './pages/Chat/Chat';
 import { Nodes } from './pages/Nodes/Nodes';
 import { Config } from './pages/Config/Config';
 import { Stats } from './pages/Stats/Stats';
-import { Map } from './pages/Map/Map';
 import styles from './styles/App.module.css';
+
+// Lazy-load the Map page: leaflet (~150 kB) is only needed when the user opens
+// the Map tab. The Suspense fallback renders a plain loading indicator while the
+// chunk fetches; the ErrorBoundary above catches any import failure gracefully.
+const Map = lazy(() => import('./pages/Map/Map').then(m => ({ default: m.Map })));
 
 type Tab = 'chat' | 'nodes' | 'map' | 'config' | 'stats';
 
@@ -38,7 +42,11 @@ function TabContent({ activeTab }: { activeTab: Tab }) {
     <ErrorBoundary>
       {activeTab === 'chat'   && <Chat />}
       {activeTab === 'nodes'  && <Nodes />}
-      {activeTab === 'map'    && <Map />}
+      {activeTab === 'map'    && (
+        <Suspense fallback={<div style={{ padding: '2rem', opacity: 0.6 }}>Loading map…</div>}>
+          <Map />
+        </Suspense>
+      )}
       {activeTab === 'config' && <Config />}
       {activeTab === 'stats'  && <Stats />}
     </ErrorBoundary>
