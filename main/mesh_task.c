@@ -93,6 +93,9 @@ static bramble_identity_t *s_identity;
 static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for beacon HMAC */
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
+/* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
+ * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
+ * this same limiter into the forward path. */
 static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
