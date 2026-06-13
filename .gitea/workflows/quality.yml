@@ -12,8 +12,9 @@ on:
       - 'ci/**'
       - 'docs/**'
     paths:
-      - '.gitea/workflows/quality.yml'
+      - '.gitea/workflows/**'
       - 'api/**'
+      - 'simulator/**'
       - 'scripts/**'
       - 'test/**'
       - 'main/**'
