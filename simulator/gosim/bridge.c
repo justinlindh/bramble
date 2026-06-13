@@ -6,7 +6,7 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
-/* Note: mailbox.h, location.h, group.h,
+/* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
 
@@ -37,7 +37,6 @@ void bridge_node_ext_init_all(void) {
     for (int i = 0; i < MAX_NODES; i++) {
         mailbox_init(&g_node_ext[i].mailbox);
         location_init(&g_node_ext[i].location);
-        group_init(&g_node_ext[i].group);
         g_node_ext[i].initialized = true;
     }
 }
@@ -1191,15 +1190,6 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
 
     /* Set initial simulated position from node coordinates */
     node_ext_set_sim_position(ext, x, y);
-
-    /* Emergency: ensure state machine is reset for this node */
-
-    /* Group: create a default sim group for testing (first 4 nodes only) */
-    if (node_idx < 4) {
-        /* Nodes 0-3 share a sim group "SimGroup" when they join */
-        uint32_t members[4] = {addr, addr + 1, addr + 2, addr + 3};
-        group_create(&ext->group, "SimGroup", addr, members, 4, now_ms);
-    }
 
     fprintf(stdout,
             "{\"type\":\"node_ext_initialized\",\"timestamp_us\":%llu"

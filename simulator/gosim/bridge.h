@@ -18,7 +18,6 @@
 /* ─── New component headers (Phase 6) ──────────────────────────────────── */
 #include "../../components/mailbox/include/mailbox.h"
 #include "../../components/location/include/location.h"
-#include "../../components/group/include/group.h"
 /* public_channel.h includes channel_key.h which includes crypto.h (via -I) */
 #include "../../components/channel/include/channel_key.h"
 #include "../../components/channel/include/public_channel.h"
@@ -27,7 +26,6 @@
 typedef struct {
     mailbox_t mailbox;             /* store-and-forward for offline destinations */
     location_manager_t location;   /* position sharing manager */
-    group_manager_t group;         /* group messaging manager */
     bool initialized;
 } bridge_node_ext_t;
 

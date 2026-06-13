@@ -45,7 +45,6 @@ See also:
 | `radio` | `components/radio/` | SX1262 driver, airtime math, and the budget-gated TX gate (single transmit path) |
 | `mailbox` | `components/mailbox/` | Store-and-forward buffer for offline destinations |
 | `location` | `components/location/` | Private location sharing with tiered privacy |
-| `group` | `components/group/` | Group DM management and key derivation |
 | `msg_store` | `components/msg_store/` | Message persistence (SPIFFS-backed message history) |
 | `audio` | `components/audio/` | Audio playback (tones, alerts) |
 | `battery` | `components/battery/` | Battery voltage monitoring and reporting |
@@ -414,38 +413,6 @@ void location_set_position(mgr, pos);
 int  location_serialize_full(pos, buf, buf_len);    /* → 17 bytes */
 int  location_serialize_coarse(pos, buf, buf_len);  /* → 5 bytes */
 ```
-
----
-
-### Group DMs (`components/group/`)
-
-Encrypted group messaging for up to 8 members per group, with up to 8 simultaneous groups per node.
-
-**Key derivation:** FNV-1a over the sorted member address list concatenated with the group name. Produces an 8-byte group ID and a 32-byte group key.
-```
-group_id || group_key = FNV-1a(sort(member_addrs) || name)
-```
-
-**Epoch-based key rotation:** After every 256 messages (`GROUP_EPOCH_ADVANCE_THRESHOLD`), `group_advance_epoch()` is called. The new key is derived from the old key + new epoch number, ensuring backward secrecy for group messages.
-
-**Invite serialization:** Group invites are serialized as fixed-size packets (`GROUP_INVITE_SIZE` = `GROUP_ID_SIZE + GROUP_KEY_SIZE + GROUP_NAME_MAX + 2`) containing the group ID, current key, name, and epoch. Used for onboarding new members.
-
-**Group lifecycle:**
-```c
-void group_init(group_manager_t *mgr);
-int  group_create(mgr, name, creator_addr, member_addrs[], num_members, now_ms);
-int  group_delete(mgr, group_id);
-int  group_add_member(group, addr);
-int  group_remove_member(group, addr);
-bool group_is_member(group, addr);
-void group_record_message(group);   /* advances epoch after threshold */
-```
-
-**Limits:**
-- `GROUP_MAX_MEMBERS` = 8 members per group
-- `GROUP_MAX_GROUPS` = 8 groups per node
-- Group name max: 32 characters
-- `GROUP_EPOCH_ADVANCE_THRESHOLD` = 256 messages
 
 ---
 
