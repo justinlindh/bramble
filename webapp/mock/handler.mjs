@@ -60,6 +60,45 @@ let airtimeUsedMs = 18720;
 let packetIdCounter = 1000;
 let msgIdCounter = 1;
 
+// Auth (issue #96): when MOCK_AUTH_TOKEN is set, the mock enforces the firmware
+// auth model from PR #83: unauthenticated connections may call only the
+// ping/getVersion allowlist, a wrong ?token= closes the WS with 1008, and
+// notifications are withheld from unauthenticated connections. Default off so
+// existing dev flows keep working; export MOCK_AUTH_TOKEN=secret to enable.
+let authToken = process.env.MOCK_AUTH_TOKEN || '';
+const AUTH_ALLOWLIST = new Set(['bramble.ping', 'bramble.getVersion']);
+const UNAUTHORIZED = { code: -1005, message: 'Unauthorized' };
+function authRequired() { return authToken.length > 0; }
+
+// Allowed-origins and OTA origin allowlist (issue #96, mirrors PR #83 / #85).
+let allowedOrigins = [];
+const OTA_DEFAULT_ORIGIN = 'https://bramblemesh.org/ota/';
+let otaOrigin = OTA_DEFAULT_ORIGIN;
+let otaOverridden = false;
+
+// Traffic debug (issue #96, BUG-6): persisted toggle plus synthesized events.
+const trafficDebug = {
+  enabled: false, include_tx: true, include_rx: true, sample_rate: 100,
+  ring_size: 512, ring_used: 0, dropped_count: 0, last_seq: 0,
+};
+const trafficEvents = [];
+let trafficSeq = 0;
+
+const hex8 = (n) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+
+// Normalize a dest param to a number. The web client sends the firmware wire
+// format (an 8-char hex string, e.g. "AABBCC03"); older callers may send a
+// number. Without this, route lookups always miss and every DM takes the
+// 95%-success path, leaving the stale-route failure case (Downtown) unreachable
+// (issue #96, BUG-5).
+function normalizeDest(dest) {
+  if (typeof dest === 'string') {
+    const n = parseInt(dest, 16);
+    return Number.isNaN(n) ? 0xFFFFFFFF : n >>> 0;
+  }
+  return (dest ?? 0xFFFFFFFF) >>> 0;
+}
+
 // Neighbors — direct radio contacts (not all peers are direct neighbors)
 const neighbors = [
   {
@@ -168,7 +207,8 @@ const clients = new Set();
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
   for (const ws of clients) {
-    if (ws.readyState === 1) ws.send(msg);
+    // Notifications are withheld from unauthenticated connections (issue #96).
+    if (ws.readyState === 1 && ws._authed) ws.send(msg);
   }
 }
 
@@ -178,7 +218,7 @@ function notify(method, params) {
 
 // ─── RPC handlers ────────────────────────────────────────────────────────────
 
-const handlers = {
+export const handlers = {
   'bramble.getStatus'(_params) {
     const uptimeSec = Math.floor((Date.now() - BOOT_TIME) / 1000);
     return {
@@ -220,6 +260,9 @@ const handlers = {
         { name: 'critical',  remainingMs: 9200,  maxMs: 10000, usedPct: 8,  refillAtMs: now + 55000  },
         { name: 'normal',    remainingMs: 41000, maxMs: 60000, usedPct: 32, refillAtMs: now + 120000 },
         { name: 'broadcast', remainingMs: 22500, maxMs: 30000, usedPct: 25, refillAtMs: now + 300000 },
+        // Receipt lane (PR #82 four-lane budget); issue #96 so the web client's
+        // receipt lane is live-testable against the mock.
+        { name: 'receipt',   remainingMs: 10800, maxMs: 12000, usedPct: 10, refillAtMs: now + 90000  },
       ],
     };
   },
@@ -246,7 +289,7 @@ const handlers = {
     txCount++;
     airtimeUsedMs += 350 + Math.floor(Math.random() * 200);
 
-    const dest = params?.dest ?? 0xFFFFFFFF;
+    const dest = normalizeDest(params?.dest);
     const delayMs = 800 + Math.floor(Math.random() * 2500);
 
     // Simulate delivery
@@ -446,25 +489,99 @@ const handlers = {
   },
 
   'bramble.getTrafficDebug'(_params) {
-    return {
-      enabled: false,
-      include_tx: true,
-      include_rx: true,
-      sample_rate: 100,
-      ring_size: 512,
-      ring_used: 0,
-      dropped_count: 0,
-      last_seq: 0,
-    };
+    return { ...trafficDebug, ring_used: trafficEvents.length, last_seq: trafficSeq };
   },
 
   'bramble.setTrafficDebug'(params) {
-    // Accept params silently — mock doesn't persist debug state
-    return { ok: true };
+    // Persist the toggle and options so the Config switch sticks and the Stats
+    // Traffic Monitor can render live events (issue #96, BUG-6).
+    if (params?.enabled !== undefined) trafficDebug.enabled = !!params.enabled;
+    if (params?.include_tx !== undefined) trafficDebug.include_tx = !!params.include_tx;
+    if (params?.include_rx !== undefined) trafficDebug.include_rx = !!params.include_rx;
+    if (params?.sample_rate !== undefined) trafficDebug.sample_rate = params.sample_rate;
+    if (!trafficDebug.enabled) {
+      trafficEvents.length = 0;
+    }
+    return { ...trafficDebug, ring_used: trafficEvents.length, last_seq: trafficSeq };
   },
 
   'bramble.getTrafficEvents'(params) {
-    return { events: [] };
+    const since = params?.since_seq ?? 0;
+    return { events: trafficEvents.filter(e => e.seq > since) };
+  },
+
+  // Auth and management RPCs (issue #96, mirrors PR #83 and PR #85).
+
+  'bramble.ping'(_params) {
+    return { pong: true, address: hex8(SELF_ADDR), protocol_version: '0.5.0' };
+  },
+
+  'bramble.getVersion'(_params) {
+    return {
+      firmware_version: '0.4.2-dev',
+      protocol_version: '0.5.0',
+      hardware: 'heltec-v3',
+      supports_delivery_event_sync: true,
+    };
+  },
+
+  'bramble.setAuthToken'(params, ctx) {
+    // Rotate the required token. The connection that sets it stays authenticated
+    // (it just proved possession); new connections must present the new token.
+    authToken = String(params?.token ?? '');
+    if (ctx?.ws) ctx.ws._authed = true;
+    return { ok: true };
+  },
+
+  'bramble.getAuthToken'(_params) {
+    return { token: authToken, enabled: authRequired() };
+  },
+
+  'bramble.setAllowedOrigins'(params) {
+    allowedOrigins = Array.isArray(params?.origins) ? params.origins.slice() : [];
+    return { ok: true, origins: allowedOrigins.slice() };
+  },
+
+  'bramble.getAllowedOrigins'(_params) {
+    return { origins: allowedOrigins.slice() };
+  },
+
+  'bramble.otaGetOrigin'(_params) {
+    return {
+      ok: true,
+      origin: otaOrigin,
+      default_origin: OTA_DEFAULT_ORIGIN,
+      overridden: otaOverridden,
+      version_floor: '1.0.0',
+      running_version: '0.4.2-dev',
+    };
+  },
+
+  'bramble.otaSetOrigin'(params) {
+    if (params?.reset) {
+      otaOrigin = OTA_DEFAULT_ORIGIN;
+      otaOverridden = false;
+    } else if (typeof params?.origin === 'string' && params.origin) {
+      if (!/^https:\/\//.test(params.origin)) {
+        return { ok: false, origin: otaOrigin, overridden: otaOverridden, error: 'origin must be https' };
+      }
+      otaOrigin = params.origin;
+      otaOverridden = true;
+    }
+    return { ok: true, origin: otaOrigin, overridden: otaOverridden };
+  },
+
+  'bramble.otaUpdate'(params) {
+    const path = String(params?.path ?? '');
+    if (!path || /^[a-z]+:\/\//i.test(path) || path.includes('..')) {
+      return { ok: false, error: 'invalid artifact path' };
+    }
+    return {
+      ok: true,
+      note: 'OTA update started (mock); the node would reboot on success',
+      url: otaOrigin.replace(/\/?$/, '/') + path,
+      partition: 'ota_1',
+    };
   },
 
   'bramble.shareLocationOnce'(params) {
@@ -495,6 +612,35 @@ setInterval(() => {
   if (Math.random() < 0.02) droppedCount++;
   airtimeUsedMs += Math.floor(Math.random() * 40);
 }, 1000);
+
+// Synthesize traffic events while traffic debug is enabled (issue #96, BUG-6)
+// so the Stats Traffic Monitor renders live data instead of an empty state.
+const TRAFFIC_KINDS = [
+  { pkt_type: 0x01, category: 'beacon', airtime_tier: 'broadcast' },
+  { pkt_type: 0x07, category: 'chat', airtime_tier: 'normal' },
+  { pkt_type: 0x02, category: 'ack', airtime_tier: 'critical' },
+  { pkt_type: 0x03, category: 'routing', airtime_tier: 'normal' },
+];
+setInterval(() => {
+  if (!trafficDebug.enabled || clients.size === 0) return;
+  const k = TRAFFIC_KINDS[Math.floor(Math.random() * TRAFFIC_KINDS.length)];
+  const is_tx = Math.random() < 0.5;
+  if ((is_tx && !trafficDebug.include_tx) || (!is_tx && !trafficDebug.include_rx)) return;
+  const event = {
+    seq: ++trafficSeq,
+    timestamp_ms: Date.now() - BOOT_TIME,
+    pkt_type: k.pkt_type,
+    category: k.category,
+    airtime_tier: k.airtime_tier,
+    packet_len: 16 + Math.floor(Math.random() * 200),
+    rssi: is_tx ? 0 : -60 - Math.floor(Math.random() * 50),
+    is_tx,
+  };
+  trafficEvents.push(event);
+  if (trafficEvents.length > trafficDebug.ring_size) trafficEvents.shift();
+  trafficDebug.last_seq = trafficSeq;
+  notify('bramble.onTrafficEvent', event);
+}, 1500);
 
 // Neighbor RSSI drift every 15s (realistic fading)
 setInterval(() => {
@@ -577,7 +723,28 @@ setInterval(() => {
  */
 export function handleConnection(ws, req) {
   const ip = req?.socket?.remoteAddress ?? 'unknown';
-  console.log(`[mock-node] Client connected from ${ip}`);
+
+  // Auth handshake (issue #96): the web client sends the token as a ?token=
+  // query parameter on the WS URL. A wrong token closes 1008 (the client maps
+  // that to "Authentication required"); a missing token leaves the connection
+  // unauthenticated (ping/getVersion only, no notifications); a correct token
+  // or no configured token authenticates fully.
+  if (authRequired()) {
+    let provided;
+    try {
+      provided = new URL(req?.url ?? '', 'ws://localhost').searchParams.get('token');
+    } catch { provided = null; }
+    if (provided && provided !== authToken) {
+      console.log(`[mock-node] Rejecting ${ip}: wrong token (1008)`);
+      ws.close(1008, 'unauthorized');
+      return;
+    }
+    ws._authed = provided === authToken;
+  } else {
+    ws._authed = true;
+  }
+
+  console.log(`[mock-node] Client connected from ${ip} (authed=${ws._authed})`);
   clients.add(ws);
 
   ws.on('message', (data) => {
@@ -598,8 +765,16 @@ export function handleConnection(ws, req) {
       return;
     }
 
+    // Enforce the unauthenticated allowlist (issue #96).
+    if (!ws._authed && !AUTH_ALLOWLIST.has(method)) {
+      if (id !== undefined) {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', id, error: { ...UNAUTHORIZED } }));
+      }
+      return;
+    }
+
     try {
-      const result = handler(params ?? {});
+      const result = handler(params ?? {}, { ws });
       if (id !== undefined) ws.send(JSON.stringify({ jsonrpc: '2.0', id, result }));
     } catch (err) {
       console.error(`[mock-node] Handler error for ${method}:`, err);
