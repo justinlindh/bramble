@@ -23,6 +23,16 @@ import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
 
+// Verbose per-message tracing is off by default: it logs full message text and
+// would leak content into the console. Enable with localStorage 'bramble:debug'='1'.
+function debugLog(...args: unknown[]): void {
+  try {
+    if (localStorage.getItem('bramble:debug') === '1') console.debug(...args);
+  } catch {
+    // ignore storage access failures
+  }
+}
+
 function loadShowRoutes(): boolean {
   try {
     return localStorage.getItem(ROUTE_VISIBILITY_KEY) === '1';
@@ -226,8 +236,8 @@ export const useStore = create<AppState & Actions>((set) => ({
           ? 'broadcast'
           : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
 
-      console.debug('[addMessage] Message:', msg);
-      console.debug('[addMessage] Determined convId:', convId, '| isBroadcast:', isBroadcast, '| activeConv:', state.activeConversationId);
+      debugLog('[addMessage] Message:', msg);
+      debugLog('[addMessage] Determined convId:', convId, '| isBroadcast:', isBroadcast, '| activeConv:', state.activeConversationId);
 
       // Update conversation summary
       const convs = new Map(state.conversations);
@@ -256,7 +266,7 @@ export const useStore = create<AppState & Actions>((set) => ({
           (shouldIncrementUnread ? 1 : 0),
       };
       
-      console.debug('[addMessage] Creating conversation:', newConv);
+      debugLog('[addMessage] Creating conversation:', newConv);
       convs.set(convId, newConv);
 
       // Persist unread counts to localStorage

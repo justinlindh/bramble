@@ -17,12 +17,13 @@ function formatRefill(refillAtMs: number): string {
   return `in ${s}s`;
 }
 
-const TIER_ORDER: AirtimeTier['name'][] = ['critical', 'normal', 'broadcast'];
+const TIER_ORDER: AirtimeTier['name'][] = ['critical', 'normal', 'broadcast', 'receipt'];
 
 const TIER_TOOLTIPS: Record<AirtimeTier['name'], string> = {
   critical: 'Critical: reliable delivery for emergency alerts and SOS location traffic',
   normal: 'Normal: acknowledged direct messages and peer data',
   broadcast: 'Broadcast: fire-and-forget channel messages and network announcements',
+  receipt: 'Receipt: delivery receipts and acknowledgements for broadcast traffic',
 };
 
 export function AirtimeCard({ airtime }: { airtime: AirtimeStatus }) {

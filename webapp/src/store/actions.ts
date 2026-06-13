@@ -370,7 +370,7 @@ export async function loadStatus(): Promise<void> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function normalizeAirtime(raw: any): AirtimeStatus {
+export function normalizeAirtime(raw: any): AirtimeStatus {
   // Firmware returns flat fields; webapp expects { tiers: [...] }
   if (raw.tiers) return raw as AirtimeStatus;
 
@@ -379,12 +379,18 @@ function normalizeAirtime(raw: any): AirtimeStatus {
   const nextRefillMs = raw.next_refill_ms ?? 3600000;
   const refillAtMs = Date.now() + (nextRefillMs > 0 ? nextRefillMs : REFILL_INTERVAL_MS);
 
+  const tiers: AirtimeTier[] = [
+    { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs },
+    { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs },
+    { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs },
+  ];
+  // The receipt lane (PR #82, firmware getAirtime) only appears when the
+  // firmware reports it; older firmware omits it and we keep three lanes.
+  if (raw.receipt_max_ms !== undefined || raw.receipt_remaining_ms !== undefined) {
+    tiers.push({ name: 'receipt', remainingMs: raw.receipt_remaining_ms ?? 0, maxMs: raw.receipt_max_ms ?? 12000, usedPct: 0, refillAtMs });
+  }
   return {
-    tiers: [
-      { name: 'critical', remainingMs: raw.critical_remaining_ms ?? 0, maxMs: raw.critical_max_ms ?? 36000, usedPct: 0, refillAtMs },
-      { name: 'normal', remainingMs: raw.normal_remaining_ms ?? 0, maxMs: raw.normal_max_ms ?? 18000, usedPct: 0, refillAtMs },
-      { name: 'broadcast', remainingMs: raw.broadcast_remaining_ms ?? 0, maxMs: raw.broadcast_max_ms ?? 18000, usedPct: 0, refillAtMs },
-    ].map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })) as [AirtimeTier, AirtimeTier, AirtimeTier],
+    tiers: tiers.map(t => ({ ...t, usedPct: t.maxMs > 0 ? Math.round(100 * (t.maxMs - t.remainingMs) / t.maxMs) : 0 })),
   };
 }
 
