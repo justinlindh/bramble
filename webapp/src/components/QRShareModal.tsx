@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import QRCode from 'qrcode';
 import styles from './QRShareModal.module.css';
 
 interface QRShareModalProps {
@@ -20,16 +19,20 @@ export function QRShareModal({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 
-  // Render QR code into canvas
+  // Render QR code into canvas. qrcode is loaded on demand to keep it out of
+  // the main bundle; it is only needed when this modal is actually shown.
   useEffect(() => {
     if (!canvasRef.current) return;
-    QRCode.toCanvas(canvasRef.current, shareString, {
-      width: 260,
-      margin: 2,
-      color: {
-        dark: '#e6edf3',
-        light: '#161b22',
-      },
+    const canvas = canvasRef.current;
+    import('qrcode').then(({ default: QRCode }) => {
+      QRCode.toCanvas(canvas, shareString, {
+        width: 260,
+        margin: 2,
+        color: {
+          dark: '#e6edf3',
+          light: '#161b22',
+        },
+      }).catch(console.error);
     }).catch(console.error);
   }, [shareString]);
 
