@@ -220,7 +220,7 @@ Session key = HKDF(ephemeral-DH ‖ static-DH, "bramble-session"). Keys rotate e
 
 Implementation status: the session/key-exchange machinery is component-level only. `PKT_TYPE_KEY_EXCHANGE` is never sent and never handled on the wire, and direct messages are encrypted with the shared channel key, not pairwise session keys (see SECURITY-MODEL.md).
 
-**Dummy traffic** (`dummy_traffic.c`): Optionally emits random-length encrypted packets to defend against traffic analysis (volume and timing correlation).
+**Dummy traffic** (`dummy_traffic.c`): Cover-traffic scheduler (random-length packets at random intervals to defeat volume/timing correlation). Component-level only: nothing in the firmware schedules it today (see SECURITY-MODEL.md); it is the building block for a planned quiet-mode cover-traffic feature.
 
 ---
 

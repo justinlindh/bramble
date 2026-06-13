@@ -5,6 +5,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* Cover-traffic scheduler. Component-level only today: no firmware caller
+ * schedules it yet; kept as the building block for the planned quiet-mode
+ * cover-traffic feature (SECURITY-MODEL.md documents the gap). */
+
 // Dummy traffic configuration
 #define DUMMY_TRAFFIC_MIN_INTERVAL_MS 5000  // 5 seconds minimum
 #define DUMMY_TRAFFIC_MAX_INTERVAL_MS 30000 // 30 seconds maximum
