@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { Neighbor, PeerLocation } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
 import { IconClock, IconEnvelope, IconLocation } from '../../components/Icons';
-import { useStore } from '../../store';
+import { usePeerName } from '../../store/peerName';
+import { useAgeTick, formatAge } from '../../hooks/useAgeTick';
 import styles from './NeighborCard.module.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -10,16 +11,6 @@ import styles from './NeighborCard.module.css';
 /** Convert delivery rate (0-255) to percentage */
 function pdrPercent(deliveryRate: number): number {
   return Math.round((deliveryRate / 255) * 100);
-}
-
-/** Human-readable "time ago" string */
-function formatAgo(ms: number): string {
-  if (ms < 1000) return 'just now';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  return `${Math.floor(m / 60)}h ago`;
 }
 
 /** Compute health tier based on PDR and RSSI */
@@ -62,7 +53,8 @@ function isNeighborStale(lastHeardMs: number): boolean {
 
 export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: NeighborCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const peerName = useStore(s => s.peerNames.get(neighbor.addr));
+  const peerName = usePeerName(neighbor.addr);
+  useAgeTick(); // drives 1s re-renders for live age display
   const health = neighborHealth(neighbor);
   const pdr = pdrPercent(neighbor.deliveryRate);
   const barPct = rssiBarPct(neighbor.rssi);
@@ -105,7 +97,7 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
       <div className={styles.row}>
         <span title="Packet Delivery Rate">PDR: {pdr}%</span>
         <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr?.toFixed(1) ?? '—'} dB</span>
-        <span title="Last heard"><IconClock size={13} /> {formatAgo(neighbor.lastHeardMs)}</span>
+        <span title="Last heard"><IconClock size={13} /> {formatAge(neighbor.lastHeardMs)}</span>
         <span
           className={stale ? styles.badgeStale : styles.badgeActive}
           title={stale ? 'Neighbor not heard from in over 10 minutes' : 'Neighbor heard from recently'}

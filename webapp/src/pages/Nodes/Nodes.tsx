@@ -1,5 +1,6 @@
 import { useStore } from '../../store/index';
 import { loadNeighbors, loadRoutes, loadPeerLocations, openDM, showOnMap } from '../../store/actions';
+import { resolvePeerName } from '../../store/peerName';
 import { usePoll } from '../../hooks/usePoll';
 import { NeighborCard } from './NeighborCard';
 import { RouteTable } from './RouteTable';
@@ -58,7 +59,7 @@ export function Nodes() {
           <p className={styles.empty}>Known from routing and location telemetry. Live neighbors are marked below.</p>
           <ul className={styles.knownList}>
             {knownPeers.map((peer) => {
-              const name = peer.peerLocation?.name?.trim() || peerNames.get(peer.addr);
+              const name = resolvePeerName(peer.addr, peerNames, peerLocations);
               const canShowOnMap = Boolean(peer.peerLocation?.position);
               return (
                 <li key={peer.addr} className={styles.knownRow}>
