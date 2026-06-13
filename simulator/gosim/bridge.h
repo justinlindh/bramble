@@ -35,7 +35,6 @@ typedef struct {
     uint64_t mailbox_delivered;    /* stored packets delivered on node rejoin */
     uint64_t mailbox_expired;      /* mailbox entries expired (24h TTL) */
     uint64_t location_updates;     /* location position updates processed */
-    uint64_t channel_rate_limited; /* public channel TX rate-limited drops */
 } bridge_ext_metrics_t;
 
 /* Accessor functions */

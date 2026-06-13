@@ -418,7 +418,6 @@ target_include_directories(test_location PRIVATE
 target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
 
-# Group DM tests (custom test harness)
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel
     test_public_channel.c
