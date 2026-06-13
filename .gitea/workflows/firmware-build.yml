@@ -55,13 +55,13 @@ jobs:
             echo "::error::OTA_SIGNING_KEY secret is not set; refusing to build unsigned release artifacts"
             exit 1
           fi
-          mkdir -p keys
           umask 077
-          printf '%s\n' "$OTA_SIGNING_KEY" > keys/ota_signing_key.pem
+          printf '%s\n' "$OTA_SIGNING_KEY" > /tmp/ota_signing_key.pem
 
       - name: Build firmware artifacts
         env:
           BRAMBLE_BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BRAMBLE_OTA_SIGNING_KEY: /tmp/ota_signing_key.pem
         run: |
           source scripts/ci-source-idf.sh
           # Strip leading v for PROJECT_VER
@@ -167,7 +167,7 @@ jobs:
 
       - name: Remove signing key from workspace
         if: always()
-        run: rm -f keys/ota_signing_key.pem
+        run: rm -f keys/ota_signing_key.pem /tmp/ota_signing_key.pem
 
       - name: Upload firmware artifacts
         if: startsWith(github.server_url, 'https://github.com')
