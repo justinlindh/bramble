@@ -36,7 +36,7 @@ See also:
 | `routing` | `components/routing/` | AODV route discovery, forwarding, beacon, route maintenance, route metrics |
 | `channel` | `components/channel/` | Named group channels (key derivation, message encrypt/decrypt, public channel) |
 | `security` | `components/security/` | Session management, key exchange, dummy traffic |
-| `reliability` | `components/reliability/` | ACKs, retransmission, delivery receipts, flow control |
+| `reliability` | `components/reliability/` | ACKs, retransmission, delivery receipts |
 | `fragment` | `components/fragment/` | Message fragmentation and reassembly |
 | `airtime` | `components/airtime/` | Duty cycle tracking and TX priority queue |
 | `dedup` | `components/dedup/` | Duplicate packet detection (sliding-window bloom filter) |
@@ -238,7 +238,7 @@ Three delivery tiers:
 
 (Constants: `tier_max_retries` / `tier_base_delay_ms` in `components/reliability/reliability.c`; jitter applied in `main/mesh_task.c`.)
 
-A per-destination sliding window (max 4 unacknowledged packets) with AIMD adjustment is implemented and tested in `reliability.c`, but is not yet wired into the mesh task; the CONGESTION packet type was removed unshipped. The retry/ACK machinery above is live.
+The retry/ACK machinery above is live. A per-destination AIMD sliding window and the CONGESTION packet type were removed unshipped; in-flight traffic is bounded by the 8-entry pending-ACK table and the airtime budget.
 
 ---
 

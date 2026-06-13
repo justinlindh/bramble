@@ -70,7 +70,6 @@ typedef struct {
 
     /* Reliability state */
     pending_ack_table_t pending_acks;
-    flow_control_t flow_control;
 
     /* Dedup state */
     dedup_buffer_t dedup;

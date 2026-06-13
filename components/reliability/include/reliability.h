@@ -32,25 +32,4 @@ bool pending_ack_remove(pending_ack_table_t* table, uint32_t packet_id);
 void pending_ack_tick(pending_ack_table_t* table, uint32_t now_ms);
 uint8_t tier_max_retries(uint8_t tier);
 uint32_t tier_base_delay_ms(uint8_t tier);
-
-#define FLOW_WINDOW_SIZE 4
-#define MAX_FLOW_DESTINATIONS 8
-
-typedef struct {
-    uint32_t dest_addr;
-    uint8_t unacked;
-    uint8_t window_size;
-    uint16_t success_counter;
-    bool active;
-} flow_window_t;
-
-typedef struct {
-    flow_window_t windows[MAX_FLOW_DESTINATIONS];
-} flow_control_t;
-
-void flow_init(flow_control_t* fc);
-bool flow_can_send(flow_control_t* fc, uint32_t dest_addr);
-void flow_on_send(flow_control_t* fc, uint32_t dest_addr);
-void flow_on_ack(flow_control_t* fc, uint32_t dest_addr);
-void flow_on_failure(flow_control_t* fc, uint32_t dest_addr);
 #endif
