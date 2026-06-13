@@ -44,7 +44,6 @@ See also:
 | `timesync` | `components/timesync/` | Stratum-based mesh time synchronization |
 | `radio` | `components/radio/` | SX1262 driver, airtime math, and the budget-gated TX gate (single transmit path) |
 | `mailbox` | `components/mailbox/` | Store-and-forward buffer for offline destinations |
-| `emergency` | `components/emergency/` | Emergency beacon state machine and tracking |
 | `location` | `components/location/` | Private location sharing with tiered privacy |
 | `group` | `components/group/` | Group DM management and key derivation |
 | `msg_store` | `components/msg_store/` | Message persistence (SPIFFS-backed message history) |
@@ -119,8 +118,6 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | 2 | `0x04` | `FLAG_ENCRYPT` | Payload is encrypted |
 | 1–0 | `0x03` | `FLAG_FRAG` | Fragment indicator (00=none, 01=first, 10=middle, 11=last) |
 
-`HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) is defined to signal emergency relay priority, but nothing in the firmware sets or checks it today; every transmission, emergency-flagged or not, goes through the budget-gated TX path.
-
 ### Packet Types
 
 | Value | Name | Description | Size |
@@ -137,13 +134,11 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x0C` | `PKT_TYPE_STORE_ACK` | Acknowledgement of successful mailbox storage | fixed |
 | `0x0D` | `PKT_TYPE_MAILBOX_DELIVERY` | Delivery of stored message to now-online destination | variable |
 | `0x0E` | `PKT_TYPE_MAILBOX_QUERY` | Query a mailbox node for messages | fixed |
-| `0x0F` | `PKT_TYPE_EMERGENCY` | Emergency beacon (plaintext, broadcast) | 17–49 bytes |
-| `0x10` | `PKT_TYPE_EMERGENCY_CANCEL` | Cancel an active emergency (authenticated) | 12 bytes |
 | `0x12` | `PKT_TYPE_PROBE` | Network reachability probe | variable |
 | `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 
-Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, the four mailbox types, and the two emergency types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE` and the four mailbox types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, `0x0F`, `0x10`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, `EMERGENCY`, `EMERGENCY_CANCEL`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
 
 ### Beacon Flags
 
@@ -387,47 +382,6 @@ void mailbox_init(mailbox_t *mb);
 int  mailbox_store(mailbox_t *mb, src, dest, payload, len, packet_id, now_ms);
 int  mailbox_retrieve(mailbox_t *mb, dest_addr, out[], max_out);
 void mailbox_purge_expired(mailbox_t *mb, now_ms);
-```
-
----
-
-### Emergency Beacon (`components/emergency/`)
-
-A three-state machine for distress signaling:
-
-```
-INACTIVE ──activate──► ACTIVE ──cancel──► COOLDOWN ──timeout──► INACTIVE
-                           │                                         ▲
-                           └──────────── 24h auto-timeout ──────────┘
-```
-
-**States:**
-- `EMERGENCY_STATE_INACTIVE` (0): normal operation
-- `EMERGENCY_STATE_ACTIVE` (1): transmitting emergency beacons every 30s
-- `EMERGENCY_STATE_COOLDOWN` (2): 15-minute cool-down after cancel before re-activation
-
-**Timing constants:**
-- Auto-timeout: 24 hours (`EMERGENCY_AUTO_TIMEOUT_MS`)
-- Beacon interval: 30 seconds (`EMERGENCY_BEACON_INTERVAL_MS`)
-- Cooldown: 15 minutes (`EMERGENCY_COOLDOWN_MS`)
-- Minimum interval between activations: 1 hour (`EMERGENCY_MIN_ACTIVATION_MS`)
-
-**Packet format:**
-- `PKT_TYPE_EMERGENCY` (`0x0F`): Plaintext beacon carrying `src_addr`, `latitude_e7`, `longitude_e7`, `altitude_m`, `battery_pct`, `timestamp`, and an optional 32-byte short message. Minimum serialized size: 17 bytes.
-- `PKT_TYPE_EMERGENCY_CANCEL` (`0x10`): Authenticated cancel (4-byte truncated HMAC-SHA256). Size: 12 bytes.
-
-**Header flag:** `HEADER_FLAG_EMERGENCY` (`0x04`) in the packet header flags byte. All relay nodes forward emergency packets unconditionally, bypassing airtime budget checks.
-
-**Multi-node tracking:** Each node maintains a table of up to 8 active emergencies received from other nodes (`emergency_record_received`, `emergency_record_cancel`).
-
-**API:**
-```c
-void emergency_init(emergency_manager_t *mgr);
-int  emergency_activate(mgr, lat_e7, lon_e7, alt_m, battery, msg, now_ms);
-int  emergency_cancel(mgr, now_ms);
-bool emergency_is_active(mgr);
-void emergency_tick(mgr, now_ms);        /* call periodically */
-bool emergency_should_beacon(mgr, now_ms);
 ```
 
 ---

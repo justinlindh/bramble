@@ -6,7 +6,7 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
-/* Note: mailbox.h, emergency.h, location.h, group.h,
+/* Note: mailbox.h, location.h, group.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
 
@@ -36,7 +36,6 @@ void bridge_node_ext_init_all(void) {
     memset(&g_ext_metrics, 0, sizeof(g_ext_metrics));
     for (int i = 0; i < MAX_NODES; i++) {
         mailbox_init(&g_node_ext[i].mailbox);
-        emergency_init(&g_node_ext[i].emergency);
         location_init(&g_node_ext[i].location);
         group_init(&g_node_ext[i].group);
         g_node_ext[i].initialized = true;
@@ -313,32 +312,6 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
         }
     }
 
-    /* Phase 6: Emergency — simulate periodic emergency beacon ingestion.
-     * In production, emergency beacons are a separate PKT_TYPE; here we
-     * synthesise one from the first node every 50 beacons (low battery proxy)
-     * so the emergency_record_received() path gets exercised. */
-    if (ext) {
-        bridge_node_ext_t* src_ext = bridge_node_ext_get(0); /* node 0 = "distress" node */
-        if (src_ext && (beacon.header.packet_id % 50) == 0) {
-            emergency_beacon_t em_beacon;
-            memset(&em_beacon, 0, sizeof(em_beacon));
-            em_beacon.src_addr = beacon.src_addr;
-            /* Derive lat/lon from neighbor's known routing position (sim proxy) */
-            em_beacon.latitude_e7 = LOC_REF_LAT_E7;
-            em_beacon.longitude_e7 = LOC_REF_LON_E7;
-            em_beacon.battery_pct = beacon.battery_pct;
-            em_beacon.timestamp = now_ms / 1000;
-            emergency_record_received(&ext->emergency, &em_beacon, now_ms);
-            g_ext_metrics.emergency_beacons_rx++;
-            fprintf(stdout,
-                    "{\"type\":\"emergency_beacon_rx\",\"timestamp_us\":%llu"
-                    ",\"node\":\"%s\",\"from\":\"0x%08X\""
-                    ",\"battery_pct\":%d,\"known_count\":%d}\n",
-                    (unsigned long long)now_us, rx->id, beacon.src_addr, (int)beacon.battery_pct,
-                    emergency_get_active_count(&ext->emergency));
-            fflush(stdout);
-        }
-    }
 
 }
 
@@ -1144,9 +1117,6 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
                 g_ext_metrics.mailbox_expired += (uint64_t)purged;
             }
 
-            /* Emergency: tick state machine (auto-timeout, cooldown transitions) */
-            emergency_tick(&ext->emergency, now_ms);
-
             /* Location: update sim position from node's current x/y coordinates */
             node_ext_set_sim_position(ext, node->x, node->y);
         }
@@ -1219,7 +1189,6 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
     node_ext_set_sim_position(ext, x, y);
 
     /* Emergency: ensure state machine is reset for this node */
-    emergency_init(&ext->emergency);
 
     /* Group: create a default sim group for testing (first 4 nodes only) */
     if (node_idx < 4) {
