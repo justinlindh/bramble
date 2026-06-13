@@ -2449,7 +2449,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 | Threat | Mitigation |
 |--------|-----------|
 | Content confidentiality | **None** — well-known PSK means anyone can decrypt. By design. |
-| Spam flooding | TX rate limit (1 msg/30s burst 3); per-source RX filter (1 msg/10s) |
+| Spam flooding | Broadcast-tier airtime budget at the TX chokepoint (section 8.2.1). A dedicated public-channel TX/RX rate limiter was removed unshipped. |
 | Impersonation | Source address is identity-derived; spoofer must know victim's private key |
 
 **Warning:** Public Channel provides **no confidentiality**. It exists for community broadcast and new-node introduction. Use private channels or DMs for sensitive content.

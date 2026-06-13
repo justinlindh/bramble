@@ -1197,9 +1197,6 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
         group_create(&ext->group, "SimGroup", addr, members, 4, now_ms);
     }
 
-    /* Public channel: rate-check TX (not rate-limited at join, just initialise) */
-    (void)public_channel_can_send(now_ms);
-
     fprintf(stdout,
             "{\"type\":\"node_ext_initialized\",\"timestamp_us\":%llu"
             ",\"node_idx\":%d,\"addr\":\"0x%08X\""
