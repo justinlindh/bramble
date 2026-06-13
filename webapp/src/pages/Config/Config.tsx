@@ -5,7 +5,8 @@ import { ChannelManager } from './ChannelManager';
 import { PeerManager } from './PeerManager';
 import { LocationSection } from './LocationSection';
 import { TrafficDebugSection } from './TrafficDebugSection';
-import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase } from '../../components/Icons';
+import { DeviceManagementSection } from './DeviceManagementSection';
+import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase, IconLock } from '../../components/Icons';
 import { messageDb } from '../../store/messageDb';
 import styles from './Config.module.css';
 
@@ -59,6 +60,12 @@ export function Config() {
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
         <LocationSection location={config.location} neighbors={neighbors} channels={config.channels} gpsAvailable={status?.gpsAvailable} />
+      </section>
+
+      {/* ── Device Management ── */}
+      <section className={styles.section}>
+        <h2><IconLock size={18} /> Device Management</h2>
+        <DeviceManagementSection />
       </section>
 
       {/* ── Traffic Debug ── */}
