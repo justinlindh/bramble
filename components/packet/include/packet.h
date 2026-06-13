@@ -193,6 +193,4 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
 esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, const uint8_t* buf,
                                                size_t len);
 
-
-
 #endif /* BRAMBLE_PACKET_H */

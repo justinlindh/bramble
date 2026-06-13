@@ -310,8 +310,6 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
             fflush(stdout);
         }
     }
-
-
 }
 
 static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_t rssi,
@@ -798,7 +796,6 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
         break;
     }
 }
-
 
 /* Sim-local nonce builder (src_addr || counter || 4 random bytes). The
  * firmware generates fully random nonces per message in channel_msg.c; the

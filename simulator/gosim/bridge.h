@@ -24,8 +24,8 @@
 
 /* ─── Extended per-node state (new components) ──────────────────────────── */
 typedef struct {
-    mailbox_t mailbox;             /* store-and-forward for offline destinations */
-    location_manager_t location;   /* position sharing manager */
+    mailbox_t mailbox;           /* store-and-forward for offline destinations */
+    location_manager_t location; /* position sharing manager */
     bool initialized;
 } bridge_node_ext_t;
 

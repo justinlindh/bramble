@@ -130,7 +130,6 @@ uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uin
            (uint32_t)mac[3];
 }
 
-
 int crypto_generate_identity(bramble_identity_t* id) {
     EVP_PKEY* pkey = NULL;
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, NULL);
