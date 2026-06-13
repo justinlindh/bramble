@@ -179,16 +179,14 @@ The `bramble_header_t` struct maps directly onto the 12-byte on-wire format. Hig
 
 ### `routing`
 
-**Files:** `beacon.c`, `beacon_routes.c`, `channel_flood.c`, `discovery.c`, `forwarding.c`, `routing.c`
+**Files:** `beacon.c`, `discovery.c`, `forwarding.c`, `routing.c`
 
 Implements AODV-inspired reactive unicast routing:
 
 1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt, 8 on the retries at +5 s and +15 s, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes have soft (30s inactivity) and hard (300s) timeouts.
 2. **Forwarding** (`forwarding.c`): Looks up next-hop from route table; decrements `hop_limit`; emits RERR on unknown destination.
 3. **Beacons** (`beacon.c`): Periodic 60s neighbor discovery beacons carrying node status, public key hash, HMAC'd with pairwise session key for known peers.
-4. **Route maintenance** (`beacon_routes.c`): Processes RERR packets, invalidates stale routes, triggers re-discovery.
-5. **Channel flooding** (`channel_flood.c`): Hop-limited (default 3) re-broadcast for channel messages. Dedup prevents loops.
-6. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
+4. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
 
 Privacy note: RREQ packets encrypt the source address: intermediate relay nodes cannot determine who initiated a route discovery.
 

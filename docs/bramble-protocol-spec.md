@@ -451,7 +451,7 @@ RSVD    RSVD    RSVD    RSVD    RSVD     ACCEPT_DM    PROBE_ACK     MAILBOX
 - `ACCEPT_DM` (0x04): Node is accepting direct messages (legacy: `accepting_dms`)
 - Bits 3–7: Reserved for future use
 
-**Route Advertisement Extension:** Beacons may optionally include up to 4 route advertisements appended after the base 36-byte beacon. Each route ad is 8 bytes (4-byte dest_addr + 1-byte hop_count + 1-byte metric + 2-byte age). This enables passive route learning — nodes receiving beacons can install or refresh routes without RREQ flooding. Route ads are selected from the sender's routing table, prioritizing recently confirmed routes.
+**Route Advertisement Extension:** Removed unshipped. The passive route-learning extension (up to 4 route ads appended to the beacon) was deleted without ever being placed on the wire; beacons carry the optional node name after the fixed fields instead.
 
 ### 4.10 KEY_EXCHANGE Packet
 
@@ -1630,6 +1630,8 @@ function forward_data(route, packet):
 ```
 
 ### 6.7 Channel (Group) Message Routing
+
+> **Firmware reality.** The hop-limited flood relay below is not implemented: received broadcast/channel DATA is consumed locally and never rebroadcast, so channel messages reach direct radio neighbors only. The `channel_flood` module that implemented this decision logic was deleted unshipped after sitting caller-less; its 50-300 ms jitter window lives on in the RREQ forward path.
 
 Channel messages use a limited controlled flood scoped by hop_limit:
 

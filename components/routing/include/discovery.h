@@ -19,7 +19,7 @@
 #define RREQ_HOP_LIMIT_EXPANDED ROUTE_HOP_LIMIT_MAX
 
 /* Relays delay RREQ rebroadcast by a random jitter in this range so same-hop
- * relays do not key up at the same instant (same window channel_flood uses). */
+ * relays do not key up at the same instant. */
 #define RREQ_FWD_JITTER_MIN_MS 50
 #define RREQ_FWD_JITTER_MAX_MS 300
 
