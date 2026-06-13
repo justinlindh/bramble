@@ -89,17 +89,6 @@ int crypto_random(uint8_t* buf, size_t len) {
     return 0;
 }
 
-void crypto_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce) {
-    nonce[0] = (src_addr >> 24) & 0xFF;
-    nonce[1] = (src_addr >> 16) & 0xFF;
-    nonce[2] = (src_addr >> 8) & 0xFF;
-    nonce[3] = src_addr & 0xFF;
-    nonce[4] = (counter >> 24) & 0xFF;
-    nonce[5] = (counter >> 16) & 0xFF;
-    nonce[6] = (counter >> 8) & 0xFF;
-    nonce[7] = counter & 0xFF;
-    crypto_random(&nonce[8], 4);
-}
 
 int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
                      uint8_t* shared_secret) {

@@ -801,6 +801,23 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
     }
 }
 
+
+/* Sim-local nonce builder (src_addr || counter || 4 random bytes). The
+ * firmware generates fully random nonces per message in channel_msg.c; the
+ * crypto RFC replaces both schemes with a persisted deterministic counter
+ * nonce, at which point this helper goes away too. */
+static void sim_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce) {
+    nonce[0] = (uint8_t)(src_addr >> 24);
+    nonce[1] = (uint8_t)(src_addr >> 16);
+    nonce[2] = (uint8_t)(src_addr >> 8);
+    nonce[3] = (uint8_t)src_addr;
+    nonce[4] = (uint8_t)(counter >> 24);
+    nonce[5] = (uint8_t)(counter >> 16);
+    nonce[6] = (uint8_t)(counter >> 8);
+    nonce[7] = (uint8_t)counter;
+    crypto_random(nonce + 8, 4);
+}
+
 void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
                                     pcg32_state_t* rng, event_queue_t* events,
                                     metrics_state_t* metrics, node_anomaly_tracker_t* anomaly,
@@ -959,7 +976,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             uint8_t key[BRAMBLE_KEY_SIZE];
             derive_pair_key(src->addr, dest_addr, key);
             uint8_t nonce[BRAMBLE_NONCE_SIZE];
-            crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+            sim_build_nonce(src->addr, src->crypto_counter++, nonce);
             /* AAD binds this fragment's header (hop_limit masked) */
             uint8_t aad[HEADER_SIZE];
             bramble_header_build_aad(&fhdr, aad, sizeof(aad));
@@ -1029,7 +1046,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         uint8_t key[BRAMBLE_KEY_SIZE];
         derive_pair_key(src->addr, dest_addr, key);
         uint8_t nonce[BRAMBLE_NONCE_SIZE];
-        crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+        sim_build_nonce(src->addr, src->crypto_counter++, nonce);
         /* AAD binds the header (hop_limit masked), matching firmware */
         uint8_t aad[HEADER_SIZE];
         bramble_header_build_aad(&hdr, aad, sizeof(aad));
