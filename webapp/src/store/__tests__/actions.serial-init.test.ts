@@ -141,14 +141,36 @@ describe('connect serial init readiness gate', () => {
     expect(messageDb.open).toHaveBeenCalledWith('DEADBEEF');
   });
 
-  it('keeps non-serial connect path unchanged (no readiness probe)', async () => {
+  it('verifies a network endpoint with ping before init (issue #91)', async () => {
     const { connect } = await import('../actions');
+    const { useStore } = await import('../index');
+
+    await connect('wifi', { url: 'ws://127.0.0.1/ws' });
+
+    // Network transports now verify the endpoint with an allowlisted ping
+    // before declaring Connected (issue #91), then proceed to the init RPCs.
+    const calledMethods = rpcMock.mock.calls.map(([method]) => method);
+    expect(calledMethods[0]).toBe('bramble.ping');
+    expect(calledMethods).toContain('bramble.getConfig');
+    expect(useStore.getState().connectionState).toBe('connected');
+  });
+
+  it('does not report Connected when a network endpoint never answers ping (issue #91)', async () => {
+    rpcMock.mockImplementation(async (method: string) => {
+      if (method === 'bramble.ping') throw new Error('timeout waiting for rpc');
+      if (method === 'bramble.getStatus') throw new Error('timeout waiting for rpc');
+      return {};
+    });
+
+    const { connect } = await import('../actions');
+    const { useStore } = await import('../index');
 
     await connect('wifi', { url: 'ws://127.0.0.1/ws' });
 
     const calledMethods = rpcMock.mock.calls.map(([method]) => method);
-    expect(calledMethods).not.toContain('bramble.ping');
-    expect(calledMethods).toContain('bramble.getConfig');
+    expect(calledMethods).not.toContain('bramble.getConfig'); // init never started
+    expect(useStore.getState().connectionState).toBe('disconnected');
+    expect(useStore.getState().connectionError).toContain('did not respond as a Bramble node');
   });
 
   it('maps auth transport failures to user-friendly error', async () => {
