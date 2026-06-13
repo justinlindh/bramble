@@ -36,6 +36,7 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/already.*connect/i, 'Already connected to a device.'],
   [/serial rpc handshake failed/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
   [/1008|unauthorized|auth/i, 'Authentication required. Enter your device token in the WiFi connection settings.'],
+  [/not a bramble node/i, 'Connected, but the endpoint did not respond as a Bramble node. Check the address and port.'],
 ];
 
 function friendlyError(raw: string): string {
@@ -119,6 +120,32 @@ async function probeRpcReadiness(): Promise<void> {
   await client.rpc('bramble.getStatus', undefined, SERIAL_RPC_READY_TIMEOUT_MS);
 }
 
+const NODE_VERIFY_ATTEMPTS = 2;
+
+// Confirm the freshly opened transport actually speaks Bramble before we report
+// "Connected". A socket that opens but is not a Bramble node (a wrong IP/port
+// that happens to host a WebSocket) would otherwise sit in a permanent empty
+// Connected state while every RPC times out and the client reconnects forever
+// (issue #91). ping/getStatus is on the unauthenticated allowlist, so this also
+// works against an auth-required node.
+async function verifyBrambleNode(): Promise<boolean> {
+  for (let attempt = 1; attempt <= NODE_VERIFY_ATTEMPTS; attempt += 1) {
+    try {
+      await probeRpcReadiness();
+      return true;
+    } catch (error) {
+      // An auth-required node answers the allowlisted ping, so a 1008/auth error
+      // here means a real node we simply cannot fully use yet: treat it as
+      // reachable and let the init RPCs surface the auth-required state.
+      if (/1008|unauthorized|auth/i.test((error as Error)?.message ?? '')) return true;
+      if (attempt < NODE_VERIFY_ATTEMPTS) {
+        await new Promise(r => setTimeout(r, SERIAL_RPC_READY_RETRY_DELAY_MS));
+      }
+    }
+  }
+  return false;
+}
+
 async function ensureSerialRpcReady(): Promise<boolean> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= SERIAL_RPC_READY_ATTEMPTS; attempt += 1) {
@@ -154,7 +181,18 @@ export async function connect(type: TransportType, options?: { url?: string; tok
     await transport.connect();
     client = new BrambleClient(transport);
     store.setTransport(transport);
-    // Unblock UI immediately after transport opens; init continues best-effort.
+
+    // Verify the endpoint speaks Bramble before declaring Connected (issue #91).
+    // Serial is a trusted physical link and keeps its existing best-effort
+    // readiness flow below, so we only gate network transports here.
+    if (type !== 'serial') {
+      const reachable = await verifyBrambleNode();
+      if (!reachable) {
+        throw new Error('Endpoint is not a Bramble node');
+      }
+    }
+
+    // Transport is open and (for network transports) verified; reflect Connected.
     store.setConnectionState('connected');
 
     // Enable auto-reconnect for WiFi/WebSocket transports
