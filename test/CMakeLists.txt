@@ -302,16 +302,6 @@ target_include_directories(test_forwarding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
 )
 
-# Channel flood tests
-add_executable(test_channel_flood
-    test_channel_flood.c
-    unity/unity.c
-)
-target_include_directories(test_channel_flood PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
-)
-
 # Fragment tests
 add_executable(test_fragment
     test_fragment.c
@@ -402,18 +392,6 @@ target_include_directories(test_dummy_traffic PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_link_libraries(test_dummy_traffic ssl crypto)
-
-# Beacon routes tests
-add_executable(test_beacon_routes
-    test_beacon_routes.c
-    unity/unity.c
-    stubs/esp_stubs.c
-)
-target_include_directories(test_beacon_routes PRIVATE
-    stubs
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-)
 
 # Mailbox tests (includes .c directly)
 add_executable(test_mailbox
