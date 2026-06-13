@@ -17,34 +17,24 @@
 
 /* ─── New component headers (Phase 6) ──────────────────────────────────── */
 #include "../../components/mailbox/include/mailbox.h"
-#include "../../components/emergency/include/emergency.h"
 #include "../../components/location/include/location.h"
-#include "../../components/group/include/group.h"
-#include "../../components/coding/include/coding.h"
 /* public_channel.h includes channel_key.h which includes crypto.h (via -I) */
 #include "../../components/channel/include/channel_key.h"
 #include "../../components/channel/include/public_channel.h"
 
 /* ─── Extended per-node state (new components) ──────────────────────────── */
 typedef struct {
-    mailbox_t mailbox;             /* store-and-forward for offline destinations */
-    emergency_manager_t emergency; /* emergency beacon state machine */
-    location_manager_t location;   /* position sharing manager */
-    group_manager_t group;         /* group messaging manager */
-    coding_engine_t coding;        /* XOR network coding at relay */
+    mailbox_t mailbox;           /* store-and-forward for offline destinations */
+    location_manager_t location; /* position sharing manager */
     bool initialized;
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
 typedef struct {
-    uint64_t mailbox_stored;       /* DATA packets stored for offline dest */
-    uint64_t mailbox_delivered;    /* stored packets delivered on node rejoin */
-    uint64_t mailbox_expired;      /* mailbox entries expired (24h TTL) */
-    uint64_t coding_opportunities; /* relay nodes that found coding opportunity */
-    uint64_t coding_encoded;       /* packets XOR-encoded and sent */
-    uint64_t emergency_beacons_rx; /* emergency beacons received/recorded */
-    uint64_t location_updates;     /* location position updates processed */
-    uint64_t channel_rate_limited; /* public channel TX rate-limited drops */
+    uint64_t mailbox_stored;    /* DATA packets stored for offline dest */
+    uint64_t mailbox_delivered; /* stored packets delivered on node rejoin */
+    uint64_t mailbox_expired;   /* mailbox entries expired (24h TTL) */
+    uint64_t location_updates;  /* location position updates processed */
 } bridge_ext_metrics_t;
 
 /* Accessor functions */

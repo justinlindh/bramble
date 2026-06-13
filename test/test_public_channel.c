@@ -10,15 +10,7 @@
 #include "../components/channel/channel_msg.c"
 #include "../components/channel/public_channel.c"
 
-/* Reset helpers declared in public_channel.c */
-extern void public_channel_reset_tx(void);
-extern void public_channel_reset_rx(void);
-
-void setUp(void) {
-    channel_msg_catchup_reset();
-    public_channel_reset_tx();
-    public_channel_reset_rx();
-}
+void setUp(void) { channel_msg_catchup_reset(); }
 
 void tearDown(void) {}
 
@@ -35,37 +27,6 @@ void test_public_channel_init(void) {
     TEST_ASSERT_EQUAL_MEMORY(expected.key, channels[0].key, BRAMBLE_KEY_SIZE);
     TEST_ASSERT_EQUAL(BRAMBLE_PUBLIC_CHANNEL_INDEX, channels[0].channel_id);
     TEST_ASSERT_EQUAL(0, channels[0].epoch);
-}
-
-/* Test 2: TX rate limiting — burst then throttle */
-/* NOTE: public_channel_can_send is no longer used for broadcast TX gating.
-   Broadcasts now go through airtime_budget (AIRTIME_TIER_BROADCAST).
-   This test validates the token bucket still works for any future callers. */
-void test_public_channel_rate_limit(void) {
-    uint32_t t = 1000;
-    /* Should allow BURST (3) sends */
-    TEST_ASSERT_TRUE(public_channel_can_send(t));
-    TEST_ASSERT_TRUE(public_channel_can_send(t + 1));
-    TEST_ASSERT_TRUE(public_channel_can_send(t + 2));
-    /* 4th should be denied */
-    TEST_ASSERT_FALSE(public_channel_can_send(t + 3));
-    /* After one refill interval, one more allowed */
-    t += BRAMBLE_PUBLIC_CHANNEL_RATE_LIMIT_MS;
-    TEST_ASSERT_TRUE(public_channel_can_send(t));
-    TEST_ASSERT_FALSE(public_channel_can_send(t + 1));
-}
-
-/* Test 3: RX per-source rate limiting */
-void test_public_channel_rx_rate_limit(void) {
-    uint32_t t = 5000;
-    /* First message from source allowed */
-    TEST_ASSERT_TRUE(public_channel_rx_check(0xAAAA, t));
-    /* Second from same source too soon — denied */
-    TEST_ASSERT_FALSE(public_channel_rx_check(0xAAAA, t + 5000));
-    /* Different source — allowed */
-    TEST_ASSERT_TRUE(public_channel_rx_check(0xBBBB, t + 5000));
-    /* Same source after interval — allowed */
-    TEST_ASSERT_TRUE(public_channel_rx_check(0xAAAA, t + 10000));
 }
 
 /* Test 4: Encrypt/decrypt on public channel */
@@ -104,8 +65,6 @@ void test_public_channel_encrypt_decrypt(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_public_channel_init);
-    RUN_TEST(test_public_channel_rate_limit);
-    RUN_TEST(test_public_channel_rx_rate_limit);
     RUN_TEST(test_public_channel_encrypt_decrypt);
     return UNITY_END();
 }

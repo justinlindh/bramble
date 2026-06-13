@@ -60,7 +60,6 @@ void node_activate(sim_node_t* node) {
     rreq_dedup_init(&node->rreq_dedup);
     discovery_init(&node->pending_discoveries);
     pending_ack_init(&node->pending_acks);
-    flow_init(&node->flow_control);
     dedup_init(&node->dedup);
     airtime_budget_init(&node->airtime, 0);
     reassembly_init(&node->reassembly);

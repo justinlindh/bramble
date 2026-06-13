@@ -6,7 +6,7 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
-/* Note: mailbox.h, emergency.h, location.h, group.h, coding.h,
+/* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
 
@@ -36,10 +36,7 @@ void bridge_node_ext_init_all(void) {
     memset(&g_ext_metrics, 0, sizeof(g_ext_metrics));
     for (int i = 0; i < MAX_NODES; i++) {
         mailbox_init(&g_node_ext[i].mailbox);
-        emergency_init(&g_node_ext[i].emergency);
         location_init(&g_node_ext[i].location);
-        group_init(&g_node_ext[i].group);
-        coding_init(&g_node_ext[i].coding);
         g_node_ext[i].initialized = true;
     }
 }
@@ -313,42 +310,6 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
             fflush(stdout);
         }
     }
-
-    /* Phase 6: Emergency — simulate periodic emergency beacon ingestion.
-     * In production, emergency beacons are a separate PKT_TYPE; here we
-     * synthesise one from the first node every 50 beacons (low battery proxy)
-     * so the emergency_record_received() path gets exercised. */
-    if (ext) {
-        bridge_node_ext_t* src_ext = bridge_node_ext_get(0); /* node 0 = "distress" node */
-        if (src_ext && (beacon.header.packet_id % 50) == 0) {
-            emergency_beacon_t em_beacon;
-            memset(&em_beacon, 0, sizeof(em_beacon));
-            em_beacon.src_addr = beacon.src_addr;
-            /* Derive lat/lon from neighbor's known routing position (sim proxy) */
-            em_beacon.latitude_e7 = LOC_REF_LAT_E7;
-            em_beacon.longitude_e7 = LOC_REF_LON_E7;
-            em_beacon.battery_pct = beacon.battery_pct;
-            em_beacon.timestamp = now_ms / 1000;
-            emergency_record_received(&ext->emergency, &em_beacon, now_ms);
-            g_ext_metrics.emergency_beacons_rx++;
-            fprintf(stdout,
-                    "{\"type\":\"emergency_beacon_rx\",\"timestamp_us\":%llu"
-                    ",\"node\":\"%s\",\"from\":\"0x%08X\""
-                    ",\"battery_pct\":%d,\"known_count\":%d}\n",
-                    (unsigned long long)now_us, rx->id, beacon.src_addr, (int)beacon.battery_pct,
-                    emergency_get_active_count(&ext->emergency));
-            fflush(stdout);
-        }
-    }
-
-    /* Phase 6: Coding — record that this neighbor has received recent packets.
-     * Piggyback reception knowledge: this beacon's packet_id marks what our
-     * neighbor has heard (simplification; real protocol would carry an ack bitmap). */
-    if (ext) {
-        uint32_t pkt_ids[1] = {beacon.header.packet_id};
-        coding_record_neighbor_reception(&ext->coding, beacon.src_addr, pkt_ids, 1);
-        coding_record_packet(&ext->coding, beacon.header.packet_id);
-    }
 }
 
 static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_t rssi,
@@ -479,9 +440,8 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         if (pa && pa->attempt > 1) {
             metrics->messages_delivered_retry++;
         }
-        /* Always clear pending ack and flow control on receipt */
+        /* Always clear the pending ack on receipt */
         pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
-        flow_on_ack(&rx->flow_control, receipt.src_addr);
 
         /* Emit delivered with path */
         fprintf(stdout,
@@ -737,62 +697,6 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
     memcpy(fwd_buf, buf, len);
     fwd_buf[3] = hop_limit;
 
-    /* Phase 6: Coding — record this packet in our coding engine.
-     * Check if we can XOR-encode this with another queued packet. */
-    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
-    if (ext && len <= CODING_MAX_PACKET_SIZE) {
-        coding_flush_expired(&ext->coding, now_ms);
-        /* Queue this packet for a coding opportunity */
-        int q = coding_queue_packet(&ext->coding, fwd_buf, len, hdr.packet_id, fwd_res.next_hop,
-                                    now_ms);
-        if (q == 0) {
-            /* Check for XOR coding opportunity */
-            int idx_a = -1, idx_b = -1;
-            if (coding_find_opportunity(&ext->coding, &idx_a, &idx_b) == 0) {
-                g_ext_metrics.coding_opportunities++;
-                coding_queue_entry_t* qa = &ext->coding.queue[idx_a];
-                coding_queue_entry_t* qb = &ext->coding.queue[idx_b];
-
-                uint8_t coded_buf[CODING_MAX_PACKET_SIZE + CODED_HEADER_MAX_SIZE];
-                uint16_t coded_len = 0;
-                if (coding_encode(qa->data, qa->len, qa->packet_id, qb->data, qb->len,
-                                  qb->packet_id, coded_buf, &coded_len) == 0) {
-                    g_ext_metrics.coding_encoded++;
-                    /* Mark both queue entries as consumed */
-                    qa->active = false;
-                    qb->active = false;
-                    /* Record in our own reception cache */
-                    coding_record_packet(&ext->coding, hdr.packet_id);
-
-                    /* Broadcast the coded packet */
-                    outbound_packet_t cpkt;
-                    memset(&cpkt, 0, sizeof(cpkt));
-                    memcpy(cpkt.data, coded_buf, coded_len);
-                    cpkt.len = coded_len;
-                    cpkt.is_broadcast = true;
-                    cpkt.dest_addr = 0xFFFFFFFF;
-                    cpkt.pkt_type = PKT_TYPE_DATA; /* reuse DATA type for coded */
-                    rx->packets_forwarded++;
-                    anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
-
-                    fprintf(stdout,
-                            "{\"type\":\"coding_encoded\",\"timestamp_us\":%llu"
-                            ",\"node\":\"%s\""
-                            ",\"id_a\":\"0x%08X\",\"id_b\":\"0x%08X\""
-                            ",\"coded_len\":%d}\n",
-                            (unsigned long long)now_us, rx->id, qa->packet_id, qb->packet_id,
-                            (int)coded_len);
-                    fflush(stdout);
-
-                    sim_radio_broadcast(rx, &cpkt, nodes, radio, rng, events, metrics, now_us);
-                    return; /* sent as coded packet */
-                }
-            }
-        }
-        /* No coding opportunity — send normally and record */
-        coding_record_packet(&ext->coding, hdr.packet_id);
-    }
-
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
     memcpy(pkt.data, fwd_buf, len);
@@ -893,6 +797,22 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
     }
 }
 
+/* Sim-local nonce builder (src_addr || counter || 4 random bytes). The
+ * firmware generates fully random nonces per message in channel_msg.c; the
+ * crypto RFC replaces both schemes with a persisted deterministic counter
+ * nonce, at which point this helper goes away too. */
+static void sim_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce) {
+    nonce[0] = (uint8_t)(src_addr >> 24);
+    nonce[1] = (uint8_t)(src_addr >> 16);
+    nonce[2] = (uint8_t)(src_addr >> 8);
+    nonce[3] = (uint8_t)src_addr;
+    nonce[4] = (uint8_t)(counter >> 24);
+    nonce[5] = (uint8_t)(counter >> 16);
+    nonce[6] = (uint8_t)(counter >> 8);
+    nonce[7] = (uint8_t)counter;
+    crypto_random(nonce + 8, 4);
+}
+
 void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
                                     pcg32_state_t* rng, event_queue_t* events,
                                     metrics_state_t* metrics, node_anomaly_tracker_t* anomaly,
@@ -977,15 +897,6 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
 
     /* Route exists — build and send DATA packet */
 
-    /* Flow control check (Phase 1) */
-    if (!flow_can_send(&src->flow_control, dest_addr)) {
-        /* Window full — reschedule */
-        sim_event_t retry = *event;
-        retry.timestamp_us += 500000ULL; /* retry in 500ms */
-        event_queue_push(events, &retry);
-        return;
-    }
-
     uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
     forward_result_t fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
     if (!fwd_res.should_send)
@@ -1051,7 +962,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             uint8_t key[BRAMBLE_KEY_SIZE];
             derive_pair_key(src->addr, dest_addr, key);
             uint8_t nonce[BRAMBLE_NONCE_SIZE];
-            crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+            sim_build_nonce(src->addr, src->crypto_counter++, nonce);
             /* AAD binds this fragment's header (hop_limit masked) */
             uint8_t aad[HEADER_SIZE];
             bramble_header_build_aad(&fhdr, aad, sizeof(aad));
@@ -1094,10 +1005,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             metrics->fragments_sent++;
         }
 
-        /* Add to pending acks and flow control */
+        /* Add to pending acks */
         pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr, MSG_TIER_NORMAL, payload_buf,
                         (uint16_t)payload_size, now_ms);
-        flow_on_send(&src->flow_control, dest_addr);
 
         src->packets_originated++;
         metrics_record_message_sent(metrics);
@@ -1121,7 +1031,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         uint8_t key[BRAMBLE_KEY_SIZE];
         derive_pair_key(src->addr, dest_addr, key);
         uint8_t nonce[BRAMBLE_NONCE_SIZE];
-        crypto_build_nonce(src->addr, src->crypto_counter++, nonce);
+        sim_build_nonce(src->addr, src->crypto_counter++, nonce);
         /* AAD binds the header (hop_limit masked), matching firmware */
         uint8_t aad[HEADER_SIZE];
         bramble_header_build_aad(&hdr, aad, sizeof(aad));
@@ -1173,10 +1083,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     pkt.pkt_type = PKT_TYPE_DATA;
     src->packets_originated++;
 
-    /* Pending ACK + flow control (Phase 1) */
+    /* Pending ACK (Phase 1) */
     pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr, MSG_TIER_NORMAL, pkt.data,
                     pkt.len, now_ms);
-    flow_on_send(&src->flow_control, dest_addr);
     airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, toa_ms);
 
     sim_radio_broadcast(src, &pkt, nodes, radio, rng, events, metrics, event->timestamp_us);
@@ -1209,12 +1118,6 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
                 g_ext_metrics.mailbox_expired += (uint64_t)purged;
             }
 
-            /* Coding: flush expired queue entries (500ms window) */
-            coding_flush_expired(&ext->coding, now_ms);
-
-            /* Emergency: tick state machine (auto-timeout, cooldown transitions) */
-            emergency_tick(&ext->emergency, now_ms);
-
             /* Location: update sim position from node's current x/y coordinates */
             node_ext_set_sim_position(ext, node->x, node->y);
         }
@@ -1232,7 +1135,6 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         /* This entry needs retransmission */
         if (pa->attempt >= pa->max_attempts) {
             /* Exhausted retries — remove and count as failed */
-            flow_on_failure(&node->flow_control, pa->dest_addr);
             pa->active = false;
             continue;
         }
@@ -1285,19 +1187,6 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
 
     /* Set initial simulated position from node coordinates */
     node_ext_set_sim_position(ext, x, y);
-
-    /* Emergency: ensure state machine is reset for this node */
-    emergency_init(&ext->emergency);
-
-    /* Group: create a default sim group for testing (first 4 nodes only) */
-    if (node_idx < 4) {
-        /* Nodes 0-3 share a sim group "SimGroup" when they join */
-        uint32_t members[4] = {addr, addr + 1, addr + 2, addr + 3};
-        group_create(&ext->group, "SimGroup", addr, members, 4, now_ms);
-    }
-
-    /* Public channel: rate-check TX (not rate-limited at join, just initialise) */
-    (void)public_channel_can_send(now_ms);
 
     fprintf(stdout,
             "{\"type\":\"node_ext_initialized\",\"timestamp_us\":%llu"

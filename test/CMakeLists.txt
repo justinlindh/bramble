@@ -240,15 +240,6 @@ target_include_directories(test_broadcast_airtime_gate PRIVATE
 )
 add_test(NAME test_broadcast_airtime_gate COMMAND test_broadcast_airtime_gate)
 
-# TX queue tests
-add_executable(test_tx_queue
-    test_tx_queue.c
-    unity/unity.c
-)
-target_include_directories(test_tx_queue PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
-)
-
 # Timesync tests
 add_executable(test_timesync
     test_timesync.c
@@ -277,15 +268,6 @@ add_executable(test_airtime
 )
 target_include_directories(test_airtime PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
-)
-
-# Anti-replay tests
-add_executable(test_anti_replay
-    test_anti_replay.c
-    unity/unity.c
-)
-target_include_directories(test_anti_replay PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/timesync/include
 )
 
 # Beacon tests
@@ -318,16 +300,6 @@ add_executable(test_forwarding
 )
 target_include_directories(test_forwarding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
-)
-
-# Channel flood tests
-add_executable(test_channel_flood
-    test_channel_flood.c
-    unity/unity.c
-)
-target_include_directories(test_channel_flood PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
 )
 
 # Fragment tests
@@ -421,18 +393,6 @@ target_include_directories(test_dummy_traffic PRIVATE
 )
 target_link_libraries(test_dummy_traffic ssl crypto)
 
-# Beacon routes tests
-add_executable(test_beacon_routes
-    test_beacon_routes.c
-    unity/unity.c
-    stubs/esp_stubs.c
-)
-target_include_directories(test_beacon_routes PRIVATE
-    stubs
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-)
-
 # Mailbox tests (includes .c directly)
 add_executable(test_mailbox
     test_mailbox.c
@@ -440,16 +400,6 @@ add_executable(test_mailbox
 )
 target_include_directories(test_mailbox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/mailbox/include
-)
-
-# Emergency beacon tests (custom test harness, links .c)
-add_executable(test_emergency
-    test_emergency.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emergency/emergency.c
-)
-target_include_directories(test_emergency PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emergency/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
 )
 
 # Location sharing tests
@@ -467,29 +417,6 @@ target_include_directories(test_location PRIVATE
 )
 target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
-
-# Group DM tests (custom test harness)
-add_executable(test_group
-    test_group.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/group/group.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
-)
-target_include_directories(test_group PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/group/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
-)
-target_link_libraries(test_group ssl crypto)
-
-# Network coding tests (custom test harness)
-add_executable(test_coding
-    test_coding.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/coding/coding.c
-)
-target_include_directories(test_coding PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/coding/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-)
 
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel

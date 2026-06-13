@@ -130,18 +130,6 @@ uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uin
            (uint32_t)mac[3];
 }
 
-void crypto_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce) {
-    nonce[0] = (src_addr >> 24) & 0xFF;
-    nonce[1] = (src_addr >> 16) & 0xFF;
-    nonce[2] = (src_addr >> 8) & 0xFF;
-    nonce[3] = src_addr & 0xFF;
-    nonce[4] = (counter >> 24) & 0xFF;
-    nonce[5] = (counter >> 16) & 0xFF;
-    nonce[6] = (counter >> 8) & 0xFF;
-    nonce[7] = counter & 0xFF;
-    RAND_bytes(nonce + 8, 4);
-}
-
 int crypto_generate_identity(bramble_identity_t* id) {
     EVP_PKEY* pkey = NULL;
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, NULL);

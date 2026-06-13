@@ -11,7 +11,6 @@ typedef struct {
     int8_t rssi;
     int8_t snr;
     uint8_t success_rate;
-    uint8_t congestion;
     uint32_t last_heard;
     uint32_t pubkey_hash;
     uint16_t tx_count;
