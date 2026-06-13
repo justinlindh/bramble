@@ -88,6 +88,10 @@
   color: var(--accent);
 }
 
+.receipt {
+  color: var(--text-muted);
+}
+
 /* Fill bar colours (compound selector requires both .fill and the tier class) */
 .fill.critical {
   background: var(--critical);
@@ -99,4 +103,8 @@
 
 .fill.broadcast {
   background: var(--accent);
+}
+
+.fill.receipt {
+  background: var(--text-muted);
 }

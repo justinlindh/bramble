@@ -104,7 +104,7 @@ export interface Conversation {
 // ─── Airtime ───────────────────────────────────────────────────────────
 
 export interface AirtimeTier {
-  name: 'critical' | 'normal' | 'broadcast';
+  name: 'critical' | 'normal' | 'broadcast' | 'receipt';
   remainingMs: number;
   maxMs: number;
   usedPct: number;          // 0-100
@@ -112,7 +112,7 @@ export interface AirtimeTier {
 }
 
 export interface AirtimeStatus {
-  tiers: [AirtimeTier, AirtimeTier, AirtimeTier]; // critical, normal, broadcast
+  tiers: AirtimeTier[]; // critical, normal, broadcast, receipt
 }
 
 // ─── Adaptive Airtime Policy ────────────────────────────────────────────
