@@ -126,30 +126,45 @@ export function ConnectionOverlay() {
         <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
 
         <div className={styles.transportSelect}>
-          <button
-            className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''} ${!hasSerial ? styles.unsupportedBtn : ''}`}
-            onClick={() => hasSerial && setTransportType('serial')}
-            disabled={!hasSerial}
-            title={hasSerial ? 'Connect via USB cable' : 'Web Serial not supported in this browser. Use Chrome or Edge 120+.'}
-          >
-            <IconUsb size={16} /> USB / Serial
-          </button>
-          <button
-            className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''} ${!hasBluetooth ? styles.unsupportedBtn : ''}`}
-            onClick={() => hasBluetooth && setTransportType('ble')}
-            disabled={!hasBluetooth}
-            title={hasBluetooth ? 'Connect via Bluetooth Low Energy' : 'Web Bluetooth not supported in this browser. Use Chrome on Android, or enable Experimental Web Platform features in chrome://flags.'}
-          >
-            <IconBluetooth size={16} /> Bluetooth
-          </button>
-          <button
-            className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''} ${!wifiAllowed ? styles.unsupportedBtn : ''}`}
-            onClick={() => wifiAllowed && setTransportType('wifi')}
-            disabled={!wifiAllowed}
-            title={wifiAllowed ? 'Connect directly to your Bramble node over LAN WiFi' : wifiReason}
-          >
-            <IconWifi size={16} /> WiFi
-          </button>
+          <div className={styles.transportOption}>
+            <button
+              className={`${styles.transportBtn} ${transportType === 'serial' ? styles.active : ''} ${!hasSerial ? styles.unsupportedBtn : ''}`}
+              onClick={() => hasSerial && setTransportType('serial')}
+              disabled={!hasSerial}
+              title={hasSerial ? 'Connect via USB cable' : 'Web Serial not supported in this browser. Use Chrome or Edge 120+.'}
+            >
+              <IconUsb size={16} /> USB / Serial
+            </button>
+            {!hasSerial && (
+              <span className={styles.unsupportedCaption}>Not supported in this browser</span>
+            )}
+          </div>
+          <div className={styles.transportOption}>
+            <button
+              className={`${styles.transportBtn} ${transportType === 'ble' ? styles.active : ''} ${!hasBluetooth ? styles.unsupportedBtn : ''}`}
+              onClick={() => hasBluetooth && setTransportType('ble')}
+              disabled={!hasBluetooth}
+              title={hasBluetooth ? 'Connect via Bluetooth Low Energy' : 'Web Bluetooth not supported in this browser. Use Chrome on Android, or enable Experimental Web Platform features in chrome://flags.'}
+            >
+              <IconBluetooth size={16} /> Bluetooth
+            </button>
+            {!hasBluetooth && (
+              <span className={styles.unsupportedCaption}>Not supported in this browser</span>
+            )}
+          </div>
+          <div className={styles.transportOption}>
+            <button
+              className={`${styles.transportBtn} ${transportType === 'wifi' ? styles.active : ''} ${!wifiAllowed ? styles.unsupportedBtn : ''}`}
+              onClick={() => wifiAllowed && setTransportType('wifi')}
+              disabled={!wifiAllowed}
+              title={wifiAllowed ? 'Connect directly to your Bramble node over LAN WiFi' : wifiReason}
+            >
+              <IconWifi size={16} /> WiFi
+            </button>
+            {!wifiAllowed && (
+              <span className={styles.unsupportedCaption}>Unavailable in hosted mode</span>
+            )}
+          </div>
         </div>
 
         <div className={styles.mockDivider}>— or —</div>
