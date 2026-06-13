@@ -186,11 +186,10 @@ Nonces are 96 random bits per message from the ESP32 hardware RNG
 `crypto_random`). There is no counter discipline and no persistence across
 reboot; uniqueness rests entirely on RNG quality and the birthday bound. At
 LoRa data rates the collision probability is small but this is a
-probabilistic argument, not a structural one. A deterministic nonce helper
-(`crypto_build_nonce` in `components/crypto/crypto_esp.c`) exists but has no
-callers in the firmware; the host simulator bridge does use it
-(`simulator/gosim/bridge.c`), so simulated nodes and real nodes generate
-nonces differently.
+probabilistic argument, not a structural one. The simulator bridge builds
+its nonces with a sim-local helper (`sim_build_nonce` in
+`simulator/gosim/bridge.c`: src_addr, counter, 4 random bytes), so simulated
+nodes and real nodes generate nonces differently.
 
 ### Trial decryption across channels, constant-trial loop
 

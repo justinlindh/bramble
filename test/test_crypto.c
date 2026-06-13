@@ -65,19 +65,6 @@ void test_hkdf_sha256_derives_key(void) {
     TEST_ASSERT_FALSE(memcmp(okm1, okm3, 32) == 0);
 }
 
-void test_build_nonce(void) {
-    uint8_t nonce[12];
-    crypto_build_nonce(0xDEADBEEF, 0x12345678, nonce);
-    TEST_ASSERT_EQUAL_HEX8(0xDE, nonce[0]);
-    TEST_ASSERT_EQUAL_HEX8(0xAD, nonce[1]);
-    TEST_ASSERT_EQUAL_HEX8(0xBE, nonce[2]);
-    TEST_ASSERT_EQUAL_HEX8(0xEF, nonce[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x12, nonce[4]);
-    TEST_ASSERT_EQUAL_HEX8(0x34, nonce[5]);
-    TEST_ASSERT_EQUAL_HEX8(0x56, nonce[6]);
-    TEST_ASSERT_EQUAL_HEX8(0x78, nonce[7]);
-    /* bytes 8-11 are random, just check they exist */
-}
 
 int main(void) {
     UNITY_BEGIN();
@@ -87,6 +74,5 @@ int main(void) {
     RUN_TEST(test_aes256gcm_tamper_detected);
     RUN_TEST(test_hmac_sha256_trunc4);
     RUN_TEST(test_hkdf_sha256_derives_key);
-    RUN_TEST(test_build_nonce);
     return UNITY_END();
 }
