@@ -23,6 +23,13 @@ the Bramble ecosystem. It is not an IETF standards-track document.
 The protocol/API version reflected by this draft is **0.5.0** and the wire
 version is **1** (`BRAMBLE_VERSION = 1`).
 
+This snapshot predates the June 2026 wire-or-delete reckoning: packet type
+codes 0x08 (CONGESTION), 0x09 (TIME_SYNC), 0x0F (EMERGENCY), 0x10
+(EMERGENCY_CANCEL), and 0x11 (CODED) referenced below have since been retired
+unshipped, and `HEADER_FLAG_EMERGENCY` no longer exists.
+[bramble-protocol-spec.md](bramble-protocol-spec.md) is the current
+description.
+
 ## Table of Contents
 
 1.  [Conventions and Terminology](#1-conventions-and-terminology)

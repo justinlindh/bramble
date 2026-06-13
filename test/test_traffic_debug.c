@@ -14,16 +14,11 @@
 #define PKT_TYPE_BEACON           0x05
 #define PKT_TYPE_KEY_EXCHANGE     0x06
 #define PKT_TYPE_DELIVERY_RECEIPT 0x07
-#define PKT_TYPE_CONGESTION       0x08
-#define PKT_TYPE_TIME_SYNC        0x09
 #define PKT_TYPE_DATA             0x0A
 #define PKT_TYPE_STORE_REQUEST    0x0B
 #define PKT_TYPE_STORE_ACK        0x0C
 #define PKT_TYPE_MAILBOX_DELIVERY 0x0D
 #define PKT_TYPE_MAILBOX_QUERY    0x0E
-#define PKT_TYPE_EMERGENCY        0x0F
-#define PKT_TYPE_EMERGENCY_CANCEL 0x10
-#define PKT_TYPE_CODED            0x11
 #define PKT_TYPE_PROBE            0x12
 #define PKT_TYPE_PROBE_ACK        0x13
 #define PKT_TYPE_LOCATION         0x14
@@ -48,11 +43,6 @@ void tearDown(void) {}
 void test_classify_beacon(void) {
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_BEACON, 
                      traffic_debug_classify_packet(PKT_TYPE_BEACON));
-}
-
-void test_classify_timesync(void) {
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_TIMESYNC,
-                     traffic_debug_classify_packet(PKT_TYPE_TIME_SYNC));
 }
 
 void test_classify_routing_packets(void) {
@@ -86,25 +76,16 @@ void test_classify_maintenance_packets(void) {
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_KEY_EXCHANGE));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
-                     traffic_debug_classify_packet(PKT_TYPE_CONGESTION));
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_STORE_REQUEST));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_MAILBOX_DELIVERY));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_MAILBOX_QUERY));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
-                     traffic_debug_classify_packet(PKT_TYPE_CODED));
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_LOCATION));
 }
 
 void test_classify_other_packets(void) {
-    /* Emergency packets are "other" - they bypass normal classification */
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_OTHER,
-                     traffic_debug_classify_packet(PKT_TYPE_EMERGENCY));
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_OTHER,
-                     traffic_debug_classify_packet(PKT_TYPE_EMERGENCY_CANCEL));
     /* Unknown packet type */
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_OTHER,
                      traffic_debug_classify_packet(0xFF));
@@ -378,7 +359,6 @@ int main(void) {
     
     /* Packet type → category mapping */
     RUN_TEST(test_classify_beacon);
-    RUN_TEST(test_classify_timesync);
     RUN_TEST(test_classify_routing_packets);
     RUN_TEST(test_classify_ack_packets);
     RUN_TEST(test_classify_chat_packets);

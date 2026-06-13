@@ -55,11 +55,10 @@ Core Grid (4×3):              Periphery:
   - Medium: ≥95% delivery, median latency <20s
   - Heavy: ≥85% delivery, no node airtime budget exhaustion
 
-### Phase 4: Congestion Handling (30 min)
+### Phase 4: Burst Load (30 min)
 - Generate burst: 10 messages from node 01→20 in 30 seconds
-- Monitor congestion packets from relay nodes
-- Verify TX queue prioritization (routing control > data)
-- **Success:** Congestion detected and signaled, routing packets not dropped
+- Monitor per-tier airtime budget behavior at the TX gate (deferrals, debits)
+- **Success:** Burst is paced by the budget without starving routing control packets
 
 ### Phase 5: Partition & Heal (45 min)
 - Power off nodes 07 and 11 (splits grid into two halves)

@@ -36,7 +36,6 @@ int crypto_hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* data, 
 uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uint8_t* data,
                                    size_t data_len);
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash);
-void crypto_build_nonce(uint32_t src_addr, uint32_t counter, uint8_t* nonce);
 int crypto_random(uint8_t* buf, size_t len);
 
 /* Default public channel PSK — well-known, not secret */

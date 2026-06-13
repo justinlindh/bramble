@@ -345,7 +345,7 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	nodeActivate(node)
 	anomalyInit(&s.anomaly[idx])
 
-	// Phase 6: Initialize extended node state (mailbox, emergency, location, etc.)
+	// Phase 6: Initialize extended node state (mailbox, location, etc.)
 	C.bridge_handle_node_join_ext(C.int(idx), C.uint32_t(nd.addr),
 		nd.x, nd.y, C.uint64_t(ts))
 

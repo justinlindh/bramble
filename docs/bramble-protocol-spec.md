@@ -257,7 +257,7 @@ TIER1   TIER0   ACK_REQ RECEIPT CHANNEL  ENCRYP   FRAG1   FRAG0
 - `ACK_REQ`: Sender requests ACK from destination
 - `RECEIPT`: Sender requests delivery receipt with relay path
 - `CHANNEL`: 1=channel (group) message, 0=direct message
-- `ENCRYP`: 1=payload encrypted, 0=plaintext (only for beacons/control). **Note:** For `PKT_TYPE_EMERGENCY` and `PKT_TYPE_EMERGENCY_CANCEL` packets, this bit is repurposed as `HEADER_FLAG_EMERGENCY` (0x04) to signal emergency relay priority — all relay nodes forward emergency packets unconditionally, bypassing airtime budget checks.
+- `ENCRYP`: 1=payload encrypted, 0=plaintext (only for beacons/control). An earlier revision repurposed this bit as `HEADER_FLAG_EMERGENCY` for the (since removed, section 4.19) emergency packets; that collision is gone with them, and the bit means encryption only.
 - `FRAG[1:0]`: Fragment indicator — 00=not fragmented, 01=first fragment, 10=middle fragment, 11=last fragment
 
 ### 4.3 Packet Types
@@ -272,22 +272,22 @@ Value  Name               Description
 0x05   BEACON             Periodic neighbor advertisement
 0x06   KEY_EXCHANGE       X25519 DH key exchange
 0x07   DELIVERY_RECEIPT   Delivery confirmation with relay path
-0x08   CONGESTION         Congestion notification
-0x09   TIME_SYNC          Time synchronization
+0x08   (retired)          Was CONGESTION; removed unshipped (see §4.12)
+0x09   (retired)          Was TIME_SYNC; removed unshipped (see §4.13)
 0x0A   DATA               Application data (text, telemetry, etc.)
 0x0B   STORE_REQUEST      Request mailbox node to store message (see §4.15)
 0x0C   STORE_ACK          Mailbox storage acknowledgment (see §4.16)
 0x0D   MAILBOX_DELIVERY   Delivery of stored message from mailbox (see §4.17)
 0x0E   MAILBOX_QUERY      Query mailbox for pending messages (see §4.18)
-0x0F   EMERGENCY          Emergency beacon (see §4.19)
-0x10   EMERGENCY_CANCEL   Cancel active emergency (see §4.20)
-0x11   CODED              XOR network-coded packet (see §4.21)
+0x0F   (retired)          Was EMERGENCY; removed unshipped (see §4.19)
+0x10   (retired)          Was EMERGENCY_CANCEL; removed unshipped (see §4.20)
+0x11   (retired)          Was CODED; removed unshipped (see §4.21)
 0x12   PKT_TYPE_PROBE    Broadcast delivery probe (see §4.22)
 0x13   PKT_TYPE_PROBE_ACK      Broadcast probe acknowledgment (see §4.23)
 0x14   LOCATION           Location sharing packet
 ```
 
-> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. `KEY_EXCHANGE`, `CONGESTION`, `TIME_SYNC`, the mailbox types (`0x0B`-`0x0E`), the emergency types (`0x0F`-`0x10`), and `CODED` are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon.
+> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. `KEY_EXCHANGE` and the mailbox types (`0x0B`-`0x0E`) are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon. The retired codes (`0x08`, `0x09`, `0x0F`-`0x11`) belonged to machinery that was removed unshipped; they stay reserved so a future wire version can reassign them deliberately.
 
 ### 4.4 DATA Packet
 
@@ -451,7 +451,7 @@ RSVD    RSVD    RSVD    RSVD    RSVD     ACCEPT_DM    PROBE_ACK     MAILBOX
 - `ACCEPT_DM` (0x04): Node is accepting direct messages (legacy: `accepting_dms`)
 - Bits 3–7: Reserved for future use
 
-**Route Advertisement Extension:** Beacons may optionally include up to 4 route advertisements appended after the base 36-byte beacon. Each route ad is 8 bytes (4-byte dest_addr + 1-byte hop_count + 1-byte metric + 2-byte age). This enables passive route learning — nodes receiving beacons can install or refresh routes without RREQ flooding. Route ads are selected from the sender's routing table, prioritizing recently confirmed routes.
+**Route Advertisement Extension:** Removed unshipped. The passive route-learning extension (up to 4 route ads appended to the beacon) was deleted without ever being placed on the wire; beacons carry the optional node name after the fixed fields instead.
 
 ### 4.10 KEY_EXCHANGE Packet
 
@@ -495,36 +495,11 @@ Each relay node appends its own address to the relay_path as it forwards the rec
 
 ### 4.12 CONGESTION Packet
 
-Broadcast by a node experiencing congestion to warn neighbors.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x09, dest=0xFFFFFFFF)
-12      4     src_addr         Congested node's address
-16      1     congestion_level 0=clear, 1=moderate(>50% queue), 2=high(>75%), 3=critical(>90%)
-17      1     queue_depth      Current TX queue depth
-18      2     est_clear_time   Estimated time to clear queue (seconds)
-──────────────────────────────────────────────────────────
-Total: 20 bytes
-```
+Removed unshipped. The congestion-notification packet and its serializers were deleted without ever being transmitted or handled; airtime admission is enforced locally by the budget-gated TX path (section 8.2.1) instead of by neighbor congestion signaling.
 
 ### 4.13 TIME_SYNC Packet
 
-Used for network time synchronization (see §9).
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x0A, dest=0xFFFFFFFF)
-12      4     src_addr         Sync source address
-16      4     timestamp        Network time (epoch seconds, lower 32 bits)
-20      2     confidence_ms    Sender's time uncertainty (ms)
-22      1     stratum          Hop distance from best time source (0=GPS, 1=GPS-neighbor, etc.)
-23      1     sequence         Monotonic counter to detect stale sync packets
-──────────────────────────────────────────────────────────
-Total: 24 bytes
-```
+Removed unshipped. Time synchronization rides the beacon (`network_time`, `time_confidence`, stratum; see section 9); the dedicated TIME_SYNC packet and its serializers were deleted without ever being transmitted or handled.
 
 ### 4.14 Fragmentation
 
@@ -643,79 +618,15 @@ The mailbox responds with MAILBOX_DELIVERY packets for any stored messages, or a
 
 ### 4.19 EMERGENCY Packet
 
-Emergency beacon for distress signaling. Broadcast, plaintext, with maximum relay priority.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x0F, HEADER_FLAG_EMERGENCY=1)
-12      4     src_addr         Emergency beacon source
-16      4     latitude_e7      Latitude in degrees × 10⁷ (signed, 0 if no GPS)
-20      4     longitude_e7     Longitude in degrees × 10⁷ (signed, 0 if no GPS)
-24      2     altitude_m       Altitude in meters (signed, INT16_MIN if unknown)
-26      1     battery_pct      Battery percentage (0–100, 0xFF=unknown)
-27      4     timestamp        Activation timestamp (epoch seconds)
-31      1     msg_len          Short message length (0–32)
-32      N     short_msg        UTF-8 short message (optional, max 32 bytes)
-──────────────────────────────────────────────────────────
-Total: 32 bytes minimum, 64 bytes maximum (with 32-byte message)
-```
-
-**Emergency state machine:**
-- `INACTIVE` (0) → `ACTIVE` (1): On long-press (3s) or BLE command
-- `ACTIVE` (1) → `COOLDOWN` (2): On cancel command or 24-hour auto-timeout
-- `COOLDOWN` (2) → `INACTIVE` (0): After 15-minute cooldown period
-
-**Beacon timing:**
-- First beacon: immediately on activation
-- Subsequent: every 30 seconds (`EMERGENCY_BEACON_INTERVAL_MS`)
-- Auto-timeout: 24 hours (`EMERGENCY_AUTO_TIMEOUT_MS`)
-- Minimum re-activation interval: 1 hour (`EMERGENCY_MIN_ACTIVATION_MS`)
-
-**Relay behavior:** Packets with `HEADER_FLAG_EMERGENCY` set bypass airtime budget checks. All nodes relay emergency packets unconditionally with randomized 100–500ms jitter.
+Removed unshipped. The emergency-beacon state machine and packet were deleted without ever being transmitted or handled, and the `HEADER_FLAG_EMERGENCY` define collided with `FLAG_ENCRYPT` (both `0x04`), so the flag could never have been used on the v1 wire. A redesigned emergency facility (origin-set, AAD-bound flag) is specified for the next wire version in the cryptographic design RFC.
 
 ### 4.20 EMERGENCY_CANCEL Packet
 
-Cancels an active emergency. Must be authenticated to prevent spoofed cancellation.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x10, HEADER_FLAG_EMERGENCY=1)
-12      4     src_addr         Same source as the emergency being cancelled
-16      4     cancel_timestamp Timestamp of cancellation (epoch seconds)
-20      4     auth_tag         HMAC-SHA256 truncated to 4 bytes over bytes 0–19
-──────────────────────────────────────────────────────────
-Total: 24 bytes
-```
-
-The `auth_tag` is computed using the node's pairwise session key (if established with peers) or the node's identity-derived key. Only the originating node can cancel its own emergency.
+Removed unshipped, together with section 4.19.
 
 ### 4.21 CODED Packet
 
-XOR network-coded packet combining two component packets. Used when a relay has packets for two neighbors who each already have the other's packet.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x11)
-12      1     num_components   Number of XOR'd components (always 2)
-13      4     component_id_1   Packet ID of first component
-17      2     component_len_1  Original length of first component
-19      4     component_id_2   Packet ID of second component
-23      2     component_len_2  Original length of second component
-25      N     coded_payload    XOR of both component payloads (N = max(len_1, len_2))
-──────────────────────────────────────────────────────────
-Total: 25 + max(len_1, len_2) bytes
-```
-
-**Coding header size:** 13 bytes (1 + 2×6)
-
-**Decoding:** A receiver who has component A computes: `coded_payload XOR component_A = component_B`
-
-**Reception cache:** Each node maintains a circular buffer of the last 32 packet IDs seen (`CODING_RECEPTION_CACHE`). Coding opportunities are detected when both neighbors have complementary packets.
-
-**Queue timing:** Packets may wait up to 500ms (`CODING_OPPORTUNITY_WINDOW_MS`) for a coding partner before being sent uncoded.
+Removed unshipped. The XOR network-coding relay optimization (FEC-style coded packets) was deleted without a coded packet ever being transmitted; relays forward packets uncoded.
 
 ### 4.22 PKT_TYPE_PROBE Packet
 
@@ -1053,62 +964,7 @@ Public Channel Key Derivation:
 
 #### Group DM Key Management
 
-Group DMs provide private group messaging for up to 8 members, routed via individual DMs (not flooded like channels).
-
-```
-Group Key Derivation:
-    // Sort member addresses lexicographically
-    sorted_addrs = sort(member_addr_1, member_addr_2, ..., member_addr_N)
-    
-    // Derive group ID and key using BLAKE2s
-    input = concat(sorted_addrs) || group_name
-    hash = blake2s(input, output_len=40)
-    
-    group_id = hash[0..7]    // 8 bytes
-    group_key = hash[8..39]  // 32 bytes
-```
-
-**Group parameters:**
-- `GROUP_MAX_MEMBERS`: 8 members per group
-- `GROUP_MAX_GROUPS`: 8 groups per node
-- `GROUP_ID_SIZE`: 8 bytes
-- `GROUP_KEY_SIZE`: 32 bytes
-- `GROUP_NAME_MAX`: 32 characters
-- `GROUP_EPOCH_ADVANCE_THRESHOLD`: 256 messages
-
-**Message encryption:**
-```
-Per-message key:
-    msg_key = hkdf_sha256(
-        salt = sender_node_id || msg_counter,
-        ikm = group_key_epoch,
-        info = "bramble-group-msg",
-        length = 32
-    )
-    nonce = blake2s(sender_node_id || msg_counter || group_id)[0..11]
-    ciphertext = AES-256-GCM(msg_key, nonce, plaintext, aad = group_id || epoch)
-```
-
-**Epoch rotation:** Group keys rotate every 256 messages via HKDF, providing backward secrecy:
-```
-function group_advance_epoch(group):
-    new_key = hkdf_sha256(
-        salt = to_bytes_be16(group.epoch + 1),
-        ikm = group.key || "bramble-group-rekey",
-        info = group.id,
-        length = 32
-    )
-    group.key = new_key
-    group.epoch += 1
-    group.message_count = 0
-```
-
-**Routing:** Group messages are sent as N-1 individual DMs (fan-out at source). Relay nodes see standard DM traffic — they cannot determine that packets belong to a group conversation.
-
-**Security properties:**
-- **Privacy:** Group membership hidden from relay nodes (messages appear as unrelated DMs)
-- **Backward secrecy:** Epoch rotation deletes old keys
-- **No forward secrecy within epoch:** Compromising current key reveals all messages in that epoch
+Removed unshipped. The group-DM key manager (FNV-1a/BLAKE2s-derived group keys with epoch rotation) was deleted without ever being wired into the firmware or carried on the wire; its key derivation would not have survived review as a real KDF. Group messaging, if it returns, will be designed on top of the pairwise session keys from the cryptographic design RFC.
 
 ### 5.4 Privacy-Preserving Source Encryption for Route Discovery
 
@@ -1720,6 +1576,8 @@ function forward_data(route, packet):
 
 ### 6.7 Channel (Group) Message Routing
 
+> **Firmware reality.** The hop-limited flood relay below is not implemented: received broadcast/channel DATA is consumed locally and never rebroadcast, so channel messages reach direct radio neighbors only. The `channel_flood` module that implemented this decision logic was deleted unshipped after sitting caller-less; its 50-300 ms jitter window lives on in the RREQ forward path.
+
 Channel messages use a limited controlled flood scoped by hop_limit:
 
 ```
@@ -1942,54 +1800,7 @@ function retry_tick():  // Called every 500ms
 
 ### 7.5 Sliding Window Flow Control
 
-To prevent a fast sender from overwhelming the network, Bramble implements a per-destination sliding window:
-
-```
-WINDOW_SIZE = 4          // Max unacknowledged packets per destination
-MAX_DESTINATIONS = 8     // Max concurrent active destinations
-
-struct flow_window {
-    uint32_t dest_addr;
-    uint8_t  unacked_count;     // Currently unacknowledged packets
-    uint8_t  window_size;       // Current window (starts at 4, can shrink)
-    uint16_t send_queue_depth;  // Packets waiting to send to this dest
-};
-```
-
-```
-function can_send_to(dest_addr):
-    window = flow_windows.lookup(dest_addr)
-    if window == NULL:
-        // New destination — create window
-        flow_windows.add(dest_addr, unacked=0, window_size=WINDOW_SIZE)
-        return true
-    
-    return window.unacked_count < window.window_size
-
-function on_send(dest_addr):
-    window = flow_windows.lookup(dest_addr)
-    window.unacked_count += 1
-
-function on_ack_received(dest_addr, packet_id):
-    window = flow_windows.lookup(dest_addr)
-    window.unacked_count -= 1
-    
-    // Additive increase: grow window by 1 for every WINDOW_SIZE successful ACKs
-    window.success_counter += 1
-    if window.success_counter >= window.window_size:
-        window.window_size = min(window.window_size + 1, 8)
-        window.success_counter = 0
-    
-    // Drain queued packets
-    while can_send_to(dest_addr) and send_queue_has(dest_addr):
-        send_next_queued(dest_addr)
-
-function on_send_failure(dest_addr):
-    window = flow_windows.lookup(dest_addr)
-    // Multiplicative decrease: halve the window
-    window.window_size = max(window.window_size / 2, 1)
-    window.success_counter = 0
-```
+Removed unshipped. The per-destination AIMD sliding window was deleted without ever being wired into the transmit path; sender pacing comes from the per-tier airtime budget (section 8) and the bounded pending-ACK table (8 entries), which caps in-flight unacknowledged traffic.
 
 ### 7.6 Duplicate Detection
 
@@ -2168,108 +1979,11 @@ function calculate_airtime_us(payload_bytes, sf, bw_hz, cr):
 
 ### 8.4 Congestion Detection and Response
 
-```
-CONGESTION_NONE     = 0   // Queue ≤ 50% (≤ 8 packets)
-CONGESTION_MODERATE = 1   // Queue 50–75% (9–12 packets)
-CONGESTION_HIGH     = 2   // Queue 75–90% (13–14 packets)
-CONGESTION_CRITICAL = 3   // Queue > 90% (15–16 packets)
-
-function assess_congestion():
-    depth = tx_queue.depth()
-    if depth <= 8:  return CONGESTION_NONE
-    if depth <= 12: return CONGESTION_MODERATE
-    if depth <= 14: return CONGESTION_HIGH
-    return CONGESTION_CRITICAL
-
-function congestion_response(level):
-    match level:
-        CONGESTION_NONE:
-            // Normal operation
-            pass
-        
-        CONGESTION_MODERATE:
-            // Broadcast a CONGESTION packet so neighbors know
-            broadcast_congestion(level)
-            // Drop broadcast-tier packets older than 5 seconds from queue
-            tx_queue.purge(tier=BROADCAST, max_age_ms=5000)
-        
-        CONGESTION_HIGH:
-            broadcast_congestion(level)
-            // Drop all broadcast-tier from queue
-            tx_queue.purge(tier=BROADCAST, max_age_ms=0)
-            // Drop normal-tier packets older than 10 seconds
-            tx_queue.purge(tier=NORMAL, max_age_ms=10000)
-            // Increase backoff multiplier to reduce transmission rate
-            increase_backoff_multiplier(2)
-        
-        CONGESTION_CRITICAL:
-            broadcast_congestion(level)
-            // Drop everything except critical
-            tx_queue.purge(tier=BROADCAST, max_age_ms=0)
-            tx_queue.purge(tier=NORMAL, max_age_ms=0)
-            // Only critical packets transmitted
-```
+Removed unshipped. The queue-depth congestion assessment and CONGESTION broadcast designed here were deleted without ever being wired; the firmware's only admission control is the budget-gated TX chokepoint (section 8.2.1), which bounds every tier including retries.
 
 ### 8.5 TX Queue and Priority Scheduling
 
-```
-struct tx_queue_entry {
-    uint8_t  priority;       // 0=highest (critical), 1=normal, 2=ack, 3=routing, 4=broadcast
-    uint8_t  packet_len;
-    uint16_t enqueue_time;   // Lower 16 bits of ms timestamp (wraps every ~65s, sufficient)
-    uint8_t  packet[222];
-};
-// Size: 226 bytes per entry
-// Max entries: 16
-// Total: 3,616 bytes
-
-// Priority levels (lower = higher priority):
-PRIORITY_CRITICAL = 0     // Critical-tier data
-PRIORITY_ACK      = 1     // ACKs and delivery receipts
-PRIORITY_ROUTING  = 2     // RREQ, RREP, RERR
-PRIORITY_NORMAL   = 3     // Normal-tier data
-PRIORITY_BROADCAST = 4    // Broadcast-tier data, beacons
-```
-
-```
-function enqueue_tx(packet, packet_len, priority):
-    if tx_queue.full():
-        // Try to make room by dropping lowest priority
-        dropped = tx_queue.drop_lowest_priority()
-        if dropped == NULL or dropped.priority <= priority:
-            // Can't drop anything less important — reject this packet
-            if dropped != NULL:
-                tx_queue.re_add(dropped)  // Put it back
-            return QUEUE_FULL
-    
-    tx_queue.insert_sorted(priority, packet, packet_len, now_ms())
-
-function tx_scheduler():  // Main TX loop, runs continuously
-    while true:
-        entry = tx_queue.peek_highest_priority()
-        if entry == NULL:
-            sleep_ms(50)
-            continue
-        
-        tier = tier_from_priority(entry.priority)
-        airtime = calculate_airtime_us(entry.packet_len, SF, BW, CR)
-        
-        if not can_transmit(airtime, tier):
-            // Out of airtime budget — sleep until we have enough
-            deficit = airtime - available_tokens(tier)
-            sleep_ms = deficit / refill_rate_for_tier(tier) * 1000
-            sleep_ms(min(sleep_ms, 5000))  // Cap at 5s to stay responsive
-            continue
-        
-        result = try_transmit(entry.packet, entry.packet_len)
-        
-        if result == SUCCESS:
-            debit_airtime(airtime, tier)
-            tx_queue.remove(entry)
-        elif result == CHANNEL_BUSY:
-            // try_transmit already requeued with delay
-            pass
-```
+Removed unshipped. The priority TX queue was deleted without ever being wired: the live transmit path is the budget-gated TX chokepoint (section 8.2.1), which performs admission and LBT inline and never queues. The beacon's `tx_queue_depth` wire field remains in the format and is always reported as 0; retiring the field is deferred to the next wire-version bump.
 
 ---
 
@@ -2286,7 +2000,7 @@ function tx_scheduler():  // Main TX loop, runs continuously
 
 Every node includes its current time estimate and confidence in its BEACON packet (§4.9). Additionally, dedicated TIME_SYNC packets provide higher-precision synchronization.
 
-> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); dedicated `TIME_SYNC` packets are never sent or handled.
+> **Firmware reality.** Only the beacon-carried sync is implemented (`timesync_handle_sync` on beacon receipt in `main/mesh_task.c`); the dedicated `TIME_SYNC` packet type was removed unshipped (section 4.13). No stratum-0 source is wired yet (no GPS or operator seed), so nodes exchange offsets but none can bootstrap the mesh to synchronized absolute time.
 
 **Stratum model:**
 - Stratum 0: GPS-equipped node with valid fix (confidence = 0 ms)
@@ -2388,26 +2102,11 @@ function process_beacon_time(beacon, rx_time_local_ms):
 
 ### 9.5 TIME_SYNC Packet Emission
 
-```
-SYNC_INTERVAL_S = 300       // Emit TIME_SYNC every 5 minutes
-SYNC_BEACON_INTERVAL_S = 60 // Beacons (which include time) every 60 seconds
-
-function time_sync_tick():
-    if my_time.stratum <= 2 and (now_local_ms() - last_sync_emit) > SYNC_INTERVAL_S * 1000:
-        // We're a good time source — share our time
-        sync_pkt = build_time_sync(
-            timestamp = get_network_time(),
-            confidence_ms = my_time.confidence_ms,
-            stratum = my_time.stratum,
-            sequence = ++sync_sequence
-        )
-        broadcast(sync_pkt)
-        last_sync_emit = now_local_ms()
-```
-
-Only nodes with stratum ≤ 2 proactively emit TIME_SYNC packets. Other nodes share their time passively via beacons. This prevents TIME_SYNC storms in large meshes.
+Removed unshipped. Proactive TIME_SYNC emission was deleted along with the packet type (section 4.13); every node shares time passively via its beacons, which is the only sync transport.
 
 ### 9.6 Anti-Replay Timestamp Windows
+
+> **Firmware reality.** Not implemented; the `anti_replay` module that implemented this design was deleted unshipped, and replay protection is being redesigned around dedup on authenticated fields. Today only the packet-id dedup buffer (section 7.6) ships.
 
 ```
 REPLAY_WINDOW_S = 30   // ±30 seconds
@@ -2599,15 +2298,7 @@ If a node is compromised:
 
 #### Emergency Beacon Security
 
-| Threat | Mitigation |
-|--------|-----------|
-| Spoofed emergency to waste resources | Emergency source is node address (identity-derived); social accountability in small meshes |
-| Spoofed cancel to endanger victim | Cancel requires 4-byte HMAC authentication; only originating node can cancel |
-| Emergency flooding DoS | Packets are broadcast, so flooding is inherent; mitigated by 30s beacon interval and auto-timeout |
-| Location tracking via emergency | Emergency beacons include GPS by design — privacy tradeoff accepted for safety |
-| Rate-limit bypass abuse | 15-minute cooldown after cancel prevents button-mashing; 1-hour minimum between activations |
-
-**Design decision:** Signing every emergency beacon was rejected (64 bytes + CPU cost per 30s beacon). Instead, only cancel packets are authenticated. False distress wastes attention; false cancel could be fatal — asymmetric risk profile.
+The emergency component was removed unshipped (section 4.19); there is no emergency traffic on the air.
 
 #### Private Location Sharing Security
 
@@ -2625,27 +2316,11 @@ If a node is compromised:
 
 #### Group DM Security
 
-| Threat | Mitigation |
-|--------|-----------|
-| Relay nodes identifying group traffic | Messages routed as independent DMs; appear as unrelated unicast traffic |
-| Non-member reading group messages | AES-256-GCM with group-derived key; requires key possession |
-| Compromised member reading past messages | Epoch rotation provides backward secrecy |
-| Compromised member reading future messages | **Not mitigated** — forward secrecy would require interactive key exchange among all members |
-| Group ID collision | 8-byte ID space (2⁶⁴); collision probability negligible |
-| Membership enumeration | Only initiator can add/remove; membership changes don't leak to non-members |
-
-**Forward secrecy gap:** Within an epoch (256 messages), compromising the group key exposes all messages. True per-message forward secrecy is impractical over LoRa. This is an explicit tradeoff for simplicity and bandwidth efficiency.
+The group-DM component was removed unshipped (section 5.3); there is no group traffic on the air.
 
 #### Network Coding Security
 
-| Threat | Mitigation |
-|--------|-----------|
-| Coded packet forgery | Component packets are already authenticated (AES-GCM); coded packet integrity follows |
-| Decoding without authorization | Decoding requires possessing a component; non-neighbors cannot decode |
-| Coding to delay delivery | 500ms max coding window; packets are flushed uncoded if no partner found |
-| Reception report abuse | Reports are piggybacked on ACKs/beacons, not dedicated packets; no amplification vector |
-
-**Note:** Network coding operates at the relay layer on already-encrypted packets. It doesn't affect E2E security — it's purely an airtime optimization.
+The network-coding component was removed unshipped (section 4.21); no coded packets exist on the air.
 
 #### Broadcast Probe Security
 
@@ -2663,7 +2338,7 @@ If a node is compromised:
 | Threat | Mitigation |
 |--------|-----------|
 | Content confidentiality | **None** — well-known PSK means anyone can decrypt. By design. |
-| Spam flooding | TX rate limit (1 msg/30s burst 3); per-source RX filter (1 msg/10s) |
+| Spam flooding | Broadcast-tier airtime budget at the TX chokepoint (section 8.2.1). A dedicated public-channel TX/RX rate limiter was removed unshipped. |
 | Impersonation | Source address is identity-derived; spoofer must know victim's private key |
 
 **Warning:** Public Channel provides **no confidentiality**. It exists for community broadcast and new-node introduction. Use private channels or DMs for sensitive content.
@@ -2683,25 +2358,19 @@ Pending route discoveries        160 B     8 entries × 20 B
 RREQ dedup cache               1,024 B     128 entries × 8 B
 Reverse route table               384 B     32 entries × 12 B
 Packet dedup buffer             2,048 B     256 entries × 8 B
-TX queue                        3,616 B     16 entries × 226 B
 RX buffer                         256 B     1 packet being processed
 Pending ACK table               1,888 B     8 entries × 236 B
 Fragment reassembly             2,464 B     4 concurrent × 4 frags × 154 B
-Flow control windows              128 B     8 destinations × 16 B
 DM session key cache            2,048 B     32 entries × 64 B (32B key + 32B metadata)
 Peer public key cache           2,048 B     64 entries × 32 B
 Airtime budget state               32 B     Token bucket state
 Time sync state                    20 B     Sync state
 RREQ rate limit table             768 B     64 entries × 12 B
-Congestion state                   16 B     Level, counters
 Mailbox buffer                  7,040 B     32 entries × 220 B (204B payload + 16B metadata)
-Emergency tracker                 416 B     8 active emergencies × 52 B
 Location manager                1,088 B     16 contacts × 68 B (config + cache)
-Group manager                   2,240 B     8 groups × 280 B (members + key + name + state)
-Coding engine                   1,536 B     Reception cache + 8-packet queue
 Probe state                       648 B     32 responses × 20 B + control state
 ────────────────────────────────────────────────────────────────
-Protocol subtotal:             33,484 B     (~33 KB)
+Protocol subtotal:             25,532 B     (~25 KB)
 
 Application buffers:
   Display framebuffer           1,024 B     128×64 / 8
@@ -2768,7 +2437,6 @@ RREQ dedup               128    Time-based: entries >60s are purged on every ins
 Reverse routes           32     Time-based: entries >60s are purged.
 Packet dedup             128    Time-based: entries >60s are purged.
 Pending ACKs             8      Oldest entry dropped (after sending failure notification).
-TX queue                 16     Lowest priority dropped. Within same priority, oldest dropped.
 Fragment reassembly      4      Oldest incomplete reassembly dropped.
 Key cache                32     LRU by last-use. Evicted keys must be re-exchanged.
 Peer pubkey cache        64     LRU. Evicted entries relearned from beacons.

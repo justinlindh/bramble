@@ -31,23 +31,20 @@ See also:
 
 | Component | Path | Purpose |
 |-----------|------|---------|
-| `crypto` | `components/crypto/` | AES-256-GCM, X25519, HKDF, anti-replay window |
+| `crypto` | `components/crypto/` | AES-256-GCM, X25519, HKDF |
 | `packet` | `components/packet/` | Packet framing, serialization, type definitions |
 | `routing` | `components/routing/` | AODV route discovery, forwarding, beacon, route maintenance, route metrics |
 | `channel` | `components/channel/` | Named group channels (key derivation, message encrypt/decrypt, public channel) |
 | `security` | `components/security/` | Session management, key exchange, dummy traffic |
-| `reliability` | `components/reliability/` | ACKs, retransmission, delivery receipts, flow control |
+| `reliability` | `components/reliability/` | ACKs, retransmission, delivery receipts |
 | `fragment` | `components/fragment/` | Message fragmentation and reassembly |
 | `airtime` | `components/airtime/` | Duty cycle tracking and TX priority queue |
 | `dedup` | `components/dedup/` | Duplicate packet detection (sliding-window bloom filter) |
 | `identity` | `components/identity/` | Node identity, X25519 keypair generation and storage |
-| `timesync` | `components/timesync/` | Stratum-based mesh time synchronization, anti-replay |
+| `timesync` | `components/timesync/` | Stratum-based mesh time synchronization |
 | `radio` | `components/radio/` | SX1262 driver, airtime math, and the budget-gated TX gate (single transmit path) |
 | `mailbox` | `components/mailbox/` | Store-and-forward buffer for offline destinations |
-| `emergency` | `components/emergency/` | Emergency beacon state machine and tracking |
 | `location` | `components/location/` | Private location sharing with tiered privacy |
-| `group` | `components/group/` | Group DM management and key derivation |
-| `coding` | `components/coding/` | XOR network coding for bidirectional relay |
 | `msg_store` | `components/msg_store/` | Message persistence (SPIFFS-backed message history) |
 | `audio` | `components/audio/` | Audio playback (tones, alerts) |
 | `battery` | `components/battery/` | Battery voltage monitoring and reporting |
@@ -120,8 +117,6 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | 2 | `0x04` | `FLAG_ENCRYPT` | Payload is encrypted |
 | 1–0 | `0x03` | `FLAG_FRAG` | Fragment indicator (00=none, 01=first, 10=middle, 11=last) |
 
-`HEADER_FLAG_EMERGENCY` (`0x04` in the flags byte) is defined to signal emergency relay priority, but nothing in the firmware sets or checks it today; every transmission, emergency-flagged or not, goes through the budget-gated TX path.
-
 ### Packet Types
 
 | Value | Name | Description | Size |
@@ -133,21 +128,16 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 44+ bytes (name optional) |
 | `0x06` | `PKT_TYPE_KEY_EXCHANGE` | X25519 key exchange (3-step) | 101 bytes |
 | `0x07` | `PKT_TYPE_DELIVERY_RECEIPT` | Path-tracing delivery receipt | 22–54 bytes |
-| `0x08` | `PKT_TYPE_CONGESTION` | Congestion notification | 20 bytes |
-| `0x09` | `PKT_TYPE_TIME_SYNC` | Mesh time synchronization | 24 bytes |
 | `0x0A` | `PKT_TYPE_DATA` | Encrypted data payload | variable |
 | `0x0B` | `PKT_TYPE_STORE_REQUEST` | Request a mailbox node to store a message | variable |
 | `0x0C` | `PKT_TYPE_STORE_ACK` | Acknowledgement of successful mailbox storage | fixed |
 | `0x0D` | `PKT_TYPE_MAILBOX_DELIVERY` | Delivery of stored message to now-online destination | variable |
 | `0x0E` | `PKT_TYPE_MAILBOX_QUERY` | Query a mailbox node for messages | fixed |
-| `0x0F` | `PKT_TYPE_EMERGENCY` | Emergency beacon (plaintext, broadcast) | 17–49 bytes |
-| `0x10` | `PKT_TYPE_EMERGENCY_CANCEL` | Cancel an active emergency (authenticated) | 12 bytes |
-| `0x11` | `PKT_TYPE_CODED` | XOR network-coded packet (two components) | variable |
 | `0x12` | `PKT_TYPE_PROBE` | Network reachability probe | variable |
 | `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 
-Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, `CONGESTION`, `TIME_SYNC`, the four mailbox types, the two emergency types, and `CODED`) are not sent or handled by the firmware today; their components exist and are unit-tested, but they are not wired into the mesh task. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE` and the four mailbox types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, `0x0F`, `0x10`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, `EMERGENCY`, `EMERGENCY_CANCEL`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
 
 ### Beacon Flags
 
@@ -171,7 +161,6 @@ Provides the cryptographic primitives used throughout the stack:
 - **X25519**: `crypto_x25519`: Diffie-Hellman key exchange
 - **HKDF-SHA256**: `crypto_hkdf`: Key derivation from shared secrets and context strings
 - **Random**: `crypto_random`: Cryptographically secure random bytes
-- **Anti-replay**: 64-bit sliding window in `timesync/anti_replay.c` (implemented and tested, but currently has no callers in the firmware; see SECURITY-MODEL.md known gaps)
 
 Key sizes: `BRAMBLE_KEY_SIZE` = 32 bytes, `BRAMBLE_NONCE_SIZE` = 12 bytes, `BRAMBLE_TAG_SIZE` = 16 bytes.
 
@@ -189,16 +178,14 @@ The `bramble_header_t` struct maps directly onto the 12-byte on-wire format. Hig
 
 ### `routing`
 
-**Files:** `beacon.c`, `beacon_routes.c`, `channel_flood.c`, `discovery.c`, `forwarding.c`, `routing.c`
+**Files:** `beacon.c`, `discovery.c`, `forwarding.c`, `routing.c`
 
 Implements AODV-inspired reactive unicast routing:
 
 1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt, 8 on the retries at +5 s and +15 s, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes have soft (30s inactivity) and hard (300s) timeouts.
 2. **Forwarding** (`forwarding.c`): Looks up next-hop from route table; decrements `hop_limit`; emits RERR on unknown destination.
 3. **Beacons** (`beacon.c`): Periodic 60s neighbor discovery beacons carrying node status, public key hash, HMAC'd with pairwise session key for known peers.
-4. **Route maintenance** (`beacon_routes.c`): Processes RERR packets, invalidates stale routes, triggers re-discovery.
-5. **Channel flooding** (`channel_flood.c`): Hop-limited (default 3) re-broadcast for channel messages. Dedup prevents loops.
-6. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
+4. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
 
 Privacy note: RREQ packets encrypt the source address: intermediate relay nodes cannot determine who initiated a route discovery.
 
@@ -232,7 +219,7 @@ Session key = HKDF(ephemeral-DH ‖ static-DH, "bramble-session"). Keys rotate e
 
 Implementation status: the session/key-exchange machinery is component-level only. `PKT_TYPE_KEY_EXCHANGE` is never sent and never handled on the wire, and direct messages are encrypted with the shared channel key, not pairwise session keys (see SECURITY-MODEL.md).
 
-**Dummy traffic** (`dummy_traffic.c`): Optionally emits random-length encrypted packets to defend against traffic analysis (volume and timing correlation).
+**Dummy traffic** (`dummy_traffic.c`): Cover-traffic scheduler (random-length packets at random intervals to defeat volume/timing correlation). Component-level only: nothing in the firmware schedules it today (see SECURITY-MODEL.md); it is the building block for a planned quiet-mode cover-traffic feature.
 
 ---
 
@@ -250,7 +237,7 @@ Three delivery tiers:
 
 (Constants: `tier_max_retries` / `tier_base_delay_ms` in `components/reliability/reliability.c`; jitter applied in `main/mesh_task.c`.)
 
-A per-destination sliding window (max 4 unacknowledged packets) with AIMD adjustment is implemented and tested in `reliability.c`, but is not yet wired into the mesh task; `PKT_TYPE_CONGESTION` is never sent or received (see the packet-type implementation status note). The retry/ACK machinery above is live.
+The retry/ACK machinery above is live. A per-destination AIMD sliding window and the CONGESTION packet type were removed unshipped; in-flight traffic is bounded by the 8-entry pending-ACK table and the airtime budget.
 
 ---
 
@@ -264,12 +251,11 @@ Splits messages larger than the LoRa MTU (~240 bytes usable after header and cry
 
 ### `airtime`
 
-**Files:** `airtime_budget.c`, `tx_queue.c`
+**Files:** `airtime_budget.c`
 
 Per-tier token-bucket airtime budget with continuous (proportional) refill, consumed by the radio TX gate:
 
 - **Budget** (`airtime_budget.c`): Four lanes with hourly base budgets of 36 s critical, 18 s normal, 18 s broadcast, and 12 s receipt (`AIRTIME_BUDGET_*_MS`). An adaptive profile scales the maxima by mesh size (`airtime_budget_set_mesh_size`), CRITICAL may borrow a capped share of NORMAL (`AIRTIME_BORROW_CAP_PCT`, 25%), and a regulatory duty-cycle cap from the frequency plan scales everything down when the region enforces one (`airtime_budget_set_duty_cap`; EU868 = 1%). See [airtime-budget-v2.md](airtime-budget-v2.md).
-- **TX queue** (`tx_queue.c`): Priority queue ordered by tier. Currently exercised only by host tests; the live transmit path is the radio TX gate below.
 
 Every transmission is admitted and debited by the TX gate in `components/radio/tx_gate.c` (see the `radio` section); there is no budget-exempt transmit path.
 
@@ -293,14 +279,12 @@ Generates and persists a node's X25519 keypair on first boot (stored in NVS). Th
 
 ### `timesync`
 
-**Files:** `timesync.c`, `anti_replay.c`
+**Files:** `timesync.c`
 
 Stratum-based mesh time synchronization inspired by NTP:
-- Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated `PKT_TYPE_TIME_SYNC` packet is defined but never sent or handled.
+- Sync rides the beacon: each beacon carries `network_time` and a stratum/confidence field, consumed by `timesync_handle_sync` on beacon receipt (`main/mesh_task.c`). The dedicated TIME_SYNC packet type was removed unshipped; the beacon is the only sync transport.
 - GPS-equipped nodes are stratum 0; other nodes adopt the best (lowest stratum) time source they hear and become stratum+1.
 - Convergence to ±1–2s across the mesh.
-
-**Anti-replay** (`anti_replay.c`): 64-bit sliding window keyed on `(src_addr, packet_id)` to reject replayed packets.
 
 ---
 
@@ -357,12 +341,7 @@ The **Bramble Common** public channel is channel index 0, always available on ev
 
 **Key material:** Derived from SHA-256(`"bramble-default"`) via the standard `channel_derive_key()` path. The well-known PSK means any node can participate without configuration.
 
-**TX rate limiting (token bucket):**
-- Burst capacity: 3 messages
-- Refill rate: 1 token per 30 seconds
-- `public_channel_can_send(now_ms)` returns `false` when the bucket is empty
-
-**RX rate limiting:** Per-source sliding-window rate limiter (`public_channel_rx_check(src_addr, now_ms)`) guards against a single noisy sender flooding the channel.
+**Rate limiting:** None of its own. Public-channel sends are gated by the broadcast-tier airtime budget at the TX chokepoint like every other broadcast; a dedicated TX token bucket and per-source RX filter were removed unshipped.
 
 **Default hop limit:** 3 hops (short-range community broadcast).
 
@@ -395,47 +374,6 @@ void mailbox_init(mailbox_t *mb);
 int  mailbox_store(mailbox_t *mb, src, dest, payload, len, packet_id, now_ms);
 int  mailbox_retrieve(mailbox_t *mb, dest_addr, out[], max_out);
 void mailbox_purge_expired(mailbox_t *mb, now_ms);
-```
-
----
-
-### Emergency Beacon (`components/emergency/`)
-
-A three-state machine for distress signaling:
-
-```
-INACTIVE ──activate──► ACTIVE ──cancel──► COOLDOWN ──timeout──► INACTIVE
-                           │                                         ▲
-                           └──────────── 24h auto-timeout ──────────┘
-```
-
-**States:**
-- `EMERGENCY_STATE_INACTIVE` (0): normal operation
-- `EMERGENCY_STATE_ACTIVE` (1): transmitting emergency beacons every 30s
-- `EMERGENCY_STATE_COOLDOWN` (2): 15-minute cool-down after cancel before re-activation
-
-**Timing constants:**
-- Auto-timeout: 24 hours (`EMERGENCY_AUTO_TIMEOUT_MS`)
-- Beacon interval: 30 seconds (`EMERGENCY_BEACON_INTERVAL_MS`)
-- Cooldown: 15 minutes (`EMERGENCY_COOLDOWN_MS`)
-- Minimum interval between activations: 1 hour (`EMERGENCY_MIN_ACTIVATION_MS`)
-
-**Packet format:**
-- `PKT_TYPE_EMERGENCY` (`0x0F`): Plaintext beacon carrying `src_addr`, `latitude_e7`, `longitude_e7`, `altitude_m`, `battery_pct`, `timestamp`, and an optional 32-byte short message. Minimum serialized size: 17 bytes.
-- `PKT_TYPE_EMERGENCY_CANCEL` (`0x10`): Authenticated cancel (4-byte truncated HMAC-SHA256). Size: 12 bytes.
-
-**Header flag:** `HEADER_FLAG_EMERGENCY` (`0x04`) in the packet header flags byte. All relay nodes forward emergency packets unconditionally, bypassing airtime budget checks.
-
-**Multi-node tracking:** Each node maintains a table of up to 8 active emergencies received from other nodes (`emergency_record_received`, `emergency_record_cancel`).
-
-**API:**
-```c
-void emergency_init(emergency_manager_t *mgr);
-int  emergency_activate(mgr, lat_e7, lon_e7, alt_m, battery, msg, now_ms);
-int  emergency_cancel(mgr, now_ms);
-bool emergency_is_active(mgr);
-void emergency_tick(mgr, now_ms);        /* call periodically */
-bool emergency_should_beacon(mgr, now_ms);
 ```
 
 ---
@@ -477,79 +415,6 @@ int  location_serialize_coarse(pos, buf, buf_len);  /* → 5 bytes */
 ```
 
 ---
-
-### Group DMs (`components/group/`)
-
-Encrypted group messaging for up to 8 members per group, with up to 8 simultaneous groups per node.
-
-**Key derivation:** FNV-1a over the sorted member address list concatenated with the group name. Produces an 8-byte group ID and a 32-byte group key.
-```
-group_id || group_key = FNV-1a(sort(member_addrs) || name)
-```
-
-**Epoch-based key rotation:** After every 256 messages (`GROUP_EPOCH_ADVANCE_THRESHOLD`), `group_advance_epoch()` is called. The new key is derived from the old key + new epoch number, ensuring backward secrecy for group messages.
-
-**Invite serialization:** Group invites are serialized as fixed-size packets (`GROUP_INVITE_SIZE` = `GROUP_ID_SIZE + GROUP_KEY_SIZE + GROUP_NAME_MAX + 2`) containing the group ID, current key, name, and epoch. Used for onboarding new members.
-
-**Group lifecycle:**
-```c
-void group_init(group_manager_t *mgr);
-int  group_create(mgr, name, creator_addr, member_addrs[], num_members, now_ms);
-int  group_delete(mgr, group_id);
-int  group_add_member(group, addr);
-int  group_remove_member(group, addr);
-bool group_is_member(group, addr);
-void group_record_message(group);   /* advances epoch after threshold */
-```
-
-**Limits:**
-- `GROUP_MAX_MEMBERS` = 8 members per group
-- `GROUP_MAX_GROUPS` = 8 groups per node
-- Group name max: 32 characters
-- `GROUP_EPOCH_ADVANCE_THRESHOLD` = 256 messages
-
----
-
-### Network Coding (`components/coding/`)
-
-XOR-based network coding for bidirectional relay scenarios. When a relay node has two packets that need to travel in opposite directions to two neighbors who each already have one of the packets, it can XOR them together and send a single coded packet: both neighbors decode the packet they need using the one they already have.
-
-**Encoding:** `coding_encode(pkt_a, len_a, id_a, pkt_b, len_b, id_b, coded_out, coded_len_out)` pads the shorter packet to `max(len_a, len_b)` and XOR-combines them. The coded header is prepended.
-
-**Decoding:** `coding_decode(coded_data, coded_len, header, known_component, known_len, known_id, decoded_out, decoded_len_out)` XORs the coded payload against the known component to recover the other.
-
-**Coded packet header** (`CODED_HEADER_MAX_SIZE` = 13 bytes):
-```
-num_components(1) + [packet_id(4) + orig_len(2)] × num_components
-```
-
-**Packet type:** `PKT_TYPE_CODED` (`0x11`)
-
-**Reception cache:**
-- Each node maintains a circular buffer of the last 32 packet IDs it has seen (`CODING_RECEPTION_CACHE`).
-- `coding_record_packet(engine, packet_id)` adds to the local cache.
-- `coding_record_neighbor_reception(engine, neighbor_addr, ids[], count)` updates per-neighbor knowledge from piggybacked reception reports.
-- `coding_neighbor_has_packet(engine, neighbor_addr, packet_id)` is used to determine whether a coding opportunity exists.
-
-**Opportunity detection:** `coding_find_opportunity(engine, &idx_a, &idx_b)` scans the queue for two packets where neighbor_a has packet_b and neighbor_b has packet_a. Returns 0 on success.
-
-**Queue:** Up to 8 packets (`CODING_QUEUE_SIZE`) can wait up to 500ms (`CODING_OPPORTUNITY_WINDOW_MS`) for a coding partner before being flushed as uncoded.
-
-**API:**
-```c
-void coding_init(coding_engine_t *engine);
-void coding_record_packet(engine, packet_id);
-int  coding_queue_packet(engine, data, len, packet_id, dest_addr, now_ms);
-int  coding_find_opportunity(engine, &idx_a, &idx_b);
-int  coding_encode(pkt_a, len_a, id_a, pkt_b, len_b, id_b, coded_out, coded_len_out);
-int  coding_decode(coded_data, coded_len, header, known, known_len, known_id, out, out_len);
-bool coding_can_decode(engine, header, known_id_out);
-void coding_flush_expired(engine, now_ms);
-```
-
----
-
-## Bug Fixes
 
 ### `channel_msg_decrypt` data pointer (2026-02-17)
 
