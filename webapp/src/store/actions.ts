@@ -1423,6 +1423,69 @@ export async function setTrafficDebugConfig(config: {
   await loadTrafficDebugStatus();
 }
 
+// ─── Device management (auth token, allowed origins, OTA): issue #95 ───────
+
+export interface AuthTokenInfo { token: string; enabled: boolean; }
+
+export async function getAuthToken(): Promise<AuthTokenInfo> {
+  if (!client) throw new Error('Not connected');
+  const r = await client.rpc<any>('bramble.getAuthToken');
+  return { token: r.token ?? '', enabled: !!r.enabled };
+}
+
+export async function setAuthToken(token: string): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setAuthToken', { token });
+}
+
+export async function getAllowedOrigins(): Promise<string[]> {
+  if (!client) throw new Error('Not connected');
+  const r = await client.rpc<any>('bramble.getAllowedOrigins');
+  return Array.isArray(r.origins) ? r.origins : [];
+}
+
+export async function setAllowedOrigins(origins: string[]): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.setAllowedOrigins', { origins });
+}
+
+export interface OtaOriginInfo {
+  origin: string;
+  defaultOrigin: string;
+  overridden: boolean;
+  versionFloor?: string;
+  runningVersion?: string;
+}
+
+export async function getOtaOrigin(): Promise<OtaOriginInfo> {
+  if (!client) throw new Error('Not connected');
+  const r = await client.rpc<any>('bramble.otaGetOrigin');
+  return {
+    origin: r.origin ?? '',
+    defaultOrigin: r.default_origin ?? r.defaultOrigin ?? '',
+    overridden: !!r.overridden,
+    versionFloor: r.version_floor ?? r.versionFloor,
+    runningVersion: r.running_version ?? r.runningVersion,
+  };
+}
+
+export async function setOtaOrigin(origin: string): Promise<{ ok: boolean; error?: string }> {
+  if (!client) throw new Error('Not connected');
+  const r = await client.rpc<any>('bramble.otaSetOrigin', { origin });
+  return { ok: !!r.ok, error: r.error };
+}
+
+export async function resetOtaOrigin(): Promise<void> {
+  if (!client) throw new Error('Not connected');
+  await client.rpc('bramble.otaSetOrigin', { reset: true });
+}
+
+export async function startOtaUpdate(path: string, allowDowngrade = false): Promise<{ ok: boolean; note?: string; url?: string; error?: string }> {
+  if (!client) throw new Error('Not connected');
+  const r = await client.rpc<any>('bramble.otaUpdate', { path, allow_downgrade: allowDowngrade });
+  return { ok: !!r.ok, note: r.note, url: r.url, error: r.error };
+}
+
 export function decodePacketType(pktType: number | string | undefined): string {
   if (typeof pktType === 'string') return pktType;
   switch (pktType) {
