@@ -342,12 +342,7 @@ The **Bramble Common** public channel is channel index 0, always available on ev
 
 **Key material:** Derived from SHA-256(`"bramble-default"`) via the standard `channel_derive_key()` path. The well-known PSK means any node can participate without configuration.
 
-**TX rate limiting (token bucket):**
-- Burst capacity: 3 messages
-- Refill rate: 1 token per 30 seconds
-- `public_channel_can_send(now_ms)` returns `false` when the bucket is empty
-
-**RX rate limiting:** Per-source sliding-window rate limiter (`public_channel_rx_check(src_addr, now_ms)`) guards against a single noisy sender flooding the channel.
+**Rate limiting:** None of its own. Public-channel sends are gated by the broadcast-tier airtime budget at the TX chokepoint like every other broadcast; a dedicated TX token bucket and per-source RX filter were removed unshipped.
 
 **Default hop limit:** 3 hops (short-range community broadcast).
 
