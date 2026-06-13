@@ -1,4 +1,5 @@
 import { useStore } from '../store/index';
+import { resolvePeerName } from '../store/peerName';
 
 export type PeerStatus = 'online' | 'reachable' | 'unknown';
 
@@ -6,7 +7,9 @@ const ONLINE_THRESHOLD_MS = 90_000;   // 3x beacon interval (30s)
 
 /** Resolve a peer address to a display name + presence status */
 export function usePeerInfo(addr: number) {
-  const name = useStore(s => s.peerNames.get(addr));
+  const resolvedName = useStore((s) =>
+    resolvePeerName(addr, s.peerNames, s.peerLocations),
+  );
   const neighbor = useStore(s => s.neighbors.find(n => n.addr === addr));
   const route = useStore(s => s.routes.find(r => r.dest === addr));
 
@@ -19,7 +22,7 @@ export function usePeerInfo(addr: number) {
 
   const shortHex = `0x${addr.toString(16).toUpperCase().padStart(8, '0').slice(-4)}`;
   const fullHex = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
-  const displayName = name || shortHex;
+  const displayName = resolvedName ?? shortHex;
 
   let lastSeen: string | null = null;
   if (neighbor && status !== 'online') {
@@ -29,7 +32,7 @@ export function usePeerInfo(addr: number) {
     else lastSeen = `${Math.round(secs / 3600)}h ago`;
   }
 
-  return { name, displayName, shortHex, fullHex, status, lastSeen };
+  return { name: resolvedName, displayName, shortHex, fullHex, status, lastSeen };
 }
 
 export const STATUS_COLORS: Record<PeerStatus, string> = {
