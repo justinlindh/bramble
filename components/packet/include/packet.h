@@ -29,7 +29,6 @@
 #define PKT_TYPE_MAILBOX_QUERY 0x0E
 #define PKT_TYPE_EMERGENCY 0x0F
 #define PKT_TYPE_EMERGENCY_CANCEL 0x10
-#define PKT_TYPE_CODED 0x11     /* Network-coded packet */
 #define PKT_TYPE_PROBE 0x12     /* Network reachability probe */
 #define PKT_TYPE_PROBE_ACK 0x13 /* Probe acknowledgement */
 #define PKT_TYPE_LOCATION 0x14  /* Location share */

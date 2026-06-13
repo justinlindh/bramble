@@ -47,7 +47,6 @@ See also:
 | `emergency` | `components/emergency/` | Emergency beacon state machine and tracking |
 | `location` | `components/location/` | Private location sharing with tiered privacy |
 | `group` | `components/group/` | Group DM management and key derivation |
-| `coding` | `components/coding/` | XOR network coding for bidirectional relay |
 | `msg_store` | `components/msg_store/` | Message persistence (SPIFFS-backed message history) |
 | `audio` | `components/audio/` | Audio playback (tones, alerts) |
 | `battery` | `components/battery/` | Battery voltage monitoring and reporting |
@@ -140,12 +139,11 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x0E` | `PKT_TYPE_MAILBOX_QUERY` | Query a mailbox node for messages | fixed |
 | `0x0F` | `PKT_TYPE_EMERGENCY` | Emergency beacon (plaintext, broadcast) | 17–49 bytes |
 | `0x10` | `PKT_TYPE_EMERGENCY_CANCEL` | Cancel an active emergency (authenticated) | 12 bytes |
-| `0x11` | `PKT_TYPE_CODED` | XOR network-coded packet (two components) | variable |
 | `0x12` | `PKT_TYPE_PROBE` | Network reachability probe | variable |
 | `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 
-Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, the four mailbox types, the two emergency types, and `CODED`) are not sent or handled by the firmware today; their components exist and are unit-tested, but they are not wired into the mesh task. Type codes `0x08` and `0x09` (formerly `CONGESTION` and `TIME_SYNC`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE`, the four mailbox types, and the two emergency types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
 
 ### Beacon Flags
 
@@ -503,47 +501,6 @@ void group_record_message(group);   /* advances epoch after threshold */
 - `GROUP_EPOCH_ADVANCE_THRESHOLD` = 256 messages
 
 ---
-
-### Network Coding (`components/coding/`)
-
-XOR-based network coding for bidirectional relay scenarios. When a relay node has two packets that need to travel in opposite directions to two neighbors who each already have one of the packets, it can XOR them together and send a single coded packet: both neighbors decode the packet they need using the one they already have.
-
-**Encoding:** `coding_encode(pkt_a, len_a, id_a, pkt_b, len_b, id_b, coded_out, coded_len_out)` pads the shorter packet to `max(len_a, len_b)` and XOR-combines them. The coded header is prepended.
-
-**Decoding:** `coding_decode(coded_data, coded_len, header, known_component, known_len, known_id, decoded_out, decoded_len_out)` XORs the coded payload against the known component to recover the other.
-
-**Coded packet header** (`CODED_HEADER_MAX_SIZE` = 13 bytes):
-```
-num_components(1) + [packet_id(4) + orig_len(2)] × num_components
-```
-
-**Packet type:** `PKT_TYPE_CODED` (`0x11`)
-
-**Reception cache:**
-- Each node maintains a circular buffer of the last 32 packet IDs it has seen (`CODING_RECEPTION_CACHE`).
-- `coding_record_packet(engine, packet_id)` adds to the local cache.
-- `coding_record_neighbor_reception(engine, neighbor_addr, ids[], count)` updates per-neighbor knowledge from piggybacked reception reports.
-- `coding_neighbor_has_packet(engine, neighbor_addr, packet_id)` is used to determine whether a coding opportunity exists.
-
-**Opportunity detection:** `coding_find_opportunity(engine, &idx_a, &idx_b)` scans the queue for two packets where neighbor_a has packet_b and neighbor_b has packet_a. Returns 0 on success.
-
-**Queue:** Up to 8 packets (`CODING_QUEUE_SIZE`) can wait up to 500ms (`CODING_OPPORTUNITY_WINDOW_MS`) for a coding partner before being flushed as uncoded.
-
-**API:**
-```c
-void coding_init(coding_engine_t *engine);
-void coding_record_packet(engine, packet_id);
-int  coding_queue_packet(engine, data, len, packet_id, dest_addr, now_ms);
-int  coding_find_opportunity(engine, &idx_a, &idx_b);
-int  coding_encode(pkt_a, len_a, id_a, pkt_b, len_b, id_b, coded_out, coded_len_out);
-int  coding_decode(coded_data, coded_len, header, known, known_len, known_id, out, out_len);
-bool coding_can_decode(engine, header, known_id_out);
-void coding_flush_expired(engine, now_ms);
-```
-
----
-
-## Bug Fixes
 
 ### `channel_msg_decrypt` data pointer (2026-02-17)
 

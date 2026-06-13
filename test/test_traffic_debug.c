@@ -21,7 +21,6 @@
 #define PKT_TYPE_MAILBOX_QUERY    0x0E
 #define PKT_TYPE_EMERGENCY        0x0F
 #define PKT_TYPE_EMERGENCY_CANCEL 0x10
-#define PKT_TYPE_CODED            0x11
 #define PKT_TYPE_PROBE            0x12
 #define PKT_TYPE_PROBE_ACK        0x13
 #define PKT_TYPE_LOCATION         0x14
@@ -84,8 +83,6 @@ void test_classify_maintenance_packets(void) {
                      traffic_debug_classify_packet(PKT_TYPE_MAILBOX_DELIVERY));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_MAILBOX_QUERY));
-    TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
-                     traffic_debug_classify_packet(PKT_TYPE_CODED));
     TEST_ASSERT_EQUAL(TRAFFIC_CAT_MAINTENANCE,
                      traffic_debug_classify_packet(PKT_TYPE_LOCATION));
 }

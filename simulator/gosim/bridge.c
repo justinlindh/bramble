@@ -6,7 +6,7 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
-/* Note: mailbox.h, emergency.h, location.h, group.h, coding.h,
+/* Note: mailbox.h, emergency.h, location.h, group.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
 
@@ -39,7 +39,6 @@ void bridge_node_ext_init_all(void) {
         emergency_init(&g_node_ext[i].emergency);
         location_init(&g_node_ext[i].location);
         group_init(&g_node_ext[i].group);
-        coding_init(&g_node_ext[i].coding);
         g_node_ext[i].initialized = true;
     }
 }
@@ -341,14 +340,6 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
         }
     }
 
-    /* Phase 6: Coding — record that this neighbor has received recent packets.
-     * Piggyback reception knowledge: this beacon's packet_id marks what our
-     * neighbor has heard (simplification; real protocol would carry an ack bitmap). */
-    if (ext) {
-        uint32_t pkt_ids[1] = {beacon.header.packet_id};
-        coding_record_neighbor_reception(&ext->coding, beacon.src_addr, pkt_ids, 1);
-        coding_record_packet(&ext->coding, beacon.header.packet_id);
-    }
 }
 
 static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_t rssi,
@@ -736,62 +727,6 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
     uint8_t fwd_buf[256];
     memcpy(fwd_buf, buf, len);
     fwd_buf[3] = hop_limit;
-
-    /* Phase 6: Coding — record this packet in our coding engine.
-     * Check if we can XOR-encode this with another queued packet. */
-    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
-    if (ext && len <= CODING_MAX_PACKET_SIZE) {
-        coding_flush_expired(&ext->coding, now_ms);
-        /* Queue this packet for a coding opportunity */
-        int q = coding_queue_packet(&ext->coding, fwd_buf, len, hdr.packet_id, fwd_res.next_hop,
-                                    now_ms);
-        if (q == 0) {
-            /* Check for XOR coding opportunity */
-            int idx_a = -1, idx_b = -1;
-            if (coding_find_opportunity(&ext->coding, &idx_a, &idx_b) == 0) {
-                g_ext_metrics.coding_opportunities++;
-                coding_queue_entry_t* qa = &ext->coding.queue[idx_a];
-                coding_queue_entry_t* qb = &ext->coding.queue[idx_b];
-
-                uint8_t coded_buf[CODING_MAX_PACKET_SIZE + CODED_HEADER_MAX_SIZE];
-                uint16_t coded_len = 0;
-                if (coding_encode(qa->data, qa->len, qa->packet_id, qb->data, qb->len,
-                                  qb->packet_id, coded_buf, &coded_len) == 0) {
-                    g_ext_metrics.coding_encoded++;
-                    /* Mark both queue entries as consumed */
-                    qa->active = false;
-                    qb->active = false;
-                    /* Record in our own reception cache */
-                    coding_record_packet(&ext->coding, hdr.packet_id);
-
-                    /* Broadcast the coded packet */
-                    outbound_packet_t cpkt;
-                    memset(&cpkt, 0, sizeof(cpkt));
-                    memcpy(cpkt.data, coded_buf, coded_len);
-                    cpkt.len = coded_len;
-                    cpkt.is_broadcast = true;
-                    cpkt.dest_addr = 0xFFFFFFFF;
-                    cpkt.pkt_type = PKT_TYPE_DATA; /* reuse DATA type for coded */
-                    rx->packets_forwarded++;
-                    anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
-
-                    fprintf(stdout,
-                            "{\"type\":\"coding_encoded\",\"timestamp_us\":%llu"
-                            ",\"node\":\"%s\""
-                            ",\"id_a\":\"0x%08X\",\"id_b\":\"0x%08X\""
-                            ",\"coded_len\":%d}\n",
-                            (unsigned long long)now_us, rx->id, qa->packet_id, qb->packet_id,
-                            (int)coded_len);
-                    fflush(stdout);
-
-                    sim_radio_broadcast(rx, &cpkt, nodes, radio, rng, events, metrics, now_us);
-                    return; /* sent as coded packet */
-                }
-            }
-        }
-        /* No coding opportunity — send normally and record */
-        coding_record_packet(&ext->coding, hdr.packet_id);
-    }
 
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -1208,9 +1143,6 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
             if (purged > 0) {
                 g_ext_metrics.mailbox_expired += (uint64_t)purged;
             }
-
-            /* Coding: flush expired queue entries (500ms window) */
-            coding_flush_expired(&ext->coding, now_ms);
 
             /* Emergency: tick state machine (auto-timeout, cooldown transitions) */
             emergency_tick(&ext->emergency, now_ms);
