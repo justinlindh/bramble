@@ -964,62 +964,7 @@ Public Channel Key Derivation:
 
 #### Group DM Key Management
 
-Group DMs provide private group messaging for up to 8 members, routed via individual DMs (not flooded like channels).
-
-```
-Group Key Derivation:
-    // Sort member addresses lexicographically
-    sorted_addrs = sort(member_addr_1, member_addr_2, ..., member_addr_N)
-    
-    // Derive group ID and key using BLAKE2s
-    input = concat(sorted_addrs) || group_name
-    hash = blake2s(input, output_len=40)
-    
-    group_id = hash[0..7]    // 8 bytes
-    group_key = hash[8..39]  // 32 bytes
-```
-
-**Group parameters:**
-- `GROUP_MAX_MEMBERS`: 8 members per group
-- `GROUP_MAX_GROUPS`: 8 groups per node
-- `GROUP_ID_SIZE`: 8 bytes
-- `GROUP_KEY_SIZE`: 32 bytes
-- `GROUP_NAME_MAX`: 32 characters
-- `GROUP_EPOCH_ADVANCE_THRESHOLD`: 256 messages
-
-**Message encryption:**
-```
-Per-message key:
-    msg_key = hkdf_sha256(
-        salt = sender_node_id || msg_counter,
-        ikm = group_key_epoch,
-        info = "bramble-group-msg",
-        length = 32
-    )
-    nonce = blake2s(sender_node_id || msg_counter || group_id)[0..11]
-    ciphertext = AES-256-GCM(msg_key, nonce, plaintext, aad = group_id || epoch)
-```
-
-**Epoch rotation:** Group keys rotate every 256 messages via HKDF, providing backward secrecy:
-```
-function group_advance_epoch(group):
-    new_key = hkdf_sha256(
-        salt = to_bytes_be16(group.epoch + 1),
-        ikm = group.key || "bramble-group-rekey",
-        info = group.id,
-        length = 32
-    )
-    group.key = new_key
-    group.epoch += 1
-    group.message_count = 0
-```
-
-**Routing:** Group messages are sent as N-1 individual DMs (fan-out at source). Relay nodes see standard DM traffic — they cannot determine that packets belong to a group conversation.
-
-**Security properties:**
-- **Privacy:** Group membership hidden from relay nodes (messages appear as unrelated DMs)
-- **Backward secrecy:** Epoch rotation deletes old keys
-- **No forward secrecy within epoch:** Compromising current key reveals all messages in that epoch
+Removed unshipped. The group-DM key manager (FNV-1a/BLAKE2s-derived group keys with epoch rotation) was deleted without ever being wired into the firmware or carried on the wire; its key derivation would not have survived review as a real KDF. Group messaging, if it returns, will be designed on top of the pairwise session keys from the cryptographic design RFC.
 
 ### 5.4 Privacy-Preserving Source Encryption for Route Discovery
 
@@ -2371,16 +2316,7 @@ The emergency component was removed unshipped (section 4.19); there is no emerge
 
 #### Group DM Security
 
-| Threat | Mitigation |
-|--------|-----------|
-| Relay nodes identifying group traffic | Messages routed as independent DMs; appear as unrelated unicast traffic |
-| Non-member reading group messages | AES-256-GCM with group-derived key; requires key possession |
-| Compromised member reading past messages | Epoch rotation provides backward secrecy |
-| Compromised member reading future messages | **Not mitigated** — forward secrecy would require interactive key exchange among all members |
-| Group ID collision | 8-byte ID space (2⁶⁴); collision probability negligible |
-| Membership enumeration | Only initiator can add/remove; membership changes don't leak to non-members |
-
-**Forward secrecy gap:** Within an epoch (256 messages), compromising the group key exposes all messages. True per-message forward secrecy is impractical over LoRa. This is an explicit tradeoff for simplicity and bandwidth efficiency.
+The group-DM component was removed unshipped (section 5.3); there is no group traffic on the air.
 
 #### Network Coding Security
 
@@ -2432,10 +2368,9 @@ Time sync state                    20 B     Sync state
 RREQ rate limit table             768 B     64 entries × 12 B
 Mailbox buffer                  7,040 B     32 entries × 220 B (204B payload + 16B metadata)
 Location manager                1,088 B     16 contacts × 68 B (config + cache)
-Group manager                   2,240 B     8 groups × 280 B (members + key + name + state)
 Probe state                       648 B     32 responses × 20 B + control state
 ────────────────────────────────────────────────────────────────
-Protocol subtotal:             27,772 B     (~27 KB)
+Protocol subtotal:             25,532 B     (~25 KB)
 
 Application buffers:
   Display framebuffer           1,024 B     128×64 / 8

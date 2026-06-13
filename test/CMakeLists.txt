@@ -419,18 +419,6 @@ target_compile_definitions(test_location PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location m)
 
 # Group DM tests (custom test harness)
-add_executable(test_group
-    test_group.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/group/group.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
-)
-target_include_directories(test_group PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/group/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
-)
-target_link_libraries(test_group ssl crypto)
-
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel
     test_public_channel.c

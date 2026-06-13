@@ -35,6 +35,5 @@
 /* New components (Phase 6) */
 #include "../../components/mailbox/mailbox.c"
 #include "../../components/location/location.c"
-#include "../../components/group/group.c"
 #include "../../components/channel/channel_key.c"
 #include "../../components/channel/public_channel.c"
