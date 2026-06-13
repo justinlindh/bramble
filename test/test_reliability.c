@@ -20,35 +20,6 @@ void test_pending_ack_add_and_remove(void) {
     TEST_ASSERT_FALSE(pending_ack_remove(&table, 42));
 }
 
-void test_flow_control_window(void) {
-    flow_control_t fc;
-    flow_init(&fc);
-    uint32_t dest = 0xABCD;
-    /* Send up to window size (4) */
-    for (int i = 0; i < FLOW_WINDOW_SIZE; i++) {
-        TEST_ASSERT_TRUE(flow_can_send(&fc, dest));
-        flow_on_send(&fc, dest);
-    }
-    TEST_ASSERT_FALSE(flow_can_send(&fc, dest));
-    /* ACK opens a slot */
-    flow_on_ack(&fc, dest);
-    TEST_ASSERT_TRUE(flow_can_send(&fc, dest));
-}
-
-void test_flow_control_failure_shrinks_window(void) {
-    flow_control_t fc;
-    flow_init(&fc);
-    uint32_t dest = 0x5678;
-    /* Default window is 4, failure halves to 2 */
-    flow_on_failure(&fc, dest);
-    /* Should be able to send exactly 2 */
-    TEST_ASSERT_TRUE(flow_can_send(&fc, dest));
-    flow_on_send(&fc, dest);
-    TEST_ASSERT_TRUE(flow_can_send(&fc, dest));
-    flow_on_send(&fc, dest);
-    TEST_ASSERT_FALSE(flow_can_send(&fc, dest));
-}
-
 void test_key_exchange_critical_tier_retries(void) {
     /* KEY_EXCHANGE should use Critical tier (8 retries, exponential backoff) */
     pending_ack_table_t table;
@@ -101,8 +72,6 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
     RUN_TEST(test_pending_ack_add_and_remove);
-    RUN_TEST(test_flow_control_window);
-    RUN_TEST(test_flow_control_failure_shrinks_window);
     RUN_TEST(test_key_exchange_critical_tier_retries);
     RUN_TEST(test_pending_ack_table_full);
     return UNITY_END();

@@ -1855,54 +1855,7 @@ function retry_tick():  // Called every 500ms
 
 ### 7.5 Sliding Window Flow Control
 
-To prevent a fast sender from overwhelming the network, Bramble implements a per-destination sliding window:
-
-```
-WINDOW_SIZE = 4          // Max unacknowledged packets per destination
-MAX_DESTINATIONS = 8     // Max concurrent active destinations
-
-struct flow_window {
-    uint32_t dest_addr;
-    uint8_t  unacked_count;     // Currently unacknowledged packets
-    uint8_t  window_size;       // Current window (starts at 4, can shrink)
-    uint16_t send_queue_depth;  // Packets waiting to send to this dest
-};
-```
-
-```
-function can_send_to(dest_addr):
-    window = flow_windows.lookup(dest_addr)
-    if window == NULL:
-        // New destination — create window
-        flow_windows.add(dest_addr, unacked=0, window_size=WINDOW_SIZE)
-        return true
-    
-    return window.unacked_count < window.window_size
-
-function on_send(dest_addr):
-    window = flow_windows.lookup(dest_addr)
-    window.unacked_count += 1
-
-function on_ack_received(dest_addr, packet_id):
-    window = flow_windows.lookup(dest_addr)
-    window.unacked_count -= 1
-    
-    // Additive increase: grow window by 1 for every WINDOW_SIZE successful ACKs
-    window.success_counter += 1
-    if window.success_counter >= window.window_size:
-        window.window_size = min(window.window_size + 1, 8)
-        window.success_counter = 0
-    
-    // Drain queued packets
-    while can_send_to(dest_addr) and send_queue_has(dest_addr):
-        send_next_queued(dest_addr)
-
-function on_send_failure(dest_addr):
-    window = flow_windows.lookup(dest_addr)
-    // Multiplicative decrease: halve the window
-    window.window_size = max(window.window_size / 2, 1)
-    window.success_counter = 0
-```
+Removed unshipped. The per-destination AIMD sliding window was deleted without ever being wired into the transmit path; sender pacing comes from the per-tier airtime budget (section 8) and the bounded pending-ACK table (8 entries), which caps in-flight unacknowledged traffic.
 
 ### 7.6 Duplicate Detection
 
@@ -2472,7 +2425,6 @@ Packet dedup buffer             2,048 B     256 entries × 8 B
 RX buffer                         256 B     1 packet being processed
 Pending ACK table               1,888 B     8 entries × 236 B
 Fragment reassembly             2,464 B     4 concurrent × 4 frags × 154 B
-Flow control windows              128 B     8 destinations × 16 B
 DM session key cache            2,048 B     32 entries × 64 B (32B key + 32B metadata)
 Peer public key cache           2,048 B     64 entries × 32 B
 Airtime budget state               32 B     Token bucket state
@@ -2483,7 +2435,7 @@ Location manager                1,088 B     16 contacts × 68 B (config + cache)
 Group manager                   2,240 B     8 groups × 280 B (members + key + name + state)
 Probe state                       648 B     32 responses × 20 B + control state
 ────────────────────────────────────────────────────────────────
-Protocol subtotal:             27,900 B     (~27 KB)
+Protocol subtotal:             27,772 B     (~27 KB)
 
 Application buffers:
   Display framebuffer           1,024 B     128×64 / 8

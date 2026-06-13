@@ -443,9 +443,8 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         if (pa && pa->attempt > 1) {
             metrics->messages_delivered_retry++;
         }
-        /* Always clear pending ack and flow control on receipt */
+        /* Always clear the pending ack on receipt */
         pending_ack_remove(&rx->pending_acks, receipt.orig_packet_id);
-        flow_on_ack(&rx->flow_control, receipt.src_addr);
 
         /* Emit delivered with path */
         fprintf(stdout,
@@ -902,15 +901,6 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
 
     /* Route exists — build and send DATA packet */
 
-    /* Flow control check (Phase 1) */
-    if (!flow_can_send(&src->flow_control, dest_addr)) {
-        /* Window full — reschedule */
-        sim_event_t retry = *event;
-        retry.timestamp_us += 500000ULL; /* retry in 500ms */
-        event_queue_push(events, &retry);
-        return;
-    }
-
     uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
     forward_result_t fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
     if (!fwd_res.should_send)
@@ -1019,10 +1009,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             metrics->fragments_sent++;
         }
 
-        /* Add to pending acks and flow control */
+        /* Add to pending acks */
         pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr, MSG_TIER_NORMAL, payload_buf,
                         (uint16_t)payload_size, now_ms);
-        flow_on_send(&src->flow_control, dest_addr);
 
         src->packets_originated++;
         metrics_record_message_sent(metrics);
@@ -1098,10 +1087,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     pkt.pkt_type = PKT_TYPE_DATA;
     src->packets_originated++;
 
-    /* Pending ACK + flow control (Phase 1) */
+    /* Pending ACK (Phase 1) */
     pending_ack_add(&src->pending_acks, hdr.packet_id, dest_addr, MSG_TIER_NORMAL, pkt.data,
                     pkt.len, now_ms);
-    flow_on_send(&src->flow_control, dest_addr);
     airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, toa_ms);
 
     sim_radio_broadcast(src, &pkt, nodes, radio, rng, events, metrics, event->timestamp_us);
@@ -1151,7 +1139,6 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         /* This entry needs retransmission */
         if (pa->attempt >= pa->max_attempts) {
             /* Exhausted retries — remove and count as failed */
-            flow_on_failure(&node->flow_control, pa->dest_addr);
             pa->active = false;
             continue;
         }
