@@ -31,10 +31,10 @@ typedef struct {
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
 typedef struct {
-    uint64_t mailbox_stored;       /* DATA packets stored for offline dest */
-    uint64_t mailbox_delivered;    /* stored packets delivered on node rejoin */
-    uint64_t mailbox_expired;      /* mailbox entries expired (24h TTL) */
-    uint64_t location_updates;     /* location position updates processed */
+    uint64_t mailbox_stored;    /* DATA packets stored for offline dest */
+    uint64_t mailbox_delivered; /* stored packets delivered on node rejoin */
+    uint64_t mailbox_expired;   /* mailbox entries expired (24h TTL) */
+    uint64_t location_updates;  /* location position updates processed */
 } bridge_ext_metrics_t;
 
 /* Accessor functions */
