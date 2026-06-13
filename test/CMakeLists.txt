@@ -463,16 +463,6 @@ target_include_directories(test_group PRIVATE
 )
 target_link_libraries(test_group ssl crypto)
 
-# Network coding tests (custom test harness)
-add_executable(test_coding
-    test_coding.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/coding/coding.c
-)
-target_include_directories(test_coding PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/coding/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
-)
-
 # Public channel tests (includes .c directly, needs OpenSSL)
 add_executable(test_public_channel
     test_public_channel.c

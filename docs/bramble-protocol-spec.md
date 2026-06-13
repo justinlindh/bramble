@@ -281,7 +281,7 @@ Value  Name               Description
 0x0E   MAILBOX_QUERY      Query mailbox for pending messages (see §4.18)
 0x0F   EMERGENCY          Emergency beacon (see §4.19)
 0x10   EMERGENCY_CANCEL   Cancel active emergency (see §4.20)
-0x11   CODED              XOR network-coded packet (see §4.21)
+0x11   (retired)          Was CODED; removed unshipped (see §4.21)
 0x12   PKT_TYPE_PROBE    Broadcast delivery probe (see §4.22)
 0x13   PKT_TYPE_PROBE_ACK      Broadcast probe acknowledgment (see §4.23)
 0x14   LOCATION           Location sharing packet
@@ -668,29 +668,7 @@ The `auth_tag` is computed using the node's pairwise session key (if established
 
 ### 4.21 CODED Packet
 
-XOR network-coded packet combining two component packets. Used when a relay has packets for two neighbors who each already have the other's packet.
-
-```
-Offset  Size  Field            Description
-──────  ────  ─────            ───────────
-0       12    header           Common header (packet_type=0x11)
-12      1     num_components   Number of XOR'd components (always 2)
-13      4     component_id_1   Packet ID of first component
-17      2     component_len_1  Original length of first component
-19      4     component_id_2   Packet ID of second component
-23      2     component_len_2  Original length of second component
-25      N     coded_payload    XOR of both component payloads (N = max(len_1, len_2))
-──────────────────────────────────────────────────────────
-Total: 25 + max(len_1, len_2) bytes
-```
-
-**Coding header size:** 13 bytes (1 + 2×6)
-
-**Decoding:** A receiver who has component A computes: `coded_payload XOR component_A = component_B`
-
-**Reception cache:** Each node maintains a circular buffer of the last 32 packet IDs seen (`CODING_RECEPTION_CACHE`). Coding opportunities are detected when both neighbors have complementary packets.
-
-**Queue timing:** Packets may wait up to 500ms (`CODING_OPPORTUNITY_WINDOW_MS`) for a coding partner before being sent uncoded.
+Removed unshipped. The XOR network-coding relay optimization (FEC-style coded packets) was deleted without a coded packet ever being transmitted; relays forward packets uncoded.
 
 ### 4.22 PKT_TYPE_PROBE Packet
 
@@ -2501,14 +2479,7 @@ If a node is compromised:
 
 #### Network Coding Security
 
-| Threat | Mitigation |
-|--------|-----------|
-| Coded packet forgery | Component packets are already authenticated (AES-GCM); coded packet integrity follows |
-| Decoding without authorization | Decoding requires possessing a component; non-neighbors cannot decode |
-| Coding to delay delivery | 500ms max coding window; packets are flushed uncoded if no partner found |
-| Reception report abuse | Reports are piggybacked on ACKs/beacons, not dedicated packets; no amplification vector |
-
-**Note:** Network coding operates at the relay layer on already-encrypted packets. It doesn't affect E2E security — it's purely an airtime optimization.
+The network-coding component was removed unshipped (section 4.21); no coded packets exist on the air.
 
 #### Broadcast Probe Security
 
@@ -2546,7 +2517,6 @@ Pending route discoveries        160 B     8 entries × 20 B
 RREQ dedup cache               1,024 B     128 entries × 8 B
 Reverse route table               384 B     32 entries × 12 B
 Packet dedup buffer             2,048 B     256 entries × 8 B
-TX queue                        3,616 B     16 entries × 226 B
 RX buffer                         256 B     1 packet being processed
 Pending ACK table               1,888 B     8 entries × 236 B
 Fragment reassembly             2,464 B     4 concurrent × 4 frags × 154 B
@@ -2556,15 +2526,13 @@ Peer public key cache           2,048 B     64 entries × 32 B
 Airtime budget state               32 B     Token bucket state
 Time sync state                    20 B     Sync state
 RREQ rate limit table             768 B     64 entries × 12 B
-Congestion state                   16 B     Level, counters
 Mailbox buffer                  7,040 B     32 entries × 220 B (204B payload + 16B metadata)
 Emergency tracker                 416 B     8 active emergencies × 52 B
 Location manager                1,088 B     16 contacts × 68 B (config + cache)
 Group manager                   2,240 B     8 groups × 280 B (members + key + name + state)
-Coding engine                   1,536 B     Reception cache + 8-packet queue
 Probe state                       648 B     32 responses × 20 B + control state
 ────────────────────────────────────────────────────────────────
-Protocol subtotal:             33,484 B     (~33 KB)
+Protocol subtotal:             28,316 B     (~28 KB)
 
 Application buffers:
   Display framebuffer           1,024 B     128×64 / 8
@@ -2631,7 +2599,6 @@ RREQ dedup               128    Time-based: entries >60s are purged on every ins
 Reverse routes           32     Time-based: entries >60s are purged.
 Packet dedup             128    Time-based: entries >60s are purged.
 Pending ACKs             8      Oldest entry dropped (after sending failure notification).
-TX queue                 16     Lowest priority dropped. Within same priority, oldest dropped.
 Fragment reassembly      4      Oldest incomplete reassembly dropped.
 Key cache                32     LRU by last-use. Evicted keys must be re-exchanged.
 Peer pubkey cache        64     LRU. Evicted entries relearned from beacons.
