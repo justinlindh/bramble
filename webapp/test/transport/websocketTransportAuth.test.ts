@@ -9,8 +9,10 @@ class MockWebSocket {
 
   readyState = MockWebSocket.OPEN;
   private listeners = new Map<string, Listener[]>();
+  public protocols?: string[];
 
-  constructor(_url: string) {
+  constructor(_url: string, protocols?: string[]) {
+    this.protocols = protocols;
     queueMicrotask(() => this.emit('open'));
   }
 
@@ -54,5 +56,18 @@ describe('WebSocketTransport auth close handling', () => {
     ws.emit('close', { code: 1008 });
 
     expect((transport as any).reconnectTimer).toBeNull();
+  });
+
+  it('offers the auth-token subprotocol plus bramble.v1 when a token is provided', async () => {
+    const transport = new WebSocketTransport('ws://node/ws', 'SECRET123');
+    await transport.connect();
+    expect(((transport as any).ws as MockWebSocket).protocols)
+      .toEqual(['bramble.v1.auth.SECRET123', 'bramble.v1']);
+  });
+
+  it('offers only bramble.v1 when no token is provided', async () => {
+    const transport = new WebSocketTransport('ws://node/ws');
+    await transport.connect();
+    expect(((transport as any).ws as MockWebSocket).protocols).toEqual(['bramble.v1']);
   });
 });
