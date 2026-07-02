@@ -1,0 +1,18 @@
+# Secure-build overlay (SEC-H4). APPLY ONLY on the sacrificial/production board:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.secure" build
+#
+# WARNING: enabling flash encryption burns eFuses on FIRST BOOT and is
+# IRREVERSIBLE. Never add these lines to the shared sdkconfig.defaults or a
+# normal dev flash will permanently lock itself. This file is inert until a
+# human deliberately builds and flashes with the overlay (USER DECISION D4).
+
+# Use the partition table that carries the encrypted nvs_keys partition.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.secure.csv"
+
+# Flash encryption, development mode (regenerable key, still an eFuse burn).
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
+
+# NVS encryption: XTS keys live in the flash-encryption-protected nvs_keys
+# partition; the identity/channel/auth-token NVS namespaces become ciphertext.
+CONFIG_NVS_ENCRYPTION=y
