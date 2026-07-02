@@ -3253,7 +3253,16 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
         s_channel_has_psk[s_num_channels] = true;
     } else {
         /* Generate random key */
-        crypto_random(ch->key, BRAMBLE_KEY_SIZE);
+        if (crypto_random(ch->key, BRAMBLE_KEY_SIZE) != 0) {
+            /* Entropy not ready (pre-RF window): do NOT install a zeroed key.
+             * Skip creating this channel; it is retried once an RF entropy
+             * source is up and the gate re-opens (SEC-L1). Release the mutex
+             * taken above before returning: this function's other early-return
+             * (MAX_CHANNELS, above) does the same. */
+            ESP_LOGW(TAG, "channel key gen deferred: entropy not ready");
+            xSemaphoreGive(s_state_mutex);
+            return -1;
+        }
         ch->epoch = 0;
         s_channel_has_psk[s_num_channels] = false;
     }

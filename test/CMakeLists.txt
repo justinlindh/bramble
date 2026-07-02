@@ -1030,3 +1030,13 @@ add_executable(test_ota_version
 target_include_directories(test_ota_version PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
 )
+
+# Entropy gate tests (SEC-L1)
+add_executable(test_crypto_entropy
+    test_crypto_entropy.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
+)
+target_include_directories(test_crypto_entropy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
