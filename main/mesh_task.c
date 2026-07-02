@@ -4,6 +4,7 @@
 
 #include "mesh_task.h"
 #include "util.h"
+#include "rreq_pseudonym.h"
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
@@ -1600,25 +1601,6 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
 
 /* ── Originator pseudonym helpers for RREQ privacy ─────────────────── */
 
-/**
- * Generate an ephemeral pseudonym for RREQ originator privacy.
- * Pseudonym = HMAC-SHA256(private_key, address || query_id)[0..3]
- * The query_id acts as a nonce, ensuring a different pseudonym per RREQ.
- */
-static uint32_t pseudonym_generate(const uint8_t *private_key, uint32_t address, uint32_t query_id) {
-    uint8_t input[8];
-    memcpy(input, &address, 4);
-    memcpy(input + 4, &query_id, 4);
-
-    uint8_t hmac_out[32];
-    crypto_hmac_sha256(private_key, BRAMBLE_KEY_SIZE, input, sizeof(input), hmac_out);
-
-    /* Truncate to 4 bytes (same size as Bramble address) */
-    uint32_t pseudonym;
-    memcpy(&pseudonym, hmac_out, 4);
-    return pseudonym;
-}
-
 /* No pseudonym lookup table exists: RREP correlation runs on query_ids in
  * the pending-discovery table, and every attempt (first try or retry) gets a
  * fresh query_id, so its pseudonym is re-derived on demand and never stored.
@@ -2391,7 +2373,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                              pd->dest_addr, pd->attempts, retry_query,
                              discovery_hop_limit_for_attempt(pd->attempts));
 
-                    uint32_t enc_src = pseudonym_generate(s_identity->private_key,
+                    uint32_t enc_src = rreq_pseudonym_generate(s_identity->private_key,
                                                           s_identity->address,
                                                           retry_query);
 
@@ -2987,7 +2969,7 @@ static int initiate_discovery(uint32_t dest_addr) {
      *
      * Nothing stores the pseudonym: RREPs are correlated by query_id via the
      * pending-discovery table, which remembers every attempt's query_id. */
-    uint32_t pseudonym = pseudonym_generate(s_identity->private_key,
+    uint32_t pseudonym = rreq_pseudonym_generate(s_identity->private_key,
                                              s_identity->address,
                                              query_id);
 

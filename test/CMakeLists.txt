@@ -1078,3 +1078,16 @@ add_executable(test_secure_nvs
 target_include_directories(test_secure_nvs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
+
+# RREQ pseudonym derivation (extracted from mesh_task.c; DES-12)
+add_executable(test_rreq_pseudonym
+    test_rreq_pseudonym.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rreq_pseudonym.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_rreq_pseudonym PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_rreq_pseudonym ssl crypto)
