@@ -762,28 +762,46 @@ void app_main(void)
         ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, NULL);
     nvs_sec_cfg_t sec_cfg;
     nvs_init_action_t plan;
+    esp_err_t fail_err = ESP_ERR_NOT_FOUND;
+    bool keys_cfg_ok = false;
+    bool secure_init_ok = false;
     ret = ESP_OK;
     if (keys_part == NULL) {
-        plan = nvs_init_plan(true, false, false);
+        plan = nvs_init_plan(true, false, false, false);
     } else {
         esp_err_t kret = nvs_flash_read_security_cfg(keys_part, &sec_cfg);
         if (kret == ESP_ERR_NVS_KEYS_NOT_INITIALIZED) {
             kret = nvs_flash_generate_keys(keys_part, &sec_cfg);
         }
-        esp_err_t sret = (kret == ESP_OK) ? nvs_flash_secure_init(&sec_cfg) : kret;
-        plan = nvs_init_plan(true, true, sret == ESP_OK);
-        ret = sret;
+        keys_cfg_ok = (kret == ESP_OK);
+        fail_err = kret;
+        /* Only call secure_init once the keys layer itself is confirmed
+         * valid: a corrupt/unreadable keys partition must fail closed, not
+         * fall through with a possibly-uninitialized sec_cfg. */
+        if (keys_cfg_ok) {
+            ret = nvs_flash_secure_init(&sec_cfg);
+            secure_init_ok = (ret == ESP_OK);
+        }
+        plan = nvs_init_plan(true, true, keys_cfg_ok, secure_init_ok);
     }
     switch (plan) {
         case NVS_INIT_FAIL:
-            ESP_LOGE(TAG, "nvs_keys partition missing on an encryption build");
-            ESP_ERROR_CHECK(ESP_ERR_NOT_FOUND);
+            /* Fail closed: a missing keys partition, or any keys-layer
+             * read/generate failure (corrupt keys partition, flash error),
+             * must abort rather than erase the main NVS partition. Erasing
+             * here would wipe the device on a transient fault and re-wipe
+             * on every boot if the fault persists. */
+            ESP_LOGE(TAG, "Secure NVS keys unavailable (partition missing or unreadable)");
+            ESP_ERROR_CHECK(fail_err);
             break;
         case NVS_INIT_SECURE_ERASE:
-            /* Plaintext-to-encrypted migration: old entries are unreadable.
-             * Erase and re-init; identity + channels regenerate on next load
-             * and the device must be re-paired (documented in the migration
-             * note). Acceptable pre-alpha, first-party fleet. */
+            /* Keys are valid; only nvs_flash_secure_init itself failed to
+             * decrypt the main partition. This is the genuine plaintext-to-
+             * encrypted migration: old entries are unreadable. Erase and
+             * re-init with the same already-valid sec_cfg; identity +
+             * channels regenerate on next load and the device must be
+             * re-paired (documented in the migration note). Acceptable
+             * pre-alpha, first-party fleet. */
             ESP_LOGW(TAG, "Encrypted NVS unreadable (migration): erasing and reinitializing");
             ESP_ERROR_CHECK(nvs_flash_erase());
             ret = nvs_flash_secure_init(&sec_cfg);
