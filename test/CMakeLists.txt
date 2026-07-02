@@ -1049,3 +1049,13 @@ add_executable(test_ble_redact
 target_include_directories(test_ble_redact PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
+
+# WS credential parser: header-only auth, no query string (NEW-SEC-6)
+add_executable(test_ws_auth_credential
+    test_ws_auth_credential.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_auth_credential.c
+)
+target_include_directories(test_ws_auth_credential PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
