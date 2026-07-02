@@ -5,7 +5,11 @@ set(CMAKE_C_STANDARD 11)
 add_compile_options(-Wall -Wextra -Werror -fsanitize=address -fno-omit-frame-pointer)
 add_link_options(-fsanitize=address)
 
-set(OPENSSL_ROOT "/home/linuxbrew/.linuxbrew/opt/openssl@3")
+# Locate OpenSSL portably (was hardcoded to a linuxbrew path; DES-19).
+# OPENSSL_ROOT is derived from the discovered include dir so the existing
+# ${OPENSSL_ROOT}/include and ${OPENSSL_ROOT}/lib references keep working.
+find_package(OpenSSL REQUIRED)
+get_filename_component(OPENSSL_ROOT "${OPENSSL_INCLUDE_DIR}" DIRECTORY)
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/unity
