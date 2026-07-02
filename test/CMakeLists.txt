@@ -1059,3 +1059,12 @@ add_executable(test_ws_auth_credential
 target_include_directories(test_ws_auth_credential PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
+
+# Secure partition table contract (SEC-H4)
+add_executable(test_secure_partitions
+    test_secure_partitions.c
+    unity/unity.c
+)
+target_compile_definitions(test_secure_partitions PRIVATE
+    SECURE_PARTITIONS_CSV="${CMAKE_CURRENT_SOURCE_DIR}/../partitions.secure.csv"
+)
