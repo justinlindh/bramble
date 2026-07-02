@@ -8,13 +8,13 @@ import styles from './ConnectionOverlay.module.css';
 const WIFI_IP_KEY = 'bramble_wifi_ip';
 const WIFI_TOKEN_KEY = 'bramble_wifi_token';
 
-export function buildWifiUrl(ip: string, protocol: string, host: string, token?: string): string {
+export function buildWifiUrl(ip: string, protocol: string, host: string, _token?: string): string {
   let url: string;
   if (ip.includes('://')) url = ip;
   else if (protocol === 'https:') url = `wss://${host}/proxy/${ip}`;
   else url = `ws://${ip}/ws`;
 
-  if (token) url += `${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  // Token is NOT embedded in the URL (NEW-SEC-6): it rides the WS subprotocol.
   return url;
 }
 
