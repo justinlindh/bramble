@@ -6,6 +6,7 @@
 #include "util.h"
 #include "rreq_pseudonym.h"
 #include "beacon_policy_calc.h"
+#include "probe_results.h"
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
@@ -2200,16 +2201,6 @@ static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
 #define PROBE_SWEEP_ROUNDS 3
 #define PROBE_SWEEP_INTERVAL_MS 350
 #define PROBE_COLLECTION_WINDOW_MS 5000
-#define MAX_PROBE_RESULTS 16
-
-typedef struct {
-    uint32_t addr;
-    uint8_t  hops;
-    int16_t  rssi;
-    int8_t   snr;
-    uint32_t latency_ms;
-    uint8_t  seen_round_mask;
-} probe_result_t;
 
 static uint32_t       s_probe_id;
 static uint32_t       s_probe_sent_ms;
@@ -3557,30 +3548,8 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     uint32_t latency = now_ms() - s_probe_sent_ms;
 
     /* Upsert by responder addr: one logical row per responder. */
-    int idx = -1;
-    for (int i = 0; i < s_probe_result_count; i++) {
-        if (s_probe_results[i].addr == resp_addr) {
-            idx = i;
-            break;
-        }
-    }
-
-    if (idx >= 0) {
-        probe_result_t *r = &s_probe_results[idx];
-        r->hops = hops;
-        r->latency_ms = latency; /* latest latency */
-        if (rssi > r->rssi) r->rssi = rssi; /* best RSSI */
-        if (snr > r->snr) r->snr = snr;      /* best SNR */
-        r->seen_round_mask |= (uint8_t)(1u << (probe_round - 1));
-    } else if (s_probe_result_count < MAX_PROBE_RESULTS) {
-        probe_result_t *r = &s_probe_results[s_probe_result_count++];
-        r->addr = resp_addr;
-        r->hops = hops;
-        r->rssi = rssi;
-        r->snr = snr;
-        r->latency_ms = latency;
-        r->seen_round_mask = (uint8_t)(1u << (probe_round - 1));
-    }
+    probe_results_upsert(s_probe_results, &s_probe_result_count, MAX_PROBE_RESULTS,
+                         resp_addr, hops, rssi, snr, latency, probe_round);
 
     char buf[12];
     ESP_LOGI(TAG, "PROBE ACK RX from=%s round=%u hops=%u rssi=%d snr=%d latency=%" PRIu32 "ms pid=%08" PRIX32,

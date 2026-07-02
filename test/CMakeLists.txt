@@ -1101,3 +1101,13 @@ add_executable(test_beacon_policy_calc
 target_include_directories(test_beacon_policy_calc PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
+
+# Probe result aggregation (extracted from mesh_task.c; DES-12)
+add_executable(test_probe_results
+    test_probe_results.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/probe_results.c
+)
+target_include_directories(test_probe_results PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
