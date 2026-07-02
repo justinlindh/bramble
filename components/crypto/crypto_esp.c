@@ -8,6 +8,7 @@
 #include "mbedtls/hkdf.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/ecp.h"
+#include "mbedtls/platform_util.h"
 #include "esp_random.h"
 #include "esp_log.h"
 #include "crypto_entropy.h"
@@ -131,6 +132,10 @@ int crypto_generate_identity(bramble_identity_t* id) {
         return -1;
     }
     memcpy(id->private_key, priv, sizeof(priv));
+    /* Wipe the stack scratch now that the key has been committed to id.
+     * mbedtls_platform_zeroize (not memset) so the compiler cannot optimize
+     * the wipe away as a dead store to a about-to-go-out-of-scope buffer. */
+    mbedtls_platform_zeroize(priv, sizeof(priv));
     // Clamp per X25519 spec
     id->private_key[0] &= 248;
     id->private_key[31] &= 127;
