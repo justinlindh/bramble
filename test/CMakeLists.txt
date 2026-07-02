@@ -1091,3 +1091,13 @@ target_include_directories(test_rreq_pseudonym PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_link_libraries(test_rreq_pseudonym ssl crypto)
+
+# Beacon policy pure kernels (extracted from mesh_task.c; DES-12)
+add_executable(test_beacon_policy_calc
+    test_beacon_policy_calc.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/beacon_policy_calc.c
+)
+target_include_directories(test_beacon_policy_calc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
