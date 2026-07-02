@@ -1040,3 +1040,12 @@ add_executable(test_crypto_entropy
 target_include_directories(test_crypto_entropy PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
+
+# BLE log redaction predicate (NEW-SEC-5)
+add_executable(test_ble_redact
+    test_ble_redact.c
+    unity/unity.c
+)
+target_include_directories(test_ble_redact PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
