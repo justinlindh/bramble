@@ -2015,55 +2015,41 @@ static void record_churn_event(uint32_t t, uint8_t neighbor_count) {
  * Returns new interval in milliseconds.
  */
 static uint32_t compute_adaptive_beacon_interval(uint32_t t, uint8_t neighbor_count) {
-    if (!s_beacon_policy.enabled || s_beacon_policy.mode != BEACON_MODE_ADAPTIVE) {
-        /* Fixed mode: return base interval */
+    uint8_t churn = beacon_churn_count(s_churn_history, MAX_CHURN_HISTORY, t,
+                                       s_beacon_policy.churn_window_ms);
+
+    beacon_interval_decision_t d = beacon_interval_decide(
+        s_beacon_policy.enabled,
+        s_beacon_policy.mode == BEACON_MODE_ADAPTIVE,
+        s_beacon_policy.base_interval_ms,
+        s_beacon_policy.min_interval_ms,
+        s_beacon_policy.max_interval_ms,
+        s_beacon_policy.dense_threshold,
+        s_beacon_policy.churn_threshold,
+        neighbor_count, churn);
+
+    if (!d.adaptive_active) {
         s_beacon_status.in_backoff = false;
-        return s_beacon_policy.base_interval_ms;
+        return d.interval_ms;
     }
-    
-    /* Calculate churn (neighbor changes) */
-    uint8_t churn = beacon_churn_count(s_churn_history, MAX_CHURN_HISTORY, t, s_beacon_policy.churn_window_ms);
+
     s_beacon_status.churn_events = churn;
     s_beacon_status.neighbor_count = neighbor_count;
-    
+
     beacon_policy_mode_t prev_mode = s_beacon_status.active_mode;
-    uint32_t interval = s_beacon_policy.base_interval_ms;
-    bool backoff = false;
-    
-    /* Dense mesh detection: increase interval to reduce airtime */
-    if (neighbor_count >= s_beacon_policy.dense_threshold) {
-        /* Dense mode: back off to max interval */
-        interval = s_beacon_policy.max_interval_ms;
-        backoff = true;
-        s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
-    }
-    /* Churn detection: temporarily increase beacon rate */
-    else if (churn >= s_beacon_policy.churn_threshold) {
-        /* Churn mode: increase beacon rate to help convergence */
-        interval = s_beacon_policy.min_interval_ms;
-        backoff = false;
-        s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
-    }
-    /* Stable small mesh: use baseline */
-    else {
-        interval = s_beacon_policy.base_interval_ms;
-        backoff = false;
-        s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
-    }
-    
-    s_beacon_status.in_backoff = backoff;
-    s_beacon_status.current_interval_ms = interval;
-    
-    /* Log mode transitions */
-    if (prev_mode != s_beacon_status.active_mode || 
+    s_beacon_status.active_mode = BEACON_MODE_ADAPTIVE;
+    s_beacon_status.in_backoff = d.in_backoff ? true : false;
+    s_beacon_status.current_interval_ms = d.interval_ms;
+
+    if (prev_mode != s_beacon_status.active_mode ||
         (s_beacon_status.last_transition_ms == 0 && s_beacon_policy.enabled)) {
         s_beacon_status.last_transition_ms = t;
         ESP_LOGI(TAG, "Beacon policy: neighbors=%u churn=%u interval=%lums %s",
-                 neighbor_count, churn, (unsigned long)interval,
-                 backoff ? "DENSE" : (interval < s_beacon_policy.base_interval_ms ? "CHURN" : "STABLE"));
+                 neighbor_count, churn, (unsigned long)d.interval_ms,
+                 d.in_backoff ? "DENSE" : (d.interval_ms < s_beacon_policy.base_interval_ms ? "CHURN" : "STABLE"));
     }
-    
-    return interval;
+
+    return d.interval_ms;
 }
 
 int mesh_set_beacon_policy(const beacon_policy_config_t *config) {
