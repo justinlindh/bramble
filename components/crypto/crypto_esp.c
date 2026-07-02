@@ -10,6 +10,7 @@
 #include "mbedtls/ecp.h"
 #include "esp_random.h"
 #include "esp_log.h"
+#include "crypto_entropy.h"
 #include <string.h>
 
 /* RNG callback for mbedtls_ecp_mul (required for side-channel blinding) */
@@ -80,13 +81,9 @@ int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm,
 }
 
 int crypto_random(uint8_t* buf, size_t len) {
-    for (size_t i = 0; i < len; i += 4) {
-        uint32_t r = esp_random();
-        size_t remaining = len - i;
-        size_t to_copy = remaining < 4 ? remaining : 4;
-        memcpy(buf + i, &r, to_copy);
-    }
-    return 0;
+    /* Fail closed behind the entropy gate; zeroes buf and returns -1 when the
+     * gate is shut (SEC-L1). See crypto_entropy.c. */
+    return crypto_entropy_fill(buf, len, esp_random);
 }
 
 int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
@@ -124,7 +121,10 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
 }
 
 int crypto_generate_identity(bramble_identity_t* id) {
-    crypto_random(id->private_key, 32);
+    if (crypto_random(id->private_key, 32) != 0) {
+        /* Entropy gate shut: refuse rather than clamp-and-use a zeroed key. */
+        return -1;
+    }
     // Clamp per X25519 spec
     id->private_key[0] &= 248;
     id->private_key[31] &= 127;

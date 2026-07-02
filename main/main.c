@@ -14,6 +14,8 @@
 #include "button.h"
 #include "ui.h"
 #include "crypto.h"
+#include "crypto_entropy.h"
+#include "bootloader_random.h"
 #include "identity.h"
 #include "mesh_task.h"
 #include "cli.h"
@@ -764,6 +766,13 @@ void app_main(void)
     ota_rollback_note_boot();
 
     /* Load or generate persistent identity */
+    /* Seed a hardware entropy source before any key generation. esp_random()
+     * is not cryptographically secure until RF (Wi-Fi/BT) is up, and identity
+     * generation runs long before that. bootloader_random_enable() turns on the
+     * SAR-ADC entropy source; it MUST be disabled again before the first app
+     * ADC user (battery_init, ~line 832) which shares the SAR-ADC. */
+    bootloader_random_enable();
+    crypto_entropy_set_ready(true);
     ESP_LOGI(TAG, "=== BOOT STAGE: identity_load ===");
     if (identity_load(&g_identity) == 0) {
         ESP_LOGI(TAG, "Identity loaded from NVS");
@@ -782,6 +791,13 @@ void app_main(void)
     my_addr = g_identity.address;
     ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")",
              my_addr, g_identity.pubkey_hash);
+
+    /* Identity generated. Release the bootloader RNG before the battery ADC
+     * (SAR-ADC is shared) and CLOSE the gate: there is no strong entropy source
+     * again until an RF subsystem comes up, so crypto_random() must fail closed
+     * in this window rather than emit weak esp_random() bytes. */
+    bootloader_random_disable();
+    crypto_entropy_set_ready(false);
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -923,6 +939,8 @@ void app_main(void)
         show_boot_status("WiFi: starting...");
 #endif
         if (wifi_manager_init(my_addr) == 0) {
+            /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
+            crypto_entropy_set_ready(true);
             const char *ip = wifi_manager_get_ip();
             if (ip[0] != '\0') {
                 ESP_LOGI(TAG, "WiFi ready: %s", ip);
@@ -989,6 +1007,8 @@ void app_main(void)
         show_boot_status("BLE: starting...");
 #endif
         if (ble_server_init() == 0) {
+            /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
+            crypto_entropy_set_ready(true);
             ble_server_start();
             /* Load (or first-boot generate) the auth token now that the BT
              * controller is running: esp_random() needs an active RF
