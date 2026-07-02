@@ -5,6 +5,7 @@
 #include "mesh_task.h"
 #include "util.h"
 #include "rreq_pseudonym.h"
+#include "beacon_policy_calc.h"
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
@@ -189,11 +190,6 @@ static beacon_policy_status_t s_beacon_status = {
     .last_transition_ms = 0,
     .in_backoff = false,
 };
-#define MAX_CHURN_HISTORY 16
-typedef struct {
-    uint32_t timestamp;
-    uint8_t  neighbor_count;
-} churn_sample_t;
 static churn_sample_t s_churn_history[MAX_CHURN_HISTORY];
 static int s_churn_history_idx = 0;
 
@@ -2015,30 +2011,6 @@ static void record_churn_event(uint32_t t, uint8_t neighbor_count) {
 }
 
 /**
- * Calculate churn events in the configured time window.
- */
-static uint8_t calculate_churn_events(uint32_t t) {
-    uint8_t events = 0;
-    uint8_t last_count = 0xff;
-    bool first = true;
-    
-    /* Count neighbor count changes within the window */
-    for (int i = 0; i < MAX_CHURN_HISTORY; i++) {
-        if (s_churn_history[i].timestamp == 0) continue;
-        if ((t - s_churn_history[i].timestamp) > s_beacon_policy.churn_window_ms) continue;
-        
-        if (first) {
-            last_count = s_churn_history[i].neighbor_count;
-            first = false;
-        } else if (s_churn_history[i].neighbor_count != last_count) {
-            events++;
-            last_count = s_churn_history[i].neighbor_count;
-        }
-    }
-    return events;
-}
-
-/**
  * Compute adaptive beacon interval based on current mesh conditions.
  * Returns new interval in milliseconds.
  */
@@ -2050,7 +2022,7 @@ static uint32_t compute_adaptive_beacon_interval(uint32_t t, uint8_t neighbor_co
     }
     
     /* Calculate churn (neighbor changes) */
-    uint8_t churn = calculate_churn_events(t);
+    uint8_t churn = beacon_churn_count(s_churn_history, MAX_CHURN_HISTORY, t, s_beacon_policy.churn_window_ms);
     s_beacon_status.churn_events = churn;
     s_beacon_status.neighbor_count = neighbor_count;
     
