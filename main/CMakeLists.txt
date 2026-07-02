@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c" "mesh_task.c" "broadcast_delivery_receipt.c" "delivery_event_ring.c" "cli.c" "rpc_methods.c" "ws_server.c" "ws_origin.c" "ws_auth_credential.c" "secure_nvs.c" "board.c" "util.c" "rreq_pseudonym.c" "beacon_policy_calc.c"
+    SRCS "main.c" "mesh_task.c" "broadcast_delivery_receipt.c" "delivery_event_ring.c" "cli.c" "rpc_methods.c" "ws_server.c" "ws_origin.c" "ws_auth_credential.c" "secure_nvs.c" "board.c" "util.c" "rreq_pseudonym.c" "beacon_policy_calc.c" "probe_results.c"
          "rerr_ack_fastfail.c"
     INCLUDE_DIRS "."
     REQUIRES nvs_keys nvs_flash esp_wifi esp_event driver esp_timer
