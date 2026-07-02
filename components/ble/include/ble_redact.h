@@ -11,8 +11,6 @@
  * demote post-auth body logs to DEBUG, since authenticated bodies can still
  * carry secrets (e.g. bramble.setAuthToken params).
  */
-static inline bool ble_rpc_body_loggable(bool authenticated) {
-    return authenticated;
-}
+static inline bool ble_rpc_body_loggable(bool authenticated) { return authenticated; }
 
 #endif /* BRAMBLE_BLE_REDACT_H */
