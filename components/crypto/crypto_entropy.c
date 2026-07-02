@@ -1,7 +1,9 @@
 #include "crypto_entropy.h"
 #include <string.h>
 
-/* Platform-independent so it compiles into both the device and host builds. */
+/* Platform-independent so it compiles into both the device and host builds.
+ * Plain bool, no lock: main() flips it at well-defined boot/RF-transition
+ * points on CPU0, while the mesh task (pinned to CPU1) only reads it. */
 static bool s_entropy_ready = false;
 
 void crypto_entropy_set_ready(bool ready) { s_entropy_ready = ready; }
