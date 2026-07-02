@@ -22,6 +22,7 @@ int probe_reply_queue_insert(pending_probe_reply_t *q, int cap,
     }
     if (slot < 0) return -1;
     pending_probe_reply_t *item = &q[slot];
+    if (wire_len > sizeof(item->buf)) return -1;
     memset(item, 0, sizeof(*item));
     item->used = true;
     memcpy(item->buf, buf, wire_len);

@@ -106,6 +106,17 @@ void test_queue_apply_sent_final_frees(void) {
     TEST_ASSERT_FALSE(q[0].used);   /* third send completes and frees the slot */
 }
 
+void test_queue_insert_oversized_wire_len_rejected(void) {
+    pending_probe_reply_t q[PROBE_REPLY_QUEUE_CAPACITY];
+    memset(q, 0, sizeof(q));
+    uint8_t buf[32] = {0};
+    /* q[0].buf is uint8_t[20]; a wire_len beyond that must be rejected
+     * rather than overflowing the fixed-size slot buffer. */
+    int slot = probe_reply_queue_insert(q, PROBE_REPLY_QUEUE_CAPACITY, buf, sizeof(buf), 3, 100u);
+    TEST_ASSERT_EQUAL_INT(-1, slot);
+    TEST_ASSERT_FALSE(q[0].used);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_slot_ms_ranges);
@@ -119,5 +130,6 @@ int main(void) {
     RUN_TEST(test_queue_apply_denied_frees_slot);
     RUN_TEST(test_queue_apply_sent_retry_reschedules);
     RUN_TEST(test_queue_apply_sent_final_frees);
+    RUN_TEST(test_queue_insert_oversized_wire_len_rejected);
     return UNITY_END();
 }
