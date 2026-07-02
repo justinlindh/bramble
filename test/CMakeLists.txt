@@ -1111,3 +1111,13 @@ add_executable(test_probe_results
 target_include_directories(test_probe_results PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
+
+# Probe reply schedule kernel (DES-15)
+add_executable(test_probe_reply
+    test_probe_reply.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/probe_reply.c
+)
+target_include_directories(test_probe_reply PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
