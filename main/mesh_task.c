@@ -7,6 +7,7 @@
 #include "rreq_pseudonym.h"
 #include "beacon_policy_calc.h"
 #include "probe_results.h"
+#include "probe_reply.h"
 #include "broadcast_delivery_receipt.h"
 #include "rpc_dispatcher.h"
 #include "radio.h"
@@ -108,6 +109,7 @@ static mesh_shared_state_t s_shared;
 
 typedef enum {
     MESH_EVT_RECEIPT_TX = 1,
+    MESH_EVT_PROBE_REPLY_TX = 2,
 } mesh_event_type_t;
 
 typedef struct {
@@ -123,6 +125,9 @@ typedef struct {
 
 static pending_receipt_t s_receipt_queue[RECEIPT_QUEUE_CAPACITY];
 static esp_timer_handle_t s_receipt_timer;
+
+static pending_probe_reply_t s_probe_reply_queue[PROBE_REPLY_QUEUE_CAPACITY];
+static esp_timer_handle_t s_probe_reply_timer;
 
 static delivery_event_ring_t *s_delivery_event_ring;
 
@@ -242,6 +247,10 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
 static void mesh_schedule_next_receipt_timer(void);
 static void mesh_process_receipt_tx_event(void);
 static void mesh_receipt_timer_cb(void *arg);
+static void mesh_schedule_next_probe_reply_timer(void);
+static void mesh_process_probe_reply_tx_event(void);
+static void mesh_probe_reply_timer_cb(void *arg);
+static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t address);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
 extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
@@ -1098,6 +1107,74 @@ static void mesh_receipt_timer_cb(void *arg) {
     mesh_event_type_t evt = MESH_EVT_RECEIPT_TX;
     if (xQueueSend(s_mesh_event_queue, &evt, 0) != pdTRUE) {
         ESP_EARLY_LOGW(TAG, "mesh event queue full; dropped receipt timer event");
+    }
+}
+
+static void mesh_schedule_next_probe_reply_timer(void) {
+    if (!s_probe_reply_timer) return;
+
+    uint32_t earliest_due = 0;
+    if (!probe_reply_queue_earliest_due(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY, &earliest_due)) {
+        esp_timer_stop(s_probe_reply_timer);
+        return;
+    }
+
+    uint32_t t = now_ms();
+    uint32_t delay_ms = (earliest_due <= t) ? 1u : (earliest_due - t);
+    esp_timer_stop(s_probe_reply_timer);
+    esp_err_t err = esp_timer_start_once(s_probe_reply_timer, (uint64_t)delay_ms * 1000ULL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to arm probe reply timer: %d", (int)err);
+    }
+}
+
+static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t address) {
+    uint32_t jitter_ms = esp_random() % 120u;                 /* +0..119, as before */
+    uint32_t initial_delay_ms = probe_reply_initial_delay_ms(address, jitter_ms);
+    uint32_t first_due_ms = probe_reply_attempt_due_ms(now_ms(), initial_delay_ms, 0);
+
+    int slot = probe_reply_queue_insert(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY,
+                                        buf, wire_len, PROBE_REPLY_ATTEMPTS, first_due_ms);
+    if (slot < 0) {
+        ESP_LOGW(TAG, "Probe reply queue full; dropping reply");
+        return;
+    }
+    mesh_schedule_next_probe_reply_timer();
+}
+
+static void mesh_process_probe_reply_tx_event(void) {
+    uint32_t t_now = now_ms();
+    int due_idx = probe_reply_queue_find_due(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY, t_now);
+    if (due_idx < 0) {
+        mesh_schedule_next_probe_reply_timer();
+        return;
+    }
+
+    pending_probe_reply_t *item = &s_probe_reply_queue[due_idx];
+
+    /* TX can block for CAD/LBT; feed the task WDT just before entering it. */
+    esp_task_wdt_reset();
+
+    int rc = mesh_tx(item->buf, item->wire_len, TX_KIND_PROBE_REPLY);
+
+    /* Deny-stop vs. sent-and-retry decision lives in the pure state machine.
+     * TX_GATE_ERR_BUDGET abandons the whole reply (first thing to shed);
+     * otherwise the send is counted and the next attempt is scheduled
+     * t_now + 140ms until attempts_total is reached. */
+    probe_reply_tx_result_t result =
+        (rc == TX_GATE_ERR_BUDGET) ? PROBE_REPLY_TX_DENIED : PROBE_REPLY_TX_SENT;
+    probe_reply_queue_apply_result(item, result, t_now);
+
+    mesh_schedule_next_probe_reply_timer();
+}
+
+static void mesh_probe_reply_timer_cb(void *arg) {
+    (void)arg;
+    if (!s_mesh_event_queue) return;
+
+    mesh_event_type_t evt = MESH_EVT_PROBE_REPLY_TX;
+    if (xQueueSend(s_mesh_event_queue, &evt, 0) != pdTRUE) {
+        ESP_EARLY_LOGW(TAG, "mesh event queue full; dropped probe reply timer event");
     }
 }
 
@@ -2532,6 +2609,8 @@ static void mesh_task(void *param) {
                 esp_task_wdt_reset();
                 if (mesh_evt == MESH_EVT_RECEIPT_TX) {
                     mesh_process_receipt_tx_event();
+                } else if (mesh_evt == MESH_EVT_PROBE_REPLY_TX) {
+                    mesh_process_probe_reply_tx_event();
                 }
             }
         }
@@ -3149,6 +3228,21 @@ void mesh_task_start(bramble_identity_t *identity) {
         return;
     }
 
+    memset(s_probe_reply_queue, 0, sizeof(s_probe_reply_queue));
+    s_probe_reply_timer = NULL;
+    esp_timer_create_args_t probe_reply_timer_args = {
+        .callback = mesh_probe_reply_timer_cb,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "probe_reply_timer",
+        .skip_unhandled_events = true,
+    };
+    esp_err_t probe_reply_timer_err = esp_timer_create(&probe_reply_timer_args, &s_probe_reply_timer);
+    if (probe_reply_timer_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create probe reply timer: %d", (int)probe_reply_timer_err);
+        return;
+    }
+
     /* Pin to CPU1 — leave CPU0 for UI/display */
     xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL,
                             MESH_TASK_PRIORITY, NULL, 1);
@@ -3469,25 +3563,16 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     buf[HEADER_SIZE + 4] = 1; /* hops = 1 for direct */
     buf[HEADER_SIZE + 5] = probe_round;
 
-    /* Deterministic slotting + bounded jitter for consistent separation among responders. */
-    uint32_t slot_ms = 300 + ((s_identity->address % 6) * 110);   /* 300..850 */
-    uint32_t jitter_ms = slot_ms + (esp_random() % 120);           /* +0..119 */
-    vTaskDelay(pdMS_TO_TICKS(jitter_ms));
+    /* Defer the reply burst (slot delay + jitter + 3 sends 140ms apart) onto
+     * the probe-reply timer/queue so the mesh task is never blocked (DES-15).
+     * Same slotting/jitter/spacing as before; only the blocking is removed. */
+    queue_probe_reply(buf, HEADER_SIZE + 6, s_identity->address);
 
-    /* Controlled retries without long tail. Deny behavior: stop the
-     * burst as soon as the budget denies; redundant replies are the
-     * first thing to shed under airtime pressure. */
-    for (int i = 0; i < 3; i++) {
-        if (mesh_tx(buf, HEADER_SIZE + 6, TX_KIND_PROBE_REPLY) == TX_GATE_ERR_BUDGET) break;
-        if (i < 2) vTaskDelay(pdMS_TO_TICKS(140));
-    }
-
-    ESP_LOGI(TAG, "PROBE ACK TX pid=%08" PRIX32 " round=%u to=%s from=%s hops=1 jitter=%" PRIu32 "ms x3",
+    ESP_LOGI(TAG, "PROBE ACK QUEUED pid=%08" PRIX32 " round=%u to=%s from=%s hops=1",
              header.packet_id,
              (unsigned)probe_round,
              addr_hex(src_addr, src_buf, sizeof(src_buf)),
-             addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
-             jitter_ms);
+             addr_hex(s_identity->address, me_buf, sizeof(me_buf)));
 
     /* Forward probe if hop limit allows */
     if (header.hop_limit > 1) {
