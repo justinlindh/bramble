@@ -813,7 +813,14 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     if (identity_check_collision(s_identity, beacon.src_addr, beacon.pubkey_hash)) {
         ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 " — regenerating identity!", beacon.src_addr);
         /* Regenerate keypair and persist to NVS */
-        identity_generate_and_save(s_identity);
+        if (identity_generate_and_save(s_identity) != 0) {
+            /* Entropy not ready (pre-RF window, SEC-L1): identity_generate_and_save
+             * refused to persist and left s_identity fully untouched (see
+             * crypto_generate_identity). Do NOT report a new identity that was
+             * never actually generated. */
+            ESP_LOGW(TAG, "identity regeneration deferred: entropy not ready");
+            return;
+        }
         ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
         /* Notify webapp */
         cJSON *params = cJSON_CreateObject();

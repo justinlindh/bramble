@@ -121,10 +121,16 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
 }
 
 int crypto_generate_identity(bramble_identity_t* id) {
-    if (crypto_random(id->private_key, 32) != 0) {
+    /* Draw into a scratch buffer first: crypto_random zeroes its destination
+     * in place when the entropy gate is shut, so drawing straight into
+     * id->private_key would clobber a caller's existing identity even on
+     * failure (SEC-L1). Only commit into id once the draw has succeeded. */
+    uint8_t priv[32];
+    if (crypto_random(priv, sizeof(priv)) != 0) {
         /* Entropy gate shut: refuse rather than clamp-and-use a zeroed key. */
         return -1;
     }
+    memcpy(id->private_key, priv, sizeof(priv));
     // Clamp per X25519 spec
     id->private_key[0] &= 248;
     id->private_key[31] &= 127;
