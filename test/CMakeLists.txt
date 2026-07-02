@@ -1068,3 +1068,13 @@ add_executable(test_secure_partitions
 target_compile_definitions(test_secure_partitions PRIVATE
     SECURE_PARTITIONS_CSV="${CMAKE_CURRENT_SOURCE_DIR}/../partitions.secure.csv"
 )
+
+# Secure NVS init decision (SEC-H4)
+add_executable(test_secure_nvs
+    test_secure_nvs.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/secure_nvs.c
+)
+target_include_directories(test_secure_nvs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)

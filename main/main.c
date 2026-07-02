@@ -16,6 +16,8 @@
 #include "crypto.h"
 #include "crypto_entropy.h"
 #include "bootloader_random.h"
+#include "secure_nvs.h"
+#include "esp_partition.h"
 #include "identity.h"
 #include "mesh_task.h"
 #include "cli.h"
@@ -751,15 +753,56 @@ void app_main(void)
     }
 
     /* NVS init */
-    ESP_LOGI(TAG, "=== BOOT STAGE: nvs_flash_init ===");
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS partition truncated/new version — erasing and reinitializing");
+    ESP_LOGI(TAG, "=== BOOT STAGE: nvs init ===");
+    esp_err_t ret;
+#ifdef CONFIG_NVS_ENCRYPTION
+    /* SEC-H4: identity/channel/auth-token NVS is encrypted at rest. Keys live
+     * in the flash-encryption-protected nvs_keys partition. */
+    const esp_partition_t* keys_part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, NULL);
+    nvs_sec_cfg_t sec_cfg;
+    nvs_init_action_t plan;
+    ret = ESP_OK;
+    if (keys_part == NULL) {
+        plan = nvs_init_plan(true, false, false);
+    } else {
+        esp_err_t kret = nvs_flash_read_security_cfg(keys_part, &sec_cfg);
+        if (kret == ESP_ERR_NVS_KEYS_NOT_INITIALIZED) {
+            kret = nvs_flash_generate_keys(keys_part, &sec_cfg);
+        }
+        esp_err_t sret = (kret == ESP_OK) ? nvs_flash_secure_init(&sec_cfg) : kret;
+        plan = nvs_init_plan(true, true, sret == ESP_OK);
+        ret = sret;
+    }
+    switch (plan) {
+        case NVS_INIT_FAIL:
+            ESP_LOGE(TAG, "nvs_keys partition missing on an encryption build");
+            ESP_ERROR_CHECK(ESP_ERR_NOT_FOUND);
+            break;
+        case NVS_INIT_SECURE_ERASE:
+            /* Plaintext-to-encrypted migration: old entries are unreadable.
+             * Erase and re-init; identity + channels regenerate on next load
+             * and the device must be re-paired (documented in the migration
+             * note). Acceptable pre-alpha, first-party fleet. */
+            ESP_LOGW(TAG, "Encrypted NVS unreadable (migration): erasing and reinitializing");
+            ESP_ERROR_CHECK(nvs_flash_erase());
+            ret = nvs_flash_secure_init(&sec_cfg);
+            ESP_ERROR_CHECK(ret);
+            break;
+        case NVS_INIT_SECURE:
+            break; /* ret already ESP_OK */
+        case NVS_INIT_PLAIN:
+            break; /* unreachable under CONFIG_NVS_ENCRYPTION */
+    }
+#else
+    ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS partition truncated/new version: erasing and reinitializing");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+#endif
     ESP_LOGI(TAG, "NVS initialized");
 
     /* Raise the OTA anti-rollback floor to the running version if higher */
