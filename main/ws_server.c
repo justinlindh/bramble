@@ -1,6 +1,7 @@
 #include "ws_server.h"
 #include "ct_strcmp.h"
 #include "ws_origin.h"
+#include "ws_auth_credential.h"
 #include "rpc_dispatcher.h"
 #include "rpc_auth.h"
 #include "wifi_manager.h"
@@ -128,49 +129,27 @@ typedef enum {
 
 static ws_auth_result_t auth_eval(httpd_req_t* req) {
     /* Explicit opt-out (auth_off in NVS) loads as an empty token. The
-     * token-unavailable failure mode does NOT take this branch: that
-     * state fails closed below. */
+     * token-unavailable failure mode does NOT take this branch: that state
+     * fails closed below. */
     if (!s_token_unavailable && s_auth_token[0] == '\0')
         return WS_AUTH_OK;
 
-    /* Preferred path: Authorization: Bearer <token> */
-    size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
-    if (hdr_len > 0 && hdr_len < AUTH_TOKEN_MAX + 16) {
-        char* hdr = malloc(hdr_len + 1);
-        if (hdr && httpd_req_get_hdr_value_str(req, "Authorization", hdr, hdr_len + 1) == ESP_OK) {
-            const char* prefix = "Bearer ";
-            size_t prefix_len = strlen(prefix);
-            if (strncmp(hdr, prefix, prefix_len) == 0) {
-                const char* tok = hdr + prefix_len;
-                bool ok = !s_token_unavailable && ct_strcmp(tok, s_auth_token) == 0;
-                free(hdr);
-                return ok ? WS_AUTH_OK : WS_AUTH_BAD;
-            }
-        }
-        free(hdr);
-        /* An Authorization header that is not Bearer counts as bad creds */
-        return WS_AUTH_BAD;
+    /* Header-based credentials only. The ?token= query-string path was removed
+     * (NEW-SEC-6): URLs leak via logs, proxies, and history. Browsers use the
+     * Sec-WebSocket-Protocol subprotocol offer instead. */
+    char authz[AUTH_TOKEN_MAX + 16] = {0};
+    char subproto[AUTH_TOKEN_MAX + 32] = {0};
+    (void)httpd_req_get_hdr_value_str(req, "Authorization", authz, sizeof(authz));
+    (void)httpd_req_get_hdr_value_str(req, "Sec-WebSocket-Protocol", subproto, sizeof(subproto));
+
+    char token[AUTH_TOKEN_MAX] = {0};
+    if (!ws_auth_extract_token(authz[0] ? authz : NULL, subproto[0] ? subproto : NULL, token,
+                               sizeof(token))) {
+        return WS_AUTH_NO_CREDS;
     }
 
-    /* Browser path: the browser WebSocket API cannot set request
-     * headers, so ?token= is the ONLY way a web page can authenticate.
-     * Non-browser clients should prefer the Authorization header because
-     * URLs leak via logs and history; for browsers this is the supported
-     * mechanism, not a deprecated one. */
-    size_t qlen = httpd_req_get_url_query_len(req);
-    if (qlen > 0 && qlen < 256) {
-        char* query = malloc(qlen + 1);
-        char token[AUTH_TOKEN_MAX] = {0};
-        if (query && httpd_req_get_url_query_str(req, query, qlen + 1) == ESP_OK &&
-            httpd_query_key_value(query, "token", token, sizeof(token)) == ESP_OK) {
-            bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
-            free(query);
-            return ok ? WS_AUTH_OK : WS_AUTH_BAD;
-        }
-        free(query);
-    }
-
-    return WS_AUTH_NO_CREDS;
+    bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
+    return ok ? WS_AUTH_OK : WS_AUTH_BAD;
 }
 
 
@@ -689,6 +668,7 @@ static const httpd_uri_t ws_uri = {
     .handler = ws_handler,
     .is_websocket = true,
     .handle_ws_control_frames = true,
+    .supported_subprotocol = "bramble.v1",
 };
 
 /* ── Public API ──────────────────────────────────────────────────────── */
