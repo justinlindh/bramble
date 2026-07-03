@@ -1401,15 +1401,16 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
-    /* AAD excludes hop_limit (relays decrement it in flight); must match the
-     * masked AAD the originator built in send_data_packet. */
-    uint8_t aad[HEADER_SIZE];
-    bramble_header_build_aad(&rx_hdr, aad, sizeof(aad));
+    /* AAD excludes hop_limit (relays decrement it in flight) but binds
+     * src_addr (SEC-M2 residual); must match the masked, src-bound AAD the
+     * originator built in send_data_packet. */
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&rx_hdr, src_addr, aad, sizeof(aad));
 
     uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE] = {0};
     int ret = channel_msg_decrypt(s_channels, s_num_channels,
                                   nonce, ciphertext, ct_len, tag,
-                                  aad, HEADER_SIZE,
+                                  aad, HEADER_SIZE + 4,
                                   plaintext, &info, now_ms());
     if (ret != 0) {
         ESP_LOGW(TAG, "Failed to decrypt data from %08" PRIX32, src_addr);
@@ -2692,14 +2693,15 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
 
     bramble_header_serialize(&header, buf, HEADER_SIZE);
 
-    /* AAD excludes hop_limit (relays decrement it in flight); the destination
-     * builds the same masked AAD in handle_data. */
-    uint8_t aad[HEADER_SIZE];
-    bramble_header_build_aad(&header, aad, sizeof(aad));
+    /* AAD excludes hop_limit (relays decrement it in flight) but binds
+     * src_addr (SEC-M2 residual); the destination builds the same masked,
+     * src-bound AAD in handle_data. */
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&header, s_identity->address, aad, sizeof(aad));
 
     int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
                                       payload, payload_len,
-                                      aad, HEADER_SIZE,
+                                      aad, HEADER_SIZE + 4,
                                       nonce, ciphertext, tag);
     if (enc_ret != 0) {
         ESP_LOGE(TAG, "Channel encrypt failed: %d", enc_ret);

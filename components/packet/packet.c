@@ -56,6 +56,20 @@ esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size
     return ESP_OK;
 }
 
+esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, uint8_t* buf,
+                                 size_t len) {
+    if (len < HEADER_SIZE + 4)
+        return ESP_ERR_INVALID_SIZE;
+    esp_err_t err = bramble_header_build_aad(h, buf, HEADER_SIZE);
+    if (err != ESP_OK)
+        return err;
+    buf[HEADER_SIZE + 0] = (uint8_t)(src_addr & 0xFF);
+    buf[HEADER_SIZE + 1] = (uint8_t)((src_addr >> 8) & 0xFF);
+    buf[HEADER_SIZE + 2] = (uint8_t)((src_addr >> 16) & 0xFF);
+    buf[HEADER_SIZE + 3] = (uint8_t)((src_addr >> 24) & 0xFF);
+    return ESP_OK;
+}
+
 /* Macro for body offset */
 #define B (HEADER_SIZE)
 

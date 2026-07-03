@@ -55,8 +55,8 @@ static size_t originate_data_packet(const bramble_channel_t* ch, const uint8_t* 
     };
     TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&header, buf, HEADER_SIZE));
 
-    uint8_t aad[HEADER_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_build_aad(&header, aad, sizeof(aad)));
+    uint8_t aad[HEADER_SIZE + 4];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_build_aead_aad(&header, TEST_SRC_ADDR, aad, sizeof(aad)));
 
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t ciphertext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
@@ -64,7 +64,7 @@ static size_t originate_data_packet(const bramble_channel_t* ch, const uint8_t* 
     size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
 
     TEST_ASSERT_EQUAL(0, channel_msg_encrypt(ch, TEST_SRC_ADDR, TEST_APP_TYPE, payload, payload_len,
-                                             aad, HEADER_SIZE, nonce, ciphertext, tag));
+                                             aad, HEADER_SIZE + 4, nonce, ciphertext, tag));
 
     uint32_t src = TEST_SRC_ADDR;
     memcpy(buf + HEADER_SIZE, &src, 4);
@@ -87,6 +87,9 @@ static void relay_data_packet(uint8_t* buf, size_t len) {
  * channel_msg_decrypt result (0 on success). */
 static int destination_decrypt(bramble_channel_t* channels, int num_channels, const uint8_t* buf,
                                size_t len, channel_msg_info_t* info, uint8_t* plaintext) {
+    uint32_t src_addr;
+    memcpy(&src_addr, buf + HEADER_SIZE, 4);
+
     const uint8_t* nonce = buf + HEADER_SIZE + 4;
     size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
     const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
@@ -94,11 +97,13 @@ static int destination_decrypt(bramble_channel_t* channels, int num_channels, co
 
     bramble_header_t rx_hdr;
     TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&rx_hdr, buf, len));
-    uint8_t aad[HEADER_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_build_aad(&rx_hdr, aad, sizeof(aad)));
+    uint8_t aad[HEADER_SIZE + 4];
+    /* Mirrors handle_data: bind the src_addr just read off the wire, not a
+     * trusted constant, so a tampered body src_addr breaks the GCM tag. */
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_build_aead_aad(&rx_hdr, src_addr, aad, sizeof(aad)));
 
     return channel_msg_decrypt(channels, num_channels, nonce, ciphertext, ct_len, tag, aad,
-                               HEADER_SIZE, plaintext, info, 0);
+                               HEADER_SIZE + 4, plaintext, info, 0);
 }
 
 /* Single hop, header untouched: decrypts (baseline sanity). */
@@ -198,6 +203,11 @@ void test_tampered_packet_id_fails(void) {
     tamper_and_expect_failure(11, 0x80); /* header bytes 8-11: packet_id */
 }
 
+void test_tampered_body_src_addr_fails(void) {
+    /* body src_addr sits at offset HEADER_SIZE; mutating it must break the tag now. */
+    tamper_and_expect_failure(HEADER_SIZE, 0x01);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_direct_delivery_decrypts);
@@ -207,5 +217,6 @@ int main(void) {
     RUN_TEST(test_tampered_flags_fails);
     RUN_TEST(test_tampered_dest_addr_fails);
     RUN_TEST(test_tampered_packet_id_fails);
+    RUN_TEST(test_tampered_body_src_addr_fails);
     return UNITY_END();
 }

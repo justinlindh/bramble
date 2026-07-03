@@ -171,6 +171,20 @@ bool bramble_header_is_supported_version(const bramble_header_t* h);
  */
 esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size_t len);
 
+/*
+ * Build the full AEAD AAD for an encrypted DATA packet: the masked header
+ * (see bramble_header_build_aad) followed by the 4-byte little-endian
+ * src_addr (SEC-M2 residual). Binds the body's src_addr field into the GCM
+ * tag so tampering it after origination fails authentication instead of
+ * silently misattributing the message. Writes HEADER_SIZE + 4 bytes.
+ *
+ * Both endpoints MUST pass the same src_addr: the originator its own
+ * identity address (send_data_packet), the destination the src_addr it just
+ * read off the wire (handle_data), before hop_limit is masked or mutated.
+ */
+esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, uint8_t* buf,
+                                 size_t len);
+
 esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len);
 esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t len);
 size_t bramble_ack_wire_size(const bramble_ack_t* p);
