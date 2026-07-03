@@ -133,6 +133,19 @@ target_include_directories(test_rrep_auth PRIVATE
 )
 target_link_libraries(test_rrep_auth ssl crypto)
 
+# RERR authentication: MAC over broken_dest/broken_next_hop only, excluding
+# the per-forwarder reporter_addr/packet_id (Task 3.3 / SEC-H1, staged).
+add_executable(test_rerr_auth
+    test_rerr_auth.c
+    unity/unity.c
+)
+target_include_directories(test_rerr_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+)
+target_link_libraries(test_rerr_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

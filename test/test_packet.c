@@ -132,6 +132,7 @@ void test_rerr_roundtrip(void) {
         .header = make_header(PKT_TYPE_RERR),
         .reporter_addr = 0x11111111, .broken_dest = 0x22222222,
         .broken_next_hop = 0x33333333,
+        .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04},
     };
     uint8_t buf[RERR_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rerr_serialize(&p, buf, sizeof(buf)));
@@ -140,6 +141,7 @@ void test_rerr_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.reporter_addr, out.reporter_addr);
     TEST_ASSERT_EQUAL_HEX32(p.broken_dest, out.broken_dest);
     TEST_ASSERT_EQUAL_HEX32(p.broken_next_hop, out.broken_next_hop);
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, sizeof(p.auth_hmac));
 }
 
 /* ---- BEACON ---- */
