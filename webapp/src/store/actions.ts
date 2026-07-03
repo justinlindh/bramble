@@ -1486,6 +1486,25 @@ export async function startOtaUpdate(path: string, allowDowngrade = false): Prom
   return { ok: !!r.ok, note: r.note, url: r.url, error: r.error };
 }
 
+// ─── Network key provisioning ──────────────────────────────────────────────
+
+/**
+ * Push a freshly-generated network key to the device out-of-band (QR / paste).
+ * The key is write-only: this call never returns the key, only whether the
+ * device accepted it. Returns false rather than throwing on rejection so
+ * callers can show an inline error instead of an unhandled promise rejection.
+ */
+export async function setNetworkKey(keyHex: string): Promise<boolean> {
+  if (!client) throw new Error('Not connected');
+  const result = await client.rpc<{ ok: boolean; error?: string }>('bramble.setNetworkKey', { key: keyHex });
+  return !!result?.ok;
+}
+
+export async function getNetworkKeyStatus(): Promise<{ provisioned: boolean; fingerprint: string }> {
+  if (!client) throw new Error('Not connected');
+  return await client.rpc<{ provisioned: boolean; fingerprint: string }>('bramble.getNetworkKeyStatus');
+}
+
 export function decodePacketType(pktType: number | string | undefined): string {
   if (typeof pktType === 'string') return pktType;
   switch (pktType) {

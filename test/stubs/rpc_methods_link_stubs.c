@@ -171,6 +171,7 @@ void mesh_set_mailbox(bool e) { g_stub_mailbox_enabled = e; }
 bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
 void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
+void mesh_rederive_beacon_key(void) {}
 bool mesh_get_beacon_status(void) { return true; }
 int mesh_set_beacon_policy(beacon_policy_mode_t m) {
     (void)m;

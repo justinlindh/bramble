@@ -11,6 +11,7 @@ This index separates **operator/developer reference docs** from **historical pla
 - [bramble-protocol-spec.md](bramble-protocol-spec.md): protocol behavior and packet semantics
 - [SECURITY-MODEL.md](SECURITY-MODEL.md): threat model, verified protections, and known gaps
 - [auth.md](auth.md): RPC authentication, pairing, and the browser origin allowlist
+- [network-key-provisioning.md](network-key-provisioning.md): generating, distributing, and verifying the control-plane network key across a fleet
 - [api/rpc.md](api/rpc.md): RPC method reference and wire-format notes
 - [COMPARISON.md](COMPARISON.md): comparison with Meshtastic and MeshCore
 - [results/simulation-2026-06.md](results/simulation-2026-06.md): measured scale results under the simulator collision model

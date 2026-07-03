@@ -82,6 +82,32 @@ void test_mac_changes_between_unprovisioned_and_provisioned(void) {
     TEST_ASSERT_NOT_EQUAL(0, memcmp(mac_fallback, mac_provisioned, sizeof(mac_fallback)));
 }
 
+void test_fingerprint_stable_key_dependent_and_convergent(void) {
+    /* Stable for a fixed key state (here: the unprovisioned fallback). */
+    uint8_t fp_fallback[4];
+    uint8_t fp_fallback_again[4];
+    network_key_fingerprint(fp_fallback);
+    network_key_fingerprint(fp_fallback_again);
+    TEST_ASSERT_EQUAL_MEMORY(fp_fallback, fp_fallback_again, 4);
+
+    /* A provisioned key yields a different fingerprint than the fallback. */
+    uint8_t key[32];
+    memset(key, 0xAB, sizeof(key));
+    network_key_set_provisioned(key);
+    uint8_t fp_prov[4];
+    network_key_fingerprint(fp_prov);
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(fp_fallback, fp_prov, 4));
+
+    /* Convergence: an identical key on another node yields the same fingerprint. */
+    network_key_clear();
+    uint8_t key_same[32];
+    memset(key_same, 0xAB, sizeof(key_same));
+    network_key_set_provisioned(key_same);
+    uint8_t fp_prov_again[4];
+    network_key_fingerprint(fp_prov_again);
+    TEST_ASSERT_EQUAL_MEMORY(fp_prov, fp_prov_again, 4);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_domain_separation_different_labels_yield_different_macs);
@@ -90,5 +116,6 @@ int main(void) {
     RUN_TEST(test_network_key_get_returns_provisioned_key_when_set);
     RUN_TEST(test_network_key_get_fallback_is_deterministic);
     RUN_TEST(test_mac_changes_between_unprovisioned_and_provisioned);
+    RUN_TEST(test_fingerprint_stable_key_dependent_and_convergent);
     return UNITY_END();
 }

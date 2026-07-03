@@ -101,10 +101,12 @@ export function parseNodeShare(input: string): ParseResult<NodeShareData> {
   }
 }
 
-/** Returns true if the string looks like any Bramble share (channel or node). */
+/** Returns true if the string looks like any Bramble share (channel, node, or network key). */
 export function isBrambleShare(s: string): boolean {
+  const trimmed = s.trim();
   return (
-    s.trim().startsWith('bramble://ch/v1?') ||
-    s.trim().startsWith('bramble://node/v1?')
+    trimmed.startsWith('bramble://ch/v1?') ||
+    trimmed.startsWith('bramble://node/v1?') ||
+    trimmed.startsWith('bramble://net/v1?')
   );
 }
