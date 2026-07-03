@@ -748,6 +748,7 @@ static int rpc_set_network_key(const cJSON *params, cJSON *result)
     }
 
     network_key_set_provisioned(key);
+    mesh_rederive_beacon_key(); /* beacons pick up the new key live, no reboot */
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }

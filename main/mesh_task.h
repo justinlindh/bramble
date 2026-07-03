@@ -255,4 +255,9 @@ void mesh_get_beacon_status(beacon_policy_status_t *status);
  */
 void mesh_beacon_policy_load_config(void);
 
+/* Re-derive the beacon HMAC subkey from the current network key. Call after
+ * a runtime setNetworkKey so beacons pick up a newly provisioned key without
+ * a reboot (routing/ACK MACs already re-read the key per call). */
+void mesh_rederive_beacon_key(void);
+
 #endif
