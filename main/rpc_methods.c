@@ -752,6 +752,28 @@ static int rpc_set_network_key(const cJSON *params, cJSON *result)
     return 0;
 }
 
+/* bramble.getNetworkKeyStatus: params none. Result:
+ *   {"provisioned": bool, "fingerprint": "<8 lowercase hex>"}
+ * Reports whether a real per-fleet key is set and a one-way fingerprint
+ * (SHA256(key)[0:4]) so an operator can confirm a fleet shares one key
+ * WITHOUT the key ever being read back. Authenticated: registered normally,
+ * so it is not in rpc_auth's unauth allowlist. This does NOT close SEC-H1/
+ * H2/NEW-SEC-4/NEW-SEC-8; it is provisioning observability, not closure. */
+static int handle_get_network_key_status(const cJSON *params, cJSON *result)
+{
+    (void)params;
+    cJSON_AddBoolToObject(result, "provisioned", network_key_is_provisioned() ? true : false);
+    uint8_t fp[4];
+    network_key_fingerprint(fp);
+    char hex[9];
+    for (int i = 0; i < 4; i++) {
+        snprintf(hex + i * 2, 3, "%02x", fp[i]);
+    }
+    hex[8] = '\0';
+    cJSON_AddStringToObject(result, "fingerprint", hex);
+    return 0;
+}
+
 /* bramble.setAllowedOrigins: params {"origins":["https://app.example.com", ...]}
  * Persists the extra WS Origin allowlist (authenticated callers only; the
  * dispatcher's unauth allowlist never includes this method). Origins are
@@ -2247,6 +2269,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setAuthToken",         rpc_set_auth_token);
     rpc_register("bramble.getAuthToken",         rpc_get_auth_token);
     rpc_register("bramble.setNetworkKey",        rpc_set_network_key);
+    rpc_register("bramble.getNetworkKeyStatus",  handle_get_network_key_status);
     rpc_register("bramble.setAllowedOrigins",    rpc_set_allowed_origins);
     rpc_register("bramble.getAllowedOrigins",    rpc_get_allowed_origins);
     rpc_register("bramble.addChannel",           handle_add_channel);
