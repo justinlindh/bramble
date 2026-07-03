@@ -53,10 +53,13 @@ int rerr_verify(const bramble_rerr_t* r) {
     return ct_eq(expect, r->auth_hmac, sizeof(expect));
 }
 
-/* src_addr(4) || ack_packet_id(4), big-endian: the 2 origin-stable fields,
- * exactly excluding relay_path/hop_count/header.hop_limit (the fields
- * forward_ack mutates on every relay hop). */
-static void ack_build_auth_buf(const bramble_ack_t* a, uint8_t buf[8]) {
+/* src_addr(4) || ack_packet_id(4) || seq(6), big-endian for the
+ * multi-byte fields: the origin-stable fields, exactly excluding
+ * relay_path/hop_count/header.hop_limit (the fields forward_ack mutates
+ * on every relay hop). seq (ws 1.3b) is origin-stable like the rest:
+ * forward_ack carries it through unchanged, so it belongs in the same
+ * coverage set. */
+static void ack_build_auth_buf(const bramble_ack_t* a, uint8_t buf[14]) {
     buf[0] = (uint8_t)(a->src_addr >> 24);
     buf[1] = (uint8_t)(a->src_addr >> 16);
     buf[2] = (uint8_t)(a->src_addr >> 8);
@@ -65,16 +68,17 @@ static void ack_build_auth_buf(const bramble_ack_t* a, uint8_t buf[8]) {
     buf[5] = (uint8_t)(a->ack_packet_id >> 16);
     buf[6] = (uint8_t)(a->ack_packet_id >> 8);
     buf[7] = (uint8_t)a->ack_packet_id;
+    memcpy(buf + 8, a->seq, 6);
 }
 
 void ack_sign(bramble_ack_t* a) {
-    uint8_t buf[8];
+    uint8_t buf[14];
     ack_build_auth_buf(a, buf);
     network_key_mac("bramble-ack-v2", buf, sizeof(buf), a->auth_hmac);
 }
 
 int ack_verify(const bramble_ack_t* a) {
-    uint8_t buf[8];
+    uint8_t buf[14];
     ack_build_auth_buf(a, buf);
     uint8_t expect[8];
     network_key_mac("bramble-ack-v2", buf, sizeof(buf), expect);

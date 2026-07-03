@@ -56,10 +56,10 @@
 /* Sizes */
 #define HEADER_SIZE 12
 #define ACK_BASE_SIZE                                                                              \
-    31 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) + auth_hmac(8);  \
-        * was 23, +8 for auth_hmac (NEW-SEC-8, Task 3.5, staged) */
+    37 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) + auth_hmac(8) + \
+        * seq(6); was 31, +6 for seq (ws 1.3b control-plane freshness) */
 #define ACK_MAX_HOPS 8
-#define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 31 + 32 = 63 */
+#define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 37 + 32 = 69 */
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
 #define RREP_SIZE 40 /* was 34; +6 for seq (ws 1.3b control-plane freshness) */
@@ -88,13 +88,21 @@ typedef struct {
     uint8_t ack_flags;
     int8_t rssi_at_dest;
     uint8_t hop_count; /* number of addresses in relay_path */
-    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h). Covers
-     * src_addr||ack_packet_id only; excludes relay_path/hop_count/
-     * hop_limit, which forward_ack mutates on every relay hop. Placed
-     * BEFORE relay_path (a fixed, hop_count-independent wire offset) so a
-     * verifier never has to trust the unauthenticated hop_count to locate
-     * the tag. */
+    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h), extended
+     * by ws 1.3b. Covers src_addr||ack_packet_id||seq; excludes
+     * relay_path/hop_count/hop_limit, which forward_ack mutates on every
+     * relay hop. Placed BEFORE relay_path (a fixed, hop_count-independent
+     * wire offset) so a verifier never has to trust the unauthenticated
+     * hop_count to locate the tag. */
     uint8_t auth_hmac[8];
+    /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
+     * destination (control_seq_next in mesh_task.c's send_ack) and
+     * carried through forward_ack unchanged, exactly like auth_hmac. Sits
+     * at the same fixed, hop_count-independent offset immediately after
+     * auth_hmac and BEFORE relay_path, for the same reason auth_hmac does:
+     * a verifier must never trust the unauthenticated hop_count to locate
+     * either. MAC-covered (ack_build_auth_buf). */
+    uint8_t seq[6];
     uint32_t relay_path[ACK_MAX_HOPS]; /* hop trail: [dest, relay1, relay2, ...] */
 } bramble_ack_t;
 

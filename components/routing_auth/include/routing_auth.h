@@ -38,20 +38,23 @@ void rerr_sign(bramble_rerr_t* r);
 int rerr_verify(const bramble_rerr_t* r);
 
 /*
- * Task 3.5 (NEW-SEC-8, STAGED, NOT closed: see network_key.h). Authenticates
- * src_addr||ack_packet_id with label "bramble-ack-v2", excluding
- * relay_path/hop_count/header.hop_limit: mesh_task.c's forward_ack grows
- * relay_path, increments hop_count, and decrements hop_limit on every
- * relay hop, so those three are the only per-hop-mutated fields. auth_hmac
- * lives at a fixed, hop_count-independent wire offset (packet.h), so a
- * verifier never has to trust the unauthenticated hop_count to find the
- * tag before checking it. ack_sign fills a->auth_hmac; call it once, in
- * the ACK builder (send_ack), before serializing. ack_verify recomputes
- * and constant-time-compares. Gates BOTH observable effects of a valid
- * ACK, cancelling retransmission (pending_ack_remove) and marking a
- * message delivered (msg_store_update_status), plus forwarding: callers
- * must reject before any of those, on both the for-us and forward
- * branches of handle_ack.
+ * Task 3.5 (NEW-SEC-8, STAGED, NOT closed: see network_key.h), extended by
+ * ws 1.3b. Authenticates src_addr||ack_packet_id||seq with label
+ * "bramble-ack-v2", excluding relay_path/hop_count/header.hop_limit:
+ * mesh_task.c's forward_ack grows relay_path, increments hop_count, and
+ * decrements hop_limit on every relay hop, so those three are the only
+ * per-hop-mutated fields. seq (ws 1.3b) is origin-stable, drawn once by
+ * send_ack and carried through forward_ack unchanged, so it sits in the
+ * same coverage set as src_addr/ack_packet_id. Both auth_hmac and seq
+ * live at a fixed, hop_count-independent wire offset (packet.h), so a
+ * verifier never has to trust the unauthenticated hop_count to find
+ * either before checking them. ack_sign fills a->auth_hmac; call it once,
+ * in the ACK builder (send_ack), after the seq is drawn and written in,
+ * before serializing. ack_verify recomputes and constant-time-compares.
+ * Gates BOTH observable effects of a valid ACK, cancelling retransmission
+ * (pending_ack_remove) and marking a message delivered
+ * (msg_store_update_status), plus forwarding: callers must reject before
+ * any of those, on both the for-us and forward branches of handle_ack.
  */
 void ack_sign(bramble_ack_t* a);
 int ack_verify(const bramble_ack_t* a);

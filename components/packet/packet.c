@@ -88,10 +88,12 @@ esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len
     buf[B + 9] = (uint8_t)p->rssi_at_dest;
     buf[B + 10] = hops;
     /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
-     * before relay_path. */
+     * before relay_path. ws 1.3b: seq sits right after auth_hmac, same
+     * fixed-offset-before-relay_path invariant. */
     memcpy(buf + B + 11, p->auth_hmac, 8);
+    memcpy(buf + B + 19, p->seq, 6);
     for (int i = 0; i < hops; i++) {
-        put_be32(buf + B + 19 + i * 4, p->relay_path[i]);
+        put_be32(buf + B + 25 + i * 4, p->relay_path[i]);
     }
     return ESP_OK;
 }
@@ -114,8 +116,10 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
     p->hop_count = buf[B + 10];
     /* NEW-SEC-8: auth_hmac at a fixed offset, read BEFORE relay_path and
      * independent of hop_count, so a verifier never has to trust the
-     * unauthenticated hop_count to locate the tag. */
+     * unauthenticated hop_count to locate the tag. ws 1.3b: seq reads at
+     * the same kind of fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 11, 8);
+    memcpy(p->seq, buf + B + 19, 6);
     if (p->hop_count > ACK_MAX_HOPS)
         p->hop_count = ACK_MAX_HOPS;
     /* Fix 5 (red-team panel): clamp hop_count down to the number of
@@ -129,11 +133,11 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
      * bug that iterates past the now-correct hop_count reads zero, not
      * garbage. */
     memset(p->relay_path, 0, sizeof(p->relay_path));
-    size_t avail_hops = (len > (size_t)(B + 19)) ? (len - (B + 19)) / 4 : 0;
+    size_t avail_hops = (len > (size_t)(B + 25)) ? (len - (B + 25)) / 4 : 0;
     if ((size_t)p->hop_count > avail_hops)
         p->hop_count = (uint8_t)avail_hops;
     for (int i = 0; i < p->hop_count; i++) {
-        p->relay_path[i] = get_be32(buf + B + 19 + i * 4);
+        p->relay_path[i] = get_be32(buf + B + 25 + i * 4);
     }
     return ESP_OK;
 }
