@@ -148,38 +148,39 @@ void test_handshaking_cap_enforced(void) {
     }
     TEST_ASSERT_EQUAL(DM_MAX_HANDSHAKING, allocated);
 }
-void test_active_not_evicted_for_handshaking(void) {
+void test_verified_active_not_evicted_for_handshaking(void) {
     dm_table_t t; dm_table_init(&t);
-    dm_session_t* act = dm_alloc(&t, 0xAA, 0); act->state = DM_STATE_ACTIVE;
+    dm_session_t* act = dm_alloc(&t, 0xAA, 0); act->state = DM_STATE_ACTIVE; act->verified = 1;
     for (uint32_t a = 1; a <= DM_MAX_HANDSHAKING; a++) {
         dm_session_t* s = dm_alloc(&t, 0x1000 + a, 1); if (s) s->state = DM_STATE_HANDSHAKING;
     }
-    TEST_ASSERT_EQUAL_PTR(act, dm_lookup(&t, 0xAA));  /* survived */
+    TEST_ASSERT_EQUAL_PTR(act, dm_lookup(&t, 0xAA));  /* survived: VERIFIED-ACTIVE protected */
 }
 
 /* Additional case beyond the brief: the three tests above never actually
  * exhaust DM_MAX_SESSIONS free slots (32 total vs. at most 1 + 8 used), so
  * none of them force the eviction branch itself to run; they only prove the
- * handshaking cap and that unrelated allocations don't clobber an ACTIVE
- * slot by accident. Fill the table completely (mixed verified/UNVERIFIED
- * ACTIVE sessions established FIRST with the SMALLEST timestamps, so they
- * would be the "oldest" and thus the natural LRU-eviction targets if ACTIVE
+ * handshaking cap and that unrelated allocations don't clobber a VERIFIED
+ * ACTIVE slot by accident. Fill the table completely (VERIFIED ACTIVE
+ * sessions established FIRST with the SMALLEST timestamps, so they would be
+ * the "oldest" and thus the natural LRU-eviction targets if ACTIVE
  * protection were broken, then two evictable HANDSHAKING slots established
  * LATER with larger timestamps) so the free-slot search must fail and the
  * real LRU-eviction path must run. A correct implementation must skip every
- * ACTIVE slot despite it being numerically older, and still evict the
- * oldest HANDSHAKING slot: only the protection check, not timestamp order,
- * explains that outcome, so this discriminates a broken/removed ACTIVE
- * guard from a correct one (unlike naive timestamp choices where the
- * correct victim happens to also be the global minimum either way). */
-void test_lru_eviction_prefers_oldest_handshaking(void) {
+ * VERIFIED ACTIVE slot despite it being numerically older, and still evict
+ * the oldest HANDSHAKING slot: only the protection check, not timestamp
+ * order, explains that outcome, so this discriminates a broken/removed
+ * VERIFIED-ACTIVE guard from a correct one (unlike naive timestamp choices
+ * where the correct victim happens to also be the global minimum either
+ * way). */
+void test_lru_eviction_prefers_oldest_handshaking_over_verified_active(void) {
     dm_table_t t; dm_table_init(&t);
 
     for (uint32_t a = 1; a <= DM_MAX_SESSIONS - 2; a++) {
         dm_session_t* s = dm_alloc(&t, a, a); /* established_ms = a: 1..30, smaller than below */
         TEST_ASSERT_NOT_NULL(s);
         s->state = DM_STATE_ACTIVE;
-        s->verified = (uint8_t)(a % 2); /* mix verified and UNVERIFIED ACTIVE: both protected */
+        s->verified = 1; /* VERIFIED ACTIVE: must never be an eviction victim */
     }
 
     dm_session_t* older_hs = dm_alloc(&t, 0x9999, 1000);
@@ -189,22 +190,85 @@ void test_lru_eviction_prefers_oldest_handshaking(void) {
     dm_session_t* newer_hs = dm_alloc(&t, 0x8888, 1050);
     TEST_ASSERT_NOT_NULL(newer_hs);
     newer_hs->state = DM_STATE_HANDSHAKING;
-    /* Table is now completely full: 30 ACTIVE + 2 HANDSHAKING = 32 slots,
-     * handshaking cap nowhere near reached (2 of 8). Every ACTIVE slot's
-     * established_ms (1..30) is smaller than either HANDSHAKING slot's
+    /* Table is now completely full: 30 VERIFIED ACTIVE + 2 HANDSHAKING = 32
+     * slots, handshaking cap nowhere near reached (2 of 8). Every ACTIVE
+     * slot's timestamp (1..30) is smaller than either HANDSHAKING slot's
      * (1000, 1050). */
 
     dm_session_t* evicted_in = dm_alloc(&t, 0xBEEF, 5000);
     TEST_ASSERT_NOT_NULL(evicted_in); /* must succeed via eviction, not NULL */
-    TEST_ASSERT_EQUAL_PTR(older_hs, evicted_in); /* oldest EVICTABLE, not an ACTIVE slot */
+    TEST_ASSERT_EQUAL_PTR(older_hs, evicted_in); /* oldest EVICTABLE, not a VERIFIED ACTIVE slot */
     TEST_ASSERT_EQUAL_UINT32(0xBEEF, evicted_in->peer_addr);
 
     TEST_ASSERT_EQUAL_PTR(newer_hs, dm_lookup(&t, 0x8888)); /* untouched */
     for (uint32_t a = 1; a <= DM_MAX_SESSIONS - 2; a++) {
         dm_session_t* s = dm_lookup(&t, a);
         TEST_ASSERT_NOT_NULL(s);
-        TEST_ASSERT_EQUAL(DM_STATE_ACTIVE, s->state); /* every ACTIVE slot survived */
+        TEST_ASSERT_EQUAL(DM_STATE_ACTIVE, s->state); /* every VERIFIED ACTIVE slot survived */
     }
+}
+
+/* Fix 1 (red-team panel, cross-task finding): process_ke_init in
+ * main/mesh_task.c allocates a first-contact INIT straight to
+ * DM_STATE_ACTIVE with verified=0 (SAS confirmation is a separate UX step,
+ * not gating establishment), never touching DM_STATE_HANDSHAKING or its
+ * DM_MAX_HANDSHAKING cap. dm_verify_init's address-binding check passes for
+ * ANY self-chosen keypair (no secret required, no real victim address
+ * needed), so an attacker can mint DM_MAX_SESSIONS forged first-contact
+ * INITs from freshly-generated identities. Before this fix, dm_alloc's
+ * eviction excluded every DM_STATE_ACTIVE slot regardless of `verified`, so
+ * those forged slots were permanently unevictable: all future DM
+ * establishment (with anyone, not just the attacker) died until reboot.
+ * This test proves the fix: filling the table entirely with UNVERIFIED
+ * ACTIVE slots (simulating the attack) must NOT prevent a subsequent
+ * legitimate allocation. */
+void test_unverified_active_evictable_under_pressure(void) {
+    dm_table_t t; dm_table_init(&t);
+    for (uint32_t a = 1; a <= DM_MAX_SESSIONS; a++) {
+        dm_session_t* s = dm_alloc(&t, a, a); /* last_active_ms = a, ascending */
+        TEST_ASSERT_NOT_NULL(s);
+        s->state = DM_STATE_ACTIVE;
+        s->verified = 0; /* forged first-contact: never confirmed */
+    }
+    /* Table is completely full (32/32 UNVERIFIED ACTIVE), zero free slots,
+     * handshaking cap nowhere near reached (0 of 8): a fix that only
+     * touched the handshaking cap would still return NULL here. The real
+     * fix must make an UNVERIFIED ACTIVE slot itself evictable. */
+    dm_session_t* legit = dm_alloc(&t, 0xC0FFEE, 1000);
+    TEST_ASSERT_NOT_NULL(legit); /* must succeed via eviction, not permanently NULL */
+    TEST_ASSERT_EQUAL_UINT32(0xC0FFEE, legit->peer_addr);
+    TEST_ASSERT_NULL(dm_lookup(&t, 1)); /* the OLDEST (by last_active_ms) was evicted */
+    for (uint32_t a = 2; a <= DM_MAX_SESSIONS; a++) {
+        TEST_ASSERT_NOT_NULL(dm_lookup(&t, a)); /* every other forged slot untouched */
+    }
+}
+
+/* A genuinely-active UNVERIFIED session (a real first-contact conversation
+ * before the user runs the SAS check) must not be the eviction victim just
+ * because it was established first: activity, not establishment order,
+ * must drive LRU choice, or a real conversation could be evicted out from
+ * under its own user by a flood of newer-but-idle forged sessions. */
+void test_recently_active_unverified_session_survives_eviction(void) {
+    dm_table_t t; dm_table_init(&t);
+
+    dm_session_t* real = dm_alloc(&t, 0xAAAA, 1); /* oldest by establishment */
+    TEST_ASSERT_NOT_NULL(real);
+    real->state = DM_STATE_ACTIVE;
+    real->verified = 0;
+
+    for (uint32_t a = 1; a < DM_MAX_SESSIONS; a++) {
+        dm_session_t* s = dm_alloc(&t, 0x1000 + a, 10 + a); /* established later */
+        TEST_ASSERT_NOT_NULL(s);
+        s->state = DM_STATE_ACTIVE;
+        s->verified = 0;
+    }
+    /* Table full: 1 (real, oldest) + 31 (attacker filler) = 32. */
+
+    real->last_active_ms = 100000; /* real's user sends/receives: activity bump */
+
+    dm_session_t* legit = dm_alloc(&t, 0xC0FFEE, 999999);
+    TEST_ASSERT_NOT_NULL(legit); /* still succeeds via eviction of a filler slot */
+    TEST_ASSERT_NOT_NULL(dm_lookup(&t, 0xAAAA)); /* real survives: recently active */
 }
 
 /* Task 1.3: handshake INIT/RESP build/parse and authentication tags.
@@ -389,8 +453,10 @@ int main(void) {
     RUN_TEST(test_sas_both_sides_agree);
     RUN_TEST(test_lookup_after_alloc);
     RUN_TEST(test_handshaking_cap_enforced);
-    RUN_TEST(test_active_not_evicted_for_handshaking);
-    RUN_TEST(test_lru_eviction_prefers_oldest_handshaking);
+    RUN_TEST(test_verified_active_not_evicted_for_handshaking);
+    RUN_TEST(test_lru_eviction_prefers_oldest_handshaking_over_verified_active);
+    RUN_TEST(test_unverified_active_evictable_under_pressure);
+    RUN_TEST(test_recently_active_unverified_session_survives_eviction);
     RUN_TEST(test_rekey_init_tag_verifies_and_fails_on_flip);
     RUN_TEST(test_rekey_init_zero_tag_rejected);
     RUN_TEST(test_first_contact_init_zero_tag_and_address_check);

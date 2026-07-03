@@ -271,12 +271,18 @@ against observers who hear the RREQ after at least one forward.
 ### Beacon integrity check, staged toward authentication (SEC-H2)
 
 Beacons carry a 16-byte truncated HMAC-SHA256 computed over the 32 fixed
-beacon fields only: header, source address, pubkey hash, telemetry, flags,
-and network time (`beacon_compute_hmac` in `components/routing/beacon.c`
-MACs the first `BEACON_SIZE - 16` bytes). The optional node name is
-serialized *after* the HMAC field (`bramble_beacon_serialize` in
-`components/packet/packet.c`) and is not covered by it, so the name is
-unauthenticated even in the integrity sense. Verification happens on
+beacon fields (header, source address, pubkey hash, telemetry, flags, and
+network time) plus the optional node name, which is serialized *after*
+`auth_hmac` on the wire (`bramble_beacon_serialize` in
+`components/packet/packet.c`; `beacon_compute_hmac` in
+`components/routing/beacon.c` concatenates the fixed prefix with the
+length-prefixed name, skipping over `auth_hmac`'s own bytes, since a
+one-shot HMAC call cannot cover two non-contiguous wire regions with a gap
+between them any other way). **Red-team panel fix**: the name was
+previously excluded entirely, so an attacker could rewrite any captured
+beacon's display name and it still verified, spoofing peer names in the
+neighbor table/UI even under a provisioned key; the name is now covered.
+Verification happens on
 receipt (`handle_beacon` in `main/mesh_task.c`) and is now constant-time
 (`beacon_verify_hmac`, XOR-accumulate, no early exit). When a network key
 is provisioned, the key is a distinct HKDF subkey of it (salt
@@ -450,6 +456,21 @@ a compromised or malicious mesh member is still an insider by definition,
 same as any symmetric-key system: authenticating a DM to a specific peer
 does not defend against that peer itself misbehaving.
 
+**Session-table exhaustion DoS, closed (red-team panel fix).** A
+first-contact INIT needs no secret (a self-generated keypair passes
+`dm_verify_init`'s address-binding check trivially), and previously landed
+straight in `DM_STATE_ACTIVE`/`verified=0` without ever touching
+`DM_STATE_HANDSHAKING` or its cap. Because `dm_alloc` (`components/dm_session`)
+protected every `DM_STATE_ACTIVE` slot from eviction regardless of
+`verified`, an attacker sending `DM_MAX_SESSIONS` forged first-contact
+INITs filled the table with permanently-unevictable sessions, killing all
+future DM establishment (with anyone) until reboot. `dm_alloc` now
+protects only VERIFIED `ACTIVE` sessions from eviction; an UNVERIFIED
+`ACTIVE` session is evictable, LRU-ordered by a `last_active_ms` timestamp
+that every real send/receive through the session bumps (`main/mesh_task.c`),
+so a genuinely-active first-contact conversation still outlives an idle
+forged flood.
+
 ### Location payload encryption (SEC-C1, closed)
 
 LOCATION packets are AES-256-GCM encrypted end to end, on both the
@@ -480,12 +501,36 @@ endpoints are not time-synced. This replaces the old unauthenticated
 `packet_id`-keyed dedup as the replay defense for these two packet types
 (dedup remains, and remains loop-suppression only, for packet types that are
 not authenticated per-message: routing control, beacon, ACK, and delivery
-receipt). Residuals: a 64-entry sender table and a 128-entry tier-2 LRU
-evict the oldest tracked sender under load, which loses replay history for
-an evicted-then-later-returning sender (needs 64, respectively 128,
-concurrent distinct senders to matter); the tier-2 deferred path can accept
-one replayed message idempotently before corroboration completes (section
-5).
+receipt).
+
+**Public-channel exclusion, closed (red-team panel fix).** The window is
+only fed a decrypt's src_addr when that src_addr is trustworthy
+(`channel_source_is_replay_trustworthy` in `components/channel`): a
+session or secret-channel src_addr costs a session key or channel
+membership, but `BRAMBLE_PUBLIC_CHANNEL_PSK` is known to literally
+everyone, so a public-channel decrypt's src_addr was previously a
+free-to-forge claim fed straight into this SHARED window. An attacker
+could encrypt a packet under the public key claiming `src_addr=victim`
+and slam the victim's high-water mark, causing the victim's own later,
+genuine packets to read `BELOW_WINDOW` and drop: a mesh-wide DoS on
+location and chat delivery reachable by anyone, not just channel members.
+Public-channel traffic is now excluded from this window entirely and
+relies on the pre-existing `packet_id`/type dedup for loop suppression
+instead; it has no replay protection of its own (residual, section 5).
+
+**Tier-1/tier-2 dedup gap, closed (red-team panel fix).** A CHAT message
+accepted via tier-1 is now also recorded in the tier-2 deferred cache
+(`replay_deferred_mark_seen`). Previously it was not: a counter accepted
+in-window and later aged out of the 64-entry tier-1 window was in NEITHER
+dedup structure, so a captured, genuinely-delivered chat packet replayed
+successfully once the sender's window moved past it (tier-1 read
+`BELOW_WINDOW`, and a tier-2 cache that had never heard of the original
+acceptance treated the replay as a fresh, legitimate deferred delivery).
+
+Residuals: a 64-entry sender table and a 128-entry tier-2 LRU evict the
+oldest tracked sender under load, which loses replay history for an
+evicted-then-later-returning sender (needs 64, respectively 128,
+concurrent distinct senders to matter).
 
 ### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; mitigation staged, not closed)
 
@@ -678,14 +723,25 @@ These do not go away when section 4 empties out.
   still read the counter off the wire and use it to order and roughly
   count a given source address's messages across a boot session. The
   previous random-nonce scheme did not expose this.
-- **A single replayed DATA/LOCATION message can be accepted once before the
-  tier-2 deferred check catches it.** The tier-2 path accepts a
-  below-window counter provisionally pending time corroboration
-  (section 3); if that provisional counter turns out to be a genuine
-  replay, at most one duplicate acceptance can slip through per replayed
-  packet before corroboration would have rejected it. This is bounded and
-  idempotent (one extra accepted duplicate, not unbounded replay), not
-  eliminated.
+- **Public-channel traffic has no replay protection of its own.** Excluding
+  a public-channel decrypt's forgeable src_addr from the shared replay
+  window (section 3, red-team panel fix) closes the shared-window
+  poisoning DoS, but leaves public-channel DATA/LOCATION relying solely on
+  the pre-existing `packet_id`/type dedup (60-second window, loop
+  suppression only). A captured public-channel packet can be replayed
+  within that 60-second window; this is accepted, since public-channel
+  content has no confidentiality expectation in the first place (the key
+  is public) and the alternative (a shared window keyed on a forgeable
+  identity) was actively worse.
+- **A first-contact DM session can, in principle, be evicted under a
+  sustained attack if it goes idle.** `dm_alloc`'s eviction (section 3,
+  red-team panel fix) protects a genuinely-active UNVERIFIED session via
+  its `last_active_ms` timestamp, but a first-contact session that is
+  established and then never sends or receives again before the SAS check
+  completes is, like any idle UNVERIFIED session, eligible for eviction
+  under table pressure. This trades a permanent, total DM outage (the
+  pre-fix behavior) for a narrow, activity-gated one; an idle session that
+  is evicted must simply re-handshake.
 - **A 64-sender or 128-entry LRU table can be evicted under enough
   concurrent senders.** The DATA/LOCATION tier-1 replay table (64 senders)
   and tier-2 deferred table (128 entries) evict the least-recently-seen

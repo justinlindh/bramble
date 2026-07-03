@@ -435,20 +435,25 @@ dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
             memset(&t->s[i], 0, sizeof(t->s[i]));
             t->s[i].peer_addr = peer_addr;
             t->s[i].established_ms = now_ms;
+            t->s[i].last_active_ms = now_ms;
             return &t->s[i];
         }
     }
 
-    /* LRU-evict the oldest slot that is neither DM_STATE_ACTIVE nor
-     * UNVERIFIED. UNVERIFIED (state==ACTIVE && verified==0) is a subset of
-     * ACTIVE, so excluding DM_STATE_ACTIVE outright, regardless of
-     * verified, protects both. Only a DM_STATE_HANDSHAKING slot can ever be
-     * the victim (DM_STATE_NONE slots were already handled above). */
+    /* LRU-evict the slot with the smallest last_active_ms that is NOT
+     * VERIFIED ACTIVE. Fix 1 (red-team panel): a first-contact INIT needs
+     * no secret and lands directly in ACTIVE/verified=0, so protecting
+     * every ACTIVE slot regardless of verified let an attacker fill the
+     * whole table with permanently-unevictable forged sessions. Only
+     * state==ACTIVE && verified==1 is fully protected here; HANDSHAKING
+     * and UNVERIFIED ACTIVE (state==ACTIVE && verified==0) share the same
+     * evictable pool, ordered by last_active_ms so a genuinely-active
+     * unverified session still outlives an idle forged one. */
     int victim = -1;
     for (int i = 0; i < DM_MAX_SESSIONS; i++) {
-        if (t->s[i].state == DM_STATE_ACTIVE)
-            continue; /* protected, verified or not */
-        if (victim < 0 || t->s[i].established_ms < t->s[victim].established_ms) {
+        if (t->s[i].state == DM_STATE_ACTIVE && t->s[i].verified)
+            continue; /* VERIFIED ACTIVE: fully protected */
+        if (victim < 0 || t->s[i].last_active_ms < t->s[victim].last_active_ms) {
             victim = i;
         }
     }
@@ -458,6 +463,7 @@ dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
     memset(&t->s[victim], 0, sizeof(t->s[victim]));
     t->s[victim].peer_addr = peer_addr;
     t->s[victim].established_ms = now_ms;
+    t->s[victim].last_active_ms = now_ms;
     return &t->s[victim];
 }
 

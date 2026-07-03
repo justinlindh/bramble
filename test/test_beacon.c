@@ -104,6 +104,38 @@ void test_beacon_hmac_rejects_different_network_key(void) {
     TEST_ASSERT_FALSE(beacon_verify_hmac(&b, beacon_key_b, sizeof(beacon_key_b)));
 }
 
+/* Fix 4 (red-team panel): beacon_compute_hmac previously covered only the
+ * fixed 32 bytes before auth_hmac; the optional name (serialized AFTER
+ * auth_hmac, at BEACON_SIZE) was outside the HMAC entirely, so an attacker
+ * could rewrite any captured beacon's name and it would still verify,
+ * spoofing peer names in the neighbor table/UI even under a provisioned
+ * key. This proves the name is now covered: tampering it must break
+ * verify. */
+void test_beacon_hmac_covers_name_tamper_rejected(void) {
+    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
+    b.name_len = 5;
+    memcpy(b.name, "alice", 5);
+    b.name[5] = '\0';
+    beacon_compute_hmac(&b, key, sizeof(key));
+    TEST_ASSERT_TRUE(beacon_verify_hmac(&b, key, sizeof(key))); /* untampered: verifies */
+
+    bramble_beacon_t tampered = b;
+    memcpy(tampered.name, "mallo", 5); /* same length, different content */
+    TEST_ASSERT_FALSE(beacon_verify_hmac(&tampered, key, sizeof(key)));
+}
+
+/* A beacon with no name at all (name_len == 0, the common case) must still
+ * compute and verify correctly: the fix must not require a name to be
+ * present. */
+void test_beacon_hmac_still_verifies_with_no_name(void) {
+    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
+    TEST_ASSERT_EQUAL(0, b.name_len);
+    beacon_compute_hmac(&b, key, sizeof(key));
+    TEST_ASSERT_TRUE(beacon_verify_hmac(&b, key, sizeof(key)));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_beacon_build);
@@ -112,5 +144,7 @@ int main(void) {
     RUN_TEST(test_beacon_hmac_zero_key);
     RUN_TEST(test_beacon_hmac_under_provisioned_network_key_verifies);
     RUN_TEST(test_beacon_hmac_rejects_different_network_key);
+    RUN_TEST(test_beacon_hmac_covers_name_tamper_rejected);
+    RUN_TEST(test_beacon_hmac_still_verifies_with_no_name);
     return UNITY_END();
 }
