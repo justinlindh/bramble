@@ -131,6 +131,82 @@ void test_sas_both_sides_agree(void) {
     TEST_ASSERT_EQUAL_STRING(sas_a, sas_b);
 }
 
+/* Task 1.2: session table, state machine, eviction. */
+void test_lookup_after_alloc(void) {
+    dm_table_t t; dm_table_init(&t);
+    dm_session_t* s = dm_alloc(&t, 0xAA, 0);
+    TEST_ASSERT_NOT_NULL(s);
+    s->state = DM_STATE_ACTIVE;
+    TEST_ASSERT_EQUAL_PTR(s, dm_lookup(&t, 0xAA));
+}
+void test_handshaking_cap_enforced(void) {
+    dm_table_t t; dm_table_init(&t);
+    int allocated = 0;
+    for (uint32_t a = 1; a <= DM_MAX_SESSIONS + 2; a++) {
+        dm_session_t* s = dm_alloc(&t, a, 0);
+        if (s) { s->state = DM_STATE_HANDSHAKING; allocated++; }
+    }
+    TEST_ASSERT_EQUAL(DM_MAX_HANDSHAKING, allocated);
+}
+void test_active_not_evicted_for_handshaking(void) {
+    dm_table_t t; dm_table_init(&t);
+    dm_session_t* act = dm_alloc(&t, 0xAA, 0); act->state = DM_STATE_ACTIVE;
+    for (uint32_t a = 1; a <= DM_MAX_HANDSHAKING; a++) {
+        dm_session_t* s = dm_alloc(&t, 0x1000 + a, 1); if (s) s->state = DM_STATE_HANDSHAKING;
+    }
+    TEST_ASSERT_EQUAL_PTR(act, dm_lookup(&t, 0xAA));  /* survived */
+}
+
+/* Additional case beyond the brief: the three tests above never actually
+ * exhaust DM_MAX_SESSIONS free slots (32 total vs. at most 1 + 8 used), so
+ * none of them force the eviction branch itself to run; they only prove the
+ * handshaking cap and that unrelated allocations don't clobber an ACTIVE
+ * slot by accident. Fill the table completely (mixed verified/UNVERIFIED
+ * ACTIVE sessions established FIRST with the SMALLEST timestamps, so they
+ * would be the "oldest" and thus the natural LRU-eviction targets if ACTIVE
+ * protection were broken, then two evictable HANDSHAKING slots established
+ * LATER with larger timestamps) so the free-slot search must fail and the
+ * real LRU-eviction path must run. A correct implementation must skip every
+ * ACTIVE slot despite it being numerically older, and still evict the
+ * oldest HANDSHAKING slot: only the protection check, not timestamp order,
+ * explains that outcome, so this discriminates a broken/removed ACTIVE
+ * guard from a correct one (unlike naive timestamp choices where the
+ * correct victim happens to also be the global minimum either way). */
+void test_lru_eviction_prefers_oldest_handshaking(void) {
+    dm_table_t t; dm_table_init(&t);
+
+    for (uint32_t a = 1; a <= DM_MAX_SESSIONS - 2; a++) {
+        dm_session_t* s = dm_alloc(&t, a, a); /* established_ms = a: 1..30, smaller than below */
+        TEST_ASSERT_NOT_NULL(s);
+        s->state = DM_STATE_ACTIVE;
+        s->verified = (uint8_t)(a % 2); /* mix verified and UNVERIFIED ACTIVE: both protected */
+    }
+
+    dm_session_t* older_hs = dm_alloc(&t, 0x9999, 1000);
+    TEST_ASSERT_NOT_NULL(older_hs);
+    older_hs->state = DM_STATE_HANDSHAKING;
+
+    dm_session_t* newer_hs = dm_alloc(&t, 0x8888, 1050);
+    TEST_ASSERT_NOT_NULL(newer_hs);
+    newer_hs->state = DM_STATE_HANDSHAKING;
+    /* Table is now completely full: 30 ACTIVE + 2 HANDSHAKING = 32 slots,
+     * handshaking cap nowhere near reached (2 of 8). Every ACTIVE slot's
+     * established_ms (1..30) is smaller than either HANDSHAKING slot's
+     * (1000, 1050). */
+
+    dm_session_t* evicted_in = dm_alloc(&t, 0xBEEF, 5000);
+    TEST_ASSERT_NOT_NULL(evicted_in); /* must succeed via eviction, not NULL */
+    TEST_ASSERT_EQUAL_PTR(older_hs, evicted_in); /* oldest EVICTABLE, not an ACTIVE slot */
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, evicted_in->peer_addr);
+
+    TEST_ASSERT_EQUAL_PTR(newer_hs, dm_lookup(&t, 0x8888)); /* untouched */
+    for (uint32_t a = 1; a <= DM_MAX_SESSIONS - 2; a++) {
+        dm_session_t* s = dm_lookup(&t, a);
+        TEST_ASSERT_NOT_NULL(s);
+        TEST_ASSERT_EQUAL(DM_STATE_ACTIVE, s->state); /* every ACTIVE slot survived */
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_quad_dh_both_sides_agree);
@@ -140,5 +216,9 @@ int main(void) {
     RUN_TEST(test_ct_le32_matches_lexicographic_order);
     RUN_TEST(test_sas_known_vector);
     RUN_TEST(test_sas_both_sides_agree);
+    RUN_TEST(test_lookup_after_alloc);
+    RUN_TEST(test_handshaking_cap_enforced);
+    RUN_TEST(test_active_not_evicted_for_handshaking);
+    RUN_TEST(test_lru_eviction_prefers_oldest_handshaking);
     return UNITY_END();
 }
