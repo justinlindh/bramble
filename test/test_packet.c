@@ -4,6 +4,14 @@
 #include "../components/location/include/location.h"
 #include "packet.c"
 
+/* TODO(PART2): tier moves into the LOCATION ciphertext and these tests are
+ * rewritten to match; until then keep the pre-DES-9 tier-in-flags behavior
+ * compiling here since packet.h no longer defines these bits (freed by the
+ * flag byte redesign, Task 0.2). Removed alongside the mesh_task.c copy in
+ * Task 2.1. */
+#define FLAG_TIER_SHIFT 6
+#define FLAG_TIER_MASK 0xC0
+
 void setUp(void) {}
 void tearDown(void) {}
 
