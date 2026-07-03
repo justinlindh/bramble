@@ -106,6 +106,7 @@ static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for be
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
 static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
+static replay_table_t      s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon) replay window, keyed on the authenticated signer address, separate from the data-plane s_replay above */
 static replay_deferred_t   s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
  * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
@@ -1086,6 +1087,40 @@ static int send_beacon(void) {
         ESP_LOGE(TAG, "Beacon TX failed: %d", ret);
     }
     return ret;
+}
+
+/*
+ * ws 1.3b infra: control-plane seq draw + replay check. No callers yet
+ * (tasks 2-6 wire these into the five control-plane build/handle sites);
+ * kept static like every other file-local helper here, so an unused-function
+ * warning is expected and harmless until those callers land.
+ *
+ * control_seq_next mirrors the data-plane nonce draw above (e.g.
+ * send_data_packet): take s_nonce_mutex, call nonce_counter_next, and on
+ * failure release the mutex and fail closed without touching *out. The
+ * control plane doesn't need a full 12-byte AEAD nonce, just the 48-bit
+ * counter nonce_counter_extract pulls out of it.
+ */
+static int control_seq_next(uint64_t *out) {
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    if (nonce_ret != 0) {
+        xSemaphoreGive(s_nonce_mutex);
+        return nonce_ret;
+    }
+    *out = nonce_counter_extract(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    return 0;
+}
+
+/*
+ * ws 1.3b infra: control-plane replay check, fed only after a MAC verify
+ * passes so signer_addr/seq are authenticated. Separate table from the
+ * data-plane s_replay (see s_control_replay above).
+ */
+static bool control_replay_ok(uint32_t signer_addr, uint64_t seq) {
+    return replay_check_and_add(&s_control_replay, signer_addr, seq, now_ms()) == REPLAY_ACCEPT;
 }
 
 /* ── Packet handlers ────────────────────────────────────────────────── */
@@ -4237,6 +4272,7 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     dedup_init(&s_dedup);
     replay_table_init(&s_replay);
+    replay_table_init(&s_control_replay);
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
