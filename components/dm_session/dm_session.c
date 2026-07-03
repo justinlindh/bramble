@@ -129,6 +129,45 @@ static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
     return r == 0;
 }
 
+/*
+ * Derives a handshake tag: HKDF(salt="bramble-dm-v2", ikm, label || info)
+ * used as an HMAC key over transcript, truncated to 16 bytes. Shared by
+ * both the K_ke_init/transcript_1 tag (dm_build_init/dm_verify_init) and
+ * the K_confirm/transcript_2 tag (dm_build_resp/dm_verify_resp), so the
+ * label length is ALWAYS computed with strlen(label) here, in exactly one
+ * place, rather than a hardcoded byte count at each of the four call
+ * sites. A hardcoded length is a footgun: "bramble-ke-init" is 15 bytes
+ * (no NUL) and "bramble-ke-confirm" is 18 (no NUL), and a future edit that
+ * changed one length without updating its matching site elsewhere would
+ * silently break every DM session (the build and verify sides would
+ * derive different keys with no compile-time or obvious runtime signal).
+ * Deriving it from strlen() at a single call site removes the possibility
+ * entirely.
+ */
+static int dm_derive_ke_tag(const char* label, const uint8_t* ikm, size_t ikm_len,
+                            uint32_t addr_a, uint32_t addr_b, uint16_t ke_epoch,
+                            const uint8_t* transcript, size_t transcript_len,
+                            uint8_t tag_out[16]) {
+    size_t label_len = strlen(label);
+    uint8_t info[10];
+    dm_build_info(addr_a, addr_b, ke_epoch, info);
+
+    uint8_t hkdf_info[32]; /* longest label (18) + 10-byte info = 28, generous */
+    if (label_len + sizeof(info) > sizeof(hkdf_info)) return -1; /* defensive; never trips today */
+    memcpy(hkdf_info, label, label_len);
+    memcpy(hkdf_info + label_len, info, sizeof(info));
+
+    uint8_t key[32];
+    const char* salt = "bramble-dm-v2";
+    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, ikm_len,
+                           hkdf_info, label_len + sizeof(info), key, sizeof(key)) != 0) return -1;
+
+    uint8_t full_mac[32];
+    if (crypto_hmac_sha256(key, sizeof(key), transcript, transcript_len, full_mac) != 0) return -1;
+    memcpy(tag_out, full_mac, 16);
+    return 0;
+}
+
 int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
                   const uint8_t my_eph_priv[32], uint32_t peer_addr, uint16_t ke_epoch,
                   const uint8_t* peer_id_pub_or_null, bramble_key_exchange_t* out) {
@@ -164,17 +203,6 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     memcpy(ikm, dh2, 32);
     memcpy(ikm + 32, dh3, 32);
 
-    uint8_t info[10];
-    dm_build_info(my_id->address, peer_addr, ke_epoch, info);
-    uint8_t hkdf_info[15 + 10];
-    memcpy(hkdf_info, "bramble-ke-init", 15);
-    memcpy(hkdf_info + 15, info, 10);
-
-    uint8_t k_ke_init[32];
-    const char* salt = "bramble-dm-v2";
-    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, sizeof(ikm),
-                           hkdf_info, sizeof(hkdf_info), k_ke_init, 32) != 0) return -1;
-
     /* transcript_1 = addr_init || addr_resp || eph_init || id_init */
     uint8_t transcript[4 + 4 + 32 + 32];
     transcript[0]=(uint8_t)(my_id->address>>24); transcript[1]=(uint8_t)(my_id->address>>16);
@@ -184,14 +212,22 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     memcpy(transcript + 8, my_eph_pub, 32);
     memcpy(transcript + 40, my_id->public_key, 32);
 
-    uint8_t full_mac[32];
-    if (crypto_hmac_sha256(k_ke_init, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
-    memcpy(out->auth_tag, full_mac, 16);
-    return 0;
+    return dm_derive_ke_tag("bramble-ke-init", ikm, sizeof(ikm), my_id->address, peer_addr,
+                            ke_epoch, transcript, sizeof(transcript), out->auth_tag);
 }
 
 int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* my_id,
                    int have_peer_id, const uint8_t peer_id_pub[32]) {
+    /* Dispatch-confusion guard: without this, a message built as RESP
+     * (or any other type) but presented to dm_verify_init would still
+     * pass address binding, and on a first-contact call (have_peer_id==0,
+     * no tag to check at all) would be accepted outright as if it were a
+     * valid INIT. Domain-separated HKDF labels already prevent tag
+     * forgery across message types, but asserting ke_type closes the
+     * dispatch confusion itself rather than relying on that as the only
+     * defense. */
+    if (msg->ke_type != KE_TYPE_INIT) return -1;
+
     /* Address binding: without this an attacker could claim any address
      * with an identity key of its own choosing. Applies on every message,
      * first-contact included. */
@@ -218,17 +254,6 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
     memcpy(ikm, dh2, 32);
     memcpy(ikm + 32, dh3, 32);
 
-    uint8_t info[10];
-    dm_build_info(addr_init, addr_resp, ke_epoch, info);
-    uint8_t hkdf_info[15 + 10];
-    memcpy(hkdf_info, "bramble-ke-init", 15);
-    memcpy(hkdf_info + 15, info, 10);
-
-    uint8_t k_ke_init[32];
-    const char* salt = "bramble-dm-v2";
-    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, sizeof(ikm),
-                           hkdf_info, sizeof(hkdf_info), k_ke_init, 32) != 0) return -1;
-
     uint8_t transcript[4 + 4 + 32 + 32];
     transcript[0]=(uint8_t)(addr_init>>24); transcript[1]=(uint8_t)(addr_init>>16);
     transcript[2]=(uint8_t)(addr_init>>8);  transcript[3]=(uint8_t)addr_init;
@@ -237,10 +262,11 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
     memcpy(transcript + 8, msg->ephemeral_pubkey, 32);
     memcpy(transcript + 40, msg->long_term_pubkey, 32);
 
-    uint8_t full_mac[32];
-    if (crypto_hmac_sha256(k_ke_init, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
+    uint8_t expect_tag[16];
+    if (dm_derive_ke_tag("bramble-ke-init", ikm, sizeof(ikm), addr_init, addr_resp, ke_epoch,
+                        transcript, sizeof(transcript), expect_tag) != 0) return -1;
 
-    return ct_eq(full_mac, msg->auth_tag, 16) ? 0 : -1;
+    return ct_eq(expect_tag, msg->auth_tag, 16) ? 0 : -1;
 }
 
 int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
@@ -259,17 +285,6 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     if (dm_session_key_from_ikm(ikm, my_id->address, init->src_addr, ke_epoch,
                                 session_key_out) != 0) return -1;
 
-    uint8_t info[10];
-    dm_build_info(init->src_addr, my_id->address, ke_epoch, info);
-    uint8_t hkdf_info[19 + 10];
-    memcpy(hkdf_info, "bramble-ke-confirm", 19);
-    memcpy(hkdf_info + 19, info, 10);
-
-    uint8_t k_confirm[32];
-    const char* salt = "bramble-dm-v2";
-    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, 128,
-                           hkdf_info, sizeof(hkdf_info), k_confirm, 32) != 0) return -1;
-
     /* transcript_2 = addr_init || addr_resp || eph_init || id_init ||
      * eph_resp || id_resp: the RFC states "over the full transcript, both
      * ephemerals and both identities now known" without an exact byte
@@ -286,33 +301,33 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     memcpy(transcript + 72, my_eph_pub, 32);
     memcpy(transcript + 104, my_id->public_key, 32);
 
-    uint8_t full_mac[32];
-    if (crypto_hmac_sha256(k_confirm, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
-    memcpy(out->auth_tag, full_mac, 16);
-    return 0;
+    return dm_derive_ke_tag("bramble-ke-confirm", ikm, sizeof(ikm), init->src_addr, my_id->address,
+                            ke_epoch, transcript, sizeof(transcript), out->auth_tag);
 }
 
 int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
                    const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32],
                    uint16_t ke_epoch, uint8_t session_key_out[32]) {
+    /* Dispatch-confusion guard, same rationale as dm_verify_init: reject a
+     * message that isn't actually a RESP before doing anything else with
+     * it. */
+    if (resp->ke_type != KE_TYPE_RESP) return -1;
+
     if (crypto_derive_address(resp->long_term_pubkey) != resp->src_addr) return -1;
 
     uint8_t ikm[128];
     if (dm_compute_ikm(my_id->private_key, my_eph_priv, resp->long_term_pubkey,
                        resp->ephemeral_pubkey, ikm) != 0) return -1;
+
+    /* Compute into a local buffer, not the caller's session_key_out, until
+     * the confirm tag verifies: a caller that ignores the return value
+     * must never observe an unauthenticated key. No secrecy is at stake
+     * either way (this is the verifier's own computation from its own
+     * private key), but a discipline of "the output is only valid on
+     * success" is worth keeping regardless. */
+    uint8_t local_key[32];
     if (dm_session_key_from_ikm(ikm, my_id->address, resp->src_addr, ke_epoch,
-                                session_key_out) != 0) return -1;
-
-    uint8_t info[10];
-    dm_build_info(my_id->address, resp->src_addr, ke_epoch, info);
-    uint8_t hkdf_info[19 + 10];
-    memcpy(hkdf_info, "bramble-ke-confirm", 19);
-    memcpy(hkdf_info + 19, info, 10);
-
-    uint8_t k_confirm[32];
-    const char* salt = "bramble-dm-v2";
-    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, 128,
-                           hkdf_info, sizeof(hkdf_info), k_confirm, 32) != 0) return -1;
+                                local_key) != 0) return -1;
 
     uint8_t transcript[4 + 4 + 32 + 32 + 32 + 32];
     transcript[0]=(uint8_t)(my_id->address>>24); transcript[1]=(uint8_t)(my_id->address>>16);
@@ -324,10 +339,14 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
     memcpy(transcript + 72, resp->ephemeral_pubkey, 32);
     memcpy(transcript + 104, resp->long_term_pubkey, 32);
 
-    uint8_t full_mac[32];
-    if (crypto_hmac_sha256(k_confirm, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
+    uint8_t expect_tag[16];
+    if (dm_derive_ke_tag("bramble-ke-confirm", ikm, sizeof(ikm), my_id->address, resp->src_addr,
+                        ke_epoch, transcript, sizeof(transcript), expect_tag) != 0) return -1;
 
-    return ct_eq(full_mac, resp->auth_tag, 16) ? 0 : -1;
+    if (!ct_eq(expect_tag, resp->auth_tag, 16)) return -1;
+
+    memcpy(session_key_out, local_key, 32);
+    return 0;
 }
 
 void dm_table_init(dm_table_t* t) { memset(t, 0, sizeof(*t)); }
