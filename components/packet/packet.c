@@ -168,7 +168,7 @@ esp_err_t bramble_rreq_deserialize(bramble_rreq_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
-/* RREP (30 bytes) */
+/* RREP (40 bytes: was 34, +6 for seq, ws 1.3b) */
 esp_err_t bramble_rrep_serialize(const bramble_rrep_t* p, uint8_t* buf, size_t len) {
     if (len < RREP_SIZE)
         return ESP_ERR_INVALID_SIZE;
@@ -181,6 +181,7 @@ esp_err_t bramble_rrep_serialize(const bramble_rrep_t* p, uint8_t* buf, size_t l
     buf[B + 12] = p->hop_count;
     buf[B + 13] = p->route_metric;
     memcpy(buf + B + 14, p->auth_hmac, 8);
+    memcpy(buf + B + 22, p->seq, 6);
     return ESP_OK;
 }
 esp_err_t bramble_rrep_deserialize(bramble_rrep_t* p, const uint8_t* buf, size_t len) {
@@ -195,6 +196,7 @@ esp_err_t bramble_rrep_deserialize(bramble_rrep_t* p, const uint8_t* buf, size_t
     p->hop_count = buf[B + 12];
     p->route_metric = buf[B + 13];
     memcpy(p->auth_hmac, buf + B + 14, 8);
+    memcpy(p->seq, buf + B + 22, 6);
     return ESP_OK;
 }
 

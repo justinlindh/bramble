@@ -2101,7 +2101,14 @@ static void send_rrep(const bramble_rrep_t *rrep) {
     if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32,
                  rrep->query_id, rrep->next_hop);
-        if (mesh_tx(buf, HEADER_SIZE + 19, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+        /* Pre-existing bug fixed here (found while adding ws 1.3b's seq
+         * field): this was HEADER_SIZE + 19 (31 bytes), 3 short of the
+         * struct's 22-byte payload (query_id+src_addr+next_hop+hop_count+
+         * route_metric+auth_hmac), truncating the last 3 bytes of
+         * auth_hmac on every real transmit. RREP_SIZE (the macro, not a
+         * hand-counted offset) is what every other RREP size check already
+         * uses, so this can't drift again the way HEADER_SIZE+19 did. */
+        if (mesh_tx(buf, RREP_SIZE, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RREP denied by airtime budget");
         }
     }
@@ -2229,6 +2236,25 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         ESP_LOGI(TAG, "RREQ is for us; sending RREP");
         bramble_rrep_t rrep = rrep_build_destination(&rreq, s_identity->address);
 
+        /* ws 1.3b: draw the 48-bit origin seq and re-sign to cover it
+         * (rrep_build_destination already signed once with seq=0 from the
+         * zeroed struct; this re-sign is the one that ships). Fail-closed:
+         * no seq means no RREP goes out this round, and the RREQ
+         * originator's retry logic will try again later. */
+        uint64_t rrep_seq;
+        if (control_seq_next(&rrep_seq) != 0) {
+            ESP_LOGE(TAG, "Seq counter unavailable, dropping RREP for query=%08" PRIX32,
+                     rreq.query_id);
+            return;
+        }
+        rrep.seq[0] = (uint8_t)(rrep_seq >> 40);
+        rrep.seq[1] = (uint8_t)(rrep_seq >> 32);
+        rrep.seq[2] = (uint8_t)(rrep_seq >> 24);
+        rrep.seq[3] = (uint8_t)(rrep_seq >> 16);
+        rrep.seq[4] = (uint8_t)(rrep_seq >> 8);
+        rrep.seq[5] = (uint8_t)rrep_seq;
+        rrep_sign(&rrep);
+
         /* Route RREP back toward the previous hop */
         reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rreq.query_id);
         if (rev) {
@@ -2272,6 +2298,19 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
              rrep.query_id, rrep.src_addr, rrep.hop_count);
+
+    /* ws 1.3b: replay check on the authenticated signer (rrep.src_addr is
+     * MAC-covered, so an attacker cannot dodge the window by mutating it).
+     * Checked after rrep_verify and strictly before route_install, so a
+     * replayed RREP never resurrects a stale route. */
+    uint64_t rrep_seq = ((uint64_t)rrep.seq[0] << 40) | ((uint64_t)rrep.seq[1] << 32) |
+                        ((uint64_t)rrep.seq[2] << 24) | ((uint64_t)rrep.seq[3] << 16) |
+                        ((uint64_t)rrep.seq[4] << 8) | (uint64_t)rrep.seq[5];
+    if (!control_replay_ok(rrep.src_addr, rrep_seq)) {
+        ESP_LOGW(TAG, "RREP replay query=%08" PRIX32 " src=%08" PRIX32, rrep.query_id,
+                 rrep.src_addr);
+        return;
+    }
 
     /* Install route to the destination (RREP source) via the sender. The
      * link penalty subtracts from the higher-is-better path metric. */
