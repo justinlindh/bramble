@@ -761,6 +761,63 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetAuthTokenResponse'
 
+  /rpc/bramble.setNetworkKey:
+    post:
+      operationId: setNetworkKey
+      summary: Provision the control-plane network key
+      description: >
+        Provisions the per-fleet network key that keys the RREP/RERR/ACK/
+        delivery-receipt/beacon control-plane MACs. Pass the raw 32-byte key
+        as 64 hex characters. Persisted to NVS and applied immediately (the
+        beacon subkey is re-derived live). Authenticated callers only. This is
+        a write-only secret: the key is never read back (see
+        bramble.getNetworkKeyStatus for a one-way fingerprint). Provisioning a
+        real key removes the universally-known public-PSK fallback but does not
+        by itself close SEC-H1/SEC-H2/NEW-SEC-4/NEW-SEC-8 (which also need
+        per-message freshness and per-node beacon identity).
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetNetworkKeyParams'
+      responses:
+        '400':
+          description: Bad request (key not 64 hex characters)
+        '200':
+          description: Network key provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.getNetworkKeyStatus:
+    post:
+      operationId: getNetworkKeyStatus
+      summary: Report network-key provisioning status
+      description: >
+        Returns whether a real per-fleet network key is provisioned and a
+        one-way fingerprint (SHA256(key)[0:4] as 8 lowercase hex) so an
+        operator can confirm a fleet converged on the same key without the key
+        ever being read back. An unprovisioned node reports the fingerprint of
+        the public-PSK fallback key (a known value that marks it as
+        unprotected).
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Network key status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetNetworkKeyStatusResponse'
+
   /rpc/bramble.setAllowedOrigins:
     post:
       operationId: setAllowedOrigins
@@ -2401,6 +2458,35 @@ components:
         enabled:
           type: boolean
           description: True when a non-empty token is configured.
+
+    SetNetworkKeyParams:
+      type: object
+      description: Parameters for bramble.setNetworkKey.
+      required: [key]
+      properties:
+        key:
+          type: string
+          description: >
+            The raw 32-byte network key as exactly 64 hex characters
+            (case-insensitive).
+          pattern: '^[0-9a-fA-F]{64}$'
+
+    GetNetworkKeyStatusResponse:
+      type: object
+      description: Response from bramble.getNetworkKeyStatus.
+      required: [provisioned, fingerprint]
+      properties:
+        provisioned:
+          type: boolean
+          description: >
+            True when a real per-fleet key has been provisioned; false when
+            the node is still on the public-PSK fallback.
+        fingerprint:
+          type: string
+          description: >
+            SHA256(network_key)[0:4] as 8 lowercase hex characters. Matches
+            across nodes that share a key; never reveals the key.
+          pattern: '^[0-9a-f]{8}$'
 
     SetAllowedOriginsParams:
       type: object
