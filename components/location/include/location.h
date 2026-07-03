@@ -118,6 +118,24 @@ int location_serialize_presence(const bramble_position_t* pos, uint8_t* buf, siz
 int location_serialize_for_tier(const bramble_position_t* pos, uint8_t tier, uint8_t* buf,
                                 size_t buf_len);
 
+/*
+ * SEC-C1 RX (Task 2.2): the decrypt-mechanism-agnostic tail, shared by both
+ * handle_location's channel path (after channel_msg_decrypt) and its
+ * session path (after dm_session_decrypt). Deliberately kept dependency-free
+ * (no channel_msg.h / dm_session.h include here): it only takes
+ * already-authenticated plaintext bytes, reads the tier from byte
+ * LOCATION_INNER_TIER_OFFSET (never the header flags), and parses the
+ * position with the TIER-APPROPRIATE deserialize length, ignoring the
+ * trailing canonical L_LOC_INNER pad. Returns 0 on success (fills tier_out
+ * and pos_out), -1 on any parse failure. The decrypt-specific glue (trial
+ * against channels, or a session lookup) lives in mesh_task.c, which
+ * already depends on both channel_msg.h and dm_session.h; adding either as
+ * a REQUIRES of the location component here rippled into unrelated host
+ * test targets that only need location's other, decrypt-independent API.
+ */
+int location_parse_inner(const uint8_t* plaintext, size_t plaintext_len, uint8_t* tier_out,
+                         bramble_position_t* pos_out);
+
 /* Cache */
 int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
                           const bramble_position_t* pos, uint32_t now_ms);

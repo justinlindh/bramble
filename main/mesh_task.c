@@ -353,7 +353,6 @@ static void mesh_probe_reply_timer_cb(void *arg);
 static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t address);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
-extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -760,14 +759,34 @@ static void mesh_persist_peer_location(uint32_t peer_addr,
     nvs_close(nvs);
 }
 
-static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
-    if (len < HEADER_SIZE + 4 + LOCATION_PRESENCE_SIZE) {
-        ESP_LOGW(TAG, "Location packet too short: %u", len);
-        return;
+/*
+ * SEC-C1 RX channel-path glue (Task 2.2): trial-decrypts against the known
+ * channels, then hands the resulting plaintext to location_parse_inner
+ * (decrypt-mechanism-agnostic tier + position parsing, exported by the
+ * location component; see its own comment for why it stays dependency-free
+ * rather than owning this glue itself). This function is intentionally
+ * thin: the only logic worth testing (tier extraction, tier-appropriate
+ * position parsing) lives in location_parse_inner, already covered by
+ * test_location_crypto.c.
+ */
+static int location_rx_decode_channel(const uint8_t *nonce, const uint8_t *ciphertext,
+                                      size_t ct_len, const uint8_t *tag, const uint8_t *aad,
+                                      size_t aad_len, uint8_t *tier_out,
+                                      bramble_position_t *pos_out) {
+    uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
+    channel_msg_info_t info;
+    if (channel_msg_decrypt(s_channels, s_num_channels, nonce, ciphertext, ct_len, tag, aad,
+                            aad_len, plaintext, &info, now_ms()) != 0) {
+        return -1;
     }
+    return location_parse_inner(info.data, info.data_len, tier_out, pos_out);
+}
 
-    bramble_header_t header;
-    if (bramble_header_deserialize(&header, data, len) != ESP_OK) {
+static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's
+     * header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16). */
+    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+        ESP_LOGW(TAG, "Location packet too short: %u", len);
         return;
     }
 
@@ -777,23 +796,71 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
         return;
     }
 
-    /* STALE (Task 2.1 TX-only scope): mesh_send_location_packet now
-     * encrypts under AEAD and moves the tier into the plaintext (SEC-C1),
-     * so this function can no longer correctly parse an incoming location
-     * packet: `flags` no longer carries a tier (always reads back as
-     * LOCATION_TIER_FULL, 0, now that the sender never sets these bits),
-     * and `payload` is ciphertext, not a serialized position. Location RX
-     * is non-functional until the follow-up task rewrites this to decrypt
-     * (channel trial-decrypt or session lookup by FLAG_CHANNEL, mirroring
-     * handle_data) and read the tier from the decrypted plaintext. Left
-     * otherwise unchanged: out of this task's file scope. */
-    uint8_t tier = (uint8_t)((header.flags >> 6) & 0x03);
-    const uint8_t *payload = data + HEADER_SIZE + 4;
-    size_t payload_len = len - HEADER_SIZE - 4;
+    bramble_header_t header;
+    if (bramble_header_deserialize(&header, data, len) != ESP_OK) {
+        return;
+    }
 
+    const uint8_t *nonce = data + HEADER_SIZE + 4;
+    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    const uint8_t *ciphertext = nonce + BRAMBLE_NONCE_SIZE;
+    const uint8_t *tag = ciphertext + ct_len;
+
+    if (ct_len > BRAMBLE_MAX_PACKET_SIZE) {
+        ESP_LOGW(TAG, "Location ciphertext too large: %u", (unsigned)ct_len);
+        return;
+    }
+
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&header, src_addr, aad, sizeof(aad));
+
+    /* Discriminator mirrors handle_data (SEC-C1/SEC-C2 share the same
+     * mechanism): FLAG_CHANNEL set means channel-shared, trial-decrypt
+     * against known channels; absent means a directed share, look up the
+     * ACTIVE session for src_addr under s_dm_mutex. */
+    uint8_t tier = 0;
     bramble_position_t pos = {0};
-    if (location_deserialize_for_tier(payload, payload_len, tier, &pos) <= 0) {
-        ESP_LOGW(TAG, "Failed to parse location payload from %08" PRIX32 " tier=%u", src_addr, tier);
+    int ok = -1;
+
+    if (header.flags & FLAG_CHANNEL) {
+        ok = location_rx_decode_channel(nonce, ciphertext, ct_len, tag, aad, sizeof(aad), &tier,
+                                        &pos);
+    } else {
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            /* Canonical session-path size (Task 2.1, M11): the encoder
+             * always pads to exactly L_LOC_INNER + CHANNEL_MSG_OVERHEAD
+             * bytes to match the channel path's total ciphertext length.
+             * Reject anything else outright rather than risk decrypting
+             * into an undersized buffer. */
+            uint8_t plaintext[L_LOC_INNER + CHANNEL_MSG_OVERHEAD];
+            if (ct_len == sizeof(plaintext) &&
+                dm_session_decrypt(sess, &header, src_addr, nonce, ciphertext, ct_len, tag,
+                                   plaintext) == 0) {
+                ok = location_parse_inner(plaintext, sizeof(plaintext), &tier, &pos);
+            }
+        }
+        xSemaphoreGive(s_dm_mutex);
+    }
+
+    if (ok != 0) {
+        ESP_LOGW(TAG, "Failed to decrypt/parse location from %08" PRIX32, src_addr);
+        return;
+    }
+
+    /* SEC-M1/M6: the SAME node-global replay window DATA uses (Task 0.5):
+     * one nonce counter and one replay window per sender, shared across
+     * every packet type that sender's node encrypts, since a counter is
+     * only ever used once regardless of what it authenticates. Never
+     * consults the deferred cache (that is chat-only, Task 0.6): location
+     * is real-time presence, so both REPLAY_REJECT_DUP and
+     * REPLAY_BELOW_WINDOW are dropped identically, never accepted late. */
+    uint64_t rx_counter = nonce_counter_extract(nonce);
+    int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
+    if (rp != REPLAY_ACCEPT) {
+        ESP_LOGD(TAG, "Location replay drop from %08" PRIX32 " ctr=%llu (rp=%d)", src_addr,
+                 (unsigned long long)rx_counter, rp);
         return;
     }
 
