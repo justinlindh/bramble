@@ -19,6 +19,7 @@
 #include "channel_msg.h"
 #include "channel_storage.h"
 #include "nonce_counter.h"
+#include "replay_window.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -106,6 +107,7 @@ static bramble_identity_t *s_identity;
 static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for beacon HMAC */
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
+static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
 /* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
  * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
  * this same limiter into the forward path. */
@@ -1424,6 +1426,20 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* SEC-M1: authenticated replay protection, keyed on the nonce counter
+     * (Task 0.4) rather than the cleartext packet_id, so it cannot be
+     * spoofed by an attacker who doesn't hold the channel key. Runs only
+     * after a successful decrypt: the counter came out of an authenticated
+     * nonce, so it is bound to this sender's identity. */
+    uint64_t rx_counter = nonce_counter_extract(nonce);
+    int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
+    if (rp == REPLAY_REJECT_DUP) {
+        ESP_LOGD(TAG, "Replay drop from %08" PRIX32 " ctr=%llu", src_addr,
+                 (unsigned long long)rx_counter);
+        return;
+    }
+    /* rp == REPLAY_BELOW_WINDOW falls through to the tier-2 deferred check (Task 0.6 note). */
+
     /* Extract the text message from the decrypted payload */
     if (info.data_len > 0) {
         /* Check if this is a fragment */
@@ -2037,6 +2053,10 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
      * - include packet type to avoid PROBE vs PROBE_ACK collisions
      * - for PROBE_ACK, include responder addr so multiple peers can respond
      *   to the same probe_id without being collapsed as duplicates.
+     *
+     * SEC-M1: authenticated replay of DATA/LOCATION is enforced post-decrypt
+     * via replay_check_and_add on the nonce counter; this dedup only
+     * suppresses relay loops of unauthenticated control packets.
      */
     uint32_t dedup_key = header.packet_id ^ (((uint32_t)header.type) << 24);
     if (header.type == PKT_TYPE_PROBE_ACK && pkt->len >= HEADER_SIZE + 4) {
@@ -3178,6 +3198,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     }
 
     dedup_init(&s_dedup);
+    replay_table_init(&s_replay);
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
     rreq_dedup_init(&s_rreq_dedup);

@@ -53,6 +53,14 @@ target_include_directories(test_nonce_counter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nonce_counter/include
 )
 
+add_executable(test_replay_window
+    test_replay_window.c
+    unity/unity.c
+)
+target_include_directories(test_replay_window PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
+)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

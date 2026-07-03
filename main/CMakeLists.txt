@@ -10,7 +10,7 @@ idf_component_register(
              ble reliability battery ota board_config
              keyboard trackball location gps sdcard audio
              ui_graphics traffic_debug fragment timesync mailbox
-             bootloader_support nonce_counter
+             bootloader_support nonce_counter replay_window
 
     PRIV_REQUIRES lvgl__lvgl
 )
