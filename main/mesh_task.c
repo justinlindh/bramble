@@ -1953,7 +1953,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             }
             uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
             int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at,
-                                            now_s, timesync_is_confident(&s_timesync));
+                                            now_s, timesync_is_confident(&s_timesync, now_ms()));
             if (dp != REPLAY_ACCEPT) {
                 ESP_LOGD(TAG, "Deferred replay drop from %08" PRIX32 " ctr=%llu sent_at=%" PRIu32,
                          src_addr, (unsigned long long)rx_counter, info.sent_at);
