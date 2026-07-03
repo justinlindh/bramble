@@ -25,6 +25,18 @@
 void setUp(void) { network_key_clear(); }
 void tearDown(void) {}
 
+/* ws 1.3b: the seq is set by the caller (not rrep_build_destination, which
+ * defaults it to zero), mirroring how mesh_task.c writes the 48-bit
+ * control_seq_next draw into r.seq before re-signing. */
+static void set_seq(bramble_rrep_t *r, uint64_t seq) {
+    r->seq[0] = (uint8_t)(seq >> 40);
+    r->seq[1] = (uint8_t)(seq >> 32);
+    r->seq[2] = (uint8_t)(seq >> 24);
+    r->seq[3] = (uint8_t)(seq >> 16);
+    r->seq[4] = (uint8_t)(seq >> 8);
+    r->seq[5] = (uint8_t)seq;
+}
+
 static bramble_rreq_t make_rreq(void) {
     bramble_rreq_t rq = {0};
     rq.header.version = BRAMBLE_VERSION;
@@ -44,7 +56,25 @@ static bramble_rreq_t make_rreq(void) {
 void test_rrep_sign_verify_round_trip(void) {
     bramble_rreq_t rq = make_rreq();
     bramble_rrep_t r = rrep_build_destination(&rq, 0xDDDDDDDD);
+    set_seq(&r, 0x0102030405);
+    rrep_sign(&r);
     TEST_ASSERT_TRUE(rrep_verify(&r));
+}
+
+/*
+ * ws 1.3b: the 48-bit seq is part of the auth buffer (rrep_build_auth_buf),
+ * so tampering it after signing must break verification exactly like
+ * tampering route_metric does above.
+ */
+void test_rrep_seq_covered_by_mac(void) {
+    bramble_rreq_t rq = make_rreq();
+    bramble_rrep_t r = rrep_build_destination(&rq, 0xDDDDDDDD);
+    set_seq(&r, 0x0102030405);
+    rrep_sign(&r);
+    TEST_ASSERT_TRUE(rrep_verify(&r)); /* sanity: correctly signed with the seq included */
+
+    r.seq[5] ^= 0xFF; /* tamper the seq after signing */
+    TEST_ASSERT_FALSE(rrep_verify(&r));
 }
 
 void test_rrep_verify_rejects_flipped_route_metric(void) {
@@ -62,12 +92,17 @@ void test_rrep_verify_rejects_flipped_route_metric(void) {
 void test_rrep_verify_survives_relay_rewrite(void) {
     bramble_rreq_t rq = make_rreq();
     bramble_rrep_t r = rrep_build_destination(&rq, 0xDDDDDDDD);
+    set_seq(&r, 0x0102030405);
+    rrep_sign(&r);
 
     bramble_rrep_t fwd = rrep_forward(&r, 0x55555555);
     /* Sanity: the rewrite actually happened, or this test would pass
      * vacuously without exercising anything. */
     TEST_ASSERT_NOT_EQUAL(r.next_hop, fwd.next_hop);
     TEST_ASSERT_NOT_EQUAL(r.header.dest_addr, fwd.header.dest_addr);
+    /* seq is origin-stable: rrep_forward carries it through unchanged, same
+     * as auth_hmac. */
+    TEST_ASSERT_EQUAL_MEMORY(r.seq, fwd.seq, sizeof(r.seq));
 
     TEST_ASSERT_TRUE(rrep_verify(&fwd));
 }
@@ -91,6 +126,7 @@ void test_rrep_verify_rejects_wrong_key_forgery(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rrep_sign_verify_round_trip);
+    RUN_TEST(test_rrep_seq_covered_by_mac);
     RUN_TEST(test_rrep_verify_rejects_flipped_route_metric);
     RUN_TEST(test_rrep_verify_survives_relay_rewrite);
     RUN_TEST(test_rrep_verify_rejects_wrong_key_forgery);
