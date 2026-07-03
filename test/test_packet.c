@@ -113,6 +113,42 @@ void test_ack_auth_hmac_offset_independent_of_hop_count(void) {
     TEST_ASSERT_EQUAL_MEMORY(p_zero_hops.auth_hmac, buf_many + hmac_offset, 8);
 }
 
+/* Fix 5 (red-team panel): a tampered/truncated hop_count claiming more
+ * relay_path entries than the buffer actually supplies must not leave
+ * relay_path[] beyond what was truly read holding uninitialized/garbage
+ * caller memory. handle_ack (main/mesh_task.c) reads relay_path[0..
+ * hop_count) straight into the onAck UI notification, so stale bytes
+ * there is a real (bounded, own-UI) leak. This proves hop_count is
+ * clamped DOWN to the number of entries the buffer truly carries, and
+ * that the untouched tail of relay_path reads zero, not whatever was on
+ * the stack before deserialize was called. */
+void test_ack_deserialize_clamps_hop_count_to_available_bytes(void) {
+    bramble_ack_t p = {
+        .header = make_header(PKT_TYPE_ACK),
+        .src_addr = 0x1, .ack_packet_id = 0x2,
+        .hop_count = ACK_MAX_HOPS,
+    };
+    for (int i = 0; i < ACK_MAX_HOPS; i++) p.relay_path[i] = 0x40000000 + i;
+    uint8_t buf[ACK_MAX_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p, buf, sizeof(buf)));
+
+    /* Truncate to only 2 hops' worth of wire bytes, as if the packet on
+     * the wire were shorter than hop_count=8 claims (attacker-tampered or
+     * genuinely truncated in transit). */
+    size_t truncated_len = ACK_BASE_SIZE + 2 * 4;
+
+    bramble_ack_t out;
+    memset(&out, 0xAA, sizeof(out)); /* poison: simulate stack garbage */
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_deserialize(&out, buf, truncated_len));
+
+    TEST_ASSERT_EQUAL(2, out.hop_count); /* clamped to what the buffer truly carries */
+    TEST_ASSERT_EQUAL_HEX32(0x40000000, out.relay_path[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x40000001, out.relay_path[1]);
+    for (int i = 2; i < ACK_MAX_HOPS; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0, out.relay_path[i]); /* zeroed, not 0xAAAAAAAA poison */
+    }
+}
+
 void test_ack_buffer_too_small(void) {
     bramble_ack_t p = { .header = make_header(PKT_TYPE_ACK) };
     /* Full-size backing array, undersized length: same rejection contract,
@@ -300,6 +336,7 @@ int main(void) {
     RUN_TEST(test_header_big_endian_wire);
     RUN_TEST(test_ack_roundtrip);
     RUN_TEST(test_ack_auth_hmac_offset_independent_of_hop_count);
+    RUN_TEST(test_ack_deserialize_clamps_hop_count_to_available_bytes);
     RUN_TEST(test_ack_buffer_too_small);
     RUN_TEST(test_rreq_roundtrip);
     RUN_TEST(test_rrep_roundtrip);

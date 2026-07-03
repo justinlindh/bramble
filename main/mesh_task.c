@@ -568,6 +568,8 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
             if (nonce_ret == 0) {
                 enc_ret = dm_session_encrypt(sess, &header, s_identity->address, session_inner,
                                              sizeof(session_inner), nonce, ciphertext, tag);
+                if (enc_ret == 0)
+                    sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
             }
         }
         xSemaphoreGive(s_dm_mutex);
@@ -774,13 +776,14 @@ static void mesh_persist_peer_location(uint32_t peer_addr,
 static int location_rx_decode_channel(const uint8_t *nonce, const uint8_t *ciphertext,
                                       size_t ct_len, const uint8_t *tag, const uint8_t *aad,
                                       size_t aad_len, uint8_t *tier_out,
-                                      bramble_position_t *pos_out) {
+                                      bramble_position_t *pos_out, int *channel_index_out) {
     uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     channel_msg_info_t info;
     if (channel_msg_decrypt(s_channels, s_num_channels, nonce, ciphertext, ct_len, tag, aad,
                             aad_len, plaintext, &info, now_ms()) != 0) {
         return -1;
     }
+    *channel_index_out = info.channel_index;
     return location_parse_inner(info.data, info.data_len, tier_out, pos_out);
 }
 
@@ -823,10 +826,12 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
     uint8_t tier = 0;
     bramble_position_t pos = {0};
     int ok = -1;
+    int is_channel_message = (header.flags & FLAG_CHANNEL) ? 1 : 0;
+    int channel_index = 0;
 
-    if (header.flags & FLAG_CHANNEL) {
+    if (is_channel_message) {
         ok = location_rx_decode_channel(nonce, ciphertext, ct_len, tag, aad, sizeof(aad), &tier,
-                                        &pos);
+                                        &pos, &channel_index);
     } else {
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
         dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
@@ -841,6 +846,7 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
                 dm_session_decrypt(sess, &header, src_addr, nonce, ciphertext, ct_len, tag,
                                    plaintext) == 0) {
                 ok = location_parse_inner(plaintext, sizeof(plaintext), &tier, &pos);
+                sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
             }
         }
         xSemaphoreGive(s_dm_mutex);
@@ -857,13 +863,20 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
      * only ever used once regardless of what it authenticates. Never
      * consults the deferred cache (that is chat-only, Task 0.6): location
      * is real-time presence, so both REPLAY_REJECT_DUP and
-     * REPLAY_BELOW_WINDOW are dropped identically, never accepted late. */
+     * REPLAY_BELOW_WINDOW are dropped identically, never accepted late.
+     * Fix 2 (red-team panel): skip this SHARED window entirely for a
+     * public-channel decrypt, whose src_addr is a free-to-forge claim
+     * (BRAMBLE_PUBLIC_CHANNEL_PSK is public), same reasoning and same
+     * helper as handle_data. Public-channel location updates rely on the
+     * pre-existing packet_id/type dedup for loop suppression instead. */
     uint64_t rx_counter = nonce_counter_extract(nonce);
-    int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
-    if (rp != REPLAY_ACCEPT) {
-        ESP_LOGD(TAG, "Location replay drop from %08" PRIX32 " ctr=%llu (rp=%d)", src_addr,
-                 (unsigned long long)rx_counter, rp);
-        return;
+    if (channel_source_is_replay_trustworthy(is_channel_message, channel_index)) {
+        int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
+        if (rp != REPLAY_ACCEPT) {
+            ESP_LOGD(TAG, "Location replay drop from %08" PRIX32 " ctr=%llu (rp=%d)", src_addr,
+                     (unsigned long long)rx_counter, rp);
+            return;
+        }
     }
 
     uint32_t t = now_ms();
@@ -1704,7 +1717,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
      * decrypted under the ACTIVE session key for src_addr; there is no
      * channel-key fallback for this path, matching send_dm_packet never
      * setting FLAG_CHANNEL on the way out. */
-    if (rx_hdr.flags & FLAG_CHANNEL) {
+    int is_channel_message = (rx_hdr.flags & FLAG_CHANNEL) ? 1 : 0;
+    if (is_channel_message) {
         int ret = channel_msg_decrypt(s_channels, s_num_channels,
                                       nonce, ciphertext, ct_len, tag,
                                       aad, HEADER_SIZE + 4,
@@ -1720,6 +1734,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         if (sess && sess->state == DM_STATE_ACTIVE) {
             ok = (dm_session_decrypt(sess, &rx_hdr, src_addr, nonce, ciphertext, ct_len, tag,
                                      plaintext) == 0);
+            if (ok)
+                sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
         }
         xSemaphoreGive(s_dm_mutex);
         if (!ok) {
@@ -1743,34 +1759,60 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     /* SEC-M1: authenticated replay protection, keyed on the nonce counter
      * (Task 0.4) rather than the cleartext packet_id, so it cannot be
-     * spoofed by an attacker who doesn't hold the channel key. Runs only
-     * after a successful decrypt: the counter came out of an authenticated
-     * nonce, so it is bound to this sender's identity. */
+     * spoofed by an attacker who doesn't hold the relevant key. Runs only
+     * after a successful decrypt, and only when src_addr is trustworthy
+     * (Fix 2, red-team panel): BRAMBLE_PUBLIC_CHANNEL_PSK is public, so a
+     * public-channel decrypt's src_addr is a free-to-forge claim, not
+     * "bound to this sender's identity". Feeding it into the SHARED
+     * per-sender window would let an attacker claim src_addr=victim and
+     * slam the victim's high-water mark, dropping the victim's own later,
+     * genuine packets as BELOW_WINDOW (a mesh-wide DoS). Public-channel
+     * traffic relies on the pre-existing packet_id/type dedup for loop
+     * suppression instead; a secret channel's or a session's src_addr is
+     * still authenticated (channel membership or a session key) and still
+     * goes through the window as before. */
     uint64_t rx_counter = nonce_counter_extract(nonce);
-    int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
-    if (rp == REPLAY_REJECT_DUP) {
-        ESP_LOGD(TAG, "Replay drop from %08" PRIX32 " ctr=%llu", src_addr,
-                 (unsigned long long)rx_counter);
-        return;
-    }
-    /* Tier-2 deferred acceptance (Task 0.6): a chat message can legitimately
-     * arrive outside the tier-1 sliding window (long store-and-forward
-     * delay), but only chat carries an authenticated sent_at to bound how
-     * old is too old. now_s uses network time (degrading to local uptime
-     * pre-sync) so it is on the same clock basis as the sender's sent_at;
-     * timesync_is_confident gates this fail-closed under untrusted time
-     * (NEW-SEC-4). */
-    if (rp == REPLAY_BELOW_WINDOW) {
-        if (info.app_type != APP_TYPE_CHAT) {
+    if (channel_source_is_replay_trustworthy(is_channel_message, info.channel_index)) {
+        int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
+        if (rp == REPLAY_REJECT_DUP) {
+            ESP_LOGD(TAG, "Replay drop from %08" PRIX32 " ctr=%llu", src_addr,
+                     (unsigned long long)rx_counter);
             return;
         }
-        uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
-        int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at, now_s,
-                                        timesync_is_confident(&s_timesync));
-        if (dp != REPLAY_ACCEPT) {
-            ESP_LOGD(TAG, "Deferred replay drop from %08" PRIX32 " ctr=%llu sent_at=%" PRIu32,
-                     src_addr, (unsigned long long)rx_counter, info.sent_at);
-            return;
+        /* Fix 3 (red-team panel): a CHAT counter accepted here via tier-1
+         * must also be recorded in the tier-2 deferred cache. Without
+         * this, a counter that later ages out of the 64-entry tier-1
+         * window is in NEITHER dedup structure: a captured, genuinely
+         * delivered chat packet replays successfully once the window has
+         * moved past it (tier-1 reads BELOW_WINDOW, and a tier-2 cache
+         * that was never told about the original acceptance treats the
+         * replay as a fresh, legitimate deferred delivery). Only chat
+         * carries the authenticated sent_at that replay_deferred_accept
+         * needs, and it is the only app type ever deferred, so there is
+         * nothing to record for any other app_type. */
+        if (rp == REPLAY_ACCEPT && info.app_type == APP_TYPE_CHAT) {
+            uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
+            replay_deferred_mark_seen(&s_deferred, src_addr, rx_counter, now_s);
+        }
+        /* Tier-2 deferred acceptance (Task 0.6): a chat message can
+         * legitimately arrive outside the tier-1 sliding window (long
+         * store-and-forward delay), but only chat carries an authenticated
+         * sent_at to bound how old is too old. now_s uses network time
+         * (degrading to local uptime pre-sync) so it is on the same clock
+         * basis as the sender's sent_at; timesync_is_confident gates this
+         * fail-closed under untrusted time (NEW-SEC-4). */
+        if (rp == REPLAY_BELOW_WINDOW) {
+            if (info.app_type != APP_TYPE_CHAT) {
+                return;
+            }
+            uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
+            int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at,
+                                            now_s, timesync_is_confident(&s_timesync));
+            if (dp != REPLAY_ACCEPT) {
+                ESP_LOGD(TAG, "Deferred replay drop from %08" PRIX32 " ctr=%llu sent_at=%" PRIu32,
+                         src_addr, (unsigned long long)rx_counter, info.sent_at);
+                return;
+            }
         }
     }
 
@@ -3241,6 +3283,7 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t *payload, size_
         pending_ack_add(&s_pending_acks, pkt_id, dest_addr, MSG_TIER_NORMAL, buf, (uint16_t)total,
                         now_ms());
         sess->msg_count++;
+        sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
         return pkt_id;
     }
     return 0;

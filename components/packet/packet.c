@@ -118,8 +118,21 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
     memcpy(p->auth_hmac, buf + B + 11, 8);
     if (p->hop_count > ACK_MAX_HOPS)
         p->hop_count = ACK_MAX_HOPS;
-    /* Read as many hops as available in buffer */
-    for (int i = 0; i < p->hop_count && (size_t)(B + 19 + (i + 1) * 4) <= len; i++) {
+    /* Fix 5 (red-team panel): clamp hop_count down to the number of
+     * relay_path entries the buffer ACTUALLY carries, not just the
+     * ACK_MAX_HOPS array bound. A tampered/truncated hop_count claiming
+     * more entries than len supplies previously left relay_path[] beyond
+     * what was read holding whatever was already in *p (handle_ack in
+     * main/mesh_task.c reads relay_path[0..hop_count) straight into the
+     * onAck UI notification, so uninitialized bytes there was a real,
+     * bounded, own-UI leak). Zero the whole array first so even a future
+     * bug that iterates past the now-correct hop_count reads zero, not
+     * garbage. */
+    memset(p->relay_path, 0, sizeof(p->relay_path));
+    size_t avail_hops = (len > (size_t)(B + 19)) ? (len - (B + 19)) / 4 : 0;
+    if ((size_t)p->hop_count > avail_hops)
+        p->hop_count = (uint8_t)avail_hops;
+    for (int i = 0; i < p->hop_count; i++) {
         p->relay_path[i] = get_be32(buf + B + 19 + i * 4);
     }
     return ESP_OK;

@@ -32,3 +32,27 @@ int replay_deferred_accept(replay_deferred_t* d, uint32_t src, uint64_t counter,
     lru->seen_s = now_s;
     return REPLAY_ACCEPT;
 }
+
+void replay_deferred_mark_seen(replay_deferred_t* d, uint32_t src, uint64_t counter,
+                               uint32_t now_s) {
+    replay_dslot_t* lru = &d->slots[0];
+    for (int i = 0; i < REPLAY_DEFERRED_MAX; i++) {
+        replay_dslot_t* s = &d->slots[i];
+        if (s->used && s->src == src && s->counter == counter) {
+            s->seen_s = now_s; /* refresh recency, already recorded */
+            return;
+        }
+        if (!s->used) {
+            s->used = 1;
+            s->src = src;
+            s->counter = counter;
+            s->seen_s = now_s;
+            return;
+        }
+        if (s->seen_s < lru->seen_s)
+            lru = s;
+    }
+    lru->src = src;
+    lru->counter = counter;
+    lru->seen_s = now_s;
+}

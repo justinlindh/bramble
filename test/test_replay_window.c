@@ -73,6 +73,47 @@ void test_deferred_fail_closed_when_timesync_untrusted(void) {
         replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 0));
 }
 
+/* Fix 3 (red-team panel): a CHAT message accepted via tier-1 must also be
+ * recorded in the tier-2 deferred cache, or a counter that ages out of the
+ * 64-entry tier-1 window is in NEITHER dedup structure: capture a
+ * delivered chat packet, wait out the 60s packet_id dedup, advance the
+ * window past the captured counter+64 (any later authentic packet from
+ * the same sender), re-inject the original -> tier-1 BELOW_WINDOW -> a
+ * tier-2 cache that was never told about the original acceptance treats
+ * it as fresh and re-delivers it. */
+void test_tier1_accept_recorded_in_deferred_prevents_later_replay(void) {
+    /* Original delivery: counter 100 accepted via tier-1. */
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 100, 0));
+    /* The fix under test: handle_data must also record this in the
+     * deferred cache so a later below-window replay of counter 100 is
+     * caught even after it ages out of the tier-1 window. */
+    replay_deferred_mark_seen(&d, 0xAA, 100, 1000);
+
+    /* Sender advances past counter 100 + 64: a later authentic message
+     * pushes the tier-1 window forward so counter 100 now reads
+     * BELOW_WINDOW. */
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 200, 0));
+    TEST_ASSERT_EQUAL(REPLAY_BELOW_WINDOW, replay_check_and_add(&t, 0xAA, 100, 0));
+
+    /* Attacker replays the captured original (counter 100). Tier-2 must
+     * reject it as a duplicate, not re-deliver it as if it were a
+     * legitimate deferred (store-and-forward) message. */
+    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP,
+                       replay_deferred_accept(&d, 0xAA, 100, 1000, 2000, 1));
+}
+
+/* Without the mark_seen recording, the same replay sequence is (wrongly)
+ * accepted: proves mark_seen is load-bearing, not redundant with tier-1's
+ * own dedup, and documents exactly what a future refactor must not drop. */
+void test_without_deferred_recording_replay_is_wrongly_accepted(void) {
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 100, 0));
+    /* Deliberately NOT calling replay_deferred_mark_seen here. */
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 200, 0));
+    TEST_ASSERT_EQUAL(REPLAY_BELOW_WINDOW, replay_check_and_add(&t, 0xAA, 100, 0));
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, /* the gap: re-delivered */
+                       replay_deferred_accept(&d, 0xAA, 100, 1000, 2000, 1));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_first_counter_accepted);
@@ -87,5 +128,7 @@ int main(void) {
     RUN_TEST(test_deferred_accepts_fresh_then_dedups);
     RUN_TEST(test_deferred_rejects_expired);
     RUN_TEST(test_deferred_fail_closed_when_timesync_untrusted);
+    RUN_TEST(test_tier1_accept_recorded_in_deferred_prevents_later_replay);
+    RUN_TEST(test_without_deferred_recording_replay_is_wrongly_accepted);
     return UNITY_END();
 }

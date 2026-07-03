@@ -72,10 +72,23 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
  * DM session table (Task 1.2). State-priority LRU with a bounded
  * DM_STATE_HANDSHAKING count: this is the DoS defense for the session
  * layer (M4 in the crypto design RFC). A spoofed-INIT flood can occupy at
- * most DM_MAX_HANDSHAKING slots regardless of table size, and an
- * ACTIVE session (verified or not; "UNVERIFIED" == state==ACTIVE &&
- * verified==0, still protected) can never be evicted to make room for a
- * new handshake.
+ * most DM_MAX_HANDSHAKING slots regardless of table size.
+ *
+ * Fix 1 (red-team panel, post-Task-3.6): only a VERIFIED ACTIVE session
+ * (state==ACTIVE && verified==1) is fully protected from eviction. An
+ * UNVERIFIED ACTIVE session (state==ACTIVE && verified==0) IS evictable
+ * under allocation pressure, LRU-ordered by last_active_ms, same pool as
+ * HANDSHAKING slots. This closes a session-table exhaustion DoS: a
+ * first-contact INIT (main/mesh_task.c's process_ke_init) needs no secret
+ * and goes straight to ACTIVE/verified=0 without ever touching
+ * DM_STATE_HANDSHAKING or its cap, so DM_MAX_SESSIONS forged first-contact
+ * INITs from freshly-generated identities used to fill the table with
+ * permanently-unevictable slots (every ACTIVE session was protected
+ * regardless of verified), killing all future DM establishment until
+ * reboot. Bumping last_active_ms on every real send/receive (the caller's
+ * job, under s_dm_mutex) means a genuinely-active UNVERIFIED session still
+ * outlives an idle attacker flood: eviction pressure reclaims stale forged
+ * slots first.
  */
 #define DM_MAX_SESSIONS 32
 #define DM_MAX_HANDSHAKING (DM_MAX_SESSIONS / 4)
@@ -88,7 +101,13 @@ typedef struct {
     uint32_t peer_addr;
     uint8_t session_key[32];
     uint8_t peer_id_pub[32]; /* cached for rekey-path msg1 auth + SAS */
-    uint32_t established_ms; /* also doubles as last-activity for LRU ordering */
+    uint32_t established_ms; /* when this slot was (re)established, informational only */
+    /* Fix 1 (red-team panel): set at allocation, and bumped by the caller
+     * (main/mesh_task.c, under s_dm_mutex) on every successful send or
+     * receive through this session. Drives dm_alloc's eviction ordering,
+     * separately from established_ms, so a genuinely-active session is
+     * never the LRU victim just because it was established first. */
+    uint32_t last_active_ms;
     uint32_t msg_count;
     uint16_t ke_epoch;
     uint8_t state;
@@ -107,15 +126,17 @@ dm_session_t* dm_lookup(dm_table_t* t, uint32_t peer_addr);
 /*
  * Returns a slot for peer_addr: an existing slot for that peer if one
  * already exists (no cap check; not a new handshake), else a free
- * (DM_STATE_NONE) slot, else the oldest slot (by established_ms) that is
- * NEITHER DM_STATE_ACTIVE NOR UNVERIFIED (state==ACTIVE && verified==0) is
- * LRU-evicted (in practice this means only a DM_STATE_HANDSHAKING slot is
- * ever evictable, since ACTIVE covers UNVERIFIED as a subset). Returns NULL
- * if a brand-new slot (free or evicted) would push the table's
- * DM_STATE_HANDSHAKING count past DM_MAX_HANDSHAKING, or if the table is
- * full with no evictable slot. The caller is responsible for transitioning
- * a freshly-returned slot's state (typically to DM_STATE_HANDSHAKING)
- * immediately; dm_alloc itself only initializes peer_addr/established_ms.
+ * (DM_STATE_NONE) slot, else the slot with the smallest last_active_ms that
+ * is NOT VERIFIED ACTIVE (state==ACTIVE && verified==1) is LRU-evicted:
+ * HANDSHAKING and UNVERIFIED ACTIVE (state==ACTIVE && verified==0) slots
+ * are both eligible victims (Fix 1, see the table's doc comment above).
+ * Returns NULL if a brand-new slot (free or evicted) would push the
+ * table's DM_STATE_HANDSHAKING count past DM_MAX_HANDSHAKING, or if the
+ * table is full with no evictable slot (every slot VERIFIED ACTIVE). The
+ * caller is responsible for transitioning a freshly-returned slot's state
+ * (typically to DM_STATE_HANDSHAKING) immediately, and for bumping
+ * last_active_ms on every subsequent send/receive; dm_alloc itself only
+ * initializes peer_addr/established_ms/last_active_ms.
  */
 dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms);
 
