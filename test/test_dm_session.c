@@ -235,6 +235,25 @@ void test_rekey_init_tag_verifies_and_fails_on_flip(void) {
     TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&tampered, &b, 1, a.public_key));
 }
 
+/* Fix 1: explicit zero-tag-downgrade case, distinct from the flipped-tag
+ * case above. An attacker who intercepts a rekey INIT and zeroes its tag
+ * (rather than flipping a byte) is trying to downgrade a rekey exchange
+ * into looking like an unauthenticated first-contact one; the verifier
+ * must still reject it when it believes have_peer_id (it knows this is
+ * supposed to be a rekey, so an all-zero tag is never legitimate here). */
+void test_rekey_init_zero_tag_rejected(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       b.public_key, &init));
+
+    bramble_key_exchange_t downgraded = init;
+    memset(downgraded.auth_tag, 0, sizeof(downgraded.auth_tag));
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&downgraded, &b, 1, a.public_key));
+}
+
 void test_first_contact_init_zero_tag_and_address_check(void) {
     bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
     bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
@@ -253,6 +272,30 @@ void test_first_contact_init_zero_tag_and_address_check(void) {
     bramble_key_exchange_t spoofed = init;
     spoofed.src_addr ^= 0x1; /* no longer crypto_derive_address(long_term_pubkey) */
     TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&spoofed, &b, 0, NULL));
+}
+
+/* Fix 1: dispatch-confusion guard. The first-contact path (have_peer_id=0)
+ * does ONLY the address check, no tag verification at all, so ke_type is
+ * its SOLE defense: a genuine, validly-addressed RESP has exactly as
+ * legitimate an address binding as an INIT would, so relabeling one as the
+ * other and feeding it to dm_verify_init must be caught by the ke_type
+ * assertion specifically, since nothing else in this code path would
+ * catch it. */
+void test_verify_init_rejects_resp_relabeled_as_init(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       NULL, &init));
+    bramble_key_exchange_t resp; uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+
+    /* Feed the RESP as-is (genuine ke_type == KE_TYPE_RESP, unmodified) to
+     * the INIT verifier: address binding alone would accept it (a RESP's
+     * address binding is exactly as valid as an INIT's), so only the
+     * ke_type assertion can catch the mismatch. */
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&resp, &a, 0, NULL));
 }
 
 void test_init_resp_roundtrip_session_key(void) {
@@ -288,6 +331,53 @@ void test_verify_resp_rejects_tampered_tag(void) {
     TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
 }
 
+/* Fix 1: dispatch-confusion guard for dm_verify_resp. ke_type is not part
+ * of transcript_2 or the K_confirm HKDF label, so flipping ONLY this field
+ * on an otherwise-genuine RESP leaves its tag still valid: without the
+ * ke_type assertion, dm_verify_resp would accept a message that no longer
+ * claims to be a RESP at all, purely because nothing else in the message
+ * changed. This isolates the ke_type check specifically, unlike a tampered
+ * address or tag (which the existing checks would also independently
+ * catch). */
+void test_verify_resp_rejects_wrong_ke_type(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       NULL, &init));
+    bramble_key_exchange_t resp; uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+
+    bramble_key_exchange_t confused = resp;
+    confused.ke_type = KE_TYPE_INIT; /* only field changed; tag is still valid */
+    uint8_t ka[32];
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&confused, &a, a_eph.private_key, a_eph.public_key,
+                                            0, ka));
+}
+
+/* Fix 1: spoofed-address mutation case. A RESP claiming an address that no
+ * longer matches its own embedded long_term_pubkey must be rejected by the
+ * address-binding check, independent of and before the confirm-tag check
+ * (which would also fail here, since the tag was computed over the
+ * original, unmutated src_addr, but the address check must catch it on
+ * its own). */
+void test_verify_resp_rejects_spoofed_address(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       NULL, &init));
+
+    bramble_key_exchange_t resp; uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+
+    resp.src_addr ^= 0x1; /* no longer crypto_derive_address(long_term_pubkey) */
+    uint8_t ka[32];
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_quad_dh_both_sides_agree);
@@ -302,8 +392,12 @@ int main(void) {
     RUN_TEST(test_active_not_evicted_for_handshaking);
     RUN_TEST(test_lru_eviction_prefers_oldest_handshaking);
     RUN_TEST(test_rekey_init_tag_verifies_and_fails_on_flip);
+    RUN_TEST(test_rekey_init_zero_tag_rejected);
     RUN_TEST(test_first_contact_init_zero_tag_and_address_check);
+    RUN_TEST(test_verify_init_rejects_resp_relabeled_as_init);
     RUN_TEST(test_init_resp_roundtrip_session_key);
     RUN_TEST(test_verify_resp_rejects_tampered_tag);
+    RUN_TEST(test_verify_resp_rejects_wrong_ke_type);
+    RUN_TEST(test_verify_resp_rejects_spoofed_address);
     return UNITY_END();
 }
