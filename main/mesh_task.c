@@ -76,6 +76,11 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx);
 static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t *data,
                                size_t data_len);
+/* ws 1.3b: defined near handle_beacon (below send_beacon in file order),
+ * but send_beacon is the first control-plane originator in the file and
+ * needs both before its own definition. */
+static int control_seq_next(uint64_t *out);
+static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -1058,6 +1063,22 @@ static int send_beacon(void) {
         beacon.name[beacon.name_len] = '\0';
     }
 
+    /* ws 1.3b: draw the 48-bit origin seq before the HMAC, since seq lives
+     * inside the HMAC-covered prefix. Fail-closed: no seq means this
+     * interval's beacon doesn't go out; the next scheduled beacon tries
+     * again. */
+    uint64_t beacon_seq;
+    if (control_seq_next(&beacon_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping beacon this interval");
+        return -1;
+    }
+    beacon.seq[0] = (uint8_t)(beacon_seq >> 40);
+    beacon.seq[1] = (uint8_t)(beacon_seq >> 32);
+    beacon.seq[2] = (uint8_t)(beacon_seq >> 24);
+    beacon.seq[3] = (uint8_t)(beacon_seq >> 16);
+    beacon.seq[4] = (uint8_t)(beacon_seq >> 8);
+    beacon.seq[5] = (uint8_t)beacon_seq;
+
     /* HMAC auth — use shared beacon key (derived from public channel PSK) */
     beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
 
@@ -1139,6 +1160,21 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     if (!beacon_verify_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key))) {
         ESP_LOGW(TAG, "Beacon from %08" PRIX32 " failed HMAC verification, discarding",
                  beacon.src_addr);
+        return;
+    }
+
+    /* ws 1.3b: replay check on the authenticated signer (beacon.src_addr
+     * is HMAC-covered, so an attacker cannot dodge the window by mutating
+     * it). Checked immediately after HMAC verify and strictly before every
+     * effect below: address-collision handling, neighbor_update, name
+     * store, and timesync_handle_sync. Gating timesync closes the part of
+     * NEW-SEC-4 where a replayed beacon re-feeds stale network_time; it
+     * does NOT close NEW-SEC-4's bootstrap-quorum race, which is 1.3c. */
+    uint64_t beacon_seq = ((uint64_t)beacon.seq[0] << 40) | ((uint64_t)beacon.seq[1] << 32) |
+                          ((uint64_t)beacon.seq[2] << 24) | ((uint64_t)beacon.seq[3] << 16) |
+                          ((uint64_t)beacon.seq[4] << 8) | (uint64_t)beacon.seq[5];
+    if (!control_replay_ok(beacon.src_addr, beacon_seq)) {
+        ESP_LOGW(TAG, "Beacon replay src=%08" PRIX32, beacon.src_addr);
         return;
     }
 

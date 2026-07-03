@@ -34,15 +34,16 @@ void beacon_compute_hmac(bramble_beacon_t* beacon, const uint8_t* shared_key, si
     bramble_beacon_serialize(beacon, buf, sizeof(buf));
 
     /* Fix 4 (red-team panel): cover the optional name field too, not just
-     * the fixed 32 bytes before auth_hmac. bramble_beacon_serialize lays
-     * the wire out as [fixed prefix (32) | auth_hmac (16) | name_len +
-     * name (0 or 1+nlen)], so the HMAC input is the fixed prefix
-     * concatenated with the name region, skipping over auth_hmac's own
-     * 16 bytes in the middle (which must stay excluded from their own
-     * coverage). Without this, an attacker rewrites any captured
-     * beacon's name and it still verifies: the display name was
-     * spoofable even under a provisioned key. */
-    size_t prefix_len = BEACON_SIZE - sizeof(beacon->auth_hmac); /* 32: before auth_hmac */
+     * the fixed prefix before auth_hmac (32 bytes originally, 38 as of ws
+     * 1.3b's seq field; always BEACON_SIZE - sizeof(auth_hmac) below,
+     * never hardcoded). bramble_beacon_serialize lays the wire out as
+     * [fixed prefix | auth_hmac (16) | name_len + name (0 or 1+nlen)], so
+     * the HMAC input is the fixed prefix concatenated with the name
+     * region, skipping over auth_hmac's own 16 bytes in the middle (which
+     * must stay excluded from their own coverage). Without this, an
+     * attacker rewrites any captured beacon's name and it still verifies:
+     * the display name was spoofable even under a provisioned key. */
+    size_t prefix_len = BEACON_SIZE - sizeof(beacon->auth_hmac);
     size_t name_wire_len = bramble_beacon_wire_size(beacon) - BEACON_SIZE; /* 0, or 1+nlen */
     uint8_t hmac_input[(BEACON_SIZE - 16) + 1 + BEACON_NAME_MAX];
     memcpy(hmac_input, buf, prefix_len);
