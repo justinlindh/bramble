@@ -62,9 +62,9 @@
 #define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 37 + 32 = 69 */
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
-#define RREP_SIZE 40 /* was 34; +6 for seq (ws 1.3b control-plane freshness) */
-#define RERR_SIZE 38 /* was 32; +6 for seq (ws 1.3b control-plane freshness) */
-#define BEACON_SIZE 48
+#define RREP_SIZE 40   /* was 34; +6 for seq (ws 1.3b control-plane freshness) */
+#define RERR_SIZE 38   /* was 32; +6 for seq (ws 1.3b control-plane freshness) */
+#define BEACON_SIZE 54 /* was 48; +6 for seq (ws 1.3b control-plane freshness) */
 #define KEY_EXCHANGE_SIZE 101
 #define DELIVERY_RECEIPT_MIN_SIZE 36 /* was 30; +6 for seq (ws 1.3b control-plane freshness) */
 #define DELIVERY_RECEIPT_MAX_SIZE 68 /* was 62; +6 for seq (ws 1.3b control-plane freshness) */
@@ -163,6 +163,16 @@ typedef struct {
     uint8_t flags;
     uint32_t network_time;
     uint16_t time_confidence;
+    /* ws 1.3b: 48-bit origin sequence. MUST stay inside the fixed prefix
+     * beacon_compute_hmac hashes (i.e. BEFORE auth_hmac): the prefix
+     * length there is BEACON_SIZE - sizeof(auth_hmac), so anything placed
+     * before auth_hmac is covered automatically, and anything placed
+     * after it (like name) needs its own explicit coverage, per Fix 4's
+     * lesson (see beacon.c). Drawn once per periodic beacon
+     * (control_seq_next in mesh_task.c's send_beacon); beacons are
+     * single-hop and never forwarded, so there is no carry-through case
+     * to preserve here (unlike RREP/ACK/receipt). */
+    uint8_t seq[6];
     uint8_t auth_hmac[16];
     /* Optional: node name (appended after fixed fields) */
     uint8_t name_len;

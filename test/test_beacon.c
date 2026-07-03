@@ -136,6 +136,32 @@ void test_beacon_hmac_still_verifies_with_no_name(void) {
     TEST_ASSERT_TRUE(beacon_verify_hmac(&b, key, sizeof(key)));
 }
 
+/*
+ * ws 1.3b: the 48-bit seq lives INSIDE the fixed prefix beacon_compute_hmac
+ * hashes (before auth_hmac, per packet.h), so it must be covered
+ * automatically without any beacon.c change: prefix_len is derived from
+ * BEACON_SIZE - sizeof(auth_hmac), not a hardcoded byte count, so growing
+ * BEACON_SIZE to fit seq grows the covered prefix too. This proves it:
+ * tampering seq after signing must break verification exactly like
+ * tampering the name does above.
+ */
+void test_beacon_seq_covered_by_hmac(void) {
+    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
+    b.seq[0] = 0x01;
+    b.seq[1] = 0x02;
+    b.seq[2] = 0x03;
+    b.seq[3] = 0x04;
+    b.seq[4] = 0x05;
+    b.seq[5] = 0x06;
+    beacon_compute_hmac(&b, key, sizeof(key));
+    TEST_ASSERT_TRUE(beacon_verify_hmac(&b, key, sizeof(key))); /* sanity: correctly signed with seq */
+
+    bramble_beacon_t tampered = b;
+    tampered.seq[5] ^= 0xFF; /* tamper the seq after signing */
+    TEST_ASSERT_FALSE(beacon_verify_hmac(&tampered, key, sizeof(key)));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_beacon_build);
@@ -146,5 +172,6 @@ int main(void) {
     RUN_TEST(test_beacon_hmac_rejects_different_network_key);
     RUN_TEST(test_beacon_hmac_covers_name_tamper_rejected);
     RUN_TEST(test_beacon_hmac_still_verifies_with_no_name);
+    RUN_TEST(test_beacon_seq_covered_by_hmac);
     return UNITY_END();
 }

@@ -232,7 +232,7 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
-/* BEACON (40 bytes) */
+/* BEACON (46 bytes fixed + optional name; was 40, +6 for seq, ws 1.3b) */
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size_t len) {
     uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
     size_t need = BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
@@ -250,7 +250,11 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size
     buf[B + 13] = p->flags;
     put_be32(buf + B + 14, p->network_time);
     put_be16(buf + B + 18, p->time_confidence);
-    memcpy(buf + B + 20, p->auth_hmac, 16);
+    /* ws 1.3b: seq sits inside the fixed prefix, before auth_hmac, so
+     * beacon_compute_hmac's prefix hash covers it without any change
+     * there (see packet.h). */
+    memcpy(buf + B + 20, p->seq, 6);
+    memcpy(buf + B + 26, p->auth_hmac, 16);
     if (nlen > 0) {
         buf[BEACON_SIZE] = nlen;
         memcpy(buf + BEACON_SIZE + 1, p->name, nlen);
@@ -278,7 +282,10 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t* p, const uint8_t* buf, si
     p->flags = buf[B + 13];
     p->network_time = get_be32(buf + B + 14);
     p->time_confidence = get_be16(buf + B + 18);
-    memcpy(p->auth_hmac, buf + B + 20, 16);
+    /* ws 1.3b: seq reads at the same fixed offset it was written at,
+     * inside the HMAC-covered prefix, before auth_hmac. */
+    memcpy(p->seq, buf + B + 20, 6);
+    memcpy(p->auth_hmac, buf + B + 26, 16);
     /* Optional name after fixed fields */
     p->name_len = 0;
     p->name[0] = '\0';
