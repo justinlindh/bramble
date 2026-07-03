@@ -14,13 +14,26 @@ static replay_slot_t* slot_for(replay_table_t* t, uint32_t src_addr, uint32_t no
     replay_slot_t* lru = &t->slots[0];
     for (int i = 0; i < REPLAY_MAX_SENDERS; i++) {
         replay_slot_t* s = &t->slots[i];
-        if (s->used && s->src_addr == src_addr) return s;
-        if (!s->used) { s->used = 1; s->src_addr = src_addr; s->high_water = 0;
-                        s->window = 0; s->seen = 0; s->last_seen_ms = now_ms; return s; }
-        if (s->last_seen_ms < lru->last_seen_ms) lru = s;
+        if (s->used && s->src_addr == src_addr)
+            return s;
+        if (!s->used) {
+            s->used = 1;
+            s->src_addr = src_addr;
+            s->high_water = 0;
+            s->window = 0;
+            s->seen = 0;
+            s->last_seen_ms = now_ms;
+            return s;
+        }
+        if (s->last_seen_ms < lru->last_seen_ms)
+            lru = s;
     }
-    lru->src_addr = src_addr; lru->high_water = 0; lru->window = 0;
-    lru->seen = 0; lru->last_seen_ms = now_ms; return lru;
+    lru->src_addr = src_addr;
+    lru->high_water = 0;
+    lru->window = 0;
+    lru->seen = 0;
+    lru->last_seen_ms = now_ms;
+    return lru;
 }
 
 int replay_check_and_add(replay_table_t* t, uint32_t src_addr, uint64_t counter, uint32_t now_ms) {
@@ -60,10 +73,13 @@ int replay_check_and_add(replay_table_t* t, uint32_t src_addr, uint64_t counter,
     }
 
     uint64_t delta = s->high_water - counter;
-    if (delta == 0) return REPLAY_REJECT_DUP;
-    if (delta > 64) return REPLAY_BELOW_WINDOW;
+    if (delta == 0)
+        return REPLAY_REJECT_DUP;
+    if (delta > 64)
+        return REPLAY_BELOW_WINDOW;
     uint64_t mask = 1ull << (delta - 1);
-    if (s->window & mask) return REPLAY_REJECT_DUP;
+    if (s->window & mask)
+        return REPLAY_REJECT_DUP;
     s->window |= mask;
     return REPLAY_ACCEPT;
 }

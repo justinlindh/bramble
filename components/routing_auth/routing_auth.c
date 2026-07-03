@@ -10,7 +10,8 @@
  */
 static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
     uint8_t acc = 0;
-    for (size_t i = 0; i < n; i++) acc |= a[i] ^ b[i];
+    for (size_t i = 0; i < n; i++)
+        acc |= a[i] ^ b[i];
     return acc == 0;
 }
 

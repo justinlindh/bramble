@@ -67,16 +67,16 @@ void channel_msg_catchup_reset(void);
  * any other app_type; it is ignored.
  */
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
-                        uint32_t sent_at, const uint8_t* data, size_t data_len,
-                        const uint8_t* aad, size_t aad_len, const uint8_t* nonce_in,
-                        uint8_t* ciphertext_out, uint8_t* tag_out);
+                        uint32_t sent_at, const uint8_t* data, size_t data_len, const uint8_t* aad,
+                        size_t aad_len, const uint8_t* nonce_in, uint8_t* ciphertext_out,
+                        uint8_t* tag_out);
 
 typedef struct {
     uint8_t channel_id;
     uint16_t epoch;
     uint8_t app_type;
     uint32_t src_addr;
-    uint32_t sent_at;   /* valid only when app_type == APP_TYPE_CHAT; 0 otherwise */
+    uint32_t sent_at; /* valid only when app_type == APP_TYPE_CHAT; 0 otherwise */
     const uint8_t* data;
     size_t data_len;
     int channel_index;

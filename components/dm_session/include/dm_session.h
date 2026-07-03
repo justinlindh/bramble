@@ -65,8 +65,8 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
  * 0 and fills session_key_out on success.
  */
 int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
-                   const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32],
-                   uint16_t ke_epoch, uint8_t session_key_out[32]);
+                   const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32], uint16_t ke_epoch,
+                   uint8_t session_key_out[32]);
 
 /*
  * DM session table (Task 1.2). State-priority LRU with a bounded
@@ -86,16 +86,18 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
 
 typedef struct {
     uint32_t peer_addr;
-    uint8_t  session_key[32];
-    uint8_t  peer_id_pub[32];  /* cached for rekey-path msg1 auth + SAS */
-    uint32_t established_ms;   /* also doubles as last-activity for LRU ordering */
+    uint8_t session_key[32];
+    uint8_t peer_id_pub[32]; /* cached for rekey-path msg1 auth + SAS */
+    uint32_t established_ms; /* also doubles as last-activity for LRU ordering */
     uint32_t msg_count;
     uint16_t ke_epoch;
-    uint8_t  state;
-    uint8_t  verified;
+    uint8_t state;
+    uint8_t verified;
 } dm_session_t;
 
-typedef struct { dm_session_t s[DM_MAX_SESSIONS]; } dm_table_t;
+typedef struct {
+    dm_session_t s[DM_MAX_SESSIONS];
+} dm_table_t;
 
 void dm_table_init(dm_table_t* t);
 
@@ -127,8 +129,8 @@ dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms);
  * rebuild the identical AAD the sender authenticated).
  */
 int dm_session_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
-                       const uint8_t* pt, size_t pt_len, const uint8_t nonce[12],
-                       uint8_t* ct_out, uint8_t* tag_out);
+                       const uint8_t* pt, size_t pt_len, const uint8_t nonce[12], uint8_t* ct_out,
+                       uint8_t* tag_out);
 
 /*
  * Decrypts under s->session_key. src_addr must be the value read off the

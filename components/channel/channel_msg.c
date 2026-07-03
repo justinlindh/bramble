@@ -6,9 +6,9 @@ _Static_assert(CHANNEL_MSG_MAX_PLAINTEXT_SIZE >=
                "plaintext buffer too small for max packet minus wire overhead");
 
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
-                        uint32_t sent_at, const uint8_t* data, size_t data_len,
-                        const uint8_t* aad, size_t aad_len, const uint8_t* nonce_in,
-                        uint8_t* ciphertext_out, uint8_t* tag_out) {
+                        uint32_t sent_at, const uint8_t* data, size_t data_len, const uint8_t* aad,
+                        size_t aad_len, const uint8_t* nonce_in, uint8_t* ciphertext_out,
+                        uint8_t* tag_out) {
     if (!ch || !nonce_in || !ciphertext_out || !tag_out)
         return -1;
 
