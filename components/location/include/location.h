@@ -15,6 +15,23 @@
 #define LOCATION_COARSE_SIZE 5   /* grid_lat(2)+grid_lon(2)+ts_low(1) */
 #define LOCATION_PRESENCE_SIZE 1 /* status(1) */
 
+/*
+ * SEC-C1 (Task 2.1, RFC section 2, M11): the sharing tier moves into the
+ * encrypted plaintext instead of the cleartext header flags, and every
+ * tier is padded to one canonical inner size so an observer cannot infer
+ * the tier (and therefore how much a sender trusts the recipient) from
+ * ciphertext length. LOCATION_INNER_TIER_OFFSET is the byte offset of the
+ * tier prefix within the inner plaintext (channel path: right after
+ * channel_msg's own CHANNEL_MSG_OVERHEAD framing; session path: byte 0,
+ * dm_session_encrypt has no framing of its own). L_LOC_INNER is that
+ * tier(1) prefix plus the position payload padded up to LOCATION_FULL_SIZE
+ * (the largest tier), so every tier (PRESENCE/COARSE/FULL) produces the
+ * same L_LOC_INNER-byte plaintext regardless of how few real bytes the
+ * chosen tier actually needs.
+ */
+#define LOCATION_INNER_TIER_OFFSET 0
+#define L_LOC_INNER (1 + LOCATION_FULL_SIZE) /* 18: tier(1) + padded position payload */
+
 #define LOCATION_MAX_CONTACTS 16
 #define LOCATION_DEFAULT_INTERVAL_MS 300000 /* 5 minutes */
 #define LOCATION_DEFAULT_INTERVAL_S 300     /* 5 minutes */

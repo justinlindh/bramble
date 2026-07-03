@@ -10,7 +10,8 @@
 
 /* Inner app types (carried, authenticated, inside the GCM plaintext). */
 #define APP_TYPE_CHAT 0x01
-#define APP_TYPE_KE 0x02 /* reserved for PART 1 */
+#define APP_TYPE_KE 0x02
+#define APP_TYPE_LOCATION 0x03 /* channel-shared location share (SEC-C1, PART 2) */
 
 /*
  * APP_TYPE_CHAT messages carry an extra 4-byte big-endian sent_at (seconds,

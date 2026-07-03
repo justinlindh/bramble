@@ -67,14 +67,6 @@
 #include "ui_graphics.h"
 #endif
 
-/* TODO(PART2): tier moves into the LOCATION ciphertext; mesh_send_location_packet
- * and handle_location are rewritten then. Until that lands, keep the two
- * remaining tier-in-flags call sites compiling since packet.h no longer
- * defines these bits (freed by the flag byte redesign, Task 0.2). Removed in
- * Task 2.1. */
-#define FLAG_TIER_SHIFT 6
-#define FLAG_TIER_MASK 0xC0
-
 static const char *TAG = "mesh";
 
 /* Forward declarations */
@@ -521,37 +513,135 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
         tier = LOCATION_TIER_COARSE;
     }
 
-    uint8_t payload[LOCATION_FULL_SIZE];
-    int payload_len = location_serialize_for_tier(pos, tier, payload, sizeof(payload));
-    if (payload_len <= 0) {
+    /* SEC-C1: tier moves into the encrypted plaintext (byte
+     * LOCATION_INNER_TIER_OFFSET), padded to L_LOC_INNER so every tier
+     * (PRESENCE/COARSE/FULL) produces an identical ciphertext length; an
+     * observer cannot infer the tier from packet size. Zeroed first so
+     * unused padding is deterministic, not stack garbage. */
+    uint8_t inner[L_LOC_INNER] = {0};
+    inner[LOCATION_INNER_TIER_OFFSET] = tier;
+    if (location_serialize_for_tier(pos, tier, inner + 1, LOCATION_FULL_SIZE) <= 0) {
         return 0;
     }
 
+    uint32_t pkt_id = next_packet_id();
     uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+
+    if (dest_addr != 0xFFFFFFFFu) {
+        /* Directed share (lcr_<addr>): only ever under the recipient's
+         * session key, never the channel key (would defeat per-contact
+         * confidentiality, the SEC-C1 point). No ACTIVE session means the
+         * send fails rather than downgrading to the channel key: location
+         * is real-time presence (RFC M6, never mailbox-deferred), so
+         * queuing this to await a handshake the way DM chat does (Task
+         * 1.4) would only deliver a stale position later, not a
+         * meaningful fix. */
+        bramble_header_t header = {
+            .version = BRAMBLE_VERSION,
+            .type = PKT_TYPE_LOCATION,
+            .flags = FLAG_ENCRYPT, /* no FLAG_CHANNEL: session-keyed (SEC-C1) */
+            .hop_limit = 3,
+            .dest_addr = dest_addr,
+            .packet_id = pkt_id,
+        };
+        bramble_header_serialize(&header, pkt, HEADER_SIZE);
+
+        /* dm_session_encrypt has no framing of its own, so pad out to
+         * L_LOC_INNER + CHANNEL_MSG_OVERHEAD bytes: the extra padding
+         * makes up for the channel path's built-in overhead below, so
+         * both paths land on the exact same total ciphertext length
+         * (M11). */
+        uint8_t session_inner[L_LOC_INNER + CHANNEL_MSG_OVERHEAD] = {0};
+        memcpy(session_inner, inner, L_LOC_INNER);
+        uint8_t ciphertext[sizeof(session_inner)];
+
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+        int enc_ret = -1;
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+            int nonce_ret = nonce_counter_next(nonce);
+            xSemaphoreGive(s_nonce_mutex);
+            if (nonce_ret == 0) {
+                enc_ret = dm_session_encrypt(sess, &header, s_identity->address, session_inner,
+                                             sizeof(session_inner), nonce, ciphertext, tag);
+            }
+        }
+        xSemaphoreGive(s_dm_mutex);
+
+        if (enc_ret != 0) {
+            ESP_LOGW(TAG, "No active session for directed location share to %08" PRIX32, dest_addr);
+            return 0;
+        }
+
+        memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+        memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
+        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
+        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+              BRAMBLE_TAG_SIZE);
+        size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+
+        int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
+        if (rc == TX_GATE_OK) {
+            ESP_LOGI(TAG, "TX location (session) to %08" PRIX32 " tier=%u len=%u",
+                     dest_addr, tier, (unsigned)wire_len);
+            return pkt_id;
+        }
+        return 0;
+    }
+
+    /* Channel-shared (broadcast): channel_msg_encrypt under the default
+     * channel key. */
+    if (s_num_channels == 0) {
+        return 0;
+    }
+    int channel_idx = s_default_channel_idx;
+    if (channel_idx < 0 || channel_idx >= s_num_channels) {
+        channel_idx = 0;
+    }
+
     bramble_header_t header = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_LOCATION,
-        /* TODO(PART2): tier moves into the LOCATION ciphertext; drop this shift. */
-        .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
+        .flags = FLAG_ENCRYPT | FLAG_CHANNEL, /* no tier bits: tier lives in the ciphertext now */
         .hop_limit = 3,
         .dest_addr = dest_addr,
-        .packet_id = next_packet_id(),
+        .packet_id = pkt_id,
     };
-
     bramble_header_serialize(&header, pkt, HEADER_SIZE);
-    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
 
-    size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
-    int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
-    if (rc == 0) {
-        ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
-                 header.dest_addr,
-                 tier,
-                 (unsigned)wire_len);
-        return header.packet_id;
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&header, s_identity->address, aad, sizeof(aad));
+
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    if (nonce_ret != 0) {
+        ESP_LOGE(TAG, "Nonce counter unavailable, dropping location send: %d", nonce_ret);
+        return 0;
     }
 
+    uint8_t ciphertext[CHANNEL_MSG_OVERHEAD + L_LOC_INNER];
+    if (channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, APP_TYPE_LOCATION, 0,
+                            inner, L_LOC_INNER, aad, sizeof(aad), nonce, ciphertext, tag) != 0) {
+        ESP_LOGE(TAG, "Channel encrypt failed for location send");
+        return 0;
+    }
+
+    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+    memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
+    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag, BRAMBLE_TAG_SIZE);
+
+    size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+    int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
+    if (rc == TX_GATE_OK) {
+        ESP_LOGI(TAG, "TX location (channel) to %08" PRIX32 " tier=%u len=%u",
+                 dest_addr, tier, (unsigned)wire_len);
+        return pkt_id;
+    }
     return 0;
 }
 
@@ -687,8 +777,17 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
         return;
     }
 
-    /* TODO(PART2): tier moves into the LOCATION ciphertext; drop this shift. */
-    uint8_t tier = (uint8_t)((header.flags >> FLAG_TIER_SHIFT) & 0x03);
+    /* STALE (Task 2.1 TX-only scope): mesh_send_location_packet now
+     * encrypts under AEAD and moves the tier into the plaintext (SEC-C1),
+     * so this function can no longer correctly parse an incoming location
+     * packet: `flags` no longer carries a tier (always reads back as
+     * LOCATION_TIER_FULL, 0, now that the sender never sets these bits),
+     * and `payload` is ciphertext, not a serialized position. Location RX
+     * is non-functional until the follow-up task rewrites this to decrypt
+     * (channel trial-decrypt or session lookup by FLAG_CHANNEL, mirroring
+     * handle_data) and read the tier from the decrypted plaintext. Left
+     * otherwise unchanged: out of this task's file scope. */
+    uint8_t tier = (uint8_t)((header.flags >> 6) & 0x03);
     const uint8_t *payload = data + HEADER_SIZE + 4;
     size_t payload_len = len - HEADER_SIZE - 4;
 

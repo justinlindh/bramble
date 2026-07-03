@@ -85,6 +85,27 @@ target_include_directories(test_ke_envelope PRIVATE
 )
 target_link_libraries(test_ke_envelope ssl crypto)
 
+# Location encryption: tier-in-ciphertext, canonical size across channel and
+# session paths (Task 2.1 / SEC-C1). location.c is a separate source (needs
+# NVS stubs + libm) rather than #include'd directly like the crypto/channel/
+# dm_session components above.
+add_executable(test_location_crypto
+    test_location_crypto.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+)
+target_include_directories(test_location_crypto PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+target_compile_definitions(test_location_crypto PRIVATE NVS_STUBS_ENABLE=1)
+target_link_libraries(test_location_crypto ssl crypto m)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

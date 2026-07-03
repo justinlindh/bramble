@@ -1,16 +1,7 @@
 #include "unity.h"
 #include "esp_stubs.h"
 #include "packet.h"
-#include "../components/location/include/location.h"
 #include "packet.c"
-
-/* TODO(PART2): tier moves into the LOCATION ciphertext and these tests are
- * rewritten to match; until then keep the pre-DES-9 tier-in-flags behavior
- * compiling here since packet.h no longer defines these bits (freed by the
- * flag byte redesign, Task 0.2). Removed alongside the mesh_task.c copy in
- * Task 2.1. */
-#define FLAG_TIER_SHIFT 6
-#define FLAG_TIER_MASK 0xC0
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -259,32 +250,6 @@ void test_delivery_receipt_zero_hops(void) {
     TEST_ASSERT_EQUAL(0, out.hop_count);
 }
 
-void test_location_packet_header_roundtrip(void) {
-    bramble_header_t h = make_header(PKT_TYPE_LOCATION);
-    h.flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT);
-
-    uint8_t buf[HEADER_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&h, buf, sizeof(buf)));
-
-    bramble_header_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out, buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out.type);
-    TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, (out.flags & FLAG_TIER_MASK) >> FLAG_TIER_SHIFT);
-}
-
-void test_location_packet_header_preserves_requested_tier(void) {
-    bramble_header_t h = make_header(PKT_TYPE_LOCATION);
-    h.flags = (uint8_t)(LOCATION_TIER_PRESENCE << FLAG_TIER_SHIFT);
-
-    uint8_t buf[HEADER_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&h, buf, sizeof(buf)));
-
-    bramble_header_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out, buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out.type);
-    TEST_ASSERT_EQUAL(LOCATION_TIER_PRESENCE, (out.flags & FLAG_TIER_MASK) >> FLAG_TIER_SHIFT);
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_header_roundtrip);
@@ -300,7 +265,5 @@ int main(void) {
     RUN_TEST(test_key_exchange_roundtrip);
     RUN_TEST(test_delivery_receipt_roundtrip);
     RUN_TEST(test_delivery_receipt_zero_hops);
-    RUN_TEST(test_location_packet_header_roundtrip);
-    RUN_TEST(test_location_packet_header_preserves_requested_tier);
     return UNITY_END();
 }
