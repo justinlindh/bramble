@@ -14,14 +14,6 @@
 #include "../components/packet/packet.c"
 #include "../components/radio/radio_mock.c"
 
-/* TODO(PART2): tier moves into the LOCATION ciphertext and this test is
- * rewritten to match; until then keep the pre-DES-9 tier-in-flags behavior
- * compiling here since packet.h no longer defines these bits (freed by the
- * flag byte redesign, Task 0.2). Removed alongside the mesh_task.c copy in
- * Task 2.1. */
-#define FLAG_TIER_SHIFT 6
-#define FLAG_TIER_MASK 0xC0
-
 /* Node addresses */
 #define ADDR_A 0x0A000001
 #define ADDR_B 0x0B000002
@@ -242,7 +234,11 @@ void test_location_tx_uses_dedicated_packet_type(void) {
     bramble_header_t hdr = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_LOCATION,
-        .flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT),
+        /* Tier lives in the ciphertext now (SEC-C1, Task 2.1), not the
+         * flags byte; this test only asserts the packet TYPE and binary
+         * (non-JSON) payload shape, so the real channel-path flags value
+         * stands in here. */
+        .flags = FLAG_ENCRYPT | FLAG_CHANNEL,
         .hop_limit = 3,
         .dest_addr = ADDR_B,
         .packet_id = 0x01020304,
