@@ -20,6 +20,7 @@
 #include "channel_storage.h"
 #include "nonce_counter.h"
 #include "replay_window.h"
+#include "replay_deferred.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -108,6 +109,7 @@ static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for be
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
 static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
+static replay_deferred_t   s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
  * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
  * this same limiter into the forward path. */
@@ -1438,7 +1440,26 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                  (unsigned long long)rx_counter);
         return;
     }
-    /* rp == REPLAY_BELOW_WINDOW falls through to the tier-2 deferred check (Task 0.6 note). */
+    /* Tier-2 deferred acceptance (Task 0.6): a chat message can legitimately
+     * arrive outside the tier-1 sliding window (long store-and-forward
+     * delay), but only chat carries an authenticated sent_at to bound how
+     * old is too old. now_s uses network time (degrading to local uptime
+     * pre-sync) so it is on the same clock basis as the sender's sent_at;
+     * timesync_is_confident gates this fail-closed under untrusted time
+     * (NEW-SEC-4). */
+    if (rp == REPLAY_BELOW_WINDOW) {
+        if (info.app_type != APP_TYPE_CHAT) {
+            return;
+        }
+        uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
+        int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at, now_s,
+                                        timesync_is_confident(&s_timesync));
+        if (dp != REPLAY_ACCEPT) {
+            ESP_LOGD(TAG, "Deferred replay drop from %08" PRIX32 " ctr=%llu sent_at=%" PRIu32,
+                     src_addr, (unsigned long long)rx_counter, info.sent_at);
+            return;
+        }
+    }
 
     /* Extract the text message from the decrypted payload */
     if (info.data_len > 0) {
@@ -2695,10 +2716,21 @@ static void mesh_task(void *param) {
  */
 static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
                                  const bramble_channel_t *ch, uint8_t app_type) {
-    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE];
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
-    size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
+    /* CHAT messages carry an authenticated sent_at inside the ciphertext
+     * (Task 0.6), so their wire ciphertext is CHANNEL_MSG_SENT_AT_SIZE bytes
+     * longer than other app types; ct_len must account for that or the
+     * memcpy/total-size math below truncates the last 4 bytes of a real
+     * chat message's ciphertext. sent_at is network time (via timesync,
+     * degrading gracefully to local uptime pre-sync) so it is comparable to
+     * a receiver's clock in the deferred-acceptance window (handle_data). */
+    uint32_t sent_at = (app_type == APP_TYPE_CHAT)
+                           ? (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000)
+                           : 0;
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + (app_type == APP_TYPE_CHAT ? CHANNEL_MSG_SENT_AT_SIZE : 0) +
+                    payload_len;
 
     /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
@@ -2741,7 +2773,7 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
         return 0;
     }
 
-    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
+    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type, sent_at,
                                       payload, payload_len,
                                       aad, HEADER_SIZE + 4,
                                       nonce, ciphertext, tag);
@@ -3199,6 +3231,7 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     dedup_init(&s_dedup);
     replay_table_init(&s_replay);
+    replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
     rreq_dedup_init(&s_rreq_dedup);

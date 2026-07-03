@@ -1,9 +1,12 @@
 #include "unity.h"
 #include "replay_window.h"
 #include "../components/replay_window/replay_window.c"
+#include "replay_deferred.h"
+#include "../components/replay_window/replay_deferred.c"
 
 static replay_table_t t;
-void setUp(void) { replay_table_init(&t); }
+static replay_deferred_t d;
+void setUp(void) { replay_table_init(&t); replay_deferred_init(&d); }
 void tearDown(void) {}
 
 void test_first_counter_accepted(void) {
@@ -54,6 +57,22 @@ void test_exact_64_jump_then_replay_old_high_water_rejected(void) {
     TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP, replay_check_and_add(&t, 0xAA, 100, 0)); /* replay old */
 }
 
+/* Deferred (tier-2) acceptance: Task 0.6. */
+void test_deferred_accepts_fresh_then_dedups(void) {
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT,
+        replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 1));
+    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP,
+        replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 1));
+}
+void test_deferred_rejects_expired(void) {
+    TEST_ASSERT_NOT_EQUAL(REPLAY_ACCEPT,
+        replay_deferred_accept(&d, 0xAA, 5, 1000, 1000 + 90000, 1)); /* > 24h old */
+}
+void test_deferred_fail_closed_when_timesync_untrusted(void) {
+    TEST_ASSERT_NOT_EQUAL(REPLAY_ACCEPT,
+        replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 0));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_first_counter_accepted);
@@ -65,5 +84,8 @@ int main(void) {
     RUN_TEST(test_distinct_senders_independent);
     RUN_TEST(test_first_counter_zero_then_replay_rejected);
     RUN_TEST(test_exact_64_jump_then_replay_old_high_water_rejected);
+    RUN_TEST(test_deferred_accepts_fresh_then_dedups);
+    RUN_TEST(test_deferred_rejects_expired);
+    RUN_TEST(test_deferred_fail_closed_when_timesync_untrusted);
     return UNITY_END();
 }

@@ -8,6 +8,19 @@
 #define CHANNEL_MSG_OVERHEAD 8 /* channel_id(1) + epoch(2) + app_type(1) + src_addr(4) */
 #define MAX_CHANNELS 16
 
+/* Inner app types (carried, authenticated, inside the GCM plaintext). */
+#define APP_TYPE_CHAT 0x01
+#define APP_TYPE_KE 0x02 /* reserved for PART 1 */
+
+/*
+ * APP_TYPE_CHAT messages carry an extra 4-byte big-endian sent_at (seconds,
+ * network time) immediately after the CHANNEL_MSG_OVERHEAD header, INSIDE
+ * the encrypted plaintext, so it is authenticated the same way as
+ * channel_id/epoch/app_type/src_addr and cannot be forged or altered by
+ * anyone without the channel key. Other app types carry no sent_at.
+ */
+#define CHANNEL_MSG_SENT_AT_SIZE 4
+
 /*
  * Max plaintext buffer size for channel encrypt/decrypt.
  * Must be >= BRAMBLE_MAX_PACKET_SIZE minus channel wire overhead (nonce + tag).
@@ -46,15 +59,23 @@
 /* Reset all catch-up buckets to full (tests and channel reconfiguration). */
 void channel_msg_catchup_reset(void);
 
+/*
+ * sent_at is only encoded when app_type == APP_TYPE_CHAT (seconds, ideally
+ * network time so it is comparable to a receiver's clock; see
+ * mesh_task.c's send_data_packet for how the device derives it). Pass 0 for
+ * any other app_type; it is ignored.
+ */
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
-                        const uint8_t* data, size_t data_len, const uint8_t* aad, size_t aad_len,
-                        const uint8_t* nonce_in, uint8_t* ciphertext_out, uint8_t* tag_out);
+                        uint32_t sent_at, const uint8_t* data, size_t data_len,
+                        const uint8_t* aad, size_t aad_len, const uint8_t* nonce_in,
+                        uint8_t* ciphertext_out, uint8_t* tag_out);
 
 typedef struct {
     uint8_t channel_id;
     uint16_t epoch;
     uint8_t app_type;
     uint32_t src_addr;
+    uint32_t sent_at;   /* valid only when app_type == APP_TYPE_CHAT; 0 otherwise */
     const uint8_t* data;
     size_t data_len;
     int channel_index;

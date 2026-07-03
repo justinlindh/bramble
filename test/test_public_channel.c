@@ -42,7 +42,9 @@ void test_public_channel_encrypt_decrypt(void) {
     uint8_t pt[256] = {0};
     uint32_t src = 0x12345678;
 
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&channels[0], src, 0x01,
+    /* app_type 0x09: deliberately not APP_TYPE_CHAT, this test is unrelated
+     * to the chat-only sent_at framing (Task 0.6). */
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&channels[0], src, 0x09, 0,
                                               data, sizeof(data),
                                               aad, sizeof(aad),
                                               nonce, ct, tag));
@@ -58,7 +60,7 @@ void test_public_channel_encrypt_decrypt(void) {
                                               CHANNEL_MSG_OVERHEAD + sizeof(data),
                                               tag, aad, sizeof(aad), pt, &info, 0));
     TEST_ASSERT_EQUAL(src, info.src_addr);
-    TEST_ASSERT_EQUAL(0x01, info.app_type);
+    TEST_ASSERT_EQUAL(0x09, info.app_type);
     TEST_ASSERT_EQUAL(sizeof(data), info.data_len);
     TEST_ASSERT_EQUAL_MEMORY(data, info.data, sizeof(data));
 }
