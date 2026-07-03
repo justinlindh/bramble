@@ -3581,7 +3581,11 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
     dm_session_t *existing = dm_lookup(&s_dm_table, src_addr);
     int have_peer_id = dm_session_has_peer_id(existing);
-    uint8_t peer_id_pub[32];
+    /* Zero-init: peer_id_pub is only read (passed below) when have_peer_id is
+     * set, and it is filled here in exactly that case, so no uninitialized
+     * read occurs. The initializer makes that invariant explicit and silences
+     * a cppcheck uninitvar warning it cannot otherwise prove. */
+    uint8_t peer_id_pub[32] = {0};
     if (have_peer_id) memcpy(peer_id_pub, existing->peer_id_pub, 32);
     xSemaphoreGive(s_dm_mutex);
 
