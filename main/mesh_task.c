@@ -1273,11 +1273,23 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
                          (uint8_t)neighbor_count(&s_neighbors));
     uint8_t hop_limit = (policy >= 2) ? 8 : 1;  /* full=8, neighbors-only=1 */
 
+    /* ws 1.3b: draw the 48-bit origin seq once per receipt; the retry
+     * queue below resends the SAME serialized bytes on loss (not a fresh
+     * re-origination), so one seq draw per receipt is correct. Fail-closed:
+     * no seq means no receipt goes out this round. */
+    uint64_t receipt_seq;
+    if (control_seq_next(&receipt_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping delivery receipt for pkt=%08" PRIX32,
+                 original_packet_id);
+        return;
+    }
+
     esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
                                                                   next_packet_id(),
                                                                   original_src_addr,
                                                                   original_packet_id,
                                                                   hop_limit,
+                                                                  receipt_seq,
                                                                   buf,
                                                                   sizeof(buf),
                                                                   &wire_len);
@@ -1722,6 +1734,20 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
      * both branches below. */
     if (!receipt_verify(&receipt)) {
         ESP_LOGW(TAG, "Delivery receipt auth failed pkt=%08" PRIX32 " src=%08" PRIX32,
+                 receipt.orig_packet_id, receipt.src_addr);
+        return;
+    }
+
+    /* ws 1.3b: replay check on the authenticated signer (receipt.src_addr
+     * is MAC-covered, so an attacker cannot dodge the window by mutating
+     * it). Checked after receipt_verify and strictly before BOTH the
+     * forward branch and the for-us effect (the broadcast delivery
+     * notification), so a replayed receipt never re-notifies or forwards. */
+    uint64_t receipt_seq = ((uint64_t)receipt.seq[0] << 40) | ((uint64_t)receipt.seq[1] << 32) |
+                           ((uint64_t)receipt.seq[2] << 24) | ((uint64_t)receipt.seq[3] << 16) |
+                           ((uint64_t)receipt.seq[4] << 8) | (uint64_t)receipt.seq[5];
+    if (!control_replay_ok(receipt.src_addr, receipt_seq)) {
+        ESP_LOGW(TAG, "Delivery receipt replay pkt=%08" PRIX32 " src=%08" PRIX32,
                  receipt.orig_packet_id, receipt.src_addr);
         return;
     }

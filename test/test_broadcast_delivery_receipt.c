@@ -108,6 +108,7 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
                                                                  0x55667788u,
                                                                  0xCAFEBABEu,
                                                                  8,
+                                                                 0x0102030405u,
                                                                  buf,
                                                                  sizeof(buf),
                                                                  &wire_len);
@@ -125,6 +126,13 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
     TEST_ASSERT_EQUAL(0xCAFEBABEu, decoded.orig_packet_id);
     TEST_ASSERT_EQUAL_UINT8(1, decoded.hop_count);
     TEST_ASSERT_EQUAL(0xAABBCCDDu, decoded.relay_path[0]);
+
+    /* ws 1.3b: the seq the caller drew (control_seq_next in mesh_task.c)
+     * round-trips through the builder onto the wire. 0x0102030405 is a
+     * 40-bit literal, so the 48-bit big-endian encoding leads with a zero
+     * byte: 0x00, 0x01, 0x02, 0x03, 0x04, 0x05. */
+    const uint8_t expected_seq[6] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05};
+    TEST_ASSERT_EQUAL_MEMORY(expected_seq, decoded.seq, sizeof(expected_seq));
 }
 
 int main(void) {
