@@ -63,6 +63,14 @@
 #include "ui_graphics.h"
 #endif
 
+/* TODO(PART2): tier moves into the LOCATION ciphertext; mesh_send_location_packet
+ * and handle_location are rewritten then. Until that lands, keep the two
+ * remaining tier-in-flags call sites compiling since packet.h no longer
+ * defines these bits (freed by the flag byte redesign, Task 0.2). Removed in
+ * Task 2.1. */
+#define FLAG_TIER_SHIFT 6
+#define FLAG_TIER_MASK 0xC0
+
 static const char *TAG = "mesh";
 
 /* Forward declarations */
@@ -423,6 +431,7 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
     bramble_header_t header = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_LOCATION,
+        /* TODO(PART2): tier moves into the LOCATION ciphertext; drop this shift. */
         .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
         .hop_limit = 3,
         .dest_addr = dest_addr,
@@ -578,6 +587,7 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
         return;
     }
 
+    /* TODO(PART2): tier moves into the LOCATION ciphertext; drop this shift. */
     uint8_t tier = (uint8_t)((header.flags >> FLAG_TIER_SHIFT) & 0x03);
     const uint8_t *payload = data + HEADER_SIZE + 4;
     size_t payload_len = len - HEADER_SIZE - 4;

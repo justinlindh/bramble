@@ -33,6 +33,12 @@ add_executable(test_wire_version
     stubs/esp_stubs.c
 )
 
+add_executable(test_flag_layout
+    test_flag_layout.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

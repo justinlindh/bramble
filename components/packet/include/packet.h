@@ -37,9 +37,11 @@
 /* Buffer sizes */
 #define BRAMBLE_MAX_PACKET_SIZE 256
 
-/* Flag bits */
-#define FLAG_TIER_SHIFT 6
-#define FLAG_TIER_MASK 0xC0
+/* Flag bits (wire v2). Tier moved into the LOCATION ciphertext, freeing bits 6-7.
+ * DES-9: FLAG_EMERGENCY no longer collides with FLAG_ENCRYPT (historical 0x04
+ * collision is gone; there is no emergency feature, bit 6 is reserved-named). */
+#define FLAG_RESERVED_HIGH 0x80 /* reserved (was FLAG_DEFERRED in RFC r1; not used) */
+#define FLAG_EMERGENCY 0x40     /* origin-set, immutable, AAD-bound; reserved for future use */
 #define FLAG_ACK_REQ (1 << 5)
 #define FLAG_RECEIPT (1 << 4)
 #define FLAG_CHANNEL (1 << 3)
