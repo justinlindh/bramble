@@ -1078,3 +1078,46 @@ add_executable(test_secure_nvs
 target_include_directories(test_secure_nvs PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
+
+# RREQ pseudonym derivation (extracted from mesh_task.c; DES-12)
+add_executable(test_rreq_pseudonym
+    test_rreq_pseudonym.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rreq_pseudonym.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_rreq_pseudonym PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_rreq_pseudonym ssl crypto)
+
+# Beacon policy pure kernels (extracted from mesh_task.c; DES-12)
+add_executable(test_beacon_policy_calc
+    test_beacon_policy_calc.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/beacon_policy_calc.c
+)
+target_include_directories(test_beacon_policy_calc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+# Probe result aggregation (extracted from mesh_task.c; DES-12)
+add_executable(test_probe_results
+    test_probe_results.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/probe_results.c
+)
+target_include_directories(test_probe_results PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+# Probe reply schedule kernel (DES-15)
+add_executable(test_probe_reply
+    test_probe_reply.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/probe_reply.c
+)
+target_include_directories(test_probe_reply PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
