@@ -18,6 +18,7 @@
 #include "channel_key.h"
 #include "channel_msg.h"
 #include "channel_storage.h"
+#include "nonce_counter.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -2699,6 +2700,10 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     uint8_t aad[HEADER_SIZE + 4];
     bramble_build_aead_aad(&header, s_identity->address, aad, sizeof(aad));
 
+    /* Deterministic node-global counter nonce (SEC-C reuse-avoidance): never
+     * reuses a nonce under this node's channel keys across its lifetime. */
+    nonce_counter_next(nonce);
+
     int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
                                       payload, payload_len,
                                       aad, HEADER_SIZE + 4,
@@ -3068,6 +3073,37 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
     return mesh_send_channel(send_idx, dest_addr, data, len);
 }
 
+/* Nonce counter NVS persistence: reserve-ahead ceiling under NVS_NS_NONCE.
+ * Not-found (first boot) resumes from ceiling 0, matching nonce_counter's own
+ * zero-initialized static state. */
+static int mesh_nonce_read(uint64_t *ceiling_out, void *ctx) {
+    (void)ctx;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NONCE, NVS_READONLY, &h) != ESP_OK) {
+        *ceiling_out = 0;
+        return 0;
+    }
+    size_t len = sizeof(*ceiling_out);
+    esp_err_t err = nvs_get_blob(h, NVS_KEY_NONCE_CEILING, ceiling_out, &len);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        *ceiling_out = 0;
+    }
+    return 0;
+}
+
+static int mesh_nonce_write(uint64_t ceiling, void *ctx) {
+    (void)ctx;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NONCE, NVS_READWRITE, &h) != ESP_OK) {
+        return -1;
+    }
+    nvs_set_blob(h, NVS_KEY_NONCE_CEILING, &ceiling, sizeof(ceiling));
+    esp_err_t err = nvs_commit(h);
+    nvs_close(h);
+    return err == ESP_OK ? 0 : -1;
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 void mesh_task_start(bramble_identity_t *identity) {
@@ -3110,6 +3146,11 @@ void mesh_task_start(bramble_identity_t *identity) {
         memcpy(s_beacon_key, beacon_ch.key, BRAMBLE_KEY_SIZE);
         ESP_LOGI(TAG, "Beacon HMAC key derived from public channel PSK");
     }
+
+    /* Deterministic node-global AEAD nonce counter (SEC-C reuse-avoidance).
+     * boot_salt is a secondary defense if NVS is ever wiped. */
+    nonce_counter_init(s_identity->address, (uint16_t)(esp_random() & 0xFFFF), mesh_nonce_read,
+                       mesh_nonce_write, NULL);
 
     dedup_init(&s_dedup);
     rreq_rate_init(&s_rreq_rl);

@@ -22,6 +22,7 @@ void test_encrypt_decrypt_single(void) {
 
     uint8_t data[] = "Hello Bramble!";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x01, sizeof(nonce));
     uint8_t aad[12] = {0};
 
     TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xDEADBEEF, 0x01,
@@ -52,6 +53,7 @@ void test_trial_decryption(void) {
 
     uint8_t data[] = "secret";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x02, sizeof(nonce));
     uint8_t aad[12] = {0};
     TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch_a, 0x12345678, 0x02,
                                               data, sizeof(data),
@@ -79,6 +81,7 @@ void test_unknown_channel(void) {
 
     uint8_t data[] = "test";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x03, sizeof(nonce));
     uint8_t aad[12] = {0};
     channel_msg_encrypt(&ch, 1, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
@@ -107,6 +110,7 @@ void test_16_channels(void) {
 
     uint8_t data[] = "from channel 12";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x04, sizeof(nonce));
     uint8_t aad[12] = {0};
     channel_msg_encrypt(&ch12, 0xAABBCCDD, 0x05, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
@@ -129,6 +133,7 @@ void test_epoch_catchup(void) {
 
     uint8_t data[] = "epoch5 msg";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x05, sizeof(nonce));
     uint8_t aad[12] = {0};
     channel_msg_encrypt(&sender, 0x11111111, 0x03, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
@@ -165,6 +170,7 @@ void test_constant_time_all_positions(void) {
 
         uint8_t data[] = "constant-time test";
         uint8_t nonce[12], ct[256], tag[16];
+        memset(nonce, 0x06, sizeof(nonce)); nonce[11] = (uint8_t)target;
     uint8_t aad[12] = {0};
         channel_msg_encrypt(&enc_ch, 0xBEEF0000 + target, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
@@ -186,6 +192,7 @@ static void make_garbage(uint8_t *nonce, uint8_t *ct, uint8_t *tag, size_t *ct_l
     make_channel("attacker-key-not-known-to-receiver", &attacker);
     uint8_t data[] = "junk";
     uint8_t aad[12] = {0};
+    memset(nonce, 0x07, BRAMBLE_NONCE_SIZE);
     channel_msg_encrypt(&attacker, 0x66666666, 0x01, data, sizeof(data), aad, sizeof(aad), nonce,
                         ct, tag);
     *ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
@@ -199,6 +206,7 @@ void test_epoch_catchup_deep_recovery(void) {
 
     uint8_t data[] = "deep";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x08, sizeof(nonce));
     uint8_t aad[12] = {0};
     channel_msg_encrypt(&sender, 0x22222222, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct,
                         tag);
@@ -235,6 +243,7 @@ void test_epoch_catchup_budget_exhaustion_and_refill(void) {
     for (int i = 0; i < 3; i++) channel_advance_epoch(&sender);
     uint8_t data[] = "late";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x09, sizeof(nonce));
     uint8_t aad[12] = {0};
     channel_msg_encrypt(&sender, 0x33333333, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct,
                         tag);
@@ -248,6 +257,7 @@ void test_epoch_catchup_budget_exhaustion_and_refill(void) {
     make_channel("budget-test", &sender_now);
     uint8_t data2[] = "now";
     uint8_t nonce2[12], ct2[256], tag2[16];
+    memset(nonce2, 0x0A, sizeof(nonce2));
     channel_msg_encrypt(&sender_now, 0x44444444, 0x01, data2, sizeof(data2), aad, sizeof(aad),
                         nonce2, ct2, tag2);
     TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce2, ct2,
@@ -279,6 +289,7 @@ void test_epoch_catchup_success_refunds_budget(void) {
         for (int i = 0; i < 200; i++) channel_advance_epoch(&sender);
         uint8_t data[] = "deep";
         uint8_t nonce[12], ct[256], tag[16];
+        memset(nonce, 0x0B, sizeof(nonce)); nonce[11] = (uint8_t)round;
         channel_msg_encrypt(&sender, 0x77777777, 0x01, data, sizeof(data), aad, sizeof(aad),
                             nonce, ct, tag);
         TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce, ct,
@@ -311,6 +322,7 @@ void test_epoch_catchup_budget_is_per_channel(void) {
     channel_advance_epoch(&sender);
     uint8_t data[] = "chB";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x0C, sizeof(nonce));
     uint8_t aad[12] = {0};
     channel_msg_encrypt(&sender, 0x55555555, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct,
                         tag);

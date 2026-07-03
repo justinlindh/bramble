@@ -7,8 +7,8 @@ _Static_assert(CHANNEL_MSG_MAX_PLAINTEXT_SIZE >=
 
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
                         const uint8_t* data, size_t data_len, const uint8_t* aad, size_t aad_len,
-                        uint8_t* nonce_out, uint8_t* ciphertext_out, uint8_t* tag_out) {
-    if (!ch || !nonce_out || !ciphertext_out || !tag_out)
+                        const uint8_t* nonce_in, uint8_t* ciphertext_out, uint8_t* tag_out) {
+    if (!ch || !nonce_in || !ciphertext_out || !tag_out)
         return -1;
 
     /* Build inner plaintext: channel_id(1) + epoch(2) + app_type(1) + src_addr(4) + data */
@@ -29,15 +29,13 @@ int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t 
         memcpy(pt + CHANNEL_MSG_OVERHEAD, data, data_len);
     }
 
-    /* Generate random nonce. Refuse rather than encrypt under a zeroed nonce:
-     * a shut entropy gate (SEC-L1) would otherwise hand GCM an all-zero
-     * nonce, and nonce reuse under one channel key is catastrophic (keystream
-     * XOR leak, auth-key recovery/forgery). */
-    if (crypto_random(nonce_out, BRAMBLE_NONCE_SIZE) != 0)
-        return -1;
-
-    /* Encrypt with header AAD binding */
-    return crypto_aes256gcm_encrypt(ch->key, nonce_out, pt, pt_len, aad, aad_len, ciphertext_out,
+    /* Nonce is caller-supplied (nonce_counter, SEC-C reuse-avoidance): the
+     * deterministic node-global counter guarantees no two encryptions under
+     * the same channel key ever reuse a nonce, which random generation alone
+     * cannot (birthday bound over a node's lifetime). Nonce reuse under one
+     * channel key is catastrophic (keystream XOR leak, auth-key
+     * recovery/forgery). */
+    return crypto_aes256gcm_encrypt(ch->key, nonce_in, pt, pt_len, aad, aad_len, ciphertext_out,
                                     tag_out);
 }
 
