@@ -112,6 +112,12 @@ static dedup_buffer_t      s_dedup;
 static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
+/* Guards nonce_counter_next only: send_data_packet is reachable from the
+ * mesh task, the RPC/httpd task, the LVGL UI task, and the CLI task, all
+ * without a lock of their own, and the nonce counter itself has no internal
+ * locking (kept host-testable, no FreeRTOS dependency). A mutex, not a
+ * critical section, because a boundary flush may block on NVS I/O. */
+static SemaphoreHandle_t   s_nonce_mutex;
 static QueueHandle_t       s_rx_queue;
 static QueueHandle_t       s_mesh_event_queue;
 static mesh_shared_state_t s_shared;
@@ -2701,8 +2707,19 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     bramble_build_aead_aad(&header, s_identity->address, aad, sizeof(aad));
 
     /* Deterministic node-global counter nonce (SEC-C reuse-avoidance): never
-     * reuses a nonce under this node's channel keys across its lifetime. */
-    nonce_counter_next(nonce);
+     * reuses a nonce under this node's channel keys across its lifetime.
+     * Mutex-guarded: send_data_packet is reachable from multiple FreeRTOS
+     * tasks (mesh, RPC/httpd, UI, CLI) and the counter has no locking of its
+     * own. Abort the send on failure exactly like an encrypt failure: a
+     * failed reserve/flush write means nonce_counter_next issued nothing
+     * (fail-closed), so there is no nonce to encrypt with. */
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    if (nonce_ret != 0) {
+        ESP_LOGE(TAG, "Nonce counter unavailable, dropping send: %d", nonce_ret);
+        return 0;
+    }
 
     int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
                                       payload, payload_len,
@@ -3148,9 +3165,17 @@ void mesh_task_start(bramble_identity_t *identity) {
     }
 
     /* Deterministic node-global AEAD nonce counter (SEC-C reuse-avoidance).
-     * boot_salt is a secondary defense if NVS is ever wiped. */
-    nonce_counter_init(s_identity->address, (uint16_t)(esp_random() & 0xFFFF), mesh_nonce_read,
-                       mesh_nonce_write, NULL);
+     * boot_salt is a secondary defense if NVS is ever wiped. Created before
+     * any task that can reach send_data_packet (RPC/httpd, UI, CLI) starts
+     * running, so nonce_counter_next is never called without the mutex. */
+    s_nonce_mutex = xSemaphoreCreateMutex();
+    if (nonce_counter_init(s_identity->address, (uint16_t)(esp_random() & 0xFFFF), mesh_nonce_read,
+                           mesh_nonce_write, NULL) != 0) {
+        /* Fail-closed by design: nonce_counter_next also refuses to issue
+         * until a write succeeds, so encrypted DATA sends stay blocked
+         * (never silently reuse a nonce) rather than crashing here. */
+        ESP_LOGE(TAG, "Nonce counter reserve-ahead write failed; encrypted sends blocked until NVS recovers");
+    }
 
     dedup_init(&s_dedup);
     rreq_rate_init(&s_rreq_rl);
