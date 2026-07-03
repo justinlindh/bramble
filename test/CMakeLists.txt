@@ -402,6 +402,7 @@ add_executable(test_beacon
 target_include_directories(test_beacon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
 )
 target_link_libraries(test_beacon ssl crypto)
 
