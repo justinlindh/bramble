@@ -4111,14 +4111,6 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     neighbor_init(&s_neighbors);
 
-    /* Derive shared beacon HMAC key from the public channel PSK */
-    {
-        bramble_channel_t beacon_ch;
-        channel_derive_key(BRAMBLE_PUBLIC_CHANNEL_PSK, &beacon_ch);
-        memcpy(s_beacon_key, beacon_ch.key, BRAMBLE_KEY_SIZE);
-        ESP_LOGI(TAG, "Beacon HMAC key derived from public channel PSK");
-    }
-
     /* Deterministic node-global AEAD nonce counter (SEC-C reuse-avoidance).
      * boot_salt is a secondary defense if NVS is ever wiped. Created before
      * any task that can reach send_data_packet (RPC/httpd, UI, CLI) starts
@@ -4151,6 +4143,33 @@ void mesh_task_start(bramble_identity_t *identity) {
      * has been set; otherwise network_key_get() falls back to the
      * PSK-derived key on its own. */
     mesh_load_network_key();
+
+    /* SEC-H2 (Task 3.4, STAGED, not closed: see network_key.h). Beacon
+     * forgeability moves from "anyone who knows the public PSK" to
+     * "network members only" once a network key is provisioned: derives a
+     * labeled subkey ("bramble-beacon-v2") from network_key_get() rather
+     * than reusing the raw network key directly, for domain separation
+     * from the other MAC types (RREP/RERR/ACK/receipt). Read once here,
+     * at init: a runtime setNetworkKey RPC call does not currently
+     * re-derive this (a real gap, not closed by this task, flagged in the
+     * report). When unprovisioned (the shipped default), falls back to
+     * the same public-PSK-derived key as before: still integrity-checkable
+     * against tampering in flight, but not exclusive to the network,
+     * since anyone can derive the identical fallback key from the public
+     * constant. */
+    if (network_key_is_provisioned()) {
+        uint8_t net_key[32];
+        network_key_get(net_key);
+        const char *salt = "bramble-beacon-v2";
+        crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), net_key, sizeof(net_key), NULL, 0,
+                           s_beacon_key, sizeof(s_beacon_key));
+        ESP_LOGI(TAG, "Beacon HMAC key derived from the provisioned network key");
+    } else {
+        bramble_channel_t beacon_ch;
+        channel_derive_key(BRAMBLE_PUBLIC_CHANNEL_PSK, &beacon_ch);
+        memcpy(s_beacon_key, beacon_ch.key, BRAMBLE_KEY_SIZE);
+        ESP_LOGW(TAG, "beacon HMAC integrity-only (no network key provisioned)");
+    }
 
     dedup_init(&s_dedup);
     replay_table_init(&s_replay);
