@@ -17,10 +17,12 @@ typedef struct {
     uint32_t src;
     uint64_t counter;
     uint32_t seen_s;
-    uint8_t  used;
+    uint8_t used;
 } replay_dslot_t;
 
-typedef struct { replay_dslot_t slots[REPLAY_DEFERRED_MAX]; } replay_deferred_t;
+typedef struct {
+    replay_dslot_t slots[REPLAY_DEFERRED_MAX];
+} replay_deferred_t;
 
 void replay_deferred_init(replay_deferred_t* d);
 
@@ -30,6 +32,6 @@ void replay_deferred_init(replay_deferred_t* d);
  * must be on the same clock basis (network time), not raw device uptime,
  * since they come from different nodes.
  */
-int replay_deferred_accept(replay_deferred_t* d, uint32_t src, uint64_t counter,
-                           uint32_t sent_at_s, uint32_t now_s, int timesync_ok);
+int replay_deferred_accept(replay_deferred_t* d, uint32_t src, uint64_t counter, uint32_t sent_at_s,
+                           uint32_t now_s, int timesync_ok);
 #endif

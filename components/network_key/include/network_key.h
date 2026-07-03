@@ -46,6 +46,6 @@ int network_key_is_provisioned(void);
  * internal code building a MAC over a message body they just serialized,
  * so an assert bounds it defensively rather than failing at runtime.
  */
-void network_key_mac(const char *label, const uint8_t *data, size_t len, uint8_t out[8]);
+void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]);
 
 #endif

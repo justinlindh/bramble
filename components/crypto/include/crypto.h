@@ -31,7 +31,8 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
  * peer points on its own. */
 static inline int crypto_x25519_check_shared(const uint8_t ss[32]) {
     uint8_t acc = 0;
-    for (int i = 0; i < 32; i++) acc |= ss[i];
+    for (int i = 0; i < 32; i++)
+        acc |= ss[i];
     return acc == 0 ? -1 : 0;
 }
 int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len,

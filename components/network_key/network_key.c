@@ -29,17 +29,17 @@ int network_key_get(uint8_t key_out[32]) {
      * so the MAC machinery has a key to run against before real
      * provisioning lands, not to authenticate anything against an
      * adversary who has read this source. */
-    const char *salt = "bramble-netkey-fallback";
-    const char *psk = BRAMBLE_PUBLIC_CHANNEL_PSK;
-    return crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), (const uint8_t *)psk,
-                              strlen(psk), NULL, 0, key_out, 32);
+    const char* salt = "bramble-netkey-fallback";
+    const char* psk = BRAMBLE_PUBLIC_CHANNEL_PSK;
+    return crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), (const uint8_t*)psk, strlen(psk),
+                              NULL, 0, key_out, 32);
 }
 
 /* Longest label in use today ("bramble-receipt-v2") is 18 bytes; 32 is
  * generous headroom for future per-type labels of the same shape. */
 #define NETWORK_KEY_MAC_MAX_LABEL_LEN 32
 
-void network_key_mac(const char *label, const uint8_t *data, size_t len, uint8_t out[8]) {
+void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]) {
     assert(len <= 255);
     size_t label_len = strlen(label);
     assert(label_len <= NETWORK_KEY_MAC_MAX_LABEL_LEN);

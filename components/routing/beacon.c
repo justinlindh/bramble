@@ -47,6 +47,7 @@ bool beacon_verify_hmac(const bramble_beacon_t* beacon, const uint8_t* shared_ke
      * early exit, unlike memcmp. The non-constant-time compare was named
      * as part of SEC-H2's root cause. */
     uint8_t r = 0;
-    for (size_t i = 0; i < sizeof(saved); i++) r |= saved[i] ^ copy.auth_hmac[i];
+    for (size_t i = 0; i < sizeof(saved); i++)
+        r |= saved[i] ^ copy.auth_hmac[i];
     return r == 0;
 }
