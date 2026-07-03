@@ -2000,6 +2000,18 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         return;
     }
 
+    if (!bramble_header_is_supported_version(&header)) {
+        /* Version flag day (ground rule 10): un-upgraded nodes are off-network.
+         * Rate-limited so a half-updated fleet is diagnosable, not silent. */
+        static uint32_t s_last_ver_log_ms = 0;
+        uint32_t vnow = now_ms();
+        if (vnow - s_last_ver_log_ms > 60000) {
+            ESP_LOGW(TAG, "Dropping wire v%u packet (need v%u)", header.version, BRAMBLE_VERSION);
+            s_last_ver_log_ms = vnow;
+        }
+        return;
+    }
+
     /* Record raw RX event */
     traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi);
 
