@@ -162,6 +162,34 @@ void test_beacon_seq_covered_by_hmac(void) {
     TEST_ASSERT_FALSE(beacon_verify_hmac(&tampered, key, sizeof(key)));
 }
 
+/*
+ * Red-team fix regression. send_beacon's TX buffer (main/mesh_task.c) is
+ * not host-testable (ESP-IDF only, board-build-verified), but the size
+ * invariant it depends on lives entirely in the host-testable serialize
+ * path: BEACON_SIZE + 1 + BEACON_NAME_MAX is the wire size of a beacon
+ * with a full-length name, and that must be exactly the size that fits.
+ * Before this fix send_beacon used a hand-counted buf[64], 7 bytes short
+ * of this, so a 10+ character name made bramble_beacon_serialize fail
+ * with ESP_ERR_INVALID_SIZE and the node silently stopped beaconing
+ * entirely (no neighbor announce, mailbox flush, or timesync) until the
+ * name was cleared.
+ */
+void test_beacon_serialize_max_name_fits_size_invariant(void) {
+    bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
+    b.name_len = BEACON_NAME_MAX;
+    memset(b.name, 'x', BEACON_NAME_MAX);
+    b.name[BEACON_NAME_MAX] = '\0';
+
+    uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_serialize(&b, buf, sizeof(buf)));
+
+    /* One byte short of the invariant must fail: this is exactly the gap
+     * the old buf[64] fell into (64 < 71). */
+    uint8_t too_small[BEACON_SIZE + BEACON_NAME_MAX];
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
+                      bramble_beacon_serialize(&b, too_small, sizeof(too_small)));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_beacon_build);
@@ -173,5 +201,6 @@ int main(void) {
     RUN_TEST(test_beacon_hmac_covers_name_tamper_rejected);
     RUN_TEST(test_beacon_hmac_still_verifies_with_no_name);
     RUN_TEST(test_beacon_seq_covered_by_hmac);
+    RUN_TEST(test_beacon_serialize_max_name_fits_size_invariant);
     return UNITY_END();
 }

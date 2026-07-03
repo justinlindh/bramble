@@ -1082,7 +1082,16 @@ static int send_beacon(void) {
     /* HMAC auth — use shared beacon key (derived from public channel PSK) */
     beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
 
-    uint8_t buf[64];
+    /* Red-team fix: was buf[64], a hand-counted constant that predates the
+     * ws 1.3b size bumps. BEACON_SIZE + 1 + BEACON_NAME_MAX (the max wire
+     * size with a full-length name) is 71 as of BEACON_SIZE 54, so any
+     * name of 10+ characters overflowed this buffer, bramble_beacon_
+     * serialize's own len < need guard rejected it, and the node silently
+     * stopped beaconing entirely (no neighbor announce, mailbox flush, or
+     * timesync) until the name was cleared. Same size expression
+     * beacon_compute_hmac already uses for its own buffer, not a new
+     * magic number. */
+    uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
     if (bramble_beacon_serialize(&beacon, buf, sizeof(buf)) != ESP_OK) {
         ESP_LOGE(TAG, "Beacon serialize failed");
         return -1;
@@ -1589,7 +1598,11 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
      * (ws 1.3b). */
     ack_sign(&ack);
 
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. Not currently
+     * truncating (send_ack always originates with hop_count 1), but
+     * macro-ized to ACK_MAX_SIZE anyway so it can't silently start
+     * truncating if that ever changes, matching forward_ack's fix below. */
+    uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(&ack, buf, sizeof(buf));
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ACK serialize failed");
@@ -1626,7 +1639,11 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
         return;
     }
 
-    uint8_t buf[64];
+    /* Red-team fix: was buf[64], a hand-counted constant. ACK_MAX_SIZE (a
+     * full 8-hop path) is 69 as of the ws 1.3b size bump, so a 7-hop (65B)
+     * or 8-hop (69B) ACK overflowed this buffer and was silently dropped
+     * (bramble_ack_serialize's len < need guard). */
+    uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(ack, buf, sizeof(buf));
     if (err != ESP_OK) return;
 
@@ -1742,7 +1759,11 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
         return;
     }
 
-    uint8_t buf[96];
+    /* Red-team audit: was buf[96], a hand-counted constant. Not currently
+     * truncating (DELIVERY_RECEIPT_MAX_SIZE is 68 as of ws 1.3b), but
+     * macro-ized for the same reason as the other TX buffers in this
+     * file. */
+    uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     esp_err_t err = bramble_delivery_receipt_serialize(receipt, buf, sizeof(buf));
     if (err != ESP_OK) return;
 
@@ -2173,7 +2194,12 @@ static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind) {
 }
 
 static void send_rreq(const bramble_rreq_t *rreq) {
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. RREQ_SIZE (30)
+     * is unaffected by the ws 1.3b size bumps and always fit, but
+     * macro-ized for the same reason as the other TX buffers in this
+     * file: a hand-counted constant can't warn you when it stops being
+     * big enough. */
+    uint8_t buf[RREQ_SIZE];
     if (bramble_rreq_serialize(rreq, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32,
                  rreq->query_id, rreq->header.dest_addr);
@@ -2187,7 +2213,10 @@ static void send_rreq(const bramble_rreq_t *rreq) {
 }
 
 static void send_rrep(const bramble_rrep_t *rrep) {
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. RREP_SIZE (40
+     * as of ws 1.3b) always fit, but macro-ized for the same reason as
+     * the other TX buffers in this file. */
+    uint8_t buf[RREP_SIZE];
     if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32,
                  rrep->query_id, rrep->next_hop);
@@ -2243,7 +2272,10 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
      * MAC-covered alongside the origin-stable broken_dest/broken_next_hop
      * (ws 1.3b). */
     rerr_sign(&rerr);
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. RERR_SIZE (38
+     * as of ws 1.3b) always fit, but macro-ized for the same reason as
+     * the other TX buffers in this file. */
+    uint8_t buf[RERR_SIZE];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
         /* RERR_SIZE (the macro), not a hand-counted offset: RREP's
