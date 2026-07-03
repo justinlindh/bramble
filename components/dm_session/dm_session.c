@@ -408,3 +408,21 @@ dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
     t->s[victim].established_ms = now_ms;
     return &t->s[victim];
 }
+
+int dm_session_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                       const uint8_t* pt, size_t pt_len, const uint8_t nonce[12],
+                       uint8_t* ct_out, uint8_t* tag_out) {
+    uint8_t aad[HEADER_SIZE + 4];
+    if (bramble_build_aead_aad(h, src_addr, aad, sizeof(aad)) != ESP_OK) return -1;
+    return crypto_aes256gcm_encrypt(s->session_key, nonce, pt, pt_len, aad, sizeof(aad),
+                                    ct_out, tag_out);
+}
+
+int dm_session_decrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                       const uint8_t nonce[12], const uint8_t* ct, size_t ct_len,
+                       const uint8_t* tag, uint8_t* pt_out) {
+    uint8_t aad[HEADER_SIZE + 4];
+    if (bramble_build_aead_aad(h, src_addr, aad, sizeof(aad)) != ESP_OK) return -1;
+    return crypto_aes256gcm_decrypt(s->session_key, nonce, ct, ct_len, aad, sizeof(aad),
+                                    tag, pt_out);
+}

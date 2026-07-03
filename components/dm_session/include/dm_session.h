@@ -116,4 +116,27 @@ dm_session_t* dm_lookup(dm_table_t* t, uint32_t peer_addr);
  * immediately; dm_alloc itself only initializes peer_addr/established_ms.
  */
 dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms);
+
+/*
+ * Task 1.4: thin AES-256-GCM wrappers over an established session key,
+ * AAD built via bramble_build_aead_aad (the same SEC-M2 src_addr-bound AAD
+ * DATA envelopes use under the channel key). src_addr is the WIRE src_addr
+ * field carried alongside the DATA envelope, not a session_t member (a
+ * session only stores the peer's address, not "my own"), so encrypt takes
+ * it explicitly, matching decrypt's own parameter (which needs it to
+ * rebuild the identical AAD the sender authenticated).
+ */
+int dm_session_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                       const uint8_t* pt, size_t pt_len, const uint8_t nonce[12],
+                       uint8_t* ct_out, uint8_t* tag_out);
+
+/*
+ * Decrypts under s->session_key. src_addr must be the value read off the
+ * wire (the DATA envelope's src_addr field): it is authenticated as part
+ * of the AAD, so a tampered src_addr fails the GCM tag rather than being
+ * silently accepted.
+ */
+int dm_session_decrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                       const uint8_t nonce[12], const uint8_t* ct, size_t ct_len,
+                       const uint8_t* tag, uint8_t* pt_out);
 #endif
