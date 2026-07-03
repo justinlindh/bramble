@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { isBrambleShare, parseChannelShare, parseNodeShare } from '../utils/channelShare';
 import type { ChannelShareData, NodeShareData } from '../utils/channelShare';
+import { parseNetworkKeyShare } from '../utils/networkKeyShare';
 import styles from './QRScanModal.module.css';
 
 export type ScanResult =
   | { kind: 'channel'; data: ChannelShareData }
-  | { kind: 'node'; data: NodeShareData };
+  | { kind: 'node'; data: NodeShareData }
+  | { kind: 'network'; data: { key: string } };
 
 interface QRScanModalProps {
   onResult: (result: ScanResult) => void;
   onClose: () => void;
+  title?: string;
 }
 
 // BarcodeDetector is a Web API available in Chrome 88+ / Android Chrome
@@ -22,7 +25,7 @@ declare class BarcodeDetector {
 const hasBarcodeDetector =
   typeof window !== 'undefined' && 'BarcodeDetector' in window;
 
-export function QRScanModal({ onResult, onClose }: QRScanModalProps) {
+export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRScanModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
@@ -45,6 +48,10 @@ export function QRScanModal({ onResult, onClose }: QRScanModalProps) {
       const result = parseChannelShare(trimmed);
       if (!result.ok) { setParseError(result.error); return; }
       onResult({ kind: 'channel', data: result.data });
+    } else if (trimmed.startsWith('bramble://net/')) {
+      const result = parseNetworkKeyShare(trimmed);
+      if (!result.ok) { setParseError(result.error); return; }
+      onResult({ kind: 'network', data: result.data });
     } else {
       const result = parseNodeShare(trimmed);
       if (!result.ok) { setParseError(result.error); return; }
@@ -116,10 +123,10 @@ export function QRScanModal({ onResult, onClose }: QRScanModalProps) {
   };
 
   return (
-    <div className={styles.backdrop} onClick={handleBackdropClick} role="dialog" aria-modal aria-label="Import channel">
+    <div className={styles.backdrop} onClick={handleBackdropClick} role="dialog" aria-modal aria-label={title}>
       <div className={styles.modal}>
         <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
-        <h3 className={styles.title}>Import Channel</h3>
+        <h3 className={styles.title}>{title}</h3>
 
         {/* Tab switcher */}
         <div className={styles.tabs}>
