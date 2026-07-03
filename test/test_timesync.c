@@ -12,7 +12,7 @@ void test_single_source_does_not_commit(void) {
 
     /* One source is not enough — CORROBORATION_REQUIRED = 3 */
     int rc = timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    TEST_ASSERT_EQUAL_INT(0, rc);  /* accepted, not committed */
+    TEST_ASSERT_EQUAL_INT(0, rc); /* accepted, not committed */
     TEST_ASSERT_FALSE(ts.synchronized);
 }
 
@@ -34,9 +34,9 @@ void test_three_distinct_sources_commits(void) {
     timesync_handle_sync(&ts, 1120, 1, 0xBBBB, 1000);
     int rc = timesync_handle_sync(&ts, 1080, 1, 0xCCCC, 1000);
 
-    TEST_ASSERT_EQUAL_INT(1, rc);  /* committed */
+    TEST_ASSERT_EQUAL_INT(1, rc); /* committed */
     TEST_ASSERT_TRUE(ts.synchronized);
-    TEST_ASSERT_EQUAL_UINT8(2, timesync_get_stratum(&ts));  /* best source 1 + 1 */
+    TEST_ASSERT_EQUAL_UINT8(2, timesync_get_stratum(&ts)); /* best source 1 + 1 */
 }
 
 void test_duplicate_source_does_not_count_as_distinct(void) {
@@ -47,7 +47,7 @@ void test_duplicate_source_does_not_count_as_distinct(void) {
     timesync_handle_sync(&ts, 1120, 1, 0xBBBB, 1000);
     /* Same source as first — should update, not add distinct */
     int rc = timesync_handle_sync(&ts, 1090, 1, 0xAAAA, 1000);
-    TEST_ASSERT_EQUAL_INT(0, rc);  /* still only 2 distinct sources */
+    TEST_ASSERT_EQUAL_INT(0, rc); /* still only 2 distinct sources */
     TEST_ASSERT_FALSE(ts.synchronized);
 
     /* Third distinct source commits */
@@ -63,9 +63,9 @@ void test_weighted_average_prefers_better_stratum(void) {
     timesync_init(&ts);
 
     /* Stratum 6 (weight 1), stratum 1 (weight 6), stratum 2 (weight 5) */
-    timesync_handle_sync(&ts, 1450, 6, 0xAAAA, 1000);  /* offset +450 */
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);  /* offset +100 */
-    int rc = timesync_handle_sync(&ts, 1200, 2, 0xCCCC, 1000);  /* offset +200 */
+    timesync_handle_sync(&ts, 1450, 6, 0xAAAA, 1000);          /* offset +450 */
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);          /* offset +100 */
+    int rc = timesync_handle_sync(&ts, 1200, 2, 0xCCCC, 1000); /* offset +200 */
     TEST_ASSERT_EQUAL_INT(1, rc);
 
     /* Weighted: (450*1 + 100*6 + 200*5) / (1+6+5) = (450+600+1000)/12 = 170 */
@@ -119,7 +119,7 @@ void test_stale_entries_expire(void) {
 
     /* Third entry at t=200000 — first two are now >180s old and should be purged */
     int rc = timesync_handle_sync(&ts, 200100, 1, 0xCCCC, 200000);
-    TEST_ASSERT_EQUAL_INT(0, rc);  /* only 1 non-expired source (0xCCCC) */
+    TEST_ASSERT_EQUAL_INT(0, rc); /* only 1 non-expired source (0xCCCC) */
     TEST_ASSERT_FALSE(ts.synchronized);
 }
 
@@ -187,16 +187,60 @@ void test_first_pending_entry_always_admitted_regardless_of_magnitude(void) {
 void test_is_confident_false_until_corroborated(void) {
     timesync_state_t ts;
     timesync_init(&ts);
-    TEST_ASSERT_FALSE(timesync_is_confident(&ts));
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts, 1000));
 
     timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    TEST_ASSERT_FALSE(timesync_is_confident(&ts));
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts, 1000));
 
     timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
-    TEST_ASSERT_FALSE(timesync_is_confident(&ts));
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts, 1000));
 
     timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
-    TEST_ASSERT_TRUE(timesync_is_confident(&ts));
+    TEST_ASSERT_TRUE(timesync_is_confident(&ts, 1000));
+}
+
+/* ── Revertible confidence (ws 1.3c) ───────────────────────────────
+ *
+ * A stale committed sync must stop gating security decisions: if no
+ * corroboration has arrived in CONFIDENCE_MAX_AGE_MS, confidence lapses
+ * back to false, and a fresh commit re-closes it. This is the core
+ * NEW-SEC-4 defect fix: a bad bootstrap offset no longer trusts itself
+ * forever just because `synchronized` latched true once. */
+
+void test_is_confident_true_right_after_commit(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    TEST_ASSERT_TRUE(ts.synchronized);
+
+    TEST_ASSERT_TRUE(timesync_is_confident(&ts, ts.last_sync_ms));
+}
+
+void test_is_confident_lapses_when_sync_goes_stale(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    TEST_ASSERT_TRUE(ts.synchronized);
+    uint32_t last_sync = ts.last_sync_ms;
+
+    /* No fresh corroboration arrives; once CONFIDENCE_MAX_AGE_MS has
+     * elapsed with no re-sync, the security gate must fail closed again,
+     * even though `synchronized` itself never reverts. */
+    uint32_t stale_now = last_sync + CONFIDENCE_MAX_AGE_MS + 1;
+    TEST_ASSERT_TRUE(ts.synchronized);
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts, stale_now));
+
+    /* A fresh committed sync at that later time refreshes last_sync_ms
+     * and re-closes the gate. */
+    int rc = timesync_handle_sync(&ts, (int64_t)stale_now + 100, 1, 0xAAAA, stale_now);
+    TEST_ASSERT_EQUAL_INT(1, rc);
+    TEST_ASSERT_TRUE(timesync_is_confident(&ts, stale_now));
 }
 
 /* ── Pool overflow ──────────────────────────────────────────────── */
@@ -219,8 +263,10 @@ void test_pool_overflow_evicts_oldest(void) {
     bool found_0x1000 = false;
     bool found_0x2000 = false;
     for (int i = 0; i < ts.pending_count; i++) {
-        if (ts.pending[i].source_addr == 0x1000) found_0x1000 = true;
-        if (ts.pending[i].source_addr == 0x2000) found_0x2000 = true;
+        if (ts.pending[i].source_addr == 0x1000)
+            found_0x1000 = true;
+        if (ts.pending[i].source_addr == 0x2000)
+            found_0x2000 = true;
     }
     TEST_ASSERT_FALSE(found_0x1000);
     TEST_ASSERT_TRUE(found_0x2000);
@@ -241,5 +287,7 @@ int main(void) {
     RUN_TEST(test_rejects_offset_inconsistent_with_pending_quorum);
     RUN_TEST(test_first_pending_entry_always_admitted_regardless_of_magnitude);
     RUN_TEST(test_is_confident_false_until_corroborated);
+    RUN_TEST(test_is_confident_true_right_after_commit);
+    RUN_TEST(test_is_confident_lapses_when_sync_goes_stale);
     return UNITY_END();
 }

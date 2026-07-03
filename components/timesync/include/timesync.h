@@ -15,11 +15,12 @@
  * prevent single-beacon time manipulation.
  */
 
-#define MAX_TIME_SHIFT_MS 2000    /* Max ±2s shift per sync when already synced */
-#define MAX_STRATUM 7             /* Stratum ceiling; nodes at MAX_STRATUM don't emit */
-#define CORROBORATION_REQUIRED 3  /* Distinct sources needed before first sync */
-#define PENDING_POOL_SIZE 8       /* Max pending offset entries */
-#define PENDING_MAX_AGE_MS 180000 /* Pending entries expire after 180s (3 beacon cycles) */
+#define MAX_TIME_SHIFT_MS 2000       /* Max ±2s shift per sync when already synced */
+#define MAX_STRATUM 7                /* Stratum ceiling; nodes at MAX_STRATUM don't emit */
+#define CORROBORATION_REQUIRED 3     /* Distinct sources needed before first sync */
+#define PENDING_POOL_SIZE 8          /* Max pending offset entries */
+#define PENDING_MAX_AGE_MS 180000    /* Pending entries expire after 180s (3 beacon cycles) */
+#define CONFIDENCE_MAX_AGE_MS 180000 /* Security-gate confidence lapses if no sync this recent */
 
 typedef struct {
     int64_t offset_ms;     /* Offset applied to produce network_time */
@@ -69,9 +70,18 @@ uint8_t timesync_get_stratum(const timesync_state_t* ts);
  * MAX_TIME_SHIFT_MS of each other once a quorum exists; see the bootstrap
  * clamp in timesync_handle_sync), so "synchronized" already IS
  * "synchronized and corroborated": there is no path to true that skips
- * corroboration. It never reverts to false once achieved (no de-sync
- * mechanism exists), which callers should be aware of.
+ * corroboration.
+ *
+ * Confidence is revertible (ws 1.3c): it also requires the last committed
+ * sync to be no older than CONFIDENCE_MAX_AGE_MS relative to local_now_ms.
+ * `last_sync_ms` refreshes on every committed sync, so confidence persists
+ * while corroboration keeps arriving and LAPSES back to false once it goes
+ * stale (the source stops beaconing, or its pending entries age out with no
+ * honest replacement). This stops a bad-but-committed bootstrap offset from
+ * gating security decisions forever; the offset itself
+ * (timesync_get_network_time) stays applied for display/non-security use,
+ * only this gate re-closes.
  */
-bool timesync_is_confident(const timesync_state_t* ts);
+bool timesync_is_confident(const timesync_state_t* ts, uint32_t local_now_ms);
 
 #endif

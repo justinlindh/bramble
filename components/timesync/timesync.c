@@ -168,4 +168,6 @@ int64_t timesync_get_network_time(const timesync_state_t* ts, uint32_t local_now
 
 uint8_t timesync_get_stratum(const timesync_state_t* ts) { return ts->stratum; }
 
-bool timesync_is_confident(const timesync_state_t* ts) { return ts->synchronized; }
+bool timesync_is_confident(const timesync_state_t* ts, uint32_t local_now_ms) {
+    return ts->synchronized && (local_now_ms - ts->last_sync_ms) <= CONFIDENCE_MAX_AGE_MS;
+}
