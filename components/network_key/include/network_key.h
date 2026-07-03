@@ -48,4 +48,13 @@ int network_key_is_provisioned(void);
  */
 void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]);
 
+/*
+ * One-way fingerprint of the current network key: SHA256(network_key_get())[0:4].
+ * Safe to expose (does not reveal the key); identical on nodes that share a
+ * key, so an operator can confirm a fleet converged on one network key
+ * without transmitting the secret. Returns the fallback key's fingerprint
+ * when unprovisioned (a known value that marks "still on the public default").
+ */
+void network_key_fingerprint(uint8_t out[4]);
+
 #endif
