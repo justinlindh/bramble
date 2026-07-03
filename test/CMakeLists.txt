@@ -1030,3 +1030,51 @@ add_executable(test_ota_version
 target_include_directories(test_ota_version PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
 )
+
+# Entropy gate tests (SEC-L1)
+add_executable(test_crypto_entropy
+    test_crypto_entropy.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_entropy.c
+)
+target_include_directories(test_crypto_entropy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+
+# BLE log redaction predicate (NEW-SEC-5)
+add_executable(test_ble_redact
+    test_ble_redact.c
+    unity/unity.c
+)
+target_include_directories(test_ble_redact PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
+
+# WS credential parser: header-only auth, no query string (NEW-SEC-6)
+add_executable(test_ws_auth_credential
+    test_ws_auth_credential.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_auth_credential.c
+)
+target_include_directories(test_ws_auth_credential PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+# Secure partition table contract (SEC-H4)
+add_executable(test_secure_partitions
+    test_secure_partitions.c
+    unity/unity.c
+)
+target_compile_definitions(test_secure_partitions PRIVATE
+    SECURE_PARTITIONS_CSV="${CMAKE_CURRENT_SOURCE_DIR}/../partitions.secure.csv"
+)
+
+# Secure NVS init decision (SEC-H4)
+add_executable(test_secure_nvs
+    test_secure_nvs.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/secure_nvs.c
+)
+target_include_directories(test_secure_nvs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)

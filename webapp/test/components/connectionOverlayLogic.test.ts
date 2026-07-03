@@ -14,14 +14,14 @@ describe('ConnectionOverlay URL logic', () => {
     expect(buildWifiUrl('192.168.4.1', 'http:', 'localhost:4173')).toBe('ws://192.168.4.1/ws');
   });
 
-  it('appends token query param when provided', () => {
-    expect(buildWifiUrl('192.168.4.1', 'http:', 'localhost:4173', 'abc 123'))
-      .toBe('ws://192.168.4.1/ws?token=abc%20123');
+  it('never embeds the token in the URL (moved to WS subprotocol)', () => {
+    expect(buildWifiUrl('192.168.4.1', 'http:', 'app.local', 'abc 123'))
+      .toBe('ws://192.168.4.1/ws');
   });
 
-  it('appends token with ampersand when URL already has query params', () => {
-    expect(buildWifiUrl('ws://10.0.0.5/ws?foo=bar', 'http:', 'localhost:4173', 'tok'))
-      .toBe('ws://10.0.0.5/ws?foo=bar&token=tok');
+  it('leaves an explicit ws:// URL untouched and adds no token', () => {
+    expect(buildWifiUrl('ws://10.0.0.5/ws?foo=bar', 'http:', 'app.local', 'tok'))
+      .toBe('ws://10.0.0.5/ws?foo=bar');
   });
 
   it('never auto-connects; user must click Connect', () => {

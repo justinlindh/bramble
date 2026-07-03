@@ -14,6 +14,10 @@
 #include "button.h"
 #include "ui.h"
 #include "crypto.h"
+#include "crypto_entropy.h"
+#include "bootloader_random.h"
+#include "secure_nvs.h"
+#include "esp_partition.h"
 #include "identity.h"
 #include "mesh_task.h"
 #include "cli.h"
@@ -749,21 +753,87 @@ void app_main(void)
     }
 
     /* NVS init */
-    ESP_LOGI(TAG, "=== BOOT STAGE: nvs_flash_init ===");
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS partition truncated/new version — erasing and reinitializing");
+    ESP_LOGI(TAG, "=== BOOT STAGE: nvs init ===");
+    esp_err_t ret;
+#ifdef CONFIG_NVS_ENCRYPTION
+    /* SEC-H4: identity/channel/auth-token NVS is encrypted at rest. Keys live
+     * in the flash-encryption-protected nvs_keys partition. */
+    const esp_partition_t* keys_part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, NULL);
+    nvs_sec_cfg_t sec_cfg;
+    nvs_init_action_t plan;
+    esp_err_t fail_err = ESP_ERR_NOT_FOUND;
+    bool keys_cfg_ok = false;
+    bool secure_init_ok = false;
+    ret = ESP_OK;
+    if (keys_part == NULL) {
+        plan = nvs_init_plan(true, false, false, false);
+    } else {
+        esp_err_t kret = nvs_flash_read_security_cfg(keys_part, &sec_cfg);
+        if (kret == ESP_ERR_NVS_KEYS_NOT_INITIALIZED) {
+            kret = nvs_flash_generate_keys(keys_part, &sec_cfg);
+        }
+        keys_cfg_ok = (kret == ESP_OK);
+        fail_err = kret;
+        /* Only call secure_init once the keys layer itself is confirmed
+         * valid: a corrupt/unreadable keys partition must fail closed, not
+         * fall through with a possibly-uninitialized sec_cfg. */
+        if (keys_cfg_ok) {
+            ret = nvs_flash_secure_init(&sec_cfg);
+            secure_init_ok = (ret == ESP_OK);
+        }
+        plan = nvs_init_plan(true, true, keys_cfg_ok, secure_init_ok);
+    }
+    switch (plan) {
+        case NVS_INIT_FAIL:
+            /* Fail closed: a missing keys partition, or any keys-layer
+             * read/generate failure (corrupt keys partition, flash error),
+             * must abort rather than erase the main NVS partition. Erasing
+             * here would wipe the device on a transient fault and re-wipe
+             * on every boot if the fault persists. */
+            ESP_LOGE(TAG, "Secure NVS keys unavailable (partition missing or unreadable)");
+            ESP_ERROR_CHECK(fail_err);
+            break;
+        case NVS_INIT_SECURE_ERASE:
+            /* Keys are valid; only nvs_flash_secure_init itself failed to
+             * decrypt the main partition. This is the genuine plaintext-to-
+             * encrypted migration: old entries are unreadable. Erase and
+             * re-init with the same already-valid sec_cfg; identity +
+             * channels regenerate on next load and the device must be
+             * re-paired (documented in the migration note). Acceptable
+             * pre-alpha, first-party fleet. */
+            ESP_LOGW(TAG, "Encrypted NVS unreadable (migration): erasing and reinitializing");
+            ESP_ERROR_CHECK(nvs_flash_erase());
+            ret = nvs_flash_secure_init(&sec_cfg);
+            ESP_ERROR_CHECK(ret);
+            break;
+        case NVS_INIT_SECURE:
+            break; /* ret already ESP_OK */
+        case NVS_INIT_PLAIN:
+            break; /* unreachable under CONFIG_NVS_ENCRYPTION */
+    }
+#else
+    ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "NVS partition truncated/new version: erasing and reinitializing");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+#endif
     ESP_LOGI(TAG, "NVS initialized");
 
     /* Raise the OTA anti-rollback floor to the running version if higher */
     ota_rollback_note_boot();
 
     /* Load or generate persistent identity */
+    /* Seed a hardware entropy source before any key generation. esp_random()
+     * is not cryptographically secure until RF (Wi-Fi/BT) is up, and identity
+     * generation runs long before that. bootloader_random_enable() turns on the
+     * SAR-ADC entropy source; it MUST be disabled again before the first app
+     * ADC user (battery_init, ~line 832) which shares the SAR-ADC. */
+    bootloader_random_enable();
+    crypto_entropy_set_ready(true);
     ESP_LOGI(TAG, "=== BOOT STAGE: identity_load ===");
     if (identity_load(&g_identity) == 0) {
         ESP_LOGI(TAG, "Identity loaded from NVS");
@@ -782,6 +852,13 @@ void app_main(void)
     my_addr = g_identity.address;
     ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")",
              my_addr, g_identity.pubkey_hash);
+
+    /* Identity generated. Release the bootloader RNG before the battery ADC
+     * (SAR-ADC is shared) and CLOSE the gate: there is no strong entropy source
+     * again until an RF subsystem comes up, so crypto_random() must fail closed
+     * in this window rather than emit weak esp_random() bytes. */
+    bootloader_random_disable();
+    crypto_entropy_set_ready(false);
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -923,6 +1000,8 @@ void app_main(void)
         show_boot_status("WiFi: starting...");
 #endif
         if (wifi_manager_init(my_addr) == 0) {
+            /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
+            crypto_entropy_set_ready(true);
             const char *ip = wifi_manager_get_ip();
             if (ip[0] != '\0') {
                 ESP_LOGI(TAG, "WiFi ready: %s", ip);
@@ -989,6 +1068,8 @@ void app_main(void)
         show_boot_status("BLE: starting...");
 #endif
         if (ble_server_init() == 0) {
+            /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
+            crypto_entropy_set_ready(true);
             ble_server_start();
             /* Load (or first-boot generate) the auth token now that the BT
              * controller is running: esp_random() needs an active RF

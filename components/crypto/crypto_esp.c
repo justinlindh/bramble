@@ -8,8 +8,10 @@
 #include "mbedtls/hkdf.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/ecp.h"
+#include "mbedtls/platform_util.h"
 #include "esp_random.h"
 #include "esp_log.h"
+#include "crypto_entropy.h"
 #include <string.h>
 
 /* RNG callback for mbedtls_ecp_mul (required for side-channel blinding) */
@@ -80,13 +82,9 @@ int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm,
 }
 
 int crypto_random(uint8_t* buf, size_t len) {
-    for (size_t i = 0; i < len; i += 4) {
-        uint32_t r = esp_random();
-        size_t remaining = len - i;
-        size_t to_copy = remaining < 4 ? remaining : 4;
-        memcpy(buf + i, &r, to_copy);
-    }
-    return 0;
+    /* Fail closed behind the entropy gate; zeroes buf and returns -1 when the
+     * gate is shut (SEC-L1). See crypto_entropy.c. */
+    return crypto_entropy_fill(buf, len, esp_random);
 }
 
 int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
@@ -124,7 +122,20 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
 }
 
 int crypto_generate_identity(bramble_identity_t* id) {
-    crypto_random(id->private_key, 32);
+    /* Draw into a scratch buffer first: crypto_random zeroes its destination
+     * in place when the entropy gate is shut, so drawing straight into
+     * id->private_key would clobber a caller's existing identity even on
+     * failure (SEC-L1). Only commit into id once the draw has succeeded. */
+    uint8_t priv[32];
+    if (crypto_random(priv, sizeof(priv)) != 0) {
+        /* Entropy gate shut: refuse rather than clamp-and-use a zeroed key. */
+        return -1;
+    }
+    memcpy(id->private_key, priv, sizeof(priv));
+    /* Wipe the stack scratch now that the key has been committed to id.
+     * mbedtls_platform_zeroize (not memset) so the compiler cannot optimize
+     * the wipe away as a dead store to a about-to-go-out-of-scope buffer. */
+    mbedtls_platform_zeroize(priv, sizeof(priv));
     // Clamp per X25519 spec
     id->private_key[0] &= 248;
     id->private_key[31] &= 127;

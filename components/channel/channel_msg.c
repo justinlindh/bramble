@@ -29,8 +29,12 @@ int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t 
         memcpy(pt + CHANNEL_MSG_OVERHEAD, data, data_len);
     }
 
-    /* Generate random nonce */
-    crypto_random(nonce_out, BRAMBLE_NONCE_SIZE);
+    /* Generate random nonce. Refuse rather than encrypt under a zeroed nonce:
+     * a shut entropy gate (SEC-L1) would otherwise hand GCM an all-zero
+     * nonce, and nonce reuse under one channel key is catastrophic (keystream
+     * XOR leak, auth-key recovery/forgery). */
+    if (crypto_random(nonce_out, BRAMBLE_NONCE_SIZE) != 0)
+        return -1;
 
     /* Encrypt with header AAD binding */
     return crypto_aes256gcm_encrypt(ch->key, nonce_out, pt, pt_len, aad, aad_len, ciphertext_out,

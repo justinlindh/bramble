@@ -19,7 +19,7 @@ function resolveMockWsUrl(): string {
 export function createTransport(type: TransportType, options?: { url?: string; token?: string }): Transport {
   if (type === 'ble') return new BLETransport();
   if (type === 'websocket') return new WebSocketTransport(resolveMockWsUrl());
-  if (type === 'wifi') return new WebSocketTransport(options?.url ?? 'ws://192.168.4.1/ws');
+  if (type === 'wifi') return new WebSocketTransport(options?.url ?? 'ws://192.168.4.1/ws', options?.token);
   return new SerialTransport();
 }
 

@@ -813,7 +813,14 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     if (identity_check_collision(s_identity, beacon.src_addr, beacon.pubkey_hash)) {
         ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 " — regenerating identity!", beacon.src_addr);
         /* Regenerate keypair and persist to NVS */
-        identity_generate_and_save(s_identity);
+        if (identity_generate_and_save(s_identity) != 0) {
+            /* Entropy not ready (pre-RF window, SEC-L1): identity_generate_and_save
+             * refused to persist and left s_identity fully untouched (see
+             * crypto_generate_identity). Do NOT report a new identity that was
+             * never actually generated. */
+            ESP_LOGW(TAG, "identity regeneration deferred: entropy not ready");
+            return;
+        }
         ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
         /* Notify webapp */
         cJSON *params = cJSON_CreateObject();
@@ -3253,7 +3260,16 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
         s_channel_has_psk[s_num_channels] = true;
     } else {
         /* Generate random key */
-        crypto_random(ch->key, BRAMBLE_KEY_SIZE);
+        if (crypto_random(ch->key, BRAMBLE_KEY_SIZE) != 0) {
+            /* Entropy not ready (pre-RF window): do NOT install a zeroed key.
+             * Skip creating this channel; it is retried once an RF entropy
+             * source is up and the gate re-opens (SEC-L1). Release the mutex
+             * taken above before returning: this function's other early-return
+             * (MAX_CHANNELS, above) does the same. */
+            ESP_LOGW(TAG, "channel key gen deferred: entropy not ready");
+            xSemaphoreGive(s_state_mutex);
+            return -1;
+        }
         ch->epoch = 0;
         s_channel_has_psk[s_num_channels] = false;
     }
