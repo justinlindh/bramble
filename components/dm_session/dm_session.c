@@ -98,3 +98,63 @@ int dm_derive_sas(const uint8_t session_ikm[128], char sas_out[8]) {
     snprintf(sas_out, 8, "%07u", (unsigned)(v % 10000000u));
     return 0;
 }
+
+void dm_table_init(dm_table_t* t) { memset(t, 0, sizeof(*t)); }
+
+dm_session_t* dm_lookup(dm_table_t* t, uint32_t peer_addr) {
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        if (t->s[i].state != DM_STATE_NONE && t->s[i].peer_addr == peer_addr) {
+            return &t->s[i];
+        }
+    }
+    return NULL;
+}
+
+dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
+    /* Reuse an existing slot for this peer: not a new handshake, so no cap
+     * check. The slot's existing state already counts toward the cap if it
+     * is DM_STATE_HANDSHAKING; returning it again doesn't add a new one. */
+    dm_session_t* existing = dm_lookup(t, peer_addr);
+    if (existing) return existing;
+
+    /* Handshaking cap (M4 DoS defense): every fresh slot (free or evicted)
+     * is a prospective handshake, since callers transition it to
+     * DM_STATE_HANDSHAKING immediately after a successful call. Refuse to
+     * create one at all, even if an evictable slot exists, once the cap is
+     * already reached: a full table under the cap must never be raided to
+     * start a 9th handshake. */
+    int handshaking_count = 0;
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        if (t->s[i].state == DM_STATE_HANDSHAKING) handshaking_count++;
+    }
+    if (handshaking_count >= DM_MAX_HANDSHAKING) return NULL;
+
+    /* Free (DM_STATE_NONE) slot. */
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        if (t->s[i].state == DM_STATE_NONE) {
+            memset(&t->s[i], 0, sizeof(t->s[i]));
+            t->s[i].peer_addr = peer_addr;
+            t->s[i].established_ms = now_ms;
+            return &t->s[i];
+        }
+    }
+
+    /* LRU-evict the oldest slot that is neither DM_STATE_ACTIVE nor
+     * UNVERIFIED. UNVERIFIED (state==ACTIVE && verified==0) is a subset of
+     * ACTIVE, so excluding DM_STATE_ACTIVE outright, regardless of
+     * verified, protects both. Only a DM_STATE_HANDSHAKING slot can ever be
+     * the victim (DM_STATE_NONE slots were already handled above). */
+    int victim = -1;
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        if (t->s[i].state == DM_STATE_ACTIVE) continue; /* protected, verified or not */
+        if (victim < 0 || t->s[i].established_ms < t->s[victim].established_ms) {
+            victim = i;
+        }
+    }
+    if (victim < 0) return NULL; /* table full, nothing evictable */
+
+    memset(&t->s[victim], 0, sizeof(t->s[victim]));
+    t->s[victim].peer_addr = peer_addr;
+    t->s[victim].established_ms = now_ms;
+    return &t->s[victim];
+}
