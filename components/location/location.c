@@ -213,6 +213,22 @@ int location_deserialize_for_tier(const uint8_t* buf, size_t len, uint8_t tier,
     }
 }
 
+int location_parse_inner(const uint8_t* plaintext, size_t plaintext_len, uint8_t* tier_out,
+                         bramble_position_t* pos_out) {
+    if (!plaintext || !tier_out || !pos_out || plaintext_len < 1)
+        return -1;
+    uint8_t tier = plaintext[LOCATION_INNER_TIER_OFFSET];
+    /* Tier-appropriate deserialize length, ignoring the trailing canonical
+     * L_LOC_INNER pad: PRESENCE/COARSE tiers only consume their own real
+     * byte count even though the plaintext carries LOCATION_FULL_SIZE
+     * bytes of position payload after the tier byte. */
+    int n = location_deserialize_for_tier(plaintext + 1, plaintext_len - 1, tier, pos_out);
+    if (n <= 0)
+        return -1;
+    *tier_out = tier;
+    return 0;
+}
+
 int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,
                           const bramble_position_t* pos, uint32_t now_ms) {
     /* Update existing */

@@ -101,6 +101,8 @@ target_include_directories(test_location_crypto PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nonce_counter/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_compile_definitions(test_location_crypto PRIVATE NVS_STUBS_ENABLE=1)
