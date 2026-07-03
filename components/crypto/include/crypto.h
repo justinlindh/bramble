@@ -23,6 +23,17 @@ uint32_t crypto_derive_address(const uint8_t* public_key);
 uint32_t crypto_derive_pubkey_hash(const uint8_t* public_key);
 int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
                      uint8_t* shared_secret);
+
+/* Returns 0 if the X25519 shared secret is contributory (non-zero), -1 if it
+ * is the all-zero low-order result (RFC 7748 contributory check). Constant-
+ * time accumulate. Shared by host and device builds; the device (mbedtls)
+ * path is the one that needs it, since mbedtls does not reject low-order
+ * peer points on its own. */
+static inline int crypto_x25519_check_shared(const uint8_t ss[32]) {
+    uint8_t acc = 0;
+    for (int i = 0; i < 32; i++) acc |= ss[i];
+    return acc == 0 ? -1 : 0;
+}
 int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len,
                        const uint8_t* info, size_t info_len, uint8_t* okm, size_t okm_len);
 int crypto_aes256gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* plaintext,
