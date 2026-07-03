@@ -1156,14 +1156,15 @@ static void mesh_process_probe_reply_tx_event(void) {
     esp_task_wdt_reset();
 
     int rc = mesh_tx(item->buf, item->wire_len, TX_KIND_PROBE_REPLY);
+    uint32_t t_after = now_ms();   /* measure the 140ms retry gap from TX return, matching the original vTaskDelay(140)-after-tx */
 
     /* Deny-stop vs. sent-and-retry decision lives in the pure state machine.
      * TX_GATE_ERR_BUDGET abandons the whole reply (first thing to shed);
      * otherwise the send is counted and the next attempt is scheduled
-     * t_now + 140ms until attempts_total is reached. */
+     * t_after + 140ms until attempts_total is reached. */
     probe_reply_tx_result_t result =
         (rc == TX_GATE_ERR_BUDGET) ? PROBE_REPLY_TX_DENIED : PROBE_REPLY_TX_SENT;
-    probe_reply_queue_apply_result(item, result, t_now);
+    probe_reply_queue_apply_result(item, result, t_after);
 
     mesh_schedule_next_probe_reply_timer();
 }
