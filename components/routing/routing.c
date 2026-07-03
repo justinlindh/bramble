@@ -14,6 +14,8 @@ int neighbor_update(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t 
             table->entries[i].snr = snr;
             table->entries[i].pubkey_hash = pubkey_hash;
             table->entries[i].last_heard = now_ms;
+            if (table->entries[i].beacon_count < 0xFFFF)
+                table->entries[i].beacon_count++;
             return i;
         }
     }
@@ -35,6 +37,8 @@ int neighbor_update(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t 
     table->entries[idx].snr = snr;
     table->entries[idx].pubkey_hash = pubkey_hash;
     table->entries[idx].last_heard = now_ms;
+    table->entries[idx].first_seen_ms = now_ms;
+    table->entries[idx].beacon_count = 1;
     /* Defaults until reliability/airtime telemetry is populated from runtime stats */
     table->entries[idx].delivery_rate = 255;     /* 100% */
     table->entries[idx].airtime_remaining = 100; /* 100% */
@@ -62,6 +66,17 @@ void neighbor_purge(neighbor_table_t* table, uint32_t now_ms) {
 }
 
 int neighbor_count(const neighbor_table_t* table) { return table->count; }
+
+bool neighbor_is_established(const neighbor_table_t* table, uint32_t addr, uint32_t now_ms) {
+    for (int i = 0; i < table->count; i++) {
+        if (table->entries[i].addr == addr) {
+            const neighbor_entry_t* e = &table->entries[i];
+            return e->beacon_count >= ESTABLISHED_MIN_BEACONS &&
+                   (now_ms - e->first_seen_ms) >= ESTABLISHED_MIN_AGE_MS;
+        }
+    }
+    return false;
+}
 
 /* ── Routing table ── */
 
