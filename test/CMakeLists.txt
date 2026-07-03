@@ -108,6 +108,18 @@ target_include_directories(test_location_crypto PRIVATE
 target_compile_definitions(test_location_crypto PRIVATE NVS_STUBS_ENABLE=1)
 target_link_libraries(test_location_crypto ssl crypto m)
 
+# Network key provider: domain-separated control-plane MAC, PSK fallback
+# when unprovisioned (Task 3.1, PART 3, staged not closed).
+add_executable(test_network_key
+    test_network_key.c
+    unity/unity.c
+)
+target_include_directories(test_network_key PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+)
+target_link_libraries(test_network_key ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
@@ -560,6 +572,8 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_rpc_set_auth_token_contract
@@ -573,6 +587,8 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_rpc_get_config_channel_export
@@ -586,6 +602,8 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_mesh_broadcast_delivery
@@ -599,6 +617,8 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 
@@ -630,6 +650,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -640,7 +661,7 @@ target_compile_definitions(test_rpc_add_channel_contract PRIVATE
 target_compile_options(test_rpc_add_channel_contract PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_add_channel_contract m)
+target_link_libraries(test_rpc_add_channel_contract m ssl crypto)
 
 target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -663,6 +684,7 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -673,7 +695,7 @@ target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
 target_compile_options(test_rpc_set_auth_token_contract PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_set_auth_token_contract m)
+target_link_libraries(test_rpc_set_auth_token_contract m ssl crypto)
 
 target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -696,6 +718,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -706,7 +729,7 @@ target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_get_config_channel_export m)
+target_link_libraries(test_rpc_get_config_channel_export m ssl crypto)
 
 target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -729,6 +752,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -739,7 +763,7 @@ target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
 target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_mesh_broadcast_delivery m)
+target_link_libraries(test_mesh_broadcast_delivery m ssl crypto)
 
 target_include_directories(test_broadcast_delivery_receipt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -874,6 +898,8 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
 )
@@ -898,6 +924,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -908,7 +935,7 @@ target_compile_definitions(test_rpc_methods_firmware PRIVATE
 target_compile_options(test_rpc_methods_firmware PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_methods_firmware m)
+target_link_libraries(test_rpc_methods_firmware m ssl crypto)
 
 # Chat message UI helper tests
 add_executable(test_chat_message_ui
@@ -1045,6 +1072,8 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
 )
@@ -1070,6 +1099,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -1079,7 +1109,7 @@ target_compile_definitions(test_host_rpc_methods PRIVATE
 target_compile_options(test_host_rpc_methods PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_host_rpc_methods m)
+target_link_libraries(test_host_rpc_methods m ssl crypto)
 
 # Mailbox integration wrapper tests (mesh_task.c wrapper logic, no ESP-IDF deps)
 # Tests: store-when-disabled, store-when-enabled, flush-for, expire/TTL

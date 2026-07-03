@@ -22,6 +22,7 @@
 #include "replay_window.h"
 #include "replay_deferred.h"
 #include "dm_session.h"
+#include "network_key.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -4029,6 +4030,27 @@ static int mesh_nonce_write(uint64_t ceiling, void *ctx) {
     return err == ESP_OK ? 0 : -1;
 }
 
+/*
+ * PART 3 (staged, not closed; see network_key.h). Loads a provisioned
+ * network key from NVS if one has been set (via the setNetworkKey RPC).
+ * Not-found is the expected, common case, the shipped default is
+ * unprovisioned, so this falls through silently to network_key_get()'s
+ * own PSK-derived fallback rather than logging an error.
+ */
+static void mesh_load_network_key(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NETKEY, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    uint8_t key[32];
+    size_t len = sizeof(key);
+    if (nvs_get_blob(h, NVS_KEY_NETKEY, key, &len) == ESP_OK && len == sizeof(key)) {
+        network_key_set_provisioned(key);
+        ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");
+    }
+    nvs_close(h);
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 void mesh_task_start(bramble_identity_t *identity) {
@@ -4099,6 +4121,11 @@ void mesh_task_start(bramble_identity_t *identity) {
      * the mesh RX task; small stack, the only work here is periodic X25519. */
     xTaskCreate(handshake_worker_task, "dm_hs_worker", DM_HANDSHAKE_WORKER_STACK, NULL,
                DM_HANDSHAKE_WORKER_PRIORITY, NULL);
+
+    /* PART 3 (staged, not closed): loads a provisioned network key if one
+     * has been set; otherwise network_key_get() falls back to the
+     * PSK-derived key on its own. */
+    mesh_load_network_key();
 
     dedup_init(&s_dedup);
     replay_table_init(&s_replay);

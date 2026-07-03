@@ -32,6 +32,7 @@
 #include "wifi_manager.h"
 #include "esp_wifi.h"
 #include "ws_server.h"
+#include "network_key.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -692,6 +693,61 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
     nvs_close(h);
 
     ws_server_load_token();  /* reload immediately */
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+static int hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* bramble.setNetworkKey: params {"key": "<64 lowercase/uppercase hex chars>"}.
+ * Provisions the control-plane network key (PART 3, STAGED: see
+ * network_key.h. This does NOT by itself close SEC-H1, SEC-H2, NEW-SEC-4,
+ * or NEW-SEC-8; those stay open until real per-fleet key distribution
+ * lands). Authenticated callers only: this method is not in rpc_auth's
+ * unauth allowlist, so an unauthenticated caller cannot reach it, exactly
+ * mirroring setAuthToken above. Persists to NVS (NVS_NS_NETKEY) so the
+ * provisioned key survives reboot, mirroring the identity/nonce NVS
+ * pattern. Distribution UX, how an operator actually gets a key onto a
+ * fleet of devices, is out of scope here: an open question for the
+ * provisioning workstream, not solved by this RPC. */
+static int rpc_set_network_key(const cJSON *params, cJSON *result)
+{
+    const cJSON *key_j = cJSON_GetObjectItem(params, "key");
+    if (!key_j || !cJSON_IsString(key_j)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    const char *hex = key_j->valuestring;
+    if (strlen(hex) != 64) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    uint8_t key[32];
+    for (int i = 0; i < 32; i++) {
+        int hi = hex_nibble(hex[i * 2]);
+        int lo = hex_nibble(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        key[i] = (uint8_t)((hi << 4) | lo);
+    }
+
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NETKEY, NVS_READWRITE, &h) != ESP_OK) {
+        return RPC_ERR_INTERNAL;
+    }
+    nvs_set_blob(h, NVS_KEY_NETKEY, key, sizeof(key));
+    esp_err_t commit_err = nvs_commit(h);
+    nvs_close(h);
+    if (commit_err != ESP_OK) {
+        return RPC_ERR_INTERNAL;
+    }
+
+    network_key_set_provisioned(key);
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
@@ -2190,6 +2246,7 @@ void rpc_methods_init(bramble_identity_t *identity) {
     rpc_register("bramble.setNodeName",          handle_set_node_name);
     rpc_register("bramble.setAuthToken",         rpc_set_auth_token);
     rpc_register("bramble.getAuthToken",         rpc_get_auth_token);
+    rpc_register("bramble.setNetworkKey",        rpc_set_network_key);
     rpc_register("bramble.setAllowedOrigins",    rpc_set_allowed_origins);
     rpc_register("bramble.getAllowedOrigins",    rpc_get_allowed_origins);
     rpc_register("bramble.addChannel",           handle_add_channel);
