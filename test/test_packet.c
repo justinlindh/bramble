@@ -1,7 +1,6 @@
 #include "unity.h"
 #include "esp_stubs.h"
 #include "packet.h"
-#include "../components/location/include/location.h"
 #include "packet.c"
 
 void setUp(void) {}
@@ -67,8 +66,10 @@ void test_ack_roundtrip(void) {
         .header = make_header(PKT_TYPE_ACK),
         .src_addr = 0xAABBCCDD, .ack_packet_id = 0x11223344,
         .ack_flags = 0x03, .rssi_at_dest = -72,
+        .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04},
+        .hop_count = 2, .relay_path = {0x10101010, 0x20202020},
     };
-    uint8_t buf[ACK_SIZE];
+    uint8_t buf[ACK_MAX_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p, buf, sizeof(buf)));
     bramble_ack_t out;
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_deserialize(&out, buf, sizeof(buf)));
@@ -76,6 +77,76 @@ void test_ack_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.ack_packet_id, out.ack_packet_id);
     TEST_ASSERT_EQUAL(p.ack_flags, out.ack_flags);
     TEST_ASSERT_EQUAL(p.rssi_at_dest, out.rssi_at_dest);
+    /* auth_hmac lives at a fixed offset BEFORE relay_path (NEW-SEC-8):
+     * round-tripping both together, with a non-zero hop_count, proves the
+     * two fields don't collide or get corrupted at the new layout. */
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, sizeof(p.auth_hmac));
+    TEST_ASSERT_EQUAL(p.hop_count, out.hop_count);
+    TEST_ASSERT_EQUAL_HEX32(p.relay_path[0], out.relay_path[0]);
+    TEST_ASSERT_EQUAL_HEX32(p.relay_path[1], out.relay_path[1]);
+}
+
+/* auth_hmac must sit at the SAME wire offset regardless of hop_count
+ * (NEW-SEC-8): a verifier reads it before it can trust hop_count at all.
+ * Serializes the same auth_hmac under two different hop_counts and
+ * confirms it lands at the identical byte offset both times. */
+void test_ack_auth_hmac_offset_independent_of_hop_count(void) {
+    bramble_ack_t p_zero_hops = {
+        .header = make_header(PKT_TYPE_ACK),
+        .src_addr = 0x1, .ack_packet_id = 0x2,
+        .auth_hmac = {1, 2, 3, 4, 5, 6, 7, 8},
+        .hop_count = 0,
+    };
+    bramble_ack_t p_many_hops = p_zero_hops;
+    p_many_hops.hop_count = 4;
+    for (int i = 0; i < 4; i++) p_many_hops.relay_path[i] = 0x30000000 + i;
+
+    uint8_t buf_zero[ACK_MAX_SIZE];
+    uint8_t buf_many[ACK_MAX_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p_zero_hops, buf_zero, sizeof(buf_zero)));
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p_many_hops, buf_many, sizeof(buf_many)));
+
+    /* Fixed offset: HEADER_SIZE + src(4) + ack_pkt_id(4) + flags(1) +
+     * rssi(1) + hop_count(1) = HEADER_SIZE + 11. */
+    size_t hmac_offset = HEADER_SIZE + 11;
+    TEST_ASSERT_EQUAL_MEMORY(buf_zero + hmac_offset, buf_many + hmac_offset, 8);
+    TEST_ASSERT_EQUAL_MEMORY(p_zero_hops.auth_hmac, buf_many + hmac_offset, 8);
+}
+
+/* Fix 5 (red-team panel): a tampered/truncated hop_count claiming more
+ * relay_path entries than the buffer actually supplies must not leave
+ * relay_path[] beyond what was truly read holding uninitialized/garbage
+ * caller memory. handle_ack (main/mesh_task.c) reads relay_path[0..
+ * hop_count) straight into the onAck UI notification, so stale bytes
+ * there is a real (bounded, own-UI) leak. This proves hop_count is
+ * clamped DOWN to the number of entries the buffer truly carries, and
+ * that the untouched tail of relay_path reads zero, not whatever was on
+ * the stack before deserialize was called. */
+void test_ack_deserialize_clamps_hop_count_to_available_bytes(void) {
+    bramble_ack_t p = {
+        .header = make_header(PKT_TYPE_ACK),
+        .src_addr = 0x1, .ack_packet_id = 0x2,
+        .hop_count = ACK_MAX_HOPS,
+    };
+    for (int i = 0; i < ACK_MAX_HOPS; i++) p.relay_path[i] = 0x40000000 + i;
+    uint8_t buf[ACK_MAX_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p, buf, sizeof(buf)));
+
+    /* Truncate to only 2 hops' worth of wire bytes, as if the packet on
+     * the wire were shorter than hop_count=8 claims (attacker-tampered or
+     * genuinely truncated in transit). */
+    size_t truncated_len = ACK_BASE_SIZE + 2 * 4;
+
+    bramble_ack_t out;
+    memset(&out, 0xAA, sizeof(out)); /* poison: simulate stack garbage */
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_deserialize(&out, buf, truncated_len));
+
+    TEST_ASSERT_EQUAL(2, out.hop_count); /* clamped to what the buffer truly carries */
+    TEST_ASSERT_EQUAL_HEX32(0x40000000, out.relay_path[0]);
+    TEST_ASSERT_EQUAL_HEX32(0x40000001, out.relay_path[1]);
+    for (int i = 2; i < ACK_MAX_HOPS; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0, out.relay_path[i]); /* zeroed, not 0xAAAAAAAA poison */
+    }
 }
 
 void test_ack_buffer_too_small(void) {
@@ -133,6 +204,7 @@ void test_rerr_roundtrip(void) {
         .header = make_header(PKT_TYPE_RERR),
         .reporter_addr = 0x11111111, .broken_dest = 0x22222222,
         .broken_next_hop = 0x33333333,
+        .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04},
     };
     uint8_t buf[RERR_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rerr_serialize(&p, buf, sizeof(buf)));
@@ -141,6 +213,7 @@ void test_rerr_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.reporter_addr, out.reporter_addr);
     TEST_ASSERT_EQUAL_HEX32(p.broken_dest, out.broken_dest);
     TEST_ASSERT_EQUAL_HEX32(p.broken_next_hop, out.broken_next_hop);
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, sizeof(p.auth_hmac));
 }
 
 /* ---- BEACON ---- */
@@ -218,6 +291,7 @@ void test_delivery_receipt_roundtrip(void) {
         .header = make_header(PKT_TYPE_DELIVERY_RECEIPT),
         .src_addr = 0x11223344, .orig_packet_id = 0x55667788,
         .hop_count = 3, .total_latency = 200,
+        .auth_hmac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x10, 0x20},
         .relay_path = {0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC},
     };
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
@@ -228,6 +302,10 @@ void test_delivery_receipt_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.orig_packet_id, out.orig_packet_id);
     TEST_ASSERT_EQUAL(p.hop_count, out.hop_count);
     TEST_ASSERT_EQUAL(p.total_latency, out.total_latency);
+    /* auth_hmac lives at a fixed offset BEFORE relay_path (NEW-SEC-8):
+     * round-tripping both together, with a non-zero hop_count, proves the
+     * two fields don't collide or get corrupted at the new layout. */
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, sizeof(p.auth_hmac));
     for (int i = 0; i < p.hop_count; i++) {
         TEST_ASSERT_EQUAL_HEX32(p.relay_path[i], out.relay_path[i]);
     }
@@ -251,38 +329,14 @@ void test_delivery_receipt_zero_hops(void) {
     TEST_ASSERT_EQUAL(0, out.hop_count);
 }
 
-void test_location_packet_header_roundtrip(void) {
-    bramble_header_t h = make_header(PKT_TYPE_LOCATION);
-    h.flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT);
-
-    uint8_t buf[HEADER_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&h, buf, sizeof(buf)));
-
-    bramble_header_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out, buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out.type);
-    TEST_ASSERT_EQUAL(LOCATION_TIER_COARSE, (out.flags & FLAG_TIER_MASK) >> FLAG_TIER_SHIFT);
-}
-
-void test_location_packet_header_preserves_requested_tier(void) {
-    bramble_header_t h = make_header(PKT_TYPE_LOCATION);
-    h.flags = (uint8_t)(LOCATION_TIER_PRESENCE << FLAG_TIER_SHIFT);
-
-    uint8_t buf[HEADER_SIZE];
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_serialize(&h, buf, sizeof(buf)));
-
-    bramble_header_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out, buf, sizeof(buf)));
-    TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out.type);
-    TEST_ASSERT_EQUAL(LOCATION_TIER_PRESENCE, (out.flags & FLAG_TIER_MASK) >> FLAG_TIER_SHIFT);
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_header_roundtrip);
     RUN_TEST(test_header_buffer_too_small);
     RUN_TEST(test_header_big_endian_wire);
     RUN_TEST(test_ack_roundtrip);
+    RUN_TEST(test_ack_auth_hmac_offset_independent_of_hop_count);
+    RUN_TEST(test_ack_deserialize_clamps_hop_count_to_available_bytes);
     RUN_TEST(test_ack_buffer_too_small);
     RUN_TEST(test_rreq_roundtrip);
     RUN_TEST(test_rrep_roundtrip);
@@ -292,7 +346,5 @@ int main(void) {
     RUN_TEST(test_key_exchange_roundtrip);
     RUN_TEST(test_delivery_receipt_roundtrip);
     RUN_TEST(test_delivery_receipt_zero_hops);
-    RUN_TEST(test_location_packet_header_roundtrip);
-    RUN_TEST(test_location_packet_header_preserves_requested_tier);
     return UNITY_END();
 }

@@ -1,0 +1,63 @@
+#ifndef BRAMBLE_ROUTING_AUTH_H
+#define BRAMBLE_ROUTING_AUTH_H
+#include "packet.h"
+
+/*
+ * Task 3.3 (SEC-H1, STAGED, NOT closed: see network_key.h). Host-compilable
+ * home for the routing/reliability control-plane sign+verify helpers
+ * (RERR here; ACK/delivery-receipt land in Task 3.5). mesh_task.c is
+ * 3800+ ESP-IDF-only lines and is never #include'd by a host test, so any
+ * verify function defined there could never be host-tested; this component
+ * exists purely so these can be. mesh_task.c includes this header and
+ * calls these functions; it defines none of them.
+ *
+ * Every helper here is forgeable under network_key.h's unprovisioned
+ * public-PSK fallback key: none of them close SEC-H1 on their own.
+ */
+
+/*
+ * Authenticates broken_dest||broken_next_hop with label "bramble-rerr-v2",
+ * deliberately excluding reporter_addr and header.packet_id: every
+ * forwarder re-originates a RERR (mesh_task.c's send_rerr) with its own
+ * reporter_addr and a fresh packet_id while passing broken_dest/
+ * broken_next_hop through unchanged, so those two are the only
+ * origin-stable fields. rerr_sign fills r->auth_hmac; call it once, right
+ * before serializing (both on first detection and on every
+ * re-origination, since send_rerr builds a fresh struct each time).
+ * rerr_verify recomputes the same MAC and constant-time-compares; returns
+ * nonzero (true) iff it matches.
+ */
+void rerr_sign(bramble_rerr_t* r);
+int rerr_verify(const bramble_rerr_t* r);
+
+/*
+ * Task 3.5 (NEW-SEC-8, STAGED, NOT closed: see network_key.h). Authenticates
+ * src_addr||ack_packet_id with label "bramble-ack-v2", excluding
+ * relay_path/hop_count/header.hop_limit: mesh_task.c's forward_ack grows
+ * relay_path, increments hop_count, and decrements hop_limit on every
+ * relay hop, so those three are the only per-hop-mutated fields. auth_hmac
+ * lives at a fixed, hop_count-independent wire offset (packet.h), so a
+ * verifier never has to trust the unauthenticated hop_count to find the
+ * tag before checking it. ack_sign fills a->auth_hmac; call it once, in
+ * the ACK builder (send_ack), before serializing. ack_verify recomputes
+ * and constant-time-compares. Gates BOTH observable effects of a valid
+ * ACK, cancelling retransmission (pending_ack_remove) and marking a
+ * message delivered (msg_store_update_status), plus forwarding: callers
+ * must reject before any of those, on both the for-us and forward
+ * branches of handle_ack.
+ */
+void ack_sign(bramble_ack_t* a);
+int ack_verify(const bramble_ack_t* a);
+
+/*
+ * Task 3.5 (NEW-SEC-8, STAGED, NOT closed). Authenticates
+ * src_addr||orig_packet_id with label "bramble-receipt-v2", excluding
+ * relay_path/hop_count/header.hop_limit for the same reason as ack_sign/
+ * verify above (forward_delivery_receipt grows relay_path, increments
+ * hop_count, decrements hop_limit per hop). Same fixed-offset,
+ * constant-time-compare contract.
+ */
+void receipt_sign(bramble_delivery_receipt_t* r);
+int receipt_verify(const bramble_delivery_receipt_t* r);
+
+#endif

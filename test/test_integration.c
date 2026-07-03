@@ -234,7 +234,11 @@ void test_location_tx_uses_dedicated_packet_type(void) {
     bramble_header_t hdr = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_LOCATION,
-        .flags = (uint8_t)(LOCATION_TIER_COARSE << FLAG_TIER_SHIFT),
+        /* Tier lives in the ciphertext now (SEC-C1, Task 2.1), not the
+         * flags byte; this test only asserts the packet TYPE and binary
+         * (non-JSON) payload shape, so the real channel-path flags value
+         * stands in here. */
+        .flags = FLAG_ENCRYPT | FLAG_CHANNEL,
         .hop_limit = 3,
         .dest_addr = ADDR_B,
         .packet_id = 0x01020304,

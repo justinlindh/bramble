@@ -26,15 +26,31 @@ bramble_beacon_t beacon_build(uint32_t my_addr, uint32_t pubkey_hash, uint16_t u
 }
 
 void beacon_compute_hmac(bramble_beacon_t* beacon, const uint8_t* shared_key, size_t key_len) {
-    /* Serialize beacon with zeroed HMAC, then compute over the pre-HMAC portion.
-     * Buffer must be large enough for name extension (BEACON_SIZE + 1 + BEACON_NAME_MAX). */
+    /* Serialize beacon with zeroed HMAC, then compute over everything
+     * EXCEPT auth_hmac itself. Buffer must be large enough for name
+     * extension (BEACON_SIZE + 1 + BEACON_NAME_MAX). */
     uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
     memset(beacon->auth_hmac, 0, sizeof(beacon->auth_hmac));
     bramble_beacon_serialize(beacon, buf, sizeof(buf));
-    /* HMAC over everything before auth_hmac: BEACON_SIZE - sizeof(auth_hmac) = 32 bytes */
-    size_t hmac_len = BEACON_SIZE - sizeof(beacon->auth_hmac);
+
+    /* Fix 4 (red-team panel): cover the optional name field too, not just
+     * the fixed 32 bytes before auth_hmac. bramble_beacon_serialize lays
+     * the wire out as [fixed prefix (32) | auth_hmac (16) | name_len +
+     * name (0 or 1+nlen)], so the HMAC input is the fixed prefix
+     * concatenated with the name region, skipping over auth_hmac's own
+     * 16 bytes in the middle (which must stay excluded from their own
+     * coverage). Without this, an attacker rewrites any captured
+     * beacon's name and it still verifies: the display name was
+     * spoofable even under a provisioned key. */
+    size_t prefix_len = BEACON_SIZE - sizeof(beacon->auth_hmac); /* 32: before auth_hmac */
+    size_t name_wire_len = bramble_beacon_wire_size(beacon) - BEACON_SIZE; /* 0, or 1+nlen */
+    uint8_t hmac_input[(BEACON_SIZE - 16) + 1 + BEACON_NAME_MAX];
+    memcpy(hmac_input, buf, prefix_len);
+    if (name_wire_len > 0) {
+        memcpy(hmac_input + prefix_len, buf + BEACON_SIZE, name_wire_len);
+    }
     uint8_t full_hmac[32];
-    crypto_hmac_sha256(shared_key, key_len, buf, hmac_len, full_hmac);
+    crypto_hmac_sha256(shared_key, key_len, hmac_input, prefix_len + name_wire_len, full_hmac);
     memcpy(beacon->auth_hmac, full_hmac, sizeof(beacon->auth_hmac));
 }
 
@@ -43,5 +59,11 @@ bool beacon_verify_hmac(const bramble_beacon_t* beacon, const uint8_t* shared_ke
     uint8_t saved[sizeof(copy.auth_hmac)];
     memcpy(saved, copy.auth_hmac, sizeof(saved));
     beacon_compute_hmac(&copy, shared_key, key_len);
-    return memcmp(saved, copy.auth_hmac, sizeof(saved)) == 0;
+    /* SEC-H2 (Task 3.4): constant-time compare, OR-accumulate XOR with no
+     * early exit, unlike memcmp. The non-constant-time compare was named
+     * as part of SEC-H2's root cause. */
+    uint8_t r = 0;
+    for (size_t i = 0; i < sizeof(saved); i++)
+        r |= saved[i] ^ copy.auth_hmac[i];
+    return r == 0;
 }

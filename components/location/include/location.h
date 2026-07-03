@@ -15,6 +15,23 @@
 #define LOCATION_COARSE_SIZE 5   /* grid_lat(2)+grid_lon(2)+ts_low(1) */
 #define LOCATION_PRESENCE_SIZE 1 /* status(1) */
 
+/*
+ * SEC-C1 (Task 2.1, RFC section 2, M11): the sharing tier moves into the
+ * encrypted plaintext instead of the cleartext header flags, and every
+ * tier is padded to one canonical inner size so an observer cannot infer
+ * the tier (and therefore how much a sender trusts the recipient) from
+ * ciphertext length. LOCATION_INNER_TIER_OFFSET is the byte offset of the
+ * tier prefix within the inner plaintext (channel path: right after
+ * channel_msg's own CHANNEL_MSG_OVERHEAD framing; session path: byte 0,
+ * dm_session_encrypt has no framing of its own). L_LOC_INNER is that
+ * tier(1) prefix plus the position payload padded up to LOCATION_FULL_SIZE
+ * (the largest tier), so every tier (PRESENCE/COARSE/FULL) produces the
+ * same L_LOC_INNER-byte plaintext regardless of how few real bytes the
+ * chosen tier actually needs.
+ */
+#define LOCATION_INNER_TIER_OFFSET 0
+#define L_LOC_INNER (1 + LOCATION_FULL_SIZE) /* 18: tier(1) + padded position payload */
+
 #define LOCATION_MAX_CONTACTS 16
 #define LOCATION_DEFAULT_INTERVAL_MS 300000 /* 5 minutes */
 #define LOCATION_DEFAULT_INTERVAL_S 300     /* 5 minutes */
@@ -100,6 +117,24 @@ int location_deserialize_coarse(const uint8_t* buf, size_t len, bramble_position
 int location_serialize_presence(const bramble_position_t* pos, uint8_t* buf, size_t buf_len);
 int location_serialize_for_tier(const bramble_position_t* pos, uint8_t tier, uint8_t* buf,
                                 size_t buf_len);
+
+/*
+ * SEC-C1 RX (Task 2.2): the decrypt-mechanism-agnostic tail, shared by both
+ * handle_location's channel path (after channel_msg_decrypt) and its
+ * session path (after dm_session_decrypt). Deliberately kept dependency-free
+ * (no channel_msg.h / dm_session.h include here): it only takes
+ * already-authenticated plaintext bytes, reads the tier from byte
+ * LOCATION_INNER_TIER_OFFSET (never the header flags), and parses the
+ * position with the TIER-APPROPRIATE deserialize length, ignoring the
+ * trailing canonical L_LOC_INNER pad. Returns 0 on success (fills tier_out
+ * and pos_out), -1 on any parse failure. The decrypt-specific glue (trial
+ * against channels, or a session lookup) lives in mesh_task.c, which
+ * already depends on both channel_msg.h and dm_session.h; adding either as
+ * a REQUIRES of the location component here rippled into unrelated host
+ * test targets that only need location's other, decrypt-independent API.
+ */
+int location_parse_inner(const uint8_t* plaintext, size_t plaintext_len, uint8_t* tier_out,
+                         bramble_position_t* pos_out);
 
 /* Cache */
 int location_cache_update(location_manager_t* mgr, uint32_t peer_addr,

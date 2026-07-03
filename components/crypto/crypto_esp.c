@@ -118,6 +118,11 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
     mbedtls_mpi_free(&z);
     mbedtls_ecp_point_free(&Qp);
     mbedtls_ecp_point_free(&R);
+    /* RFC 7748 contributory check: mbedtls does not reject a low-order peer
+     * point on its own, so a malicious/degenerate peer_public_key can force
+     * an all-zero shared_secret here. Reject it explicitly. */
+    if (ret == 0 && crypto_x25519_check_shared(shared_secret) != 0)
+        ret = -1;
     return ret;
 }
 
