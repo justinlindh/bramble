@@ -41,3 +41,59 @@ int rerr_verify(const bramble_rerr_t* r) {
     network_key_mac("bramble-rerr-v2", buf, sizeof(buf), expect);
     return ct_eq(expect, r->auth_hmac, sizeof(expect));
 }
+
+/* src_addr(4) || ack_packet_id(4), big-endian: the 2 origin-stable fields,
+ * exactly excluding relay_path/hop_count/header.hop_limit (the fields
+ * forward_ack mutates on every relay hop). */
+static void ack_build_auth_buf(const bramble_ack_t* a, uint8_t buf[8]) {
+    buf[0] = (uint8_t)(a->src_addr >> 24);
+    buf[1] = (uint8_t)(a->src_addr >> 16);
+    buf[2] = (uint8_t)(a->src_addr >> 8);
+    buf[3] = (uint8_t)a->src_addr;
+    buf[4] = (uint8_t)(a->ack_packet_id >> 24);
+    buf[5] = (uint8_t)(a->ack_packet_id >> 16);
+    buf[6] = (uint8_t)(a->ack_packet_id >> 8);
+    buf[7] = (uint8_t)a->ack_packet_id;
+}
+
+void ack_sign(bramble_ack_t* a) {
+    uint8_t buf[8];
+    ack_build_auth_buf(a, buf);
+    network_key_mac("bramble-ack-v2", buf, sizeof(buf), a->auth_hmac);
+}
+
+int ack_verify(const bramble_ack_t* a) {
+    uint8_t buf[8];
+    ack_build_auth_buf(a, buf);
+    uint8_t expect[8];
+    network_key_mac("bramble-ack-v2", buf, sizeof(buf), expect);
+    return ct_eq(expect, a->auth_hmac, sizeof(expect));
+}
+
+/* src_addr(4) || orig_packet_id(4), big-endian: the 2 origin-stable
+ * fields, exactly excluding relay_path/hop_count/header.hop_limit (the
+ * fields forward_delivery_receipt mutates on every relay hop). */
+static void receipt_build_auth_buf(const bramble_delivery_receipt_t* r, uint8_t buf[8]) {
+    buf[0] = (uint8_t)(r->src_addr >> 24);
+    buf[1] = (uint8_t)(r->src_addr >> 16);
+    buf[2] = (uint8_t)(r->src_addr >> 8);
+    buf[3] = (uint8_t)r->src_addr;
+    buf[4] = (uint8_t)(r->orig_packet_id >> 24);
+    buf[5] = (uint8_t)(r->orig_packet_id >> 16);
+    buf[6] = (uint8_t)(r->orig_packet_id >> 8);
+    buf[7] = (uint8_t)r->orig_packet_id;
+}
+
+void receipt_sign(bramble_delivery_receipt_t* r) {
+    uint8_t buf[8];
+    receipt_build_auth_buf(r, buf);
+    network_key_mac("bramble-receipt-v2", buf, sizeof(buf), r->auth_hmac);
+}
+
+int receipt_verify(const bramble_delivery_receipt_t* r) {
+    uint8_t buf[8];
+    receipt_build_auth_buf(r, buf);
+    uint8_t expect[8];
+    network_key_mac("bramble-receipt-v2", buf, sizeof(buf), expect);
+    return ct_eq(expect, r->auth_hmac, sizeof(expect));
+}

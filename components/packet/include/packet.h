@@ -56,17 +56,19 @@
 /* Sizes */
 #define HEADER_SIZE 12
 #define ACK_BASE_SIZE                                                                              \
-    23 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) */
+    31 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) + auth_hmac(8); \
+        * was 23, +8 for auth_hmac (NEW-SEC-8, Task 3.5, staged) */
 #define ACK_MAX_HOPS 8
-#define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 23 + 32 = 55 */
+#define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 31 + 32 = 63 */
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
 #define RREP_SIZE 34
 #define RERR_SIZE 32 /* was 24; +8 for auth_hmac (SEC-H1, Task 3.3, staged) */
 #define BEACON_SIZE 48
 #define KEY_EXCHANGE_SIZE 101
-#define DELIVERY_RECEIPT_MIN_SIZE 22
-#define DELIVERY_RECEIPT_MAX_SIZE 54
+#define DELIVERY_RECEIPT_MIN_SIZE                                                                 \
+    30 /* was 22; +8 for auth_hmac (NEW-SEC-8, Task 3.5, staged) */
+#define DELIVERY_RECEIPT_MAX_SIZE 62 /* was 54; +8 for auth_hmac */
 
 #define DELIVERY_RECEIPT_MAX_HOPS 8
 
@@ -87,6 +89,13 @@ typedef struct {
     uint8_t ack_flags;
     int8_t rssi_at_dest;
     uint8_t hop_count;                 /* number of addresses in relay_path */
+    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h). Covers
+     * src_addr||ack_packet_id only; excludes relay_path/hop_count/
+     * hop_limit, which forward_ack mutates on every relay hop. Placed
+     * BEFORE relay_path (a fixed, hop_count-independent wire offset) so a
+     * verifier never has to trust the unauthenticated hop_count to locate
+     * the tag. */
+    uint8_t auth_hmac[8];
     uint32_t relay_path[ACK_MAX_HOPS]; /* hop trail: [dest, relay1, relay2, ...] */
 } bramble_ack_t;
 
@@ -163,6 +172,12 @@ typedef struct {
     uint32_t orig_packet_id;
     uint8_t hop_count;
     uint8_t total_latency;
+    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h). Covers
+     * src_addr||orig_packet_id only; excludes relay_path/hop_count/
+     * hop_limit, which forward_delivery_receipt mutates on every relay
+     * hop. Placed BEFORE relay_path (a fixed, hop_count-independent wire
+     * offset), same rationale as bramble_ack_t's auth_hmac above. */
+    uint8_t auth_hmac[8];
     uint32_t relay_path[DELIVERY_RECEIPT_MAX_HOPS];
 } bramble_delivery_receipt_t;
 

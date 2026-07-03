@@ -66,8 +66,10 @@ void test_ack_roundtrip(void) {
         .header = make_header(PKT_TYPE_ACK),
         .src_addr = 0xAABBCCDD, .ack_packet_id = 0x11223344,
         .ack_flags = 0x03, .rssi_at_dest = -72,
+        .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04},
+        .hop_count = 2, .relay_path = {0x10101010, 0x20202020},
     };
-    uint8_t buf[ACK_SIZE];
+    uint8_t buf[ACK_MAX_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p, buf, sizeof(buf)));
     bramble_ack_t out;
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_deserialize(&out, buf, sizeof(buf)));
@@ -75,6 +77,40 @@ void test_ack_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.ack_packet_id, out.ack_packet_id);
     TEST_ASSERT_EQUAL(p.ack_flags, out.ack_flags);
     TEST_ASSERT_EQUAL(p.rssi_at_dest, out.rssi_at_dest);
+    /* auth_hmac lives at a fixed offset BEFORE relay_path (NEW-SEC-8):
+     * round-tripping both together, with a non-zero hop_count, proves the
+     * two fields don't collide or get corrupted at the new layout. */
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, sizeof(p.auth_hmac));
+    TEST_ASSERT_EQUAL(p.hop_count, out.hop_count);
+    TEST_ASSERT_EQUAL_HEX32(p.relay_path[0], out.relay_path[0]);
+    TEST_ASSERT_EQUAL_HEX32(p.relay_path[1], out.relay_path[1]);
+}
+
+/* auth_hmac must sit at the SAME wire offset regardless of hop_count
+ * (NEW-SEC-8): a verifier reads it before it can trust hop_count at all.
+ * Serializes the same auth_hmac under two different hop_counts and
+ * confirms it lands at the identical byte offset both times. */
+void test_ack_auth_hmac_offset_independent_of_hop_count(void) {
+    bramble_ack_t p_zero_hops = {
+        .header = make_header(PKT_TYPE_ACK),
+        .src_addr = 0x1, .ack_packet_id = 0x2,
+        .auth_hmac = {1, 2, 3, 4, 5, 6, 7, 8},
+        .hop_count = 0,
+    };
+    bramble_ack_t p_many_hops = p_zero_hops;
+    p_many_hops.hop_count = 4;
+    for (int i = 0; i < 4; i++) p_many_hops.relay_path[i] = 0x30000000 + i;
+
+    uint8_t buf_zero[ACK_MAX_SIZE];
+    uint8_t buf_many[ACK_MAX_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p_zero_hops, buf_zero, sizeof(buf_zero)));
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p_many_hops, buf_many, sizeof(buf_many)));
+
+    /* Fixed offset: HEADER_SIZE + src(4) + ack_pkt_id(4) + flags(1) +
+     * rssi(1) + hop_count(1) = HEADER_SIZE + 11. */
+    size_t hmac_offset = HEADER_SIZE + 11;
+    TEST_ASSERT_EQUAL_MEMORY(buf_zero + hmac_offset, buf_many + hmac_offset, 8);
+    TEST_ASSERT_EQUAL_MEMORY(p_zero_hops.auth_hmac, buf_many + hmac_offset, 8);
 }
 
 void test_ack_buffer_too_small(void) {
@@ -219,6 +255,7 @@ void test_delivery_receipt_roundtrip(void) {
         .header = make_header(PKT_TYPE_DELIVERY_RECEIPT),
         .src_addr = 0x11223344, .orig_packet_id = 0x55667788,
         .hop_count = 3, .total_latency = 200,
+        .auth_hmac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x10, 0x20},
         .relay_path = {0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC},
     };
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
@@ -229,6 +266,10 @@ void test_delivery_receipt_roundtrip(void) {
     TEST_ASSERT_EQUAL_HEX32(p.orig_packet_id, out.orig_packet_id);
     TEST_ASSERT_EQUAL(p.hop_count, out.hop_count);
     TEST_ASSERT_EQUAL(p.total_latency, out.total_latency);
+    /* auth_hmac lives at a fixed offset BEFORE relay_path (NEW-SEC-8):
+     * round-tripping both together, with a non-zero hop_count, proves the
+     * two fields don't collide or get corrupted at the new layout. */
+    TEST_ASSERT_EQUAL_MEMORY(p.auth_hmac, out.auth_hmac, sizeof(p.auth_hmac));
     for (int i = 0; i < p.hop_count; i++) {
         TEST_ASSERT_EQUAL_HEX32(p.relay_path[i], out.relay_path[i]);
     }
@@ -258,6 +299,7 @@ int main(void) {
     RUN_TEST(test_header_buffer_too_small);
     RUN_TEST(test_header_big_endian_wire);
     RUN_TEST(test_ack_roundtrip);
+    RUN_TEST(test_ack_auth_hmac_offset_independent_of_hop_count);
     RUN_TEST(test_ack_buffer_too_small);
     RUN_TEST(test_rreq_roundtrip);
     RUN_TEST(test_rrep_roundtrip);

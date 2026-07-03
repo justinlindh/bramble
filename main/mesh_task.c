@@ -1474,6 +1474,10 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         .hop_count = 1,
         .relay_path = { s_identity->address },  /* destination is first hop */
     };
+    /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
+     * hop_count/hop_limit is set (those are excluded from the MAC and
+     * legitimately change per relay hop). */
+    ack_sign(&ack);
 
     uint8_t buf[64];
     esp_err_t err = bramble_ack_serialize(&ack, buf, sizeof(buf));
@@ -1527,6 +1531,15 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     esp_err_t err = bramble_ack_deserialize(&ack, data, len);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ACK deserialize failed");
+        return;
+    }
+
+    /* NEW-SEC-8 (STAGED, see network_key.h): verify before ANY effect of
+     * this ACK, on both branches below. A forged ACK must not cancel
+     * retransmission, mark a message delivered, or be forwarded. */
+    if (!ack_verify(&ack)) {
+        ESP_LOGW(TAG, "ACK auth failed pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
+                 ack.src_addr);
         return;
     }
 
@@ -1626,6 +1639,14 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
     bramble_delivery_receipt_t receipt;
     if (bramble_delivery_receipt_deserialize(&receipt, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Delivery receipt deserialize failed");
+        return;
+    }
+
+    /* NEW-SEC-8 (STAGED, see network_key.h): verify before acting, on
+     * both branches below. */
+    if (!receipt_verify(&receipt)) {
+        ESP_LOGW(TAG, "Delivery receipt auth failed pkt=%08" PRIX32 " src=%08" PRIX32,
+                 receipt.orig_packet_id, receipt.src_addr);
         return;
     }
 
