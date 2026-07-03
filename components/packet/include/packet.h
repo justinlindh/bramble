@@ -62,7 +62,7 @@
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
 #define RREP_SIZE 34
-#define RERR_SIZE 24
+#define RERR_SIZE 32 /* was 24; +8 for auth_hmac (SEC-H1, Task 3.3, staged) */
 #define BEACON_SIZE 48
 #define KEY_EXCHANGE_SIZE 101
 #define DELIVERY_RECEIPT_MIN_SIZE 22
@@ -115,6 +115,11 @@ typedef struct {
     uint32_t reporter_addr;
     uint32_t broken_dest;
     uint32_t broken_next_hop;
+    /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h). Covers
+     * broken_dest||broken_next_hop only, the two origin-stable fields;
+     * excludes reporter_addr and header.packet_id, which every forwarder
+     * legitimately rewrites on re-origination (send_rerr, mesh_task.c). */
+    uint8_t auth_hmac[8];
 } bramble_rerr_t;
 
 #define BEACON_NAME_MAX 16

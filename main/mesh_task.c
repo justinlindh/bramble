@@ -23,6 +23,7 @@
 #include "replay_deferred.h"
 #include "dm_session.h"
 #include "network_key.h"
+#include "routing_auth.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -2024,10 +2025,15 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
         .broken_dest = broken_dest,
         .broken_next_hop = broken_next_hop,
     };
+    /* SEC-H1 (STAGED): re-signed on every call, including re-origination,
+     * since this function builds a fresh struct each time (fresh
+     * reporter_addr/packet_id) but broken_dest/broken_next_hop are the
+     * caller-supplied, origin-stable values the MAC covers. */
+    rerr_sign(&rerr);
     uint8_t buf[64];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
-        if (mesh_tx(buf, HEADER_SIZE + 12, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+        if (mesh_tx(buf, HEADER_SIZE + 20, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RERR denied by airtime budget");
         }
     }
@@ -2222,6 +2228,15 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
     bramble_rerr_t rerr;
     if (bramble_rerr_deserialize(&rerr, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid RERR packet");
+        return;
+    }
+
+    /* SEC-H1 (STAGED, see network_key.h): verify before ANY route
+     * teardown. An unauthenticated RERR must never break a route: reject
+     * before route_lookup/route_marked_broken/fastfail run at all. */
+    if (!rerr_verify(&rerr)) {
+        ESP_LOGW(TAG, "RERR auth failed dest=%08" PRIX32 " broken_hop=%08" PRIX32,
+                 rerr.broken_dest, rerr.broken_next_hop);
         return;
     }
 

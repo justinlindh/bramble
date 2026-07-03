@@ -188,6 +188,7 @@ esp_err_t bramble_rerr_serialize(const bramble_rerr_t* p, uint8_t* buf, size_t l
     put_be32(buf + B, p->reporter_addr);
     put_be32(buf + B + 4, p->broken_dest);
     put_be32(buf + B + 8, p->broken_next_hop);
+    memcpy(buf + B + 12, p->auth_hmac, 8);
     return ESP_OK;
 }
 esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t len) {
@@ -199,6 +200,7 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t
     p->reporter_addr = get_be32(buf + B);
     p->broken_dest = get_be32(buf + B + 4);
     p->broken_next_hop = get_be32(buf + B + 8);
+    memcpy(p->auth_hmac, buf + B + 12, 8);
     return ESP_OK;
 }
 
