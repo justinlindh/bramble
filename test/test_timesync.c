@@ -140,6 +140,65 @@ void test_get_network_time(void) {
     TEST_ASSERT_EQUAL_INT64(2100, nt);
 }
 
+/* ── Bootstrap clamp (NEW-SEC-4, Task 3.5, STAGED) ─────────────────── */
+
+/*
+ * The key regression case. Two honest sources have already agreed on an
+ * offset near 100 (well within MAX_TIME_SHIFT_MS of each other); a third
+ * proposal wildly inconsistent with that (an attacker, or a misconfigured
+ * node) must be rejected as an outlier rather than silently averaged into
+ * the quorum, since without this fix a lone bad proposal reaching
+ * CORROBORATION_REQUIRED distinct sources would commit immediately.
+ */
+void test_rejects_offset_inconsistent_with_pending_quorum(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000); /* offset ~100 */
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000); /* offset ~100 */
+
+    /* Wildly inconsistent: offset ~49000, far beyond MAX_TIME_SHIFT_MS
+     * (2000) from the ~100 consensus already pending. */
+    int rc = timesync_handle_sync(&ts, 50000, 1, 0xCCCC, 1000);
+    TEST_ASSERT_EQUAL_INT(-2, rc);
+    TEST_ASSERT_FALSE(ts.synchronized);
+
+    /* A genuinely consistent third source still completes the quorum and
+     * commits normally: the fix rejects disagreement, not corroboration
+     * itself. */
+    rc = timesync_handle_sync(&ts, 1080, 1, 0xDDDD, 1000);
+    TEST_ASSERT_EQUAL_INT(1, rc);
+    TEST_ASSERT_TRUE(ts.synchronized);
+}
+
+/* The very first pending entry has nothing to compare against yet and must
+ * always be admitted, no matter how far from zero: remote_time_ms is real
+ * network time while local_now_ms is raw uptime since boot, so every
+ * legitimate first proposal is naturally far from a zero baseline. */
+void test_first_pending_entry_always_admitted_regardless_of_magnitude(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    int rc = timesync_handle_sync(&ts, 1700000000000LL, 1, 0xAAAA, 5000);
+    TEST_ASSERT_EQUAL_INT(0, rc); /* accepted (pending), not yet committed */
+    TEST_ASSERT_EQUAL_INT(1, ts.pending_count);
+}
+
+void test_is_confident_false_until_corroborated(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts));
+
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts));
+
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
+    TEST_ASSERT_FALSE(timesync_is_confident(&ts));
+
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    TEST_ASSERT_TRUE(timesync_is_confident(&ts));
+}
+
 /* ── Pool overflow ──────────────────────────────────────────────── */
 
 void test_pool_overflow_evicts_oldest(void) {
@@ -179,5 +238,8 @@ int main(void) {
     RUN_TEST(test_stale_entries_expire);
     RUN_TEST(test_get_network_time);
     RUN_TEST(test_pool_overflow_evicts_oldest);
+    RUN_TEST(test_rejects_offset_inconsistent_with_pending_quorum);
+    RUN_TEST(test_first_pending_entry_always_admitted_regardless_of_magnitude);
+    RUN_TEST(test_is_confident_false_until_corroborated);
     return UNITY_END();
 }

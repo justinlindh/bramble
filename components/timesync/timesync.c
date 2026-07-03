@@ -73,9 +73,36 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
 
     int64_t proposed_offset = remote_time_ms - (int64_t)local_now_ms;
 
-    /* Reject large shifts when already synchronized */
     if (ts->synchronized) {
+        /* Reject large shifts once already synchronized. */
         int64_t shift = proposed_offset - ts->offset_ms;
+        if (shift < 0)
+            shift = -shift;
+        if (shift > MAX_TIME_SHIFT_MS) {
+            return -2;
+        }
+    } else if (ts->pending_count > 0) {
+        /* NEW-SEC-4 (Task 3.5, STAGED, see network_key.h): before the
+         * first sync commits, ts->offset_ms is not yet meaningful (it is
+         * still its zero-init value), so a lone huge proposal cannot be
+         * judged against it the way the synchronized branch above does.
+         * remote_time_ms is real epoch-ish network time while
+         * local_now_ms is raw uptime since boot, so EVERY legitimate
+         * first sync proposes an offset far from zero; clamping against
+         * zero would permanently block bootstrap. Instead this clamps a
+         * NEW proposal against the CONSENSUS of already-pending, DISTINCT
+         * sources: a proposal wildly inconsistent with what other sources
+         * have already reported is rejected as an outlier before it can
+         * enter the pool and skew the weighted average, rather than
+         * silently averaged in. A quorum (CORROBORATION_REQUIRED distinct
+         * sources) that genuinely agrees with each other still commits
+         * normally; only a proposal that disagrees with an existing
+         * quorum-in-progress is rejected here. The very first pending
+         * entry (pending_count == 0) has nothing to compare against yet
+         * and is always admitted; every later entry is judged against it. */
+        uint8_t unused_stratum;
+        int64_t consensus = compute_weighted_offset(ts, &unused_stratum);
+        int64_t shift = proposed_offset - consensus;
         if (shift < 0)
             shift = -shift;
         if (shift > MAX_TIME_SHIFT_MS) {

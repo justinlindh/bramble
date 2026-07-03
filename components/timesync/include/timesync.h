@@ -62,9 +62,15 @@ uint8_t timesync_get_stratum(const timesync_state_t* ts);
 
 /*
  * Whether network time is trustworthy enough to gate a security decision on
- * (e.g. deferred replay acceptance, NEW-SEC-4). Placeholder for Task 3.5's
- * stratum/corroboration-aware confidence signal; for now this mirrors
- * `synchronized` (at least one corroborated sync has committed).
+ * (e.g. deferred replay acceptance in handle_data, NEW-SEC-4). Task 3.5:
+ * this is the real signal, not a placeholder. `synchronized` can only ever
+ * become true via timesync_handle_sync's commit path, which requires
+ * CORROBORATION_REQUIRED distinct sources to have already agreed (within
+ * MAX_TIME_SHIFT_MS of each other once a quorum exists; see the bootstrap
+ * clamp in timesync_handle_sync), so "synchronized" already IS
+ * "synchronized and corroborated": there is no path to true that skips
+ * corroboration. It never reverts to false once achieved (no de-sync
+ * mechanism exists), which callers should be aware of.
  */
 bool timesync_is_confident(const timesync_state_t* ts);
 

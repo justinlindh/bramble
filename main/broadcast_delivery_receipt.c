@@ -1,6 +1,7 @@
 #include "broadcast_delivery_receipt.h"
 
 #include "packet.h"
+#include "routing_auth.h"
 
 /* Receipt slot timing — controls how delivery receipts from multiple nodes
  * spread out in time after receiving the same broadcast.  Wider spacing
@@ -99,6 +100,10 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
         .total_latency = 0,
         .relay_path = { local_addr },
     };
+    /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
+     * hop_count/hop_limit is set (excluded from the MAC, legitimately
+     * change per relay hop). */
+    receipt_sign(&receipt);
 
     esp_err_t err = bramble_delivery_receipt_serialize(&receipt, buf, buf_len);
     if (err != ESP_OK) {

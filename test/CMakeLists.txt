@@ -146,6 +146,20 @@ target_include_directories(test_rerr_auth PRIVATE
 )
 target_link_libraries(test_rerr_auth ssl crypto)
 
+# ACK / delivery receipt authentication: MAC over src_addr/ack_packet_id
+# (or orig_packet_id) only, excluding the per-hop relay_path/hop_count/
+# hop_limit (Task 3.5 / NEW-SEC-8, staged).
+add_executable(test_ack_auth
+    test_ack_auth.c
+    unity/unity.c
+)
+target_include_directories(test_ack_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+)
+target_link_libraries(test_ack_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
@@ -665,6 +679,9 @@ add_executable(test_broadcast_delivery_receipt
     stubs/esp_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/broadcast_delivery_receipt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/routing_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -806,10 +823,14 @@ target_include_directories(test_broadcast_delivery_receipt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_compile_definitions(test_broadcast_delivery_receipt PRIVATE
     UNIT_TEST=1
 )
+target_link_libraries(test_broadcast_delivery_receipt ssl crypto)
 
 # NMEA parser tests (pure C, no ESP-IDF deps)
 add_executable(test_nmea_parser
