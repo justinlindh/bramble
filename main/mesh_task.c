@@ -2130,15 +2130,36 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
         .broken_dest = broken_dest,
         .broken_next_hop = broken_next_hop,
     };
+    /* ws 1.3b: every re-origination draws its own fresh seq (unlike RREP's
+     * origin-stable seq, RERR's seq is per-hop, matching reporter_addr).
+     * Fail-closed: no seq means no RERR goes out this call; the caller's
+     * route-broken detection or forwarding chain simply doesn't propagate
+     * this hop, rather than shipping an unfresh/replayable report. */
+    uint64_t rerr_seq;
+    if (control_seq_next(&rerr_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping RERR for broken_dest=%08" PRIX32,
+                 broken_dest);
+        return;
+    }
+    rerr.seq[0] = (uint8_t)(rerr_seq >> 40);
+    rerr.seq[1] = (uint8_t)(rerr_seq >> 32);
+    rerr.seq[2] = (uint8_t)(rerr_seq >> 24);
+    rerr.seq[3] = (uint8_t)(rerr_seq >> 16);
+    rerr.seq[4] = (uint8_t)(rerr_seq >> 8);
+    rerr.seq[5] = (uint8_t)rerr_seq;
     /* SEC-H1 (STAGED): re-signed on every call, including re-origination,
      * since this function builds a fresh struct each time (fresh
-     * reporter_addr/packet_id) but broken_dest/broken_next_hop are the
-     * caller-supplied, origin-stable values the MAC covers. */
+     * reporter_addr/packet_id/seq), and reporter_addr/seq are now
+     * MAC-covered alongside the origin-stable broken_dest/broken_next_hop
+     * (ws 1.3b). */
     rerr_sign(&rerr);
     uint8_t buf[64];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
-        if (mesh_tx(buf, HEADER_SIZE + 20, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+        /* RERR_SIZE (the macro), not a hand-counted offset: RREP's
+         * equivalent hand-counted offset drifted 3 bytes short of its
+         * struct for years before being caught in ws 1.3b Task 2. */
+        if (mesh_tx(buf, RERR_SIZE, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RERR denied by airtime budget");
         }
     }
@@ -2379,6 +2400,20 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 
     ESP_LOGW(TAG, "RX RERR: dest=%08" PRIX32 " broken_hop=%08" PRIX32,
              rerr.broken_dest, rerr.broken_next_hop);
+
+    /* ws 1.3b: replay check on the authenticated (reporter_addr, seq) pair
+     * (both MAC-covered as of this change, so an attacker cannot dodge the
+     * window by mutating either). Checked after rerr_verify and strictly
+     * before any teardown effect (route_marked_broken, forwarding,
+     * failfast), so a replayed RERR never re-tears-down a live route. */
+    uint64_t rerr_seq = ((uint64_t)rerr.seq[0] << 40) | ((uint64_t)rerr.seq[1] << 32) |
+                        ((uint64_t)rerr.seq[2] << 24) | ((uint64_t)rerr.seq[3] << 16) |
+                        ((uint64_t)rerr.seq[4] << 8) | (uint64_t)rerr.seq[5];
+    if (!control_replay_ok(rerr.reporter_addr, rerr_seq)) {
+        ESP_LOGW(TAG, "RERR replay reporter=%08" PRIX32 " dest=%08" PRIX32, rerr.reporter_addr,
+                 rerr.broken_dest);
+        return;
+    }
 
     /* Invalidate route if it uses the broken next hop */
     route_entry_t *route = route_lookup(&s_routes, rerr.broken_dest);

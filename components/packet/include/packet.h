@@ -63,7 +63,7 @@
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
 #define RREP_SIZE 40 /* was 34; +6 for seq (ws 1.3b control-plane freshness) */
-#define RERR_SIZE 32 /* was 24; +8 for auth_hmac (SEC-H1, Task 3.3, staged) */
+#define RERR_SIZE 38 /* was 32; +6 for seq (ws 1.3b control-plane freshness) */
 #define BEACON_SIZE 48
 #define KEY_EXCHANGE_SIZE 101
 #define DELIVERY_RECEIPT_MIN_SIZE 30 /* was 22; +8 for auth_hmac (NEW-SEC-8, Task 3.5, staged) */
@@ -128,11 +128,18 @@ typedef struct {
     uint32_t reporter_addr;
     uint32_t broken_dest;
     uint32_t broken_next_hop;
-    /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h). Covers
-     * broken_dest||broken_next_hop only, the two origin-stable fields;
-     * excludes reporter_addr and header.packet_id, which every forwarder
-     * legitimately rewrites on re-origination (send_rerr, mesh_task.c). */
+    /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h), extended by
+     * ws 1.3b. Covers reporter_addr||broken_dest||broken_next_hop||seq;
+     * excludes only header.packet_id, which every forwarder legitimately
+     * rewrites on re-origination (send_rerr, mesh_task.c). reporter_addr
+     * is MAC-covered because every forwarder re-signs with its OWN
+     * reporter_addr on every re-origination (see routing_auth.h). */
     uint8_t auth_hmac[8];
+    /* ws 1.3b: 48-bit origin sequence, freshly drawn by EACH hop on every
+     * re-origination (control_seq_next in mesh_task.c's send_rerr), not
+     * origin-stable like RREP's. MAC-covered; replay-keyed on
+     * (reporter_addr, seq), both authenticated. */
+    uint8_t seq[6];
 } bramble_rerr_t;
 
 #define BEACON_NAME_MAX 16

@@ -15,28 +15,38 @@ static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
     return acc == 0;
 }
 
-/* broken_dest(4) || broken_next_hop(4), big-endian: the 2 origin-stable
- * fields, exactly excluding reporter_addr and header.packet_id (the two
- * fields every forwarder rewrites on re-origination). */
-static void rerr_build_auth_buf(const bramble_rerr_t* r, uint8_t buf[8]) {
-    buf[0] = (uint8_t)(r->broken_dest >> 24);
-    buf[1] = (uint8_t)(r->broken_dest >> 16);
-    buf[2] = (uint8_t)(r->broken_dest >> 8);
-    buf[3] = (uint8_t)r->broken_dest;
-    buf[4] = (uint8_t)(r->broken_next_hop >> 24);
-    buf[5] = (uint8_t)(r->broken_next_hop >> 16);
-    buf[6] = (uint8_t)(r->broken_next_hop >> 8);
-    buf[7] = (uint8_t)r->broken_next_hop;
+/* reporter_addr(4) || broken_dest(4) || broken_next_hop(4) || seq(6),
+ * big-endian for the multi-byte fields: was broken_dest||broken_next_hop
+ * only (8 bytes); ws 1.3b adds reporter_addr and seq (now 18 bytes).
+ * reporter_addr is safe to cover because every forwarder re-signs with
+ * its OWN reporter_addr on every re-origination (send_rerr rebuilds the
+ * whole struct and calls rerr_sign again each time); only
+ * header.packet_id remains uncovered, the one field every forwarder still
+ * rewrites without re-deriving a value this MAC could pin. */
+static void rerr_build_auth_buf(const bramble_rerr_t* r, uint8_t buf[18]) {
+    buf[0] = (uint8_t)(r->reporter_addr >> 24);
+    buf[1] = (uint8_t)(r->reporter_addr >> 16);
+    buf[2] = (uint8_t)(r->reporter_addr >> 8);
+    buf[3] = (uint8_t)r->reporter_addr;
+    buf[4] = (uint8_t)(r->broken_dest >> 24);
+    buf[5] = (uint8_t)(r->broken_dest >> 16);
+    buf[6] = (uint8_t)(r->broken_dest >> 8);
+    buf[7] = (uint8_t)r->broken_dest;
+    buf[8] = (uint8_t)(r->broken_next_hop >> 24);
+    buf[9] = (uint8_t)(r->broken_next_hop >> 16);
+    buf[10] = (uint8_t)(r->broken_next_hop >> 8);
+    buf[11] = (uint8_t)r->broken_next_hop;
+    memcpy(buf + 12, r->seq, 6);
 }
 
 void rerr_sign(bramble_rerr_t* r) {
-    uint8_t buf[8];
+    uint8_t buf[18];
     rerr_build_auth_buf(r, buf);
     network_key_mac("bramble-rerr-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 int rerr_verify(const bramble_rerr_t* r) {
-    uint8_t buf[8];
+    uint8_t buf[18];
     rerr_build_auth_buf(r, buf);
     uint8_t expect[8];
     network_key_mac("bramble-rerr-v2", buf, sizeof(buf), expect);

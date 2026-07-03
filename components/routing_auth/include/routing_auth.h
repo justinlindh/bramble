@@ -16,16 +16,23 @@
  */
 
 /*
- * Authenticates broken_dest||broken_next_hop with label "bramble-rerr-v2",
- * deliberately excluding reporter_addr and header.packet_id: every
+ * Authenticates reporter_addr||broken_dest||broken_next_hop||seq with
+ * label "bramble-rerr-v2", excluding only header.packet_id: every
  * forwarder re-originates a RERR (mesh_task.c's send_rerr) with its own
- * reporter_addr and a fresh packet_id while passing broken_dest/
- * broken_next_hop through unchanged, so those two are the only
- * origin-stable fields. rerr_sign fills r->auth_hmac; call it once, right
- * before serializing (both on first detection and on every
- * re-origination, since send_rerr builds a fresh struct each time).
- * rerr_verify recomputes the same MAC and constant-time-compares; returns
- * nonzero (true) iff it matches.
+ * reporter_addr and a freshly-drawn seq, passing broken_dest/
+ * broken_next_hop through unchanged, and re-signs the WHOLE struct
+ * (including its own reporter_addr and seq) on every call. reporter_addr
+ * moved INTO the MAC in ws 1.3b (it used to be excluded alongside
+ * packet_id): this is safe specifically because each hop signs its own
+ * reporter_addr rather than carrying someone else's forward, and it is
+ * what makes replay-keying RERR on (reporter_addr, seq) sound, since both
+ * halves of that key are now authenticated and reporter_addr identifies
+ * exactly one node drawing one monotonic seq counter (no cross-signer
+ * interleaving to break the sliding window). rerr_sign fills r->auth_hmac;
+ * call it once, right before serializing (both on first detection and on
+ * every re-origination, since send_rerr builds a fresh struct each time
+ * and must re-draw a fresh seq for it). rerr_verify recomputes the same
+ * MAC and constant-time-compares; returns nonzero (true) iff it matches.
  */
 void rerr_sign(bramble_rerr_t* r);
 int rerr_verify(const bramble_rerr_t* r);
