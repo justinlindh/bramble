@@ -11,6 +11,7 @@
  */
 
 #include "ble_server.h"
+#include "ble_redact.h"
 #include "rpc_dispatcher.h"
 #include "rpc_auth.h"
 #include "ct_strcmp.h"
@@ -143,7 +144,13 @@ static void ble_rpc_task(void* param) {
     while (1) {
         if (xQueueReceive(s_rpc_queue, &msg, portMAX_DELAY) == pdTRUE) {
             msg.data[msg.len] = '\0';
-            ESP_LOGI(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)msg.len, msg.data);
+            /* Never echo pre-auth payloads: the first write is the bare token
+             * (NEW-SEC-5). Post-auth bodies go to DEBUG only. */
+            if (ble_rpc_body_loggable(s_ble_authenticated)) {
+                ESP_LOGD(TAG, "BLE RPC request (%u bytes): %.80s", (unsigned)msg.len, msg.data);
+            } else {
+                ESP_LOGI(TAG, "BLE RPC request (%u bytes)", (unsigned)msg.len);
+            }
 
             char resp[BLE_RPC_BUF_SIZE];
             if (!s_ble_authenticated) {

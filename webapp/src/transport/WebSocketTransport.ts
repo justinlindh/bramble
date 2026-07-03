@@ -18,6 +18,7 @@ export class WebSocketTransport implements Transport {
   private pending = new Map<number, Pending>();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   readonly url: string;
+  private readonly authToken?: string;
 
   // Reconnect state
   private autoReconnect = false;
@@ -32,8 +33,9 @@ export class WebSocketTransport implements Transport {
   private static PING_INTERVAL = 10_000;  // send ping every 10s
   private static PONG_TIMEOUT = 5_000;    // if no pong in 5s, consider dead
 
-  constructor(url: string) {
+  constructor(url: string, authToken?: string) {
     this.url = url;
+    this.authToken = authToken;
   }
 
   get connected(): boolean {
@@ -50,7 +52,10 @@ export class WebSocketTransport implements Transport {
       // Clean up any stale socket
       this.cleanup();
 
-      const ws = new WebSocket(this.url);
+      const protocols = this.authToken
+        ? [`bramble.v1.auth.${this.authToken}`, 'bramble.v1']
+        : ['bramble.v1'];
+      const ws = new WebSocket(this.url, protocols);
       this.ws = ws;
 
       const connectTimeout = setTimeout(() => {
