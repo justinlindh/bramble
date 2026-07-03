@@ -207,6 +207,87 @@ void test_lru_eviction_prefers_oldest_handshaking(void) {
     }
 }
 
+/* Task 1.3: handshake INIT/RESP build/parse and authentication tags.
+ *
+ * NOTE on dm_build_init's signature: the brief lists it without a
+ * my_eph_priv parameter, but the rekey-path tag's DH3 term is
+ * X25519(my_eph_priv, peer_id_pub) (RFC section 1's B1 construction), which
+ * is impossible to compute without the initiator's own ephemeral private
+ * key. dm_build_resp's own brief signature already carries both
+ * my_eph_pub and my_eph_priv for the identical reason (it needs eph_priv
+ * for the quad-DH). Added my_eph_priv to dm_build_init to match; see the
+ * task report for the full trace. */
+void test_rekey_init_tag_verifies_and_fails_on_flip(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       b.public_key, &init));
+    /* Non-zero tag: this is the rekey path, not first contact. */
+    uint8_t zero16[16] = {0};
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(zero16, init.auth_tag, 16));
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 1, a.public_key));
+
+    /* Flip a single tag byte: must be rejected. */
+    bramble_key_exchange_t tampered = init;
+    tampered.auth_tag[0] ^= 0x01;
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&tampered, &b, 1, a.public_key));
+}
+
+void test_first_contact_init_zero_tag_and_address_check(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       NULL, &init));
+
+    uint8_t zero16[16] = {0};
+    TEST_ASSERT_EQUAL_MEMORY(zero16, init.auth_tag, 16);
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL));
+
+    /* Address binding still applies on first contact: a message claiming
+     * an address that doesn't match its embedded identity key must be
+     * rejected even though there is no tag to check. */
+    bramble_key_exchange_t spoofed = init;
+    spoofed.src_addr ^= 0x1; /* no longer crypto_derive_address(long_term_pubkey) */
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&spoofed, &b, 0, NULL));
+}
+
+void test_init_resp_roundtrip_session_key(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       NULL, &init));
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL));
+
+    bramble_key_exchange_t resp; uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+
+    uint8_t ka[32];
+    TEST_ASSERT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+    TEST_ASSERT_EQUAL_MEMORY(ka, kb, 32);
+}
+
+void test_verify_resp_rejects_tampered_tag(void) {
+    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
+                                       NULL, &init));
+
+    bramble_key_exchange_t resp; uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+
+    resp.auth_tag[0] ^= 0x01; /* flip a single byte of the confirm tag */
+    uint8_t ka[32];
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_quad_dh_both_sides_agree);
@@ -220,5 +301,9 @@ int main(void) {
     RUN_TEST(test_handshaking_cap_enforced);
     RUN_TEST(test_active_not_evicted_for_handshaking);
     RUN_TEST(test_lru_eviction_prefers_oldest_handshaking);
+    RUN_TEST(test_rekey_init_tag_verifies_and_fails_on_flip);
+    RUN_TEST(test_first_contact_init_zero_tag_and_address_check);
+    RUN_TEST(test_init_resp_roundtrip_session_key);
+    RUN_TEST(test_verify_resp_rejects_tampered_tag);
     return UNITY_END();
 }

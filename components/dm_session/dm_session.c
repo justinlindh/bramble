@@ -70,22 +70,39 @@ static int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_pri
     return 0;
 }
 
+/* Shared by dm_derive_session_key, the K_ke_init tag, and the K_confirm
+ * tag: lo(4 BE) || hi(4 BE) || ke_epoch(2 LE), lo/hi = min/max(addr_a,
+ * addr_b) so the result is identical regardless of which side calls it
+ * with its own address first. */
+static void dm_build_info(uint32_t addr_a, uint32_t addr_b, uint16_t ke_epoch, uint8_t info[10]) {
+    uint32_t lo = addr_a < addr_b ? addr_a : addr_b;
+    uint32_t hi = addr_a < addr_b ? addr_b : addr_a;
+    info[0]=(uint8_t)(lo>>24); info[1]=(uint8_t)(lo>>16); info[2]=(uint8_t)(lo>>8); info[3]=(uint8_t)lo;
+    info[4]=(uint8_t)(hi>>24); info[5]=(uint8_t)(hi>>16); info[6]=(uint8_t)(hi>>8); info[7]=(uint8_t)hi;
+    info[8]=(uint8_t)(ke_epoch & 0xFF); info[9]=(uint8_t)((ke_epoch>>8) & 0xFF);
+}
+
+/* Derives the session key from an already-computed 128-byte IKM. Split out
+ * of dm_derive_session_key so dm_build_resp/dm_verify_resp (Task 1.3) can
+ * compute the IKM once via dm_compute_ikm and reuse it both here and for
+ * K_confirm, instead of repeating the four X25519 scalar multiplications
+ * (each 30-100ms on the S3 per the RFC's compute-placement note). */
+static int dm_session_key_from_ikm(const uint8_t ikm[128], uint32_t addr_a, uint32_t addr_b,
+                                   uint16_t ke_epoch, uint8_t session_key_out[32]) {
+    uint8_t info[10];
+    dm_build_info(addr_a, addr_b, ke_epoch, info);
+    const char* salt = "bramble-dm-v2";
+    return crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, 128,
+                              info, sizeof(info), session_key_out, 32);
+}
+
 int dm_derive_session_key(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
                           const uint8_t peer_id_pub[32], const uint8_t peer_eph_pub[32],
                           uint32_t addr_a, uint32_t addr_b, uint16_t ke_epoch,
                           uint8_t session_key_out[32]) {
     uint8_t ikm[128];
     if (dm_compute_ikm(my_id_priv, my_eph_priv, peer_id_pub, peer_eph_pub, ikm) != 0) return -1;
-
-    uint32_t lo = addr_a < addr_b ? addr_a : addr_b;
-    uint32_t hi = addr_a < addr_b ? addr_b : addr_a;
-    uint8_t info[10];
-    info[0]=(uint8_t)(lo>>24); info[1]=(uint8_t)(lo>>16); info[2]=(uint8_t)(lo>>8); info[3]=(uint8_t)lo;
-    info[4]=(uint8_t)(hi>>24); info[5]=(uint8_t)(hi>>16); info[6]=(uint8_t)(hi>>8); info[7]=(uint8_t)hi;
-    info[8]=(uint8_t)(ke_epoch & 0xFF); info[9]=(uint8_t)((ke_epoch>>8) & 0xFF);
-    const char* salt = "bramble-dm-v2";
-    return crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, sizeof(ikm),
-                              info, sizeof(info), session_key_out, 32);
+    return dm_session_key_from_ikm(ikm, addr_a, addr_b, ke_epoch, session_key_out);
 }
 
 int dm_derive_sas(const uint8_t session_ikm[128], char sas_out[8]) {
@@ -97,6 +114,220 @@ int dm_derive_sas(const uint8_t session_ikm[128], char sas_out[8]) {
     uint32_t v = ((uint32_t)okm[0]<<24)|((uint32_t)okm[1]<<16)|((uint32_t)okm[2]<<8)|okm[3];
     snprintf(sas_out, 8, "%07u", (unsigned)(v % 10000000u));
     return 0;
+}
+
+/*
+ * Constant-time equality over two byte buffers (tag comparison). OR-
+ * accumulate every byte's XOR difference with no early exit, so comparing
+ * a computed tag against an attacker-supplied one never leaks how many
+ * leading bytes matched through timing. Used for EVERY tag check below;
+ * never memcmp on a tag.
+ */
+static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
+    uint8_t r = 0;
+    for (size_t i = 0; i < n; i++) r |= a[i] ^ b[i];
+    return r == 0;
+}
+
+int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
+                  const uint8_t my_eph_priv[32], uint32_t peer_addr, uint16_t ke_epoch,
+                  const uint8_t* peer_id_pub_or_null, bramble_key_exchange_t* out) {
+    memset(out, 0, sizeof(*out));
+    out->src_addr = my_id->address;
+    memcpy(out->ephemeral_pubkey, my_eph_pub, 32);
+    memcpy(out->long_term_pubkey, my_id->public_key, 32);
+    out->key_id = (uint8_t)(ke_epoch & 0xFF);
+    out->ke_type = KE_TYPE_INIT;
+
+    if (!peer_id_pub_or_null) {
+        /* First contact: no peer-keyed DH is computable yet (the
+         * initiator doesn't hold peer_id_pub). Zero tag, stated not
+         * hidden: proves nothing, the initiator is authenticated later
+         * (message 3, the first DATA under the session key). */
+        memset(out->auth_tag, 0, sizeof(out->auth_tag));
+        return 0;
+    }
+
+    /* Rekey / known peer (RFC section 1's B1 construction). DH2 is
+     * static-static (symmetric, same value either side computes it from).
+     * DH3 is the initiator's OWN ephemeral bound to the peer's identity;
+     * only the initiator's ephemeral exists at this point (the responder
+     * hasn't generated one yet), so this is a fixed, role-specific
+     * pairing, not Task 1.1's role-agnostic sorted cross-term (that sort
+     * exists only because the FINAL session key mixes both parties'
+     * ephemerals symmetrically after both exist; here only one does). */
+    uint8_t dh2[32], dh3[32];
+    if (crypto_x25519_dh(my_id->private_key, peer_id_pub_or_null, dh2) != 0) return -1;
+    if (crypto_x25519_dh(my_eph_priv, peer_id_pub_or_null, dh3) != 0) return -1;
+
+    uint8_t ikm[64];
+    memcpy(ikm, dh2, 32);
+    memcpy(ikm + 32, dh3, 32);
+
+    uint8_t info[10];
+    dm_build_info(my_id->address, peer_addr, ke_epoch, info);
+    uint8_t hkdf_info[15 + 10];
+    memcpy(hkdf_info, "bramble-ke-init", 15);
+    memcpy(hkdf_info + 15, info, 10);
+
+    uint8_t k_ke_init[32];
+    const char* salt = "bramble-dm-v2";
+    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, sizeof(ikm),
+                           hkdf_info, sizeof(hkdf_info), k_ke_init, 32) != 0) return -1;
+
+    /* transcript_1 = addr_init || addr_resp || eph_init || id_init */
+    uint8_t transcript[4 + 4 + 32 + 32];
+    transcript[0]=(uint8_t)(my_id->address>>24); transcript[1]=(uint8_t)(my_id->address>>16);
+    transcript[2]=(uint8_t)(my_id->address>>8);  transcript[3]=(uint8_t)my_id->address;
+    transcript[4]=(uint8_t)(peer_addr>>24); transcript[5]=(uint8_t)(peer_addr>>16);
+    transcript[6]=(uint8_t)(peer_addr>>8);  transcript[7]=(uint8_t)peer_addr;
+    memcpy(transcript + 8, my_eph_pub, 32);
+    memcpy(transcript + 40, my_id->public_key, 32);
+
+    uint8_t full_mac[32];
+    if (crypto_hmac_sha256(k_ke_init, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
+    memcpy(out->auth_tag, full_mac, 16);
+    return 0;
+}
+
+int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* my_id,
+                   int have_peer_id, const uint8_t peer_id_pub[32]) {
+    /* Address binding: without this an attacker could claim any address
+     * with an identity key of its own choosing. Applies on every message,
+     * first-contact included. */
+    if (crypto_derive_address(msg->long_term_pubkey) != msg->src_addr) return -1;
+
+    if (!have_peer_id) {
+        /* First contact: no tag to check by design. */
+        return 0;
+    }
+
+    uint32_t addr_init = msg->src_addr;
+    uint32_t addr_resp = my_id->address;
+    uint16_t ke_epoch = (uint16_t)msg->key_id;
+
+    uint8_t dh2[32], dh3[32];
+    if (crypto_x25519_dh(my_id->private_key, peer_id_pub, dh2) != 0) return -1;
+    /* My identity bound to the initiator's ephemeral (msg->ephemeral_pubkey).
+     * By X25519 symmetry this equals the initiator's own
+     * X25519(their eph_priv, my id_pub) computed in dm_build_init; the
+     * verifier needs no ephemeral of its own for this term. */
+    if (crypto_x25519_dh(my_id->private_key, msg->ephemeral_pubkey, dh3) != 0) return -1;
+
+    uint8_t ikm[64];
+    memcpy(ikm, dh2, 32);
+    memcpy(ikm + 32, dh3, 32);
+
+    uint8_t info[10];
+    dm_build_info(addr_init, addr_resp, ke_epoch, info);
+    uint8_t hkdf_info[15 + 10];
+    memcpy(hkdf_info, "bramble-ke-init", 15);
+    memcpy(hkdf_info + 15, info, 10);
+
+    uint8_t k_ke_init[32];
+    const char* salt = "bramble-dm-v2";
+    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, sizeof(ikm),
+                           hkdf_info, sizeof(hkdf_info), k_ke_init, 32) != 0) return -1;
+
+    uint8_t transcript[4 + 4 + 32 + 32];
+    transcript[0]=(uint8_t)(addr_init>>24); transcript[1]=(uint8_t)(addr_init>>16);
+    transcript[2]=(uint8_t)(addr_init>>8);  transcript[3]=(uint8_t)addr_init;
+    transcript[4]=(uint8_t)(addr_resp>>24); transcript[5]=(uint8_t)(addr_resp>>16);
+    transcript[6]=(uint8_t)(addr_resp>>8);  transcript[7]=(uint8_t)addr_resp;
+    memcpy(transcript + 8, msg->ephemeral_pubkey, 32);
+    memcpy(transcript + 40, msg->long_term_pubkey, 32);
+
+    uint8_t full_mac[32];
+    if (crypto_hmac_sha256(k_ke_init, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
+
+    return ct_eq(full_mac, msg->auth_tag, 16) ? 0 : -1;
+}
+
+int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
+                  const uint8_t my_eph_priv[32], const bramble_key_exchange_t* init,
+                  uint16_t ke_epoch, bramble_key_exchange_t* out, uint8_t session_key_out[32]) {
+    memset(out, 0, sizeof(*out));
+    out->src_addr = my_id->address;
+    memcpy(out->ephemeral_pubkey, my_eph_pub, 32);
+    memcpy(out->long_term_pubkey, my_id->public_key, 32);
+    out->key_id = (uint8_t)(ke_epoch & 0xFF);
+    out->ke_type = KE_TYPE_RESP;
+
+    uint8_t ikm[128];
+    if (dm_compute_ikm(my_id->private_key, my_eph_priv, init->long_term_pubkey,
+                       init->ephemeral_pubkey, ikm) != 0) return -1;
+    if (dm_session_key_from_ikm(ikm, my_id->address, init->src_addr, ke_epoch,
+                                session_key_out) != 0) return -1;
+
+    uint8_t info[10];
+    dm_build_info(init->src_addr, my_id->address, ke_epoch, info);
+    uint8_t hkdf_info[19 + 10];
+    memcpy(hkdf_info, "bramble-ke-confirm", 19);
+    memcpy(hkdf_info + 19, info, 10);
+
+    uint8_t k_confirm[32];
+    const char* salt = "bramble-dm-v2";
+    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, 128,
+                           hkdf_info, sizeof(hkdf_info), k_confirm, 32) != 0) return -1;
+
+    /* transcript_2 = addr_init || addr_resp || eph_init || id_init ||
+     * eph_resp || id_resp: the RFC states "over the full transcript, both
+     * ephemerals and both identities now known" without an exact byte
+     * layout; this extends transcript_1's exact field order with the two
+     * newly-known responder fields, binding every field an attacker could
+     * swap or reflect (unknown-key-share / reflection defense). */
+    uint8_t transcript[4 + 4 + 32 + 32 + 32 + 32];
+    transcript[0]=(uint8_t)(init->src_addr>>24); transcript[1]=(uint8_t)(init->src_addr>>16);
+    transcript[2]=(uint8_t)(init->src_addr>>8);  transcript[3]=(uint8_t)init->src_addr;
+    transcript[4]=(uint8_t)(my_id->address>>24); transcript[5]=(uint8_t)(my_id->address>>16);
+    transcript[6]=(uint8_t)(my_id->address>>8);  transcript[7]=(uint8_t)my_id->address;
+    memcpy(transcript + 8, init->ephemeral_pubkey, 32);
+    memcpy(transcript + 40, init->long_term_pubkey, 32);
+    memcpy(transcript + 72, my_eph_pub, 32);
+    memcpy(transcript + 104, my_id->public_key, 32);
+
+    uint8_t full_mac[32];
+    if (crypto_hmac_sha256(k_confirm, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
+    memcpy(out->auth_tag, full_mac, 16);
+    return 0;
+}
+
+int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
+                   const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32],
+                   uint16_t ke_epoch, uint8_t session_key_out[32]) {
+    if (crypto_derive_address(resp->long_term_pubkey) != resp->src_addr) return -1;
+
+    uint8_t ikm[128];
+    if (dm_compute_ikm(my_id->private_key, my_eph_priv, resp->long_term_pubkey,
+                       resp->ephemeral_pubkey, ikm) != 0) return -1;
+    if (dm_session_key_from_ikm(ikm, my_id->address, resp->src_addr, ke_epoch,
+                                session_key_out) != 0) return -1;
+
+    uint8_t info[10];
+    dm_build_info(my_id->address, resp->src_addr, ke_epoch, info);
+    uint8_t hkdf_info[19 + 10];
+    memcpy(hkdf_info, "bramble-ke-confirm", 19);
+    memcpy(hkdf_info + 19, info, 10);
+
+    uint8_t k_confirm[32];
+    const char* salt = "bramble-dm-v2";
+    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, 128,
+                           hkdf_info, sizeof(hkdf_info), k_confirm, 32) != 0) return -1;
+
+    uint8_t transcript[4 + 4 + 32 + 32 + 32 + 32];
+    transcript[0]=(uint8_t)(my_id->address>>24); transcript[1]=(uint8_t)(my_id->address>>16);
+    transcript[2]=(uint8_t)(my_id->address>>8);  transcript[3]=(uint8_t)my_id->address;
+    transcript[4]=(uint8_t)(resp->src_addr>>24); transcript[5]=(uint8_t)(resp->src_addr>>16);
+    transcript[6]=(uint8_t)(resp->src_addr>>8);  transcript[7]=(uint8_t)resp->src_addr;
+    memcpy(transcript + 8, my_eph_pub, 32);
+    memcpy(transcript + 40, my_id->public_key, 32);
+    memcpy(transcript + 72, resp->ephemeral_pubkey, 32);
+    memcpy(transcript + 104, resp->long_term_pubkey, 32);
+
+    uint8_t full_mac[32];
+    if (crypto_hmac_sha256(k_confirm, 32, transcript, sizeof(transcript), full_mac) != 0) return -1;
+
+    return ct_eq(full_mac, resp->auth_tag, 16) ? 0 : -1;
 }
 
 void dm_table_init(dm_table_t* t) { memset(t, 0, sizeof(*t)); }
