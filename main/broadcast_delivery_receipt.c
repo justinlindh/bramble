@@ -78,6 +78,7 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
                                                        uint32_t original_src_addr,
                                                        uint32_t original_packet_id,
                                                        uint8_t hop_limit,
+                                                       uint64_t seq,
                                                        uint8_t *buf,
                                                        size_t buf_len,
                                                        size_t *out_len) {
@@ -99,10 +100,14 @@ esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
         .hop_count = 1,
         .total_latency = 0,
         .relay_path = { local_addr },
+        .seq = {
+            (uint8_t)(seq >> 40), (uint8_t)(seq >> 32), (uint8_t)(seq >> 24),
+            (uint8_t)(seq >> 16), (uint8_t)(seq >> 8), (uint8_t)seq,
+        },
     };
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (excluded from the MAC, legitimately
-     * change per relay hop). */
+     * change per relay hop); seq is set above and IS covered (ws 1.3b). */
     receipt_sign(&receipt);
 
     esp_err_t err = bramble_delivery_receipt_serialize(&receipt, buf, buf_len);

@@ -342,10 +342,12 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
     buf[B + 8] = p->hop_count;
     buf[B + 9] = p->total_latency;
     /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
-     * before relay_path. */
+     * before relay_path. ws 1.3b: seq sits right after auth_hmac, same
+     * fixed-offset-before-relay_path invariant. */
     memcpy(buf + B + 10, p->auth_hmac, 8);
+    memcpy(buf + B + 18, p->seq, 6);
     for (uint8_t i = 0; i < p->hop_count; i++) {
-        put_be32(buf + B + 18 + i * 4, p->relay_path[i]);
+        put_be32(buf + B + 24 + i * 4, p->relay_path[i]);
     }
     return ESP_OK;
 }
@@ -362,15 +364,17 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     p->total_latency = buf[B + 9];
     /* NEW-SEC-8: read at a fixed offset, before validating/using
      * hop_count, so a verifier never has to trust the unauthenticated
-     * hop_count to locate the tag. */
+     * hop_count to locate the tag. ws 1.3b: seq reads at the same kind of
+     * fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 10, 8);
+    memcpy(p->seq, buf + B + 18, 6);
     if (p->hop_count > DELIVERY_RECEIPT_MAX_HOPS)
         return ESP_ERR_INVALID_SIZE;
     size_t needed = DELIVERY_RECEIPT_MIN_SIZE + (size_t)p->hop_count * 4;
     if (len < needed)
         return ESP_ERR_INVALID_SIZE;
     for (uint8_t i = 0; i < p->hop_count; i++) {
-        p->relay_path[i] = get_be32(buf + B + 18 + i * 4);
+        p->relay_path[i] = get_be32(buf + B + 24 + i * 4);
     }
     return ESP_OK;
 }

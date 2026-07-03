@@ -85,10 +85,13 @@ int ack_verify(const bramble_ack_t* a) {
     return ct_eq(expect, a->auth_hmac, sizeof(expect));
 }
 
-/* src_addr(4) || orig_packet_id(4), big-endian: the 2 origin-stable
- * fields, exactly excluding relay_path/hop_count/header.hop_limit (the
- * fields forward_delivery_receipt mutates on every relay hop). */
-static void receipt_build_auth_buf(const bramble_delivery_receipt_t* r, uint8_t buf[8]) {
+/* src_addr(4) || orig_packet_id(4) || seq(6), big-endian for the
+ * multi-byte fields: the origin-stable fields, exactly excluding
+ * relay_path/hop_count/header.hop_limit (the fields
+ * forward_delivery_receipt mutates on every relay hop). seq (ws 1.3b) is
+ * origin-stable like the rest: forward_delivery_receipt carries it
+ * through unchanged, so it belongs in the same coverage set. */
+static void receipt_build_auth_buf(const bramble_delivery_receipt_t* r, uint8_t buf[14]) {
     buf[0] = (uint8_t)(r->src_addr >> 24);
     buf[1] = (uint8_t)(r->src_addr >> 16);
     buf[2] = (uint8_t)(r->src_addr >> 8);
@@ -97,16 +100,17 @@ static void receipt_build_auth_buf(const bramble_delivery_receipt_t* r, uint8_t 
     buf[5] = (uint8_t)(r->orig_packet_id >> 16);
     buf[6] = (uint8_t)(r->orig_packet_id >> 8);
     buf[7] = (uint8_t)r->orig_packet_id;
+    memcpy(buf + 8, r->seq, 6);
 }
 
 void receipt_sign(bramble_delivery_receipt_t* r) {
-    uint8_t buf[8];
+    uint8_t buf[14];
     receipt_build_auth_buf(r, buf);
     network_key_mac("bramble-receipt-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 int receipt_verify(const bramble_delivery_receipt_t* r) {
-    uint8_t buf[8];
+    uint8_t buf[14];
     receipt_build_auth_buf(r, buf);
     uint8_t expect[8];
     network_key_mac("bramble-receipt-v2", buf, sizeof(buf), expect);

@@ -60,11 +60,15 @@ void ack_sign(bramble_ack_t* a);
 int ack_verify(const bramble_ack_t* a);
 
 /*
- * Task 3.5 (NEW-SEC-8, STAGED, NOT closed). Authenticates
- * src_addr||orig_packet_id with label "bramble-receipt-v2", excluding
- * relay_path/hop_count/header.hop_limit for the same reason as ack_sign/
- * verify above (forward_delivery_receipt grows relay_path, increments
- * hop_count, decrements hop_limit per hop). Same fixed-offset,
+ * Task 3.5 (NEW-SEC-8, STAGED, NOT closed), extended by ws 1.3b.
+ * Authenticates src_addr||orig_packet_id||seq with label
+ * "bramble-receipt-v2", excluding relay_path/hop_count/header.hop_limit
+ * for the same reason as ack_sign/verify above (forward_delivery_receipt
+ * grows relay_path, increments hop_count, decrements hop_limit per hop).
+ * seq (ws 1.3b) is origin-stable, drawn once by the receipt builder
+ * (mesh_build_broadcast_delivery_receipt_packet) and carried through
+ * forward_delivery_receipt unchanged, at the same fixed,
+ * hop_count-independent offset as auth_hmac. Same fixed-offset,
  * constant-time-compare contract.
  */
 void receipt_sign(bramble_delivery_receipt_t* r);
