@@ -1,4 +1,5 @@
 #include "include/discovery.h"
+#include "network_key.h"
 #include <string.h>
 
 void discovery_init(pending_discovery_table_t* table) { memset(table, 0, sizeof(*table)); }
@@ -102,6 +103,49 @@ bramble_rreq_t rreq_forward(const bramble_rreq_t* incoming, uint32_t my_addr, in
     return r;
 }
 
+/*
+ * Constant-time equality (tag comparison), same OR-accumulate pattern used
+ * elsewhere in this codebase for MAC/tag checks (e.g. dm_session.c's
+ * ct_eq): no early exit, so comparing a computed MAC against an
+ * attacker-supplied one never leaks how many leading bytes matched.
+ */
+static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
+    uint8_t acc = 0;
+    for (size_t i = 0; i < n; i++) acc |= a[i] ^ b[i];
+    return acc == 0;
+}
+
+/* query_id(4) || src_addr(4) || hop_count(1) || route_metric(1), big-endian
+ * for the multi-byte fields: the 4 origin-stable fields, exactly excluding
+ * next_hop and header.dest_addr (the only two fields rrep_forward
+ * mutates). */
+static void rrep_build_auth_buf(const bramble_rrep_t* r, uint8_t buf[10]) {
+    buf[0] = (uint8_t)(r->query_id >> 24);
+    buf[1] = (uint8_t)(r->query_id >> 16);
+    buf[2] = (uint8_t)(r->query_id >> 8);
+    buf[3] = (uint8_t)r->query_id;
+    buf[4] = (uint8_t)(r->src_addr >> 24);
+    buf[5] = (uint8_t)(r->src_addr >> 16);
+    buf[6] = (uint8_t)(r->src_addr >> 8);
+    buf[7] = (uint8_t)r->src_addr;
+    buf[8] = r->hop_count;
+    buf[9] = r->route_metric;
+}
+
+void rrep_sign(bramble_rrep_t* r) {
+    uint8_t buf[10];
+    rrep_build_auth_buf(r, buf);
+    network_key_mac("bramble-rrep-v2", buf, sizeof(buf), r->auth_hmac);
+}
+
+int rrep_verify(const bramble_rrep_t* r) {
+    uint8_t buf[10];
+    rrep_build_auth_buf(r, buf);
+    uint8_t expect[8];
+    network_key_mac("bramble-rrep-v2", buf, sizeof(buf), expect);
+    return ct_eq(expect, r->auth_hmac, sizeof(expect));
+}
+
 bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_addr) {
     bramble_rrep_t r;
     memset(&r, 0, sizeof(r));
@@ -116,10 +160,14 @@ bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_ad
     r.next_hop = rreq->prev_hop;
     r.hop_count = rreq->hop_count + 1;
     r.route_metric = rreq->metric;
+    rrep_sign(&r);
     return r;
 }
 
 bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back) {
+    /* Copies the whole struct, including auth_hmac, unchanged: only
+     * next_hop and header.dest_addr are relay-mutable, exactly the two
+     * fields rrep_sign/rrep_verify exclude from the MAC. */
     bramble_rrep_t r = *incoming;
     r.next_hop = next_hop_back;
     r.header.dest_addr = next_hop_back;
