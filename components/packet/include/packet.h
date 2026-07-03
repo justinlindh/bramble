@@ -21,6 +21,11 @@
 #define PKT_TYPE_RREP 0x03
 #define PKT_TYPE_RERR 0x04
 #define PKT_TYPE_BEACON 0x05
+/* 0x06 retired from the wire in v2: handshakes ride DATA envelopes
+ * (app_type APP_TYPE_KE). Never RX-dispatched; a stray 0x06 falls through
+ * to the RX switch's default case and is dropped. Kept defined only so
+ * legacy references (e.g. traffic_debug's packet-type classifier) still
+ * compile; do not add a case for it to the RX switch. */
 #define PKT_TYPE_KEY_EXCHANGE 0x06
 #define PKT_TYPE_DELIVERY_RECEIPT 0x07
 #define PKT_TYPE_DATA 0x0A
@@ -131,6 +136,12 @@ typedef struct {
     char name[BEACON_NAME_MAX + 1];
 } bramble_beacon_t;
 
+/* 0x06 retired from the wire in v2: handshakes ride DATA envelopes (app_type
+ * APP_TYPE_KE). Struct kept as the inner-payload layout: dm_build_init/
+ * dm_build_resp fill it, bramble_key_exchange_serialize/deserialize frame
+ * it as the plaintext carried inside a channel-key-encrypted DATA packet
+ * (see handle_ke_envelope in mesh_task.c), it never appears standalone on
+ * the wire under PKT_TYPE_KEY_EXCHANGE again. */
 typedef struct {
     bramble_header_t header;
     uint32_t src_addr;
