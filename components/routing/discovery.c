@@ -116,11 +116,12 @@ static int ct_eq(const uint8_t* a, const uint8_t* b, size_t n) {
     return acc == 0;
 }
 
-/* query_id(4) || src_addr(4) || hop_count(1) || route_metric(1), big-endian
- * for the multi-byte fields: the 4 origin-stable fields, exactly excluding
- * next_hop and header.dest_addr (the only two fields rrep_forward
- * mutates). */
-static void rrep_build_auth_buf(const bramble_rrep_t* r, uint8_t buf[10]) {
+/* query_id(4) || src_addr(4) || hop_count(1) || route_metric(1) || seq(6),
+ * big-endian for the multi-byte fields: the origin-stable fields, exactly
+ * excluding next_hop and header.dest_addr (the only two fields rrep_forward
+ * mutates). seq (ws 1.3b) is origin-stable like the rest: rrep_forward
+ * carries it through unchanged, so it belongs in the same coverage set. */
+static void rrep_build_auth_buf(const bramble_rrep_t* r, uint8_t buf[16]) {
     buf[0] = (uint8_t)(r->query_id >> 24);
     buf[1] = (uint8_t)(r->query_id >> 16);
     buf[2] = (uint8_t)(r->query_id >> 8);
@@ -131,16 +132,17 @@ static void rrep_build_auth_buf(const bramble_rrep_t* r, uint8_t buf[10]) {
     buf[7] = (uint8_t)r->src_addr;
     buf[8] = r->hop_count;
     buf[9] = r->route_metric;
+    memcpy(buf + 10, r->seq, 6);
 }
 
 void rrep_sign(bramble_rrep_t* r) {
-    uint8_t buf[10];
+    uint8_t buf[16];
     rrep_build_auth_buf(r, buf);
     network_key_mac("bramble-rrep-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 int rrep_verify(const bramble_rrep_t* r) {
-    uint8_t buf[10];
+    uint8_t buf[16];
     rrep_build_auth_buf(r, buf);
     uint8_t expect[8];
     network_key_mac("bramble-rrep-v2", buf, sizeof(buf), expect);

@@ -88,10 +88,12 @@ esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len
     buf[B + 9] = (uint8_t)p->rssi_at_dest;
     buf[B + 10] = hops;
     /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
-     * before relay_path. */
+     * before relay_path. ws 1.3b: seq sits right after auth_hmac, same
+     * fixed-offset-before-relay_path invariant. */
     memcpy(buf + B + 11, p->auth_hmac, 8);
+    memcpy(buf + B + 19, p->seq, 6);
     for (int i = 0; i < hops; i++) {
-        put_be32(buf + B + 19 + i * 4, p->relay_path[i]);
+        put_be32(buf + B + 25 + i * 4, p->relay_path[i]);
     }
     return ESP_OK;
 }
@@ -114,8 +116,10 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
     p->hop_count = buf[B + 10];
     /* NEW-SEC-8: auth_hmac at a fixed offset, read BEFORE relay_path and
      * independent of hop_count, so a verifier never has to trust the
-     * unauthenticated hop_count to locate the tag. */
+     * unauthenticated hop_count to locate the tag. ws 1.3b: seq reads at
+     * the same kind of fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 11, 8);
+    memcpy(p->seq, buf + B + 19, 6);
     if (p->hop_count > ACK_MAX_HOPS)
         p->hop_count = ACK_MAX_HOPS;
     /* Fix 5 (red-team panel): clamp hop_count down to the number of
@@ -129,11 +133,11 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
      * bug that iterates past the now-correct hop_count reads zero, not
      * garbage. */
     memset(p->relay_path, 0, sizeof(p->relay_path));
-    size_t avail_hops = (len > (size_t)(B + 19)) ? (len - (B + 19)) / 4 : 0;
+    size_t avail_hops = (len > (size_t)(B + 25)) ? (len - (B + 25)) / 4 : 0;
     if ((size_t)p->hop_count > avail_hops)
         p->hop_count = (uint8_t)avail_hops;
     for (int i = 0; i < p->hop_count; i++) {
-        p->relay_path[i] = get_be32(buf + B + 19 + i * 4);
+        p->relay_path[i] = get_be32(buf + B + 25 + i * 4);
     }
     return ESP_OK;
 }
@@ -168,7 +172,7 @@ esp_err_t bramble_rreq_deserialize(bramble_rreq_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
-/* RREP (30 bytes) */
+/* RREP (40 bytes: was 34, +6 for seq, ws 1.3b) */
 esp_err_t bramble_rrep_serialize(const bramble_rrep_t* p, uint8_t* buf, size_t len) {
     if (len < RREP_SIZE)
         return ESP_ERR_INVALID_SIZE;
@@ -181,6 +185,7 @@ esp_err_t bramble_rrep_serialize(const bramble_rrep_t* p, uint8_t* buf, size_t l
     buf[B + 12] = p->hop_count;
     buf[B + 13] = p->route_metric;
     memcpy(buf + B + 14, p->auth_hmac, 8);
+    memcpy(buf + B + 22, p->seq, 6);
     return ESP_OK;
 }
 esp_err_t bramble_rrep_deserialize(bramble_rrep_t* p, const uint8_t* buf, size_t len) {
@@ -195,10 +200,11 @@ esp_err_t bramble_rrep_deserialize(bramble_rrep_t* p, const uint8_t* buf, size_t
     p->hop_count = buf[B + 12];
     p->route_metric = buf[B + 13];
     memcpy(p->auth_hmac, buf + B + 14, 8);
+    memcpy(p->seq, buf + B + 22, 6);
     return ESP_OK;
 }
 
-/* RERR (24 bytes) */
+/* RERR (38 bytes: was 32, +6 for seq, ws 1.3b) */
 esp_err_t bramble_rerr_serialize(const bramble_rerr_t* p, uint8_t* buf, size_t len) {
     if (len < RERR_SIZE)
         return ESP_ERR_INVALID_SIZE;
@@ -209,6 +215,7 @@ esp_err_t bramble_rerr_serialize(const bramble_rerr_t* p, uint8_t* buf, size_t l
     put_be32(buf + B + 4, p->broken_dest);
     put_be32(buf + B + 8, p->broken_next_hop);
     memcpy(buf + B + 12, p->auth_hmac, 8);
+    memcpy(buf + B + 20, p->seq, 6);
     return ESP_OK;
 }
 esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t len) {
@@ -221,10 +228,11 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t
     p->broken_dest = get_be32(buf + B + 4);
     p->broken_next_hop = get_be32(buf + B + 8);
     memcpy(p->auth_hmac, buf + B + 12, 8);
+    memcpy(p->seq, buf + B + 20, 6);
     return ESP_OK;
 }
 
-/* BEACON (40 bytes) */
+/* BEACON (46 bytes fixed + optional name; was 40, +6 for seq, ws 1.3b) */
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size_t len) {
     uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
     size_t need = BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
@@ -242,7 +250,11 @@ esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size
     buf[B + 13] = p->flags;
     put_be32(buf + B + 14, p->network_time);
     put_be16(buf + B + 18, p->time_confidence);
-    memcpy(buf + B + 20, p->auth_hmac, 16);
+    /* ws 1.3b: seq sits inside the fixed prefix, before auth_hmac, so
+     * beacon_compute_hmac's prefix hash covers it without any change
+     * there (see packet.h). */
+    memcpy(buf + B + 20, p->seq, 6);
+    memcpy(buf + B + 26, p->auth_hmac, 16);
     if (nlen > 0) {
         buf[BEACON_SIZE] = nlen;
         memcpy(buf + BEACON_SIZE + 1, p->name, nlen);
@@ -270,7 +282,10 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t* p, const uint8_t* buf, si
     p->flags = buf[B + 13];
     p->network_time = get_be32(buf + B + 14);
     p->time_confidence = get_be16(buf + B + 18);
-    memcpy(p->auth_hmac, buf + B + 20, 16);
+    /* ws 1.3b: seq reads at the same fixed offset it was written at,
+     * inside the HMAC-covered prefix, before auth_hmac. */
+    memcpy(p->seq, buf + B + 20, 6);
+    memcpy(p->auth_hmac, buf + B + 26, 16);
     /* Optional name after fixed fields */
     p->name_len = 0;
     p->name[0] = '\0';
@@ -334,10 +349,12 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
     buf[B + 8] = p->hop_count;
     buf[B + 9] = p->total_latency;
     /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
-     * before relay_path. */
+     * before relay_path. ws 1.3b: seq sits right after auth_hmac, same
+     * fixed-offset-before-relay_path invariant. */
     memcpy(buf + B + 10, p->auth_hmac, 8);
+    memcpy(buf + B + 18, p->seq, 6);
     for (uint8_t i = 0; i < p->hop_count; i++) {
-        put_be32(buf + B + 18 + i * 4, p->relay_path[i]);
+        put_be32(buf + B + 24 + i * 4, p->relay_path[i]);
     }
     return ESP_OK;
 }
@@ -354,15 +371,17 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     p->total_latency = buf[B + 9];
     /* NEW-SEC-8: read at a fixed offset, before validating/using
      * hop_count, so a verifier never has to trust the unauthenticated
-     * hop_count to locate the tag. */
+     * hop_count to locate the tag. ws 1.3b: seq reads at the same kind of
+     * fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 10, 8);
+    memcpy(p->seq, buf + B + 18, 6);
     if (p->hop_count > DELIVERY_RECEIPT_MAX_HOPS)
         return ESP_ERR_INVALID_SIZE;
     size_t needed = DELIVERY_RECEIPT_MIN_SIZE + (size_t)p->hop_count * 4;
     if (len < needed)
         return ESP_ERR_INVALID_SIZE;
     for (uint8_t i = 0; i < p->hop_count; i++) {
-        p->relay_path[i] = get_be32(buf + B + 18 + i * 4);
+        p->relay_path[i] = get_be32(buf + B + 24 + i * 4);
     }
     return ESP_OK;
 }

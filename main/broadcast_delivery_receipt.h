@@ -48,11 +48,20 @@ void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms,
 uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
                                                uint32_t receipt_budget_remaining_ms);
 
+/*
+ * seq (ws 1.3b): the 48-bit control-plane origin sequence, drawn by the
+ * CALLER via control_seq_next (mesh_task.c) and written into the struct
+ * before receipt_sign. This function lives in a host-testable file (no
+ * FreeRTOS/ESP-IDF dependency) and cannot reach control_seq_next itself,
+ * same reason rrep_build_destination in components/routing/discovery.c
+ * doesn't draw its own seq either.
+ */
 esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
                                                        uint32_t receipt_packet_id,
                                                        uint32_t original_src_addr,
                                                        uint32_t original_packet_id,
                                                        uint8_t hop_limit,
+                                                       uint64_t seq,
                                                        uint8_t *buf,
                                                        size_t buf_len,
                                                        size_t *out_len);

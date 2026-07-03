@@ -13,7 +13,7 @@
 #endif
 
 /* Protocol version */
-#define BRAMBLE_VERSION 2
+#define BRAMBLE_VERSION 3 /* was 2; ws 1.3b flag day: control-plane messages now carry a seq */
 
 /* Packet types */
 #define PKT_TYPE_ACK 0x01
@@ -56,18 +56,18 @@
 /* Sizes */
 #define HEADER_SIZE 12
 #define ACK_BASE_SIZE                                                                              \
-    31 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) + auth_hmac(8);  \
-        * was 23, +8 for auth_hmac (NEW-SEC-8, Task 3.5, staged) */
+    37 /* header(12) + src(4) + ack_pkt_id(4) + flags(1) + rssi(1) + hop_count(1) + auth_hmac(8) + \
+        * seq(6); was 31, +6 for seq (ws 1.3b control-plane freshness) */
 #define ACK_MAX_HOPS 8
-#define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 31 + 32 = 63 */
+#define ACK_MAX_SIZE (ACK_BASE_SIZE + ACK_MAX_HOPS * 4) /* 37 + 32 = 69 */
 #define ACK_SIZE ACK_BASE_SIZE                          /* backward compat for min size checks */
 #define RREQ_SIZE 30
-#define RREP_SIZE 34
-#define RERR_SIZE 32 /* was 24; +8 for auth_hmac (SEC-H1, Task 3.3, staged) */
-#define BEACON_SIZE 48
+#define RREP_SIZE 40   /* was 34; +6 for seq (ws 1.3b control-plane freshness) */
+#define RERR_SIZE 38   /* was 32; +6 for seq (ws 1.3b control-plane freshness) */
+#define BEACON_SIZE 54 /* was 48; +6 for seq (ws 1.3b control-plane freshness) */
 #define KEY_EXCHANGE_SIZE 101
-#define DELIVERY_RECEIPT_MIN_SIZE 30 /* was 22; +8 for auth_hmac (NEW-SEC-8, Task 3.5, staged) */
-#define DELIVERY_RECEIPT_MAX_SIZE 62 /* was 54; +8 for auth_hmac */
+#define DELIVERY_RECEIPT_MIN_SIZE 36 /* was 30; +6 for seq (ws 1.3b control-plane freshness) */
+#define DELIVERY_RECEIPT_MAX_SIZE 68 /* was 62; +6 for seq (ws 1.3b control-plane freshness) */
 
 #define DELIVERY_RECEIPT_MAX_HOPS 8
 
@@ -88,13 +88,21 @@ typedef struct {
     uint8_t ack_flags;
     int8_t rssi_at_dest;
     uint8_t hop_count; /* number of addresses in relay_path */
-    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h). Covers
-     * src_addr||ack_packet_id only; excludes relay_path/hop_count/
-     * hop_limit, which forward_ack mutates on every relay hop. Placed
-     * BEFORE relay_path (a fixed, hop_count-independent wire offset) so a
-     * verifier never has to trust the unauthenticated hop_count to locate
-     * the tag. */
+    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h), extended
+     * by ws 1.3b. Covers src_addr||ack_packet_id||seq; excludes
+     * relay_path/hop_count/hop_limit, which forward_ack mutates on every
+     * relay hop. Placed BEFORE relay_path (a fixed, hop_count-independent
+     * wire offset) so a verifier never has to trust the unauthenticated
+     * hop_count to locate the tag. */
     uint8_t auth_hmac[8];
+    /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
+     * destination (control_seq_next in mesh_task.c's send_ack) and
+     * carried through forward_ack unchanged, exactly like auth_hmac. Sits
+     * at the same fixed, hop_count-independent offset immediately after
+     * auth_hmac and BEFORE relay_path, for the same reason auth_hmac does:
+     * a verifier must never trust the unauthenticated hop_count to locate
+     * either. MAC-covered (ack_build_auth_buf). */
+    uint8_t seq[6];
     uint32_t relay_path[ACK_MAX_HOPS]; /* hop trail: [dest, relay1, relay2, ...] */
 } bramble_ack_t;
 
@@ -116,6 +124,11 @@ typedef struct {
     uint8_t hop_count;
     uint8_t route_metric;
     uint8_t auth_hmac[8];
+    /* ws 1.3b: 48-bit origin sequence, drawn once by the originator
+     * (control_seq_next in mesh_task.c) and carried through rrep_forward
+     * unchanged, exactly like auth_hmac. MAC-covered (rrep_build_auth_buf).
+     */
+    uint8_t seq[6];
 } bramble_rrep_t;
 
 typedef struct {
@@ -123,11 +136,18 @@ typedef struct {
     uint32_t reporter_addr;
     uint32_t broken_dest;
     uint32_t broken_next_hop;
-    /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h). Covers
-     * broken_dest||broken_next_hop only, the two origin-stable fields;
-     * excludes reporter_addr and header.packet_id, which every forwarder
-     * legitimately rewrites on re-origination (send_rerr, mesh_task.c). */
+    /* SEC-H1 (Task 3.3, STAGED, not closed: see network_key.h), extended by
+     * ws 1.3b. Covers reporter_addr||broken_dest||broken_next_hop||seq;
+     * excludes only header.packet_id, which every forwarder legitimately
+     * rewrites on re-origination (send_rerr, mesh_task.c). reporter_addr
+     * is MAC-covered because every forwarder re-signs with its OWN
+     * reporter_addr on every re-origination (see routing_auth.h). */
     uint8_t auth_hmac[8];
+    /* ws 1.3b: 48-bit origin sequence, freshly drawn by EACH hop on every
+     * re-origination (control_seq_next in mesh_task.c's send_rerr), not
+     * origin-stable like RREP's. MAC-covered; replay-keyed on
+     * (reporter_addr, seq), both authenticated. */
+    uint8_t seq[6];
 } bramble_rerr_t;
 
 #define BEACON_NAME_MAX 16
@@ -143,6 +163,16 @@ typedef struct {
     uint8_t flags;
     uint32_t network_time;
     uint16_t time_confidence;
+    /* ws 1.3b: 48-bit origin sequence. MUST stay inside the fixed prefix
+     * beacon_compute_hmac hashes (i.e. BEFORE auth_hmac): the prefix
+     * length there is BEACON_SIZE - sizeof(auth_hmac), so anything placed
+     * before auth_hmac is covered automatically, and anything placed
+     * after it (like name) needs its own explicit coverage, per Fix 4's
+     * lesson (see beacon.c). Drawn once per periodic beacon
+     * (control_seq_next in mesh_task.c's send_beacon); beacons are
+     * single-hop and never forwarded, so there is no carry-through case
+     * to preserve here (unlike RREP/ACK/receipt). */
+    uint8_t seq[6];
     uint8_t auth_hmac[16];
     /* Optional: node name (appended after fixed fields) */
     uint8_t name_len;
@@ -171,12 +201,21 @@ typedef struct {
     uint32_t orig_packet_id;
     uint8_t hop_count;
     uint8_t total_latency;
-    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h). Covers
-     * src_addr||orig_packet_id only; excludes relay_path/hop_count/
-     * hop_limit, which forward_delivery_receipt mutates on every relay
-     * hop. Placed BEFORE relay_path (a fixed, hop_count-independent wire
-     * offset), same rationale as bramble_ack_t's auth_hmac above. */
+    /* NEW-SEC-8 (Task 3.5, STAGED, not closed: see network_key.h), extended
+     * by ws 1.3b. Covers src_addr||orig_packet_id||seq; excludes
+     * relay_path/hop_count/hop_limit, which forward_delivery_receipt
+     * mutates on every relay hop. Placed BEFORE relay_path (a fixed,
+     * hop_count-independent wire offset), same rationale as
+     * bramble_ack_t's auth_hmac above. */
     uint8_t auth_hmac[8];
+    /* ws 1.3b: 48-bit origin sequence, drawn once by the originating
+     * builder (control_seq_next in mesh_task.c, via
+     * mesh_build_broadcast_delivery_receipt_packet) and carried through
+     * forward_delivery_receipt unchanged, exactly like auth_hmac. Same
+     * fixed, hop_count-independent offset rule as auth_hmac and
+     * bramble_ack_t's seq: immediately after auth_hmac, before
+     * relay_path. MAC-covered (receipt_build_auth_buf). */
+    uint8_t seq[6];
     uint32_t relay_path[DELIVERY_RECEIPT_MAX_HOPS];
 } bramble_delivery_receipt_t;
 
