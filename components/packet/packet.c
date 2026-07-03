@@ -44,11 +44,29 @@ esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, si
     return ESP_OK;
 }
 
+bool bramble_header_is_supported_version(const bramble_header_t* h) {
+    return h && h->version == BRAMBLE_VERSION;
+}
+
 esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size_t len) {
     esp_err_t r = bramble_header_serialize(h, buf, len);
     if (r != ESP_OK)
         return r;
     buf[3] = 0; /* hop_limit: relay-mutated in flight, excluded from authentication */
+    return ESP_OK;
+}
+
+esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, uint8_t* buf,
+                                 size_t len) {
+    if (len < HEADER_SIZE + 4)
+        return ESP_ERR_INVALID_SIZE;
+    esp_err_t err = bramble_header_build_aad(h, buf, HEADER_SIZE);
+    if (err != ESP_OK)
+        return err;
+    buf[HEADER_SIZE + 0] = (uint8_t)(src_addr & 0xFF);
+    buf[HEADER_SIZE + 1] = (uint8_t)((src_addr >> 8) & 0xFF);
+    buf[HEADER_SIZE + 2] = (uint8_t)((src_addr >> 16) & 0xFF);
+    buf[HEADER_SIZE + 3] = (uint8_t)((src_addr >> 24) & 0xFF);
     return ESP_OK;
 }
 
@@ -69,8 +87,11 @@ esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len
     buf[B + 8] = p->ack_flags;
     buf[B + 9] = (uint8_t)p->rssi_at_dest;
     buf[B + 10] = hops;
+    /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
+     * before relay_path. */
+    memcpy(buf + B + 11, p->auth_hmac, 8);
     for (int i = 0; i < hops; i++) {
-        put_be32(buf + B + 11 + i * 4, p->relay_path[i]);
+        put_be32(buf + B + 19 + i * 4, p->relay_path[i]);
     }
     return ESP_OK;
 }
@@ -91,11 +112,28 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
     p->ack_flags = buf[B + 8];
     p->rssi_at_dest = (int8_t)buf[B + 9];
     p->hop_count = buf[B + 10];
+    /* NEW-SEC-8: auth_hmac at a fixed offset, read BEFORE relay_path and
+     * independent of hop_count, so a verifier never has to trust the
+     * unauthenticated hop_count to locate the tag. */
+    memcpy(p->auth_hmac, buf + B + 11, 8);
     if (p->hop_count > ACK_MAX_HOPS)
         p->hop_count = ACK_MAX_HOPS;
-    /* Read as many hops as available in buffer */
-    for (int i = 0; i < p->hop_count && (size_t)(B + 11 + (i + 1) * 4) <= len; i++) {
-        p->relay_path[i] = get_be32(buf + B + 11 + i * 4);
+    /* Fix 5 (red-team panel): clamp hop_count down to the number of
+     * relay_path entries the buffer ACTUALLY carries, not just the
+     * ACK_MAX_HOPS array bound. A tampered/truncated hop_count claiming
+     * more entries than len supplies previously left relay_path[] beyond
+     * what was read holding whatever was already in *p (handle_ack in
+     * main/mesh_task.c reads relay_path[0..hop_count) straight into the
+     * onAck UI notification, so uninitialized bytes there was a real,
+     * bounded, own-UI leak). Zero the whole array first so even a future
+     * bug that iterates past the now-correct hop_count reads zero, not
+     * garbage. */
+    memset(p->relay_path, 0, sizeof(p->relay_path));
+    size_t avail_hops = (len > (size_t)(B + 19)) ? (len - (B + 19)) / 4 : 0;
+    if ((size_t)p->hop_count > avail_hops)
+        p->hop_count = (uint8_t)avail_hops;
+    for (int i = 0; i < p->hop_count; i++) {
+        p->relay_path[i] = get_be32(buf + B + 19 + i * 4);
     }
     return ESP_OK;
 }
@@ -170,6 +208,7 @@ esp_err_t bramble_rerr_serialize(const bramble_rerr_t* p, uint8_t* buf, size_t l
     put_be32(buf + B, p->reporter_addr);
     put_be32(buf + B + 4, p->broken_dest);
     put_be32(buf + B + 8, p->broken_next_hop);
+    memcpy(buf + B + 12, p->auth_hmac, 8);
     return ESP_OK;
 }
 esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t len) {
@@ -181,6 +220,7 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t
     p->reporter_addr = get_be32(buf + B);
     p->broken_dest = get_be32(buf + B + 4);
     p->broken_next_hop = get_be32(buf + B + 8);
+    memcpy(p->auth_hmac, buf + B + 12, 8);
     return ESP_OK;
 }
 
@@ -293,8 +333,11 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
     put_be32(buf + B + 4, p->orig_packet_id);
     buf[B + 8] = p->hop_count;
     buf[B + 9] = p->total_latency;
+    /* NEW-SEC-8: auth_hmac at a fixed, hop_count-independent offset,
+     * before relay_path. */
+    memcpy(buf + B + 10, p->auth_hmac, 8);
     for (uint8_t i = 0; i < p->hop_count; i++) {
-        put_be32(buf + B + 10 + i * 4, p->relay_path[i]);
+        put_be32(buf + B + 18 + i * 4, p->relay_path[i]);
     }
     return ESP_OK;
 }
@@ -309,13 +352,17 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     p->orig_packet_id = get_be32(buf + B + 4);
     p->hop_count = buf[B + 8];
     p->total_latency = buf[B + 9];
+    /* NEW-SEC-8: read at a fixed offset, before validating/using
+     * hop_count, so a verifier never has to trust the unauthenticated
+     * hop_count to locate the tag. */
+    memcpy(p->auth_hmac, buf + B + 10, 8);
     if (p->hop_count > DELIVERY_RECEIPT_MAX_HOPS)
         return ESP_ERR_INVALID_SIZE;
     size_t needed = DELIVERY_RECEIPT_MIN_SIZE + (size_t)p->hop_count * 4;
     if (len < needed)
         return ESP_ERR_INVALID_SIZE;
     for (uint8_t i = 0; i < p->hop_count; i++) {
-        p->relay_path[i] = get_be32(buf + B + 10 + i * 4);
+        p->relay_path[i] = get_be32(buf + B + 18 + i * 4);
     }
     return ESP_OK;
 }

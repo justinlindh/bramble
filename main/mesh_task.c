@@ -18,6 +18,12 @@
 #include "channel_key.h"
 #include "channel_msg.h"
 #include "channel_storage.h"
+#include "nonce_counter.h"
+#include "replay_window.h"
+#include "replay_deferred.h"
+#include "dm_session.h"
+#include "network_key.h"
+#include "routing_auth.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -68,6 +74,8 @@ static const char *TAG = "mesh";
 /* Forward declarations */
 static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx);
+static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t *data,
+                               size_t data_len);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -97,12 +105,38 @@ static bramble_identity_t *s_identity;
 static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for beacon HMAC */
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
+static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
+static replay_deferred_t   s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
  * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
  * this same limiter into the forward path. */
 static rreq_rate_limiter_t s_rreq_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
+/* Guards nonce_counter_next only: send_data_packet is reachable from the
+ * mesh task, the RPC/httpd task, the LVGL UI task, and the CLI task, all
+ * without a lock of their own, and the nonce counter itself has no internal
+ * locking (kept host-testable, no FreeRTOS dependency). A mutex, not a
+ * critical section, because a boundary flush may block on NVS I/O. */
+static SemaphoreHandle_t   s_nonce_mutex;
+/*
+ * DM session table (SEC-C2, Task 1.4). Guards every dm_lookup/dm_alloc,
+ * every session state transition, and every read of session_key for
+ * dm_session_encrypt/decrypt. Reachable from the mesh RX task
+ * (handle_ke_envelope, handle_data's session-decrypt path),
+ * handshake_worker_task (the DH compute + state update), and the TX-side
+ * callers of mesh_send_message/mesh_send_channel (RPC/httpd, LVGL UI, CLI
+ * tasks), same multi-task shape as s_nonce_mutex.
+ *
+ * Locking discipline: s_dm_mutex is always the OUTER lock relative to
+ * s_nonce_mutex. Anything that needs both (send_dm_packet, called with
+ * s_dm_mutex already held, takes s_nonce_mutex internally exactly like
+ * send_data_packet does) takes s_dm_mutex first and releases s_nonce_mutex
+ * before releasing s_dm_mutex. Nothing ever takes s_nonce_mutex first and
+ * then reaches for s_dm_mutex, so the two can never deadlock on each other.
+ */
+static SemaphoreHandle_t   s_dm_mutex;
+static dm_table_t          s_dm_table;
 static QueueHandle_t       s_rx_queue;
 static QueueHandle_t       s_mesh_event_queue;
 static mesh_shared_state_t s_shared;
@@ -143,16 +177,84 @@ static rreq_dedup_t               s_rreq_dedup;
 static reverse_route_table_t      s_reverse_routes;
 static pending_discovery_table_t  s_pending_disc;
 
-/* Queued messages waiting for route discovery */
+/* Queued messages waiting for route discovery (QUEUE_REASON_ROUTE) or for a
+ * DM session to establish (QUEUE_REASON_SESSION, Task 1.4 / SEC-C2 B5). Both
+ * reasons share this one array; `reason` disambiguates so the reaper, the
+ * route-established flush, and the session-established flush each only
+ * touch entries meant for them. */
 #define MAX_QUEUED_MSGS 8
+#define QUEUE_REASON_ROUTE 0
+#define QUEUE_REASON_SESSION 1
+/* B5: covers the full handshake retransmit budget (base 4s, x2 backoff,
+ * cap 64s, 5 attempts, worst case ~124s) plus margin, so a slow-SF path
+ * cannot have its awaiting-session message reaped before the handshake can
+ * possibly complete. Route-awaiting entries keep the pre-existing flat
+ * 60000ms below. */
+#define DM_QUEUE_TTL_MS 150000
 typedef struct {
     uint32_t dest_addr;
     uint8_t  data[BRAMBLE_MAX_PACKET_SIZE];
     size_t   len;
     uint32_t timestamp;
     bool     used;
+    uint8_t  reason;     /* QUEUE_REASON_ROUTE or QUEUE_REASON_SESSION */
+    uint32_t pkt_id;     /* tracking id surfaced to the caller/UI; only meaningful for QUEUE_REASON_SESSION */
+    int16_t  channel_idx;/* only meaningful for QUEUE_REASON_SESSION (msg_store bookkeeping on flush) */
 } queued_msg_t;
 static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
+
+/*
+ * Handshake dedup (SEC-C2 item 5): a replayed INIT (same src_addr, same
+ * ephemeral pubkey, same ke_epoch) must not re-run the quad-DH state
+ * machine or re-emit a RESP, or an attacker can loop expensive handshake
+ * work and RESP retransmission for free. Checked (and recorded) in
+ * handle_ke_envelope BEFORE the work item is posted to the worker, so a
+ * replay never even reaches the M7 offload path, let alone the DH itself.
+ * Small fixed ring, LRU by seen_ms; not a security boundary in itself (it
+ * only suppresses redundant work), so no cap-based DoS concern the way
+ * DM_MAX_HANDSHAKING is.
+ */
+#define DM_HS_DEDUP_MAX 16
+typedef struct {
+    uint32_t src_addr;
+    uint32_t eph_pub_hash;
+    uint16_t ke_epoch;
+    uint32_t seen_ms;
+    bool     used;
+} dm_hs_dedup_entry_t;
+static dm_hs_dedup_entry_t s_hs_dedup[DM_HS_DEDUP_MAX];
+
+/*
+ * Pending-initiator ephemeral keys (Task 1.4). dm_session_t (Task 1.2,
+ * already locked in and unit-tested) has no field for "my own in-flight
+ * handshake ephemeral": it stores only the FINAL session key. To verify a
+ * RESP via dm_verify_resp, the initiator needs the ephemeral keypair it
+ * generated when it sent the matching INIT, so mesh_task.c (the
+ * integration layer) owns this small side table instead of growing
+ * dm_session_t. Sized to DM_MAX_HANDSHAKING since only handshaking peers
+ * need one.
+ */
+typedef struct {
+    uint32_t peer_addr;
+    uint8_t  eph_priv[32];
+    uint8_t  eph_pub[32];
+    bool     used;
+} dm_pending_eph_t;
+static dm_pending_eph_t s_pending_eph[DM_MAX_HANDSHAKING];
+
+/* M7 offload (RFC compute-placement): the four X25519 scalar multiplications
+ * a handshake message requires must not run inline on the mesh RX loop.
+ * handle_ke_envelope does only cheap parsing/validation and posts a work
+ * item here; handshake_worker_task drains it on a low-priority task. */
+#define HANDSHAKE_WORK_QUEUE_LEN 8
+#define DM_HANDSHAKE_WORKER_STACK 4096
+#define DM_HANDSHAKE_WORKER_PRIORITY (MESH_TASK_PRIORITY - 2)
+typedef struct {
+    uint32_t              src_addr;
+    int                   channel_idx;
+    bramble_key_exchange_t msg;
+} dm_handshake_work_item_t;
+static QueueHandle_t s_handshake_work_q;
 
 /* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
  * random 50-300ms so same-hop relays do not key up at the same instant; the
@@ -253,7 +355,6 @@ static void mesh_probe_reply_timer_cb(void *arg);
 static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t address);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
-extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
@@ -413,36 +514,137 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
         tier = LOCATION_TIER_COARSE;
     }
 
-    uint8_t payload[LOCATION_FULL_SIZE];
-    int payload_len = location_serialize_for_tier(pos, tier, payload, sizeof(payload));
-    if (payload_len <= 0) {
+    /* SEC-C1: tier moves into the encrypted plaintext (byte
+     * LOCATION_INNER_TIER_OFFSET), padded to L_LOC_INNER so every tier
+     * (PRESENCE/COARSE/FULL) produces an identical ciphertext length; an
+     * observer cannot infer the tier from packet size. Zeroed first so
+     * unused padding is deterministic, not stack garbage. */
+    uint8_t inner[L_LOC_INNER] = {0};
+    inner[LOCATION_INNER_TIER_OFFSET] = tier;
+    if (location_serialize_for_tier(pos, tier, inner + 1, LOCATION_FULL_SIZE) <= 0) {
         return 0;
     }
 
+    uint32_t pkt_id = next_packet_id();
     uint8_t pkt[BRAMBLE_MAX_PACKET_SIZE] = {0};
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+
+    if (dest_addr != 0xFFFFFFFFu) {
+        /* Directed share (lcr_<addr>): only ever under the recipient's
+         * session key, never the channel key (would defeat per-contact
+         * confidentiality, the SEC-C1 point). No ACTIVE session means the
+         * send fails rather than downgrading to the channel key: location
+         * is real-time presence (RFC M6, never mailbox-deferred), so
+         * queuing this to await a handshake the way DM chat does (Task
+         * 1.4) would only deliver a stale position later, not a
+         * meaningful fix. */
+        bramble_header_t header = {
+            .version = BRAMBLE_VERSION,
+            .type = PKT_TYPE_LOCATION,
+            .flags = FLAG_ENCRYPT, /* no FLAG_CHANNEL: session-keyed (SEC-C1) */
+            .hop_limit = 3,
+            .dest_addr = dest_addr,
+            .packet_id = pkt_id,
+        };
+        bramble_header_serialize(&header, pkt, HEADER_SIZE);
+
+        /* dm_session_encrypt has no framing of its own, so pad out to
+         * L_LOC_INNER + CHANNEL_MSG_OVERHEAD bytes: the extra padding
+         * makes up for the channel path's built-in overhead below, so
+         * both paths land on the exact same total ciphertext length
+         * (M11). */
+        uint8_t session_inner[L_LOC_INNER + CHANNEL_MSG_OVERHEAD] = {0};
+        memcpy(session_inner, inner, L_LOC_INNER);
+        uint8_t ciphertext[sizeof(session_inner)];
+
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+        int enc_ret = -1;
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+            int nonce_ret = nonce_counter_next(nonce);
+            xSemaphoreGive(s_nonce_mutex);
+            if (nonce_ret == 0) {
+                enc_ret = dm_session_encrypt(sess, &header, s_identity->address, session_inner,
+                                             sizeof(session_inner), nonce, ciphertext, tag);
+                if (enc_ret == 0)
+                    sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+            }
+        }
+        xSemaphoreGive(s_dm_mutex);
+
+        if (enc_ret != 0) {
+            ESP_LOGW(TAG, "No active session for directed location share to %08" PRIX32, dest_addr);
+            return 0;
+        }
+
+        memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+        memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
+        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
+        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+              BRAMBLE_TAG_SIZE);
+        size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+
+        int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
+        if (rc == TX_GATE_OK) {
+            ESP_LOGI(TAG, "TX location (session) to %08" PRIX32 " tier=%u len=%u",
+                     dest_addr, tier, (unsigned)wire_len);
+            return pkt_id;
+        }
+        return 0;
+    }
+
+    /* Channel-shared (broadcast): channel_msg_encrypt under the default
+     * channel key. */
+    if (s_num_channels == 0) {
+        return 0;
+    }
+    int channel_idx = s_default_channel_idx;
+    if (channel_idx < 0 || channel_idx >= s_num_channels) {
+        channel_idx = 0;
+    }
+
     bramble_header_t header = {
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_LOCATION,
-        .flags = (uint8_t)((tier & 0x03) << FLAG_TIER_SHIFT),
+        .flags = FLAG_ENCRYPT | FLAG_CHANNEL, /* no tier bits: tier lives in the ciphertext now */
         .hop_limit = 3,
         .dest_addr = dest_addr,
-        .packet_id = next_packet_id(),
+        .packet_id = pkt_id,
     };
-
     bramble_header_serialize(&header, pkt, HEADER_SIZE);
-    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(pkt + HEADER_SIZE + 4, payload, (size_t)payload_len);
 
-    size_t wire_len = HEADER_SIZE + 4 + (size_t)payload_len;
-    int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
-    if (rc == 0) {
-        ESP_LOGI(TAG, "TX location packet to %08" PRIX32 " tier=%u len=%u",
-                 header.dest_addr,
-                 tier,
-                 (unsigned)wire_len);
-        return header.packet_id;
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&header, s_identity->address, aad, sizeof(aad));
+
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    if (nonce_ret != 0) {
+        ESP_LOGE(TAG, "Nonce counter unavailable, dropping location send: %d", nonce_ret);
+        return 0;
     }
 
+    uint8_t ciphertext[CHANNEL_MSG_OVERHEAD + L_LOC_INNER];
+    if (channel_msg_encrypt(&s_channels[channel_idx], s_identity->address, APP_TYPE_LOCATION, 0,
+                            inner, L_LOC_INNER, aad, sizeof(aad), nonce, ciphertext, tag) != 0) {
+        ESP_LOGE(TAG, "Channel encrypt failed for location send");
+        return 0;
+    }
+
+    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
+    memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
+    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag, BRAMBLE_TAG_SIZE);
+
+    size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+    int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
+    if (rc == TX_GATE_OK) {
+        ESP_LOGI(TAG, "TX location (channel) to %08" PRIX32 " tier=%u len=%u",
+                 dest_addr, tier, (unsigned)wire_len);
+        return pkt_id;
+    }
     return 0;
 }
 
@@ -561,14 +763,35 @@ static void mesh_persist_peer_location(uint32_t peer_addr,
     nvs_close(nvs);
 }
 
-static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
-    if (len < HEADER_SIZE + 4 + LOCATION_PRESENCE_SIZE) {
-        ESP_LOGW(TAG, "Location packet too short: %u", len);
-        return;
+/*
+ * SEC-C1 RX channel-path glue (Task 2.2): trial-decrypts against the known
+ * channels, then hands the resulting plaintext to location_parse_inner
+ * (decrypt-mechanism-agnostic tier + position parsing, exported by the
+ * location component; see its own comment for why it stays dependency-free
+ * rather than owning this glue itself). This function is intentionally
+ * thin: the only logic worth testing (tier extraction, tier-appropriate
+ * position parsing) lives in location_parse_inner, already covered by
+ * test_location_crypto.c.
+ */
+static int location_rx_decode_channel(const uint8_t *nonce, const uint8_t *ciphertext,
+                                      size_t ct_len, const uint8_t *tag, const uint8_t *aad,
+                                      size_t aad_len, uint8_t *tier_out,
+                                      bramble_position_t *pos_out, int *channel_index_out) {
+    uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
+    channel_msg_info_t info;
+    if (channel_msg_decrypt(s_channels, s_num_channels, nonce, ciphertext, ct_len, tag, aad,
+                            aad_len, plaintext, &info, now_ms()) != 0) {
+        return -1;
     }
+    *channel_index_out = info.channel_index;
+    return location_parse_inner(info.data, info.data_len, tier_out, pos_out);
+}
 
-    bramble_header_t header;
-    if (bramble_header_deserialize(&header, data, len) != ESP_OK) {
+static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's
+     * header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16). */
+    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+        ESP_LOGW(TAG, "Location packet too short: %u", len);
         return;
     }
 
@@ -578,14 +801,82 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
         return;
     }
 
-    uint8_t tier = (uint8_t)((header.flags >> FLAG_TIER_SHIFT) & 0x03);
-    const uint8_t *payload = data + HEADER_SIZE + 4;
-    size_t payload_len = len - HEADER_SIZE - 4;
-
-    bramble_position_t pos = {0};
-    if (location_deserialize_for_tier(payload, payload_len, tier, &pos) <= 0) {
-        ESP_LOGW(TAG, "Failed to parse location payload from %08" PRIX32 " tier=%u", src_addr, tier);
+    bramble_header_t header;
+    if (bramble_header_deserialize(&header, data, len) != ESP_OK) {
         return;
+    }
+
+    const uint8_t *nonce = data + HEADER_SIZE + 4;
+    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    const uint8_t *ciphertext = nonce + BRAMBLE_NONCE_SIZE;
+    const uint8_t *tag = ciphertext + ct_len;
+
+    if (ct_len > BRAMBLE_MAX_PACKET_SIZE) {
+        ESP_LOGW(TAG, "Location ciphertext too large: %u", (unsigned)ct_len);
+        return;
+    }
+
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&header, src_addr, aad, sizeof(aad));
+
+    /* Discriminator mirrors handle_data (SEC-C1/SEC-C2 share the same
+     * mechanism): FLAG_CHANNEL set means channel-shared, trial-decrypt
+     * against known channels; absent means a directed share, look up the
+     * ACTIVE session for src_addr under s_dm_mutex. */
+    uint8_t tier = 0;
+    bramble_position_t pos = {0};
+    int ok = -1;
+    int is_channel_message = (header.flags & FLAG_CHANNEL) ? 1 : 0;
+    int channel_index = 0;
+
+    if (is_channel_message) {
+        ok = location_rx_decode_channel(nonce, ciphertext, ct_len, tag, aad, sizeof(aad), &tier,
+                                        &pos, &channel_index);
+    } else {
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            /* Canonical session-path size (Task 2.1, M11): the encoder
+             * always pads to exactly L_LOC_INNER + CHANNEL_MSG_OVERHEAD
+             * bytes to match the channel path's total ciphertext length.
+             * Reject anything else outright rather than risk decrypting
+             * into an undersized buffer. */
+            uint8_t plaintext[L_LOC_INNER + CHANNEL_MSG_OVERHEAD];
+            if (ct_len == sizeof(plaintext) &&
+                dm_session_decrypt(sess, &header, src_addr, nonce, ciphertext, ct_len, tag,
+                                   plaintext) == 0) {
+                ok = location_parse_inner(plaintext, sizeof(plaintext), &tier, &pos);
+                sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+            }
+        }
+        xSemaphoreGive(s_dm_mutex);
+    }
+
+    if (ok != 0) {
+        ESP_LOGW(TAG, "Failed to decrypt/parse location from %08" PRIX32, src_addr);
+        return;
+    }
+
+    /* SEC-M1/M6: the SAME node-global replay window DATA uses (Task 0.5):
+     * one nonce counter and one replay window per sender, shared across
+     * every packet type that sender's node encrypts, since a counter is
+     * only ever used once regardless of what it authenticates. Never
+     * consults the deferred cache (that is chat-only, Task 0.6): location
+     * is real-time presence, so both REPLAY_REJECT_DUP and
+     * REPLAY_BELOW_WINDOW are dropped identically, never accepted late.
+     * Fix 2 (red-team panel): skip this SHARED window entirely for a
+     * public-channel decrypt, whose src_addr is a free-to-forge claim
+     * (BRAMBLE_PUBLIC_CHANNEL_PSK is public), same reasoning and same
+     * helper as handle_data. Public-channel location updates rely on the
+     * pre-existing packet_id/type dedup for loop suppression instead. */
+    uint64_t rx_counter = nonce_counter_extract(nonce);
+    if (channel_source_is_replay_trustworthy(is_channel_message, channel_index)) {
+        int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
+        if (rp != REPLAY_ACCEPT) {
+            ESP_LOGD(TAG, "Location replay drop from %08" PRIX32 " ctr=%llu (rp=%d)", src_addr,
+                     (unsigned long long)rx_counter, rp);
+            return;
+        }
     }
 
     uint32_t t = now_ms();
@@ -1196,6 +1487,10 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         .hop_count = 1,
         .relay_path = { s_identity->address },  /* destination is first hop */
     };
+    /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
+     * hop_count/hop_limit is set (those are excluded from the MAC and
+     * legitimately change per relay hop). */
+    ack_sign(&ack);
 
     uint8_t buf[64];
     esp_err_t err = bramble_ack_serialize(&ack, buf, sizeof(buf));
@@ -1249,6 +1544,15 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     esp_err_t err = bramble_ack_deserialize(&ack, data, len);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "ACK deserialize failed");
+        return;
+    }
+
+    /* NEW-SEC-8 (STAGED, see network_key.h): verify before ANY effect of
+     * this ACK, on both branches below. A forged ACK must not cancel
+     * retransmission, mark a message delivered, or be forwarded. */
+    if (!ack_verify(&ack)) {
+        ESP_LOGW(TAG, "ACK auth failed pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
+                 ack.src_addr);
         return;
     }
 
@@ -1351,6 +1655,14 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
         return;
     }
 
+    /* NEW-SEC-8 (STAGED, see network_key.h): verify before acting, on
+     * both branches below. */
+    if (!receipt_verify(&receipt)) {
+        ESP_LOGW(TAG, "Delivery receipt auth failed pkt=%08" PRIX32 " src=%08" PRIX32,
+                 receipt.orig_packet_id, receipt.src_addr);
+        return;
+    }
+
     if (receipt.header.dest_addr != s_identity->address) {
         forward_delivery_receipt(&receipt);
         return;
@@ -1378,7 +1690,6 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     const uint8_t *ciphertext = nonce + BRAMBLE_NONCE_SIZE;
     const uint8_t *tag = ciphertext + ct_len;
 
-    /* Try to decrypt with known channels */
     channel_msg_info_t info;
     if (ct_len > BRAMBLE_MAX_PACKET_SIZE) {
         ESP_LOGW(TAG, "Data too large: %u", (unsigned)ct_len);
@@ -1391,18 +1702,130 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
-    /* AAD excludes hop_limit (relays decrement it in flight); must match the
-     * masked AAD the originator built in send_data_packet. */
-    uint8_t aad[HEADER_SIZE];
-    bramble_header_build_aad(&rx_hdr, aad, sizeof(aad));
+    /* AAD excludes hop_limit (relays decrement it in flight) but binds
+     * src_addr (SEC-M2 residual); must match the masked, src-bound AAD the
+     * originator built in send_data_packet/send_dm_packet. */
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&rx_hdr, src_addr, aad, sizeof(aad));
 
     uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE] = {0};
-    int ret = channel_msg_decrypt(s_channels, s_num_channels,
-                                  nonce, ciphertext, ct_len, tag,
-                                  aad, HEADER_SIZE,
-                                  plaintext, &info, now_ms());
-    if (ret != 0) {
-        ESP_LOGW(TAG, "Failed to decrypt data from %08" PRIX32, src_addr);
+
+    /* SEC-C2: FLAG_CHANNEL selects the decrypt mechanism, not just a
+     * bookkeeping bit. Set: trial-decrypt under known channel keys (this is
+     * also the handshake TRANSPORT, app_type APP_TYPE_KE, since no session
+     * exists yet when handshaking). Absent: this is a unicast DM payload,
+     * decrypted under the ACTIVE session key for src_addr; there is no
+     * channel-key fallback for this path, matching send_dm_packet never
+     * setting FLAG_CHANNEL on the way out. */
+    int is_channel_message = (rx_hdr.flags & FLAG_CHANNEL) ? 1 : 0;
+    if (is_channel_message) {
+        int ret = channel_msg_decrypt(s_channels, s_num_channels,
+                                      nonce, ciphertext, ct_len, tag,
+                                      aad, HEADER_SIZE + 4,
+                                      plaintext, &info, now_ms());
+        if (ret != 0) {
+            ESP_LOGW(TAG, "Failed to decrypt channel data from %08" PRIX32, src_addr);
+            return;
+        }
+    } else {
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+        int ok = 0;
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            ok = (dm_session_decrypt(sess, &rx_hdr, src_addr, nonce, ciphertext, ct_len, tag,
+                                     plaintext) == 0);
+            if (ok)
+                sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+        }
+        xSemaphoreGive(s_dm_mutex);
+        if (!ok) {
+            ESP_LOGW(TAG, "Failed session decrypt from %08" PRIX32, src_addr);
+            return;
+        }
+        /* Session payloads are always chat in this wiring: there is no
+         * session-encrypted handshake message (handshakes always ride the
+         * channel key, since no session exists yet by definition), and
+         * session sends never fragment (mesh_send_dm rejects payloads over
+         * FRAG_MAX_PLAINTEXT rather than fragmenting under a session key).
+         * channel_id/channel_index are left at their zero-value (not a
+         * channel message); the RPC onMessage notification below already
+         * renders channel_id==0 as "channel": -1. */
+        memset(&info, 0, sizeof(info));
+        info.app_type = APP_TYPE_CHAT;
+        info.src_addr = src_addr;
+        info.data = plaintext;
+        info.data_len = ct_len;
+    }
+
+    /* SEC-M1: authenticated replay protection, keyed on the nonce counter
+     * (Task 0.4) rather than the cleartext packet_id, so it cannot be
+     * spoofed by an attacker who doesn't hold the relevant key. Runs only
+     * after a successful decrypt, and only when src_addr is trustworthy
+     * (Fix 2, red-team panel): BRAMBLE_PUBLIC_CHANNEL_PSK is public, so a
+     * public-channel decrypt's src_addr is a free-to-forge claim, not
+     * "bound to this sender's identity". Feeding it into the SHARED
+     * per-sender window would let an attacker claim src_addr=victim and
+     * slam the victim's high-water mark, dropping the victim's own later,
+     * genuine packets as BELOW_WINDOW (a mesh-wide DoS). Public-channel
+     * traffic relies on the pre-existing packet_id/type dedup for loop
+     * suppression instead; a secret channel's or a session's src_addr is
+     * still authenticated (channel membership or a session key) and still
+     * goes through the window as before. */
+    uint64_t rx_counter = nonce_counter_extract(nonce);
+    if (channel_source_is_replay_trustworthy(is_channel_message, info.channel_index)) {
+        int rp = replay_check_and_add(&s_replay, src_addr, rx_counter, now_ms());
+        if (rp == REPLAY_REJECT_DUP) {
+            ESP_LOGD(TAG, "Replay drop from %08" PRIX32 " ctr=%llu", src_addr,
+                     (unsigned long long)rx_counter);
+            return;
+        }
+        /* Fix 3 (red-team panel): a CHAT counter accepted here via tier-1
+         * must also be recorded in the tier-2 deferred cache. Without
+         * this, a counter that later ages out of the 64-entry tier-1
+         * window is in NEITHER dedup structure: a captured, genuinely
+         * delivered chat packet replays successfully once the window has
+         * moved past it (tier-1 reads BELOW_WINDOW, and a tier-2 cache
+         * that was never told about the original acceptance treats the
+         * replay as a fresh, legitimate deferred delivery). Only chat
+         * carries the authenticated sent_at that replay_deferred_accept
+         * needs, and it is the only app type ever deferred, so there is
+         * nothing to record for any other app_type. */
+        if (rp == REPLAY_ACCEPT && info.app_type == APP_TYPE_CHAT) {
+            uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
+            replay_deferred_mark_seen(&s_deferred, src_addr, rx_counter, now_s);
+        }
+        /* Tier-2 deferred acceptance (Task 0.6): a chat message can
+         * legitimately arrive outside the tier-1 sliding window (long
+         * store-and-forward delay), but only chat carries an authenticated
+         * sent_at to bound how old is too old. now_s uses network time
+         * (degrading to local uptime pre-sync) so it is on the same clock
+         * basis as the sender's sent_at; timesync_is_confident gates this
+         * fail-closed under untrusted time (NEW-SEC-4). */
+        if (rp == REPLAY_BELOW_WINDOW) {
+            if (info.app_type != APP_TYPE_CHAT) {
+                return;
+            }
+            uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
+            int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at,
+                                            now_s, timesync_is_confident(&s_timesync));
+            if (dp != REPLAY_ACCEPT) {
+                ESP_LOGD(TAG, "Deferred replay drop from %08" PRIX32 " ctr=%llu sent_at=%" PRIu32,
+                         src_addr, (unsigned long long)rx_counter, info.sent_at);
+                return;
+            }
+        }
+    }
+
+    /* APP_TYPE_KE (handshake-in-DATA, SEC-C2): parse+dispatch and return,
+     * never reaching the chat/fragment logic below. Runs after tier-1
+     * replay above, so a replayed handshake nonce is still caught by the
+     * same authenticated window every other DATA type uses; the
+     * handshake-level dedup (hs_dedup_check_and_record, keyed on the
+     * message content rather than the nonce) is a separate check inside
+     * handle_ke_envelope. Only reachable via the FLAG_CHANNEL branch above
+     * (a session payload is always built with app_type == APP_TYPE_CHAT). */
+    if (info.app_type == APP_TYPE_KE) {
+        handle_ke_envelope(src_addr, info.channel_index, info.data, info.data_len);
         return;
     }
 
@@ -1665,10 +2088,15 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
         .broken_dest = broken_dest,
         .broken_next_hop = broken_next_hop,
     };
+    /* SEC-H1 (STAGED): re-signed on every call, including re-origination,
+     * since this function builds a fresh struct each time (fresh
+     * reporter_addr/packet_id) but broken_dest/broken_next_hop are the
+     * caller-supplied, origin-stable values the MAC covers. */
+    rerr_sign(&rerr);
     uint8_t buf[64];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
-        if (mesh_tx(buf, HEADER_SIZE + 12, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+        if (mesh_tx(buf, HEADER_SIZE + 20, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RERR denied by airtime budget");
         }
     }
@@ -1725,8 +2153,13 @@ static void process_rreq_forward_queue(uint32_t t) {
 /* ── End jittered RREQ forwarding ──────────────────────────────── */
 
 static void flush_queued_messages(uint32_t dest_addr) {
+    /* Route-established trigger only. QUEUE_REASON_SESSION entries are
+     * flushed separately by flush_session_queue on session establishment;
+     * touching them here would re-run mesh_send_message's route+session
+     * decision and double-queue them under a fresh slot. */
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-        if (s_queued_msgs[i].used && s_queued_msgs[i].dest_addr == dest_addr) {
+        if (s_queued_msgs[i].used && s_queued_msgs[i].reason == QUEUE_REASON_ROUTE &&
+            s_queued_msgs[i].dest_addr == dest_addr) {
             ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)",
                      dest_addr, (unsigned)s_queued_msgs[i].len);
             mesh_send_message(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len);
@@ -1792,6 +2225,16 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* SEC-H1 (STAGED, see network_key.h): reject before installing any
+     * route from this RREP. Covers query_id/src_addr/hop_count/route_metric
+     * only, so a legitimate relay's next_hop/header.dest_addr rewrite
+     * (rrep_forward) still verifies. */
+    if (!rrep_verify(&rrep)) {
+        ESP_LOGW(TAG, "RREP auth failed query=%08" PRIX32 " src=%08" PRIX32, rrep.query_id,
+                 rrep.src_addr);
+        return;
+    }
+
     ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
              rrep.query_id, rrep.src_addr, rrep.hop_count);
 
@@ -1848,6 +2291,15 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
     bramble_rerr_t rerr;
     if (bramble_rerr_deserialize(&rerr, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid RERR packet");
+        return;
+    }
+
+    /* SEC-H1 (STAGED, see network_key.h): verify before ANY route
+     * teardown. An unauthenticated RERR must never break a route: reject
+     * before route_lookup/route_marked_broken/fastfail run at all. */
+    if (!rerr_verify(&rerr)) {
+        ESP_LOGW(TAG, "RERR auth failed dest=%08" PRIX32 " broken_hop=%08" PRIX32,
+                 rerr.broken_dest, rerr.broken_next_hop);
         return;
     }
 
@@ -2000,6 +2452,18 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
         return;
     }
 
+    if (!bramble_header_is_supported_version(&header)) {
+        /* Version flag day (ground rule 10): un-upgraded nodes are off-network.
+         * Rate-limited so a half-updated fleet is diagnosable, not silent. */
+        static uint32_t s_last_ver_log_ms = 0;
+        uint32_t vnow = now_ms();
+        if (vnow - s_last_ver_log_ms > 60000) {
+            ESP_LOGW(TAG, "Dropping wire v%u packet (need v%u)", header.version, BRAMBLE_VERSION);
+            s_last_ver_log_ms = vnow;
+        }
+        return;
+    }
+
     /* Record raw RX event */
     traffic_debug_record_rx(&s_traffic_debug, header.type, pkt->len, pkt->rssi);
 
@@ -2007,6 +2471,10 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
      * - include packet type to avoid PROBE vs PROBE_ACK collisions
      * - for PROBE_ACK, include responder addr so multiple peers can respond
      *   to the same probe_id without being collapsed as duplicates.
+     *
+     * SEC-M1: authenticated replay of DATA/LOCATION is enforced post-decrypt
+     * via replay_check_and_add on the nonce counter; this dedup only
+     * suppresses relay loops of unauthenticated control packets.
      */
     uint32_t dedup_key = header.packet_id ^ (((uint32_t)header.type) << 24);
     if (header.type == PKT_TYPE_PROBE_ACK && pkt->len >= HEADER_SIZE + 4) {
@@ -2354,11 +2822,28 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         s_shared.neighbors = s_neighbors;
         xSemaphoreGive(s_state_mutex);
 
-        /* Expire queued messages older than 60s */
+        /* Expire queued messages. Route-awaiting entries keep the original
+         * flat 60s/log-only behavior (route discovery timing, unrelated to
+         * the handshake budget). Session-awaiting entries use DM_QUEUE_TTL_MS
+         * (B5: covers the full handshake retransmit budget) and emit
+         * onAck status=failed reason="no_secure_session" before freeing, so
+         * the UI always sees a clear failure rather than a silent drop. The
+         * dm_alloc'd HANDSHAKING slot itself is left alone here: it is
+         * reclaimed by dm_alloc's own state-priority LRU eviction the next
+         * time a fresh handshake slot is needed, never left occupying an
+         * ACTIVE session's protection. */
         for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-            if (s_queued_msgs[i].used && (t - s_queued_msgs[i].timestamp) > 60000) {
-                ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
-                         s_queued_msgs[i].dest_addr);
+            if (!s_queued_msgs[i].used) continue;
+            uint32_t ttl = (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) ? DM_QUEUE_TTL_MS : 60000;
+            if ((t - s_queued_msgs[i].timestamp) > ttl) {
+                if (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) {
+                    ESP_LOGW(TAG, "Queued DM for %08" PRIX32 " expired (no secure session)",
+                             s_queued_msgs[i].dest_addr);
+                    rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "no_secure_session", NULL);
+                } else {
+                    ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
+                             s_queued_msgs[i].dest_addr);
+                }
                 s_queued_msgs[i].used = false;
             }
         }
@@ -2377,9 +2862,12 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                 if (pd->attempts >= MAX_RREQ_ATTEMPTS) {
                     ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
                              pd->dest_addr, pd->attempts);
-                    /* Clear queued messages for this dest */
+                    /* Clear queued messages for this dest. Route-awaiting
+                     * only: a QUEUE_REASON_SESSION entry's fate is decided
+                     * by the handshake, not by route discovery, and has its
+                     * own TTL/onAck-failed reaper above. */
                     for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
-                        if (s_queued_msgs[j].used &&
+                        if (s_queued_msgs[j].used && s_queued_msgs[j].reason == QUEUE_REASON_ROUTE &&
                             s_queued_msgs[j].dest_addr == pd->dest_addr) {
                             s_queued_msgs[j].used = false;
                         }
@@ -2645,10 +3133,21 @@ static void mesh_task(void *param) {
  */
 static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
                                  const bramble_channel_t *ch, uint8_t app_type) {
-    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD];
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE];
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
-    size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
+    /* CHAT messages carry an authenticated sent_at inside the ciphertext
+     * (Task 0.6), so their wire ciphertext is CHANNEL_MSG_SENT_AT_SIZE bytes
+     * longer than other app types; ct_len must account for that or the
+     * memcpy/total-size math below truncates the last 4 bytes of a real
+     * chat message's ciphertext. sent_at is network time (via timesync,
+     * degrading gracefully to local uptime pre-sync) so it is comparable to
+     * a receiver's clock in the deferred-acceptance window (handle_data). */
+    uint32_t sent_at = (app_type == APP_TYPE_CHAT)
+                           ? (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000)
+                           : 0;
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + (app_type == APP_TYPE_CHAT ? CHANNEL_MSG_SENT_AT_SIZE : 0) +
+                    payload_len;
 
     /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
@@ -2670,14 +3169,30 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
 
     bramble_header_serialize(&header, buf, HEADER_SIZE);
 
-    /* AAD excludes hop_limit (relays decrement it in flight); the destination
-     * builds the same masked AAD in handle_data. */
-    uint8_t aad[HEADER_SIZE];
-    bramble_header_build_aad(&header, aad, sizeof(aad));
+    /* AAD excludes hop_limit (relays decrement it in flight) but binds
+     * src_addr (SEC-M2 residual); the destination builds the same masked,
+     * src-bound AAD in handle_data. */
+    uint8_t aad[HEADER_SIZE + 4];
+    bramble_build_aead_aad(&header, s_identity->address, aad, sizeof(aad));
 
-    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type,
+    /* Deterministic node-global counter nonce (SEC-C reuse-avoidance): never
+     * reuses a nonce under this node's channel keys across its lifetime.
+     * Mutex-guarded: send_data_packet is reachable from multiple FreeRTOS
+     * tasks (mesh, RPC/httpd, UI, CLI) and the counter has no locking of its
+     * own. Abort the send on failure exactly like an encrypt failure: a
+     * failed reserve/flush write means nonce_counter_next issued nothing
+     * (fail-closed), so there is no nonce to encrypt with. */
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    if (nonce_ret != 0) {
+        ESP_LOGE(TAG, "Nonce counter unavailable, dropping send: %d", nonce_ret);
+        return 0;
+    }
+
+    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type, sent_at,
                                       payload, payload_len,
-                                      aad, HEADER_SIZE,
+                                      aad, HEADER_SIZE + 4,
                                       nonce, ciphertext, tag);
     if (enc_ret != 0) {
         ESP_LOGE(TAG, "Channel encrypt failed: %d", enc_ret);
@@ -2704,6 +3219,523 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
         return pkt_id;
     }
     return 0;
+}
+
+/*
+ * SEC-C2 / Task 1.4: sends a chat payload under an ESTABLISHED session key
+ * (dm_session_encrypt), FLAG_ENCRYPT WITHOUT FLAG_CHANNEL. This is the DM
+ * PAYLOAD path; it never falls back to the channel key. Caller MUST already
+ * hold s_dm_mutex (this function reads/writes *sess, which lives inside
+ * s_dm_table) and must have already checked sess->state == DM_STATE_ACTIVE.
+ * Mirrors send_data_packet's nonce/TX/pending_ack handling exactly, minus
+ * the channel_msg framing (a session is 1:1, so there is no channel_id/
+ * epoch/app_type to multiplex; the wire layout is header+src_addr+nonce+
+ * ciphertext+tag same as the channel path, just under a different key and
+ * without FLAG_CHANNEL, which is exactly the signal handle_data uses to
+ * pick the decrypt path on the other end).
+ */
+static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
+                               dm_session_t *sess) {
+    uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE];
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    uint8_t tag[BRAMBLE_TAG_SIZE];
+
+    size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + payload_len + BRAMBLE_TAG_SIZE;
+    if (total > 255) {
+        ESP_LOGE(TAG, "DM packet too large: %u bytes", (unsigned)total);
+        return 0;
+    }
+
+    uint8_t buf[255];
+    uint32_t pkt_id = next_packet_id();
+    bramble_header_t header = {
+        .version = BRAMBLE_VERSION,
+        .type = PKT_TYPE_DATA,
+        .flags = FLAG_ENCRYPT, /* no FLAG_CHANNEL: session-keyed DM (SEC-C2) */
+        .hop_limit = ROUTE_HOP_LIMIT_MAX,
+        .dest_addr = dest_addr,
+        .packet_id = pkt_id,
+    };
+
+    bramble_header_serialize(&header, buf, HEADER_SIZE);
+
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    if (nonce_ret != 0) {
+        ESP_LOGE(TAG, "Nonce counter unavailable, dropping DM send: %d", nonce_ret);
+        return 0;
+    }
+
+    if (dm_session_encrypt(sess, &header, s_identity->address, payload, payload_len,
+                           nonce, ciphertext, tag) != 0) {
+        ESP_LOGE(TAG, "Session encrypt failed for %08" PRIX32, dest_addr);
+        return 0;
+    }
+
+    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
+    memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
+    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + payload_len, tag, BRAMBLE_TAG_SIZE);
+
+    int ret = mesh_tx(buf, (uint8_t)total, TX_KIND_DATA);
+    if (ret == TX_GATE_OK) {
+        pending_ack_add(&s_pending_acks, pkt_id, dest_addr, MSG_TIER_NORMAL, buf, (uint16_t)total,
+                        now_ms());
+        sess->msg_count++;
+        sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
+        return pkt_id;
+    }
+    return 0;
+}
+
+/*
+ * SEC-C2 / Task 1.4: sends a handshake message (INIT or RESP) as an
+ * APP_TYPE_KE inner payload of a DATA envelope under the CHANNEL key. This
+ * is the handshake TRANSPORT (no session exists yet by definition), which
+ * is why it reuses send_data_packet unmodified rather than send_dm_packet.
+ */
+static uint32_t send_ke_envelope(uint32_t dest_addr, int channel_idx,
+                                 const bramble_key_exchange_t *ke) {
+    if (channel_idx < 0 || channel_idx >= s_num_channels) {
+        ESP_LOGE(TAG, "send_ke_envelope: invalid channel index %d", channel_idx);
+        return 0;
+    }
+    uint8_t wire[KEY_EXCHANGE_SIZE];
+    if (bramble_key_exchange_serialize(ke, wire, sizeof(wire)) != ESP_OK) {
+        ESP_LOGE(TAG, "KE envelope serialize failed");
+        return 0;
+    }
+    return send_data_packet(dest_addr, wire, sizeof(wire), &s_channels[channel_idx], APP_TYPE_KE);
+}
+
+/* Public identity-key caching heuristic: peer_id_pub is a public value (sent
+ * in the clear as long_term_pubkey on every handshake message), so a plain
+ * early-exit scan leaks nothing secret; it is not a tag/key comparison.
+ * dm_alloc memsets a fresh or evicted slot, so all-zero reliably means "no
+ * identity cached here yet" for any slot this node has allocated. */
+static int dm_session_has_peer_id(const dm_session_t *s) {
+    if (!s) return 0;
+    for (int i = 0; i < 32; i++) {
+        if (s->peer_id_pub[i] != 0) return 1;
+    }
+    return 0;
+}
+
+static void pending_eph_store(uint32_t peer_addr, const uint8_t eph_priv[32],
+                              const uint8_t eph_pub[32]) {
+    int free_idx = -1;
+    for (int i = 0; i < DM_MAX_HANDSHAKING; i++) {
+        if (s_pending_eph[i].used && s_pending_eph[i].peer_addr == peer_addr) {
+            free_idx = i;
+            break;
+        }
+        if (free_idx < 0 && !s_pending_eph[i].used) free_idx = i;
+    }
+    if (free_idx < 0) {
+        /* Table sized to DM_MAX_HANDSHAKING, same cap dm_alloc enforces for
+         * HANDSHAKING slots, so this should never actually trip: dm_alloc
+         * would have already refused a new handshake before this is called. */
+        ESP_LOGW(TAG, "Pending ephemeral table full, dropping entry for %08" PRIX32, peer_addr);
+        return;
+    }
+    s_pending_eph[free_idx].peer_addr = peer_addr;
+    memcpy(s_pending_eph[free_idx].eph_priv, eph_priv, 32);
+    memcpy(s_pending_eph[free_idx].eph_pub, eph_pub, 32);
+    s_pending_eph[free_idx].used = true;
+}
+
+static dm_pending_eph_t *pending_eph_lookup(uint32_t peer_addr) {
+    for (int i = 0; i < DM_MAX_HANDSHAKING; i++) {
+        if (s_pending_eph[i].used && s_pending_eph[i].peer_addr == peer_addr) {
+            return &s_pending_eph[i];
+        }
+    }
+    return NULL;
+}
+
+static void pending_eph_clear(uint32_t peer_addr) {
+    for (int i = 0; i < DM_MAX_HANDSHAKING; i++) {
+        if (s_pending_eph[i].used && s_pending_eph[i].peer_addr == peer_addr) {
+            memset(&s_pending_eph[i], 0, sizeof(s_pending_eph[i]));
+            return;
+        }
+    }
+}
+
+/*
+ * Handshake dedup (SEC-C2 item 5). Returns 1 (dup, caller must drop without
+ * reprocessing) or 0 (fresh, recorded so the next identical INIT dedups).
+ * eph_pub_hash is a plain truncated SHA-256 over the ephemeral pubkey (a
+ * public value): this is a dedup cache key, not an authentication tag, so
+ * no HMAC/constant-time comparison is needed.
+ */
+static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32],
+                                     uint16_t ke_epoch, uint32_t now) {
+    uint8_t digest[32] = {0};
+    (void)crypto_sha256(eph_pub, 32, digest);
+    uint32_t eph_hash;
+    memcpy(&eph_hash, digest, 4);
+
+    int lru = 0;
+    for (int i = 0; i < DM_HS_DEDUP_MAX; i++) {
+        dm_hs_dedup_entry_t *e = &s_hs_dedup[i];
+        if (e->used && e->src_addr == src_addr && e->eph_pub_hash == eph_hash &&
+            e->ke_epoch == ke_epoch) {
+            return 1;
+        }
+        if (!e->used) { lru = i; break; }
+        if (e->seen_ms < s_hs_dedup[lru].seen_ms) lru = i;
+    }
+    s_hs_dedup[lru].src_addr = src_addr;
+    s_hs_dedup[lru].eph_pub_hash = eph_hash;
+    s_hs_dedup[lru].ke_epoch = ke_epoch;
+    s_hs_dedup[lru].seen_ms = now;
+    s_hs_dedup[lru].used = true;
+    return 0;
+}
+
+/*
+ * B5 queue-and-trigger: queues a DM payload awaiting session establishment
+ * and assigns it a real, trackable packet_id up front (unlike the legacy
+ * awaiting-route queue_message, which has no onAck story at all). Queue
+ * pressure evicts the oldest QUEUE_REASON_SESSION entry with the same
+ * visible onAck failure a TTL expiry gets, rather than dropping the new
+ * send silently; if every slot is a QUEUE_REASON_ROUTE entry, this send
+ * fails visibly instead (a route-awaiting entry belongs to a different
+ * subsystem's queue and is not evicted here).
+ *
+ * Known limitation (documented, not fixed here): the pkt_id returned here
+ * is a tracking placeholder, not the pkt_id that eventually appears on the
+ * wire once the session establishes and flush_session_queue actually calls
+ * send_dm_packet (which mints its own pkt_id via next_packet_id, matching
+ * every other send_*_packet in this file). A caller polling status by the
+ * placeholder id will not see the real send's ack/delivery events; it will
+ * see a failure notification via rerr_fastfail_notify if the queue entry
+ * expires or is evicted, and nothing further if it is flushed successfully.
+ */
+static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t *data, size_t len,
+                                      int channel_idx) {
+    int free_idx = -1;
+    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+        if (!s_queued_msgs[i].used) { free_idx = i; break; }
+    }
+    if (free_idx < 0) {
+        int oldest = -1;
+        for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+            if (s_queued_msgs[i].used && s_queued_msgs[i].reason == QUEUE_REASON_SESSION &&
+                (oldest < 0 || s_queued_msgs[i].timestamp < s_queued_msgs[oldest].timestamp)) {
+                oldest = i;
+            }
+        }
+        if (oldest < 0) {
+            ESP_LOGW(TAG, "Message queue full (no evictable session entry), failing DM for %08" PRIX32,
+                     dest_addr);
+            return 0;
+        }
+        ESP_LOGW(TAG, "Message queue full, evicting oldest awaiting-session entry for %08" PRIX32,
+                 s_queued_msgs[oldest].dest_addr);
+        rerr_fastfail_notify(s_queued_msgs[oldest].pkt_id, "queue_full", NULL);
+        free_idx = oldest;
+    }
+
+    uint32_t pkt_id = next_packet_id();
+    s_queued_msgs[free_idx].dest_addr = dest_addr;
+    memcpy(s_queued_msgs[free_idx].data, data, len);
+    s_queued_msgs[free_idx].len = len;
+    s_queued_msgs[free_idx].timestamp = now_ms();
+    s_queued_msgs[free_idx].reason = QUEUE_REASON_SESSION;
+    s_queued_msgs[free_idx].pkt_id = pkt_id;
+    s_queued_msgs[free_idx].channel_idx = (int16_t)channel_idx;
+    s_queued_msgs[free_idx].used = true;
+    ESP_LOGI(TAG, "Queued DM for %08" PRIX32 " (awaiting session)", dest_addr);
+    return pkt_id;
+}
+
+/* Sends every QUEUE_REASON_SESSION entry for dest_addr now that a session
+ * is ACTIVE. Takes s_dm_mutex fresh per entry (not held across the whole
+ * loop) so a long flush never blocks handle_ke_envelope/handshake_worker_task
+ * for longer than a single send. */
+static void flush_session_queue(uint32_t dest_addr) {
+    for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
+        if (!s_queued_msgs[i].used || s_queued_msgs[i].reason != QUEUE_REASON_SESSION ||
+            s_queued_msgs[i].dest_addr != dest_addr) {
+            continue;
+        }
+
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+        uint32_t pkt_id = 0;
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            pkt_id = send_dm_packet(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len, sess);
+        }
+        xSemaphoreGive(s_dm_mutex);
+
+        if (pkt_id != 0) {
+            ESP_LOGI(TAG, "Flushed queued DM to %08" PRIX32 " (%u bytes)",
+                     dest_addr, (unsigned)s_queued_msgs[i].len);
+            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char *)s_queued_msgs[i].data,
+                              s_queued_msgs[i].len, 0, 0, pkt_id, MSG_STATUS_SENT,
+                              s_queued_msgs[i].channel_idx);
+        } else {
+            ESP_LOGW(TAG, "Failed to flush queued DM to %08" PRIX32, dest_addr);
+            rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "session_send_failed", NULL);
+        }
+        s_queued_msgs[i].used = false;
+    }
+}
+
+/*
+ * Builds and sends a first-contact INIT (SEC-C2 handshake transport, under
+ * the channel key via send_ke_envelope). Always first-contact: the only
+ * caller (mesh_send_dm) reaches this exclusively for a peer with no
+ * existing s_dm_table slot at all, so there is never a cached peer_id_pub
+ * to rekey against here. Proactive rekey of an already-ACTIVE session is a
+ * different trigger, out of this task's wiring scope.
+ */
+static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx) {
+    bramble_identity_t my_eph;
+    crypto_generate_identity(&my_eph);
+
+    bramble_key_exchange_t init;
+    if (dm_build_init(s_identity, my_eph.public_key, my_eph.private_key, dest_addr, 0, NULL,
+                      &init) != 0) {
+        ESP_LOGE(TAG, "dm_build_init failed for %08" PRIX32, dest_addr);
+        return;
+    }
+
+    pending_eph_store(dest_addr, my_eph.private_key, my_eph.public_key);
+
+    if (send_ke_envelope(dest_addr, channel_idx, &init) == 0) {
+        ESP_LOGW(TAG, "Failed to send INIT to %08" PRIX32, dest_addr);
+    }
+}
+
+/*
+ * SEC-C2 queue-and-trigger (item 4): the ONLY place a unicast DM decides
+ * between the session path and queue-and-handshake. NEVER falls back to
+ * the channel key for a DM payload: an ACTIVE session sends via
+ * send_dm_packet; anything else queues and (if not already handshaking)
+ * triggers an INIT, or fails visibly if the handshaking cap is reached.
+ */
+static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len) {
+    if (len > FRAG_MAX_PLAINTEXT) {
+        /* Fragmentation under a session key is out of this task's scope
+         * (DM chat payloads are short); fail visibly rather than silently
+         * truncating or falling back to the channel key. */
+        ESP_LOGW(TAG, "DM payload too large for the session path: %u bytes", (unsigned)len);
+        return 0;
+    }
+
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+    if (sess && sess->state == DM_STATE_ACTIVE) {
+        uint32_t pkt_id = send_dm_packet(dest_addr, data, len, sess);
+        xSemaphoreGive(s_dm_mutex);
+        if (pkt_id != 0) {
+            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0,
+                              pkt_id, MSG_STATUS_SENT, (int16_t)channel_idx);
+        }
+        return pkt_id;
+    }
+
+    bool handshake_in_progress = sess && sess->state == DM_STATE_HANDSHAKING;
+    dm_session_t *hs = sess;
+    if (!hs) {
+        hs = dm_alloc(&s_dm_table, dest_addr, now_ms());
+        if (hs) hs->state = DM_STATE_HANDSHAKING;
+    }
+    xSemaphoreGive(s_dm_mutex);
+
+    if (!hs) {
+        /* M4 DoS defense: handshaking cap reached. Fail the send visibly;
+         * never transmit this payload under the channel key instead. */
+        ESP_LOGW(TAG, "No session and handshaking cap reached for %08" PRIX32, dest_addr);
+        return 0;
+    }
+
+    uint32_t pkt_id = queue_session_message(dest_addr, data, len, channel_idx);
+    if (pkt_id == 0) {
+        return 0;
+    }
+
+    if (!handshake_in_progress) {
+        initiate_dm_handshake(dest_addr, channel_idx);
+    }
+
+    /* Still store in msg_store so UI shows it as pending, same convention
+     * as the awaiting-route path. */
+    msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
+    return pkt_id;
+}
+
+/*
+ * Responder side of the INIT/RESP state machine (runs on
+ * handshake_worker_task, never inline on the mesh RX loop: M7). Item 2
+ * downgrade defense: have_peer_id is derived from whatever s_dm_table
+ * already holds for src_addr at the moment of the check, so a zero-tag
+ * INIT can never be accepted as first-contact against an already-known
+ * identity.
+ */
+static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t *init) {
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    dm_session_t *existing = dm_lookup(&s_dm_table, src_addr);
+    int have_peer_id = dm_session_has_peer_id(existing);
+    uint8_t peer_id_pub[32];
+    if (have_peer_id) memcpy(peer_id_pub, existing->peer_id_pub, 32);
+    xSemaphoreGive(s_dm_mutex);
+
+    if (dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL) != 0) {
+        ESP_LOGW(TAG, "INIT verify failed from %08" PRIX32, src_addr);
+        return;
+    }
+
+    bramble_identity_t my_eph;
+    crypto_generate_identity(&my_eph);
+    uint16_t ke_epoch = (uint16_t)init->key_id;
+
+    bramble_key_exchange_t resp;
+    uint8_t session_key[32];
+    if (dm_build_resp(s_identity, my_eph.public_key, my_eph.private_key, init, ke_epoch, &resp,
+                      session_key) != 0) {
+        ESP_LOGE(TAG, "dm_build_resp failed for %08" PRIX32, src_addr);
+        return;
+    }
+
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    dm_session_t *sess = dm_alloc(&s_dm_table, src_addr, now_ms());
+    if (sess) {
+        memcpy(sess->session_key, session_key, 32);
+        memcpy(sess->peer_id_pub, init->long_term_pubkey, 32);
+        sess->established_ms = now_ms();
+        sess->msg_count = 0;
+        sess->ke_epoch = ke_epoch;
+        sess->state = DM_STATE_ACTIVE;
+        sess->verified = 0; /* SAS confirmation is a separate UX step, not wired here */
+    }
+    xSemaphoreGive(s_dm_mutex);
+
+    if (!sess) {
+        ESP_LOGW(TAG, "Handshaking cap reached, cannot establish session with %08" PRIX32, src_addr);
+        return;
+    }
+
+    if (send_ke_envelope(src_addr, channel_idx, &resp) == 0) {
+        ESP_LOGW(TAG, "Failed to send RESP to %08" PRIX32, src_addr);
+    }
+
+    flush_session_queue(src_addr);
+}
+
+/*
+ * Initiator side: verifies a RESP against the ephemeral we generated when
+ * we sent the matching INIT (dm_pending_eph_t; dm_session_t itself has no
+ * field for in-flight handshake material, see its declaration above).
+ */
+static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t *resp) {
+    dm_pending_eph_t *pe = pending_eph_lookup(src_addr);
+    if (!pe) {
+        ESP_LOGW(TAG, "RESP from %08" PRIX32 " with no matching pending INIT", src_addr);
+        return;
+    }
+
+    uint16_t ke_epoch = (uint16_t)resp->key_id;
+    uint8_t session_key[32];
+    if (dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch, session_key) != 0) {
+        ESP_LOGW(TAG, "RESP verify failed from %08" PRIX32, src_addr);
+        return;
+    }
+
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+    if (sess) {
+        memcpy(sess->session_key, session_key, 32);
+        memcpy(sess->peer_id_pub, resp->long_term_pubkey, 32);
+        sess->established_ms = now_ms();
+        sess->msg_count = 0;
+        sess->ke_epoch = ke_epoch;
+        sess->state = DM_STATE_ACTIVE;
+        sess->verified = 0;
+    }
+    xSemaphoreGive(s_dm_mutex);
+
+    pending_eph_clear(src_addr);
+
+    if (!sess) {
+        ESP_LOGW(TAG, "Session slot for %08" PRIX32 " vanished before RESP could complete it",
+                 src_addr);
+        return;
+    }
+
+    flush_session_queue(src_addr);
+}
+
+/* M7 offload: drains handshake work items posted by handle_ke_envelope.
+ * Low priority, small stack: the only work here is the occasional
+ * four-X25519-mult handshake, never on the mesh RX critical path. */
+static void handshake_worker_task(void *arg) {
+    (void)arg;
+    dm_handshake_work_item_t item;
+    for (;;) {
+        if (xQueueReceive(s_handshake_work_q, &item, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        if (item.msg.ke_type == KE_TYPE_INIT) {
+            process_ke_init(item.src_addr, item.channel_idx, &item.msg);
+        } else if (item.msg.ke_type == KE_TYPE_RESP) {
+            process_ke_resp(item.src_addr, &item.msg);
+        }
+    }
+}
+
+/*
+ * RX entry point for APP_TYPE_KE inner payloads (SEC-C2 handshake-in-DATA).
+ * Does only cheap parsing/validation here; the DH-heavy INIT/RESP state
+ * machine runs on handshake_worker_task (M7). src_addr is the OUTER DATA
+ * envelope's already-authenticated src_addr (from channel_msg_decrypt's
+ * AAD binding), not yet trusted to equal the inner struct's own claimed
+ * src_addr until checked below.
+ */
+static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t *data,
+                               size_t data_len) {
+    bramble_key_exchange_t msg;
+    if (bramble_key_exchange_deserialize(&msg, data, data_len) != ESP_OK) {
+        ESP_LOGW(TAG, "Malformed KE envelope from %08" PRIX32, src_addr);
+        return;
+    }
+    if (msg.ke_type != KE_TYPE_INIT && msg.ke_type != KE_TYPE_RESP) {
+        ESP_LOGW(TAG, "Unknown ke_type %u from %08" PRIX32, msg.ke_type, src_addr);
+        return;
+    }
+    /* Outer/inner src_addr consistency: closes a confusion vector where a
+     * valid channel-key sender embeds a KE payload claiming a different
+     * address than the one the outer envelope's AAD already authenticated. */
+    if (msg.src_addr != src_addr) {
+        ESP_LOGW(TAG, "KE envelope src_addr mismatch: outer=%08" PRIX32 " inner=%08" PRIX32,
+                 src_addr, msg.src_addr);
+        return;
+    }
+    /* Item 3: reject self-addressed (role-confusion-at-dispatch defense). */
+    if (src_addr == s_identity->address) {
+        ESP_LOGW(TAG, "Dropping self-addressed KE envelope");
+        return;
+    }
+
+    if (msg.ke_type == KE_TYPE_INIT) {
+        uint16_t ke_epoch = (uint16_t)msg.key_id;
+        if (hs_dedup_check_and_record(src_addr, msg.ephemeral_pubkey, ke_epoch, now_ms())) {
+            ESP_LOGD(TAG, "Duplicate INIT from %08" PRIX32 ", not re-running handshake", src_addr);
+            return;
+        }
+    }
+
+    dm_handshake_work_item_t item;
+    item.src_addr = src_addr;
+    item.channel_idx = channel_idx;
+    item.msg = msg;
+    if (xQueueSend(s_handshake_work_q, &item, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Handshake work queue full, dropping KE from %08" PRIX32, src_addr);
+    }
 }
 
 bool mesh_supports_delivery_event_sync(void) {
@@ -2878,6 +3910,15 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
         return 0;
     }
 
+    /* SEC-C2: every unicast send (whether via mesh_send_message's default
+     * channel or an explicit channel picked by rpc_methods.c) converges
+     * here before any bytes are encrypted. Broadcasts (dest_addr ==
+     * 0xFFFFFFFF) have no peer to hold a session with and always fall
+     * through to the channel-key path below unchanged. */
+    if (dest_addr != 0xFFFFFFFFu) {
+        return mesh_send_dm(channel_idx, dest_addr, data, len);
+    }
+
     /* Check if fragmentation is needed */
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Long message — split into fragments */
@@ -2967,6 +4008,9 @@ static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
             memcpy(s_queued_msgs[i].data, data, len);
             s_queued_msgs[i].len = len;
             s_queued_msgs[i].timestamp = now_ms();
+            s_queued_msgs[i].reason = QUEUE_REASON_ROUTE;
+            s_queued_msgs[i].pkt_id = 0;
+            s_queued_msgs[i].channel_idx = 0;
             s_queued_msgs[i].used = true;
             ESP_LOGI(TAG, "Queued msg for %08" PRIX32 " (waiting for route)", dest_addr);
             return 0;
@@ -3044,6 +4088,58 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
     return mesh_send_channel(send_idx, dest_addr, data, len);
 }
 
+/* Nonce counter NVS persistence: reserve-ahead ceiling under NVS_NS_NONCE.
+ * Not-found (first boot) resumes from ceiling 0, matching nonce_counter's own
+ * zero-initialized static state. */
+static int mesh_nonce_read(uint64_t *ceiling_out, void *ctx) {
+    (void)ctx;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NONCE, NVS_READONLY, &h) != ESP_OK) {
+        *ceiling_out = 0;
+        return 0;
+    }
+    size_t len = sizeof(*ceiling_out);
+    esp_err_t err = nvs_get_blob(h, NVS_KEY_NONCE_CEILING, ceiling_out, &len);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        *ceiling_out = 0;
+    }
+    return 0;
+}
+
+static int mesh_nonce_write(uint64_t ceiling, void *ctx) {
+    (void)ctx;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NONCE, NVS_READWRITE, &h) != ESP_OK) {
+        return -1;
+    }
+    nvs_set_blob(h, NVS_KEY_NONCE_CEILING, &ceiling, sizeof(ceiling));
+    esp_err_t err = nvs_commit(h);
+    nvs_close(h);
+    return err == ESP_OK ? 0 : -1;
+}
+
+/*
+ * PART 3 (staged, not closed; see network_key.h). Loads a provisioned
+ * network key from NVS if one has been set (via the setNetworkKey RPC).
+ * Not-found is the expected, common case, the shipped default is
+ * unprovisioned, so this falls through silently to network_key_get()'s
+ * own PSK-derived fallback rather than logging an error.
+ */
+static void mesh_load_network_key(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NETKEY, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    uint8_t key[32];
+    size_t len = sizeof(key);
+    if (nvs_get_blob(h, NVS_KEY_NETKEY, key, &len) == ESP_OK && len == sizeof(key)) {
+        network_key_set_provisioned(key);
+        ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");
+    }
+    nvs_close(h);
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 void mesh_task_start(bramble_identity_t *identity) {
@@ -3079,15 +4175,69 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     neighbor_init(&s_neighbors);
 
-    /* Derive shared beacon HMAC key from the public channel PSK */
-    {
+    /* Deterministic node-global AEAD nonce counter (SEC-C reuse-avoidance).
+     * boot_salt is a secondary defense if NVS is ever wiped. Created before
+     * any task that can reach send_data_packet (RPC/httpd, UI, CLI) starts
+     * running, so nonce_counter_next is never called without the mutex. */
+    s_nonce_mutex = xSemaphoreCreateMutex();
+    if (nonce_counter_init(s_identity->address, (uint16_t)(esp_random() & 0xFFFF), mesh_nonce_read,
+                           mesh_nonce_write, NULL) != 0) {
+        /* Fail-closed by design: nonce_counter_next also refuses to issue
+         * until a write succeeds, so encrypted DATA sends stay blocked
+         * (never silently reuse a nonce) rather than crashing here. */
+        ESP_LOGE(TAG, "Nonce counter reserve-ahead write failed; encrypted sends blocked until NVS recovers");
+    }
+
+    /* DM session table (SEC-C2). Same "created before any task that can
+     * reach the guarded state starts" rule as s_nonce_mutex above. */
+    s_dm_mutex = xSemaphoreCreateMutex();
+    dm_table_init(&s_dm_table);
+    memset(s_hs_dedup, 0, sizeof(s_hs_dedup));
+    memset(s_pending_eph, 0, sizeof(s_pending_eph));
+    s_handshake_work_q = xQueueCreate(HANDSHAKE_WORK_QUEUE_LEN, sizeof(dm_handshake_work_item_t));
+    if (!s_handshake_work_q) {
+        ESP_LOGE(TAG, "Failed to create handshake work queue");
+    }
+    /* M7 offload: low priority so the occasional handshake never preempts
+     * the mesh RX task; small stack, the only work here is periodic X25519. */
+    xTaskCreate(handshake_worker_task, "dm_hs_worker", DM_HANDSHAKE_WORKER_STACK, NULL,
+               DM_HANDSHAKE_WORKER_PRIORITY, NULL);
+
+    /* PART 3 (staged, not closed): loads a provisioned network key if one
+     * has been set; otherwise network_key_get() falls back to the
+     * PSK-derived key on its own. */
+    mesh_load_network_key();
+
+    /* SEC-H2 (Task 3.4, STAGED, not closed: see network_key.h). Beacon
+     * forgeability moves from "anyone who knows the public PSK" to
+     * "network members only" once a network key is provisioned: derives a
+     * labeled subkey ("bramble-beacon-v2") from network_key_get() rather
+     * than reusing the raw network key directly, for domain separation
+     * from the other MAC types (RREP/RERR/ACK/receipt). Read once here,
+     * at init: a runtime setNetworkKey RPC call does not currently
+     * re-derive this (a real gap, not closed by this task, flagged in the
+     * report). When unprovisioned (the shipped default), falls back to
+     * the same public-PSK-derived key as before: still integrity-checkable
+     * against tampering in flight, but not exclusive to the network,
+     * since anyone can derive the identical fallback key from the public
+     * constant. */
+    if (network_key_is_provisioned()) {
+        uint8_t net_key[32];
+        network_key_get(net_key);
+        const char *salt = "bramble-beacon-v2";
+        crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), net_key, sizeof(net_key), NULL, 0,
+                           s_beacon_key, sizeof(s_beacon_key));
+        ESP_LOGI(TAG, "Beacon HMAC key derived from the provisioned network key");
+    } else {
         bramble_channel_t beacon_ch;
         channel_derive_key(BRAMBLE_PUBLIC_CHANNEL_PSK, &beacon_ch);
         memcpy(s_beacon_key, beacon_ch.key, BRAMBLE_KEY_SIZE);
-        ESP_LOGI(TAG, "Beacon HMAC key derived from public channel PSK");
+        ESP_LOGW(TAG, "beacon HMAC integrity-only (no network key provisioned)");
     }
 
     dedup_init(&s_dedup);
+    replay_table_init(&s_replay);
+    replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
     rreq_dedup_init(&s_rreq_dedup);

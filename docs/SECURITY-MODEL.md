@@ -25,17 +25,26 @@ Not defended against for most *metadata* and, today, not for location packets
 **Active RF injector.** The same attacker, now transmitting: forging packets,
 replaying captured frames, jamming. Partially defended against today.
 Encrypted payloads cannot be forged without a channel key, and the cleartext
-header is bound to the ciphertext as AEAD associated data. Routing control
-traffic, location packets, mailbox triggers, acknowledgements, and delivery
-receipts are forgeable (section 4).
+header is bound to the ciphertext as AEAD associated data. Location packets
+are now encrypted end to end (section 3), and routing control traffic
+(RREP, RERR, beacon, ACK, delivery receipt) now carries a network-key HMAC,
+but that key is a public fallback until provisioned, and even provisioned it
+does not stop replay of a captured, genuinely-valid control message
+(section 4, section 5): this attacker can still forge routing control
+traffic against an unprovisioned fleet, and can replay it against any
+fleet. Mailbox triggers ride the same staged beacon key.
 Jamming is not defendable at this layer and is accepted (section 5).
 
 **Malicious mesh member.** A node that legitimately holds one or more channel
 keys: an invited member gone bad, or a stolen key. They decrypt everything on
 those channels, can impersonate any source address inside those channels, and
-participate fully in routing. The design goal is to limit them to the channels
-they hold keys for and to make routing lies detectable; today routing lies are
-not detectable (section 4).
+participate fully in routing. The design goal is to limit them to the
+channels they hold keys for and to make routing lies detectable. A member
+who also holds the network key can still forge or replay any routing
+control message on behalf of any other member (section 5): authentication
+proves "signed by a network-key holder", not "signed by this specific
+member", so routing lies from a key-holding insider remain undetectable by
+design, not by omission.
 
 **Mailbox or relay operator.** Any node forwards packets, and a node with
 mailbox mode enabled stores ciphertext for offline peers. The design intends
@@ -174,22 +183,46 @@ it on a captured ciphertext; duplicate suppression keyed on the
 authenticated `packet_id` bounds what re-injection achieves while the dedup
 entry lives.
 
-The 4-byte cleartext `src_addr` field that follows the header is *not*
-in the AAD, but an authenticated copy of the source address travels inside
-the encrypted payload (`components/channel/channel_msg.c`), and receivers use
-the inner copy. The outer field is unauthenticated bytes on the wire.
+As of `feat/wire-format-security-batch`, the 4-byte cleartext `src_addr`
+field that follows the header is also bound into the AAD
+(`bramble_build_aead_aad` in `components/packet/packet.c`: the masked
+header plus a 4-byte little-endian `src_addr`, 16 bytes total), not
+excluded from it. Both the originator (`send_data_packet`) and the
+destination (`handle_data`) pass the same `src_addr`, so tampering it after
+origination now fails the GCM tag instead of silently misattributing the
+message. An authenticated copy of the source address also still travels
+inside the encrypted payload for channel messages
+(`components/channel/channel_msg.c`); receivers use that inner copy for
+channel traffic, where the outer `src_addr` field is zeroed rather than
+meaningful (see the DATA packet format in
+`docs/bramble-protocol-spec.md` section 4.4).
 
 ### Nonce generation
 
-Nonces are 96 random bits per message from the ESP32 hardware RNG
-(`channel_msg_encrypt` in `components/channel/channel_msg.c` calls
-`crypto_random`). There is no counter discipline and no persistence across
-reboot; uniqueness rests entirely on RNG quality and the birthday bound. At
-LoRa data rates the collision probability is small but this is a
-probabilistic argument, not a structural one. The simulator bridge builds
-its nonces with a sim-local helper (`sim_build_nonce` in
-`simulator/gosim/bridge.c`: src_addr, counter, 4 random bytes), so simulated
-nodes and real nodes generate nonces differently.
+As of `feat/wire-format-security-batch` (wire v2), nonces for DATA and
+LOCATION packets are no longer random. Each node keeps a single node-global
+48-bit deterministic counter (`components/nonce_counter`), seeded with the
+node's address and a random per-boot salt and persisted to NVS with a
+reserve-ahead ceiling: a counter value is never issued unless the ceiling
+covering it has already been durably written, so a crash can never reveal a
+counter value NVS does not already know about, and a persistent write
+failure stops issuing nonces entirely (fail-closed: drop beats reuse). A
+single mutex around the one `nonce_counter_next` call site
+(`main/mesh_task.c`) serializes the RPC, UI, and mesh-task producers that
+can all reach it concurrently. This replaces the previous RNG-per-message
+scheme's probabilistic uniqueness argument with a structural one: uniqueness
+now holds as long as the persisted ceiling invariant holds, not as a
+birthday-bound argument over 96 random bits. The simulator bridge still
+builds its nonces with a sim-local helper (`sim_build_nonce` in
+`simulator/gosim/bridge.c`: src_addr, counter, 4 random bytes) that predates
+and is independent of this counter, so simulated nodes and real nodes
+generate nonces differently.
+
+Residual: the counter is visible in the cleartext nonce field on every
+wire packet. An observer who cannot decrypt anything can still extract it
+(`nonce_counter_extract`) and use it to order and count messages from a
+given source address across a boot session, a metadata linkability the
+prior random-nonce scheme did not have. See "Residual risks" (section 5).
 
 ### Trial decryption across channels, constant-trial loop
 
@@ -235,22 +268,34 @@ cleartext `prev_hop` field equals the originator's real address while
 transmission identifies the originator anyway. The pseudonym helps only
 against observers who hear the RREQ after at least one forward.
 
-### Beacon integrity check (not authentication)
+### Beacon integrity check, staged toward authentication (SEC-H2)
 
 Beacons carry a 16-byte truncated HMAC-SHA256 computed over the 32 fixed
-beacon fields only: header, source address, pubkey hash, telemetry, flags,
-and network time (`beacon_compute_hmac` in `components/routing/beacon.c`
-MACs the first `BEACON_SIZE - 16` bytes). The optional node name is
-serialized *after* the HMAC field (`bramble_beacon_serialize` in
-`components/packet/packet.c`) and is not covered by it, so the name is
-unauthenticated even in the integrity sense. Verification happens on receipt
-(`handle_beacon` in `main/mesh_task.c`). The key is derived from the
-*public, well-known* channel PSK (`BRAMBLE_PUBLIC_CHANNEL_PSK` =
-"bramble-default" in `components/crypto/include/crypto.h`; derivation at
-mesh init in `main/mesh_task.c`). Because anyone can derive this key, the
-HMAC proves only that the sender runs Bramble-compatible code; it rejects
-corruption and non-Bramble traffic, not attackers. It is an integrity check,
-not authentication, and nothing in the code treats it as more than that.
+beacon fields (header, source address, pubkey hash, telemetry, flags, and
+network time) plus the optional node name, which is serialized *after*
+`auth_hmac` on the wire (`bramble_beacon_serialize` in
+`components/packet/packet.c`; `beacon_compute_hmac` in
+`components/routing/beacon.c` concatenates the fixed prefix with the
+length-prefixed name, skipping over `auth_hmac`'s own bytes, since a
+one-shot HMAC call cannot cover two non-contiguous wire regions with a gap
+between them any other way). **Red-team panel fix**: the name was
+previously excluded entirely, so an attacker could rewrite any captured
+beacon's display name and it still verified, spoofing peer names in the
+neighbor table/UI even under a provisioned key; the name is now covered.
+Verification happens on
+receipt (`handle_beacon` in `main/mesh_task.c`) and is now constant-time
+(`beacon_verify_hmac`, XOR-accumulate, no early exit). When a network key
+is provisioned, the key is a distinct HKDF subkey of it (salt
+`"bramble-beacon-v2"`), not the channel PSK; unprovisioned, the key still
+derives from the *public, well-known* `BRAMBLE_PUBLIC_CHANNEL_PSK`
+(`"bramble-default"` in `components/crypto/include/crypto.h`), logged
+explicitly as integrity-only in that case. Unprovisioned, the HMAC still
+proves only that the sender runs Bramble-compatible code, not that it is a
+trusted member. Provisioned, it proves the sender holds the network key,
+which is real authentication against outsiders, but not against another
+key holder (section 5) and not against replay of a captured, genuinely
+valid beacon (section 5). Do not treat a provisioned beacon HMAC as more
+than that.
 
 ### RREQ origination rate limiting
 
@@ -391,54 +436,166 @@ ciphertext; the mailbox never holds plaintext it could not already read
 `components/mailbox/mailbox.c`). Entries are RAM-only, capped per
 destination, and expire.
 
+### Direct message end-to-end encryption (SEC-C2, closed)
+
+Unicast DMs no longer ride channel keys. `mesh_send_message`
+(`main/mesh_task.c`) never transmits a DM under a channel key: a per-peer
+session is established with an authenticated X25519 handshake carried
+inside `PKT_TYPE_DATA` envelopes (`app_type = APP_TYPE_KE`), using a
+role-symmetric quad-DH key schedule (`components/dm_session`) that rejects
+low-order X25519 points and produces a 7-digit SAS for out-of-band
+verification. If no session exists yet, the send queues and triggers a
+handshake rather than falling back to a channel key; on handshake timeout
+the caller sees `onAck failed reason="no_secure_session"`. The retired
+`PKT_TYPE_KEY_EXCHANGE` (0x06) standalone packet is gone; see
+`docs/bramble-protocol-spec.md` section 4.25. This closes the two gaps
+this document previously listed under "Direct messages are encrypted with
+shared channel keys" and "DMs are encrypted under the well-known public
+PSK". Residual: no out-of-band SAS comparison UX ships yet (section 5), and
+a compromised or malicious mesh member is still an insider by definition,
+same as any symmetric-key system: authenticating a DM to a specific peer
+does not defend against that peer itself misbehaving.
+
+**Session-table exhaustion DoS, closed (red-team panel fix).** A
+first-contact INIT needs no secret (a self-generated keypair passes
+`dm_verify_init`'s address-binding check trivially), and previously landed
+straight in `DM_STATE_ACTIVE`/`verified=0` without ever touching
+`DM_STATE_HANDSHAKING` or its cap. Because `dm_alloc` (`components/dm_session`)
+protected every `DM_STATE_ACTIVE` slot from eviction regardless of
+`verified`, an attacker sending `DM_MAX_SESSIONS` forged first-contact
+INITs filled the table with permanently-unevictable sessions, killing all
+future DM establishment (with anyone) until reboot. `dm_alloc` now
+protects only VERIFIED `ACTIVE` sessions from eviction; an UNVERIFIED
+`ACTIVE` session is evictable, LRU-ordered by a `last_active_ms` timestamp
+that every real send/receive through the session bumps (`main/mesh_task.c`),
+so a genuinely-active first-contact conversation still outlives an idle
+forged flood.
+
+### Location payload encryption (SEC-C1, closed)
+
+LOCATION packets are AES-256-GCM encrypted end to end, on both the
+channel-shared and direct-session paths (`mesh_send_location_packet`,
+`handle_location` in `main/mesh_task.c`). The sharing tier travels inside
+the authenticated plaintext (byte 0) rather than the cleartext header, and
+every LOCATION ciphertext pads to one canonical size regardless of tier, so
+ciphertext length does not leak which tier was chosen. A per-sender replay
+window (shared with DATA, below) rejects replayed location updates; a
+below-window location update is dropped, never deferred, since location is
+real-time and a stale position accepted late is worse than one dropped.
+This closes the gap this document previously listed under "Location
+packets are transmitted entirely in cleartext". Residual: an observer still
+learns that a node is running location sharing and roughly how often it
+updates, from packet type and timing alone, even with coordinates hidden
+(section 5).
+
+### Per-sender replay windows for DATA and LOCATION (SEC-M1, closed)
+
+Received DATA and LOCATION packets are checked against a per-sender sliding
+replay window keyed on `(src_addr, nonce_counter_extract(nonce))`, enforced
+post-decrypt on the authenticated counter, not the cleartext header
+(`components/replay_window`). A tier-1 (immediate) window covers the common
+case; a tier-2 path defers acceptance of a below-window counter until the
+authenticated `sent_at` timestamp inside the GCM plaintext can be corroborated
+against synchronized network time, and fails closed (rejects) if the two
+endpoints are not time-synced. This replaces the old unauthenticated
+`packet_id`-keyed dedup as the replay defense for these two packet types
+(dedup remains, and remains loop-suppression only, for packet types that are
+not authenticated per-message: routing control, beacon, ACK, and delivery
+receipt).
+
+**Public-channel exclusion, closed (red-team panel fix).** The window is
+only fed a decrypt's src_addr when that src_addr is trustworthy
+(`channel_source_is_replay_trustworthy` in `components/channel`): a
+session or secret-channel src_addr costs a session key or channel
+membership, but `BRAMBLE_PUBLIC_CHANNEL_PSK` is known to literally
+everyone, so a public-channel decrypt's src_addr was previously a
+free-to-forge claim fed straight into this SHARED window. An attacker
+could encrypt a packet under the public key claiming `src_addr=victim`
+and slam the victim's high-water mark, causing the victim's own later,
+genuine packets to read `BELOW_WINDOW` and drop: a mesh-wide DoS on
+location and chat delivery reachable by anyone, not just channel members.
+Public-channel traffic is now excluded from this window entirely and
+relies on the pre-existing `packet_id`/type dedup for loop suppression
+instead; it has no replay protection of its own (residual, section 5).
+
+**Tier-1/tier-2 dedup gap, closed (red-team panel fix).** A CHAT message
+accepted via tier-1 is now also recorded in the tier-2 deferred cache
+(`replay_deferred_mark_seen`). Previously it was not: a counter accepted
+in-window and later aged out of the 64-entry tier-1 window was in NEITHER
+dedup structure, so a captured, genuinely-delivered chat packet replayed
+successfully once the sender's window moved past it (tier-1 read
+`BELOW_WINDOW`, and a tier-2 cache that had never heard of the original
+acceptance treated the replay as a fresh, legitimate deferred delivery).
+
+Residuals: a 64-entry sender table and a 128-entry tier-2 LRU evict the
+oldest tracked sender under load, which loses replay history for an
+evicted-then-later-returning sender (needs 64, respectively 128,
+concurrent distinct senders to matter).
+
+### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; mitigation staged, not closed)
+
+Every routing and reliability control message that previously carried no
+authentication now carries a network-key HMAC, verified before the message
+is acted on: RREP (`rrep_verify` in `components/routing/discovery.c`,
+before `route_install`), RERR (`rerr_verify` in
+`components/routing_auth`, before any route teardown), ACK and delivery
+receipt (`ack_verify`/`receipt_verify` in `components/routing_auth`, before
+retransmission is cancelled, a message is marked delivered, or the packet
+is forwarded), and beacon (`beacon_verify_hmac` in
+`components/routing/beacon.c`, now constant-time). Each MAC's covered field
+set was chosen by reading the corresponding forwarding function first and
+excluding exactly the fields it legitimately mutates in flight (`next_hop`,
+`header.dest_addr` on RREP; `reporter_addr`, `packet_id` on RERR;
+`relay_path`, `hop_count`, `header.hop_limit` on ACK and delivery receipt),
+so a legitimate forward never breaks verification and a relay-mutated field
+is never trusted as authenticated.
+
+**This does not close SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8.** The key
+behind every one of these MACs comes from `components/network_key`, which
+ships unprovisioned by default: `network_key_get()` falls back to a key
+derived from `BRAMBLE_PUBLIC_CHANNEL_PSK`, a public, compile-time constant
+(`"bramble-default"`). Anyone who reads that constant, which is checked
+into this repository, derives the identical fallback key and forges a
+valid MAC for any of these five message types. A real per-fleet key can be
+loaded via the authenticated `bramble.setNetworkKey` RPC (gated the same
+way as `bramble.setAuthToken`) or from NVS at boot, but this batch does not
+ship key generation, distribution, or rotation UX. Closure of these four
+findings requires provisioning **plus** the additional work in section 5
+below (per-message freshness and per-node beacon identity); provisioning
+alone is not sufficient and must not be described as closing them.
+
 ## 4. Known gaps in the current implementation
 
 Facts of the code on `main` today. Each entry shrinks or disappears in the
 same PR that fixes it.
 
-- **Location packets are transmitted entirely in cleartext**, including
-  coordinates, with the sharing tier readable in the cleartext header flags
-  (`mesh_send_location_packet` and `handle_location` in `main/mesh_task.c`;
-  serialization in `components/location/location.c`).
-- **Direct messages are encrypted with shared channel keys, not end-to-end
-  pairwise keys**, so every holder of the channel key reads every DM on it
-  (`mesh_send_message` routes through `mesh_send_channel` in
-  `main/mesh_task.c`).
-- **On a device whose default channel is still channel 0, DMs are encrypted
-  under the well-known public PSK** ("bramble-default") and are readable by
-  anyone, since `s_default_channel_idx` initializes to 0 and
-  `mesh_send_message` uses it (`main/mesh_task.c`).
-- **`PKT_TYPE_KEY_EXCHANGE` is defined on the wire but never sent and never
-  handled**; it falls through to the unhandled-type branch of
-  `mesh_process_rx_packet` (`components/packet/include/packet.h`,
-  `main/mesh_task.c`).
-- **The RREP `auth_hmac` field is dead**: zeroed at build, never computed,
-  never verified, so any node can forge route replies and black-hole traffic
-  (`rrep_build_destination` in `components/routing/discovery.c`,
-  `handle_rrep` in `main/mesh_task.c`).
-- **RERR packets carry no authentication**, so any in-range transmitter can
-  mark arbitrary routes broken and fast-fail pending messages (`handle_rerr`
-  in `main/mesh_task.c`).
-- **ACKs and delivery receipts are forgeable**: `packet_id` is cleartext in
-  the DATA header, and `handle_ack` and `handle_delivery_receipt` in
-  `main/mesh_task.c` accept unauthenticated packets, so a forged ACK both
-  cancels retransmission (`pending_ack_remove`) and marks the message
-  `DELIVERED` in the store and UI, letting an in-range transmitter fake
-  delivery confirmation while suppressing the retry and mailbox fallback.
+- **RREP, RERR, ACK, delivery receipt, and beacon authentication is staged,
+  not closed** (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8): the verify logic
+  described in section 3 is real, but every key it checks against is
+  forgeable by anyone who reads the public `BRAMBLE_PUBLIC_CHANNEL_PSK`
+  fallback until a real network key is provisioned, and even a provisioned
+  key does not stop replay of a captured, genuinely-valid message on any of
+  these five types (section 5). Treat all five as unauthenticated against a
+  knowledgeable insider until both provisioning and the section 5 follow-up
+  work land.
 - **RREQ forwarding is not rate-limited**; the 30-second limiter applies only
   to locally-originated discoveries, so a flood of foreign RREQs is forwarded
   without restriction (`handle_rreq` in `main/mesh_task.c`).
-- **There is no replay protection**: dedup keys on unauthenticated
-  `packet_id` and type inside a 60-second window
-  (`components/dedup/dedup.c`).
-- **The identity private key, all channel keys, and the RPC auth token are
-  stored as plaintext NVS entries, and message history is plaintext SPIFFS**,
-  with flash encryption, NVS encryption, and secure boot all disabled in the
-  build (`components/identity/identity.c`,
-  `components/channel/channel_storage.c`,
-  `components/msg_store/msg_store_spiffs.c`; `sdkconfig` has
-  `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`, and
-  `CONFIG_SECURE_BOOT` all unset).
+- **Replay protection does not cover routing or reliability control
+  traffic.** DATA and LOCATION now have real per-sender replay windows
+  (section 3), but RREP, RERR, beacon, ACK, and delivery receipt still
+  dedup only on unauthenticated `packet_id` and type inside a 60-second
+  window (`components/dedup/dedup.c`), which is loop suppression, not
+  replay protection: a captured, genuinely-valid message on any of these
+  five types replays until the dedup window expires (section 5).
+- **The identity private key, all channel keys, the RPC auth token, and,
+  once provisioned, the network key are stored as plaintext NVS entries,
+  and message history is plaintext SPIFFS**, with flash encryption, NVS
+  encryption, and secure boot all disabled in the build
+  (`components/identity/identity.c`, `components/channel/channel_storage.c`,
+  `components/msg_store/msg_store_spiffs.c`, `components/network_key`;
+  `sdkconfig` has `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`,
+  and `CONFIG_SECURE_BOOT` all unset).
 - **The WebSocket transport is plaintext HTTP on port 80**, so an on-path
   LAN attacker reads all RPC traffic including the bearer token; the
   `?token=` query parameter that browser clients must use additionally
@@ -452,10 +609,12 @@ same PR that fixes it.
   anti-rollback closes this; it is staged behind bench validation on a
   sacrificial board (human-gated). Consistent with the device-as-secret
   posture above, physical possession is already treated as compromise.
-- **Mailbox flush is triggered by an effectively unauthenticated beacon**,
-  since the beacon HMAC key is derived from the public PSK; a forged beacon
-  for a victim address makes a mailbox transmit that victim's queued
-  ciphertext (`handle_beacon` mailbox flush in `main/mesh_task.c`).
+- **Mailbox flush trust follows the same staged beacon key as everything
+  else in section 3's control-plane entry**: unprovisioned, the beacon key
+  is still public-PSK-derived, so a forged beacon for a victim address makes
+  a mailbox transmit that victim's queued ciphertext (`handle_beacon`
+  mailbox flush in `main/mesh_task.c`); provisioned, forgery requires the
+  network key but a captured valid beacon still replays (section 5).
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
   and mailbox capability in cleartext** (`mesh_send_beacon` in
   `main/mesh_task.c`).
@@ -495,6 +654,113 @@ These do not go away when section 4 empties out.
   airtime on messages, not chaff (a small dummy-traffic component exists in
   `components/security/dummy_traffic.c`, but nothing schedules it on the
   air today).
+- **Insider forgery of control-plane messages is inherent to a shared
+  symmetric network key.** Every RREP, RERR, ACK, delivery receipt, and
+  beacon MAC in section 3 proves "signed by a network-key holder", not
+  "signed by a specific node". Once the network key is provisioned, any
+  holder can still forge a control message on behalf of any other holder;
+  the design goal of provisioning is excluding non-members, not
+  distinguishing among members. This is the same shape as "a key-holding
+  insider can lie in routing" above, applied to the newly-authenticated
+  message types.
+- **Replay of RREP, RERR, beacon, ACK, and delivery receipt is not closed by
+  network-key provisioning.** None of the five section 3 MACs bind a nonce,
+  sequence number, or timestamp; provisioning stops a non-member from
+  forging a fresh message but does nothing to stop anyone from recording
+  and re-transmitting a captured, genuinely-valid one. Ranked by impact:
+  **RERR replay is worst**: `route_lookup`/teardown in `handle_rerr`
+  (`main/mesh_task.c`) is ungated by any freshness check, so a captured
+  valid RERR re-tears-down a live route on replay, a persistent, repeatable,
+  targeted denial of service, partially self-limiting only because a
+  torn-down route gets rediscovered. **RREP replay** resurrects a stale
+  route: `route_install` (`main/mesh_task.c`) is ungated by discovery
+  freshness, so a captured valid RREP re-installs an old path. Beacon, ACK,
+  and delivery-receipt replay have narrower blast radii (a stale mailbox
+  flush trigger; a spuriously re-cancelled retry or re-marked delivery; a
+  redundant forwarded receipt) but are equally unauthenticated for
+  freshness. Closing any of this requires per-message freshness or sequence
+  binding added to each of the five MACs, a distinct piece of work from
+  provisioning itself.
+- **The timesync bootstrap quorum can still be won by one key holder with
+  multiple addresses (NEW-SEC-4).** The beacon HMAC gate and the
+  bootstrap-offset clamp (section 3) both require holding the network key,
+  but neither requires holding a *distinct* identity per beacon. A single
+  insider who holds the network key and transmits under three fabricated
+  source addresses satisfies `CORROBORATION_REQUIRED` (3 distinct sources)
+  entirely on their own and commits an arbitrary first time offset; the
+  bootstrap clamp only bounds a proposal against the *existing* pending
+  pool, which that same insider fully controls when they are the only
+  contributor. Compounding this, `timesync_is_confident` never reverts to
+  false once `synchronized` becomes true (`components/timesync/timesync.c`),
+  so a bad offset committed at bootstrap is trusted indefinitely, not just
+  until the next corroboration round. Closing NEW-SEC-4 needs provisioning
+  **plus** a per-node beacon identity binding (so one network key cannot
+  mint an arbitrary number of distinct-looking sources), on top of the
+  general control-plane replay work above.
+- **RREP `next_hop` poisoning is inherent, not a bug this batch can close.**
+  `next_hop` is necessarily a relay-mutated, unauthenticated field: each
+  forwarder must be able to rewrite it to route the reply back toward the
+  originator, so it can never be included in `auth_hmac`'s covered set
+  without breaking every legitimate forward. A malicious relay can always
+  redirect a RREP's next hop within what its position in the network
+  already lets it do; this is a property of hop-by-hop mutable routing
+  fields in general, not something a control-plane MAC can fix.
+- **Beacon re-keying lags a runtime `setNetworkKey` call.** RREP, RERR, ACK,
+  and delivery-receipt MACs read `network_key_get()` live on every call, so
+  a runtime-provisioned key protects them immediately. The beacon key is
+  derived once at init and cached (`s_beacon_key` in `main/mesh_task.c`), so
+  it keeps using the old (possibly still-unprovisioned) key until the node
+  reboots. An operator who calls `setNetworkKey` at runtime does not get
+  uniform, instant protection across all five MAC types.
+- **DM handshake SAS verification has no UX.** `dm_derive_sas` produces a
+  7-digit short authentication string, but nothing in this batch surfaces
+  it for an out-of-band comparison. A MitM during first-contact handshake
+  is only detectable if the two users compare the code through some channel
+  outside Bramble itself; today, nothing prompts them to.
+- **The nonce counter is metadata, not just a cryptographic nonce.**
+  Because DATA/LOCATION nonces are now a deterministic counter rather than
+  random bits (section 3), an observer who cannot decrypt anything can
+  still read the counter off the wire and use it to order and roughly
+  count a given source address's messages across a boot session. The
+  previous random-nonce scheme did not expose this.
+- **Public-channel traffic has no replay protection of its own.** Excluding
+  a public-channel decrypt's forgeable src_addr from the shared replay
+  window (section 3, red-team panel fix) closes the shared-window
+  poisoning DoS, but leaves public-channel DATA/LOCATION relying solely on
+  the pre-existing `packet_id`/type dedup (60-second window, loop
+  suppression only). A captured public-channel packet can be replayed
+  within that 60-second window; this is accepted, since public-channel
+  content has no confidentiality expectation in the first place (the key
+  is public) and the alternative (a shared window keyed on a forgeable
+  identity) was actively worse.
+- **A first-contact DM session can, in principle, be evicted under a
+  sustained attack if it goes idle.** `dm_alloc`'s eviction (section 3,
+  red-team panel fix) protects a genuinely-active UNVERIFIED session via
+  its `last_active_ms` timestamp, but a first-contact session that is
+  established and then never sends or receives again before the SAS check
+  completes is, like any idle UNVERIFIED session, eligible for eviction
+  under table pressure. This trades a permanent, total DM outage (the
+  pre-fix behavior) for a narrow, activity-gated one; an idle session that
+  is evicted must simply re-handshake.
+- **A 64-sender or 128-entry LRU table can be evicted under enough
+  concurrent senders.** The DATA/LOCATION tier-1 replay table (64 senders)
+  and tier-2 deferred table (128 entries) evict the least-recently-seen
+  entry under load. An evicted sender who later returns starts with no
+  replay history, which only matters once a mesh sustains that many
+  concurrent distinct senders.
+- **Minor, non-exploitable robustness notes:** `network_key_mac`'s
+  `label || data` concatenation is not length-prefixed, which would be
+  ambiguous for attacker-chosen labels, but every label is a fixed,
+  prefix-free internal constant (`"bramble-rrep-v2"`, `"bramble-rerr-v2"`,
+  `"bramble-ack-v2"`, `"bramble-receipt-v2"`, `"bramble-beacon-v2"`), so
+  this is not reachable today. ACK and delivery-receipt `relay_path` and
+  `hop_count` remain intentionally unauthenticated (they are per-hop
+  telemetry, not security-relevant), so a replayed ACK or receipt can
+  still trigger a bounded re-forward and a cosmetic hop-trail change in the
+  UI even where the core `src_addr`/packet-id binding holds. The LOCATION
+  channel-message decode path does not assert `app_type == APP_TYPE_LOCATION`
+  before parsing (defense-in-depth only; it is inside the AEAD trust
+  boundary and memory-safe either way).
 
 ## 6. How to think about Bramble's privacy
 
@@ -503,12 +769,16 @@ Plain words, current state:
 - **What you say on a private channel is protected** from outsiders by
   strong, standard encryption, as long as the passphrase is good and was
   shared securely. Everyone *on* the channel reads everything on it.
-- **Today, do not use Bramble location sharing for anything sensitive.**
-  Location packets currently go over the air unencrypted; anyone in radio
-  range with cheap hardware can read your coordinates.
-- **Direct messages are currently group-readable.** A DM is hidden from
-  outsiders, but every member of the channel it rides on can decrypt it. If
-  you have not set up a private channel, a DM is readable by anyone at all.
+- **Location sharing is now encrypted end to end.** Coordinates and the
+  sharing tier travel under AES-256-GCM; an outsider without your keys
+  cannot read them. They can still tell that you are sharing location and
+  roughly how often, from packet type and timing alone.
+- **Direct messages are now end-to-end encrypted per conversation**, not
+  shared with everyone on a channel. A DM is protected by a session key
+  negotiated directly with the recipient; other channel members cannot read
+  it. There is no out-of-band way yet to confirm you are talking to the
+  right person on first contact (a short verification code exists in the
+  code but nothing in the app surfaces it to compare with the other side).
 - **Who you talk to is more exposed than what you say.** Destination
   addresses, beacons with your node's name, and message timing are visible
   to anyone in range.

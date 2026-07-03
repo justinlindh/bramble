@@ -524,6 +524,13 @@ esp_err_t nvs_set_i32(nvs_handle_t h, const char* k, int32_t v) {
     (void)v;
     return ESP_OK;
 }
+esp_err_t nvs_set_blob(nvs_handle_t h, const char* k, const void* v, size_t l) {
+    (void)h;
+    (void)k;
+    (void)v;
+    (void)l;
+    return ESP_OK;
+}
 esp_err_t nvs_get_u8(nvs_handle_t h, const char* k, uint8_t* o) {
     (void)h;
     (void)k;

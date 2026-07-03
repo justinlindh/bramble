@@ -245,6 +245,8 @@ Offset  Size  Field           Description
 Total: 12 bytes
 ```
 
+> **Firmware reality (wire v2).** `version` is `2`, not `0x01` as shown above (`BRAMBLE_VERSION` in `components/packet/include/packet.h`). The RX path drops any packet whose header version does not match before any type-specific parsing (`bramble_header_is_supported_version`, checked in `mesh_process_rx_packet`). See §4.25 for the full wire v2 change inventory.
+
 **Flags byte (bit fields):**
 
 ```
@@ -259,6 +261,8 @@ TIER1   TIER0   ACK_REQ RECEIPT CHANNEL  ENCRYP   FRAG1   FRAG0
 - `CHANNEL`: 1=channel (group) message, 0=direct message
 - `ENCRYP`: 1=payload encrypted, 0=plaintext (only for beacons/control). An earlier revision repurposed this bit as `HEADER_FLAG_EMERGENCY` for the (since removed, section 4.19) emergency packets; that collision is gone with them, and the bit means encryption only.
 - `FRAG[1:0]`: Fragment indicator — 00=not fragmented, 01=first fragment, 10=middle fragment, 11=last fragment
+
+> **Firmware reality (wire v2).** Bits 7:6 are no longer `TIER[1:0]`. Tier moved into the LOCATION ciphertext (§4.25 item 4), freeing those two bits: bit 7 is `FLAG_RESERVED_HIGH` (unused), bit 6 is `FLAG_EMERGENCY` (reserved for a future origin-set, AAD-bound emergency facility, not implemented today). Bits 5 through 0 are unchanged. See §4.25 item 2.
 
 ### 4.3 Packet Types
 
@@ -353,6 +357,8 @@ Total: 22 bytes
 
 ACKs are routed back along the reverse path. They are small and high-priority. The `rssi_at_dest` field lets the sender gauge link quality to the destination.
 
+> **Firmware reality (wire v2).** The current `bramble_ack_t` also carries a `hop_count` and a variable-length `relay_path[]` (for critical-tier ACKs) beyond the fields shown above, and as of this batch a fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, so the base size is 31 bytes (up to 63 with a full 8-hop path), not 22. See §4.25 item 6 and `components/packet/include/packet.h` for the current layout.
+
 ### 4.6 ROUTE_REQUEST Packet
 
 Privacy-preserving route discovery. Intermediate nodes cannot determine who initiated the request — only the destination can decrypt the source identity.
@@ -398,6 +404,8 @@ Total: 34 bytes
 
 - Bit 5 (reserved in common header): `OPEN_SOURCE` — when set, `encrypted_source` contains the plaintext source address (not encrypted). Used for first-contact discovery when the destination's public key is unknown. See §5.4 for details.
 
+> **Firmware reality (wire v2).** `auth_hmac` is no longer dead or zeroed. It authenticates `query_id || src_addr || hop_count || route_metric` with a network-key HMAC (label `"bramble-rrep-v2"`), excluding `next_hop` and `header.dest_addr` (the two fields `rrep_forward` legitimately rewrites at each relay). The static-DH-shared-secret keying scheme described above was never implemented and does not reflect any shipped version of the code. `RREP_SIZE` is unchanged at 34 bytes (the field already existed on the wire, unused). See §4.25 item 7.
+
 ### 4.8 ROUTE_ERROR Packet
 
 Sent when a forwarding node detects a broken link (no ACK from next hop after max retries).
@@ -412,6 +420,8 @@ Offset  Size  Field            Description
 ──────────────────────────────────────────────────────────
 Total: 24 bytes
 ```
+
+> **Firmware reality (wire v2).** `RERR_SIZE` is now 32 bytes (was 24). A trailing `auth_hmac[8]` authenticates `broken_dest || broken_next_hop` (the two origin-stable fields), excluding `reporter_addr` and `packet_id`, which every forwarder rewrites when it re-originates a RERR. Verified before any teardown action. See §4.25 item 5.
 
 ### 4.9 BEACON Packet
 
@@ -453,6 +463,8 @@ RSVD    RSVD    RSVD    RSVD    RSVD     ACCEPT_DM    PROBE_ACK     MAILBOX
 
 **Route Advertisement Extension:** Removed unshipped. The passive route-learning extension (up to 4 route ads appended to the beacon) was deleted without ever being placed on the wire; beacons carry the optional node name after the fixed fields instead.
 
+> **Firmware reality (wire v2).** The HMAC key is now derived from the network key when one is provisioned (`HKDF-SHA256(salt="bramble-beacon-v2", ikm=network_key)`), a distinct subkey rather than a channel-PSK-derived key; the public-PSK-derived fallback remains, logged explicitly as integrity-only, when unprovisioned. Verification (`beacon_verify_hmac`) is constant-time (XOR-accumulate, no early exit), not a fast-exit compare. See §4.25 item 8.
+
 ### 4.10 KEY_EXCHANGE Packet
 
 X25519 Diffie-Hellman key exchange for establishing DM encryption keys.
@@ -471,6 +483,8 @@ Offset  Size  Field            Description
 ──────────────────────────────────────────────────────────
 Total: 101 bytes
 ```
+
+> **Firmware reality (wire v2).** As of this batch `PKT_TYPE_KEY_EXCHANGE` (0x06) is formally retired from the wire: it is not sent or dispatched (as §4.3 already notes it never was), and DM handshakes now travel inside `PKT_TYPE_DATA` envelopes with `app_type = APP_TYPE_KE` instead, using per-peer AES-256-GCM session keys derived from a quad-DH X25519 exchange plus a 7-digit SAS. `bramble_key_exchange_t` remains in `packet.h`/`packet.c` as the inner-payload layout for those handshake messages; the standalone `0x06` packet type never appears on the wire. See §4.25 item 3 and `docs/SECURITY-MODEL.md`.
 
 ### 4.11 DELIVERY_RECEIPT Packet
 
@@ -492,6 +506,8 @@ Total: 22 + (hop_count × 4) bytes (max 54 bytes at 8 hops)
 Each relay node appends its own address to the relay_path as it forwards the receipt back toward the original sender. The sender receives the complete path and can update its routing intelligence.
 
 **Relay path restriction:** Delivery receipts with relay paths (the full DELIVERY_RECEIPT packet above) are only generated for **Critical tier** messages. Normal tier messages receive simple ACKs only (§4.5) — no relay path data. The `RECEIPT` flag in the common header flags byte should only be set for Critical tier. This limits exposure of relay path data, which is visible to nodes on the return route. This is an acceptable tradeoff since those nodes already know they are relays for that specific delivery.
+
+> **Firmware reality (wire v2).** `DELIVERY_RECEIPT_MIN_SIZE`/`MAX_SIZE` are now 30/62 bytes (were 22/54). A fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, authenticating `src_addr || orig_packet_id`, so a verifier never has to trust the unauthenticated `hop_count` to locate the tag. Excludes `relay_path`/`hop_count`/`header.hop_limit`, which every relay hop mutates. See §4.25 item 6.
 
 ### 4.12 CONGESTION Packet
 
@@ -731,6 +747,22 @@ Total: 1 byte
 **Cache:**
 - `LOCATION_MAX_CONTACTS`: 16 peers
 - `LOCATION_CACHE_TTL_MS`: 1 hour
+
+### 4.25 Wire Version 2 (Firmware Reality)
+
+`BRAMBLE_VERSION` is `2` (`components/packet/include/packet.h`). The RX path drops any packet whose header version does not match before body parsing (`bramble_header_is_supported_version`, checked in `mesh_process_rx_packet` before dedup or handler dispatch). There is no v1/v2 compatibility shim: a v1 node and a v2 node cannot talk to each other, and none was attempted.
+
+This section is the wire v2 change inventory for `feat/wire-format-security-batch`. It supersedes the packet tables above (§4.2 through §4.11) wherever they conflict; the per-section notes above point back here.
+
+1. **Version bump and RX gate.** `BRAMBLE_VERSION 1 -> 2`. Non-v2 packets are rejected before any type-specific parsing.
+2. **Flags byte redesign (tier out of flags).** The v1 `TIER[1:0]` bits (7:6) are gone; tier now travels inside the LOCATION ciphertext (item 4 below), not the cleartext header. Bits 7:6 are `FLAG_RESERVED_HIGH` (0x80, unused) and `FLAG_EMERGENCY` (0x40, reserved for a future origin-set, AAD-bound emergency facility, not implemented). Note: DES-9, the historical collision between an emergency flag and `FLAG_ENCRYPT` (both `0x04`), was already resolved before this batch when the unshipped emergency packet machinery was deleted (§4.19, §4.20); this flag redesign is a distinct, later cleanup, not the DES-9 fix itself.
+3. **`PKT_TYPE_KEY_EXCHANGE` (0x06) retired from the wire.** DM handshakes now travel inside `PKT_TYPE_DATA` envelopes with `app_type = APP_TYPE_KE`, using per-peer AES-256-GCM session keys derived from a quad-DH X25519 exchange plus a 7-digit SAS. `0x06` never appears on the wire again.
+4. **DATA and LOCATION are AEAD with a bound header.** Both use AES-256-GCM with a 12-byte nonce derived from a node-global, NVS-persisted 48-bit deterministic counter (`components/nonce_counter`), not the random-nonce scheme this document described previously. The associated data binds the serialized 12-byte header (with `hop_limit` zeroed, the one field a relay legitimately mutates) plus, for DATA, the sender's `src_addr`. LOCATION packets are now always encrypted; the sharing tier moves from the old cleartext header bits into byte 0 of the authenticated plaintext, and every LOCATION ciphertext pads to one canonical size regardless of tier, so ciphertext length no longer leaks which tier was chosen. Post-decrypt replay protection is enforced per-sender on `(src_addr, nonce_counter_extract(nonce))`.
+5. **ROUTE_ERROR (RERR) plus 8 bytes.** `RERR_SIZE 24 -> 32`. A trailing `auth_hmac[8]` authenticates `broken_dest || broken_next_hop` with a network-key HMAC (label `"bramble-rerr-v2"`); `reporter_addr` and `packet_id` are excluded because each forwarder rewrites both on re-origination. Verified before any teardown action.
+6. **ACK plus 8 bytes, DELIVERY_RECEIPT plus 8 bytes.** `ACK_BASE_SIZE 23 -> 31` (`ACK_MAX_SIZE` 55 -> 63); `DELIVERY_RECEIPT_MIN_SIZE 22 -> 30` (`DELIVERY_RECEIPT_MAX_SIZE` 54 -> 62). Both structs gain `auth_hmac[8]`, authenticating `src_addr || ack_packet_id` (label `"bramble-ack-v2"`) and `src_addr || orig_packet_id` (label `"bramble-receipt-v2"`) respectively. The field sits immediately before the variable-length `relay_path`, at a fixed offset independent of `hop_count`, so a verifier never has to trust the attacker-controlled, unauthenticated `hop_count` to locate the tag. Excludes `relay_path`, `hop_count`, and `hop_limit`, which every relay hop legitimately mutates.
+7. **ROUTE_REPLY (RREP) `auth_hmac` is now real.** `RREP_SIZE` is unchanged at 34 bytes (the field already existed on the wire, zeroed and ignored). It now authenticates `query_id || src_addr || hop_count || route_metric` with label `"bramble-rrep-v2"`, excluding `next_hop` and `header.dest_addr`, the two fields `rrep_forward` legitimately rewrites at each relay.
+8. **BEACON HMAC re-keyed.** When a network key is provisioned, the beacon HMAC key is `HKDF-SHA256(salt="bramble-beacon-v2", ikm=network_key)`, a distinct subkey rather than a channel-PSK-derived key; the public-PSK-derived fallback remains, logged as integrity-only, when unprovisioned. Verification is now constant-time (XOR-accumulate, no early exit). Operational note: `bramble.setNetworkKey` takes effect immediately for RREP, RERR, ACK, and receipt MACs (each call reads the current key live), but the beacon key is cached at init and needs a reboot to pick up a runtime-provisioned key.
+9. **Minimal network key provider added (`components/network_key`).** NVS-backed (namespace `bramble_netkey`), settable via the authenticated `bramble.setNetworkKey` RPC (gated the same way as `bramble.setAuthToken`: absence from the dispatcher's unauthenticated-method allowlist, not a per-handler check). Unprovisioned nodes fall back to a key derived from the public, compile-time `BRAMBLE_PUBLIC_CHANNEL_PSK`, so items 5 through 8 above are wire format and verification logic only. See `docs/SECURITY-MODEL.md` for why SEC-H1, SEC-H2, NEW-SEC-4, and NEW-SEC-8 do not close until a real key is provisioned and distributed.
 
 ---
 

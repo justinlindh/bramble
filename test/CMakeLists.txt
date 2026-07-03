@@ -27,6 +27,139 @@ add_executable(test_packet
     stubs/esp_stubs.c
 )
 
+add_executable(test_wire_version
+    test_wire_version.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+
+add_executable(test_flag_layout
+    test_flag_layout.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+
+add_executable(test_aead_aad
+    test_aead_aad.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+
+add_executable(test_nonce_counter
+    test_nonce_counter.c
+    unity/unity.c
+)
+target_include_directories(test_nonce_counter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nonce_counter/include
+)
+
+add_executable(test_replay_window
+    test_replay_window.c
+    unity/unity.c
+)
+target_include_directories(test_replay_window PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
+)
+
+add_executable(test_dm_session
+    test_dm_session.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
+target_include_directories(test_dm_session PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_dm_session ssl crypto)
+
+# KE-in-DATA envelope: handshake transport under the channel key + the
+# resulting session round-tripping a chat payload (Task 1.4).
+add_executable(test_ke_envelope
+    test_ke_envelope.c
+    unity/unity.c
+)
+target_include_directories(test_ke_envelope PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_ke_envelope ssl crypto)
+
+# Location encryption: tier-in-ciphertext, canonical size across channel and
+# session paths (Task 2.1 / SEC-C1). location.c is a separate source (needs
+# NVS stubs + libm) rather than #include'd directly like the crypto/channel/
+# dm_session components above.
+add_executable(test_location_crypto
+    test_location_crypto.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+)
+target_include_directories(test_location_crypto PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nonce_counter/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+target_compile_definitions(test_location_crypto PRIVATE NVS_STUBS_ENABLE=1)
+target_link_libraries(test_location_crypto ssl crypto m)
+
+# Network key provider: domain-separated control-plane MAC, PSK fallback
+# when unprovisioned (Task 3.1, PART 3, staged not closed).
+add_executable(test_network_key
+    test_network_key.c
+    unity/unity.c
+)
+target_include_directories(test_network_key PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+)
+target_link_libraries(test_network_key ssl crypto)
+
+# RREP authentication: MAC over origin-stable fields only, excluding the
+# relay-mutated next_hop/header.dest_addr (Task 3.2 / SEC-H1, staged).
+add_executable(test_rrep_auth
+    test_rrep_auth.c
+    unity/unity.c
+)
+target_include_directories(test_rrep_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+target_link_libraries(test_rrep_auth ssl crypto)
+
+# RERR authentication: MAC over broken_dest/broken_next_hop only, excluding
+# the per-forwarder reporter_addr/packet_id (Task 3.3 / SEC-H1, staged).
+add_executable(test_rerr_auth
+    test_rerr_auth.c
+    unity/unity.c
+)
+target_include_directories(test_rerr_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+)
+target_link_libraries(test_rerr_auth ssl crypto)
+
+# ACK / delivery receipt authentication: MAC over src_addr/ack_packet_id
+# (or orig_packet_id) only, excluding the per-hop relay_path/hop_count/
+# hop_limit (Task 3.5 / NEW-SEC-8, staged).
+add_executable(test_ack_auth
+    test_ack_auth.c
+    unity/unity.c
+)
+target_include_directories(test_ack_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+)
+target_link_libraries(test_ack_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
@@ -283,6 +416,7 @@ add_executable(test_beacon
 target_include_directories(test_beacon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
 )
 target_link_libraries(test_beacon ssl crypto)
 
@@ -291,10 +425,15 @@ add_executable(test_discovery
     test_discovery.c
     unity/unity.c
     stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_discovery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
+target_link_libraries(test_discovery ssl crypto)
 
 # Forwarding tests
 add_executable(test_forwarding
@@ -373,13 +512,18 @@ add_executable(test_integration
     test_integration.c
     unity/unity.c
     stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_integration PRIVATE
     stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
+target_link_libraries(test_integration ssl crypto)
 
 # Dummy traffic tests
 add_executable(test_dummy_traffic
@@ -479,6 +623,8 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_rpc_set_auth_token_contract
@@ -492,6 +638,8 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_rpc_get_config_channel_export
@@ -505,6 +653,8 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 add_executable(test_mesh_broadcast_delivery
@@ -518,6 +668,8 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
 
@@ -527,6 +679,9 @@ add_executable(test_broadcast_delivery_receipt
     stubs/esp_stubs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/broadcast_delivery_receipt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/routing_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -549,6 +704,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -559,7 +715,7 @@ target_compile_definitions(test_rpc_add_channel_contract PRIVATE
 target_compile_options(test_rpc_add_channel_contract PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_add_channel_contract m)
+target_link_libraries(test_rpc_add_channel_contract m ssl crypto)
 
 target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -582,6 +738,7 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -592,7 +749,7 @@ target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
 target_compile_options(test_rpc_set_auth_token_contract PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_set_auth_token_contract m)
+target_link_libraries(test_rpc_set_auth_token_contract m ssl crypto)
 
 target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -615,6 +772,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -625,7 +783,7 @@ target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_get_config_channel_export m)
+target_link_libraries(test_rpc_get_config_channel_export m ssl crypto)
 
 target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -648,6 +806,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -658,16 +817,20 @@ target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
 target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_mesh_broadcast_delivery m)
+target_link_libraries(test_mesh_broadcast_delivery m ssl crypto)
 
 target_include_directories(test_broadcast_delivery_receipt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_compile_definitions(test_broadcast_delivery_receipt PRIVATE
     UNIT_TEST=1
 )
+target_link_libraries(test_broadcast_delivery_receipt ssl crypto)
 
 # NMEA parser tests (pure C, no ESP-IDF deps)
 add_executable(test_nmea_parser
@@ -793,6 +956,8 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
 )
@@ -817,6 +982,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
@@ -827,7 +993,7 @@ target_compile_definitions(test_rpc_methods_firmware PRIVATE
 target_compile_options(test_rpc_methods_firmware PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_rpc_methods_firmware m)
+target_link_libraries(test_rpc_methods_firmware m ssl crypto)
 
 # Chat message UI helper tests
 add_executable(test_chat_message_ui
@@ -964,6 +1130,8 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
 )
@@ -989,6 +1157,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
@@ -998,7 +1167,7 @@ target_compile_definitions(test_host_rpc_methods PRIVATE
 target_compile_options(test_host_rpc_methods PRIVATE
     -Wno-error=unused-parameter
 )
-target_link_libraries(test_host_rpc_methods m)
+target_link_libraries(test_host_rpc_methods m ssl crypto)
 
 # Mailbox integration wrapper tests (mesh_task.c wrapper logic, no ESP-IDF deps)
 # Tests: store-when-disabled, store-when-enabled, flush-for, expire/TTL
