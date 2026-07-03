@@ -558,11 +558,30 @@ derived from `BRAMBLE_PUBLIC_CHANNEL_PSK`, a public, compile-time constant
 into this repository, derives the identical fallback key and forges a
 valid MAC for any of these five message types. A real per-fleet key can be
 loaded via the authenticated `bramble.setNetworkKey` RPC (gated the same
-way as `bramble.setAuthToken`) or from NVS at boot, but this batch does not
-ship key generation, distribution, or rotation UX. Closure of these four
-findings requires provisioning **plus** the additional work in section 5
-below (per-message freshness and per-node beacon identity); provisioning
-alone is not sufficient and must not be described as closing them.
+way as `bramble.setAuthToken`) or from NVS at boot. RREP, RERR, ACK, and
+delivery-receipt verification read `network_key_get()` live on every call,
+so a runtime-provisioned key protects them immediately; the beacon HMAC key
+used to be derived once at init and cached, so it kept using the old key
+until reboot, but the RPC handler now also calls `mesh_rederive_beacon_key`
+(`main/mesh_task.c`), so beacons pick up a runtime-provisioned key live too
+(the earlier "beacon key needs a reboot" gap is resolved).
+
+Provisioning and distribution now exist end to end: the webapp generates a
+random 32-byte key, carries it out-of-band as a `bramble://net/v1?k=` QR
+code or copy-paste string (write-only; the key is never read back from a
+device), and an operator confirms fleet convergence with
+`bramble.getNetworkKeyStatus`, which reports whether a node is provisioned
+and the one-way `SHA256(key)[0:4]` fingerprint of whatever key it currently
+holds, so every node's fingerprint can be compared without the key itself
+ever crossing the wire a second time. Key rotation UX (retiring an old key
+across a fleet without a coordinated flag day) remains out of scope. None
+of this establishes a short-authentication-string comparison or forward
+secrecy for the network key; see section 5.
+
+Closure of these four findings requires provisioning **plus** the
+additional work in section 5 below (per-message freshness and per-node
+beacon identity); provisioning alone is not sufficient and must not be
+described as closing them.
 
 ## 4. Known gaps in the current implementation
 
@@ -705,13 +724,6 @@ These do not go away when section 4 empties out.
   redirect a RREP's next hop within what its position in the network
   already lets it do; this is a property of hop-by-hop mutable routing
   fields in general, not something a control-plane MAC can fix.
-- **Beacon re-keying lags a runtime `setNetworkKey` call.** RREP, RERR, ACK,
-  and delivery-receipt MACs read `network_key_get()` live on every call, so
-  a runtime-provisioned key protects them immediately. The beacon key is
-  derived once at init and cached (`s_beacon_key` in `main/mesh_task.c`), so
-  it keeps using the old (possibly still-unprovisioned) key until the node
-  reboots. An operator who calls `setNetworkKey` at runtime does not get
-  uniform, instant protection across all five MAC types.
 - **DM handshake SAS verification has no UX.** `dm_derive_sas` produces a
   7-digit short authentication string, but nothing in this batch surfaces
   it for an out-of-band comparison. A MitM during first-contact handshake

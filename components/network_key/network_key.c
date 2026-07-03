@@ -53,3 +53,11 @@ void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t
     crypto_hmac_sha256(key, sizeof(key), buf, label_len + len, full_mac);
     memcpy(out, full_mac, 8);
 }
+
+void network_key_fingerprint(uint8_t out[4]) {
+    uint8_t key[32];
+    network_key_get(key);
+    uint8_t hash[32];
+    crypto_sha256(key, sizeof(key), hash);
+    memcpy(out, hash, 4);
+}
