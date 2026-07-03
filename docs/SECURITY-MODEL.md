@@ -753,15 +753,23 @@ These do not go away when section 4 empties out.
   work), and it does not close NEW-SEC-4 (below), whose bootstrap-quorum
   race is about distinguishing identities, not freshness.
 - **A control message reordered more than 64 counter-values behind a newer
-  one from the same signer is a bounded false-reject.** The per-signer
-  replay window added above reuses the same 64-position sliding window as
-  the DATA/LOCATION replay windows (`components/replay_window`): a
-  control-plane message arriving more than 64 sequence numbers behind the
-  highest one already seen from that signer reads `BELOW_WINDOW` and is
-  dropped, even though it was never actually replayed. Same accepted
-  trade-off as the DATA/LOCATION windows (section 3): bounded, and only
-  reachable by a signer drawing sequence numbers unusually fast relative
-  to a message delayed unusually long in transit.
+  one from the same signer is a bounded false-reject, reachable under
+  normal data-plane load, not just an edge case.** The per-signer replay
+  window added above reuses the same 64-position sliding window as the
+  DATA/LOCATION replay windows (`components/replay_window`), and the same
+  counter: `control_seq_next` draws from the identical node-global
+  `nonce_counter` that DATA and LOCATION sends already consume for their
+  AEAD nonces (section 3), not a separate, slower, control-plane-only
+  counter. A busy sender's counter advances on every DATA/LOCATION send it
+  makes, so a multi-hop control-plane message (a RERR forwarded hop by
+  hop, or an RREP crossing a slow or congested path) can easily see more
+  than 64 of that signer's other sends complete before a distant receiver
+  finally processes it. When that happens the message reads
+  `BELOW_WINDOW` and is dropped, even though it was never actually
+  replayed. This fails closed only, never a false accept: it costs
+  availability (a dropped, genuine control-plane message under
+  contention), not security. Same accepted trade-off as the DATA/LOCATION
+  windows (section 3).
 - **`handle_rrep` installs a route for a fresh, unsolicited RREP.**
   Freshness (above) stops a *replayed* RREP from resurrecting a stale
   route, but does not stop a network-key holder from originating a
@@ -831,9 +839,19 @@ These do not go away when section 4 empties out.
 - **A 64-sender or 128-entry LRU table can be evicted under enough
   concurrent senders.** The DATA/LOCATION tier-1 replay table (64 senders)
   and tier-2 deferred table (128 entries) evict the least-recently-seen
-  entry under load. An evicted sender who later returns starts with no
-  replay history, which only matters once a mesh sustains that many
-  concurrent distinct senders.
+  entry under load. The ws 1.3b control-plane replay table
+  (`s_control_replay`) shares the same `REPLAY_MAX_SENDERS` = 64 bound as
+  the data-plane table, since it is a second instance of the same
+  `replay_window` component: a signer evicted after the mesh has seen more
+  than 64 other distinct signers resets, and a very old, previously-valid
+  control-plane message replayed after that signer's eviction could be
+  accepted again. Not outsider-drivable: `s_control_replay` is only ever
+  fed a `(signer, seq)` pair after that message's MAC has already
+  verified, so an attacker without the network key cannot manufacture the
+  flood of distinct authenticated signers a targeted eviction would need.
+  An evicted sender who later returns (data-plane) or re-transmits
+  (control-plane) starts with no replay history, which only matters once a
+  mesh sustains that many concurrent distinct senders.
 - **Minor, non-exploitable robustness notes:** `network_key_mac`'s
   `label || data` concatenation is not length-prefixed, which would be
   ambiguous for attacker-chosen labels, but every label is a fixed,
