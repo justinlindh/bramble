@@ -1,6 +1,7 @@
 #ifndef BRAMBLE_PACKET_H
 #define BRAMBLE_PACKET_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -12,7 +13,7 @@
 #endif
 
 /* Protocol version */
-#define BRAMBLE_VERSION 1
+#define BRAMBLE_VERSION 2
 
 /* Packet types */
 #define PKT_TYPE_ACK 0x01
@@ -150,6 +151,7 @@ typedef struct {
 /* Serialize/deserialize functions. Return ESP_OK or ESP_ERR_INVALID_SIZE. */
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len);
 esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, size_t len);
+bool bramble_header_is_supported_version(const bramble_header_t* h);
 
 /*
  * Build the AES-GCM AAD for an encrypted DATA packet: the serialized header

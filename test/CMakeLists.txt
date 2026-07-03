@@ -27,6 +27,12 @@ add_executable(test_packet
     stubs/esp_stubs.c
 )
 
+add_executable(test_wire_version
+    test_wire_version.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
