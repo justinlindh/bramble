@@ -60,4 +60,12 @@ int64_t timesync_get_network_time(const timesync_state_t* ts, uint32_t local_now
 /* Get our current stratum */
 uint8_t timesync_get_stratum(const timesync_state_t* ts);
 
+/*
+ * Whether network time is trustworthy enough to gate a security decision on
+ * (e.g. deferred replay acceptance, NEW-SEC-4). Placeholder for Task 3.5's
+ * stratum/corroboration-aware confidence signal; for now this mirrors
+ * `synchronized` (at least one corroborated sync has committed).
+ */
+bool timesync_is_confident(const timesync_state_t* ts);
+
 #endif

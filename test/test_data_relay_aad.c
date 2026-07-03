@@ -32,7 +32,10 @@ void tearDown(void) {}
 #define TEST_SRC_ADDR 0xA1B2C3D4u
 #define TEST_DEST_ADDR 0x11223344u
 #define TEST_PACKET_ID 0xCAFEF00Du
-#define TEST_APP_TYPE 0x01
+/* Deliberately not APP_TYPE_CHAT (0x01): this suite tests AAD/relay/tamper
+ * behavior, unrelated to the chat-only sent_at framing (Task 0.6), and
+ * picking a non-chat value keeps ct_len at the plain CHANNEL_MSG_OVERHEAD. */
+#define TEST_APP_TYPE 0x09
 
 static void make_channel(const char* psk, bramble_channel_t* ch) {
     TEST_ASSERT_EQUAL(0, channel_derive_key(psk, ch));
@@ -64,7 +67,7 @@ static size_t originate_data_packet(const bramble_channel_t* ch, const uint8_t* 
     uint8_t tag[BRAMBLE_TAG_SIZE];
     size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
 
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(ch, TEST_SRC_ADDR, TEST_APP_TYPE, payload, payload_len,
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(ch, TEST_SRC_ADDR, TEST_APP_TYPE, 0, payload, payload_len,
                                              aad, HEADER_SIZE + 4, nonce, ciphertext, tag));
 
     uint32_t src = TEST_SRC_ADDR;

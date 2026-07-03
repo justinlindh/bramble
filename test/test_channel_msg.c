@@ -25,7 +25,9 @@ void test_encrypt_decrypt_single(void) {
     memset(nonce, 0x01, sizeof(nonce));
     uint8_t aad[12] = {0};
 
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xDEADBEEF, 0x01,
+    /* app_type 0x09: deliberately not APP_TYPE_CHAT (see test_sent_at_*
+     * below for that), so ct_len stays at plain CHANNEL_MSG_OVERHEAD. */
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xDEADBEEF, 0x09, 0,
                                               data, sizeof(data),
                                               aad, sizeof(aad),
                                               nonce, ct, tag));
@@ -40,7 +42,7 @@ void test_encrypt_decrypt_single(void) {
 
     TEST_ASSERT_EQUAL(ch.channel_id, info.channel_id);
     TEST_ASSERT_EQUAL(0, info.epoch);
-    TEST_ASSERT_EQUAL(0x01, info.app_type);
+    TEST_ASSERT_EQUAL(0x09, info.app_type);
     TEST_ASSERT_EQUAL(0xDEADBEEF, info.src_addr);
     TEST_ASSERT_EQUAL(sizeof(data), info.data_len);
     TEST_ASSERT_EQUAL(0, info.channel_index);
@@ -55,7 +57,7 @@ void test_trial_decryption(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x02, sizeof(nonce));
     uint8_t aad[12] = {0};
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch_a, 0x12345678, 0x02,
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch_a, 0x12345678, 0x02, 0,
                                               data, sizeof(data),
                                               aad, sizeof(aad),
                                               nonce, ct, tag));
@@ -83,7 +85,7 @@ void test_unknown_channel(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x03, sizeof(nonce));
     uint8_t aad[12] = {0};
-    channel_msg_encrypt(&ch, 1, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
+    channel_msg_encrypt(&ch, 1, 0, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
     bramble_channel_t channels[2];
     make_channel("other-1", &channels[0]);
@@ -112,7 +114,7 @@ void test_16_channels(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x04, sizeof(nonce));
     uint8_t aad[12] = {0};
-    channel_msg_encrypt(&ch12, 0xAABBCCDD, 0x05, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
+    channel_msg_encrypt(&ch12, 0xAABBCCDD, 0x05, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
     channel_msg_info_t info;
     uint8_t pt[256] = {0};
@@ -135,7 +137,7 @@ void test_epoch_catchup(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x05, sizeof(nonce));
     uint8_t aad[12] = {0};
-    channel_msg_encrypt(&sender, 0x11111111, 0x03, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
+    channel_msg_encrypt(&sender, 0x11111111, 0x03, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
     /* Receiver at epoch 3 */
     bramble_channel_t receiver;
@@ -172,7 +174,7 @@ void test_constant_time_all_positions(void) {
         uint8_t nonce[12], ct[256], tag[16];
         memset(nonce, 0x06, sizeof(nonce)); nonce[11] = (uint8_t)target;
     uint8_t aad[12] = {0};
-        channel_msg_encrypt(&enc_ch, 0xBEEF0000 + target, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
+        channel_msg_encrypt(&enc_ch, 0xBEEF0000 + target, 0x09, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct, tag);
 
         channel_msg_info_t info;
         uint8_t pt[256] = {0};
@@ -193,7 +195,7 @@ static void make_garbage(uint8_t *nonce, uint8_t *ct, uint8_t *tag, size_t *ct_l
     uint8_t data[] = "junk";
     uint8_t aad[12] = {0};
     memset(nonce, 0x07, BRAMBLE_NONCE_SIZE);
-    channel_msg_encrypt(&attacker, 0x66666666, 0x01, data, sizeof(data), aad, sizeof(aad), nonce,
+    channel_msg_encrypt(&attacker, 0x66666666, 0x09, 0, data, sizeof(data), aad, sizeof(aad), nonce,
                         ct, tag);
     *ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
 }
@@ -208,7 +210,7 @@ void test_epoch_catchup_deep_recovery(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x08, sizeof(nonce));
     uint8_t aad[12] = {0};
-    channel_msg_encrypt(&sender, 0x22222222, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct,
+    channel_msg_encrypt(&sender, 0x22222222, 0x09, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct,
                         tag);
 
     bramble_channel_t receiver;
@@ -245,7 +247,7 @@ void test_epoch_catchup_budget_exhaustion_and_refill(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x09, sizeof(nonce));
     uint8_t aad[12] = {0};
-    channel_msg_encrypt(&sender, 0x33333333, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct,
+    channel_msg_encrypt(&sender, 0x33333333, 0x09, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct,
                         tag);
     size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
     TEST_ASSERT_EQUAL(-1, channel_msg_decrypt(&receiver, 1, nonce, ct, ct_len, tag, aad,
@@ -258,7 +260,7 @@ void test_epoch_catchup_budget_exhaustion_and_refill(void) {
     uint8_t data2[] = "now";
     uint8_t nonce2[12], ct2[256], tag2[16];
     memset(nonce2, 0x0A, sizeof(nonce2));
-    channel_msg_encrypt(&sender_now, 0x44444444, 0x01, data2, sizeof(data2), aad, sizeof(aad),
+    channel_msg_encrypt(&sender_now, 0x44444444, 0x09, 0, data2, sizeof(data2), aad, sizeof(aad),
                         nonce2, ct2, tag2);
     TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce2, ct2,
                                              CHANNEL_MSG_OVERHEAD + sizeof(data2), tag2, aad,
@@ -290,7 +292,7 @@ void test_epoch_catchup_success_refunds_budget(void) {
         uint8_t data[] = "deep";
         uint8_t nonce[12], ct[256], tag[16];
         memset(nonce, 0x0B, sizeof(nonce)); nonce[11] = (uint8_t)round;
-        channel_msg_encrypt(&sender, 0x77777777, 0x01, data, sizeof(data), aad, sizeof(aad),
+        channel_msg_encrypt(&sender, 0x77777777, 0x09, 0, data, sizeof(data), aad, sizeof(aad),
                             nonce, ct, tag);
         TEST_ASSERT_EQUAL(0, channel_msg_decrypt(&receiver, 1, nonce, ct,
                                                  CHANNEL_MSG_OVERHEAD + sizeof(data), tag, aad,
@@ -324,12 +326,75 @@ void test_epoch_catchup_budget_is_per_channel(void) {
     uint8_t nonce[12], ct[256], tag[16];
     memset(nonce, 0x0C, sizeof(nonce));
     uint8_t aad[12] = {0};
-    channel_msg_encrypt(&sender, 0x55555555, 0x01, data, sizeof(data), aad, sizeof(aad), nonce, ct,
+    channel_msg_encrypt(&sender, 0x55555555, 0x09, 0, data, sizeof(data), aad, sizeof(aad), nonce, ct,
                         tag);
     TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 2, nonce, ct,
                                              CHANNEL_MSG_OVERHEAD + sizeof(data), tag, aad,
                                              sizeof(aad), pt, &info, 0));
     TEST_ASSERT_EQUAL(1, info.channel_index);
+}
+
+/* ── sent_at (Task 0.6) ─────────────────────────────────────────────── */
+
+/* APP_TYPE_CHAT carries an authenticated sent_at inside the ciphertext:
+ * confirm it survives the round trip and the extra 4 bytes are correctly
+ * excluded from the decoded data. */
+void test_sent_at_round_trips_for_chat(void) {
+    bramble_channel_t ch;
+    make_channel("sent-at-psk", &ch);
+
+    uint8_t data[] = "hello at a known time";
+    uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x0D, sizeof(nonce));
+    uint8_t aad[12] = {0};
+    uint32_t sent_at = 1700000000u;
+
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0x99999999, APP_TYPE_CHAT, sent_at,
+                                              data, sizeof(data), aad, sizeof(aad),
+                                              nonce, ct, tag));
+
+    bramble_channel_t channels[1];
+    make_channel("sent-at-psk", &channels[0]);
+    channel_msg_info_t info;
+    uint8_t pt[256] = {0};
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE + sizeof(data);
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 1, nonce, ct, ct_len, tag, aad,
+                                             sizeof(aad), pt, &info, 0));
+
+    TEST_ASSERT_EQUAL(APP_TYPE_CHAT, info.app_type);
+    TEST_ASSERT_EQUAL_UINT32(sent_at, info.sent_at);
+    TEST_ASSERT_EQUAL(sizeof(data), info.data_len);
+    TEST_ASSERT_EQUAL_MEMORY(data, info.data, sizeof(data));
+}
+
+/* A non-chat app_type carries no sent_at: the caller's value is ignored on
+ * encrypt, and decrypt reports it absent (0), not whatever was passed in. */
+void test_sent_at_absent_for_non_chat(void) {
+    bramble_channel_t ch;
+    make_channel("sent-at-psk-2", &ch);
+
+    uint8_t data[] = "not chat";
+    uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x0E, sizeof(nonce));
+    uint8_t aad[12] = {0};
+
+    /* Deliberately pass a nonzero sent_at to confirm it is ignored for a
+     * non-chat app_type. */
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0x88888888, 0x09, 1700000000u,
+                                              data, sizeof(data), aad, sizeof(aad),
+                                              nonce, ct, tag));
+
+    bramble_channel_t channels[1];
+    make_channel("sent-at-psk-2", &channels[0]);
+    channel_msg_info_t info;
+    uint8_t pt[256] = {0};
+    size_t ct_len = CHANNEL_MSG_OVERHEAD + sizeof(data);
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels, 1, nonce, ct, ct_len, tag, aad,
+                                             sizeof(aad), pt, &info, 0));
+
+    TEST_ASSERT_EQUAL(0x09, info.app_type);
+    TEST_ASSERT_EQUAL_UINT32(0, info.sent_at);
+    TEST_ASSERT_EQUAL(sizeof(data), info.data_len);
 }
 
 int main(void) {
@@ -344,5 +409,7 @@ int main(void) {
     RUN_TEST(test_epoch_catchup_budget_exhaustion_and_refill);
     RUN_TEST(test_epoch_catchup_success_refunds_budget);
     RUN_TEST(test_epoch_catchup_budget_is_per_channel);
+    RUN_TEST(test_sent_at_round_trips_for_chat);
+    RUN_TEST(test_sent_at_absent_for_non_chat);
     return UNITY_END();
 }

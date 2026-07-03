@@ -6,13 +6,19 @@ _Static_assert(CHANNEL_MSG_MAX_PLAINTEXT_SIZE >=
                "plaintext buffer too small for max packet minus wire overhead");
 
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
-                        const uint8_t* data, size_t data_len, const uint8_t* aad, size_t aad_len,
-                        const uint8_t* nonce_in, uint8_t* ciphertext_out, uint8_t* tag_out) {
+                        uint32_t sent_at, const uint8_t* data, size_t data_len,
+                        const uint8_t* aad, size_t aad_len, const uint8_t* nonce_in,
+                        uint8_t* ciphertext_out, uint8_t* tag_out) {
     if (!ch || !nonce_in || !ciphertext_out || !tag_out)
         return -1;
 
-    /* Build inner plaintext: channel_id(1) + epoch(2) + app_type(1) + src_addr(4) + data */
-    size_t pt_len = CHANNEL_MSG_OVERHEAD + data_len;
+    /* Build inner plaintext: channel_id(1) + epoch(2) + app_type(1) + src_addr(4)
+     * + [sent_at(4), CHAT only] + data. sent_at rides inside the GCM
+     * plaintext (not the cleartext header) so it is authenticated: nobody
+     * without the channel key can forge or alter it. */
+    bool has_sent_at = (app_type == APP_TYPE_CHAT);
+    size_t hdr_len = CHANNEL_MSG_OVERHEAD + (has_sent_at ? CHANNEL_MSG_SENT_AT_SIZE : 0);
+    size_t pt_len = hdr_len + data_len;
     uint8_t pt[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     if (pt_len > sizeof(pt))
         return -1;
@@ -25,8 +31,14 @@ int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t 
     pt[5] = (uint8_t)((src_addr >> 8) & 0xFF);
     pt[6] = (uint8_t)((src_addr >> 16) & 0xFF);
     pt[7] = (uint8_t)((src_addr >> 24) & 0xFF);
+    if (has_sent_at) {
+        pt[8] = (uint8_t)(sent_at >> 24);
+        pt[9] = (uint8_t)(sent_at >> 16);
+        pt[10] = (uint8_t)(sent_at >> 8);
+        pt[11] = (uint8_t)(sent_at);
+    }
     if (data_len > 0 && data) {
-        memcpy(pt + CHANNEL_MSG_OVERHEAD, data, data_len);
+        memcpy(pt + hdr_len, data, data_len);
     }
 
     /* Nonce is caller-supplied (nonce_counter, SEC-C reuse-avoidance): the
@@ -195,9 +207,25 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
         return -1;
     }
 
-    if (ct_len > CHANNEL_MSG_OVERHEAD) {
-        memcpy(plaintext_out, pt + CHANNEL_MSG_OVERHEAD, ct_len - CHANNEL_MSG_OVERHEAD);
+    /* app_type (pt[3]) is authenticated by the tag we just verified, so it is
+     * safe to trust for deciding whether a sent_at field follows. Guard
+     * ct_len explicitly: app_type is attacker-choosable by any legitimate
+     * channel-key holder, so a malformed CHAT message shorter than the
+     * sent_at field it claims to carry must not be read out of bounds; treat
+     * it as carrying no sent_at rather than misparsing past the buffer. */
+    size_t hdr_len = CHANNEL_MSG_OVERHEAD;
+    if (pt[3] == APP_TYPE_CHAT && ct_len >= CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE) {
+        found_info.sent_at = ((uint32_t)pt[8] << 24) | ((uint32_t)pt[9] << 16) |
+                             ((uint32_t)pt[10] << 8) | (uint32_t)pt[11];
+        hdr_len += CHANNEL_MSG_SENT_AT_SIZE;
+    } else {
+        found_info.sent_at = 0;
     }
+
+    if (ct_len > hdr_len) {
+        memcpy(plaintext_out, pt + hdr_len, ct_len - hdr_len);
+    }
+    found_info.data_len = ct_len > hdr_len ? ct_len - hdr_len : 0;
     found_info.data = plaintext_out;
 
     *info_out = found_info;
