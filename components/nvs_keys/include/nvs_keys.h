@@ -24,6 +24,7 @@
 #define NVS_NS_TELEMETRY_DBG "bramble_tdbg" /**< Telemetry debug flags   */
 #define NVS_NS_OTA "bramble_ota"            /**< OTA origin + rollback   */
 #define NVS_NS_NONCE "bramble_nonce"        /**< AEAD nonce counter ceiling */
+#define NVS_NS_NETKEY "bramble_netkey"      /**< Control-plane network key (PART 3, staged) */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"
@@ -43,3 +44,6 @@
 
 /* ── NVS_NS_NONCE keys ───────────────────────────────────────────────────── */
 #define NVS_KEY_NONCE_CEILING "ceiling"
+
+/* ── NVS_NS_NETKEY keys ──────────────────────────────────────────────────── */
+#define NVS_KEY_NETKEY "key"
