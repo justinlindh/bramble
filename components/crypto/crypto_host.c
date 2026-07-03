@@ -49,6 +49,8 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(priv);
     EVP_PKEY_free(pub);
+    if (ret == 0 && crypto_x25519_check_shared(shared_secret) != 0)
+        ret = -1;
     return ret;
 }
 

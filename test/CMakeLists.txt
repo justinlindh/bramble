@@ -61,6 +61,16 @@ target_include_directories(test_replay_window PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
 )
 
+add_executable(test_dm_session
+    test_dm_session.c
+    unity/unity.c
+)
+target_include_directories(test_dm_session PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_dm_session ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
