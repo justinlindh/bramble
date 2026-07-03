@@ -1506,6 +1506,15 @@ static void mesh_probe_reply_timer_cb(void *arg) {
 }
 
 static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
+    /* ws 1.3b: draw the 48-bit origin seq before building the struct, so it
+     * can go straight into the designated initializer below instead of a
+     * second pass. Fail-closed: no seq means no ACK goes out; the sender's
+     * retransmission timer covers a missing ACK exactly like a lost one. */
+    uint64_t ack_seq;
+    if (control_seq_next(&ack_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping ACK for pkt=%08" PRIX32, ack_packet_id);
+        return;
+    }
     bramble_ack_t ack = {
         .header = {
             .version = BRAMBLE_VERSION,
@@ -1521,10 +1530,15 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         .rssi_at_dest = rssi,
         .hop_count = 1,
         .relay_path = { s_identity->address },  /* destination is first hop */
+        .seq = {
+            (uint8_t)(ack_seq >> 40), (uint8_t)(ack_seq >> 32), (uint8_t)(ack_seq >> 24),
+            (uint8_t)(ack_seq >> 16), (uint8_t)(ack_seq >> 8), (uint8_t)ack_seq,
+        },
     };
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (those are excluded from the MAC and
-     * legitimately change per relay hop). */
+     * legitimately change per relay hop); seq is set above and IS covered
+     * (ws 1.3b). */
     ack_sign(&ack);
 
     uint8_t buf[64];
@@ -1587,6 +1601,20 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
      * retransmission, mark a message delivered, or be forwarded. */
     if (!ack_verify(&ack)) {
         ESP_LOGW(TAG, "ACK auth failed pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
+                 ack.src_addr);
+        return;
+    }
+
+    /* ws 1.3b: replay check on the authenticated signer (ack.src_addr is
+     * MAC-covered, so an attacker cannot dodge the window by mutating it).
+     * Checked after ack_verify and strictly before BOTH the forward branch
+     * and the for-us effects below (pending_ack_remove, msg_store_update),
+     * so a replayed ACK never cancels a live retransmission or forwards. */
+    uint64_t ack_seq = ((uint64_t)ack.seq[0] << 40) | ((uint64_t)ack.seq[1] << 32) |
+                       ((uint64_t)ack.seq[2] << 24) | ((uint64_t)ack.seq[3] << 16) |
+                       ((uint64_t)ack.seq[4] << 8) | (uint64_t)ack.seq[5];
+    if (!control_replay_ok(ack.src_addr, ack_seq)) {
+        ESP_LOGW(TAG, "ACK replay pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
                  ack.src_addr);
         return;
     }
