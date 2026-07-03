@@ -120,6 +120,19 @@ target_include_directories(test_network_key PRIVATE
 )
 target_link_libraries(test_network_key ssl crypto)
 
+# RREP authentication: MAC over origin-stable fields only, excluding the
+# relay-mutated next_hop/header.dest_addr (Task 3.2 / SEC-H1, staged).
+add_executable(test_rrep_auth
+    test_rrep_auth.c
+    unity/unity.c
+)
+target_include_directories(test_rrep_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+target_link_libraries(test_rrep_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
@@ -384,10 +397,15 @@ add_executable(test_discovery
     test_discovery.c
     unity/unity.c
     stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_discovery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
+target_link_libraries(test_discovery ssl crypto)
 
 # Forwarding tests
 add_executable(test_forwarding
@@ -466,13 +484,18 @@ add_executable(test_integration
     test_integration.c
     unity/unity.c
     stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
 target_include_directories(test_integration PRIVATE
     stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
+target_link_libraries(test_integration ssl crypto)
 
 # Dummy traffic tests
 add_executable(test_dummy_traffic

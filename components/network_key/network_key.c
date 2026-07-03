@@ -35,10 +35,15 @@ int network_key_get(uint8_t key_out[32]) {
                               strlen(psk), NULL, 0, key_out, 32);
 }
 
+/* Longest label in use today ("bramble-receipt-v2") is 18 bytes; 32 is
+ * generous headroom for future per-type labels of the same shape. */
+#define NETWORK_KEY_MAC_MAX_LABEL_LEN 32
+
 void network_key_mac(const char *label, const uint8_t *data, size_t len, uint8_t out[8]) {
     assert(len <= 255);
     size_t label_len = strlen(label);
-    uint8_t buf[255 + 32]; /* longest label today (bramble-receipt-v2) is 18 bytes; generous */
+    assert(label_len <= NETWORK_KEY_MAC_MAX_LABEL_LEN);
+    uint8_t buf[255 + NETWORK_KEY_MAC_MAX_LABEL_LEN];
     memcpy(buf, label, label_len);
     memcpy(buf + label_len, data, len);
 

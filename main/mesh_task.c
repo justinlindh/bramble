@@ -2156,6 +2156,16 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* SEC-H1 (STAGED, see network_key.h): reject before installing any
+     * route from this RREP. Covers query_id/src_addr/hop_count/route_metric
+     * only, so a legitimate relay's next_hop/header.dest_addr rewrite
+     * (rrep_forward) still verifies. */
+    if (!rrep_verify(&rrep)) {
+        ESP_LOGW(TAG, "RREP auth failed query=%08" PRIX32 " src=%08" PRIX32, rrep.query_id,
+                 rrep.src_addr);
+        return;
+    }
+
     ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
              rrep.query_id, rrep.src_addr, rrep.hop_count);
 
