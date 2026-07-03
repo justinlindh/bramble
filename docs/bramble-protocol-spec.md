@@ -761,8 +761,8 @@ This section is the wire v2 change inventory for `feat/wire-format-security-batc
 5. **ROUTE_ERROR (RERR) plus 8 bytes.** `RERR_SIZE 24 -> 32`. A trailing `auth_hmac[8]` authenticates `broken_dest || broken_next_hop` with a network-key HMAC (label `"bramble-rerr-v2"`); `reporter_addr` and `packet_id` are excluded because each forwarder rewrites both on re-origination. Verified before any teardown action.
 6. **ACK plus 8 bytes, DELIVERY_RECEIPT plus 8 bytes.** `ACK_BASE_SIZE 23 -> 31` (`ACK_MAX_SIZE` 55 -> 63); `DELIVERY_RECEIPT_MIN_SIZE 22 -> 30` (`DELIVERY_RECEIPT_MAX_SIZE` 54 -> 62). Both structs gain `auth_hmac[8]`, authenticating `src_addr || ack_packet_id` (label `"bramble-ack-v2"`) and `src_addr || orig_packet_id` (label `"bramble-receipt-v2"`) respectively. The field sits immediately before the variable-length `relay_path`, at a fixed offset independent of `hop_count`, so a verifier never has to trust the attacker-controlled, unauthenticated `hop_count` to locate the tag. Excludes `relay_path`, `hop_count`, and `hop_limit`, which every relay hop legitimately mutates.
 7. **ROUTE_REPLY (RREP) `auth_hmac` is now real.** `RREP_SIZE` is unchanged at 34 bytes (the field already existed on the wire, zeroed and ignored). It now authenticates `query_id || src_addr || hop_count || route_metric` with label `"bramble-rrep-v2"`, excluding `next_hop` and `header.dest_addr`, the two fields `rrep_forward` legitimately rewrites at each relay.
-8. **BEACON HMAC re-keyed.** When a network key is provisioned, the beacon HMAC key is `HKDF-SHA256(salt="bramble-beacon-v2", ikm=network_key)`, a distinct subkey rather than a channel-PSK-derived key; the public-PSK-derived fallback remains, logged as integrity-only, when unprovisioned. Verification is now constant-time (XOR-accumulate, no early exit). Operational note: `bramble.setNetworkKey` takes effect immediately for RREP, RERR, ACK, and receipt MACs (each call reads the current key live), but the beacon key is cached at init and needs a reboot to pick up a runtime-provisioned key.
-9. **Minimal network key provider added (`components/network_key`).** NVS-backed (namespace `bramble_netkey`), settable via the authenticated `bramble.setNetworkKey` RPC (gated the same way as `bramble.setAuthToken`: absence from the dispatcher's unauthenticated-method allowlist, not a per-handler check). Unprovisioned nodes fall back to a key derived from the public, compile-time `BRAMBLE_PUBLIC_CHANNEL_PSK`, so items 5 through 8 above are wire format and verification logic only. See `docs/SECURITY-MODEL.md` for why SEC-H1, SEC-H2, NEW-SEC-4, and NEW-SEC-8 do not close until a real key is provisioned and distributed.
+8. **BEACON HMAC re-keyed.** When a network key is provisioned, the beacon HMAC key is `HKDF-SHA256(salt="bramble-beacon-v2", ikm=network_key)`, a distinct subkey rather than a channel-PSK-derived key; the public-PSK-derived fallback remains, logged as integrity-only, when unprovisioned. Verification is now constant-time (XOR-accumulate, no early exit). Operational note: `bramble.setNetworkKey` takes effect immediately for RREP, RERR, ACK, and receipt MACs (each call reads the current key live); the beacon key used to be cached at init and require a reboot to pick up a runtime-provisioned key, but the RPC handler now also calls `mesh_rederive_beacon_key`, so beacons re-key live too and that gap is resolved.
+9. **Minimal network key provider added (`components/network_key`).** NVS-backed (namespace `bramble_netkey`), settable via the authenticated `bramble.setNetworkKey` RPC (gated the same way as `bramble.setAuthToken`: absence from the dispatcher's unauthenticated-method allowlist, not a per-handler check). Unprovisioned nodes fall back to a key derived from the public, compile-time `BRAMBLE_PUBLIC_CHANNEL_PSK`, so items 5 through 8 above are wire format and verification logic only until a real key is provisioned. Generation, out-of-band distribution (the `bramble://net/v1` share URI above), and fleet-convergence verification (`bramble.getNetworkKeyStatus` fingerprint) now ship in the webapp; key rotation UX does not. See `docs/SECURITY-MODEL.md` for why SEC-H1, SEC-H2, NEW-SEC-4, and NEW-SEC-8 still do not close: provisioning excludes non-members but does not stop a member from forging on another member's behalf, does not add replay protection to any of the five MACs, and does not close the NEW-SEC-4 bootstrap-quorum race, which needs per-node beacon identity.
 
 ---
 
@@ -997,6 +997,26 @@ Public Channel Key Derivation:
 #### Group DM Key Management
 
 Removed unshipped. The group-DM key manager (FNV-1a/BLAKE2s-derived group keys with epoch rotation) was deleted without ever being wired into the firmware or carried on the wire; its key derivation would not have survived review as a real KDF. Group messaging, if it returns, will be designed on top of the pairwise session keys from the cryptographic design RFC.
+
+#### Out-of-band share URIs (webapp)
+
+The webapp encodes channel, node, and network-key material distributed out-of-band (QR code or copy-paste) as `bramble://` URIs, all implemented in `webapp/src/utils/`:
+
+```
+Channel share:  bramble://ch/v1?n={name}&k={psk_hex}
+    n   URL-encoded channel name (required)
+    k   hex-encoded PSK (omitted when the channel has none)
+
+Node share:     bramble://node/v1?n={name}&a={addr_hex}&pk={pubkey_base64url}
+    n   URL-encoded node name
+    a   hex address, no 0x prefix
+    pk  base64url-encoded public key
+
+Network key share: bramble://net/v1?k={key_hex}
+    k   64 lowercase hex chars, the raw 32-byte network key
+```
+
+The network-key share is **write-only**: it exists solely to carry a freshly-generated key to each node's `bramble.setNetworkKey` RPC (§4.25 item 9) out of band, and the key is never read back from a device onto a share string. Instead, an operator verifies that provisioning converged across the fleet by comparing the `bramble.getNetworkKeyStatus` fingerprint on each node, `SHA256(key)[0:4]` as 8 lowercase hex chars, against the fingerprint of the key they generated. A matching fingerprint confirms the same key landed on both ends without either end ever transmitting the key itself a second time; it is not a short-authentication-string handshake and does not by itself authenticate the *node* being compared against, only the key material. See `docs/SECURITY-MODEL.md` §3 and §5 for what network-key provisioning does and does not close.
 
 ### 5.4 Privacy-Preserving Source Encryption for Route Discovery
 
