@@ -13,7 +13,7 @@
 #endif
 
 /* Protocol version */
-#define BRAMBLE_VERSION 2
+#define BRAMBLE_VERSION 3 /* was 2; ws 1.3b flag day: control-plane messages now carry a seq */
 
 /* Packet types */
 #define PKT_TYPE_ACK 0x01
