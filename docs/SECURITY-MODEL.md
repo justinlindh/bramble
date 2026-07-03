@@ -27,24 +27,30 @@ replaying captured frames, jamming. Partially defended against today.
 Encrypted payloads cannot be forged without a channel key, and the cleartext
 header is bound to the ciphertext as AEAD associated data. Location packets
 are now encrypted end to end (section 3), and routing control traffic
-(RREP, RERR, beacon, ACK, delivery receipt) now carries a network-key HMAC,
-but that key is a public fallback until provisioned, and even provisioned it
-does not stop replay of a captured, genuinely-valid control message
-(section 4, section 5): this attacker can still forge routing control
-traffic against an unprovisioned fleet, and can replay it against any
-fleet. Mailbox triggers ride the same staged beacon key.
-Jamming is not defendable at this layer and is accepted (section 5).
+(RREP, RERR, beacon, ACK, delivery receipt) now carries a network-key HMAC
+plus a per-message freshness sequence (ws 1.3b, section 3): against a
+provisioned fleet, this attacker can neither forge nor replay any of the
+five control-plane message types. Against an unprovisioned fleet the HMAC
+key is still the public fallback, so this attacker can forge routing
+control traffic freely (section 4). Mailbox triggers ride the same staged
+beacon key. Jamming is not defendable at this layer and is accepted
+(section 5).
 
 **Malicious mesh member.** A node that legitimately holds one or more channel
 keys: an invited member gone bad, or a stolen key. They decrypt everything on
 those channels, can impersonate any source address inside those channels, and
 participate fully in routing. The design goal is to limit them to the
 channels they hold keys for and to make routing lies detectable. A member
-who also holds the network key can still forge or replay any routing
-control message on behalf of any other member (section 5): authentication
-proves "signed by a network-key holder", not "signed by this specific
-member", so routing lies from a key-holding insider remain undetectable by
-design, not by omission.
+who also holds the network key can still forge a fresh routing control
+message on behalf of any other member (section 5): authentication proves
+"signed by a network-key holder", not "signed by this specific member", so
+routing lies from a key-holding insider remain undetectable by design, not
+by omission. Replay is different: the ws 1.3b per-signer freshness window
+(section 3) keys on the authenticated signer field extracted from a
+verified message, not on who is currently transmitting it, so it also
+rejects an insider re-transmitting a captured, genuinely-valid message
+signed by someone else, exactly like it rejects an outsider doing the
+same. Only forgery, not replay, remains open to this adversary.
 
 **Mailbox or relay operator.** Any node forwards packets, and a node with
 mailbox mode enabled stores ciphertext for offline peers. The design intends
@@ -293,9 +299,10 @@ explicitly as integrity-only in that case. Unprovisioned, the HMAC still
 proves only that the sender runs Bramble-compatible code, not that it is a
 trusted member. Provisioned, it proves the sender holds the network key,
 which is real authentication against outsiders, but not against another
-key holder (section 5) and not against replay of a captured, genuinely
-valid beacon (section 5). Do not treat a provisioned beacon HMAC as more
-than that.
+key holder forging a fresh beacon (section 5). Freshness (ws 1.3b, below)
+closes replay of a captured, genuinely valid beacon, but not forgery by
+another key holder. Do not treat a provisioned beacon HMAC as more than
+that.
 
 ### RREQ origination rate limiting
 
@@ -532,7 +539,7 @@ oldest tracked sender under load, which loses replay history for an
 evicted-then-later-returning sender (needs 64, respectively 128,
 concurrent distinct senders to matter).
 
-### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; mitigation staged, not closed)
+### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge and replay closed under a provisioned key, insider forgery and NEW-SEC-4's bootstrap race remain)
 
 Every routing and reliability control message that previously carried no
 authentication now carries a network-key HMAC, verified before the message
@@ -578,10 +585,38 @@ across a fleet without a coordinated flag day) remains out of scope. None
 of this establishes a short-authentication-string comparison or forward
 secrecy for the network key; see section 5.
 
-Closure of these four findings requires provisioning **plus** the
-additional work in section 5 below (per-message freshness and per-node
-beacon identity); provisioning alone is not sufficient and must not be
-described as closing them.
+**Per-message freshness (ws 1.3b, closed under a provisioned key).** Each
+of these five MACs now also binds a monotonic 48-bit origin sequence
+(`nonce_counter`-derived, reserve-ahead, fail-closed) into its covered
+field set, and a dedicated per-signer replay window (`s_control_replay` in
+`main/mesh_task.c`, a second `replay_window` instance separate from
+DATA/LOCATION's) rejects any `(signer, seq)` pair already seen. RERR's MAC
+additionally now covers `reporter_addr` (previously excluded alongside
+`packet_id`), because keying replay on `(reporter_addr, seq)` requires
+both halves to be authenticated; this is sound because every
+re-origination re-signs with the hop's own `reporter_addr` (`send_rerr`,
+`main/mesh_task.c`). RREP, ACK, and delivery-receipt seq is origin-stable
+and carried through forwarding unchanged, like their existing HMACs;
+RERR's seq is freshly drawn on every re-origination, matching
+`reporter_addr`. Under a provisioned network key, a captured,
+genuinely-valid message on any of these five types can no longer be
+replayed: RERR replay (the worst of the five, since it re-tears-down a
+live route) is closed, along with RREP route resurrection and the
+narrower beacon/ACK/receipt cases. This required a wire format bump
+(`BRAMBLE_VERSION` 2 to 3, a flag day: see
+`docs/bramble-protocol-spec.md`) since none of the five carried a field
+for freshness before.
+
+Provisioning plus this freshness work together close outsider forgery and
+outsider replay for all five message types. They do **not** close
+SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8 outright: a network-key insider
+can still forge a message on behalf of any other holder (inherent to a
+shared symmetric key, accepted, see section 5), and NEW-SEC-4
+additionally needs a per-node beacon identity binding to close its
+bootstrap-quorum race (staged as 1.3c, see section 5). State precisely
+which half, forge vs. replay, outsider vs. insider, is closed when citing
+any of these four findings; neither provisioning nor freshness alone is
+sufficient for full closure of any of them.
 
 ## 4. Known gaps in the current implementation
 
@@ -589,24 +624,30 @@ Facts of the code on `main` today. Each entry shrinks or disappears in the
 same PR that fixes it.
 
 - **RREP, RERR, ACK, delivery receipt, and beacon authentication is staged,
-  not closed** (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8): the verify logic
-  described in section 3 is real, but every key it checks against is
+  not fully closed** (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8): the verify
+  logic described in section 3 is real, but every key it checks against is
   forgeable by anyone who reads the public `BRAMBLE_PUBLIC_CHANNEL_PSK`
-  fallback until a real network key is provisioned, and even a provisioned
-  key does not stop replay of a captured, genuinely-valid message on any of
-  these five types (section 5). Treat all five as unauthenticated against a
-  knowledgeable insider until both provisioning and the section 5 follow-up
-  work land.
+  fallback until a real network key is provisioned. Once provisioned, ws
+  1.3b's per-message freshness (section 3) closes replay of a captured,
+  genuinely-valid message on all five types; a network-key insider can
+  still forge on behalf of any other holder (section 5, inherent and
+  accepted), and NEW-SEC-4 additionally needs a per-node beacon identity
+  binding, staged as 1.3c (section 5). Treat all five as unauthenticated
+  against an unprovisioned deployment, and as insider-forgeable even once
+  provisioned, until that follow-up work lands.
 - **RREQ forwarding is not rate-limited**; the 30-second limiter applies only
   to locally-originated discoveries, so a flood of foreign RREQs is forwarded
   without restriction (`handle_rreq` in `main/mesh_task.c`).
-- **Replay protection does not cover routing or reliability control
-  traffic.** DATA and LOCATION now have real per-sender replay windows
-  (section 3), but RREP, RERR, beacon, ACK, and delivery receipt still
-  dedup only on unauthenticated `packet_id` and type inside a 60-second
-  window (`components/dedup/dedup.c`), which is loop suppression, not
-  replay protection: a captured, genuinely-valid message on any of these
-  five types replays until the dedup window expires (section 5).
+- **Replay protection for routing and reliability control traffic is now
+  closed under a provisioned key (ws 1.3b).** RREP, RERR, beacon, ACK, and
+  delivery receipt previously deduped only on unauthenticated `packet_id`
+  and type inside a 60-second window (`components/dedup/dedup.c`), which
+  was loop suppression, not replay protection. Each of the five now also
+  carries an authenticated 48-bit sequence checked against a per-signer
+  replay window (section 3); the old dedup remains underneath it as loop
+  suppression, now redundant for these five types but still load-bearing
+  for packet types with no per-message MAC. Unprovisioned, the same
+  forgery caveat as the bullet above applies.
 - **The identity private key, all channel keys, the RPC auth token, and,
   once provisioned, the network key are stored as plaintext NVS entries,
   and message history is plaintext SPIFFS**, with flash encryption, NVS
@@ -633,7 +674,10 @@ same PR that fixes it.
   is still public-PSK-derived, so a forged beacon for a victim address makes
   a mailbox transmit that victim's queued ciphertext (`handle_beacon`
   mailbox flush in `main/mesh_task.c`); provisioned, forgery requires the
-  network key but a captured valid beacon still replays (section 5).
+  network key, and ws 1.3b's beacon replay closure (section 5) means a
+  captured valid beacon can no longer be replayed to trigger this either,
+  but a network-key insider can still fabricate a fresh, correctly-signed
+  beacon for the victim address (section 5, inherent and accepted).
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
   and mailbox capability in cleartext** (`mesh_send_beacon` in
   `main/mesh_task.c`).
@@ -682,24 +726,58 @@ These do not go away when section 4 empties out.
   distinguishing among members. This is the same shape as "a key-holding
   insider can lie in routing" above, applied to the newly-authenticated
   message types.
-- **Replay of RREP, RERR, beacon, ACK, and delivery receipt is not closed by
-  network-key provisioning.** None of the five section 3 MACs bind a nonce,
-  sequence number, or timestamp; provisioning stops a non-member from
-  forging a fresh message but does nothing to stop anyone from recording
-  and re-transmitting a captured, genuinely-valid one. Ranked by impact:
-  **RERR replay is worst**: `route_lookup`/teardown in `handle_rerr`
-  (`main/mesh_task.c`) is ungated by any freshness check, so a captured
-  valid RERR re-tears-down a live route on replay, a persistent, repeatable,
-  targeted denial of service, partially self-limiting only because a
-  torn-down route gets rediscovered. **RREP replay** resurrects a stale
-  route: `route_install` (`main/mesh_task.c`) is ungated by discovery
-  freshness, so a captured valid RREP re-installs an old path. Beacon, ACK,
-  and delivery-receipt replay have narrower blast radii (a stale mailbox
-  flush trigger; a spuriously re-cancelled retry or re-marked delivery; a
-  redundant forwarded receipt) but are equally unauthenticated for
-  freshness. Closing any of this requires per-message freshness or sequence
-  binding added to each of the five MACs, a distinct piece of work from
-  provisioning itself.
+- **Replay of RREP, RERR, beacon, ACK, and delivery receipt is now closed
+  under network-key provisioning (ws 1.3b).** Each of the five section 3
+  MACs now binds a monotonic 48-bit origin sequence
+  (`nonce_counter`-derived, reserve-ahead, fail-closed) and is checked
+  against a dedicated per-signer replay window (`s_control_replay` in
+  `main/mesh_task.c`, a second `replay_window` instance, separate from
+  DATA/LOCATION's), rejecting any `(signer, seq)` pair already seen.
+  **RERR was the worst by impact**: `handle_rerr` (`main/mesh_task.c`)
+  previously had no freshness check before `route_lookup`/teardown, so a
+  captured valid RERR could re-tear-down a live route on replay, a
+  persistent, repeatable, targeted denial of service; RERR's MAC now also
+  covers `reporter_addr` (previously excluded alongside `packet_id`),
+  because keying replay on `(reporter_addr, seq)` requires both halves to
+  be authenticated, and this is sound because every re-origination
+  re-signs with the hop's own `reporter_addr` (`send_rerr`). **RREP
+  replay**, which resurrected a stale route via `route_install`, and the
+  narrower beacon/ACK/delivery-receipt cases (a stale mailbox flush
+  trigger; a spuriously re-cancelled retry or re-marked delivery; a
+  redundant forwarded receipt) are closed the same way. This required a
+  wire format bump (`BRAMBLE_VERSION` 2 to 3, a flag day: see
+  `docs/bramble-protocol-spec.md`), since none of the five carried a field
+  for this before. Two things this does **not** do: it does not stop a
+  network-key insider from forging a message with a fresh, self-issued
+  sequence (see the insider-forgery residual above, unchanged by this
+  work), and it does not close NEW-SEC-4 (below), whose bootstrap-quorum
+  race is about distinguishing identities, not freshness.
+- **A control message reordered more than 64 counter-values behind a newer
+  one from the same signer is a bounded false-reject, reachable under
+  normal data-plane load, not just an edge case.** The per-signer replay
+  window added above reuses the same 64-position sliding window as the
+  DATA/LOCATION replay windows (`components/replay_window`), and the same
+  counter: `control_seq_next` draws from the identical node-global
+  `nonce_counter` that DATA and LOCATION sends already consume for their
+  AEAD nonces (section 3), not a separate, slower, control-plane-only
+  counter. A busy sender's counter advances on every DATA/LOCATION send it
+  makes, so a multi-hop control-plane message (a RERR forwarded hop by
+  hop, or an RREP crossing a slow or congested path) can easily see more
+  than 64 of that signer's other sends complete before a distant receiver
+  finally processes it. When that happens the message reads
+  `BELOW_WINDOW` and is dropped, even though it was never actually
+  replayed. This fails closed only, never a false accept: it costs
+  availability (a dropped, genuine control-plane message under
+  contention), not security. Same accepted trade-off as the DATA/LOCATION
+  windows (section 3).
+- **`handle_rrep` installs a route for a fresh, unsolicited RREP.**
+  Freshness (above) stops a *replayed* RREP from resurrecting a stale
+  route, but does not stop a network-key holder from originating a
+  brand-new, correctly-signed, correctly-sequenced RREP for a query this
+  node never issued; `handle_rrep` (`main/mesh_task.c`) installs the route
+  regardless. Distinct from replay (the message is fresh, not captured)
+  and a candidate follow-on, not something the ws 1.3b freshness work was
+  scoped to fix.
 - **The timesync bootstrap quorum can still be won by one key holder with
   multiple addresses (NEW-SEC-4).** The beacon HMAC gate and the
   bootstrap-offset clamp (section 3) both require holding the network key,
@@ -714,8 +792,12 @@ These do not go away when section 4 empties out.
   so a bad offset committed at bootstrap is trusted indefinitely, not just
   until the next corroboration round. Closing NEW-SEC-4 needs provisioning
   **plus** a per-node beacon identity binding (so one network key cannot
-  mint an arbitrary number of distinct-looking sources), on top of the
-  general control-plane replay work above.
+  mint an arbitrary number of distinct-looking sources). Ws 1.3b's beacon
+  replay closure (above) means a captured beacon can no longer re-feed a
+  stale time offset, but does nothing to stop this insider from
+  fabricating fresh, correctly-signed, correctly-sequenced beacons under
+  three distinct addresses, since freshness authenticates the signer's
+  key, not a per-node identity. Staged as 1.3c.
 - **RREP `next_hop` poisoning is inherent, not a bug this batch can close.**
   `next_hop` is necessarily a relay-mutated, unauthenticated field: each
   forwarder must be able to rewrite it to route the reply back toward the
@@ -757,9 +839,19 @@ These do not go away when section 4 empties out.
 - **A 64-sender or 128-entry LRU table can be evicted under enough
   concurrent senders.** The DATA/LOCATION tier-1 replay table (64 senders)
   and tier-2 deferred table (128 entries) evict the least-recently-seen
-  entry under load. An evicted sender who later returns starts with no
-  replay history, which only matters once a mesh sustains that many
-  concurrent distinct senders.
+  entry under load. The ws 1.3b control-plane replay table
+  (`s_control_replay`) shares the same `REPLAY_MAX_SENDERS` = 64 bound as
+  the data-plane table, since it is a second instance of the same
+  `replay_window` component: a signer evicted after the mesh has seen more
+  than 64 other distinct signers resets, and a very old, previously-valid
+  control-plane message replayed after that signer's eviction could be
+  accepted again. Not outsider-drivable: `s_control_replay` is only ever
+  fed a `(signer, seq)` pair after that message's MAC has already
+  verified, so an attacker without the network key cannot manufacture the
+  flood of distinct authenticated signers a targeted eviction would need.
+  An evicted sender who later returns (data-plane) or re-transmits
+  (control-plane) starts with no replay history, which only matters once a
+  mesh sustains that many concurrent distinct senders.
 - **Minor, non-exploitable robustness notes:** `network_key_mac`'s
   `label || data` concatenation is not length-prefixed, which would be
   ambiguous for attacker-chosen labels, but every label is a fixed,
@@ -767,9 +859,12 @@ These do not go away when section 4 empties out.
   `"bramble-ack-v2"`, `"bramble-receipt-v2"`, `"bramble-beacon-v2"`), so
   this is not reachable today. ACK and delivery-receipt `relay_path` and
   `hop_count` remain intentionally unauthenticated (they are per-hop
-  telemetry, not security-relevant), so a replayed ACK or receipt can
-  still trigger a bounded re-forward and a cosmetic hop-trail change in the
-  UI even where the core `src_addr`/packet-id binding holds. The LOCATION
+  telemetry, not security-relevant), so a malicious relay along the
+  legitimate forwarding path can still tamper with them in transit,
+  producing a cosmetic hop-trail change in the UI even where the core
+  `src_addr`/packet-id/seq binding holds. This is in-flight tampering
+  during a single legitimate transit, not replay: ws 1.3b's freshness work
+  (section 3) closes replay of the message as a whole. The LOCATION
   channel-message decode path does not assert `app_type == APP_TYPE_LOCATION`
   before parsing (defense-in-depth only; it is inside the AEAD trust
   boundary and memory-safe either way).

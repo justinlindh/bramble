@@ -76,6 +76,11 @@ static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
 static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx);
 static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t *data,
                                size_t data_len);
+/* ws 1.3b: defined near handle_beacon (below send_beacon in file order),
+ * but send_beacon is the first control-plane originator in the file and
+ * needs both before its own definition. */
+static int control_seq_next(uint64_t *out);
+static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -106,6 +111,7 @@ static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for be
 static neighbor_table_t    s_neighbors;
 static dedup_buffer_t      s_dedup;
 static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
+static replay_table_t      s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon) replay window, keyed on the authenticated signer address, separate from the data-plane s_replay above */
 static replay_deferred_t   s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
  * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
@@ -1057,10 +1063,35 @@ static int send_beacon(void) {
         beacon.name[beacon.name_len] = '\0';
     }
 
+    /* ws 1.3b: draw the 48-bit origin seq before the HMAC, since seq lives
+     * inside the HMAC-covered prefix. Fail-closed: no seq means this
+     * interval's beacon doesn't go out; the next scheduled beacon tries
+     * again. */
+    uint64_t beacon_seq;
+    if (control_seq_next(&beacon_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping beacon this interval");
+        return -1;
+    }
+    beacon.seq[0] = (uint8_t)(beacon_seq >> 40);
+    beacon.seq[1] = (uint8_t)(beacon_seq >> 32);
+    beacon.seq[2] = (uint8_t)(beacon_seq >> 24);
+    beacon.seq[3] = (uint8_t)(beacon_seq >> 16);
+    beacon.seq[4] = (uint8_t)(beacon_seq >> 8);
+    beacon.seq[5] = (uint8_t)beacon_seq;
+
     /* HMAC auth — use shared beacon key (derived from public channel PSK) */
     beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
 
-    uint8_t buf[64];
+    /* Red-team fix: was buf[64], a hand-counted constant that predates the
+     * ws 1.3b size bumps. BEACON_SIZE + 1 + BEACON_NAME_MAX (the max wire
+     * size with a full-length name) is 71 as of BEACON_SIZE 54, so any
+     * name of 10+ characters overflowed this buffer, bramble_beacon_
+     * serialize's own len < need guard rejected it, and the node silently
+     * stopped beaconing entirely (no neighbor announce, mailbox flush, or
+     * timesync) until the name was cleared. Same size expression
+     * beacon_compute_hmac already uses for its own buffer, not a new
+     * magic number. */
+    uint8_t buf[BEACON_SIZE + 1 + BEACON_NAME_MAX];
     if (bramble_beacon_serialize(&beacon, buf, sizeof(buf)) != ESP_OK) {
         ESP_LOGE(TAG, "Beacon serialize failed");
         return -1;
@@ -1088,6 +1119,40 @@ static int send_beacon(void) {
     return ret;
 }
 
+/*
+ * ws 1.3b infra: control-plane seq draw + replay check. No callers yet
+ * (tasks 2-6 wire these into the five control-plane build/handle sites);
+ * kept static like every other file-local helper here, so an unused-function
+ * warning is expected and harmless until those callers land.
+ *
+ * control_seq_next mirrors the data-plane nonce draw above (e.g.
+ * send_data_packet): take s_nonce_mutex, call nonce_counter_next, and on
+ * failure release the mutex and fail closed without touching *out. The
+ * control plane doesn't need a full 12-byte AEAD nonce, just the 48-bit
+ * counter nonce_counter_extract pulls out of it.
+ */
+static int control_seq_next(uint64_t *out) {
+    uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
+    int nonce_ret = nonce_counter_next(nonce);
+    if (nonce_ret != 0) {
+        xSemaphoreGive(s_nonce_mutex);
+        return nonce_ret;
+    }
+    *out = nonce_counter_extract(nonce);
+    xSemaphoreGive(s_nonce_mutex);
+    return 0;
+}
+
+/*
+ * ws 1.3b infra: control-plane replay check, fed only after a MAC verify
+ * passes so signer_addr/seq are authenticated. Separate table from the
+ * data-plane s_replay (see s_control_replay above).
+ */
+static bool control_replay_ok(uint32_t signer_addr, uint64_t seq) {
+    return replay_check_and_add(&s_control_replay, signer_addr, seq, now_ms()) == REPLAY_ACCEPT;
+}
+
 /* ── Packet handlers ────────────────────────────────────────────────── */
 
 static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
@@ -1104,6 +1169,21 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     if (!beacon_verify_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key))) {
         ESP_LOGW(TAG, "Beacon from %08" PRIX32 " failed HMAC verification, discarding",
                  beacon.src_addr);
+        return;
+    }
+
+    /* ws 1.3b: replay check on the authenticated signer (beacon.src_addr
+     * is HMAC-covered, so an attacker cannot dodge the window by mutating
+     * it). Checked immediately after HMAC verify and strictly before every
+     * effect below: address-collision handling, neighbor_update, name
+     * store, and timesync_handle_sync. Gating timesync closes the part of
+     * NEW-SEC-4 where a replayed beacon re-feeds stale network_time; it
+     * does NOT close NEW-SEC-4's bootstrap-quorum race, which is 1.3c. */
+    uint64_t beacon_seq = ((uint64_t)beacon.seq[0] << 40) | ((uint64_t)beacon.seq[1] << 32) |
+                          ((uint64_t)beacon.seq[2] << 24) | ((uint64_t)beacon.seq[3] << 16) |
+                          ((uint64_t)beacon.seq[4] << 8) | (uint64_t)beacon.seq[5];
+    if (!control_replay_ok(beacon.src_addr, beacon_seq)) {
+        ESP_LOGW(TAG, "Beacon replay src=%08" PRIX32, beacon.src_addr);
         return;
     }
 
@@ -1238,11 +1318,23 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
                          (uint8_t)neighbor_count(&s_neighbors));
     uint8_t hop_limit = (policy >= 2) ? 8 : 1;  /* full=8, neighbors-only=1 */
 
+    /* ws 1.3b: draw the 48-bit origin seq once per receipt; the retry
+     * queue below resends the SAME serialized bytes on loss (not a fresh
+     * re-origination), so one seq draw per receipt is correct. Fail-closed:
+     * no seq means no receipt goes out this round. */
+    uint64_t receipt_seq;
+    if (control_seq_next(&receipt_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping delivery receipt for pkt=%08" PRIX32,
+                 original_packet_id);
+        return;
+    }
+
     esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
                                                                   next_packet_id(),
                                                                   original_src_addr,
                                                                   original_packet_id,
                                                                   hop_limit,
+                                                                  receipt_seq,
                                                                   buf,
                                                                   sizeof(buf),
                                                                   &wire_len);
@@ -1471,6 +1563,15 @@ static void mesh_probe_reply_timer_cb(void *arg) {
 }
 
 static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
+    /* ws 1.3b: draw the 48-bit origin seq before building the struct, so it
+     * can go straight into the designated initializer below instead of a
+     * second pass. Fail-closed: no seq means no ACK goes out; the sender's
+     * retransmission timer covers a missing ACK exactly like a lost one. */
+    uint64_t ack_seq;
+    if (control_seq_next(&ack_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping ACK for pkt=%08" PRIX32, ack_packet_id);
+        return;
+    }
     bramble_ack_t ack = {
         .header = {
             .version = BRAMBLE_VERSION,
@@ -1486,13 +1587,22 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         .rssi_at_dest = rssi,
         .hop_count = 1,
         .relay_path = { s_identity->address },  /* destination is first hop */
+        .seq = {
+            (uint8_t)(ack_seq >> 40), (uint8_t)(ack_seq >> 32), (uint8_t)(ack_seq >> 24),
+            (uint8_t)(ack_seq >> 16), (uint8_t)(ack_seq >> 8), (uint8_t)ack_seq,
+        },
     };
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (those are excluded from the MAC and
-     * legitimately change per relay hop). */
+     * legitimately change per relay hop); seq is set above and IS covered
+     * (ws 1.3b). */
     ack_sign(&ack);
 
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. Not currently
+     * truncating (send_ack always originates with hop_count 1), but
+     * macro-ized to ACK_MAX_SIZE anyway so it can't silently start
+     * truncating if that ever changes, matching forward_ack's fix below. */
+    uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(&ack, buf, sizeof(buf));
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ACK serialize failed");
@@ -1529,7 +1639,11 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
         return;
     }
 
-    uint8_t buf[64];
+    /* Red-team fix: was buf[64], a hand-counted constant. ACK_MAX_SIZE (a
+     * full 8-hop path) is 69 as of the ws 1.3b size bump, so a 7-hop (65B)
+     * or 8-hop (69B) ACK overflowed this buffer and was silently dropped
+     * (bramble_ack_serialize's len < need guard). */
+    uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(ack, buf, sizeof(buf));
     if (err != ESP_OK) return;
 
@@ -1552,6 +1666,20 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
      * retransmission, mark a message delivered, or be forwarded. */
     if (!ack_verify(&ack)) {
         ESP_LOGW(TAG, "ACK auth failed pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
+                 ack.src_addr);
+        return;
+    }
+
+    /* ws 1.3b: replay check on the authenticated signer (ack.src_addr is
+     * MAC-covered, so an attacker cannot dodge the window by mutating it).
+     * Checked after ack_verify and strictly before BOTH the forward branch
+     * and the for-us effects below (pending_ack_remove, msg_store_update),
+     * so a replayed ACK never cancels a live retransmission or forwards. */
+    uint64_t ack_seq = ((uint64_t)ack.seq[0] << 40) | ((uint64_t)ack.seq[1] << 32) |
+                       ((uint64_t)ack.seq[2] << 24) | ((uint64_t)ack.seq[3] << 16) |
+                       ((uint64_t)ack.seq[4] << 8) | (uint64_t)ack.seq[5];
+    if (!control_replay_ok(ack.src_addr, ack_seq)) {
+        ESP_LOGW(TAG, "ACK replay pkt=%08" PRIX32 " src=%08" PRIX32, ack.ack_packet_id,
                  ack.src_addr);
         return;
     }
@@ -1631,7 +1759,11 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
         return;
     }
 
-    uint8_t buf[96];
+    /* Red-team audit: was buf[96], a hand-counted constant. Not currently
+     * truncating (DELIVERY_RECEIPT_MAX_SIZE is 68 as of ws 1.3b), but
+     * macro-ized for the same reason as the other TX buffers in this
+     * file. */
+    uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     esp_err_t err = bramble_delivery_receipt_serialize(receipt, buf, sizeof(buf));
     if (err != ESP_OK) return;
 
@@ -1659,6 +1791,20 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
      * both branches below. */
     if (!receipt_verify(&receipt)) {
         ESP_LOGW(TAG, "Delivery receipt auth failed pkt=%08" PRIX32 " src=%08" PRIX32,
+                 receipt.orig_packet_id, receipt.src_addr);
+        return;
+    }
+
+    /* ws 1.3b: replay check on the authenticated signer (receipt.src_addr
+     * is MAC-covered, so an attacker cannot dodge the window by mutating
+     * it). Checked after receipt_verify and strictly before BOTH the
+     * forward branch and the for-us effect (the broadcast delivery
+     * notification), so a replayed receipt never re-notifies or forwards. */
+    uint64_t receipt_seq = ((uint64_t)receipt.seq[0] << 40) | ((uint64_t)receipt.seq[1] << 32) |
+                           ((uint64_t)receipt.seq[2] << 24) | ((uint64_t)receipt.seq[3] << 16) |
+                           ((uint64_t)receipt.seq[4] << 8) | (uint64_t)receipt.seq[5];
+    if (!control_replay_ok(receipt.src_addr, receipt_seq)) {
+        ESP_LOGW(TAG, "Delivery receipt replay pkt=%08" PRIX32 " src=%08" PRIX32,
                  receipt.orig_packet_id, receipt.src_addr);
         return;
     }
@@ -2048,7 +2194,12 @@ static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind) {
 }
 
 static void send_rreq(const bramble_rreq_t *rreq) {
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. RREQ_SIZE (30)
+     * is unaffected by the ws 1.3b size bumps and always fit, but
+     * macro-ized for the same reason as the other TX buffers in this
+     * file: a hand-counted constant can't warn you when it stops being
+     * big enough. */
+    uint8_t buf[RREQ_SIZE];
     if (bramble_rreq_serialize(rreq, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32,
                  rreq->query_id, rreq->header.dest_addr);
@@ -2062,11 +2213,21 @@ static void send_rreq(const bramble_rreq_t *rreq) {
 }
 
 static void send_rrep(const bramble_rrep_t *rrep) {
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. RREP_SIZE (40
+     * as of ws 1.3b) always fit, but macro-ized for the same reason as
+     * the other TX buffers in this file. */
+    uint8_t buf[RREP_SIZE];
     if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32,
                  rrep->query_id, rrep->next_hop);
-        if (mesh_tx(buf, HEADER_SIZE + 19, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+        /* Pre-existing bug fixed here (found while adding ws 1.3b's seq
+         * field): this was HEADER_SIZE + 19 (31 bytes), 3 short of the
+         * struct's 22-byte payload (query_id+src_addr+next_hop+hop_count+
+         * route_metric+auth_hmac), truncating the last 3 bytes of
+         * auth_hmac on every real transmit. RREP_SIZE (the macro, not a
+         * hand-counted offset) is what every other RREP size check already
+         * uses, so this can't drift again the way HEADER_SIZE+19 did. */
+        if (mesh_tx(buf, RREP_SIZE, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RREP denied by airtime budget");
         }
     }
@@ -2088,15 +2249,39 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
         .broken_dest = broken_dest,
         .broken_next_hop = broken_next_hop,
     };
+    /* ws 1.3b: every re-origination draws its own fresh seq (unlike RREP's
+     * origin-stable seq, RERR's seq is per-hop, matching reporter_addr).
+     * Fail-closed: no seq means no RERR goes out this call; the caller's
+     * route-broken detection or forwarding chain simply doesn't propagate
+     * this hop, rather than shipping an unfresh/replayable report. */
+    uint64_t rerr_seq;
+    if (control_seq_next(&rerr_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, dropping RERR for broken_dest=%08" PRIX32,
+                 broken_dest);
+        return;
+    }
+    rerr.seq[0] = (uint8_t)(rerr_seq >> 40);
+    rerr.seq[1] = (uint8_t)(rerr_seq >> 32);
+    rerr.seq[2] = (uint8_t)(rerr_seq >> 24);
+    rerr.seq[3] = (uint8_t)(rerr_seq >> 16);
+    rerr.seq[4] = (uint8_t)(rerr_seq >> 8);
+    rerr.seq[5] = (uint8_t)rerr_seq;
     /* SEC-H1 (STAGED): re-signed on every call, including re-origination,
      * since this function builds a fresh struct each time (fresh
-     * reporter_addr/packet_id) but broken_dest/broken_next_hop are the
-     * caller-supplied, origin-stable values the MAC covers. */
+     * reporter_addr/packet_id/seq), and reporter_addr/seq are now
+     * MAC-covered alongside the origin-stable broken_dest/broken_next_hop
+     * (ws 1.3b). */
     rerr_sign(&rerr);
-    uint8_t buf[64];
+    /* Red-team audit: was buf[64], a hand-counted constant. RERR_SIZE (38
+     * as of ws 1.3b) always fit, but macro-ized for the same reason as
+     * the other TX buffers in this file. */
+    uint8_t buf[RERR_SIZE];
     if (bramble_rerr_serialize(&rerr, buf, sizeof(buf)) == ESP_OK) {
         ESP_LOGI(TAG, "TX RERR broken_dest=%08" PRIX32, broken_dest);
-        if (mesh_tx(buf, HEADER_SIZE + 20, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
+        /* RERR_SIZE (the macro), not a hand-counted offset: RREP's
+         * equivalent hand-counted offset drifted 3 bytes short of its
+         * struct for years before being caught in ws 1.3b Task 2. */
+        if (mesh_tx(buf, RERR_SIZE, TX_KIND_ROUTING) == TX_GATE_ERR_BUDGET) {
             ESP_LOGW(TAG, "RERR denied by airtime budget");
         }
     }
@@ -2194,6 +2379,25 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         ESP_LOGI(TAG, "RREQ is for us; sending RREP");
         bramble_rrep_t rrep = rrep_build_destination(&rreq, s_identity->address);
 
+        /* ws 1.3b: draw the 48-bit origin seq and re-sign to cover it
+         * (rrep_build_destination already signed once with seq=0 from the
+         * zeroed struct; this re-sign is the one that ships). Fail-closed:
+         * no seq means no RREP goes out this round, and the RREQ
+         * originator's retry logic will try again later. */
+        uint64_t rrep_seq;
+        if (control_seq_next(&rrep_seq) != 0) {
+            ESP_LOGE(TAG, "Seq counter unavailable, dropping RREP for query=%08" PRIX32,
+                     rreq.query_id);
+            return;
+        }
+        rrep.seq[0] = (uint8_t)(rrep_seq >> 40);
+        rrep.seq[1] = (uint8_t)(rrep_seq >> 32);
+        rrep.seq[2] = (uint8_t)(rrep_seq >> 24);
+        rrep.seq[3] = (uint8_t)(rrep_seq >> 16);
+        rrep.seq[4] = (uint8_t)(rrep_seq >> 8);
+        rrep.seq[5] = (uint8_t)rrep_seq;
+        rrep_sign(&rrep);
+
         /* Route RREP back toward the previous hop */
         reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rreq.query_id);
         if (rev) {
@@ -2237,6 +2441,19 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
     ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
              rrep.query_id, rrep.src_addr, rrep.hop_count);
+
+    /* ws 1.3b: replay check on the authenticated signer (rrep.src_addr is
+     * MAC-covered, so an attacker cannot dodge the window by mutating it).
+     * Checked after rrep_verify and strictly before route_install, so a
+     * replayed RREP never resurrects a stale route. */
+    uint64_t rrep_seq = ((uint64_t)rrep.seq[0] << 40) | ((uint64_t)rrep.seq[1] << 32) |
+                        ((uint64_t)rrep.seq[2] << 24) | ((uint64_t)rrep.seq[3] << 16) |
+                        ((uint64_t)rrep.seq[4] << 8) | (uint64_t)rrep.seq[5];
+    if (!control_replay_ok(rrep.src_addr, rrep_seq)) {
+        ESP_LOGW(TAG, "RREP replay query=%08" PRIX32 " src=%08" PRIX32, rrep.query_id,
+                 rrep.src_addr);
+        return;
+    }
 
     /* Install route to the destination (RREP source) via the sender. The
      * link penalty subtracts from the higher-is-better path metric. */
@@ -2305,6 +2522,20 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 
     ESP_LOGW(TAG, "RX RERR: dest=%08" PRIX32 " broken_hop=%08" PRIX32,
              rerr.broken_dest, rerr.broken_next_hop);
+
+    /* ws 1.3b: replay check on the authenticated (reporter_addr, seq) pair
+     * (both MAC-covered as of this change, so an attacker cannot dodge the
+     * window by mutating either). Checked after rerr_verify and strictly
+     * before any teardown effect (route_marked_broken, forwarding,
+     * failfast), so a replayed RERR never re-tears-down a live route. */
+    uint64_t rerr_seq = ((uint64_t)rerr.seq[0] << 40) | ((uint64_t)rerr.seq[1] << 32) |
+                        ((uint64_t)rerr.seq[2] << 24) | ((uint64_t)rerr.seq[3] << 16) |
+                        ((uint64_t)rerr.seq[4] << 8) | (uint64_t)rerr.seq[5];
+    if (!control_replay_ok(rerr.reporter_addr, rerr_seq)) {
+        ESP_LOGW(TAG, "RERR replay reporter=%08" PRIX32 " dest=%08" PRIX32, rerr.reporter_addr,
+                 rerr.broken_dest);
+        return;
+    }
 
     /* Invalidate route if it uses the broken next hop */
     route_entry_t *route = route_lookup(&s_routes, rerr.broken_dest);
@@ -4237,6 +4468,7 @@ void mesh_task_start(bramble_identity_t *identity) {
 
     dedup_init(&s_dedup);
     replay_table_init(&s_replay);
+    replay_table_init(&s_control_replay);
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     route_init(&s_routes);
