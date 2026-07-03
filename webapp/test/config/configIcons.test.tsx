@@ -30,6 +30,7 @@ vi.mock('../../src/pages/Config/ChannelManager', () => ({ ChannelManager: () => 
 vi.mock('../../src/pages/Config/PeerManager', () => ({ PeerManager: () => <div /> }));
 vi.mock('../../src/pages/Config/LocationSection', () => ({ LocationSection: () => <div /> }));
 vi.mock('../../src/pages/Config/TrafficDebugSection', () => ({ TrafficDebugSection: () => <div /> }));
+vi.mock('../../src/pages/Config/NetworkKeySection', () => ({ NetworkKeySection: () => <div /> }));
 
 describe('Config section icons', () => {
   it('uses a warning icon for Traffic Debug and a non-warning icon for Data', () => {
