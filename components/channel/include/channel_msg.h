@@ -48,7 +48,7 @@ void channel_msg_catchup_reset(void);
 
 int channel_msg_encrypt(const bramble_channel_t* ch, uint32_t src_addr, uint8_t app_type,
                         const uint8_t* data, size_t data_len, const uint8_t* aad, size_t aad_len,
-                        uint8_t* nonce_out, uint8_t* ciphertext_out, uint8_t* tag_out);
+                        const uint8_t* nonce_in, uint8_t* ciphertext_out, uint8_t* tag_out);
 
 typedef struct {
     uint8_t channel_id;

@@ -45,6 +45,14 @@ add_executable(test_aead_aad
     stubs/esp_stubs.c
 )
 
+add_executable(test_nonce_counter
+    test_nonce_counter.c
+    unity/unity.c
+)
+target_include_directories(test_nonce_counter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nonce_counter/include
+)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

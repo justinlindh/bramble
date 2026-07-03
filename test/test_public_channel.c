@@ -37,6 +37,7 @@ void test_public_channel_encrypt_decrypt(void) {
 
     uint8_t data[] = "Hello public channel!";
     uint8_t nonce[12], ct[256], tag[16];
+    memset(nonce, 0x5A, sizeof(nonce)); /* fixed test pattern; caller-supplied since Task 0.4 */
     uint8_t aad[12] = {0};
     uint8_t pt[256] = {0};
     uint32_t src = 0x12345678;

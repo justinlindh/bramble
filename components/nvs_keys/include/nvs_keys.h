@@ -23,6 +23,7 @@
 #define NVS_NS_BACKPRESSURE "bramble_bp"    /**< Backpressure state      */
 #define NVS_NS_TELEMETRY_DBG "bramble_tdbg" /**< Telemetry debug flags   */
 #define NVS_NS_OTA "bramble_ota"            /**< OTA origin + rollback   */
+#define NVS_NS_NONCE "bramble_nonce"        /**< AEAD nonce counter ceiling */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"
@@ -39,3 +40,6 @@
 /* ── NVS_NS_WIFI keys ────────────────────────────────────────────────────── */
 #define NVS_KEY_WIFI_SSID "ssid"
 #define NVS_KEY_WIFI_PASSWORD "password"
+
+/* ── NVS_NS_NONCE keys ───────────────────────────────────────────────────── */
+#define NVS_KEY_NONCE_CEILING "ceiling"

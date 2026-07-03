@@ -59,6 +59,7 @@ static size_t originate_data_packet(const bramble_channel_t* ch, const uint8_t* 
     TEST_ASSERT_EQUAL(ESP_OK, bramble_build_aead_aad(&header, TEST_SRC_ADDR, aad, sizeof(aad)));
 
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
+    memset(nonce, 0xA5, sizeof(nonce)); /* fixed test pattern; caller-supplied since Task 0.4 */
     uint8_t ciphertext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
     size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
