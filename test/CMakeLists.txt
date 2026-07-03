@@ -39,6 +39,12 @@ add_executable(test_flag_layout
     stubs/esp_stubs.c
 )
 
+add_executable(test_aead_aad
+    test_aead_aad.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
