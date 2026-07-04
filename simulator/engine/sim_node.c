@@ -1,8 +1,19 @@
 #include "sim_node.h"
+#include "sim_radio.h"
 #include "../../components/packet/include/packet.h"
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
 #include <string.h>
+
+void sim_beacon_policy_init(sim_beacon_policy_t* policy) {
+    policy->adaptive = false; /* firmware default: BEACON_MODE_FIXED, disabled */
+    policy->interval_ms = SIM_BEACON_POLICY_DEFAULT_INTERVAL_MS;
+    policy->min_interval_ms = SIM_BEACON_POLICY_DEFAULT_MIN_MS;
+    policy->max_interval_ms = SIM_BEACON_POLICY_DEFAULT_MAX_MS;
+    policy->dense_threshold = SIM_BEACON_POLICY_DEFAULT_DENSE_THRESHOLD;
+    policy->churn_threshold = SIM_BEACON_POLICY_DEFAULT_CHURN_THRESHOLD;
+    policy->churn_window_ms = SIM_BEACON_POLICY_DEFAULT_CHURN_WINDOW_MS;
+}
 
 void node_array_init(node_array_t* array) { memset(array, 0, sizeof(*array)); }
 
@@ -62,6 +73,11 @@ void node_activate(sim_node_t* node) {
     pending_ack_init(&node->pending_acks);
     dedup_init(&node->dedup);
     airtime_budget_init(&node->airtime, 0);
+    /* Same instances mesh_task_start initializes (main/mesh_task.c:4536-4537). */
+    rreq_rate_init(&node->rreq_rate);
+    rreq_fwd_init(&node->rreq_fwd, 0);
+    node->rreq_rate_denied = 0;
+    node->rreq_fwd_denied = 0;
     reassembly_init(&node->reassembly);
     /* Crypto: generate identity but keep sim-defined address */
     {
@@ -72,13 +88,15 @@ void node_activate(sim_node_t* node) {
     }
     node->crypto_counter = 0;
     node->packets_forwarded = 0;
+    memset(node->budget_denied, 0, sizeof(node->budget_denied));
 
-    /* Initialize adaptive beacon controller */
-    node->adaptive_beacon_interval_us = NODE_BEACON_INTERVAL_BASE_US;
-    memset(node->neighbor_history, 0, sizeof(node->neighbor_history));
-    node->neighbor_history_idx = 0;
-    node->last_mode_transition_us = 0;
-    node->adaptive_enabled = true; /* Enable by default for simulation */
+    /* Beacon churn tracking reset (fresh boot has no history). The policy
+     * CONFIG (sim_beacon_policy_t) lives outside sim_node_t entirely, one
+     * shared instance passed into node_tick every call (see sim_node.h),
+     * so there is nothing to reset for it here. */
+    memset(node->beacon_churn_history, 0, sizeof(node->beacon_churn_history));
+    node->beacon_churn_history_idx = 0;
+    node->beacon_last_neighbor_count = 0;
 
     /* Per-node jitter PRNG (deterministic per address) and first beacon due
      * time: real nodes boot at uncorrelated times, so the first beacon gets
@@ -97,78 +115,44 @@ void node_move(sim_node_t* node, float x, float y) {
 }
 
 /*
- * Adaptive beacon controller — computes beacon interval based on local mesh conditions.
- * Policy:
- *  - Small/stable mesh (neighbor_count < 10, low churn) → 60s interval (conservative airtime)
- *  - Dense mesh (neighbor_count >= 10) → 60s interval (backoff to reduce collisions)
- *  - High churn detected → 15s interval (fast discovery)
- * Returns: beacon_interval_us
- */
-static uint64_t adaptive_beacon_interval(sim_node_t* node, uint64_t now_us) {
-    if (!node->adaptive_enabled) {
-        return NODE_BEACON_INTERVAL_BASE_US;
-    }
-
-    uint8_t num_neighbors = (uint8_t)neighbor_count(&node->neighbors);
-
-    /* Update neighbor history for churn detection */
-    node->neighbor_history[node->neighbor_history_idx] = num_neighbors;
-    node->neighbor_history_idx = (node->neighbor_history_idx + 1) % ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
-
-    /* Detect churn: count significant neighbor changes in rolling window */
-    uint8_t churn_events = 0;
-    for (int i = 1; i < ADAPTIVE_NEIGHBOR_CHURN_WINDOW; i++) {
-        int prev_idx = (node->neighbor_history_idx - i + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) %
-                       ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
-        int curr_idx = (node->neighbor_history_idx - i + 1 + ADAPTIVE_NEIGHBOR_CHURN_WINDOW) %
-                       ADAPTIVE_NEIGHBOR_CHURN_WINDOW;
-        uint8_t prev = node->neighbor_history[prev_idx];
-        uint8_t curr = node->neighbor_history[curr_idx];
-        if (prev > curr ? (prev - curr) >= 2 : (curr - prev) >= 2) {
-            churn_events++;
-        }
-    }
-
-    bool dense = (num_neighbors >= ADAPTIVE_NEIGHBOR_DENSE_THRESHOLD);
-    bool high_churn = (churn_events >= ADAPTIVE_CHURN_THRESHOLD);
-
-    /* Apply hysteresis with cooldown. Branch mapping mirrors the firmware
-     * policy (main/mesh_task.c beacon_policy): dense backs off to the max
-     * interval, churn speeds up to the min interval, otherwise base. */
-    uint64_t new_interval;
-    if (dense) {
-        new_interval = NODE_BEACON_INTERVAL_DENSE_US;
-    } else if (high_churn) {
-        new_interval = NODE_BEACON_INTERVAL_CHURN_US;
-    } else {
-        new_interval = NODE_BEACON_INTERVAL_BASE_US;
-    }
-
-    /* Only transition if cooldown elapsed */
-    if (new_interval != node->adaptive_beacon_interval_us) {
-        if (now_us - node->last_mode_transition_us >= ADAPTIVE_MODE_COOLDOWN_US) {
-            node->last_mode_transition_us = now_us;
-            node->adaptive_beacon_interval_us = new_interval;
-        }
-    }
-
-    return node->adaptive_beacon_interval_us;
-}
-
-/*
  * node_tick — called every NODE_TICK_INTERVAL_US for each active node.
  * Performs: beacon TX, neighbor purge, route maintenance, discovery retry.
  * Produces outbound packets in `result` for the caller to radio-broadcast.
  */
-void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
+void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
+               const sim_beacon_policy_t* beacon_policy, node_tick_result_t* result) {
     result->count = 0;
     uint32_t now_ms = (uint32_t)(now_us / 1000);
 
-    /* 1. Beacon transmission with adaptive interval and firmware-style
-     * per-beacon jitter (+-5 s, BEACON_JITTER_MS). Without jitter, beacon
-     * phases lock to the deterministic tick stagger and identical collision
-     * storms repeat every interval, which real fleets do not exhibit. */
-    uint64_t beacon_interval = adaptive_beacon_interval(node, now_us);
+    /* 1. Beacon transmission. The interval is decided by the REAL firmware
+     * function beacon_interval_decide() (main/beacon_policy_calc.c),
+     * evaluated every tick exactly like firmware's mesh_periodic_maintenance
+     * evaluates compute_adaptive_beacon_interval every loop iteration
+     * (mesh_task.c:3033-3046): the decision recomputes continuously, only
+     * the ACT (actually sending) is gated on the due-time check below.
+     * Firmware-style per-beacon jitter (+-5 s, BEACON_JITTER_MS) is layered
+     * on top: without jitter, beacon phases lock to the deterministic tick
+     * stagger and identical collision storms repeat every interval, which
+     * real fleets do not exhibit. */
+    uint8_t num_neighbors = (uint8_t)neighbor_count(&node->neighbors);
+    if (num_neighbors != node->beacon_last_neighbor_count) {
+        node->beacon_churn_history[node->beacon_churn_history_idx].timestamp = now_ms;
+        node->beacon_churn_history[node->beacon_churn_history_idx].neighbor_count = num_neighbors;
+        node->beacon_churn_history_idx = (node->beacon_churn_history_idx + 1) % MAX_CHURN_HISTORY;
+        node->beacon_last_neighbor_count = num_neighbors;
+    }
+    uint8_t churn_events = beacon_churn_count(node->beacon_churn_history, MAX_CHURN_HISTORY, now_ms,
+                                              beacon_policy->churn_window_ms);
+    /* enabled and mode_is_adaptive collapse to one scenario flag: the sim
+     * only distinguishes fixed vs adaptive, never firmware's separate
+     * "adaptive mode selected but disabled" RPC nuance, which has no
+     * scenario equivalent. */
+    beacon_interval_decision_t beacon_decision =
+        beacon_interval_decide(beacon_policy->adaptive, beacon_policy->adaptive,
+                               beacon_policy->interval_ms, beacon_policy->min_interval_ms,
+                               beacon_policy->max_interval_ms, beacon_policy->dense_threshold,
+                               beacon_policy->churn_threshold, num_neighbors, churn_events);
+    uint64_t beacon_interval = (uint64_t)beacon_decision.interval_ms * 1000ULL; /* ms -> us */
     if (now_us >= node->next_beacon_due_us) {
         uint64_t jitter_span_ms = (uint32_t)(2 * NODE_BEACON_JITTER_US / 1000ULL);
         uint64_t jitter_us =
@@ -199,13 +183,27 @@ void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
         beacon.network_time = now_ms;
         beacon.time_confidence = 0;
 
-        outbound_packet_t* out = &result->pkts[result->count++];
-        bramble_beacon_serialize(&beacon, out->data, BEACON_SIZE);
-        out->len = BEACON_SIZE;
-        out->is_broadcast = true;
-        out->dest_addr = 0xFFFFFFFF;
-        out->pkt_type = PKT_TYPE_BEACON;
-        node->beacons_sent++;
+        /* Budget-gate the beacon exactly like firmware's mesh_tx: refresh
+         * the profile's peer-count scaler from the current neighbor table,
+         * then check the BROADCAST lane (tx_gate_kind_tier: TX_KIND_BEACON
+         * -> AIRTIME_TIER_BROADCAST) before putting it on the air. Denied
+         * beacons are dropped, not queued, matching tx_gate's no-queue
+         * semantics; the next beacon is still scheduled on schedule. */
+        airtime_budget_set_mesh_size(&node->airtime, (uint8_t)neighbor_count(&node->neighbors));
+        uint32_t beacon_airtime_ms = radio_frame_airtime_ms(radio, BEACON_SIZE);
+        if (airtime_budget_can_transmit(&node->airtime, AIRTIME_TIER_BROADCAST,
+                                        beacon_airtime_ms)) {
+            outbound_packet_t* out = &result->pkts[result->count++];
+            bramble_beacon_serialize(&beacon, out->data, BEACON_SIZE);
+            out->len = BEACON_SIZE;
+            out->is_broadcast = true;
+            out->dest_addr = 0xFFFFFFFF;
+            out->pkt_type = PKT_TYPE_BEACON;
+            node->beacons_sent++;
+            airtime_budget_debit(&node->airtime, AIRTIME_TIER_BROADCAST, beacon_airtime_ms);
+        } else {
+            node->budget_denied[AIRTIME_IDX_BROADCAST]++;
+        }
     }
 
     /* 2. Neighbor table purge */
@@ -236,12 +234,23 @@ void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
                     rreq_build_originator(node->addr, d->dest_addr, query_id, node->addr,
                                           discovery_hop_limit_for_attempt(d->attempts));
 
-                outbound_packet_t* out = &result->pkts[result->count++];
-                bramble_rreq_serialize(&rreq, out->data, RREQ_SIZE);
-                out->len = RREQ_SIZE;
-                out->is_broadcast = true;
-                out->dest_addr = 0xFFFFFFFF;
-                out->pkt_type = PKT_TYPE_RREQ;
+                /* Budget-gate the retry RREQ: tx_gate_kind_tier maps
+                 * TX_KIND_ROUTING to AIRTIME_TIER_CRITICAL. */
+                airtime_budget_set_mesh_size(&node->airtime,
+                                             (uint8_t)neighbor_count(&node->neighbors));
+                uint32_t rreq_airtime_ms = radio_frame_airtime_ms(radio, RREQ_SIZE);
+                if (airtime_budget_can_transmit(&node->airtime, AIRTIME_TIER_CRITICAL,
+                                                rreq_airtime_ms)) {
+                    outbound_packet_t* out = &result->pkts[result->count++];
+                    bramble_rreq_serialize(&rreq, out->data, RREQ_SIZE);
+                    out->len = RREQ_SIZE;
+                    out->is_broadcast = true;
+                    out->dest_addr = 0xFFFFFFFF;
+                    out->pkt_type = PKT_TYPE_RREQ;
+                    airtime_budget_debit(&node->airtime, AIRTIME_TIER_CRITICAL, rreq_airtime_ms);
+                } else {
+                    node->budget_denied[AIRTIME_IDX_CRITICAL]++;
+                }
             }
         }
     }

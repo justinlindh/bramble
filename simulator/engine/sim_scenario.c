@@ -95,6 +95,62 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
     if (lbt && cJSON_IsBool(lbt))
         radio->lbt_enabled = cJSON_IsTrue(lbt);
 
+    /* Optional regulatory duty-cycle cap (DES-8): absent = unlimited,
+     * matching today's behavior (radio_config_init already left
+     * duty_cycle_set false). When present, applied via the real
+     * airtime_budget_set_duty_cap on every node (bridge_apply_duty_cycle_cap),
+     * never computed here. */
+    cJSON* duty = cJSON_GetObjectItem(radio_json, "duty_cycle_pct");
+    if (duty && cJSON_IsNumber(duty)) {
+        double pct = duty->valuedouble;
+        if (pct < 0.0)
+            pct = 0.0;
+        if (pct > 100.0)
+            pct = 100.0;
+        radio->duty_cycle_set = true;
+        radio->duty_cycle_pct = (uint8_t)pct;
+    }
+
+    return true;
+}
+
+/*
+ * Beacon interval policy (sim_node.h sim_beacon_policy_t), one shared
+ * instance for the whole scenario, consumed by beacon_interval_decide()
+ * (main/beacon_policy_calc.c) every node_tick. Defaults mirror firmware's
+ * shipped BEACON_MODE_FIXED config (mesh_task.c:298-306): adaptive
+ * disabled, fixed 60s. adaptive=true opts into the same dense/churn policy
+ * firmware's opt-in adaptive mode uses.
+ */
+static bool load_beacon_policy(cJSON* beacon_json, sim_beacon_policy_t* beacon) {
+    sim_beacon_policy_init(beacon);
+
+    if (!beacon_json || !cJSON_IsObject(beacon_json))
+        return true; /* no override: firmware defaults stand */
+
+    cJSON* adaptive = cJSON_GetObjectItem(beacon_json, "adaptive");
+    cJSON* interval_ms = cJSON_GetObjectItem(beacon_json, "interval_ms");
+    cJSON* min_ms = cJSON_GetObjectItem(beacon_json, "min_interval_ms");
+    cJSON* max_ms = cJSON_GetObjectItem(beacon_json, "max_interval_ms");
+    cJSON* dense_th = cJSON_GetObjectItem(beacon_json, "dense_threshold");
+    cJSON* churn_th = cJSON_GetObjectItem(beacon_json, "churn_threshold");
+    cJSON* churn_window_ms = cJSON_GetObjectItem(beacon_json, "churn_window_ms");
+
+    if (adaptive && cJSON_IsBool(adaptive))
+        beacon->adaptive = cJSON_IsTrue(adaptive);
+    if (interval_ms && cJSON_IsNumber(interval_ms))
+        beacon->interval_ms = (uint32_t)interval_ms->valuedouble;
+    if (min_ms && cJSON_IsNumber(min_ms))
+        beacon->min_interval_ms = (uint32_t)min_ms->valuedouble;
+    if (max_ms && cJSON_IsNumber(max_ms))
+        beacon->max_interval_ms = (uint32_t)max_ms->valuedouble;
+    if (dense_th && cJSON_IsNumber(dense_th))
+        beacon->dense_threshold = (uint8_t)dense_th->valuedouble;
+    if (churn_th && cJSON_IsNumber(churn_th))
+        beacon->churn_threshold = (uint8_t)churn_th->valuedouble;
+    if (churn_window_ms && cJSON_IsNumber(churn_window_ms))
+        beacon->churn_window_ms = (uint32_t)churn_window_ms->valuedouble;
+
     return true;
 }
 
@@ -548,6 +604,10 @@ bool scenario_load_file(const char* path, scenario_t* scenario) {
         stochastic = (strcmp(mode_json->valuestring, "stochastic") == 0);
 
     scenario->metadata.deterministic = !stochastic;
+
+    /* ── Beacon policy (both modes, independent of node loading) ────────── */
+    cJSON* beacon_json = cJSON_GetObjectItem(root, "beacon");
+    load_beacon_policy(beacon_json, &scenario->beacon);
 
     /* ── Route to correct loader ───────────────────────────────────────── */
     bool ok;

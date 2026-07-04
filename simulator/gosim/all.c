@@ -32,9 +32,15 @@
 #include "../../components/airtime/airtime_budget.c"
 #include "../../components/fragment/fragment.c"
 #include "../../components/crypto/crypto_host.c"
+#include "../../components/security/security.c"
 
 /* New components (Phase 6) */
 #include "../../components/mailbox/mailbox.c"
 #include "../../components/location/location.c"
 #include "../../components/channel/channel_key.c"
 #include "../../components/channel/public_channel.c"
+
+/* Firmware policy modules: pure, no ESP-IDF deps, host-tested directly
+ * (test/test_beacon_policy_calc.c). Lives under main/ but is logic, not
+ * app glue, so it compiles into the sim exactly like the components/ above. */
+#include "../../main/beacon_policy_calc.c"
