@@ -46,14 +46,14 @@
 #define BRAMBLE_PROTOCOL_VERSION "0.5.0"
 
 /* NVS namespaces and keys are defined in nvs_keys.h */
-#define NVS_NAMESPACE            NVS_NS_BRAMBLE
+#define NVS_NAMESPACE NVS_NS_BRAMBLE
 
-static const char *TAG = "rpc_methods";
-static bramble_identity_t *s_identity;
+static const char* TAG = "rpc_methods";
+static bramble_identity_t* s_identity;
 
-#define LOCATION_SOURCE_KEY            "source"
-#define LOCATION_CONTACT_RULE_PREFIX   "lcr_"
-#define LOCATION_CHANNEL_RULE_PREFIX   "lch_"
+#define LOCATION_SOURCE_KEY "source"
+#define LOCATION_CONTACT_RULE_PREFIX "lcr_"
+#define LOCATION_CHANNEL_RULE_PREFIX "lch_"
 
 typedef struct {
     bool enabled;
@@ -61,8 +61,8 @@ typedef struct {
     uint16_t interval_s;
 } rpc_location_rule_t;
 
-static const char *bramble_hardware(void) {
-    const bramble_board_config_t *board = board_get_config();
+static const char* bramble_hardware(void) {
+    const bramble_board_config_t* board = board_get_config();
     if (board && board->short_name && board->short_name[0] != '\0') {
         return board->short_name;
     }
@@ -84,7 +84,7 @@ typedef struct __attribute__((packed)) {
 /* ── Query handlers (pre-existing) ─────────────────────────────────── */
 
 /* bramble.getStatus */
-static int handle_get_status(const cJSON *params, cJSON *result) {
+static int handle_get_status(const cJSON* params, cJSON* result) {
     (void)params;
     char buf[12];
     static mesh_shared_state_t st;
@@ -105,34 +105,41 @@ static int handle_get_status(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
     cJSON_AddNumberToObject(result, "battery_pct", battery_read_pct());
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
-    cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
+    cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
+                          mesh_supports_delivery_event_sync());
     return 0;
 }
 
 /* bramble.getDiagnostics */
-static int handle_get_diagnostics(const cJSON *params, cJSON *result) {
+static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     bool include_heap_dump = false;
     if (params) {
-        const cJSON *dump = cJSON_GetObjectItem(params, "include_heap_dump");
+        const cJSON* dump = cJSON_GetObjectItem(params, "include_heap_dump");
         include_heap_dump = cJSON_IsTrue(dump);
     }
 
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
 
-    cJSON *heap = cJSON_AddObjectToObject(result, "heap");
-    cJSON_AddNumberToObject(heap, "internal_free", (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    cJSON_AddNumberToObject(heap, "internal_min_ever_free", (double)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    cJSON_AddNumberToObject(heap, "internal_largest_free_block", (double)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON* heap = cJSON_AddObjectToObject(result, "heap");
+    cJSON_AddNumberToObject(heap, "internal_free",
+                            (double)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(
+        heap, "internal_min_ever_free",
+        (double)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(
+        heap, "internal_largest_free_block",
+        (double)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     cJSON_AddNumberToObject(heap, "dma_free", (double)heap_caps_get_free_size(MALLOC_CAP_DMA));
-    cJSON_AddNumberToObject(heap, "dma_largest_free_block", (double)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    cJSON_AddNumberToObject(heap, "dma_largest_free_block",
+                            (double)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
     cJSON_AddNumberToObject(heap, "psram_free", (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    cJSON_AddNumberToObject(heap, "psram_min_ever_free", (double)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
+    cJSON_AddNumberToObject(heap, "psram_min_ever_free",
+                            (double)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
 
-    static const char *task_names[] = {
-        "main", "mesh", "ui_gfx", "wifi", "sys_evt", "tiT", "Tmr Svc", "IDLE0", "IDLE1", "ipc0", "ipc1"
-    };
-    cJSON *tasks = cJSON_AddArrayToObject(result, "task_stack_hwm");
+    static const char* task_names[] = {"main",    "mesh",  "ui_gfx", "wifi", "sys_evt", "tiT",
+                                       "Tmr Svc", "IDLE0", "IDLE1",  "ipc0", "ipc1"};
+    cJSON* tasks = cJSON_AddArrayToObject(result, "task_stack_hwm");
     for (size_t i = 0; i < (sizeof(task_names) / sizeof(task_names[0])); i++) {
         TaskHandle_t h = xTaskGetHandle(task_names[i]);
         if (!h) {
@@ -140,7 +147,7 @@ static int handle_get_diagnostics(const cJSON *params, cJSON *result) {
         }
 
         UBaseType_t hwm_words = uxTaskGetStackHighWaterMark(h);
-        cJSON *obj = cJSON_CreateObject();
+        cJSON* obj = cJSON_CreateObject();
         cJSON_AddStringToObject(obj, "task", task_names[i]);
         cJSON_AddNumberToObject(obj, "hwm_words", (double)hwm_words);
         cJSON_AddNumberToObject(obj, "hwm_bytes", (double)(hwm_words * sizeof(StackType_t)));
@@ -148,7 +155,9 @@ static int handle_get_diagnostics(const cJSON *params, cJSON *result) {
     }
 
     if (include_heap_dump) {
-        ESP_LOGI(TAG, "bramble.getDiagnostics requested heap_caps_dump(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)");
+        ESP_LOGI(
+            TAG,
+            "bramble.getDiagnostics requested heap_caps_dump(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)");
         heap_caps_dump(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
 
@@ -156,13 +165,13 @@ static int handle_get_diagnostics(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getWifiStatus */
-static int handle_get_wifi_status(const cJSON *params, cJSON *result) {
+static int handle_get_wifi_status(const cJSON* params, cJSON* result) {
     (void)params;
 
     wifi_status_t status = {0};
     wifi_manager_get_status(&status);
 
-    const char *mode = "off";
+    const char* mode = "off";
     if (status.mode == BRAMBLE_WIFI_STATION) {
         mode = "station";
     } else if (status.mode == BRAMBLE_WIFI_AP) {
@@ -170,10 +179,8 @@ static int handle_get_wifi_status(const cJSON *params, cJSON *result) {
     }
 
     uint8_t mac[6] = {0};
-    esp_err_t mac_rc = esp_wifi_get_mac(
-        status.mode == BRAMBLE_WIFI_AP ? WIFI_IF_AP : WIFI_IF_STA,
-        mac
-    );
+    esp_err_t mac_rc =
+        esp_wifi_get_mac(status.mode == BRAMBLE_WIFI_AP ? WIFI_IF_AP : WIFI_IF_STA, mac);
 
     int clients = 0;
     if (status.mode == BRAMBLE_WIFI_AP) {
@@ -185,8 +192,8 @@ static int handle_get_wifi_status(const cJSON *params, cJSON *result) {
 
     char mac_str[18] = {0};
     if (mac_rc == ESP_OK) {
-        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
+                 mac[3], mac[4], mac[5]);
     }
 
     cJSON_AddStringToObject(result, "mode", mode);
@@ -200,62 +207,67 @@ static int handle_get_wifi_status(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getIdentity */
-static int handle_get_identity(const cJSON *params, cJSON *result) {
+static int handle_get_identity(const cJSON* params, cJSON* result) {
     (void)params;
     char buf[12];
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
-    cJSON_AddStringToObject(result, "pubkey_hash", addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
+    cJSON_AddStringToObject(result, "pubkey_hash",
+                            addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
     return 0;
 }
 
 /* bramble.getVersion */
-static int handle_get_version(const cJSON *params, cJSON *result) {
+static int handle_get_version(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
     cJSON_AddStringToObject(result, "hardware", bramble_hardware());
-    cJSON_AddBoolToObject(result, "supports_delivery_event_sync", mesh_supports_delivery_event_sync());
+    cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
+                          mesh_supports_delivery_event_sync());
     return 0;
 }
 
 /* bramble.getDeliveryEvents — params: {sinceEventSeq|since_event_seq, limit?} */
-static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
+static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
     uint32_t since_seq = 0u;
     uint32_t limit = 256u;
 
-    const cJSON *since = params ? cJSON_GetObjectItem(params, "sinceEventSeq") : NULL;
-    if (!since) since = params ? cJSON_GetObjectItem(params, "since_event_seq") : NULL;
+    const cJSON* since = params ? cJSON_GetObjectItem(params, "sinceEventSeq") : NULL;
+    if (!since)
+        since = params ? cJSON_GetObjectItem(params, "since_event_seq") : NULL;
     if (cJSON_IsNumber(since) && since->valuedouble >= 0) {
         since_seq = (uint32_t)since->valuedouble;
     }
 
-    const cJSON *limit_json = params ? cJSON_GetObjectItem(params, "limit") : NULL;
+    const cJSON* limit_json = params ? cJSON_GetObjectItem(params, "limit") : NULL;
     if (cJSON_IsNumber(limit_json) && limit_json->valuedouble > 0) {
         limit = (uint32_t)limit_json->valuedouble;
     }
-    if (limit > 1024u) limit = 1024u;
+    if (limit > 1024u)
+        limit = 1024u;
 
     size_t out_max = (size_t)((limit < 256u) ? limit : 256u);
     size_t events_bytes = out_max * sizeof(delivery_event_record_t);
 
-    delivery_event_record_t *events = NULL;
+    delivery_event_record_t* events = NULL;
     if (events_bytes > 0u) {
         events = heap_caps_malloc(events_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!events) {
             events = malloc(events_bytes);
         }
         if (!events) {
-            ESP_LOGE(TAG, "Failed to allocate delivery events buffer (%u bytes)", (unsigned)events_bytes);
+            ESP_LOGE(TAG, "Failed to allocate delivery events buffer (%u bytes)",
+                     (unsigned)events_bytes);
             return RPC_ERR_INTERNAL;
         }
     }
 
     size_t n = mesh_delivery_events_list_since(since_seq, events, out_max);
 
-    cJSON *arr = cJSON_AddArrayToObject(result, "events");
+    cJSON* arr = cJSON_AddArrayToObject(result, "events");
     for (size_t i = 0; i < n; i++) {
-        const delivery_event_record_t *e = &events[i];
-        cJSON *obj = cJSON_CreateObject();
+        const delivery_event_record_t* e = &events[i];
+        cJSON* obj = cJSON_CreateObject();
         cJSON_AddNumberToObject(obj, "event_seq", e->event_seq);
         cJSON_AddNumberToObject(obj, "timestamp_ms", (double)e->timestamp_s * 1000.0);
 
@@ -266,7 +278,7 @@ static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
         char msg_buf[12];
         snprintf(msg_buf, sizeof(msg_buf), "%08" PRIX32, e->message_id);
 
-        cJSON *payload = cJSON_CreateObject();
+        cJSON* payload = cJSON_CreateObject();
         if (e->event_type == 2u) {
             cJSON_AddStringToObject(obj, "event_type", "broadcast_delivery");
             cJSON_AddStringToObject(obj, "broadcast_id", msg_buf);
@@ -279,9 +291,9 @@ static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
             cJSON_AddStringToObject(obj, "packet_id", msg_buf);
             cJSON_AddStringToObject(payload, "status", "delivered");
 
-            cJSON *path = cJSON_AddArrayToObject(payload, "relayPath");
+            cJSON* path = cJSON_AddArrayToObject(payload, "relayPath");
             for (uint8_t h = 0; h < e->route_len && h < DELIVERY_EVENT_ROUTE_MAX_HOPS; h++) {
-                cJSON *hop = cJSON_CreateObject();
+                cJSON* hop = cJSON_CreateObject();
                 char hop_buf[12];
                 snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, e->route_hops[h]);
                 cJSON_AddStringToObject(hop, "addr", hop_buf);
@@ -301,19 +313,20 @@ static int handle_get_delivery_events(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getNeighbors */
-static int handle_get_neighbors(const cJSON *params, cJSON *result) {
+static int handle_get_neighbors(const cJSON* params, cJSON* result) {
     (void)params;
     static mesh_shared_state_t st;
     mesh_get_state(&st);
 
-    cJSON *arr = cJSON_AddArrayToObject(result, "neighbors");
+    cJSON* arr = cJSON_AddArrayToObject(result, "neighbors");
     char buf[12];
 
     for (int i = 0; i < st.neighbors.count; i++) {
-        const neighbor_entry_t *n = &st.neighbors.entries[i];
-        if (n->addr == 0) continue;
+        const neighbor_entry_t* n = &st.neighbors.entries[i];
+        if (n->addr == 0)
+            continue;
 
-        cJSON *obj = cJSON_CreateObject();
+        cJSON* obj = cJSON_CreateObject();
         cJSON_AddStringToObject(obj, "address", addr_hex(n->addr, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "rssi", n->rssi);
         cJSON_AddNumberToObject(obj, "snr", n->snr);
@@ -332,25 +345,23 @@ static int handle_get_neighbors(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getRoutes */
-static int handle_get_routes(const cJSON *params, cJSON *result) {
+static int handle_get_routes(const cJSON* params, cJSON* result) {
     (void)params;
     routing_table_t routes;
     mesh_get_routes(&routes);
 
-    cJSON *arr = cJSON_AddArrayToObject(result, "routes");
+    cJSON* arr = cJSON_AddArrayToObject(result, "routes");
     char buf[12];
-    static const char *state_names[] = {
-        "discovering", "unverified", "active", "stale", "broken"
-    };
+    static const char* state_names[] = {"discovering", "unverified", "active", "stale", "broken"};
     for (int i = 0; i < routes.count; i++) {
-        const route_entry_t *r = &routes.entries[i];
-        cJSON *obj = cJSON_CreateObject();
+        const route_entry_t* r = &routes.entries[i];
+        cJSON* obj = cJSON_CreateObject();
         cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
         cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
         cJSON_AddNumberToObject(obj, "hop_count", r->hop_count);
         cJSON_AddNumberToObject(obj, "metric", r->metric);
         cJSON_AddStringToObject(obj, "state",
-            r->state <= ROUTE_BROKEN ? state_names[r->state] : "unknown");
+                                r->state <= ROUTE_BROKEN ? state_names[r->state] : "unknown");
         cJSON_AddNumberToObject(obj, "use_count", r->use_count);
         cJSON_AddItemToArray(arr, obj);
     }
@@ -358,27 +369,32 @@ static int handle_get_routes(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getAirtime */
-static int handle_get_airtime(const cJSON *params, cJSON *result) {
+static int handle_get_airtime(const cJSON* params, cJSON* result) {
     (void)params;
     static mesh_shared_state_t st;
     mesh_get_state(&st);
     /* Refill before reporting so values are current */
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     airtime_budget_refill(&st.airtime, now_ms);
-    cJSON_AddNumberToObject(result, "critical_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_CRITICAL));
-    cJSON_AddNumberToObject(result, "normal_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_NORMAL));
-    cJSON_AddNumberToObject(result, "broadcast_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_BROADCAST));
-    cJSON_AddNumberToObject(result, "receipt_remaining_ms", airtime_budget_remaining(&st.airtime, AIRTIME_TIER_RECEIPT));
+    cJSON_AddNumberToObject(result, "critical_remaining_ms",
+                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_CRITICAL));
+    cJSON_AddNumberToObject(result, "normal_remaining_ms",
+                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_NORMAL));
+    cJSON_AddNumberToObject(result, "broadcast_remaining_ms",
+                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_BROADCAST));
+    cJSON_AddNumberToObject(result, "receipt_remaining_ms",
+                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_RECEIPT));
     cJSON_AddNumberToObject(result, "critical_max_ms", st.airtime.max_ms[AIRTIME_IDX_CRITICAL]);
     cJSON_AddNumberToObject(result, "normal_max_ms", st.airtime.max_ms[AIRTIME_IDX_NORMAL]);
     cJSON_AddNumberToObject(result, "broadcast_max_ms", st.airtime.max_ms[AIRTIME_IDX_BROADCAST]);
     cJSON_AddNumberToObject(result, "receipt_max_ms", st.airtime.max_ms[AIRTIME_IDX_RECEIPT]);
-    cJSON_AddNumberToObject(result, "next_refill_ms", airtime_budget_next_refill_ms(&st.airtime, now_ms));
+    cJSON_AddNumberToObject(result, "next_refill_ms",
+                            airtime_budget_next_refill_ms(&st.airtime, now_ms));
     return 0;
 }
 
 /* bramble.ping */
-static int handle_ping(const cJSON *params, cJSON *result) {
+static int handle_ping(const cJSON* params, cJSON* result) {
     (void)params;
     char buf[12];
     cJSON_AddBoolToObject(result, "pong", true);
@@ -391,19 +407,19 @@ static int handle_ping(const cJSON *params, cJSON *result) {
 
 /* ── Fragmentation constants (aligned with components/fragment) ──────── */
 /* Single-packet DATA max: 255 - 52 bytes overhead = 203 bytes plaintext */
-#define SINGLE_PACKET_MAX_BYTES    203
+#define SINGLE_PACKET_MAX_BYTES 203
 /* Fragment payload per packet: 154 bytes (from fragment.h FRAG_MAX_PLAINTEXT) */
-#define FRAGMENT_PAYLOAD_BYTES     154
+#define FRAGMENT_PAYLOAD_BYTES 154
 /* Max fragments per message: 4 (from fragment.h FRAG_MAX_FRAGMENTS) */
-#define MAX_FRAGMENTS              4
+#define MAX_FRAGMENTS 4
 /* True max with fragmentation: 154 * 4 = 616 bytes */
-#define FRAGMENTED_MAX_BYTES       (FRAGMENT_PAYLOAD_BYTES * MAX_FRAGMENTS)
+#define FRAGMENTED_MAX_BYTES (FRAGMENT_PAYLOAD_BYTES * MAX_FRAGMENTS)
 
 /* bramble.sendMessage — params: {"dest":"HEXADDR", "text":"...", "channel"?:N} */
-static int handle_send_message(const cJSON *params, cJSON *result) {
-    const char *dest_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dest"));
-    const char *text     = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
-    cJSON *channel_j     = cJSON_GetObjectItem(params, "channel");
+static int handle_send_message(const cJSON* params, cJSON* result) {
+    const char* dest_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dest"));
+    const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
+    cJSON* channel_j = cJSON_GetObjectItem(params, "channel");
     if (!dest_str || !text) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -434,7 +450,7 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
             dest = 0xFFFFFFFF;
         }
 
-        pkt_id = mesh_send_channel(ch, dest, (const uint8_t *)text, text_len);
+        pkt_id = mesh_send_channel(ch, dest, (const uint8_t*)text, text_len);
         if (pkt_id == 0) {
             ESP_LOGW(TAG, "mesh_send_channel ch=%d to %08" PRIX32 " failed", ch, dest);
             cJSON_AddStringToObject(result, "error", "send failed");
@@ -442,7 +458,7 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
         }
         cJSON_AddNumberToObject(result, "channel", ch);
     } else {
-        pkt_id = mesh_send_message(dest, (const uint8_t *)text, text_len);
+        pkt_id = mesh_send_message(dest, (const uint8_t*)text, text_len);
         if (pkt_id == 0) {
             ESP_LOGW(TAG, "mesh_send_message to %08" PRIX32 " failed", dest);
             cJSON_AddStringToObject(result, "error", "send failed");
@@ -469,14 +485,14 @@ static int handle_send_message(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.sendBroadcast — params: {"text":"..."} */
-static int handle_send_broadcast(const cJSON *params, cJSON *result) {
-    const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
+static int handle_send_broadcast(const cJSON* params, cJSON* result) {
+    const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
     if (!text) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
     size_t text_len = strlen(text);
-    
+
     /* Enforce true fragmented maximum */
     if (text_len > FRAGMENTED_MAX_BYTES) {
         cJSON_AddStringToObject(result, "error", "message too long");
@@ -486,7 +502,7 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
-    int rc = mesh_send_broadcast((const uint8_t *)text, text_len);
+    int rc = mesh_send_broadcast((const uint8_t*)text, text_len);
     if (rc == -2) {
         cJSON_AddStringToObject(result, "error", "rate limited");
         return RPC_ERR_RATE_LIMIT;
@@ -508,7 +524,7 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
     cJSON_AddStringToObject(result, "status", "sent");
     cJSON_AddBoolToObject(result, "broadcast", true);
     cJSON_AddNumberToObject(result, "channel", -1);
-    
+
     /* Add fragmentation metadata */
     bool will_fragment = text_len > SINGLE_PACKET_MAX_BYTES;
     cJSON_AddBoolToObject(result, "fragmented", will_fragment);
@@ -518,12 +534,12 @@ static int handle_send_broadcast(const cJSON *params, cJSON *result) {
     }
     cJSON_AddNumberToObject(result, "max_bytes", (double)FRAGMENTED_MAX_BYTES);
     cJSON_AddNumberToObject(result, "actual_bytes", (double)text_len);
-    
+
     return 0;
 }
 
 /* bramble.reboot — no params required */
-static int handle_reboot(const cJSON *params, cJSON *result) {
+static int handle_reboot(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddBoolToObject(result, "ok", true);
     mesh_reboot_delayed(500);
@@ -531,7 +547,7 @@ static int handle_reboot(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.sendProbe — stub: params {"dest":"HEXADDR"} */
-static int handle_send_probe(const cJSON *params, cJSON *result) {
+static int handle_send_probe(const cJSON* params, cJSON* result) {
     (void)params;
     uint32_t probe_id = mesh_send_probe();
     if (probe_id == 0) {
@@ -547,28 +563,34 @@ static int handle_send_probe(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.setRadio — stub: params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
-static int handle_set_radio(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
+static int handle_set_radio(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
 
     /* Get current config as base */
     radio_config_t cfg;
     radio_get_config(&cfg);
 
     /* Apply any provided fields */
-    cJSON *freq = cJSON_GetObjectItem(params, "frequency_mhz");
-    cJSON *sf   = cJSON_GetObjectItem(params, "sf");
-    cJSON *bw   = cJSON_GetObjectItem(params, "bw_hz");
-    cJSON *txp  = cJSON_GetObjectItem(params, "tx_power_dbm");
-    cJSON *cr   = cJSON_GetObjectItem(params, "coding_rate");
+    cJSON* freq = cJSON_GetObjectItem(params, "frequency_mhz");
+    cJSON* sf = cJSON_GetObjectItem(params, "sf");
+    cJSON* bw = cJSON_GetObjectItem(params, "bw_hz");
+    cJSON* txp = cJSON_GetObjectItem(params, "tx_power_dbm");
+    cJSON* cr = cJSON_GetObjectItem(params, "coding_rate");
 
-    if (freq && cJSON_IsNumber(freq)) cfg.frequency_mhz = (float)freq->valuedouble;
-    if (sf   && cJSON_IsNumber(sf))   cfg.sf = (uint8_t)sf->valueint;
-    if (bw   && cJSON_IsNumber(bw))   cfg.bw_hz = (uint32_t)bw->valuedouble;
-    if (txp  && cJSON_IsNumber(txp))  cfg.tx_power = (int8_t)txp->valueint;
-    if (cr   && cJSON_IsNumber(cr))   cfg.coding_rate = (uint8_t)cr->valueint;
+    if (freq && cJSON_IsNumber(freq))
+        cfg.frequency_mhz = (float)freq->valuedouble;
+    if (sf && cJSON_IsNumber(sf))
+        cfg.sf = (uint8_t)sf->valueint;
+    if (bw && cJSON_IsNumber(bw))
+        cfg.bw_hz = (uint32_t)bw->valuedouble;
+    if (txp && cJSON_IsNumber(txp))
+        cfg.tx_power = (int8_t)txp->valueint;
+    if (cr && cJSON_IsNumber(cr))
+        cfg.coding_rate = (uint8_t)cr->valueint;
 
     /* Validate against freq plan */
-    const bramble_freq_plan_t *plan = freq_plan_get_default();
+    const bramble_freq_plan_t* plan = freq_plan_get_default();
     if (!freq_plan_valid_freq(plan, cfg.frequency_mhz)) {
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "frequency out of region bounds");
@@ -608,8 +630,8 @@ static int handle_set_radio(const cJSON *params, cJSON *result) {
         nvs_close(nvs);
     }
 
-    ESP_LOGI(TAG, "Radio reconfigured: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
-             cfg.frequency_mhz, cfg.sf, cfg.bw_hz, cfg.tx_power);
+    ESP_LOGI(TAG, "Radio reconfigured: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm", cfg.frequency_mhz,
+             cfg.sf, cfg.bw_hz, cfg.tx_power);
 
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddNumberToObject(result, "frequency_mhz", cfg.frequency_mhz);
@@ -621,8 +643,8 @@ static int handle_set_radio(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.setNodeName — params: {"name":"..."} — persists to NVS */
-static int handle_set_node_name(const cJSON *params, cJSON *result) {
-    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
+static int handle_set_node_name(const cJSON* params, cJSON* result) {
+    const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
     if (!name || strlen(name) == 0 || strlen(name) > BRAMBLE_NODE_NAME_MAX) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -656,13 +678,12 @@ static int handle_set_node_name(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int rpc_set_auth_token(const cJSON *params, cJSON *result)
-{
-    const cJSON *token_j = cJSON_GetObjectItem(params, "token");
+static int rpc_set_auth_token(const cJSON* params, cJSON* result) {
+    const cJSON* token_j = cJSON_GetObjectItem(params, "token");
     if (!token_j || !cJSON_IsString(token_j)) {
         return RPC_ERR_INVALID_PARAMS;
     }
-    const char *val = token_j->valuestring;
+    const char* val = token_j->valuestring;
     if (strlen(val) >= 128) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -692,16 +713,18 @@ static int rpc_set_auth_token(const cJSON *params, cJSON *result)
     nvs_commit(h);
     nvs_close(h);
 
-    ws_server_load_token();  /* reload immediately */
+    ws_server_load_token(); /* reload immediately */
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
-static int hex_nibble(char c)
-{
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+static int hex_nibble(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
     return -1;
 }
 
@@ -716,13 +739,12 @@ static int hex_nibble(char c)
  * pattern. Distribution UX, how an operator actually gets a key onto a
  * fleet of devices, is out of scope here: an open question for the
  * provisioning workstream, not solved by this RPC. */
-static int rpc_set_network_key(const cJSON *params, cJSON *result)
-{
-    const cJSON *key_j = cJSON_GetObjectItem(params, "key");
+static int rpc_set_network_key(const cJSON* params, cJSON* result) {
+    const cJSON* key_j = cJSON_GetObjectItem(params, "key");
     if (!key_j || !cJSON_IsString(key_j)) {
         return RPC_ERR_INVALID_PARAMS;
     }
-    const char *hex = key_j->valuestring;
+    const char* hex = key_j->valuestring;
     if (strlen(hex) != 64) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -760,8 +782,7 @@ static int rpc_set_network_key(const cJSON *params, cJSON *result)
  * WITHOUT the key ever being read back. Authenticated: registered normally,
  * so it is not in rpc_auth's unauth allowlist. This does NOT close SEC-H1/
  * H2/NEW-SEC-4/NEW-SEC-8; it is provisioning observability, not closure. */
-static int handle_get_network_key_status(const cJSON *params, cJSON *result)
-{
+static int handle_get_network_key_status(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddBoolToObject(result, "provisioned", network_key_is_provisioned() ? true : false);
     uint8_t fp[4];
@@ -780,21 +801,20 @@ static int handle_get_network_key_status(const cJSON *params, cJSON *result)
  * dispatcher's unauth allowlist never includes this method). Origins are
  * stored as a comma-separated list, so entries must not contain commas or
  * spaces; full origins (scheme://host[:port]) never do. */
-static int rpc_set_allowed_origins(const cJSON *params, cJSON *result)
-{
-    const cJSON *origins_j = cJSON_GetObjectItem(params, "origins");
+static int rpc_set_allowed_origins(const cJSON* params, cJSON* result) {
+    const cJSON* origins_j = cJSON_GetObjectItem(params, "origins");
     if (!origins_j || !cJSON_IsArray(origins_j)) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
     char joined[256] = {0};
     size_t used = 0;
-    const cJSON *entry = NULL;
+    const cJSON* entry = NULL;
     cJSON_ArrayForEach(entry, origins_j) {
         if (!cJSON_IsString(entry) || entry->valuestring[0] == '\0') {
             return RPC_ERR_INVALID_PARAMS;
         }
-        const char *o = entry->valuestring;
+        const char* o = entry->valuestring;
         size_t olen = strlen(o);
         if (strchr(o, ',') || strchr(o, ' ')) {
             return RPC_ERR_INVALID_PARAMS;
@@ -841,11 +861,10 @@ static int rpc_set_allowed_origins(const cJSON *params, cJSON *result)
     return 0;
 }
 
-static int rpc_get_allowed_origins(const cJSON *params, cJSON *result)
-{
+static int rpc_get_allowed_origins(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON *arr = cJSON_AddArrayToObject(result, "origins");
-    const char *p = ws_server_get_extra_origins();
+    cJSON* arr = cJSON_AddArrayToObject(result, "origins");
+    const char* p = ws_server_get_extra_origins();
     while (p && *p != '\0') {
         while (*p == ',') {
             p++;
@@ -868,28 +887,28 @@ static int rpc_get_allowed_origins(const cJSON *params, cJSON *result)
     return 0;
 }
 
-static int rpc_get_auth_token(const cJSON *params, cJSON *result)
-{
+static int rpc_get_auth_token(const cJSON* params, cJSON* result) {
     (void)params;
-    const char *token = ws_server_get_token();
+    const char* token = ws_server_get_token();
     cJSON_AddStringToObject(result, "token", (token && token[0]) ? token : "");
     cJSON_AddBoolToObject(result, "enabled", token && token[0] != '\0');
     return 0;
 }
 
 /* bramble.addChannel — params {"name":"...", "psk":"passphrase"} */
-static int handle_add_channel(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
-    const char *psk = cJSON_GetStringValue(cJSON_GetObjectItem(params, "psk"));
+static int handle_add_channel(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
+    const char* psk = cJSON_GetStringValue(cJSON_GetObjectItem(params, "psk"));
     if (!name || strlen(name) == 0 || strlen(name) > 19) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
-    const uint8_t *psk_ptr = NULL;
+    const uint8_t* psk_ptr = NULL;
     size_t psk_len = 0;
     if (psk && psk[0] != '\0') {
-        psk_ptr = (const uint8_t *)psk;
+        psk_ptr = (const uint8_t*)psk;
         psk_len = strlen(psk);
     }
 
@@ -908,10 +927,12 @@ static int handle_add_channel(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_remove_channel(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    cJSON *idx_j = cJSON_GetObjectItem(params, "index");
-    if (!idx_j || !cJSON_IsNumber(idx_j)) return RPC_ERR_INVALID_PARAMS;
+static int handle_remove_channel(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    cJSON* idx_j = cJSON_GetObjectItem(params, "index");
+    if (!idx_j || !cJSON_IsNumber(idx_j))
+        return RPC_ERR_INVALID_PARAMS;
     int index = idx_j->valueint;
 
     if (index == 0) {
@@ -934,10 +955,12 @@ static int handle_remove_channel(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_set_default_channel(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    cJSON *idx_j = cJSON_GetObjectItem(params, "index");
-    if (!idx_j || !cJSON_IsNumber(idx_j)) return RPC_ERR_INVALID_PARAMS;
+static int handle_set_default_channel(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    cJSON* idx_j = cJSON_GetObjectItem(params, "index");
+    if (!idx_j || !cJSON_IsNumber(idx_j))
+        return RPC_ERR_INVALID_PARAMS;
 
     int rc = mesh_set_default_channel(idx_j->valueint);
     if (rc != 0) {
@@ -950,10 +973,12 @@ static int handle_set_default_channel(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_set_mailbox(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
-    if (!enabled || !cJSON_IsBool(enabled)) return RPC_ERR_INVALID_PARAMS;
+static int handle_set_mailbox(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
+    if (!enabled || !cJSON_IsBool(enabled))
+        return RPC_ERR_INVALID_PARAMS;
 
     /* Persist to NVS */
     nvs_handle_t nvs;
@@ -972,8 +997,9 @@ static int handle_set_mailbox(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_t *policy) {
-    if (!policy) return ESP_ERR_INVALID_ARG;
+static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_t* policy) {
+    if (!policy)
+        return ESP_ERR_INVALID_ARG;
 
     location_policy_set_defaults(policy);
 
@@ -1027,16 +1053,21 @@ static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_
     return ESP_OK;
 }
 
-static const char *rpc_location_source_normalize(const char *source) {
-    if (!source || source[0] == '\0') return "hybrid";
-    if (strcmp(source, "gps") == 0) return "gps";
-    if (strcmp(source, "manual") == 0) return "manual";
-    if (strcmp(source, "hybrid") == 0) return "hybrid";
+static const char* rpc_location_source_normalize(const char* source) {
+    if (!source || source[0] == '\0')
+        return "hybrid";
+    if (strcmp(source, "gps") == 0)
+        return "gps";
+    if (strcmp(source, "manual") == 0)
+        return "manual";
+    if (strcmp(source, "hybrid") == 0)
+        return "hybrid";
     return "hybrid";
 }
 
-static bool rpc_location_parse_rule_string(const char *raw, rpc_location_rule_t *rule) {
-    if (!raw || !rule) return false;
+static bool rpc_location_parse_rule_string(const char* raw, rpc_location_rule_t* rule) {
+    if (!raw || !rule)
+        return false;
 
     int enabled = 1;
     char tier[16] = {0};
@@ -1059,16 +1090,17 @@ static bool rpc_location_parse_rule_string(const char *raw, rpc_location_rule_t 
     return true;
 }
 
-static void rpc_location_write_rule_string(char *out, size_t out_len, const rpc_location_rule_t *rule) {
-    if (!out || out_len == 0 || !rule) return;
-    snprintf(out, out_len, "%d|%s|%u",
-             rule->enabled ? 1 : 0,
-             location_tier_to_string(rule->tier),
+static void rpc_location_write_rule_string(char* out, size_t out_len,
+                                           const rpc_location_rule_t* rule) {
+    if (!out || out_len == 0 || !rule)
+        return;
+    snprintf(out, out_len, "%d|%s|%u", rule->enabled ? 1 : 0, location_tier_to_string(rule->tier),
              (unsigned)rule->interval_s);
 }
 
-static int handle_set_location_config(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
+static int handle_set_location_config(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
@@ -1085,24 +1117,25 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
         return 0;
     }
 
-    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
+    cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
     if (enabled && cJSON_IsBool(enabled)) {
         policy.enabled = cJSON_IsTrue(enabled);
     }
 
-    cJSON *interval = cJSON_GetObjectItem(params, "interval_s");
+    cJSON* interval = cJSON_GetObjectItem(params, "interval_s");
     if (interval && cJSON_IsNumber(interval)) {
         int interval_val = interval->valueint;
-        if (interval_val < 0) interval_val = 0;
+        if (interval_val < 0)
+            interval_val = 0;
         policy.interval_s = location_policy_clamp_interval_s((uint16_t)interval_val);
     }
 
-    cJSON *default_tier = cJSON_GetObjectItem(params, "default_tier");
+    cJSON* default_tier = cJSON_GetObjectItem(params, "default_tier");
     if (default_tier && cJSON_IsString(default_tier)) {
         policy.default_tier = location_tier_from_string(default_tier->valuestring);
     }
 
-    cJSON *source = cJSON_GetObjectItem(params, "source");
+    cJSON* source = cJSON_GetObjectItem(params, "source");
     if (source && cJSON_IsString(source)) {
         nvs_set_str(nvs, LOCATION_SOURCE_KEY, rpc_location_source_normalize(source->valuestring));
     }
@@ -1112,12 +1145,13 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
     nvs_set_u16(nvs, "interval_s", policy.interval_s);
     nvs_set_str(nvs, "def_tier", location_tier_to_string(policy.default_tier));
 
-    cJSON *contact_rules = cJSON_GetObjectItem(params, "contact_rules");
+    cJSON* contact_rules = cJSON_GetObjectItem(params, "contact_rules");
     if (contact_rules && cJSON_IsArray(contact_rules)) {
-        const cJSON *entry = NULL;
+        const cJSON* entry = NULL;
         cJSON_ArrayForEach(entry, contact_rules) {
-            const cJSON *address = cJSON_GetObjectItem(entry, "address");
-            if (!cJSON_IsString(address) || !address->valuestring) continue;
+            const cJSON* address = cJSON_GetObjectItem(entry, "address");
+            if (!cJSON_IsString(address) || !address->valuestring)
+                continue;
 
             rpc_location_rule_t rule = {
                 .enabled = true,
@@ -1125,16 +1159,19 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
                 .interval_s = policy.interval_s,
             };
 
-            const cJSON *rule_enabled = cJSON_GetObjectItem(entry, "enabled");
-            if (rule_enabled && cJSON_IsBool(rule_enabled)) rule.enabled = cJSON_IsTrue(rule_enabled);
+            const cJSON* rule_enabled = cJSON_GetObjectItem(entry, "enabled");
+            if (rule_enabled && cJSON_IsBool(rule_enabled))
+                rule.enabled = cJSON_IsTrue(rule_enabled);
 
-            const cJSON *rule_tier = cJSON_GetObjectItem(entry, "tier");
-            if (rule_tier && cJSON_IsString(rule_tier)) rule.tier = location_tier_from_string(rule_tier->valuestring);
+            const cJSON* rule_tier = cJSON_GetObjectItem(entry, "tier");
+            if (rule_tier && cJSON_IsString(rule_tier))
+                rule.tier = location_tier_from_string(rule_tier->valuestring);
 
-            const cJSON *rule_interval = cJSON_GetObjectItem(entry, "interval_s");
+            const cJSON* rule_interval = cJSON_GetObjectItem(entry, "interval_s");
             if (rule_interval && cJSON_IsNumber(rule_interval)) {
                 int v = rule_interval->valueint;
-                if (v > 0) rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
+                if (v > 0)
+                    rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
             }
 
             char key[20];
@@ -1145,12 +1182,13 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
         }
     }
 
-    cJSON *channel_targets = cJSON_GetObjectItem(params, "channel_targets");
+    cJSON* channel_targets = cJSON_GetObjectItem(params, "channel_targets");
     if (channel_targets && cJSON_IsArray(channel_targets)) {
-        const cJSON *entry = NULL;
+        const cJSON* entry = NULL;
         cJSON_ArrayForEach(entry, channel_targets) {
-            const cJSON *channel = cJSON_GetObjectItem(entry, "channel");
-            if (!cJSON_IsNumber(channel)) continue;
+            const cJSON* channel = cJSON_GetObjectItem(entry, "channel");
+            if (!cJSON_IsNumber(channel))
+                continue;
 
             rpc_location_rule_t rule = {
                 .enabled = true,
@@ -1158,16 +1196,19 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
                 .interval_s = policy.interval_s,
             };
 
-            const cJSON *rule_enabled = cJSON_GetObjectItem(entry, "enabled");
-            if (rule_enabled && cJSON_IsBool(rule_enabled)) rule.enabled = cJSON_IsTrue(rule_enabled);
+            const cJSON* rule_enabled = cJSON_GetObjectItem(entry, "enabled");
+            if (rule_enabled && cJSON_IsBool(rule_enabled))
+                rule.enabled = cJSON_IsTrue(rule_enabled);
 
-            const cJSON *rule_tier = cJSON_GetObjectItem(entry, "tier");
-            if (rule_tier && cJSON_IsString(rule_tier)) rule.tier = location_tier_from_string(rule_tier->valuestring);
+            const cJSON* rule_tier = cJSON_GetObjectItem(entry, "tier");
+            if (rule_tier && cJSON_IsString(rule_tier))
+                rule.tier = location_tier_from_string(rule_tier->valuestring);
 
-            const cJSON *rule_interval = cJSON_GetObjectItem(entry, "interval_s");
+            const cJSON* rule_interval = cJSON_GetObjectItem(entry, "interval_s");
             if (rule_interval && cJSON_IsNumber(rule_interval)) {
                 int v = rule_interval->valueint;
-                if (v > 0) rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
+                if (v > 0)
+                    rule.interval_s = location_policy_clamp_interval_s((uint16_t)v);
             }
 
             char key[20];
@@ -1179,8 +1220,8 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
     }
 
     /* Accept manual coordinates (no GPS hardware on Heltec V3) */
-    cJSON *lat = cJSON_GetObjectItem(params, "lat");
-    cJSON *lon = cJSON_GetObjectItem(params, "lon");
+    cJSON* lat = cJSON_GetObjectItem(params, "lat");
+    cJSON* lon = cJSON_GetObjectItem(params, "lon");
     if (lat && cJSON_IsNumber(lat))
         nvs_set_i32(nvs, "lat_e6", (int32_t)(lat->valuedouble * 1e6));
     if (lon && cJSON_IsNumber(lon))
@@ -1193,11 +1234,13 @@ static int handle_set_location_config(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_set_location_contact(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
-    const char *tier = cJSON_GetStringValue(cJSON_GetObjectItem(params, "tier"));
-    if (!addr_str) return RPC_ERR_INVALID_PARAMS;
+static int handle_set_location_contact(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    const char* tier = cJSON_GetStringValue(cJSON_GetObjectItem(params, "tier"));
+    if (!addr_str)
+        return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
@@ -1210,9 +1253,10 @@ static int handle_set_location_contact(const cJSON *params, cJSON *result) {
         .tier = tier ? location_tier_from_string(tier) : LOCATION_TIER_COARSE,
         .interval_s = LOCATION_DEFAULT_INTERVAL_S,
     };
-    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
-    cJSON *interval_s = cJSON_GetObjectItem(params, "interval_s");
-    if (enabled && cJSON_IsBool(enabled)) rule.enabled = cJSON_IsTrue(enabled);
+    cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
+    cJSON* interval_s = cJSON_GetObjectItem(params, "interval_s");
+    if (enabled && cJSON_IsBool(enabled))
+        rule.enabled = cJSON_IsTrue(enabled);
     if (interval_s && cJSON_IsNumber(interval_s) && interval_s->valueint > 0) {
         rule.interval_s = location_policy_clamp_interval_s((uint16_t)interval_s->valueint);
     }
@@ -1230,10 +1274,12 @@ static int handle_set_location_contact(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_remove_location_contact(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
-    if (!addr_str) return RPC_ERR_INVALID_PARAMS;
+static int handle_remove_location_contact(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    if (!addr_str)
+        return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
@@ -1251,10 +1297,12 @@ static int handle_remove_location_contact(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_share_location_once(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    const char *addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
-    if (!addr_str) return RPC_ERR_INVALID_PARAMS;
+static int handle_share_location_once(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    if (!addr_str)
+        return RPC_ERR_INVALID_PARAMS;
 
     /* Read stored location from NVS */
     nvs_handle_t nvs;
@@ -1278,12 +1326,13 @@ static int handle_share_location_once(const cJSON *params, cJSON *result) {
 
     if (lat_e6 == 0 && lon_e6 == 0) {
         cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "no location set (use setLocationConfig with lat/lon)");
+        cJSON_AddStringToObject(result, "error",
+                                "no location set (use setLocationConfig with lat/lon)");
         return 0;
     }
 
     uint8_t tier = policy.default_tier;
-    cJSON *tier_j = cJSON_GetObjectItem(params, "tier");
+    cJSON* tier_j = cJSON_GetObjectItem(params, "tier");
     if (tier_j && cJSON_IsString(tier_j)) {
         tier = location_tier_from_string(tier_j->valuestring);
     }
@@ -1318,41 +1367,53 @@ static int handle_share_location_once(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getMessages — returns stored messages from ring buffer */
-static int handle_get_messages(const cJSON *params, cJSON *result) {
+static int handle_get_messages(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON *arr = cJSON_AddArrayToObject(result, "messages");
+    cJSON* arr = cJSON_AddArrayToObject(result, "messages");
     char buf[12];
 
     int count = msg_store_count();
     for (int i = 0; i < count; i++) {
-        const stored_msg_t *m = msg_store_get(i);
-        if (!m) continue;
+        const stored_msg_t* m = msg_store_get(i);
+        if (!m)
+            continue;
 
-        cJSON *obj = cJSON_CreateObject();
+        cJSON* obj = cJSON_CreateObject();
         char buf2[12];
         bool is_out = (m->direction == MSG_DIR_OUTGOING || m->direction == MSG_DIR_BROADCAST_OUT);
         cJSON_AddStringToObject(obj, "from",
-            is_out ? addr_hex(s_identity->address, buf, sizeof(buf))
-                   : addr_hex(m->peer_addr, buf, sizeof(buf)));
+                                is_out ? addr_hex(s_identity->address, buf, sizeof(buf))
+                                       : addr_hex(m->peer_addr, buf, sizeof(buf)));
         cJSON_AddStringToObject(obj, "to",
-            is_out ? addr_hex(m->peer_addr, buf2, sizeof(buf2))
-                   : addr_hex(s_identity->address, buf2, sizeof(buf2)));
+                                is_out ? addr_hex(m->peer_addr, buf2, sizeof(buf2))
+                                       : addr_hex(s_identity->address, buf2, sizeof(buf2)));
 
-        const char *dir_str = "incoming";
+        const char* dir_str = "incoming";
         switch (m->direction) {
-            case MSG_DIR_OUTGOING:       dir_str = "outgoing"; break;
-            case MSG_DIR_BROADCAST_IN:   dir_str = "broadcast_in"; break;
-            case MSG_DIR_BROADCAST_OUT:  dir_str = "broadcast_out"; break;
-            default: break;
+        case MSG_DIR_OUTGOING:
+            dir_str = "outgoing";
+            break;
+        case MSG_DIR_BROADCAST_IN:
+            dir_str = "broadcast_in";
+            break;
+        case MSG_DIR_BROADCAST_OUT:
+            dir_str = "broadcast_out";
+            break;
+        default:
+            break;
         }
         cJSON_AddStringToObject(obj, "direction", dir_str);
         cJSON_AddStringToObject(obj, "text", m->text);
         cJSON_AddNumberToObject(obj, "channel", m->channel_index);
-        cJSON_AddBoolToObject(obj, "broadcast", (m->direction == MSG_DIR_BROADCAST_IN || m->direction == MSG_DIR_BROADCAST_OUT));
+        cJSON_AddBoolToObject(
+            obj, "broadcast",
+            (m->direction == MSG_DIR_BROADCAST_IN || m->direction == MSG_DIR_BROADCAST_OUT));
         cJSON_AddNumberToObject(obj, "timestamp_s", m->timestamp_s);
-        if (m->rssi != 0) cJSON_AddNumberToObject(obj, "rssi", m->rssi);
-        if (m->snr != 0)  cJSON_AddNumberToObject(obj, "snr", m->snr);
-        static const char *status_names[] = {"none", "sent", "delivered", "failed"};
+        if (m->rssi != 0)
+            cJSON_AddNumberToObject(obj, "rssi", m->rssi);
+        if (m->snr != 0)
+            cJSON_AddNumberToObject(obj, "snr", m->snr);
+        static const char* status_names[] = {"none", "sent", "delivered", "failed"};
         if (m->status > 0 && m->status <= 3) {
             cJSON_AddStringToObject(obj, "status", status_names[m->status]);
         }
@@ -1362,9 +1423,9 @@ static int handle_get_messages(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getPeerLocations — returns own location + any received peer locations */
-static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
+static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON *peer_locations = cJSON_AddArrayToObject(result, "peerLocations");
+    cJSON* peer_locations = cJSON_AddArrayToObject(result, "peerLocations");
 
     /* Open NVS once for both own location and peer entries.
      * READWRITE needed because location_policy_load_or_init may write defaults. */
@@ -1378,70 +1439,78 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
             nvs_get_i32(nvs, "lon_e6", &lon_e6);
 
             if (policy.enabled && (lat_e6 != 0 || lon_e6 != 0)) {
-                cJSON *self = cJSON_CreateObject();
+                cJSON* self = cJSON_CreateObject();
                 char buf[12];
-                cJSON *position = cJSON_CreateObject();
+                cJSON* position = cJSON_CreateObject();
                 cJSON_AddNumberToObject(position, "lat", lat_e6 / 1e6);
                 cJSON_AddNumberToObject(position, "lon", lon_e6 / 1e6);
                 cJSON_AddNumberToObject(position, "alt", 0);
                 cJSON_AddNumberToObject(position, "accuracy", 0);
                 cJSON_AddNumberToObject(position, "speed", 0);
                 cJSON_AddNumberToObject(position, "heading", 0);
-                cJSON_AddNumberToObject(position, "timestampMs", (double)(esp_timer_get_time() / 1000ULL));
+                cJSON_AddNumberToObject(position, "timestampMs",
+                                        (double)(esp_timer_get_time() / 1000ULL));
 
-                cJSON_AddStringToObject(self, "addr", addr_hex(s_identity->address, buf, sizeof(buf)));
+                cJSON_AddStringToObject(self, "addr",
+                                        addr_hex(s_identity->address, buf, sizeof(buf)));
                 cJSON_AddStringToObject(self, "name", "self");
                 cJSON_AddStringToObject(self, "tier", "full");
                 cJSON_AddItemToObject(self, "position", position);
                 cJSON_AddBoolToObject(self, "online", true);
-                cJSON_AddNumberToObject(self, "lastUpdatedMs", (double)(esp_timer_get_time() / 1000ULL));
+                cJSON_AddNumberToObject(self, "lastUpdatedMs",
+                                        (double)(esp_timer_get_time() / 1000ULL));
                 cJSON_AddItemToArray(peer_locations, self);
             }
         }
 
         /* Include received peer locations persisted by mesh location RX path. */
         {
-        nvs_iterator_t it = NULL;
-        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+            nvs_iterator_t it = NULL;
+            uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-        if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
-            while (it != NULL) {
-                nvs_entry_info_t info;
-                nvs_entry_info(it, &info);
+            if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
+                while (it != NULL) {
+                    nvs_entry_info_t info;
+                    nvs_entry_info(it, &info);
 
-                if (strncmp(info.key, "lp_", 3) == 0) {
-                    persisted_peer_location_t stored = {0};
-                    size_t len = sizeof(stored);
-                    if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK && len == sizeof(stored)) {
-                        cJSON *peer = cJSON_CreateObject();
-                        uint32_t freshness_ms = (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0;
+                    if (strncmp(info.key, "lp_", 3) == 0) {
+                        persisted_peer_location_t stored = {0};
+                        size_t len = sizeof(stored);
+                        if (nvs_get_blob(nvs, info.key, &stored, &len) == ESP_OK &&
+                            len == sizeof(stored)) {
+                            cJSON* peer = cJSON_CreateObject();
+                            uint32_t freshness_ms =
+                                (now_ms >= stored.received_ms) ? (now_ms - stored.received_ms) : 0;
 
-                        cJSON *position = cJSON_CreateObject();
-                        cJSON_AddNumberToObject(position, "lat", stored.latitude_e7 / 1e7);
-                        cJSON_AddNumberToObject(position, "lon", stored.longitude_e7 / 1e7);
-                        cJSON_AddNumberToObject(position, "alt", stored.altitude_m);
-                        cJSON_AddNumberToObject(position, "accuracy", stored.accuracy_m);
-                        cJSON_AddNumberToObject(position, "speed", stored.speed_kmh);
-                        cJSON_AddNumberToObject(position, "heading", stored.heading_deg2 * 2);
-                        cJSON_AddNumberToObject(position, "timestampMs", (double)stored.timestamp * 1000.0);
+                            cJSON* position = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(position, "lat", stored.latitude_e7 / 1e7);
+                            cJSON_AddNumberToObject(position, "lon", stored.longitude_e7 / 1e7);
+                            cJSON_AddNumberToObject(position, "alt", stored.altitude_m);
+                            cJSON_AddNumberToObject(position, "accuracy", stored.accuracy_m);
+                            cJSON_AddNumberToObject(position, "speed", stored.speed_kmh);
+                            cJSON_AddNumberToObject(position, "heading", stored.heading_deg2 * 2);
+                            cJSON_AddNumberToObject(position, "timestampMs",
+                                                    (double)stored.timestamp * 1000.0);
 
-                        cJSON_AddStringToObject(peer, "addr", info.key + 3);
-                        cJSON_AddStringToObject(peer, "name", "");
-                        cJSON_AddStringToObject(peer, "tier", location_tier_to_string(stored.tier));
-                        cJSON_AddItemToObject(peer, "position", position);
-                        cJSON_AddBoolToObject(peer, "online", freshness_ms < LOCATION_CACHE_TTL_MS);
-                        cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
+                            cJSON_AddStringToObject(peer, "addr", info.key + 3);
+                            cJSON_AddStringToObject(peer, "name", "");
+                            cJSON_AddStringToObject(peer, "tier",
+                                                    location_tier_to_string(stored.tier));
+                            cJSON_AddItemToObject(peer, "position", position);
+                            cJSON_AddBoolToObject(peer, "online",
+                                                  freshness_ms < LOCATION_CACHE_TTL_MS);
+                            cJSON_AddNumberToObject(peer, "lastUpdatedMs", stored.received_ms);
 
-                        cJSON_AddItemToArray(peer_locations, peer);
+                            cJSON_AddItemToArray(peer_locations, peer);
+                        }
+                    }
+
+                    if (nvs_entry_next(&it) != ESP_OK) {
+                        break;
                     }
                 }
-
-                if (nvs_entry_next(&it) != ESP_OK) {
-                    break;
-                }
+                nvs_release_iterator(it);
             }
-            nvs_release_iterator(it);
-        }
         } /* end peer locations block */
         nvs_close(nvs);
     }
@@ -1449,8 +1518,9 @@ static int handle_get_peer_locations(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static bool rpc_get_persisted_channel_name(int index, char *name_out, size_t name_out_len) {
-    if (!name_out || name_out_len == 0 || index < 0) return false;
+static bool rpc_get_persisted_channel_name(int index, char* name_out, size_t name_out_len) {
+    if (!name_out || name_out_len == 0 || index < 0)
+        return false;
 
     nvs_handle_t ch_nvs;
     if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &ch_nvs) != ESP_OK) {
@@ -1472,8 +1542,9 @@ static bool rpc_get_persisted_channel_name(int index, char *name_out, size_t nam
     return (err == ESP_OK && name_out[0] != '\0');
 }
 
-static bool rpc_get_persisted_channel_has_psk(int index, bool *has_psk_out) {
-    if (!has_psk_out || index < 0) return false;
+static bool rpc_get_persisted_channel_has_psk(int index, bool* has_psk_out) {
+    if (!has_psk_out || index < 0)
+        return false;
 
     nvs_handle_t ch_nvs;
     if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &ch_nvs) != ESP_OK) {
@@ -1485,14 +1556,15 @@ static bool rpc_get_persisted_channel_has_psk(int index, bool *has_psk_out) {
     snprintf(key, sizeof(key), "psk%d", index);
     esp_err_t err = nvs_get_u8(ch_nvs, key, &has_psk);
     nvs_close(ch_nvs);
-    if (err != ESP_OK) return false;
+    if (err != ESP_OK)
+        return false;
 
     *has_psk_out = (has_psk != 0);
     return true;
 }
 
 /* bramble.getConfig — returns node name + radio config + channel list */
-static int handle_get_config(const cJSON *params, cJSON *result) {
+static int handle_get_config(const cJSON* params, cJSON* result) {
     (void)params;
 
     /* Node name from NVS (falls back to "(unnamed)" if not set) */
@@ -1508,12 +1580,13 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     /* Node address */
     char buf[12];
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
-    cJSON_AddStringToObject(result, "pubkey_hash", addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
+    cJSON_AddStringToObject(result, "pubkey_hash",
+                            addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
 
     /* Radio config — read actual runtime state */
     radio_config_t rcfg;
     radio_get_config(&rcfg);
-    cJSON *radio = cJSON_CreateObject();
+    cJSON* radio = cJSON_CreateObject();
     cJSON_AddNumberToObject(radio, "frequency_mhz", rcfg.frequency_mhz);
     cJSON_AddNumberToObject(radio, "sf", rcfg.sf);
     cJSON_AddNumberToObject(radio, "bw_hz", rcfg.bw_hz);
@@ -1525,11 +1598,11 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     /* Channel list — read from mesh runtime state */
     int default_channel = 0;
     int ch_count = mesh_get_channel_info(&default_channel);
-    cJSON *channels = cJSON_CreateArray();
+    cJSON* channels = cJSON_CreateArray();
 
     for (int i = 0; i < ch_count; i++) {
-        cJSON *ch = cJSON_CreateObject();
-        const char *ch_name = mesh_get_channel_name(i);
+        cJSON* ch = cJSON_CreateObject();
+        const char* ch_name = mesh_get_channel_name(i);
         bool has_psk = false;
         uint16_t epoch = 0;
         mesh_get_channel_security(i, &has_psk, &epoch);
@@ -1565,13 +1638,14 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     cJSON_AddItemToObject(result, "channels", channels);
 
     /* Location sharing policy contract (hybrid privacy-first). */
-    cJSON *location = cJSON_CreateObject();
+    cJSON* location = cJSON_CreateObject();
     if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) == ESP_OK) {
         location_policy_t policy;
         if (location_policy_load_or_init(nvs, &policy) == ESP_OK) {
             cJSON_AddBoolToObject(location, "enabled", policy.enabled);
             cJSON_AddStringToObject(location, "tier", location_tier_to_string(policy.default_tier));
-            cJSON_AddStringToObject(location, "default_tier", location_tier_to_string(policy.default_tier));
+            cJSON_AddStringToObject(location, "default_tier",
+                                    location_tier_to_string(policy.default_tier));
             cJSON_AddNumberToObject(location, "interval_s", policy.interval_s);
         } else {
             cJSON_AddBoolToObject(location, "enabled", false);
@@ -1589,11 +1663,13 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
         }
 
         int32_t lat_e6 = 0, lon_e6 = 0;
-        if (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) cJSON_AddNumberToObject(location, "lat", lat_e6 / 1e6);
-        if (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) cJSON_AddNumberToObject(location, "lon", lon_e6 / 1e6);
+        if (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK)
+            cJSON_AddNumberToObject(location, "lat", lat_e6 / 1e6);
+        if (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK)
+            cJSON_AddNumberToObject(location, "lon", lon_e6 / 1e6);
 
-        cJSON *contact_rules = cJSON_AddArrayToObject(location, "contact_rules");
-        cJSON *channel_targets = cJSON_AddArrayToObject(location, "channel_targets");
+        cJSON* contact_rules = cJSON_AddArrayToObject(location, "contact_rules");
+        cJSON* channel_targets = cJSON_AddArrayToObject(location, "channel_targets");
 
         nvs_iterator_t it = NULL;
         if (nvs_entry_find(NVS_PARTITION, NVS_NS_LOCATION, NVS_TYPE_ANY, &it) == ESP_OK) {
@@ -1601,15 +1677,18 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
                 nvs_entry_info_t info;
                 nvs_entry_info(it, &info);
 
-                if (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX, strlen(LOCATION_CONTACT_RULE_PREFIX)) == 0) {
-                    const char *addr_suffix = info.key + strlen(LOCATION_CONTACT_RULE_PREFIX);
+                if (strncmp(info.key, LOCATION_CONTACT_RULE_PREFIX,
+                            strlen(LOCATION_CONTACT_RULE_PREFIX)) == 0) {
+                    const char* addr_suffix = info.key + strlen(LOCATION_CONTACT_RULE_PREFIX);
 
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
                     if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
-                        rpc_location_rule_t rule = { .enabled = true, .tier = LOCATION_TIER_COARSE, .interval_s = LOCATION_DEFAULT_INTERVAL_S };
+                        rpc_location_rule_t rule = {.enabled = true,
+                                                    .tier = LOCATION_TIER_COARSE,
+                                                    .interval_s = LOCATION_DEFAULT_INTERVAL_S};
                         rpc_location_parse_rule_string(raw, &rule);
-                        cJSON *entry = cJSON_CreateObject();
+                        cJSON* entry = cJSON_CreateObject();
                         cJSON_AddStringToObject(entry, "address", addr_suffix);
                         cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
                         cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
@@ -1618,14 +1697,19 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
                     }
                 }
 
-                if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX, strlen(LOCATION_CHANNEL_RULE_PREFIX)) == 0) {
+                if (strncmp(info.key, LOCATION_CHANNEL_RULE_PREFIX,
+                            strlen(LOCATION_CHANNEL_RULE_PREFIX)) == 0) {
                     char raw[64] = {0};
                     size_t raw_len = sizeof(raw);
                     if (nvs_get_str(nvs, info.key, raw, &raw_len) == ESP_OK) {
-                        rpc_location_rule_t rule = { .enabled = true, .tier = LOCATION_TIER_COARSE, .interval_s = LOCATION_DEFAULT_INTERVAL_S };
+                        rpc_location_rule_t rule = {.enabled = true,
+                                                    .tier = LOCATION_TIER_COARSE,
+                                                    .interval_s = LOCATION_DEFAULT_INTERVAL_S};
                         rpc_location_parse_rule_string(raw, &rule);
-                        cJSON *entry = cJSON_CreateObject();
-                        cJSON_AddNumberToObject(entry, "channel", atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
+                        cJSON* entry = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(
+                            entry, "channel",
+                            atoi(info.key + strlen(LOCATION_CHANNEL_RULE_PREFIX)));
                         cJSON_AddBoolToObject(entry, "enabled", rule.enabled);
                         cJSON_AddStringToObject(entry, "tier", location_tier_to_string(rule.tier));
                         cJSON_AddNumberToObject(entry, "interval_s", rule.interval_s);
@@ -1652,12 +1736,18 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     }
     cJSON_AddItemToObject(result, "location", location);
 
-    const char *mode = "recipient_only";
+    const char* mode = "recipient_only";
     switch (mesh_get_broadcast_telemetry_mode()) {
-        case BROADCAST_TELEMETRY_OFF: mode = "off"; break;
-        case BROADCAST_TELEMETRY_PATH_SAMPLED: mode = "path_sampled"; break;
-        case BROADCAST_TELEMETRY_RECIPIENT_ONLY:
-        default: mode = "recipient_only"; break;
+    case BROADCAST_TELEMETRY_OFF:
+        mode = "off";
+        break;
+    case BROADCAST_TELEMETRY_PATH_SAMPLED:
+        mode = "path_sampled";
+        break;
+    case BROADCAST_TELEMETRY_RECIPIENT_ONLY:
+    default:
+        mode = "recipient_only";
+        break;
     }
     cJSON_AddStringToObject(result, "broadcast_telemetry_mode", mode);
 
@@ -1667,10 +1757,12 @@ static int handle_get_config(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int handle_set_broadcast_telemetry_mode(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    const char *mode = cJSON_GetStringValue(cJSON_GetObjectItem(params, "mode"));
-    if (!mode) return RPC_ERR_INVALID_PARAMS;
+static int handle_set_broadcast_telemetry_mode(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* mode = cJSON_GetStringValue(cJSON_GetObjectItem(params, "mode"));
+    if (!mode)
+        return RPC_ERR_INVALID_PARAMS;
 
     broadcast_telemetry_mode_t m;
     if (strcmp(mode, "off") == 0) {
@@ -1848,11 +1940,12 @@ static int handle_ota_set_origin(const cJSON* params, cJSON* result) {
 }
 
 /* bramble.sleep — enter deep sleep with optional wake timer */
-static int handle_sleep(const cJSON *params, cJSON *result) {
+static int handle_sleep(const cJSON* params, cJSON* result) {
     int wake_sec = 0;
     if (params) {
-        cJSON *ws = cJSON_GetObjectItem(params, "wake_after_s");
-        if (ws && cJSON_IsNumber(ws)) wake_sec = ws->valueint;
+        cJSON* ws = cJSON_GetObjectItem(params, "wake_after_s");
+        if (ws && cJSON_IsNumber(ws))
+            wake_sec = ws->valueint;
     }
 
     cJSON_AddBoolToObject(result, "ok", true);
@@ -1879,7 +1972,7 @@ static int handle_sleep(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getBattery — returns battery voltage and percentage */
-static int handle_get_battery(const cJSON *params, cJSON *result) {
+static int handle_get_battery(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddNumberToObject(result, "voltage_mv", battery_read_mv());
     cJSON_AddNumberToObject(result, "percentage", battery_read_pct());
@@ -1887,18 +1980,18 @@ static int handle_get_battery(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.setBacklight — control display backlight */
-static int handle_set_backlight(const cJSON *params, cJSON *result) {
-    const bramble_board_config_t *board = board_get_config();
+static int handle_set_backlight(const cJSON* params, cJSON* result) {
+    const bramble_board_config_t* board = board_get_config();
     if (board->spi_display.backlight < 0) {
         cJSON_AddStringToObject(result, "error", "no backlight control");
         return -1;
     }
-    
-    cJSON *level = cJSON_GetObjectItem(params, "level");
+
+    cJSON* level = cJSON_GetObjectItem(params, "level");
     if (!level || !cJSON_IsNumber(level)) {
         return RPC_ERR_INVALID_PARAMS;
     }
-    
+
     int val = level->valueint;
     uint8_t duty = (val <= 0) ? 0 : (val >= 255 ? 255 : (uint8_t)val);
     display_set_backlight(duty);
@@ -1907,7 +2000,7 @@ static int handle_set_backlight(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getGpsPosition — returns GPS position if available */
-static int handle_get_gps_position(const cJSON *params, cJSON *result) {
+static int handle_get_gps_position(const cJSON* params, cJSON* result) {
     (void)params;
     if (!board_has_cap(BOARD_CAP_GPS)) {
         cJSON_AddStringToObject(result, "error", "gps not supported on this board");
@@ -1934,7 +2027,7 @@ static int handle_get_gps_position(const cJSON *params, cJSON *result) {
 #include "sdcard.h"
 
 /* bramble.getStorageInfo — returns SD card status */
-static int handle_get_storage_info(const cJSON *params, cJSON *result) {
+static int handle_get_storage_info(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddBoolToObject(result, "sd_present", sdcard_is_present());
     if (sdcard_is_present()) {
@@ -1945,16 +2038,16 @@ static int handle_get_storage_info(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.playTone — play a predefined alert tone */
-static int handle_play_tone(const cJSON *params, cJSON *result) {
+static int handle_play_tone(const cJSON* params, cJSON* result) {
     (void)result;
-    cJSON *tone = cJSON_GetObjectItem(params, "tone");
+    cJSON* tone = cJSON_GetObjectItem(params, "tone");
     if (!tone || !cJSON_IsString(tone)) {
         return RPC_ERR_INVALID_PARAMS;
     }
 
-    const char *name = tone->valuestring;
+    const char* name = tone->valuestring;
     audio_tone_t t;
-    
+
     if (strcmp(name, "message_rx") == 0) {
         t = AUDIO_TONE_MESSAGE_RX;
     } else if (strcmp(name, "message_tx") == 0) {
@@ -1983,9 +2076,9 @@ static int handle_play_tone(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.setVolume — set audio volume 0-100 */
-static int handle_set_volume(const cJSON *params, cJSON *result) {
+static int handle_set_volume(const cJSON* params, cJSON* result) {
     (void)result;
-    cJSON *vol = cJSON_GetObjectItem(params, "volume");
+    cJSON* vol = cJSON_GetObjectItem(params, "volume");
     if (!vol || !cJSON_IsNumber(vol)) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -1998,9 +2091,9 @@ static int handle_set_volume(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.setMuted — mute or unmute audio */
-static int handle_set_muted(const cJSON *params, cJSON *result) {
+static int handle_set_muted(const cJSON* params, cJSON* result) {
     (void)result;
-    cJSON *muted = cJSON_GetObjectItem(params, "muted");
+    cJSON* muted = cJSON_GetObjectItem(params, "muted");
     if (!muted || !cJSON_IsBool(muted)) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -2009,45 +2102,50 @@ static int handle_set_muted(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getAudioStatus — get volume, mute, and playback state */
-static int handle_get_audio_status(const cJSON *params, cJSON *result) {
+static int handle_get_audio_status(const cJSON* params, cJSON* result) {
     (void)params;
-    cJSON_AddBoolToObject(result,   "available", audio_is_available());
-    cJSON_AddNumberToObject(result, "volume",    audio_get_volume());
-    cJSON_AddBoolToObject(result,   "muted",     audio_get_muted());
-    cJSON_AddBoolToObject(result,   "playing",   audio_is_playing());
+    cJSON_AddBoolToObject(result, "available", audio_is_available());
+    cJSON_AddNumberToObject(result, "volume", audio_get_volume());
+    cJSON_AddBoolToObject(result, "muted", audio_get_muted());
+    cJSON_AddBoolToObject(result, "playing", audio_is_playing());
     return 0;
 }
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* ── Traffic debug RPC methods ─────────────────────────────────────── */
 
-/* bramble.setTrafficDebug — params: {"enabled":bool, "include_tx":bool, "include_rx":bool, "sample_rate":0-100} */
-static int handle_set_traffic_debug(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    
+/* bramble.setTrafficDebug — params: {"enabled":bool, "include_tx":bool, "include_rx":bool,
+ * "sample_rate":0-100} */
+static int handle_set_traffic_debug(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+
     /* Default values */
     bool enabled = false;
     bool include_tx = true;
     bool include_rx = true;
     uint8_t sample_rate = 100;
-    
-    cJSON *en = cJSON_GetObjectItem(params, "enabled");
-    if (en && cJSON_IsBool(en)) enabled = cJSON_IsTrue(en);
-    
-    cJSON *tx = cJSON_GetObjectItem(params, "include_tx");
-    if (tx && cJSON_IsBool(tx)) include_tx = cJSON_IsTrue(tx);
-    
-    cJSON *rx = cJSON_GetObjectItem(params, "include_rx");
-    if (rx && cJSON_IsBool(rx)) include_rx = cJSON_IsTrue(rx);
-    
-    cJSON *sr = cJSON_GetObjectItem(params, "sample_rate");
+
+    cJSON* en = cJSON_GetObjectItem(params, "enabled");
+    if (en && cJSON_IsBool(en))
+        enabled = cJSON_IsTrue(en);
+
+    cJSON* tx = cJSON_GetObjectItem(params, "include_tx");
+    if (tx && cJSON_IsBool(tx))
+        include_tx = cJSON_IsTrue(tx);
+
+    cJSON* rx = cJSON_GetObjectItem(params, "include_rx");
+    if (rx && cJSON_IsBool(rx))
+        include_rx = cJSON_IsTrue(rx);
+
+    cJSON* sr = cJSON_GetObjectItem(params, "sample_rate");
     if (sr && cJSON_IsNumber(sr)) {
         int val = sr->valueint;
         sample_rate = (val < 0) ? 0 : (val > 100 ? 100 : (uint8_t)val);
     }
-    
+
     mesh_traffic_debug_set_config(enabled, include_tx, include_rx, sample_rate);
-    
+
     cJSON_AddBoolToObject(result, "ok", true);
     cJSON_AddBoolToObject(result, "enabled", enabled);
     cJSON_AddBoolToObject(result, "include_tx", include_tx);
@@ -2057,15 +2155,15 @@ static int handle_set_traffic_debug(const cJSON *params, cJSON *result) {
 }
 
 /* bramble.getTrafficDebug — returns current config + buffer state */
-static int handle_get_traffic_debug(const cJSON *params, cJSON *result) {
+static int handle_get_traffic_debug(const cJSON* params, cJSON* result) {
     (void)params;
-    
+
     bool enabled, include_tx, include_rx;
     uint8_t sample_rate;
     mesh_traffic_debug_get_config(&enabled, &include_tx, &include_rx, &sample_rate);
-    
-    traffic_debug_t *td = mesh_get_traffic_debug();
-    
+
+    traffic_debug_t* td = mesh_get_traffic_debug();
+
     cJSON_AddBoolToObject(result, "enabled", enabled);
     cJSON_AddBoolToObject(result, "include_tx", include_tx);
     cJSON_AddBoolToObject(result, "include_rx", include_rx);
@@ -2073,100 +2171,103 @@ static int handle_get_traffic_debug(const cJSON *params, cJSON *result) {
     cJSON_AddNumberToObject(result, "buffer_capacity", 512);
     cJSON_AddNumberToObject(result, "buffer_count", traffic_debug_get_count(td));
     cJSON_AddNumberToObject(result, "dropped_count", traffic_debug_get_dropped(td));
-    
+
     return 0;
 }
 
 /* bramble.getTrafficEvents — params: {"since_seq":uint32, "limit":uint16} */
-static int handle_get_traffic_events(const cJSON *params, cJSON *result) {
-    traffic_debug_t *td = mesh_get_traffic_debug();
-    
+static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
+    traffic_debug_t* td = mesh_get_traffic_debug();
+
     uint32_t since_seq = 0;
-    uint16_t limit = 100;  /* default limit */
-    
+    uint16_t limit = 100; /* default limit */
+
     if (params) {
-        cJSON *seq = cJSON_GetObjectItem(params, "since_seq");
-        if (seq && cJSON_IsNumber(seq)) since_seq = (uint32_t)seq->valuedouble;
-        
-        cJSON *lim = cJSON_GetObjectItem(params, "limit");
+        cJSON* seq = cJSON_GetObjectItem(params, "since_seq");
+        if (seq && cJSON_IsNumber(seq))
+            since_seq = (uint32_t)seq->valuedouble;
+
+        cJSON* lim = cJSON_GetObjectItem(params, "limit");
         if (lim && cJSON_IsNumber(lim)) {
             int val = lim->valueint;
             limit = (val <= 0) ? 100 : (val > 512 ? 512 : (uint16_t)val);
         }
     }
-    
-    cJSON *events = cJSON_AddArrayToObject(result, "events");
-    
+
+    cJSON* events = cJSON_AddArrayToObject(result, "events");
+
     uint16_t count = traffic_debug_get_count(td);
     uint16_t returned = 0;
-    
+
     for (uint16_t i = 0; i < count && returned < limit; i++) {
-        const traffic_event_t *evt = traffic_debug_get_event(td, i);
-        if (!evt) break;
-        
+        const traffic_event_t* evt = traffic_debug_get_event(td, i);
+        if (!evt)
+            break;
+
         /* Filter by seq if requested */
-        if (since_seq > 0 && evt->seq <= since_seq) continue;
-        
-        cJSON *obj = cJSON_CreateObject();
+        if (since_seq > 0 && evt->seq <= since_seq)
+            continue;
+
+        cJSON* obj = cJSON_CreateObject();
         cJSON_AddNumberToObject(obj, "seq", evt->seq);
         cJSON_AddNumberToObject(obj, "timestamp_ms", evt->timestamp_ms);
         cJSON_AddNumberToObject(obj, "pkt_type", evt->pkt_type);
-        
+
         /* Category as string */
-        static const char *cat_names[] = {
-            "beacon", "timesync", "routing", "ack", "chat", "maintenance", "other"
-        };
+        static const char* cat_names[] = {"beacon", "timesync",    "routing", "ack",
+                                          "chat",   "maintenance", "other"};
         if (evt->category < 7) {
             cJSON_AddStringToObject(obj, "category", cat_names[evt->category]);
         } else {
             cJSON_AddStringToObject(obj, "category", "unknown");
         }
-        
+
         /* Airtime tier as string */
-        static const char *tier_names[] = { "none", "normal", "critical", "broadcast" };
+        static const char* tier_names[] = {"none", "normal", "critical", "broadcast"};
         if (evt->airtime_tier <= 3) {
             cJSON_AddStringToObject(obj, "airtime_tier", tier_names[evt->airtime_tier]);
         } else {
             cJSON_AddStringToObject(obj, "airtime_tier", "unknown");
         }
-        
+
         cJSON_AddNumberToObject(obj, "packet_len", evt->packet_len);
         cJSON_AddNumberToObject(obj, "rssi", evt->rssi);
         cJSON_AddBoolToObject(obj, "is_tx", evt->is_tx);
-        
+
         cJSON_AddItemToArray(events, obj);
         returned++;
     }
-    
+
     cJSON_AddNumberToObject(result, "returned", returned);
     cJSON_AddNumberToObject(result, "total_available", count);
-    
+
     return 0;
 }
 
 /* bramble.setBeaconPolicy — params: {"enabled":bool, "mode":str, "baseIntervalMs":num, ...} */
-static int handle_set_beacon_policy(const cJSON *params, cJSON *result) {
-    if (!params) return RPC_ERR_INVALID_PARAMS;
-    
+static int handle_set_beacon_policy(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+
     beacon_policy_config_t config;
-    mesh_get_beacon_policy(&config);  /* Start with current config */
-    
+    mesh_get_beacon_policy(&config); /* Start with current config */
+
     /* Parse parameters */
-    cJSON *enabled = cJSON_GetObjectItem(params, "enabled");
-    cJSON *mode_str = cJSON_GetObjectItem(params, "mode");
-    cJSON *base_ms = cJSON_GetObjectItem(params, "baseIntervalMs");
-    cJSON *min_ms = cJSON_GetObjectItem(params, "minIntervalMs");
-    cJSON *max_ms = cJSON_GetObjectItem(params, "maxIntervalMs");
-    cJSON *dense_th = cJSON_GetObjectItem(params, "denseThreshold");
-    cJSON *churn_th = cJSON_GetObjectItem(params, "churnThreshold");
-    cJSON *churn_win = cJSON_GetObjectItem(params, "churnWindowMs");
-    
+    cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
+    cJSON* mode_str = cJSON_GetObjectItem(params, "mode");
+    cJSON* base_ms = cJSON_GetObjectItem(params, "baseIntervalMs");
+    cJSON* min_ms = cJSON_GetObjectItem(params, "minIntervalMs");
+    cJSON* max_ms = cJSON_GetObjectItem(params, "maxIntervalMs");
+    cJSON* dense_th = cJSON_GetObjectItem(params, "denseThreshold");
+    cJSON* churn_th = cJSON_GetObjectItem(params, "churnThreshold");
+    cJSON* churn_win = cJSON_GetObjectItem(params, "churnWindowMs");
+
     if (enabled && cJSON_IsBool(enabled)) {
         config.enabled = cJSON_IsTrue(enabled);
     }
-    
+
     if (mode_str && cJSON_IsString(mode_str)) {
-        const char *mode = cJSON_GetStringValue(mode_str);
+        const char* mode = cJSON_GetStringValue(mode_str);
         if (strcmp(mode, "fixed") == 0) {
             config.mode = BEACON_MODE_FIXED;
         } else if (strcmp(mode, "adaptive") == 0) {
@@ -2176,7 +2277,7 @@ static int handle_set_beacon_policy(const cJSON *params, cJSON *result) {
             return RPC_ERR_INVALID_PARAMS;
         }
     }
-    
+
     if (base_ms && cJSON_IsNumber(base_ms)) {
         config.base_interval_ms = (uint32_t)base_ms->valuedouble;
     }
@@ -2195,118 +2296,117 @@ static int handle_set_beacon_policy(const cJSON *params, cJSON *result) {
     if (churn_win && cJSON_IsNumber(churn_win)) {
         config.churn_window_ms = (uint32_t)churn_win->valuedouble;
     }
-    
+
     /* Apply the configuration */
     int rc = mesh_set_beacon_policy(&config);
     if (rc != 0) {
         cJSON_AddStringToObject(result, "error", "Failed to set beacon policy");
         return RPC_ERR_INTERNAL;
     }
-    
+
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
 /* bramble.getBeaconPolicy — returns config and status */
-static int handle_get_beacon_policy(const cJSON *params, cJSON *result) {
+static int handle_get_beacon_policy(const cJSON* params, cJSON* result) {
     (void)params;
-    
+
     beacon_policy_config_t config;
     beacon_policy_status_t status;
-    
+
     mesh_get_beacon_policy(&config);
     mesh_get_beacon_status(&status);
-    
+
     /* Config */
-    cJSON *cfg = cJSON_AddObjectToObject(result, "config");
+    cJSON* cfg = cJSON_AddObjectToObject(result, "config");
     cJSON_AddBoolToObject(cfg, "enabled", config.enabled);
-    cJSON_AddStringToObject(cfg, "mode", 
-        config.mode == BEACON_MODE_FIXED ? "fixed" : "adaptive");
+    cJSON_AddStringToObject(cfg, "mode", config.mode == BEACON_MODE_FIXED ? "fixed" : "adaptive");
     cJSON_AddNumberToObject(cfg, "baseIntervalMs", config.base_interval_ms);
     cJSON_AddNumberToObject(cfg, "minIntervalMs", config.min_interval_ms);
     cJSON_AddNumberToObject(cfg, "maxIntervalMs", config.max_interval_ms);
     cJSON_AddNumberToObject(cfg, "denseThreshold", config.dense_threshold);
     cJSON_AddNumberToObject(cfg, "churnThreshold", config.churn_threshold);
     cJSON_AddNumberToObject(cfg, "churnWindowMs", config.churn_window_ms);
-    
+
     /* Status */
-    cJSON *st = cJSON_AddObjectToObject(result, "status");
+    cJSON* st = cJSON_AddObjectToObject(result, "status");
     cJSON_AddStringToObject(st, "activeMode",
-        status.active_mode == BEACON_MODE_FIXED ? "fixed" : "adaptive");
+                            status.active_mode == BEACON_MODE_FIXED ? "fixed" : "adaptive");
     cJSON_AddNumberToObject(st, "currentIntervalMs", status.current_interval_ms);
     cJSON_AddNumberToObject(st, "neighborCount", status.neighbor_count);
     cJSON_AddNumberToObject(st, "churnEvents", status.churn_events);
     cJSON_AddNumberToObject(st, "lastTransitionMs", status.last_transition_ms);
     cJSON_AddBoolToObject(st, "inBackoff", status.in_backoff);
-    
+
     return 0;
 }
 
-void rpc_methods_init(bramble_identity_t *identity) {
+void rpc_methods_init(bramble_identity_t* identity) {
     s_identity = identity;
 
     /* Query methods */
-    rpc_register("bramble.getStatus",    handle_get_status);
+    rpc_register("bramble.getStatus", handle_get_status);
     rpc_register("bramble.getDiagnostics", handle_get_diagnostics);
     rpc_register("bramble.getWifiStatus", handle_get_wifi_status);
-    rpc_register("bramble.getIdentity",  handle_get_identity);
-    rpc_register("bramble.getVersion",   handle_get_version);
+    rpc_register("bramble.getIdentity", handle_get_identity);
+    rpc_register("bramble.getVersion", handle_get_version);
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
-    rpc_register("bramble.getRoutes",    handle_get_routes);
-    rpc_register("bramble.getAirtime",   handle_get_airtime);
-    rpc_register("bramble.ping",         handle_ping);
-    rpc_register("bramble.getConfig",    handle_get_config);
-    rpc_register("bramble.getMessages",  handle_get_messages);
+    rpc_register("bramble.getRoutes", handle_get_routes);
+    rpc_register("bramble.getAirtime", handle_get_airtime);
+    rpc_register("bramble.ping", handle_ping);
+    rpc_register("bramble.getConfig", handle_get_config);
+    rpc_register("bramble.getMessages", handle_get_messages);
     rpc_register("bramble.getPeerLocations", handle_get_peer_locations);
 
     /* Action methods */
-    rpc_register("bramble.sendMessage",          handle_send_message);
-    rpc_register("bramble.sendBroadcast",        handle_send_broadcast);
-    rpc_register("bramble.reboot",               handle_reboot);
-    rpc_register("bramble.sendProbe",            handle_send_probe);
-    rpc_register("bramble.setRadio",             handle_set_radio);
-    rpc_register("bramble.setNodeName",          handle_set_node_name);
-    rpc_register("bramble.setAuthToken",         rpc_set_auth_token);
-    rpc_register("bramble.getAuthToken",         rpc_get_auth_token);
-    rpc_register("bramble.setNetworkKey",        rpc_set_network_key);
-    rpc_register("bramble.getNetworkKeyStatus",  handle_get_network_key_status);
-    rpc_register("bramble.setAllowedOrigins",    rpc_set_allowed_origins);
-    rpc_register("bramble.getAllowedOrigins",    rpc_get_allowed_origins);
-    rpc_register("bramble.addChannel",           handle_add_channel);
-    rpc_register("bramble.removeChannel",        handle_remove_channel);
-    rpc_register("bramble.setDefaultChannel",    handle_set_default_channel);
-    rpc_register("bramble.setMailbox",           handle_set_mailbox);
+    rpc_register("bramble.sendMessage", handle_send_message);
+    rpc_register("bramble.sendBroadcast", handle_send_broadcast);
+    rpc_register("bramble.reboot", handle_reboot);
+    rpc_register("bramble.sendProbe", handle_send_probe);
+    rpc_register("bramble.setRadio", handle_set_radio);
+    rpc_register("bramble.setNodeName", handle_set_node_name);
+    rpc_register("bramble.setAuthToken", rpc_set_auth_token);
+    rpc_register("bramble.getAuthToken", rpc_get_auth_token);
+    rpc_register("bramble.setNetworkKey", rpc_set_network_key);
+    rpc_register("bramble.getNetworkKeyStatus", handle_get_network_key_status);
+    rpc_register("bramble.setAllowedOrigins", rpc_set_allowed_origins);
+    rpc_register("bramble.getAllowedOrigins", rpc_get_allowed_origins);
+    rpc_register("bramble.addChannel", handle_add_channel);
+    rpc_register("bramble.removeChannel", handle_remove_channel);
+    rpc_register("bramble.setDefaultChannel", handle_set_default_channel);
+    rpc_register("bramble.setMailbox", handle_set_mailbox);
     rpc_register("bramble.setBroadcastTelemetryMode", handle_set_broadcast_telemetry_mode);
-    rpc_register("bramble.setLocationConfig",    handle_set_location_config);
-    rpc_register("bramble.setLocationContact",   handle_set_location_contact);
-    rpc_register("bramble.removeLocationContact",handle_remove_location_contact);
-    rpc_register("bramble.shareLocationOnce",    handle_share_location_once);
-    rpc_register("bramble.otaUpdate",            handle_ota_update);
-    rpc_register("bramble.otaGetOrigin",         handle_ota_get_origin);
-    rpc_register("bramble.otaSetOrigin",         handle_ota_set_origin);
-    rpc_register("bramble.getBattery",           handle_get_battery);
-    rpc_register("bramble.setBacklight",         handle_set_backlight);
-    rpc_register("bramble.sleep",               handle_sleep);
+    rpc_register("bramble.setLocationConfig", handle_set_location_config);
+    rpc_register("bramble.setLocationContact", handle_set_location_contact);
+    rpc_register("bramble.removeLocationContact", handle_remove_location_contact);
+    rpc_register("bramble.shareLocationOnce", handle_share_location_once);
+    rpc_register("bramble.otaUpdate", handle_ota_update);
+    rpc_register("bramble.otaGetOrigin", handle_ota_get_origin);
+    rpc_register("bramble.otaSetOrigin", handle_ota_set_origin);
+    rpc_register("bramble.getBattery", handle_get_battery);
+    rpc_register("bramble.setBacklight", handle_set_backlight);
+    rpc_register("bramble.sleep", handle_sleep);
 
-    rpc_register("bramble.getGpsPosition",       handle_get_gps_position);
+    rpc_register("bramble.getGpsPosition", handle_get_gps_position);
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-    rpc_register("bramble.getStorageInfo",       handle_get_storage_info);
-    rpc_register("bramble.playTone",             handle_play_tone);
-    rpc_register("bramble.setVolume",            handle_set_volume);
-    rpc_register("bramble.setMuted",             handle_set_muted);
-    rpc_register("bramble.getAudioStatus",       handle_get_audio_status);
+    rpc_register("bramble.getStorageInfo", handle_get_storage_info);
+    rpc_register("bramble.playTone", handle_play_tone);
+    rpc_register("bramble.setVolume", handle_set_volume);
+    rpc_register("bramble.setMuted", handle_set_muted);
+    rpc_register("bramble.getAudioStatus", handle_get_audio_status);
 #endif
 
     /* Traffic debug methods */
-    rpc_register("bramble.setTrafficDebug",      handle_set_traffic_debug);
-    rpc_register("bramble.getTrafficDebug",      handle_get_traffic_debug);
-    rpc_register("bramble.getTrafficEvents",     handle_get_traffic_events);
+    rpc_register("bramble.setTrafficDebug", handle_set_traffic_debug);
+    rpc_register("bramble.getTrafficDebug", handle_get_traffic_debug);
+    rpc_register("bramble.getTrafficEvents", handle_get_traffic_events);
 
     /* Beacon policy methods */
-    rpc_register("bramble.setBeaconPolicy",      handle_set_beacon_policy);
-    rpc_register("bramble.getBeaconPolicy",      handle_get_beacon_policy);
+    rpc_register("bramble.setBeaconPolicy", handle_set_beacon_policy);
+    rpc_register("bramble.getBeaconPolicy", handle_get_beacon_policy);
 
     ESP_LOGI(TAG, "RPC methods registered");
 }

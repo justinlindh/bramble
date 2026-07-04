@@ -44,10 +44,8 @@ void test_public_channel_encrypt_decrypt(void) {
 
     /* app_type 0x09: deliberately not APP_TYPE_CHAT, this test is unrelated
      * to the chat-only sent_at framing (Task 0.6). */
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&channels[0], src, 0x09, 0,
-                                              data, sizeof(data),
-                                              aad, sizeof(aad),
-                                              nonce, ct, tag));
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&channels[0], src, 0x09, 0, data, sizeof(data), aad,
+                                             sizeof(aad), nonce, ct, tag));
 
     channel_msg_info_t info;
     /* Need a fresh channel set for decrypt (same key) */
@@ -55,10 +53,9 @@ void test_public_channel_encrypt_decrypt(void) {
     int dec_num = 0;
     public_channel_init(dec_channels, &dec_num);
 
-    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(dec_channels, dec_num,
-                                              nonce, ct,
-                                              CHANNEL_MSG_OVERHEAD + sizeof(data),
-                                              tag, aad, sizeof(aad), pt, &info, 0));
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(dec_channels, dec_num, nonce, ct,
+                                             CHANNEL_MSG_OVERHEAD + sizeof(data), tag, aad,
+                                             sizeof(aad), pt, &info, 0));
     TEST_ASSERT_EQUAL(src, info.src_addr);
     TEST_ASSERT_EQUAL(0x09, info.app_type);
     TEST_ASSERT_EQUAL(sizeof(data), info.data_len);
@@ -75,8 +72,7 @@ void test_replay_trustworthy_false_for_public_channel(void) {
     TEST_ASSERT_EQUAL(0, channel_source_is_replay_trustworthy(1, BRAMBLE_PUBLIC_CHANNEL_INDEX));
 }
 void test_replay_trustworthy_true_for_secret_channel(void) {
-    TEST_ASSERT_EQUAL(1,
-                       channel_source_is_replay_trustworthy(1, BRAMBLE_PUBLIC_CHANNEL_INDEX + 1));
+    TEST_ASSERT_EQUAL(1, channel_source_is_replay_trustworthy(1, BRAMBLE_PUBLIC_CHANNEL_INDEX + 1));
 }
 /* DM/session decrypts leave channel_index at its zero default (the same
  * value as BRAMBLE_PUBLIC_CHANNEL_INDEX), so is_channel_message=0 must

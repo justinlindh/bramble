@@ -69,30 +69,30 @@
 #include "ui_graphics.h"
 #endif
 
-static const char *TAG = "mesh";
+static const char* TAG = "mesh";
 
 /* Forward declarations */
-static void traffic_event_notify(const traffic_event_t *evt, void *ctx);
-static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx);
-static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t *data,
+static void traffic_event_notify(const traffic_event_t* evt, void* ctx);
+static void rerr_fastfail_notify(uint32_t packet_id, const char* reason, void* ctx);
+static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data,
                                size_t data_len);
 /* ws 1.3b: defined near handle_beacon (below send_beacon in file order),
  * but send_beacon is the first control-plane originator in the file and
  * needs both before its own definition. */
-static int control_seq_next(uint64_t *out);
+static int control_seq_next(uint64_t* out);
 static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
-#define BEACON_INTERVAL_MS      60000   /* 60 seconds between beacons (A/B test) */
-#define BEACON_JITTER_MS        5000    /* ±5s random jitter */
-#define NEIGHBOR_PURGE_INTERVAL 60000   /* purge expired neighbors every 60s */
-#define RX_QUEUE_DEPTH          16
-#define MESH_EVENT_QUEUE_DEPTH  8
-#define MESH_TASK_STACK         8192
-#define MESH_TASK_PRIORITY      5
+#define BEACON_INTERVAL_MS 60000      /* 60 seconds between beacons (A/B test) */
+#define BEACON_JITTER_MS 5000         /* ±5s random jitter */
+#define NEIGHBOR_PURGE_INTERVAL 60000 /* purge expired neighbors every 60s */
+#define RX_QUEUE_DEPTH 16
+#define MESH_EVENT_QUEUE_DEPTH 8
+#define MESH_TASK_STACK 8192
+#define MESH_TASK_PRIORITY 5
 
-#define RECEIPT_QUEUE_CAPACITY  8
+#define RECEIPT_QUEUE_CAPACITY 8
 #define RECENT_BROADCAST_RING_SIZE 8
 
 /* ── Received packet queue item ─────────────────────────────────────── */
@@ -101,18 +101,20 @@ typedef struct {
     uint8_t data[BRAMBLE_MAX_PACKET_SIZE];
     uint8_t len;
     int16_t rssi;
-    int8_t  snr;
+    int8_t snr;
 } rx_packet_t;
 
 /* ── State ──────────────────────────────────────────────────────────── */
 
-static bramble_identity_t *s_identity;
-static uint8_t             s_beacon_key[BRAMBLE_KEY_SIZE];  /* shared key for beacon HMAC */
-static neighbor_table_t    s_neighbors;
-static dedup_buffer_t      s_dedup;
-static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
-static replay_table_t      s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon) replay window, keyed on the authenticated signer address, separate from the data-plane s_replay above */
-static replay_deferred_t   s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
+static bramble_identity_t* s_identity;
+static uint8_t s_beacon_key[BRAMBLE_KEY_SIZE]; /* shared key for beacon HMAC */
+static neighbor_table_t s_neighbors;
+static dedup_buffer_t s_dedup;
+static replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
+static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
+                                           replay window, keyed on the authenticated signer address,
+                                           separate from the data-plane s_replay above */
+static replay_deferred_t s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate. Forwarded RREQs are gated separately, by the global
  * s_rreq_fwd_rl budget below (ws 1.3d, SEC-M4); see SECURITY-MODEL.md for the
  * node-global-not-per-neighbor residual. */
@@ -122,14 +124,14 @@ static rreq_rate_limiter_t s_rreq_rl;
  * rreq.prev_hop field; not keyed per-neighbor on purpose (see
  * SECURITY-MODEL.md). */
 static rreq_fwd_limiter_t s_rreq_fwd_rl;
-static SemaphoreHandle_t   s_state_mutex;
-static SemaphoreHandle_t   s_delivery_event_mutex;
+static SemaphoreHandle_t s_state_mutex;
+static SemaphoreHandle_t s_delivery_event_mutex;
 /* Guards nonce_counter_next only: send_data_packet is reachable from the
  * mesh task, the RPC/httpd task, the LVGL UI task, and the CLI task, all
  * without a lock of their own, and the nonce counter itself has no internal
  * locking (kept host-testable, no FreeRTOS dependency). A mutex, not a
  * critical section, because a boundary flush may block on NVS I/O. */
-static SemaphoreHandle_t   s_nonce_mutex;
+static SemaphoreHandle_t s_nonce_mutex;
 /*
  * DM session table (SEC-C2, Task 1.4). Guards every dm_lookup/dm_alloc,
  * every session state transition, and every read of session_key for
@@ -146,10 +148,10 @@ static SemaphoreHandle_t   s_nonce_mutex;
  * before releasing s_dm_mutex. Nothing ever takes s_nonce_mutex first and
  * then reaches for s_dm_mutex, so the two can never deadlock on each other.
  */
-static SemaphoreHandle_t   s_dm_mutex;
-static dm_table_t          s_dm_table;
-static QueueHandle_t       s_rx_queue;
-static QueueHandle_t       s_mesh_event_queue;
+static SemaphoreHandle_t s_dm_mutex;
+static dm_table_t s_dm_table;
+static QueueHandle_t s_rx_queue;
+static QueueHandle_t s_mesh_event_queue;
 static mesh_shared_state_t s_shared;
 
 typedef enum {
@@ -174,19 +176,19 @@ static esp_timer_handle_t s_receipt_timer;
 static pending_probe_reply_t s_probe_reply_queue[PROBE_REPLY_QUEUE_CAPACITY];
 static esp_timer_handle_t s_probe_reply_timer;
 
-static delivery_event_ring_t *s_delivery_event_ring;
+static delivery_event_ring_t* s_delivery_event_ring;
 
 enum {
     DELIVERY_EVENT_TYPE_ACK = 1,
     DELIVERY_EVENT_TYPE_BROADCAST_DELIVERY = 2,
 };
-static char                s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = "";  /* loaded from NVS at startup */
+static char s_node_name[BRAMBLE_NODE_NAME_MAX + 1] = ""; /* loaded from NVS at startup */
 
 /* Routing state */
-static routing_table_t            s_routes;
-static rreq_dedup_t               s_rreq_dedup;
-static reverse_route_table_t      s_reverse_routes;
-static pending_discovery_table_t  s_pending_disc;
+static routing_table_t s_routes;
+static rreq_dedup_t s_rreq_dedup;
+static reverse_route_table_t s_reverse_routes;
+static pending_discovery_table_t s_pending_disc;
 
 /* Queued messages waiting for route discovery (QUEUE_REASON_ROUTE) or for a
  * DM session to establish (QUEUE_REASON_SESSION, Task 1.4 / SEC-C2 B5). Both
@@ -204,13 +206,15 @@ static pending_discovery_table_t  s_pending_disc;
 #define DM_QUEUE_TTL_MS 150000
 typedef struct {
     uint32_t dest_addr;
-    uint8_t  data[BRAMBLE_MAX_PACKET_SIZE];
-    size_t   len;
+    uint8_t data[BRAMBLE_MAX_PACKET_SIZE];
+    size_t len;
     uint32_t timestamp;
-    bool     used;
-    uint8_t  reason;     /* QUEUE_REASON_ROUTE or QUEUE_REASON_SESSION */
-    uint32_t pkt_id;     /* tracking id surfaced to the caller/UI; only meaningful for QUEUE_REASON_SESSION */
-    int16_t  channel_idx;/* only meaningful for QUEUE_REASON_SESSION (msg_store bookkeeping on flush) */
+    bool used;
+    uint8_t reason;  /* QUEUE_REASON_ROUTE or QUEUE_REASON_SESSION */
+    uint32_t pkt_id; /* tracking id surfaced to the caller/UI; only meaningful for
+                        QUEUE_REASON_SESSION */
+    int16_t
+        channel_idx; /* only meaningful for QUEUE_REASON_SESSION (msg_store bookkeeping on flush) */
 } queued_msg_t;
 static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
@@ -231,7 +235,7 @@ typedef struct {
     uint32_t eph_pub_hash;
     uint16_t ke_epoch;
     uint32_t seen_ms;
-    bool     used;
+    bool used;
 } dm_hs_dedup_entry_t;
 static dm_hs_dedup_entry_t s_hs_dedup[DM_HS_DEDUP_MAX];
 
@@ -247,9 +251,9 @@ static dm_hs_dedup_entry_t s_hs_dedup[DM_HS_DEDUP_MAX];
  */
 typedef struct {
     uint32_t peer_addr;
-    uint8_t  eph_priv[32];
-    uint8_t  eph_pub[32];
-    bool     used;
+    uint8_t eph_priv[32];
+    uint8_t eph_pub[32];
+    bool used;
 } dm_pending_eph_t;
 static dm_pending_eph_t s_pending_eph[DM_MAX_HANDSHAKING];
 
@@ -261,8 +265,8 @@ static dm_pending_eph_t s_pending_eph[DM_MAX_HANDSHAKING];
 #define DM_HANDSHAKE_WORKER_STACK 4096
 #define DM_HANDSHAKE_WORKER_PRIORITY (MESH_TASK_PRIORITY - 2)
 typedef struct {
-    uint32_t              src_addr;
-    int                   channel_idx;
+    uint32_t src_addr;
+    int channel_idx;
     bramble_key_exchange_t msg;
 } dm_handshake_work_item_t;
 static QueueHandle_t s_handshake_work_q;
@@ -283,16 +287,16 @@ static pending_ack_table_t s_pending_acks;
 
 /* Traffic debug telemetry */
 #define TRAFFIC_DEBUG_CAPACITY 512
-static traffic_event_t     s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
-static traffic_debug_t     s_traffic_debug;
-static timesync_state_t    s_timesync;
+static traffic_event_t s_traffic_events[TRAFFIC_DEBUG_CAPACITY];
+static traffic_debug_t s_traffic_debug;
+static timesync_state_t s_timesync;
 
 /* Fragment reassembly context */
-static reassembly_ctx_t    s_reassembly;
+static reassembly_ctx_t s_reassembly;
 
 /* Adaptive beacon interval policy */
 static beacon_policy_config_t s_beacon_policy = {
-    .enabled = false,              /* Default: disabled (fixed 60s) */
+    .enabled = false, /* Default: disabled (fixed 60s) */
     .mode = BEACON_MODE_FIXED,
     .base_interval_ms = 60000,
     .min_interval_ms = 30000,
@@ -313,15 +317,15 @@ static churn_sample_t s_churn_history[MAX_CHURN_HISTORY];
 static int s_churn_history_idx = 0;
 
 /* Channel state */
-static bramble_channel_t   s_channels[MAX_CHANNELS];
-static char                s_channel_names[MAX_CHANNELS][20];
-static bool                s_channel_has_psk[MAX_CHANNELS];
-static int                 s_num_channels = 0;
-static int                 s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
-static uint32_t            s_last_broadcast_id = 0;
-static uint16_t            s_last_broadcast_frag_msg_id = 0;
-static uint32_t            s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
-static int                 s_recent_broadcast_idx = 0;
+static bramble_channel_t s_channels[MAX_CHANNELS];
+static char s_channel_names[MAX_CHANNELS][20];
+static bool s_channel_has_psk[MAX_CHANNELS];
+static int s_num_channels = 0;
+static int s_default_channel_idx = 0; /* unicast default, public broadcast stays channel 0 */
+static uint32_t s_last_broadcast_id = 0;
+static uint16_t s_last_broadcast_frag_msg_id = 0;
+static uint32_t s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
+static int s_recent_broadcast_idx = 0;
 static broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
 
 /* Mailbox — store-and-forward for offline neighbors (backed by components/mailbox) */
@@ -349,37 +353,38 @@ typedef struct __attribute__((packed)) {
 /* ── Helpers ────────────────────────────────────────────────────────── */
 
 /* Forward declarations */
-static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
-static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
-static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr);
+static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
+static void handle_probe_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
+static void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr);
 static int mesh_send_probe_round(uint32_t pid, uint8_t round);
 static void mesh_start_probe_sweep(uint32_t pid);
 static void mailbox_flush_for(uint32_t dest_addr);
-static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind);
-static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id);
+static int mesh_tx(const uint8_t* buf, uint8_t len, tx_kind_t kind);
+static void queue_broadcast_delivery_receipt(uint32_t original_src_addr,
+                                             uint32_t original_packet_id);
 static void mesh_schedule_next_receipt_timer(void);
 static void mesh_process_receipt_tx_event(void);
-static void mesh_receipt_timer_cb(void *arg);
+static void mesh_receipt_timer_cb(void* arg);
 static void mesh_schedule_next_probe_reply_timer(void);
 static void mesh_process_probe_reply_tx_event(void);
-static void mesh_probe_reply_timer_cb(void *arg);
-static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t address);
+static void mesh_probe_reply_timer_cb(void* arg);
+static void queue_probe_reply(const uint8_t* buf, uint8_t wire_len, uint32_t address);
 static void mesh_persist_channel_psk_flags(void);
 static void mesh_load_channel_psk_flags(void);
 
-static uint32_t now_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000ULL);
-}
+static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
 
-static void delivery_event_ring_append_locked(const delivery_event_record_t *event) {
-    if (!event || !s_delivery_event_mutex || !s_delivery_event_ring) return;
+static void delivery_event_ring_append_locked(const delivery_event_record_t* event) {
+    if (!event || !s_delivery_event_mutex || !s_delivery_event_ring)
+        return;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
     delivery_event_ring_append(s_delivery_event_ring, event);
     xSemaphoreGive(s_delivery_event_mutex);
 }
 
-static void record_ack_delivery_event(const bramble_ack_t *ack) {
-    if (!ack) return;
+static void record_ack_delivery_event(const bramble_ack_t* ack) {
+    if (!ack)
+        return;
 
     delivery_event_record_t evt = {0};
     evt.message_id = ack->ack_packet_id;
@@ -390,7 +395,8 @@ static void record_ack_delivery_event(const bramble_ack_t *ack) {
     evt.tier = MSG_TIER_NORMAL;
 
     uint8_t hops = ack->hop_count;
-    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS) hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
+    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
+        hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
     evt.route_len = hops;
     for (uint8_t i = 0; i < hops; i++) {
         evt.route_hops[i] = ack->relay_path[i];
@@ -399,10 +405,8 @@ static void record_ack_delivery_event(const bramble_ack_t *ack) {
     delivery_event_ring_append_locked(&evt);
 }
 
-static void record_broadcast_delivery_event(uint32_t recipient_addr,
-                                            uint32_t broadcast_id,
-                                            uint8_t hop_count,
-                                            const uint32_t *relay_path) {
+static void record_broadcast_delivery_event(uint32_t recipient_addr, uint32_t broadcast_id,
+                                            uint8_t hop_count, const uint32_t* relay_path) {
     delivery_event_record_t evt = {0};
     evt.message_id = broadcast_id;
     evt.timestamp_s = now_ms() / 1000u;
@@ -412,7 +416,8 @@ static void record_broadcast_delivery_event(uint32_t recipient_addr,
     evt.tier = MSG_TIER_BROADCAST;
 
     uint8_t hops = hop_count;
-    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS) hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
+    if (hops > DELIVERY_EVENT_ROUTE_MAX_HOPS)
+        hops = DELIVERY_EVENT_ROUTE_MAX_HOPS;
     evt.route_len = hops;
     if (relay_path) {
         for (uint8_t i = 0; i < hops; i++) {
@@ -424,13 +429,15 @@ static void record_broadcast_delivery_event(uint32_t recipient_addr,
 }
 
 static void recent_broadcast_record(uint32_t packet_id) {
-    if (packet_id == 0) return;
+    if (packet_id == 0)
+        return;
     s_recent_broadcast_ids[s_recent_broadcast_idx] = packet_id;
     s_recent_broadcast_idx = (s_recent_broadcast_idx + 1) % RECENT_BROADCAST_RING_SIZE;
 }
 
 static bool recent_broadcast_contains(uint32_t packet_id) {
-    if (packet_id == 0) return false;
+    if (packet_id == 0)
+        return false;
     for (int i = 0; i < RECENT_BROADCAST_RING_SIZE; i++) {
         if (s_recent_broadcast_ids[i] == packet_id) {
             return true;
@@ -439,28 +446,27 @@ static bool recent_broadcast_contains(uint32_t packet_id) {
     return false;
 }
 
-static void maybe_emit_implicit_broadcast_delivery(const bramble_header_t *header,
-                                                   const rx_packet_t *pkt) {
-    if (!header || !pkt) return;
-    if (header->type != PKT_TYPE_DATA) return;
-    if (header->dest_addr != 0xFFFFFFFFu) return;
-    if (!recent_broadcast_contains(header->packet_id)) return;
-    if (pkt->len < HEADER_SIZE + sizeof(uint32_t)) return;
+static void maybe_emit_implicit_broadcast_delivery(const bramble_header_t* header,
+                                                   const rx_packet_t* pkt) {
+    if (!header || !pkt)
+        return;
+    if (header->type != PKT_TYPE_DATA)
+        return;
+    if (header->dest_addr != 0xFFFFFFFFu)
+        return;
+    if (!recent_broadcast_contains(header->packet_id))
+        return;
+    if (pkt->len < HEADER_SIZE + sizeof(uint32_t))
+        return;
 
     uint32_t relayer_addr = 0;
     memcpy(&relayer_addr, pkt->data + HEADER_SIZE, sizeof(relayer_addr));
-    if (relayer_addr == 0) return;
+    if (relayer_addr == 0)
+        return;
 
-    uint32_t relay_path[1] = { relayer_addr };
-    mesh_emit_broadcast_delivery_notification(relayer_addr,
-                                              header->packet_id,
-                                              0,
-                                              1,
-                                              relay_path);
-    record_broadcast_delivery_event(relayer_addr,
-                                    header->packet_id,
-                                    1,
-                                    relay_path);
+    uint32_t relay_path[1] = {relayer_addr};
+    mesh_emit_broadcast_delivery_notification(relayer_addr, header->packet_id, 0, 1, relay_path);
+    record_broadcast_delivery_event(relayer_addr, header->packet_id, 1, relay_path);
 }
 
 static uint32_t next_packet_id(void) {
@@ -473,7 +479,7 @@ static uint32_t next_packet_id(void) {
     return counter++;
 }
 
-static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t *policy) {
+static void location_policy_load_or_defaults(nvs_handle_t nvs, location_policy_t* policy) {
     location_policy_set_defaults(policy);
 
     uint8_t enabled = 0;
@@ -516,10 +522,10 @@ static bool location_policy_has_targets(void) {
     return false;
 }
 
-uint32_t mesh_send_location_packet(uint32_t dest_addr,
-                                  const bramble_position_t *pos,
-                                  uint8_t tier) {
-    if (!pos || !pos->valid) return 0;
+uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t* pos,
+                                   uint8_t tier) {
+    if (!pos || !pos->valid)
+        return 0;
 
     if (tier > LOCATION_TIER_PRESENCE) {
         tier = LOCATION_TIER_COARSE;
@@ -570,7 +576,7 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
         uint8_t ciphertext[sizeof(session_inner)];
 
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+        dm_session_t* sess = dm_lookup(&s_dm_table, dest_addr);
         int enc_ret = -1;
         if (sess && sess->state == DM_STATE_ACTIVE) {
             xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
@@ -594,13 +600,14 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
         memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
         memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
         memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
-              BRAMBLE_TAG_SIZE);
-        size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+               BRAMBLE_TAG_SIZE);
+        size_t wire_len =
+            HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
 
         int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
         if (rc == TX_GATE_OK) {
-            ESP_LOGI(TAG, "TX location (session) to %08" PRIX32 " tier=%u len=%u",
-                     dest_addr, tier, (unsigned)wire_len);
+            ESP_LOGI(TAG, "TX location (session) to %08" PRIX32 " tier=%u len=%u", dest_addr, tier,
+                     (unsigned)wire_len);
             return pkt_id;
         }
         return 0;
@@ -652,22 +659,19 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr,
     size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
     int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
     if (rc == TX_GATE_OK) {
-        ESP_LOGI(TAG, "TX location (channel) to %08" PRIX32 " tier=%u len=%u",
-                 dest_addr, tier, (unsigned)wire_len);
+        ESP_LOGI(TAG, "TX location (channel) to %08" PRIX32 " tier=%u len=%u", dest_addr, tier,
+                 (unsigned)wire_len);
         return pkt_id;
     }
     return 0;
 }
 
-static void mesh_emit_location_event(const char *event,
-                                     uint32_t peer_addr,
-                                     uint8_t tier,
-                                     uint32_t timestamp_ms,
-                                     int16_t rssi,
-                                     int8_t snr,
+static void mesh_emit_location_event(const char* event, uint32_t peer_addr, uint8_t tier,
+                                     uint32_t timestamp_ms, int16_t rssi, int8_t snr,
                                      uint32_t count) {
-    cJSON *params = cJSON_CreateObject();
-    if (!params) return;
+    cJSON* params = cJSON_CreateObject();
+    if (!params)
+        return;
     cJSON_AddStringToObject(params, "event", event);
     if (peer_addr != 0) {
         char addr_buf[9];
@@ -687,9 +691,8 @@ static void mesh_emit_location_event(const char *event,
     cJSON_Delete(params);
 }
 
-static void mesh_send_location_updates(uint32_t t,
-                                       const location_policy_t *policy,
-                                       const bramble_position_t *source_pos) {
+static void mesh_send_location_updates(uint32_t t, const location_policy_t* policy,
+                                       const bramble_position_t* source_pos) {
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
         return;
@@ -707,7 +710,7 @@ static void mesh_send_location_updates(uint32_t t,
             nvs_entry_info(it, &info);
 
             if (strncmp(info.key, "lcr_", 4) == 0) {
-                const char *addr = info.key + 4;
+                const char* addr = info.key + 4;
 
                 bool enabled = true;
                 uint8_t tier = policy->default_tier;
@@ -724,7 +727,8 @@ static void mesh_send_location_updates(uint32_t t,
                 }
 
                 if (enabled) {
-                    uint32_t pkt_id = mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
+                    uint32_t pkt_id =
+                        mesh_send_location_packet((uint32_t)strtoul(addr, NULL, 16), &pos, tier);
                     if (pkt_id != 0) {
                         sent_count++;
                     }
@@ -745,10 +749,8 @@ static void mesh_send_location_updates(uint32_t t,
     }
 }
 
-static void mesh_persist_peer_location(uint32_t peer_addr,
-                                       const bramble_position_t *pos,
-                                       uint8_t tier,
-                                       uint32_t now_ms) {
+static void mesh_persist_peer_location(uint32_t peer_addr, const bramble_position_t* pos,
+                                       uint8_t tier, uint32_t now_ms) {
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
         return;
@@ -784,10 +786,10 @@ static void mesh_persist_peer_location(uint32_t peer_addr,
  * position parsing) lives in location_parse_inner, already covered by
  * test_location_crypto.c.
  */
-static int location_rx_decode_channel(const uint8_t *nonce, const uint8_t *ciphertext,
-                                      size_t ct_len, const uint8_t *tag, const uint8_t *aad,
-                                      size_t aad_len, uint8_t *tier_out,
-                                      bramble_position_t *pos_out, int *channel_index_out) {
+static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphertext,
+                                      size_t ct_len, const uint8_t* tag, const uint8_t* aad,
+                                      size_t aad_len, uint8_t* tier_out,
+                                      bramble_position_t* pos_out, int* channel_index_out) {
     uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     channel_msg_info_t info;
     if (channel_msg_decrypt(s_channels, s_num_channels, nonce, ciphertext, ct_len, tag, aad,
@@ -798,7 +800,7 @@ static int location_rx_decode_channel(const uint8_t *nonce, const uint8_t *ciphe
     return location_parse_inner(info.data, info.data_len, tier_out, pos_out);
 }
 
-static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's
      * header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16). */
     if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
@@ -817,10 +819,10 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
         return;
     }
 
-    const uint8_t *nonce = data + HEADER_SIZE + 4;
+    const uint8_t* nonce = data + HEADER_SIZE + 4;
     size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
-    const uint8_t *ciphertext = nonce + BRAMBLE_NONCE_SIZE;
-    const uint8_t *tag = ciphertext + ct_len;
+    const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
+    const uint8_t* tag = ciphertext + ct_len;
 
     if (ct_len > BRAMBLE_MAX_PACKET_SIZE) {
         ESP_LOGW(TAG, "Location ciphertext too large: %u", (unsigned)ct_len);
@@ -845,7 +847,7 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
                                         &pos, &channel_index);
     } else {
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+        dm_session_t* sess = dm_lookup(&s_dm_table, src_addr);
         if (sess && sess->state == DM_STATE_ACTIVE) {
             /* Canonical session-path size (Task 2.1, M11): the encoder
              * always pads to exactly L_LOC_INNER + CHANNEL_MSG_OVERHEAD
@@ -894,7 +896,8 @@ static void handle_location(const uint8_t *data, uint8_t len, int16_t rssi, int8
     location_cache_update(&s_location_mgr, src_addr, &pos, t);
     mesh_persist_peer_location(src_addr, &pos, tier, t);
 
-    ESP_LOGI(TAG, "RX location from %08" PRIX32 " tier=%u RSSI:%d SNR:%d", src_addr, tier, rssi, snr);
+    ESP_LOGI(TAG, "RX location from %08" PRIX32 " tier=%u RSSI:%d SNR:%d", src_addr, tier, rssi,
+             snr);
     rpc_notify("bramble.onPeerLocation", NULL);
     mesh_emit_location_event("received", src_addr, tier, t, rssi, snr, 0);
 }
@@ -996,9 +999,10 @@ static void reboot_timer_cb(TimerHandle_t xTimer) {
 }
 
 void mesh_reboot_delayed(int delay_ms) {
-    if (delay_ms <= 0) delay_ms = 100;
-    TimerHandle_t t = xTimerCreate("reboot", pdMS_TO_TICKS(delay_ms),
-                                   pdFALSE, NULL, reboot_timer_cb);
+    if (delay_ms <= 0)
+        delay_ms = 100;
+    TimerHandle_t t =
+        xTimerCreate("reboot", pdMS_TO_TICKS(delay_ms), pdFALSE, NULL, reboot_timer_cb);
     if (t == NULL) {
         ESP_LOGE(TAG, "Failed to create reboot timer — rebooting immediately");
         esp_restart();
@@ -1014,7 +1018,7 @@ void mesh_reboot_delayed(int delay_ms) {
 
 /* ── Radio callbacks (ISR context → queue) ──────────────────────────── */
 
-static void on_rx(const uint8_t *data, uint8_t len, const radio_rx_info_t *info) {
+static void on_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info) {
     rx_packet_t pkt;
     /* len is uint8_t (max 255), pkt.data is 256 bytes — always fits */
     memcpy(pkt.data, data, len);
@@ -1028,9 +1032,7 @@ static void on_rx(const uint8_t *data, uint8_t len, const radio_rx_info_t *info)
     }
 }
 
-static void on_tx_done(void) {
-    ESP_LOGD(TAG, "TX complete");
-}
+static void on_tx_done(void) { ESP_LOGD(TAG, "TX complete"); }
 
 /* ── Beacon TX ──────────────────────────────────────────────────────── */
 
@@ -1040,8 +1042,8 @@ static int send_beacon(void) {
     beacon.header.version = BRAMBLE_VERSION;
     beacon.header.type = PKT_TYPE_BEACON;
     beacon.header.flags = 0;
-    beacon.header.hop_limit = 1;  /* beacons are 1-hop only */
-    beacon.header.dest_addr = 0xFFFFFFFF;  /* broadcast */
+    beacon.header.hop_limit = 1;          /* beacons are 1-hop only */
+    beacon.header.dest_addr = 0xFFFFFFFF; /* broadcast */
     beacon.header.packet_id = next_packet_id();
 
     beacon.src_addr = s_identity->address;
@@ -1057,13 +1059,14 @@ static int send_beacon(void) {
         beacon.time_confidence = timesync_get_stratum(&s_timesync);
     } else {
         beacon.network_time = 0;
-        beacon.time_confidence = 0xFFFF;  /* no confidence */
+        beacon.time_confidence = 0xFFFF; /* no confidence */
     }
 
     /* Include node name in beacon (if set) */
     if (s_node_name[0] != '\0') {
         beacon.name_len = (uint8_t)strlen(s_node_name);
-        if (beacon.name_len > BEACON_NAME_MAX) beacon.name_len = BEACON_NAME_MAX;
+        if (beacon.name_len > BEACON_NAME_MAX)
+            beacon.name_len = BEACON_NAME_MAX;
         memcpy(beacon.name, s_node_name, beacon.name_len);
         beacon.name[beacon.name_len] = '\0';
     }
@@ -1114,8 +1117,8 @@ static int send_beacon(void) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.beacon_tx_count++;
         xSemaphoreGive(s_state_mutex);
-        ESP_LOGI(TAG, "Beacon TX #%" PRIu32 " (neighbors: %d)",
-                 s_shared.beacon_tx_count, neighbor_count(&s_neighbors));
+        ESP_LOGI(TAG, "Beacon TX #%" PRIu32 " (neighbors: %d)", s_shared.beacon_tx_count,
+                 neighbor_count(&s_neighbors));
     } else if (ret == TX_GATE_ERR_BUDGET) {
         ESP_LOGD(TAG, "Beacon skipped this interval: airtime budget exhausted");
     } else {
@@ -1136,7 +1139,7 @@ static int send_beacon(void) {
  * control plane doesn't need a full 12-byte AEAD nonce, just the 48-bit
  * counter nonce_counter_extract pulls out of it.
  */
-static int control_seq_next(uint64_t *out) {
+static int control_seq_next(uint64_t* out) {
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
     int nonce_ret = nonce_counter_next(nonce);
@@ -1160,7 +1163,7 @@ static bool control_replay_ok(uint32_t signer_addr, uint64_t seq) {
 
 /* ── Packet handlers ────────────────────────────────────────────────── */
 
-static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     bramble_beacon_t beacon;
     if (bramble_beacon_deserialize(&beacon, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid beacon (len=%u)", len);
@@ -1168,7 +1171,8 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     }
 
     /* Ignore our own beacons */
-    if (beacon.src_addr == s_identity->address) return;
+    if (beacon.src_addr == s_identity->address)
+        return;
 
     /* Verify beacon HMAC authenticity using shared beacon key */
     if (!beacon_verify_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key))) {
@@ -1194,7 +1198,8 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
     /* Check for address collision — different pubkey_hash but same address */
     if (identity_check_collision(s_identity, beacon.src_addr, beacon.pubkey_hash)) {
-        ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 " — regenerating identity!", beacon.src_addr);
+        ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 " — regenerating identity!",
+                 beacon.src_addr);
         /* Regenerate keypair and persist to NVS */
         if (identity_generate_and_save(s_identity) != 0) {
             /* Entropy not ready (pre-RF window, SEC-L1): identity_generate_and_save
@@ -1206,7 +1211,7 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
         }
         ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
         /* Notify webapp */
-        cJSON *params = cJSON_CreateObject();
+        cJSON* params = cJSON_CreateObject();
         char addr_buf[12];
         snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, s_identity->address);
         cJSON_AddStringToObject(params, "new_address", addr_buf);
@@ -1219,11 +1224,11 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     /* Update neighbor table — track if this is a new neighbor */
     uint32_t t = now_ms();
     int old_count = neighbor_count(&s_neighbors);
-    int idx = neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr,
-                              beacon.pubkey_hash, t);
+    int idx =
+        neighbor_update(&s_neighbors, beacon.src_addr, (int8_t)rssi, snr, beacon.pubkey_hash, t);
     int new_count = neighbor_count(&s_neighbors);
     bool is_new_peer = (new_count > old_count);
-    
+
     /* Store peer name if present */
     if (idx >= 0 && beacon.name_len > 0) {
         memcpy(s_neighbors.entries[idx].name, beacon.name, beacon.name_len);
@@ -1251,9 +1256,8 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
     xSemaphoreGive(s_state_mutex);
 
     if (idx >= 0) {
-        ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)%s",
-                 beacon.src_addr, rssi, snr, neighbor_count(&s_neighbors),
-                 is_new_peer ? " [NEW]" : "");
+        ESP_LOGI(TAG, "Neighbor %08" PRIX32 " RSSI:%d SNR:%d (total: %d)%s", beacon.src_addr, rssi,
+                 snr, neighbor_count(&s_neighbors), is_new_peer ? " [NEW]" : "");
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
         /* Play peer join tone for new neighbors */
@@ -1278,7 +1282,8 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
                 rssi_vals[i] = s_neighbors.entries[i].rssi;
             }
             if (sybil_check_rssi_cluster(rssi_vals, nc)) {
-                ESP_LOGW(TAG, "SYBIL WARNING: beacon from %08" PRIX32
+                ESP_LOGW(TAG,
+                         "SYBIL WARNING: beacon from %08" PRIX32
                          " — %d neighbors with suspiciously similar RSSI (latest RSSI:%d)",
                          beacon.src_addr, nc, rssi);
             }
@@ -1292,14 +1297,16 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 /* ── ACK handling ────────────────────────────────────────────────────── */
 
 static void mesh_schedule_next_receipt_timer(void) {
-    if (!s_receipt_timer) return;
+    if (!s_receipt_timer)
+        return;
 
     uint32_t t = now_ms();
     uint32_t earliest_due = 0;
     bool have_pending = false;
 
     for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
-        if (!s_receipt_queue[i].used) continue;
+        if (!s_receipt_queue[i].used)
+            continue;
         if (!have_pending || s_receipt_queue[i].due_at_ms < earliest_due) {
             earliest_due = s_receipt_queue[i].due_at_ms;
             have_pending = true;
@@ -1319,14 +1326,15 @@ static void mesh_schedule_next_receipt_timer(void) {
     }
 }
 
-static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_t original_packet_id) {
+static void queue_broadcast_delivery_receipt(uint32_t original_src_addr,
+                                             uint32_t original_packet_id) {
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     size_t wire_len = 0;
 
     /* Determine receipt policy based on mesh size */
-    uint8_t policy = mesh_broadcast_receipt_policy(0xFFFFFFFFu,
-                         (uint8_t)neighbor_count(&s_neighbors));
-    uint8_t hop_limit = (policy >= 2) ? 8 : 1;  /* full=8, neighbors-only=1 */
+    uint8_t policy =
+        mesh_broadcast_receipt_policy(0xFFFFFFFFu, (uint8_t)neighbor_count(&s_neighbors));
+    uint8_t hop_limit = (policy >= 2) ? 8 : 1; /* full=8, neighbors-only=1 */
 
     /* ws 1.3b: draw the 48-bit origin seq once per receipt; the retry
      * queue below resends the SAME serialized bytes on loss (not a fresh
@@ -1339,15 +1347,9 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
         return;
     }
 
-    esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(s_identity->address,
-                                                                  next_packet_id(),
-                                                                  original_src_addr,
-                                                                  original_packet_id,
-                                                                  hop_limit,
-                                                                  receipt_seq,
-                                                                  buf,
-                                                                  sizeof(buf),
-                                                                  &wire_len);
+    esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(
+        s_identity->address, next_packet_id(), original_src_addr, original_packet_id, hop_limit,
+        receipt_seq, buf, sizeof(buf), &wire_len);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Delivery receipt build failed: %d", (int)err);
         return;
@@ -1365,10 +1367,11 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr, uint32_
         return;
     }
 
-    uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
+    uint32_t slot_delay_ms =
+        mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
     uint32_t initial_delay_ms = slot_delay_ms + (esp_random() % 400u); /* +0..399ms jitter */
 
-    pending_receipt_t *item = &s_receipt_queue[slot];
+    pending_receipt_t* item = &s_receipt_queue[slot];
     memset(item, 0, sizeof(*item));
     item->used = true;
     item->original_src_addr = original_src_addr;
@@ -1390,7 +1393,8 @@ static void mesh_process_receipt_tx_event(void) {
     int due_idx = -1;
 
     for (int i = 0; i < RECEIPT_QUEUE_CAPACITY; i++) {
-        if (!s_receipt_queue[i].used) continue;
+        if (!s_receipt_queue[i].used)
+            continue;
         if (s_receipt_queue[i].due_at_ms <= t_now) {
             due_idx = i;
             break;
@@ -1402,7 +1406,7 @@ static void mesh_process_receipt_tx_event(void) {
         return;
     }
 
-    pending_receipt_t *item = &s_receipt_queue[due_idx];
+    pending_receipt_t* item = &s_receipt_queue[due_idx];
     uint8_t attempt_no = (uint8_t)(item->attempts_sent + 1u);
 
     /* TX path can block for CAD/LBT + radio wait; feed task WDT just before entering it. */
@@ -1418,9 +1422,9 @@ static void mesh_process_receipt_tx_event(void) {
         item->attempts_sent++;
         if (item->attempts_sent >= item->attempts_total) {
             ESP_LOGW(TAG,
-                     "Delivery receipt DROPPED for pkt=%08" PRIX32 " (all %u attempts airtime-exhausted)",
-                     item->original_packet_id,
-                     (unsigned)item->attempts_total);
+                     "Delivery receipt DROPPED for pkt=%08" PRIX32
+                     " (all %u attempts airtime-exhausted)",
+                     item->original_packet_id, (unsigned)item->attempts_total);
             memset(item, 0, sizeof(*item));
         } else {
             uint32_t remaining = tx_gate_remaining(AIRTIME_TIER_RECEIPT);
@@ -1428,22 +1432,26 @@ static void mesh_process_receipt_tx_event(void) {
             uint32_t scale_den = 1u;
             mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
             if (!(scale_num == 1u && scale_den == 1u)) {
-                uint32_t utilized_pct = ((AIRTIME_BUDGET_RECEIPT_MS - (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) * 100u) / AIRTIME_BUDGET_RECEIPT_MS;
+                uint32_t utilized_pct =
+                    ((AIRTIME_BUDGET_RECEIPT_MS - (remaining > AIRTIME_BUDGET_RECEIPT_MS
+                                                       ? AIRTIME_BUDGET_RECEIPT_MS
+                                                       : remaining)) *
+                     100u) /
+                    AIRTIME_BUDGET_RECEIPT_MS;
                 ESP_LOGD(TAG,
-                         "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32 "%%)",
-                         scale_num,
-                         scale_den,
-                         utilized_pct);
+                         "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32
+                         "%%)",
+                         scale_num, scale_den, utilized_pct);
             }
-            uint32_t raw_backoff_ms = 1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
+            uint32_t raw_backoff_ms =
+                1000u + ((uint32_t)item->attempts_sent * 2000u) + (esp_random() % 1000u);
             uint32_t backoff_ms = (raw_backoff_ms * scale_num) / scale_den;
             item->due_at_ms = t_now + backoff_ms;
             ESP_LOGW(TAG,
-                     "Delivery receipt deferred for pkt=%08" PRIX32 " (attempt=%u/%u): airtime exhausted, retry in %" PRIu32 "ms",
-                     item->original_packet_id,
-                     (unsigned)(item->attempts_sent),
-                     (unsigned)item->attempts_total,
-                     backoff_ms);
+                     "Delivery receipt deferred for pkt=%08" PRIX32
+                     " (attempt=%u/%u): airtime exhausted, retry in %" PRIu32 "ms",
+                     item->original_packet_id, (unsigned)(item->attempts_sent),
+                     (unsigned)item->attempts_total, backoff_ms);
         }
         mesh_schedule_next_receipt_timer();
         return;
@@ -1453,9 +1461,7 @@ static void mesh_process_receipt_tx_event(void) {
         ESP_LOGI(TAG,
                  "TX delivery receipt for broadcast pkt=%08" PRIX32 " to %08" PRIX32
                  " attempt=%u/%u",
-                 item->original_packet_id,
-                 item->original_src_addr,
-                 (unsigned)attempt_no,
+                 item->original_packet_id, item->original_src_addr, (unsigned)attempt_no,
                  (unsigned)item->attempts_total);
     }
 
@@ -1472,12 +1478,14 @@ static void mesh_process_receipt_tx_event(void) {
     uint32_t scale_den = 1u;
     mesh_broadcast_receipt_retry_scale(remaining, &scale_num, &scale_den);
     if (!(scale_num == 1u && scale_den == 1u)) {
-        uint32_t utilized_pct = ((AIRTIME_BUDGET_RECEIPT_MS - (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) * 100u) / AIRTIME_BUDGET_RECEIPT_MS;
+        uint32_t utilized_pct =
+            ((AIRTIME_BUDGET_RECEIPT_MS -
+              (remaining > AIRTIME_BUDGET_RECEIPT_MS ? AIRTIME_BUDGET_RECEIPT_MS : remaining)) *
+             100u) /
+            AIRTIME_BUDGET_RECEIPT_MS;
         ESP_LOGD(TAG,
                  "Receipt retry multiplier=%" PRIu32 "/%" PRIu32 " (utilization=%" PRIu32 "%%)",
-                 scale_num,
-                 scale_den,
-                 utilized_pct);
+                 scale_num, scale_den, utilized_pct);
     }
 
     uint32_t raw_base_ms = 500u + ((uint32_t)i * 700u);
@@ -1493,9 +1501,10 @@ static void mesh_process_receipt_tx_event(void) {
     mesh_schedule_next_receipt_timer();
 }
 
-static void mesh_receipt_timer_cb(void *arg) {
+static void mesh_receipt_timer_cb(void* arg) {
     (void)arg;
-    if (!s_mesh_event_queue) return;
+    if (!s_mesh_event_queue)
+        return;
 
     mesh_event_type_t evt = MESH_EVT_RECEIPT_TX;
     if (xQueueSend(s_mesh_event_queue, &evt, 0) != pdTRUE) {
@@ -1504,10 +1513,12 @@ static void mesh_receipt_timer_cb(void *arg) {
 }
 
 static void mesh_schedule_next_probe_reply_timer(void) {
-    if (!s_probe_reply_timer) return;
+    if (!s_probe_reply_timer)
+        return;
 
     uint32_t earliest_due = 0;
-    if (!probe_reply_queue_earliest_due(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY, &earliest_due)) {
+    if (!probe_reply_queue_earliest_due(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY,
+                                        &earliest_due)) {
         esp_timer_stop(s_probe_reply_timer);
         return;
     }
@@ -1521,13 +1532,13 @@ static void mesh_schedule_next_probe_reply_timer(void) {
     }
 }
 
-static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t address) {
-    uint32_t jitter_ms = esp_random() % 120u;                 /* +0..119, as before */
+static void queue_probe_reply(const uint8_t* buf, uint8_t wire_len, uint32_t address) {
+    uint32_t jitter_ms = esp_random() % 120u; /* +0..119, as before */
     uint32_t initial_delay_ms = probe_reply_initial_delay_ms(address, jitter_ms);
     uint32_t first_due_ms = probe_reply_attempt_due_ms(now_ms(), initial_delay_ms, 0);
 
-    int slot = probe_reply_queue_insert(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY,
-                                        buf, wire_len, PROBE_REPLY_ATTEMPTS, first_due_ms);
+    int slot = probe_reply_queue_insert(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY, buf,
+                                        wire_len, PROBE_REPLY_ATTEMPTS, first_due_ms);
     if (slot < 0) {
         ESP_LOGW(TAG, "Probe reply queue full; dropping reply");
         return;
@@ -1537,19 +1548,21 @@ static void queue_probe_reply(const uint8_t *buf, uint8_t wire_len, uint32_t add
 
 static void mesh_process_probe_reply_tx_event(void) {
     uint32_t t_now = now_ms();
-    int due_idx = probe_reply_queue_find_due(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY, t_now);
+    int due_idx =
+        probe_reply_queue_find_due(s_probe_reply_queue, PROBE_REPLY_QUEUE_CAPACITY, t_now);
     if (due_idx < 0) {
         mesh_schedule_next_probe_reply_timer();
         return;
     }
 
-    pending_probe_reply_t *item = &s_probe_reply_queue[due_idx];
+    pending_probe_reply_t* item = &s_probe_reply_queue[due_idx];
 
     /* TX can block for CAD/LBT; feed the task WDT just before entering it. */
     esp_task_wdt_reset();
 
     int rc = mesh_tx(item->buf, item->wire_len, TX_KIND_PROBE_REPLY);
-    uint32_t t_after = now_ms();   /* measure the 140ms retry gap from TX return, matching the original vTaskDelay(140)-after-tx */
+    uint32_t t_after = now_ms(); /* measure the 140ms retry gap from TX return, matching the
+                                    original vTaskDelay(140)-after-tx */
 
     /* Deny-stop vs. sent-and-retry decision lives in the pure state machine.
      * TX_GATE_ERR_BUDGET abandons the whole reply (first thing to shed);
@@ -1562,9 +1575,10 @@ static void mesh_process_probe_reply_tx_event(void) {
     mesh_schedule_next_probe_reply_timer();
 }
 
-static void mesh_probe_reply_timer_cb(void *arg) {
+static void mesh_probe_reply_timer_cb(void* arg) {
     (void)arg;
-    if (!s_mesh_event_queue) return;
+    if (!s_mesh_event_queue)
+        return;
 
     mesh_event_type_t evt = MESH_EVT_PROBE_REPLY_TX;
     if (xQueueSend(s_mesh_event_queue, &evt, 0) != pdTRUE) {
@@ -1583,24 +1597,30 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
         return;
     }
     bramble_ack_t ack = {
-        .header = {
-            .version = BRAMBLE_VERSION,
-            .type = PKT_TYPE_ACK,
-            .flags = 0,
-            .hop_limit = 8,
-            .dest_addr = dest_addr,
-            .packet_id = next_packet_id(),
-        },
+        .header =
+            {
+                .version = BRAMBLE_VERSION,
+                .type = PKT_TYPE_ACK,
+                .flags = 0,
+                .hop_limit = 8,
+                .dest_addr = dest_addr,
+                .packet_id = next_packet_id(),
+            },
         .src_addr = s_identity->address,
         .ack_packet_id = ack_packet_id,
         .ack_flags = 0,
         .rssi_at_dest = rssi,
         .hop_count = 1,
-        .relay_path = { s_identity->address },  /* destination is first hop */
-        .seq = {
-            (uint8_t)(ack_seq >> 40), (uint8_t)(ack_seq >> 32), (uint8_t)(ack_seq >> 24),
-            (uint8_t)(ack_seq >> 16), (uint8_t)(ack_seq >> 8), (uint8_t)ack_seq,
-        },
+        .relay_path = {s_identity->address}, /* destination is first hop */
+        .seq =
+            {
+                (uint8_t)(ack_seq >> 40),
+                (uint8_t)(ack_seq >> 32),
+                (uint8_t)(ack_seq >> 24),
+                (uint8_t)(ack_seq >> 16),
+                (uint8_t)(ack_seq >> 8),
+                (uint8_t)ack_seq,
+            },
     };
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (those are excluded from the MAC and
@@ -1624,12 +1644,12 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
      * the node is severely over budget. */
     int ret = mesh_tx(buf, (uint8_t)wire_len, TX_KIND_ACK);
     if (ret == TX_GATE_OK) {
-        ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32 " (%u hops)",
-                 ack_packet_id, dest_addr, ack.hop_count);
+        ESP_LOGI(TAG, "ACK sent for pkt %08" PRIX32 " to %08" PRIX32 " (%u hops)", ack_packet_id,
+                 dest_addr, ack.hop_count);
     }
 }
 
-static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
+static void forward_ack(bramble_ack_t* ack, int16_t rssi) {
     /* Append our address to the relay path */
     if (ack->hop_count < ACK_MAX_HOPS) {
         ack->relay_path[ack->hop_count++] = s_identity->address;
@@ -1643,7 +1663,7 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
     ack->header.hop_limit--;
 
     /* Look up route back to the original sender */
-    route_entry_t *route = route_lookup(&s_routes, ack->header.dest_addr);
+    route_entry_t* route = route_lookup(&s_routes, ack->header.dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
         ESP_LOGW(TAG, "No route to forward ACK to %08" PRIX32, ack->header.dest_addr);
         return;
@@ -1655,7 +1675,8 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
      * (bramble_ack_serialize's len < need guard). */
     uint8_t buf[ACK_MAX_SIZE];
     esp_err_t err = bramble_ack_serialize(ack, buf, sizeof(buf));
-    if (err != ESP_OK) return;
+    if (err != ESP_OK)
+        return;
 
     size_t wire_len = bramble_ack_wire_size(ack);
     ESP_LOGI(TAG, "Forwarding ACK for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
@@ -1663,7 +1684,7 @@ static void forward_ack(bramble_ack_t *ack, int16_t rssi) {
     mesh_tx(buf, (uint8_t)wire_len, TX_KIND_ACK);
 }
 
-static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     bramble_ack_t ack;
     esp_err_t err = bramble_ack_deserialize(&ack, data, len);
     if (err != ESP_OK) {
@@ -1700,7 +1721,8 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
         return;
     }
 
-    ESP_LOGI(TAG, "ACK received for pkt %08" PRIX32 " from %08" PRIX32 " (RSSI at dest: %d, %u hops)",
+    ESP_LOGI(TAG,
+             "ACK received for pkt %08" PRIX32 " from %08" PRIX32 " (RSSI at dest: %d, %u hops)",
              ack.ack_packet_id, ack.src_addr, ack.rssi_at_dest, ack.hop_count);
 
     /* Remove from pending ACK table */
@@ -1718,12 +1740,13 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     }
 
     /* Update message store status */
-    if (msg_store_update_status_with_route(ack.ack_packet_id, MSG_STATUS_DELIVERED, route_hop_count, route_hops)) {
+    if (msg_store_update_status_with_route(ack.ack_packet_id, MSG_STATUS_DELIVERED, route_hop_count,
+                                           route_hops)) {
         record_ack_delivery_event(&ack);
         /* Notify webapp with full relay path from ACK */
         char addr_buf[12];
         snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, ack.src_addr);
-        cJSON *params = cJSON_CreateObject();
+        cJSON* params = cJSON_CreateObject();
         cJSON_AddStringToObject(params, "from", addr_buf);
         char pkt_buf[12];
         snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, ack.ack_packet_id);
@@ -1731,13 +1754,14 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
         cJSON_AddStringToObject(params, "status", "delivered");
         cJSON_AddNumberToObject(params, "rssi_at_dest", ack.rssi_at_dest);
 
-        cJSON *path = cJSON_AddArrayToObject(params, "relayPath");
+        cJSON* path = cJSON_AddArrayToObject(params, "relayPath");
         char hop_buf[12];
         for (uint8_t i = 0; i < route_hop_count; i++) {
-            cJSON *hop = cJSON_CreateObject();
+            cJSON* hop = cJSON_CreateObject();
             snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, route_hops[i]);
             cJSON_AddStringToObject(hop, "addr", hop_buf);
-            cJSON_AddNumberToObject(hop, "rssi", (i == (route_hop_count - 1)) ? ack.rssi_at_dest : 0);
+            cJSON_AddNumberToObject(hop, "rssi",
+                                    (i == (route_hop_count - 1)) ? ack.rssi_at_dest : 0);
             cJSON_AddItemToArray(path, hop);
         }
 
@@ -1750,8 +1774,9 @@ static void handle_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t sn
     }
 }
 
-static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
-    if (!receipt) return;
+static void forward_delivery_receipt(bramble_delivery_receipt_t* receipt) {
+    if (!receipt)
+        return;
 
     if (receipt->hop_count < DELIVERY_RECEIPT_MAX_HOPS) {
         receipt->relay_path[receipt->hop_count++] = s_identity->address;
@@ -1763,9 +1788,10 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
     }
     receipt->header.hop_limit--;
 
-    route_entry_t *route = route_lookup(&s_routes, receipt->header.dest_addr);
+    route_entry_t* route = route_lookup(&s_routes, receipt->header.dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
-        ESP_LOGW(TAG, "No route to forward delivery receipt to %08" PRIX32, receipt->header.dest_addr);
+        ESP_LOGW(TAG, "No route to forward delivery receipt to %08" PRIX32,
+                 receipt->header.dest_addr);
         return;
     }
 
@@ -1775,21 +1801,24 @@ static void forward_delivery_receipt(bramble_delivery_receipt_t *receipt) {
      * file. */
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     esp_err_t err = bramble_delivery_receipt_serialize(receipt, buf, sizeof(buf));
-    if (err != ESP_OK) return;
+    if (err != ESP_OK)
+        return;
 
     size_t wire_len = DELIVERY_RECEIPT_MIN_SIZE + ((size_t)receipt->hop_count * 4u);
-    ESP_LOGI(TAG, "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
+    ESP_LOGI(TAG,
+             "Forwarding delivery receipt for pkt %08" PRIX32 " toward %08" PRIX32 " (%u hops)",
              receipt->orig_packet_id, receipt->header.dest_addr, receipt->hop_count);
     /* Deny behavior: a forwarded receipt is best-effort on behalf of a
      * remote sender; suppress when the RECEIPT lane is exhausted. */
     if (mesh_tx(buf, (uint8_t)wire_len, TX_KIND_RECEIPT) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG,
-                 "Forwarded delivery receipt suppressed for pkt=%08" PRIX32 ": receipt airtime budget exhausted",
+                 "Forwarded delivery receipt suppressed for pkt=%08" PRIX32
+                 ": receipt airtime budget exhausted",
                  receipt->orig_packet_id);
     }
 }
 
-static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     (void)snr;
     bramble_delivery_receipt_t receipt;
     if (bramble_delivery_receipt_deserialize(&receipt, data, len) != ESP_OK) {
@@ -1824,14 +1853,11 @@ static void handle_delivery_receipt(const uint8_t *data, uint8_t len, int16_t rs
         return;
     }
 
-    mesh_emit_broadcast_delivery_notification(receipt.src_addr,
-                                              receipt.orig_packet_id,
-                                              rssi,
-                                              receipt.hop_count,
-                                              receipt.relay_path);
+    mesh_emit_broadcast_delivery_notification(receipt.src_addr, receipt.orig_packet_id, rssi,
+                                              receipt.hop_count, receipt.relay_path);
 }
 
-static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Data packet too short: %u", len);
@@ -1841,10 +1867,10 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     uint32_t src_addr;
     memcpy(&src_addr, data + HEADER_SIZE, 4);
 
-    const uint8_t *nonce = data + HEADER_SIZE + 4;
+    const uint8_t* nonce = data + HEADER_SIZE + 4;
     size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
-    const uint8_t *ciphertext = nonce + BRAMBLE_NONCE_SIZE;
-    const uint8_t *tag = ciphertext + ct_len;
+    const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
+    const uint8_t* tag = ciphertext + ct_len;
 
     channel_msg_info_t info;
     if (ct_len > BRAMBLE_MAX_PACKET_SIZE) {
@@ -1875,17 +1901,15 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
      * setting FLAG_CHANNEL on the way out. */
     int is_channel_message = (rx_hdr.flags & FLAG_CHANNEL) ? 1 : 0;
     if (is_channel_message) {
-        int ret = channel_msg_decrypt(s_channels, s_num_channels,
-                                      nonce, ciphertext, ct_len, tag,
-                                      aad, HEADER_SIZE + 4,
-                                      plaintext, &info, now_ms());
+        int ret = channel_msg_decrypt(s_channels, s_num_channels, nonce, ciphertext, ct_len, tag,
+                                      aad, HEADER_SIZE + 4, plaintext, &info, now_ms());
         if (ret != 0) {
             ESP_LOGW(TAG, "Failed to decrypt channel data from %08" PRIX32, src_addr);
             return;
         }
     } else {
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+        dm_session_t* sess = dm_lookup(&s_dm_table, src_addr);
         int ok = 0;
         if (sess && sess->state == DM_STATE_ACTIVE) {
             ok = (dm_session_decrypt(sess, &rx_hdr, src_addr, nonce, ciphertext, ct_len, tag,
@@ -1962,8 +1986,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                 return;
             }
             uint32_t now_s = (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000);
-            int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at,
-                                            now_s, timesync_is_confident(&s_timesync, now_ms()));
+            int dp = replay_deferred_accept(&s_deferred, src_addr, rx_counter, info.sent_at, now_s,
+                                            timesync_is_confident(&s_timesync, now_ms()));
             if (dp != REPLAY_ACCEPT) {
                 ESP_LOGD(TAG, "Deferred replay drop from %08" PRIX32 " ctr=%llu sent_at=%" PRIu32,
                          src_addr, (unsigned long long)rx_counter, info.sent_at);
@@ -1999,23 +2023,23 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                 frag_hdr.frag_total <= FRAG_MAX_FRAGMENTS) {
                 /* This is a fragment — process through reassembly */
                 ESP_LOGI(TAG, "RX fragment %u/%u msg_id=%04X from %08" PRIX32,
-                         frag_hdr.frag_index + 1, frag_hdr.frag_total,
-                         frag_hdr.message_id, info.src_addr);
+                         frag_hdr.frag_index + 1, frag_hdr.frag_total, frag_hdr.message_id,
+                         info.src_addr);
 
-                int ret = reassembly_add(&s_reassembly, &frag_hdr,
-                                        info.data + FRAG_HEADER_SIZE,
-                                        info.data_len - FRAG_HEADER_SIZE,
-                                        now_ms(), rx_hdr.packet_id);
+                int ret =
+                    reassembly_add(&s_reassembly, &frag_hdr, info.data + FRAG_HEADER_SIZE,
+                                   info.data_len - FRAG_HEADER_SIZE, now_ms(), rx_hdr.packet_id);
                 if (ret == 1) {
                     /* Reassembly complete — collect the full message.
                      * Buffers allocated on heap to avoid ~1.2KB stack pressure
                      * in the mesh task (which has tight stack headroom). */
                     /* Get first-received fragment's packet_id before collect frees slot */
-                    uint32_t first_frag_pkt_id = reassembly_get_first_packet_id(
-                        &s_reassembly, frag_hdr.message_id);
+                    uint32_t first_frag_pkt_id =
+                        reassembly_get_first_packet_id(&s_reassembly, frag_hdr.message_id);
 
-                    size_t reasm_sz = frag_hdr.frag_total * FRAG_MAX_PLAINTEXT;  /* F27: size to actual count */
-                    uint8_t *reassembled = malloc(reasm_sz);
+                    size_t reasm_sz =
+                        frag_hdr.frag_total * FRAG_MAX_PLAINTEXT; /* F27: size to actual count */
+                    uint8_t* reassembled = malloc(reasm_sz);
                     if (!reassembled) {
                         ESP_LOGE(TAG, "OOM for reassembly buffer");
                         return;
@@ -2024,32 +2048,36 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                                                        reassembled, reasm_sz);
                     if (total_len > 0) {
                         /* Process the reassembled message */
-                        char *text = malloc(reasm_sz + 1);
+                        char* text = malloc(reasm_sz + 1);
                         if (!text) {
                             ESP_LOGE(TAG, "OOM for reassembly text buffer");
                             free(reassembled);
                             return;
                         }
                         size_t tlen = (size_t)total_len;
-                        if (tlen >= reasm_sz + 1) tlen = reasm_sz;
+                        if (tlen >= reasm_sz + 1)
+                            tlen = reasm_sz;
                         memcpy(text, reassembled, tlen);
                         text[tlen] = '\0';
 
                         ESP_LOGI(TAG, "");
-                        ESP_LOGI(TAG, "*** REASSEMBLED MESSAGE from %08" PRIX32 " ***", info.src_addr);
+                        ESP_LOGI(TAG, "*** REASSEMBLED MESSAGE from %08" PRIX32 " ***",
+                                 info.src_addr);
                         ESP_LOGI(TAG, ">>> %s", text);
                         ESP_LOGI(TAG, "*** (%u bytes from %u fragments, ch:%d RSSI:%d SNR:%d) ***",
-                                 (unsigned)total_len, frag_hdr.frag_total, info.channel_id, rssi, snr);
+                                 (unsigned)total_len, frag_hdr.frag_total, info.channel_id, rssi,
+                                 snr);
 
                         /* Store and notify for reassembled message */
                         uint32_t hdr_dest;
                         memcpy(&hdr_dest, data + 4, 4);
                         bool is_channel_message = (info.channel_id > 0);
                         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message)
-                            ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
+                                                  ? MSG_DIR_BROADCAST_IN
+                                                  : MSG_DIR_INCOMING;
                         int16_t channel_index = (int16_t)info.channel_id;
-                        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
-                                          0, MSG_STATUS_NONE, channel_index);
+                        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr, 0,
+                                          MSG_STATUS_NONE, channel_index);
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
                         ui_graphics_notify(UI_EVT_MSG_RECEIVED);
@@ -2066,22 +2094,25 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
                             char addr_buf[12];
                             snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
 
-                            cJSON *params = cJSON_CreateObject();
+                            cJSON* params = cJSON_CreateObject();
                             cJSON_AddStringToObject(params, "from", addr_buf);
                             cJSON_AddStringToObject(params, "text", text);
                             cJSON_AddNumberToObject(params, "rssi", rssi);
                             cJSON_AddNumberToObject(params, "snr", snr);
-                            cJSON_AddNumberToObject(params, "channel", (info.channel_id > 0) ? info.channel_id : -1);
-                            cJSON_AddBoolToObject(params, "broadcast", (dir == MSG_DIR_BROADCAST_IN));
+                            cJSON_AddNumberToObject(params, "channel",
+                                                    (info.channel_id > 0) ? info.channel_id : -1);
+                            cJSON_AddBoolToObject(params, "broadcast",
+                                                  (dir == MSG_DIR_BROADCAST_IN));
                             rpc_notify("bramble.onMessage", params);
                             cJSON_Delete(params);
                         }
 
-                        /* Send ACK/receipt: use first-received fragment's packet_id for broadcasts */
+                        /* Send ACK/receipt: use first-received fragment's packet_id for broadcasts
+                         */
                         if (dir == MSG_DIR_INCOMING) {
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
-                        } else if (mesh_should_emit_broadcast_delivery_receipt(rx_hdr.dest_addr,
-                                       (uint8_t)neighbor_count(&s_neighbors))) {
+                        } else if (mesh_should_emit_broadcast_delivery_receipt(
+                                       rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
                             queue_broadcast_delivery_receipt(info.src_addr, first_frag_pkt_id);
                         }
 
@@ -2104,7 +2135,8 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         /* Not a fragment — process as regular single-packet message */
         char text[256];
         size_t tlen = info.data_len;
-        if (tlen >= sizeof(text)) tlen = sizeof(text) - 1;
+        if (tlen >= sizeof(text))
+            tlen = sizeof(text) - 1;
         memcpy(text, info.data, tlen);
         text[tlen] = '\0';
 
@@ -2115,13 +2147,13 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
 
         /* Store in message store — classify broadcast vs channel routing */
         uint32_t hdr_dest;
-        memcpy(&hdr_dest, data + 4, 4);  /* dest_addr at offset 4 in header */
+        memcpy(&hdr_dest, data + 4, 4); /* dest_addr at offset 4 in header */
         bool is_channel_message = (info.channel_id > 0);
-        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message)
-            ? MSG_DIR_BROADCAST_IN : MSG_DIR_INCOMING;
+        msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message) ? MSG_DIR_BROADCAST_IN
+                                                                              : MSG_DIR_INCOMING;
         int16_t channel_index = (int16_t)info.channel_id;
-        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr,
-                          0, MSG_STATUS_NONE, channel_index);
+        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr, 0, MSG_STATUS_NONE,
+                          channel_index);
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
         /* Notify UI of new message for unread badge and refresh */
@@ -2140,14 +2172,14 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
             char addr_buf[12];
             snprintf(addr_buf, sizeof(addr_buf), "%08" PRIX32, info.src_addr);
 
-            cJSON *params = cJSON_CreateObject();
+            cJSON* params = cJSON_CreateObject();
             cJSON_AddStringToObject(params, "from", addr_buf);
             cJSON_AddStringToObject(params, "text", text);
             cJSON_AddNumberToObject(params, "rssi", rssi);
             cJSON_AddNumberToObject(params, "snr", snr);
-            cJSON_AddNumberToObject(params, "channel", (info.channel_id > 0) ? info.channel_id : -1);
-            cJSON_AddBoolToObject(params, "broadcast",
-                dir == MSG_DIR_BROADCAST_IN);
+            cJSON_AddNumberToObject(params, "channel",
+                                    (info.channel_id > 0) ? info.channel_id : -1);
+            cJSON_AddBoolToObject(params, "broadcast", dir == MSG_DIR_BROADCAST_IN);
             rpc_notify("bramble.onMessage", params);
             cJSON_Delete(params);
         }
@@ -2156,8 +2188,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
         } else if (mesh_should_emit_broadcast_delivery_receipt(
-                       rx_hdr.dest_addr,
-                       (uint8_t)neighbor_count(&s_neighbors))) {
+                       rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
         }
 
@@ -2179,7 +2210,7 @@ static void handle_data(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
  * Returns TX_GATE_OK, TX_GATE_ERR_BUDGET (denied, nothing transmitted)
  * or TX_GATE_ERR_RADIO. Per-kind deny behavior lives at the call sites.
  */
-static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind) {
+static int mesh_tx(const uint8_t* buf, uint8_t len, tx_kind_t kind) {
     uint8_t pkt_type = (len >= 2) ? buf[1] : 0xFF;
 
     /* Relaxed read: neighbor_count(&s_neighbors) may run from the RPC/UI
@@ -2197,13 +2228,13 @@ static int mesh_tx(const uint8_t *buf, uint8_t len, tx_kind_t kind) {
         tx_gate_snapshot(&s_shared.airtime);
         xSemaphoreGive(s_state_mutex);
     } else if (rc == TX_GATE_ERR_BUDGET) {
-        ESP_LOGD(TAG, "TX denied by airtime budget (kind=%d type=0x%02X len=%u)",
-                 (int)kind, pkt_type, len);
+        ESP_LOGD(TAG, "TX denied by airtime budget (kind=%d type=0x%02X len=%u)", (int)kind,
+                 pkt_type, len);
     }
     return rc;
 }
 
-static void send_rreq(const bramble_rreq_t *rreq) {
+static void send_rreq(const bramble_rreq_t* rreq) {
     /* Red-team audit: was buf[64], a hand-counted constant. RREQ_SIZE (30)
      * is unaffected by the ws 1.3b size bumps and always fit, but
      * macro-ized for the same reason as the other TX buffers in this
@@ -2211,8 +2242,8 @@ static void send_rreq(const bramble_rreq_t *rreq) {
      * big enough. */
     uint8_t buf[RREQ_SIZE];
     if (bramble_rreq_serialize(rreq, buf, sizeof(buf)) == ESP_OK) {
-        ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32,
-                 rreq->query_id, rreq->header.dest_addr);
+        ESP_LOGI(TAG, "TX RREQ query=%08" PRIX32 " dest=%08" PRIX32, rreq->query_id,
+                 rreq->header.dest_addr);
         /* Deny behavior: routing control rides the reserved CRITICAL lane
          * (can also borrow from NORMAL); if even that is exhausted the
          * discovery retry scheduler will try again. Log loudly. */
@@ -2222,14 +2253,14 @@ static void send_rreq(const bramble_rreq_t *rreq) {
     }
 }
 
-static void send_rrep(const bramble_rrep_t *rrep) {
+static void send_rrep(const bramble_rrep_t* rrep) {
     /* Red-team audit: was buf[64], a hand-counted constant. RREP_SIZE (40
      * as of ws 1.3b) always fit, but macro-ized for the same reason as
      * the other TX buffers in this file. */
     uint8_t buf[RREP_SIZE];
     if (bramble_rrep_serialize(rrep, buf, sizeof(buf)) == ESP_OK) {
-        ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32,
-                 rrep->query_id, rrep->next_hop);
+        ESP_LOGI(TAG, "TX RREP query=%08" PRIX32 " → next=%08" PRIX32, rrep->query_id,
+                 rrep->next_hop);
         /* Pre-existing bug fixed here (found while adding ws 1.3b's seq
          * field): this was HEADER_SIZE + 19 (31 bytes), 3 short of the
          * struct's 22-byte payload (query_id+src_addr+next_hop+hop_count+
@@ -2245,16 +2276,17 @@ static void send_rrep(const bramble_rrep_t *rrep) {
 
 static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
     bramble_rerr_t rerr = {
-        .header = {
-            .version = BRAMBLE_VERSION,
-            .type = PKT_TYPE_RERR,
-            .flags = 0,
-            /* Per-hop budget; the route-match chain bounds teardown depth
-             * because matching relays re-originate with a fresh limit. */
-            .hop_limit = ROUTE_HOP_LIMIT_MAX,
-            .dest_addr = 0xFFFFFFFF, /* broadcast */
-            .packet_id = next_packet_id(),
-        },
+        .header =
+            {
+                .version = BRAMBLE_VERSION,
+                .type = PKT_TYPE_RERR,
+                .flags = 0,
+                /* Per-hop budget; the route-match chain bounds teardown depth
+                 * because matching relays re-originate with a fresh limit. */
+                .hop_limit = ROUTE_HOP_LIMIT_MAX,
+                .dest_addr = 0xFFFFFFFF, /* broadcast */
+                .packet_id = next_packet_id(),
+            },
         .reporter_addr = s_identity->address,
         .broken_dest = broken_dest,
         .broken_next_hop = broken_next_hop,
@@ -2314,20 +2346,19 @@ static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
  * the queue is full (under a forward storm the jitter no longer matters, and
  * dropping the forward could sever the only path).
  */
-static void schedule_rreq_forward(const bramble_rreq_t *fwd) {
+static void schedule_rreq_forward(const bramble_rreq_t* fwd) {
     uint32_t jitter = discovery_forward_jitter_ms(esp_random());
     for (int i = 0; i < RREQ_FWD_QUEUE_CAPACITY; i++) {
         if (!s_rreq_fwd_queue[i].used) {
             s_rreq_fwd_queue[i].used = true;
             s_rreq_fwd_queue[i].due_at_ms = now_ms() + jitter;
             s_rreq_fwd_queue[i].rreq = *fwd;
-            ESP_LOGD(TAG, "RREQ fwd query=%08" PRIX32 " jittered %" PRIu32 "ms",
-                     fwd->query_id, jitter);
+            ESP_LOGD(TAG, "RREQ fwd query=%08" PRIX32 " jittered %" PRIu32 "ms", fwd->query_id,
+                     jitter);
             return;
         }
     }
-    ESP_LOGW(TAG, "RREQ fwd queue full; forwarding query=%08" PRIX32 " immediately",
-             fwd->query_id);
+    ESP_LOGW(TAG, "RREQ fwd queue full; forwarding query=%08" PRIX32 " immediately", fwd->query_id);
     send_rreq(fwd);
 }
 
@@ -2337,8 +2368,7 @@ static void schedule_rreq_forward(const bramble_rreq_t *fwd) {
  */
 static void process_rreq_forward_queue(uint32_t t) {
     for (int i = 0; i < RREQ_FWD_QUEUE_CAPACITY; i++) {
-        if (s_rreq_fwd_queue[i].used &&
-            (int32_t)(t - s_rreq_fwd_queue[i].due_at_ms) >= 0) {
+        if (s_rreq_fwd_queue[i].used && (int32_t)(t - s_rreq_fwd_queue[i].due_at_ms) >= 0) {
             send_rreq(&s_rreq_fwd_queue[i].rreq);
             s_rreq_fwd_queue[i].used = false;
         }
@@ -2355,23 +2385,23 @@ static void flush_queued_messages(uint32_t dest_addr) {
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (s_queued_msgs[i].used && s_queued_msgs[i].reason == QUEUE_REASON_ROUTE &&
             s_queued_msgs[i].dest_addr == dest_addr) {
-            ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)",
-                     dest_addr, (unsigned)s_queued_msgs[i].len);
+            ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)", dest_addr,
+                     (unsigned)s_queued_msgs[i].len);
             mesh_send_message(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len);
             s_queued_msgs[i].used = false;
         }
     }
 }
 
-static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     bramble_rreq_t rreq;
     if (bramble_rreq_deserialize(&rreq, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid RREQ packet");
         return;
     }
 
-    ESP_LOGI(TAG, "RX RREQ query=%08" PRIX32 " dest=%08" PRIX32 " hops=%u metric=%u",
-             rreq.query_id, rreq.header.dest_addr, rreq.hop_count, rreq.metric);
+    ESP_LOGI(TAG, "RX RREQ query=%08" PRIX32 " dest=%08" PRIX32 " hops=%u metric=%u", rreq.query_id,
+             rreq.header.dest_addr, rreq.hop_count, rreq.metric);
 
     /* First-arrival dedup: the first flood copy wins. Path quality still
      * arbitrates at route_install time, between RREPs answering different
@@ -2409,7 +2439,7 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         rrep_sign(&rrep);
 
         /* Route RREP back toward the previous hop */
-        reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rreq.query_id);
+        reverse_route_t* rev = reverse_route_lookup(&s_reverse_routes, rreq.query_id);
         if (rev) {
             rrep.next_hop = rev->prev_hop;
         }
@@ -2418,8 +2448,8 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         /* Install route to the source via prev_hop. The link penalty
          * subtracts from the higher-is-better path metric. */
         uint8_t metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
-        route_install(&s_routes, rreq.prev_hop, rreq.prev_hop,
-                      rreq.hop_count, metric, ROUTE_ACTIVE, now_ms());
+        route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, metric, ROUTE_ACTIVE,
+                      now_ms());
         return;
     }
 
@@ -2436,7 +2466,7 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     }
 }
 
-static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
+static void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     bramble_rrep_t rrep;
     if (bramble_rrep_deserialize(&rrep, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid RREP packet");
@@ -2453,8 +2483,8 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
-    ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u",
-             rrep.query_id, rrep.src_addr, rrep.hop_count);
+    ESP_LOGI(TAG, "RX RREP query=%08" PRIX32 " src=%08" PRIX32 " hops=%u", rrep.query_id,
+             rrep.src_addr, rrep.hop_count);
 
     /* ws 1.3b: replay check on the authenticated signer (rrep.src_addr is
      * MAC-covered, so an attacker cannot dodge the window by mutating it).
@@ -2484,8 +2514,8 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     switch (d.action) {
     case RREP_RX_DELIVER:
         /* This RREP is for us: we originated the RREQ. */
-        ESP_LOGI(TAG, "Route discovered to %08" PRIX32 " (hops=%u, metric=%u)",
-                 d.deliver_dest, d.route_hops, d.route_metric);
+        ESP_LOGI(TAG, "Route discovered to %08" PRIX32 " (hops=%u, metric=%u)", d.deliver_dest,
+                 d.route_hops, d.route_metric);
         discovery_remove(&s_pending_disc, d.deliver_dest);
 
         /* Flush queued messages waiting for this route */
@@ -2504,10 +2534,10 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
     }
 }
 
-static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *ctx) {
+static void rerr_fastfail_notify(uint32_t packet_id, const char* reason, void* ctx) {
     (void)ctx;
 
-    cJSON *params = cJSON_CreateObject();
+    cJSON* params = cJSON_CreateObject();
     if (!params) {
         return;
     }
@@ -2524,7 +2554,7 @@ static void rerr_fastfail_notify(uint32_t packet_id, const char *reason, void *c
     cJSON_Delete(params);
 }
 
-static void handle_rerr(const uint8_t *data, uint8_t len) {
+static void handle_rerr(const uint8_t* data, uint8_t len) {
     bramble_rerr_t rerr;
     if (bramble_rerr_deserialize(&rerr, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid RERR packet");
@@ -2535,13 +2565,13 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
      * teardown. An unauthenticated RERR must never break a route: reject
      * before route_lookup/route_marked_broken/fastfail run at all. */
     if (!rerr_verify(&rerr)) {
-        ESP_LOGW(TAG, "RERR auth failed dest=%08" PRIX32 " broken_hop=%08" PRIX32,
-                 rerr.broken_dest, rerr.broken_next_hop);
+        ESP_LOGW(TAG, "RERR auth failed dest=%08" PRIX32 " broken_hop=%08" PRIX32, rerr.broken_dest,
+                 rerr.broken_next_hop);
         return;
     }
 
-    ESP_LOGW(TAG, "RX RERR: dest=%08" PRIX32 " broken_hop=%08" PRIX32,
-             rerr.broken_dest, rerr.broken_next_hop);
+    ESP_LOGW(TAG, "RX RERR: dest=%08" PRIX32 " broken_hop=%08" PRIX32, rerr.broken_dest,
+             rerr.broken_next_hop);
 
     /* ws 1.3b: replay check on the authenticated (reporter_addr, seq) pair
      * (both MAC-covered as of this change, so an attacker cannot dodge the
@@ -2558,7 +2588,7 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
     }
 
     /* Invalidate route if it uses the broken next hop */
-    route_entry_t *route = route_lookup(&s_routes, rerr.broken_dest);
+    route_entry_t* route = route_lookup(&s_routes, rerr.broken_dest);
     bool route_marked_broken = false;
     if (route && route->next_hop == rerr.broken_next_hop) {
         route->state = ROUTE_BROKEN;
@@ -2573,16 +2603,11 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
     }
 
     /* Fail fast for pending packets to the destination, even on forwarded RERRs */
-    size_t failed = rerr_ack_failfast_for_dest(&s_pending_acks,
-                                               rerr.broken_dest,
-                                               "route_broken",
-                                               rerr_fastfail_notify,
-                                               NULL);
+    size_t failed = rerr_ack_failfast_for_dest(&s_pending_acks, rerr.broken_dest, "route_broken",
+                                               rerr_fastfail_notify, NULL);
     if (failed > 0) {
-        ESP_LOGW(TAG,
-                 "RERR fast-failed %u pending ACK(s) for dest %08" PRIX32 "%s",
-                 (unsigned)failed,
-                 rerr.broken_dest,
+        ESP_LOGW(TAG, "RERR fast-failed %u pending ACK(s) for dest %08" PRIX32 "%s",
+                 (unsigned)failed, rerr.broken_dest,
                  route_marked_broken ? "" : " (forwarded RERR/no local next-hop match)");
     }
 }
@@ -2591,10 +2616,10 @@ static void handle_rerr(const uint8_t *data, uint8_t len) {
 
 /* ── Mailbox helpers ─────────────────────────────────────────────────── */
 
-static bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr,
-                               const uint8_t *raw, uint8_t raw_len,
-                               uint32_t packet_id) {
-    if (!s_mailbox_enabled) return false;
+static bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr, const uint8_t* raw,
+                               uint8_t raw_len, uint32_t packet_id) {
+    if (!s_mailbox_enabled)
+        return false;
 
     /* Component payload is capped at MAILBOX_MAX_PAYLOAD (200) bytes.
      * Raw packets that exceed this limit cannot be buffered — drop with a warning. */
@@ -2604,11 +2629,10 @@ static bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr,
         return false;
     }
 
-    int rc = mailbox_store(&s_mailbox, src_addr, dest_addr,
-                           raw, raw_len, packet_id, now_ms());
+    int rc = mailbox_store(&s_mailbox, src_addr, dest_addr, raw, raw_len, packet_id, now_ms());
     if (rc == 0) {
-        ESP_LOGI(TAG, "Mailbox: stored packet for %08" PRIX32 " (id=%08" PRIX32 ")",
-                 dest_addr, packet_id);
+        ESP_LOGI(TAG, "Mailbox: stored packet for %08" PRIX32 " (id=%08" PRIX32 ")", dest_addr,
+                 packet_id);
         return true;
     } else if (rc == -2) {
         ESP_LOGD(TAG, "Mailbox: duplicate packet id=%08" PRIX32 ", not stored", packet_id);
@@ -2622,35 +2646,32 @@ static void mailbox_flush_for(uint32_t dest_addr) {
     mailbox_entry_t entries[MAILBOX_MAX_PER_DEST];
     int count = mailbox_retrieve(&s_mailbox, dest_addr, entries, MAILBOX_MAX_PER_DEST);
     for (int i = 0; i < count; i++) {
-        ESP_LOGI(TAG, "Mailbox: delivering stored packet to %08" PRIX32
-                 " (id=%08" PRIX32 " len=%u)",
+        ESP_LOGI(TAG,
+                 "Mailbox: delivering stored packet to %08" PRIX32 " (id=%08" PRIX32 " len=%u)",
                  dest_addr, entries[i].packet_id, entries[i].payload_len);
         /* Deny behavior: budget denial and radio failure both re-store the
          * entry for the next flush; stored mail is never silently lost. */
         int rc = mesh_tx(entries[i].payload, (uint8_t)entries[i].payload_len, TX_KIND_MAILBOX);
         if (rc != 0) {
             /* Transmit failed (LBT / radio busy) — re-store for retry on next flush */
-            ESP_LOGW(TAG, "Mailbox: transmit failed (rc=%d) for id=%08" PRIX32
-                     ", re-queuing", rc, entries[i].packet_id);
-            mailbox_store(&s_mailbox, entries[i].src_addr, entries[i].dest_addr,
-                          entries[i].payload, entries[i].payload_len,
-                          entries[i].packet_id, entries[i].stored_at_ms);
+            ESP_LOGW(TAG, "Mailbox: transmit failed (rc=%d) for id=%08" PRIX32 ", re-queuing", rc,
+                     entries[i].packet_id);
+            mailbox_store(&s_mailbox, entries[i].src_addr, entries[i].dest_addr, entries[i].payload,
+                          entries[i].payload_len, entries[i].packet_id, entries[i].stored_at_ms);
         }
     }
 }
 
-static void mailbox_expire(uint32_t t) {
-    mailbox_purge_expired(&s_mailbox, t);
-}
+static void mailbox_expire(uint32_t t) { mailbox_purge_expired(&s_mailbox, t); }
 
-static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_header_t *header) {
+static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_t* header) {
     if (header->hop_limit <= 1) {
         ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
         return;
     }
 
     /* Look up route to destination */
-    route_entry_t *route = route_lookup(&s_routes, header->dest_addr);
+    route_entry_t* route = route_lookup(&s_routes, header->dest_addr);
     if (!route || route->state == ROUTE_BROKEN) {
         /* Extract src_addr from the data packet header area (offset HEADER_SIZE) */
         uint32_t fwd_src_addr = 0;
@@ -2659,8 +2680,7 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
         }
         /* If mailbox enabled, store for later delivery instead of dropping */
         if (s_mailbox_enabled &&
-            mesh_mailbox_store(fwd_src_addr, header->dest_addr,
-                               data, len, header->packet_id)) {
+            mesh_mailbox_store(fwd_src_addr, header->dest_addr, data, len, header->packet_id)) {
             ESP_LOGI(TAG, "No route to %08" PRIX32 " — stored in mailbox", header->dest_addr);
         } else {
             ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
@@ -2677,8 +2697,8 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     fwd_hdr.hop_limit--;
     bramble_header_serialize(&fwd_hdr, buf, HEADER_SIZE);
 
-    ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32,
-             header->dest_addr, route->next_hop);
+    ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32, header->dest_addr,
+             route->next_hop);
     /* Deny behavior: relayed traffic is dropped when the NORMAL lane is
      * exhausted; the originator's ACK-driven retries cover recovery. */
     if (mesh_tx(buf, len, TX_KIND_FORWARD) == TX_GATE_ERR_BUDGET) {
@@ -2691,7 +2711,7 @@ static void forward_data_packet(const uint8_t *data, uint8_t len, const bramble_
     route->use_count++;
 }
 
-static void mesh_process_rx_packet(const rx_packet_t *pkt) {
+static void mesh_process_rx_packet(const rx_packet_t* pkt) {
     if (pkt->len < HEADER_SIZE) {
         ESP_LOGW(TAG, "Packet too short: %u bytes", pkt->len);
         return;
@@ -2750,8 +2770,8 @@ static void mesh_process_rx_packet(const rx_packet_t *pkt) {
     s_shared.packets_rx++;
     xSemaphoreGive(s_state_mutex);
 
-    ESP_LOGI(TAG, "RX type=0x%02X from pkt_id=%08" PRIX32 " RSSI:%d SNR:%d",
-             header.type, header.packet_id, pkt->rssi, pkt->snr);
+    ESP_LOGI(TAG, "RX type=0x%02X from pkt_id=%08" PRIX32 " RSSI:%d SNR:%d", header.type,
+             header.packet_id, pkt->rssi, pkt->snr);
 
     switch (header.type) {
     case PKT_TYPE_BEACON:
@@ -2813,18 +2833,14 @@ static void record_churn_event(uint32_t t, uint8_t neighbor_count) {
  * Returns new interval in milliseconds.
  */
 static uint32_t compute_adaptive_beacon_interval(uint32_t t, uint8_t neighbor_count) {
-    uint8_t churn = beacon_churn_count(s_churn_history, MAX_CHURN_HISTORY, t,
-                                       s_beacon_policy.churn_window_ms);
+    uint8_t churn =
+        beacon_churn_count(s_churn_history, MAX_CHURN_HISTORY, t, s_beacon_policy.churn_window_ms);
 
     beacon_interval_decision_t d = beacon_interval_decide(
-        s_beacon_policy.enabled,
-        s_beacon_policy.mode == BEACON_MODE_ADAPTIVE,
-        s_beacon_policy.base_interval_ms,
-        s_beacon_policy.min_interval_ms,
-        s_beacon_policy.max_interval_ms,
-        s_beacon_policy.dense_threshold,
-        s_beacon_policy.churn_threshold,
-        neighbor_count, churn);
+        s_beacon_policy.enabled, s_beacon_policy.mode == BEACON_MODE_ADAPTIVE,
+        s_beacon_policy.base_interval_ms, s_beacon_policy.min_interval_ms,
+        s_beacon_policy.max_interval_ms, s_beacon_policy.dense_threshold,
+        s_beacon_policy.churn_threshold, neighbor_count, churn);
 
     if (!d.adaptive_active) {
         s_beacon_status.in_backoff = false;
@@ -2842,17 +2858,20 @@ static uint32_t compute_adaptive_beacon_interval(uint32_t t, uint8_t neighbor_co
     if (prev_mode != s_beacon_status.active_mode ||
         (s_beacon_status.last_transition_ms == 0 && s_beacon_policy.enabled)) {
         s_beacon_status.last_transition_ms = t;
-        ESP_LOGI(TAG, "Beacon policy: neighbors=%u churn=%u interval=%lums %s",
-                 neighbor_count, churn, (unsigned long)d.interval_ms,
-                 d.in_backoff ? "DENSE" : (d.interval_ms < s_beacon_policy.base_interval_ms ? "CHURN" : "STABLE"));
+        ESP_LOGI(TAG, "Beacon policy: neighbors=%u churn=%u interval=%lums %s", neighbor_count,
+                 churn, (unsigned long)d.interval_ms,
+                 d.in_backoff
+                     ? "DENSE"
+                     : (d.interval_ms < s_beacon_policy.base_interval_ms ? "CHURN" : "STABLE"));
     }
 
     return d.interval_ms;
 }
 
-int mesh_set_beacon_policy(const beacon_policy_config_t *config) {
-    if (!config) return -1;
-    
+int mesh_set_beacon_policy(const beacon_policy_config_t* config) {
+    if (!config)
+        return -1;
+
     /* Validate config */
     if (config->min_interval_ms < 10000 || config->max_interval_ms > 300000) {
         ESP_LOGE(TAG, "Invalid beacon interval range");
@@ -2862,18 +2881,18 @@ int mesh_set_beacon_policy(const beacon_policy_config_t *config) {
         ESP_LOGE(TAG, "Min interval must be <= max interval");
         return -1;
     }
-    
+
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_beacon_policy = *config;
     xSemaphoreGive(s_state_mutex);
-    
+
     /* Persist to NVS */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_BACKPRESSURE, NVS_READWRITE, &nvs) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS for beacon policy");
         return -1;
     }
-    
+
     nvs_set_u8(nvs, "enabled", config->enabled ? 1 : 0);
     nvs_set_u8(nvs, "mode", (uint8_t)config->mode);
     nvs_set_u32(nvs, "base_ms", config->base_interval_ms);
@@ -2882,29 +2901,31 @@ int mesh_set_beacon_policy(const beacon_policy_config_t *config) {
     nvs_set_u8(nvs, "dense_th", config->dense_threshold);
     nvs_set_u8(nvs, "churn_th", config->churn_threshold);
     nvs_set_u32(nvs, "churn_win", config->churn_window_ms);
-    
+
     esp_err_t err = nvs_commit(nvs);
     nvs_close(nvs);
-    
+
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to persist beacon policy to NVS");
         return -1;
     }
-    
-    ESP_LOGI(TAG, "Beacon policy updated: enabled=%d mode=%d base=%lums",
-             config->enabled, config->mode, (unsigned long)config->base_interval_ms);
+
+    ESP_LOGI(TAG, "Beacon policy updated: enabled=%d mode=%d base=%lums", config->enabled,
+             config->mode, (unsigned long)config->base_interval_ms);
     return 0;
 }
 
-void mesh_get_beacon_policy(beacon_policy_config_t *config) {
-    if (!config) return;
+void mesh_get_beacon_policy(beacon_policy_config_t* config) {
+    if (!config)
+        return;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *config = s_beacon_policy;
     xSemaphoreGive(s_state_mutex);
 }
 
-void mesh_get_beacon_status(beacon_policy_status_t *status) {
-    if (!status) return;
+void mesh_get_beacon_status(beacon_policy_status_t* status) {
+    if (!status)
+        return;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *status = s_beacon_status;
     xSemaphoreGive(s_state_mutex);
@@ -2916,10 +2937,10 @@ void mesh_beacon_policy_load_config(void) {
         /* No saved config, use defaults */
         return;
     }
-    
+
     uint8_t enabled = 0, mode = 0, dense_th = 10, churn_th = 3;
     uint32_t base_ms = 60000, min_ms = 30000, max_ms = 120000, churn_win = 60000;
-    
+
     nvs_get_u8(nvs, "enabled", &enabled);
     nvs_get_u8(nvs, "mode", &mode);
     nvs_get_u32(nvs, "base_ms", &base_ms);
@@ -2929,7 +2950,7 @@ void mesh_beacon_policy_load_config(void) {
     nvs_get_u8(nvs, "churn_th", &churn_th);
     nvs_get_u32(nvs, "churn_win", &churn_win);
     nvs_close(nvs);
-    
+
     s_beacon_policy.enabled = (enabled != 0);
     s_beacon_policy.mode = (beacon_policy_mode_t)mode;
     s_beacon_policy.base_interval_ms = base_ms;
@@ -2938,9 +2959,9 @@ void mesh_beacon_policy_load_config(void) {
     s_beacon_policy.dense_threshold = dense_th;
     s_beacon_policy.churn_threshold = churn_th;
     s_beacon_policy.churn_window_ms = churn_win;
-    
-    ESP_LOGI(TAG, "Loaded beacon policy: enabled=%d mode=%d base=%lums",
-             enabled, mode, (unsigned long)base_ms);
+
+    ESP_LOGI(TAG, "Loaded beacon policy: enabled=%d mode=%d base=%lums", enabled, mode,
+             (unsigned long)base_ms);
 }
 
 /* ── Main mesh task ─────────────────────────────────────────────────── */
@@ -2949,11 +2970,11 @@ void mesh_beacon_policy_load_config(void) {
  * Initialize radio configuration from frequency plan and NVS overrides.
  * Returns ESP_OK on success.
  */
-static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
+static esp_err_t mesh_init_radio_config(radio_config_t* radio_cfg) {
     ESP_LOGI(TAG, "=== BOOT STAGE: frequency plan init ===");
-    const bramble_freq_plan_t *plan = freq_plan_get_default();
-    ESP_LOGI(TAG, "Frequency plan: %s (%.1f MHz, max %d dBm)",
-             plan->name, plan->default_freq_mhz, plan->max_tx_power_dbm);
+    const bramble_freq_plan_t* plan = freq_plan_get_default();
+    ESP_LOGI(TAG, "Frequency plan: %s (%.1f MHz, max %d dBm)", plan->name, plan->default_freq_mhz,
+             plan->max_tx_power_dbm);
 
     ESP_LOGI(TAG, "=== BOOT STAGE: radio profile config ===");
     radio_get_profile_config(RADIO_PROFILE_LONG_RANGE, radio_cfg);
@@ -2985,9 +3006,8 @@ static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
         ESP_LOGI(TAG, "Loaded radio config from NVS");
     }
 
-    ESP_LOGI(TAG, "Radio config: %.1f MHz SF%d BW%lu TX:%d dBm",
-             radio_cfg->frequency_mhz, radio_cfg->sf,
-             (unsigned long)radio_cfg->bw_hz, radio_cfg->tx_power);
+    ESP_LOGI(TAG, "Radio config: %.1f MHz SF%d BW%lu TX:%d dBm", radio_cfg->frequency_mhz,
+             radio_cfg->sf, (unsigned long)radio_cfg->bw_hz, radio_cfg->tx_power);
 
     return ESP_OK;
 }
@@ -2999,30 +3019,29 @@ static esp_err_t mesh_init_radio_config(radio_config_t *radio_cfg) {
 #define PROBE_SWEEP_INTERVAL_MS 350
 #define PROBE_COLLECTION_WINDOW_MS 5000
 
-static uint32_t       s_probe_id;
-static uint32_t       s_probe_sent_ms;
-static bool           s_probe_collecting;
-static bool           s_probe_complete_emitted;
+static uint32_t s_probe_id;
+static uint32_t s_probe_sent_ms;
+static bool s_probe_collecting;
+static bool s_probe_complete_emitted;
 static probe_result_t s_probe_results[MAX_PROBE_RESULTS];
-static int            s_probe_result_count;
-static uint8_t        s_probe_rounds_sent;
-static uint32_t       s_probe_next_round_ms;
-static bool           s_probe_request_pending;
-static uint32_t       s_probe_request_id;
+static int s_probe_result_count;
+static uint8_t s_probe_rounds_sent;
+static uint32_t s_probe_next_round_ms;
+static bool s_probe_request_pending;
+static uint32_t s_probe_request_id;
 
-static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
-                                     uint32_t *beacon_interval,
-                                     uint32_t *last_purge_ms) {
+static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
+                                      uint32_t* beacon_interval, uint32_t* last_purge_ms) {
     /* Update adaptive beacon interval based on mesh conditions */
     static uint8_t last_neighbor_count = 0;
     uint8_t current_neighbor_count = neighbor_count(&s_neighbors);
-    
+
     /* Record churn event if neighbor count changed */
     if (current_neighbor_count != last_neighbor_count) {
         record_churn_event(t, current_neighbor_count);
         last_neighbor_count = current_neighbor_count;
     }
-    
+
     /* Compute adaptive beacon interval */
     uint32_t base_interval = compute_adaptive_beacon_interval(t, current_neighbor_count);
 
@@ -3043,7 +3062,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         }
         base_interval = budget_floor;
     }
-    
+
     /* Periodic beacon TX */
     if ((t - *last_beacon_ms) >= *beacon_interval) {
         send_beacon();
@@ -3052,7 +3071,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         /* Add jitter for next interval */
         uint8_t j[2];
         crypto_random(j, 2);
-        int32_t jitter = ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
+        int32_t jitter =
+            ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
         *beacon_interval = base_interval + jitter;
     }
 
@@ -3066,7 +3086,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         *last_purge_ms = t;
 
         /* Expire old mailbox entries */
-        if (s_mailbox_enabled) mailbox_expire(t);
+        if (s_mailbox_enabled)
+            mailbox_expire(t);
 
         /* Update shared state */
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -3084,8 +3105,10 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
          * time a fresh handshake slot is needed, never left occupying an
          * ACTIVE session's protection. */
         for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-            if (!s_queued_msgs[i].used) continue;
-            uint32_t ttl = (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) ? DM_QUEUE_TTL_MS : 60000;
+            if (!s_queued_msgs[i].used)
+                continue;
+            uint32_t ttl =
+                (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) ? DM_QUEUE_TTL_MS : 60000;
             if ((t - s_queued_msgs[i].timestamp) > ttl) {
                 if (s_queued_msgs[i].reason == QUEUE_REASON_SESSION) {
                     ESP_LOGW(TAG, "Queued DM for %08" PRIX32 " expired (no secure session)",
@@ -3108,7 +3131,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     if ((t - last_disc_check) >= 5000) {
         last_disc_check = t;
         for (int i = 0; i < s_pending_disc.count; i++) {
-            pending_discovery_t *pd = &s_pending_disc.entries[i];
+            pending_discovery_t* pd = &s_pending_disc.entries[i];
             if (discovery_should_retry(pd, t)) {
                 if (pd->attempts >= MAX_RREQ_ATTEMPTS) {
                     ESP_LOGW(TAG, "Discovery failed for %08" PRIX32 " after %u attempts",
@@ -3118,7 +3141,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                      * by the handshake, not by route discovery, and has its
                      * own TTL/onAck-failed reaper above. */
                     for (int j = 0; j < MAX_QUEUED_MSGS; j++) {
-                        if (s_queued_msgs[j].used && s_queued_msgs[j].reason == QUEUE_REASON_ROUTE &&
+                        if (s_queued_msgs[j].used &&
+                            s_queued_msgs[j].reason == QUEUE_REASON_ROUTE &&
                             s_queued_msgs[j].dest_addr == pd->dest_addr) {
                             s_queued_msgs[j].used = false;
                         }
@@ -3134,18 +3158,17 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                      * query_id. Retries also widen the ring (DES-1). */
                     uint32_t retry_query = next_packet_id();
                     discovery_record_attempt(pd, retry_query, t);
-                    ESP_LOGI(TAG, "Retrying RREQ for %08" PRIX32
-                             " (attempt %u, query=%08" PRIX32 ", hop_limit=%u)",
+                    ESP_LOGI(TAG,
+                             "Retrying RREQ for %08" PRIX32 " (attempt %u, query=%08" PRIX32
+                             ", hop_limit=%u)",
                              pd->dest_addr, pd->attempts, retry_query,
                              discovery_hop_limit_for_attempt(pd->attempts));
 
                     uint32_t enc_src = rreq_pseudonym_generate(s_identity->private_key,
-                                                          s_identity->address,
-                                                          retry_query);
+                                                               s_identity->address, retry_query);
 
                     bramble_rreq_t rreq = rreq_build_originator(
-                        s_identity->address, pd->dest_addr,
-                        retry_query, enc_src,
+                        s_identity->address, pd->dest_addr, retry_query, enc_src,
                         discovery_hop_limit_for_attempt(pd->attempts));
                     send_rreq(&rreq);
                 }
@@ -3155,25 +3178,26 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
 
     /* ACK retry tick — retransmit unacknowledged packets */
     static uint32_t last_ack_tick = 0;
-    if ((t - last_ack_tick) >= 1000) {  /* Check every 1s */
+    if ((t - last_ack_tick) >= 1000) { /* Check every 1s */
         last_ack_tick = t;
         for (int i = 0; i < MAX_PENDING_ACKS; i++) {
-            pending_ack_t *pa = &s_pending_acks.entries[i];
-            if (!pa->active) continue;
+            pending_ack_t* pa = &s_pending_acks.entries[i];
+            if (!pa->active)
+                continue;
             if (t >= pa->next_retry_ms) {
                 /* Extract packet type from stored packet data for telemetry */
                 uint8_t pkt_type = (pa->packet_len >= 2) ? pa->packet_data[1] : 0xFF;
-                
+
                 if (pa->attempt >= pa->max_attempts) {
                     ESP_LOGW(TAG, "Message %08" PRIX32 " to %08" PRIX32 " failed after %u attempts",
                              pa->packet_id, pa->dest_addr, pa->attempt);
-                    
+
                     /* Record timeout event - TX fail represents final timeout */
                     traffic_debug_record_tx(&s_traffic_debug, pkt_type, pa->packet_len, pa->tier);
-                    
+
                     msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
                     /* Notify webapp of failure */
-                    cJSON *params = cJSON_CreateObject();
+                    cJSON* params = cJSON_CreateObject();
                     char pkt_buf[12];
                     snprintf(pkt_buf, sizeof(pkt_buf), "%08" PRIX32, pa->packet_id);
                     cJSON_AddStringToObject(params, "packet_id", pkt_buf);
@@ -3183,9 +3207,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                     pa->active = false;
                 } else {
                     ESP_LOGI(TAG, "Retransmit pkt %08" PRIX32 " to %08" PRIX32 " (attempt %u/%u)",
-                             pa->packet_id, pa->dest_addr,
-                             pa->attempt + 1, pa->max_attempts);
-                    
+                             pa->packet_id, pa->dest_addr, pa->attempt + 1, pa->max_attempts);
+
                     /* Budget-gated retransmission (DES-6). Deny behavior:
                      * a denied retry burns the attempt deliberately. The
                      * original TX already went out once; retries are pure
@@ -3197,7 +3220,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
                     int retry_rc = mesh_tx(pa->packet_data, pa->packet_len, TX_KIND_DATA_RETRY);
                     if (retry_rc == TX_GATE_ERR_BUDGET) {
                         ESP_LOGW(TAG,
-                                 "Retry of pkt %08" PRIX32 " denied by airtime budget (attempt %u/%u burned)",
+                                 "Retry of pkt %08" PRIX32
+                                 " denied by airtime budget (attempt %u/%u burned)",
                                  pa->packet_id, pa->attempt + 1, pa->max_attempts);
                     }
                     pa->attempt++;
@@ -3213,7 +3237,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         }
     }
 
-    if (s_probe_collecting && s_probe_rounds_sent < PROBE_SWEEP_ROUNDS && t >= s_probe_next_round_ms) {
+    if (s_probe_collecting && s_probe_rounds_sent < PROBE_SWEEP_ROUNDS &&
+        t >= s_probe_next_round_ms) {
         uint8_t round = (uint8_t)(s_probe_rounds_sent + 1);
         mesh_send_probe_round(s_probe_id, round);
         s_probe_rounds_sent = round;
@@ -3221,8 +3246,9 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     }
 
     /* Probe completion event */
-    if (s_probe_collecting && !s_probe_complete_emitted && (t - s_probe_sent_ms) >= PROBE_COLLECTION_WINDOW_MS) {
-        cJSON *params = cJSON_CreateObject();
+    if (s_probe_collecting && !s_probe_complete_emitted &&
+        (t - s_probe_sent_ms) >= PROBE_COLLECTION_WINDOW_MS) {
+        cJSON* params = cJSON_CreateObject();
         char pid_buf[12];
         snprintf(pid_buf, sizeof(pid_buf), "%08" PRIX32, s_probe_id);
         cJSON_AddStringToObject(params, "probe_id", pid_buf);
@@ -3230,11 +3256,11 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
         cJSON_AddNumberToObject(params, "duration_ms", t - s_probe_sent_ms);
         cJSON_AddNumberToObject(params, "rounds_total", PROBE_SWEEP_ROUNDS);
 
-        cJSON *responders = cJSON_AddArrayToObject(params, "responders");
+        cJSON* responders = cJSON_AddArrayToObject(params, "responders");
         for (int i = 0; i < s_probe_result_count; i++) {
-            probe_result_t *r = &s_probe_results[i];
+            probe_result_t* r = &s_probe_results[i];
             int seen_rounds = __builtin_popcount((unsigned)r->seen_round_mask);
-            cJSON *item = cJSON_CreateObject();
+            cJSON* item = cJSON_CreateObject();
             char addr_buf[12];
             cJSON_AddStringToObject(item, "address", addr_hex(r->addr, addr_buf, sizeof(addr_buf)));
             cJSON_AddNumberToObject(item, "hops", r->hops);
@@ -3255,7 +3281,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t *last_beacon_ms,
     }
 }
 
-static void mesh_task(void *param) {
+static void mesh_task(void* param) {
     (void)param;
 
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task start (core %d) ===", xPortGetCoreID());
@@ -3382,8 +3408,8 @@ static void mesh_task(void *param) {
 /**
  * Send a DATA packet. Returns packet_id on success, 0 on failure.
  */
-static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
-                                 const bramble_channel_t *ch, uint8_t app_type) {
+static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,
+                                 const bramble_channel_t* ch, uint8_t app_type) {
     uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE + CHANNEL_MSG_OVERHEAD + CHANNEL_MSG_SENT_AT_SIZE];
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
@@ -3397,8 +3423,8 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     uint32_t sent_at = (app_type == APP_TYPE_CHAT)
                            ? (uint32_t)(timesync_get_network_time(&s_timesync, now_ms()) / 1000)
                            : 0;
-    size_t ct_len = CHANNEL_MSG_OVERHEAD + (app_type == APP_TYPE_CHAT ? CHANNEL_MSG_SENT_AT_SIZE : 0) +
-                    payload_len;
+    size_t ct_len = CHANNEL_MSG_OVERHEAD +
+                    (app_type == APP_TYPE_CHAT ? CHANNEL_MSG_SENT_AT_SIZE : 0) + payload_len;
 
     /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
     size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
@@ -3441,10 +3467,8 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
         return 0;
     }
 
-    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type, sent_at,
-                                      payload, payload_len,
-                                      aad, HEADER_SIZE + 4,
-                                      nonce, ciphertext, tag);
+    int enc_ret = channel_msg_encrypt(ch, s_identity->address, app_type, sent_at, payload,
+                                      payload_len, aad, HEADER_SIZE + 4, nonce, ciphertext, tag);
     if (enc_ret != 0) {
         ESP_LOGE(TAG, "Channel encrypt failed: %d", enc_ret);
         return 0;
@@ -3464,8 +3488,8 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
     if (ret == TX_GATE_OK) {
         /* Register for ACK tracking (unicast only) */
         if (dest_addr != 0xFFFFFFFF) {
-            pending_ack_add(&s_pending_acks, pkt_id, dest_addr,
-                            MSG_TIER_NORMAL, buf, (uint16_t)total, now_ms());
+            pending_ack_add(&s_pending_acks, pkt_id, dest_addr, MSG_TIER_NORMAL, buf,
+                            (uint16_t)total, now_ms());
         }
         return pkt_id;
     }
@@ -3485,8 +3509,8 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t *payload, siz
  * without FLAG_CHANNEL, which is exactly the signal handle_data uses to
  * pick the decrypt path on the other end).
  */
-static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t *payload, size_t payload_len,
-                               dm_session_t *sess) {
+static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_t payload_len,
+                               dm_session_t* sess) {
     uint8_t ciphertext[BRAMBLE_MAX_PACKET_SIZE];
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
@@ -3518,8 +3542,8 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t *payload, size_
         return 0;
     }
 
-    if (dm_session_encrypt(sess, &header, s_identity->address, payload, payload_len,
-                           nonce, ciphertext, tag) != 0) {
+    if (dm_session_encrypt(sess, &header, s_identity->address, payload, payload_len, nonce,
+                           ciphertext, tag) != 0) {
         ESP_LOGE(TAG, "Session encrypt failed for %08" PRIX32, dest_addr);
         return 0;
     }
@@ -3547,7 +3571,7 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t *payload, size_
  * is why it reuses send_data_packet unmodified rather than send_dm_packet.
  */
 static uint32_t send_ke_envelope(uint32_t dest_addr, int channel_idx,
-                                 const bramble_key_exchange_t *ke) {
+                                 const bramble_key_exchange_t* ke) {
     if (channel_idx < 0 || channel_idx >= s_num_channels) {
         ESP_LOGE(TAG, "send_ke_envelope: invalid channel index %d", channel_idx);
         return 0;
@@ -3565,10 +3589,12 @@ static uint32_t send_ke_envelope(uint32_t dest_addr, int channel_idx,
  * early-exit scan leaks nothing secret; it is not a tag/key comparison.
  * dm_alloc memsets a fresh or evicted slot, so all-zero reliably means "no
  * identity cached here yet" for any slot this node has allocated. */
-static int dm_session_has_peer_id(const dm_session_t *s) {
-    if (!s) return 0;
+static int dm_session_has_peer_id(const dm_session_t* s) {
+    if (!s)
+        return 0;
     for (int i = 0; i < 32; i++) {
-        if (s->peer_id_pub[i] != 0) return 1;
+        if (s->peer_id_pub[i] != 0)
+            return 1;
     }
     return 0;
 }
@@ -3581,7 +3607,8 @@ static void pending_eph_store(uint32_t peer_addr, const uint8_t eph_priv[32],
             free_idx = i;
             break;
         }
-        if (free_idx < 0 && !s_pending_eph[i].used) free_idx = i;
+        if (free_idx < 0 && !s_pending_eph[i].used)
+            free_idx = i;
     }
     if (free_idx < 0) {
         /* Table sized to DM_MAX_HANDSHAKING, same cap dm_alloc enforces for
@@ -3596,7 +3623,7 @@ static void pending_eph_store(uint32_t peer_addr, const uint8_t eph_priv[32],
     s_pending_eph[free_idx].used = true;
 }
 
-static dm_pending_eph_t *pending_eph_lookup(uint32_t peer_addr) {
+static dm_pending_eph_t* pending_eph_lookup(uint32_t peer_addr) {
     for (int i = 0; i < DM_MAX_HANDSHAKING; i++) {
         if (s_pending_eph[i].used && s_pending_eph[i].peer_addr == peer_addr) {
             return &s_pending_eph[i];
@@ -3630,13 +3657,17 @@ static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32
 
     int lru = 0;
     for (int i = 0; i < DM_HS_DEDUP_MAX; i++) {
-        dm_hs_dedup_entry_t *e = &s_hs_dedup[i];
+        dm_hs_dedup_entry_t* e = &s_hs_dedup[i];
         if (e->used && e->src_addr == src_addr && e->eph_pub_hash == eph_hash &&
             e->ke_epoch == ke_epoch) {
             return 1;
         }
-        if (!e->used) { lru = i; break; }
-        if (e->seen_ms < s_hs_dedup[lru].seen_ms) lru = i;
+        if (!e->used) {
+            lru = i;
+            break;
+        }
+        if (e->seen_ms < s_hs_dedup[lru].seen_ms)
+            lru = i;
     }
     s_hs_dedup[lru].src_addr = src_addr;
     s_hs_dedup[lru].eph_pub_hash = eph_hash;
@@ -3665,11 +3696,14 @@ static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32
  * see a failure notification via rerr_fastfail_notify if the queue entry
  * expires or is evicted, and nothing further if it is flushed successfully.
  */
-static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t *data, size_t len,
+static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, size_t len,
                                       int channel_idx) {
     int free_idx = -1;
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
-        if (!s_queued_msgs[i].used) { free_idx = i; break; }
+        if (!s_queued_msgs[i].used) {
+            free_idx = i;
+            break;
+        }
     }
     if (free_idx < 0) {
         int oldest = -1;
@@ -3680,7 +3714,8 @@ static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t *data, s
             }
         }
         if (oldest < 0) {
-            ESP_LOGW(TAG, "Message queue full (no evictable session entry), failing DM for %08" PRIX32,
+            ESP_LOGW(TAG,
+                     "Message queue full (no evictable session entry), failing DM for %08" PRIX32,
                      dest_addr);
             return 0;
         }
@@ -3715,7 +3750,7 @@ static void flush_session_queue(uint32_t dest_addr) {
         }
 
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+        dm_session_t* sess = dm_lookup(&s_dm_table, dest_addr);
         uint32_t pkt_id = 0;
         if (sess && sess->state == DM_STATE_ACTIVE) {
             pkt_id = send_dm_packet(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len, sess);
@@ -3723,9 +3758,9 @@ static void flush_session_queue(uint32_t dest_addr) {
         xSemaphoreGive(s_dm_mutex);
 
         if (pkt_id != 0) {
-            ESP_LOGI(TAG, "Flushed queued DM to %08" PRIX32 " (%u bytes)",
-                     dest_addr, (unsigned)s_queued_msgs[i].len);
-            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char *)s_queued_msgs[i].data,
+            ESP_LOGI(TAG, "Flushed queued DM to %08" PRIX32 " (%u bytes)", dest_addr,
+                     (unsigned)s_queued_msgs[i].len);
+            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char*)s_queued_msgs[i].data,
                               s_queued_msgs[i].len, 0, 0, pkt_id, MSG_STATUS_SENT,
                               s_queued_msgs[i].channel_idx);
         } else {
@@ -3769,7 +3804,7 @@ static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx) {
  * send_dm_packet; anything else queues and (if not already handshaking)
  * triggers an INIT, or fails visibly if the handshaking cap is reached.
  */
-static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len) {
+static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len) {
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Fragmentation under a session key is out of this task's scope
          * (DM chat payloads are short); fail visibly rather than silently
@@ -3779,22 +3814,23 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t 
     }
 
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t *sess = dm_lookup(&s_dm_table, dest_addr);
+    dm_session_t* sess = dm_lookup(&s_dm_table, dest_addr);
     if (sess && sess->state == DM_STATE_ACTIVE) {
         uint32_t pkt_id = send_dm_packet(dest_addr, data, len, sess);
         xSemaphoreGive(s_dm_mutex);
         if (pkt_id != 0) {
-            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0,
-                              pkt_id, MSG_STATUS_SENT, (int16_t)channel_idx);
+            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, pkt_id,
+                              MSG_STATUS_SENT, (int16_t)channel_idx);
         }
         return pkt_id;
     }
 
     bool handshake_in_progress = sess && sess->state == DM_STATE_HANDSHAKING;
-    dm_session_t *hs = sess;
+    dm_session_t* hs = sess;
     if (!hs) {
         hs = dm_alloc(&s_dm_table, dest_addr, now_ms());
-        if (hs) hs->state = DM_STATE_HANDSHAKING;
+        if (hs)
+            hs->state = DM_STATE_HANDSHAKING;
     }
     xSemaphoreGive(s_dm_mutex);
 
@@ -3816,7 +3852,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t 
 
     /* Still store in msg_store so UI shows it as pending, same convention
      * as the awaiting-route path. */
-    msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
+    msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0);
     return pkt_id;
 }
 
@@ -3828,16 +3864,18 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t 
  * INIT can never be accepted as first-contact against an already-known
  * identity.
  */
-static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t *init) {
+static void process_ke_init(uint32_t src_addr, int channel_idx,
+                            const bramble_key_exchange_t* init) {
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t *existing = dm_lookup(&s_dm_table, src_addr);
+    dm_session_t* existing = dm_lookup(&s_dm_table, src_addr);
     int have_peer_id = dm_session_has_peer_id(existing);
     /* Zero-init: peer_id_pub is only read (passed below) when have_peer_id is
      * set, and it is filled here in exactly that case, so no uninitialized
      * read occurs. The initializer makes that invariant explicit and silences
      * a cppcheck uninitvar warning it cannot otherwise prove. */
     uint8_t peer_id_pub[32] = {0};
-    if (have_peer_id) memcpy(peer_id_pub, existing->peer_id_pub, 32);
+    if (have_peer_id)
+        memcpy(peer_id_pub, existing->peer_id_pub, 32);
     xSemaphoreGive(s_dm_mutex);
 
     if (dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL) != 0) {
@@ -3858,7 +3896,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     }
 
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t *sess = dm_alloc(&s_dm_table, src_addr, now_ms());
+    dm_session_t* sess = dm_alloc(&s_dm_table, src_addr, now_ms());
     if (sess) {
         memcpy(sess->session_key, session_key, 32);
         memcpy(sess->peer_id_pub, init->long_term_pubkey, 32);
@@ -3871,7 +3909,8 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     xSemaphoreGive(s_dm_mutex);
 
     if (!sess) {
-        ESP_LOGW(TAG, "Handshaking cap reached, cannot establish session with %08" PRIX32, src_addr);
+        ESP_LOGW(TAG, "Handshaking cap reached, cannot establish session with %08" PRIX32,
+                 src_addr);
         return;
     }
 
@@ -3887,8 +3926,8 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
  * we sent the matching INIT (dm_pending_eph_t; dm_session_t itself has no
  * field for in-flight handshake material, see its declaration above).
  */
-static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t *resp) {
-    dm_pending_eph_t *pe = pending_eph_lookup(src_addr);
+static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp) {
+    dm_pending_eph_t* pe = pending_eph_lookup(src_addr);
     if (!pe) {
         ESP_LOGW(TAG, "RESP from %08" PRIX32 " with no matching pending INIT", src_addr);
         return;
@@ -3902,7 +3941,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t *res
     }
 
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t *sess = dm_lookup(&s_dm_table, src_addr);
+    dm_session_t* sess = dm_lookup(&s_dm_table, src_addr);
     if (sess) {
         memcpy(sess->session_key, session_key, 32);
         memcpy(sess->peer_id_pub, resp->long_term_pubkey, 32);
@@ -3928,7 +3967,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t *res
 /* M7 offload: drains handshake work items posted by handle_ke_envelope.
  * Low priority, small stack: the only work here is the occasional
  * four-X25519-mult handshake, never on the mesh RX critical path. */
-static void handshake_worker_task(void *arg) {
+static void handshake_worker_task(void* arg) {
     (void)arg;
     dm_handshake_work_item_t item;
     for (;;) {
@@ -3951,7 +3990,7 @@ static void handshake_worker_task(void *arg) {
  * AAD binding), not yet trusted to equal the inner struct's own claimed
  * src_addr until checked below.
  */
-static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t *data,
+static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t* data,
                                size_t data_len) {
     bramble_key_exchange_t msg;
     if (bramble_key_exchange_deserialize(&msg, data, data_len) != ESP_OK) {
@@ -3993,24 +4032,23 @@ static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t
     }
 }
 
-bool mesh_supports_delivery_event_sync(void) {
-    return true;
-}
+bool mesh_supports_delivery_event_sync(void) { return true; }
 
 uint32_t mesh_delivery_events_latest_seq(void) {
     uint32_t latest = 0u;
-    if (!s_delivery_event_mutex) return 0u;
+    if (!s_delivery_event_mutex)
+        return 0u;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
     latest = delivery_event_ring_latest_seq(s_delivery_event_ring);
     xSemaphoreGive(s_delivery_event_mutex);
     return latest;
 }
 
-size_t mesh_delivery_events_list_since(uint32_t since_event_seq,
-                                       delivery_event_record_t *out,
+size_t mesh_delivery_events_list_since(uint32_t since_event_seq, delivery_event_record_t* out,
                                        size_t out_max) {
     size_t count = 0u;
-    if (!s_delivery_event_mutex) return 0u;
+    if (!s_delivery_event_mutex)
+        return 0u;
     xSemaphoreTake(s_delivery_event_mutex, portMAX_DELAY);
     count = delivery_event_ring_list_since(s_delivery_event_ring, since_event_seq, out, out_max);
     xSemaphoreGive(s_delivery_event_mutex);
@@ -4033,17 +4071,15 @@ broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
     return s_broadcast_telemetry_mode;
 }
 
-void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
-                                               uint32_t broadcast_id,
-                                               int8_t rssi_at_dest,
-                                               uint8_t hop_count,
-                                               const uint32_t *relay_path) {
+void mesh_emit_broadcast_delivery_notification(uint32_t src_addr, uint32_t broadcast_id,
+                                               int8_t rssi_at_dest, uint8_t hop_count,
+                                               const uint32_t* relay_path) {
     if (s_broadcast_telemetry_mode == BROADCAST_TELEMETRY_OFF) {
         return;
     }
 
     char src_buf[12], id_buf[12], hop_buf[12];
-    cJSON *params = cJSON_CreateObject();
+    cJSON* params = cJSON_CreateObject();
     snprintf(src_buf, sizeof(src_buf), "%08" PRIX32, src_addr);
     snprintf(id_buf, sizeof(id_buf), "%08" PRIX32, broadcast_id);
     cJSON_AddStringToObject(params, "recipient", src_buf);
@@ -4051,11 +4087,13 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
     cJSON_AddStringToObject(params, "status", "delivered");
     cJSON_AddNumberToObject(params, "rssi_at_dest", rssi_at_dest);
 
-    if (s_broadcast_telemetry_mode == BROADCAST_TELEMETRY_PATH_SAMPLED && hop_count > 0 && relay_path) {
-        uint8_t bounded_hops = (hop_count > DELIVERY_RECEIPT_MAX_HOPS) ? DELIVERY_RECEIPT_MAX_HOPS : hop_count;
-        cJSON *path = cJSON_AddArrayToObject(params, "relayPath");
+    if (s_broadcast_telemetry_mode == BROADCAST_TELEMETRY_PATH_SAMPLED && hop_count > 0 &&
+        relay_path) {
+        uint8_t bounded_hops =
+            (hop_count > DELIVERY_RECEIPT_MAX_HOPS) ? DELIVERY_RECEIPT_MAX_HOPS : hop_count;
+        cJSON* path = cJSON_AddArrayToObject(params, "relayPath");
         for (uint8_t i = 0; i < bounded_hops; i++) {
-            cJSON *hop = cJSON_CreateObject();
+            cJSON* hop = cJSON_CreateObject();
             snprintf(hop_buf, sizeof(hop_buf), "%08" PRIX32, relay_path[i]);
             cJSON_AddStringToObject(hop, "addr", hop_buf);
             cJSON_AddItemToArray(path, hop);
@@ -4068,7 +4106,7 @@ void mesh_emit_broadcast_delivery_notification(uint32_t src_addr,
     cJSON_Delete(params);
 }
 
-int mesh_send_broadcast(const uint8_t *data, size_t len) {
+int mesh_send_broadcast(const uint8_t* data, size_t len) {
     if (s_num_channels == 0) {
         ESP_LOGE(TAG, "No channels initialized");
         return -1;
@@ -4079,15 +4117,17 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
                  (unsigned)s_channels[0].channel_id);
         return -1;
     }
-    ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u", (unsigned)s_channels[0].channel_id);
+    ESP_LOGI(TAG, "mesh_send_broadcast using idx0 channel_id=%u",
+             (unsigned)s_channels[0].channel_id);
 
     /* Pre-check with the real ToA of the first packet that would hit the
      * air, so RPC callers get a clean -2 before paying for encryption.
      * The gate still checks and debits every individual transmission. */
     size_t est_payload = (len > FRAG_MAX_PLAINTEXT) ? FRAG_MAX_PLAINTEXT : len;
-    size_t est_wire =
-        HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + CHANNEL_MSG_OVERHEAD + est_payload + BRAMBLE_TAG_SIZE;
-    if (est_wire > 255) est_wire = 255;
+    size_t est_wire = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + CHANNEL_MSG_OVERHEAD + est_payload +
+                      BRAMBLE_TAG_SIZE;
+    if (est_wire > 255)
+        est_wire = 255;
     tx_gate_set_peer_count((uint8_t)neighbor_count(&s_neighbors));
     if (!tx_gate_check((uint8_t)est_wire, TX_KIND_DATA_BROADCAST)) {
         ESP_LOGW(TAG, "Broadcast rate limited by airtime budget (remaining=%" PRIu32 "ms)",
@@ -4099,7 +4139,7 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Long message — split into fragments */
         uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
-        fragment_t *frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
+        fragment_t* frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
         if (!frags) {
             ESP_LOGE(TAG, "Fragment allocation failed");
             return -1;
@@ -4118,8 +4158,8 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
 
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
-            uint32_t pkt_id = send_data_packet(0xFFFFFFFF, frags[i].data, frags[i].len,
-                                              &s_channels[0], 0x01);
+            uint32_t pkt_id =
+                send_data_packet(0xFFFFFFFF, frags[i].data, frags[i].len, &s_channels[0], 0x01);
             if (i == 0 && pkt_id != 0) {
                 s_last_broadcast_id = pkt_id;
                 s_last_broadcast_frag_msg_id = msg_id;
@@ -4128,7 +4168,8 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
                 recent_broadcast_record(pkt_id);
-                ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
+                ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags,
+                         pkt_id);
             }
 
             /* Inter-fragment pacing to avoid flooding */
@@ -4140,9 +4181,8 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         free(frags);
 
         /* Store the full message in message store */
-        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
-                          (const char *)data, len, 0, 0,
-                          0, MSG_STATUS_NONE, 0);
+        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
+                          MSG_STATUS_NONE, 0);
         return 0;
     }
 
@@ -4152,14 +4192,13 @@ int mesh_send_broadcast(const uint8_t *data, size_t len) {
         s_last_broadcast_id = pkt_id;
         s_last_broadcast_frag_msg_id = 0;
         recent_broadcast_record(pkt_id);
-        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT,
-                          (const char *)data, len, 0, 0,
-                          0, MSG_STATUS_NONE, 0);
+        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
+                          MSG_STATUS_NONE, 0);
     }
     return pkt_id ? 0 : -1;
 }
 
-uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *data, size_t len) {
+uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len) {
     if (channel_idx < 0 || channel_idx >= s_num_channels) {
         ESP_LOGE(TAG, "Invalid channel index: %d (count=%d)", channel_idx, s_num_channels);
         return 0;
@@ -4178,7 +4217,7 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Long message — split into fragments */
         uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
-        fragment_t *frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
+        fragment_t* frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
         if (!frags) {
             ESP_LOGE(TAG, "Fragment allocation failed");
             return 0;
@@ -4201,7 +4240,7 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
             uint32_t pkt_id = send_data_packet(dest_addr, frags[i].data, frags[i].len,
-                                              &s_channels[channel_idx], 0x01);
+                                               &s_channels[channel_idx], 0x01);
             if (pkt_id == 0) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
             } else {
@@ -4215,7 +4254,8 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
                 if (dest_addr == 0xFFFFFFFFu) {
                     recent_broadcast_record(pkt_id);
                 }
-                ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags, pkt_id);
+                ESP_LOGI(TAG, "Sent fragment %d/%d (pkt_id=%08" PRIX32 ")", i + 1, num_frags,
+                         pkt_id);
             }
 
             /* Inter-fragment pacing to avoid flooding */
@@ -4229,10 +4269,11 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
         /* Store the full message in message store */
         if (first_pkt_id != 0) {
             msg_store_add_ex2(dest_addr,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
-                              (const char *)data, len, 0, 0,
-                              first_pkt_id,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
+                                                                            : MSG_DIR_OUTGOING,
+                              (const char*)data, len, 0, 0, first_pkt_id,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE
+                                                                            : MSG_STATUS_SENT,
                               (int16_t)channel_idx);
         }
         return first_pkt_id;
@@ -4247,16 +4288,17 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t *d
             recent_broadcast_record(pkt_id);
         }
         msg_store_add_ex2(dest_addr,
-                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT : MSG_DIR_OUTGOING,
-                          (const char *)data, len, 0, 0,
-                          pkt_id,
-                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
+                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
+                                                                        : MSG_DIR_OUTGOING,
+                          (const char*)data, len, 0, 0, pkt_id,
+                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE
+                                                                        : MSG_STATUS_SENT,
                           (int16_t)channel_idx);
     }
     return pkt_id;
 }
 
-static int queue_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
+static int queue_message(uint32_t dest_addr, const uint8_t* data, size_t len) {
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (!s_queued_msgs[i].used) {
             s_queued_msgs[i].dest_addr = dest_addr;
@@ -4297,32 +4339,32 @@ static int initiate_discovery(uint32_t dest_addr) {
      *
      * Nothing stores the pseudonym: RREPs are correlated by query_id via the
      * pending-discovery table, which remembers every attempt's query_id. */
-    uint32_t pseudonym = rreq_pseudonym_generate(s_identity->private_key,
-                                             s_identity->address,
-                                             query_id);
+    uint32_t pseudonym =
+        rreq_pseudonym_generate(s_identity->private_key, s_identity->address, query_id);
 
-    ESP_LOGI(TAG, "RREQ privacy: addr=%08" PRIX32 " → pseudonym=%08" PRIX32 " (query=%08" PRIX32 ")",
+    ESP_LOGI(TAG,
+             "RREQ privacy: addr=%08" PRIX32 " → pseudonym=%08" PRIX32 " (query=%08" PRIX32 ")",
              s_identity->address, pseudonym, query_id);
 
     uint32_t encrypted_source = pseudonym;
-    bramble_rreq_t rreq = rreq_build_originator(s_identity->address, dest_addr,
-                                                  query_id, encrypted_source,
-                                                  discovery_hop_limit_for_attempt(1));
+    bramble_rreq_t rreq =
+        rreq_build_originator(s_identity->address, dest_addr, query_id, encrypted_source,
+                              discovery_hop_limit_for_attempt(1));
     send_rreq(&rreq);
     return 0;
 }
 
-uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) {
+uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) {
     if (s_num_channels == 0) {
         ESP_LOGE(TAG, "No channels initialized");
         return 0;
     }
 
     /* For non-neighbor destinations, check route table */
-    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, dest_addr);
+    neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, dest_addr);
     if (!nb) {
         /* Not a direct neighbor — need routing */
-        route_entry_t *route = route_lookup(&s_routes, dest_addr);
+        route_entry_t* route = route_lookup(&s_routes, dest_addr);
         if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
             /* No route — start discovery and queue the message */
             if (!discovery_lookup(&s_pending_disc, dest_addr)) {
@@ -4330,7 +4372,7 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
             }
             queue_message(dest_addr, data, len);
             /* Still store in msg_store so UI shows it as pending */
-            msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char *)data, len, 0, 0);
+            msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0);
             return 1; /* queued — nonzero = success but no packet_id yet */
         }
         /* Have a route — send_data_packet will transmit (next hop gets it) */
@@ -4346,7 +4388,7 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len) 
 /* Nonce counter NVS persistence: reserve-ahead ceiling under NVS_NS_NONCE.
  * Not-found (first boot) resumes from ceiling 0, matching nonce_counter's own
  * zero-initialized static state. */
-static int mesh_nonce_read(uint64_t *ceiling_out, void *ctx) {
+static int mesh_nonce_read(uint64_t* ceiling_out, void* ctx) {
     (void)ctx;
     nvs_handle_t h;
     if (nvs_open(NVS_NS_NONCE, NVS_READONLY, &h) != ESP_OK) {
@@ -4362,7 +4404,7 @@ static int mesh_nonce_read(uint64_t *ceiling_out, void *ctx) {
     return 0;
 }
 
-static int mesh_nonce_write(uint64_t ceiling, void *ctx) {
+static int mesh_nonce_write(uint64_t ceiling, void* ctx) {
     (void)ctx;
     nvs_handle_t h;
     if (nvs_open(NVS_NS_NONCE, NVS_READWRITE, &h) != ESP_OK) {
@@ -4405,8 +4447,8 @@ void mesh_rederive_beacon_key(void) {
     if (network_key_is_provisioned()) {
         uint8_t net_key[32];
         network_key_get(net_key);
-        const char *salt = "bramble-beacon-v2";
-        crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), net_key, sizeof(net_key), NULL, 0,
+        const char* salt = "bramble-beacon-v2";
+        crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), net_key, sizeof(net_key), NULL, 0,
                            s_beacon_key, sizeof(s_beacon_key));
         ESP_LOGI(TAG, "Beacon HMAC key derived from the provisioned network key");
     } else {
@@ -4419,7 +4461,7 @@ void mesh_rederive_beacon_key(void) {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-void mesh_task_start(bramble_identity_t *identity) {
+void mesh_task_start(bramble_identity_t* identity) {
     s_identity = identity;
 
     /* Load node name from NVS */
@@ -4442,8 +4484,7 @@ void mesh_task_start(bramble_identity_t *identity) {
             /* Defensive: ensure null termination even on successful read */
             s_node_name[sizeof(s_node_name) - 1] = '\0';
             if (len > sizeof(s_node_name)) {
-                ESP_LOGW(TAG, "NVS node_name length %u exceeds buffer, truncated",
-                         (unsigned)len);
+                ESP_LOGW(TAG, "NVS node_name length %u exceeds buffer, truncated", (unsigned)len);
             }
         }
         nvs_close(nvs);
@@ -4462,7 +4503,9 @@ void mesh_task_start(bramble_identity_t *identity) {
         /* Fail-closed by design: nonce_counter_next also refuses to issue
          * until a write succeeds, so encrypted DATA sends stay blocked
          * (never silently reuse a nonce) rather than crashing here. */
-        ESP_LOGE(TAG, "Nonce counter reserve-ahead write failed; encrypted sends blocked until NVS recovers");
+        ESP_LOGE(
+            TAG,
+            "Nonce counter reserve-ahead write failed; encrypted sends blocked until NVS recovers");
     }
 
     /* DM session table (SEC-C2). Same "created before any task that can
@@ -4478,7 +4521,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     /* M7 offload: low priority so the occasional handshake never preempts
      * the mesh RX task; small stack, the only work here is periodic X25519. */
     xTaskCreate(handshake_worker_task, "dm_hs_worker", DM_HANDSHAKE_WORKER_STACK, NULL,
-               DM_HANDSHAKE_WORKER_PRIORITY, NULL);
+                DM_HANDSHAKE_WORKER_PRIORITY, NULL);
 
     /* PART 3 (staged, not closed): loads a provisioned network key if one
      * has been set; otherwise network_key_get() falls back to the
@@ -4500,14 +4543,14 @@ void mesh_task_start(bramble_identity_t *identity) {
     {
         /* One TX path: the gate owns the airtime budget and applies the
          * regulatory duty-cycle cap from the frequency plan (DES-8). */
-        const bramble_freq_plan_t *plan = freq_plan_get_default();
+        const bramble_freq_plan_t* plan = freq_plan_get_default();
         tx_gate_global_init(plan->max_duty_cycle_pct, plan->duty_cycle_enforced);
     }
     traffic_debug_init(&s_traffic_debug, s_traffic_events, TRAFFIC_DEBUG_CAPACITY);
     timesync_init(&s_timesync);
-    mesh_traffic_debug_load_config();  /* Restore persisted debug config */
+    mesh_traffic_debug_load_config(); /* Restore persisted debug config */
     traffic_debug_set_notify_callback(&s_traffic_debug, traffic_event_notify, NULL);
-    mesh_beacon_policy_load_config();  /* Restore persisted beacon policy config */
+    mesh_beacon_policy_load_config(); /* Restore persisted beacon policy config */
     reassembly_init(&s_reassembly);
     location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
@@ -4530,48 +4573,51 @@ void mesh_task_start(bramble_identity_t *identity) {
         int loaded_count = 0;
         int loaded_default = 0;
 
-        if (channel_storage_load(loaded_channels, &loaded_count, loaded_names, &loaded_default) == 0 
-            && loaded_count > 0) {
+        if (channel_storage_load(loaded_channels, &loaded_count, loaded_names, &loaded_default) ==
+                0 &&
+            loaded_count > 0) {
             /* Merge loaded channels, preserving channel 0 (public) which is already initialized */
             for (int i = 0; i < loaded_count && s_num_channels < MAX_CHANNELS; i++) {
                 /* Skip channel 0 if it was saved (public channel is always first) */
                 if (loaded_channels[i].channel_id == 0 && i == 0) {
                     /* Copy the name if it exists */
                     if (loaded_names[i][0] != '\0') {
-                        strncpy(s_channel_names[0], loaded_names[i], sizeof(s_channel_names[0]) - 1);
+                        strncpy(s_channel_names[0], loaded_names[i],
+                                sizeof(s_channel_names[0]) - 1);
                         s_channel_names[0][sizeof(s_channel_names[0]) - 1] = '\0';
                     }
                     continue;
                 }
-                
+
                 /* Add to channel list */
                 memcpy(&s_channels[s_num_channels], &loaded_channels[i], sizeof(bramble_channel_t));
-                
+
                 /* Ensure channel_id matches array index */
                 s_channels[s_num_channels].channel_id = (uint8_t)s_num_channels;
-                
+
                 /* Copy channel name */
                 if (loaded_names[i][0] != '\0') {
-                    strncpy(s_channel_names[s_num_channels], loaded_names[i], 
-                           sizeof(s_channel_names[s_num_channels]) - 1);
-                    s_channel_names[s_num_channels][sizeof(s_channel_names[s_num_channels]) - 1] = '\0';
+                    strncpy(s_channel_names[s_num_channels], loaded_names[i],
+                            sizeof(s_channel_names[s_num_channels]) - 1);
+                    s_channel_names[s_num_channels][sizeof(s_channel_names[s_num_channels]) - 1] =
+                        '\0';
                 }
 
                 /* PSK lock state is loaded separately from NVS metadata. */
                 s_channel_has_psk[s_num_channels] = false;
-                ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", s_num_channels, 
-                        loaded_names[i][0] ? loaded_names[i] : "(unnamed)");
+                ESP_LOGI(TAG, "Loaded channel %d from NVS: %s", s_num_channels,
+                         loaded_names[i][0] ? loaded_names[i] : "(unnamed)");
                 s_num_channels++;
             }
-            
+
             /* Restore default channel index */
             if (loaded_default >= 0 && loaded_default < s_num_channels) {
                 s_default_channel_idx = loaded_default;
             }
-            
+
             mesh_load_channel_psk_flags();
-            ESP_LOGI(TAG, "Total channels after NVS load: %d (default=%d)", 
-                    s_num_channels, s_default_channel_idx);
+            ESP_LOGI(TAG, "Total channels after NVS load: %d (default=%d)", s_num_channels,
+                     s_default_channel_idx);
         }
     }
 
@@ -4589,7 +4635,8 @@ void mesh_task_start(bramble_identity_t *identity) {
             }
             nvs_close(mb_nvs);
         }
-        ESP_LOGI(TAG, "Mailbox component initialized: max_entries=%d per_dest=%d per_src=%d ttl=24h",
+        ESP_LOGI(TAG,
+                 "Mailbox component initialized: max_entries=%d per_dest=%d per_src=%d ttl=24h",
                  MAILBOX_MAX_ENTRIES, MAILBOX_MAX_PER_DEST, MAILBOX_MAX_PER_SOURCE);
     }
 
@@ -4611,9 +4658,8 @@ void mesh_task_start(bramble_identity_t *identity) {
     s_rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_packet_t));
     s_mesh_event_queue = xQueueCreate(MESH_EVENT_QUEUE_DEPTH, sizeof(mesh_event_type_t));
     if (!s_rx_queue || !s_mesh_event_queue) {
-        ESP_LOGE(TAG, "Failed to create mesh queues (rx=%p evt=%p)",
-                 (void *)s_rx_queue,
-                 (void *)s_mesh_event_queue);
+        ESP_LOGE(TAG, "Failed to create mesh queues (rx=%p evt=%p)", (void*)s_rx_queue,
+                 (void*)s_mesh_event_queue);
         return;
     }
 
@@ -4641,44 +4687,44 @@ void mesh_task_start(bramble_identity_t *identity) {
         .name = "probe_reply_timer",
         .skip_unhandled_events = true,
     };
-    esp_err_t probe_reply_timer_err = esp_timer_create(&probe_reply_timer_args, &s_probe_reply_timer);
+    esp_err_t probe_reply_timer_err =
+        esp_timer_create(&probe_reply_timer_args, &s_probe_reply_timer);
     if (probe_reply_timer_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create probe reply timer: %d", (int)probe_reply_timer_err);
         return;
     }
 
     /* Pin to CPU1 — leave CPU0 for UI/display */
-    xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL,
-                            MESH_TASK_PRIORITY, NULL, 1);
+    xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL, 1);
     ESP_LOGI(TAG, "Mesh task created (pinned to CPU1)");
 }
 
-void mesh_get_state(mesh_shared_state_t *out) {
+void mesh_get_state(mesh_shared_state_t* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_shared;
     xSemaphoreGive(s_state_mutex);
 }
 
-void mesh_get_routes(routing_table_t *out) {
+void mesh_get_routes(routing_table_t* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_routes;
     xSemaphoreGive(s_state_mutex);
 }
 
-void mesh_get_location_state(location_manager_t *out) {
+void mesh_get_location_state(location_manager_t* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_location_mgr;
     xSemaphoreGive(s_state_mutex);
 }
 
-int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
+int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     if (s_num_channels >= MAX_CHANNELS) {
         xSemaphoreGive(s_state_mutex);
         return -1;
     }
 
-    bramble_channel_t *ch = &s_channels[s_num_channels];
+    bramble_channel_t* ch = &s_channels[s_num_channels];
     if (psk && psk_len > 0) {
         /* Use provided PSK — treat as passphrase string */
         char psk_str[65];
@@ -4715,7 +4761,8 @@ int mesh_add_channel(const char *name, const uint8_t *psk, size_t psk_len) {
     }
 
     /* Persist all channels using channel_storage (Phase 1) */
-    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
+    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) !=
+        0) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS");
     }
     mesh_persist_channel_psk_flags();
@@ -4758,7 +4805,8 @@ int mesh_remove_channel(int index) {
     }
 
     /* Persist channels after removal (Phase 1) */
-    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
+    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) !=
+        0) {
         ESP_LOGW(TAG, "Failed to persist channels to NVS after removal");
     }
     mesh_persist_channel_psk_flags();
@@ -4772,16 +4820,17 @@ int mesh_remove_channel(int index) {
     return 0;
 }
 
-int mesh_get_channel_count(void) {
-    return s_num_channels;
-}
+int mesh_get_channel_count(void) { return s_num_channels; }
 
-const char *mesh_get_channel_name(int index) {
-    if (index < 0 || index >= s_num_channels) return NULL;
-    if (s_channel_names[index][0]) return s_channel_names[index];
+const char* mesh_get_channel_name(int index) {
+    if (index < 0 || index >= s_num_channels)
+        return NULL;
+    if (s_channel_names[index][0])
+        return s_channel_names[index];
 
     static char name_buf[20];
-    if (index == 0) return "Broadcast";
+    if (index == 0)
+        return "Broadcast";
 
     nvs_handle_t ch_nvs;
     if (nvs_open(NVS_NS_CHANNEL, NVS_READONLY, &ch_nvs) != ESP_OK) {
@@ -4811,21 +4860,23 @@ const char *mesh_get_channel_name(int index) {
     return s_channel_names[index];
 }
 
-int mesh_get_channel_security(int index, bool *has_psk, uint16_t *epoch) {
+int mesh_get_channel_security(int index, bool* has_psk, uint16_t* epoch) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     if (index < 0 || index >= s_num_channels) {
         xSemaphoreGive(s_state_mutex);
         return -1;
     }
 
-    if (has_psk) *has_psk = s_channel_has_psk[index];
-    if (epoch) *epoch = s_channels[index].epoch;
+    if (has_psk)
+        *has_psk = s_channel_has_psk[index];
+    if (epoch)
+        *epoch = s_channels[index].epoch;
 
     xSemaphoreGive(s_state_mutex);
     return 0;
 }
 
-void mesh_set_node_name(const char *name) {
+void mesh_set_node_name(const char* name) {
     if (name && strlen(name) < sizeof(s_node_name)) {
         strncpy(s_node_name, name, sizeof(s_node_name) - 1);
         s_node_name[sizeof(s_node_name) - 1] = '\0';
@@ -4835,7 +4886,7 @@ void mesh_set_node_name(const char *name) {
     ESP_LOGI(TAG, "Node name updated: %s", s_node_name[0] ? s_node_name : "(none)");
 }
 
-int mesh_set_node_name_persist(const char *name) {
+int mesh_set_node_name_persist(const char* name) {
     if (!name || name[0] == '\0' || strlen(name) >= sizeof(s_node_name)) {
         return -1;
     }
@@ -4862,9 +4913,7 @@ void mesh_set_mailbox(bool enabled) {
     ESP_LOGI(TAG, "Mailbox runtime: %s", enabled ? "enabled" : "disabled");
 }
 
-bool mesh_get_mailbox(void) {
-    return s_mailbox_enabled;
-}
+bool mesh_get_mailbox(void) { return s_mailbox_enabled; }
 
 /* ── Probe tracking ──────────────────────────────────────────────────── */
 
@@ -4926,8 +4975,9 @@ uint32_t mesh_send_probe(void) {
     return pid;
 }
 
-static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
-    if (len < HEADER_SIZE + 4) return;
+static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
+    if (len < HEADER_SIZE + 4)
+        return;
 
     bramble_header_t header;
     bramble_header_deserialize(&header, data, len);
@@ -4938,13 +4988,9 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
 
     char src_buf[12], me_buf[12];
     ESP_LOGI(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
-             header.packet_id,
-             (unsigned)probe_round,
-             addr_hex(src_addr, src_buf, sizeof(src_buf)),
-             addr_hex(s_identity->address, me_buf, sizeof(me_buf)),
-             (unsigned)header.hop_limit,
-             (int)rssi,
-             (int)snr);
+             header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
+             addr_hex(s_identity->address, me_buf, sizeof(me_buf)), (unsigned)header.hop_limit,
+             (int)rssi, (int)snr);
 
     /* Ignore our own probe if it loops back through relays. */
     if (src_addr == s_identity->address) {
@@ -4973,9 +5019,7 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
     queue_probe_reply(buf, HEADER_SIZE + 6, s_identity->address);
 
     ESP_LOGI(TAG, "PROBE ACK QUEUED pid=%08" PRIX32 " round=%u to=%s from=%s hops=1",
-             header.packet_id,
-             (unsigned)probe_round,
-             addr_hex(src_addr, src_buf, sizeof(src_buf)),
+             header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)));
 
     /* Forward probe if hop limit allows */
@@ -4986,12 +5030,14 @@ static void handle_probe(const uint8_t *data, uint8_t len, int16_t rssi, int8_t 
         bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
         memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
         mesh_tx(fwd_buf, HEADER_SIZE + 4, TX_KIND_PROBE);
-        ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id, (unsigned)fwd.hop_limit);
+        ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id,
+                 (unsigned)fwd.hop_limit);
     }
 }
 
-static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int8_t snr) {
-    if (len < HEADER_SIZE + 5) return;
+static void handle_probe_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
+    if (len < HEADER_SIZE + 5)
+        return;
 
     bramble_header_t header;
     bramble_header_deserialize(&header, data, len);
@@ -5007,10 +5053,8 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
             memcpy(fwd_buf, data, len);
             bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
             mesh_tx(fwd_buf, len, TX_KIND_PROBE_REPLY);
-            ESP_LOGI(TAG, "PROBE ACK FWD pid=%08" PRIX32 " dest=%s hop=%u",
-                     header.packet_id,
-                     addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)),
-                     (unsigned)fwd.hop_limit);
+            ESP_LOGI(TAG, "PROBE ACK FWD pid=%08" PRIX32 " dest=%s hop=%u", header.packet_id,
+                     addr_hex(header.dest_addr, dst_buf, sizeof(dst_buf)), (unsigned)fwd.hop_limit);
         } else {
             ESP_LOGI(TAG, "PROBE ACK drop hop-limit pid=%08" PRIX32, header.packet_id);
         }
@@ -5026,7 +5070,8 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     memcpy(&resp_addr, data + HEADER_SIZE, 4);
     uint8_t hops = data[HEADER_SIZE + 4];
     uint8_t probe_round = (len >= HEADER_SIZE + 6) ? data[HEADER_SIZE + 5] : 1;
-    if (probe_round < 1 || probe_round > PROBE_SWEEP_ROUNDS) probe_round = 1;
+    if (probe_round < 1 || probe_round > PROBE_SWEEP_ROUNDS)
+        probe_round = 1;
 
     /* Never include self in probe responders. */
     if (resp_addr == s_identity->address) {
@@ -5037,21 +5082,18 @@ static void handle_probe_ack(const uint8_t *data, uint8_t len, int16_t rssi, int
     uint32_t latency = now_ms() - s_probe_sent_ms;
 
     /* Upsert by responder addr: one logical row per responder. */
-    probe_results_upsert(s_probe_results, &s_probe_result_count, MAX_PROBE_RESULTS,
-                         resp_addr, hops, rssi, snr, latency, probe_round);
+    probe_results_upsert(s_probe_results, &s_probe_result_count, MAX_PROBE_RESULTS, resp_addr, hops,
+                         rssi, snr, latency, probe_round);
 
     char buf[12];
-    ESP_LOGI(TAG, "PROBE ACK RX from=%s round=%u hops=%u rssi=%d snr=%d latency=%" PRIu32 "ms pid=%08" PRIX32,
-             addr_hex(resp_addr, buf, sizeof(buf)),
-             (unsigned)probe_round,
-             (unsigned)hops,
-             (int)rssi,
-             (int)snr,
-             now_ms() - s_probe_sent_ms,
-             header.packet_id);
+    ESP_LOGI(TAG,
+             "PROBE ACK RX from=%s round=%u hops=%u rssi=%d snr=%d latency=%" PRIu32
+             "ms pid=%08" PRIX32,
+             addr_hex(resp_addr, buf, sizeof(buf)), (unsigned)probe_round, (unsigned)hops,
+             (int)rssi, (int)snr, now_ms() - s_probe_sent_ms, header.packet_id);
 
     /* Emit notification */
-    cJSON *params = cJSON_CreateObject();
+    cJSON* params = cJSON_CreateObject();
     cJSON_AddStringToObject(params, "address", addr_hex(resp_addr, buf, sizeof(buf)));
     cJSON_AddNumberToObject(params, "hops", hops);
     cJSON_AddNumberToObject(params, "rssi", rssi);
@@ -5075,7 +5117,8 @@ int mesh_set_default_channel(int index) {
     s_default_channel_idx = index;
 
     /* Persist default channel (Phase 1) */
-    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) != 0) {
+    if (channel_storage_save(s_channels, s_num_channels, s_channel_names, s_default_channel_idx) !=
+        0) {
         ESP_LOGW(TAG, "Failed to persist default channel to NVS");
     }
 
@@ -5085,13 +5128,15 @@ int mesh_set_default_channel(int index) {
     return 0;
 }
 
-const char *mesh_get_node_name(void) {
-    if (s_node_name[0] == '\0') return NULL;
+const char* mesh_get_node_name(void) {
+    if (s_node_name[0] == '\0')
+        return NULL;
     return s_node_name;
 }
 
-int mesh_get_identity(uint32_t *addr_out, uint8_t pubkey_out[32]) {
-    if (!s_identity || !addr_out || !pubkey_out) return -1;
+int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]) {
+    if (!s_identity || !addr_out || !pubkey_out)
+        return -1;
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *addr_out = s_identity->address;
@@ -5100,11 +5145,11 @@ int mesh_get_identity(uint32_t *addr_out, uint8_t pubkey_out[32]) {
     return 0;
 }
 
-const char *mesh_get_peer_name(uint32_t addr) {
+const char* mesh_get_peer_name(uint32_t addr) {
     static char s_name_buf[17];
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    neighbor_entry_t *nb = neighbor_lookup(&s_neighbors, addr);
+    neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, addr);
     if (nb && nb->name[0] != '\0') {
         strncpy(s_name_buf, nb->name, sizeof(s_name_buf) - 1);
         s_name_buf[sizeof(s_name_buf) - 1] = '\0';
@@ -5115,7 +5160,7 @@ const char *mesh_get_peer_name(uint32_t addr) {
     return NULL;
 }
 
-int mesh_get_channel_info(int *default_idx) {
+int mesh_get_channel_info(int* default_idx) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     int count = s_num_channels;
     if (default_idx) {
@@ -5127,53 +5172,51 @@ int mesh_get_channel_info(int *default_idx) {
 
 /* ── Traffic debug access ───────────────────────────────────────────── */
 
-static void traffic_event_notify(const traffic_event_t *evt, void *ctx) {
+static void traffic_event_notify(const traffic_event_t* evt, void* ctx) {
     (void)ctx;
-    
+
     /* Only send notifications if debug is enabled */
     if (!traffic_debug_is_enabled(&s_traffic_debug)) {
         return;
     }
-    
+
     /* Build notification payload */
-    cJSON *params = cJSON_CreateObject();
+    cJSON* params = cJSON_CreateObject();
     cJSON_AddNumberToObject(params, "seq", evt->seq);
     cJSON_AddNumberToObject(params, "timestamp_ms", evt->timestamp_ms);
     cJSON_AddNumberToObject(params, "pkt_type", evt->pkt_type);
-    
+
     /* Category as string */
-    static const char *cat_names[] = {
-        "beacon", "timesync", "routing", "ack", "chat", "maintenance", "other"
-    };
+    static const char* cat_names[] = {"beacon", "timesync",    "routing", "ack",
+                                      "chat",   "maintenance", "other"};
     if (evt->category < 7) {
         cJSON_AddStringToObject(params, "category", cat_names[evt->category]);
     } else {
         cJSON_AddStringToObject(params, "category", "unknown");
     }
-    
+
     /* Airtime tier as string */
-    static const char *tier_names[] = { "none", "normal", "critical", "broadcast" };
+    static const char* tier_names[] = {"none", "normal", "critical", "broadcast"};
     if (evt->airtime_tier <= 3) {
         cJSON_AddStringToObject(params, "airtime_tier", tier_names[evt->airtime_tier]);
     } else {
         cJSON_AddStringToObject(params, "airtime_tier", "unknown");
     }
-    
+
     cJSON_AddNumberToObject(params, "packet_len", evt->packet_len);
     cJSON_AddNumberToObject(params, "rssi", evt->rssi);
     cJSON_AddBoolToObject(params, "is_tx", evt->is_tx);
-    
+
     /* Send notification via RPC notify system (which forwards to WebSocket) */
     rpc_notify("bramble.onTrafficEvent", params);
-    
+
     cJSON_Delete(params);
 }
 
-traffic_debug_t *mesh_get_traffic_debug(void) {
-    return &s_traffic_debug;
-}
+traffic_debug_t* mesh_get_traffic_debug(void) { return &s_traffic_debug; }
 
-void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx, uint8_t sample_rate) {
+void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_rx,
+                                   uint8_t sample_rate) {
     /* F26: Update in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     traffic_debug_enable(&s_traffic_debug, enabled);
@@ -5193,10 +5236,12 @@ void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_r
     ESP_LOGI(TAG, "Traffic debug %s", enabled ? "enabled" : "disabled");
 }
 
-void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *include_rx, uint8_t *sample_rate) {
+void mesh_traffic_debug_get_config(bool* enabled, bool* include_tx, bool* include_rx,
+                                   uint8_t* sample_rate) {
     /* F26: Read in-memory state under mutex, then do NVS I/O outside */
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    if (enabled) *enabled = traffic_debug_is_enabled(&s_traffic_debug);
+    if (enabled)
+        *enabled = traffic_debug_is_enabled(&s_traffic_debug);
     xSemaphoreGive(s_state_mutex);
 
     /* Load other config from NVS (flash I/O — do NOT hold mesh mutex) */
@@ -5206,24 +5251,27 @@ void mesh_traffic_debug_get_config(bool *enabled, bool *include_tx, bool *includ
         if (include_tx && nvs_get_u8(nvs, "inc_tx", &val) == ESP_OK)
             *include_tx = (val != 0);
         else if (include_tx)
-            *include_tx = true;  /* default */
+            *include_tx = true; /* default */
 
         if (include_rx && nvs_get_u8(nvs, "inc_rx", &val) == ESP_OK)
             *include_rx = (val != 0);
         else if (include_rx)
-            *include_rx = true;  /* default */
+            *include_rx = true; /* default */
 
         if (sample_rate && nvs_get_u8(nvs, "sample", &val) == ESP_OK)
             *sample_rate = val;
         else if (sample_rate)
-            *sample_rate = 100;  /* default: no sampling */
+            *sample_rate = 100; /* default: no sampling */
 
         nvs_close(nvs);
     } else {
         /* NVS read failed, return defaults */
-        if (include_tx) *include_tx = true;
-        if (include_rx) *include_rx = true;
-        if (sample_rate) *sample_rate = 100;
+        if (include_tx)
+            *include_tx = true;
+        if (include_rx)
+            *include_rx = true;
+        if (sample_rate)
+            *sample_rate = 100;
     }
 }
 

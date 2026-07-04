@@ -26,11 +26,11 @@ void test_rreq_rate_after_cooldown_allowed(void) {
 
 void test_sybil_rssi_cluster_detected(void) {
     // 3 nodes all within 3dB of each other → suspicious
-    int8_t rssi[] = { -70, -71, -72, -50 };
+    int8_t rssi[] = {-70, -71, -72, -50};
     TEST_ASSERT_TRUE(sybil_check_rssi_cluster(rssi, 4));
 
     // All spread out → not suspicious
-    int8_t rssi2[] = { -70, -50, -30 };
+    int8_t rssi2[] = {-70, -50, -30};
     TEST_ASSERT_FALSE(sybil_check_rssi_cluster(rssi2, 3));
 }
 
@@ -61,7 +61,7 @@ void test_rreq_fwd_long_idle_caps_at_burst(void) {
     for (int i = 0; i < RREQ_FWD_BURST; i++) {
         rreq_fwd_allow(&rl, 0);
     }
-    uint32_t huge_idle = (uint32_t) RREQ_FWD_BURST * RREQ_FWD_REFILL_MS * 100;
+    uint32_t huge_idle = (uint32_t)RREQ_FWD_BURST * RREQ_FWD_REFILL_MS * 100;
     for (int i = 0; i < RREQ_FWD_BURST; i++) {
         TEST_ASSERT_TRUE(rreq_fwd_allow(&rl, huge_idle));
     }
@@ -84,7 +84,7 @@ void test_rreq_fwd_monotonic_flood_bounded_to_refill_rate(void) {
             allowed++;
         }
     }
-    TEST_ASSERT_EQUAL_INT((int) windows, allowed);
+    TEST_ASSERT_EQUAL_INT((int)windows, allowed);
 }
 
 int main(void) {

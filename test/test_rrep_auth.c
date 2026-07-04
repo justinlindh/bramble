@@ -28,7 +28,7 @@ void tearDown(void) {}
 /* ws 1.3b: the seq is set by the caller (not rrep_build_destination, which
  * defaults it to zero), mirroring how mesh_task.c writes the 48-bit
  * control_seq_next draw into r.seq before re-signing. */
-static void set_seq(bramble_rrep_t *r, uint64_t seq) {
+static void set_seq(bramble_rrep_t* r, uint64_t seq) {
     r->seq[0] = (uint8_t)(seq >> 40);
     r->seq[1] = (uint8_t)(seq >> 32);
     r->seq[2] = (uint8_t)(seq >> 24);

@@ -5,33 +5,21 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-void test_ct_strcmp_match(void) {
-    TEST_ASSERT_EQUAL(0, ct_strcmp("abc", "abc"));
-}
+void test_ct_strcmp_match(void) { TEST_ASSERT_EQUAL(0, ct_strcmp("abc", "abc")); }
 
-void test_ct_strcmp_mismatch(void) {
-    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("abc", "abd"));
-}
+void test_ct_strcmp_mismatch(void) { TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("abc", "abd")); }
 
-void test_ct_strcmp_length_mismatch(void) {
-    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("abc", "ab"));
-}
+void test_ct_strcmp_length_mismatch(void) { TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("abc", "ab")); }
 
-void test_ct_strcmp_both_empty(void) {
-    TEST_ASSERT_EQUAL(0, ct_strcmp("", ""));
-}
+void test_ct_strcmp_both_empty(void) { TEST_ASSERT_EQUAL(0, ct_strcmp("", "")); }
 
-void test_ct_strcmp_one_empty_a(void) {
-    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("a", ""));
-}
+void test_ct_strcmp_one_empty_a(void) { TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("a", "")); }
 
-void test_ct_strcmp_one_empty_b(void) {
-    TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("", "a"));
-}
+void test_ct_strcmp_one_empty_b(void) { TEST_ASSERT_NOT_EQUAL(0, ct_strcmp("", "a")); }
 
 void test_ct_strcmp_long_match(void) {
     /* 64-char token, typical generated size x2 */
-    const char *t = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+    const char* t = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
     TEST_ASSERT_EQUAL(0, ct_strcmp(t, t));
 }
 

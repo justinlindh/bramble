@@ -27,7 +27,7 @@ void tearDown(void) {}
 /* ws 1.3b: the seq is set by the caller (send_ack/the receipt builder
  * draw it via control_seq_next and write it in before ack_sign/
  * receipt_sign), mirroring the RREP/RERR test files' set_seq helpers. */
-static void set_ack_seq(bramble_ack_t *a, uint64_t seq) {
+static void set_ack_seq(bramble_ack_t* a, uint64_t seq) {
     a->seq[0] = (uint8_t)(seq >> 40);
     a->seq[1] = (uint8_t)(seq >> 32);
     a->seq[2] = (uint8_t)(seq >> 24);
@@ -52,7 +52,7 @@ static bramble_ack_t make_ack(uint32_t src_addr, uint32_t ack_packet_id) {
     return a;
 }
 
-static void set_receipt_seq(bramble_delivery_receipt_t *r, uint64_t seq) {
+static void set_receipt_seq(bramble_delivery_receipt_t* r, uint64_t seq) {
     r->seq[0] = (uint8_t)(seq >> 40);
     r->seq[1] = (uint8_t)(seq >> 32);
     r->seq[2] = (uint8_t)(seq >> 24);

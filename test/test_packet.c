@@ -9,9 +9,9 @@ void tearDown(void) {}
 /* Helper: fill a standard header */
 static bramble_header_t make_header(uint8_t type) {
     bramble_header_t h = {
-        .version   = BRAMBLE_VERSION,
-        .type      = type,
-        .flags     = FLAG_ACK_REQ | FLAG_ENCRYPT,
+        .version = BRAMBLE_VERSION,
+        .type = type,
+        .flags = FLAG_ACK_REQ | FLAG_ENCRYPT,
         .hop_limit = 7,
         .dest_addr = 0xDEADBEEF,
         .packet_id = 0x12345678,
@@ -43,8 +43,12 @@ void test_header_buffer_too_small(void) {
 
 void test_header_big_endian_wire(void) {
     bramble_header_t h = {
-        .version = 1, .type = 0x0A, .flags = 0x24, .hop_limit = 7,
-        .dest_addr = 0xDEADBEEF, .packet_id = 0x12345678,
+        .version = 1,
+        .type = 0x0A,
+        .flags = 0x24,
+        .hop_limit = 7,
+        .dest_addr = 0xDEADBEEF,
+        .packet_id = 0x12345678,
     };
     uint8_t buf[HEADER_SIZE];
     bramble_header_serialize(&h, buf, sizeof(buf));
@@ -64,10 +68,13 @@ void test_header_big_endian_wire(void) {
 void test_ack_roundtrip(void) {
     bramble_ack_t p = {
         .header = make_header(PKT_TYPE_ACK),
-        .src_addr = 0xAABBCCDD, .ack_packet_id = 0x11223344,
-        .ack_flags = 0x03, .rssi_at_dest = -72,
+        .src_addr = 0xAABBCCDD,
+        .ack_packet_id = 0x11223344,
+        .ack_flags = 0x03,
+        .rssi_at_dest = -72,
         .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04},
-        .hop_count = 2, .relay_path = {0x10101010, 0x20202020},
+        .hop_count = 2,
+        .relay_path = {0x10101010, 0x20202020},
     };
     uint8_t buf[ACK_MAX_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p, buf, sizeof(buf)));
@@ -93,13 +100,15 @@ void test_ack_roundtrip(void) {
 void test_ack_auth_hmac_offset_independent_of_hop_count(void) {
     bramble_ack_t p_zero_hops = {
         .header = make_header(PKT_TYPE_ACK),
-        .src_addr = 0x1, .ack_packet_id = 0x2,
+        .src_addr = 0x1,
+        .ack_packet_id = 0x2,
         .auth_hmac = {1, 2, 3, 4, 5, 6, 7, 8},
         .hop_count = 0,
     };
     bramble_ack_t p_many_hops = p_zero_hops;
     p_many_hops.hop_count = 4;
-    for (int i = 0; i < 4; i++) p_many_hops.relay_path[i] = 0x30000000 + i;
+    for (int i = 0; i < 4; i++)
+        p_many_hops.relay_path[i] = 0x30000000 + i;
 
     uint8_t buf_zero[ACK_MAX_SIZE];
     uint8_t buf_many[ACK_MAX_SIZE];
@@ -125,10 +134,12 @@ void test_ack_auth_hmac_offset_independent_of_hop_count(void) {
 void test_ack_deserialize_clamps_hop_count_to_available_bytes(void) {
     bramble_ack_t p = {
         .header = make_header(PKT_TYPE_ACK),
-        .src_addr = 0x1, .ack_packet_id = 0x2,
+        .src_addr = 0x1,
+        .ack_packet_id = 0x2,
         .hop_count = ACK_MAX_HOPS,
     };
-    for (int i = 0; i < ACK_MAX_HOPS; i++) p.relay_path[i] = 0x40000000 + i;
+    for (int i = 0; i < ACK_MAX_HOPS; i++)
+        p.relay_path[i] = 0x40000000 + i;
     uint8_t buf[ACK_MAX_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&p, buf, sizeof(buf)));
 
@@ -150,7 +161,7 @@ void test_ack_deserialize_clamps_hop_count_to_available_bytes(void) {
 }
 
 void test_ack_buffer_too_small(void) {
-    bramble_ack_t p = { .header = make_header(PKT_TYPE_ACK) };
+    bramble_ack_t p = {.header = make_header(PKT_TYPE_ACK)};
     /* Full-size backing array, undersized length: same rejection contract,
      * but GCC's -Warray-bounds path analysis cannot flag the (unreachable)
      * serializer writes past a too-small array. */
@@ -162,8 +173,11 @@ void test_ack_buffer_too_small(void) {
 void test_rreq_roundtrip(void) {
     bramble_rreq_t p = {
         .header = make_header(PKT_TYPE_RREQ),
-        .query_id = 0x99887766, .encrypted_source = 0x55443322,
-        .hop_count = 3, .metric = 42, .prev_hop = 0xFEDCBA98,
+        .query_id = 0x99887766,
+        .encrypted_source = 0x55443322,
+        .hop_count = 3,
+        .metric = 42,
+        .prev_hop = 0xFEDCBA98,
         .rreq_salt = 0xABCD1234,
     };
     uint8_t buf[RREQ_SIZE];
@@ -182,8 +196,11 @@ void test_rreq_roundtrip(void) {
 void test_rrep_roundtrip(void) {
     bramble_rrep_t p = {
         .header = make_header(PKT_TYPE_RREP),
-        .query_id = 0xAAAAAAAA, .src_addr = 0xBBBBBBBB,
-        .next_hop = 0xCCCCCCCC, .hop_count = 5, .route_metric = 100,
+        .query_id = 0xAAAAAAAA,
+        .src_addr = 0xBBBBBBBB,
+        .next_hop = 0xCCCCCCCC,
+        .hop_count = 5,
+        .route_metric = 100,
         .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE},
     };
     uint8_t buf[RREP_SIZE];
@@ -202,7 +219,8 @@ void test_rrep_roundtrip(void) {
 void test_rerr_roundtrip(void) {
     bramble_rerr_t p = {
         .header = make_header(PKT_TYPE_RERR),
-        .reporter_addr = 0x11111111, .broken_dest = 0x22222222,
+        .reporter_addr = 0x11111111,
+        .broken_dest = 0x22222222,
         .broken_next_hop = 0x33333333,
         .auth_hmac = {0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04},
     };
@@ -220,10 +238,15 @@ void test_rerr_roundtrip(void) {
 void test_beacon_roundtrip(void) {
     bramble_beacon_t p = {
         .header = make_header(PKT_TYPE_BEACON),
-        .src_addr = 0xAAAA1111, .pubkey_hash = 0xBBBB2222,
-        .uptime_min = 1234, .battery_pct = 85, .tx_queue_depth = 3,
-        .neighbor_count = 7, .flags = 0x0F,
-        .network_time = 0xCAFEBABE, .time_confidence = 500,
+        .src_addr = 0xAAAA1111,
+        .pubkey_hash = 0xBBBB2222,
+        .uptime_min = 1234,
+        .battery_pct = 85,
+        .tx_queue_depth = 3,
+        .neighbor_count = 7,
+        .flags = 0x0F,
+        .network_time = 0xCAFEBABE,
+        .time_confidence = 500,
         .auth_hmac = {0x01, 0x02, 0x03, 0x04},
     };
     uint8_t buf[BEACON_SIZE];
@@ -245,9 +268,12 @@ void test_beacon_roundtrip(void) {
 void test_beacon_wire_format(void) {
     bramble_beacon_t p = {
         .header = make_header(PKT_TYPE_BEACON),
-        .src_addr = 0x01020304, .pubkey_hash = 0x05060708,
-        .uptime_min = 0x0A0B, .battery_pct = 85,
-        .network_time = 0xCAFEBABE, .time_confidence = 0x1234,
+        .src_addr = 0x01020304,
+        .pubkey_hash = 0x05060708,
+        .uptime_min = 0x0A0B,
+        .battery_pct = 85,
+        .network_time = 0xCAFEBABE,
+        .time_confidence = 0x1234,
     };
     uint8_t buf[BEACON_SIZE] = {0};
     TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_serialize(&p, buf, sizeof(buf)));
@@ -268,11 +294,16 @@ void test_beacon_wire_format(void) {
 void test_key_exchange_roundtrip(void) {
     bramble_key_exchange_t p = {
         .header = make_header(PKT_TYPE_KEY_EXCHANGE),
-        .src_addr = 0x44556677, .key_id = 0xAB, .ke_type = 0x01,
+        .src_addr = 0x44556677,
+        .key_id = 0xAB,
+        .ke_type = 0x01,
     };
-    for (int i = 0; i < 32; i++) p.ephemeral_pubkey[i] = (uint8_t)i;
-    for (int i = 0; i < 32; i++) p.long_term_pubkey[i] = (uint8_t)(0x80 + i);
-    for (int i = 0; i < 16; i++) p.auth_tag[i] = (uint8_t)(0xF0 + i);
+    for (int i = 0; i < 32; i++)
+        p.ephemeral_pubkey[i] = (uint8_t)i;
+    for (int i = 0; i < 32; i++)
+        p.long_term_pubkey[i] = (uint8_t)(0x80 + i);
+    for (int i = 0; i < 16; i++)
+        p.auth_tag[i] = (uint8_t)(0xF0 + i);
     uint8_t buf[KEY_EXCHANGE_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_key_exchange_serialize(&p, buf, sizeof(buf)));
     bramble_key_exchange_t out;
@@ -289,8 +320,10 @@ void test_key_exchange_roundtrip(void) {
 void test_delivery_receipt_roundtrip(void) {
     bramble_delivery_receipt_t p = {
         .header = make_header(PKT_TYPE_DELIVERY_RECEIPT),
-        .src_addr = 0x11223344, .orig_packet_id = 0x55667788,
-        .hop_count = 3, .total_latency = 200,
+        .src_addr = 0x11223344,
+        .orig_packet_id = 0x55667788,
+        .hop_count = 3,
+        .total_latency = 200,
         .auth_hmac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x10, 0x20},
         .relay_path = {0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC},
     };
@@ -314,8 +347,10 @@ void test_delivery_receipt_roundtrip(void) {
 void test_delivery_receipt_zero_hops(void) {
     bramble_delivery_receipt_t p = {
         .header = make_header(PKT_TYPE_DELIVERY_RECEIPT),
-        .src_addr = 0x11223344, .orig_packet_id = 0x55667788,
-        .hop_count = 0, .total_latency = 10,
+        .src_addr = 0x11223344,
+        .orig_packet_id = 0x55667788,
+        .hop_count = 0,
+        .total_latency = 10,
     };
     /* Max-size backing array, min-size length argument: still proves the
      * zero-hop wire contract, without tripping GCC -Warray-bounds on the

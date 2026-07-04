@@ -20,9 +20,9 @@ void test_normalize_invalid_channel_falls_back_to_broadcast(void) {
 void test_broadcast_matches_only_broadcast_directions(void) {
     chat_target_t t = chat_target_default();
 
-    stored_msg_t b_in = { .direction = MSG_DIR_BROADCAST_IN, .channel_index = 0 };
-    stored_msg_t b_out = { .direction = MSG_DIR_BROADCAST_OUT, .channel_index = 0 };
-    stored_msg_t dm = { .direction = MSG_DIR_INCOMING, .channel_index = 0 };
+    stored_msg_t b_in = {.direction = MSG_DIR_BROADCAST_IN, .channel_index = 0};
+    stored_msg_t b_out = {.direction = MSG_DIR_BROADCAST_OUT, .channel_index = 0};
+    stored_msg_t dm = {.direction = MSG_DIR_INCOMING, .channel_index = 0};
 
     TEST_ASSERT_TRUE(chat_target_matches_message(t, &b_in, 0));
     TEST_ASSERT_TRUE(chat_target_matches_message(t, &b_out, 0));
@@ -32,23 +32,26 @@ void test_broadcast_matches_only_broadcast_directions(void) {
 void test_channel_target_excludes_other_channels(void) {
     chat_target_t t = chat_target_normalize(CHAT_TARGET_CHANNEL, 2, 4);
 
-    stored_msg_t ch1 = { .direction = MSG_DIR_BROADCAST_IN, .channel_index = 1 };
+    stored_msg_t ch1 = {.direction = MSG_DIR_BROADCAST_IN, .channel_index = 1};
     TEST_ASSERT_FALSE(chat_target_matches_message(t, &ch1, 1));
 }
 
 void test_channel_target_includes_message_when_channel_matches(void) {
     chat_target_t t = chat_target_normalize(CHAT_TARGET_CHANNEL, 2, 4);
 
-    stored_msg_t m = { .direction = MSG_DIR_BROADCAST_IN, .channel_index = 2 };
+    stored_msg_t m = {.direction = MSG_DIR_BROADCAST_IN, .channel_index = 2};
     TEST_ASSERT_TRUE(chat_target_matches_message(t, &m, 2));
 }
 
 void test_dm_target_matches_only_peer_dm(void) {
     chat_target_t t = chat_target_dm(0x12345678);
 
-    stored_msg_t dm_match = { .direction = MSG_DIR_INCOMING, .peer_addr = 0x12345678, .channel_index = 0 };
-    stored_msg_t dm_other = { .direction = MSG_DIR_INCOMING, .peer_addr = 0xAABBCCDD, .channel_index = 0 };
-    stored_msg_t bcast = { .direction = MSG_DIR_BROADCAST_IN, .peer_addr = 0x12345678, .channel_index = 0 };
+    stored_msg_t dm_match = {
+        .direction = MSG_DIR_INCOMING, .peer_addr = 0x12345678, .channel_index = 0};
+    stored_msg_t dm_other = {
+        .direction = MSG_DIR_INCOMING, .peer_addr = 0xAABBCCDD, .channel_index = 0};
+    stored_msg_t bcast = {
+        .direction = MSG_DIR_BROADCAST_IN, .peer_addr = 0x12345678, .channel_index = 0};
 
     TEST_ASSERT_TRUE(chat_target_matches_message(t, &dm_match, 0));
     TEST_ASSERT_FALSE(chat_target_matches_message(t, &dm_other, 0));

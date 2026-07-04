@@ -21,7 +21,7 @@ void setUp(void) {
 
 void tearDown(void) {}
 
-static int set_token_and_get_code(const char *token, char *response, size_t resp_len) {
+static int set_token_and_get_code(const char* token, char* response, size_t resp_len) {
     char req[256];
     snprintf(req, sizeof(req),
              "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bramble.setAuthToken\","
@@ -30,14 +30,14 @@ static int set_token_and_get_code(const char *token, char *response, size_t resp
     int len = rpc_dispatch(req, response, resp_len);
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *j = cJSON_Parse(response);
+    cJSON* j = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(j);
-    cJSON *err = cJSON_GetObjectItem(j, "error");
+    cJSON* err = cJSON_GetObjectItem(j, "error");
     int code = 0;
     if (err) {
         code = cJSON_GetObjectItem(err, "code")->valueint;
     } else {
-        cJSON *res = cJSON_GetObjectItem(j, "result");
+        cJSON* res = cJSON_GetObjectItem(j, "result");
         TEST_ASSERT_NOT_NULL(res);
         TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "ok")));
     }
@@ -48,7 +48,8 @@ static int set_token_and_get_code(const char *token, char *response, size_t resp
 void test_set_auth_token_rejects_short_token(void) {
     char response[512];
     /* 15 bytes: one short of the floor */
-    TEST_ASSERT_EQUAL(-32602, set_token_and_get_code("abcdefghijklmno", response, sizeof(response)));
+    TEST_ASSERT_EQUAL(-32602,
+                      set_token_and_get_code("abcdefghijklmno", response, sizeof(response)));
 }
 
 void test_set_auth_token_rejects_one_char_token(void) {
@@ -63,8 +64,8 @@ void test_set_auth_token_accepts_16_byte_token(void) {
 
 void test_set_auth_token_accepts_generated_style_token(void) {
     char response[512];
-    TEST_ASSERT_EQUAL(0, set_token_and_get_code("0123456789ABCDEF0123456789ABCDEF", response,
-                                                sizeof(response)));
+    TEST_ASSERT_EQUAL(
+        0, set_token_and_get_code("0123456789ABCDEF0123456789ABCDEF", response, sizeof(response)));
 }
 
 void test_set_auth_token_accepts_empty_token_as_opt_out(void) {

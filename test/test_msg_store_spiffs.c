@@ -1,6 +1,6 @@
 /*
  * Test suite for msg_store SPIFFS persistence module
- * 
+ *
  * Note: These tests run on host (non-ESP), so SPIFFS functions are stubbed.
  * Full integration tests should be run on actual hardware with SPIFFS mounted.
  */
@@ -9,9 +9,7 @@
 #include "msg_store.h"
 #include "msg_store_spiffs.h"
 
-void setUp(void) {
-    msg_store_init();
-}
+void setUp(void) { msg_store_init(); }
 
 void tearDown(void) {}
 
@@ -62,13 +60,13 @@ void test_msg_store_init_with_persistence_works_without_spiffs(void) {
 
 void test_msg_store_init_with_persistence_preserves_ram_functionality(void) {
     msg_store_init_with_persistence();
-    
+
     /* Add a message to RAM */
     msg_store_add_ex2(0x1234, MSG_DIR_OUTGOING, "test", 4, -70, 5, 1, MSG_STATUS_SENT, 0);
-    
+
     /* Verify it's in RAM */
     TEST_ASSERT_EQUAL(1, msg_store_count());
-    const stored_msg_t *m = msg_store_get(0);
+    const stored_msg_t* m = msg_store_get(0);
     TEST_ASSERT_NOT_NULL(m);
     TEST_ASSERT_EQUAL(0x1234, m->peer_addr);
     TEST_ASSERT_EQUAL_STRING("test", m->text);

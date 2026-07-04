@@ -20,14 +20,14 @@
 #ifdef ESP_PLATFORM
 #include "freertos/semphr.h"
 
-static const char *TAG = "board";
+static const char* TAG = "board";
 static bool s_initialized = false;
 
 /* Shared SPI mutex — created for boards with BOARD_CAP_SHARED_SPI */
 SemaphoreHandle_t g_spi_mutex = NULL;
 #endif
 
-const bramble_board_config_t *board_get_config(void) {
+const bramble_board_config_t* board_get_config(void) {
 #if defined(CONFIG_BRAMBLE_BOARD_TDECK_PLUS)
     return &board_tdeck_plus;
 #elif defined(CONFIG_BRAMBLE_BOARD_HELTEC_V4)
@@ -39,7 +39,7 @@ const bramble_board_config_t *board_get_config(void) {
 
 int board_init(void) {
 #ifdef ESP_PLATFORM
-    const bramble_board_config_t *cfg = board_get_config();
+    const bramble_board_config_t* cfg = board_get_config();
     ESP_LOGI(TAG, "Board: %s", cfg->name);
 
     /* Step 1: Enable peripheral power rail if needed */
@@ -51,7 +51,7 @@ int board_init(void) {
         gpio_config(&pwr_conf);
         gpio_set_level(cfg->peripheral_power_pin, 1);
         ESP_LOGI(TAG, "Peripheral power enabled (GPIO%d)", cfg->peripheral_power_pin);
-        vTaskDelay(pdMS_TO_TICKS(100));  /* Let rails stabilize */
+        vTaskDelay(pdMS_TO_TICKS(100)); /* Let rails stabilize */
     }
 
     /* Step 2: Initialize shared SPI bus if board has shared SPI */
@@ -81,7 +81,7 @@ int board_init(void) {
                     .mode = GPIO_MODE_OUTPUT,
                 };
                 gpio_config(&cs_conf);
-                gpio_set_level(cs_pins[i], 1);  /* Deselect */
+                gpio_set_level(cs_pins[i], 1); /* Deselect */
             }
         }
         ESP_LOGI(TAG, "All SPI CS pins driven HIGH");

@@ -59,7 +59,7 @@ void test_retry_count_default_three_attempts(void) {
 }
 
 void test_slot_distribution_no_collision_for_typical_mesh(void) {
-    uint32_t addrs[] = { 0x196F8E71u, 0xE3CF8D24u, 0x0D941BEAu, 0xD4813079u, 0x6CBF8FE3u };
+    uint32_t addrs[] = {0x196F8E71u, 0xE3CF8D24u, 0x0D941BEAu, 0xD4813079u, 0x6CBF8FE3u};
     int collision_count = 0;
 
     for (uint32_t pkt_id = 0; pkt_id < 1000u; pkt_id++) {
@@ -85,12 +85,12 @@ void test_slot_distribution_no_collision_for_typical_mesh(void) {
 void test_retry_delay_scaling_from_airtime_utilization(void) {
     const uint32_t raw_base = 500u;
 
-    TEST_ASSERT_EQUAL_UINT32(raw_base / 2u,
-                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS));
-    TEST_ASSERT_EQUAL_UINT32(raw_base,
-                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 2u));
-    TEST_ASSERT_EQUAL_UINT32(raw_base * 2u,
-                             mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 5u));
+    TEST_ASSERT_EQUAL_UINT32(
+        raw_base / 2u, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS));
+    TEST_ASSERT_EQUAL_UINT32(
+        raw_base, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 2u));
+    TEST_ASSERT_EQUAL_UINT32(
+        raw_base * 2u, mesh_broadcast_receipt_scale_delay_ms(raw_base, RECEIPT_BUDGET_MAX_MS / 5u));
 }
 
 void test_retry_delay_scaling_integer_math_bounds(void) {
@@ -103,15 +103,9 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     size_t wire_len = 0;
 
-    esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(0xAABBCCDDu,
-                                                                 0x11223344u,
-                                                                 0x55667788u,
-                                                                 0xCAFEBABEu,
-                                                                 8,
-                                                                 0x0102030405u,
-                                                                 buf,
-                                                                 sizeof(buf),
-                                                                 &wire_len);
+    esp_err_t err = mesh_build_broadcast_delivery_receipt_packet(
+        0xAABBCCDDu, 0x11223344u, 0x55667788u, 0xCAFEBABEu, 8, 0x0102030405u, buf, sizeof(buf),
+        &wire_len);
     TEST_ASSERT_EQUAL(ESP_OK, err);
     TEST_ASSERT_EQUAL(DELIVERY_RECEIPT_MIN_SIZE + 4, wire_len);
 

@@ -6,9 +6,7 @@ static dedup_buffer_t buf;
 void setUp(void) { dedup_init(&buf); }
 void tearDown(void) {}
 
-void test_init_count_zero(void) {
-    TEST_ASSERT_EQUAL_INT(0, dedup_count(&buf));
-}
+void test_init_count_zero(void) { TEST_ASSERT_EQUAL_INT(0, dedup_count(&buf)); }
 
 void test_first_packet_not_duplicate(void) {
     TEST_ASSERT_FALSE(dedup_check_and_add(&buf, 1000, 0));

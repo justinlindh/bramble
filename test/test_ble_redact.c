@@ -9,9 +9,7 @@ void test_preauth_body_never_loggable(void) {
     TEST_ASSERT_FALSE(ble_rpc_body_loggable(false));
 }
 
-void test_postauth_body_loggable(void) {
-    TEST_ASSERT_TRUE(ble_rpc_body_loggable(true));
-}
+void test_postauth_body_loggable(void) { TEST_ASSERT_TRUE(ble_rpc_body_loggable(true)); }
 
 int main(void) {
     UNITY_BEGIN();

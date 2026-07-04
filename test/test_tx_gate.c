@@ -233,8 +233,7 @@ void test_routing_flood_cannot_exhaust_data_lane(void) {
 
     TEST_ASSERT_TRUE(airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_NORMAL) >=
                      (normal_max * 3u) / 4u);
-    TEST_ASSERT_EQUAL_INT(TX_GATE_OK,
-                          tx_gate_transmit(&s_gate, data, sizeof(data), TX_KIND_DATA));
+    TEST_ASSERT_EQUAL_INT(TX_GATE_OK, tx_gate_transmit(&s_gate, data, sizeof(data), TX_KIND_DATA));
 }
 
 void test_mesh_size_propagates_to_budget(void) {

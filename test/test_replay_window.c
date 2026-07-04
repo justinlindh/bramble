@@ -6,7 +6,10 @@
 
 static replay_table_t t;
 static replay_deferred_t d;
-void setUp(void) { replay_table_init(&t); replay_deferred_init(&d); }
+void setUp(void) {
+    replay_table_init(&t);
+    replay_deferred_init(&d);
+}
 void tearDown(void) {}
 
 void test_first_counter_accepted(void) {
@@ -22,8 +25,8 @@ void test_forward_shift_accepts(void) {
 }
 void test_in_window_reorder_accepts_once(void) {
     replay_check_and_add(&t, 0xAA, 100, 0);
-    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 90, 0));      /* within 64 */
-    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP, replay_check_and_add(&t, 0xAA, 90, 0));  /* dup */
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 90, 0));     /* within 64 */
+    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP, replay_check_and_add(&t, 0xAA, 90, 0)); /* dup */
 }
 void test_below_window_flagged(void) {
     replay_check_and_add(&t, 0xAA, 1000, 0);
@@ -53,24 +56,21 @@ void test_first_counter_zero_then_replay_rejected(void) {
  * it and lets the old high_water be replayed. */
 void test_exact_64_jump_then_replay_old_high_water_rejected(void) {
     replay_check_and_add(&t, 0xAA, 100, 0);
-    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 164, 0)); /* +64 exactly */
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 164, 0));     /* +64 exactly */
     TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP, replay_check_and_add(&t, 0xAA, 100, 0)); /* replay old */
 }
 
 /* Deferred (tier-2) acceptance: Task 0.6. */
 void test_deferred_accepts_fresh_then_dedups(void) {
-    TEST_ASSERT_EQUAL(REPLAY_ACCEPT,
-        replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 1));
-    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP,
-        replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 1));
+    TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 1));
+    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP, replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 1));
 }
 void test_deferred_rejects_expired(void) {
-    TEST_ASSERT_NOT_EQUAL(REPLAY_ACCEPT,
-        replay_deferred_accept(&d, 0xAA, 5, 1000, 1000 + 90000, 1)); /* > 24h old */
+    TEST_ASSERT_NOT_EQUAL(
+        REPLAY_ACCEPT, replay_deferred_accept(&d, 0xAA, 5, 1000, 1000 + 90000, 1)); /* > 24h old */
 }
 void test_deferred_fail_closed_when_timesync_untrusted(void) {
-    TEST_ASSERT_NOT_EQUAL(REPLAY_ACCEPT,
-        replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 0));
+    TEST_ASSERT_NOT_EQUAL(REPLAY_ACCEPT, replay_deferred_accept(&d, 0xAA, 5, 1000, 2000, 0));
 }
 
 /* Fix 3 (red-team panel): a CHAT message accepted via tier-1 must also be
@@ -98,8 +98,7 @@ void test_tier1_accept_recorded_in_deferred_prevents_later_replay(void) {
     /* Attacker replays the captured original (counter 100). Tier-2 must
      * reject it as a duplicate, not re-deliver it as if it were a
      * legitimate deferred (store-and-forward) message. */
-    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP,
-                       replay_deferred_accept(&d, 0xAA, 100, 1000, 2000, 1));
+    TEST_ASSERT_EQUAL(REPLAY_REJECT_DUP, replay_deferred_accept(&d, 0xAA, 100, 1000, 2000, 1));
 }
 
 /* Without the mark_seen recording, the same replay sequence is (wrongly)
@@ -111,7 +110,7 @@ void test_without_deferred_recording_replay_is_wrongly_accepted(void) {
     TEST_ASSERT_EQUAL(REPLAY_ACCEPT, replay_check_and_add(&t, 0xAA, 200, 0));
     TEST_ASSERT_EQUAL(REPLAY_BELOW_WINDOW, replay_check_and_add(&t, 0xAA, 100, 0));
     TEST_ASSERT_EQUAL(REPLAY_ACCEPT, /* the gap: re-delivered */
-                       replay_deferred_accept(&d, 0xAA, 100, 1000, 2000, 1));
+                      replay_deferred_accept(&d, 0xAA, 100, 1000, 2000, 1));
 }
 
 int main(void) {
