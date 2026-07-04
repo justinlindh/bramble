@@ -790,6 +790,14 @@ func (s *Sim) complete() {
 
 	sent := uint64(s.metrics.messages_sent)
 	delivered := uint64(s.metrics.delivered_packets)
+	// Phase 2 "save reactive routing" Part A: confirmed is the TRUE
+	// confirmed-delivery count (bridge.c's bridge_msg_track_confirm, fired
+	// only when a delivery receipt reaches the true ORIGINATOR), as opposed
+	// to delivered above (destination reach only; see bridge.c's "don't
+	// wait for receipt to arrive at source" comment). confirmed <= delivered
+	// always, since a receipt can only exist after the destination decoded
+	// the message.
+	confirmed := uint64(s.metrics.confirmed_packets)
 	dropped := uint64(s.metrics.dropped_packets)
 	undelivered := uint64(0)
 	if sent > delivered {
@@ -925,6 +933,18 @@ func (s *Sim) complete() {
 		// (delivered + dropped + undelivered). THE delivery number for
 		// baseline and scale comparisons.
 		"message_delivery_rate": messageDeliveryRate(delivered, dropped, undelivered),
+		// confirmed_delivery_rate is Bramble's actual differentiator: the
+		// fraction of scripted messages whose delivery receipt made it all
+		// the way back to the true ORIGINATOR (confirmed), not just reached
+		// the destination (delivered/message_delivery_rate above). Deliberately
+		// divides by the SAME terminal-state denominator message_delivery_rate
+		// uses (delivered + dropped + undelivered), not confirmed's own
+		// (smaller) total, so the two rates are directly comparable side by
+		// side: reach vs confirmation, matching the
+		// flood_reached_rate/flood_confirmed_rate pair flood mode already
+		// reports.
+		"confirmed":               confirmed,
+		"confirmed_delivery_rate": confirmedDeliveryRate(confirmed, delivered, dropped, undelivered),
 		// control_airtime_pct is now genuinely ToA-weighted:
 		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
 		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,
@@ -984,6 +1004,22 @@ func messageDeliveryRate(delivered, dropped, undelivered uint64) float64 {
 		return 0.0
 	}
 	return float64(delivered) / float64(total)
+}
+
+// confirmedDeliveryRate is confirmed / (delivered + dropped + undelivered):
+// the fraction of ALL scripted messages (the same terminal-state
+// denominator messageDeliveryRate uses) whose delivery receipt made it back
+// to the true originator. Deliberately NOT confirmed / (confirmed + dropped
+// + undelivered): that would use a different, smaller denominator than
+// message_delivery_rate and the two rates would no longer be comparable
+// side by side. confirmed <= delivered always, so this rate is always <=
+// message_delivery_rate. Zero-denominator (no scripted messages) reports 0.
+func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) float64 {
+	total := delivered + dropped + undelivered
+	if total == 0 {
+		return 0.0
+	}
+	return float64(confirmed) / float64(total)
 }
 
 // emitJSON marshals and broadcasts a JSON event.

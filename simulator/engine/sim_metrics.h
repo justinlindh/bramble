@@ -24,6 +24,17 @@ typedef struct {
     uint64_t total_packets;
     uint64_t messages_sent;
     uint64_t delivered_packets;
+    /* Phase 2 "save reactive routing" Part A: distinct scripted messages
+     * whose delivery receipt made it all the way back to the true
+     * ORIGINATOR (bridge.c's _handle_delivery_receipt, at the point
+     * receipt.header.dest_addr == rx->addr), not just reached the
+     * destination. This is Bramble's actual differentiator (confirmed
+     * delivery); delivered_packets/message_delivery_rate is destination
+     * REACH only (see bridge.c's "don't wait for receipt to arrive at
+     * source" comment). confirmed_packets <= delivered_packets always,
+     * since a receipt can only return after the destination decoded the
+     * message. */
+    uint64_t confirmed_packets;
     uint64_t dropped_packets;
     uint64_t total_latency_us;
     uint64_t latency_count;
@@ -59,6 +70,11 @@ void metrics_init(metrics_state_t* metrics);
 void metrics_record_packet_sent(metrics_state_t* metrics);
 void metrics_record_message_sent(metrics_state_t* metrics);
 void metrics_record_packet_delivered(metrics_state_t* metrics, uint64_t latency_us);
+/* Records a distinct scripted message's delivery receipt reaching the true
+ * originator; see confirmed_packets' doc comment above. Caller
+ * (bridge_msg_track_confirm) is responsible for de-duplicating so a given
+ * packet_id only increments this once. */
+void metrics_record_packet_confirmed(metrics_state_t* metrics);
 void metrics_record_packet_dropped(metrics_state_t* metrics);
 void metrics_record_beacon_sent(metrics_state_t* metrics);
 void metrics_record_rreq_sent(metrics_state_t* metrics);
