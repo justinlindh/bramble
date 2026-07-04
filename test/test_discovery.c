@@ -314,7 +314,8 @@ void test_three_node_discovery(void) {
 
     /* Step 4: B receives RREP */
     /* B installs forward route to C (direct neighbor) */
-    route_install(&rt_b, ADDR_C, ADDR_C, rrep_c.hop_count, rrep_c.route_metric, ROUTE_ACTIVE, now);
+    route_install(&rt_b, ADDR_C, ADDR_C, rrep_c.hop_count, rrep_c.route_metric, ROUTE_ACTIVE,
+                  ROUTE_SRC_DISCOVERED, now);
     /* B looks up reverse route to forward RREP toward A */
     reverse_route_t* rev = reverse_route_lookup(&rev_b, rrep_c.query_id);
     TEST_ASSERT_NOT_NULL(rev);
@@ -322,7 +323,8 @@ void test_three_node_discovery(void) {
     bramble_rrep_t rrep_b = rrep_forward(&rrep_c, rev->prev_hop, ADDR_B);
 
     /* Step 5: A receives RREP */
-    route_install(&rt_a, ADDR_C, ADDR_B, rrep_b.hop_count, rrep_b.route_metric, ROUTE_ACTIVE, now);
+    route_install(&rt_a, ADDR_C, ADDR_B, rrep_b.hop_count, rrep_b.route_metric, ROUTE_ACTIVE,
+                  ROUTE_SRC_DISCOVERED, now);
     discovery_remove(&dtbl, ADDR_C);
 
     /* Step 6: Verify */

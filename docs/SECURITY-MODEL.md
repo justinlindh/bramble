@@ -636,6 +636,159 @@ State precisely which half, forge vs. replay, outsider vs. insider, is
 closed when citing any of these four findings; neither provisioning nor
 freshness alone is sufficient for full closure of any of them.
 
+### DATA reverse-route learning authentication (Task 4-fix F1, wire v4)
+
+Wire v4 (`BRAMBLE_VERSION` 3 to 4, a strict `==` flag day at the same RX gate
+described above, no v3/v4 compatibility shim, same policy as every prior
+version bump) adds an 8-byte network-key HMAC, `auth_hmac`, to every DATA
+frame, plus a relay-mutated `prev_hop` field that each transmitter (the
+originator on first TX, then every relay before it retransmits) overwrites
+with its own address (`data_auth_sign`/`data_auth_verify` in
+`components/routing_auth/routing_auth.c`; offsets and full layout rationale
+in `components/packet/include/packet.h`). The MAC uses label
+`"bramble-data-v1"` and covers exactly the same origin-stable bytes as the
+existing AEAD AAD (the masked header, `hop_limit` zeroed, plus `src_addr`),
+excluding `prev_hop` and `hop_limit`, the two fields a relay legitimately
+mutates in flight. `mesh_process_rx_packet` verifies it before a received or
+forwarded DATA frame is allowed to install a route or be forwarded at all
+(`main/mesh_task.c`); a bad MAC drops the frame outright, same as any other
+unauthenticated control input.
+
+**Why this exists.** A relay never decrypts DATA (it has no channel or
+session key for most traffic passing through it), so the AEAD tag, checked
+only at the destination, could never gate anything a relay itself does. Wire
+v4 also introduced DATA-driven reverse-route learning (below); without this
+MAC, a keyless attacker (no network key at all) could inject a fabricated
+DATA frame with an arbitrary spoofed `src_addr` and poison every hearing
+node's route table toward that address, for a victim address of the
+attacker's choosing, with no constraint on who that victim was or whether
+the victim had transmitted anything at all. `auth_hmac` closes exactly that:
+only a network-key holder can originate a frame that any node will act on,
+which is the same bar RREP, RERR, ACK, and delivery receipt already clear
+(see the control-plane section above). `src_addr` staying AEAD/AAD-bound (SEC-M2,
+above) means the identity a reverse route resolves to cannot be spoofed by
+an on-path relay either; only the unauthenticated next-hop hint can be lied
+about (residual, below). Like every other control-plane MAC in this
+document, `auth_hmac` is forgeable by anyone who reads the public,
+compile-time `BRAMBLE_PUBLIC_CHANNEL_PSK` fallback until a real network key
+is provisioned; it closes the *keyless* attacker, not the keyed insider.
+
+**Reverse-route learning trust model.** Every unicast DATA frame a node
+receives or forwards (after `auth_hmac` verifies) teaches it a route back to
+the frame's originator: `route_install(dest = src_addr, next_hop = prev_hop,
+..., source = ROUTE_SRC_BREADCRUMB)` (`data_rx_decide` in
+`components/routing/forwarding.c`, called from `mesh_process_rx_packet`).
+This is what leaves a breadcrumb at every relay on the forward path, so a
+destination's ACK or delivery receipt has a route home instead of dying at
+the first hop's `route_lookup(src_addr) == NULL`, which was the
+confirmation-return bug this wire change exists to fix. Two rules bound how
+much a breadcrumb can override real routing state
+(`route_install` in `components/routing/routing.c`):
+
+- A route learned this way is installed with a distinct trust class,
+  `ROUTE_SRC_BREADCRUMB`, separate from `ROUTE_SRC_DISCOVERED` (routes
+  learned from RREQ/RREP/beacon, all HMAC-gated end to end). A
+  `ROUTE_SRC_DISCOVERED` install always reclaims an existing
+  `ROUTE_SRC_BREADCRUMB` entry for the same destination, unconditionally,
+  regardless of metric or hop count; a `ROUTE_SRC_BREADCRUMB` install can
+  never displace an existing `ROUTE_SRC_DISCOVERED` entry. Same-class
+  installs (breadcrumb vs. breadcrumb, discovered vs. discovered) fall
+  through to the pre-existing metric/hop-count arbitration.
+- Broadcast DATA (`dest_addr == 0xFFFFFFFF`) never installs a reverse route
+  at all (Task 4-fix F3, `data_rx_decide`): a broadcast implies no unicast
+  return path worth learning, and allowing it would let a single forged or
+  legitimate broadcast poison an entire neighborhood's route tables toward
+  the broadcaster in one shot. The self-referential cases (`src_addr ==
+  self_addr`, `prev_hop == self_addr`) are also skipped as meaningless.
+
+**RESIDUAL: the reverse route's next-hop hint remains unauthenticated, and
+this is narrower than the pre-v4 gap, not a fix of it.** `prev_hop` and
+`hop_limit` are, by design, excluded from `auth_hmac` because a relay must
+be able to rewrite both in flight without breaking authentication for every
+later hop (exactly like RREP's `next_hop`, see the residual below). That
+means a keyless attacker who overhears a genuinely valid, network-key-signed
+DATA frame in flight can still install itself as the reverse next hop
+*toward whichever originator's frame it overheard*, two ways:
+
+1. **Rushing an in-flight frame.** Duplicate suppression (`s_dedup`,
+   `components/dedup/dedup.c`, 60-second window keyed on `packet_id XOR
+   (type << 24)`) is first-arrival-wins per receiving node: whichever copy
+   of a given `packet_id` a node hears first is the one it processes: the
+   legitimate relay's real retransmission, or an attacker's own
+   retransmission of the overheard frame with `prev_hop` rewritten to the
+   attacker's own address (and, since `hop_limit` is unauthenticated too,
+   an attacker-chosen `hop_limit`; see point 3). Whichever copy a given
+   victim node hears first installs the breadcrumb; the second copy to
+   arrive at that node is dropped as a duplicate before it ever reaches
+   `data_rx_decide` and cannot re-arbitrate.
+2. **Replaying after the 60-second dedup window.** `auth_hmac` carries no
+   freshness or sequence field (unlike RREP/RERR/ACK/beacon's ws 1.3b `seq`),
+   so a captured, genuinely valid frame's MAC never expires. Once the
+   originating `packet_id` ages out of `s_dedup`'s 60-second window, the
+   exact same frame, replayed with `prev_hop` rewritten to the attacker,
+   is indistinguishable from a fresh transmission and is processed again.
+3. **`hop_limit` exclusion can let a forged breadcrumb win same-class
+   arbitration.** `data_rx_decide`'s reverse-route hop count is derived from
+   the received (unauthenticated) `hop_limit`, while its metric is derived
+   from the physical RSSI/SNR of the frame as *this* receiver actually heard
+   it (not forgeable remotely). Because `hop_limit` is excluded from
+   `auth_hmac`, an attacker replaying or rushing a captured frame can choose
+   a `hop_limit` that makes its claimed hop count beat an already-installed
+   breadcrumb of the same trust class under `route_install`'s "better metric,
+   or same metric fewer hops" rule, even though the attacker's own link
+   quality is what actually got measured.
+
+**This is strictly narrower than the pre-v4 gap, not a new class of attack.**
+Before this MAC existed, a keyless attacker could fabricate an entire DATA
+frame from nothing, with any `src_addr` of its choosing, and poison every
+hearing node's route toward a completely invented or silent victim who had
+never transmitted anything. After it, the attacker is confined to victims
+whose valid, network-key-signed frame it actually overheard on the air; it
+cannot manufacture a route-poisoning target out of thin air. What it has
+*not* done is add freshness or authenticate `prev_hop`, so "the `prev_hop`
+next-hop-hint is unauthenticated" remains an open, accepted residual (see
+section 5, mirroring the same residual already accepted for RREP's
+`next_hop`), and the `hop_limit`-exclusion-wins-arbitration wrinkle above is
+new to this trust-class arbitration and not previously analyzed. Tracked as
+follow-up hardening: anti-replay/freshness on the DATA breadcrumb path,
+matching the ws 1.3b treatment already given to RREP/RERR/ACK/receipt/beacon.
+
+**Re-ACK-on-duplicate, now auth_hmac-gated (final whole-branch review,
+finding 3).** Task 6's lost-ACK fix re-sends an ACK when a duplicate unicast
+DATA arrives for a message this node already delivered locally
+(`mesh_process_rx_packet`'s `s_dedup` duplicate branch, `main/mesh_task.c`),
+keyed on `header.packet_id XOR src_addr` against `s_delivered_dedup`.
+`src_addr` is still read off the still-plaintext wire at the dedup-hit check,
+but the re-ACK send itself is now additionally gated on `data_auth_verify`
+against that same `src_addr` and the frame's `auth_hmac` (the identical check
+the `PKT_TYPE_DATA` case runs), so a re-ACK can only fire for a frame that is
+itself a currently-valid, network-key-signed DATA frame, not merely one whose
+`(packet_id, src_addr)` happen to collide with a past delivery. This closes
+the reflection angle for a keyless attacker: forging or replaying a frame
+with an attacker-chosen `src_addr` to bounce a budget-bounded ACK toward an
+arbitrary address now requires a valid `auth_hmac`, the same bar every other
+control-plane action in this section already clears. A keyed insider who
+already holds a valid signed frame for the `(packet_id, src_addr)` pair could
+still trigger the re-ACK, but that insider could just as easily replay the
+frame itself to the same effect, so this adds nothing beyond the pre-existing
+insider trust boundary. On auth failure the duplicate falls through to the
+normal drop (no ACK), exactly as if this re-ACK carve-out did not exist.
+
+**Table-full eviction now source-aware (final whole-branch review, finding
+2).** `route_install`'s eviction path, used only when the routing table is
+full and a brand-new destination needs a slot, now searches for a
+`ROUTE_SRC_BREADCRUMB` victim first (broken, then stale, then
+least-recently-used, among just that class) before ever considering a
+`ROUTE_SRC_DISCOVERED` entry (`components/routing/routing.c`). If the table
+holds no breadcrumb entry at all, a `ROUTE_SRC_BREADCRUMB` install is refused
+outright rather than evicting a `ROUTE_SRC_DISCOVERED` route to make room for
+itself; a `ROUTE_SRC_DISCOVERED` install has no such restriction and may
+still evict any entry via the original broken/stale/LRU search. This extends
+the same-destination trust-class rule above (a breadcrumb can never displace
+a discovered route) to capacity pressure on a *different* destination: a
+currently-active, HMAC-gated discovered route can no longer be evicted from a
+full table just to make room for a new breadcrumb.
+
 ## 4. Known gaps in the current implementation
 
 Facts of the code on `main` today. Each entry shrinks or disappears in the
@@ -708,6 +861,17 @@ same PR that fixes it.
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
   and mailbox capability in cleartext** (`mesh_send_beacon` in
   `main/mesh_task.c`).
+- **DATA's `auth_hmac` (wire v4, section 3) has no freshness or replay
+  window**, unlike RREP/RERR/ACK/delivery-receipt/beacon's ws 1.3b `seq`. A
+  captured, genuinely valid DATA frame's MAC never expires, so a keyless
+  attacker who overheard it can still install itself as the reverse-route
+  next hop toward that frame's originator, either by winning the
+  first-arrival dedup race with a rewritten `prev_hop` or by replaying the
+  frame once its `packet_id` ages out of the 60-second dedup window; because
+  `hop_limit` is also MAC-excluded, the forged breadcrumb can further win
+  same-class arbitration against a genuine one. See section 3's "DATA
+  reverse-route learning authentication" for the full mechanism and why this
+  is narrower than the pre-v4 gap it replaces, not a closure of it.
 
 ## 5. Residual risks that remain by design
 
@@ -891,6 +1055,20 @@ These do not go away when section 4 empties out.
   redirect a RREP's next hop within what its position in the network
   already lets it do; this is a property of hop-by-hop mutable routing
   fields in general, not something a control-plane MAC can fix.
+- **DATA `prev_hop` poisoning, same shape as RREP's above, plus a replay
+  angle RREP's `seq` already closes and DATA's does not (wire v4).** Like
+  `next_hop`, `prev_hop` must be relay-mutable (each forwarder overwrites it
+  with its own address) and is therefore MAC-excluded by necessity, not
+  oversight; an on-path relay can already lie about it to attract or
+  blackhole reverse traffic, the same inherent residual as RREP. What is new
+  and worth calling out precisely: DATA's `auth_hmac` (section 3, section 4)
+  has no `seq`/freshness field, so a KEYLESS outsider, not just an on-path
+  keyed relay, can achieve a narrower version of the same redirection by
+  overhearing and replaying (or racing) a valid frame, and the excluded
+  `hop_limit` can let that forged breadcrumb win arbitration too. Strictly
+  narrower than the pre-v4 gap (the outsider is confined to victims whose
+  valid frame it actually overheard, not an arbitrary silent address), and
+  tracked as follow-up hardening (section 3, section 4), not closed here.
 - **DM handshake SAS verification has no UX.** `dm_derive_sas` produces a
   7-digit short authentication string, but nothing in this batch surfaces
   it for an out-of-band comparison. A MitM during first-contact handshake
@@ -941,18 +1119,26 @@ These do not go away when section 4 empties out.
   `label || data` concatenation is not length-prefixed, which would be
   ambiguous for attacker-chosen labels, but every label is a fixed,
   prefix-free internal constant (`"bramble-rrep-v2"`, `"bramble-rerr-v2"`,
-  `"bramble-ack-v2"`, `"bramble-receipt-v2"`, `"bramble-beacon-v2"`), so
-  this is not reachable today. ACK and delivery-receipt `relay_path` and
-  `hop_count` remain intentionally unauthenticated (they are per-hop
-  telemetry, not security-relevant), so a malicious relay along the
-  legitimate forwarding path can still tamper with them in transit,
-  producing a cosmetic hop-trail change in the UI even where the core
-  `src_addr`/packet-id/seq binding holds. This is in-flight tampering
-  during a single legitimate transit, not replay: ws 1.3b's freshness work
-  (section 3) closes replay of the message as a whole. The LOCATION
-  channel-message decode path does not assert `app_type == APP_TYPE_LOCATION`
-  before parsing (defense-in-depth only; it is inside the AEAD trust
-  boundary and memory-safe either way).
+  `"bramble-ack-v2"`, `"bramble-receipt-v2"`, `"bramble-beacon-v2"`,
+  `"bramble-data-v1"`), so this is not reachable today. ACK and
+  delivery-receipt `relay_path` and `hop_count` remain intentionally
+  unauthenticated (they are per-hop telemetry, not security-relevant), so a
+  malicious relay along the legitimate forwarding path can still tamper with
+  them in transit, producing a cosmetic hop-trail change in the UI even
+  where the core `src_addr`/packet-id/seq binding holds. This is in-flight
+  tampering during a single legitimate transit, not replay: ws 1.3b's
+  freshness work (section 3) closes replay of the message as a whole. The
+  LOCATION channel-message decode path does not assert `app_type ==
+  APP_TYPE_LOCATION` before parsing (defense-in-depth only; it is inside the
+  AEAD trust boundary and memory-safe either way). Two more from wire v4
+  (section 3), both since closed by the final whole-branch review: the DATA
+  re-ACK-on-duplicate path now gates its ACK send on `data_auth_verify`
+  against the frame's `auth_hmac`, not just an unauthenticated `packet_id XOR
+  src_addr` dedup-hit; and `route_install`'s table-full eviction now searches
+  for a `ROUTE_SRC_BREADCRUMB` victim (broken, then stale, then
+  least-recently-used) before ever considering a `ROUTE_SRC_DISCOVERED` one,
+  refusing a breadcrumb install outright rather than evicting a discovered
+  route when no breadcrumb victim exists.
 
 ## 6. How to think about Bramble's privacy
 

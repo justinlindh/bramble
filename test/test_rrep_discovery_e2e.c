@@ -67,7 +67,7 @@ static rrep_rx_decision_t deliver_rrep(node_t* node, const bramble_rrep_t* rrep,
     rrep_rx_decision_t d = rrep_rx_decide(rrep, node->addr, metric, &node->pend, &node->rev);
     if (d.install_route) {
         route_install(&node->routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
-                      ROUTE_ACTIVE, now_ms);
+                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms);
     }
     return d;
 }

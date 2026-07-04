@@ -27,6 +27,8 @@
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
+#include "forwarding.h"
+#include "channel_flood.h"
 #include "reliability.h"
 #include "rerr_ack_fastfail.h"
 #include "battery.h"
@@ -81,6 +83,10 @@ static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t
  * needs both before its own definition. */
 static int control_seq_next(uint64_t* out);
 static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
+/* Task 5 (channel flood): handle_data (near the top of the file) schedules
+ * a jittered rebroadcast of a broadcast DATA frame; the queue it schedules
+ * onto is defined near its sibling schedule_rreq_forward, further down. */
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -110,6 +116,32 @@ static bramble_identity_t* s_identity;
 static uint8_t s_beacon_key[BRAMBLE_KEY_SIZE]; /* shared key for beacon HMAC */
 static neighbor_table_t s_neighbors;
 static dedup_buffer_t s_dedup;
+/* Task 5 (channel flood): a SEPARATE dedup buffer from s_dedup, keyed
+ * src_addr-qualified (packet_id ^ src_addr), not just packet_id. s_dedup's
+ * key (header.packet_id ^ (type << 24), mesh_process_rx_packet) has no
+ * src_addr component; two different originators whose broadcasts happen to
+ * collide on packet_id would otherwise have one silently treated as a
+ * duplicate of the other's at every shared relay -- harmless for the
+ * existing unicast-only traffic s_dedup gates today (a collision there just
+ * delays a retry), but a real correctness risk once broadcasts flood
+ * multiple hops (the delivery-path audit's flagged concern). Kept as its
+ * own instance rather than widening s_dedup's key so this stays scoped to
+ * the flood path and cannot change dedup behavior for RREQ/PROBE_ACK/other
+ * control traffic that already relies on s_dedup's existing key shape. */
+static dedup_buffer_t s_flood_dedup;
+/* Task 6 (GAP A): tracks unicast DATA we have already delivered locally
+ * (ACK already sent), keyed the same src_addr-qualified way s_flood_dedup
+ * is (packet_id ^ src_addr, collision-safe for the same reason). Consulted
+ * ONLY at mesh_process_rx_packet's s_dedup duplicate-hit branch: without
+ * this, a duplicate unicast DATA (the sender's own retransmit after its
+ * first ACK was lost) is silently dropped there and NEVER re-ACKed, making
+ * a single lost ACK terminal (the message was delivered, but the sender
+ * eventually marks it FAILED). Recorded once, right after send_ack, for
+ * every genuinely new unicast delivery in handle_data; a later duplicate is
+ * recognized via dedup_contains (a pure peek, never inserts on a miss) and
+ * re-triggers send_ack WITHOUT re-entering handle_data's decrypt/deliver
+ * path, so local delivery stays exactly-once. */
+static dedup_buffer_t s_delivered_dedup;
 static replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
 static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
                                            replay window, keyed on the authenticated signer address,
@@ -270,6 +302,19 @@ typedef struct {
     bramble_key_exchange_t msg;
 } dm_handshake_work_item_t;
 static QueueHandle_t s_handshake_work_q;
+
+/* Jittered channel-flood relay queue (Task 5). Same shape and drain cadence
+ * as the RREQ forward queue below, holding the exact relay-mutated wire
+ * bytes (hop_limit decremented, prev_hop rewritten to us) a broadcast DATA
+ * frame is rebroadcast with once its jitter elapses. */
+#define FLOOD_RELAY_QUEUE_CAPACITY 8
+typedef struct {
+    bool used;
+    uint32_t due_at_ms;
+    uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
+    uint8_t len;
+} pending_flood_relay_t;
+static pending_flood_relay_t s_flood_relay_queue[FLOOD_RELAY_QUEUE_CAPACITY];
 
 /* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
  * random 50-300ms so same-hop relays do not key up at the same instant; the
@@ -596,13 +641,21 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
             return 0;
         }
 
-        memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-        memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
-        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+        memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+        /* Wire v4: originator writes its own address as prev_hop, same as
+         * send_data_packet/send_dm_packet. */
+        memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+        /* Wire v4 (F1): origin-authenticate; see send_data_packet. LOCATION
+         * shares the envelope so it carries the field, though it is never
+         * relayed today (handle_location delivers dest==self/broadcast only). */
+        data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext,
+               sizeof(ciphertext));
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
                BRAMBLE_TAG_SIZE);
-        size_t wire_len =
-            HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+        size_t wire_len = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE +
+                          sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
 
         int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
         if (rc == TX_GATE_OK) {
@@ -651,12 +704,18 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
         return 0;
     }
 
-    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
-    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag, BRAMBLE_TAG_SIZE);
+    memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+    /* Wire v4: originator writes its own address as prev_hop. */
+    memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    /* Wire v4 (F1): origin-authenticate; see send_data_packet. */
+    data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+    memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
+    memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+           BRAMBLE_TAG_SIZE);
 
-    size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+    size_t wire_len = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) +
+                      BRAMBLE_TAG_SIZE;
     int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
     if (rc == TX_GATE_OK) {
         ESP_LOGI(TAG, "TX location (channel) to %08" PRIX32 " tier=%u len=%u", dest_addr, tier,
@@ -801,15 +860,20 @@ static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphe
 }
 
 static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
-    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's
-     * header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16). */
-    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's wire v4
+     * envelope: header(12) + src_addr(4) + prev_hop(4) + nonce(12) +
+     * ciphertext(N) + tag(16). LOCATION is never forwarded today (no relay
+     * path exists for it), so prev_hop is written by the originator only
+     * and not consulted for reverse-route learning here; see
+     * task-4-report.md for why that is in scope but deliberately not
+     * turned on. */
+    if (len < BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Location packet too short: %u", len);
         return;
     }
 
     uint32_t src_addr = 0;
-    memcpy(&src_addr, data + HEADER_SIZE, 4);
+    memcpy(&src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
     if (src_addr == s_identity->address) {
         return;
     }
@@ -819,8 +883,8 @@ static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8
         return;
     }
 
-    const uint8_t* nonce = data + HEADER_SIZE + 4;
-    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    const uint8_t* nonce = data + BRAMBLE_DATA_NONCE_OFFSET;
+    size_t ct_len = len - BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
     const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
     const uint8_t* tag = ciphertext + ct_len;
 
@@ -1858,17 +1922,35 @@ static void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rs
 }
 
 static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
-    /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
-    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+    /* Data packet layout (wire v4): header(12) + src_addr(4) + prev_hop(4) +
+     * nonce(12) + ciphertext(N) + tag(16). prev_hop is relay-mutable/
+     * MAC-excluded (packet.h); reverse-route learning off it happens once,
+     * at the mesh_process_rx_packet dispatch site, not here. */
+    if (len < BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Data packet too short: %u", len);
         return;
     }
 
     uint32_t src_addr;
-    memcpy(&src_addr, data + HEADER_SIZE, 4);
+    memcpy(&src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
 
-    const uint8_t* nonce = data + HEADER_SIZE + 4;
-    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    /* Self-originated guard (mirrors handle_location): the Task 5 channel
+     * flood means a node now hears its OWN broadcast/channel DATA echoed
+     * back by a neighbor's rebroadcast. Without this, the frame below would
+     * still get trial-decrypted (this node holds the key it encrypted with)
+     * and re-delivered as a spurious incoming onMessage/msg_store_add, plus
+     * a self-ACK and an s_delivered_dedup record for channel messages. The
+     * flood relay decision a few lines down already independently forces
+     * should_relay=false for a self-echo via is_own_echo, so returning here
+     * before that logic runs does not change relay behavior for this frame;
+     * it only skips the decrypt/deliver path that follows. Frames from
+     * other sources are completely unaffected by this check. */
+    if (src_addr == s_identity->address) {
+        return;
+    }
+
+    const uint8_t* nonce = data + BRAMBLE_DATA_NONCE_OFFSET;
+    size_t ct_len = len - BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
     const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
     const uint8_t* tag = ciphertext + ct_len;
 
@@ -1882,6 +1964,75 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
     if (bramble_header_deserialize(&rx_hdr, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Data packet header invalid");
         return;
+    }
+
+    /* Task 5: multi-hop channel flood. A broadcast/channel DATA (dest ==
+     * 0xFFFFFFFF) is "delivered" locally below regardless of whether THIS
+     * node can decrypt it (public broadcast vs. a secret channel this node
+     * may not belong to) -- that is orthogonal to whether it should be
+     * relayed onward. Relaying does not require decrypting: mesh_process_
+     * rx_packet already verified the frame's network-key auth_hmac before
+     * ever reaching data_rx_decide/handle_data (routing_auth.h), so this
+     * frame is known to come from a genuine network-key holder regardless
+     * of decrypt outcome. Deliberately placed BEFORE the decrypt fork
+     * below, so a node without this channel's key still relays the exact
+     * ciphertext onward for members further out in the mesh -- the entire
+     * point of a flood is that relays do not need to understand the
+     * payload, exactly like RREQ/RERR relays never decrypt anything. */
+    if (rx_hdr.dest_addr == 0xFFFFFFFF) {
+        /* Src_addr-qualified dedup key (s_flood_dedup, not the packet_id-
+         * only s_dedup already consulted at the mesh_process_rx_packet
+         * dispatch gate): see s_flood_dedup's doc comment for why a plain
+         * packet_id key risks a cross-source collision on the flood path. */
+        uint32_t flood_key = rx_hdr.packet_id ^ src_addr;
+        bool is_dup = dedup_check_and_add(&s_flood_dedup, flood_key, now_ms());
+
+        /* A mesh flood means a relay hears its own originated broadcast
+         * echoed back once some neighbor rebroadcasts it; re-relaying that
+         * echo would burn airtime without ever helping the message reach
+         * anywhere new (we already delivered it locally the instant we
+         * sent it). Folded into is_duplicate rather than a separate
+         * channel_flood_decide input: from a relay decision's point of
+         * view "already seen, nothing to gain by relaying again" is
+         * exactly the same rule for both cases. Mirrors data_rx_decide's
+         * own src_addr == self_addr guard on reverse-route learning, same
+         * self-referential-is-meaningless reasoning. */
+        bool is_own_echo = (src_addr == s_identity->address);
+
+        /* Non-mutating pre-check against the real BROADCAST-lane airtime
+         * budget (same tier TX_KIND_DATA_BROADCAST debits); the actual
+         * mesh_tx() at the jittered send time re-checks and debits for
+         * real, so a node that goes from "had budget" to "spent it" before
+         * its jitter elapses still yields there too. */
+        bool budget_permits = tx_gate_check(len, TX_KIND_DATA_BROADCAST);
+
+        channel_flood_decision_t flood = channel_flood_decide(
+            rx_hdr.hop_limit, is_dup || is_own_echo, budget_permits, esp_random());
+
+        if (flood.should_relay) {
+            uint8_t relay_buf[BRAMBLE_MAX_PACKET_SIZE];
+            memcpy(relay_buf, data, len);
+
+            bramble_header_t relay_hdr = rx_hdr;
+            relay_hdr.hop_limit = flood.new_hop_limit;
+            bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+
+            /* Wire v4: overwrite prev_hop with OUR OWN address before
+             * rebroadcast, exactly like forward_data_packet does for
+             * unicast forwards -- relay-mutable/MAC-excluded, so this never
+             * touches anything under auth_hmac or the AEAD tag. */
+            if (len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
+                memcpy(relay_buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+            }
+
+            ESP_LOGI(TAG,
+                     "Channel flood relay from %08" PRIX32 " pkt=%08" PRIX32 " hop_limit %u->%u",
+                     src_addr, rx_hdr.packet_id, rx_hdr.hop_limit, flood.new_hop_limit);
+            schedule_flood_relay(relay_buf, len, flood.jitter_ms);
+        } else if (!budget_permits) {
+            ESP_LOGD(TAG, "Channel flood relay denied by airtime budget, pkt=%08" PRIX32,
+                     rx_hdr.packet_id);
+        }
     }
 
     /* AAD excludes hop_limit (relays decrement it in flight) but binds
@@ -2111,6 +2262,15 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                          */
                         if (dir == MSG_DIR_INCOMING) {
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+                            /* Task 6 (GAP A): record this delivery so a later
+                             * duplicate of THIS fragment (same packet_id,
+                             * the sender's retransmit after a lost ACK) is
+                             * recognized at mesh_process_rx_packet's dedup
+                             * gate and re-ACKed instead of silently dropped.
+                             * Keyed like s_flood_dedup (packet_id ^
+                             * src_addr). */
+                            dedup_check_and_add(&s_delivered_dedup, rx_hdr.packet_id ^ src_addr,
+                                                now_ms());
                         } else if (mesh_should_emit_broadcast_delivery_receipt(
                                        rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
                             queue_broadcast_delivery_receipt(info.src_addr, first_frag_pkt_id);
@@ -2187,6 +2347,12 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+            /* Task 6 (GAP A): record this delivery so a later duplicate
+             * (same packet_id, the sender's retransmit after a lost ACK) is
+             * recognized at mesh_process_rx_packet's dedup gate and
+             * re-ACKed instead of silently dropped. Keyed like
+             * s_flood_dedup (packet_id ^ src_addr). */
+            dedup_check_and_add(&s_delivered_dedup, rx_hdr.packet_id ^ src_addr, now_ms());
         } else if (mesh_should_emit_broadcast_delivery_receipt(
                        rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
@@ -2275,22 +2441,13 @@ static void send_rrep(const bramble_rrep_t* rrep) {
 }
 
 static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
-    bramble_rerr_t rerr = {
-        .header =
-            {
-                .version = BRAMBLE_VERSION,
-                .type = PKT_TYPE_RERR,
-                .flags = 0,
-                /* Per-hop budget; the route-match chain bounds teardown depth
-                 * because matching relays re-originate with a fresh limit. */
-                .hop_limit = ROUTE_HOP_LIMIT_MAX,
-                .dest_addr = 0xFFFFFFFF, /* broadcast */
-                .packet_id = next_packet_id(),
-            },
-        .reporter_addr = s_identity->address,
-        .broken_dest = broken_dest,
-        .broken_next_hop = broken_next_hop,
-    };
+    /* components/routing/forwarding.c: rerr_build fills version/type/flags/
+     * hop_limit/dest_addr/reporter_addr/broken_dest/broken_next_hop
+     * identically to the struct literal this replaced. packet_id and seq
+     * are this node's own counters (rerr_build leaves them zeroed since it
+     * owns no sequencing state), so they're set here same as before. */
+    bramble_rerr_t rerr = rerr_build(s_identity->address, broken_dest, broken_next_hop);
+    rerr.header.packet_id = next_packet_id();
     /* ws 1.3b: every re-origination draws its own fresh seq (unlike RREP's
      * origin-stable seq, RERR's seq is per-hop, matching reporter_addr).
      * Fail-closed: no seq means no RERR goes out this call; the caller's
@@ -2377,6 +2534,60 @@ static void process_rreq_forward_queue(uint32_t t) {
 
 /* ── End jittered RREQ forwarding ──────────────────────────────── */
 
+/* ── Jittered channel-flood relay (Task 5) ──────────────────────── */
+
+/**
+ * Queue a broadcast/channel DATA rebroadcast with random jitter, exactly
+ * like schedule_rreq_forward: same-hop relays that all decided to flood the
+ * same frame should not key up at the same instant. Falls back to immediate
+ * transmission when the queue is full (a forward storm makes the jitter
+ * moot, and dropping the relay could be the only path further out).
+ *
+ * buf/len are the ALREADY relay-mutated wire bytes (hop_limit decremented,
+ * prev_hop rewritten to this node -- see the caller in handle_data): this
+ * function only owns the timing, not the frame content.
+ */
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!s_flood_relay_queue[i].used) {
+            s_flood_relay_queue[i].used = true;
+            s_flood_relay_queue[i].due_at_ms = now_ms() + jitter_ms;
+            memcpy(s_flood_relay_queue[i].buf, buf, len);
+            s_flood_relay_queue[i].len = len;
+            ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
+            return;
+        }
+    }
+    ESP_LOGW(TAG, "Flood relay queue full; relaying immediately");
+    if (mesh_tx(buf, len, TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+        ESP_LOGW(TAG, "Immediate flood relay denied by airtime budget");
+    }
+}
+
+/**
+ * Transmit any due jittered flood relays. Called from the mesh task main
+ * loop alongside process_rreq_forward_queue, so relays stay scheduled
+ * rather than blocking packet handling. The airtime budget gets the final,
+ * authoritative say here (mesh_tx -> tx_gate_send): a node that was under
+ * budget when it decided to relay but has since spent it (e.g. its own
+ * traffic, or other jittered relays firing first) still yields instead of
+ * transmitting -- the airtime-aware stop that keeps a saturated node from
+ * amplifying a storm.
+ */
+static void process_flood_relay_queue(uint32_t t) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (s_flood_relay_queue[i].used && (int32_t)(t - s_flood_relay_queue[i].due_at_ms) >= 0) {
+            if (mesh_tx(s_flood_relay_queue[i].buf, s_flood_relay_queue[i].len,
+                        TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+                ESP_LOGD(TAG, "Jittered flood relay denied by airtime budget");
+            }
+            s_flood_relay_queue[i].used = false;
+        }
+    }
+}
+
+/* ── End jittered channel-flood relay ───────────────────────────── */
+
 static void flush_queued_messages(uint32_t dest_addr) {
     /* Route-established trigger only. QUEUE_REASON_SESSION entries are
      * flushed separately by flush_session_queue on session establishment;
@@ -2449,7 +2660,7 @@ static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
          * subtracts from the higher-is-better path metric. */
         uint8_t metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, metric, ROUTE_ACTIVE,
-                      now_ms());
+                      ROUTE_SRC_DISCOVERED, now_ms());
         return;
     }
 
@@ -2508,7 +2719,7 @@ static void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
 
     if (d.install_route) {
         route_install(&s_routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
-                      ROUTE_ACTIVE, now_ms());
+                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms());
     }
 
     switch (d.action) {
@@ -2587,13 +2798,13 @@ static void handle_rerr(const uint8_t* data, uint8_t len) {
         return;
     }
 
-    /* Invalidate route if it uses the broken next hop */
-    route_entry_t* route = route_lookup(&s_routes, rerr.broken_dest);
-    bool route_marked_broken = false;
-    if (route && route->next_hop == rerr.broken_next_hop) {
-        route->state = ROUTE_BROKEN;
-        route->fail_count++;
-        route_marked_broken = true;
+    /* Invalidate route if it uses the broken next hop. components/routing/
+     * forwarding.c: rerr_handle does the route_lookup + state/fail_count
+     * mutation (identical to the inline logic this replaced) and reports
+     * back whether it actually marked a route broken, since only mesh_task
+     * needs that to decide on re-origination and logging. */
+    bool route_marked_broken = rerr_handle(&s_routes, &rerr);
+    if (route_marked_broken) {
         ESP_LOGW(TAG, "Route to %08" PRIX32 " marked BROKEN", rerr.broken_dest);
 
         /* Forward RERR if hop limit allows */
@@ -2646,6 +2857,17 @@ static void mailbox_flush_for(uint32_t dest_addr) {
     mailbox_entry_t entries[MAILBOX_MAX_PER_DEST];
     int count = mailbox_retrieve(&s_mailbox, dest_addr, entries, MAILBOX_MAX_PER_DEST);
     for (int i = 0; i < count; i++) {
+        /* Wire v4: mailbox entries are raw DATA packet bytes captured at
+         * store time (mesh_mailbox_store, forward_data_packet's no-route
+         * branch), so their prev_hop byte range reflects whoever wrote it
+         * back then, not us. WE are the transmitter on this flush, so
+         * rewrite prev_hop to our own address before TX, exactly like
+         * forward_data_packet's rewrite -- otherwise the recipient would
+         * learn a stale/wrong reverse-route hop from a store-and-forward
+         * delivery. */
+        if (entries[i].payload_len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
+            memcpy(entries[i].payload + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+        }
         ESP_LOGI(TAG,
                  "Mailbox: delivering stored packet to %08" PRIX32 " (id=%08" PRIX32 " len=%u)",
                  dest_addr, entries[i].packet_id, entries[i].payload_len);
@@ -2665,23 +2887,41 @@ static void mailbox_flush_for(uint32_t dest_addr) {
 static void mailbox_expire(uint32_t t) { mailbox_purge_expired(&s_mailbox, t); }
 
 static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_t* header) {
-    if (header->hop_limit <= 1) {
-        ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
-        return;
-    }
+    /* components/routing/forwarding.c: forward_data() owns the route-lookup
+     * plus hop-limit-decrement decision (the same function gosim's bridge.c
+     * already calls, and test_forwarding.c already exercises). Task 2 (ws
+     * 1.4): mesh_task keeps only its own side effects around the decision:
+     * mailbox-store-on-no-route, RERR-on-no-route, the actual TX, and stats.
+     * Two behavioral deltas came along for the ride, both resolved by
+     * adopting the tested/shipped-by-gosim behavior rather than silently
+     * keeping the untested one (see task-2-report.md for the full list):
+     *   - a STALE route used to forward is now promoted to ACTIVE with a
+     *     refreshed last_confirmed (forward_data_packet never did this);
+     *   - route last_used/use_count are now bumped at decision time
+     *     (inside forward_data()) rather than only after a successful
+     *     mesh_tx, so a budget-denied forward still counts as "used". */
+    uint8_t hop_limit = header->hop_limit;
+    forward_result_t fwd = forward_data(&s_routes, header->dest_addr, &hop_limit, now_ms());
 
-    /* Look up route to destination */
-    route_entry_t* route = route_lookup(&s_routes, header->dest_addr);
-    if (!route || route->state == ROUTE_BROKEN) {
-        /* Extract src_addr from the data packet header area (offset HEADER_SIZE) */
+    if (!fwd.should_send) {
+        if (!fwd.route_error) {
+            /* Hop limit already exhausted: silent drop, no mailbox/RERR,
+             * matching the pre-refactor behavior exactly. */
+            ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
+            return;
+        }
+
+        /* No usable route (unknown dest or ROUTE_BROKEN). */
+        /* Extract src_addr from the data packet body (offset
+         * BRAMBLE_DATA_SRC_ADDR_OFFSET). */
         uint32_t fwd_src_addr = 0;
-        if (len >= HEADER_SIZE + 4) {
-            memcpy(&fwd_src_addr, data + HEADER_SIZE, 4);
+        if (len >= BRAMBLE_DATA_SRC_ADDR_OFFSET + 4) {
+            memcpy(&fwd_src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
         }
         /* If mailbox enabled, store for later delivery instead of dropping */
         if (s_mailbox_enabled &&
             mesh_mailbox_store(fwd_src_addr, header->dest_addr, data, len, header->packet_id)) {
-            ESP_LOGI(TAG, "No route to %08" PRIX32 " — stored in mailbox", header->dest_addr);
+            ESP_LOGI(TAG, "No route to %08" PRIX32 ": stored in mailbox", header->dest_addr);
         } else {
             ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
             send_rerr(header->dest_addr, s_identity->address);
@@ -2689,26 +2929,31 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
         return;
     }
 
-    /* Rebuild header with decremented hop limit */
+    /* Rebuild header with the hop limit forward_data() already decremented */
     uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
     memcpy(buf, data, len);
 
     bramble_header_t fwd_hdr = *header;
-    fwd_hdr.hop_limit--;
+    fwd_hdr.hop_limit = hop_limit;
     bramble_header_serialize(&fwd_hdr, buf, HEADER_SIZE);
 
+    /* Wire v4: overwrite prev_hop with OUR OWN address before rebroadcast,
+     * mirroring RREP's forwarder-address rewrite (#119). This is what lets
+     * the next hop learn a route back to this DATA's originator via US,
+     * closing the reverse-route gap that made multi-hop delivery
+     * confirmations die at the first relay. Relay-mutable/MAC-excluded, so
+     * this rewrite never touches anything under the AEAD tag. */
+    if (len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
+        memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    }
+
     ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32, header->dest_addr,
-             route->next_hop);
+             fwd.next_hop);
     /* Deny behavior: relayed traffic is dropped when the NORMAL lane is
      * exhausted; the originator's ACK-driven retries cover recovery. */
     if (mesh_tx(buf, len, TX_KIND_FORWARD) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG, "Forward denied by airtime budget for %08" PRIX32, header->dest_addr);
-        return;
     }
-
-    /* Update route usage */
-    route->last_used = now_ms();
-    route->use_count++;
 }
 
 static void mesh_process_rx_packet(const rx_packet_t* pkt) {
@@ -2760,6 +3005,46 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
 
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
         maybe_emit_implicit_broadcast_delivery(&header, pkt);
+
+        /* Task 6 (GAP A): a duplicate unicast DATA addressed to us is the
+         * sender's retransmit of an already-delivered message (its first
+         * ACK was lost in transit). Re-send the ACK (idempotent, gives the
+         * retransmit's sender another chance to hear the confirmation)
+         * WITHOUT touching handle_data's decrypt/deliver path, so local
+         * delivery stays exactly-once. src_addr is read directly off the
+         * still-plaintext wire prefix here (SEC-M2); s_delivered_dedup only
+         * ever gains an entry AFTER a frame with that exact (src_addr,
+         * packet_id) pair already passed full auth_hmac verification,
+         * decrypt, and local delivery (handle_data), so a hit here can only
+         * be produced by replaying bytes that already cleared that bar
+         * once. Finding 3 (final whole-branch review): for consistency with
+         * the Task-5 lesson of never acting on unauthenticated wire bytes,
+         * the re-ACK itself is additionally gated on data_auth_verify here
+         * (same network-key MAC check the PKT_TYPE_DATA case below runs),
+         * so a re-ACK can only be triggered by a frame that is ALSO a valid,
+         * currently-authenticated DATA frame, not merely one whose src_addr/
+         * packet_id happen to collide with a past delivery. On auth
+         * failure this falls through to the normal duplicate-drop below
+         * (no ACK, no re-verification retry) exactly as if this dup-ACK
+         * carve-out didn't exist. Length-guarded the same way the
+         * PKT_TYPE_DATA case guards its own data_auth_verify call, since
+         * auth_hmac lives at BRAMBLE_DATA_AUTH_HMAC_OFFSET..NONCE_OFFSET. */
+        if (header.type == PKT_TYPE_DATA && header.dest_addr == s_identity->address &&
+            pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
+            uint32_t dup_src_addr;
+            memcpy(&dup_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+            uint32_t delivered_key = header.packet_id ^ dup_src_addr;
+            if (dedup_contains(&s_delivered_dedup, delivered_key, now_ms()) &&
+                data_auth_verify(&header, dup_src_addr,
+                                 pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
+                ESP_LOGI(TAG,
+                         "Re-sending ACK for already-delivered duplicate pkt=%08" PRIX32
+                         " from %08" PRIX32,
+                         header.packet_id, dup_src_addr);
+                send_ack(dup_src_addr, header.packet_id, pkt->rssi);
+            }
+        }
+
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -2792,14 +3077,75 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
     case PKT_TYPE_RERR:
         handle_rerr(pkt->data, pkt->len);
         break;
-    case PKT_TYPE_DATA:
-        /* Check if this data is for us or needs forwarding */
-        if (header.dest_addr != s_identity->address && header.dest_addr != 0xFFFFFFFF) {
+    case PKT_TYPE_DATA: {
+        /* components/routing/forwarding.c: data_rx_decide() owns the
+         * deliver-locally-vs-forward fork (Task 3, ws 1.5) AND, as of wire
+         * v4 (Task 4), the reverse-route-learning decision: every DATA
+         * frame we receive or forward teaches us a route back to its
+         * originator (src_addr) via prev_hop, the verified last radio hop.
+         * That is what leaves a breadcrumb route at every relay on the
+         * forward path, so the destination's ACK/receipt has somewhere to
+         * go home to instead of dying at route_lookup(src_addr) == NULL.
+         *
+         * src_addr/prev_hop are read directly off the wire here (both are
+         * plaintext outside the AEAD ciphertext; see packet.h). A frame too
+         * short to hold the full envelope prefix (through the auth_hmac and
+         * up to the nonce) is dropped outright: there is no valid v4
+         * DATA/LOCATION frame this short. */
+        if (pkt->len < BRAMBLE_DATA_NONCE_OFFSET) {
+            ESP_LOGW(TAG, "DATA frame too short for v4 envelope: %u", pkt->len);
+            break;
+        }
+        uint32_t data_src_addr;
+        uint32_t data_prev_hop;
+        memcpy(&data_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+        memcpy(&data_prev_hop, pkt->data + BRAMBLE_DATA_PREV_HOP_OFFSET, 4);
+
+        /* Task 4-fix F1 (Critical): authenticate the frame's origin BEFORE
+         * learning any reverse route or forwarding. A relay never decrypts
+         * DATA, so the AEAD tag cannot gate this; the network-key auth_hmac
+         * over the masked header + src_addr is the DATA analogue of
+         * RREP/ACK/RERR's control-plane MAC. A keyless attacker (no network
+         * key) cannot forge it, so it can no longer inject a frame that
+         * poisons every node's route toward a spoofed victim. On failure we
+         * neither learn nor forward nor deliver -- a bad-MAC DATA frame is
+         * treated exactly like any unauthenticated control frame. A
+         * legitimate frame always carries a valid MAC (every originator
+         * signs; all provisioned nodes share the key), so this drops nothing
+         * real. Forgeable only under the unprovisioned public-PSK fallback,
+         * the accepted baseline for all control-plane auth (network_key.h). */
+        if (!data_auth_verify(&header, data_src_addr, pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
+            ESP_LOGW(TAG, "DATA auth_hmac failed (src=%08" PRIX32 " prev_hop=%08" PRIX32 "), drop",
+                     data_src_addr, data_prev_hop);
+            break;
+        }
+
+        /* Metric mirrors handle_rrep's pattern (metric_apply_link_penalty
+         * computed by the caller, then passed into the pure decide
+         * function): DATA carries no accumulated path metric of its own,
+         * so the base is the same maximum (255) RREQ originates with,
+         * penalized by the one link this frame was just heard on. */
+        uint8_t data_link_metric = metric_apply_link_penalty(255, (int8_t)pkt->rssi, pkt->snr);
+        data_rx_decision_t data_rx =
+            data_rx_decide(header.dest_addr, s_identity->address, data_src_addr, data_prev_hop,
+                           header.hop_limit, data_link_metric);
+
+        if (data_rx.install_reverse_route) {
+            /* Task 4-fix F2: breadcrumbs install as ROUTE_SRC_BREADCRUMB so
+             * they can never displace an HMAC-gated DISCOVERED route (and a
+             * later DISCOVERED route always reclaims this entry). */
+            route_install(&s_routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
+                          data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE,
+                          ROUTE_SRC_BREADCRUMB, now_ms());
+        }
+
+        if (data_rx.action == DATA_RX_FORWARD) {
             forward_data_packet(pkt->data, pkt->len, &header);
         } else {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
         break;
+    }
     case PKT_TYPE_LOCATION:
         if (header.dest_addr == s_identity->address || header.dest_addr == 0xFFFFFFFF) {
             handle_location(pkt->data, pkt->len, pkt->rssi, pkt->snr);
@@ -3080,6 +3426,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
         neighbor_purge(&s_neighbors, t);
         dedup_purge(&s_dedup, t);
+        dedup_purge(&s_flood_dedup, t);
+        dedup_purge(&s_delivered_dedup, t);
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
         reassembly_purge(&s_reassembly, t);
@@ -3125,6 +3473,9 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 
     /* Drain due jittered RREQ forwards every loop iteration (10ms cadence) */
     process_rreq_forward_queue(t);
+
+    /* Drain due jittered channel-flood relays (Task 5) every loop iteration */
+    process_flood_relay_queue(t);
 
     /* Discovery retries (check every 5s) */
     static uint32_t last_disc_check = 0;
@@ -3426,8 +3777,10 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
     size_t ct_len = CHANNEL_MSG_OVERHEAD +
                     (app_type == APP_TYPE_CHAT ? CHANNEL_MSG_SENT_AT_SIZE : 0) + payload_len;
 
-    /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
-    size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
+    /* Build packet: header(12) + src_addr(4) + prev_hop(4) + nonce(12) +
+     * ciphertext(N) + tag(16). Wire v4. */
+    size_t total =
+        BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
         ESP_LOGE(TAG, "Data packet too large: %u bytes", (unsigned)total);
         return 0;
@@ -3474,10 +3827,18 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
         return 0;
     }
 
-    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
+    memcpy(buf + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+    /* Wire v4: we are the ORIGINATOR, so prev_hop starts as our own address
+     * (the first relay's receiver learns a 1-hop route to us via this).
+     * Relay-mutable/MAC-excluded; see packet.h. */
+    memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    /* Wire v4 (F1): network-key MAC over the origin-stable fields (masked
+     * header + src_addr), so relays can gate reverse-route learning without
+     * decrypting. Origin-written, carried through every forward unchanged. */
+    data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
 
     /* Deny behavior: data sends fail visibly upward. A zero return tells
      * every caller (mesh_send_channel, mesh_send_broadcast, RPC) that
@@ -3486,10 +3847,16 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
     tx_kind_t kind = (dest_addr == 0xFFFFFFFF) ? TX_KIND_DATA_BROADCAST : TX_KIND_DATA;
     int ret = mesh_tx(buf, (uint8_t)total, kind);
     if (ret == TX_GATE_OK) {
-        /* Register for ACK tracking (unicast only) */
+        /* Register for ACK tracking (unicast only). Task 6 (GAP B): tier is
+         * decided by msg_tier_for_send, the single source of truth for
+         * this -- key exchange (APP_TYPE_KE, the handshake TRANSPORT) must
+         * retry at MSG_TIER_CRITICAL (8 attempts), not the MSG_TIER_NORMAL
+         * (3 attempts) every other app_type gets, per spec: losing a
+         * handshake message stalls session establishment entirely. */
         if (dest_addr != 0xFFFFFFFF) {
-            pending_ack_add(&s_pending_acks, pkt_id, dest_addr, MSG_TIER_NORMAL, buf,
-                            (uint16_t)total, now_ms());
+            uint8_t tier = msg_tier_for_send(app_type == APP_TYPE_KE);
+            pending_ack_add(&s_pending_acks, pkt_id, dest_addr, tier, buf, (uint16_t)total,
+                            now_ms());
         }
         return pkt_id;
     }
@@ -3515,7 +3882,8 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
 
-    size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + payload_len + BRAMBLE_TAG_SIZE;
+    size_t total =
+        BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + payload_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
         ESP_LOGE(TAG, "DM packet too large: %u bytes", (unsigned)total);
         return 0;
@@ -3548,10 +3916,16 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
         return 0;
     }
 
-    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + payload_len, tag, BRAMBLE_TAG_SIZE);
+    memcpy(buf + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+    /* Wire v4: ORIGINATOR writes its own address as prev_hop; see
+     * send_data_packet's identical comment. */
+    memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    /* Wire v4 (F1): origin-authenticate; see send_data_packet. */
+    data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + payload_len, tag,
+           BRAMBLE_TAG_SIZE);
 
     int ret = mesh_tx(buf, (uint8_t)total, TX_KIND_DATA);
     if (ret == TX_GATE_OK) {
@@ -4124,8 +4498,8 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
      * air, so RPC callers get a clean -2 before paying for encryption.
      * The gate still checks and debits every individual transmission. */
     size_t est_payload = (len > FRAG_MAX_PLAINTEXT) ? FRAG_MAX_PLAINTEXT : len;
-    size_t est_wire = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + CHANNEL_MSG_OVERHEAD + est_payload +
-                      BRAMBLE_TAG_SIZE;
+    size_t est_wire = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE +
+                      CHANNEL_MSG_OVERHEAD + est_payload + BRAMBLE_TAG_SIZE;
     if (est_wire > 255)
         est_wire = 255;
     tx_gate_set_peer_count((uint8_t)neighbor_count(&s_neighbors));
@@ -4530,6 +4904,8 @@ void mesh_task_start(bramble_identity_t* identity) {
     mesh_rederive_beacon_key();
 
     dedup_init(&s_dedup);
+    dedup_init(&s_flood_dedup);
+    dedup_init(&s_delivered_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
     replay_deferred_init(&s_deferred);
@@ -4555,6 +4931,8 @@ void mesh_task_start(bramble_identity_t* identity) {
     location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(s_rreq_fwd_queue, 0, sizeof(s_rreq_fwd_queue)); /* Init jittered RREQ forward queue */
+    memset(s_flood_relay_queue, 0,
+           sizeof(s_flood_relay_queue)); /* Init jittered channel-flood relay queue (Task 5) */
     memset(&s_shared, 0, sizeof(s_shared));
     tx_gate_snapshot(&s_shared.airtime);
 

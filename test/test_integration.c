@@ -128,7 +128,8 @@ void test_three_node_route_discovery(void) {
     TEST_ASSERT_EQUAL(ADDR_C, rrep_at_b.src_addr);
 
     /* B installs forward route: dest=C, next_hop=C (direct) */
-    route_install(&nodes[1].routes, ADDR_C, ADDR_C, 1, rrep_at_b.route_metric, ROUTE_ACTIVE, now);
+    route_install(&nodes[1].routes, ADDR_C, ADDR_C, 1, rrep_at_b.route_metric, ROUTE_ACTIVE,
+                  ROUTE_SRC_DISCOVERED, now);
     route_entry_t* r_bc = route_lookup(&nodes[1].routes, ADDR_C);
     TEST_ASSERT_NOT_NULL(r_bc);
     TEST_ASSERT_EQUAL(ADDR_C, r_bc->next_hop);
@@ -163,7 +164,7 @@ void test_three_node_route_discovery(void) {
 
     /* A installs route: dest=C, next_hop=B */
     route_install(&nodes[0].routes, ADDR_C, ADDR_B, rrep_at_a.hop_count, rrep_at_a.route_metric,
-                  ROUTE_ACTIVE, now);
+                  ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now);
 
     /* Step 6: Verify A's route to C goes via B */
     route_entry_t* r_ac = route_lookup(&nodes[0].routes, ADDR_C);
@@ -207,7 +208,8 @@ void test_rerr_breaks_route(void) {
     uint32_t now = 3000;
 
     /* Install a route */
-    route_install(&nodes[0].routes, ADDR_C, ADDR_B, 2, 200, ROUTE_ACTIVE, now);
+    route_install(&nodes[0].routes, ADDR_C, ADDR_B, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED,
+                  now);
 
     /* Build and handle RERR */
     bramble_rerr_t rerr = rerr_build(ADDR_B, ADDR_C, ADDR_C);

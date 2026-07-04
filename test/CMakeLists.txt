@@ -160,6 +160,21 @@ target_include_directories(test_ack_auth PRIVATE
 )
 target_link_libraries(test_ack_auth ssl crypto)
 
+# DATA origin authentication (Task 4-fix F1, Critical): the 8-byte network-key
+# auth_hmac over the masked header + src_addr that gates reverse-route
+# learning, plus the keyless-forged-DATA poisoning attack regression.
+add_executable(test_data_auth
+    test_data_auth.c
+    unity/unity.c
+)
+target_include_directories(test_data_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+target_link_libraries(test_data_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
@@ -459,6 +474,31 @@ add_executable(test_forwarding
 target_include_directories(test_forwarding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
 )
+
+# Phase 1 delivery-core Task 4: wire v4 prev_hop reverse-route learning e2e
+add_executable(test_data_delivery_e2e
+    test_data_delivery_e2e.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_data_delivery_e2e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+
+# Phase 1 delivery-core Task 5: multi-hop channel flood relay decision
+add_executable(test_channel_flood
+    test_channel_flood.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_channel_flood PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_channel_flood ssl crypto)
 
 # Fragment tests
 add_executable(test_fragment
