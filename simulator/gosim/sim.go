@@ -106,6 +106,13 @@ type Sim struct {
 	lastScenario           string
 	headless               bool
 	broadcastTelemetryMode string
+
+	// Phase 2 Task 0 (flood-comparison baseline): "routing" scenario field,
+	// "reactive" (default, Bramble's real firmware AODV path via
+	// bridge_handle_*) or "flood" (Go-only managed-flooding mode, see
+	// flood.go). flood is nil in reactive mode.
+	routingMode string
+	flood       *floodSim
 }
 
 // NewSim creates a new simulation engine.
@@ -278,11 +285,23 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 	case C.EVT_TICK_NODE:
 		s.handleTickNode(evt)
 	case C.EVT_RECEIVE_PACKET:
-		s.handleReceivePacket(evt)
+		if s.routingMode == "flood" {
+			s.handleReceivePacketFlood(evt)
+		} else {
+			s.handleReceivePacket(evt)
+		}
 	case C.EVT_GENERATE_MESSAGE:
-		s.handleGenerateMessage(evt)
+		if s.routingMode == "flood" {
+			s.handleGenerateMessageFlood(evt)
+		} else {
+			s.handleGenerateMessage(evt)
+		}
 	case C.EVT_SEND_PACKET:
-		s.handleFloodRelay(evt)
+		if s.routingMode == "flood" {
+			s.handleFloodRelayDue(evt)
+		} else {
+			s.handleFloodRelay(evt)
+		}
 	case C.EVT_NODE_JOIN:
 		s.handleNodeJoin(evt)
 	case C.EVT_NODE_LEAVE:
@@ -306,6 +325,16 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 
 	node := nodeArrayFindByID(&s.nodes, nodeID)
 	if node == nil || !bool(node.active) {
+		return
+	}
+
+	// Phase 2 Task 0: managed flooding has no periodic control-plane duty
+	// (no beacons -- there is no neighbor table for one to serve -- no
+	// route maintenance, no per-hop retransmit ladder). Nothing to do on a
+	// tick, and nothing depends on rescheduling it: flood mode's own
+	// EVT_RECEIVE_PACKET/EVT_SEND_PACKET handlers (flood.go) drive
+	// everything else.
+	if s.routingMode == "flood" {
 		return
 	}
 
@@ -512,6 +541,27 @@ func (s *Sim) cmdLoad(cmd Command) {
 		log.Printf("failed to load scenario: %s", scenarioPath)
 		return
 	}
+
+	// Phase 2 Task 0: optional "routing"/"flood_hop_limit" fields, read
+	// directly off the scenario file (see flood.go's loadRoutingConfig),
+	// independent of the C-side cJSON parse above. Defaults to "reactive"
+	// (today's only behavior) for every scenario that omits "routing".
+	routingMode, floodHopLimit := loadRoutingConfig(scenarioPath)
+	s.routingMode = routingMode
+	if routingMode == "flood" {
+		s.flood = newFloodSim(floodHopLimit)
+	} else {
+		s.flood = nil
+	}
+
+	// Phase 2 "save reactive routing" Part B: optional "intermediate_rrep"
+	// scenario field, read the same way as "routing" above (independent Go-
+	// side JSON read, so this schema extension needs no C-side sim_scenario
+	// changes). Defaults to true (firmware's always-on shipped behavior);
+	// explicitly re-applied on every run (not just when disabling) so one
+	// scenario's setting never leaks into the next run in the same process
+	// (see bridge.h's doc comment on bridge_set_intermediate_rrep_enabled).
+	C.bridge_set_intermediate_rrep_enabled(C.bool(loadIntermediateRREPConfig(scenarioPath)))
 
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)
@@ -749,6 +799,14 @@ func (s *Sim) complete() {
 
 	sent := uint64(s.metrics.messages_sent)
 	delivered := uint64(s.metrics.delivered_packets)
+	// Phase 2 "save reactive routing" Part A: confirmed is the TRUE
+	// confirmed-delivery count (bridge.c's bridge_msg_track_confirm, fired
+	// only when a delivery receipt reaches the true ORIGINATOR), as opposed
+	// to delivered above (destination reach only; see bridge.c's "don't
+	// wait for receipt to arrive at source" comment). confirmed <= delivered
+	// always, since a receipt can only exist after the destination decoded
+	// the message.
+	confirmed := uint64(s.metrics.confirmed_packets)
 	dropped := uint64(s.metrics.dropped_packets)
 	undelivered := uint64(0)
 	if sent > delivered {
@@ -884,6 +942,18 @@ func (s *Sim) complete() {
 		// (delivered + dropped + undelivered). THE delivery number for
 		// baseline and scale comparisons.
 		"message_delivery_rate": messageDeliveryRate(delivered, dropped, undelivered),
+		// confirmed_delivery_rate is Bramble's actual differentiator: the
+		// fraction of scripted messages whose delivery receipt made it all
+		// the way back to the true ORIGINATOR (confirmed), not just reached
+		// the destination (delivered/message_delivery_rate above). Deliberately
+		// divides by the SAME terminal-state denominator message_delivery_rate
+		// uses (delivered + dropped + undelivered), not confirmed's own
+		// (smaller) total, so the two rates are directly comparable side by
+		// side: reach vs confirmation, matching the
+		// flood_reached_rate/flood_confirmed_rate pair flood mode already
+		// reports.
+		"confirmed":               confirmed,
+		"confirmed_delivery_rate": confirmedDeliveryRate(confirmed, delivered, dropped, undelivered),
 		// control_airtime_pct is now genuinely ToA-weighted:
 		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
 		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,
@@ -897,6 +967,39 @@ func (s *Sim) complete() {
 		"rreq_rate_denied":      rreqRateDenied,
 		"rreq_fwd_denied":       rreqFwdDenied,
 	})
+
+	// Phase 2 Task 0 (flood-comparison baseline): flood mode's own delivery
+	// bars. message_delivery_rate above is 0/0 in flood runs (flood.go never
+	// touches metrics.delivered_packets/dropped_packets -- see flood.go's
+	// package comment) and must not be read for flood scenarios; use these
+	// fields instead. flood_reached_rate is the LOOSE bar (destination ever
+	// received the DATA, no confirmation, how Meshtastic is actually used);
+	// flood_confirmed_rate is the STRICT bar (the true sender received a
+	// flooded ACK back, this task's chosen non-N/A confirmation signal).
+	if s.flood != nil {
+		fl := s.flood
+		reachedRate, confirmedRate := 0.0, 0.0
+		if fl.totalScripted > 0 {
+			reachedRate = float64(fl.reachedCount) / float64(fl.totalScripted)
+			confirmedRate = float64(fl.confirmedCount) / float64(fl.totalScripted)
+		}
+		s.emitJSON(map[string]interface{}{
+			"type":                           "flood_final_metrics",
+			"flood_hop_limit":                fl.hopLimit,
+			"flood_total_scripted":           fl.totalScripted,
+			"flood_reached":                  fl.reachedCount,
+			"flood_reached_rate":             reachedRate,
+			"flood_confirmed":                fl.confirmedCount,
+			"flood_confirmed_rate":           confirmedRate,
+			"flood_avg_reached_latency_ms":   avgUs(fl.reachedLatUs) / 1000.0,
+			"flood_avg_confirmed_latency_ms": avgUs(fl.confirmedLatUs) / 1000.0,
+			"flood_data_tx":                  fl.dataTx,
+			"flood_ack_tx":                   fl.ackTx,
+			"flood_relays_fired":             fl.relaysFired,
+			"flood_relays_canceled":          fl.relaysCanceled,
+		})
+	}
+
 	s.emitJSON(map[string]interface{}{"type": "sim_ended"})
 }
 
@@ -910,6 +1013,22 @@ func messageDeliveryRate(delivered, dropped, undelivered uint64) float64 {
 		return 0.0
 	}
 	return float64(delivered) / float64(total)
+}
+
+// confirmedDeliveryRate is confirmed / (delivered + dropped + undelivered):
+// the fraction of ALL scripted messages (the same terminal-state
+// denominator messageDeliveryRate uses) whose delivery receipt made it back
+// to the true originator. Deliberately NOT confirmed / (confirmed + dropped
+// + undelivered): that would use a different, smaller denominator than
+// message_delivery_rate and the two rates would no longer be comparable
+// side by side. confirmed <= delivered always, so this rate is always <=
+// message_delivery_rate. Zero-denominator (no scripted messages) reports 0.
+func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) float64 {
+	total := delivered + dropped + undelivered
+	if total == 0 {
+		return 0.0
+	}
+	return float64(confirmed) / float64(total)
 }
 
 // emitJSON marshals and broadcasts a JSON event.

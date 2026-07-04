@@ -381,6 +381,160 @@ void test_retry_discovery_succeeds_through_warm_dedup(void) {
     TEST_ASSERT_EQUAL_PTR(d, discovery_lookup_by_query(&dtbl, QUERY));
 }
 
+/* --- Phase 2 "save reactive routing" Part B: intermediate-node RREP --- */
+
+static route_entry_t fresh_discovered_route(uint32_t dest, uint32_t next_hop, uint8_t hop_count,
+                                            uint8_t metric, uint32_t now_ms) {
+    route_entry_t r;
+    memset(&r, 0, sizeof(r));
+    r.dest_addr = dest;
+    r.next_hop = next_hop;
+    r.hop_count = hop_count;
+    r.metric = metric;
+    r.state = ROUTE_ACTIVE;
+    r.source = ROUTE_SRC_DISCOVERED;
+    r.last_confirmed = now_ms;
+    r.last_used = now_ms;
+    return r;
+}
+
+void test_intermediate_rrep_route_usable_accepts_fresh_discovered_active(void) {
+    route_entry_t r = fresh_discovered_route(ADDR_D, ADDR_C, 1, 200, 10000);
+    TEST_ASSERT_TRUE(intermediate_rrep_route_usable(&r, 10000));
+    /* Still within the freshness window */
+    TEST_ASSERT_TRUE(intermediate_rrep_route_usable(&r, 10000 + INTERMEDIATE_RREP_MAX_AGE_MS));
+}
+
+void test_intermediate_rrep_route_usable_rejects_null(void) {
+    TEST_ASSERT_FALSE(intermediate_rrep_route_usable(NULL, 10000));
+}
+
+void test_intermediate_rrep_route_usable_rejects_breadcrumb(void) {
+    /* A DATA-forwarding breadcrumb: unauthenticated next-hop hint (see
+     * route_source_t doc comment). Must never be used to author a reply on
+     * someone else's behalf. */
+    route_entry_t r = fresh_discovered_route(ADDR_D, ADDR_C, 1, 255, 10000);
+    r.source = ROUTE_SRC_BREADCRUMB;
+    TEST_ASSERT_FALSE(intermediate_rrep_route_usable(&r, 10000));
+}
+
+void test_intermediate_rrep_route_usable_rejects_stale_and_broken(void) {
+    route_entry_t stale = fresh_discovered_route(ADDR_D, ADDR_C, 1, 200, 10000);
+    stale.state = ROUTE_STALE;
+    TEST_ASSERT_FALSE(intermediate_rrep_route_usable(&stale, 10000));
+
+    route_entry_t broken = fresh_discovered_route(ADDR_D, ADDR_C, 1, 200, 10000);
+    broken.state = ROUTE_BROKEN;
+    TEST_ASSERT_FALSE(intermediate_rrep_route_usable(&broken, 10000));
+}
+
+void test_intermediate_rrep_route_usable_rejects_too_old(void) {
+    /* ACTIVE state alone is too coarse a freshness signal (no destination
+     * sequence numbers exist to check instead): last_confirmed beyond the
+     * tight INTERMEDIATE_RREP_MAX_AGE_MS window must still be rejected even
+     * though the route has not yet transitioned out of ROUTE_ACTIVE
+     * (that transition only happens at the much longer
+     * ROUTE_ACTIVE_TIMEOUT_MS). */
+    route_entry_t r = fresh_discovered_route(ADDR_D, ADDR_C, 1, 200, 10000);
+    uint32_t just_too_old = 10000 + INTERMEDIATE_RREP_MAX_AGE_MS + 1;
+    TEST_ASSERT_TRUE(just_too_old < ROUTE_ACTIVE_TIMEOUT_MS + 10000); /* still ACTIVE by state */
+    TEST_ASSERT_FALSE(intermediate_rrep_route_usable(&r, just_too_old));
+}
+
+void test_rrep_build_intermediate_hop_and_metric_math(void) {
+    /* Originator A -> relay B -> intermediate I: the RREQ I (ADDR_C, reused
+     * as "I" here) receives has already been forwarded once by B, so
+     * rreq.hop_count == 1 (hops from A to B) and rreq.prev_hop == B. */
+    bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_D, QUERY, 0xEEEE, 8);
+    bramble_rreq_t at_i = rreq_forward(&rreq, ADDR_B, -70, 8);
+    TEST_ASSERT_EQUAL(1, at_i.hop_count);
+    TEST_ASSERT_EQUAL(ADDR_B, at_i.prev_hop);
+
+    /* I's cached route to D: 2 hops away, metric 180. */
+    route_entry_t route_to_d =
+        fresh_discovered_route(ADDR_D, ADDR_B /* unused here */, 2, 180, 5000);
+
+    bramble_rrep_t rrep = rrep_build_intermediate(&at_i, &route_to_d, ADDR_C, -70, 8);
+
+    TEST_ASSERT_EQUAL(PKT_TYPE_RREP, rrep.header.type);
+    TEST_ASSERT_EQUAL(QUERY, rrep.query_id);
+    /* Answering ON BEHALF OF D, not as I. */
+    TEST_ASSERT_EQUAL(ADDR_D, rrep.src_addr);
+    /* I is the first hop back, from its own perspective. */
+    TEST_ASSERT_EQUAL(ADDR_C, rrep.next_hop);
+    /* Frame routes back toward whoever sent I this RREQ. */
+    TEST_ASSERT_EQUAL(ADDR_B, rrep.header.dest_addr);
+    /* hop_count = (rreq.hop_count(1) + 1) + route.hop_count(2) = 4: total
+     * accumulated path length A -> B -> I -> ... -> D. */
+    TEST_ASSERT_EQUAL(4, rrep.hop_count);
+    TEST_ASSERT_EQUAL(ROUTE_HOP_LIMIT_MAX, rrep.header.hop_limit);
+    /* Metric composition: metric_to_me = at_i.metric link-penalized once
+     * more for the B->I hop, then the route's own accumulated penalty
+     * (255 - route_to_d.metric) subtracts further, floored at zero. */
+    uint8_t metric_to_me = metric_apply_link_penalty(at_i.metric, -70, 8);
+    uint16_t dest_penalty = (uint16_t)(255 - route_to_d.metric);
+    uint8_t expect_metric =
+        (dest_penalty >= metric_to_me) ? 0 : (uint8_t)(metric_to_me - dest_penalty);
+    TEST_ASSERT_EQUAL(expect_metric, rrep.route_metric);
+
+    /* Authenticated exactly like any other RREP: a receiver's rrep_verify
+     * must accept it. */
+    TEST_ASSERT_TRUE(rrep_verify(&rrep));
+}
+
+void test_rrep_build_intermediate_tamper_fails_verify(void) {
+    bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_D, QUERY, 0xEEEE, 8);
+    route_entry_t route_to_d = fresh_discovered_route(ADDR_D, ADDR_B, 1, 200, 5000);
+    bramble_rrep_t rrep = rrep_build_intermediate(&rreq, &route_to_d, ADDR_C, -70, 8);
+    TEST_ASSERT_TRUE(rrep_verify(&rrep));
+    rrep.hop_count += 1; /* tamper with a MAC-covered field */
+    TEST_ASSERT_FALSE(rrep_verify(&rrep));
+}
+
+/* --- Integration: intermediate reply short-circuits the flood, mirroring
+ * main/mesh_task.c's handle_rreq control flow (reply, do not also
+ * forward). Topology: A -- B -- I -- D was already discovered once (I
+ * holds a fresh route to D); a NEW RREQ from E arrives at I via B. I must
+ * answer on D's behalf and must NOT schedule a forward, so D never has to
+ * see this second discovery at all. --- */
+void test_intermediate_reply_suppresses_forward(void) {
+    uint32_t now = 20000;
+    routing_table_t rt_i;
+    route_init(&rt_i);
+    /* I already learned a route to D (2 hops away) from an earlier,
+     * unrelated discovery. */
+    route_entry_t installed = fresh_discovered_route(ADDR_D, ADDR_B, 2, 210, now);
+    rt_i.entries[rt_i.count++] = installed;
+
+    /* E originates a fresh discovery for D; by the time it reaches I it has
+     * been forwarded once (through some other relay), same shape as
+     * test_rrep_build_intermediate_hop_and_metric_math's setup. */
+    bramble_rreq_t rreq = rreq_build_originator(ADDR_A, ADDR_D, QUERY2, 0xAAAA, 8);
+    bramble_rreq_t at_i = rreq_forward(&rreq, ADDR_B, -75, 6);
+
+    /* Mirrors handle_rreq: dedup + reverse route bookkeeping happen
+     * regardless of what follows (not exercised by name here, since this
+     * test's focus is the reply-vs-forward decision itself). */
+    route_entry_t* cached = route_lookup(&rt_i, at_i.header.dest_addr);
+    TEST_ASSERT_NOT_NULL(cached);
+    TEST_ASSERT_TRUE(intermediate_rrep_route_usable(cached, now));
+
+    bool forwarded = false; /* would be set true by a schedule_rreq_forward-equivalent call */
+    bramble_rrep_t rrep;
+    if (intermediate_rrep_route_usable(cached, now)) {
+        rrep = rrep_build_intermediate(&at_i, cached, ADDR_C, -75, 6);
+        /* Reply path taken: mesh_task.c's handle_rreq returns here, with NO
+         * fall-through to schedule_rreq_forward. */
+    } else if (at_i.header.hop_limit > 1) {
+        forwarded = true;
+    }
+
+    TEST_ASSERT_FALSE(forwarded);
+    TEST_ASSERT_TRUE(rrep_verify(&rrep));
+    TEST_ASSERT_EQUAL(ADDR_D, rrep.src_addr);
+    TEST_ASSERT_EQUAL(ADDR_B, rrep.header.dest_addr); /* back toward the RREQ sender */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_discovery_start_and_lookup);
@@ -405,5 +559,13 @@ int main(void) {
     RUN_TEST(test_rrep_rx_decide_unsolicited_drops_without_install);
     RUN_TEST(test_three_node_discovery);
     RUN_TEST(test_retry_discovery_succeeds_through_warm_dedup);
+    RUN_TEST(test_intermediate_rrep_route_usable_accepts_fresh_discovered_active);
+    RUN_TEST(test_intermediate_rrep_route_usable_rejects_null);
+    RUN_TEST(test_intermediate_rrep_route_usable_rejects_breadcrumb);
+    RUN_TEST(test_intermediate_rrep_route_usable_rejects_stale_and_broken);
+    RUN_TEST(test_intermediate_rrep_route_usable_rejects_too_old);
+    RUN_TEST(test_rrep_build_intermediate_hop_and_metric_math);
+    RUN_TEST(test_rrep_build_intermediate_tamper_fails_verify);
+    RUN_TEST(test_intermediate_reply_suppresses_forward);
     return UNITY_END();
 }

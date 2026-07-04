@@ -14,6 +14,8 @@ void metrics_record_packet_delivered(metrics_state_t* metrics, uint64_t latency_
     metrics->latency_count++;
 }
 
+void metrics_record_packet_confirmed(metrics_state_t* metrics) { metrics->confirmed_packets++; }
+
 void metrics_record_packet_dropped(metrics_state_t* metrics) { metrics->dropped_packets++; }
 
 void metrics_update_active_nodes(metrics_state_t* metrics, int count) {
