@@ -370,36 +370,47 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
     if (bramble_rrep_deserialize(&rrep, buf, len) != ESP_OK)
         return;
 
-    route_install(&rx->routes, rrep.src_addr, pkt_src_addr, rrep.hop_count, rrep.route_metric,
-                  ROUTE_ACTIVE, now_ms);
-    emit_route_added(stdout, now_us, rx->id, rrep.src_addr, pkt_src_addr, rrep.hop_count);
-
+    /* Use the real firmware decision (rrep_rx_decide) rather than a hand-rolled
+     * copy, so the simulator cannot drift from mesh_task.c's handle_rrep: the
+     * next_hop = forwarder-address fix and the discovery-participation install
+     * gate both come for free. The simulator does not apply a link penalty, so
+     * it passes rrep.route_metric through as the link metric. pkt_src_addr is
+     * now unused: rrep.next_hop already carries the forwarder's own address. */
+    (void)pkt_src_addr;
     int node_idx = (int)(rx - nodes->nodes);
-    anomaly_check_route_flap(&anomaly[node_idx].flap, rrep.src_addr, pkt_src_addr, now_us, stdout,
-                             rx->id);
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, rx->addr, rrep.route_metric,
+                                          &rx->pending_discoveries, &rx->reverse_routes);
 
-    pending_discovery_t* pd = discovery_lookup_by_query(&rx->pending_discoveries, rrep.query_id);
-    if (pd) {
-        discovery_remove(&rx->pending_discoveries, pd->dest_addr);
-        return;
+    if (d.install_route) {
+        route_install(&rx->routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
+                      ROUTE_ACTIVE, now_ms);
+        emit_route_added(stdout, now_us, rx->id, d.route_dest, d.route_next_hop, d.route_hops);
+        anomaly_check_route_flap(&anomaly[node_idx].flap, d.route_dest, d.route_next_hop, now_us,
+                                 stdout, rx->id);
     }
 
-    reverse_route_t* rr = reverse_route_lookup(&rx->reverse_routes, rrep.query_id);
-    if (!rr)
+    switch (d.action) {
+    case RREP_RX_DELIVER:
+        discovery_remove(&rx->pending_discoveries, d.deliver_dest);
         return;
+    case RREP_RX_FORWARD: {
+        bramble_rrep_t fwd = rrep_forward(&rrep, d.forward_to, rx->addr);
 
-    bramble_rrep_t fwd = rrep_forward(&rrep, rr->prev_hop);
+        outbound_packet_t pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        bramble_rrep_serialize(&fwd, pkt.data, RREP_SIZE);
+        pkt.len = RREP_SIZE;
+        pkt.is_broadcast = false;
+        pkt.dest_addr = d.forward_to;
+        pkt.pkt_type = PKT_TYPE_RREP;
+        rx->packets_forwarded++;
 
-    outbound_packet_t pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    bramble_rrep_serialize(&fwd, pkt.data, RREP_SIZE);
-    pkt.len = RREP_SIZE;
-    pkt.is_broadcast = false;
-    pkt.dest_addr = rr->prev_hop;
-    pkt.pkt_type = PKT_TYPE_RREP;
-    rx->packets_forwarded++;
-
-    sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+        return;
+    }
+    case RREP_RX_DROP:
+        return;
+    }
 }
 
 static void _handle_rerr(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
