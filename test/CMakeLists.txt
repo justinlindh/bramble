@@ -435,6 +435,21 @@ target_include_directories(test_discovery PRIVATE
 )
 target_link_libraries(test_discovery ssl crypto)
 
+# Multi-node RREP discovery harness (real components end to end)
+add_executable(test_rrep_discovery_e2e
+    test_rrep_discovery_e2e.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_rrep_discovery_e2e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_rrep_discovery_e2e ssl crypto)
+
 # Forwarding tests
 add_executable(test_forwarding
     test_forwarding.c
