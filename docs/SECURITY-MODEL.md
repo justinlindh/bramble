@@ -309,8 +309,24 @@ that.
 A node limits its *own* route discoveries to one per (source, destination)
 pair per 30 seconds (`rreq_rate_allow` in `components/security/security.c`,
 called from `initiate_discovery` in `main/mesh_task.c`). This bounds
-self-inflicted flood, not third-party flood: see section 4 for the missing
-forward-path limit.
+self-inflicted flood, not third-party flood.
+
+Forwarded RREQs (ws 1.3d, closes SEC-M4) are bounded separately by a global
+token bucket, `rreq_fwd_allow` in `components/security/security.c`, called
+from `handle_rreq` in `main/mesh_task.c` after the duplicate-suppression
+check below so only non-duplicate RREQs consume a token. `RREQ_FWD_BURST`
+(16) tokens refill at one per `RREQ_FWD_REFILL_MS` (2000ms), about 30
+sustained forwards per minute plus a burst of 16. The cap is node-global, not
+per-neighbor, because the only sender signal at RREQ RX, `rreq.prev_hop`, is
+an unauthenticated wire field each relay overwrites with its own address: an
+attacker can rotate it across fabricated values to spread a flood across
+per-neighbor buckets, or set it to a victim's address to fill that victim's
+bucket and frame them. Keying the cap on `prev_hop` would be evadable and
+would introduce a targeted framing DoS that does not exist today, so it is
+deliberately not done. Robust per-neighbor fairness needs RREQ
+authentication (future work, out of ws 1.3d scope). Under a sustained flood
+the global cap also drops some legitimate forwarded RREQs; this is an
+accepted airtime-vs-reach tradeoff, and discovery already retries.
 
 ### Duplicate suppression
 
@@ -638,9 +654,17 @@ same PR that fixes it.
   scope for pre-alpha. Treat all five as unauthenticated against an
   unprovisioned deployment, and as insider-forgeable even once
   provisioned, until that follow-up work lands.
-- **RREQ forwarding is not rate-limited**; the 30-second limiter applies only
-  to locally-originated discoveries, so a flood of foreign RREQs is forwarded
-  without restriction (`handle_rreq` in `main/mesh_task.c`).
+- **RREQ forwarding rate limiting is node-global, not per-neighbor (SEC-M4,
+  closed by ws 1.3d).** A flood of foreign RREQs is now bounded by a global
+  token bucket (`rreq_fwd_allow`, section 3), not forwarded without
+  restriction; the residual is that the cap cannot be attributed to a
+  specific sender, because `rreq.prev_hop` is unauthenticated and spoofable.
+  A per-neighbor cap keyed on it would be evadable (rotate `prev_hop`) and
+  would let an attacker frame a victim by spoofing `prev_hop = victim` to
+  drain their bucket, so it was deliberately not built that way. Robust
+  per-neighbor fairness needs RREQ authentication (future). Under sustained
+  flood the global cap also drops some legitimate forwarded RREQs (accepted
+  airtime-vs-reach tradeoff; discovery retries).
 - **Replay protection for routing and reliability control traffic is now
   closed under a provisioned key (ws 1.3b).** RREP, RERR, beacon, ACK, and
   delivery receipt previously deduped only on unauthenticated `packet_id`
