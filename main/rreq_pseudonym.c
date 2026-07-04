@@ -2,7 +2,7 @@
 #include <string.h>
 #include "crypto.h"
 
-uint32_t rreq_pseudonym_generate(const uint8_t *private_key, uint32_t address, uint32_t query_id) {
+uint32_t rreq_pseudonym_generate(const uint8_t* private_key, uint32_t address, uint32_t query_id) {
     uint8_t input[8];
     memcpy(input, &address, 4);
     memcpy(input + 4, &query_id, 4);

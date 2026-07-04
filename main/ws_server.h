@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 void ws_server_load_token(void);
-const char *ws_server_get_token(void);
+const char* ws_server_get_token(void);
 
 /* True only when auth was EXPLICITLY disabled (empty token set via an
  * authenticated bramble.setAuthToken call). A missing or unreadable token
@@ -15,7 +15,7 @@ bool ws_server_auth_disabled(void);
  * comma-separated list. Same-origin connections are always allowed; this
  * list is for hosted webapp origins and the like (see main/ws_origin.h). */
 void ws_server_load_origins(void);
-const char *ws_server_get_extra_origins(void);
+const char* ws_server_get_extra_origins(void);
 
 /* Start the WebSocket server on port 80.
  * Incoming WS frames on /ws are routed to rpc_dispatch().

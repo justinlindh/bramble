@@ -2,9 +2,7 @@
 #include "chat_unread.h"
 #include "msg_store.h"
 
-void setUp(void) {
-    chat_unread_reset();
-}
+void setUp(void) { chat_unread_reset(); }
 
 void tearDown(void) {}
 
@@ -50,8 +48,8 @@ void test_outgoing_messages_do_not_increment(void) {
 }
 
 void test_clear_only_target_channel(void) {
-    stored_msg_t ch1 = { .direction = MSG_DIR_INCOMING, .channel_index = 1 };
-    stored_msg_t ch2 = { .direction = MSG_DIR_INCOMING, .channel_index = 2 };
+    stored_msg_t ch1 = {.direction = MSG_DIR_INCOMING, .channel_index = 1};
+    stored_msg_t ch2 = {.direction = MSG_DIR_INCOMING, .channel_index = 2};
 
     chat_unread_mark_for_message(&ch1);
     chat_unread_mark_for_message(&ch2);

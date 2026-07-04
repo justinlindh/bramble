@@ -22,9 +22,7 @@ static void setUpState(void) {
     s_status_update_calls = 0;
 }
 
-void setUp(void) {
-    setUpState();
-}
+void setUp(void) { setUpState(); }
 
 void tearDown(void) {}
 
@@ -33,7 +31,8 @@ void test_rerr_for_dest_fast_fails_matching_pending_ack(void) {
     pending_ack_init(&table);
 
     uint8_t payload[] = {0xAA, 0xBB};
-    int idx = pending_ack_add(&table, 0x12345678, 0xABCDEF01, MSG_TIER_NORMAL, payload, sizeof(payload), 1000);
+    int idx = pending_ack_add(&table, 0x12345678, 0xABCDEF01, MSG_TIER_NORMAL, payload,
+                              sizeof(payload), 1000);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
     TEST_ASSERT_TRUE(table.entries[idx].active);
 
@@ -48,8 +47,10 @@ void test_rerr_for_dest_does_not_affect_other_destination(void) {
     pending_ack_init(&table);
 
     uint8_t payload[] = {0x11, 0x22};
-    int idx_a = pending_ack_add(&table, 0xAAAA0001, 0xDEAD0001, MSG_TIER_NORMAL, payload, sizeof(payload), 1000);
-    int idx_b = pending_ack_add(&table, 0xBBBB0002, 0xDEAD0002, MSG_TIER_NORMAL, payload, sizeof(payload), 1000);
+    int idx_a = pending_ack_add(&table, 0xAAAA0001, 0xDEAD0001, MSG_TIER_NORMAL, payload,
+                                sizeof(payload), 1000);
+    int idx_b = pending_ack_add(&table, 0xBBBB0002, 0xDEAD0002, MSG_TIER_NORMAL, payload,
+                                sizeof(payload), 1000);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx_a);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx_b);
 
@@ -65,7 +66,8 @@ void test_rerr_fast_fail_updates_msg_store_status_to_failed(void) {
     pending_ack_init(&table);
 
     uint8_t payload[] = {0x44, 0x55};
-    int idx = pending_ack_add(&table, 0xCAFEBABE, 0xFEEDBEEF, MSG_TIER_NORMAL, payload, sizeof(payload), 1000);
+    int idx = pending_ack_add(&table, 0xCAFEBABE, 0xFEEDBEEF, MSG_TIER_NORMAL, payload,
+                              sizeof(payload), 1000);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
 
     (void)rerr_ack_failfast_for_dest(&table, 0xFEEDBEEF, "route_broken", NULL, NULL);

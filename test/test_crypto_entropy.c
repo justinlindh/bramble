@@ -5,12 +5,13 @@
 static uint32_t g_counter;
 static uint32_t stub_source(void) { return ++g_counter; }
 
-void setUp(void) { crypto_entropy_set_ready(false); g_counter = 0; }
+void setUp(void) {
+    crypto_entropy_set_ready(false);
+    g_counter = 0;
+}
 void tearDown(void) {}
 
-void test_gate_blocks_until_set_ready(void) {
-    TEST_ASSERT_FALSE(crypto_entropy_is_ready());
-}
+void test_gate_blocks_until_set_ready(void) { TEST_ASSERT_FALSE(crypto_entropy_is_ready()); }
 
 void test_gate_opens_when_set_ready(void) {
     crypto_entropy_set_ready(true);

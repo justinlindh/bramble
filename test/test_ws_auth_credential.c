@@ -33,8 +33,7 @@ void test_subprotocol_token_any_order(void) {
 
 void test_subprotocol_used_when_authorization_not_bearer(void) {
     char out[64] = {0};
-    TEST_ASSERT_TRUE(
-        ws_auth_extract_token("Basic xyz", "bramble.v1.auth.TOK", out, sizeof(out)));
+    TEST_ASSERT_TRUE(ws_auth_extract_token("Basic xyz", "bramble.v1.auth.TOK", out, sizeof(out)));
     TEST_ASSERT_EQUAL_STRING("TOK", out);
 }
 

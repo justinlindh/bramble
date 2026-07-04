@@ -9,23 +9,27 @@ void tearDown(void) {}
 
 void test_quad_dh_both_sides_agree(void) {
     bramble_identity_t a_id, b_id, a_eph, b_eph;
-    crypto_generate_identity(&a_id); crypto_generate_identity(&b_id);
-    crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    crypto_generate_identity(&a_id);
+    crypto_generate_identity(&b_id);
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
     uint32_t lo = a_id.address < b_id.address ? a_id.address : b_id.address;
     uint32_t hi = a_id.address < b_id.address ? b_id.address : a_id.address;
 
     uint8_t ka[32], kb[32];
-    TEST_ASSERT_EQUAL(0, dm_derive_session_key(a_id.private_key, a_eph.private_key,
-        b_id.public_key, b_eph.public_key, lo, hi, 0, ka));
-    TEST_ASSERT_EQUAL(0, dm_derive_session_key(b_id.private_key, b_eph.private_key,
-        a_id.public_key, a_eph.public_key, lo, hi, 0, kb));
+    TEST_ASSERT_EQUAL(0, dm_derive_session_key(a_id.private_key, a_eph.private_key, b_id.public_key,
+                                               b_eph.public_key, lo, hi, 0, ka));
+    TEST_ASSERT_EQUAL(0, dm_derive_session_key(b_id.private_key, b_eph.private_key, a_id.public_key,
+                                               a_eph.public_key, lo, hi, 0, kb));
     TEST_ASSERT_EQUAL_MEMORY(ka, kb, 32);
 }
 
 void test_different_epoch_yields_different_key(void) {
     bramble_identity_t a_id, b_id, a_eph, b_eph;
-    crypto_generate_identity(&a_id); crypto_generate_identity(&b_id);
-    crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    crypto_generate_identity(&a_id);
+    crypto_generate_identity(&b_id);
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
     uint8_t k0[32], k1[32];
     dm_derive_session_key(a_id.private_key, a_eph.private_key, b_id.public_key, b_eph.public_key,
                           a_id.address, b_id.address, 0, k0);
@@ -40,11 +44,11 @@ void test_different_epoch_yields_different_key(void) {
  * u-coordinate (order 8, little-endian) so the vector is real; the accumulator
  * guard is what protects the mbedtls DEVICE path, which does not reject these. */
 static const uint8_t k_low_order_u[32] = {
-    0xe0,0xeb,0x7a,0x7c,0x3b,0x41,0xb8,0xae,0x16,0x56,0xe3,0xfa,0xf1,0x9f,0xc4,0x6a,
-    0xda,0x09,0x8d,0xeb,0x9c,0x32,0xb1,0xfd,0x86,0x62,0x05,0x16,0x5f,0x49,0xb8,0x00
-};
+    0xe0, 0xeb, 0x7a, 0x7c, 0x3b, 0x41, 0xb8, 0xae, 0x16, 0x56, 0xe3, 0xfa, 0xf1, 0x9f, 0xc4, 0x6a,
+    0xda, 0x09, 0x8d, 0xeb, 0x9c, 0x32, 0xb1, 0xfd, 0x86, 0x62, 0x05, 0x16, 0x5f, 0x49, 0xb8, 0x00};
 void test_low_order_dh_rejected(void) {
-    uint8_t priv[32]; crypto_random(priv, 32);
+    uint8_t priv[32];
+    crypto_random(priv, 32);
     uint8_t out[32];
     /* Contract: crypto_x25519_dh must fail on a low-order peer point. On host
      * OpenSSL rejects it upstream; on device only the added accumulator guard
@@ -60,7 +64,9 @@ void test_zero_shared_secret_guard(void) {
      * all-zero shared secret. crypto_x25519_check_shared (extracted guard,
      * added below) must reject it. */
     uint8_t zero_ss[32] = {0};
-    uint8_t ok_ss[32]; crypto_random(ok_ss, 32); ok_ss[0] |= 1;
+    uint8_t ok_ss[32];
+    crypto_random(ok_ss, 32);
+    ok_ss[0] |= 1;
     TEST_ASSERT_NOT_EQUAL(0, crypto_x25519_check_shared(zero_ss));
     TEST_ASSERT_EQUAL(0, crypto_x25519_check_shared(ok_ss));
 }
@@ -74,16 +80,20 @@ void test_ct_le32_matches_lexicographic_order(void) {
     uint8_t a[32], b[32];
 
     /* Differ only in the last (least significant) byte. */
-    memset(a, 0x00, sizeof(a)); a[31] = 0x01;
-    memset(b, 0x00, sizeof(b)); b[31] = 0x02;
+    memset(a, 0x00, sizeof(a));
+    a[31] = 0x01;
+    memset(b, 0x00, sizeof(b));
+    b[31] = 0x02;
     TEST_ASSERT_EQUAL(1, ct_le32(a, b));
     TEST_ASSERT_EQUAL(0, ct_le32(b, a));
 
     /* Differ only in the first (most significant) byte, with every other
      * byte pointing the "wrong" way: a's tail is all 0xFF, b's tail is all
      * 0x00. The first-byte difference must still decide it. */
-    memset(a, 0xFF, sizeof(a)); a[0] = 0x01;
-    memset(b, 0x00, sizeof(b)); b[0] = 0x02;
+    memset(a, 0xFF, sizeof(a));
+    a[0] = 0x01;
+    memset(b, 0x00, sizeof(b));
+    b[0] = 0x02;
     TEST_ASSERT_EQUAL(1, ct_le32(a, b));
     TEST_ASSERT_EQUAL(0, ct_le32(b, a));
 
@@ -99,7 +109,8 @@ void test_ct_le32_matches_lexicographic_order(void) {
  * dm_derive_sas makes, over ikm[i] = i for i in 0..127. */
 void test_sas_known_vector(void) {
     uint8_t ikm[128];
-    for (int i = 0; i < 128; i++) ikm[i] = (uint8_t)i;
+    for (int i = 0; i < 128; i++)
+        ikm[i] = (uint8_t)i;
 
     char sas[8];
     TEST_ASSERT_EQUAL(0, dm_derive_sas(ikm, sas));
@@ -115,14 +126,16 @@ void test_sas_known_vector(void) {
  * itself is unchanged. */
 void test_sas_both_sides_agree(void) {
     bramble_identity_t a_id, b_id, a_eph, b_eph;
-    crypto_generate_identity(&a_id); crypto_generate_identity(&b_id);
-    crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    crypto_generate_identity(&a_id);
+    crypto_generate_identity(&b_id);
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
 
     uint8_t ikm_a[128], ikm_b[128];
-    TEST_ASSERT_EQUAL(0, dm_compute_ikm(a_id.private_key, a_eph.private_key,
-        b_id.public_key, b_eph.public_key, ikm_a));
-    TEST_ASSERT_EQUAL(0, dm_compute_ikm(b_id.private_key, b_eph.private_key,
-        a_id.public_key, a_eph.public_key, ikm_b));
+    TEST_ASSERT_EQUAL(0, dm_compute_ikm(a_id.private_key, a_eph.private_key, b_id.public_key,
+                                        b_eph.public_key, ikm_a));
+    TEST_ASSERT_EQUAL(0, dm_compute_ikm(b_id.private_key, b_eph.private_key, a_id.public_key,
+                                        a_eph.public_key, ikm_b));
     TEST_ASSERT_EQUAL_MEMORY(ikm_a, ikm_b, 128); /* same underlying fix as 0.1.1's key agreement */
 
     char sas_a[8], sas_b[8];
@@ -133,28 +146,38 @@ void test_sas_both_sides_agree(void) {
 
 /* Task 1.2: session table, state machine, eviction. */
 void test_lookup_after_alloc(void) {
-    dm_table_t t; dm_table_init(&t);
+    dm_table_t t;
+    dm_table_init(&t);
     dm_session_t* s = dm_alloc(&t, 0xAA, 0);
     TEST_ASSERT_NOT_NULL(s);
     s->state = DM_STATE_ACTIVE;
     TEST_ASSERT_EQUAL_PTR(s, dm_lookup(&t, 0xAA));
 }
 void test_handshaking_cap_enforced(void) {
-    dm_table_t t; dm_table_init(&t);
+    dm_table_t t;
+    dm_table_init(&t);
     int allocated = 0;
     for (uint32_t a = 1; a <= DM_MAX_SESSIONS + 2; a++) {
         dm_session_t* s = dm_alloc(&t, a, 0);
-        if (s) { s->state = DM_STATE_HANDSHAKING; allocated++; }
+        if (s) {
+            s->state = DM_STATE_HANDSHAKING;
+            allocated++;
+        }
     }
     TEST_ASSERT_EQUAL(DM_MAX_HANDSHAKING, allocated);
 }
 void test_verified_active_not_evicted_for_handshaking(void) {
-    dm_table_t t; dm_table_init(&t);
-    dm_session_t* act = dm_alloc(&t, 0xAA, 0); act->state = DM_STATE_ACTIVE; act->verified = 1;
+    dm_table_t t;
+    dm_table_init(&t);
+    dm_session_t* act = dm_alloc(&t, 0xAA, 0);
+    act->state = DM_STATE_ACTIVE;
+    act->verified = 1;
     for (uint32_t a = 1; a <= DM_MAX_HANDSHAKING; a++) {
-        dm_session_t* s = dm_alloc(&t, 0x1000 + a, 1); if (s) s->state = DM_STATE_HANDSHAKING;
+        dm_session_t* s = dm_alloc(&t, 0x1000 + a, 1);
+        if (s)
+            s->state = DM_STATE_HANDSHAKING;
     }
-    TEST_ASSERT_EQUAL_PTR(act, dm_lookup(&t, 0xAA));  /* survived: VERIFIED-ACTIVE protected */
+    TEST_ASSERT_EQUAL_PTR(act, dm_lookup(&t, 0xAA)); /* survived: VERIFIED-ACTIVE protected */
 }
 
 /* Additional case beyond the brief: the three tests above never actually
@@ -174,7 +197,8 @@ void test_verified_active_not_evicted_for_handshaking(void) {
  * where the correct victim happens to also be the global minimum either
  * way). */
 void test_lru_eviction_prefers_oldest_handshaking_over_verified_active(void) {
-    dm_table_t t; dm_table_init(&t);
+    dm_table_t t;
+    dm_table_init(&t);
 
     for (uint32_t a = 1; a <= DM_MAX_SESSIONS - 2; a++) {
         dm_session_t* s = dm_alloc(&t, a, a); /* established_ms = a: 1..30, smaller than below */
@@ -196,7 +220,7 @@ void test_lru_eviction_prefers_oldest_handshaking_over_verified_active(void) {
      * (1000, 1050). */
 
     dm_session_t* evicted_in = dm_alloc(&t, 0xBEEF, 5000);
-    TEST_ASSERT_NOT_NULL(evicted_in); /* must succeed via eviction, not NULL */
+    TEST_ASSERT_NOT_NULL(evicted_in);            /* must succeed via eviction, not NULL */
     TEST_ASSERT_EQUAL_PTR(older_hs, evicted_in); /* oldest EVICTABLE, not a VERIFIED ACTIVE slot */
     TEST_ASSERT_EQUAL_UINT32(0xBEEF, evicted_in->peer_addr);
 
@@ -223,7 +247,8 @@ void test_lru_eviction_prefers_oldest_handshaking_over_verified_active(void) {
  * ACTIVE slots (simulating the attack) must NOT prevent a subsequent
  * legitimate allocation. */
 void test_unverified_active_evictable_under_pressure(void) {
-    dm_table_t t; dm_table_init(&t);
+    dm_table_t t;
+    dm_table_init(&t);
     for (uint32_t a = 1; a <= DM_MAX_SESSIONS; a++) {
         dm_session_t* s = dm_alloc(&t, a, a); /* last_active_ms = a, ascending */
         TEST_ASSERT_NOT_NULL(s);
@@ -249,7 +274,8 @@ void test_unverified_active_evictable_under_pressure(void) {
  * must drive LRU choice, or a real conversation could be evicted out from
  * under its own user by a flood of newer-but-idle forged sessions. */
 void test_recently_active_unverified_session_survives_eviction(void) {
-    dm_table_t t; dm_table_init(&t);
+    dm_table_t t;
+    dm_table_init(&t);
 
     dm_session_t* real = dm_alloc(&t, 0xAAAA, 1); /* oldest by establishment */
     TEST_ASSERT_NOT_NULL(real);
@@ -267,7 +293,7 @@ void test_recently_active_unverified_session_survives_eviction(void) {
     real->last_active_ms = 100000; /* real's user sends/receives: activity bump */
 
     dm_session_t* legit = dm_alloc(&t, 0xC0FFEE, 999999);
-    TEST_ASSERT_NOT_NULL(legit); /* still succeeds via eviction of a filler slot */
+    TEST_ASSERT_NOT_NULL(legit);                 /* still succeeds via eviction of a filler slot */
     TEST_ASSERT_NOT_NULL(dm_lookup(&t, 0xAAAA)); /* real survives: recently active */
 }
 
@@ -282,8 +308,11 @@ void test_recently_active_unverified_session_survives_eviction(void) {
  * for the quad-DH). Added my_eph_priv to dm_build_init to match; see the
  * task report for the full trace. */
 void test_rekey_init_tag_verifies_and_fails_on_flip(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph;
+    crypto_generate_identity(&a_eph);
 
     bramble_key_exchange_t init;
     TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
@@ -306,8 +335,11 @@ void test_rekey_init_tag_verifies_and_fails_on_flip(void) {
  * must still reject it when it believes have_peer_id (it knows this is
  * supposed to be a rekey, so an all-zero tag is never legitimate here). */
 void test_rekey_init_zero_tag_rejected(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph;
+    crypto_generate_identity(&a_eph);
 
     bramble_key_exchange_t init;
     TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
@@ -319,12 +351,15 @@ void test_rekey_init_zero_tag_rejected(void) {
 }
 
 void test_first_contact_init_zero_tag_and_address_check(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph; crypto_generate_identity(&a_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph;
+    crypto_generate_identity(&a_eph);
 
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
-                                       NULL, &init));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
 
     uint8_t zero16[16] = {0};
     TEST_ASSERT_EQUAL_MEMORY(zero16, init.auth_tag, 16);
@@ -346,14 +381,20 @@ void test_first_contact_init_zero_tag_and_address_check(void) {
  * assertion specifically, since nothing else in this code path would
  * catch it. */
 void test_verify_init_rejects_resp_relabeled_as_init(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
 
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
-                                       NULL, &init));
-    bramble_key_exchange_t resp; uint8_t kb[32];
-    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
+    bramble_key_exchange_t resp;
+    uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0,
+                      dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
     /* Feed the RESP as-is (genuine ke_type == KE_TYPE_RESP, unmodified) to
      * the INIT verifier: address binding alone would accept it (a RESP's
@@ -363,16 +404,22 @@ void test_verify_init_rejects_resp_relabeled_as_init(void) {
 }
 
 void test_init_resp_roundtrip_session_key(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
 
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
-                                       NULL, &init));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
     TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL));
 
-    bramble_key_exchange_t resp; uint8_t kb[32];
-    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+    bramble_key_exchange_t resp;
+    uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0,
+                      dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
     uint8_t ka[32];
     TEST_ASSERT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
@@ -380,15 +427,21 @@ void test_init_resp_roundtrip_session_key(void) {
 }
 
 void test_verify_resp_rejects_tampered_tag(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
 
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
-                                       NULL, &init));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
 
-    bramble_key_exchange_t resp; uint8_t kb[32];
-    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+    bramble_key_exchange_t resp;
+    uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0,
+                      dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
     resp.auth_tag[0] ^= 0x01; /* flip a single byte of the confirm tag */
     uint8_t ka[32];
@@ -404,20 +457,26 @@ void test_verify_resp_rejects_tampered_tag(void) {
  * address or tag (which the existing checks would also independently
  * catch). */
 void test_verify_resp_rejects_wrong_ke_type(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
 
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
-                                       NULL, &init));
-    bramble_key_exchange_t resp; uint8_t kb[32];
-    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
+    bramble_key_exchange_t resp;
+    uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0,
+                      dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
     bramble_key_exchange_t confused = resp;
     confused.ke_type = KE_TYPE_INIT; /* only field changed; tag is still valid */
     uint8_t ka[32];
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&confused, &a, a_eph.private_key, a_eph.public_key,
-                                            0, ka));
+    TEST_ASSERT_NOT_EQUAL(
+        0, dm_verify_resp(&confused, &a, a_eph.private_key, a_eph.public_key, 0, ka));
 }
 
 /* Fix 1: spoofed-address mutation case. A RESP claiming an address that no
@@ -427,15 +486,21 @@ void test_verify_resp_rejects_wrong_ke_type(void) {
  * original, unmutated src_addr, but the address check must catch it on
  * its own). */
 void test_verify_resp_rejects_spoofed_address(void) {
-    bramble_identity_t a, b; crypto_generate_identity(&a); crypto_generate_identity(&b);
-    bramble_identity_t a_eph, b_eph; crypto_generate_identity(&a_eph); crypto_generate_identity(&b_eph);
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
 
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0,
-                                       NULL, &init));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
 
-    bramble_key_exchange_t resp; uint8_t kb[32];
-    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+    bramble_key_exchange_t resp;
+    uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0,
+                      dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
     resp.src_addr ^= 0x1; /* no longer crypto_derive_address(long_term_pubkey) */
     uint8_t ka[32];

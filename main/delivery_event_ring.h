@@ -43,36 +43,32 @@ typedef struct {
     delivery_event_record_t records[DELIVERY_EVENT_RING_CAPACITY];
 } delivery_event_ring_t;
 
-void delivery_event_ring_init(delivery_event_ring_t *ring);
+void delivery_event_ring_init(delivery_event_ring_t* ring);
 
 /*
  * Appends an event and assigns a monotonically increasing event_seq.
  * Returns the assigned sequence number (0 on invalid input).
  */
-uint32_t delivery_event_ring_append(delivery_event_ring_t *ring,
-                                   const delivery_event_record_t *event);
+uint32_t delivery_event_ring_append(delivery_event_ring_t* ring,
+                                    const delivery_event_record_t* event);
 
-uint32_t delivery_event_ring_count(const delivery_event_ring_t *ring);
-uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t *ring);
+uint32_t delivery_event_ring_count(const delivery_event_ring_t* ring);
+uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t* ring);
 
 /*
  * Lists events in chronological order with event_seq > since_event_seq.
  * Returns number of records written to out.
  */
-size_t delivery_event_ring_list_since(const delivery_event_ring_t *ring,
-                                      uint32_t since_event_seq,
-                                      delivery_event_record_t *out,
-                                      size_t out_max);
+size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_t since_event_seq,
+                                      delivery_event_record_t* out, size_t out_max);
 
 /*
  * Serialize/deserialize the full ring state for durable persistence.
  * Returns number of bytes written/read, or 0 on error.
  */
-size_t delivery_event_ring_serialize(const delivery_event_ring_t *ring,
-                                     uint8_t *out,
+size_t delivery_event_ring_serialize(const delivery_event_ring_t* ring, uint8_t* out,
                                      size_t out_len);
-size_t delivery_event_ring_deserialize(delivery_event_ring_t *ring,
-                                       const uint8_t *in,
+size_t delivery_event_ring_deserialize(delivery_event_ring_t* ring, const uint8_t* in,
                                        size_t in_len);
 
 #ifdef __cplusplus

@@ -6,10 +6,10 @@
 
 #include <string.h>
 
-static bramble_identity_t s_id = { .address = 0x01020304, .pubkey_hash = 0xAABBCCDD };
+static bramble_identity_t s_id = {.address = 0x01020304, .pubkey_hash = 0xAABBCCDD};
 static char s_last_notify[512];
 
-static void cap_notify(const char *json, size_t len, void *ctx) {
+static void cap_notify(const char* json, size_t len, void* ctx) {
     (void)ctx;
     size_t n = len < sizeof(s_last_notify) - 1 ? len : sizeof(s_last_notify) - 1;
     memcpy(s_last_notify, json, n);
@@ -27,22 +27,23 @@ void tearDown(void) {}
 
 void test_send_broadcast_returns_broadcast_id(void) {
     char response[512];
-    const char *req = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.sendBroadcast\",\"params\":{\"text\":\"hi\"}}";
+    const char* req = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.sendBroadcast\","
+                      "\"params\":{\"text\":\"hi\"}}";
     int len = rpc_dispatch(req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *j = cJSON_Parse(response);
+    cJSON* j = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(j);
-    cJSON *result = cJSON_GetObjectItem(j, "result");
+    cJSON* result = cJSON_GetObjectItem(j, "result");
     TEST_ASSERT_NOT_NULL(result);
-    cJSON *bid = cJSON_GetObjectItem(result, "broadcast_id");
+    cJSON* bid = cJSON_GetObjectItem(result, "broadcast_id");
     TEST_ASSERT_TRUE(cJSON_IsString(bid));
     TEST_ASSERT_EQUAL(8, (int)strlen(bid->valuestring));
     cJSON_Delete(j);
 }
 
 void test_broadcast_delivery_emits_notification(void) {
-    cJSON *params = cJSON_CreateObject();
+    cJSON* params = cJSON_CreateObject();
     cJSON_AddStringToObject(params, "recipient", "A1B2C3D4");
     cJSON_AddStringToObject(params, "broadcast_id", "ABCDEF01");
     rpc_notify("bramble.onBroadcastDelivery", params);
@@ -55,19 +56,21 @@ void test_broadcast_delivery_emits_notification(void) {
 
 void test_recipient_only_mode_omits_path(void) {
     char response[512];
-    const char *set_req = "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"bramble.setBroadcastTelemetryMode\",\"params\":{\"mode\":\"recipient_only\"}}";
+    const char* set_req = "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"bramble."
+                          "setBroadcastTelemetryMode\",\"params\":{\"mode\":\"recipient_only\"}}";
     int len = rpc_dispatch(set_req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    const char *get_req = "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"bramble.getConfig\",\"params\":{}}";
+    const char* get_req =
+        "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"bramble.getConfig\",\"params\":{}}";
     len = rpc_dispatch(get_req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *j = cJSON_Parse(response);
+    cJSON* j = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(j);
-    cJSON *result = cJSON_GetObjectItem(j, "result");
+    cJSON* result = cJSON_GetObjectItem(j, "result");
     TEST_ASSERT_NOT_NULL(result);
-    cJSON *mode = cJSON_GetObjectItem(result, "broadcast_telemetry_mode");
+    cJSON* mode = cJSON_GetObjectItem(result, "broadcast_telemetry_mode");
     TEST_ASSERT_TRUE(cJSON_IsString(mode));
     TEST_ASSERT_EQUAL_STRING("recipient_only", mode->valuestring);
     cJSON_Delete(j);

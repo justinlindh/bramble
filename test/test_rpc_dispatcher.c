@@ -5,14 +5,14 @@
 void setUp(void) { rpc_init(); }
 void tearDown(void) {}
 
-static int mock_handler(const cJSON *params, cJSON *result) {
+static int mock_handler(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddStringToObject(result, "hello", "world");
     return 0;
 }
 
-static int mock_handler_with_params(const cJSON *params, cJSON *result) {
-    cJSON *val = cJSON_GetObjectItem(params, "name");
+static int mock_handler_with_params(const cJSON* params, cJSON* result) {
+    cJSON* val = cJSON_GetObjectItem(params, "name");
     if (val && cJSON_IsString(val)) {
         cJSON_AddStringToObject(result, "greeting", val->valuestring);
     } else {
@@ -21,15 +21,15 @@ static int mock_handler_with_params(const cJSON *params, cJSON *result) {
     return 0;
 }
 
-static int mock_handler_error(const cJSON *params, cJSON *result) {
+static int mock_handler_error(const cJSON* params, cJSON* result) {
     (void)params;
     (void)result;
     return -1001;
 }
 
 /* Helper: parse response and check jsonrpc field */
-static cJSON *parse_response(const char *resp) {
-    cJSON *j = cJSON_Parse(resp);
+static cJSON* parse_response(const char* resp) {
+    cJSON* j = cJSON_Parse(resp);
     TEST_ASSERT_NOT_NULL(j);
     TEST_ASSERT_EQUAL_STRING("2.0", cJSON_GetObjectItem(j, "jsonrpc")->valuestring);
     return j;
@@ -39,14 +39,14 @@ void test_dispatch_valid_request(void) {
     rpc_register("test.method", mock_handler);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"test.method\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"test.method\"}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
+    cJSON* resp = parse_response(response);
     TEST_ASSERT_EQUAL(1, cJSON_GetObjectItem(resp, "id")->valueint);
-    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    cJSON* result = cJSON_GetObjectItem(resp, "result");
     TEST_ASSERT_NOT_NULL(result);
     TEST_ASSERT_EQUAL_STRING("world", cJSON_GetObjectItem(result, "hello")->valuestring);
     cJSON_Delete(resp);
@@ -54,13 +54,13 @@ void test_dispatch_valid_request(void) {
 
 void test_dispatch_unknown_method(void) {
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"no.such.method\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"no.such.method\"}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-32601, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
@@ -72,8 +72,8 @@ void test_dispatch_malformed_json(void) {
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-32700, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
@@ -81,13 +81,13 @@ void test_dispatch_malformed_json(void) {
 
 void test_dispatch_missing_jsonrpc_field(void) {
     char response[1024];
-    const char *request = "{\"id\":1,\"method\":\"test\"}";
+    const char* request = "{\"id\":1,\"method\":\"test\"}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-32600, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
@@ -95,13 +95,13 @@ void test_dispatch_missing_jsonrpc_field(void) {
 
 void test_dispatch_missing_method(void) {
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":1}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":1}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-32600, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
@@ -111,13 +111,13 @@ void test_dispatch_no_params(void) {
     rpc_register("greet", mock_handler_with_params);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"greet\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"greet\"}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
-    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    cJSON* resp = parse_response(response);
+    cJSON* result = cJSON_GetObjectItem(resp, "result");
     TEST_ASSERT_NOT_NULL(result);
     TEST_ASSERT_EQUAL_STRING("anonymous", cJSON_GetObjectItem(result, "greeting")->valuestring);
     cJSON_Delete(resp);
@@ -136,22 +136,22 @@ void test_handler_error_code(void) {
     rpc_register("fail", mock_handler_error);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"fail\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"fail\"}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
 
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-1001, cJSON_GetObjectItem(err, "code")->valueint);
     TEST_ASSERT_NULL(cJSON_GetObjectItem(resp, "result"));
     cJSON_Delete(resp);
 }
 
-static int mock_location_policy_shape(const cJSON *params, cJSON *result) {
-    cJSON *contact_rules = cJSON_GetObjectItem(params, "contact_rules");
-    cJSON *channel_targets = cJSON_GetObjectItem(params, "channel_targets");
+static int mock_location_policy_shape(const cJSON* params, cJSON* result) {
+    cJSON* contact_rules = cJSON_GetObjectItem(params, "contact_rules");
+    cJSON* channel_targets = cJSON_GetObjectItem(params, "channel_targets");
     if (!cJSON_IsArray(contact_rules) || !cJSON_IsArray(channel_targets)) {
         return RPC_ERR_INVALID_PARAMS;
     }
@@ -164,14 +164,15 @@ void test_dispatch_preserves_nested_location_policy_arrays(void) {
     rpc_register("bramble.setLocationConfig", mock_location_policy_shape);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"bramble.setLocationConfig\",\"params\":{"
-                          "\"contact_rules\":[{\"address\":\"01020304\",\"tier\":\"coarse\"}],"
-                          "\"channel_targets\":[{\"channel\":0,\"tier\":\"coarse\"}]}}";
+    const char* request =
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"bramble.setLocationConfig\",\"params\":{"
+        "\"contact_rules\":[{\"address\":\"01020304\",\"tier\":\"coarse\"}],"
+        "\"channel_targets\":[{\"channel\":0,\"tier\":\"coarse\"}]}}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *resp = parse_response(response);
-    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    cJSON* resp = parse_response(response);
+    cJSON* result = cJSON_GetObjectItem(resp, "result");
     TEST_ASSERT_NOT_NULL(result);
     TEST_ASSERT_EQUAL(1, cJSON_GetObjectItem(result, "contact_rules_count")->valueint);
     TEST_ASSERT_EQUAL(1, cJSON_GetObjectItem(result, "channel_targets_count")->valueint);
@@ -180,7 +181,7 @@ void test_dispatch_preserves_nested_location_policy_arrays(void) {
 
 /* ── rpc_dispatch_authed: unauthenticated allowlist gating ──────────── */
 
-static int mock_version_handler(const cJSON *params, cJSON *result) {
+static int mock_version_handler(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddStringToObject(result, "firmware_version", "test");
     return 0;
@@ -190,11 +191,11 @@ void test_unauth_dispatch_allowlisted_method_succeeds(void) {
     rpc_register("bramble.getVersion", mock_version_handler);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.getVersion\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.getVersion\"}";
     int len = rpc_dispatch_authed(request, response, sizeof(response), false);
 
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *resp = parse_response(response);
+    cJSON* resp = parse_response(response);
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
     TEST_ASSERT_NULL(cJSON_GetObjectItem(resp, "error"));
     cJSON_Delete(resp);
@@ -204,12 +205,12 @@ void test_unauth_dispatch_other_method_unauthorized(void) {
     rpc_register("bramble.getMessages", mock_version_handler);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"bramble.getMessages\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"bramble.getMessages\"}";
     int len = rpc_dispatch_authed(request, response, sizeof(response), false);
 
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-1005, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
@@ -219,12 +220,12 @@ void test_unauth_dispatch_unknown_method_unauthorized_not_not_found(void) {
     /* No method-table enumeration without auth: unknown methods answer
      * Unauthorized (-1005), not Method-not-found (-32601). */
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.nope\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.nope\"}";
     int len = rpc_dispatch_authed(request, response, sizeof(response), false);
 
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *resp = parse_response(response);
-    cJSON *err = cJSON_GetObjectItem(resp, "error");
+    cJSON* resp = parse_response(response);
+    cJSON* err = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(err);
     TEST_ASSERT_EQUAL(-1005, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
@@ -234,11 +235,11 @@ void test_authed_dispatch_full_access(void) {
     rpc_register("bramble.getMessages", mock_version_handler);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"bramble.getMessages\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"bramble.getMessages\"}";
     int len = rpc_dispatch_authed(request, response, sizeof(response), true);
 
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *resp = parse_response(response);
+    cJSON* resp = parse_response(response);
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
     cJSON_Delete(resp);
 }
@@ -247,11 +248,11 @@ void test_legacy_dispatch_is_full_privilege(void) {
     rpc_register("bramble.getMessages", mock_version_handler);
 
     char response[1024];
-    const char *request = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.getMessages\"}";
+    const char* request = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.getMessages\"}";
     int len = rpc_dispatch(request, response, sizeof(response));
 
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *resp = parse_response(response);
+    cJSON* resp = parse_response(response);
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(resp, "result"));
     cJSON_Delete(resp);
 }

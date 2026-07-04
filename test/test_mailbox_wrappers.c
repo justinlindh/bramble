@@ -23,59 +23,52 @@
  */
 
 static mailbox_t s_mailbox;
-static bool      s_mailbox_enabled = false;
+static bool s_mailbox_enabled = false;
 
 /* Simulates mesh_mailbox_store() */
-static bool wrapper_mailbox_store(uint32_t src_addr, uint32_t dest_addr,
-                                   const uint8_t *raw, uint8_t raw_len,
-                                   uint32_t packet_id, uint32_t now_ms)
-{
-    if (!s_mailbox_enabled) return false;
-    if (raw_len > MAILBOX_MAX_PAYLOAD) return false;
-    int rc = mailbox_store(&s_mailbox, src_addr, dest_addr,
-                           raw, raw_len, packet_id, now_ms);
+static bool wrapper_mailbox_store(uint32_t src_addr, uint32_t dest_addr, const uint8_t* raw,
+                                  uint8_t raw_len, uint32_t packet_id, uint32_t now_ms) {
+    if (!s_mailbox_enabled)
+        return false;
+    if (raw_len > MAILBOX_MAX_PAYLOAD)
+        return false;
+    int rc = mailbox_store(&s_mailbox, src_addr, dest_addr, raw, raw_len, packet_id, now_ms);
     return (rc == 0);
 }
 
 /* Tracks payloads that would have been transmitted by mailbox_flush_for() */
-static int  s_tx_count = 0;
+static int s_tx_count = 0;
 static bool s_fake_transmit_fail = false; /* configurable failure mode */
-static int fake_transmit(const uint8_t *payload, uint8_t len)
-{
+static int fake_transmit(const uint8_t* payload, uint8_t len) {
     (void)payload;
     (void)len;
-    if (s_fake_transmit_fail) return -1;
+    if (s_fake_transmit_fail)
+        return -1;
     s_tx_count++;
     return 0;
 }
 
 /* Simulates mailbox_flush_for() — mirrors mesh_task.c retry-on-failure logic */
-static int wrapper_flush_for(uint32_t dest_addr)
-{
+static int wrapper_flush_for(uint32_t dest_addr) {
     mailbox_entry_t entries[MAILBOX_MAX_PER_DEST];
     int count = mailbox_retrieve(&s_mailbox, dest_addr, entries, MAILBOX_MAX_PER_DEST);
     for (int i = 0; i < count; i++) {
         int rc = fake_transmit(entries[i].payload, (uint8_t)entries[i].payload_len);
         if (rc != 0) {
             /* Re-store for retry, mirroring mesh_task.c */
-            mailbox_store(&s_mailbox, entries[i].src_addr, entries[i].dest_addr,
-                          entries[i].payload, entries[i].payload_len,
-                          entries[i].packet_id, entries[i].stored_at_ms);
+            mailbox_store(&s_mailbox, entries[i].src_addr, entries[i].dest_addr, entries[i].payload,
+                          entries[i].payload_len, entries[i].packet_id, entries[i].stored_at_ms);
         }
     }
     return count;
 }
 
 /* Simulates mailbox_expire() */
-static void wrapper_expire(uint32_t t)
-{
-    mailbox_purge_expired(&s_mailbox, t);
-}
+static void wrapper_expire(uint32_t t) { mailbox_purge_expired(&s_mailbox, t); }
 
 /* ── Unity fixtures ─────────────────────────────────────────────────── */
 
-void setUp(void)
-{
+void setUp(void) {
     mailbox_init(&s_mailbox);
     s_mailbox_enabled = false;
     s_tx_count = 0;
@@ -89,12 +82,10 @@ void tearDown(void) {}
 /**
  * 1. mesh_mailbox_store returns false when mailbox is disabled.
  */
-void test_wrapper_store_disabled_returns_false(void)
-{
+void test_wrapper_store_disabled_returns_false(void) {
     s_mailbox_enabled = false;
     uint8_t payload[] = "hello";
-    bool result = wrapper_mailbox_store(0xAABBCCDD, 0x11223344,
-                                        payload, 5, 0xDEAD, 0);
+    bool result = wrapper_mailbox_store(0xAABBCCDD, 0x11223344, payload, 5, 0xDEAD, 0);
     TEST_ASSERT_FALSE(result);
     TEST_ASSERT_EQUAL_INT(0, s_mailbox.count);
 }
@@ -102,12 +93,10 @@ void test_wrapper_store_disabled_returns_false(void)
 /**
  * 2. mesh_mailbox_store succeeds when mailbox is enabled.
  */
-void test_wrapper_store_enabled_succeeds(void)
-{
+void test_wrapper_store_enabled_succeeds(void) {
     s_mailbox_enabled = true;
     uint8_t payload[] = "world";
-    bool result = wrapper_mailbox_store(0xAABBCCDD, 0x11223344,
-                                        payload, 5, 0xBEEF, 0);
+    bool result = wrapper_mailbox_store(0xAABBCCDD, 0x11223344, payload, 5, 0xBEEF, 0);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_INT(1, s_mailbox.count);
     TEST_ASSERT_EQUAL_UINT32(1, mailbox_count_for_dest(&s_mailbox, 0x11223344));
@@ -116,8 +105,7 @@ void test_wrapper_store_enabled_succeeds(void)
 /**
  * 3. mesh_mailbox_store returns false for a duplicate packet_id.
  */
-void test_wrapper_store_duplicate_returns_false(void)
-{
+void test_wrapper_store_duplicate_returns_false(void) {
     s_mailbox_enabled = true;
     uint8_t p[] = "dup";
     TEST_ASSERT_TRUE(wrapper_mailbox_store(1, 100, p, 3, 42, 0));
@@ -131,8 +119,7 @@ void test_wrapper_store_duplicate_returns_false(void)
  * 4. mailbox_flush_for retrieves and "transmits" stored entries,
  *    removing them from the mailbox.
  */
-void test_wrapper_flush_for_delivers_stored_entries(void)
-{
+void test_wrapper_flush_for_delivers_stored_entries(void) {
     s_mailbox_enabled = true;
     uint8_t p1[] = "msg1";
     uint8_t p2[] = "msg2";
@@ -157,8 +144,7 @@ void test_wrapper_flush_for_delivers_stored_entries(void)
 /**
  * 5. mailbox_flush_for on an address with no stored entries transmits nothing.
  */
-void test_wrapper_flush_for_empty_dest_is_noop(void)
-{
+void test_wrapper_flush_for_empty_dest_is_noop(void) {
     s_mailbox_enabled = true;
     uint8_t p[] = "x";
     wrapper_mailbox_store(1, 0xAAAA, p, 1, 7, 0);
@@ -172,8 +158,7 @@ void test_wrapper_flush_for_empty_dest_is_noop(void)
 /**
  * 6. mailbox_expire purges entries past their TTL.
  */
-void test_wrapper_expire_purges_old_entries(void)
-{
+void test_wrapper_expire_purges_old_entries(void) {
     s_mailbox_enabled = true;
     uint8_t p[] = "hi";
 
@@ -194,8 +179,7 @@ void test_wrapper_expire_purges_old_entries(void)
 /**
  * 7. mailbox_expire with a timestamp before any TTL is a noop.
  */
-void test_wrapper_expire_before_ttl_is_noop(void)
-{
+void test_wrapper_expire_before_ttl_is_noop(void) {
     s_mailbox_enabled = true;
     uint8_t p[] = "keep";
     wrapper_mailbox_store(1, 100, p, 4, 5, 0);
@@ -208,8 +192,7 @@ void test_wrapper_expire_before_ttl_is_noop(void)
 /**
  * 8. When transmit fails, mailbox_flush_for preserves entries for retry.
  */
-void test_wrapper_flush_for_transmit_failure_preserves_entries(void)
-{
+void test_wrapper_flush_for_transmit_failure_preserves_entries(void) {
     s_mailbox_enabled = true;
     uint8_t p1[] = "msg1";
     uint8_t p2[] = "msg2";
@@ -222,8 +205,8 @@ void test_wrapper_flush_for_transmit_failure_preserves_entries(void)
     s_fake_transmit_fail = true;
 
     int flushed = wrapper_flush_for(0xDEAD);
-    TEST_ASSERT_EQUAL_INT(2, flushed);      /* retrieve returned 2 entries */
-    TEST_ASSERT_EQUAL_INT(0, s_tx_count);   /* no successful transmits */
+    TEST_ASSERT_EQUAL_INT(2, flushed);    /* retrieve returned 2 entries */
+    TEST_ASSERT_EQUAL_INT(0, s_tx_count); /* no successful transmits */
 
     /* Entries should be re-stored in the mailbox */
     TEST_ASSERT_EQUAL_INT(2, s_mailbox.count);
@@ -240,8 +223,7 @@ void test_wrapper_flush_for_transmit_failure_preserves_entries(void)
 /**
  * 9. Partial transmit failure: some entries succeed, failed ones are preserved.
  */
-void test_wrapper_flush_for_partial_failure(void)
-{
+void test_wrapper_flush_for_partial_failure(void) {
     s_mailbox_enabled = true;
     uint8_t p1[] = "msg1";
     uint8_t p2[] = "msg2";
@@ -269,8 +251,7 @@ void test_wrapper_flush_for_partial_failure(void)
 
 /* ── Runner ─────────────────────────────────────────────────────────── */
 
-int main(void)
-{
+int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_wrapper_store_disabled_returns_false);
     RUN_TEST(test_wrapper_store_enabled_succeeds);

@@ -67,8 +67,9 @@ static size_t originate_data_packet(const bramble_channel_t* ch, const uint8_t* 
     uint8_t tag[BRAMBLE_TAG_SIZE];
     size_t ct_len = CHANNEL_MSG_OVERHEAD + payload_len;
 
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(ch, TEST_SRC_ADDR, TEST_APP_TYPE, 0, payload, payload_len,
-                                             aad, HEADER_SIZE + 4, nonce, ciphertext, tag));
+    TEST_ASSERT_EQUAL(0,
+                      channel_msg_encrypt(ch, TEST_SRC_ADDR, TEST_APP_TYPE, 0, payload, payload_len,
+                                          aad, HEADER_SIZE + 4, nonce, ciphertext, tag));
 
     uint32_t src = TEST_SRC_ADDR;
     memcpy(buf + HEADER_SIZE, &src, 4);

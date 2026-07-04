@@ -18,7 +18,8 @@ void test_broadcast_allowed_when_budget_available(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
     /* Fresh budget should allow a broadcast */
-    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
+    TEST_ASSERT_TRUE(
+        airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
 }
 
 void test_broadcast_denied_when_budget_exhausted(void) {
@@ -29,7 +30,8 @@ void test_broadcast_denied_when_budget_exhausted(void) {
     airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, remaining);
     TEST_ASSERT_EQUAL_UINT32(0u, airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
     /* Now a broadcast should be denied */
-    TEST_ASSERT_FALSE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
+    TEST_ASSERT_FALSE(
+        airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
 }
 
 void test_broadcast_budget_refills_over_time(void) {
@@ -40,7 +42,8 @@ void test_broadcast_budget_refills_over_time(void) {
     /* After half the refill interval, some budget should be restored */
     airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS / 2u);
     TEST_ASSERT_TRUE(airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST) > 0u);
-    TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
+    TEST_ASSERT_TRUE(
+        airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
 }
 
 void test_micro_mesh_gets_more_broadcast_budget(void) {
@@ -68,12 +71,14 @@ void test_rapid_broadcasts_exhaust_budget_not_arbitrary_limit(void) {
     while (airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS)) {
         airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS);
         count++;
-        if (count > 500) break; /* safety valve */
+        if (count > 500)
+            break; /* safety valve */
     }
     /* Should allow many more than the old 3-burst limit */
     TEST_ASSERT_TRUE(count > 100);
     /* But should eventually exhaust */
-    TEST_ASSERT_FALSE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
+    TEST_ASSERT_FALSE(
+        airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS));
 }
 
 int main(void) {

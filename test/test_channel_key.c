@@ -48,8 +48,7 @@ void test_epoch_one_way(void) {
        HKDF with epoch0 info doesn't give back epoch0 key */
     uint8_t check[32];
     uint8_t info[2] = {0, 0}; /* epoch 0 info */
-    crypto_hkdf_sha256((const uint8_t *)"bramble-channel-epoch", 21,
-                       ch.key, 32, info, 2, check, 32);
+    crypto_hkdf_sha256((const uint8_t*)"bramble-channel-epoch", 21, ch.key, 32, info, 2, check, 32);
     TEST_ASSERT_FALSE(memcmp(check, epoch0, 32) == 0);
 }
 
@@ -59,8 +58,10 @@ void test_catchup_convergence(void) {
     bramble_channel_t ch1, ch2;
     channel_derive_key("shared", &ch1);
     channel_derive_key("shared", &ch2);
-    for (int i = 0; i < 5; i++) channel_advance_epoch(&ch1);
-    for (int i = 0; i < 5; i++) channel_advance_epoch(&ch2);
+    for (int i = 0; i < 5; i++)
+        channel_advance_epoch(&ch1);
+    for (int i = 0; i < 5; i++)
+        channel_advance_epoch(&ch2);
     TEST_ASSERT_EQUAL_MEMORY(ch1.key, ch2.key, 32);
     TEST_ASSERT_EQUAL(ch1.epoch, ch2.epoch);
 }

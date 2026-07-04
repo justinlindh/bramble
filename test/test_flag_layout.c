@@ -13,14 +13,12 @@ void test_no_flag_collides_with_encrypt(void) {
     TEST_ASSERT_NOT_EQUAL(FLAG_ENCRYPT, FLAG_CHANNEL);
 }
 
-void test_emergency_on_freed_bit6(void) {
-    TEST_ASSERT_EQUAL_HEX8(0x40, FLAG_EMERGENCY);
-}
+void test_emergency_on_freed_bit6(void) { TEST_ASSERT_EQUAL_HEX8(0x40, FLAG_EMERGENCY); }
 
 /* All flag bits are pairwise disjoint. */
 void test_flags_pairwise_disjoint(void) {
-    uint8_t all = FLAG_RESERVED_HIGH | FLAG_EMERGENCY | FLAG_ACK_REQ | FLAG_RECEIPT |
-                  FLAG_CHANNEL | FLAG_ENCRYPT | FLAG_FRAG_MASK;
+    uint8_t all = FLAG_RESERVED_HIGH | FLAG_EMERGENCY | FLAG_ACK_REQ | FLAG_RECEIPT | FLAG_CHANNEL |
+                  FLAG_ENCRYPT | FLAG_FRAG_MASK;
     TEST_ASSERT_EQUAL_HEX8(0xFF, all);
 }
 

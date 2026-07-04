@@ -66,8 +66,8 @@ static rrep_rx_decision_t deliver_rrep(node_t* node, const bramble_rrep_t* rrep,
     uint8_t metric = metric_apply_link_penalty(rrep->route_metric, rssi, snr);
     rrep_rx_decision_t d = rrep_rx_decide(rrep, node->addr, metric, &node->pend, &node->rev);
     if (d.install_route) {
-        route_install(&node->routes, d.route_dest, d.route_next_hop, d.route_hops,
-                      d.route_metric, ROUTE_ACTIVE, now_ms);
+        route_install(&node->routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
+                      ROUTE_ACTIVE, now_ms);
     }
     return d;
 }

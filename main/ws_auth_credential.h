@@ -23,7 +23,7 @@
  * out / out_len: receives the NUL-terminated token on success.
  * Returns true and fills out iff a non-empty token is found that fits out.
  */
-bool ws_auth_extract_token(const char* authorization, const char* subprotocols,
-                           char* out, size_t out_len);
+bool ws_auth_extract_token(const char* authorization, const char* subprotocols, char* out,
+                           size_t out_len);
 
 #endif /* BRAMBLE_WS_AUTH_CREDENTIAL_H */

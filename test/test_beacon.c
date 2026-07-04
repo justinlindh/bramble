@@ -25,7 +25,7 @@ void test_beacon_build(void) {
 }
 
 void test_beacon_hmac_compute_verify(void) {
-    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
     beacon_compute_hmac(&b, key, sizeof(key));
     /* HMAC should be non-zero */
@@ -36,8 +36,8 @@ void test_beacon_hmac_compute_verify(void) {
 }
 
 void test_beacon_hmac_wrong_key(void) {
-    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
-    uint8_t bad_key[16] = {99,98,97,96,95,94,93,92,91,90,89,88,87,86,85,84};
+    uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    uint8_t bad_key[16] = {99, 98, 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87, 86, 85, 84};
     bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
     beacon_compute_hmac(&b, key, sizeof(key));
     TEST_ASSERT_FALSE(beacon_verify_hmac(&b, bad_key, sizeof(bad_key)));
@@ -62,8 +62,8 @@ void test_beacon_hmac_zero_key(void) {
  * reject the wrong one) alongside the source change itself.
  */
 static void derive_beacon_key_from_network_key(const uint8_t net_key[32], uint8_t beacon_key[32]) {
-    const char *salt = "bramble-beacon-v2";
-    TEST_ASSERT_EQUAL(0, crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), net_key, 32, NULL,
+    const char* salt = "bramble-beacon-v2";
+    TEST_ASSERT_EQUAL(0, crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), net_key, 32, NULL,
                                             0, beacon_key, 32));
 }
 
@@ -112,7 +112,7 @@ void test_beacon_hmac_rejects_different_network_key(void) {
  * key. This proves the name is now covered: tampering it must break
  * verify. */
 void test_beacon_hmac_covers_name_tamper_rejected(void) {
-    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
     b.name_len = 5;
     memcpy(b.name, "alice", 5);
@@ -129,7 +129,7 @@ void test_beacon_hmac_covers_name_tamper_rejected(void) {
  * compute and verify correctly: the fix must not require a name to be
  * present. */
 void test_beacon_hmac_still_verifies_with_no_name(void) {
-    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
     TEST_ASSERT_EQUAL(0, b.name_len);
     beacon_compute_hmac(&b, key, sizeof(key));
@@ -146,7 +146,7 @@ void test_beacon_hmac_still_verifies_with_no_name(void) {
  * tampering the name does above.
  */
 void test_beacon_seq_covered_by_hmac(void) {
-    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     bramble_beacon_t b = beacon_build(0xAABB, 0x1234, 10, 90, 1, 2, 0, 5000, 100);
     b.seq[0] = 0x01;
     b.seq[1] = 0x02;
@@ -155,7 +155,8 @@ void test_beacon_seq_covered_by_hmac(void) {
     b.seq[4] = 0x05;
     b.seq[5] = 0x06;
     beacon_compute_hmac(&b, key, sizeof(key));
-    TEST_ASSERT_TRUE(beacon_verify_hmac(&b, key, sizeof(key))); /* sanity: correctly signed with seq */
+    TEST_ASSERT_TRUE(
+        beacon_verify_hmac(&b, key, sizeof(key))); /* sanity: correctly signed with seq */
 
     bramble_beacon_t tampered = b;
     tampered.seq[5] ^= 0xFF; /* tamper the seq after signing */

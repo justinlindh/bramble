@@ -29,7 +29,8 @@ void test_mailbox_store_and_retrieve(void) {
 void test_mailbox_per_dest_cap(void) {
     uint8_t p[] = "x";
     for (int i = 0; i < 9; i++) {
-        TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, (uint32_t)(i + 1), 100, p, 1, (uint32_t)(i + 1), (uint32_t)(i * 100)));
+        TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, (uint32_t)(i + 1), 100, p, 1, (uint32_t)(i + 1),
+                                               (uint32_t)(i * 100)));
     }
     /* Should still be 8 for dest=100 (oldest evicted) */
     TEST_ASSERT_EQUAL_INT(8, mailbox_count_for_dest(&mb, 100));
@@ -47,7 +48,8 @@ void test_mailbox_per_dest_cap(void) {
 void test_mailbox_per_source_cap(void) {
     uint8_t p[] = "x";
     for (int i = 0; i < 9; i++) {
-        TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, 42, (uint32_t)(100 + i), p, 1, (uint32_t)(i + 1), (uint32_t)(i * 100)));
+        TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, 42, (uint32_t)(100 + i), p, 1,
+                                               (uint32_t)(i + 1), (uint32_t)(i * 100)));
     }
     TEST_ASSERT_EQUAL_INT(8, mailbox_count_for_source(&mb, 42));
     TEST_ASSERT_EQUAL_INT(8, mb.count);
@@ -71,7 +73,8 @@ void test_mailbox_fifo_eviction(void) {
     uint8_t p[] = "z";
     /* Fill all 32 slots with unique dests and sources to avoid per-cap eviction */
     for (int i = 0; i < 32; i++) {
-        TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, (uint32_t)(i + 1), (uint32_t)(1000 + i), p, 1, (uint32_t)(i + 1), (uint32_t)(i * 10)));
+        TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, (uint32_t)(i + 1), (uint32_t)(1000 + i), p, 1,
+                                               (uint32_t)(i + 1), (uint32_t)(i * 10)));
     }
     TEST_ASSERT_EQUAL_INT(32, mb.count);
 

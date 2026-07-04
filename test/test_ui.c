@@ -78,7 +78,7 @@ void test_long_press_dirty_no_change(void) {
 }
 
 void test_format_main_line1(void) {
-    ui_main_data_t data = { .my_addr = 0xAABBCCDD, .battery_pct = 87 };
+    ui_main_data_t data = {.my_addr = 0xAABBCCDD, .battery_pct = 87};
     char buf[32];
     ui_format_main_line1(&data, buf, sizeof(buf));
     TEST_ASSERT_EQUAL_STRING("AABBCCDD  87%", buf);
@@ -109,7 +109,7 @@ void test_format_uptime_days(void) {
 }
 
 void test_format_buffer_too_small(void) {
-    ui_main_data_t data = { .my_addr = 0xAABBCCDD, .battery_pct = 87 };
+    ui_main_data_t data = {.my_addr = 0xAABBCCDD, .battery_pct = 87};
     char buf[5];
     int ret = ui_format_main_line1(&data, buf, sizeof(buf));
     // snprintf truncates safely, ret indicates what would have been written
@@ -153,7 +153,7 @@ void test_trackball_up_prev_screen(void) {
 void test_trackball_select_on_messages_opens_compose(void) {
     ui_handle_button(&state, BTN_SHORT_PRESS, 1000);
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
-    
+
     ui_handle_button(&state, BTN_SELECT, 2000);
     TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
     TEST_ASSERT_EQUAL(0, state.compose_len);
@@ -226,7 +226,7 @@ void test_trackball_settings_edit_confirm_with_select(void) {
     state.current_screen = SCREEN_SETTINGS;
     state.settings_editing = true;
     state.settings_confirmed = false;
-    
+
     ui_handle_button(&state, BTN_SELECT, 1000);
     TEST_ASSERT_TRUE(state.settings_confirmed);
 }
@@ -234,7 +234,7 @@ void test_trackball_settings_edit_confirm_with_select(void) {
 void test_trackball_settings_edit_cancel_with_left(void) {
     state.current_screen = SCREEN_SETTINGS;
     state.settings_editing = true;
-    
+
     ui_handle_button(&state, BTN_LEFT, 1000);
     TEST_ASSERT_FALSE(state.settings_editing);
 }

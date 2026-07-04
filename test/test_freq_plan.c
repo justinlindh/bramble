@@ -5,7 +5,7 @@ void setUp(void) {}
 void tearDown(void) {}
 
 void test_region_boundaries_are_inclusive(void) {
-    const bramble_freq_plan_t *eu = freq_plan_get(FREQ_REGION_EU868);
+    const bramble_freq_plan_t* eu = freq_plan_get(FREQ_REGION_EU868);
     TEST_ASSERT_NOT_NULL(eu);
 
     TEST_ASSERT_TRUE(freq_plan_valid_freq(eu, eu->freq_start_mhz));
@@ -15,7 +15,7 @@ void test_region_boundaries_are_inclusive(void) {
 }
 
 void test_power_validation_and_clamp(void) {
-    const bramble_freq_plan_t *eu = freq_plan_get(FREQ_REGION_EU868);
+    const bramble_freq_plan_t* eu = freq_plan_get(FREQ_REGION_EU868);
     TEST_ASSERT_NOT_NULL(eu);
 
     TEST_ASSERT_TRUE(freq_plan_valid_power(eu, eu->max_tx_power_dbm));

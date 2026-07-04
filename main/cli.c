@@ -28,21 +28,23 @@
 #include <string.h>
 #include <inttypes.h>
 
-static const char *TAG = "cli";
-static bramble_identity_t *s_identity;
+static const char* TAG = "cli";
+static bramble_identity_t* s_identity;
 
 /* ── Command: peers ─────────────────────────────────────────────────── */
 
-static int cmd_peers(int argc, char **argv) {
-    (void)argc; (void)argv;
+static int cmd_peers(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     static mesh_shared_state_t state;
     mesh_get_state(&state);
 
     int count = neighbor_count(&state.neighbors);
     printf("Neighbors: %d\n", count);
     for (int i = 0; i < state.neighbors.count; i++) {
-        neighbor_entry_t *e = &state.neighbors.entries[i];
-        if (e->addr == 0) continue;
+        neighbor_entry_t* e = &state.neighbors.entries[i];
+        if (e->addr == 0)
+            continue;
         printf("  %08" PRIX32 "  RSSI:%d  SNR:%d\n", e->addr, e->rssi, e->snr);
     }
     return 0;
@@ -50,18 +52,18 @@ static int cmd_peers(int argc, char **argv) {
 
 /* ── Command: status ────────────────────────────────────────────────── */
 
-static int cmd_status(int argc, char **argv) {
-    (void)argc; (void)argv;
+static int cmd_status(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     static mesh_shared_state_t state;
     mesh_get_state(&state);
 
     printf("Node:     %08" PRIX32 "\n", s_identity->address);
     printf("Radio:    %s\n", state.radio_ok ? "OK" : "FAILED");
     printf("Peers:    %d\n", neighbor_count(&state.neighbors));
-    printf("Beacons:  TX:%" PRIu32 " RX:%" PRIu32 "\n",
-           state.beacon_tx_count, state.beacon_rx_count);
-    printf("Packets:  TX:%" PRIu32 " RX:%" PRIu32 "\n",
-           state.packets_tx, state.packets_rx);
+    printf("Beacons:  TX:%" PRIu32 " RX:%" PRIu32 "\n", state.beacon_tx_count,
+           state.beacon_rx_count);
+    printf("Packets:  TX:%" PRIu32 " RX:%" PRIu32 "\n", state.packets_tx, state.packets_rx);
     if (state.last_rx_rssi != 0) {
         printf("Last RX:  RSSI:%d SNR:%d\n", state.last_rx_rssi, state.last_rx_snr);
     }
@@ -70,7 +72,7 @@ static int cmd_status(int argc, char **argv) {
 
 /* ── Command: broadcast ─────────────────────────────────────────────── */
 
-static int cmd_broadcast(int argc, char **argv) {
+static int cmd_broadcast(int argc, char** argv) {
     if (argc < 2) {
         printf("Usage: broadcast <message>\n");
         return 1;
@@ -80,16 +82,18 @@ static int cmd_broadcast(int argc, char **argv) {
     char msg[256];
     int pos = 0;
     for (int i = 1; i < argc && pos < (int)sizeof(msg) - 1; i++) {
-        if (i > 1) msg[pos++] = ' ';
+        if (i > 1)
+            msg[pos++] = ' ';
         int len = strlen(argv[i]);
-        if (pos + len >= (int)sizeof(msg) - 1) len = sizeof(msg) - 1 - pos;
+        if (pos + len >= (int)sizeof(msg) - 1)
+            len = sizeof(msg) - 1 - pos;
         memcpy(msg + pos, argv[i], len);
         pos += len;
     }
     msg[pos] = '\0';
 
     printf("Broadcasting: \"%s\"\n", msg);
-    int ret = mesh_send_broadcast((const uint8_t *)msg, pos);
+    int ret = mesh_send_broadcast((const uint8_t*)msg, pos);
     if (ret == 0) {
         printf("Sent OK\n");
     } else {
@@ -100,7 +104,7 @@ static int cmd_broadcast(int argc, char **argv) {
 
 /* ── Command: send ──────────────────────────────────────────────────── */
 
-static int cmd_send(int argc, char **argv) {
+static int cmd_send(int argc, char** argv) {
     if (argc < 3) {
         printf("Usage: send <hex-addr> <message>\n");
         printf("  e.g.: send 6EEA8967 hello there\n");
@@ -117,16 +121,18 @@ static int cmd_send(int argc, char **argv) {
     char msg[256];
     int pos = 0;
     for (int i = 2; i < argc && pos < (int)sizeof(msg) - 1; i++) {
-        if (i > 2) msg[pos++] = ' ';
+        if (i > 2)
+            msg[pos++] = ' ';
         int len = strlen(argv[i]);
-        if (pos + len >= (int)sizeof(msg) - 1) len = sizeof(msg) - 1 - pos;
+        if (pos + len >= (int)sizeof(msg) - 1)
+            len = sizeof(msg) - 1 - pos;
         memcpy(msg + pos, argv[i], len);
         pos += len;
     }
     msg[pos] = '\0';
 
     printf("Sending to %08" PRIX32 ": \"%s\"\n", dest_addr, msg);
-    int ret = mesh_send_message(dest_addr, (const uint8_t *)msg, pos);
+    int ret = mesh_send_message(dest_addr, (const uint8_t*)msg, pos);
     if (ret == 0) {
         printf("Sent OK\n");
     } else {
@@ -137,7 +143,7 @@ static int cmd_send(int argc, char **argv) {
 
 /* ── Command: wifi ──────────────────────────────────────────────────── */
 
-static int cmd_wifi(int argc, char **argv) {
+static int cmd_wifi(int argc, char** argv) {
     if (argc < 2) {
         printf("Usage:\n");
         printf("  wifi status              Show WiFi status\n");
@@ -149,8 +155,9 @@ static int cmd_wifi(int argc, char **argv) {
     if (strcmp(argv[1], "status") == 0) {
         wifi_status_t st;
         wifi_manager_get_status(&st);
-        const char *mode_str = st.mode == BRAMBLE_WIFI_STATION ? "Station" :
-                               st.mode == BRAMBLE_WIFI_AP ? "AP" : "Off";
+        const char* mode_str = st.mode == BRAMBLE_WIFI_STATION ? "Station"
+                               : st.mode == BRAMBLE_WIFI_AP    ? "AP"
+                                                               : "Off";
         printf("Mode:  %s\n", mode_str);
         printf("SSID:  %s\n", st.ssid);
         printf("IP:    %s\n", st.ip_addr);
@@ -158,8 +165,8 @@ static int cmd_wifi(int argc, char **argv) {
         /* Show saved NVS creds (SSID only, not password) */
         char nvs_ssid[33] = {0};
         char nvs_pass[65] = {0};
-        if (wifi_manager_nvs_get_creds(nvs_ssid, sizeof(nvs_ssid),
-                                        nvs_pass, sizeof(nvs_pass)) == 0) {
+        if (wifi_manager_nvs_get_creds(nvs_ssid, sizeof(nvs_ssid), nvs_pass, sizeof(nvs_pass)) ==
+            0) {
             printf("Saved: %s (in NVS)\n", nvs_ssid);
         } else {
             printf("Saved: (none)\n");
@@ -169,8 +176,8 @@ static int cmd_wifi(int argc, char **argv) {
             printf("Usage: wifi set <ssid> [password]\n");
             return 1;
         }
-        const char *ssid = argv[2];
-        const char *pass = argc >= 4 ? argv[3] : "";
+        const char* ssid = argv[2];
+        const char* pass = argc >= 4 ? argv[3] : "";
         if (wifi_manager_nvs_set_creds(ssid, pass) == 0) {
             printf("WiFi credentials saved. Reboot to connect.\n");
             printf("  SSID: %s\n", ssid);
@@ -195,9 +202,9 @@ static int cmd_wifi(int argc, char **argv) {
 
 /* ── Command: name ──────────────────────────────────────────────────── */
 
-static int cmd_name(int argc, char **argv) {
+static int cmd_name(int argc, char** argv) {
     if (argc < 2) {
-        const char *current = mesh_get_node_name();
+        const char* current = mesh_get_node_name();
         if (current && current[0]) {
             printf("Node name: %s\n", current);
         } else {
@@ -210,7 +217,8 @@ static int cmd_name(int argc, char **argv) {
     static char name_buf[64];
     name_buf[0] = '\0';
     for (int i = 1; i < argc; i++) {
-        if (i > 1) strncat(name_buf, " ", sizeof(name_buf) - strlen(name_buf) - 1);
+        if (i > 1)
+            strncat(name_buf, " ", sizeof(name_buf) - strlen(name_buf) - 1);
         strncat(name_buf, argv[i], sizeof(name_buf) - strlen(name_buf) - 1);
     }
 
@@ -225,8 +233,9 @@ static int cmd_name(int argc, char **argv) {
 
 /* ── Command: reboot ────────────────────────────────────────────────── */
 
-static int cmd_reboot(int argc, char **argv) {
-    (void)argc; (void)argv;
+static int cmd_reboot(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     printf("Rebooting...\n");
     fflush(stdout);
     mesh_reboot_delayed(500);
@@ -235,8 +244,9 @@ static int cmd_reboot(int argc, char **argv) {
 
 /* ── Command: help ──────────────────────────────────────────────────── */
 
-static int cmd_help(int argc, char **argv) {
-    (void)argc; (void)argv;
+static int cmd_help(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     printf("Bramble CLI commands:\n");
     printf("  broadcast <msg>        Send on public channel\n");
     printf("  send <addr> <msg>      Send encrypted to address\n");
@@ -251,7 +261,7 @@ static int cmd_help(int argc, char **argv) {
 
 /* ── UART notification callback for JSON-RPC ────────────────────────── */
 
-static void uart_notify_cb(const char *json, size_t len, void *ctx) {
+static void uart_notify_cb(const char* json, size_t len, void* ctx) {
     (void)ctx;
     (void)len;
     printf("%s\n", json);
@@ -260,7 +270,7 @@ static void uart_notify_cb(const char *json, size_t len, void *ctx) {
 
 /* ── CLI task ───────────────────────────────────────────────────────── */
 
-static void cli_task(void *param) {
+static void cli_task(void* param) {
     (void)param;
 
     /* Disable buffering on stdin/stdout */
@@ -269,7 +279,7 @@ static void cli_task(void *param) {
 
     /* Tell linenoise to handle backspace etc */
     linenoiseSetMultiLine(1);
-    linenoiseSetDumbMode(1);  /* No escape codes — works over plain serial */
+    linenoiseSetDumbMode(1); /* No escape codes — works over plain serial */
 
     printf("\n");
     printf("=================================\n");
@@ -282,7 +292,7 @@ static void cli_task(void *param) {
     esp_task_wdt_delete(NULL);
 
     while (1) {
-        char *line = linenoise("bramble> ");
+        char* line = linenoise("bramble> ");
         if (line == NULL) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
@@ -323,7 +333,7 @@ static void cli_task(void *param) {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
-void cli_init(bramble_identity_t *identity) {
+void cli_init(bramble_identity_t* identity) {
     s_identity = identity;
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
@@ -347,14 +357,14 @@ void cli_init(bramble_identity_t *identity) {
 
     /* Register commands */
     const esp_console_cmd_t cmds[] = {
-        { .command = "peers",     .help = "List neighbors",          .func = cmd_peers },
-        { .command = "status",    .help = "Node status",             .func = cmd_status },
-        { .command = "broadcast", .help = "Send on public channel",  .func = cmd_broadcast },
-        { .command = "send",      .help = "Send to address",         .func = cmd_send },
-        { .command = "name",      .help = "Show or set node name",   .func = cmd_name },
-        { .command = "wifi",      .help = "WiFi management",         .func = cmd_wifi },
-        { .command = "reboot",    .help = "Restart device",          .func = cmd_reboot },
-        { .command = "help",      .help = "Show commands",           .func = cmd_help },
+        {.command = "peers", .help = "List neighbors", .func = cmd_peers},
+        {.command = "status", .help = "Node status", .func = cmd_status},
+        {.command = "broadcast", .help = "Send on public channel", .func = cmd_broadcast},
+        {.command = "send", .help = "Send to address", .func = cmd_send},
+        {.command = "name", .help = "Show or set node name", .func = cmd_name},
+        {.command = "wifi", .help = "WiFi management", .func = cmd_wifi},
+        {.command = "reboot", .help = "Restart device", .func = cmd_reboot},
+        {.command = "help", .help = "Show commands", .func = cmd_help},
     };
     for (int i = 0; i < (int)(sizeof(cmds) / sizeof(cmds[0])); i++) {
         esp_console_cmd_register(&cmds[i]);
@@ -366,6 +376,7 @@ void cli_init(bramble_identity_t *identity) {
     /* Register UART as notification transport */
     rpc_register_notify_transport(uart_notify_cb, NULL);
 
-    xTaskCreate(cli_task, "cli", 8192, NULL, 1, NULL);  /* Priority 1 — same as main_task, won't starve UI */
+    xTaskCreate(cli_task, "cli", 8192, NULL, 1,
+                NULL); /* Priority 1 — same as main_task, won't starve UI */
     ESP_LOGI(TAG, "CLI initialized");
 }
