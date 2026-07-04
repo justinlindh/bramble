@@ -20,6 +20,15 @@
 static bridge_node_ext_t g_node_ext[MAX_NODES];
 static bridge_ext_metrics_t g_ext_metrics;
 
+/* ─── Intermediate-node RREP on/off switch (Phase 2 Part B) ─────────────── */
+/* See bridge.h's doc comment: firmware always has this on; this exists so
+ * gosim scenarios can A/B it. Defaults to true (the shipped behavior). */
+static bool g_intermediate_rrep_enabled = true;
+
+void bridge_set_intermediate_rrep_enabled(bool enabled) { g_intermediate_rrep_enabled = enabled; }
+
+bool bridge_get_intermediate_rrep_enabled(void) { return g_intermediate_rrep_enabled; }
+
 /* Public channel state (one global instance) */
 static bramble_channel_t g_pub_channels[16];
 static int g_num_pub_channels = 0;
@@ -436,6 +445,46 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         pkt.pkt_type = PKT_TYPE_RREP;
 
         /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+        budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                          now_us);
+    } else if (g_intermediate_rrep_enabled &&
+               intermediate_rrep_route_usable(route_lookup(&rx->routes, rreq.header.dest_addr),
+                                              now_ms)) {
+        /* Phase 2 "save reactive routing" Part B: intermediate-node RREP.
+         * Mirrors main/mesh_task.c's handle_rreq using the SAME real
+         * component functions (intermediate_rrep_route_usable,
+         * rrep_build_intermediate) so the sim cannot drift from firmware's
+         * trust/freshness rules. g_intermediate_rrep_enabled (default true)
+         * exists only so a gosim scenario can A/B this feature on identical
+         * topology/traffic (see bridge.h); firmware has no such switch, it
+         * is always on.
+         *
+         * Unlike firmware's handle_rreq, this does not redraw/re-sign a
+         * fresh seq: gosim's destination-reply branch just above never has
+         * either (rrep_build_destination's own internal rrep_sign, with
+         * seq left at its zeroed default, is what ships here), since gosim
+         * does not model the ws 1.3b replay window at all. Matching that
+         * existing simplification keeps this branch internally consistent
+         * with gosim's own destination path rather than firmware's fuller
+         * one. Same reasoning for skipping the reverse route_install to the
+         * RREQ source that firmware's destination AND intermediate
+         * branches both do: gosim's destination branch here does not do it
+         * either. */
+        route_entry_t* cached_route = route_lookup(&rx->routes, rreq.header.dest_addr);
+        bramble_rrep_t rrep = rrep_build_intermediate(&rreq, cached_route, rx->addr, rssi, 0);
+
+        outbound_packet_t pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        bramble_rrep_serialize(&rrep, pkt.data, RREP_SIZE);
+        pkt.len = RREP_SIZE;
+        pkt.is_broadcast = false;
+        pkt.dest_addr = rreq.prev_hop;
+        pkt.pkt_type = PKT_TYPE_RREP;
+
+        /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. Having
+         * replied, this node does NOT also forward the RREQ (see
+         * main/mesh_task.c's handle_rreq for the airtime-saving/safety
+         * rationale): no fall-through to the forward branch below. */
         budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
                           now_us);
     } else if (rreq.header.hop_limit > 1) {

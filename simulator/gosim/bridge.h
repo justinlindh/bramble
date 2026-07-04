@@ -174,4 +174,20 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
  */
 void bridge_init(void);
 
+/*
+ * Phase 2 "save reactive routing" Part B: intermediate-node RREP
+ * (components/routing/include/discovery.h's rrep_build_intermediate /
+ * intermediate_rrep_route_usable). Firmware (main/mesh_task.c's
+ * handle_rreq) always has this on; gosim exposes a runtime on/off switch
+ * purely so a scenario can A/B the SAME topology/traffic with and without
+ * the feature for measurement (see internal-planning plans/2026-07-04
+ * phase2-scale-framework.md's before/after requirement), without needing
+ * two firmware builds. Defaults to true (the shipped firmware behavior);
+ * gosim/sim.go resets this explicitly on every run (see the scenario's
+ * optional "intermediate_rrep" JSON field), so no run leaks a previous
+ * run's setting.
+ */
+void bridge_set_intermediate_rrep_enabled(bool enabled);
+bool bridge_get_intermediate_rrep_enabled(void);
+
 #endif /* BRIDGE_H */

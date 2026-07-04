@@ -554,6 +554,15 @@ func (s *Sim) cmdLoad(cmd Command) {
 		s.flood = nil
 	}
 
+	// Phase 2 "save reactive routing" Part B: optional "intermediate_rrep"
+	// scenario field, read the same way as "routing" above (independent Go-
+	// side JSON read, so this schema extension needs no C-side sim_scenario
+	// changes). Defaults to true (firmware's always-on shipped behavior);
+	// explicitly re-applied on every run (not just when disabling) so one
+	// scenario's setting never leaks into the next run in the same process
+	// (see bridge.h's doc comment on bridge_set_intermediate_rrep_enabled).
+	C.bridge_set_intermediate_rrep_enabled(C.bool(loadIntermediateRREPConfig(scenarioPath)))
+
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)
 	if disableCollisionModel {

@@ -256,6 +256,33 @@ func loadRoutingConfig(path string) (mode string, hopLimit byte) {
 	return mode, hopLimit
 }
 
+// intermediateRREPConfigJSON is Phase 2 "save reactive routing" Part B's
+// scenario-level A/B switch for intermediate-node RREP (see bridge.h's
+// bridge_set_intermediate_rrep_enabled doc comment): a pointer so "field
+// omitted" is distinguishable from "field explicitly false".
+type intermediateRREPConfigJSON struct {
+	IntermediateRREP *bool `json:"intermediate_rrep"`
+}
+
+// loadIntermediateRREPConfig reads a scenario file's optional
+// "intermediate_rrep" field (default true, matching firmware's always-on
+// shipped behavior). Any read/parse failure or omitted field returns true,
+// same fail-open-to-today's-default convention as loadRoutingConfig.
+func loadIntermediateRREPConfig(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	var cfg intermediateRREPConfigJSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return true
+	}
+	if cfg.IntermediateRREP == nil {
+		return true
+	}
+	return *cfg.IntermediateRREP
+}
+
 // --- Event handlers (dispatched from sim.go's dispatchEvent when
 // s.routingMode == "flood") ---
 
