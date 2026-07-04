@@ -147,4 +147,27 @@ jobs:
           mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           bash scripts/flash.sh local heltec-v3 build
 
+  gosim-integration:
+    name: gosim integration
+    runs-on: linux
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+      - name: Assert cgo build deps are pre-baked on the runner
+        run: |
+          command -v gcc >/dev/null || { echo "::error::gcc missing from runner image"; exit 1; }
+          test -f /usr/include/openssl/ssl.h || { echo "::error::libssl-dev missing from runner image"; exit 1; }
+      - name: Build and test the gosim simulator
+        # gosim is a multi-node mesh simulator that compiles the real firmware
+        # routing/packet/crypto components via cgo (all.c) and drives them end to
+        # end. Running it in CI catches component drift into the simulator and
+        # routing regressions the board-build-only handlers never exercise.
+        run: |
+          cd simulator/gosim
+          go build ./...
+          go test ./...
+
 # ci-sync-trigger 1772679720
