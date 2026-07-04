@@ -71,7 +71,7 @@ const (
 	// (packet_id, src_addr) while waiting out its delay. Meshtastic cancels
 	// on the first overheard relay; kept as a named constant so a sweep can
 	// try a higher tolerance without touching the algorithm.
-	floodSuppressAfterHeard = 1
+	floodSuppressAfterHeard = 2
 )
 
 // floodKey identifies one flood transmission for dedup/suppression
