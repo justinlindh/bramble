@@ -98,6 +98,69 @@ void test_route_unverified_state(void) {
     TEST_ASSERT_EQUAL(ROUTE_UNVERIFIED, e->state);
 }
 
+/* Finding 2 (final whole-branch review): capacity-eviction victim selection
+ * must never pick a DISCOVERED route as the eviction victim while a
+ * BREADCRUMB victim exists anywhere in the table, and must not sacrifice a
+ * DISCOVERED route for a BREADCRUMB install even when no BREADCRUMB victim
+ * exists -- the same trust-class rule the same-dest F2 tests above already
+ * enforce, extended to the MAX_ROUTES-full capacity path. */
+
+/* Table full of nothing but DISCOVERED routes: a new BREADCRUMB install has
+ * no lower-trust victim to reclaim, so the invariant "a breadcrumb install
+ * never evicts a discovered route while any breadcrumb victim exists" can
+ * only be honored by refusing the install outright -- evicting ANY of these
+ * DISCOVERED entries to make room for a breadcrumb would be the exact
+ * trust-class inversion F2 forbids for the same-dest case. */
+void test_f2_capacity_eviction_refuses_breadcrumb_when_all_discovered(void) {
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        route_install(&rt, 0x1000 + (uint32_t)i, 0x0001, 3, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED,
+                      1000 + (uint32_t)i);
+    }
+    TEST_ASSERT_EQUAL(MAX_ROUTES, route_count(&rt));
+
+    int ret =
+        route_install(&rt, 0xF00D, 0xA77ACC, 1, 255, ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, 999999);
+
+    /* Refused: table size unchanged, the new dest was not installed, and
+     * every original DISCOVERED entry is still present untouched. */
+    TEST_ASSERT_EQUAL(-1, ret);
+    TEST_ASSERT_EQUAL(MAX_ROUTES, route_count(&rt));
+    TEST_ASSERT_NULL(route_lookup(&rt, 0xF00D));
+    for (int i = 0; i < MAX_ROUTES; i++) {
+        route_entry_t* e = route_lookup(&rt, 0x1000 + (uint32_t)i);
+        TEST_ASSERT_NOT_NULL(e);
+        TEST_ASSERT_EQUAL(ROUTE_SRC_DISCOVERED, e->source);
+    }
+}
+
+/* Table full but with one BREADCRUMB entry among many DISCOVERED ones: the
+ * breadcrumb must be the victim, never a discovered route, even though the
+ * breadcrumb is not the oldest (LRU) entry overall. */
+void test_f2_capacity_eviction_prefers_breadcrumb_victim(void) {
+    route_install(&rt, 0x2000, 0x0001, 3, 200, ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, 5000);
+    for (int i = 1; i < MAX_ROUTES; i++) {
+        /* Older last_used than the breadcrumb above, so a source-blind LRU
+         * scan would pick one of these DISCOVERED entries instead. */
+        route_install(&rt, 0x1000 + (uint32_t)i, 0x0001, 3, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED,
+                      1000 + (uint32_t)i);
+    }
+    TEST_ASSERT_EQUAL(MAX_ROUTES, route_count(&rt));
+
+    int ret = route_install(&rt, 0xF00D, 0x600D, 4, 10, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 999999);
+
+    TEST_ASSERT_TRUE(ret >= 0);
+    TEST_ASSERT_EQUAL(MAX_ROUTES, route_count(&rt));
+    TEST_ASSERT_NOT_NULL(route_lookup(&rt, 0xF00D));
+    /* The lone breadcrumb is gone; every original DISCOVERED entry
+     * survived. */
+    TEST_ASSERT_NULL(route_lookup(&rt, 0x2000));
+    for (int i = 1; i < MAX_ROUTES; i++) {
+        route_entry_t* e = route_lookup(&rt, 0x1000 + (uint32_t)i);
+        TEST_ASSERT_NOT_NULL(e);
+        TEST_ASSERT_EQUAL(ROUTE_SRC_DISCOVERED, e->source);
+    }
+}
+
 void test_rreq_dedup(void) {
     rreq_dedup_t cache;
     rreq_dedup_init(&cache);
@@ -127,6 +190,8 @@ int main(void) {
     RUN_TEST(test_f2_discovered_reclaims_over_poison_breadcrumb);
     RUN_TEST(test_f2_breadcrumb_cannot_displace_discovered);
     RUN_TEST(test_f2_breadcrumb_metric_rule_preserved);
+    RUN_TEST(test_f2_capacity_eviction_refuses_breadcrumb_when_all_discovered);
+    RUN_TEST(test_f2_capacity_eviction_prefers_breadcrumb_victim);
     RUN_TEST(test_route_maintenance_active_to_stale);
     RUN_TEST(test_route_maintenance_stale_removed);
     RUN_TEST(test_route_unverified_state);

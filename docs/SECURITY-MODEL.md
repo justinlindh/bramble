@@ -753,36 +753,41 @@ new to this trust-class arbitration and not previously analyzed. Tracked as
 follow-up hardening: anti-replay/freshness on the DATA breadcrumb path,
 matching the ws 1.3b treatment already given to RREP/RERR/ACK/receipt/beacon.
 
-**Two smaller, lower-severity residuals from the same batch:**
+**Re-ACK-on-duplicate, now auth_hmac-gated (final whole-branch review,
+finding 3).** Task 6's lost-ACK fix re-sends an ACK when a duplicate unicast
+DATA arrives for a message this node already delivered locally
+(`mesh_process_rx_packet`'s `s_dedup` duplicate branch, `main/mesh_task.c`),
+keyed on `header.packet_id XOR src_addr` against `s_delivered_dedup`.
+`src_addr` is still read off the still-plaintext wire at the dedup-hit check,
+but the re-ACK send itself is now additionally gated on `data_auth_verify`
+against that same `src_addr` and the frame's `auth_hmac` (the identical check
+the `PKT_TYPE_DATA` case runs), so a re-ACK can only fire for a frame that is
+itself a currently-valid, network-key-signed DATA frame, not merely one whose
+`(packet_id, src_addr)` happen to collide with a past delivery. This closes
+the reflection angle for a keyless attacker: forging or replaying a frame
+with an attacker-chosen `src_addr` to bounce a budget-bounded ACK toward an
+arbitrary address now requires a valid `auth_hmac`, the same bar every other
+control-plane action in this section already clears. A keyed insider who
+already holds a valid signed frame for the `(packet_id, src_addr)` pair could
+still trigger the re-ACK, but that insider could just as easily replay the
+frame itself to the same effect, so this adds nothing beyond the pre-existing
+insider trust boundary. On auth failure the duplicate falls through to the
+normal drop (no ACK), exactly as if this re-ACK carve-out did not exist.
 
-- **Re-ACK-on-duplicate reflection.** Task 6's lost-ACK fix re-sends an ACK
-  when a duplicate unicast DATA arrives for a message this node already
-  delivered locally (`mesh_process_rx_packet`'s `s_dedup` duplicate branch,
-  `main/mesh_task.c`), keyed on `header.packet_id XOR
-  <src_addr read unauthenticated off the still-plaintext wire>` against
-  `s_delivered_dedup`. Because that `src_addr` read is unauthenticated at
-  this check (it has not yet passed `data_auth_verify`, which only happens
-  inside the DATA case further down the dispatch), an attacker who already
-  knows one legitimate `(packet_id, src_addr)` pair for a message this node
-  delivered (both cleartext and observable off the air) can solve for a
-  `packet_id XOR src_addr` collision that reflects a budget-bounded ACK
-  toward an address of the attacker's choosing. The reflected ACK is
-  ignored by any recipient that has no matching pending-ACK entry for that
-  `packet_id`, costs only one ACK-tier airtime send, and does not touch any
-  persistent state (no route install, no delivery-status change): transient
-  and idempotent, unlike the breadcrumb residual above.
-- **Table-full LRU eviction does not consider route trust class.**
-  `route_install`'s eviction path, used only when the routing table is full
-  and a brand-new destination needs a slot, picks a broken entry first, then
-  a stale one, then the least-recently-used entry, with no regard for
-  whether that entry is `ROUTE_SRC_DISCOVERED` or `ROUTE_SRC_BREADCRUMB`
-  (`components/routing/routing.c`). The trust-class arbitration above only
-  protects an existing entry for the *same destination* from being
-  downgraded; it says nothing about eviction for a *different* destination
-  under table pressure. A currently-active, HMAC-gated discovered route can
-  therefore be evicted from a full table to make room for a new breadcrumb,
-  if that discovered route happens to be the least-recently-used
-  non-broken, non-stale entry at that moment.
+**Table-full eviction now source-aware (final whole-branch review, finding
+2).** `route_install`'s eviction path, used only when the routing table is
+full and a brand-new destination needs a slot, now searches for a
+`ROUTE_SRC_BREADCRUMB` victim first (broken, then stale, then
+least-recently-used, among just that class) before ever considering a
+`ROUTE_SRC_DISCOVERED` entry (`components/routing/routing.c`). If the table
+holds no breadcrumb entry at all, a `ROUTE_SRC_BREADCRUMB` install is refused
+outright rather than evicting a `ROUTE_SRC_DISCOVERED` route to make room for
+itself; a `ROUTE_SRC_DISCOVERED` install has no such restriction and may
+still evict any entry via the original broken/stale/LRU search. This extends
+the same-destination trust-class rule above (a breadcrumb can never displace
+a discovered route) to capacity pressure on a *different* destination: a
+currently-active, HMAC-gated discovered route can no longer be evicted from a
+full table just to make room for a new breadcrumb.
 
 ## 4. Known gaps in the current implementation
 
@@ -1126,15 +1131,14 @@ These do not go away when section 4 empties out.
   LOCATION channel-message decode path does not assert `app_type ==
   APP_TYPE_LOCATION` before parsing (defense-in-depth only; it is inside the
   AEAD trust boundary and memory-safe either way). Two more from wire v4
-  (section 3): the DATA re-ACK-on-duplicate path reads `src_addr`
-  unauthenticated at its dedup-hit check, so a `packet_id XOR src_addr`
-  collision can reflect a budget-bounded ACK toward an attacker-chosen
-  address, ignored by any non-matching recipient and touching no persistent
-  state; and `route_install`'s table-full eviction (broken, then stale, then
-  least-recently-used) does not consider trust class, so a `ROUTE_SRC_
-  DISCOVERED` route can be evicted to make room for a new
-  `ROUTE_SRC_BREADCRUMB` destination if it happens to be the
-  least-recently-used non-broken, non-stale entry.
+  (section 3), both since closed by the final whole-branch review: the DATA
+  re-ACK-on-duplicate path now gates its ACK send on `data_auth_verify`
+  against the frame's `auth_hmac`, not just an unauthenticated `packet_id XOR
+  src_addr` dedup-hit; and `route_install`'s table-full eviction now searches
+  for a `ROUTE_SRC_BREADCRUMB` victim (broken, then stale, then
+  least-recently-used) before ever considering a `ROUTE_SRC_DISCOVERED` one,
+  refusing a breadcrumb install outright rather than evicting a discovered
+  route when no breadcrumb victim exists.
 
 ## 6. How to think about Bramble's privacy
 
