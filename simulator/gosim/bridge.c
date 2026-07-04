@@ -1304,6 +1304,11 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
     fflush(stdout);
 }
 
+/* ─── Duty-cycle cap (DES-8, Task 5) ────────────────────────────────────── */
+void bridge_apply_duty_cycle_cap(sim_node_t* node, uint8_t max_duty_cycle_pct) {
+    airtime_budget_set_duty_cap(&node->airtime, max_duty_cycle_pct, true);
+}
+
 /* ─── Init relay path tracker + extended state ────────────────────────── */
 void bridge_init(void) {
     relay_path_init();

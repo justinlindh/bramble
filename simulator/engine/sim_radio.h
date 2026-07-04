@@ -71,6 +71,16 @@ typedef struct radio_config {
     float path_loss_exp;   /* log-distance path loss exponent n */
     float path_loss_d0_db; /* path loss at d0 = 1 grid unit (10 m) */
     channel_log_t channel; /* occupancy log of recent transmissions */
+
+    /* Optional regulatory duty-cycle cap (DES-8), scenario-wide like the
+     * rest of this struct. duty_cycle_set=false (the scenario's "radio"
+     * block has no duty_cycle_pct) means unlimited, today's behavior. The
+     * sim has no duty-cycle math of its own: this only remembers what to
+     * pass to the real airtime_budget_set_duty_cap on each node (see
+     * bridge_apply_duty_cycle_cap), exactly mirroring firmware's
+     * mesh_task_start -> tx_gate_global_init -> tx_gate_init wiring. */
+    bool duty_cycle_set;
+    uint8_t duty_cycle_pct;
 } radio_config_t;
 
 /* Listen-before-talk parameters, mirroring main/mesh_task.c transmit_packet

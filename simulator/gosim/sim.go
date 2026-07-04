@@ -335,6 +335,18 @@ func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
+// applyDutyCycleCap re-applies the scenario's optional regulatory
+// duty-cycle cap (Task 5) to a node's real airtime budget via the real
+// airtime_budget_set_duty_cap. Must run after every node_activate, since
+// node_activate's airtime_budget_init resets the cap; no-op if the
+// scenario's "radio" block has no duty_cycle_pct (unlimited, today's
+// behavior).
+func (s *Sim) applyDutyCycleCap(node *C.sim_node_t) {
+	if bool(s.radio.duty_cycle_set) {
+		C.bridge_apply_duty_cycle_cap(node, s.radio.duty_cycle_pct)
+	}
+}
+
 func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	nd := C.bridge_get_node_event(evt)
 	nodeID := C.GoString(&nd.node_id[0])
@@ -347,6 +359,7 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	}
 	node := C.node_array_get(&s.nodes, C.int(idx))
 	nodeActivate(node)
+	s.applyDutyCycleCap(node)
 	anomalyInit(&s.anomaly[idx])
 
 	// Phase 6: Initialize extended node state (mailbox, location, etc.)
@@ -514,6 +527,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 			continue
 		}
 		nodeActivate(node)
+		s.applyDutyCycleCap(node)
 		anomalyInit(&s.anomaly[i])
 
 		// Schedule initial tick (staggered by 100ms per node)
@@ -641,6 +655,7 @@ func (s *Sim) cmdAddNode(cmd Command) {
 	}
 	node := C.node_array_get(&s.nodes, C.int(idx))
 	nodeActivate(node)
+	s.applyDutyCycleCap(node)
 	anomalyInit(&s.anomaly[idx])
 
 	// Schedule tick
@@ -835,21 +850,21 @@ func (s *Sim) complete() {
 		// instead. "Attempted" for a given tier or limiter = sent + its
 		// denied counter; see budget_denied_by_tier's own note on why that
 		// reconstruction is per-tier, not per-packet-type, for the budget.
-		"beacons_sent":          uint64(s.metrics.beacons_sent),
-		"rreqs_sent":            uint64(s.metrics.rreqs_sent),
-		"rreps_sent":            uint64(s.metrics.rreps_sent),
-		"collisions":            uint64(s.metrics.collisions),
-		"half_duplex_drops":     uint64(s.metrics.half_duplex_drops),
-		"capture_wins":          uint64(s.metrics.capture_wins),
-		"lbt_backoffs":          uint64(s.metrics.lbt_backoffs),
-		"receptions_ok":         uint64(s.metrics.receptions_ok),
-		"channel_log_overflow":  uint64(s.radio.channel.overflow_drops),
-		"airtime_total_ms":      uint64(s.metrics.airtime_total_us) / 1000,
-		"airtime_ms_by_type":    airtimeMsByType,
-		"offered_load_erlangs":  offeredLoadErlangs,
-		"channel_util_pct":      channelUtilPct,
-		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
-		"delivery_rate":         metricsDeliveryRate(&s.metrics),
+		"beacons_sent":         uint64(s.metrics.beacons_sent),
+		"rreqs_sent":           uint64(s.metrics.rreqs_sent),
+		"rreps_sent":           uint64(s.metrics.rreps_sent),
+		"collisions":           uint64(s.metrics.collisions),
+		"half_duplex_drops":    uint64(s.metrics.half_duplex_drops),
+		"capture_wins":         uint64(s.metrics.capture_wins),
+		"lbt_backoffs":         uint64(s.metrics.lbt_backoffs),
+		"receptions_ok":        uint64(s.metrics.receptions_ok),
+		"channel_log_overflow": uint64(s.radio.channel.overflow_drops),
+		"airtime_total_ms":     uint64(s.metrics.airtime_total_us) / 1000,
+		"airtime_ms_by_type":   airtimeMsByType,
+		"offered_load_erlangs": offeredLoadErlangs,
+		"channel_util_pct":     channelUtilPct,
+		"avg_latency_ms":       metricsAvgLatencyMs(&s.metrics),
+		"delivery_rate":        metricsDeliveryRate(&s.metrics),
 		// control_airtime_pct is now genuinely ToA-weighted:
 		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
 		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,

@@ -95,6 +95,22 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
     if (lbt && cJSON_IsBool(lbt))
         radio->lbt_enabled = cJSON_IsTrue(lbt);
 
+    /* Optional regulatory duty-cycle cap (DES-8): absent = unlimited,
+     * matching today's behavior (radio_config_init already left
+     * duty_cycle_set false). When present, applied via the real
+     * airtime_budget_set_duty_cap on every node (bridge_apply_duty_cycle_cap),
+     * never computed here. */
+    cJSON* duty = cJSON_GetObjectItem(radio_json, "duty_cycle_pct");
+    if (duty && cJSON_IsNumber(duty)) {
+        double pct = duty->valuedouble;
+        if (pct < 0.0)
+            pct = 0.0;
+        if (pct > 100.0)
+            pct = 100.0;
+        radio->duty_cycle_set = true;
+        radio->duty_cycle_pct = (uint8_t)pct;
+    }
+
     return true;
 }
 
