@@ -611,12 +611,14 @@ Provisioning plus this freshness work together close outsider forgery and
 outsider replay for all five message types. They do **not** close
 SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8 outright: a network-key insider
 can still forge a message on behalf of any other holder (inherent to a
-shared symmetric key, accepted, see section 5), and NEW-SEC-4
-additionally needs a per-node beacon identity binding to close its
-bootstrap-quorum race (staged as 1.3c, see section 5). State precisely
-which half, forge vs. replay, outsider vs. insider, is closed when citing
-any of these four findings; neither provisioning nor freshness alone is
-sufficient for full closure of any of them.
+shared symmetric key, accepted, see section 5), and NEW-SEC-4's
+bootstrap-quorum race is raised in cost, not closed, by ws 1.3c's
+established-source quorum, revertible confidence, and self-healing offset
+(see section 5); full closure needs a trust anchor (GPS-authoritative
+nodes or a pre-shared trusted-node list), out of scope for pre-alpha.
+State precisely which half, forge vs. replay, outsider vs. insider, is
+closed when citing any of these four findings; neither provisioning nor
+freshness alone is sufficient for full closure of any of them.
 
 ## 4. Known gaps in the current implementation
 
@@ -631,9 +633,10 @@ same PR that fixes it.
   1.3b's per-message freshness (section 3) closes replay of a captured,
   genuinely-valid message on all five types; a network-key insider can
   still forge on behalf of any other holder (section 5, inherent and
-  accepted), and NEW-SEC-4 additionally needs a per-node beacon identity
-  binding, staged as 1.3c (section 5). Treat all five as unauthenticated
-  against an unprovisioned deployment, and as insider-forgeable even once
+  accepted), and NEW-SEC-4's bootstrap-quorum race is only mitigated, not
+  closed, by ws 1.3c (section 5); closing it needs a trust anchor, out of
+  scope for pre-alpha. Treat all five as unauthenticated against an
+  unprovisioned deployment, and as insider-forgeable even once
   provisioned, until that follow-up work lands.
 - **RREQ forwarding is not rate-limited**; the 30-second limiter applies only
   to locally-originated discoveries, so a flood of foreign RREQs is forwarded
@@ -778,26 +781,57 @@ These do not go away when section 4 empties out.
   regardless. Distinct from replay (the message is fresh, not captured)
   and a candidate follow-on, not something the ws 1.3b freshness work was
   scoped to fix.
-- **The timesync bootstrap quorum can still be won by one key holder with
-  multiple addresses (NEW-SEC-4).** The beacon HMAC gate and the
-  bootstrap-offset clamp (section 3) both require holding the network key,
-  but neither requires holding a *distinct* identity per beacon. A single
-  insider who holds the network key and transmits under three fabricated
-  source addresses satisfies `CORROBORATION_REQUIRED` (3 distinct sources)
-  entirely on their own and commits an arbitrary first time offset; the
-  bootstrap clamp only bounds a proposal against the *existing* pending
-  pool, which that same insider fully controls when they are the only
-  contributor. Compounding this, `timesync_is_confident` never reverts to
-  false once `synchronized` becomes true (`components/timesync/timesync.c`),
-  so a bad offset committed at bootstrap is trusted indefinitely, not just
-  until the next corroboration round. Closing NEW-SEC-4 needs provisioning
-  **plus** a per-node beacon identity binding (so one network key cannot
-  mint an arbitrary number of distinct-looking sources). Ws 1.3b's beacon
-  replay closure (above) means a captured beacon can no longer re-feed a
-  stale time offset, but does nothing to stop this insider from
-  fabricating fresh, correctly-signed, correctly-sequenced beacons under
-  three distinct addresses, since freshness authenticates the signer's
-  key, not a per-node identity. Staged as 1.3c.
+- **The timesync bootstrap quorum can still be won by one key holder who
+  sustains multiple established addresses (NEW-SEC-4, mitigated by ws 1.3c,
+  NOT closed).** The beacon HMAC gate and the bootstrap-offset clamp
+  (section 3) both require holding the network key, but neither requires
+  holding a *distinct* identity per beacon. Ws 1.3b's beacon replay closure
+  (above) means a captured beacon can no longer re-feed a stale time
+  offset, but does nothing to stop an insider from fabricating fresh,
+  correctly-signed, correctly-sequenced beacons under multiple addresses,
+  since freshness authenticates the signer's key, not a per-node identity.
+  Ws 1.3c (`components/timesync`, `components/routing`) raises the cost of
+  this attack in three ways, none of which make it impossible. First, the
+  pre-commit corroboration count (`CORROBORATION_REQUIRED`, 3 distinct
+  sources) now counts only sources whose neighbor-table entry is
+  *established*: seen for at least `ESTABLISHED_MIN_BEACONS` beacons
+  spanning at least `ESTABLISHED_MIN_AGE_MS` (5 minutes,
+  `neighbor_is_established`). An insider can no longer mint three fresh
+  addresses and win the quorum instantly; each fabricated address must
+  first accumulate sustained tenure, turning instant-mint Sybil into
+  sustained-over-time Sybil, not into scarce Sybil: `crypto_generate_identity`
+  is still free and `s_beacon_key` is still one fleet-wide key, so an
+  insider willing to keep three fabricated addresses beaconing for the
+  tenure window still mints and sustains as many established-looking
+  identities as they want. Second, `timesync_is_confident(ts,
+  local_now_ms)` no longer latches true forever once `synchronized` first
+  becomes true; it now also requires the last committed sync to be no
+  older than `CONFIDENCE_MAX_AGE_MS` (180 seconds), so a bad offset
+  committed via a Sybil quorum stops gating the tier-2 deferred-chat
+  freshness check once that insider stops beaconing, instead of being
+  trusted indefinitely (this document previously stated that
+  `timesync_is_confident` never reverts; that claim was true before ws
+  1.3c and is not true now). Third, post-first-commit, every accepted
+  better-stratum sync recomputes the weighted offset from the full pending
+  pool bounded to +/-`MAX_TIME_SHIFT_MS` (2 seconds) per step, so a thin or
+  attacker-influenced bootstrap offset drifts toward the honest majority as
+  real beacons arrive and stale entries purge, provided honest traffic
+  keeps arriving. **None of this closes NEW-SEC-4.** A network-key insider
+  willing to sustain multiple fabricated established identities
+  continuously over the tenure window still wins the quorum and commits an
+  arbitrary offset; ws 1.3c raises the bar and time-boxes the damage but
+  cannot make Sybil identities scarce without an asymmetric identity
+  primitive the crypto component does not have (X25519 ECDH plus HMAC
+  only; adding one is novel crypto, out of scope) and, even with one,
+  without a cost or rate limit on identity minting, which nothing in this
+  codebase enforces. Closing NEW-SEC-4 for real needs a trust anchor
+  (GPS-authoritative nodes or a pre-shared trusted-node list), out of
+  scope for pre-alpha. Cold start is intentionally fail-closed under this
+  design: a freshly booted node has no established neighbors, so it cannot
+  reach `CORROBORATION_REQUIRED` established sources and stays
+  unsynchronized, and therefore `timesync_is_confident`-false, until it
+  has integrated real, sustained neighbors. That is the intended posture,
+  not a bug.
 - **RREP `next_hop` poisoning is inherent, not a bug this batch can close.**
   `next_hop` is necessarily a relay-mutated, unauthenticated field: each
   forwarder must be able to rewrite it to route the reply back toward the
