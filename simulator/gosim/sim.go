@@ -83,6 +83,7 @@ type Sim struct {
 	metrics  C.metrics_state_t
 	anomaly  [C.MAX_NODES]C.node_anomaly_tracker_t
 	msgTrack [C.MAX_MSG_TRACK]C.msg_tracker_t
+	beacon   C.sim_beacon_policy_t // scenario-wide beacon interval policy (Task 3)
 
 	// Sim clock
 	simTime    uint64
@@ -123,6 +124,9 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 
 	// Initialize bridge-level state
 	C.bridge_init()
+
+	// Firmware-default beacon policy until a scenario overrides it (cmdLoad)
+	C.sim_beacon_policy_init(&s.beacon)
 
 	// Create pipe to capture C stdout output
 	r, w, err := os.Pipe()
@@ -305,7 +309,7 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 
 	var result C.node_tick_result_t
 	ts := getEventTimestamp(evt)
-	C.node_tick(node, C.uint64_t(ts), &s.radio, &result)
+	C.node_tick(node, C.uint64_t(ts), &s.radio, &s.beacon, &result)
 
 	// Broadcast any outbound packets
 	for i := 0; i < int(result.count); i++ {
@@ -493,6 +497,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		s.radio.collisions_enabled = C.bool(false)
 	}
 	s.duration = uint64(scenario.metadata.duration_us)
+	s.beacon = scenario.beacon
 	s.simTime = 0
 	s.speed = 1.0
 	s.nextAddr = 0x1000

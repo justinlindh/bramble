@@ -11,6 +11,7 @@
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
 #include "../../components/security/include/security.h"
+#include "../../main/beacon_policy_calc.h"
 #include "sim_random.h"
 
 /* Forward declaration only: the full definition lives in sim_radio.h, which
@@ -22,25 +23,50 @@ typedef struct radio_config radio_config_t;
 #define MAX_NODES 256
 #define NODE_ID_LEN 16
 
-/* Tick intervals (microseconds). Beacon cadence mirrors the firmware's
- * beacon policy defaults (main/mesh_task.c): base 60 s, churn min 30 s,
- * dense max 120 s, +-5 s per-beacon jitter (BEACON_JITTER_MS). The firmware
- * default is FIXED 60 s; the adaptive policy is opt-in there, and the sim
- * keeps it enabled to exercise it, with firmware-matching constants. */
-#define NODE_BEACON_INTERVAL_BASE_US 60000000ULL   /* 60 s firmware base */
-#define NODE_BEACON_INTERVAL_CHURN_US 30000000ULL  /* 30 s firmware churn min */
-#define NODE_BEACON_INTERVAL_DENSE_US 120000000ULL /* 120 s firmware dense max */
-#define NODE_BEACON_JITTER_US 5000000ULL           /* +-5 s firmware BEACON_JITTER_MS */
-#define NODE_NEIGHBOR_PURGE_US 60000000ULL         /* 60 s */
-#define NODE_ROUTE_MAINT_US 60000000ULL            /* 60 s */
-#define NODE_DISCOVERY_CHECK_US 5000000ULL         /*  5 s */
-#define NODE_TICK_INTERVAL_US 1000000ULL           /*  1 s base tick */
+/* Tick intervals (microseconds). NODE_BEACON_INTERVAL_BASE_US is only used to
+ * size the randomized first-beacon phase at boot (node_activate), so staggered
+ * nodes do not all key up on the same tick; the actual beacon cadence is
+ * decided every tick by beacon_interval_decide() (main/beacon_policy_calc.c),
+ * driven by the scenario's sim_beacon_policy_t (see below). Jitter matches
+ * firmware's BEACON_JITTER_MS (main/mesh_task.c). */
+#define NODE_BEACON_INTERVAL_BASE_US 60000000ULL /* 60 s firmware base, boot-phase only */
+#define NODE_BEACON_JITTER_US 5000000ULL         /* +-5 s firmware BEACON_JITTER_MS */
+#define NODE_NEIGHBOR_PURGE_US 60000000ULL       /* 60 s */
+#define NODE_ROUTE_MAINT_US 60000000ULL          /* 60 s */
+#define NODE_DISCOVERY_CHECK_US 5000000ULL       /*  5 s */
+#define NODE_TICK_INTERVAL_US 1000000ULL         /*  1 s base tick */
 
-/* Adaptive beacon policy thresholds */
-#define ADAPTIVE_NEIGHBOR_DENSE_THRESHOLD 10   /* Dense mesh if neighbor_count >= this */
-#define ADAPTIVE_NEIGHBOR_CHURN_WINDOW 5       /* Track churn over last N ticks (5s) */
-#define ADAPTIVE_CHURN_THRESHOLD 3             /* High churn if >=3 neighbor changes in window */
-#define ADAPTIVE_MODE_COOLDOWN_US 120000000ULL /* 2 min cooldown before mode transitions */
+/*
+ * Beacon interval policy: scenario-wide configuration fed into the REAL
+ * firmware decision function beacon_interval_decide() (main/beacon_policy_calc.c),
+ * one shared instance for the whole sim, mirroring the single per-device
+ * s_beacon_policy in mesh_task.c (every simulated node evaluates the same
+ * policy against its own neighbor/churn state, exactly like every real
+ * device runs the same shipped policy against its own local conditions).
+ * Defaults mirror firmware's shipped config (mesh_task.c:298-306): adaptive
+ * disabled (BEACON_MODE_FIXED), fixed 60 s. Overridable per scenario
+ * (simulator/engine/sim_scenario.c "beacon" block).
+ */
+typedef struct {
+    bool adaptive;            /* false = fixed cadence (firmware default) */
+    uint32_t interval_ms;     /* base/fixed interval */
+    uint32_t min_interval_ms; /* adaptive: high-churn floor */
+    uint32_t max_interval_ms; /* adaptive: dense-mesh ceiling */
+    uint8_t dense_threshold;  /* adaptive: neighbor_count >= this -> max_interval_ms */
+    uint8_t churn_threshold;  /* adaptive: churn_events >= this -> min_interval_ms */
+    uint32_t churn_window_ms; /* adaptive: churn lookback window */
+} sim_beacon_policy_t;
+
+/* Firmware's literal shipped defaults (mesh_task.c:298-306); not exported as
+ * macros there, so mirrored here as the sim's firmware-default baseline. */
+#define SIM_BEACON_POLICY_DEFAULT_INTERVAL_MS 60000u
+#define SIM_BEACON_POLICY_DEFAULT_MIN_MS 30000u
+#define SIM_BEACON_POLICY_DEFAULT_MAX_MS 120000u
+#define SIM_BEACON_POLICY_DEFAULT_DENSE_THRESHOLD 10u
+#define SIM_BEACON_POLICY_DEFAULT_CHURN_THRESHOLD 3u
+#define SIM_BEACON_POLICY_DEFAULT_CHURN_WINDOW_MS 60000u
+
+void sim_beacon_policy_init(sim_beacon_policy_t* policy);
 
 /* Maximum packets a single tick can produce */
 #define NODE_TICK_MAX_OUTBOUND 4
@@ -108,13 +134,14 @@ typedef struct {
     uint64_t last_discovery_check_us;
     uint32_t uptime_min;
 
-    /* Adaptive beacon controller state */
-    uint64_t adaptive_beacon_interval_us; /* Current dynamic beacon interval */
-    uint8_t
-        neighbor_history[ADAPTIVE_NEIGHBOR_CHURN_WINDOW]; /* Rolling window of neighbor counts */
-    uint8_t neighbor_history_idx;                         /* Current index in rolling window */
-    uint64_t last_mode_transition_us;                     /* When did we last change mode? */
-    bool adaptive_enabled;                                /* Feature flag for adaptive policy */
+    /* Beacon churn tracking (main/beacon_policy_calc.h churn_sample_t ring),
+     * mirrors mesh_task's s_churn_history/s_churn_history_idx/
+     * last_neighbor_count: per-node DYNAMIC state, reset on (re)activation.
+     * The policy CONFIG itself (sim_beacon_policy_t) is scenario-wide, not
+     * per-node; see sim_node.h's sim_beacon_policy_t. */
+    churn_sample_t beacon_churn_history[MAX_CHURN_HISTORY];
+    int beacon_churn_history_idx;
+    uint8_t beacon_last_neighbor_count;
     uint64_t next_beacon_due_us; /* Jittered absolute due time of the next beacon */
     pcg32_state_t beacon_rng;    /* Per-node PRNG for beacon jitter (seeded from addr) */
 
@@ -150,6 +177,6 @@ void node_activate(sim_node_t* node);
 void node_deactivate(sim_node_t* node);
 void node_move(sim_node_t* node, float x, float y);
 void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
-               node_tick_result_t* result);
+               const sim_beacon_policy_t* beacon_policy, node_tick_result_t* result);
 
 #endif /* SIM_NODE_H */
