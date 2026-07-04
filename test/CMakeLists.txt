@@ -249,6 +249,32 @@ target_include_directories(test_flood_origination PRIVATE
 )
 target_link_libraries(test_flood_origination ssl crypto)
 
+# Flooding F1 hardening (whole-branch review): the rebroadcast-suppression
+# overheard-copy counter must act ONLY on AUTHENTICATED duplicates. Mirrors the
+# two mesh_task.c dispatch-gate suppression branches (DATA via data_auth_verify,
+# flooded ACK via bramble_ack_deserialize + ack_verify) with the real component
+# functions, proving a bad-MAC duplicate never bumps `heard` / cancels a genuine
+# pending relay while a valid one does (single flipped auth byte is the only
+# difference). mesh_task.c itself is never host-compiled (same rationale as
+# test_unicast_flood.c / test_flooded_ack.c).
+add_executable(test_flood_suppression_auth
+    test_flood_suppression_auth.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+)
+target_include_directories(test_flood_suppression_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+)
+target_link_libraries(test_flood_suppression_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

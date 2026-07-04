@@ -3227,14 +3227,32 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         bool flood_relay_active = (header.dest_addr == 0xFFFFFFFF ||
                                    (s_flood_transport && header.dest_addr != s_identity->address));
         if (header.type == PKT_TYPE_DATA && flood_relay_active &&
-            pkt->len >= BRAMBLE_DATA_SRC_ADDR_OFFSET + 4) {
+            pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
             uint32_t flood_dup_src;
             memcpy(&flood_dup_src, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
-            uint32_t flood_dup_key = header.packet_id ^ flood_dup_src;
-            if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
-                                             flood_dup_key)) {
-                ESP_LOGD(TAG, "Flood relay suppressed after %d overheard copies, pkt=%08" PRIX32,
-                         FLOOD_SUPPRESS_AFTER, header.packet_id);
+            /* Finding (final whole-branch review): only an AUTHENTICATED
+             * duplicate copy may count toward suppression. The first
+             * legitimate copy inserts the s_dedup key ABOVE (dedup_check_and_
+             * add) BEFORE the network-key MAC is ever checked, so without this
+             * gate a keyless party could replay a garbage-MAC frame carrying a
+             * matching plaintext packet_id + src_addr, hit this dedup branch,
+             * and bump `heard` to FLOOD_SUPPRESS_AFTER -- cancelling a genuine
+             * node's pending relay and punching a targeted coverage hole in a
+             * sparse mesh. Verify the copy's network-key MAC first, mirroring
+             * the re-ACK carve-out above and handle_data's own data_auth_verify
+             * gate, so only genuine overheard copies suppress. Costs one HMAC
+             * per overheard flood duplicate (precedented, acceptable). The
+             * length guard is widened to BRAMBLE_DATA_NONCE_OFFSET so the 8
+             * auth_hmac bytes at BRAMBLE_DATA_AUTH_HMAC_OFFSET are in range. */
+            if (data_auth_verify(&header, flood_dup_src,
+                                 pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
+                uint32_t flood_dup_key = header.packet_id ^ flood_dup_src;
+                if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                                 flood_dup_key)) {
+                    ESP_LOGD(TAG,
+                             "Flood relay suppressed after %d overheard copies, pkt=%08" PRIX32,
+                             FLOOD_SUPPRESS_AFTER, header.packet_id);
+                }
             }
         }
 
@@ -3250,16 +3268,29 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * big-endian here to match handle_ack's host-order ack.src_addr. */
         if (header.type == PKT_TYPE_ACK && s_flood_transport &&
             header.dest_addr != s_identity->address && pkt->len >= HEADER_SIZE + 4) {
-            uint32_t ack_dup_src = ((uint32_t)pkt->data[HEADER_SIZE] << 24) |
-                                   ((uint32_t)pkt->data[HEADER_SIZE + 1] << 16) |
-                                   ((uint32_t)pkt->data[HEADER_SIZE + 2] << 8) |
-                                   (uint32_t)pkt->data[HEADER_SIZE + 3];
-            uint32_t ack_dup_key = header.packet_id ^ ack_dup_src;
-            if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
-                                             ack_dup_key)) {
-                ESP_LOGD(TAG,
-                         "Flooded ACK relay suppressed after %d overheard copies, pkt=%08" PRIX32,
-                         FLOOD_SUPPRESS_AFTER, header.packet_id);
+            /* Finding (final whole-branch review): as with the DATA flood
+             * above, only an AUTHENTICATED overheard copy may count toward
+             * suppression. handle_ack inserts the s_dedup key at the dispatch
+             * gate BEFORE ack_verify runs, so without this gate a garbage-MAC
+             * duplicate carrying a matching plaintext packet_id + src_addr
+             * would reach this counter and cancel a genuine node's pending ACK
+             * relay. Deserialize and verify the network-key MAC here, mirroring
+             * handle_ack's ack_verify gate, so only genuine copies suppress.
+             * dup_ack.src_addr (host order) equals the big-endian wire read
+             * this block previously did by hand (proven by
+             * test_flood_ack_wire_suppression_key_matches). Costs one
+             * deserialize + HMAC per overheard flooded-ACK duplicate. */
+            bramble_ack_t dup_ack;
+            if (bramble_ack_deserialize(&dup_ack, pkt->data, pkt->len) == ESP_OK &&
+                ack_verify(&dup_ack)) {
+                uint32_t ack_dup_key = dup_ack.header.packet_id ^ dup_ack.src_addr;
+                if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                                 ack_dup_key)) {
+                    ESP_LOGD(
+                        TAG,
+                        "Flooded ACK relay suppressed after %d overheard copies, pkt=%08" PRIX32,
+                        FLOOD_SUPPRESS_AFTER, header.packet_id);
+                }
             }
         }
 

@@ -794,7 +794,17 @@ static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
      * see mesh_task.c). This IS the overheard-copy the pending relay counts:
      * bump heard on the matching src-qualified entry and cancel it once
      * FLOOD_SUPPRESS_AFTER copies are in. The FIRST copy is not a duplicate
-     * (is_dup false -> schedules below), so it is never counted here. */
+     * (is_dup false -> schedules below), so it is never counted here.
+     *
+     * Whole-branch review note: firmware gates its two overheard-copy counters
+     * on the copy's network-key MAC verifying first (data_auth_verify /
+     * ack_verify in mesh_task.c), so a keyless party cannot forge a duplicate
+     * to cancel a genuine relay. No equivalent gate is needed here because
+     * gosim models only honest, key-holding nodes and never injects forged /
+     * bad-MAC frames: every duplicate that reaches this path is a genuine
+     * re-flood by another honest relay (data_rx_decide's auth gate is assumed
+     * already passed, see the DATA_RX_DELIVER comment below). The firmware MAC
+     * gate is the load-bearing fix; this stays a faithful honest-node model. */
     if (is_dup) {
         bridge_flood_pending_note_overheard(rx, flood_key);
     }
