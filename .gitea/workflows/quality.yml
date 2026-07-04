@@ -168,6 +168,8 @@ jobs:
         run: |
           cd simulator/gosim
           go build ./...
-          go test ./...
+          # -count=1 defeats go's test cache, which can serve stale results
+          # across cgo-compiled C edits (observed on this runner setup).
+          go test -count=1 ./...
 
 # ci-sync-trigger 1772679720

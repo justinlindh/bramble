@@ -46,7 +46,10 @@ typedef enum {
     RADIO_RX_CAPTURED,    /* overlapped, but won via the capture effect */
 } radio_rx_outcome_t;
 
-typedef struct {
+/* Tagged so sim_node.h can forward-declare radio_config_t (node_tick needs a
+ * pointer to it to compute beacon/RREQ airtime; sim_node.h cannot include
+ * this header back, since this header already includes sim_node.h). */
+typedef struct radio_config {
     float range;
     float loss_pct;
     float propagation_speed_ms_per_unit;
@@ -68,6 +71,16 @@ typedef struct {
     float path_loss_exp;   /* log-distance path loss exponent n */
     float path_loss_d0_db; /* path loss at d0 = 1 grid unit (10 m) */
     channel_log_t channel; /* occupancy log of recent transmissions */
+
+    /* Optional regulatory duty-cycle cap (DES-8), scenario-wide like the
+     * rest of this struct. duty_cycle_set=false (the scenario's "radio"
+     * block has no duty_cycle_pct) means unlimited, today's behavior. The
+     * sim has no duty-cycle math of its own: this only remembers what to
+     * pass to the real airtime_budget_set_duty_cap on each node (see
+     * bridge_apply_duty_cycle_cap), exactly mirroring firmware's
+     * mesh_task_start -> tx_gate_global_init -> tx_gate_init wiring. */
+    bool duty_cycle_set;
+    uint8_t duty_cycle_pct;
 } radio_config_t;
 
 /* Listen-before-talk parameters, mirroring main/mesh_task.c transmit_packet
@@ -93,6 +106,14 @@ bool radio_in_interference(const radio_config_t* config, const sim_node_t* node)
  * bramble_calculate_airtime_us (components/radio/radio_airtime.c).
  */
 uint32_t radio_frame_airtime_us(const radio_config_t* config, uint16_t frame_bytes);
+
+/*
+ * radio_frame_airtime_ms: radio_frame_airtime_us rounded up to whole
+ * milliseconds (minimum 1 ms), the unit the airtime budget accounts in.
+ * Single source of truth for the us->ms rounding used at every budget-gated
+ * TX site (never undercount airtime).
+ */
+uint32_t radio_frame_airtime_ms(const radio_config_t* config, uint16_t frame_bytes);
 
 /*
  * radio_preamble_us: duration of the LoRa preamble (programmed symbols + 4.25

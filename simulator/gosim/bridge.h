@@ -49,6 +49,18 @@ void bridge_node_ext_init_all(void);
  */
 void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, uint64_t now_us);
 
+/*
+ * bridge_apply_duty_cycle_cap:
+ *   Applies the scenario's optional regulatory duty-cycle cap (DES-8) to one
+ *   node's real airtime budget via airtime_budget_set_duty_cap, exactly as
+ *   firmware's mesh_task_start -> tx_gate_global_init -> tx_gate_init wiring
+ *   does. Call after every node_activate (initial load, scripted/chaos
+ *   join, RPC add-node): node_activate's airtime_budget_init resets the cap,
+ *   so it must be reapplied each time. No-op call site convention: caller
+ *   only calls this when the scenario's radio.duty_cycle_set is true.
+ */
+void bridge_apply_duty_cycle_cap(sim_node_t* node, uint8_t max_duty_cycle_pct);
+
 /* ─── Global simulation time ───────────────────────────────────────────── */
 extern uint64_t g_bridge_sim_time_us;
 void bridge_set_sim_time(uint64_t us);
@@ -71,6 +83,13 @@ sim_event_t bridge_make_node_event(event_type_t type, uint64_t ts_us, const char
 sim_event_t bridge_make_generate_msg_event(uint64_t ts_us, const char* node_id, uint32_t dest_addr);
 sim_event_t bridge_make_interference_start(uint64_t ts_us, float cx, float cy, float radius);
 sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index);
+/* Test-only injection: builds an EVT_RECEIVE_PACKET event directly (normally
+ * only sim_radio_broadcast produces these), so Go tests can drive
+ * bridge_handle_receive_packet with a hand-built frame without going through
+ * the full radio model. air_start_us/air_end_us are set to [ts_us, ts_us], so
+ * radio_check_reception sees no occupancy window to overlap against. */
+sim_event_t bridge_make_receive_packet_event(uint64_t ts_us, uint32_t src_addr, uint32_t dest_addr,
+                                             const uint8_t* data, uint16_t len);
 
 /* ─── Message tracking ─────────────────────────────────────────────────── */
 #define MAX_MSG_TRACK 1024

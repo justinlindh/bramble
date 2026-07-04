@@ -64,6 +64,9 @@ void radio_config_init(radio_config_t* config) {
     config->capture_db = 6.0f;
     config->path_loss_exp = 2.9f;
     config->path_loss_d0_db = 52.0f;
+
+    config->duty_cycle_set = false; /* unlimited: today's behavior */
+    config->duty_cycle_pct = 0;
 }
 
 float radio_distance(const sim_node_t* a, const sim_node_t* b) {
@@ -157,6 +160,12 @@ uint32_t radio_frame_airtime_us(const radio_config_t* config, uint16_t frame_byt
     uint32_t bw = config->bw_hz ? config->bw_hz : 125000;
     uint8_t cr = config->cr ? config->cr : 1;
     return bramble_calculate_airtime_us(frame_bytes, sf, bw, cr);
+}
+
+uint32_t radio_frame_airtime_ms(const radio_config_t* config, uint16_t frame_bytes) {
+    uint32_t us = radio_frame_airtime_us(config, frame_bytes);
+    uint32_t ms = (us + 999u) / 1000u;
+    return ms ? ms : 1u;
 }
 
 uint64_t radio_preamble_us(const radio_config_t* config) {
@@ -305,6 +314,11 @@ void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node
     tx_node->tx_busy_until_us = air_end;
     tx_node->airtime_tx_us += toa_us;
     metrics->airtime_total_us += toa_us;
+    /* Per-type ToA (Task 4): same toa_us the channel/collision model above
+     * just used, charged once per actual (post-budget-gate) transmission,
+     * since sim_radio_broadcast is the single chokepoint every TX site
+     * (beacon, RREQ/RREP/RERR, DATA, receipts) converges through. */
+    metrics_record_tx_airtime(metrics, pkt->pkt_type, toa_us);
 
     if (radio->collisions_enabled) {
         channel_log_add(&radio->channel, tx_node->addr, tx_node->x, tx_node->y, air_start, air_end,

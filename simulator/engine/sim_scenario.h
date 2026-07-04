@@ -21,6 +21,10 @@ typedef struct {
     radio_config_t* radio;
     event_queue_t* events;
     pcg32_state_t* rng;
+    /* Beacon interval policy (sim_node.h sim_beacon_policy_t), shared by
+     * every node in the scenario; defaults to firmware's shipped fixed-60s
+     * config if the scenario has no "beacon" block. */
+    sim_beacon_policy_t beacon;
 } scenario_t;
 
 bool scenario_load_file(const char* path, scenario_t* scenario);
