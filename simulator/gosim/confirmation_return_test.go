@@ -33,17 +33,25 @@ import (
 // This test also covers the Task 4 brief's ACK-loss fallback ("drop the
 // first ACK, assert retry eventually yields DELIVERED; if Task 6 [re-ACK on
 // duplicate DATA] not yet done, assert at least that the reverse route
-// exists and a re-sent ACK would route"). Task 6 has not landed yet, and
-// the sim harness has no scenario primitive to selectively drop a single
-// in-flight packet (only a global radio.loss_pct), so a literal "drop the
-// first ACK, observe a second one arrive" run is not constructible here.
-// Per the brief's explicit fallback, the assertions below instead prove the
-// weaker, still-load-bearing claim directly off this same run: every relay
-// on the forward path (B, C) installs a reverse route to A as a side
-// effect of A's DATA transiting it, BEFORE any delivery receipt is ever
-// sent. That route does not depend on a receipt having arrived, which is
-// exactly why it would still be there for a retried/re-sent confirmation
-// even if the first attempt were lost.
+// exists and a re-sent ACK would route"). Task 6 has since landed on the
+// firmware side (main/mesh_task.c: a duplicate unicast DATA whose
+// (src_addr, packet_id) was already delivered locally now re-sends the ACK
+// instead of being silently dropped -- see components/dedup's
+// dedup_contains and test_dedup.c's
+// test_delivered_dedup_enables_reack_without_redelivery), but the sim
+// harness still has no scenario primitive to selectively drop a single
+// in-flight packet (only a global radio.loss_pct; gosim also does not
+// dedup unicast DATA at the destination at all -- see bridge.c's dedup
+// comment -- so it never had this gap to begin with, and there is nothing
+// for gosim to reproduce here), so a literal "drop the first ACK, observe a
+// second one arrive" run is still not constructible here. Per the brief's
+// explicit fallback, the assertions below instead prove the weaker,
+// still-load-bearing claim directly off this same run: every relay on the
+// forward path (B, C) installs a reverse route to A as a side effect of
+// A's DATA transiting it, BEFORE any delivery receipt is ever sent. That
+// route does not depend on a receipt having arrived, which is exactly why
+// it would still be there for a retried/re-sent confirmation even if the
+// first attempt were lost.
 //
 // (These fallback assertions are folded into this same test, reusing one
 // runScenarioHeadless call, rather than a second scenario-level test: the

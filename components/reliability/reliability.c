@@ -26,6 +26,10 @@ uint32_t tier_base_delay_ms(uint8_t tier) {
     }
 }
 
+uint8_t msg_tier_for_send(bool is_key_exchange) {
+    return is_key_exchange ? MSG_TIER_CRITICAL : MSG_TIER_NORMAL;
+}
+
 void pending_ack_init(pending_ack_table_t* table) { memset(table, 0, sizeof(*table)); }
 
 int pending_ack_add(pending_ack_table_t* table, uint32_t packet_id, uint32_t dest_addr,
