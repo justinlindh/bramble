@@ -21,11 +21,18 @@ static void purge_stale(timesync_state_t* ts, uint32_t local_now_ms) {
     ts->pending_count = write;
 }
 
-/* Count distinct source addresses in pending pool */
-static int count_distinct_sources(const timesync_state_t* ts) {
+/* Count distinct source addresses among ESTABLISHED entries in the pending
+ * pool. Only established sources count toward the pre-commit corroboration
+ * quorum (ws 1.3c, NEW-SEC-4 mitigation): a non-established entry can still
+ * sit in the pool (and its offset still feeds compute_weighted_offset once
+ * a quorum has committed via the post-sync path), it just doesn't help
+ * reach the FIRST commit. */
+static int count_distinct_established_sources(const timesync_state_t* ts) {
     uint32_t seen[PENDING_POOL_SIZE];
     int n = 0;
     for (int i = 0; i < ts->pending_count; i++) {
+        if (!ts->pending[i].established)
+            continue;
         bool dup = false;
         for (int j = 0; j < n; j++) {
             if (seen[j] == ts->pending[i].source_addr) {
@@ -65,7 +72,7 @@ static int64_t compute_weighted_offset(const timesync_state_t* ts, uint8_t* best
 }
 
 int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t remote_stratum,
-                         uint32_t source_addr, uint32_t local_now_ms) {
+                         uint32_t source_addr, bool source_established, uint32_t local_now_ms) {
     /* Reject if remote stratum is not better than ours (when synchronized) */
     if (ts->synchronized && remote_stratum >= ts->stratum) {
         return -1;
@@ -119,6 +126,7 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
             ts->pending[i].offset_ms = proposed_offset;
             ts->pending[i].stratum = remote_stratum;
             ts->pending[i].timestamp_ms = local_now_ms;
+            ts->pending[i].established = source_established;
             goto check_commit;
         }
     }
@@ -135,6 +143,7 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
             .source_addr = source_addr,
             .timestamp_ms = local_now_ms,
             .stratum = remote_stratum,
+            .established = source_established,
         };
     } else {
         ts->pending[ts->pending_count++] = (timesync_pending_t){
@@ -142,13 +151,17 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
             .source_addr = source_addr,
             .timestamp_ms = local_now_ms,
             .stratum = remote_stratum,
+            .established = source_established,
         };
     }
 
 check_commit:;
-    /* Require corroboration from distinct sources before first sync */
-    int distinct = count_distinct_sources(ts);
-    if (!ts->synchronized && distinct < CORROBORATION_REQUIRED) {
+    /* Require corroboration from distinct ESTABLISHED sources before first
+     * sync (ws 1.3c anti-Sybil lever). Once synchronized, this gate is
+     * skipped entirely (see the outer if), so post-commit re-syncs
+     * (self-heal) are unaffected by source tenure. */
+    int distinct_established = count_distinct_established_sources(ts);
+    if (!ts->synchronized && distinct_established < CORROBORATION_REQUIRED) {
         return 0; /* Accepted but not yet committed */
     }
 
@@ -168,4 +181,6 @@ int64_t timesync_get_network_time(const timesync_state_t* ts, uint32_t local_now
 
 uint8_t timesync_get_stratum(const timesync_state_t* ts) { return ts->stratum; }
 
-bool timesync_is_confident(const timesync_state_t* ts) { return ts->synchronized; }
+bool timesync_is_confident(const timesync_state_t* ts, uint32_t local_now_ms) {
+    return ts->synchronized && (local_now_ms - ts->last_sync_ms) <= CONFIDENCE_MAX_AGE_MS;
+}

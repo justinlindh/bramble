@@ -23,6 +23,8 @@ typedef struct {
     uint8_t airtime_remaining; /* last reported airtime % (from beacon) */
     uint16_t avg_latency_ms;   /* EMA round-trip latency */
     char name[17];             /* node name from beacon (max 16 chars + null) */
+    uint32_t first_seen_ms;    /* timestamp of first beacon from this address (tenure start) */
+    uint16_t beacon_count;     /* beacons received from this address, saturates at 0xFFFF */
 } neighbor_entry_t;
 
 typedef struct {
@@ -36,6 +38,17 @@ int neighbor_update(neighbor_table_t* table, uint32_t addr, int8_t rssi, int8_t 
 neighbor_entry_t* neighbor_lookup(neighbor_table_t* table, uint32_t addr);
 void neighbor_purge(neighbor_table_t* table, uint32_t now_ms);
 int neighbor_count(const neighbor_table_t* table);
+
+/* Tenure thresholds for treating a neighbor as established (ws 1.3c
+ * anti-Sybil lever): sustained presence, not just a single beacon. */
+#define ESTABLISHED_MIN_BEACONS 3
+#define ESTABLISHED_MIN_AGE_MS 300000
+
+/* True iff addr has a table entry with enough beacons over enough elapsed
+ * time to be treated as a trusted corroboration source. A re-added neighbor
+ * (post-purge) starts fresh, since neighbor_update resets tenure on a new
+ * entry. */
+bool neighbor_is_established(const neighbor_table_t* table, uint32_t addr, uint32_t now_ms);
 
 #define MAX_ROUTES 64
 #define ROUTE_ACTIVE_TIMEOUT_MS 300000
