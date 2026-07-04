@@ -687,6 +687,60 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
     }
 }
 
+/* Flooding F1 rebroadcast suppression (gosim-bridge parity with firmware's
+ * channel_flood_note_overheard + s_flood_relay_queue and flood.go's
+ * floodSim.pending): record a node's scheduled relay so a later overheard
+ * duplicate can find and cancel it. */
+static void bridge_flood_pending_add(sim_node_t* rx, uint32_t flood_key) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!rx->flood_pending[i].used) {
+            rx->flood_pending[i].used = true;
+            rx->flood_pending[i].flood_key = flood_key;
+            rx->flood_pending[i].heard = 0;
+            rx->flood_pending[i].canceled = false;
+            return;
+        }
+    }
+    /* Queue full: leave the relay uncancellable (it still fires), matching
+     * firmware's fall-back-to-immediate-relay-when-full posture. */
+}
+
+/* Register one overheard duplicate of flood_key against rx's pending relays;
+ * cancel the matching entry once FLOOD_SUPPRESS_AFTER copies are in. The key
+ * is src-qualified (packet_id ^ orig_sender), so a duplicate from a different
+ * originator never matches. Mirrors channel_flood_note_overheard /
+ * floodSim.noteHeardDuplicate exactly. */
+static void bridge_flood_pending_note_overheard(sim_node_t* rx, uint32_t flood_key) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!rx->flood_pending[i].used || rx->flood_pending[i].flood_key != flood_key ||
+            rx->flood_pending[i].canceled) {
+            continue;
+        }
+        rx->flood_pending[i].heard++;
+        if (rx->flood_pending[i].heard >= FLOOD_SUPPRESS_AFTER) {
+            rx->flood_pending[i].canceled = true;
+        }
+        return;
+    }
+}
+
+/* When rx's relay for flood_key comes due, report whether it was canceled by
+ * overheard copies and release the slot. Returns true iff the caller must
+ * SKIP the send (relay was suppressed). A miss (no matching slot, e.g. queue
+ * was full at schedule time) returns false -> relay fires, matching the
+ * uncancellable fallback in bridge_flood_pending_add. */
+static bool bridge_flood_pending_take_canceled(sim_node_t* rx, uint32_t flood_key) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!rx->flood_pending[i].used || rx->flood_pending[i].flood_key != flood_key) {
+            continue;
+        }
+        bool canceled = rx->flood_pending[i].canceled;
+        rx->flood_pending[i].used = false;
+        return canceled;
+    }
+    return false;
+}
+
 /* Flooding F1 Task 1: the ONE flood relay engine shared by broadcast DATA
  * (always flood-eligible) and, when g_flood_transport_enabled, unicast DATA
  * not addressed to the receiving node. Mirrors main/mesh_task.c's handle_data
@@ -706,6 +760,17 @@ static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
      * path. */
     uint32_t flood_key = hdr->packet_id ^ orig_sender;
     bool is_dup = dedup_check_and_add(&rx->flood_dedup, flood_key, now_ms);
+
+    /* Flooding F1 suppression: unlike firmware, bridge's dispatch-gate dedup
+     * (rx->dedup) is RREQ-only, so a duplicate DATA reaches here every time
+     * with is_dup==true (firmware instead counts these at its s_dedup gate,
+     * see mesh_task.c). This IS the overheard-copy the pending relay counts:
+     * bump heard on the matching src-qualified entry and cancel it once
+     * FLOOD_SUPPRESS_AFTER copies are in. The FIRST copy is not a duplicate
+     * (is_dup false -> schedules below), so it is never counted here. */
+    if (is_dup) {
+        bridge_flood_pending_note_overheard(rx, flood_key);
+    }
 
     /* Non-mutating pre-check against the real BROADCAST-lane airtime budget
      * (tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST),
@@ -734,9 +799,22 @@ static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
         relay_evt.timestamp_us = now_us + (uint64_t)flood.jitter_ms * 1000ULL;
         relay_evt.type = EVT_SEND_PACKET;
         relay_evt.data.packet.src_addr = rx->addr;
+        /* Flooding F1: carry the src-qualified flood_key on the relay event's
+         * otherwise-unused dest_addr field (bridge_handle_flood_relay always
+         * rewrites dest to 0xFFFFFFFF on TX), so the due handler can look up
+         * this node's pending entry and honor a cancellation. gosim DATA has
+         * no wire-embedded src_addr to recompute the key from at due time (the
+         * originator is tracked out-of-band by packet_id), so it must ride the
+         * event. */
+        relay_evt.data.packet.dest_addr = flood_key;
         relay_evt.data.packet.len = len;
         memcpy(relay_evt.data.packet.data, relay_buf, len);
         event_queue_push(events, &relay_evt);
+
+        /* Track the scheduled relay so an overheard duplicate can cancel it
+         * (mirrors firmware's schedule_flood_relay recording flood_key/heard
+         * and flood.go's floodScheduleRelay populating floodSim.pending). */
+        bridge_flood_pending_add(rx, flood_key);
     }
     return is_dup;
 }
@@ -1110,6 +1188,23 @@ void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_co
     sim_node_t* tx = node_array_find_by_addr(nodes, event->data.packet.src_addr);
     if (!tx || !tx->active)
         return;
+
+    /* Flooding F1 rebroadcast suppression: the scheduling side stashed this
+     * relay's src-qualified flood_key on the event's dest_addr field. If
+     * enough OTHER copies were overheard while it waited out its jitter
+     * (FLOOD_SUPPRESS_AFTER), skip the now-redundant send -- exactly what
+     * firmware's process_flood_relay_queue does by finding used==false, and
+     * flood.go's handleFloodRelayDue does via p.canceled. Emit a
+     * flood_relay_suppressed signal so scenarios can prove the cancellation
+     * fired and count it against the model's flood_relays_canceled. */
+    if (bridge_flood_pending_take_canceled(tx, event->data.packet.dest_addr)) {
+        fprintf(stdout,
+                "{\"type\":\"flood_relay_suppressed\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\"}\n",
+                (unsigned long long)event->timestamp_us, tx->id);
+        fflush(stdout);
+        return;
+    }
 
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
