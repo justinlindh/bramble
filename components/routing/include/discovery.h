@@ -58,7 +58,13 @@ bramble_rreq_t rreq_build_originator(uint32_t my_addr, uint32_t dest_addr, uint3
 bramble_rreq_t rreq_forward(const bramble_rreq_t* incoming, uint32_t my_addr, int8_t rx_rssi,
                             int8_t rx_snr);
 bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_addr);
-bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back);
+/* next_hop_back is the frame-routing target (header.dest_addr): the next
+ * physical node this RREP unicasts to, toward the originator. my_addr is
+ * THIS relay's own address, written into next_hop so the receiver installs
+ * a route via the node that actually delivered the RREP (fixes multi-hop
+ * next_hop; see rrep_rx_decide). */
+bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back,
+                            uint32_t my_addr);
 
 /*
  * SEC-H1 (Task 3.2, STAGED, NOT closed: see network_key.h). Authenticates
@@ -74,5 +80,41 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
  */
 void rrep_sign(bramble_rrep_t* r);
 int rrep_verify(const bramble_rrep_t* r);
+
+/* The routing decision an RREP receipt resolves to. Pure and host-testable:
+ * operates only on the already-host-testable routing tables, taking crypto
+ * verification (rrep_verify, control_replay_ok) as done by the caller.
+ *
+ * route_next_hop is rrep->next_hop directly: the node that actually
+ * delivered this RREP, correct at any hop count (see rrep_forward). This
+ * replaced an earlier dest_addr==self_addr ternary that was only correct
+ * one hop from the destination (see the harness design doc).
+ *
+ * install_route is gated on discovery participation: true when we
+ * originated the matching RREQ (pd found) or relayed it (rev found), false
+ * when neither, so an unsolicited RREP (overheard, or forged for a query we
+ * never saw) cannot plant a route. */
+typedef enum {
+    RREP_RX_DROP = 0,
+    RREP_RX_DELIVER,
+    RREP_RX_FORWARD,
+} rrep_rx_action_t;
+
+typedef struct {
+    rrep_rx_action_t action;
+    bool install_route;
+    uint32_t route_dest;
+    uint32_t route_next_hop;
+    uint8_t route_hops;
+    uint8_t route_metric;
+    uint32_t forward_to;   /* RREP_RX_FORWARD: reverse-route prev_hop */
+    uint32_t deliver_dest; /* RREP_RX_DELIVER: pd->dest_addr to flush */
+} rrep_rx_decision_t;
+
+/* self_addr, link_metric (already link-penalized by the caller), and the
+ * node's pending-discovery / reverse-route tables. */
+rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr,
+                                  uint8_t link_metric, pending_discovery_table_t* pd,
+                                  reverse_route_table_t* rev);
 
 #endif

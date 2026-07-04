@@ -113,7 +113,7 @@ void test_three_node_route_discovery(void) {
     bramble_rrep_t rrep_c = rrep_build_destination(&rreq_at_c, ADDR_C);
     TEST_ASSERT_EQUAL(PKT_TYPE_RREP, rrep_c.header.type);
     TEST_ASSERT_EQUAL(ADDR_C, rrep_c.src_addr);
-    TEST_ASSERT_EQUAL(ADDR_B, rrep_c.next_hop);  /* unicast back to prev_hop */
+    TEST_ASSERT_EQUAL(ADDR_C, rrep_c.next_hop);  /* C's own address: first hop toward itself */
 
     /* C serializes and sends RREP toward B */
     uint8_t rrep_buf[RREP_SIZE];
@@ -139,8 +139,8 @@ void test_three_node_route_discovery(void) {
     TEST_ASSERT_NOT_NULL(rr);
     TEST_ASSERT_EQUAL(ADDR_A, rr->prev_hop);
 
-    bramble_rrep_t rrep_fwd = rrep_forward(&rrep_at_b, ADDR_A);
-    TEST_ASSERT_EQUAL(ADDR_A, rrep_fwd.next_hop);
+    bramble_rrep_t rrep_fwd = rrep_forward(&rrep_at_b, ADDR_A, ADDR_B);
+    TEST_ASSERT_EQUAL(ADDR_B, rrep_fwd.next_hop); /* B's own address: it is the forwarder */
     TEST_ASSERT_EQUAL(ADDR_A, rrep_fwd.header.dest_addr);
 
     uint8_t rrep_buf2[RREP_SIZE];

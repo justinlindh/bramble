@@ -160,19 +160,77 @@ bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_ad
     r.header.packet_id = rreq->query_id;
     r.query_id = rreq->query_id;
     r.src_addr = my_addr;
-    r.next_hop = rreq->prev_hop;
+    /* next_hop carries the FORWARDER's own address, not the frame-routing
+     * target: the destination is its own first hop toward itself. Every
+     * relay hop overwrites this with its own address in rrep_forward, so a
+     * receiver installs next_hop = whoever actually delivered the RREP,
+     * fixing the multi-hop bug (see the harness design doc). */
+    r.next_hop = my_addr;
     r.hop_count = rreq->hop_count + 1;
     r.route_metric = rreq->metric;
     rrep_sign(&r);
     return r;
 }
 
-bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back) {
+bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back,
+                            uint32_t my_addr) {
     /* Copies the whole struct, including auth_hmac, unchanged: only
      * next_hop and header.dest_addr are relay-mutable, exactly the two
-     * fields rrep_sign/rrep_verify exclude from the MAC. */
+     * fields rrep_sign/rrep_verify exclude from the MAC. next_hop becomes
+     * THIS relay's own address (the node the next receiver should install
+     * as its next hop); header.dest_addr stays the frame-routing target
+     * (next_hop_back), unicasting the packet itself toward the originator. */
     bramble_rrep_t r = *incoming;
-    r.next_hop = next_hop_back;
+    r.next_hop = my_addr;
     r.header.dest_addr = next_hop_back;
     return r;
+}
+
+rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr,
+                                  uint8_t link_metric, pending_discovery_table_t* pd,
+                                  reverse_route_table_t* rev) {
+    rrep_rx_decision_t d;
+    memset(&d, 0, sizeof(d));
+
+    /* self_addr is currently unused: it only fed the pre-fix next_hop
+     * ternary, removed now that rrep.next_hop directly carries the
+     * forwarder's address (see rrep_forward/rrep_build_destination). Kept
+     * in the signature since it is part of the documented interface and
+     * callers already pass it. */
+    (void)self_addr;
+
+    /* next_hop is whichever node actually delivered this RREP to us:
+     * rrep_build_destination/rrep_forward write the sender's own address
+     * there on every hop, so this is correct at any hop count, not just one
+     * hop from the destination. */
+    d.route_dest = rrep->src_addr;
+    d.route_next_hop = rrep->next_hop;
+    d.route_hops = rrep->hop_count;
+    d.route_metric = link_metric;
+
+    pending_discovery_t* pd_entry = discovery_lookup_by_query(pd, rrep->query_id);
+    if (pd_entry) {
+        d.install_route = true;
+        d.action = RREP_RX_DELIVER;
+        d.deliver_dest = pd_entry->dest_addr;
+        return d;
+    }
+
+    reverse_route_t* rev_entry = reverse_route_lookup(rev, rrep->query_id);
+    if (rev_entry) {
+        d.install_route = true;
+        d.action = RREP_RX_FORWARD;
+        d.forward_to = rev_entry->prev_hop;
+        return d;
+    }
+
+    /* Neither an outstanding discovery (we're not the originator) nor a
+     * reverse route (we never relayed the matching RREQ) for this
+     * query_id: we did not participate in this discovery, so the RREP is
+     * unsolicited, whether overheard or forged for a query we never saw.
+     * Drop before install so a bystander or forger cannot plant a route
+     * (closes the unsolicited-RREP residual). */
+    d.install_route = false;
+    d.action = RREP_RX_DROP;
+    return d;
 }
