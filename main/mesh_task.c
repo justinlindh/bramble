@@ -27,6 +27,7 @@
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
+#include "forwarding.h"
 #include "reliability.h"
 #include "rerr_ack_fastfail.h"
 #include "battery.h"
@@ -2275,22 +2276,13 @@ static void send_rrep(const bramble_rrep_t* rrep) {
 }
 
 static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
-    bramble_rerr_t rerr = {
-        .header =
-            {
-                .version = BRAMBLE_VERSION,
-                .type = PKT_TYPE_RERR,
-                .flags = 0,
-                /* Per-hop budget; the route-match chain bounds teardown depth
-                 * because matching relays re-originate with a fresh limit. */
-                .hop_limit = ROUTE_HOP_LIMIT_MAX,
-                .dest_addr = 0xFFFFFFFF, /* broadcast */
-                .packet_id = next_packet_id(),
-            },
-        .reporter_addr = s_identity->address,
-        .broken_dest = broken_dest,
-        .broken_next_hop = broken_next_hop,
-    };
+    /* components/routing/forwarding.c: rerr_build fills version/type/flags/
+     * hop_limit/dest_addr/reporter_addr/broken_dest/broken_next_hop
+     * identically to the struct literal this replaced. packet_id and seq
+     * are this node's own counters (rerr_build leaves them zeroed since it
+     * owns no sequencing state), so they're set here same as before. */
+    bramble_rerr_t rerr = rerr_build(s_identity->address, broken_dest, broken_next_hop);
+    rerr.header.packet_id = next_packet_id();
     /* ws 1.3b: every re-origination draws its own fresh seq (unlike RREP's
      * origin-stable seq, RERR's seq is per-hop, matching reporter_addr).
      * Fail-closed: no seq means no RERR goes out this call; the caller's
@@ -2587,13 +2579,13 @@ static void handle_rerr(const uint8_t* data, uint8_t len) {
         return;
     }
 
-    /* Invalidate route if it uses the broken next hop */
-    route_entry_t* route = route_lookup(&s_routes, rerr.broken_dest);
-    bool route_marked_broken = false;
-    if (route && route->next_hop == rerr.broken_next_hop) {
-        route->state = ROUTE_BROKEN;
-        route->fail_count++;
-        route_marked_broken = true;
+    /* Invalidate route if it uses the broken next hop. components/routing/
+     * forwarding.c: rerr_handle does the route_lookup + state/fail_count
+     * mutation (identical to the inline logic this replaced) and reports
+     * back whether it actually marked a route broken, since only mesh_task
+     * needs that to decide on re-origination and logging. */
+    bool route_marked_broken = rerr_handle(&s_routes, &rerr);
+    if (route_marked_broken) {
         ESP_LOGW(TAG, "Route to %08" PRIX32 " marked BROKEN", rerr.broken_dest);
 
         /* Forward RERR if hop limit allows */
@@ -2665,14 +2657,31 @@ static void mailbox_flush_for(uint32_t dest_addr) {
 static void mailbox_expire(uint32_t t) { mailbox_purge_expired(&s_mailbox, t); }
 
 static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_header_t* header) {
-    if (header->hop_limit <= 1) {
-        ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
-        return;
-    }
+    /* components/routing/forwarding.c: forward_data() owns the route-lookup
+     * plus hop-limit-decrement decision (the same function gosim's bridge.c
+     * already calls, and test_forwarding.c already exercises). Task 2 (ws
+     * 1.4): mesh_task keeps only its own side effects around the decision:
+     * mailbox-store-on-no-route, RERR-on-no-route, the actual TX, and stats.
+     * Two behavioral deltas came along for the ride, both resolved by
+     * adopting the tested/shipped-by-gosim behavior rather than silently
+     * keeping the untested one (see task-2-report.md for the full list):
+     *   - a STALE route used to forward is now promoted to ACTIVE with a
+     *     refreshed last_confirmed (forward_data_packet never did this);
+     *   - route last_used/use_count are now bumped at decision time
+     *     (inside forward_data()) rather than only after a successful
+     *     mesh_tx, so a budget-denied forward still counts as "used". */
+    uint8_t hop_limit = header->hop_limit;
+    forward_result_t fwd = forward_data(&s_routes, header->dest_addr, &hop_limit, now_ms());
 
-    /* Look up route to destination */
-    route_entry_t* route = route_lookup(&s_routes, header->dest_addr);
-    if (!route || route->state == ROUTE_BROKEN) {
+    if (!fwd.should_send) {
+        if (!fwd.route_error) {
+            /* Hop limit already exhausted: silent drop, no mailbox/RERR,
+             * matching the pre-refactor behavior exactly. */
+            ESP_LOGD(TAG, "Data packet hop limit reached, dropping");
+            return;
+        }
+
+        /* No usable route (unknown dest or ROUTE_BROKEN). */
         /* Extract src_addr from the data packet header area (offset HEADER_SIZE) */
         uint32_t fwd_src_addr = 0;
         if (len >= HEADER_SIZE + 4) {
@@ -2681,7 +2690,7 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
         /* If mailbox enabled, store for later delivery instead of dropping */
         if (s_mailbox_enabled &&
             mesh_mailbox_store(fwd_src_addr, header->dest_addr, data, len, header->packet_id)) {
-            ESP_LOGI(TAG, "No route to %08" PRIX32 " — stored in mailbox", header->dest_addr);
+            ESP_LOGI(TAG, "No route to %08" PRIX32 ": stored in mailbox", header->dest_addr);
         } else {
             ESP_LOGW(TAG, "No route to forward data for %08" PRIX32, header->dest_addr);
             send_rerr(header->dest_addr, s_identity->address);
@@ -2689,26 +2698,21 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
         return;
     }
 
-    /* Rebuild header with decremented hop limit */
+    /* Rebuild header with the hop limit forward_data() already decremented */
     uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
     memcpy(buf, data, len);
 
     bramble_header_t fwd_hdr = *header;
-    fwd_hdr.hop_limit--;
+    fwd_hdr.hop_limit = hop_limit;
     bramble_header_serialize(&fwd_hdr, buf, HEADER_SIZE);
 
     ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32, header->dest_addr,
-             route->next_hop);
+             fwd.next_hop);
     /* Deny behavior: relayed traffic is dropped when the NORMAL lane is
      * exhausted; the originator's ACK-driven retries cover recovery. */
     if (mesh_tx(buf, len, TX_KIND_FORWARD) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG, "Forward denied by airtime budget for %08" PRIX32, header->dest_addr);
-        return;
     }
-
-    /* Update route usage */
-    route->last_used = now_ms();
-    route->use_count++;
 }
 
 static void mesh_process_rx_packet(const rx_packet_t* pkt) {
