@@ -276,6 +276,36 @@ sim_event_t bridge_make_receive_packet_event(uint64_t ts_us, uint32_t src_addr, 
     return e;
 }
 
+/*
+ * bridge_make_flood_relay_event (Phase 2 Task 0, managed-flooding routing
+ * mode): builds a due-timestamped EVT_SEND_PACKET carrying a scheduled
+ * rebroadcast for gosim's Go-only flood.go, exactly the same event-union
+ * construction problem bridge_make_flood_relay_event's Task 5 sibling
+ * (_handle_data's broadcast branch) solves inline in C: cgo cannot set
+ * fields inside a C union from Go, so any code building a sim_event_t
+ * whose payload is the packet union needs a tiny C constructor. Unlike
+ * Task 5's relay (which is fired by bridge_handle_flood_relay, the AODV
+ * DATA-broadcast path), this event is only ever produced and consumed by
+ * flood.go's own EVT_SEND_PACKET handler (dispatchEvent branches on
+ * routing mode), so node_addr/frame are flood.go's own wire format, not
+ * bramble_header_t. data.packet.src_addr carries the RELAYING node's own
+ * address (which node this rebroadcast is due on), matching the Task 5
+ * convention.
+ */
+sim_event_t bridge_make_flood_relay_event(uint64_t due_us, uint32_t node_addr, const uint8_t* frame,
+                                          uint16_t len) {
+    sim_event_t e;
+    memset(&e, 0, sizeof(e));
+    e.type = EVT_SEND_PACKET;
+    e.timestamp_us = due_us;
+    e.data.packet.src_addr = node_addr;
+    if (len > sizeof(e.data.packet.data))
+        len = (uint16_t)sizeof(e.data.packet.data);
+    memcpy(e.data.packet.data, frame, len);
+    e.data.packet.len = len;
+    return e;
+}
+
 /* ─── Message tracking ─────────────────────────────────────────────────── */
 
 void bridge_msg_track_init(msg_tracker_t* track, int count) {

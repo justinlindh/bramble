@@ -24,6 +24,11 @@ static const char* pkt_type_name(uint8_t t) {
         return "BEACON";
     case PKT_TYPE_DATA:
         return "DATA";
+    case PKT_TYPE_ACK:
+        /* Phase 2 Task 0: also the flood-comparison baseline's flooded ACK
+         * (gosim/flood.go), not just a firmware ACK use; kept as one label
+         * since both are genuinely PKT_TYPE_ACK on the wire. */
+        return "ACK";
     default:
         return "UNKNOWN";
     }

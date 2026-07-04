@@ -139,6 +139,16 @@ def build_scenario(args):
     if args.seed is not None:
         scenario["seed"] = args.seed
 
+    # Phase 2 Task 0 (flood-comparison baseline): "routing" selects gosim's
+    # routing mode ("reactive", the default, or "flood", the Meshtastic-
+    # style managed-flooding mode, simulator/gosim/flood.go); omitted unless
+    # explicitly given, same emit-only-if-explicit rule as everything else
+    # in this generator, so existing scenarios' interpretation never changes.
+    if args.routing is not None:
+        scenario["routing"] = args.routing
+    if args.flood_hop_limit is not None:
+        scenario["flood_hop_limit"] = args.flood_hop_limit
+
     beacon = {}
     if args.beacon_adaptive is not None:
         beacon["adaptive"] = bool(args.beacon_adaptive)
@@ -174,6 +184,13 @@ def parse_args(argv):
     p.add_argument("--duty-cycle-pct", type=float, default=None,
                   help="optional regulatory duty-cycle cap 0-100; omitted (unlimited, today's "
                        "behavior) unless given")
+    p.add_argument("--routing", choices=["reactive", "flood"], default=None,
+                  help="gosim routing mode; omitted (sim default: reactive, Bramble's real "
+                       "firmware AODV path) unless given. 'flood' selects the Phase 2 Task 0 "
+                       "Meshtastic-style managed-flooding sim-layer mode (simulator/gosim/flood.go)")
+    p.add_argument("--flood-hop-limit", type=int, default=None,
+                  help="flood mode's hop_limit; omitted (sim default: 3, Meshtastic's shipped "
+                       "default) unless given. Ignored when --routing is not 'flood'")
     p.add_argument("--traffic-msgs-per-min", type=float, default=LEGACY_TRAFFIC_MSGS_PER_MIN,
                   help=f"message generation rate (default: {LEGACY_TRAFFIC_MSGS_PER_MIN})")
     p.add_argument("--duration-s", type=int, default=LEGACY_DURATION_S,
