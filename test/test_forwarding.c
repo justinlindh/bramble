@@ -63,7 +63,8 @@ void test_rerr_build_and_handle(void) {
     TEST_ASSERT_EQUAL(0xCCCC, rerr.broken_dest);
     TEST_ASSERT_EQUAL(0xBBBB, rerr.broken_next_hop);
 
-    rerr_handle(&rt, &rerr);
+    bool marked = rerr_handle(&rt, &rerr);
+    TEST_ASSERT_TRUE(marked);
     route_entry_t* e = route_lookup(&rt, 0xCCCC);
     TEST_ASSERT_EQUAL(ROUTE_BROKEN, e->state);
 }
@@ -71,9 +72,22 @@ void test_rerr_build_and_handle(void) {
 void test_rerr_wrong_next_hop_ignored(void) {
     route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
     bramble_rerr_t rerr = rerr_build(0xAAAA, 0xCCCC, 0x9999); /* wrong next_hop */
-    rerr_handle(&rt, &rerr);
+    bool marked = rerr_handle(&rt, &rerr);
+    TEST_ASSERT_FALSE(marked);
     route_entry_t* e = route_lookup(&rt, 0xCCCC);
     TEST_ASSERT_EQUAL(ROUTE_ACTIVE, e->state); /* unchanged */
+}
+
+/* Task 2: mesh_task.c's handle_rerr used to bump fail_count itself right
+ * alongside marking a route broken. That side effect now lives in
+ * rerr_handle so firmware and gosim both get it instead of only whichever
+ * hand-copy happened to remember it. */
+void test_rerr_handle_bumps_fail_count(void) {
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    bramble_rerr_t rerr = rerr_build(0xAAAA, 0xCCCC, 0xBBBB);
+    rerr_handle(&rt, &rerr);
+    route_entry_t* e = route_lookup(&rt, 0xCCCC);
+    TEST_ASSERT_EQUAL(1, e->fail_count);
 }
 
 int main(void) {
@@ -85,5 +99,6 @@ int main(void) {
     RUN_TEST(test_forward_broken_after_failures);
     RUN_TEST(test_rerr_build_and_handle);
     RUN_TEST(test_rerr_wrong_next_hop_ignored);
+    RUN_TEST(test_rerr_handle_bumps_fail_count);
     return UNITY_END();
 }

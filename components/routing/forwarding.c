@@ -60,9 +60,12 @@ bramble_rerr_t rerr_build(uint32_t my_addr, uint32_t broken_dest, uint32_t broke
     return e;
 }
 
-void rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr) {
+bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr) {
     route_entry_t* r = route_lookup(table, rerr->broken_dest);
     if (r && r->next_hop == rerr->broken_next_hop) {
         r->state = ROUTE_BROKEN;
+        r->fail_count++;
+        return true;
     }
+    return false;
 }
