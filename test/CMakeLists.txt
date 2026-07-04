@@ -199,6 +199,31 @@ target_include_directories(test_unicast_flood PRIVATE
 )
 target_link_libraries(test_unicast_flood ssl crypto)
 
+# Flooding F1 Task 2: flooded-ACK sender-confirmation without routes. Mirrors
+# handle_ack's flood-relay branch + the sender's pending-ack consume path with
+# the real ack_sign/ack_verify, channel_flood_decide, and pending_ack
+# functions (mesh_task.c itself is never host-compiled, same rationale as
+# test_unicast_flood.c / test_data_auth.c).
+add_executable(test_flooded_ack
+    test_flooded_ack.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/reliability.c
+)
+target_include_directories(test_flooded_ack PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
+)
+target_link_libraries(test_flooded_ack ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
