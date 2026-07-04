@@ -188,12 +188,12 @@ void test_unsolicited_rrep_installs_no_route(void) {
     TEST_ASSERT_EQUAL(RREP_RX_DROP, d.action);
 
     route_entry_t* r = route_lookup(&X.routes, ADDR_C);
-    /* BUG (ws-harness): current code installs unconditionally even for an
-     * unsolicited RREP (no pd, no reverse route). Confirmed FAILING against
-     * the correct assertion (TEST_ASSERT_NULL(r)) before this line was
-     * flipped; see task-2-report.md. Task 4 gates install on pd/rev
-     * participation, at which point this flips back to TEST_ASSERT_NULL(r). */
-    TEST_ASSERT_NOT_NULL(r);
+    /* Fixed (Task 4): X never participated in this discovery (no pd, no
+     * reverse route), so rrep_rx_decide's participation gate drops before
+     * install. Confirmed this assertion FAILED (TEST_ASSERT_NOT_NULL(r)
+     * before this line was flipped) against pre-fix code; see
+     * task-2-report.md. */
+    TEST_ASSERT_NULL(r);
 }
 
 int main(void) {

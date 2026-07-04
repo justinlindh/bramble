@@ -267,7 +267,7 @@ void test_rrep_rx_decide_intermediate_forwards(void) {
     TEST_ASSERT_EQUAL(180, d.route_metric);
 }
 
-void test_rrep_rx_decide_unsolicited_drops_but_still_installs(void) {
+void test_rrep_rx_decide_unsolicited_drops_without_install(void) {
     bramble_rrep_t rrep;
     memset(&rrep, 0, sizeof(rrep));
     rrep.header.dest_addr = ADDR_A;
@@ -276,13 +276,12 @@ void test_rrep_rx_decide_unsolicited_drops_but_still_installs(void) {
     rrep.next_hop = ADDR_D;
     rrep.hop_count = 1;
 
-    /* No pd, no reverse route for this query: nothing to deliver or forward. */
+    /* No pd, no reverse route for this query: we never participated in this
+     * discovery, so the participation gate drops before install. */
     rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 150, &dtbl, &rev_b);
 
     TEST_ASSERT_EQUAL(RREP_RX_DROP, d.action);
-    /* This is the documented current bug: install still runs unconditionally.
-     * A later task gates this on pd/rev participation. */
-    TEST_ASSERT_TRUE(d.install_route);
+    TEST_ASSERT_FALSE(d.install_route);
     TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
     TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop);
     TEST_ASSERT_EQUAL(1, d.route_hops);
@@ -401,7 +400,7 @@ int main(void) {
     RUN_TEST(test_rrep_forward);
     RUN_TEST(test_rrep_rx_decide_originator_delivers);
     RUN_TEST(test_rrep_rx_decide_intermediate_forwards);
-    RUN_TEST(test_rrep_rx_decide_unsolicited_drops_but_still_installs);
+    RUN_TEST(test_rrep_rx_decide_unsolicited_drops_without_install);
     RUN_TEST(test_three_node_discovery);
     RUN_TEST(test_retry_discovery_succeeds_through_warm_dedup);
     return UNITY_END();
