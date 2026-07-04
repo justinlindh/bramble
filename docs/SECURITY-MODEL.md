@@ -789,6 +789,51 @@ a discovered route) to capacity pressure on a *different* destination: a
 currently-active, HMAC-gated discovered route can no longer be evicted from a
 full table just to make room for a new breadcrumb.
 
+### Optional flooding transport: authenticated flood, confirmed delivery, authenticated suppression (Flooding F1)
+
+Behind a single runtime toggle (`s_flood_transport` in `main/mesh_task.c`,
+default `false`, so reactive routing is the shipping default and this whole
+subsection is off the path unless enabled), Bramble can carry unicast DATA and
+its ACK over the same hop-limited, source-qualified-deduplicated,
+airtime-budget-gated flood engine that broadcast/channel DATA already uses
+(`channel_flood_decide`, `components/routing/channel_flood.c`). Three security
+properties matter here.
+
+**The flood is authenticated.** Every flooded DATA frame carries the wire-v4
+`auth_hmac` (the DATA reverse-route section above), verified by
+`data_auth_verify` before a relay will rebroadcast it, so only a network-key
+holder's traffic propagates. The flooded ACK is verified twice before relay:
+`ack_verify` (network-key MAC) and the ws-1.3b per-message freshness check
+against the control-replay window (the control-plane section above), so a
+forged or replayed ACK is neither relayed nor allowed to confirm anything.
+
+**Confirmed delivery without routes.** The flooded ACK gives the original
+sender sender-confirmation with no route table consulted anywhere on the path:
+the sender correlates a received ACK to a pending message purely by
+`ack_packet_id`. This is a reliability property, but it is security-relevant
+because the confirmation a sender acts on is one that cleared the two checks
+above, not an unauthenticated wire echo.
+
+**Rebroadcast suppression counts only authenticated copies.** A node cancels
+its own still-jittering flood relay once it overhears `FLOOD_SUPPRESS_AFTER`
+(= 2) other copies of the same frame (matched on `packet_id XOR src_addr`). The
+dispatch-gate deduplicator inserts a frame's dedup key on its **first** copy,
+before that copy's MAC is verified, so a keyless attacker could otherwise replay
+garbage-MAC duplicates carrying a matching plaintext `packet_id`/`src_addr`,
+land in the duplicate branch, and drive a legitimate node's overheard count to
+the threshold, cancelling its genuine pending relay and punching a targeted
+coverage hole in a sparse mesh. Both suppression counters are therefore gated on
+verifying each overheard copy's network-key MAC first (`data_auth_verify` for
+DATA, `bramble_ack_deserialize` + `ack_verify` for the flooded ACK) before it
+may increment `heard` or cancel a relay (`main/mesh_task.c`'s dispatch gate;
+`channel_flood_note_overheard`). This costs one HMAC (plus one deserialize for
+the ACK) per overheard flood duplicate, the same bar the re-ACK carve-out above
+already pays, and closes the *keyless* suppression-cancellation attack, not the
+keyed insider (residuals below). The gosim bridge counts overheard copies
+without this gate, but it models only honest, key-holding nodes and never
+injects forged frames, so the firmware MAC gate is the load-bearing fix and the
+bridge stays a faithful honest-node model.
+
 ## 4. Known gaps in the current implementation
 
 Facts of the code on `main` today. Each entry shrinks or disappears in the
@@ -1139,6 +1184,34 @@ These do not go away when section 4 empties out.
   least-recently-used) before ever considering a `ROUTE_SRC_DISCOVERED` one,
   refusing a breadcrumb install outright rather than evicting a discovered
   route when no breadcrumb victim exists.
+- **Optional flooding transport (section 3): accepted operational residuals.**
+  These are efficiency/availability limits of the opt-in flooding transport
+  (`s_flood_transport`, default off), not confidentiality or integrity holes;
+  the authenticated-flood, confirmed-delivery, and authenticated-suppression
+  properties in section 3 hold whenever the toggle is on.
+  - **Suppression only fires on a fast radio profile.** Cancelling a pending
+    relay requires overhearing enough other copies before the local relay's
+    jitter elapses, which only happens when the jitter window exceeds a frame's
+    time-on-air. At the long-range default (SF10 / 125 kHz) air time exceeds
+    jitter, so suppression does not fire and the flood relays unsuppressed. This
+    ties transport efficiency to matching the radio profile to a dense
+    deployment (the SF-to-density deployment guidance).
+  - **Retry re-floods the same `packet_id`,** which is suppressed at every relay
+    still holding the 60-second dedup key for that frame, so retry mainly helps
+    the single-hop / lost-ACK case, not multi-hop propagation failures. An F2
+    tuning item.
+  - **A full flood relay queue (capacity 8) falls back to immediate,
+    uncancellable transmission,** so under burst load suppression silently stops
+    and the flood reverts to unsuppressed rebroadcast.
+  - **Suppression is global; only the unicast extension is toggled.** The
+    broadcast/channel flood suppression applies regardless of the toggle;
+    `s_flood_transport` gates only the unicast DATA + flooded-ACK extension, and
+    the reactive routing path is entirely unchanged when it is off.
+  - **Keyed-insider residual unchanged.** A network-key holder can still forge a
+    flood frame or ACK (every MAC here proves "signed by a holder", not "by a
+    specific node"); replay of a captured valid frame is caught by the
+    control-replay window, but insider forgery is inherent to a shared symmetric
+    key (the insider-forgery residual above).
 
 ## 6. How to think about Bramble's privacy
 
