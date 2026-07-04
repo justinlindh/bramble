@@ -7,11 +7,11 @@
 
 typedef struct {
     uint32_t addr;
-    uint8_t  hops;
-    int16_t  rssi;
-    int8_t   snr;
+    uint8_t hops;
+    int16_t rssi;
+    int8_t snr;
     uint32_t latency_ms;
-    uint8_t  seen_round_mask;
+    uint8_t seen_round_mask;
 } probe_result_t;
 
 /* Upsert one probe-ACK observation keyed by responder addr: latest hops and
@@ -23,8 +23,8 @@ typedef struct {
  * If PROBE_SWEEP_ROUNDS ever exceeds 8, `1u << (probe_round - 1)` into the
  * uint8_t seen_round_mask overflows; that is pre-existing and preserved
  * verbatim. */
-void probe_results_upsert(probe_result_t *results, int *count, int max_results,
-                          uint32_t resp_addr, uint8_t hops, int16_t rssi, int8_t snr,
-                          uint32_t latency_ms, uint8_t probe_round);
+void probe_results_upsert(probe_result_t* results, int* count, int max_results, uint32_t resp_addr,
+                          uint8_t hops, int16_t rssi, int8_t snr, uint32_t latency_ms,
+                          uint8_t probe_round);
 
 #endif /* PROBE_RESULTS_H */

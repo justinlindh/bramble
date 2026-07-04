@@ -35,21 +35,27 @@ void test_double_dh_key_agreement(void) {
     uint32_t min_addr = alice.address < bob.address ? alice.address : bob.address;
     uint32_t max_addr = alice.address < bob.address ? bob.address : alice.address;
     uint8_t info[8];
-    info[0] = (min_addr >> 24) & 0xFF; info[1] = (min_addr >> 16) & 0xFF;
-    info[2] = (min_addr >> 8) & 0xFF;  info[3] = min_addr & 0xFF;
-    info[4] = (max_addr >> 24) & 0xFF; info[5] = (max_addr >> 16) & 0xFF;
-    info[6] = (max_addr >> 8) & 0xFF;  info[7] = max_addr & 0xFF;
+    info[0] = (min_addr >> 24) & 0xFF;
+    info[1] = (min_addr >> 16) & 0xFF;
+    info[2] = (min_addr >> 8) & 0xFF;
+    info[3] = min_addr & 0xFF;
+    info[4] = (max_addr >> 24) & 0xFF;
+    info[5] = (max_addr >> 16) & 0xFF;
+    info[6] = (max_addr >> 8) & 0xFF;
+    info[7] = max_addr & 0xFF;
 
     uint8_t session_key_a[32], session_key_b[32];
-    const char *salt = "bramble-dm-v1";
+    const char* salt = "bramble-dm-v1";
 
     /* Bob constructs same ikm */
     uint8_t ikm_b[64];
     memcpy(ikm_b, ss1_b, 32);
     memcpy(ikm_b + 32, ss2_b, 32);
 
-    TEST_ASSERT_EQUAL(0, crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), ikm, 64, info, 8, session_key_a, 32));
-    TEST_ASSERT_EQUAL(0, crypto_hkdf_sha256((const uint8_t *)salt, strlen(salt), ikm_b, 64, info, 8, session_key_b, 32));
+    TEST_ASSERT_EQUAL(0, crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, 64, info, 8,
+                                            session_key_a, 32));
+    TEST_ASSERT_EQUAL(0, crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm_b, 64, info, 8,
+                                            session_key_b, 32));
     TEST_ASSERT_EQUAL_MEMORY(session_key_a, session_key_b, 32);
 }
 

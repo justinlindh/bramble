@@ -6,13 +6,11 @@ static neighbor_table_t tbl;
 void setUp(void) { neighbor_init(&tbl); }
 void tearDown(void) {}
 
-void test_neighbor_init_empty(void) {
-    TEST_ASSERT_EQUAL(0, neighbor_count(&tbl));
-}
+void test_neighbor_init_empty(void) { TEST_ASSERT_EQUAL(0, neighbor_count(&tbl)); }
 
 void test_neighbor_add_and_lookup(void) {
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
-    neighbor_entry_t *e = neighbor_lookup(&tbl, 0xAABB);
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL(-70, e->rssi);
     TEST_ASSERT_EQUAL(8, e->snr);
@@ -23,7 +21,7 @@ void test_neighbor_update_existing(void) {
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
     neighbor_update(&tbl, 0xAABB, -80, 5, 0x1234, 2000);
     TEST_ASSERT_EQUAL(1, neighbor_count(&tbl));
-    neighbor_entry_t *e = neighbor_lookup(&tbl, 0xAABB);
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
     TEST_ASSERT_EQUAL(-80, e->rssi);
     TEST_ASSERT_EQUAL(5, e->snr);
     TEST_ASSERT_EQUAL(2000, e->last_heard);
@@ -52,7 +50,7 @@ void test_neighbor_full_evicts_oldest(void) {
 
 void test_neighbor_new_has_fresh_tenure(void) {
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 1000);
-    neighbor_entry_t *e = neighbor_lookup(&tbl, 0xAABB);
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL(1, e->beacon_count);
     TEST_ASSERT_EQUAL(1000, e->first_seen_ms);
@@ -67,7 +65,7 @@ void test_neighbor_becomes_established_after_beacons_and_age(void) {
 
     /* Third beacon arrives right at the age threshold: now both conditions hold */
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, ESTABLISHED_MIN_AGE_MS);
-    neighbor_entry_t *e = neighbor_lookup(&tbl, 0xAABB);
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
     TEST_ASSERT_EQUAL(3, e->beacon_count);
     TEST_ASSERT_TRUE(neighbor_is_established(&tbl, 0xAABB, ESTABLISHED_MIN_AGE_MS));
 }
@@ -93,7 +91,7 @@ void test_neighbor_is_established_unknown_addr_false(void) {
 
 void test_neighbor_beacon_count_saturates(void) {
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 0);
-    neighbor_entry_t *e = neighbor_lookup(&tbl, 0xAABB);
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 0xAABB);
     e->beacon_count = 0xFFFF;
     neighbor_update(&tbl, 0xAABB, -70, 8, 0x1234, 100);
     TEST_ASSERT_EQUAL(0xFFFF, e->beacon_count);
@@ -112,7 +110,7 @@ void test_neighbor_purge_then_reappear_resets_tenure(void) {
 
     /* Reappears: tenure must start fresh, not carry over */
     neighbor_update(&tbl, 1, -70, 8, 0, purge_time);
-    neighbor_entry_t *e = neighbor_lookup(&tbl, 1);
+    neighbor_entry_t* e = neighbor_lookup(&tbl, 1);
     TEST_ASSERT_EQUAL(1, e->beacon_count);
     TEST_ASSERT_EQUAL(purge_time, e->first_seen_ms);
     TEST_ASSERT_FALSE(neighbor_is_established(&tbl, 1, purge_time));

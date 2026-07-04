@@ -26,9 +26,9 @@
 void setUp(void);
 void tearDown(void) {}
 
-#define BEACON_WIRE_LEN 40u          /* base beacon + short name */
-#define CONFIGURED_INTERVAL 60000u   /* BEACON_INTERVAL_MS default */
-#define NEIGHBOR_EXPIRY 600000u      /* routing.h NEIGHBOR_EXPIRY_MS */
+#define BEACON_WIRE_LEN 40u        /* base beacon + short name */
+#define CONFIGURED_INTERVAL 60000u /* BEACON_INTERVAL_MS default */
+#define NEIGHBOR_EXPIRY 600000u    /* routing.h NEIGHBOR_EXPIRY_MS */
 
 static struct {
     uint8_t sf;
@@ -88,15 +88,12 @@ void test_beacon_demand_fits_lane_at_every_sf_and_region(void) {
                 gate_for(plan, sfs[s], peers[p]);
                 uint32_t cost = tx_gate_cost_ms(&s_gate, BEACON_WIRE_LEN);
                 uint32_t min_iv = tx_gate_min_beacon_interval_ms(&s_gate);
-                uint32_t effective =
-                    (min_iv > CONFIGURED_INTERVAL) ? min_iv : CONFIGURED_INTERVAL;
+                uint32_t effective = (min_iv > CONFIGURED_INTERVAL) ? min_iv : CONFIGURED_INTERVAL;
 
-                uint64_t demand_per_hr =
-                    ((uint64_t)cost * AIRTIME_REFILL_INTERVAL_MS) / effective;
-                uint64_t lane_share =
-                    ((uint64_t)s_gate.budget.max_ms[AIRTIME_IDX_BROADCAST] *
-                     TX_GATE_BEACON_LANE_PCT) /
-                    100u;
+                uint64_t demand_per_hr = ((uint64_t)cost * AIRTIME_REFILL_INTERVAL_MS) / effective;
+                uint64_t lane_share = ((uint64_t)s_gate.budget.max_ms[AIRTIME_IDX_BROADCAST] *
+                                       TX_GATE_BEACON_LANE_PCT) /
+                                      100u;
 
                 uint64_t lane_full = s_gate.budget.max_ms[AIRTIME_IDX_BROADCAST];
                 char msg[96];
@@ -174,8 +171,7 @@ void test_beacons_never_denied_under_broadcast_flood(void) {
         if (t >= next_beacon) {
             int rc = tx_gate_transmit(&s_gate, beacon, sizeof(beacon), TX_KIND_BEACON);
             char msg[64];
-            snprintf(msg, sizeof(msg), "beacon denied at t=%u (n=%d)", (unsigned)t,
-                     beacons_sent);
+            snprintf(msg, sizeof(msg), "beacon denied at t=%u (n=%d)", (unsigned)t, beacons_sent);
             TEST_ASSERT_EQUAL_INT_MESSAGE(TX_GATE_OK, rc, msg);
             beacons_sent++;
             next_beacon = t + min_iv;
@@ -192,8 +188,7 @@ void test_reserve_does_not_touch_normal_lane(void) {
     gate_for(eu, eu->default_sf, 5);
     uint8_t data[200] = {0};
     uint32_t before = airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_NORMAL);
-    TEST_ASSERT_EQUAL_INT(TX_GATE_OK,
-                          tx_gate_transmit(&s_gate, data, sizeof(data), TX_KIND_DATA));
+    TEST_ASSERT_EQUAL_INT(TX_GATE_OK, tx_gate_transmit(&s_gate, data, sizeof(data), TX_KIND_DATA));
     TEST_ASSERT_TRUE(airtime_budget_remaining(&s_gate.budget, AIRTIME_TIER_NORMAL) < before);
 }
 

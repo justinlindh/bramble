@@ -38,7 +38,8 @@ void test_aes256gcm_tamper_detected(void) {
     uint8_t ct[sizeof(pt)], dec[sizeof(pt)];
     crypto_aes256gcm_encrypt(key, nonce, pt, sizeof(pt), NULL, 0, ct, tag);
     ct[0] ^= 0xFF; /* tamper */
-    TEST_ASSERT_NOT_EQUAL(0, crypto_aes256gcm_decrypt(key, nonce, ct, sizeof(pt), NULL, 0, tag, dec));
+    TEST_ASSERT_NOT_EQUAL(0,
+                          crypto_aes256gcm_decrypt(key, nonce, ct, sizeof(pt), NULL, 0, tag, dec));
 }
 
 void test_hmac_sha256_trunc4(void) {
@@ -64,7 +65,6 @@ void test_hkdf_sha256_derives_key(void) {
     crypto_hkdf_sha256(salt, 4, ikm, 18, info2, 5, okm3, 32);
     TEST_ASSERT_FALSE(memcmp(okm1, okm3, 32) == 0);
 }
-
 
 int main(void) {
     UNITY_BEGIN();

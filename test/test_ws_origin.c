@@ -97,15 +97,15 @@ void test_extra_origin_scheme_must_match(void) {
 }
 
 void test_extra_origin_port_must_match(void) {
-    TEST_ASSERT_FALSE(
-        ws_origin_allowed("https://app.example.com:8443", "192.168.4.1", "https://app.example.com"));
+    TEST_ASSERT_FALSE(ws_origin_allowed("https://app.example.com:8443", "192.168.4.1",
+                                        "https://app.example.com"));
     TEST_ASSERT_TRUE(ws_origin_allowed("https://app.example.com:8443", "192.168.4.1",
                                        "https://app.example.com:8443"));
 }
 
 void test_extra_origin_substring_not_enough(void) {
-    TEST_ASSERT_FALSE(
-        ws_origin_allowed("https://app.example.com.evil.com", "192.168.4.1", "https://app.example.com"));
+    TEST_ASSERT_FALSE(ws_origin_allowed("https://app.example.com.evil.com", "192.168.4.1",
+                                        "https://app.example.com"));
 }
 
 void test_null_extras_rejects_cross_origin(void) {
@@ -140,13 +140,11 @@ void test_config_post_no_browser_headers_allowed(void) {
 }
 
 void test_config_post_same_origin_allowed(void) {
-    TEST_ASSERT_TRUE(
-        ws_config_post_allowed("http://192.168.4.1", NULL, "192.168.4.1", ""));
+    TEST_ASSERT_TRUE(ws_config_post_allowed("http://192.168.4.1", NULL, "192.168.4.1", ""));
 }
 
 void test_config_post_foreign_origin_rejected(void) {
-    TEST_ASSERT_FALSE(
-        ws_config_post_allowed("http://evil.example.com", NULL, "192.168.4.1", ""));
+    TEST_ASSERT_FALSE(ws_config_post_allowed("http://evil.example.com", NULL, "192.168.4.1", ""));
     TEST_ASSERT_FALSE(ws_config_post_allowed("null", NULL, "192.168.4.1", ""));
 }
 
@@ -157,8 +155,7 @@ void test_config_post_allowlisted_origin_allowed(void) {
 
 void test_config_post_same_origin_referer_allowed(void) {
     /* Older browsers may omit Origin on same-origin POSTs but send Referer */
-    TEST_ASSERT_TRUE(
-        ws_config_post_allowed(NULL, "http://192.168.4.1/", "192.168.4.1", ""));
+    TEST_ASSERT_TRUE(ws_config_post_allowed(NULL, "http://192.168.4.1/", "192.168.4.1", ""));
     TEST_ASSERT_TRUE(
         ws_config_post_allowed(NULL, "http://192.168.4.1/index.html", "192.168.4.1:80", ""));
 }
@@ -174,8 +171,8 @@ void test_config_post_malformed_referer_rejected(void) {
 
 void test_config_post_origin_takes_precedence_over_referer(void) {
     /* A foreign Origin with a spoofed same-origin Referer must lose */
-    TEST_ASSERT_FALSE(ws_config_post_allowed("http://evil.example.com",
-                                             "http://192.168.4.1/", "192.168.4.1", ""));
+    TEST_ASSERT_FALSE(ws_config_post_allowed("http://evil.example.com", "http://192.168.4.1/",
+                                             "192.168.4.1", ""));
 }
 
 int main(void) {

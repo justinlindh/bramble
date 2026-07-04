@@ -21,7 +21,10 @@ void setUp(void) {
     g_buf[got] = '\0';
     fclose(f);
 }
-void tearDown(void) { free(g_buf); g_buf = NULL; }
+void tearDown(void) {
+    free(g_buf);
+    g_buf = NULL;
+}
 
 void test_has_encrypted_nvs_keys_partition(void) {
     /* A line naming subtype nvs_keys carrying the encrypted flag. */

@@ -2,7 +2,7 @@
 #include "../components/security/dummy_traffic.c"
 #include "../components/packet/packet.c"
 
-void setUp(void) { }
+void setUp(void) {}
 void tearDown(void) {}
 
 void test_init_disabled(void) {
@@ -37,7 +37,8 @@ void test_should_send_after_interval_true(void) {
     dummy_traffic_enable(&ctx, true, 1000);
     size_t size;
     // Jump well past any possible interval
-    bool sent = dummy_traffic_should_send(&ctx, 1000 + DUMMY_TRAFFIC_MAX_INTERVAL_MS + 1, 10000, &size);
+    bool sent =
+        dummy_traffic_should_send(&ctx, 1000 + DUMMY_TRAFFIC_MAX_INTERVAL_MS + 1, 10000, &size);
     TEST_ASSERT_TRUE(sent);
     TEST_ASSERT_TRUE(size >= DUMMY_TRAFFIC_MIN_SIZE);
     TEST_ASSERT_TRUE(size <= DUMMY_TRAFFIC_MAX_SIZE);
@@ -58,11 +59,12 @@ void test_airtime_budget_exceeded(void) {
     dummy_traffic_enable(&ctx, true, 1000);
 
     // Use up a lot of airtime
-    ctx.airtime_used_ms = 500;  // Already used 500ms
+    ctx.airtime_used_ms = 500; // Already used 500ms
 
     size_t size;
     // Budget remaining is 100ms, total = 600ms, 2% = 12ms, we already used 500 > 12
-    bool sent = dummy_traffic_should_send(&ctx, 1000 + DUMMY_TRAFFIC_MAX_INTERVAL_MS + 1, 100, &size);
+    bool sent =
+        dummy_traffic_should_send(&ctx, 1000 + DUMMY_TRAFFIC_MAX_INTERVAL_MS + 1, 100, &size);
     TEST_ASSERT_FALSE(sent);
 }
 

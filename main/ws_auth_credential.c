@@ -13,8 +13,8 @@ static bool copy_token(const char* start, size_t n, char* out, size_t out_len) {
     return true;
 }
 
-bool ws_auth_extract_token(const char* authorization, const char* subprotocols,
-                           char* out, size_t out_len) {
+bool ws_auth_extract_token(const char* authorization, const char* subprotocols, char* out,
+                           size_t out_len) {
     if (!out || out_len == 0) {
         return false;
     }
@@ -46,8 +46,7 @@ bool ws_auth_extract_token(const char* authorization, const char* subprotocols,
                 p++;
             }
             size_t entry_len = (size_t)(p - entry);
-            while (entry_len > 0 &&
-                   (entry[entry_len - 1] == ' ' || entry[entry_len - 1] == '\t')) {
+            while (entry_len > 0 && (entry[entry_len - 1] == ' ' || entry[entry_len - 1] == '\t')) {
                 entry_len--;
             }
             if (entry_len > plen && strncmp(entry, SUBPROTO_AUTH_PREFIX, plen) == 0) {

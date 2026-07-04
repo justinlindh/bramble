@@ -10,24 +10,31 @@
 
 /* Board stub */
 static bramble_board_config_t g_cfg;
-const bramble_board_config_t *board_get_config(void) { return &g_cfg; }
+const bramble_board_config_t* board_get_config(void) { return &g_cfg; }
 
 /* Control flow escape for gps_task infinite loop */
 static jmp_buf g_jmp;
 static int g_allow_jump = 0;
 static int g_in_task = 0;
 static size_t g_uart_pos = 0;
-static const char *g_uart_stream = NULL;
+static const char* g_uart_stream = NULL;
 
 /* Time stub */
 static int64_t g_time_us = 0;
 int64_t esp_timer_get_time(void) { return g_time_us; }
 
 /* RTOS task stubs */
-void vTaskDelay(int ticks) { (void)ticks; g_time_us += 1000; }
-int xTaskCreate(void (*task)(void*), const char* name, int stack, void* arg, int pri, TaskHandle_t* out) {
-    (void)name; (void)stack; (void)pri;
-    if (out) *out = (void*)0x1234;
+void vTaskDelay(int ticks) {
+    (void)ticks;
+    g_time_us += 1000;
+}
+int xTaskCreate(void (*task)(void*), const char* name, int stack, void* arg, int pri,
+                TaskHandle_t* out) {
+    (void)name;
+    (void)stack;
+    (void)pri;
+    if (out)
+        *out = (void*)0x1234;
     g_uart_pos = 0;
     g_in_task = 1;
     task(arg);
@@ -40,16 +47,42 @@ static int g_uart_driver_deleted = 0;
 static int g_uart_set_baud_calls = 0;
 
 esp_err_t uart_driver_install(uart_port_t uart_num, int rx_buffer_size, int tx_buffer_size,
-                              int queue_size, void *uart_queue, int intr_alloc_flags) {
-    (void)uart_num;(void)rx_buffer_size;(void)tx_buffer_size;(void)queue_size;(void)uart_queue;(void)intr_alloc_flags;
+                              int queue_size, void* uart_queue, int intr_alloc_flags) {
+    (void)uart_num;
+    (void)rx_buffer_size;
+    (void)tx_buffer_size;
+    (void)queue_size;
+    (void)uart_queue;
+    (void)intr_alloc_flags;
     return ESP_OK;
 }
-esp_err_t uart_param_config(uart_port_t uart_num, const uart_config_t *uart_config) {(void)uart_num;(void)uart_config; return ESP_OK;}
-esp_err_t uart_set_pin(uart_port_t uart_num, int tx_io_num, int rx_io_num, int rts_io_num, int cts_io_num) {(void)uart_num;(void)tx_io_num;(void)rx_io_num;(void)rts_io_num;(void)cts_io_num; return ESP_OK;}
-esp_err_t uart_set_baudrate(uart_port_t uart_num, int baudrate) {(void)uart_num;(void)baudrate; g_uart_set_baud_calls++; return ESP_OK;}
-esp_err_t uart_flush_input(uart_port_t uart_num) {(void)uart_num; return ESP_OK;}
-int uart_read_bytes(uart_port_t uart_num, void *buf, uint32_t length, uint32_t ticks_to_wait) {
-    (void)uart_num; (void)ticks_to_wait;
+esp_err_t uart_param_config(uart_port_t uart_num, const uart_config_t* uart_config) {
+    (void)uart_num;
+    (void)uart_config;
+    return ESP_OK;
+}
+esp_err_t uart_set_pin(uart_port_t uart_num, int tx_io_num, int rx_io_num, int rts_io_num,
+                       int cts_io_num) {
+    (void)uart_num;
+    (void)tx_io_num;
+    (void)rx_io_num;
+    (void)rts_io_num;
+    (void)cts_io_num;
+    return ESP_OK;
+}
+esp_err_t uart_set_baudrate(uart_port_t uart_num, int baudrate) {
+    (void)uart_num;
+    (void)baudrate;
+    g_uart_set_baud_calls++;
+    return ESP_OK;
+}
+esp_err_t uart_flush_input(uart_port_t uart_num) {
+    (void)uart_num;
+    return ESP_OK;
+}
+int uart_read_bytes(uart_port_t uart_num, void* buf, uint32_t length, uint32_t ticks_to_wait) {
+    (void)uart_num;
+    (void)ticks_to_wait;
     g_time_us += 100000;
 
     if (!g_in_task) {
@@ -57,13 +90,15 @@ int uart_read_bytes(uart_port_t uart_num, void *buf, uint32_t length, uint32_t t
     }
 
     if (!g_uart_stream) {
-        if (g_allow_jump && g_in_task) longjmp(g_jmp, 1);
+        if (g_allow_jump && g_in_task)
+            longjmp(g_jmp, 1);
         return 0;
     }
 
     size_t remain = strlen(g_uart_stream) - g_uart_pos;
     if (remain == 0) {
-        if (g_allow_jump && g_in_task) longjmp(g_jmp, 1);
+        if (g_allow_jump && g_in_task)
+            longjmp(g_jmp, 1);
         return 0;
     }
 
@@ -72,11 +107,22 @@ int uart_read_bytes(uart_port_t uart_num, void *buf, uint32_t length, uint32_t t
     g_uart_pos += n;
     return (int)n;
 }
-esp_err_t uart_driver_delete(uart_port_t uart_num) { (void)uart_num; g_uart_driver_deleted++; return ESP_OK; }
+esp_err_t uart_driver_delete(uart_port_t uart_num) {
+    (void)uart_num;
+    g_uart_driver_deleted++;
+    return ESP_OK;
+}
 
 /* GPIO stubs */
-esp_err_t gpio_config(const gpio_config_t *pGPIOConfig) { (void)pGPIOConfig; return ESP_OK; }
-esp_err_t gpio_set_level(gpio_num_t gpio_num, uint32_t level) { (void)gpio_num; (void)level; return ESP_OK; }
+esp_err_t gpio_config(const gpio_config_t* pGPIOConfig) {
+    (void)pGPIOConfig;
+    return ESP_OK;
+}
+esp_err_t gpio_set_level(gpio_num_t gpio_num, uint32_t level) {
+    (void)gpio_num;
+    (void)level;
+    return ESP_OK;
+}
 
 static void reset_state(void) {
     memset(&g_cfg, 0, sizeof(g_cfg));

@@ -7,10 +7,14 @@ void tearDown(void) {}
 void test_budget_starts_full(void) {
     airtime_budget_t ab;
     airtime_budget_init(&ab, 0);
-    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL], airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
-    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_CRITICAL], airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
-    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST], airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
-    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_RECEIPT], airtime_budget_remaining(&ab, AIRTIME_TIER_RECEIPT));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL],
+                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_CRITICAL],
+                             airtime_budget_remaining(&ab, AIRTIME_TIER_CRITICAL));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST],
+                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_RECEIPT],
+                             airtime_budget_remaining(&ab, AIRTIME_TIER_RECEIPT));
 }
 
 void test_continuous_refill_partial_interval(void) {
@@ -34,7 +38,8 @@ void test_refill_clamps_to_max(void) {
     airtime_budget_debit(&ab, AIRTIME_TIER_NORMAL, AIRTIME_BUDGET_NORMAL_MS);
 
     airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS * 10u);
-    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL], airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_NORMAL],
+                             airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL));
 }
 
 void test_critical_borrow_from_normal_still_works(void) {
@@ -52,7 +57,8 @@ void test_receipt_tier_isolated_from_broadcast(void) {
     airtime_budget_init(&ab, 0);
     airtime_budget_debit(&ab, AIRTIME_TIER_RECEIPT, ab.max_ms[AIRTIME_IDX_RECEIPT]);
     TEST_ASSERT_EQUAL_UINT32(0u, airtime_budget_remaining(&ab, AIRTIME_TIER_RECEIPT));
-    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST], airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
+    TEST_ASSERT_EQUAL_UINT32(ab.max_ms[AIRTIME_IDX_BROADCAST],
+                             airtime_budget_remaining(&ab, AIRTIME_TIER_BROADCAST));
 }
 
 void test_adaptive_profile_small_mesh_relaxes_budgets(void) {
@@ -104,8 +110,7 @@ void test_critical_borrow_capped_at_quarter_of_normal(void) {
     }
 
     /* NORMAL keeps at least 75% of its bucket for local data. */
-    TEST_ASSERT_TRUE(airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL) >=
-                     (normal_max * 3u) / 4u);
+    TEST_ASSERT_TRUE(airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL) >= (normal_max * 3u) / 4u);
     /* And a normal-tier send still passes. */
     TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_NORMAL, 1000u));
 }
@@ -126,8 +131,7 @@ void test_borrow_allowance_refills_over_time(void) {
      * borrow in this window stays bounded by the allowance). */
     airtime_budget_refill(&ab, AIRTIME_REFILL_INTERVAL_MS / 2u);
     TEST_ASSERT_TRUE(airtime_budget_can_transmit(&ab, AIRTIME_TIER_CRITICAL, 100u));
-    TEST_ASSERT_TRUE(airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL) >=
-                     (normal_max * 3u) / 4u);
+    TEST_ASSERT_TRUE(airtime_budget_remaining(&ab, AIRTIME_TIER_NORMAL) >= (normal_max * 3u) / 4u);
 }
 
 int main(void) {

@@ -5,7 +5,7 @@
 #define DELIVERY_EVENT_RING_MAGIC 0x44565247u /* "DVRG" */
 #define DELIVERY_EVENT_RING_VERSION 1u
 
-static uint32_t ring_oldest_index(const delivery_event_ring_t *ring) {
+static uint32_t ring_oldest_index(const delivery_event_ring_t* ring) {
     if (!ring) {
         return 0u;
     }
@@ -15,7 +15,7 @@ static uint32_t ring_oldest_index(const delivery_event_ring_t *ring) {
     return ring->header.write_index;
 }
 
-void delivery_event_ring_init(delivery_event_ring_t *ring) {
+void delivery_event_ring_init(delivery_event_ring_t* ring) {
     if (!ring) {
         return;
     }
@@ -28,8 +28,8 @@ void delivery_event_ring_init(delivery_event_ring_t *ring) {
     ring->header.next_seq = 1u;
 }
 
-uint32_t delivery_event_ring_append(delivery_event_ring_t *ring,
-                                   const delivery_event_record_t *event) {
+uint32_t delivery_event_ring_append(delivery_event_ring_t* ring,
+                                    const delivery_event_record_t* event) {
     delivery_event_record_t stored;
 
     if (!ring || !event || ring->header.capacity == 0u) {
@@ -57,21 +57,19 @@ uint32_t delivery_event_ring_append(delivery_event_ring_t *ring,
     return stored.event_seq;
 }
 
-uint32_t delivery_event_ring_count(const delivery_event_ring_t *ring) {
+uint32_t delivery_event_ring_count(const delivery_event_ring_t* ring) {
     return ring ? ring->header.count : 0u;
 }
 
-uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t *ring) {
+uint32_t delivery_event_ring_latest_seq(const delivery_event_ring_t* ring) {
     if (!ring || ring->header.count == 0u || ring->header.next_seq == 0u) {
         return 0u;
     }
     return ring->header.next_seq - 1u;
 }
 
-size_t delivery_event_ring_list_since(const delivery_event_ring_t *ring,
-                                      uint32_t since_event_seq,
-                                      delivery_event_record_t *out,
-                                      size_t out_max) {
+size_t delivery_event_ring_list_since(const delivery_event_ring_t* ring, uint32_t since_event_seq,
+                                      delivery_event_record_t* out, size_t out_max) {
     size_t written = 0u;
     uint32_t i;
     uint32_t oldest;
@@ -83,7 +81,7 @@ size_t delivery_event_ring_list_since(const delivery_event_ring_t *ring,
     oldest = ring_oldest_index(ring);
     for (i = 0u; i < ring->header.count && written < out_max; i++) {
         uint32_t idx = (oldest + i) % ring->header.capacity;
-        const delivery_event_record_t *rec = &ring->records[idx];
+        const delivery_event_record_t* rec = &ring->records[idx];
         if (rec->event_seq > since_event_seq) {
             out[written++] = *rec;
         }
@@ -92,8 +90,7 @@ size_t delivery_event_ring_list_since(const delivery_event_ring_t *ring,
     return written;
 }
 
-size_t delivery_event_ring_serialize(const delivery_event_ring_t *ring,
-                                     uint8_t *out,
+size_t delivery_event_ring_serialize(const delivery_event_ring_t* ring, uint8_t* out,
                                      size_t out_len) {
     size_t bytes_needed;
 
@@ -101,22 +98,20 @@ size_t delivery_event_ring_serialize(const delivery_event_ring_t *ring,
         return 0u;
     }
 
-    bytes_needed = sizeof(ring->header) +
-                   (size_t)ring->header.capacity * sizeof(delivery_event_record_t);
+    bytes_needed =
+        sizeof(ring->header) + (size_t)ring->header.capacity * sizeof(delivery_event_record_t);
     if (out_len < bytes_needed) {
         return 0u;
     }
 
     memcpy(out, &ring->header, sizeof(ring->header));
-    memcpy(out + sizeof(ring->header),
-           ring->records,
+    memcpy(out + sizeof(ring->header), ring->records,
            (size_t)ring->header.capacity * sizeof(delivery_event_record_t));
 
     return bytes_needed;
 }
 
-size_t delivery_event_ring_deserialize(delivery_event_ring_t *ring,
-                                       const uint8_t *in,
+size_t delivery_event_ring_deserialize(delivery_event_ring_t* ring, const uint8_t* in,
                                        size_t in_len) {
     delivery_event_ring_header_t hdr;
     size_t bytes_needed;
@@ -126,8 +121,7 @@ size_t delivery_event_ring_deserialize(delivery_event_ring_t *ring,
     }
 
     memcpy(&hdr, in, sizeof(hdr));
-    if (hdr.magic != DELIVERY_EVENT_RING_MAGIC ||
-        hdr.version != DELIVERY_EVENT_RING_VERSION ||
+    if (hdr.magic != DELIVERY_EVENT_RING_MAGIC || hdr.version != DELIVERY_EVENT_RING_VERSION ||
         hdr.capacity != DELIVERY_EVENT_RING_CAPACITY) {
         return 0u;
     }
@@ -142,9 +136,7 @@ size_t delivery_event_ring_deserialize(delivery_event_ring_t *ring,
 
     memset(ring, 0, sizeof(*ring));
     ring->header = hdr;
-    memcpy(ring->records,
-           in + sizeof(hdr),
-           (size_t)hdr.capacity * sizeof(delivery_event_record_t));
+    memcpy(ring->records, in + sizeof(hdr), (size_t)hdr.capacity * sizeof(delivery_event_record_t));
 
     return bytes_needed;
 }

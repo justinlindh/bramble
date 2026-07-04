@@ -8,20 +8,23 @@
  * reduces collision probability when many nodes try to TX receipts
  * simultaneously.  At SF10/125kHz a receipt packet takes ~150-200ms
  * airtime, so slots need to be wider than that. */
-#define BROADCAST_RECEIPT_DELAY_BASE_MS      300u
-#define BROADCAST_RECEIPT_SLOT_SPACING_MS    500u
-#define BROADCAST_RECEIPT_SLOT_BUCKETS       32u
-#define BROADCAST_RECEIPT_RETRY_COUNT        3u
+#define BROADCAST_RECEIPT_DELAY_BASE_MS 300u
+#define BROADCAST_RECEIPT_SLOT_SPACING_MS 500u
+#define BROADCAST_RECEIPT_SLOT_BUCKETS 32u
+#define BROADCAST_RECEIPT_RETRY_COUNT 3u
 
-#define RECEIPT_POLICY_FULL_MAX_PEERS       15u
-#define RECEIPT_POLICY_NEIGHBORS_MAX_PEERS  40u
-#define RECEIPT_BUDGET_MAX_MS               12000u
+#define RECEIPT_POLICY_FULL_MAX_PEERS 15u
+#define RECEIPT_POLICY_NEIGHBORS_MAX_PEERS 40u
+#define RECEIPT_BUDGET_MAX_MS 12000u
 
 uint8_t mesh_broadcast_receipt_policy(uint32_t dest_addr, uint8_t peer_count) {
-    if (dest_addr != 0xFFFFFFFFu) return 0;
-    if (peer_count > RECEIPT_POLICY_NEIGHBORS_MAX_PEERS) return 0;  /* off */
-    if (peer_count > RECEIPT_POLICY_FULL_MAX_PEERS) return 1;       /* neighbors-only */
-    return 2;                                                        /* full */
+    if (dest_addr != 0xFFFFFFFFu)
+        return 0;
+    if (peer_count > RECEIPT_POLICY_NEIGHBORS_MAX_PEERS)
+        return 0; /* off */
+    if (peer_count > RECEIPT_POLICY_FULL_MAX_PEERS)
+        return 1; /* neighbors-only */
+    return 2;     /* full */
 }
 
 bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr, uint8_t peer_count) {
@@ -33,13 +36,10 @@ uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t orig
     return BROADCAST_RECEIPT_DELAY_BASE_MS + (slot * BROADCAST_RECEIPT_SLOT_SPACING_MS);
 }
 
-uint8_t mesh_broadcast_receipt_retry_count(void) {
-    return BROADCAST_RECEIPT_RETRY_COUNT;
-}
+uint8_t mesh_broadcast_receipt_retry_count(void) { return BROADCAST_RECEIPT_RETRY_COUNT; }
 
-void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms,
-                                        uint32_t *scale_num,
-                                        uint32_t *scale_den) {
+void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms, uint32_t* scale_num,
+                                        uint32_t* scale_den) {
     if (!scale_num || !scale_den) {
         return;
     }
@@ -73,37 +73,38 @@ uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
     return (raw_delay_ms * scale_num) / scale_den;
 }
 
-esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
-                                                       uint32_t receipt_packet_id,
-                                                       uint32_t original_src_addr,
-                                                       uint32_t original_packet_id,
-                                                       uint8_t hop_limit,
-                                                       uint64_t seq,
-                                                       uint8_t *buf,
-                                                       size_t buf_len,
-                                                       size_t *out_len) {
+esp_err_t mesh_build_broadcast_delivery_receipt_packet(
+    uint32_t local_addr, uint32_t receipt_packet_id, uint32_t original_src_addr,
+    uint32_t original_packet_id, uint8_t hop_limit, uint64_t seq, uint8_t* buf, size_t buf_len,
+    size_t* out_len) {
     if (!buf || !out_len) {
         return ESP_FAIL;
     }
 
     bramble_delivery_receipt_t receipt = {
-        .header = {
-            .version = BRAMBLE_VERSION,
-            .type = PKT_TYPE_DELIVERY_RECEIPT,
-            .flags = 0,
-            .hop_limit = hop_limit,
-            .dest_addr = original_src_addr,
-            .packet_id = receipt_packet_id,
-        },
+        .header =
+            {
+                .version = BRAMBLE_VERSION,
+                .type = PKT_TYPE_DELIVERY_RECEIPT,
+                .flags = 0,
+                .hop_limit = hop_limit,
+                .dest_addr = original_src_addr,
+                .packet_id = receipt_packet_id,
+            },
         .src_addr = local_addr,
         .orig_packet_id = original_packet_id,
         .hop_count = 1,
         .total_latency = 0,
-        .relay_path = { local_addr },
-        .seq = {
-            (uint8_t)(seq >> 40), (uint8_t)(seq >> 32), (uint8_t)(seq >> 24),
-            (uint8_t)(seq >> 16), (uint8_t)(seq >> 8), (uint8_t)seq,
-        },
+        .relay_path = {local_addr},
+        .seq =
+            {
+                (uint8_t)(seq >> 40),
+                (uint8_t)(seq >> 32),
+                (uint8_t)(seq >> 24),
+                (uint8_t)(seq >> 16),
+                (uint8_t)(seq >> 8),
+                (uint8_t)seq,
+            },
     };
     /* NEW-SEC-8 (STAGED): sign after every field except relay_path/
      * hop_count/hop_limit is set (excluded from the MAC, legitimately

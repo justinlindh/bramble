@@ -40,9 +40,8 @@ uint8_t mesh_broadcast_receipt_retry_count(void);
  *   30-70% => 1.0x (num=1, den=1)
  *   >70%   => 2.0x (num=2, den=1)
  */
-void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms,
-                                        uint32_t *scale_num,
-                                        uint32_t *scale_den);
+void mesh_broadcast_receipt_retry_scale(uint32_t receipt_budget_remaining_ms, uint32_t* scale_num,
+                                        uint32_t* scale_den);
 
 /* Scale an arbitrary delay value by current receipt airtime utilization. */
 uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
@@ -56,15 +55,10 @@ uint32_t mesh_broadcast_receipt_scale_delay_ms(uint32_t raw_delay_ms,
  * same reason rrep_build_destination in components/routing/discovery.c
  * doesn't draw its own seq either.
  */
-esp_err_t mesh_build_broadcast_delivery_receipt_packet(uint32_t local_addr,
-                                                       uint32_t receipt_packet_id,
-                                                       uint32_t original_src_addr,
-                                                       uint32_t original_packet_id,
-                                                       uint8_t hop_limit,
-                                                       uint64_t seq,
-                                                       uint8_t *buf,
-                                                       size_t buf_len,
-                                                       size_t *out_len);
+esp_err_t mesh_build_broadcast_delivery_receipt_packet(
+    uint32_t local_addr, uint32_t receipt_packet_id, uint32_t original_src_addr,
+    uint32_t original_packet_id, uint8_t hop_limit, uint64_t seq, uint8_t* buf, size_t buf_len,
+    size_t* out_len);
 
 #ifdef __cplusplus
 }

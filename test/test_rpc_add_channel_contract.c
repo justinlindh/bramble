@@ -28,7 +28,8 @@ void tearDown(void) {}
 
 void test_add_channel_forwards_name_and_passphrase_psk_to_mesh_add_channel(void) {
     char response[512];
-    const char *req = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.addChannel\",\"params\":{\"name\":\"ops-room\",\"psk\":\"meshpass42\"}}";
+    const char* req = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.addChannel\",\"params\":{"
+                      "\"name\":\"ops-room\",\"psk\":\"meshpass42\"}}";
 
     int len = rpc_dispatch(req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
@@ -38,9 +39,9 @@ void test_add_channel_forwards_name_and_passphrase_psk_to_mesh_add_channel(void)
     TEST_ASSERT_EQUAL_UINT8('m', g_last_channel_psk[0]);
     TEST_ASSERT_EQUAL_UINT8('e', g_last_channel_psk[1]);
 
-    cJSON *j = cJSON_Parse(response);
+    cJSON* j = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(j);
-    cJSON *res = cJSON_GetObjectItem(j, "result");
+    cJSON* res = cJSON_GetObjectItem(j, "result");
     TEST_ASSERT_NOT_NULL(res);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "ok")));
     cJSON_Delete(j);
