@@ -322,6 +322,7 @@ int bridge_msg_track_add(msg_tracker_t* track, int count, uint32_t packet_id, ui
             track[i].dest_addr = dest_addr;
             track[i].sent_us = sent_us;
             track[i].attempt = 1;
+            track[i].confirmed = false;
             return i;
         }
     }
@@ -344,6 +345,25 @@ bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_
             uint64_t latency_us = now_us - track[i].sent_us;
             metrics_record_packet_delivered(metrics, latency_us);
             track[i].active = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_id,
+                              metrics_state_t* metrics) {
+    for (int i = 0; i < count; i++) {
+        if (track[i].packet_id == packet_id && !track[i].confirmed) {
+            /* A freshly-memset (never-used) slot also has packet_id == 0
+             * and confirmed == false; guard against matching it when the
+             * real packet_id happens to be 0 by requiring the slot to have
+             * been used at least once (src_addr set at track_add time is
+             * never 0 for a real node address). */
+            if (track[i].src_addr == 0)
+                continue;
+            track[i].confirmed = true;
+            metrics_record_packet_confirmed(metrics);
             return true;
         }
     }
@@ -534,6 +554,22 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         /* This receipt is for us — the original sender */
         bridge_msg_track_complete(msg_track, msg_track_count, receipt.orig_packet_id, now_us,
                                   metrics);
+
+        /* Phase 2 "save reactive routing" Part A: this is the TRUE
+         * confirmed-delivery signal (confirmed_packets, feeding
+         * confirmed_delivery_rate), distinct from the destination-reach
+         * signal (delivered_packets, feeding message_delivery_rate) the
+         * bridge_msg_track_complete call above records at DATA arrival, one
+         * call up the stack in _handle_data. That earlier call already
+         * deactivated this packet_id's tracker entry, so the
+         * bridge_msg_track_complete call right above (same packet_id) is a
+         * no-op by design; this is genuinely the only place a receipt
+         * reaching the ORIGINATOR can be observed. bridge_msg_track_confirm
+         * looks the entry up by packet_id regardless of `active` and
+         * de-dupes on its own `confirmed` flag, so a second receipt for the
+         * same message (e.g. both of two DATA retries succeeding) is not
+         * double-counted. */
+        bridge_msg_track_confirm(msg_track, msg_track_count, receipt.orig_packet_id, metrics);
 
         /* Check if this was a retried message */
         pending_ack_t* pa = NULL;

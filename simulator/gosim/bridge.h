@@ -105,6 +105,15 @@ typedef struct {
     uint64_t sent_us;
     uint8_t attempt; /* retransmission count */
     bool active;
+    /* Phase 2 "save reactive routing" Part A: set once the delivery
+     * receipt for this packet_id has been observed back at the true
+     * originator (bridge_msg_track_confirm). Tracked separately from
+     * `active` because `active` already flips false the moment DATA
+     * reaches the destination (bridge_msg_track_complete, called from
+     * _handle_data on arrival) -- well before any receipt has traveled
+     * back, often before it even exists. Reset to false whenever a slot is
+     * reused for a new scripted message (bridge_msg_track_add). */
+    bool confirmed;
 } msg_tracker_t;
 
 void bridge_msg_track_init(msg_tracker_t* track, int count);
@@ -112,6 +121,16 @@ int bridge_msg_track_add(msg_tracker_t* track, int count, uint32_t packet_id, ui
                          uint32_t dest_addr, uint64_t sent_us);
 bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_id, uint64_t now_us,
                                metrics_state_t* metrics);
+/* Marks packet_id as confirmed (its delivery receipt reached the true
+ * originator) and records it in metrics exactly once, regardless of the
+ * entry's `active` state (which is normally already false by the time this
+ * runs; see the struct doc comment above). Looks the entry up by packet_id
+ * alone, not `active`, since track_add's dest_addr/sent_us fields on that
+ * entry are still meaningful here. Returns true iff this call is the one
+ * that recorded the confirmation (false if the entry was not found, or was
+ * already confirmed). */
+bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_id,
+                              metrics_state_t* metrics);
 
 /* ─── Packet handling wrappers ─────────────────────────────────────────── */
 /*
