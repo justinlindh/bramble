@@ -88,9 +88,12 @@ int rrep_verify(const bramble_rrep_t* r);
  * route_next_hop is rrep->next_hop directly: the node that actually
  * delivered this RREP, correct at any hop count (see rrep_forward). This
  * replaced an earlier dest_addr==self_addr ternary that was only correct
- * one hop from the destination (see the harness design doc). install_route
- * is still unconditionally true; the unsolicited-RREP gate on pd/rev
- * participation is a separate, later fix. */
+ * one hop from the destination (see the harness design doc).
+ *
+ * install_route is gated on discovery participation: true when we
+ * originated the matching RREQ (pd found) or relayed it (rev found), false
+ * when neither, so an unsolicited RREP (overheard, or forged for a query we
+ * never saw) cannot plant a route. */
 typedef enum {
     RREP_RX_DROP = 0,
     RREP_RX_DELIVER,

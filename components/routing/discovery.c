@@ -199,12 +199,10 @@ rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr
      * callers already pass it. */
     (void)self_addr;
 
-    /* install still runs unconditionally (the unsolicited-RREP gate is a
-     * separate, later fix). next_hop is whichever node actually delivered
-     * this RREP to us: rrep_build_destination/rrep_forward write the
-     * sender's own address there on every hop, so this is correct at any
-     * hop count, not just one hop from the destination. */
-    d.install_route = true;
+    /* next_hop is whichever node actually delivered this RREP to us:
+     * rrep_build_destination/rrep_forward write the sender's own address
+     * there on every hop, so this is correct at any hop count, not just one
+     * hop from the destination. */
     d.route_dest = rrep->src_addr;
     d.route_next_hop = rrep->next_hop;
     d.route_hops = rrep->hop_count;
@@ -212,6 +210,7 @@ rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr
 
     pending_discovery_t* pd_entry = discovery_lookup_by_query(pd, rrep->query_id);
     if (pd_entry) {
+        d.install_route = true;
         d.action = RREP_RX_DELIVER;
         d.deliver_dest = pd_entry->dest_addr;
         return d;
@@ -219,11 +218,19 @@ rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr
 
     reverse_route_t* rev_entry = reverse_route_lookup(rev, rrep->query_id);
     if (rev_entry) {
+        d.install_route = true;
         d.action = RREP_RX_FORWARD;
         d.forward_to = rev_entry->prev_hop;
         return d;
     }
 
+    /* Neither an outstanding discovery (we're not the originator) nor a
+     * reverse route (we never relayed the matching RREQ) for this
+     * query_id: we did not participate in this discovery, so the RREP is
+     * unsolicited, whether overheard or forged for a query we never saw.
+     * Drop before install so a bystander or forger cannot plant a route
+     * (closes the unsolicited-RREP residual). */
+    d.install_route = false;
     d.action = RREP_RX_DROP;
     return d;
 }
