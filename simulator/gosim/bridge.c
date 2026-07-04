@@ -136,20 +136,55 @@ static void derive_pair_key(uint32_t addr_a, uint32_t addr_b, uint8_t* key_out) 
     crypto_sha256(material, sizeof(material), key_out);
 }
 
-/* Real time-on-air for a frame, in ms, for airtime budget accounting.
- * Matches what the radio model actually occupies the medium with. */
-static uint32_t frame_airtime_ms(const radio_config_t* radio, uint16_t frame_len) {
-    uint32_t us = radio_frame_airtime_us(radio, frame_len);
-    uint32_t ms = (us + 999u) / 1000u;
-    return ms ? ms : 1u;
-}
-
 /* ─── Global simulation time ───────────────────────────────────────────── */
 uint64_t g_bridge_sim_time_us = 0;
 
 void bridge_set_sim_time(uint64_t us) { g_bridge_sim_time_us = us; }
 
 uint32_t sim_get_time_ms(void) { return (uint32_t)(g_bridge_sim_time_us / 1000); }
+
+/* ─── Control-plane airtime budget gate ────────────────────────────────── */
+
+/* AIRTIME_TIER_* -> AIRTIME_IDX_* (mirrors the private tier_idx in
+ * components/airtime/airtime_budget.c, which is not exported: the sim only
+ * needs it to pick a budget_denied[] slot, never to change the actual
+ * accounting, which always goes through the real airtime_budget_can_transmit
+ * / airtime_budget_debit). */
+static int airtime_tier_idx(uint8_t tier) {
+    switch (tier) {
+    case AIRTIME_TIER_CRITICAL:
+        return AIRTIME_IDX_CRITICAL;
+    case AIRTIME_TIER_BROADCAST:
+        return AIRTIME_IDX_BROADCAST;
+    case AIRTIME_TIER_RECEIPT:
+        return AIRTIME_IDX_RECEIPT;
+    default:
+        return AIRTIME_IDX_NORMAL;
+    }
+}
+
+/* Single chokepoint for every control-plane transmission (RREQ/RREP/RERR
+ * origination and forwarding, delivery receipts): mirrors tx_gate_transmit's
+ * check -> transmit -> debit sequence using the node's real airtime budget,
+ * with the peer-count scaler refreshed from the current neighbor table first
+ * (matching mesh_tx's tx_gate_set_peer_count call on every transmit). On
+ * denial the packet is dropped, no queue, matching tx_gate's drop-no-queue
+ * semantics, and the tier's budget_denied counter is incremented. Returns
+ * true iff the packet was actually put on the air, so callers only count a
+ * forward/send in their own stats when it really happened. */
+static bool budget_gated_send(sim_node_t* tx, const outbound_packet_t* pkt, uint8_t tier,
+                              node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
+                              event_queue_t* events, metrics_state_t* metrics, uint64_t send_us) {
+    uint32_t airtime_ms = radio_frame_airtime_ms(radio, pkt->len);
+    airtime_budget_set_mesh_size(&tx->airtime, (uint8_t)neighbor_count(&tx->neighbors));
+    if (!airtime_budget_can_transmit(&tx->airtime, tier, airtime_ms)) {
+        tx->budget_denied[airtime_tier_idx(tier)]++;
+        return false;
+    }
+    airtime_budget_debit(&tx->airtime, tier, airtime_ms);
+    sim_radio_broadcast(tx, pkt, nodes, radio, rng, events, metrics, send_us);
+    return true;
+}
 
 /* ─── Event union accessors ────────────────────────────────────────────── */
 
@@ -336,7 +371,9 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         pkt.dest_addr = rreq.prev_hop;
         pkt.pkt_type = PKT_TYPE_RREP;
 
-        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+        /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+        budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                          now_us);
     } else if (rreq.header.hop_limit > 1) {
         bramble_rreq_t fwd = rreq_forward(&rreq, rx->addr, rssi, 0);
 
@@ -347,7 +384,6 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         pkt.is_broadcast = true;
         pkt.dest_addr = 0xFFFFFFFF;
         pkt.pkt_type = PKT_TYPE_RREQ;
-        rx->packets_forwarded++;
 
         {
             int node_idx = (int)(rx - nodes->nodes);
@@ -358,7 +394,10 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         /* Jittered rebroadcast (DES-3), same 50-300ms window as firmware,
          * so same-hop relays do not key up at the same instant. */
         uint64_t jitter_us = (uint64_t)discovery_forward_jitter_ms(pcg32_random(rng)) * 1000ULL;
-        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us + jitter_us);
+        if (budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                              now_us + jitter_us)) {
+            rx->packets_forwarded++;
+        }
     }
 }
 
@@ -403,9 +442,12 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
         pkt.is_broadcast = false;
         pkt.dest_addr = d.forward_to;
         pkt.pkt_type = PKT_TYPE_RREP;
-        rx->packets_forwarded++;
 
-        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+        /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+        if (budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                              now_us)) {
+            rx->packets_forwarded++;
+        }
         return;
     }
     case RREP_RX_DROP:
@@ -489,9 +531,12 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
     pkt.is_broadcast = false;
     pkt.dest_addr = fwd_res.next_hop;
     pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
-    rx->packets_forwarded++;
 
-    sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+    /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
+    if (budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events, metrics,
+                          now_us)) {
+        rx->packets_forwarded++;
+    }
 }
 
 static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
@@ -641,7 +686,9 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
                     pkt.dest_addr = fwd_res.next_hop;
                     pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
 
-                    sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+                    /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
+                    budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events,
+                                      metrics, now_us);
                 }
             }
         }
@@ -669,7 +716,9 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
         pkt.dest_addr = 0xFFFFFFFF;
         pkt.pkt_type = PKT_TYPE_RERR;
 
-        sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+        /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+        budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                          now_us);
         emit_packet_dropped(stdout, now_us, rx->id, "no_route");
 
         /* Phase 6: Mailbox — store the DATA payload for the offline destination.
@@ -715,11 +764,16 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
     pkt.is_broadcast = false;
     pkt.dest_addr = fwd_res.next_hop;
     pkt.pkt_type = PKT_TYPE_DATA;
-    rx->packets_forwarded++;
 
     anomaly_record_fwd(&anomaly[node_idx].blackhole, now_us);
 
-    sim_radio_broadcast(rx, &pkt, nodes, radio, rng, events, metrics, now_us);
+    /* tx_gate_kind_tier: TX_KIND_FORWARD -> AIRTIME_TIER_NORMAL. This site had
+     * no budget check at all before Task 1 (unlike the retransmit/originate
+     * DATA sites), a gap the "every simulated transmission" audit missed. */
+    if (budget_gated_send(rx, &pkt, AIRTIME_TIER_NORMAL, nodes, radio, rng, events, metrics,
+                          now_us)) {
+        rx->packets_forwarded++;
+    }
 }
 
 /* ─── Public packet handling wrappers ──────────────────────────────────── */
@@ -890,7 +944,9 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             pkt.dest_addr = 0xFFFFFFFF;
             pkt.pkt_type = PKT_TYPE_RREQ;
 
-            sim_radio_broadcast(src, &pkt, nodes, radio, rng, events, metrics, event->timestamp_us);
+            /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+            budget_gated_send(src, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                              event->timestamp_us);
 
             {
                 int src_idx = (int)(src - nodes->nodes);
@@ -993,7 +1049,8 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             }
 
             /* Airtime check (Phase 3): real time-on-air for this fragment */
-            uint32_t frag_toa_ms = frame_airtime_ms(radio, (uint16_t)enc_offset);
+            uint32_t frag_toa_ms = radio_frame_airtime_ms(radio, (uint16_t)enc_offset);
+            airtime_budget_set_mesh_size(&src->airtime, (uint8_t)neighbor_count(&src->neighbors));
             if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, frag_toa_ms)) {
                 metrics->airtime_deferred++;
                 fprintf(stdout,
@@ -1068,7 +1125,8 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     }
 
     /* Airtime check (Phase 3): real time-on-air for this frame */
-    uint32_t toa_ms = frame_airtime_ms(radio, total_len);
+    uint32_t toa_ms = radio_frame_airtime_ms(radio, total_len);
+    airtime_budget_set_mesh_size(&src->airtime, (uint8_t)neighbor_count(&src->neighbors));
     if (!airtime_budget_can_transmit(&src->airtime, MSG_TIER_NORMAL, toa_ms)) {
         metrics->airtime_deferred++;
         fprintf(stdout, "{\"type\":\"airtime_exceeded\",\"timestamp_us\":%llu,\"node\":\"%s\"}\n",
@@ -1157,7 +1215,8 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
             continue;
 
         /* Airtime check: real time-on-air of the stored frame */
-        uint32_t retx_toa_ms = frame_airtime_ms(radio, pa->packet_len);
+        uint32_t retx_toa_ms = radio_frame_airtime_ms(radio, pa->packet_len);
+        airtime_budget_set_mesh_size(&node->airtime, (uint8_t)neighbor_count(&node->neighbors));
         if (!airtime_budget_can_transmit(&node->airtime, MSG_TIER_NORMAL, retx_toa_ms)) {
             metrics->airtime_deferred++;
             continue;

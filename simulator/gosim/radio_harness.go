@@ -62,6 +62,63 @@ func (h *radioHarness) addNode(addr uint32, x, y float32) {
 	}
 }
 
+// activateNode runs node_activate (routing/neighbor/airtime-budget init,
+// beacon RNG seeding) on an already-added node and returns it, so tests can
+// drive node_tick and inspect/poke its budget-gate state directly.
+func (h *radioHarness) activateNode(addr uint32) *C.sim_node_t {
+	n := C.node_array_find_by_addr(h.nodes, C.uint32_t(addr))
+	if n == nil {
+		panic("radioHarness: unknown node")
+	}
+	nodeActivate(n)
+	return n
+}
+
+// tick drives node_tick for one node at nowUs through the real budget gate
+// (Task 1: beacon TX in node_tick), broadcasting any packets it produces
+// exactly as sim.go's handleTickNode does. Returns the number of packets
+// the node actually put on the air this tick (0 if the gate denied them).
+func (h *radioHarness) tick(node *C.sim_node_t, nowUs uint64) int {
+	var result C.node_tick_result_t
+	C.node_tick(node, C.uint64_t(nowUs), h.radio, &result)
+	for i := 0; i < int(result.count); i++ {
+		C.sim_radio_broadcast(node, &result.pkts[i], h.nodes, h.radio, h.rng, h.events, h.metrics,
+			C.uint64_t(nowUs))
+	}
+	return int(result.count)
+}
+
+// setBroadcastBudgetMs sets an artificially tiny BROADCAST-lane airtime
+// budget directly on a node, bypassing the normal peer-count profile, so
+// tests can force the gate to deny without waiting for realistic exhaustion.
+func (h *radioHarness) setBroadcastBudgetMs(node *C.sim_node_t, ms uint32) {
+	node.airtime.max_ms[C.AIRTIME_IDX_BROADCAST] = C.uint32_t(ms)
+	node.airtime.tokens_ms[C.AIRTIME_IDX_BROADCAST] = C.uint32_t(ms)
+}
+
+// budgetDeniedBroadcast reads the node's BROADCAST-lane budget_denied
+// counter (incremented by node_tick's beacon gate on denial).
+func (h *radioHarness) budgetDeniedBroadcast(node *C.sim_node_t) uint32 {
+	return uint32(node.budget_denied[C.AIRTIME_IDX_BROADCAST])
+}
+
+// forceBeaconDue makes the node's next beacon due at nowUs, so the very next
+// tick() call attempts a beacon deterministically instead of waiting on the
+// randomized first-beacon phase from node_activate.
+func (h *radioHarness) forceBeaconDue(node *C.sim_node_t, nowUs uint64) {
+	node.next_beacon_due_us = C.uint64_t(nowUs)
+}
+
+// nextBeaconDue reads the node's next scheduled beacon time, so tests can
+// advance simulated time to exactly when the next beacon attempt is due.
+func (h *radioHarness) nextBeaconDue(node *C.sim_node_t) uint64 {
+	return uint64(node.next_beacon_due_us)
+}
+
+// beaconWireSize is the serialized beacon frame length (components/packet
+// BEACON_SIZE), for computing the real ToA of a beacon in tests.
+func beaconWireSize() int { return int(C.BEACON_SIZE) }
+
 func (h *radioHarness) setRange(r float32) {
 	h.radio._range = C.float(r)
 }
