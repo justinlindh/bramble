@@ -103,6 +103,12 @@ channel_flood_decision_t channel_flood_decide(uint8_t hop_limit, bool is_duplica
  *               duplicate from a different originator never matches this
  *               entry (see channel_flood_note_overheard).
  *   heard     = count of OTHER copies overheard since this relay was queued.
+ *   tx_kind   = the tx_gate kind (a tx_kind_t stored as a plain uint8_t to
+ *               avoid a routing->radio header dependency) the relay is sent
+ *               with, so a flooded DATA debits the BROADCAST lane and a
+ *               flooded ACK (Flooding F1 Task 2) debits the CRITICAL/ACK lane
+ *               -- one shared queue + suppression engine, correct per-lane
+ *               airtime accounting.
  */
 typedef struct {
     bool used;
@@ -111,6 +117,7 @@ typedef struct {
     uint8_t len;
     uint32_t flood_key;
     uint8_t heard;
+    uint8_t tx_kind;
 } pending_flood_relay_t;
 
 /*

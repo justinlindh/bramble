@@ -50,6 +50,14 @@ bridge_node_ext_t* bridge_node_ext_get(int node_idx) {
 
 bridge_ext_metrics_t* bridge_ext_metrics_get(void) { return &g_ext_metrics; }
 
+/* Flooding F1 Task 2: _handle_delivery_receipt (defined above bridge_flood_
+ * relay) floods the confirmation receipt back through the shared flood engine
+ * under flood transport, so it needs this forward declaration. */
+static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
+                               const bramble_header_t* hdr, uint32_t orig_sender, bool is_own_echo,
+                               uint64_t now_us, uint32_t now_ms, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events);
+
 void bridge_node_ext_init_all(void) {
     memset(&g_node_ext, 0, sizeof(g_node_ext));
     memset(&g_ext_metrics, 0, sizeof(g_ext_metrics));
@@ -661,6 +669,25 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         return;
     }
 
+    /* Flooding F1 Task 2: under flood transport there are no routes, so the
+     * confirmation (gosim's delivery receipt, the packet that feeds
+     * confirmed_delivery_rate exactly as the firmware ACK does) FLOODS back to
+     * the originator through the SAME engine DATA floods with (bridge_flood_
+     * relay: src-qualified dedup + channel_flood_decide + jittered relay +
+     * FLOOD_SUPPRESS_AFTER). receipt.src_addr is the destination that
+     * originated the receipt; a node hearing its OWN receipt echoed back
+     * (is_own_echo) never rebroadcasts it. The re-injected relay dispatches on
+     * the wire header type (PKT_TYPE_DELIVERY_RECEIPT), so it re-enters this
+     * handler at the next hop with no route table consulted anywhere. When
+     * flood transport is off, the reactive route-lookup forward below is
+     * unchanged. */
+    if (g_flood_transport_enabled) {
+        bool is_own_echo = (receipt.src_addr == rx->addr);
+        bridge_flood_relay(rx, buf, len, &receipt.header, receipt.src_addr, is_own_echo, now_us,
+                           now_ms, radio, rng, events);
+        return;
+    }
+
     /* Forward the receipt toward its destination */
     uint8_t hop_limit = receipt.header.hop_limit;
     forward_result_t fwd_res =
@@ -1064,22 +1091,42 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
             uint16_t receipt_len = DELIVERY_RECEIPT_MIN_SIZE + receipt.hop_count * 4;
             if (bramble_delivery_receipt_serialize(&receipt, receipt_buf, sizeof(receipt_buf)) ==
                 ESP_OK) {
-                /* Route receipt back to sender */
-                uint8_t rcpt_hop = 32;
-                forward_result_t fwd_res =
-                    forward_data(&rx->routes, orig_sender, &rcpt_hop, now_ms);
-                if (fwd_res.should_send) {
+                if (g_flood_transport_enabled) {
+                    /* Flooding F1 Task 2: originate the confirmation as a
+                     * flood, not a routed unicast. There are no routes back to
+                     * the sender under flood transport, so the destination
+                     * broadcasts the receipt once (header.dest_addr stays the
+                     * originator, so only it consumes) and every neighbor
+                     * flood-relays it via _handle_delivery_receipt. This is the
+                     * exact analogue of firmware send_ack's single mesh_tx that
+                     * neighbors then flood. */
                     outbound_packet_t pkt;
                     memset(&pkt, 0, sizeof(pkt));
                     memcpy(pkt.data, receipt_buf, receipt_len);
                     pkt.len = receipt_len;
-                    pkt.is_broadcast = false;
-                    pkt.dest_addr = fwd_res.next_hop;
+                    pkt.is_broadcast = true;
+                    pkt.dest_addr = 0xFFFFFFFF;
                     pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
-
-                    /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
-                    budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events,
+                    budget_gated_send(rx, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events,
                                       metrics, now_us);
+                } else {
+                    /* Route receipt back to sender */
+                    uint8_t rcpt_hop = 32;
+                    forward_result_t fwd_res =
+                        forward_data(&rx->routes, orig_sender, &rcpt_hop, now_ms);
+                    if (fwd_res.should_send) {
+                        outbound_packet_t pkt;
+                        memset(&pkt, 0, sizeof(pkt));
+                        memcpy(pkt.data, receipt_buf, receipt_len);
+                        pkt.len = receipt_len;
+                        pkt.is_broadcast = false;
+                        pkt.dest_addr = fwd_res.next_hop;
+                        pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
+
+                        /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
+                        budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events,
+                                          metrics, now_us);
+                    }
                 }
             }
         }
@@ -1212,7 +1259,17 @@ void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_co
     pkt.len = event->data.packet.len;
     pkt.is_broadcast = true;
     pkt.dest_addr = 0xFFFFFFFF;
-    pkt.pkt_type = PKT_TYPE_DATA;
+    /* Flooding F1 Task 2: the flood engine now carries both DATA and the
+     * confirmation receipt, so derive the emitter/airtime pkt_type from the
+     * wire header rather than assuming DATA. Dispatch at the receiver is on
+     * the wire type regardless; this only keeps TX metrics/logs accurate. */
+    bramble_header_t relay_hdr;
+    if (bramble_header_deserialize(&relay_hdr, event->data.packet.data, event->data.packet.len) ==
+        ESP_OK) {
+        pkt.pkt_type = relay_hdr.type;
+    } else {
+        pkt.pkt_type = PKT_TYPE_DATA;
+    }
 
     /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
     if (budget_gated_send(tx, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,

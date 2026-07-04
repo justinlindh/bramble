@@ -87,7 +87,7 @@ static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
  * a jittered rebroadcast of a broadcast DATA frame; the queue it schedules
  * onto is defined near its sibling schedule_rreq_forward, further down. */
 static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
-                                 uint32_t flood_key);
+                                 uint32_t flood_key, tx_kind_t tx_kind);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -1785,7 +1785,62 @@ static void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t sn
 
     /* Not for us — forward it */
     if (ack.header.dest_addr != s_identity->address) {
-        forward_ack(&ack, rssi);
+        if (s_flood_transport) {
+            /* Flooding F1 Task 2: under s_flood_transport there are no routes,
+             * so the ACK cannot be route-forwarded home. It FLOODS back
+             * through the SAME engine the DATA flood uses (channel_flood_decide
+             * + the jittered schedule_flood_relay queue + FLOOD_SUPPRESS_AFTER
+             * suppression + airtime budget), authenticated: ack_verify above
+             * already gated this branch, so a bad-MAC ACK was dropped before
+             * ever reaching here and is never rebroadcast (the same "never act
+             * on unauthenticated wire bytes" rule the DATA flood applies via
+             * data_auth_verify). The dispatch s_dedup gate (packet_id ^ type)
+             * already dedups the flooded ACK's own packet_id: copies 2+ never
+             * reach handle_ack; they are counted at the dispatch gate for
+             * suppression instead (see mesh_process_rx_packet). A re-ACK of a
+             * duplicate DATA carries a FRESH header.packet_id (send_ack draws
+             * next_packet_id every call), so it is not deduped and floods
+             * anew, preserving the Phase 1 re-ACK-on-duplicate second chance.
+             *
+             * The flood dedup key mirrors the DATA flood's packet_id ^ src:
+             * both fields are stable across relay hops (only relay_path/
+             * hop_count/hop_limit are forward-mutated) and identify this ACK
+             * for the suppression bookkeeping at the dispatch gate. A node that
+             * hears its OWN originated ACK echoed back (ack.src_addr == self)
+             * must not rebroadcast it, exactly like the DATA flood's
+             * is_own_echo guard. */
+            uint32_t ack_flood_key = ack.header.packet_id ^ ack.src_addr;
+            bool is_own_echo = (ack.src_addr == s_identity->address);
+            size_t cur_wire = bramble_ack_wire_size(&ack);
+            bool budget_permits = tx_gate_check((uint8_t)cur_wire, TX_KIND_ACK);
+            channel_flood_decision_t flood = channel_flood_decide(ack.header.hop_limit, is_own_echo,
+                                                                  budget_permits, esp_random());
+            if (flood.should_relay) {
+                /* Append our address to the relay trail (relay_path/hop_count
+                 * are MAC-excluded, mutated per hop exactly as forward_ack
+                 * does) and decrement the hop limit to the flood engine's
+                 * value, then re-serialize the mutated ACK for rebroadcast. */
+                if (ack.hop_count < ACK_MAX_HOPS) {
+                    ack.relay_path[ack.hop_count++] = s_identity->address;
+                }
+                ack.header.hop_limit = flood.new_hop_limit;
+                uint8_t relay_buf[ACK_MAX_SIZE];
+                if (bramble_ack_serialize(&ack, relay_buf, sizeof(relay_buf)) == ESP_OK) {
+                    size_t wlen = bramble_ack_wire_size(&ack);
+                    ESP_LOGI(TAG,
+                             "Flooding ACK for pkt %08" PRIX32 " toward %08" PRIX32
+                             " hop_limit->%u",
+                             ack.ack_packet_id, ack.header.dest_addr, flood.new_hop_limit);
+                    schedule_flood_relay(relay_buf, (uint8_t)wlen, flood.jitter_ms, ack_flood_key,
+                                         TX_KIND_ACK);
+                }
+            } else if (!budget_permits) {
+                ESP_LOGD(TAG, "Flooded ACK relay denied by airtime budget, pkt=%08" PRIX32,
+                         ack.ack_packet_id);
+            }
+        } else {
+            forward_ack(&ack, rssi);
+        }
         return;
     }
 
@@ -2054,7 +2109,8 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             ESP_LOGI(TAG,
                      "Channel flood relay from %08" PRIX32 " pkt=%08" PRIX32 " hop_limit %u->%u",
                      src_addr, rx_hdr.packet_id, rx_hdr.hop_limit, flood.new_hop_limit);
-            schedule_flood_relay(relay_buf, len, flood.jitter_ms, flood_key);
+            schedule_flood_relay(relay_buf, len, flood.jitter_ms, flood_key,
+                                 TX_KIND_DATA_BROADCAST);
         } else if (!budget_permits) {
             ESP_LOGD(TAG, "Channel flood relay denied by airtime budget, pkt=%08" PRIX32,
                      rx_hdr.packet_id);
@@ -2592,9 +2648,14 @@ static void process_rreq_forward_queue(uint32_t t) {
  * it fires (Flooding F1; see channel_flood_note_overheard). heard starts at 0
  * -- the copy that triggered this schedule is the FIRST copy, never counted
  * as an overheard one.
+ *
+ * tx_kind is the airtime lane the relay is sent on: TX_KIND_DATA_BROADCAST
+ * for a flooded DATA frame, TX_KIND_ACK for a flooded ACK (Flooding F1
+ * Task 2). One queue + one suppression engine serves both; only the lane the
+ * final mesh_tx debits differs.
  */
 static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
-                                 uint32_t flood_key) {
+                                 uint32_t flood_key, tx_kind_t tx_kind) {
     for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
         if (!s_flood_relay_queue[i].used) {
             s_flood_relay_queue[i].used = true;
@@ -2603,12 +2664,13 @@ static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitte
             s_flood_relay_queue[i].len = len;
             s_flood_relay_queue[i].flood_key = flood_key;
             s_flood_relay_queue[i].heard = 0;
+            s_flood_relay_queue[i].tx_kind = (uint8_t)tx_kind;
             ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
             return;
         }
     }
     ESP_LOGW(TAG, "Flood relay queue full; relaying immediately");
-    if (mesh_tx(buf, len, TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+    if (mesh_tx(buf, len, tx_kind) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG, "Immediate flood relay denied by airtime budget");
     }
 }
@@ -2627,7 +2689,7 @@ static void process_flood_relay_queue(uint32_t t) {
     for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
         if (s_flood_relay_queue[i].used && (int32_t)(t - s_flood_relay_queue[i].due_at_ms) >= 0) {
             if (mesh_tx(s_flood_relay_queue[i].buf, s_flood_relay_queue[i].len,
-                        TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+                        (tx_kind_t)s_flood_relay_queue[i].tx_kind) == TX_GATE_ERR_BUDGET) {
                 ESP_LOGD(TAG, "Jittered flood relay denied by airtime budget");
             }
             s_flood_relay_queue[i].used = false;
@@ -3172,6 +3234,31 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
                                              flood_dup_key)) {
                 ESP_LOGD(TAG, "Flood relay suppressed after %d overheard copies, pkt=%08" PRIX32,
+                         FLOOD_SUPPRESS_AFTER, header.packet_id);
+            }
+        }
+
+        /* Flooding F1 Task 2: the same suppression bookkeeping for a flooded
+         * ACK. A flooded ACK addressed to someone else (i.e. NOT consumed by
+         * this node) is relayed via handle_ack's flood branch, which queues a
+         * jittered rebroadcast keyed on ack.header.packet_id ^ ack.src_addr.
+         * The 2nd/3rd... copies land here at the dispatch dedup gate; recompute
+         * that same key from the wire and register the overheard copy so the
+         * pending ACK relay cancels once FLOOD_SUPPRESS_AFTER copies are in.
+         * ACK.src_addr is big-endian on the wire at HEADER_SIZE (packet.c's
+         * put_be32), unlike DATA's little-endian src_addr, so it is read
+         * big-endian here to match handle_ack's host-order ack.src_addr. */
+        if (header.type == PKT_TYPE_ACK && s_flood_transport &&
+            header.dest_addr != s_identity->address && pkt->len >= HEADER_SIZE + 4) {
+            uint32_t ack_dup_src = ((uint32_t)pkt->data[HEADER_SIZE] << 24) |
+                                   ((uint32_t)pkt->data[HEADER_SIZE + 1] << 16) |
+                                   ((uint32_t)pkt->data[HEADER_SIZE + 2] << 8) |
+                                   (uint32_t)pkt->data[HEADER_SIZE + 3];
+            uint32_t ack_dup_key = header.packet_id ^ ack_dup_src;
+            if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                             ack_dup_key)) {
+                ESP_LOGD(TAG,
+                         "Flooded ACK relay suppressed after %d overheard copies, pkt=%08" PRIX32,
                          FLOOD_SUPPRESS_AFTER, header.packet_id);
             }
         }

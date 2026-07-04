@@ -29,6 +29,13 @@ static const char* pkt_type_name(uint8_t t) {
          * (gosim/flood.go), not just a firmware ACK use; kept as one label
          * since both are genuinely PKT_TYPE_ACK on the wire. */
         return "ACK";
+    case PKT_TYPE_DELIVERY_RECEIPT:
+        /* Flooding F1 Task 2: the confirmation receipt is now a first-class
+         * flooded packet (broadcast under flood transport, unicast-routed
+         * under reactive), so label it instead of leaving it "UNKNOWN" and let
+         * scenarios distinguish a flooded receipt (dest 0xFFFFFFFF) from a
+         * routed one. */
+        return "DELIVERY_RECEIPT";
     default:
         return "UNKNOWN";
     }
