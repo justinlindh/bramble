@@ -562,9 +562,10 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
     }
 }
 
-static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
-                         uint32_t now_ms, node_array_t* nodes, radio_config_t* radio,
-                         pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics,
+static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
+                         int8_t rssi, int8_t snr, uint64_t now_us, uint32_t now_ms,
+                         node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
+                         event_queue_t* events, metrics_state_t* metrics,
                          node_anomaly_tracker_t* anomaly, msg_tracker_t* msg_track,
                          int msg_track_count) {
     bramble_header_t hdr;
@@ -576,9 +577,44 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
     anomaly_record_rx(&anomaly[node_idx].blackhole, now_us);
     anomaly_check_loop(&anomaly[node_idx].loop, hdr.packet_id, now_us, stdout, rx->id);
 
-    if (hdr.dest_addr == rx->addr) {
-        /* Message reached destination — send delivery receipt back to source */
-        uint32_t orig_sender = bridge_msg_track_find_src(msg_track, msg_track_count, hdr.packet_id);
+    /* Gosim has no wire-embedded src_addr/prev_hop for DATA (its framing
+     * already diverges from firmware's, see task-4-report.md): the DATA's
+     * ORIGINATOR is tracked out-of-band by packet_id
+     * (bridge_msg_track_add, set once at origination), and prev_hop is the
+     * radio layer's own notion of "who transmitted this specific frame"
+     * (pkt_src_addr == event->data.packet.src_addr, set by sim_radio.c on
+     * every single broadcast/retransmit; a relay's retransmit is a new
+     * broadcast from the relay, so this is already exactly prev_hop
+     * semantics with zero extra plumbing needed on the TX side). */
+    uint32_t orig_sender = bridge_msg_track_find_src(msg_track, msg_track_count, hdr.packet_id);
+
+    /* Same data_rx_decide the firmware calls (main/mesh_task.c,
+     * mesh_process_rx_packet's PKT_TYPE_DATA case): no parallel
+     * deliver/forward-vs-reverse-route logic here. orig_sender == 0 means
+     * this packet_id was never tracked (should not happen for in-flight
+     * traffic; guarded defensively so a lookup miss cannot install a
+     * dest=0 route, a gosim-only concern since firmware always has a real
+     * wire src_addr and never sees "unknown"). */
+    uint8_t data_link_metric = metric_apply_link_penalty(255, rssi, snr);
+    data_rx_decision_t data_rx = data_rx_decide(hdr.dest_addr, rx->addr, orig_sender, pkt_src_addr,
+                                                hdr.hop_limit, data_link_metric);
+    if (data_rx.install_reverse_route && orig_sender != 0) {
+        route_install(&rx->routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
+                      data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE, now_ms);
+        emit_route_added(stdout, now_us, rx->id, data_rx.reverse_dest, data_rx.reverse_next_hop,
+                         data_rx.reverse_hop_count);
+    }
+
+    /* NOTE (red-team, Task 4): DATA_RX_DELIVER is also the decision for a
+     * broadcast dest (0xFFFFFFFF). Today gosim never originates a
+     * broadcast-dest PKT_TYPE_DATA (only RREQ/RERR use 0xFFFFFFFF), so
+     * this branch only ever runs for dest == rx->addr, identical to the
+     * pre-Task-4 condition. When Task 5 (channel flood) introduces real
+     * broadcast DATA, the unicast-only logic below (pair-key decrypt,
+     * private delivery receipt) MUST NOT run for it; split on
+     * hdr.dest_addr == 0xFFFFFFFF here when that lands. */
+    if (data_rx.action == DATA_RX_DELIVER) {
+        /* Message reached destination: send delivery receipt back to source */
 
         /* Crypto: decrypt payload if present (Phase 5) */
         uint8_t decrypted_payload[256];
@@ -748,12 +784,12 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
          * This relay node volunteers to hold the message until the dest rejoins. */
         bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
         if (ext && len > HEADER_SIZE) {
-            /* Store the raw packet payload (everything after the header) */
-            uint32_t orig_src =
-                bridge_msg_track_find_src(msg_track, msg_track_count, hdr.packet_id);
-            if (orig_src != 0) {
+            /* Store the raw packet payload (everything after the header).
+             * orig_sender is the tracker lookup hoisted to the top of this
+             * function (Task 4); this branch used to repeat it. */
+            if (orig_sender != 0) {
                 int stored =
-                    mailbox_store(&ext->mailbox, orig_src, hdr.dest_addr, buf + HEADER_SIZE,
+                    mailbox_store(&ext->mailbox, orig_sender, hdr.dest_addr, buf + HEADER_SIZE,
                                   len - HEADER_SIZE, hdr.packet_id, now_ms);
                 if (stored == 0) {
                     g_ext_metrics.mailbox_stored++;
@@ -873,8 +909,9 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
         _handle_rerr(rx, buf, len, event->timestamp_us, now_ms);
         break;
     case PKT_TYPE_DATA:
-        _handle_data(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics,
-                     anomaly, msg_track, msg_track_count);
+        _handle_data(rx, buf, len, event->data.packet.src_addr, rssi, event->data.packet.snr,
+                     event->timestamp_us, now_ms, nodes, radio, rng, events, metrics, anomaly,
+                     msg_track, msg_track_count);
         break;
     case PKT_TYPE_DELIVERY_RECEIPT:
         _handle_delivery_receipt(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng,

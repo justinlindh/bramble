@@ -8,23 +8,50 @@ import (
 	"testing"
 )
 
-// TestPhase1ConfirmationNeverReachesOriginatorAcrossMultiHopLine is the
-// system-level TDD baseline for Phase 1 delivery-core plan Task 1
+// TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine is the
+// system-level proof for Phase 1 delivery-core plan Task 4
 // (internal-planning/plans/2026-07-04-phase1-delivery-core-plan.md).
 //
 // gosim used to install a route to every beacon sender (the old
 // _handle_beacon in bridge.c), which firmware's own handle_beacon
 // (main/mesh_task.c) never does. That accidentally supplied the reverse-hop
 // route real relays never get, which masked the confirmation-return bug:
-// relays only ever install routes TOWARD an RREQ/RREP discovery target
-// (rrep_rx_decide), never back toward a message's originator. With that
-// masking removed, this scenario proves gosim now reproduces the real
-// failure: on a line topology forcing 3 hops (A-B-C-D, each hop just barely
-// in range, non-adjacent pairs out of range), A's unicast DATA to D is
-// delivered (D decodes it), but D's delivery receipt can never route back
-// to A (no node on the path, including D itself, ever learned a route
-// toward A), so A never observes a confirmation.
-func TestPhase1ConfirmationNeverReachesOriginatorAcrossMultiHopLine(t *testing.T) {
+// relays only ever installed routes TOWARD an RREQ/RREP discovery target
+// (rrep_rx_decide), never back toward a message's originator. Task 1
+// removed that masking and captured the bug as a TDD baseline (this test
+// used to assert sourceConfirmed == false, with an explicit BUG marker).
+//
+// Task 4 fixes the root cause: DATA now carries a relay-mutated prev_hop
+// (wire v4), and every node that receives or forwards a DATA frame learns a
+// route back to its src_addr via prev_hop (data_rx_decide's
+// install_reverse_route, wired into both main/mesh_task.c's
+// mesh_process_rx_packet and gosim's own _handle_data). On this same line
+// topology forcing 3 hops (A-B-C-D), A's unicast DATA to D is still
+// delivered (D decodes it), and D's delivery receipt now has a breadcrumb
+// route at every relay to travel home on, so A observes the confirmation.
+//
+// This test also covers the Task 4 brief's ACK-loss fallback ("drop the
+// first ACK, assert retry eventually yields DELIVERED; if Task 6 [re-ACK on
+// duplicate DATA] not yet done, assert at least that the reverse route
+// exists and a re-sent ACK would route"). Task 6 has not landed yet, and
+// the sim harness has no scenario primitive to selectively drop a single
+// in-flight packet (only a global radio.loss_pct), so a literal "drop the
+// first ACK, observe a second one arrive" run is not constructible here.
+// Per the brief's explicit fallback, the assertions below instead prove the
+// weaker, still-load-bearing claim directly off this same run: every relay
+// on the forward path (B, C) installs a reverse route to A as a side
+// effect of A's DATA transiting it, BEFORE any delivery receipt is ever
+// sent. That route does not depend on a receipt having arrived, which is
+// exactly why it would still be there for a retried/re-sent confirmation
+// even if the first attempt were lost.
+//
+// (These fallback assertions are folded into this same test, reusing one
+// runScenarioHeadless call, rather than a second scenario-level test: the
+// pipe-based stdout capture runScenarioHeadless uses is only built to be
+// exercised once per test process, and a second back-to-back invocation
+// in the same package process was observed to lose C-side fprintf lines,
+// a pre-existing harness fragility this task does not attempt to fix.)
+func TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase1-line-4hop",
 		"mode": "deterministic",
@@ -61,20 +88,25 @@ func TestPhase1ConfirmationNeverReachesOriginatorAcrossMultiHopLine(t *testing.T
 	}
 
 	var packetIDHex string
+	var addrAHex string
 	destDelivered := false
 	sourceConfirmed := false
 	for _, line := range result.Lines() {
-		if !strings.Contains(line, `"type":"message_`) {
-			continue
-		}
 		var evt map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
 			continue
 		}
 		typ, _ := evt["type"].(string)
 		node, _ := evt["node"].(string)
-		pid, _ := evt["packet_id"].(string)
 
+		if typ == "node_joined" && node == "A" {
+			addrAHex, _ = evt["addr"].(string)
+		}
+
+		if !strings.HasPrefix(typ, "message_") {
+			continue
+		}
+		pid, _ := evt["packet_id"].(string)
 		if typ == "message_sent" && node == "A" {
 			packetIDHex = pid
 		}
@@ -97,31 +129,57 @@ func TestPhase1ConfirmationNeverReachesOriginatorAcrossMultiHopLine(t *testing.T
 			"RREQ/RREP discovery; multi-hop DATA forwarding is broken", packetIDHex)
 	}
 
-	/* BUG (phase1): confirmation return path broken, relays have no route
-	 * back to the originator; Task 4 flips this assertion. */
-	if sourceConfirmed {
-		t.Fatalf("source A observed a delivery confirmation for %s. Per the Phase 1 "+
-			"delivery-core plan this should currently be impossible: relays only ever "+
-			"install routes TOWARD a discovery target (rrep_rx_decide), never back toward "+
-			"the originator, so D's delivery receipt has no route home. If this now "+
-			"passes, Task 4 (wire v4 prev_hop reverse-route learning) has landed and this "+
-			"assertion should be flipped to require sourceConfirmed", packetIDHex)
+	/* FIXED (Task 4): wire v4's relay-mutated prev_hop plus data_rx_decide's
+	 * reverse-route learning give every relay on the forward path a
+	 * breadcrumb route home, so D's delivery receipt now reaches A. */
+	if !sourceConfirmed {
+		t.Fatalf("source A never observed a delivery confirmation for %s even though D "+
+			"decoded it. Task 4 (wire v4 prev_hop reverse-route learning) should make every "+
+			"relay on the forward path (B, C) learn a route back to A via prev_hop as A's "+
+			"DATA transits them, so D's delivery receipt has a route home", packetIDHex)
 	}
 
 	// The scenario's 15s duration is chosen to land well before the
 	// NORMAL-tier pending-ack retry backoff exhausts (base 2s, doubling,
 	// max 3 attempts: exhaustion lands around t=~20s after send at t=1s),
-	// so a still-active pending ack here reflects "no receipt has arrived",
-	// not "gave up after retries" (which would also clear it, for an
-	// unrelated reason, and must not be confused with a real confirmation).
+	// so a cleared pending ack here reflects "a confirmation genuinely
+	// arrived" (pending_ack_remove only runs from _handle_delivery_receipt
+	// when a receipt actually reaches the source), not "gave up after
+	// retries" (which would also clear it, for an unrelated reason, and
+	// must not be confused with a real confirmation: sourceConfirmed above
+	// already rules that out, since only an arriving receipt sets it).
 	packetID64, perr := strconv.ParseUint(strings.TrimPrefix(packetIDHex, "0x"), 16, 32)
 	if perr != nil {
 		t.Fatalf("could not parse packet_id %q: %v", packetIDHex, perr)
 	}
-	if !result.PendingAckActive("A", uint32(packetID64)) {
-		t.Fatalf("A's pending-ack for %s was cleared without a confirmation ever reaching "+
-			"A (no message_delivered event at node A); pending_ack_remove should only run "+
-			"from _handle_delivery_receipt when a receipt actually arrives at the source",
-			packetIDHex)
+	if result.PendingAckActive("A", uint32(packetID64)) {
+		t.Fatalf("A's pending-ack for %s is still active even though A observed a delivery "+
+			"confirmation (sourceConfirmed); _handle_delivery_receipt should have cleared it "+
+			"via pending_ack_remove when the receipt arrived", packetIDHex)
+	}
+
+	// ACK-loss fallback (see the doc comment above): the reverse route at
+	// every relay must exist independently of any receipt having arrived,
+	// so it is unaffected by whether the first delivery confirmation made
+	// it back or not. Read the C route table directly (RouteNextHop)
+	// rather than the route_added JSON log line, which is emitted via the
+	// same pipe-based stdout capture PendingAckActive's doc comment already
+	// treats as reliable only for the higher-level message_* events this
+	// test depends on above.
+	if addrAHex == "" {
+		t.Fatalf("never saw a node_joined event for A; could not determine A's address")
+	}
+	addrA64, perr := strconv.ParseUint(strings.TrimPrefix(addrAHex, "0x"), 16, 32)
+	if perr != nil {
+		t.Fatalf("could not parse A's address %q: %v", addrAHex, perr)
+	}
+	addrA := uint32(addrA64)
+	for _, relay := range []string{"B", "C"} {
+		if _, ok := result.RouteNextHop(relay, addrA); !ok {
+			t.Fatalf("relay %s never installed a reverse route to A (%s) while forwarding "+
+				"A's DATA. This route must exist independently of any delivery receipt "+
+				"arriving, so a retried/re-sent confirmation can still find its way home "+
+				"even if the first one is lost in flight", relay, addrAHex)
+		}
 	}
 }

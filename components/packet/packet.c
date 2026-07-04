@@ -58,6 +58,10 @@ esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size
 
 esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, uint8_t* buf,
                                  size_t len) {
+    /* Wire v4: this buffer stays HEADER_SIZE + 4 bytes on purpose. prev_hop
+     * (BRAMBLE_DATA_PREV_HOP_OFFSET in packet.h) is relay-mutable and lives
+     * further out in the wire envelope; it is never copied in here, which
+     * is exactly how it stays excluded from the AEAD tag. */
     if (len < HEADER_SIZE + 4)
         return ESP_ERR_INVALID_SIZE;
     esp_err_t err = bramble_header_build_aad(h, buf, HEADER_SIZE);

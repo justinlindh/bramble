@@ -92,23 +92,73 @@ void test_rerr_handle_bumps_fail_count(void) {
 
 /* Task 3 (Phase 1 delivery-core plan): data_rx_decide extracts the
  * deliver-locally-vs-forward fork out of mesh_task.c's mesh_process_rx_packet
- * PKT_TYPE_DATA case, behavior-preserving. */
+ * PKT_TYPE_DATA case, behavior-preserving. Task 4 turns on reverse-route
+ * learning (dest=src_addr, next_hop=prev_hop) for every case below; these
+ * three now also assert the reverse-route fields land correctly alongside
+ * the original deliver/forward action. */
+#define SELF_ADDR 0xAAAAu
+#define ORIGIN_ADDR 0x0A0A0A0Au
+#define PREV_HOP_ADDR 0x0B0B0B0Bu
+#define OTHER_UNICAST_DEST 0xCCCCu
+
 void test_data_rx_decide_deliver_self(void) {
-    data_rx_decision_t d = data_rx_decide(0xAAAA, 0xAAAA);
+    data_rx_decision_t d =
+        data_rx_decide(SELF_ADDR, SELF_ADDR, ORIGIN_ADDR, PREV_HOP_ADDR, ROUTE_HOP_LIMIT_MAX, 200);
     TEST_ASSERT_EQUAL(DATA_RX_DELIVER, d.action);
-    TEST_ASSERT_FALSE(d.install_reverse_route);
+    TEST_ASSERT_TRUE(d.install_reverse_route);
+    TEST_ASSERT_EQUAL_UINT32(ORIGIN_ADDR, d.reverse_dest);
+    TEST_ASSERT_EQUAL_UINT32(PREV_HOP_ADDR, d.reverse_next_hop);
+    TEST_ASSERT_EQUAL(1, d.reverse_hop_count);
+    TEST_ASSERT_EQUAL(200, d.reverse_metric);
 }
 
 void test_data_rx_decide_deliver_broadcast(void) {
-    data_rx_decision_t d = data_rx_decide(0xFFFFFFFF, 0xAAAA);
+    data_rx_decision_t d =
+        data_rx_decide(0xFFFFFFFF, SELF_ADDR, ORIGIN_ADDR, PREV_HOP_ADDR, ROUTE_HOP_LIMIT_MAX, 150);
     TEST_ASSERT_EQUAL(DATA_RX_DELIVER, d.action);
-    TEST_ASSERT_FALSE(d.install_reverse_route);
+    /* Broadcast DATA's sender is just as reachable via prev_hop as a
+     * unicast sender is; install_reverse_route does not depend on action. */
+    TEST_ASSERT_TRUE(d.install_reverse_route);
+    TEST_ASSERT_EQUAL_UINT32(ORIGIN_ADDR, d.reverse_dest);
+    TEST_ASSERT_EQUAL_UINT32(PREV_HOP_ADDR, d.reverse_next_hop);
 }
 
 void test_data_rx_decide_forward_other_unicast(void) {
-    data_rx_decision_t d = data_rx_decide(0xCCCC, 0xAAAA);
+    data_rx_decision_t d = data_rx_decide(OTHER_UNICAST_DEST, SELF_ADDR, ORIGIN_ADDR, PREV_HOP_ADDR,
+                                          ROUTE_HOP_LIMIT_MAX, 100);
     TEST_ASSERT_EQUAL(DATA_RX_FORWARD, d.action);
+    TEST_ASSERT_TRUE(d.install_reverse_route);
+    TEST_ASSERT_EQUAL_UINT32(ORIGIN_ADDR, d.reverse_dest);
+    TEST_ASSERT_EQUAL_UINT32(PREV_HOP_ADDR, d.reverse_next_hop);
+}
+
+/* Skip conditions: never install a self-referential route. */
+void test_data_rx_decide_skips_when_src_is_self(void) {
+    data_rx_decision_t d = data_rx_decide(OTHER_UNICAST_DEST, SELF_ADDR, SELF_ADDR, PREV_HOP_ADDR,
+                                          ROUTE_HOP_LIMIT_MAX, 100);
     TEST_ASSERT_FALSE(d.install_reverse_route);
+}
+
+void test_data_rx_decide_skips_when_prev_hop_is_self(void) {
+    data_rx_decision_t d = data_rx_decide(OTHER_UNICAST_DEST, SELF_ADDR, ORIGIN_ADDR, SELF_ADDR,
+                                          ROUTE_HOP_LIMIT_MAX, 100);
+    TEST_ASSERT_FALSE(d.install_reverse_route);
+}
+
+/* Hop-count derivation, verified against the A-B-C scenario from the brief:
+ * A originates at ROUTE_HOP_LIMIT_MAX (never decremented before B receives
+ * it) -> B learns A at 1 hop. B decrements once before forwarding, so C
+ * receives ROUTE_HOP_LIMIT_MAX - 1 -> C learns A at 2 hops. */
+void test_data_rx_decide_hop_count_one_hop_from_origin(void) {
+    data_rx_decision_t d = data_rx_decide(OTHER_UNICAST_DEST, SELF_ADDR, ORIGIN_ADDR, PREV_HOP_ADDR,
+                                          ROUTE_HOP_LIMIT_MAX, 100);
+    TEST_ASSERT_EQUAL(1, d.reverse_hop_count);
+}
+
+void test_data_rx_decide_hop_count_two_hops_from_origin(void) {
+    data_rx_decision_t d = data_rx_decide(OTHER_UNICAST_DEST, SELF_ADDR, ORIGIN_ADDR, PREV_HOP_ADDR,
+                                          ROUTE_HOP_LIMIT_MAX - 1, 100);
+    TEST_ASSERT_EQUAL(2, d.reverse_hop_count);
 }
 
 int main(void) {
@@ -124,5 +174,9 @@ int main(void) {
     RUN_TEST(test_data_rx_decide_deliver_self);
     RUN_TEST(test_data_rx_decide_deliver_broadcast);
     RUN_TEST(test_data_rx_decide_forward_other_unicast);
+    RUN_TEST(test_data_rx_decide_skips_when_src_is_self);
+    RUN_TEST(test_data_rx_decide_skips_when_prev_hop_is_self);
+    RUN_TEST(test_data_rx_decide_hop_count_one_hop_from_origin);
+    RUN_TEST(test_data_rx_decide_hop_count_two_hops_from_origin);
     return UNITY_END();
 }
