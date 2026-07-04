@@ -311,6 +311,11 @@ void sim_radio_broadcast(sim_node_t* tx_node, const outbound_packet_t* pkt, node
     tx_node->tx_busy_until_us = air_end;
     tx_node->airtime_tx_us += toa_us;
     metrics->airtime_total_us += toa_us;
+    /* Per-type ToA (Task 4): same toa_us the channel/collision model above
+     * just used, charged once per actual (post-budget-gate) transmission,
+     * since sim_radio_broadcast is the single chokepoint every TX site
+     * (beacon, RREQ/RREP/RERR, DATA, receipts) converges through. */
+    metrics_record_tx_airtime(metrics, pkt->pkt_type, toa_us);
 
     if (radio->collisions_enabled) {
         channel_log_add(&radio->channel, tx_node->addr, tx_node->x, tx_node->y, air_start, air_end,

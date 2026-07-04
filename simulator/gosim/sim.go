@@ -731,14 +731,26 @@ func (s *Sim) complete() {
 		undelivered = sent - delivered
 	}
 
-	// Per-node airtime distribution (real time-on-air transmitted)
+	// Per-node airtime distribution (real time-on-air transmitted), plus
+	// per-tier/per-limiter denial counts: budget_denied (Task 1) and
+	// rreq_rate_denied/rreq_fwd_denied (Task 2) live on each sim_node_t,
+	// summed here across the fleet for final_metrics.
 	var perNodeMs []uint64
+	var budgetDeniedNormal, budgetDeniedCritical, budgetDeniedBroadcast, budgetDeniedReceipt uint64
+	var rreqRateDenied, rreqFwdDenied uint64
 	count := nodeCount(&s.nodes)
 	for i := 0; i < count; i++ {
 		node := C.node_array_get(&s.nodes, C.int(i))
-		if node != nil {
-			perNodeMs = append(perNodeMs, uint64(node.airtime_tx_us)/1000)
+		if node == nil {
+			continue
 		}
+		perNodeMs = append(perNodeMs, uint64(node.airtime_tx_us)/1000)
+		budgetDeniedNormal += uint64(node.budget_denied[C.AIRTIME_IDX_NORMAL])
+		budgetDeniedCritical += uint64(node.budget_denied[C.AIRTIME_IDX_CRITICAL])
+		budgetDeniedBroadcast += uint64(node.budget_denied[C.AIRTIME_IDX_BROADCAST])
+		budgetDeniedReceipt += uint64(node.budget_denied[C.AIRTIME_IDX_RECEIPT])
+		rreqRateDenied += uint64(node.rreq_rate_denied)
+		rreqFwdDenied += uint64(node.rreq_fwd_denied)
 	}
 	sort.Slice(perNodeMs, func(i, j int) bool { return perNodeMs[i] < perNodeMs[j] })
 	pct := func(p float64) uint64 {
@@ -749,9 +761,44 @@ func (s *Sim) complete() {
 		return perNodeMs[idx]
 	}
 	channelUtilPct := 0.0
+	offeredLoadErlangs := 0.0
 	if s.duration > 0 {
 		channelUtilPct = float64(s.metrics.airtime_total_us) / float64(s.duration) * 100.0
+		// Erlangs: offered load as a fraction of the observation window (1.0 =
+		// channel busy 100% of the time). Same ratio as channel_util_pct/100,
+		// computed independently here since it is the metric's own name, not
+		// a derived display value.
+		offeredLoadErlangs = float64(s.metrics.airtime_total_us) / float64(s.duration)
 	}
+
+	// Per-type real time-on-air (Task 4): same accumulators
+	// metrics_control_airtime_pct reads, charged once per actual TX at the
+	// single sim_radio_broadcast chokepoint. ms here (not us) to match the
+	// rest of this JSON's airtime fields.
+	airtimeMsByType := map[string]uint64{
+		"beacon":  uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_BEACON]) / 1000,
+		"rreq":    uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_RREQ]) / 1000,
+		"rrep":    uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_RREP]) / 1000,
+		"rerr":    uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_RERR]) / 1000,
+		"data":    uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_DATA]) / 1000,
+		"ack":     uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_ACK]) / 1000,
+		"receipt": uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_RECEIPT]) / 1000,
+		"probe":   uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_PROBE]) / 1000,
+		"other":   uint64(s.metrics.airtime_us_by_type[C.SIM_PKT_METRIC_OTHER]) / 1000,
+	}
+
+	// Airtime-BUDGET denials (Task 1), by lane. Note these are per-TIER, not
+	// per-packet-type: AIRTIME_IDX_BROADCAST covers both beacons and
+	// broadcast DATA, AIRTIME_IDX_CRITICAL covers RREQ+RREP+RERR together,
+	// so "attempted = sent + denied" only reconstructs at the tier level,
+	// not per packet type, from these fields alone.
+	budgetDeniedByTier := map[string]uint64{
+		"normal":    budgetDeniedNormal,
+		"critical":  budgetDeniedCritical,
+		"broadcast": budgetDeniedBroadcast,
+		"receipt":   budgetDeniedReceipt,
+	}
+
 	s.emitJSON(map[string]interface{}{
 		"type":             "airtime_distribution",
 		"per_node_ms":      perNodeMs,
@@ -780,6 +827,14 @@ func (s *Sim) complete() {
 		"crypto_encrypted":      uint64(s.metrics.crypto_encrypted),
 		"crypto_decrypted":      uint64(s.metrics.crypto_decrypted),
 		"crypto_auth_failed":    uint64(s.metrics.crypto_auth_failed),
+		// beacons_sent/rreqs_sent/rreps_sent (and every per-type count/ToA
+		// bucket below) count SUCCESSFUL transmissions only, i.e. post the
+		// Task 1 airtime-budget gate and Task 2 RREQ rate limiters: a
+		// packet that was attempted but denied is NOT counted here, it is
+		// counted in budget_denied_by_tier / rreq_rate_denied / rreq_fwd_denied
+		// instead. "Attempted" for a given tier or limiter = sent + its
+		// denied counter; see budget_denied_by_tier's own note on why that
+		// reconstruction is per-tier, not per-packet-type, for the budget.
 		"beacons_sent":          uint64(s.metrics.beacons_sent),
 		"rreqs_sent":            uint64(s.metrics.rreqs_sent),
 		"rreps_sent":            uint64(s.metrics.rreps_sent),
@@ -790,10 +845,23 @@ func (s *Sim) complete() {
 		"receptions_ok":         uint64(s.metrics.receptions_ok),
 		"channel_log_overflow":  uint64(s.radio.channel.overflow_drops),
 		"airtime_total_ms":      uint64(s.metrics.airtime_total_us) / 1000,
+		"airtime_ms_by_type":    airtimeMsByType,
+		"offered_load_erlangs":  offeredLoadErlangs,
 		"channel_util_pct":      channelUtilPct,
 		"avg_latency_ms":        metricsAvgLatencyMs(&s.metrics),
 		"delivery_rate":         metricsDeliveryRate(&s.metrics),
-		"control_airtime_pct":   metricsControlAirtimePct(&s.metrics),
+		// control_airtime_pct is now genuinely ToA-weighted:
+		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
+		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,
+		// RERR not included) kept under its own honest name for continuity.
+		"control_airtime_pct": metricsControlAirtimePct(&s.metrics),
+		"control_packet_pct":  metricsControlPacketPct(&s.metrics),
+		// Per-tier airtime-budget denials (Task 1) and per-limiter RREQ
+		// denials (Task 2), so scale runs can see how much control/data
+		// traffic the real gates actually refused, not just what got sent.
+		"budget_denied_by_tier": budgetDeniedByTier,
+		"rreq_rate_denied":      rreqRateDenied,
+		"rreq_fwd_denied":       rreqFwdDenied,
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ended"})
 }
