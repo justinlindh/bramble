@@ -330,24 +330,20 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
 
     neighbor_update(&rx->neighbors, beacon.src_addr, rssi, 0, beacon.pubkey_hash, now_ms);
 
-    route_entry_t* existing = route_lookup(&rx->routes, beacon.src_addr);
-    bool new_or_broken = (!existing || existing->state == ROUTE_BROKEN);
-
-    /* Direct-neighbor route from the beacon, scored by link quality alone,
-     * matching the firmware's penalty-based metric (the composite scoring
-     * module was deleted as decorative; DES-4). */
+    /* Phase 1 Task 1 (delivery-core plan): firmware's handle_beacon
+     * (main/mesh_task.c) never installs a route on a heard beacon, only the
+     * neighbor_update above. The sim used to install a direct route to every
+     * beacon sender here, which accidentally supplied the reverse-hop route
+     * that relays never get in real firmware, masking the confirmation-return
+     * bug: relays only ever learn routes TOWARD a discovery target via RREP
+     * (see _handle_rrep / rrep_rx_decide), never back toward a message's
+     * originator. Route installation now happens exclusively via RREQ/RREP,
+     * matching firmware, so the sim can reproduce that bug instead of hiding
+     * it. anomaly is now unused here since the beacon-triggered route-flap
+     * check went away with the route_install it guarded. */
+    (void)anomaly;
     int node_idx = (int)(rx - nodes->nodes);
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
-    uint8_t metric = metric_apply_link_penalty(255, rssi, 0);
-
-    route_install(&rx->routes, beacon.src_addr, beacon.src_addr, 1, metric, ROUTE_ACTIVE, now_ms);
-
-    if (new_or_broken) {
-        emit_route_added(stdout, now_us, rx->id, beacon.src_addr, beacon.src_addr, 1);
-
-        anomaly_check_route_flap(&anomaly[node_idx].flap, beacon.src_addr, beacon.src_addr, now_us,
-                                 stdout, rx->id);
-    }
 
     /* Phase 6: Mailbox — check if we have stored messages for the beacon sender */
     if (ext && ext->mailbox.count > 0) {
