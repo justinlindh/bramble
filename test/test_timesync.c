@@ -11,7 +11,7 @@ void test_single_source_does_not_commit(void) {
     timesync_init(&ts);
 
     /* One source is not enough — CORROBORATION_REQUIRED = 3 */
-    int rc = timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
+    int rc = timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* accepted, not committed */
     TEST_ASSERT_FALSE(ts.synchronized);
 }
@@ -20,8 +20,8 @@ void test_two_sources_does_not_commit(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    int rc = timesync_handle_sync(&ts, 1120, 1, 0xBBBB, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    int rc = timesync_handle_sync(&ts, 1120, 1, 0xBBBB, true, 1000);
     TEST_ASSERT_EQUAL_INT(0, rc);
     TEST_ASSERT_FALSE(ts.synchronized);
 }
@@ -30,9 +30,9 @@ void test_three_distinct_sources_commits(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1120, 1, 0xBBBB, 1000);
-    int rc = timesync_handle_sync(&ts, 1080, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1120, 1, 0xBBBB, true, 1000);
+    int rc = timesync_handle_sync(&ts, 1080, 1, 0xCCCC, true, 1000);
 
     TEST_ASSERT_EQUAL_INT(1, rc); /* committed */
     TEST_ASSERT_TRUE(ts.synchronized);
@@ -43,15 +43,15 @@ void test_duplicate_source_does_not_count_as_distinct(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1120, 1, 0xBBBB, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1120, 1, 0xBBBB, true, 1000);
     /* Same source as first — should update, not add distinct */
-    int rc = timesync_handle_sync(&ts, 1090, 1, 0xAAAA, 1000);
+    int rc = timesync_handle_sync(&ts, 1090, 1, 0xAAAA, true, 1000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* still only 2 distinct sources */
     TEST_ASSERT_FALSE(ts.synchronized);
 
     /* Third distinct source commits */
-    rc = timesync_handle_sync(&ts, 1080, 1, 0xCCCC, 1000);
+    rc = timesync_handle_sync(&ts, 1080, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_EQUAL_INT(1, rc);
     TEST_ASSERT_TRUE(ts.synchronized);
 }
@@ -63,9 +63,9 @@ void test_weighted_average_prefers_better_stratum(void) {
     timesync_init(&ts);
 
     /* Stratum 6 (weight 1), stratum 1 (weight 6), stratum 2 (weight 5) */
-    timesync_handle_sync(&ts, 1450, 6, 0xAAAA, 1000);          /* offset +450 */
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);          /* offset +100 */
-    int rc = timesync_handle_sync(&ts, 1200, 2, 0xCCCC, 1000); /* offset +200 */
+    timesync_handle_sync(&ts, 1450, 6, 0xAAAA, true, 1000);          /* offset +450 */
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);          /* offset +100 */
+    int rc = timesync_handle_sync(&ts, 1200, 2, 0xCCCC, true, 1000); /* offset +200 */
     TEST_ASSERT_EQUAL_INT(1, rc);
 
     /* Weighted: (450*1 + 100*6 + 200*5) / (1+6+5) = (450+600+1000)/12 = 170 */
@@ -81,14 +81,14 @@ void test_rejects_worse_stratum_when_synchronized(void) {
     timesync_init(&ts);
 
     /* Sync from 3 sources at stratum 1 → our stratum = 2 */
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(ts.synchronized);
     TEST_ASSERT_EQUAL_UINT8(2, ts.stratum);
 
     /* Stratum 2 is not strictly better than our 2 */
-    int rc = timesync_handle_sync(&ts, 1200, 2, 0xDDDD, 2000);
+    int rc = timesync_handle_sync(&ts, 1200, 2, 0xDDDD, true, 2000);
     TEST_ASSERT_EQUAL_INT(-1, rc);
 }
 
@@ -97,13 +97,13 @@ void test_rejects_large_shift_when_synchronized(void) {
     timesync_init(&ts);
 
     /* Sync with offset ~+100 */
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(ts.synchronized);
 
     /* Propose offset +5000 — shift of ~4900, exceeds MAX_TIME_SHIFT_MS (2000) */
-    int rc = timesync_handle_sync(&ts, 6000, 0, 0xDDDD, 1000);
+    int rc = timesync_handle_sync(&ts, 6000, 0, 0xDDDD, true, 1000);
     TEST_ASSERT_EQUAL_INT(-2, rc);
 }
 
@@ -114,11 +114,11 @@ void test_stale_entries_expire(void) {
     timesync_init(&ts);
 
     /* Two entries at t=1000 */
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
 
     /* Third entry at t=200000 — first two are now >180s old and should be purged */
-    int rc = timesync_handle_sync(&ts, 200100, 1, 0xCCCC, 200000);
+    int rc = timesync_handle_sync(&ts, 200100, 1, 0xCCCC, true, 200000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* only 1 non-expired source (0xCCCC) */
     TEST_ASSERT_FALSE(ts.synchronized);
 }
@@ -130,9 +130,9 @@ void test_get_network_time(void) {
     timesync_init(&ts);
 
     /* Force sync for this test */
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(ts.synchronized);
 
     /* offset should be ~100; network_time at local_now=2000 = 2100 */
@@ -154,19 +154,19 @@ void test_rejects_offset_inconsistent_with_pending_quorum(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000); /* offset ~100 */
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000); /* offset ~100 */
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000); /* offset ~100 */
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000); /* offset ~100 */
 
     /* Wildly inconsistent: offset ~49000, far beyond MAX_TIME_SHIFT_MS
      * (2000) from the ~100 consensus already pending. */
-    int rc = timesync_handle_sync(&ts, 50000, 1, 0xCCCC, 1000);
+    int rc = timesync_handle_sync(&ts, 50000, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_EQUAL_INT(-2, rc);
     TEST_ASSERT_FALSE(ts.synchronized);
 
     /* A genuinely consistent third source still completes the quorum and
      * commits normally: the fix rejects disagreement, not corroboration
      * itself. */
-    rc = timesync_handle_sync(&ts, 1080, 1, 0xDDDD, 1000);
+    rc = timesync_handle_sync(&ts, 1080, 1, 0xDDDD, true, 1000);
     TEST_ASSERT_EQUAL_INT(1, rc);
     TEST_ASSERT_TRUE(ts.synchronized);
 }
@@ -179,7 +179,7 @@ void test_first_pending_entry_always_admitted_regardless_of_magnitude(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    int rc = timesync_handle_sync(&ts, 1700000000000LL, 1, 0xAAAA, 5000);
+    int rc = timesync_handle_sync(&ts, 1700000000000LL, 1, 0xAAAA, true, 5000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* accepted (pending), not yet committed */
     TEST_ASSERT_EQUAL_INT(1, ts.pending_count);
 }
@@ -189,13 +189,13 @@ void test_is_confident_false_until_corroborated(void) {
     timesync_init(&ts);
     TEST_ASSERT_FALSE(timesync_is_confident(&ts, 1000));
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
     TEST_ASSERT_FALSE(timesync_is_confident(&ts, 1000));
 
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
     TEST_ASSERT_FALSE(timesync_is_confident(&ts, 1000));
 
-    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(timesync_is_confident(&ts, 1000));
 }
 
@@ -211,9 +211,9 @@ void test_is_confident_true_right_after_commit(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(ts.synchronized);
 
     TEST_ASSERT_TRUE(timesync_is_confident(&ts, ts.last_sync_ms));
@@ -223,9 +223,9 @@ void test_is_confident_lapses_when_sync_goes_stale(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, 1000);
-    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(ts.synchronized);
     uint32_t last_sync = ts.last_sync_ms;
 
@@ -238,9 +238,116 @@ void test_is_confident_lapses_when_sync_goes_stale(void) {
 
     /* A fresh committed sync at that later time refreshes last_sync_ms
      * and re-closes the gate. */
-    int rc = timesync_handle_sync(&ts, (int64_t)stale_now + 100, 1, 0xAAAA, stale_now);
+    int rc = timesync_handle_sync(&ts, (int64_t)stale_now + 100, 1, 0xAAAA, true, stale_now);
     TEST_ASSERT_EQUAL_INT(1, rc);
     TEST_ASSERT_TRUE(timesync_is_confident(&ts, stale_now));
+}
+
+/* ── Established-source bootstrap quorum (ws 1.3c, NEW-SEC-4 anti-Sybil) ──
+ *
+ * The pre-commit corroboration count now considers only established
+ * neighbors, so an insider who mints fresh addresses instantly cannot
+ * bootstrap the quorum: their fabricated identities are never established
+ * (neighbor_is_established requires sustained tenure) until they have
+ * beaconed for a while, turning instant-mint Sybil into sustained-over-time
+ * Sybil. Post-commit behavior (self-heal, stratum/shift gates) is
+ * unaffected: being established never bypasses CORROBORATION_REQUIRED, and
+ * the fix only concerns WHO counts toward the FIRST commit. */
+
+void test_non_established_sources_never_commit(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    /* Three distinct sources, none established: an insider fabricating
+     * fresh addresses can't win the quorum just by having three of them. */
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, false, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, false, 1000);
+    int rc = timesync_handle_sync(&ts, 1100, 1, 0xCCCC, false, 1000);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    TEST_ASSERT_FALSE(ts.synchronized);
+
+    /* Adding more non-established sources still never commits. */
+    rc = timesync_handle_sync(&ts, 1100, 1, 0xDDDD, false, 1000);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    rc = timesync_handle_sync(&ts, 1100, 1, 0xEEEE, false, 1000);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    TEST_ASSERT_FALSE(ts.synchronized);
+}
+
+void test_three_established_sources_commit(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    int rc = timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
+    TEST_ASSERT_EQUAL_INT(1, rc);
+    TEST_ASSERT_TRUE(ts.synchronized);
+}
+
+void test_mix_of_established_and_not_stays_pending(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    /* Only 2 of 3 distinct sources are established; the non-established
+     * one doesn't count toward quorum, so this is really a 2-established
+     * situation and must stay pending. */
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    int rc = timesync_handle_sync(&ts, 1100, 1, 0xCCCC, false, 1000);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    TEST_ASSERT_FALSE(ts.synchronized);
+
+    /* A third established source completes quorum and commits. */
+    rc = timesync_handle_sync(&ts, 1100, 1, 0xDDDD, true, 1000);
+    TEST_ASSERT_EQUAL_INT(1, rc);
+    TEST_ASSERT_TRUE(ts.synchronized);
+}
+
+void test_established_does_not_bypass_corroboration_required(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    /* Only 2 established sources: still short of CORROBORATION_REQUIRED
+     * (3), being established is not a shortcut around the count. */
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    int rc = timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    TEST_ASSERT_FALSE(ts.synchronized);
+}
+
+void test_repeated_established_source_still_one_distinct(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    /* An established insider repeating itself is still one distinct
+     * source: the existing dedup-by-source_addr applies regardless of
+     * tenure. */
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    int rc = timesync_handle_sync(&ts, 1090, 1, 0xAAAA, true, 1000);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    TEST_ASSERT_FALSE(ts.synchronized);
+}
+
+void test_self_heal_after_established_quorum_commit(void) {
+    timesync_state_t ts;
+    timesync_init(&ts);
+
+    /* Establish quorum at stratum 1, offset ~100. */
+    timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
+    timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
+    TEST_ASSERT_TRUE(ts.synchronized);
+    TEST_ASSERT_EQUAL_INT64(100, ts.offset_ms);
+
+    /* Post-commit, the established-only rule doesn't apply: the
+     * synchronized branch (stratum + MAX_TIME_SHIFT gates, re-commit) is
+     * unchanged, so a later better-stratum source, established or not,
+     * still pulls the offset within MAX_TIME_SHIFT_MS as before. */
+    int rc = timesync_handle_sync(&ts, 1050, 0, 0xEEEE, true, 1000);
+    TEST_ASSERT_EQUAL_INT(1, rc);
+    TEST_ASSERT_EQUAL_UINT8(1, timesync_get_stratum(&ts)); /* best stratum 0 + 1 */
 }
 
 /* ── Pool overflow ──────────────────────────────────────────────── */
@@ -251,12 +358,12 @@ void test_pool_overflow_evicts_oldest(void) {
 
     /* Fill pool with 8 entries from different sources at different times */
     for (int i = 0; i < PENDING_POOL_SIZE; i++) {
-        timesync_handle_sync(&ts, 1100 + i, 1, 0x1000 + i, 1000 + i);
+        timesync_handle_sync(&ts, 1100 + i, 1, 0x1000 + i, true, 1000 + i);
     }
     TEST_ASSERT_EQUAL_INT(PENDING_POOL_SIZE, ts.pending_count);
 
     /* 9th entry should evict the oldest (timestamp 1000, addr 0x1000) */
-    timesync_handle_sync(&ts, 1200, 1, 0x2000, 2000);
+    timesync_handle_sync(&ts, 1200, 1, 0x2000, true, 2000);
     TEST_ASSERT_EQUAL_INT(PENDING_POOL_SIZE, ts.pending_count);
 
     /* Verify oldest was evicted: 0x1000 should be gone */
@@ -289,5 +396,11 @@ int main(void) {
     RUN_TEST(test_is_confident_false_until_corroborated);
     RUN_TEST(test_is_confident_true_right_after_commit);
     RUN_TEST(test_is_confident_lapses_when_sync_goes_stale);
+    RUN_TEST(test_non_established_sources_never_commit);
+    RUN_TEST(test_three_established_sources_commit);
+    RUN_TEST(test_mix_of_established_and_not_stays_pending);
+    RUN_TEST(test_established_does_not_bypass_corroboration_required);
+    RUN_TEST(test_repeated_established_source_still_one_distinct);
+    RUN_TEST(test_self_heal_after_established_quorum_commit);
     return UNITY_END();
 }

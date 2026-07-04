@@ -27,6 +27,7 @@ typedef struct {
     uint32_t source_addr;  /* Which node contributed this offset */
     uint32_t timestamp_ms; /* local_now_ms when this entry was recorded */
     uint8_t stratum;       /* Remote stratum of the source */
+    bool established;      /* Source was an established neighbor when admitted/updated (ws 1.3c) */
 } timesync_pending_t;
 
 typedef struct {
@@ -45,6 +46,15 @@ void timesync_init(timesync_state_t* ts);
 /*
  * Ingest a time observation from a beacon.
  *
+ * source_established (ws 1.3c, NEW-SEC-4 mitigation): whether source_addr is
+ * an established neighbor (neighbor_is_established) at the time this beacon
+ * arrived. Only established sources count toward the pre-commit
+ * corroboration quorum (CORROBORATION_REQUIRED distinct established
+ * sources), so an insider fabricating fresh source addresses cannot
+ * bootstrap the clock instantly: their addresses must first accumulate
+ * tenure. This does not affect the post-commit path (stratum/shift gates,
+ * self-heal recompute), which runs unconditionally once synchronized.
+ *
  * Returns:
  *   0  = accepted (may or may not commit depending on corroboration)
  *   1  = accepted AND committed (corroboration threshold met)
@@ -53,7 +63,7 @@ void timesync_init(timesync_state_t* ts);
  *  -3  = rejected: duplicate source within pending window
  */
 int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t remote_stratum,
-                         uint32_t source_addr, uint32_t local_now_ms);
+                         uint32_t source_addr, bool source_established, uint32_t local_now_ms);
 
 /* Get network time from current offset + local clock */
 int64_t timesync_get_network_time(const timesync_state_t* ts, uint32_t local_now_ms);

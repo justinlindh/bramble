@@ -1229,8 +1229,13 @@ static void handle_beacon(const uint8_t *data, uint8_t len, int16_t rssi, int8_t
 
     /* Feed timesync from beacon — requires corroboration from multiple sources */
     if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
+        /* ws 1.3c: only established neighbors count toward the pre-commit
+         * corroboration quorum (NEW-SEC-4 anti-Sybil lever). Computed after
+         * neighbor_update above so the current beacon's tenure (beacon_count,
+         * first_seen_ms) is reflected before the established check. */
+        bool established = neighbor_is_established(&s_neighbors, beacon.src_addr, t);
         timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
-                             (uint8_t)beacon.time_confidence, beacon.src_addr, t);
+                             (uint8_t)beacon.time_confidence, beacon.src_addr, established, t);
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
