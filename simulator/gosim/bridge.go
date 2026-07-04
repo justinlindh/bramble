@@ -306,5 +306,26 @@ func (r *scenarioRunResult) PendingAckActive(nodeID string, packetID uint32) boo
 	return false
 }
 
+// RouteNextHop reports whether nodeID's routing table has an entry for
+// destAddr, and if so, its next_hop. Reads the C route table directly
+// (like PendingAckActive reads pending_acks) rather than scraping the
+// route_added JSON log line: route_added is emitted via a C-side fprintf
+// through runScenarioHeadless's pipe-based stdout capture, which is only
+// built to be exercised once per test process and has been observed to
+// drop lines under load; a direct struct read has no such race.
+func (r *scenarioRunResult) RouteNextHop(nodeID string, destAddr uint32) (uint32, bool) {
+	node := nodeArrayFindByID(&r.sim.nodes, nodeID)
+	if node == nil {
+		return 0, false
+	}
+	for i := 0; i < int(node.routes.count); i++ {
+		e := node.routes.entries[i]
+		if uint32(e.dest_addr) == destAddr {
+			return uint32(e.next_hop), true
+		}
+	}
+	return 0, false
+}
+
 // Ensure imports are used
 var _ = unsafe.Pointer(nil)

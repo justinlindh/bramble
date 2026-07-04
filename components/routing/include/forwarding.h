@@ -30,15 +30,40 @@ bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr);
  * EXACTLY (dest_addr == self_addr or the broadcast address 0xFFFFFFFF
  * delivers locally; any other dest_addr forwards).
  *
- * install_reverse_route / reverse_dest / reverse_next_hop are placeholders
- * for wire v4 (Task 4 of the Phase 1 delivery-core plan): once DATA carries
- * a relay-mutated prev_hop field, this function will learn a route back to
- * the DATA's originator (dest_addr = the packet's src_addr, next_hop =
- * prev_hop, the verified last radio hop) so ACKs/receipts have a reverse
- * path at every relay. That input does not exist on the wire yet, so today
- * install_reverse_route is unconditionally false; the fields are already
- * part of the struct so Task 4 is a semantic change to this function's body,
- * not an interface change for its callers. */
+ * Wire v4 (Task 4 of the Phase 1 delivery-core plan): DATA now carries a
+ * relay-mutated prev_hop field (packet.h, BRAMBLE_DATA_PREV_HOP_OFFSET), so
+ * this function also decides whether to learn a route back to the DATA's
+ * ORIGINATOR: dest = src_addr (AAD-bound, trustworthy), next_hop = prev_hop
+ * (the verified last radio hop, unauthenticated/relay-mutable by design).
+ * This is what leaves every relay on the forward path a fresh breadcrumb
+ * route home, so a destination's ACK/receipt has somewhere to go instead of
+ * dying at route_lookup(src_addr) == NULL.
+ *
+ * install_reverse_route fires for received AND forwarded unicast DATA, and
+ * for broadcast DATA too (a broadcast's sender is just as reachable via
+ * prev_hop as a unicast sender is) -- it does not depend on `action`.  It
+ * does NOT fire when src_addr == self_addr (an echo of our own packet) or
+ * prev_hop == self_addr (the last hop was somehow ourselves); either would
+ * install a self-referential route.
+ *
+ * reverse_hop_count is derived from received_hop_limit: the originator
+ * always sends at ROUTE_HOP_LIMIT_MAX, and every forwarder decrements
+ * hop_limit by exactly one before retransmitting (forward_data). So
+ * hops_traveled = ROUTE_HOP_LIMIT_MAX - received_hop_limit + 1. Verified
+ * A-B-C: B receives hop_limit == ROUTE_HOP_LIMIT_MAX (A never decremented
+ * it) -> 1 hop; C receives hop_limit == ROUTE_HOP_LIMIT_MAX - 1 (B
+ * decremented once before forwarding) -> 2 hops.
+ *
+ * reverse_metric mirrors how RREQ/RREP install a route's metric
+ * (metric_apply_link_penalty over a higher-is-better base): DATA carries no
+ * accumulated path metric of its own (unlike RREQ/RREP's propagated metric
+ * field), so callers pass the same maximum base (255) RREQ originates with,
+ * penalized by the ONE link this frame was just heard on (link_metric is
+ * precomputed by the caller, mirroring handle_rrep's
+ * metric_apply_link_penalty-before-rrep_rx_decide pattern in mesh_task.c).
+ * The result reflects only the immediate radio link, not the full path back
+ * to the originator -- the best information a breadcrumb route can have
+ * without a propagated metric field on the wire. */
 typedef enum {
     DATA_RX_DELIVER = 0,
     DATA_RX_FORWARD,
@@ -46,11 +71,15 @@ typedef enum {
 
 typedef struct {
     data_rx_action_t action;
-    bool install_reverse_route; /* always false today; see Task 4 */
-    uint32_t reverse_dest;      /* unused today */
-    uint32_t reverse_next_hop;  /* unused today */
+    bool install_reverse_route;
+    uint32_t reverse_dest;     /* src_addr: the DATA's originator */
+    uint32_t reverse_next_hop; /* prev_hop: the verified last radio hop */
+    uint8_t reverse_hop_count; /* derived from received_hop_limit */
+    uint8_t reverse_metric;    /* caller-supplied link_metric, passed through */
 } data_rx_decision_t;
 
-data_rx_decision_t data_rx_decide(uint32_t dest_addr, uint32_t self_addr);
+data_rx_decision_t data_rx_decide(uint32_t dest_addr, uint32_t self_addr, uint32_t src_addr,
+                                  uint32_t prev_hop, uint8_t received_hop_limit,
+                                  uint8_t link_metric);
 
 #endif

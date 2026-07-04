@@ -597,13 +597,17 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
             return 0;
         }
 
-        memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-        memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
-        memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+        memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+        /* Wire v4: originator writes its own address as prev_hop, same as
+         * send_data_packet/send_dm_packet. */
+        memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext,
+               sizeof(ciphertext));
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
                BRAMBLE_TAG_SIZE);
-        size_t wire_len =
-            HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+        size_t wire_len = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE +
+                          sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
 
         int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
         if (rc == TX_GATE_OK) {
@@ -652,12 +656,16 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
         return 0;
     }
 
-    memcpy(pkt + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(pkt + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
-    memcpy(pkt + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag, BRAMBLE_TAG_SIZE);
+    memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+    /* Wire v4: originator writes its own address as prev_hop. */
+    memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
+    memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+           BRAMBLE_TAG_SIZE);
 
-    size_t wire_len = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+    size_t wire_len = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + sizeof(ciphertext) +
+                      BRAMBLE_TAG_SIZE;
     int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
     if (rc == TX_GATE_OK) {
         ESP_LOGI(TAG, "TX location (channel) to %08" PRIX32 " tier=%u len=%u", dest_addr, tier,
@@ -802,15 +810,20 @@ static int location_rx_decode_channel(const uint8_t* nonce, const uint8_t* ciphe
 }
 
 static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
-    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's
-     * header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16). */
-    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+    /* SEC-C1 RX (Task 2.2): location packet layout matches DATA's wire v4
+     * envelope: header(12) + src_addr(4) + prev_hop(4) + nonce(12) +
+     * ciphertext(N) + tag(16). LOCATION is never forwarded today (no relay
+     * path exists for it), so prev_hop is written by the originator only
+     * and not consulted for reverse-route learning here; see
+     * task-4-report.md for why that is in scope but deliberately not
+     * turned on. */
+    if (len < BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Location packet too short: %u", len);
         return;
     }
 
     uint32_t src_addr = 0;
-    memcpy(&src_addr, data + HEADER_SIZE, 4);
+    memcpy(&src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
     if (src_addr == s_identity->address) {
         return;
     }
@@ -820,8 +833,8 @@ static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8
         return;
     }
 
-    const uint8_t* nonce = data + HEADER_SIZE + 4;
-    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    const uint8_t* nonce = data + BRAMBLE_DATA_NONCE_OFFSET;
+    size_t ct_len = len - BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
     const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
     const uint8_t* tag = ciphertext + ct_len;
 
@@ -1859,17 +1872,20 @@ static void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rs
 }
 
 static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
-    /* Data packet layout: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
-    if (len < HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
+    /* Data packet layout (wire v4): header(12) + src_addr(4) + prev_hop(4) +
+     * nonce(12) + ciphertext(N) + tag(16). prev_hop is relay-mutable/
+     * MAC-excluded (packet.h); reverse-route learning off it happens once,
+     * at the mesh_process_rx_packet dispatch site, not here. */
+    if (len < BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + BRAMBLE_TAG_SIZE + 1) {
         ESP_LOGW(TAG, "Data packet too short: %u", len);
         return;
     }
 
     uint32_t src_addr;
-    memcpy(&src_addr, data + HEADER_SIZE, 4);
+    memcpy(&src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
 
-    const uint8_t* nonce = data + HEADER_SIZE + 4;
-    size_t ct_len = len - HEADER_SIZE - 4 - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
+    const uint8_t* nonce = data + BRAMBLE_DATA_NONCE_OFFSET;
+    size_t ct_len = len - BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
     const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
     const uint8_t* tag = ciphertext + ct_len;
 
@@ -2638,6 +2654,17 @@ static void mailbox_flush_for(uint32_t dest_addr) {
     mailbox_entry_t entries[MAILBOX_MAX_PER_DEST];
     int count = mailbox_retrieve(&s_mailbox, dest_addr, entries, MAILBOX_MAX_PER_DEST);
     for (int i = 0; i < count; i++) {
+        /* Wire v4: mailbox entries are raw DATA packet bytes captured at
+         * store time (mesh_mailbox_store, forward_data_packet's no-route
+         * branch), so their prev_hop byte range reflects whoever wrote it
+         * back then, not us. WE are the transmitter on this flush, so
+         * rewrite prev_hop to our own address before TX, exactly like
+         * forward_data_packet's rewrite -- otherwise the recipient would
+         * learn a stale/wrong reverse-route hop from a store-and-forward
+         * delivery. */
+        if (entries[i].payload_len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
+            memcpy(entries[i].payload + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+        }
         ESP_LOGI(TAG,
                  "Mailbox: delivering stored packet to %08" PRIX32 " (id=%08" PRIX32 " len=%u)",
                  dest_addr, entries[i].packet_id, entries[i].payload_len);
@@ -2682,10 +2709,11 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
         }
 
         /* No usable route (unknown dest or ROUTE_BROKEN). */
-        /* Extract src_addr from the data packet header area (offset HEADER_SIZE) */
+        /* Extract src_addr from the data packet body (offset
+         * BRAMBLE_DATA_SRC_ADDR_OFFSET). */
         uint32_t fwd_src_addr = 0;
-        if (len >= HEADER_SIZE + 4) {
-            memcpy(&fwd_src_addr, data + HEADER_SIZE, 4);
+        if (len >= BRAMBLE_DATA_SRC_ADDR_OFFSET + 4) {
+            memcpy(&fwd_src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
         }
         /* If mailbox enabled, store for later delivery instead of dropping */
         if (s_mailbox_enabled &&
@@ -2705,6 +2733,16 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
     bramble_header_t fwd_hdr = *header;
     fwd_hdr.hop_limit = hop_limit;
     bramble_header_serialize(&fwd_hdr, buf, HEADER_SIZE);
+
+    /* Wire v4: overwrite prev_hop with OUR OWN address before rebroadcast,
+     * mirroring RREP's forwarder-address rewrite (#119). This is what lets
+     * the next hop learn a route back to this DATA's originator via US,
+     * closing the reverse-route gap that made multi-hop delivery
+     * confirmations die at the first relay. Relay-mutable/MAC-excluded, so
+     * this rewrite never touches anything under the AEAD tag. */
+    if (len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
+        memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    }
 
     ESP_LOGI(TAG, "Forwarding data to %08" PRIX32 " via %08" PRIX32, header->dest_addr,
              fwd.next_hop);
@@ -2798,13 +2836,43 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         break;
     case PKT_TYPE_DATA: {
         /* components/routing/forwarding.c: data_rx_decide() owns the
-         * deliver-locally-vs-forward fork (Task 3, ws 1.5). Behavior-
-         * preserving extraction: same two calls, same cases, now routed
-         * through a pure host-testable decision. install_reverse_route is
-         * always false today; Task 4 turns it on once wire v4 adds the
-         * prev_hop input this decision needs to learn a route back to the
-         * DATA's originator. */
-        data_rx_decision_t data_rx = data_rx_decide(header.dest_addr, s_identity->address);
+         * deliver-locally-vs-forward fork (Task 3, ws 1.5) AND, as of wire
+         * v4 (Task 4), the reverse-route-learning decision: every DATA
+         * frame we receive or forward teaches us a route back to its
+         * originator (src_addr) via prev_hop, the verified last radio hop.
+         * That is what leaves a breadcrumb route at every relay on the
+         * forward path, so the destination's ACK/receipt has somewhere to
+         * go home to instead of dying at route_lookup(src_addr) == NULL.
+         *
+         * src_addr/prev_hop are read directly off the wire here (both are
+         * plaintext outside the AEAD ciphertext; see packet.h): a length
+         * guard covers a too-short/malformed frame by falling back to
+         * self_addr as src_addr, which data_rx_decide's own src==self skip
+         * turns into "do not learn" -- there is no valid v4 DATA/LOCATION
+         * frame this short. */
+        uint32_t data_src_addr = s_identity->address;
+        uint32_t data_prev_hop = 0;
+        if (pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
+            memcpy(&data_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+            memcpy(&data_prev_hop, pkt->data + BRAMBLE_DATA_PREV_HOP_OFFSET, 4);
+        }
+
+        /* Metric mirrors handle_rrep's pattern (metric_apply_link_penalty
+         * computed by the caller, then passed into the pure decide
+         * function): DATA carries no accumulated path metric of its own,
+         * so the base is the same maximum (255) RREQ originates with,
+         * penalized by the one link this frame was just heard on. */
+        uint8_t data_link_metric = metric_apply_link_penalty(255, (int8_t)pkt->rssi, pkt->snr);
+        data_rx_decision_t data_rx =
+            data_rx_decide(header.dest_addr, s_identity->address, data_src_addr, data_prev_hop,
+                           header.hop_limit, data_link_metric);
+
+        if (data_rx.install_reverse_route) {
+            route_install(&s_routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
+                          data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE,
+                          now_ms());
+        }
+
         if (data_rx.action == DATA_RX_FORWARD) {
             forward_data_packet(pkt->data, pkt->len, &header);
         } else {
@@ -3438,8 +3506,10 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
     size_t ct_len = CHANNEL_MSG_OVERHEAD +
                     (app_type == APP_TYPE_CHAT ? CHANNEL_MSG_SENT_AT_SIZE : 0) + payload_len;
 
-    /* Build packet: header(12) + src_addr(4) + nonce(12) + ciphertext(N) + tag(16) */
-    size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
+    /* Build packet: header(12) + src_addr(4) + prev_hop(4) + nonce(12) +
+     * ciphertext(N) + tag(16). Wire v4. */
+    size_t total =
+        BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + ct_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
         ESP_LOGE(TAG, "Data packet too large: %u bytes", (unsigned)total);
         return 0;
@@ -3486,10 +3556,14 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
         return 0;
     }
 
-    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
+    memcpy(buf + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+    /* Wire v4: we are the ORIGINATOR, so prev_hop starts as our own address
+     * (the first relay's receiver learns a 1-hop route to us via this).
+     * Relay-mutable/MAC-excluded; see packet.h. */
+    memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
 
     /* Deny behavior: data sends fail visibly upward. A zero return tells
      * every caller (mesh_send_channel, mesh_send_broadcast, RPC) that
@@ -3527,7 +3601,8 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
 
-    size_t total = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + payload_len + BRAMBLE_TAG_SIZE;
+    size_t total =
+        BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + payload_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
         ESP_LOGE(TAG, "DM packet too large: %u bytes", (unsigned)total);
         return 0;
@@ -3560,10 +3635,14 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
         return 0;
     }
 
-    memcpy(buf + HEADER_SIZE, &s_identity->address, 4);
-    memcpy(buf + HEADER_SIZE + 4, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
-    memcpy(buf + HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + payload_len, tag, BRAMBLE_TAG_SIZE);
+    memcpy(buf + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
+    /* Wire v4: ORIGINATOR writes its own address as prev_hop; see
+     * send_data_packet's identical comment. */
+    memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + payload_len, tag,
+           BRAMBLE_TAG_SIZE);
 
     int ret = mesh_tx(buf, (uint8_t)total, TX_KIND_DATA);
     if (ret == TX_GATE_OK) {
@@ -4136,8 +4215,8 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
      * air, so RPC callers get a clean -2 before paying for encryption.
      * The gate still checks and debits every individual transmission. */
     size_t est_payload = (len > FRAG_MAX_PLAINTEXT) ? FRAG_MAX_PLAINTEXT : len;
-    size_t est_wire = HEADER_SIZE + 4 + BRAMBLE_NONCE_SIZE + CHANNEL_MSG_OVERHEAD + est_payload +
-                      BRAMBLE_TAG_SIZE;
+    size_t est_wire = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE +
+                      CHANNEL_MSG_OVERHEAD + est_payload + BRAMBLE_TAG_SIZE;
     if (est_wire > 255)
         est_wire = 255;
     tx_gate_set_peer_count((uint8_t)neighbor_count(&s_neighbors));

@@ -460,6 +460,16 @@ target_include_directories(test_forwarding PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
 )
 
+# Phase 1 delivery-core Task 4: wire v4 prev_hop reverse-route learning e2e
+add_executable(test_data_delivery_e2e
+    test_data_delivery_e2e.c
+    unity/unity.c
+    stubs/esp_stubs.c
+)
+target_include_directories(test_data_delivery_e2e PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+
 # Fragment tests
 add_executable(test_fragment
     test_fragment.c
