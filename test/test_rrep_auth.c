@@ -95,7 +95,7 @@ void test_rrep_verify_survives_relay_rewrite(void) {
     set_seq(&r, 0x0102030405);
     rrep_sign(&r);
 
-    bramble_rrep_t fwd = rrep_forward(&r, 0x55555555);
+    bramble_rrep_t fwd = rrep_forward(&r, 0x55555555, 0x66666666);
     /* Sanity: the rewrite actually happened, or this test would pass
      * vacuously without exercising anything. */
     TEST_ASSERT_NOT_EQUAL(r.next_hop, fwd.next_hop);

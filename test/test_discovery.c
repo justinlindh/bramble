@@ -203,7 +203,11 @@ void test_rrep_build_destination(void) {
     TEST_ASSERT_EQUAL(ADDR_C, rrep.src_addr);
     TEST_ASSERT_EQUAL(2, rrep.hop_count); /* fwd.hop_count(1) + 1 */
     TEST_ASSERT_EQUAL(fwd.metric, rrep.route_metric);
-    TEST_ASSERT_EQUAL(ADDR_B, rrep.next_hop);
+    /* next_hop is the destination's OWN address: it is the first hop toward
+     * itself. header.dest_addr (unchanged) still carries the frame-routing
+     * target (fwd.prev_hop == ADDR_B). */
+    TEST_ASSERT_EQUAL(ADDR_C, rrep.next_hop);
+    TEST_ASSERT_EQUAL(ADDR_B, rrep.header.dest_addr);
     /* RREP must be able to return along an expanded-ring path */
     TEST_ASSERT_EQUAL(ROUTE_HOP_LIMIT_MAX, rrep.header.hop_limit);
 }
@@ -211,10 +215,10 @@ void test_rrep_build_destination(void) {
 void test_rrep_forward(void) {
     bramble_rrep_t rrep;
     memset(&rrep, 0, sizeof(rrep));
-    rrep.next_hop = ADDR_B;
-    bramble_rrep_t fwd = rrep_forward(&rrep, ADDR_A);
-    TEST_ASSERT_EQUAL(ADDR_A, fwd.next_hop);
-    TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr);
+    rrep.next_hop = ADDR_C; /* whatever the incoming next_hop was, gets overwritten */
+    bramble_rrep_t fwd = rrep_forward(&rrep, ADDR_A, ADDR_B);
+    TEST_ASSERT_EQUAL(ADDR_B, fwd.next_hop);        /* the forwarder's own address */
+    TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr); /* frame routing target, unchanged role */
 }
 
 /* --- rrep_rx_decide: behavior-preserving extraction of handle_rrep --- */
@@ -222,10 +226,10 @@ void test_rrep_forward(void) {
 void test_rrep_rx_decide_originator_delivers(void) {
     bramble_rrep_t rrep;
     memset(&rrep, 0, sizeof(rrep));
-    rrep.header.dest_addr = ADDR_A; /* addressed to us: ternary picks src_addr */
+    rrep.header.dest_addr = ADDR_A;
     rrep.query_id = QUERY;
     rrep.src_addr = ADDR_C;
-    rrep.next_hop = ADDR_B; /* must be ignored by the current ternary */
+    rrep.next_hop = ADDR_B; /* the forwarder that delivered this RREP to us */
     rrep.hop_count = 3;
 
     discovery_start(&dtbl, ADDR_C, QUERY, 1000);
@@ -236,7 +240,7 @@ void test_rrep_rx_decide_originator_delivers(void) {
     TEST_ASSERT_EQUAL(ADDR_C, d.deliver_dest);
     TEST_ASSERT_TRUE(d.install_route);
     TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
-    TEST_ASSERT_EQUAL(ADDR_C, d.route_next_hop); /* current ternary: dest==self -> src_addr */
+    TEST_ASSERT_EQUAL(ADDR_B, d.route_next_hop); /* rrep.next_hop: the forwarder, not src_addr */
     TEST_ASSERT_EQUAL(3, d.route_hops);
     TEST_ASSERT_EQUAL(210, d.route_metric);
 }
@@ -247,7 +251,7 @@ void test_rrep_rx_decide_intermediate_forwards(void) {
     rrep.header.dest_addr = ADDR_A; /* framed toward the originator, not us */
     rrep.query_id = QUERY;
     rrep.src_addr = ADDR_C;
-    rrep.next_hop = ADDR_D; /* current ternary uses this since dest != self */
+    rrep.next_hop = ADDR_D; /* the forwarder that delivered this RREP to us */
     rrep.hop_count = 2;
 
     reverse_route_add(&rev_b, QUERY, ADDR_A, 1000);
@@ -258,7 +262,7 @@ void test_rrep_rx_decide_intermediate_forwards(void) {
     TEST_ASSERT_EQUAL(ADDR_A, d.forward_to);
     TEST_ASSERT_TRUE(d.install_route);
     TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
-    TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop); /* current ternary: dest!=self -> rrep.next_hop */
+    TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop); /* rrep.next_hop directly */
     TEST_ASSERT_EQUAL(2, d.route_hops);
     TEST_ASSERT_EQUAL(180, d.route_metric);
 }
@@ -316,7 +320,7 @@ void test_three_node_discovery(void) {
     reverse_route_t* rev = reverse_route_lookup(&rev_b, rrep_c.query_id);
     TEST_ASSERT_NOT_NULL(rev);
     TEST_ASSERT_EQUAL(ADDR_A, rev->prev_hop);
-    bramble_rrep_t rrep_b = rrep_forward(&rrep_c, rev->prev_hop);
+    bramble_rrep_t rrep_b = rrep_forward(&rrep_c, rev->prev_hop, ADDR_B);
 
     /* Step 5: A receives RREP */
     route_install(&rt_a, ADDR_C, ADDR_B, rrep_b.hop_count, rrep_b.route_metric, ROUTE_ACTIVE, now);

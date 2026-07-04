@@ -2493,7 +2493,7 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         break;
     case RREP_RX_FORWARD: {
         /* Not for us: forward the RREP toward the originator via the reverse route. */
-        bramble_rrep_t fwd = rrep_forward(&rrep, d.forward_to);
+        bramble_rrep_t fwd = rrep_forward(&rrep, d.forward_to, s_identity->address);
         send_rrep(&fwd);
         break;
     }

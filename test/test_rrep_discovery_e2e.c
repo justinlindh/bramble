@@ -101,21 +101,20 @@ void test_two_hop_discovery_next_hop(void) {
     TEST_ASSERT_NOT_NULL(rb);
     TEST_ASSERT_EQUAL(ADDR_C, rb->next_hop);
 
-    /* B -> A: RREP (A is 2 hops from C: this is where the bug bites) */
-    bramble_rrep_t rrep_b = rrep_forward(&rrep_c, db.forward_to);
+    /* B -> A: RREP (A is 2 hops from C: this is where the old bug bit) */
+    bramble_rrep_t rrep_b = rrep_forward(&rrep_c, db.forward_to, B.addr);
     rrep_rx_decision_t da = deliver_rrep(&A, &rrep_b, -72, 6, now);
     TEST_ASSERT_EQUAL(RREP_RX_DELIVER, da.action);
     route_entry_t* ra = route_lookup(&A.routes, ADDR_C);
     TEST_ASSERT_NOT_NULL(ra);
-    /* BUG (ws-harness): A is 2 hops from C, so its route's next_hop must be
-     * its actual neighbor B, not the destination C. Current handle_rrep's
-     * ternary resolves to rrep.src_addr (== C) here, because
-     * header.dest_addr always equals the receiving node's own address on
-     * any legitimately unicast-routed RREP. Confirmed FAILING against the
-     * correct assertion (TEST_ASSERT_EQUAL(ADDR_B, ra->next_hop)) before
-     * this line was flipped; see task-2-report.md. Task 3 flips this back
-     * to ADDR_B. */
-    TEST_ASSERT_EQUAL(ADDR_C, ra->next_hop);
+    /* Fixed (Task 3): A is 2 hops from C, so its route's next_hop must be
+     * its actual neighbor B, not the destination C. rrep_rx_decide now uses
+     * rrep.next_hop directly (the forwarder's own address, written by
+     * rrep_forward), not the old dest_addr==self_addr ternary that resolved
+     * to rrep.src_addr here. Confirmed this assertion FAILED
+     * (TEST_ASSERT_EQUAL(ADDR_C, ra->next_hop) before this line was
+     * flipped) against pre-fix code; see task-2-report.md. */
+    TEST_ASSERT_EQUAL(ADDR_B, ra->next_hop);
 }
 
 /* --- A-B-C-D (3-hop): same bug, one hop further out --- */
@@ -146,26 +145,26 @@ void test_three_hop_discovery_next_hop(void) {
     TEST_ASSERT_EQUAL(ADDR_D, rc->next_hop);
 
     /* C -> B: RREP (B is 2 hops from D) */
-    bramble_rrep_t rrep_c_fwd = rrep_forward(&rrep_d, dc.forward_to);
+    bramble_rrep_t rrep_c_fwd = rrep_forward(&rrep_d, dc.forward_to, C.addr);
     rrep_rx_decision_t db = deliver_rrep(&B, &rrep_c_fwd, -71, 7, now);
     TEST_ASSERT_EQUAL(RREP_RX_FORWARD, db.action);
     route_entry_t* rb = route_lookup(&B.routes, ADDR_D);
     TEST_ASSERT_NOT_NULL(rb);
-    /* BUG (ws-harness): B is 2 hops from D; its route's next_hop must be its
-     * actual neighbor C, not D. Confirmed FAILING against the correct
-     * assertion (TEST_ASSERT_EQUAL(ADDR_C, rb->next_hop)) before this line
-     * was flipped; see task-2-report.md. Task 3 flips this back to ADDR_C. */
-    TEST_ASSERT_EQUAL(ADDR_D, rb->next_hop);
+    /* Fixed (Task 3): B is 2 hops from D; its route's next_hop must be its
+     * actual neighbor C, not D. Confirmed this assertion FAILED
+     * (TEST_ASSERT_EQUAL(ADDR_D, rb->next_hop) before this line was
+     * flipped) against pre-fix code; see task-2-report.md. */
+    TEST_ASSERT_EQUAL(ADDR_C, rb->next_hop);
 
     /* B -> A: RREP (A is 3 hops from D) */
-    bramble_rrep_t rrep_b_fwd = rrep_forward(&rrep_c_fwd, db.forward_to);
+    bramble_rrep_t rrep_b_fwd = rrep_forward(&rrep_c_fwd, db.forward_to, B.addr);
     rrep_rx_decision_t da = deliver_rrep(&A, &rrep_b_fwd, -72, 6, now);
     TEST_ASSERT_EQUAL(RREP_RX_DELIVER, da.action);
     route_entry_t* ra = route_lookup(&A.routes, ADDR_D);
     TEST_ASSERT_NOT_NULL(ra);
-    /* BUG (ws-harness): A is 3 hops from D; its route's next_hop must be its
-     * actual neighbor B, not D. Task 3 flips this back to ADDR_B. */
-    TEST_ASSERT_EQUAL(ADDR_D, ra->next_hop);
+    /* Fixed (Task 3): A is 3 hops from D; its route's next_hop must be its
+     * actual neighbor B, not D. */
+    TEST_ASSERT_EQUAL(ADDR_B, ra->next_hop);
 }
 
 /* --- Unsolicited RREP: a bystander with no pd/rev installs nothing --- */
