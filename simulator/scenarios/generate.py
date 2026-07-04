@@ -8,18 +8,23 @@ simulator/engine/sim_scenario.c's scenario_load_file, including the
 Task 3 "beacon" block and Task 5 "radio.duty_cycle_pct" field.
 
 Design rule: every schema field that has a real firmware/sim default
-(sf, bw_hz, beacon.*, radio.duty_cycle_pct, seed) is emitted ONLY if its
-CLI flag was explicitly given. Omitted fields let the sim apply its own
+(sf, bw_hz, range, beacon.*, radio.duty_cycle_pct, seed) is emitted ONLY if
+its CLI flag was explicitly given. Omitted fields let the sim apply its own
 default (radio_config_init / sim_beacon_policy_init / scenario_load_file's
 seed=42 fallback), exactly as if the scenario file had never mentioned
-them. This is what makes --legacy reproduce the old files byte-for-byte:
-the old generator never wrote sf/bw_hz/beacon/duty_cycle_pct/seed at all.
+them. This is what makes --legacy reproduce the old files byte-for-byte
+(modulo "range": the old generator hardcoded "range": 150; this one omits it
+so range derives from the sf/bw link budget instead of being a fixed disk
+decoupled from them -- at the default PHY, SF10/125 kHz, that derivation
+still lands at ~150 units, so --legacy's runtime behavior is unchanged even
+though the emitted JSON no longer has the literal field). Pass --range to
+force the old fixed-disk field back on.
 
 Legacy mapping (--legacy {10,50,100,200}), matching the deleted
-generate-adaptive-scenarios.py exactly:
+generate-adaptive-scenarios.py's behavior:
     --topology grid --spacing 120 --duration-s 600
     --traffic-msgs-per-min 2 --nodes {10,50,100,200}
-    (sf/bw/beacon/duty/seed all omitted)
+    (sf/bw/beacon/duty/seed/range all omitted)
     name: airtime-adaptive-{N}, out: airtime-adaptive-{N}.json
 """
 
@@ -117,10 +122,17 @@ def build_scenario(args):
     events = generate_messages(nodes, duration_ms, args.traffic_msgs_per_min)
 
     radio = {
-        "range": 150,
         "loss_pct": 0,
         "propagation_speed_ms_per_unit": 0.1,
     }
+    # "range" is omitted unless explicitly given: the sim derives it from the
+    # link budget implied by sf/bw_hz (simulator/engine/sim_radio.c
+    # radio_derive_range), so a radio-knob scenario gets SF/BW physically
+    # coupled to reception range instead of a fixed disk. Pass --range to
+    # keep the old fixed-disk behavior for topology tests that want range
+    # decoupled from SF/BW.
+    if args.range is not None:
+        radio["range"] = args.range
     if args.sf is not None:
         radio["sf"] = args.sf
     if args.bw is not None:
@@ -176,6 +188,10 @@ def parse_args(argv):
                   help="LoRa spreading factor; omitted (sim default SF10) unless given")
     p.add_argument("--bw", type=int, choices=[125000, 250000], default=None,
                   help="LoRa bandwidth Hz; omitted (sim default 125000) unless given")
+    p.add_argument("--range", type=float, default=None,
+                  help="fixed reception-range override, grid units; omitted (sim derives range "
+                       "from the sf/bw link budget, see sim_radio.c radio_derive_range) unless "
+                       "given. Set this to decouple range from sf/bw, e.g. for topology tests")
     p.add_argument("--beacon-interval-ms", type=int, default=None,
                   help="fixed/base beacon interval ms; omitted (sim default 60000) unless given")
     p.add_argument("--beacon-adaptive", type=int, choices=[0, 1], default=None,

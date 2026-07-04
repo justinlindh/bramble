@@ -183,6 +183,31 @@ func (h *radioHarness) setRange(r float32) {
 	h.radio._range = C.float(r)
 }
 
+// sensitivityDbm returns the LoRa receiver sensitivity for (sf, bwHz),
+// including the NOISE_MARGIN_DB calibration constant (sim_radio.c).
+func (h *radioHarness) sensitivityDbm(sf int, bwHz int) float32 {
+	return float32(C.radio_sensitivity_dbm(C.uint8_t(sf), C.uint32_t(bwHz)))
+}
+
+// deriveRange returns the link-budget range (grid units) implied by the
+// harness's current radio config (sf, bw_hz, tx_power_dbm, path_loss_*).
+func (h *radioHarness) deriveRange() float32 {
+	return float32(C.radio_derive_range(h.radio))
+}
+
+// rangeField reads the harness's current radio_config_t.range, whatever set
+// it last (radio_config_init's default derivation, setRange, or a scenario
+// load).
+func (h *radioHarness) rangeField() float32 {
+	return float32(h.radio._range)
+}
+
+// radioCanReceive calls the real radio_can_receive (distance/interference/
+// loss_pct gate) for tx -> rx under the harness's current radio config.
+func radioCanReceive(h *radioHarness, tx, rx *C.sim_node_t) bool {
+	return bool(C.radio_can_receive(h.radio, tx, rx, h.rng))
+}
+
 func (h *radioHarness) disableCollisions() {
 	h.radio.collisions_enabled = C.bool(false)
 }
