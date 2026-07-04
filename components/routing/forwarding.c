@@ -69,3 +69,21 @@ bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr) {
     }
     return false;
 }
+
+data_rx_decision_t data_rx_decide(uint32_t dest_addr, uint32_t self_addr) {
+    data_rx_decision_t d;
+    memset(&d, 0, sizeof(d));
+
+    /* Reverse-route learning waits on wire v4's prev_hop field (Task 4);
+     * until then this is always false, matching today's behavior exactly. */
+    d.install_reverse_route = false;
+    d.reverse_dest = 0;
+    d.reverse_next_hop = 0;
+
+    if (dest_addr == self_addr || dest_addr == 0xFFFFFFFF) {
+        d.action = DATA_RX_DELIVER;
+    } else {
+        d.action = DATA_RX_FORWARD;
+    }
+    return d;
+}
