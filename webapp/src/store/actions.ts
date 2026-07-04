@@ -544,6 +544,45 @@ const packetIdToMsgId = new Map<string, string>();
 const broadcastIdToMsgId = new Map<string, string>();
 const pendingBroadcastTelemetry = new Map<string, BroadcastDeliveryNotification[]>();
 
+/* Task 7 (audit gap #8): 'timeout' is a client-only UI status, distinct from
+ * firmware's 'failed' (which only fires after the node exhausts its own
+ * retry budget, up to ~15s for Normal tier and several minutes for Critical
+ * -- docs/bramble-protocol-spec.md section 7.4). It exists purely to tell the
+ * user "no confirmation yet" well before that, without asserting the send
+ * failed. Firmware never reports 'timeout'; this map is how the UI produces
+ * it and clears it again the moment a real ack/failure arrives. */
+const sentStatusTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const SENT_TO_TIMEOUT_UI_MS = 10000;
+
+function clearSentStatusTimer(msgId: string): void {
+  const timer = sentStatusTimers.get(msgId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    sentStatusTimers.delete(msgId);
+  }
+}
+
+function clearAllSentStatusTimers(): void {
+  for (const timer of sentStatusTimers.values()) clearTimeout(timer);
+  sentStatusTimers.clear();
+}
+
+function scheduleSentStatusTimeout(msgId: string): void {
+  clearSentStatusTimer(msgId);
+  const timer = setTimeout(() => {
+    sentStatusTimers.delete(msgId);
+    /* Only flip if still 'sent': a real ack/failed already superseded this,
+     * or would have cleared the timer via clearSentStatusTimer. Re-checked
+     * here too since the timer callback and an in-flight ack can race. */
+    const current = useStore.getState().messages.find(m => m.id === msgId);
+    if (current && current.status === 'sent') {
+      useStore.getState().updateMessageStatus(msgId, 'timeout');
+      messageDb.updateMessageStatus(msgId, 'timeout').catch(() => {});
+    }
+  }, SENT_TO_TIMEOUT_UI_MS);
+  sentStatusTimers.set(msgId, timer);
+}
+
 const DEFAULT_DELIVERY_EVENT_RETENTION_DAYS = 30;
 const DELIVERY_EVENT_RETENTION_DAYS = Number((import.meta as any).env?.VITE_DELIVERY_EVENT_RETENTION_DAYS ?? DEFAULT_DELIVERY_EVENT_RETENTION_DAYS);
 const DELIVERY_EVENT_SYNC_SEQ_KEY_PREFIX = 'bramble:delivery-event-sync:last-seq:';
@@ -720,6 +759,7 @@ function hydrateCorrelationMaps(messages: Message[]): void {
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
+  clearAllSentStatusTimers();
   for (const msg of messages) {
     if (msg.packetId) packetIdToMsgId.set(String(msg.packetId), msg.id);
     if (msg.broadcastId) broadcastIdToMsgId.set(msg.broadcastId, msg.id);
@@ -1001,7 +1041,14 @@ export async function sendMessage(
       packetId: result?.packetId ?? result?.packet_id,
       broadcastId: result?.broadcastId ?? result?.broadcast_id,
     });
+    /* Unicast only: broadcasts have no single ack and are tracked instead
+     * via broadcastRecipients/telemetry, which already has its own
+     * per-recipient pending/delivered/failed state. */
+    if (!isBroadcast) {
+      scheduleSentStatusTimeout(msg.id);
+    }
   } catch (e) {
+    clearSentStatusTimer(msg.id);
     store.updateMessageStatus(msg.id, 'failed');
     messageDb.updateMessageStatus(msg.id, 'failed').catch(() => {});
     throw e;
@@ -1026,6 +1073,7 @@ export function handleAck(params: unknown): void {
   const msgId = packetIdToMsgId.get(packetId);
   if (msgId) {
     packetIdToMsgId.delete(packetId);
+    clearSentStatusTimer(msgId);
     const newStatus = status === 'delivered' ? 'delivered' : 'failed';
     const nowTs = Date.now();
 
@@ -1577,6 +1625,7 @@ export function __resetBroadcastTelemetryForTests(): void {
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
+  clearAllSentStatusTimers();
 }
 
 export function __normalizeReplayDeliveryEventForTests(raw: DeliveryReplayEventWire): DeliveryEventRecord | null {
@@ -1587,6 +1636,7 @@ export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
+  clearAllSentStatusTimers();
 
   try {
     if (nodeAddr) {
