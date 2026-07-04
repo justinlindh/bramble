@@ -41,7 +41,8 @@ void test_key_exchange_critical_tier_retries(void) {
         now += 5000; /* advance 5s each step */
         uint8_t prev_attempt = table.entries[idx].attempt;
         pending_ack_tick(&table, now);
-        if (table.entries[idx].attempt > prev_attempt) retries++;
+        if (table.entries[idx].attempt > prev_attempt)
+            retries++;
     }
     /* Should have retried multiple times before giving up */
     TEST_ASSERT_GREATER_OR_EQUAL(1, retries);

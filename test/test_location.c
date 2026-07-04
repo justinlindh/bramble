@@ -4,22 +4,21 @@
 #include <math.h>
 
 static location_manager_t mgr;
-extern int location_deserialize_for_tier(const uint8_t *buf, size_t len, uint8_t tier, bramble_position_t *pos);
+extern int location_deserialize_for_tier(const uint8_t* buf, size_t len, uint8_t tier,
+                                         bramble_position_t* pos);
 
 void setUp(void) { location_init(&mgr); }
 void tearDown(void) {}
 
 void test_location_serialize_full_roundtrip(void) {
-    bramble_position_t pos = {
-        .latitude_e7 = 374220000,   /* ~37.422° N */
-        .longitude_e7 = -1220840000, /* ~-122.084° W */
-        .altitude_m = 42,
-        .accuracy_m = 10,
-        .speed_kmh = 5,
-        .heading_deg2 = 90,
-        .timestamp = 1700000000,
-        .valid = true
-    };
+    bramble_position_t pos = {.latitude_e7 = 374220000,    /* ~37.422° N */
+                              .longitude_e7 = -1220840000, /* ~-122.084° W */
+                              .altitude_m = 42,
+                              .accuracy_m = 10,
+                              .speed_kmh = 5,
+                              .heading_deg2 = 90,
+                              .timestamp = 1700000000,
+                              .valid = true};
     uint8_t buf[32];
     int n = location_serialize_full(&pos, buf, sizeof(buf));
     TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE, n);
@@ -40,11 +39,7 @@ void test_location_serialize_full_roundtrip(void) {
 
 void test_location_serialize_coarse_roundtrip(void) {
     bramble_position_t pos = {
-        .latitude_e7 = 374225678,
-        .longitude_e7 = -1220841234,
-        .timestamp = 0x42,
-        .valid = true
-    };
+        .latitude_e7 = 374225678, .longitude_e7 = -1220841234, .timestamp = 0x42, .valid = true};
     uint8_t buf[8];
     int n = location_serialize_coarse(&pos, buf, sizeof(buf));
     TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE, n);
@@ -54,7 +49,8 @@ void test_location_serialize_coarse_roundtrip(void) {
     TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE, n);
     /* Coarse quantization: lat/10000 -> +90000 -> /3 -> *3 -> -90000 -> *10000
      * 374225678/10000 = 37422, +90000=127422, /3=42474, *3=127422, -90000=37422, *10000=374220000
-     * lon: -1220841234/10000 = -122084, +180000=57916, /6=9652, *6=57912, -180000=-122088, *10000=-1220880000 */
+     * lon: -1220841234/10000 = -122084, +180000=57916, /6=9652, *6=57912, -180000=-122088,
+     * *10000=-1220880000 */
     TEST_ASSERT_EQUAL(374220000, out.latitude_e7);
     TEST_ASSERT_EQUAL(-1220880000, out.longitude_e7);
     TEST_ASSERT_TRUE(out.valid);
@@ -62,11 +58,7 @@ void test_location_serialize_coarse_roundtrip(void) {
 
 void test_location_coarse_precision(void) {
     /* Verify coarse position is within ~1.5km of original */
-    bramble_position_t pos = {
-        .latitude_e7 = 374229999,
-        .longitude_e7 = -1220849999,
-        .valid = true
-    };
+    bramble_position_t pos = {.latitude_e7 = 374229999, .longitude_e7 = -1220849999, .valid = true};
     uint8_t buf[8];
     location_serialize_coarse(&pos, buf, sizeof(buf));
     bramble_position_t out;
@@ -86,7 +78,7 @@ void test_location_contact_management(void) {
     TEST_ASSERT_EQUAL(-1, location_add_contact(&mgr, 0x1234, LOCATION_TIER_FULL)); /* dup */
     TEST_ASSERT_EQUAL(2, mgr.contact_count);
 
-    location_contact_t *c = location_find_contact(&mgr, 0x1234);
+    location_contact_t* c = location_find_contact(&mgr, 0x1234);
     TEST_ASSERT_NOT_NULL(c);
     TEST_ASSERT_EQUAL(LOCATION_TIER_FULL, c->tier);
 
@@ -97,10 +89,10 @@ void test_location_contact_management(void) {
 }
 
 void test_location_cache(void) {
-    bramble_position_t pos = { .latitude_e7 = 100000000, .longitude_e7 = 200000000, .valid = true };
+    bramble_position_t pos = {.latitude_e7 = 100000000, .longitude_e7 = 200000000, .valid = true};
 
     TEST_ASSERT_EQUAL(0, location_cache_update(&mgr, 0xAA, &pos, 1000));
-    const location_cache_entry_t *e = location_cache_get(&mgr, 0xAA);
+    const location_cache_entry_t* e = location_cache_get(&mgr, 0xAA);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL(100000000, e->pos.latitude_e7);
 
@@ -128,7 +120,7 @@ void test_location_should_send_time(void) {
     TEST_ASSERT_TRUE(location_should_send(&mgr, 0x10, 1000));
 
     /* Mark as sent */
-    location_contact_t *c = location_find_contact(&mgr, 0x10);
+    location_contact_t* c = location_find_contact(&mgr, 0x10);
     c->last_sent_ms = 1000;
 
     /* Not enough time elapsed */
@@ -148,11 +140,9 @@ void test_location_policy_defaults(void) {
 }
 
 void test_location_policy_interval_floor(void) {
-    location_policy_t policy = {
-        .enabled = true,
-        .default_tier = LOCATION_TIER_FULL,
-        .interval_s = (uint16_t)(LOCATION_MIN_INTERVAL_S - 1)
-    };
+    location_policy_t policy = {.enabled = true,
+                                .default_tier = LOCATION_TIER_FULL,
+                                .interval_s = (uint16_t)(LOCATION_MIN_INTERVAL_S - 1)};
 
     location_policy_normalize(&policy);
 
@@ -161,15 +151,12 @@ void test_location_policy_interval_floor(void) {
 
 void test_location_should_send_distance(void) {
     location_add_contact(&mgr, 0x20, LOCATION_TIER_FULL);
-    location_contact_t *c = location_find_contact(&mgr, 0x20);
+    location_contact_t* c = location_find_contact(&mgr, 0x20);
     c->last_sent_ms = 1000; /* recently sent */
 
     /* Set current position */
     bramble_position_t pos1 = {
-        .latitude_e7 = 374220000,
-        .longitude_e7 = -1220840000,
-        .valid = true
-    };
+        .latitude_e7 = 374220000, .longitude_e7 = -1220840000, .valid = true};
     location_set_position(&mgr, &pos1);
 
     /* Cache peer's last known position (same as ours = where we were when we last sent) */
@@ -249,26 +236,31 @@ void test_location_deserialize_for_tier_full_coarse_presence(void) {
     };
 
     uint8_t full_buf[LOCATION_FULL_SIZE];
-    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE, location_serialize_full(&full, full_buf, sizeof(full_buf)));
+    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE,
+                      location_serialize_full(&full, full_buf, sizeof(full_buf)));
 
     bramble_position_t out = {0};
-    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE,
-                      location_deserialize_for_tier(full_buf, sizeof(full_buf), LOCATION_TIER_FULL, &out));
+    TEST_ASSERT_EQUAL(LOCATION_FULL_SIZE, location_deserialize_for_tier(full_buf, sizeof(full_buf),
+                                                                        LOCATION_TIER_FULL, &out));
     TEST_ASSERT_EQUAL(full.latitude_e7, out.latitude_e7);
     TEST_ASSERT_EQUAL(full.longitude_e7, out.longitude_e7);
 
     uint8_t coarse_buf[LOCATION_COARSE_SIZE];
-    TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE, location_serialize_coarse(&full, coarse_buf, sizeof(coarse_buf)));
-    memset(&out, 0, sizeof(out));
     TEST_ASSERT_EQUAL(LOCATION_COARSE_SIZE,
-                      location_deserialize_for_tier(coarse_buf, sizeof(coarse_buf), LOCATION_TIER_COARSE, &out));
+                      location_serialize_coarse(&full, coarse_buf, sizeof(coarse_buf)));
+    memset(&out, 0, sizeof(out));
+    TEST_ASSERT_EQUAL(
+        LOCATION_COARSE_SIZE,
+        location_deserialize_for_tier(coarse_buf, sizeof(coarse_buf), LOCATION_TIER_COARSE, &out));
     TEST_ASSERT_TRUE(out.valid);
 
     uint8_t presence_buf[LOCATION_PRESENCE_SIZE];
-    TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE, location_serialize_presence(&full, presence_buf, sizeof(presence_buf)));
+    TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE,
+                      location_serialize_presence(&full, presence_buf, sizeof(presence_buf)));
     memset(&out, 0, sizeof(out));
     TEST_ASSERT_EQUAL(LOCATION_PRESENCE_SIZE,
-                      location_deserialize_for_tier(presence_buf, sizeof(presence_buf), LOCATION_TIER_PRESENCE, &out));
+                      location_deserialize_for_tier(presence_buf, sizeof(presence_buf),
+                                                    LOCATION_TIER_PRESENCE, &out));
     TEST_ASSERT_TRUE(out.valid);
 }
 

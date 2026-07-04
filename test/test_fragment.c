@@ -12,8 +12,8 @@ void test_split_small(void) {
     int n = fragment_split(data, 100, 0x1234, frags, 8);
     TEST_ASSERT_EQUAL(1, n);
     TEST_ASSERT_EQUAL(FRAG_HEADER_SIZE + 100, frags[0].len);
-    TEST_ASSERT_EQUAL(0, frags[0].data[0]); /* index */
-    TEST_ASSERT_EQUAL(1, frags[0].data[1]); /* total */
+    TEST_ASSERT_EQUAL(0, frags[0].data[0]);    /* index */
+    TEST_ASSERT_EQUAL(1, frags[0].data[1]);    /* total */
     TEST_ASSERT_EQUAL(0x34, frags[0].data[2]); /* message_id low */
     TEST_ASSERT_EQUAL(0x12, frags[0].data[3]); /* message_id high */
     TEST_ASSERT_EQUAL(0xAB, frags[0].data[4]);
@@ -22,7 +22,8 @@ void test_split_small(void) {
 /* Test 2: Split 500B → 4 fragments */
 void test_split_500(void) {
     uint8_t data[500];
-    for (int i = 0; i < 500; i++) data[i] = (uint8_t)(i & 0xFF);
+    for (int i = 0; i < 500; i++)
+        data[i] = (uint8_t)(i & 0xFF);
     fragment_t frags[4];
     int n = fragment_split(data, 500, 42, frags, 4);
     /* ceil(500/154) = 4 */
@@ -64,23 +65,22 @@ void test_reassembly_in_order(void) {
     reassembly_init(&ctx);
 
     uint8_t orig[300];
-    for (int i = 0; i < 300; i++) orig[i] = (uint8_t)(i & 0xFF);
+    for (int i = 0; i < 300; i++)
+        orig[i] = (uint8_t)(i & 0xFF);
     fragment_t frags[4];
     int n = fragment_split(orig, 300, 0x5678, frags, 4);
     TEST_ASSERT_EQUAL(2, n);
 
     for (int i = 0; i < n; i++) {
-        frag_header_t hdr = {
-            .frag_index = frags[i].data[0],
-            .frag_total = frags[i].data[1],
-            .message_id = (uint16_t)(frags[i].data[2] | (frags[i].data[3] << 8))
-        };
-        int rc = reassembly_add(&ctx, &hdr,
-                                frags[i].data + FRAG_HEADER_SIZE,
-                                frags[i].len - FRAG_HEADER_SIZE,
-                                1000, 0x1000 + i);
-        if (i < n - 1) TEST_ASSERT_EQUAL(0, rc);
-        else TEST_ASSERT_EQUAL(1, rc);
+        frag_header_t hdr = {.frag_index = frags[i].data[0],
+                             .frag_total = frags[i].data[1],
+                             .message_id = (uint16_t)(frags[i].data[2] | (frags[i].data[3] << 8))};
+        int rc = reassembly_add(&ctx, &hdr, frags[i].data + FRAG_HEADER_SIZE,
+                                frags[i].len - FRAG_HEADER_SIZE, 1000, 0x1000 + i);
+        if (i < n - 1)
+            TEST_ASSERT_EQUAL(0, rc);
+        else
+            TEST_ASSERT_EQUAL(1, rc);
     }
 
     uint8_t out[616];
@@ -95,7 +95,8 @@ void test_reassembly_out_of_order(void) {
     reassembly_init(&ctx);
 
     uint8_t orig[400];
-    for (int i = 0; i < 400; i++) orig[i] = (uint8_t)i;
+    for (int i = 0; i < 400; i++)
+        orig[i] = (uint8_t)i;
     fragment_t frags[4];
     int n = fragment_split(orig, 400, 100, frags, 4);
     TEST_ASSERT_EQUAL(3, n);
@@ -104,17 +105,15 @@ void test_reassembly_out_of_order(void) {
     int order[] = {2, 0, 1};
     for (int k = 0; k < n; k++) {
         int i = order[k];
-        frag_header_t hdr = {
-            .frag_index = frags[i].data[0],
-            .frag_total = frags[i].data[1],
-            .message_id = (uint16_t)(frags[i].data[2] | (frags[i].data[3] << 8))
-        };
-        int rc = reassembly_add(&ctx, &hdr,
-                                frags[i].data + FRAG_HEADER_SIZE,
-                                frags[i].len - FRAG_HEADER_SIZE,
-                                2000, 0x2000 + i);
-        if (k < n - 1) TEST_ASSERT_EQUAL(0, rc);
-        else TEST_ASSERT_EQUAL(1, rc);
+        frag_header_t hdr = {.frag_index = frags[i].data[0],
+                             .frag_total = frags[i].data[1],
+                             .message_id = (uint16_t)(frags[i].data[2] | (frags[i].data[3] << 8))};
+        int rc = reassembly_add(&ctx, &hdr, frags[i].data + FRAG_HEADER_SIZE,
+                                frags[i].len - FRAG_HEADER_SIZE, 2000, 0x2000 + i);
+        if (k < n - 1)
+            TEST_ASSERT_EQUAL(0, rc);
+        else
+            TEST_ASSERT_EQUAL(1, rc);
     }
 
     uint8_t out[616];
@@ -129,7 +128,7 @@ void test_reassembly_duplicate(void) {
     reassembly_init(&ctx);
 
     frag_header_t hdr = {.frag_index = 0, .frag_total = 2, .message_id = 50};
-    uint8_t data[10] = {1,2,3,4,5,6,7,8,9,10};
+    uint8_t data[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
     int rc = reassembly_add(&ctx, &hdr, data, 10, 1000, 0);
     TEST_ASSERT_EQUAL(0, rc);
@@ -203,7 +202,6 @@ void test_reject_over_616(void) {
     TEST_ASSERT_EQUAL(4, n);
 }
 
-
 /* Test 11: first_packet_id stored on first fragment received (in-order) */
 void test_first_packet_id_in_order(void) {
     reassembly_ctx_t ctx;
@@ -216,13 +214,9 @@ void test_first_packet_id_in_order(void) {
     TEST_ASSERT_EQUAL(2, n);
 
     /* Add frag 0 with packet_id 0xDEAD0001 */
-    frag_header_t hdr0 = {
-        .frag_index = 0, .frag_total = 2, .message_id = 0xABCD
-    };
-    int rc = reassembly_add(&ctx, &hdr0,
-                            frags[0].data + FRAG_HEADER_SIZE,
-                            frags[0].len - FRAG_HEADER_SIZE,
-                            1000, 0xDEAD0001);
+    frag_header_t hdr0 = {.frag_index = 0, .frag_total = 2, .message_id = 0xABCD};
+    int rc = reassembly_add(&ctx, &hdr0, frags[0].data + FRAG_HEADER_SIZE,
+                            frags[0].len - FRAG_HEADER_SIZE, 1000, 0xDEAD0001);
     TEST_ASSERT_EQUAL(0, rc);
 
     /* first_packet_id should be frag 0's packet_id */
@@ -230,13 +224,9 @@ void test_first_packet_id_in_order(void) {
     TEST_ASSERT_EQUAL_HEX32(0xDEAD0001, first_id);
 
     /* Add frag 1 with a different packet_id */
-    frag_header_t hdr1 = {
-        .frag_index = 1, .frag_total = 2, .message_id = 0xABCD
-    };
-    rc = reassembly_add(&ctx, &hdr1,
-                        frags[1].data + FRAG_HEADER_SIZE,
-                        frags[1].len - FRAG_HEADER_SIZE,
-                        1000, 0xDEAD0002);
+    frag_header_t hdr1 = {.frag_index = 1, .frag_total = 2, .message_id = 0xABCD};
+    rc = reassembly_add(&ctx, &hdr1, frags[1].data + FRAG_HEADER_SIZE,
+                        frags[1].len - FRAG_HEADER_SIZE, 1000, 0xDEAD0002);
     TEST_ASSERT_EQUAL(1, rc); /* complete */
 
     /* first_packet_id should still be the first fragment's */
@@ -256,11 +246,9 @@ void test_first_packet_id_out_of_order(void) {
     TEST_ASSERT_EQUAL(3, n);
 
     /* Receive frag 2 first (packet_id 0xBEEF0003) */
-    frag_header_t hdr2 = { .frag_index = 2, .frag_total = 3, .message_id = 200 };
-    int rc = reassembly_add(&ctx, &hdr2,
-                            frags[2].data + FRAG_HEADER_SIZE,
-                            frags[2].len - FRAG_HEADER_SIZE,
-                            1000, 0xBEEF0003);
+    frag_header_t hdr2 = {.frag_index = 2, .frag_total = 3, .message_id = 200};
+    int rc = reassembly_add(&ctx, &hdr2, frags[2].data + FRAG_HEADER_SIZE,
+                            frags[2].len - FRAG_HEADER_SIZE, 1000, 0xBEEF0003);
     TEST_ASSERT_EQUAL(0, rc);
 
     /* first_packet_id should be frag 2's (the first received) */
@@ -268,11 +256,9 @@ void test_first_packet_id_out_of_order(void) {
     TEST_ASSERT_EQUAL_HEX32(0xBEEF0003, first_id);
 
     /* Receive frag 0 (packet_id 0xBEEF0001) */
-    frag_header_t hdr0 = { .frag_index = 0, .frag_total = 3, .message_id = 200 };
-    rc = reassembly_add(&ctx, &hdr0,
-                        frags[0].data + FRAG_HEADER_SIZE,
-                        frags[0].len - FRAG_HEADER_SIZE,
-                        1000, 0xBEEF0001);
+    frag_header_t hdr0 = {.frag_index = 0, .frag_total = 3, .message_id = 200};
+    rc = reassembly_add(&ctx, &hdr0, frags[0].data + FRAG_HEADER_SIZE,
+                        frags[0].len - FRAG_HEADER_SIZE, 1000, 0xBEEF0001);
     TEST_ASSERT_EQUAL(0, rc);
 
     /* first_packet_id should still be frag 2's */
@@ -280,11 +266,9 @@ void test_first_packet_id_out_of_order(void) {
     TEST_ASSERT_EQUAL_HEX32(0xBEEF0003, first_id);
 
     /* Receive frag 1 to complete */
-    frag_header_t hdr1 = { .frag_index = 1, .frag_total = 3, .message_id = 200 };
-    rc = reassembly_add(&ctx, &hdr1,
-                        frags[1].data + FRAG_HEADER_SIZE,
-                        frags[1].len - FRAG_HEADER_SIZE,
-                        1000, 0xBEEF0002);
+    frag_header_t hdr1 = {.frag_index = 1, .frag_total = 3, .message_id = 200};
+    rc = reassembly_add(&ctx, &hdr1, frags[1].data + FRAG_HEADER_SIZE,
+                        frags[1].len - FRAG_HEADER_SIZE, 1000, 0xBEEF0002);
     TEST_ASSERT_EQUAL(1, rc); /* complete */
 
     /* first_packet_id is still from the first-received fragment */

@@ -50,8 +50,8 @@ void test_ke_envelope_round_trip_to_session(void) {
 
     /* A builds INIT (first contact: no cached peer id for b.address). */
     bramble_key_exchange_t init;
-    TEST_ASSERT_EQUAL(0, dm_build_init(&a, a_eph.public_key, a_eph.private_key,
-                                        b.address, 0, NULL, &init));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
 
     uint8_t init_wire[KEY_EXCHANGE_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_key_exchange_serialize(&init, init_wire, sizeof(init_wire)));
@@ -65,23 +65,23 @@ void test_ke_envelope_round_trip_to_session(void) {
 
     uint8_t ct1[CHANNEL_MSG_OVERHEAD + KEY_EXCHANGE_SIZE];
     uint8_t tag1[16];
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch_a, a.address, APP_TYPE_KE, 0,
-                                              init_wire, sizeof(init_wire),
-                                              aad1, sizeof(aad1), nonce1, ct1, tag1));
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch_a, a.address, APP_TYPE_KE, 0, init_wire,
+                                             sizeof(init_wire), aad1, sizeof(aad1), nonce1, ct1,
+                                             tag1));
 
     /* B decodes the envelope. */
     bramble_channel_t channels_b[1];
     channels_b[0] = ch_b;
     channel_msg_info_t info1;
     uint8_t pt1[CHANNEL_MSG_MAX_PLAINTEXT_SIZE] = {0};
-    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels_b, 1, nonce1, ct1, sizeof(ct1), tag1,
-                                              aad1, sizeof(aad1), pt1, &info1, 0));
+    TEST_ASSERT_EQUAL(0, channel_msg_decrypt(channels_b, 1, nonce1, ct1, sizeof(ct1), tag1, aad1,
+                                             sizeof(aad1), pt1, &info1, 0));
     TEST_ASSERT_EQUAL(APP_TYPE_KE, info1.app_type);
     TEST_ASSERT_EQUAL(KEY_EXCHANGE_SIZE, info1.data_len);
 
     bramble_key_exchange_t recv_init;
     TEST_ASSERT_EQUAL(ESP_OK,
-        bramble_key_exchange_deserialize(&recv_init, info1.data, info1.data_len));
+                      bramble_key_exchange_deserialize(&recv_init, info1.data, info1.data_len));
 
     /* B verifies INIT (first contact: have_peer_id = 0). */
     TEST_ASSERT_EQUAL(0, dm_verify_init(&recv_init, &b, 0, NULL));
@@ -89,8 +89,8 @@ void test_ke_envelope_round_trip_to_session(void) {
     /* B builds RESP. */
     bramble_key_exchange_t resp;
     uint8_t kb[32];
-    TEST_ASSERT_EQUAL(0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key,
-                                        &recv_init, 0, &resp, kb));
+    TEST_ASSERT_EQUAL(
+        0, dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &recv_init, 0, &resp, kb));
 
     /* A verifies RESP; both sides now hold the same session key. */
     uint8_t ka[32];
@@ -119,8 +119,8 @@ void test_ke_envelope_round_trip_to_session(void) {
                                             nonce2, ct2, tag2));
 
     uint8_t pt2[sizeof(chat_pt)] = {0};
-    TEST_ASSERT_EQUAL(0, dm_session_decrypt(&sess_b, &hdr2, a.address, nonce2, ct2,
-                                            sizeof(ct2), tag2, pt2));
+    TEST_ASSERT_EQUAL(
+        0, dm_session_decrypt(&sess_b, &hdr2, a.address, nonce2, ct2, sizeof(ct2), tag2, pt2));
     TEST_ASSERT_EQUAL_MEMORY(chat_pt, pt2, sizeof(chat_pt));
 }
 
@@ -144,12 +144,12 @@ void test_session_decrypt_rejects_spoofed_src_addr(void) {
     memset(nonce, 0x33, sizeof(nonce));
     uint8_t ct[sizeof(pt)];
     uint8_t tag[16];
-    TEST_ASSERT_EQUAL(0, dm_session_encrypt(&sess, &hdr, a.address, pt, sizeof(pt),
-                                            nonce, ct, tag));
+    TEST_ASSERT_EQUAL(0,
+                      dm_session_encrypt(&sess, &hdr, a.address, pt, sizeof(pt), nonce, ct, tag));
 
     uint8_t out[sizeof(pt)] = {0};
-    TEST_ASSERT_NOT_EQUAL(0, dm_session_decrypt(&sess, &hdr, a.address + 1, nonce, ct,
-                                                sizeof(ct), tag, out));
+    TEST_ASSERT_NOT_EQUAL(
+        0, dm_session_decrypt(&sess, &hdr, a.address + 1, nonce, ct, sizeof(ct), tag, out));
 }
 
 int main(void) {

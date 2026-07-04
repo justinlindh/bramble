@@ -5,9 +5,10 @@ static bramble_probe_state_t state;
 static uint8_t sent_data[256];
 static uint16_t sent_len;
 
-static void test_send_fn(const uint8_t *data, uint16_t len, void *ctx) {
+static void test_send_fn(const uint8_t* data, uint16_t len, void* ctx) {
     (void)ctx;
-    if (len > sizeof(sent_data)) len = sizeof(sent_data);
+    if (len > sizeof(sent_data))
+        len = sizeof(sent_data);
     memcpy(sent_data, data, len);
     sent_len = len;
 }
@@ -34,9 +35,9 @@ void test_v2_no_self_responder(void) {
     ack.probe_id = probe_id;
     ack.rssi = -40;
 
-    bramble_probe_handle_ack(&state, (const uint8_t *)&ack, 14, 1200);
+    bramble_probe_handle_ack(&state, (const uint8_t*)&ack, 14, 1200);
 
-    const probe_result_t *result = bramble_probe_get_result(&state);
+    const probe_result_t* result = bramble_probe_get_result(&state);
     TEST_ASSERT_EQUAL_UINT16(0, result->response_count);
 }
 
@@ -56,10 +57,10 @@ void test_v2_duplicate_responder_updates_row_not_count(void) {
     bramble_probe_ack_t ack2 = ack1;
     ack2.rssi = -60; /* better */
 
-    bramble_probe_handle_ack(&state, (const uint8_t *)&ack1, 14, 1500);
-    bramble_probe_handle_ack(&state, (const uint8_t *)&ack2, 14, 1800);
+    bramble_probe_handle_ack(&state, (const uint8_t*)&ack1, 14, 1500);
+    bramble_probe_handle_ack(&state, (const uint8_t*)&ack2, 14, 1800);
 
-    const probe_result_t *result = bramble_probe_get_result(&state);
+    const probe_result_t* result = bramble_probe_get_result(&state);
     TEST_ASSERT_EQUAL_UINT16(1, result->response_count);
     TEST_ASSERT_EQUAL_HEX32(0x11223344, result->responses[0].responder_addr);
     TEST_ASSERT_EQUAL_INT8(-60, result->responses[0].rssi);
@@ -84,9 +85,10 @@ void test_v2_completion_window_is_explicitly_bounded(void) {
     ack.src_addr = 0x55667788;
     ack.probe_id = state.result.probe_id;
 
-    bramble_probe_handle_ack(&state, (const uint8_t *)&ack, 13, 1000 + PROBE_COLLECTION_WINDOW_MS + 500);
+    bramble_probe_handle_ack(&state, (const uint8_t*)&ack, 13,
+                             1000 + PROBE_COLLECTION_WINDOW_MS + 500);
 
-    const probe_result_t *result = bramble_probe_get_result(&state);
+    const probe_result_t* result = bramble_probe_get_result(&state);
     TEST_ASSERT_EQUAL_UINT16(0, result->response_count);
 }
 

@@ -11,7 +11,7 @@ void setUp(void) {}
 void tearDown(void) {}
 
 /* Helper: hex string to bytes */
-static void hex_to_bytes(const char *hex, uint8_t *out, size_t out_len) {
+static void hex_to_bytes(const char* hex, uint8_t* out, size_t out_len) {
     for (size_t i = 0; i < out_len; i++) {
         unsigned int byte;
         sscanf(hex + 2 * i, "%02x", &byte);
@@ -50,10 +50,10 @@ void test_aes256gcm_nist_vector_with_data(void) {
      * Key:  00000000000000000000000000000000 00000000000000000000000000000000
      * IV:   000000000000000000000000
      * P:    00000000000000000000000000000000 (16 bytes of zeros)
-     * 
+     *
      * Actually let's use a well-known simple vector:
      * Key: all zeros (32 bytes)
-     * IV: all zeros (12 bytes)  
+     * IV: all zeros (12 bytes)
      * PT: all zeros (16 bytes)
      * Expected CT: cea7403d4d606b6e074ec5d3baf39d18
      * Expected Tag: d0d1c8a799996bf0265b98b5d48ab919
@@ -101,15 +101,20 @@ void test_x25519_rfc7748_shared_secret(void) {
     uint8_t shared_ab[32], shared_ba[32];
 
     hex_to_bytes("77076d0a7318a57d3c16c17251b26645"
-                 "df4c2f87ebc0992ab177fba51db92c2a", alice_priv, 32);
+                 "df4c2f87ebc0992ab177fba51db92c2a",
+                 alice_priv, 32);
     hex_to_bytes("8520f0098930a754748b7ddcb43ef75a"
-                 "0dbf3a0d26381af4eba4a98eaa9b4e6a", alice_pub, 32);
+                 "0dbf3a0d26381af4eba4a98eaa9b4e6a",
+                 alice_pub, 32);
     hex_to_bytes("5dab087e624a8a4b79e17f8b83800ee6"
-                 "6f3bb1292618b6fd1c2f8b27ff88e0eb", bob_priv, 32);
+                 "6f3bb1292618b6fd1c2f8b27ff88e0eb",
+                 bob_priv, 32);
     hex_to_bytes("de9edb7d7b7dc1b4d35b61c2ece43537"
-                 "3f8343c85b78674dadfc7e146f882b4f", bob_pub, 32);
+                 "3f8343c85b78674dadfc7e146f882b4f",
+                 bob_pub, 32);
     hex_to_bytes("4a5d9d5ba4ce2de1728e3bf480350f25"
-                 "e07e21c947d19e3376f09b3c1e161742", expected_shared, 32);
+                 "e07e21c947d19e3376f09b3c1e161742",
+                 expected_shared, 32);
 
     /* Alice computes shared secret with Bob's public key */
     int ret = crypto_x25519_dh(alice_priv, bob_pub, shared_ab);
@@ -160,7 +165,8 @@ void test_hmac_sha256_rfc4231_case1(void) {
     hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", key, 20);
     hex_to_bytes("4869205468657265", data, 8);
     hex_to_bytes("b0344c61d8db38535ca8afceaf0bf12b"
-                 "881dc200c9833da726e9376c2e32cff7", expected, 32);
+                 "881dc200c9833da726e9376c2e32cff7",
+                 expected, 32);
 
     int ret = crypto_hmac_sha256(key, 20, data, 8, result);
     TEST_ASSERT_EQUAL(0, ret);
@@ -174,12 +180,13 @@ void test_hmac_sha256_rfc4231_case2(void) {
      * Data: "what do ya want for nothing?" (28 bytes)
      * HMAC: 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843
      */
-    const uint8_t *key = (const uint8_t *)"Jefe";
-    const uint8_t *data = (const uint8_t *)"what do ya want for nothing?";
+    const uint8_t* key = (const uint8_t*)"Jefe";
+    const uint8_t* data = (const uint8_t*)"what do ya want for nothing?";
     uint8_t expected[32], result[32];
 
     hex_to_bytes("5bdcc146bf60754e6a042426089575c7"
-                 "5a003f089d2739839dec58b964ec3843", expected, 32);
+                 "5a003f089d2739839dec58b964ec3843",
+                 expected, 32);
 
     int ret = crypto_hmac_sha256(key, 4, data, 28, result);
     TEST_ASSERT_EQUAL(0, ret);
@@ -196,7 +203,7 @@ void test_hmac_sha256_trunc4_consistency(void) {
     uint32_t trunc = crypto_hmac_sha256_trunc4(key, 20, data, 8);
 
     uint32_t expected = ((uint32_t)full[0] << 24) | ((uint32_t)full[1] << 16) |
-                        ((uint32_t)full[2] << 8)  | (uint32_t)full[3];
+                        ((uint32_t)full[2] << 8) | (uint32_t)full[3];
     TEST_ASSERT_EQUAL_HEX32(expected, trunc);
 }
 

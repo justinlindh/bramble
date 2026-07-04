@@ -24,11 +24,11 @@ void test_upsert_keeps_best_rssi_snr_latest_latency(void) {
     probe_results_upsert(r, &count, MAX_PROBE_RESULTS, 0xAAAA, 2, -80, 5, 1000u, 1);
     probe_results_upsert(r, &count, MAX_PROBE_RESULTS, 0xAAAA, 3, -70, 9, 2000u, 2);
     probe_results_upsert(r, &count, MAX_PROBE_RESULTS, 0xAAAA, 4, -90, 2, 3000u, 3);
-    TEST_ASSERT_EQUAL_INT(1, count);          /* still one logical row */
-    TEST_ASSERT_EQUAL_INT16(-70, r[0].rssi);  /* best (max) RSSI */
-    TEST_ASSERT_EQUAL_INT8(9, r[0].snr);      /* best (max) SNR */
-    TEST_ASSERT_EQUAL_UINT32(3000u, r[0].latency_ms); /* latest */
-    TEST_ASSERT_EQUAL_UINT8(4, r[0].hops);    /* latest hops */
+    TEST_ASSERT_EQUAL_INT(1, count);                     /* still one logical row */
+    TEST_ASSERT_EQUAL_INT16(-70, r[0].rssi);             /* best (max) RSSI */
+    TEST_ASSERT_EQUAL_INT8(9, r[0].snr);                 /* best (max) SNR */
+    TEST_ASSERT_EQUAL_UINT32(3000u, r[0].latency_ms);    /* latest */
+    TEST_ASSERT_EQUAL_UINT8(4, r[0].hops);               /* latest hops */
     TEST_ASSERT_EQUAL_UINT8(0x07, r[0].seen_round_mask); /* rounds 1|2|3 */
 }
 
@@ -47,7 +47,8 @@ void test_capacity_ceiling_drops_overflow_but_updates_existing(void) {
     int count = 0;
     memset(r, 0, sizeof(r));
     for (int i = 0; i < MAX_PROBE_RESULTS; i++)
-        probe_results_upsert(r, &count, MAX_PROBE_RESULTS, 0x1000u + (uint32_t)i, 1, -70, 5, 10u, 1);
+        probe_results_upsert(r, &count, MAX_PROBE_RESULTS, 0x1000u + (uint32_t)i, 1, -70, 5, 10u,
+                             1);
     TEST_ASSERT_EQUAL_INT(MAX_PROBE_RESULTS, count);
     /* Overflow insert of a NEW addr is dropped. */
     probe_results_upsert(r, &count, MAX_PROBE_RESULTS, 0xFFFFu, 1, -70, 5, 10u, 1);

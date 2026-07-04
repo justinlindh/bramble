@@ -15,10 +15,10 @@
 /* Controllable stubs from rpc_methods_test_stubs.c */
 extern uint32_t g_stub_send_message_return;
 extern uint32_t g_stub_send_channel_return;
-extern int      g_stub_send_broadcast_return;
+extern int g_stub_send_broadcast_return;
 extern uint32_t g_stub_last_broadcast_id;
-extern bool     g_nvs_allow_open;
-extern char     g_nvs_node_name[64];
+extern bool g_nvs_allow_open;
+extern char g_nvs_node_name[64];
 
 static bramble_identity_t s_id = {
     .address = 0xAABBCCDD,
@@ -39,27 +39,27 @@ void setUp(void) {
 void tearDown(void) {}
 
 /* Suppress known OTA strdup leak in test environment */
-const char *__asan_default_options(void) { return "detect_leaks=0"; }
+const char* __asan_default_options(void) { return "detect_leaks=0"; }
 
 /* ── Helpers ──────────────────────────────────────────────────────── */
 
-static cJSON *dispatch_and_parse(const char *req) {
+static cJSON* dispatch_and_parse(const char* req) {
     char response[2048];
     int len = rpc_dispatch(req, response, sizeof(response));
     TEST_ASSERT_GREATER_THAN(0, len);
-    cJSON *j = cJSON_Parse(response);
+    cJSON* j = cJSON_Parse(response);
     TEST_ASSERT_NOT_NULL(j);
     return j;
 }
 
-static cJSON *get_result(cJSON *resp) {
-    cJSON *r = cJSON_GetObjectItem(resp, "result");
+static cJSON* get_result(cJSON* resp) {
+    cJSON* r = cJSON_GetObjectItem(resp, "result");
     TEST_ASSERT_NOT_NULL(r);
     return r;
 }
 
-static cJSON *get_error(cJSON *resp) {
-    cJSON *e = cJSON_GetObjectItem(resp, "error");
+static cJSON* get_error(cJSON* resp) {
+    cJSON* e = cJSON_GetObjectItem(resp, "error");
     TEST_ASSERT_NOT_NULL(e);
     return e;
 }
@@ -67,9 +67,9 @@ static cJSON *get_error(cJSON *resp) {
 /* ── 1. getStatus ─────────────────────────────────────────────────── */
 
 void test_get_status_returns_expected_fields(void) {
-    cJSON *resp = dispatch_and_parse(
+    cJSON* resp = dispatch_and_parse(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bramble.getStatus\",\"params\":{}}");
-    cJSON *r = get_result(resp);
+    cJSON* r = get_result(resp);
 
     /* address should be our identity hex */
     TEST_ASSERT_EQUAL_STRING("AABBCCDD", cJSON_GetObjectItem(r, "address")->valuestring);
@@ -91,10 +91,10 @@ void test_get_status_returns_expected_fields(void) {
 /* ── 2. getNeighbors ──────────────────────────────────────────────── */
 
 void test_get_neighbors_empty_table(void) {
-    cJSON *resp = dispatch_and_parse(
+    cJSON* resp = dispatch_and_parse(
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"bramble.getNeighbors\",\"params\":{}}");
-    cJSON *r = get_result(resp);
-    cJSON *arr = cJSON_GetObjectItem(r, "neighbors");
+    cJSON* r = get_result(resp);
+    cJSON* arr = cJSON_GetObjectItem(r, "neighbors");
     TEST_ASSERT_NOT_NULL(arr);
     TEST_ASSERT_TRUE(cJSON_IsArray(arr));
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetArraySize(arr));
@@ -104,17 +104,17 @@ void test_get_neighbors_empty_table(void) {
 /* ── 3. sendMessage ───────────────────────────────────────────────── */
 
 void test_send_message_missing_dest(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"bramble.sendMessage\",\"params\":{\"text\":\"hello\"}}");
-    cJSON *err = get_error(resp);
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"bramble."
+                                     "sendMessage\",\"params\":{\"text\":\"hello\"}}");
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
 void test_send_message_missing_text(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"bramble.sendMessage\",\"params\":{\"dest\":\"AABBCCDD\"}}");
-    cJSON *err = get_error(resp);
+    cJSON* resp = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"bramble."
+                                     "sendMessage\",\"params\":{\"dest\":\"AABBCCDD\"}}");
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
@@ -126,21 +126,22 @@ void test_send_message_too_long(void) {
     memset(big_msg, 'A', 699);
     big_msg[699] = '\0';
     snprintf(params, sizeof(params),
-        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"bramble.sendMessage\","
-        "\"params\":{\"dest\":\"AABBCCDD\",\"text\":\"%s\"}}", big_msg);
+             "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"bramble.sendMessage\","
+             "\"params\":{\"dest\":\"AABBCCDD\",\"text\":\"%s\"}}",
+             big_msg);
 
-    cJSON *resp = dispatch_and_parse(params);
-    cJSON *err = get_error(resp);
+    cJSON* resp = dispatch_and_parse(params);
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
 void test_send_message_valid(void) {
     g_stub_send_message_return = 0xDEADBEEF;
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"bramble.sendMessage\","
-        "\"params\":{\"dest\":\"AABBCCDD\",\"text\":\"hello\"}}");
-    cJSON *r = get_result(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"bramble.sendMessage\","
+                           "\"params\":{\"dest\":\"AABBCCDD\",\"text\":\"hello\"}}");
+    cJSON* r = get_result(resp);
     TEST_ASSERT_EQUAL_STRING("sent", cJSON_GetObjectItem(r, "status")->valuestring);
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "packetId"));
     TEST_ASSERT_EQUAL_STRING("DEADBEEF", cJSON_GetObjectItem(r, "packetId")->valuestring);
@@ -148,11 +149,11 @@ void test_send_message_valid(void) {
 }
 
 void test_send_message_radio_failure(void) {
-    g_stub_send_message_return = 0;  /* 0 = failure */
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.sendMessage\","
-        "\"params\":{\"dest\":\"AABBCCDD\",\"text\":\"hello\"}}");
-    cJSON *err = get_error(resp);
+    g_stub_send_message_return = 0; /* 0 = failure */
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"bramble.sendMessage\","
+                           "\"params\":{\"dest\":\"AABBCCDD\",\"text\":\"hello\"}}");
+    cJSON* err = get_error(resp);
     TEST_ASSERT_NOT_NULL(err);
     cJSON_Delete(resp);
 }
@@ -160,20 +161,20 @@ void test_send_message_radio_failure(void) {
 /* ── 4. sendBroadcast ─────────────────────────────────────────────── */
 
 void test_send_broadcast_missing_text(void) {
-    cJSON *resp = dispatch_and_parse(
+    cJSON* resp = dispatch_and_parse(
         "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"bramble.sendBroadcast\",\"params\":{}}");
-    cJSON *err = get_error(resp);
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
 void test_send_broadcast_valid(void) {
-    g_stub_send_broadcast_return = 0;  /* 0 = success */
+    g_stub_send_broadcast_return = 0; /* 0 = success */
     g_stub_last_broadcast_id = 0xCAFEBABE;
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.sendBroadcast\","
-        "\"params\":{\"text\":\"alert everyone\"}}");
-    cJSON *r = get_result(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"bramble.sendBroadcast\","
+                           "\"params\":{\"text\":\"alert everyone\"}}");
+    cJSON* r = get_result(resp);
     TEST_ASSERT_EQUAL_STRING("CAFEBABE", cJSON_GetObjectItem(r, "broadcast_id")->valuestring);
     TEST_ASSERT_EQUAL_STRING("sent", cJSON_GetObjectItem(r, "status")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "broadcast")));
@@ -293,42 +294,41 @@ void test_ota_set_origin_validates_policy(void) {
     cJSON_Delete(resp);
 }
 
-
 /* ── 6. setNodeName ───────────────────────────────────────────────── */
 
 void test_set_node_name_too_long(void) {
     /* BRAMBLE_NODE_NAME_MAX = 32, so 33 chars should fail */
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"bramble.setNodeName\","
-        "\"params\":{\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}");
-    cJSON *err = get_error(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"bramble.setNodeName\","
+                           "\"params\":{\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}");
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
 void test_set_node_name_empty(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"bramble.setNodeName\","
-        "\"params\":{\"name\":\"\"}}");
-    cJSON *err = get_error(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"bramble.setNodeName\","
+                           "\"params\":{\"name\":\"\"}}");
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
 void test_set_node_name_missing(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"bramble.setNodeName\","
-        "\"params\":{}}");
-    cJSON *err = get_error(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"bramble.setNodeName\","
+                           "\"params\":{}}");
+    cJSON* err = get_error(resp);
     TEST_ASSERT_EQUAL_INT(-32602, cJSON_GetObjectItem(err, "code")->valueint);
     cJSON_Delete(resp);
 }
 
 void test_set_node_name_valid(void) {
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"bramble.setNodeName\","
-        "\"params\":{\"name\":\"MyNode\"}}");
-    cJSON *r = get_result(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"bramble.setNodeName\","
+                           "\"params\":{\"name\":\"MyNode\"}}");
+    cJSON* r = get_result(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
     TEST_ASSERT_EQUAL_STRING("MyNode", cJSON_GetObjectItem(r, "name")->valuestring);
     /* Verify NVS was written */
@@ -338,10 +338,10 @@ void test_set_node_name_valid(void) {
 
 void test_set_node_name_max_length(void) {
     /* Exactly 32 chars should succeed */
-    cJSON *resp = dispatch_and_parse(
-        "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"bramble.setNodeName\","
-        "\"params\":{\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}");
-    cJSON *r = get_result(resp);
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"bramble.setNodeName\","
+                           "\"params\":{\"name\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}");
+    cJSON* r = get_result(resp);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
     cJSON_Delete(resp);
 }

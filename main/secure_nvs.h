@@ -23,7 +23,8 @@ typedef enum {
     NVS_INIT_PLAIN,        /* encryption off: normal nvs_flash_init */
     NVS_INIT_SECURE,       /* keys valid and secure init ok: proceed */
     NVS_INIT_SECURE_ERASE, /* keys valid but secure init failed (real migration): erase + retry */
-    NVS_INIT_FAIL          /* encryption build but keys partition missing OR keys-layer read/generate failed */
+    NVS_INIT_FAIL /* encryption build but keys partition missing OR keys-layer read/generate failed
+                   */
 } nvs_init_action_t;
 
 nvs_init_action_t nvs_init_plan(bool encryption_enabled, bool keys_partition_found,

@@ -49,19 +49,19 @@
 #include "ui_graphics.h"
 #endif
 
-static const char *TAG = "bramble";
+static const char* TAG = "bramble";
 
 /* ── Layout constants derived from display size ─────────────────────── */
 
-#define FONT_W          6
-#define FONT_H          8
-#define LINE_H          (FONT_H + 2)   /* 10px per line */
-#define LARGE_FONT_H    (FONT_H * 2)   /* 16px */
-#define HEADER_Y        0
-#define DIVIDER_Y       (FONT_H + 2)   /* below header text */
-#define CONTENT_Y       (DIVIDER_Y + 4) /* below divider */
-#define FOOTER_Y        (DISPLAY_HEIGHT - FONT_H - 2)
-#define CHARS_PER_LINE  (DISPLAY_WIDTH / FONT_W)
+#define FONT_W 6
+#define FONT_H 8
+#define LINE_H (FONT_H + 2)       /* 10px per line */
+#define LARGE_FONT_H (FONT_H * 2) /* 16px */
+#define HEADER_Y 0
+#define DIVIDER_Y (FONT_H + 2)    /* below header text */
+#define CONTENT_Y (DIVIDER_Y + 4) /* below divider */
+#define FOOTER_Y (DISPLAY_HEIGHT - FONT_H - 2)
+#define CHARS_PER_LINE (DISPLAY_WIDTH / FONT_W)
 
 /* ── Location manager ───────────────────────────────────────────────── */
 
@@ -70,9 +70,10 @@ static bool s_last_gps_fix = false;
 static bool s_has_last_wifi_status = false;
 static wifi_status_t s_last_wifi_status = {0};
 
-static void emit_gps_event(const char *event, const bramble_position_t *pos) {
-    cJSON *params = cJSON_CreateObject();
-    if (!params) return;
+static void emit_gps_event(const char* event, const bramble_position_t* pos) {
+    cJSON* params = cJSON_CreateObject();
+    if (!params)
+        return;
     cJSON_AddStringToObject(params, "event", event);
     if (pos) {
         cJSON_AddBoolToObject(params, "valid", pos->valid);
@@ -85,13 +86,16 @@ static void emit_gps_event(const char *event, const bramble_position_t *pos) {
     cJSON_Delete(params);
 }
 
-static void emit_wifi_event(const wifi_status_t *st, const char *event) {
-    cJSON *params = cJSON_CreateObject();
-    if (!params) return;
+static void emit_wifi_event(const wifi_status_t* st, const char* event) {
+    cJSON* params = cJSON_CreateObject();
+    if (!params)
+        return;
     const bool connected = st->ip_addr[0] != '\0';
-    const char *mode = "off";
-    if (st->mode == BRAMBLE_WIFI_STATION) mode = "sta";
-    else if (st->mode == BRAMBLE_WIFI_AP) mode = "ap";
+    const char* mode = "off";
+    if (st->mode == BRAMBLE_WIFI_STATION)
+        mode = "sta";
+    else if (st->mode == BRAMBLE_WIFI_AP)
+        mode = "ap";
 
     cJSON_AddStringToObject(params, "event", event);
     cJSON_AddStringToObject(params, "mode", mode);
@@ -127,14 +131,14 @@ static void poll_connectivity_events(void) {
     bool last_connected = s_last_wifi_status.ip_addr[0] != '\0';
     if (connected != last_connected) {
         emit_wifi_event(&st, connected ? "connected" : "disconnected");
-    } else if (strncmp(st.ip_addr, s_last_wifi_status.ip_addr, sizeof(st.ip_addr)) != 0 && connected) {
+    } else if (strncmp(st.ip_addr, s_last_wifi_status.ip_addr, sizeof(st.ip_addr)) != 0 &&
+               connected) {
         emit_wifi_event(&st, "ip_changed");
     }
     s_last_wifi_status = st;
 }
 
-static void log_heap_diagnostics_periodic(void)
-{
+static void log_heap_diagnostics_periodic(void) {
     static uint64_t s_last_log_us = 0;
     uint64_t now_us = (uint64_t)esp_timer_get_time();
     if (s_last_log_us != 0 && (now_us - s_last_log_us) < 30000000ULL) {
@@ -144,21 +148,20 @@ static void log_heap_diagnostics_periodic(void)
 
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t min_internal = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_internal =
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     size_t min_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
 
-    ESP_LOGI(TAG,
-             "diag.heap internal_free=%u internal_min=%u internal_largest=%u psram_free=%u psram_min=%u",
-             (unsigned)free_internal,
-             (unsigned)min_internal,
-             (unsigned)largest_internal,
-             (unsigned)free_psram,
-             (unsigned)min_psram);
+    ESP_LOGI(
+        TAG,
+        "diag.heap internal_free=%u internal_min=%u internal_largest=%u psram_free=%u psram_min=%u",
+        (unsigned)free_internal, (unsigned)min_internal, (unsigned)largest_internal,
+        (unsigned)free_psram, (unsigned)min_psram);
 }
 
-static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
-    location_manager_t *mgr = (location_manager_t *)ctx;
+static void on_gps_fix(const bramble_position_t* pos, void* ctx) {
+    location_manager_t* mgr = (location_manager_t*)ctx;
     location_set_position(mgr, pos);
     if (pos && pos->valid) {
         s_last_gps_fix = true;
@@ -169,8 +172,8 @@ static void on_gps_fix(const bramble_position_t *pos, void *ctx) {
         if (s_last_gps_notify_us == 0 || (now_us - s_last_gps_notify_us) >= 5000000ULL) {
             s_last_gps_notify_us = now_us;
             emit_gps_event("fix_acquired", pos);
-            ESP_LOGI(TAG, "GPS position updated: lat=%.6f lon=%.6f alt=%d",
-                     pos->latitude_e7 / 1e7, pos->longitude_e7 / 1e7, pos->altitude_m);
+            ESP_LOGI(TAG, "GPS position updated: lat=%.6f lon=%.6f alt=%d", pos->latitude_e7 / 1e7,
+                     pos->longitude_e7 / 1e7, pos->altitude_m);
         }
     }
 }
@@ -186,7 +189,8 @@ conn_mode_t conn_mode_get(void) {
         nvs_get_u8(nvs, NVS_KEY_CONN_MODE, &mode);
         nvs_close(nvs);
     }
-    if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT) mode = CONN_MODE_WIFI;
+    if (mode == CONN_MODE_BOTH || mode >= CONN_MODE_COUNT)
+        mode = CONN_MODE_WIFI;
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     return conn_mode_resolve_boot((conn_mode_t)mode, true);
@@ -213,7 +217,7 @@ void conn_mode_set(conn_mode_t mode) {
  * Redraws the BRAMBLE header + divider and places msg below the divider.
  * Only used on non-graphical boards (Heltec V3 SSD1306 OLED).
  */
-static void show_boot_status(const char *msg) {
+static void show_boot_status(const char* msg) {
     display_clear();
 
     /* Redraw BRAMBLE header (same layout as show_splash) */
@@ -238,7 +242,7 @@ static void show_splash(void) {
     display_clear();
 
     /* "BRAMBLE" in large text, centered */
-    int title_w = 7 * FONT_W * 2;  /* 7 chars × 12px */
+    int title_w = 7 * FONT_W * 2; /* 7 chars × 12px */
     int title_x = (DISPLAY_WIDTH - title_w) / 2;
     int title_y = DISPLAY_HEIGHT / 4;
     display_draw_text_large(title_x, title_y, "BRAMBLE");
@@ -248,12 +252,12 @@ static void show_splash(void) {
     display_hline(DISPLAY_WIDTH / 8, div_y, DISPLAY_WIDTH * 3 / 4);
 
     /* Tagline centered */
-    const char *tag = "LoRa Mesh Network";
+    const char* tag = "LoRa Mesh Network";
     int tag_w = strlen(tag) * FONT_W;
     display_draw_text((DISPLAY_WIDTH - tag_w) / 2, div_y + 8, tag);
 
     /* Version centered */
-    const char *ver = esp_app_get_description()->version;
+    const char* ver = esp_app_get_description()->version;
     int ver_w = strlen(ver) * FONT_W;
     display_draw_text((DISPLAY_WIDTH - ver_w) / 2, div_y + 20, ver);
 
@@ -269,7 +273,7 @@ static uint32_t boot_time_ms = 0;
 /* Shared render-time snapshots — only one screen renders at a time,
  * so a single static instance avoids ~8KB of duplicate BSS. */
 static mesh_shared_state_t s_render_mesh;
-static routing_table_t     s_render_routes;
+static routing_table_t s_render_routes;
 
 static void render_main_screen(void) {
     display_clear();
@@ -312,12 +316,12 @@ static void render_main_screen(void) {
     y += LINE_H;
 
     /* WiFi IP address (if connected), else last RX signal */
-    const char *ip = wifi_manager_get_ip();
+    const char* ip = wifi_manager_get_ip();
     if (ip && ip[0] != '\0') {
         snprintf(line, sizeof(line), "IP: %s", ip);
     } else if (n > 0) {
-        snprintf(line, sizeof(line), "RSSI:%d SNR:%d",
-                 s_render_mesh.last_rx_rssi, s_render_mesh.last_rx_snr);
+        snprintf(line, sizeof(line), "RSSI:%d SNR:%d", s_render_mesh.last_rx_rssi,
+                 s_render_mesh.last_rx_snr);
     } else {
         line[0] = '\0';
     }
@@ -327,8 +331,7 @@ static void render_main_screen(void) {
     y += LINE_H;
 
     /* Uptime */
-    uint32_t up_sec = (uint32_t)((esp_timer_get_time() / 1000000ULL) -
-                                  (boot_time_ms / 1000));
+    uint32_t up_sec = (uint32_t)((esp_timer_get_time() / 1000000ULL) - (boot_time_ms / 1000));
     char uptime[32];
     ui_format_uptime(up_sec, uptime, sizeof(uptime));
     snprintf(line, sizeof(line), "Up: %s", uptime);
@@ -341,13 +344,18 @@ static void render_main_screen(void) {
         int direct = neighbor_count(&s_render_mesh.neighbors);
         int routed = 0;
         for (int i = 0; i < s_render_routes.count; i++) {
-            const route_entry_t *r = &s_render_routes.entries[i];
-            if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN) continue;
+            const route_entry_t* r = &s_render_routes.entries[i];
+            if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN)
+                continue;
             bool is_direct = false;
             for (int j = 0; j < s_render_mesh.neighbors.count; j++) {
-                if (s_render_mesh.neighbors.entries[j].addr == r->dest_addr) { is_direct = true; break; }
+                if (s_render_mesh.neighbors.entries[j].addr == r->dest_addr) {
+                    is_direct = true;
+                    break;
+                }
             }
-            if (!is_direct) routed++;
+            if (!is_direct)
+                routed++;
         }
         int total = direct + routed;
         snprintf(line, sizeof(line), "Reach:%d (%d direct)", total, direct);
@@ -357,7 +365,7 @@ static void render_main_screen(void) {
     display_flush();
 }
 
-static void render_screen(ui_state_t *ui) {
+static void render_screen(ui_state_t* ui) {
     switch (ui_get_screen(ui)) {
     case SCREEN_MAIN:
         render_main_screen();
@@ -372,7 +380,7 @@ static void render_screen(ui_state_t *ui) {
 
         if (mcount == 0) {
             int no_msg_y = (DISPLAY_HEIGHT - FONT_H) / 2;
-            const char *no_msg = "(no messages yet)";
+            const char* no_msg = "(no messages yet)";
             int no_msg_x = (DISPLAY_WIDTH - strlen(no_msg) * FONT_W) / 2;
             display_draw_text(no_msg_x, no_msg_y, no_msg);
         } else {
@@ -381,61 +389,74 @@ static void render_screen(ui_state_t *ui) {
             int start = mcount > max_msgs ? mcount - max_msgs : 0;
             int y = CONTENT_Y;
             for (int i = start; i < mcount && y < FOOTER_Y; i++) {
-                const stored_msg_t *m = msg_store_get(i);
-                if (!m) continue;
+                const stored_msg_t* m = msg_store_get(i);
+                if (!m)
+                    continue;
                 char line[CHARS_PER_LINE + 1];
-                bool outgoing = (m->direction == MSG_DIR_OUTGOING ||
-                                 m->direction == MSG_DIR_BROADCAST_OUT);
+                bool outgoing =
+                    (m->direction == MSG_DIR_OUTGOING || m->direction == MSG_DIR_BROADCAST_OUT);
 
                 char prefix[8];
                 if (m->channel_index > 0) {
                     /* Non-default channel: include channel number with direction marker.
                      * Outgoing: "1>", Incoming: "<1" */
-                    snprintf(prefix, sizeof(prefix), outgoing ? "%d>" : "<%d", (int)m->channel_index);
+                    snprintf(prefix, sizeof(prefix), outgoing ? "%d>" : "<%d",
+                             (int)m->channel_index);
                 } else {
                     snprintf(prefix, sizeof(prefix), "%s", outgoing ? ">" : "<");
                 }
 
                 /* Delivery badge for outgoing messages (2 chars at end) */
-                const char *badge = "";
+                const char* badge = "";
                 if (m->direction == MSG_DIR_OUTGOING) {
                     switch (m->status) {
-                    case MSG_STATUS_SENT:      badge = " *";  break; /* pending */
+                    case MSG_STATUS_SENT:
+                        badge = " *";
+                        break; /* pending */
                     case MSG_STATUS_DELIVERED:
-                        badge = (m->route_hop_count > 1) ? "++" : " +"; break; /* acked */
-                    case MSG_STATUS_FAILED:    badge = " x";  break; /* failed */
-                    default:                   badge = "";    break;
+                        badge = (m->route_hop_count > 1) ? "++" : " +";
+                        break; /* acked */
+                    case MSG_STATUS_FAILED:
+                        badge = " x";
+                        break; /* failed */
+                    default:
+                        badge = "";
+                        break;
                     }
                 }
                 int badge_len = (int)strlen(badge);
 
                 /* Detect CTCP ACTION: \x01ACTION text\x01 */
-                bool is_action = (m->text_len > 9 &&
-                                  m->text[0] == 0x01 &&
+                bool is_action = (m->text_len > 9 && m->text[0] == 0x01 &&
                                   strncmp(m->text + 1, "ACTION ", 7) == 0);
 
                 if (is_action) {
                     /* Extract action text: skip \x01ACTION  (8 bytes), strip trailing \x01 */
-                    const char *act = m->text + 8;
+                    const char* act = m->text + 8;
                     int act_len = (int)m->text_len - 8;
-                    if (act_len > 0 && act[act_len - 1] == 0x01) act_len--;
-                    if (act_len < 0) act_len = 0;
+                    if (act_len > 0 && act[act_len - 1] == 0x01)
+                        act_len--;
+                    if (act_len < 0)
+                        act_len = 0;
 
                     if (outgoing) {
                         /* "* me <action>" */
                         int act_max = CHARS_PER_LINE - 5 /* "* me " */;
-                        if (act_max < 1) act_max = 1;
+                        if (act_max < 1)
+                            act_max = 1;
                         snprintf(line, sizeof(line), "* me %.*s", act_max, act);
                     } else {
                         /* "* XXXX <action>" — last 4 hex digits of peer_addr */
                         int act_max = CHARS_PER_LINE - 7 /* "* XXXX " */;
-                        if (act_max < 1) act_max = 1;
+                        if (act_max < 1)
+                            act_max = 1;
                         snprintf(line, sizeof(line), "* %04X %.*s",
                                  (unsigned)(m->peer_addr & 0xFFFF), act_max, act);
                     }
                 } else {
                     int text_max = CHARS_PER_LINE - (int)strlen(prefix) - 1 /* space */ - badge_len;
-                    if (text_max < 1) text_max = 1;
+                    if (text_max < 1)
+                        text_max = 1;
                     snprintf(line, sizeof(line), "%s %.*s%s", prefix, text_max, m->text, badge);
                 }
                 display_draw_text(2, y, line);
@@ -460,9 +481,11 @@ static void render_screen(ui_state_t *ui) {
         int route_count = 0;
         int hop_total = 0;
         for (int i = 0; i < s_render_routes.count; i++) {
-            const route_entry_t *r = &s_render_routes.entries[i];
-            if (r->dest_addr == 0) continue;
-            if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN) continue;
+            const route_entry_t* r = &s_render_routes.entries[i];
+            if (r->dest_addr == 0)
+                continue;
+            if (r->state == ROUTE_STALE || r->state == ROUTE_BROKEN)
+                continue;
             route_count++;
             hop_total += r->hop_count;
         }
@@ -474,8 +497,8 @@ static void render_screen(ui_state_t *ui) {
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         char summary[32];
-        snprintf(summary, sizeof(summary), "Avg: %d.%d hops",
-                 avg_hops_tenths / 10, avg_hops_tenths % 10);
+        snprintf(summary, sizeof(summary), "Avg: %d.%d hops", avg_hops_tenths / 10,
+                 avg_hops_tenths % 10);
         int y = CONTENT_Y;
         display_draw_text(2, y, summary);
         y += LINE_H;
@@ -483,20 +506,23 @@ static void render_screen(ui_state_t *ui) {
         int cnt = neighbor_count(&s_render_mesh.neighbors);
         if (cnt == 0) {
             int no_nbr_y = y + ((FOOTER_Y - y - FONT_H) / 2);
-            if (no_nbr_y < y) no_nbr_y = y;
-            const char *no_nbr = "(no neighbors yet)";
+            if (no_nbr_y < y)
+                no_nbr_y = y;
+            const char* no_nbr = "(no neighbors yet)";
             int no_nbr_x = (DISPLAY_WIDTH - strlen(no_nbr) * FONT_W) / 2;
             display_draw_text(no_nbr_x, no_nbr_y, no_nbr);
         } else {
             char nl[64];
             uint32_t now_ms_n = (uint32_t)(esp_timer_get_time() / 1000ULL);
             for (int i = 0; i < s_render_mesh.neighbors.count && y < FOOTER_Y; i++) {
-                neighbor_entry_t *e = &s_render_mesh.neighbors.entries[i];
-                if (e->addr == 0) continue;
+                neighbor_entry_t* e = &s_render_mesh.neighbors.entries[i];
+                if (e->addr == 0)
+                    continue;
                 /* Format last-seen age: seconds, minutes, or hours */
                 char age_str[8];
                 uint32_t age_ms = (e->last_heard > 0 && now_ms_n >= e->last_heard)
-                                  ? (now_ms_n - e->last_heard) : 0;
+                                      ? (now_ms_n - e->last_heard)
+                                      : 0;
                 uint32_t age_s = age_ms / 1000;
                 if (age_s < 60) {
                     snprintf(age_str, sizeof(age_str), "%lus", (unsigned long)age_s);
@@ -529,12 +555,12 @@ static void render_screen(ui_state_t *ui) {
             if (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) {
                 display_draw_text(2, y, "Connectivity Mode:");
                 y += LINE_H + 4;
-                static const char *mode_names[] = {"WiFi", "BLE"};
+                static const char* mode_names[] = {"WiFi", "BLE"};
                 conn_mode_t current = conn_mode_get();
                 for (int i = 0; i < CONN_MODE_COUNT; i++) {
                     char ml[32];
-                    const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
-                    const char *mark = (i == (int)current) ? " *" : "";
+                    const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char* mark = (i == (int)current) ? " *" : "";
                     snprintf(ml, sizeof(ml), "%s %s%s", arrow, mode_names[i], mark);
                     display_draw_text(2, y, ml);
                     y += LINE_H;
@@ -542,12 +568,12 @@ static void render_screen(ui_state_t *ui) {
             } else if (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) {
                 display_draw_text(2, y, "Location Sharing:");
                 y += LINE_H + 4;
-                static const char *loc_names[] = {"Off", "Coarse", "Exact"};
+                static const char* loc_names[] = {"Off", "Coarse", "Exact"};
                 loc_share_mode_t cur_loc = location_share_mode_get();
                 for (int i = 0; i < LOC_SHARE_COUNT; i++) {
                     char ml[32];
-                    const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
-                    const char *mark = (i == (int)cur_loc) ? " *" : "";
+                    const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char* mark = (i == (int)cur_loc) ? " *" : "";
                     snprintf(ml, sizeof(ml), "%s %s%s", arrow, loc_names[i], mark);
                     display_draw_text(2, y, ml);
                     y += LINE_H;
@@ -556,12 +582,12 @@ static void render_screen(ui_state_t *ui) {
                 /* OLED rotation */
                 display_draw_text(2, y, "OLED Rotation:");
                 y += LINE_H + 4;
-                static const char *rot_names[] = {"Normal", "180 deg"};
+                static const char* rot_names[] = {"Normal", "180 deg"};
                 bool cur_rot = display_get_rotated_180();
                 for (int i = 0; i < 2; i++) {
                     char ml[32];
-                    const char *arrow = (i == ui->settings_cursor) ? ">" : " ";
-                    const char *mark = (i == (int)cur_rot) ? " *" : "";
+                    const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char* mark = (i == (int)cur_rot) ? " *" : "";
                     snprintf(ml, sizeof(ml), "%s %s%s", arrow, rot_names[i], mark);
                     display_draw_text(2, y, ml);
                     y += LINE_H;
@@ -578,27 +604,30 @@ static void render_screen(ui_state_t *ui) {
             int y = CONTENT_Y;
 
             conn_mode_t cur_mode = conn_mode_get();
-            static const char *mnames[] = {"WiFi", "BLE"};
+            static const char* mnames[] = {"WiFi", "BLE"};
             loc_share_mode_t cur_loc = location_share_mode_get();
-            static const char *loc_names[] = {"Off", "Coarse", "Exact"};
+            static const char* loc_names[] = {"Off", "Coarse", "Exact"};
 
             /* Row 0: Connectivity */
             {
-                const char *sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) ? ">" : " ";
+                const char* sel =
+                    (ui->settings_item_cursor == UI_SETTINGS_ITEM_CONN_MODE) ? ">" : " ";
                 snprintf(line, sizeof(line), "%sConn: %s", sel, mnames[cur_mode]);
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
             /* Row 1: OLED Rotation (placeholder) */
             {
-                const char *sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_OLED_ROTATION) ? ">" : " ";
+                const char* sel =
+                    (ui->settings_item_cursor == UI_SETTINGS_ITEM_OLED_ROTATION) ? ">" : " ";
                 snprintf(line, sizeof(line), "%sRotation: 0", sel);
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
             /* Row 2: Location Sharing */
             {
-                const char *sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) ? ">" : " ";
+                const char* sel =
+                    (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) ? ">" : " ";
                 snprintf(line, sizeof(line), "%sLocation: %s", sel, loc_names[cur_loc]);
                 display_draw_text(2, y, line);
                 y += LINE_H;
@@ -617,40 +646,41 @@ static void render_screen(ui_state_t *ui) {
     }
     case SCREEN_COMPOSE: {
         display_clear();
-        
+
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
         /* T-Deck Plus: full compose screen with keyboard input */
         display_draw_text(2, HEADER_Y, "Compose");
-        
+
         /* Show recipient (broadcast for now) */
         char recip[] = "To: Broadcast";
         int recip_x = DISPLAY_WIDTH - (strlen(recip) * FONT_W) - 2;
         display_draw_text(recip_x, HEADER_Y, recip);
-        
+
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
-        
+
         /* Message text area */
         int y = CONTENT_Y;
-        int chars_per_row = CHARS_PER_LINE - 1;  /* leave margin */
-        
+        int chars_per_row = CHARS_PER_LINE - 1; /* leave margin */
+
         /* Word-wrap compose buffer */
-        for (int i = 0; i < ui->compose_len && y < FOOTER_Y - LINE_H; ) {
+        for (int i = 0; i < ui->compose_len && y < FOOTER_Y - LINE_H;) {
             char row[64];
-            int row_len = (ui->compose_len - i > chars_per_row) ? chars_per_row : ui->compose_len - i;
+            int row_len =
+                (ui->compose_len - i > chars_per_row) ? chars_per_row : ui->compose_len - i;
             memcpy(row, ui->compose_buf + i, row_len);
             row[row_len] = '\0';
             display_draw_text(2, y, row);
             i += row_len;
             y += LINE_H;
         }
-        
+
         /* Cursor (blinking underscore after text) */
         int cursor_x = 2 + (ui->compose_len % chars_per_row) * FONT_W;
         int cursor_y = CONTENT_Y + (ui->compose_len / chars_per_row) * LINE_H;
         if (cursor_y < FOOTER_Y - LINE_H) {
             display_draw_text(cursor_x, cursor_y, "_");
         }
-        
+
         /* Footer */
         display_draw_text(2, FOOTER_Y, "[Enter] Send  [Esc/Left] Back");
 #else
@@ -663,21 +693,21 @@ static void render_screen(ui_state_t *ui) {
 
         /* Line 1: TX/RX counters */
         mesh_get_state(&s_render_mesh);
-        snprintf(line, sizeof(line), "TX:%"PRIu32" RX:%"PRIu32,
-                 s_render_mesh.packets_tx, s_render_mesh.packets_rx);
+        snprintf(line, sizeof(line), "TX:%" PRIu32 " RX:%" PRIu32, s_render_mesh.packets_tx,
+                 s_render_mesh.packets_rx);
         display_draw_text(2, y, line);
         y += LINE_H;
 
         /* Line 2: Airtime TX budget used % (NORMAL tier) */
         {
             uint32_t used_ms = 0;
-            uint32_t max_ms  = s_render_mesh.airtime.max_ms[0];
+            uint32_t max_ms = s_render_mesh.airtime.max_ms[0];
             if (max_ms > 0 && s_render_mesh.airtime.tokens_ms[0] <= max_ms) {
                 used_ms = max_ms - s_render_mesh.airtime.tokens_ms[0];
             }
             uint32_t pct_tenths = (max_ms > 0) ? (used_ms * 1000 / max_ms) : 0;
-            snprintf(line, sizeof(line), "Air: %"PRIu32".%"PRIu32"%% TX",
-                     pct_tenths / 10, pct_tenths % 10);
+            snprintf(line, sizeof(line), "Air: %" PRIu32 ".%" PRIu32 "%% TX", pct_tenths / 10,
+                     pct_tenths % 10);
         }
         display_draw_text(2, y, line);
         y += LINE_H;
@@ -685,11 +715,11 @@ static void render_screen(ui_state_t *ui) {
         /* Line 3: Heap + Uptime */
         {
             uint32_t heap_kb = esp_get_free_heap_size() / 1024;
-            uint32_t up_sec = (uint32_t)((esp_timer_get_time() / 1000000ULL) -
-                                          (boot_time_ms / 1000));
+            uint32_t up_sec =
+                (uint32_t)((esp_timer_get_time() / 1000000ULL) - (boot_time_ms / 1000));
             char uptime[20];
             ui_format_uptime(up_sec, uptime, sizeof(uptime));
-            snprintf(line, sizeof(line), "Heap:%"PRIu32"KB Up:%s", heap_kb, uptime);
+            snprintf(line, sizeof(line), "Heap:%" PRIu32 "KB Up:%s", heap_kb, uptime);
         }
         display_draw_text(2, y, line);
         y += LINE_H;
@@ -700,7 +730,8 @@ static void render_screen(ui_state_t *ui) {
             int route_cnt = 0;
             for (int i = 0; i < s_render_routes.count; i++) {
                 route_state_t st = s_render_routes.entries[i].state;
-                if (st != ROUTE_STALE && st != ROUTE_BROKEN) route_cnt++;
+                if (st != ROUTE_STALE && st != ROUTE_BROKEN)
+                    route_cnt++;
             }
             uint8_t bpct = battery_read_pct();
             snprintf(line, sizeof(line), "Routes:%d Batt:%u%%", route_cnt, (unsigned)bpct);
@@ -709,7 +740,7 @@ static void render_screen(ui_state_t *ui) {
 
         display_draw_text(2, FOOTER_Y, "[press] next screen");
 #endif
-        
+
         display_flush();
         break;
     }
@@ -724,24 +755,25 @@ static void render_screen(ui_state_t *ui) {
 /* ── Main ───────────────────────────────────────────────────────────── */
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-static void lv_tick_cb(void *arg) {
+static void lv_tick_cb(void* arg) {
     (void)arg;
     ui_graphics_tick_1ms();
 }
 
-static void ui_graphics_task(void *arg) {
+static void ui_graphics_task(void* arg) {
     (void)arg;
     while (1) {
         uint32_t delay = ui_graphics_tick();
-        if (delay < 5) delay = 5;
-        if (delay > 30) delay = 30;
+        if (delay < 5)
+            delay = 5;
+        if (delay > 30)
+            delay = 30;
         vTaskDelay(pdMS_TO_TICKS(delay));
     }
 }
 #endif
 
-void app_main(void)
-{
+void app_main(void) {
     ESP_LOGI(TAG, "=== BOOT STAGE: app_main entry ===");
     ESP_LOGI(TAG, "Bramble LoRa Mesh starting...");
 
@@ -785,32 +817,32 @@ void app_main(void)
         plan = nvs_init_plan(true, true, keys_cfg_ok, secure_init_ok);
     }
     switch (plan) {
-        case NVS_INIT_FAIL:
-            /* Fail closed: a missing keys partition, or any keys-layer
-             * read/generate failure (corrupt keys partition, flash error),
-             * must abort rather than erase the main NVS partition. Erasing
-             * here would wipe the device on a transient fault and re-wipe
-             * on every boot if the fault persists. */
-            ESP_LOGE(TAG, "Secure NVS keys unavailable (partition missing or unreadable)");
-            ESP_ERROR_CHECK(fail_err);
-            break;
-        case NVS_INIT_SECURE_ERASE:
-            /* Keys are valid; only nvs_flash_secure_init itself failed to
-             * decrypt the main partition. This is the genuine plaintext-to-
-             * encrypted migration: old entries are unreadable. Erase and
-             * re-init with the same already-valid sec_cfg; identity +
-             * channels regenerate on next load and the device must be
-             * re-paired (documented in the migration note). Acceptable
-             * pre-alpha, first-party fleet. */
-            ESP_LOGW(TAG, "Encrypted NVS unreadable (migration): erasing and reinitializing");
-            ESP_ERROR_CHECK(nvs_flash_erase());
-            ret = nvs_flash_secure_init(&sec_cfg);
-            ESP_ERROR_CHECK(ret);
-            break;
-        case NVS_INIT_SECURE:
-            break; /* ret already ESP_OK */
-        case NVS_INIT_PLAIN:
-            break; /* unreachable under CONFIG_NVS_ENCRYPTION */
+    case NVS_INIT_FAIL:
+        /* Fail closed: a missing keys partition, or any keys-layer
+         * read/generate failure (corrupt keys partition, flash error),
+         * must abort rather than erase the main NVS partition. Erasing
+         * here would wipe the device on a transient fault and re-wipe
+         * on every boot if the fault persists. */
+        ESP_LOGE(TAG, "Secure NVS keys unavailable (partition missing or unreadable)");
+        ESP_ERROR_CHECK(fail_err);
+        break;
+    case NVS_INIT_SECURE_ERASE:
+        /* Keys are valid; only nvs_flash_secure_init itself failed to
+         * decrypt the main partition. This is the genuine plaintext-to-
+         * encrypted migration: old entries are unreadable. Erase and
+         * re-init with the same already-valid sec_cfg; identity +
+         * channels regenerate on next load and the device must be
+         * re-paired (documented in the migration note). Acceptable
+         * pre-alpha, first-party fleet. */
+        ESP_LOGW(TAG, "Encrypted NVS unreadable (migration): erasing and reinitializing");
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_secure_init(&sec_cfg);
+        ESP_ERROR_CHECK(ret);
+        break;
+    case NVS_INIT_SECURE:
+        break; /* ret already ESP_OK */
+    case NVS_INIT_PLAIN:
+        break; /* unreachable under CONFIG_NVS_ENCRYPTION */
     }
 #else
     ret = nvs_flash_init();
@@ -850,8 +882,8 @@ void app_main(void)
         }
     }
     my_addr = g_identity.address;
-    ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")",
-             my_addr, g_identity.pubkey_hash);
+    ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")", my_addr,
+             g_identity.pubkey_hash);
 
     /* Identity generated. Release the bootloader RNG before the battery ADC
      * (SAR-ADC is shared) and CLOSE the gate: there is no strong entropy source
@@ -901,7 +933,7 @@ void app_main(void)
     /* Init keyboard and trackball (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: keyboard_init ===");
     keyboard_init();
-    keyboard_set_backlight(255);  /* Keyboard LEDs at full brightness */
+    keyboard_set_backlight(255); /* Keyboard LEDs at full brightness */
     ESP_LOGI(TAG, "=== BOOT STAGE: trackball_init ===");
     trackball_init();
 #endif
@@ -958,7 +990,7 @@ void app_main(void)
 
     /* Read connectivity mode */
     conn_mode_t boot_mode = conn_mode_get();
-    static const char *mode_str[] = {"WiFi", "BLE"};
+    static const char* mode_str[] = {"WiFi", "BLE"};
     ESP_LOGI(TAG, "Connectivity mode: %s", mode_str[boot_mode]);
 
     /* Init RPC dispatcher and register methods BEFORE transports
@@ -978,11 +1010,13 @@ void app_main(void)
     };
     esp_err_t spiffs_ret = esp_vfs_spiffs_register(&spiffs_conf);
     if (spiffs_ret != ESP_OK) {
-        ESP_LOGW(TAG, "SPIFFS mount failed (%s), msg persistence disabled", esp_err_to_name(spiffs_ret));
+        ESP_LOGW(TAG, "SPIFFS mount failed (%s), msg persistence disabled",
+                 esp_err_to_name(spiffs_ret));
     } else {
         size_t total = 0, used = 0;
         if (esp_spiffs_info(NULL, &total, &used) == ESP_OK) {
-            ESP_LOGI(TAG, "SPIFFS mounted: used=%u / total=%u bytes", (unsigned)used, (unsigned)total);
+            ESP_LOGI(TAG, "SPIFFS mounted: used=%u / total=%u bytes", (unsigned)used,
+                     (unsigned)total);
         }
     }
 
@@ -1002,7 +1036,7 @@ void app_main(void)
         if (wifi_manager_init(my_addr) == 0) {
             /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
             crypto_entropy_set_ready(true);
-            const char *ip = wifi_manager_get_ip();
+            const char* ip = wifi_manager_get_ip();
             if (ip[0] != '\0') {
                 ESP_LOGI(TAG, "WiFi ready: %s", ip);
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -1098,16 +1132,13 @@ void app_main(void)
     /* Initialize LVGL graphical UI */
     ESP_LOGI(TAG, "=== BOOT STAGE: ui_graphics_init ===");
     ui_graphics_init();
-    
+
     /* Create 1ms tick timer for LVGL */
-    const esp_timer_create_args_t tick_args = {
-        .callback = lv_tick_cb,
-        .name = "lv_tick"
-    };
+    const esp_timer_create_args_t tick_args = {.callback = lv_tick_cb, .name = "lv_tick"};
     esp_timer_handle_t tick_timer;
     esp_timer_create(&tick_args, &tick_timer);
     esp_timer_start_periodic(tick_timer, 1000);
-    
+
     /* Create LVGL task on core 1 (core 0 runs mesh).
      *
      * IMPORTANT constraints:
@@ -1129,14 +1160,7 @@ void app_main(void)
      * the SX1262.  CPU0 + low priority matches the proven Bramble
      * architecture: radio always preempts display. */
     TaskHandle_t ui_task_handle = xTaskCreateStaticPinnedToCore(
-        ui_graphics_task,
-        "ui_gfx",
-        10240,
-        NULL,
-        2,
-        ui_task_stack,
-        &ui_task_tcb,
-        0);
+        ui_graphics_task, "ui_gfx", 10240, NULL, 2, ui_task_stack, &ui_task_tcb, 0);
     if (ui_task_handle == NULL) {
         ESP_LOGE(TAG, "FAILED to create ui_gfx task (static alloc). Display will be blank.");
     } else {
@@ -1189,7 +1213,7 @@ void app_main(void)
                     /* Send the message */
                     if (ui.compose_len > 0) {
                         ui.compose_buf[ui.compose_len] = '\0';
-                        mesh_send_broadcast((const uint8_t *)ui.compose_buf, ui.compose_len);
+                        mesh_send_broadcast((const uint8_t*)ui.compose_buf, ui.compose_len);
                         ui.compose_len = 0;
                         ui.compose_buf[0] = '\0';
                         /* Return to messages screen */
@@ -1238,23 +1262,23 @@ void app_main(void)
 
                     /* Show confirmation before reboot */
                     display_clear();
-                    static const char *mnames[] = {"WiFi", "BLE"};
-                    
-                    const char *msg1 = "Mode changed:";
+                    static const char* mnames[] = {"WiFi", "BLE"};
+
+                    const char* msg1 = "Mode changed:";
                     int msg1_x = (DISPLAY_WIDTH - strlen(msg1) * FONT_W) / 2;
                     int msg1_y = DISPLAY_HEIGHT / 4;
                     display_draw_text(msg1_x, msg1_y, msg1);
-                    
+
                     int mode_w = strlen(mnames[new_mode]) * FONT_W * 2;
                     int mode_x = (DISPLAY_WIDTH - mode_w) / 2;
                     int mode_y = msg1_y + FONT_H + 8;
                     display_draw_text_large(mode_x, mode_y, mnames[new_mode]);
-                    
-                    const char *msg2 = "Rebooting...";
+
+                    const char* msg2 = "Rebooting...";
                     int msg2_x = (DISPLAY_WIDTH - strlen(msg2) * FONT_W) / 2;
                     int msg2_y = mode_y + LARGE_FONT_H + 8;
                     display_draw_text(msg2_x, msg2_y, msg2);
-                    
+
                     display_flush();
                     vTaskDelay(pdMS_TO_TICKS(1500));
                     esp_restart();
@@ -1266,7 +1290,7 @@ void app_main(void)
                 loc_share_mode_t old_loc = location_share_mode_get();
                 if (new_loc != old_loc) {
                     location_share_mode_set(new_loc);
-                    static const char *loc_names[] = {"Off", "Coarse", "Exact"};
+                    static const char* loc_names[] = {"Off", "Coarse", "Exact"};
                     ESP_LOGI(TAG, "Location sharing set to %s", loc_names[new_loc]);
                 }
                 ui.screen_dirty = true;

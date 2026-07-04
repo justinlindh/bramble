@@ -13,9 +13,7 @@ void tearDown(void) {}
  * (packet.c:47) means a v2 packet is no longer just "old", it is REJECTED
  * outright, same as v1 always was.
  */
-void test_current_version_is_three(void) {
-    TEST_ASSERT_EQUAL_UINT8(3, BRAMBLE_VERSION);
-}
+void test_current_version_is_three(void) { TEST_ASSERT_EQUAL_UINT8(3, BRAMBLE_VERSION); }
 
 void test_supported_version_accepts_current(void) {
     bramble_header_t h = {.version = BRAMBLE_VERSION, .type = PKT_TYPE_DATA};

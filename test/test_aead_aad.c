@@ -7,9 +7,12 @@ void setUp(void) {}
 void tearDown(void) {}
 
 void test_aead_aad_appends_src_and_masks_hoplimit(void) {
-    bramble_header_t h = {.version = BRAMBLE_VERSION, .type = PKT_TYPE_DATA,
-                          .flags = FLAG_ENCRYPT, .hop_limit = 7,
-                          .dest_addr = 0x11223344, .packet_id = 0xAABBCCDD};
+    bramble_header_t h = {.version = BRAMBLE_VERSION,
+                          .type = PKT_TYPE_DATA,
+                          .flags = FLAG_ENCRYPT,
+                          .hop_limit = 7,
+                          .dest_addr = 0x11223344,
+                          .packet_id = 0xAABBCCDD};
     uint8_t aad[HEADER_SIZE + 4];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_build_aead_aad(&h, 0xA1B2C3D4u, aad, sizeof(aad)));
     /* hop_limit byte (index 3) masked to 0 */

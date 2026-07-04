@@ -28,8 +28,7 @@
  * The per-iteration bounds predicates compile to branchless selects on
  * our targets; any residual microarchitectural signal is orders of
  * magnitude below the byte-granular plateau the old loop leaked. */
-static inline int ct_strcmp(const char *a, const char *b)
-{
+static inline int ct_strcmp(const char* a, const char* b) {
     size_t len_a = strnlen(a, CT_STRCMP_BOUND);
     size_t len_b = strnlen(b, CT_STRCMP_BOUND);
     /* Both lengths are <= 128, so the XOR fits in one byte. */

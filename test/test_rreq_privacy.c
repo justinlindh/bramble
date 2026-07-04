@@ -4,7 +4,8 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-static void rreq_derive_otp(const uint8_t *dh_shared, uint32_t time_bucket, uint32_t salt, uint8_t otp[4]) {
+static void rreq_derive_otp(const uint8_t* dh_shared, uint32_t time_bucket, uint32_t salt,
+                            uint8_t otp[4]) {
     /* OTP = SHA256(dh_shared || time_bucket_be32 || salt_be32 || "bramble-rreq-v1")[0:4] */
     uint8_t buf[32 + 4 + 4 + 15]; /* shared + time_bucket + salt + "bramble-rreq-v1" */
     memcpy(buf, dh_shared, 32);
@@ -22,15 +23,17 @@ static void rreq_derive_otp(const uint8_t *dh_shared, uint32_t time_bucket, uint
     memcpy(otp, hash, 4);
 }
 
-static uint32_t rreq_encrypt_source(uint32_t addr, const uint8_t *dh_shared, uint32_t time_bucket, uint32_t salt) {
+static uint32_t rreq_encrypt_source(uint32_t addr, const uint8_t* dh_shared, uint32_t time_bucket,
+                                    uint32_t salt) {
     uint8_t otp[4];
     rreq_derive_otp(dh_shared, time_bucket, salt, otp);
-    uint32_t otp32 = ((uint32_t)otp[0] << 24) | ((uint32_t)otp[1] << 16) |
-                     ((uint32_t)otp[2] << 8)  | (uint32_t)otp[3];
+    uint32_t otp32 = ((uint32_t)otp[0] << 24) | ((uint32_t)otp[1] << 16) | ((uint32_t)otp[2] << 8) |
+                     (uint32_t)otp[3];
     return addr ^ otp32;
 }
 
-static uint32_t rreq_decrypt_source(uint32_t encrypted, const uint8_t *dh_shared, uint32_t time_bucket, uint32_t salt) {
+static uint32_t rreq_decrypt_source(uint32_t encrypted, const uint8_t* dh_shared,
+                                    uint32_t time_bucket, uint32_t salt) {
     return rreq_encrypt_source(encrypted, dh_shared, time_bucket, salt); /* XOR is self-inverse */
 }
 

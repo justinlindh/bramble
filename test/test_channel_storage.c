@@ -11,9 +11,7 @@
 void setUp(void) {}
 void tearDown(void) {}
 
-void test_init_succeeds(void) {
-    TEST_ASSERT_EQUAL(0, channel_storage_init());
-}
+void test_init_succeeds(void) { TEST_ASSERT_EQUAL(0, channel_storage_init()); }
 
 void test_save_and_load_empty(void) {
     bramble_channel_t channels[MAX_CHANNELS];
@@ -34,7 +32,7 @@ void test_save_and_load_empty(void) {
 
     /* Load */
     int ret = channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default);
-    TEST_ASSERT_EQUAL(-1, ret);  /* No data */
+    TEST_ASSERT_EQUAL(-1, ret); /* No data */
     TEST_ASSERT_EQUAL(0, loaded_count);
 }
 
@@ -61,7 +59,8 @@ void test_save_and_load_single_channel(void) {
     TEST_ASSERT_EQUAL(0, channel_storage_save(channels, 1, names, 0));
 
     /* Load */
-    TEST_ASSERT_EQUAL(0, channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
+    TEST_ASSERT_EQUAL(0,
+                      channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
     TEST_ASSERT_EQUAL(1, loaded_count);
     TEST_ASSERT_EQUAL(0, loaded_default);
 
@@ -97,7 +96,8 @@ void test_save_and_load_multiple_channels(void) {
     TEST_ASSERT_EQUAL(0, channel_storage_save(channels, 5, names, 2));
 
     /* Load */
-    TEST_ASSERT_EQUAL(0, channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
+    TEST_ASSERT_EQUAL(0,
+                      channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
     TEST_ASSERT_EQUAL(5, loaded_count);
     TEST_ASSERT_EQUAL(2, loaded_default);
 
@@ -105,12 +105,12 @@ void test_save_and_load_multiple_channels(void) {
     for (int i = 0; i < 5; i++) {
         TEST_ASSERT_EQUAL(i, loaded[i].channel_id);
         TEST_ASSERT_EQUAL(100 + i, loaded[i].epoch);
-        
+
         /* Verify key (all bytes should be i+1) */
         for (size_t j = 0; j < sizeof(loaded[i].key); j++) {
             TEST_ASSERT_EQUAL_UINT8(i + 1, loaded[i].key[j]);
         }
-        
+
         char expected_name[20];
         snprintf(expected_name, sizeof(expected_name), "Channel%d", i);
         TEST_ASSERT_EQUAL_STRING(expected_name, loaded_names[i]);
@@ -142,7 +142,8 @@ void test_max_channels(void) {
     TEST_ASSERT_EQUAL(0, channel_storage_save(channels, MAX_CHANNELS, names, 0));
 
     /* Load */
-    TEST_ASSERT_EQUAL(0, channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
+    TEST_ASSERT_EQUAL(0,
+                      channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
     TEST_ASSERT_EQUAL(MAX_CHANNELS, loaded_count);
 
     /* Verify all */
@@ -197,7 +198,8 @@ void test_default_channel_index_persists(void) {
     TEST_ASSERT_EQUAL(0, channel_storage_save(channels, 3, names, 2));
 
     /* Load and verify default */
-    TEST_ASSERT_EQUAL(0, channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
+    TEST_ASSERT_EQUAL(0,
+                      channel_storage_load(loaded, &loaded_count, loaded_names, &loaded_default));
     TEST_ASSERT_EQUAL(3, loaded_count);
     TEST_ASSERT_EQUAL(2, loaded_default);
 }

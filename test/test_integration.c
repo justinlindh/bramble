@@ -34,8 +34,8 @@ static node_state_t nodes[3];
 void setUp(void) {
     /* Init radio: A↔B, B↔C, no A↔C */
     mock_radio_init(&radio, 3);
-    mock_radio_connect(&radio, 0, 1, -60, 10);  /* A↔B: good link */
-    mock_radio_connect(&radio, 1, 2, -70, 8);   /* B↔C: decent link */
+    mock_radio_connect(&radio, 0, 1, -60, 10); /* A↔B: good link */
+    mock_radio_connect(&radio, 1, 2, -70, 8);  /* B↔C: decent link */
     /* A↔C: not connected (default) */
 
     /* Init node state */
@@ -60,8 +60,8 @@ void test_three_node_route_discovery(void) {
     uint32_t query_id = 0x12345678;
 
     /* Step 1: A builds RREQ for C */
-    bramble_rreq_t rreq_a = rreq_build_originator(ADDR_A, ADDR_C, query_id, ADDR_A,
-                                                  discovery_hop_limit_for_attempt(1));
+    bramble_rreq_t rreq_a =
+        rreq_build_originator(ADDR_A, ADDR_C, query_id, ADDR_A, discovery_hop_limit_for_attempt(1));
     TEST_ASSERT_EQUAL(PKT_TYPE_RREQ, rreq_a.header.type);
     TEST_ASSERT_EQUAL(ADDR_C, rreq_a.header.dest_addr);
     TEST_ASSERT_EQUAL(0, rreq_a.hop_count);
@@ -85,7 +85,7 @@ void test_three_node_route_discovery(void) {
 
     /* B stores reverse route (query_id → prev_hop=A) */
     reverse_route_add(&nodes[1].reverse_routes, query_id, ADDR_A, now);
-    reverse_route_t *rr = reverse_route_lookup(&nodes[1].reverse_routes, query_id);
+    reverse_route_t* rr = reverse_route_lookup(&nodes[1].reverse_routes, query_id);
     TEST_ASSERT_NOT_NULL(rr);
     TEST_ASSERT_EQUAL(ADDR_A, rr->prev_hop);
 
@@ -93,7 +93,7 @@ void test_three_node_route_discovery(void) {
     bramble_rreq_t rreq_fwd = rreq_forward(&rreq_at_b, ADDR_B, pkt.rssi, pkt.snr);
     TEST_ASSERT_EQUAL(1, rreq_fwd.hop_count);
     TEST_ASSERT_EQUAL(ADDR_B, rreq_fwd.prev_hop);
-    TEST_ASSERT_TRUE(rreq_fwd.metric <= 255);  /* penalty applied */
+    TEST_ASSERT_TRUE(rreq_fwd.metric <= 255); /* penalty applied */
 
     uint8_t buf2[RREQ_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rreq_serialize(&rreq_fwd, buf2, RREQ_SIZE));
@@ -113,7 +113,7 @@ void test_three_node_route_discovery(void) {
     bramble_rrep_t rrep_c = rrep_build_destination(&rreq_at_c, ADDR_C);
     TEST_ASSERT_EQUAL(PKT_TYPE_RREP, rrep_c.header.type);
     TEST_ASSERT_EQUAL(ADDR_C, rrep_c.src_addr);
-    TEST_ASSERT_EQUAL(ADDR_C, rrep_c.next_hop);  /* C's own address: first hop toward itself */
+    TEST_ASSERT_EQUAL(ADDR_C, rrep_c.next_hop); /* C's own address: first hop toward itself */
 
     /* C serializes and sends RREP toward B */
     uint8_t rrep_buf[RREP_SIZE];
@@ -128,9 +128,8 @@ void test_three_node_route_discovery(void) {
     TEST_ASSERT_EQUAL(ADDR_C, rrep_at_b.src_addr);
 
     /* B installs forward route: dest=C, next_hop=C (direct) */
-    route_install(&nodes[1].routes, ADDR_C, ADDR_C, 1, rrep_at_b.route_metric,
-                  ROUTE_ACTIVE, now);
-    route_entry_t *r_bc = route_lookup(&nodes[1].routes, ADDR_C);
+    route_install(&nodes[1].routes, ADDR_C, ADDR_C, 1, rrep_at_b.route_metric, ROUTE_ACTIVE, now);
+    route_entry_t* r_bc = route_lookup(&nodes[1].routes, ADDR_C);
     TEST_ASSERT_NOT_NULL(r_bc);
     TEST_ASSERT_EQUAL(ADDR_C, r_bc->next_hop);
 
@@ -163,11 +162,11 @@ void test_three_node_route_discovery(void) {
     TEST_ASSERT_EQUAL(ADDR_C, rrep_at_a.src_addr);
 
     /* A installs route: dest=C, next_hop=B */
-    route_install(&nodes[0].routes, ADDR_C, ADDR_B, rrep_at_a.hop_count,
-                  rrep_at_a.route_metric, ROUTE_ACTIVE, now);
+    route_install(&nodes[0].routes, ADDR_C, ADDR_B, rrep_at_a.hop_count, rrep_at_a.route_metric,
+                  ROUTE_ACTIVE, now);
 
     /* Step 6: Verify A's route to C goes via B */
-    route_entry_t *r_ac = route_lookup(&nodes[0].routes, ADDR_C);
+    route_entry_t* r_ac = route_lookup(&nodes[0].routes, ADDR_C);
     TEST_ASSERT_NOT_NULL(r_ac);
     TEST_ASSERT_EQUAL(ADDR_B, r_ac->next_hop);
     TEST_ASSERT_EQUAL(ROUTE_ACTIVE, r_ac->state);
@@ -178,7 +177,7 @@ void test_three_node_route_discovery(void) {
     TEST_ASSERT_TRUE(fwd.should_send);
     TEST_ASSERT_FALSE(fwd.route_error);
     TEST_ASSERT_EQUAL(ADDR_B, fwd.next_hop);
-    TEST_ASSERT_EQUAL(3, hop_limit);  /* decremented */
+    TEST_ASSERT_EQUAL(3, hop_limit); /* decremented */
 
     /* B can forward toward C */
     hop_limit = 3;
@@ -215,7 +214,7 @@ void test_rerr_breaks_route(void) {
     rerr_handle(&nodes[0].routes, &rerr);
 
     /* Route should not be broken — RERR says broken_next_hop=C but A's next_hop=B */
-    route_entry_t *r = route_lookup(&nodes[0].routes, ADDR_C);
+    route_entry_t* r = route_lookup(&nodes[0].routes, ADDR_C);
     TEST_ASSERT_EQUAL(ROUTE_ACTIVE, r->state);
 
     /* Now RERR with matching next_hop */
@@ -249,7 +248,8 @@ void test_location_tx_uses_dedicated_packet_type(void) {
     memcpy(packet + HEADER_SIZE + 4, payload, (size_t)payload_len);
 
     bramble_header_t out_hdr;
-    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&out_hdr, packet, HEADER_SIZE + 4 + payload_len));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      bramble_header_deserialize(&out_hdr, packet, HEADER_SIZE + 4 + payload_len));
     TEST_ASSERT_EQUAL(PKT_TYPE_LOCATION, out_hdr.type);
     TEST_ASSERT_NOT_EQUAL('{', packet[HEADER_SIZE + 4]);
 }

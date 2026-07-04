@@ -5,7 +5,7 @@ void setUp(void) {}
 void tearDown(void) {}
 
 void test_heltec_v4_profile_identity_and_caps(void) {
-    const bramble_board_config_t *cfg = board_get_config();
+    const bramble_board_config_t* cfg = board_get_config();
     TEST_ASSERT_NOT_NULL(cfg);
 
     TEST_ASSERT_EQUAL_STRING("Heltec WiFi LoRa 32 V4", cfg->name);
@@ -16,7 +16,7 @@ void test_heltec_v4_profile_identity_and_caps(void) {
 }
 
 void test_heltec_v4_profile_has_expected_radio_contract(void) {
-    const bramble_board_config_t *cfg = board_get_config();
+    const bramble_board_config_t* cfg = board_get_config();
     TEST_ASSERT_NOT_NULL(cfg);
 
     TEST_ASSERT_EQUAL_INT(10, cfg->spi.mosi);
@@ -33,7 +33,7 @@ void test_heltec_v4_profile_has_expected_radio_contract(void) {
 }
 
 void test_heltec_v4_profile_has_deterministic_optional_peripheral_defaults(void) {
-    const bramble_board_config_t *cfg = board_get_config();
+    const bramble_board_config_t* cfg = board_get_config();
     TEST_ASSERT_NOT_NULL(cfg);
 
     TEST_ASSERT_EQUAL_INT(128, cfg->display_width);

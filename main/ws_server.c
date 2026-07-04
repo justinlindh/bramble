@@ -120,11 +120,10 @@ static void client_remove(int fd) {
 /* Token comparison delegates to ct_strcmp (fixed-bound, length-independent
  * constant-time compare; see main/ct_strcmp.h). */
 
-
 typedef enum {
-    WS_AUTH_OK = 0,    /* valid credentials, or auth explicitly disabled */
-    WS_AUTH_NO_CREDS,  /* no credentials supplied */
-    WS_AUTH_BAD,       /* credentials supplied and wrong */
+    WS_AUTH_OK = 0,   /* valid credentials, or auth explicitly disabled */
+    WS_AUTH_NO_CREDS, /* no credentials supplied */
+    WS_AUTH_BAD,      /* credentials supplied and wrong */
 } ws_auth_result_t;
 
 static ws_auth_result_t auth_eval(httpd_req_t* req) {
@@ -151,7 +150,6 @@ static ws_auth_result_t auth_eval(httpd_req_t* req) {
     bool ok = !s_token_unavailable && ct_strcmp(token, s_auth_token) == 0;
     return ok ? WS_AUTH_OK : WS_AUTH_BAD;
 }
-
 
 static esp_err_t send_401_http(httpd_req_t* req) {
     httpd_resp_set_status(req, "401 Unauthorized");
@@ -581,8 +579,8 @@ static esp_err_t config_post_handler(httpd_req_t* req) {
         }
         (void)httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host));
         if (!ws_config_post_allowed(origin, referer, host, s_extra_origins)) {
-            ESP_LOGW(TAG, "Config POST cross-origin (origin '%s' referer '%s'), rejecting",
-                     origin, referer);
+            ESP_LOGW(TAG, "Config POST cross-origin (origin '%s' referer '%s'), rejecting", origin,
+                     referer);
             httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Origin not allowed");
             return ESP_FAIL;
         }
@@ -691,7 +689,6 @@ void ws_server_load_token(void) {
         ESP_LOGW(TAG, "RPC auth disabled by explicit opt-out (open access)");
     }
 }
-
 
 void ws_server_load_origins(void) {
     s_extra_origins[0] = '\0';

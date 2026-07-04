@@ -217,7 +217,7 @@ void test_rrep_forward(void) {
     memset(&rrep, 0, sizeof(rrep));
     rrep.next_hop = ADDR_C; /* whatever the incoming next_hop was, gets overwritten */
     bramble_rrep_t fwd = rrep_forward(&rrep, ADDR_A, ADDR_B);
-    TEST_ASSERT_EQUAL(ADDR_B, fwd.next_hop);        /* the forwarder's own address */
+    TEST_ASSERT_EQUAL(ADDR_B, fwd.next_hop);         /* the forwarder's own address */
     TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr); /* frame routing target, unchanged role */
 }
 

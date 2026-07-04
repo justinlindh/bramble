@@ -45,7 +45,7 @@ static bramble_rerr_t make_rerr(uint32_t reporter_addr, uint32_t packet_id) {
 /* ws 1.3b: the seq is set by the caller (send_rerr draws it via
  * control_seq_next and writes it in before rerr_sign), mirroring the RREP
  * test file's set_seq helper. */
-static void set_seq(bramble_rerr_t *r, uint64_t seq) {
+static void set_seq(bramble_rerr_t* r, uint64_t seq) {
     r->seq[0] = (uint8_t)(seq >> 40);
     r->seq[1] = (uint8_t)(seq >> 32);
     r->seq[2] = (uint8_t)(seq >> 24);

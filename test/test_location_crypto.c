@@ -26,10 +26,10 @@
  * location_parse_inner (exported by the location component, exercised
  * directly by this same helper), not in this glue.
  */
-static int test_rx_decode_channel(bramble_channel_t *channels, int num_channels,
-                                  const uint8_t *nonce, const uint8_t *ciphertext, size_t ct_len,
-                                  const uint8_t *tag, const uint8_t *aad, size_t aad_len,
-                                  uint8_t *tier_out, bramble_position_t *pos_out) {
+static int test_rx_decode_channel(bramble_channel_t* channels, int num_channels,
+                                  const uint8_t* nonce, const uint8_t* ciphertext, size_t ct_len,
+                                  const uint8_t* tag, const uint8_t* aad, size_t aad_len,
+                                  uint8_t* tier_out, bramble_position_t* pos_out) {
     uint8_t plaintext[CHANNEL_MSG_MAX_PLAINTEXT_SIZE];
     channel_msg_info_t info;
     if (channel_msg_decrypt(channels, num_channels, nonce, ciphertext, ct_len, tag, aad, aad_len,
@@ -70,7 +70,7 @@ static bramble_position_t sample_position(void) {
  * LOCATION_FULL_SIZE. Every tier is exactly L_LOC_INNER bytes regardless of
  * how few real bytes that tier serializes (PRESENCE 1, COARSE 5, FULL 17):
  * this padding is the entire SEC-C1 point. */
-static void build_channel_inner(const bramble_position_t *pos, uint8_t tier,
+static void build_channel_inner(const bramble_position_t* pos, uint8_t tier,
                                 uint8_t out[L_LOC_INNER]) {
     memset(out, 0, L_LOC_INNER);
     out[LOCATION_INNER_TIER_OFFSET] = tier;
@@ -117,12 +117,12 @@ void test_presence_and_full_tiers_yield_identical_channel_ciphertext_length(void
     size_t presence_data_len = (size_t)L_LOC_INNER;
     size_t full_data_len = (size_t)L_LOC_INNER;
 
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xAAAAAAAA, APP_TYPE_LOCATION, 0,
-                                              inner_presence, presence_data_len, aad, sizeof(aad),
-                                              nonce, ct_presence, tag_presence));
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xAAAAAAAA, APP_TYPE_LOCATION, 0,
-                                              inner_full, full_data_len, aad, sizeof(aad),
-                                              nonce, ct_full, tag_full));
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xAAAAAAAA, APP_TYPE_LOCATION, 0, inner_presence,
+                                             presence_data_len, aad, sizeof(aad), nonce,
+                                             ct_presence, tag_presence));
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xAAAAAAAA, APP_TYPE_LOCATION, 0, inner_full,
+                                             full_data_len, aad, sizeof(aad), nonce, ct_full,
+                                             tag_full));
 
     size_t ct_len_presence = CHANNEL_MSG_OVERHEAD + presence_data_len;
     size_t ct_len_full = CHANNEL_MSG_OVERHEAD + full_data_len;
@@ -166,9 +166,9 @@ void test_session_path_matches_channel_path_ciphertext_length(void) {
     memset(nonce1, 0x11, sizeof(nonce1));
     uint8_t ct_ch[CHANNEL_MSG_OVERHEAD + L_LOC_INNER];
     uint8_t tag_ch[16];
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xAAAAAAAA, APP_TYPE_LOCATION, 0,
-                                              inner_channel, L_LOC_INNER, aad_ch, sizeof(aad_ch),
-                                              nonce1, ct_ch, tag_ch));
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xAAAAAAAA, APP_TYPE_LOCATION, 0, inner_channel,
+                                             L_LOC_INNER, aad_ch, sizeof(aad_ch), nonce1, ct_ch,
+                                             tag_ch));
     size_t channel_total = CHANNEL_MSG_OVERHEAD + (size_t)L_LOC_INNER;
 
     size_t session_inner_len = (size_t)L_LOC_INNER + CHANNEL_MSG_OVERHEAD;
@@ -231,8 +231,8 @@ void test_location_rx_decode_round_trip(void) {
 
     uint8_t ct[CHANNEL_MSG_OVERHEAD + L_LOC_INNER];
     uint8_t tag[16];
-    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xCCCCCCCC, APP_TYPE_LOCATION, 0,
-                                              inner, L_LOC_INNER, aad, sizeof(aad), nonce, ct, tag));
+    TEST_ASSERT_EQUAL(0, channel_msg_encrypt(&ch, 0xCCCCCCCC, APP_TYPE_LOCATION, 0, inner,
+                                             L_LOC_INNER, aad, sizeof(aad), nonce, ct, tag));
 
     bramble_channel_t channels[1];
     channels[0] = ch;
