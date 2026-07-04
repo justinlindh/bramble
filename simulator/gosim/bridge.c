@@ -258,6 +258,23 @@ sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index) {
     return e;
 }
 
+sim_event_t bridge_make_receive_packet_event(uint64_t ts_us, uint32_t src_addr, uint32_t dest_addr,
+                                             const uint8_t* data, uint16_t len) {
+    sim_event_t e;
+    memset(&e, 0, sizeof(e));
+    e.type = EVT_RECEIVE_PACKET;
+    e.timestamp_us = ts_us;
+    e.data.packet.src_addr = src_addr;
+    e.data.packet.dest_addr = dest_addr;
+    e.data.packet.air_start_us = ts_us;
+    e.data.packet.air_end_us = ts_us;
+    if (len > sizeof(e.data.packet.data))
+        len = (uint16_t)sizeof(e.data.packet.data);
+    memcpy(e.data.packet.data, data, len);
+    e.data.packet.len = len;
+    return e;
+}
+
 /* ─── Message tracking ─────────────────────────────────────────────────── */
 
 void bridge_msg_track_init(msg_tracker_t* track, int count) {
@@ -375,6 +392,16 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
                           now_us);
     } else if (rreq.header.hop_limit > 1) {
+        /* Global forwarded-RREQ token bucket (SEC-M4), same decision point as
+         * firmware's handle_rreq (main/mesh_task.c:2460): gated AFTER the
+         * dedup check above, BEFORE building the forward packet or scheduling
+         * the jittered rebroadcast. Denied means dropped, same as firmware
+         * (which only logs and returns; no queue). */
+        if (!rreq_fwd_allow(&rx->rreq_fwd, now_ms)) {
+            rx->rreq_fwd_denied++;
+            return;
+        }
+
         bramble_rreq_t fwd = rreq_forward(&rreq, rx->addr, rssi, 0);
 
         outbound_packet_t pkt;
@@ -918,9 +945,19 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         pending_discovery_t* pd = discovery_lookup(&src->pending_discoveries, dest_addr);
         bool should_send_rreq = false;
         if (!pd) {
-            uint32_t query_id = pcg32_random(rng);
-            discovery_start(&src->pending_discoveries, dest_addr, query_id, now_ms);
-            should_send_rreq = true;
+            /* Fresh discovery origination: same decision point and gate as
+             * firmware's initiate_discovery (main/mesh_task.c:4320-4322).
+             * Discovery retries (the branch below and node_tick's discovery
+             * retry check) are NOT rate-limited in firmware either: only the
+             * first RREQ for a dest goes through rreq_rate_allow; retries are
+             * throttled by their own discovery_should_retry backoff cadence. */
+            if (!rreq_rate_allow(&src->rreq_rate, src->addr, dest_addr, now_ms)) {
+                src->rreq_rate_denied++;
+            } else {
+                uint32_t query_id = pcg32_random(rng);
+                discovery_start(&src->pending_discoveries, dest_addr, query_id, now_ms);
+                should_send_rreq = true;
+            }
         } else if (discovery_should_retry(pd, now_ms)) {
             discovery_record_attempt(pd, pcg32_random(rng), now_ms);
             should_send_rreq = true;

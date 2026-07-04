@@ -15,11 +15,13 @@ import (
 // exercise sim_radio's collision, capture, half-duplex, and time-on-air
 // behavior through a pure-Go API.
 type radioHarness struct {
-	nodes   *C.node_array_t
-	radio   *C.radio_config_t
-	events  *C.event_queue_t
-	rng     *C.pcg32_state_t
-	metrics *C.metrics_state_t
+	nodes    *C.node_array_t
+	radio    *C.radio_config_t
+	events   *C.event_queue_t
+	rng      *C.pcg32_state_t
+	metrics  *C.metrics_state_t
+	anomaly  *C.node_anomaly_tracker_t // MAX_NODES-sized, indexed like nodes.nodes
+	msgTrack *C.msg_tracker_t          // MAX_MSG_TRACK-sized
 }
 
 // rxResult is one reception attempt evaluated under the collision model.
@@ -32,11 +34,13 @@ type rxResult struct {
 
 func newRadioHarness() *radioHarness {
 	h := &radioHarness{
-		nodes:   (*C.node_array_t)(C.calloc(1, C.sizeof_node_array_t)),
-		radio:   (*C.radio_config_t)(C.calloc(1, C.sizeof_radio_config_t)),
-		events:  (*C.event_queue_t)(C.calloc(1, C.sizeof_event_queue_t)),
-		rng:     (*C.pcg32_state_t)(C.calloc(1, C.sizeof_pcg32_state_t)),
-		metrics: (*C.metrics_state_t)(C.calloc(1, C.sizeof_metrics_state_t)),
+		nodes:    (*C.node_array_t)(C.calloc(1, C.sizeof_node_array_t)),
+		radio:    (*C.radio_config_t)(C.calloc(1, C.sizeof_radio_config_t)),
+		events:   (*C.event_queue_t)(C.calloc(1, C.sizeof_event_queue_t)),
+		rng:      (*C.pcg32_state_t)(C.calloc(1, C.sizeof_pcg32_state_t)),
+		metrics:  (*C.metrics_state_t)(C.calloc(1, C.sizeof_metrics_state_t)),
+		anomaly:  (*C.node_anomaly_tracker_t)(C.calloc(C.MAX_NODES, C.sizeof_node_anomaly_tracker_t)),
+		msgTrack: (*C.msg_tracker_t)(C.calloc(C.MAX_MSG_TRACK, C.sizeof_msg_tracker_t)),
 	}
 	C.sim_emitter_set_quiet(C.bool(true))
 	C.node_array_init(h.nodes)
@@ -53,6 +57,8 @@ func (h *radioHarness) free() {
 	C.free(unsafe.Pointer(h.events))
 	C.free(unsafe.Pointer(h.rng))
 	C.free(unsafe.Pointer(h.metrics))
+	C.free(unsafe.Pointer(h.anomaly))
+	C.free(unsafe.Pointer(h.msgTrack))
 }
 
 func (h *radioHarness) addNode(addr uint32, x, y float32) {
@@ -208,4 +214,66 @@ func (h *radioHarness) receptionsUntil(ts uint64) []rxResult {
 		})
 	}
 	return out
+}
+
+// deliverRREQ hand-builds an originator-style RREQ (prev_hop = fromAddr,
+// query_id/packet_id = queryID so distinct calls are distinct RREQs to both
+// rreq_dedup and the general dedup) and delivers it as an EVT_RECEIVE_PACKET
+// to node `to` at nowUs, driving the real bridge_handle_receive_packet
+// dispatch (dedup -> rreq_fwd_allow -> forward) exactly like a received
+// radio frame, without needing the sender to actually exist as a node.
+func (h *radioHarness) deliverRREQ(to *C.sim_node_t, fromAddr, rreqDestAddr, queryID uint32,
+	hopLimit uint8, nowUs uint64) {
+	rreq := C.rreq_build_originator(C.uint32_t(fromAddr), C.uint32_t(rreqDestAddr),
+		C.uint32_t(queryID), C.uint32_t(fromAddr), C.uint8_t(hopLimit))
+
+	var buf [C.RREQ_SIZE]C.uint8_t
+	if C.bramble_rreq_serialize(&rreq, &buf[0], C.RREQ_SIZE) != C.ESP_OK {
+		panic("deliverRREQ: bramble_rreq_serialize failed")
+	}
+
+	evt := C.bridge_make_receive_packet_event(C.uint64_t(nowUs), C.uint32_t(fromAddr),
+		C.uint32_t(to.addr), &buf[0], C.RREQ_SIZE)
+	C.bridge_handle_receive_packet(&evt, h.nodes, h.radio, h.rng, h.events, h.metrics,
+		h.anomaly, h.msgTrack, C.MAX_MSG_TRACK)
+}
+
+// packetsForwarded reads a node's forwarded-packet counter (only incremented
+// on an actual successful transmission, per Task 1).
+func (h *radioHarness) packetsForwarded(node *C.sim_node_t) uint64 {
+	return uint64(node.packets_forwarded)
+}
+
+// rreqFwdDenied reads a node's forwarded-RREQ rate-limiter denial counter.
+func (h *radioHarness) rreqFwdDenied(node *C.sim_node_t) uint32 {
+	return uint32(node.rreq_fwd_denied)
+}
+
+// rreqRateDenied reads a node's discovery-origination rate-limiter denial
+// counter.
+func (h *radioHarness) rreqRateDenied(node *C.sim_node_t) uint32 {
+	return uint32(node.rreq_rate_denied)
+}
+
+// packetsSent reads a node's total-transmitted counter (sim_radio_broadcast).
+func (h *radioHarness) packetsSent(node *C.sim_node_t) uint64 {
+	return uint64(node.packets_sent)
+}
+
+// generateMessage drives bridge_handle_generate_message for `node` sending
+// to destAddr at nowUs, exactly as the event loop does for an EVT_GENERATE_MESSAGE.
+func (h *radioHarness) generateMessage(node *C.sim_node_t, destAddr uint32, nowUs uint64) {
+	id := C.GoString(&node.id[0])
+	cid := C.CString(id)
+	defer C.free(unsafe.Pointer(cid))
+	evt := C.bridge_make_generate_msg_event(C.uint64_t(nowUs), cid, C.uint32_t(destAddr))
+	C.bridge_handle_generate_message(&evt, h.nodes, h.radio, h.rng, h.events, h.metrics,
+		h.anomaly, h.msgTrack, C.MAX_MSG_TRACK)
+}
+
+// removePendingDiscovery drops a node's pending discovery for destAddr, so a
+// later generateMessage call takes the fresh-origination (!pd) branch again,
+// simulating an abandoned/exhausted discovery.
+func (h *radioHarness) removePendingDiscovery(node *C.sim_node_t, destAddr uint32) {
+	C.discovery_remove(&node.pending_discoveries, C.uint32_t(destAddr))
 }
