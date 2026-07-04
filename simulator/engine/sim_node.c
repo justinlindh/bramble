@@ -73,6 +73,7 @@ void node_activate(sim_node_t* node) {
     pending_ack_init(&node->pending_acks);
     dedup_init(&node->dedup);
     dedup_init(&node->flood_dedup);
+    memset(node->flood_pending, 0, sizeof(node->flood_pending));
     airtime_budget_init(&node->airtime, 0);
     /* Same instances mesh_task_start initializes (main/mesh_task.c:4536-4537). */
     rreq_rate_init(&node->rreq_rate);

@@ -16,3 +16,23 @@ channel_flood_decision_t channel_flood_decide(uint8_t hop_limit, bool is_duplica
     d.jitter_ms = discovery_forward_jitter_ms(random_value);
     return d;
 }
+
+bool channel_flood_note_overheard(pending_flood_relay_t* queue, int capacity, uint32_t flood_key) {
+    for (int i = 0; i < capacity; i++) {
+        if (!queue[i].used || queue[i].flood_key != flood_key) {
+            continue;
+        }
+        /* Src-qualified match: this overheard copy is of the SAME frame
+         * (packet_id ^ src_addr) this pending relay would rebroadcast. Count
+         * it, and once enough OTHER copies have been overheard, cancel our
+         * own now-redundant relay so process_flood_relay_queue never fires
+         * it (used=false). */
+        queue[i].heard++;
+        if (queue[i].heard >= FLOOD_SUPPRESS_AFTER) {
+            queue[i].used = false;
+            return true;
+        }
+        return false;
+    }
+    return false;
+}

@@ -86,7 +86,8 @@ static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
 /* Task 5 (channel flood): handle_data (near the top of the file) schedules
  * a jittered rebroadcast of a broadcast DATA frame; the queue it schedules
  * onto is defined near its sibling schedule_rreq_forward, further down. */
-static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms);
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
+                                 uint32_t flood_key);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -306,14 +307,9 @@ static QueueHandle_t s_handshake_work_q;
 /* Jittered channel-flood relay queue (Task 5). Same shape and drain cadence
  * as the RREQ forward queue below, holding the exact relay-mutated wire
  * bytes (hop_limit decremented, prev_hop rewritten to us) a broadcast DATA
- * frame is rebroadcast with once its jitter elapses. */
-#define FLOOD_RELAY_QUEUE_CAPACITY 8
-typedef struct {
-    bool used;
-    uint32_t due_at_ms;
-    uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
-    uint8_t len;
-} pending_flood_relay_t;
+ * frame is rebroadcast with once its jitter elapses. pending_flood_relay_t,
+ * FLOOD_RELAY_QUEUE_CAPACITY and the rebroadcast-suppression helper live in
+ * channel_flood.h (Flooding F1) so they are unit-testable in isolation. */
 static pending_flood_relay_t s_flood_relay_queue[FLOOD_RELAY_QUEUE_CAPACITY];
 
 /* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
@@ -2058,7 +2054,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             ESP_LOGI(TAG,
                      "Channel flood relay from %08" PRIX32 " pkt=%08" PRIX32 " hop_limit %u->%u",
                      src_addr, rx_hdr.packet_id, rx_hdr.hop_limit, flood.new_hop_limit);
-            schedule_flood_relay(relay_buf, len, flood.jitter_ms);
+            schedule_flood_relay(relay_buf, len, flood.jitter_ms, flood_key);
         } else if (!budget_permits) {
             ESP_LOGD(TAG, "Channel flood relay denied by airtime budget, pkt=%08" PRIX32,
                      rx_hdr.packet_id);
@@ -2589,14 +2585,24 @@ static void process_rreq_forward_queue(uint32_t t) {
  * buf/len are the ALREADY relay-mutated wire bytes (hop_limit decremented,
  * prev_hop rewritten to this node -- see the caller in handle_data): this
  * function only owns the timing, not the frame content.
+ *
+ * flood_key = packet_id ^ src_addr (the caller already computed it for the
+ * src-qualified flood dedup) is recorded on the queued entry so an overheard
+ * duplicate of the SAME frame can find and suppress this pending relay before
+ * it fires (Flooding F1; see channel_flood_note_overheard). heard starts at 0
+ * -- the copy that triggered this schedule is the FIRST copy, never counted
+ * as an overheard one.
  */
-static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms) {
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
+                                 uint32_t flood_key) {
     for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
         if (!s_flood_relay_queue[i].used) {
             s_flood_relay_queue[i].used = true;
             s_flood_relay_queue[i].due_at_ms = now_ms() + jitter_ms;
             memcpy(s_flood_relay_queue[i].buf, buf, len);
             s_flood_relay_queue[i].len = len;
+            s_flood_relay_queue[i].flood_key = flood_key;
+            s_flood_relay_queue[i].heard = 0;
             ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
             return;
         }
@@ -3141,6 +3147,32 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
                          " from %08" PRIX32,
                          header.packet_id, dup_src_addr);
                 send_ack(dup_src_addr, header.packet_id, pkt->rssi);
+            }
+        }
+
+        /* Flooding F1 rebroadcast suppression: the dispatch dedup gate above
+         * catches the 2nd/3rd... copies of a flooded DATA frame and returns
+         * BEFORE handle_data, so this is the one place a node can COUNT the
+         * OTHER relays it overhears while its own rebroadcast still waits out
+         * its jitter. On a duplicate DATA that is on the flood relay path
+         * (broadcast, or -- under s_flood_transport -- unicast for someone
+         * else), find the matching queued relay by its src-qualified key
+         * (packet_id ^ src_addr, recomputed here from the wire the same way
+         * schedule_flood_relay recorded it) and register the overheard copy;
+         * channel_flood_note_overheard cancels the relay once FLOOD_SUPPRESS_
+         * AFTER copies are in. This is disjoint from the re-ACK carve-out
+         * above, which only fires for unicast-to-SELF duplicates. */
+        bool flood_relay_active = (header.dest_addr == 0xFFFFFFFF ||
+                                   (s_flood_transport && header.dest_addr != s_identity->address));
+        if (header.type == PKT_TYPE_DATA && flood_relay_active &&
+            pkt->len >= BRAMBLE_DATA_SRC_ADDR_OFFSET + 4) {
+            uint32_t flood_dup_src;
+            memcpy(&flood_dup_src, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+            uint32_t flood_dup_key = header.packet_id ^ flood_dup_src;
+            if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                             flood_dup_key)) {
+                ESP_LOGD(TAG, "Flood relay suppressed after %d overheard copies, pkt=%08" PRIX32,
+                         FLOOD_SUPPRESS_AFTER, header.packet_id);
             }
         }
 
