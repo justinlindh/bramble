@@ -797,14 +797,41 @@ These do not go away when section 4 empties out.
   availability (a dropped, genuine control-plane message under
   contention), not security. Same accepted trade-off as the DATA/LOCATION
   windows (section 3).
-- **`handle_rrep` installs a route for a fresh, unsolicited RREP.**
-  Freshness (above) stops a *replayed* RREP from resurrecting a stale
-  route, but does not stop a network-key holder from originating a
-  brand-new, correctly-signed, correctly-sequenced RREP for a query this
-  node never issued; `handle_rrep` (`main/mesh_task.c`) installs the route
-  regardless. Distinct from replay (the message is fresh, not captured)
-  and a candidate follow-on, not something the ws 1.3b freshness work was
-  scoped to fix.
+- **`handle_rrep` installing a route for a fresh, unsolicited RREP is now
+  closed by a discovery-participation gate (ws 1.3b's freshness work above
+  did not cover this).** `rrep_rx_decide` (`components/routing/discovery.c`)
+  now installs a route only when this node participated in the matching
+  discovery: it originated it (a `pending_discovery` entry matches the
+  RREP's `query_id`) or it is on the reverse path (a `reverse_route` entry
+  matches). A bystander overhearing an RREP for a query it never touched,
+  or an attacker fabricating one for an unrelated `query_id`, now gets
+  dropped before `route_install` runs; previously it installed
+  unconditionally. What this does NOT close: an insider who first floods a
+  matching RREQ, so this node legitimately records a reverse route for
+  that `query_id`, then answers it with a correctly-signed,
+  correctly-sequenced RREP, still gets the route installed, because that
+  node genuinely did participate. That is inherent insider forgery, a
+  network-key holder lying about a route it claims to relay, the same
+  accepted residual as the rest of the control plane (section 4); the gate
+  closes the no-participation case, not insider forgery in general.
+- **RREP `next_hop` was also wrong beyond one hop from the destination, a
+  functional bug distinct from the security items above, found while
+  building `rrep_rx_decide`'s host-test harness.** `handle_rrep` previously
+  installed `next_hop` from a `dest_addr == self_addr ? src_addr :
+  next_hop` ternary that resolves to the destination's own address for
+  every legitimate recipient (a unicast RREP's `header.dest_addr` always
+  equals the receiving node's own address), so any node more than one hop
+  from the destination installed a route via a neighbor it did not
+  actually have; multi-hop unicast routes were unusable. Fixed by having
+  `rrep_build_destination`/`rrep_forward` write the FORWARDER's own
+  address into `next_hop` on each hop (no wire change: `next_hop` was
+  already excluded from `auth_hmac`), so `rrep_rx_decide` now installs
+  `rrep.next_hop` directly and it is correct at any hop count. The RREP
+  receive path had never run end to end in the host suite before
+  (`handle_rrep` was `static` and board-build-only); the new
+  `test/test_rrep_discovery_e2e.c` harness drives real multi-hop
+  discoveries through the real routing components and is the durable
+  coverage that caught this and will catch any regression.
 - **The timesync bootstrap quorum can still be won by one key holder who
   sustains multiple established addresses (NEW-SEC-4, mitigated by ws 1.3c,
   NOT closed).** The beacon HMAC gate and the bootstrap-offset clamp
