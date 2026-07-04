@@ -2796,14 +2796,22 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
     case PKT_TYPE_RERR:
         handle_rerr(pkt->data, pkt->len);
         break;
-    case PKT_TYPE_DATA:
-        /* Check if this data is for us or needs forwarding */
-        if (header.dest_addr != s_identity->address && header.dest_addr != 0xFFFFFFFF) {
+    case PKT_TYPE_DATA: {
+        /* components/routing/forwarding.c: data_rx_decide() owns the
+         * deliver-locally-vs-forward fork (Task 3, ws 1.5). Behavior-
+         * preserving extraction: same two calls, same cases, now routed
+         * through a pure host-testable decision. install_reverse_route is
+         * always false today; Task 4 turns it on once wire v4 adds the
+         * prev_hop input this decision needs to learn a route back to the
+         * DATA's originator. */
+        data_rx_decision_t data_rx = data_rx_decide(header.dest_addr, s_identity->address);
+        if (data_rx.action == DATA_RX_FORWARD) {
             forward_data_packet(pkt->data, pkt->len, &header);
         } else {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
         break;
+    }
     case PKT_TYPE_LOCATION:
         if (header.dest_addr == s_identity->address || header.dest_addr == 0xFFFFFFFF) {
             handle_location(pkt->data, pkt->len, pkt->rssi, pkt->snr);

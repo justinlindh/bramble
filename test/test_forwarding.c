@@ -90,6 +90,27 @@ void test_rerr_handle_bumps_fail_count(void) {
     TEST_ASSERT_EQUAL(1, e->fail_count);
 }
 
+/* Task 3 (Phase 1 delivery-core plan): data_rx_decide extracts the
+ * deliver-locally-vs-forward fork out of mesh_task.c's mesh_process_rx_packet
+ * PKT_TYPE_DATA case, behavior-preserving. */
+void test_data_rx_decide_deliver_self(void) {
+    data_rx_decision_t d = data_rx_decide(0xAAAA, 0xAAAA);
+    TEST_ASSERT_EQUAL(DATA_RX_DELIVER, d.action);
+    TEST_ASSERT_FALSE(d.install_reverse_route);
+}
+
+void test_data_rx_decide_deliver_broadcast(void) {
+    data_rx_decision_t d = data_rx_decide(0xFFFFFFFF, 0xAAAA);
+    TEST_ASSERT_EQUAL(DATA_RX_DELIVER, d.action);
+    TEST_ASSERT_FALSE(d.install_reverse_route);
+}
+
+void test_data_rx_decide_forward_other_unicast(void) {
+    data_rx_decision_t d = data_rx_decide(0xCCCC, 0xAAAA);
+    TEST_ASSERT_EQUAL(DATA_RX_FORWARD, d.action);
+    TEST_ASSERT_FALSE(d.install_reverse_route);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_forward_active_route);
@@ -100,5 +121,8 @@ int main(void) {
     RUN_TEST(test_rerr_build_and_handle);
     RUN_TEST(test_rerr_wrong_next_hop_ignored);
     RUN_TEST(test_rerr_handle_bumps_fail_count);
+    RUN_TEST(test_data_rx_decide_deliver_self);
+    RUN_TEST(test_data_rx_decide_deliver_broadcast);
+    RUN_TEST(test_data_rx_decide_forward_other_unicast);
     return UNITY_END();
 }
