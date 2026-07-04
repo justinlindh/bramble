@@ -176,3 +176,36 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
     r.header.dest_addr = next_hop_back;
     return r;
 }
+
+rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr,
+                                  uint8_t link_metric, pending_discovery_table_t* pd,
+                                  reverse_route_table_t* rev) {
+    rrep_rx_decision_t d;
+    memset(&d, 0, sizeof(d));
+
+    /* Behavior-preserving extraction of the current handle_rrep logic:
+     * install runs unconditionally, and next_hop keeps the pre-fix ternary
+     * (correct only when self_addr is a direct neighbor of the source). */
+    d.install_route = true;
+    d.route_dest = rrep->src_addr;
+    d.route_next_hop = (rrep->header.dest_addr == self_addr) ? rrep->src_addr : rrep->next_hop;
+    d.route_hops = rrep->hop_count;
+    d.route_metric = link_metric;
+
+    pending_discovery_t* pd_entry = discovery_lookup_by_query(pd, rrep->query_id);
+    if (pd_entry) {
+        d.action = RREP_RX_DELIVER;
+        d.deliver_dest = pd_entry->dest_addr;
+        return d;
+    }
+
+    reverse_route_t* rev_entry = reverse_route_lookup(rev, rrep->query_id);
+    if (rev_entry) {
+        d.action = RREP_RX_FORWARD;
+        d.forward_to = rev_entry->prev_hop;
+        return d;
+    }
+
+    d.action = RREP_RX_DROP;
+    return d;
+}
