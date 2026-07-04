@@ -305,7 +305,7 @@ func (s *Sim) handleTickNode(evt *C.sim_event_t) {
 
 	var result C.node_tick_result_t
 	ts := getEventTimestamp(evt)
-	C.node_tick(node, C.uint64_t(ts), &result)
+	C.node_tick(node, C.uint64_t(ts), &s.radio, &result)
 
 	// Broadcast any outbound packets
 	for i := 0; i < int(result.count); i++ {

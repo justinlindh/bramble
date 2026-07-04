@@ -1,4 +1,5 @@
 #include "sim_node.h"
+#include "sim_radio.h"
 #include "../../components/packet/include/packet.h"
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
@@ -72,6 +73,7 @@ void node_activate(sim_node_t* node) {
     }
     node->crypto_counter = 0;
     node->packets_forwarded = 0;
+    memset(node->budget_denied, 0, sizeof(node->budget_denied));
 
     /* Initialize adaptive beacon controller */
     node->adaptive_beacon_interval_us = NODE_BEACON_INTERVAL_BASE_US;
@@ -160,7 +162,8 @@ static uint64_t adaptive_beacon_interval(sim_node_t* node, uint64_t now_us) {
  * Performs: beacon TX, neighbor purge, route maintenance, discovery retry.
  * Produces outbound packets in `result` for the caller to radio-broadcast.
  */
-void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
+void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
+               node_tick_result_t* result) {
     result->count = 0;
     uint32_t now_ms = (uint32_t)(now_us / 1000);
 
@@ -199,13 +202,27 @@ void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
         beacon.network_time = now_ms;
         beacon.time_confidence = 0;
 
-        outbound_packet_t* out = &result->pkts[result->count++];
-        bramble_beacon_serialize(&beacon, out->data, BEACON_SIZE);
-        out->len = BEACON_SIZE;
-        out->is_broadcast = true;
-        out->dest_addr = 0xFFFFFFFF;
-        out->pkt_type = PKT_TYPE_BEACON;
-        node->beacons_sent++;
+        /* Budget-gate the beacon exactly like firmware's mesh_tx: refresh
+         * the profile's peer-count scaler from the current neighbor table,
+         * then check the BROADCAST lane (tx_gate_kind_tier: TX_KIND_BEACON
+         * -> AIRTIME_TIER_BROADCAST) before putting it on the air. Denied
+         * beacons are dropped, not queued, matching tx_gate's no-queue
+         * semantics; the next beacon is still scheduled on schedule. */
+        airtime_budget_set_mesh_size(&node->airtime, (uint8_t)neighbor_count(&node->neighbors));
+        uint32_t beacon_airtime_ms = radio_frame_airtime_ms(radio, BEACON_SIZE);
+        if (airtime_budget_can_transmit(&node->airtime, AIRTIME_TIER_BROADCAST,
+                                        beacon_airtime_ms)) {
+            outbound_packet_t* out = &result->pkts[result->count++];
+            bramble_beacon_serialize(&beacon, out->data, BEACON_SIZE);
+            out->len = BEACON_SIZE;
+            out->is_broadcast = true;
+            out->dest_addr = 0xFFFFFFFF;
+            out->pkt_type = PKT_TYPE_BEACON;
+            node->beacons_sent++;
+            airtime_budget_debit(&node->airtime, AIRTIME_TIER_BROADCAST, beacon_airtime_ms);
+        } else {
+            node->budget_denied[AIRTIME_IDX_BROADCAST]++;
+        }
     }
 
     /* 2. Neighbor table purge */
@@ -236,12 +253,23 @@ void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result) {
                     rreq_build_originator(node->addr, d->dest_addr, query_id, node->addr,
                                           discovery_hop_limit_for_attempt(d->attempts));
 
-                outbound_packet_t* out = &result->pkts[result->count++];
-                bramble_rreq_serialize(&rreq, out->data, RREQ_SIZE);
-                out->len = RREQ_SIZE;
-                out->is_broadcast = true;
-                out->dest_addr = 0xFFFFFFFF;
-                out->pkt_type = PKT_TYPE_RREQ;
+                /* Budget-gate the retry RREQ: tx_gate_kind_tier maps
+                 * TX_KIND_ROUTING to AIRTIME_TIER_CRITICAL. */
+                airtime_budget_set_mesh_size(&node->airtime,
+                                             (uint8_t)neighbor_count(&node->neighbors));
+                uint32_t rreq_airtime_ms = radio_frame_airtime_ms(radio, RREQ_SIZE);
+                if (airtime_budget_can_transmit(&node->airtime, AIRTIME_TIER_CRITICAL,
+                                                rreq_airtime_ms)) {
+                    outbound_packet_t* out = &result->pkts[result->count++];
+                    bramble_rreq_serialize(&rreq, out->data, RREQ_SIZE);
+                    out->len = RREQ_SIZE;
+                    out->is_broadcast = true;
+                    out->dest_addr = 0xFFFFFFFF;
+                    out->pkt_type = PKT_TYPE_RREQ;
+                    airtime_budget_debit(&node->airtime, AIRTIME_TIER_CRITICAL, rreq_airtime_ms);
+                } else {
+                    node->budget_denied[AIRTIME_IDX_CRITICAL]++;
+                }
             }
         }
     }

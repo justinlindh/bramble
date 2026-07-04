@@ -46,7 +46,10 @@ typedef enum {
     RADIO_RX_CAPTURED,    /* overlapped, but won via the capture effect */
 } radio_rx_outcome_t;
 
-typedef struct {
+/* Tagged so sim_node.h can forward-declare radio_config_t (node_tick needs a
+ * pointer to it to compute beacon/RREQ airtime; sim_node.h cannot include
+ * this header back, since this header already includes sim_node.h). */
+typedef struct radio_config {
     float range;
     float loss_pct;
     float propagation_speed_ms_per_unit;
@@ -93,6 +96,14 @@ bool radio_in_interference(const radio_config_t* config, const sim_node_t* node)
  * bramble_calculate_airtime_us (components/radio/radio_airtime.c).
  */
 uint32_t radio_frame_airtime_us(const radio_config_t* config, uint16_t frame_bytes);
+
+/*
+ * radio_frame_airtime_ms: radio_frame_airtime_us rounded up to whole
+ * milliseconds (minimum 1 ms), the unit the airtime budget accounts in.
+ * Single source of truth for the us->ms rounding used at every budget-gated
+ * TX site (never undercount airtime).
+ */
+uint32_t radio_frame_airtime_ms(const radio_config_t* config, uint16_t frame_bytes);
 
 /*
  * radio_preamble_us: duration of the LoRa preamble (programmed symbols + 4.25

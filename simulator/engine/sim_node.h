@@ -12,6 +12,12 @@
 #include "../../components/crypto/include/crypto.h"
 #include "sim_random.h"
 
+/* Forward declaration only: the full definition lives in sim_radio.h, which
+ * itself includes this header, so it cannot be included back here. node_tick
+ * needs just a pointer, to gate beacon/RREQ transmissions through the real
+ * airtime budget using the real radio ToA (radio_frame_airtime_ms). */
+typedef struct radio_config radio_config_t;
+
 #define MAX_NODES 256
 #define NODE_ID_LEN 16
 
@@ -112,6 +118,11 @@ typedef struct {
     uint64_t packets_originated;
     uint64_t beacons_sent;
     uint64_t airtime_tx_us; /* cumulative real time-on-air transmitted */
+
+    /* Airtime budget denials, by AIRTIME_IDX_* lane. Incremented at every
+     * gated TX site when airtime_budget_can_transmit refuses; the packet is
+     * dropped (no queue), matching firmware's tx_gate drop-no-queue semantics. */
+    uint32_t budget_denied[AIRTIME_TIER_COUNT];
 } sim_node_t;
 
 typedef struct {
@@ -128,6 +139,7 @@ sim_node_t* node_array_get(node_array_t* array, int index);
 void node_activate(sim_node_t* node);
 void node_deactivate(sim_node_t* node);
 void node_move(sim_node_t* node, float x, float y);
-void node_tick(sim_node_t* node, uint64_t now_us, node_tick_result_t* result);
+void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
+               node_tick_result_t* result);
 
 #endif /* SIM_NODE_H */

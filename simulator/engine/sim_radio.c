@@ -159,6 +159,12 @@ uint32_t radio_frame_airtime_us(const radio_config_t* config, uint16_t frame_byt
     return bramble_calculate_airtime_us(frame_bytes, sf, bw, cr);
 }
 
+uint32_t radio_frame_airtime_ms(const radio_config_t* config, uint16_t frame_bytes) {
+    uint32_t us = radio_frame_airtime_us(config, frame_bytes);
+    uint32_t ms = (us + 999u) / 1000u;
+    return ms ? ms : 1u;
+}
+
 uint64_t radio_preamble_us(const radio_config_t* config) {
     uint8_t sf = config->sf ? config->sf : 10;
     uint32_t bw = config->bw_hz ? config->bw_hz : 125000;
