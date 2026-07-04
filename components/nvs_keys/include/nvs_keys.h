@@ -18,6 +18,7 @@
 #define NVS_NS_LOCATION "bramble_loc"       /**< Location & contacts     */
 #define NVS_NS_CHANNEL "bramble_ch"         /**< Channel storage         */
 #define NVS_NS_MAILBOX "bramble_mb"         /**< Mailbox policy          */
+#define NVS_NS_FLOOD "bramble_flood"        /**< Flood transport toggle  */
 #define NVS_NS_WIFI "bramble_wifi"          /**< Wi-Fi credentials       */
 #define NVS_NS_IDENTITY "bramble_id"        /**< Node identity / keys    */
 #define NVS_NS_BACKPRESSURE "bramble_bp"    /**< Backpressure state      */

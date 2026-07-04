@@ -563,6 +563,16 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// (see bridge.h's doc comment on bridge_set_intermediate_rrep_enabled).
 	C.bridge_set_intermediate_rrep_enabled(C.bool(loadIntermediateRREPConfig(scenarioPath)))
 
+	// Flooding F1 Task 1: optional "flood_transport" scenario field, read the
+	// same way as "intermediate_rrep" above (independent Go-side JSON read,
+	// no C-side sim_scenario changes needed). Drives the REAL firmware flood
+	// transport through bridge.c (see flood.go's loadFloodTransportConfig doc
+	// comment); distinct from s.routingMode's Go-only "flood" MODEL.
+	// Defaults to false (firmware's shipped NVS default); re-applied on every
+	// load so one scenario's setting never leaks into the next run in the
+	// same process.
+	C.bridge_set_flood_transport_enabled(C.bool(loadFloodTransportConfig(scenarioPath)))
+
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)
 	if disableCollisionModel {

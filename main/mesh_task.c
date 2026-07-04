@@ -378,6 +378,14 @@ static bool s_mailbox_enabled = false;
 #define MAILBOX_BEACON_FLAG 0x01
 static mailbox_t s_mailbox;
 
+/* Flooding F1 Task 1: runtime toggle for the unicast flood transport. OFF
+ * (default) preserves today's reactive route-lookup forward for unicast
+ * DATA; ON routes unicast DATA not addressed to us through the same
+ * multi-hop flood engine broadcast DATA already uses (channel_flood_decide +
+ * s_flood_dedup) instead of forward_data_packet. See mesh_process_rx_packet's
+ * PKT_TYPE_DATA case. NVS-persisted, same pattern as s_mailbox_enabled. */
+static bool s_flood_transport = false;
+
 /* Location policy engine tick state */
 static uint32_t s_location_last_policy_tick_ms = 0;
 static uint32_t s_location_last_send_ms = 0;
@@ -1966,6 +1974,19 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* Flooding F1 Task 1: dest filter for the ONE flood relay path shared by
+     * broadcast and (when s_flood_transport is on) unicast DATA not
+     * addressed to us. dest_is_broadcast is always flood-eligible (Task 5,
+     * unchanged); dest_is_self never relays (it is delivered below instead,
+     * hop_limit is irrelevant once a message has arrived). A unicast frame
+     * for someone else only enters the relay block when the toggle is on;
+     * when it is off, mesh_process_rx_packet's PKT_TYPE_DATA case never
+     * calls handle_data for that frame at all (it calls forward_data_packet,
+     * the reactive route-lookup path), so this flag is a belt-and-suspenders
+     * check, not the only gate. */
+    bool dest_is_broadcast = (rx_hdr.dest_addr == 0xFFFFFFFF);
+    bool dest_is_self = (rx_hdr.dest_addr == s_identity->address);
+
     /* Task 5: multi-hop channel flood. A broadcast/channel DATA (dest ==
      * 0xFFFFFFFF) is "delivered" locally below regardless of whether THIS
      * node can decrypt it (public broadcast vs. a secret channel this node
@@ -1978,8 +1999,17 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
      * below, so a node without this channel's key still relays the exact
      * ciphertext onward for members further out in the mesh -- the entire
      * point of a flood is that relays do not need to understand the
-     * payload, exactly like RREQ/RERR relays never decrypt anything. */
-    if (rx_hdr.dest_addr == 0xFFFFFFFF) {
+     * payload, exactly like RREQ/RERR relays never decrypt anything.
+     *
+     * Task 1 extends this same block to unicast: when s_flood_transport is
+     * on and this frame is unicast for someone else, it goes through the
+     * identical dedup + channel_flood_decide + rebroadcast dance as a
+     * broadcast flood, reusing channel_flood_decide rather than a second
+     * flood implementation. The only difference from broadcast is that a
+     * relayed-only unicast frame returns right after this block (see the
+     * "not for us" check below) instead of falling into the decrypt/deliver
+     * code, since a relay is never the intended recipient. */
+    if (dest_is_broadcast || (s_flood_transport && !dest_is_self)) {
         /* Src_addr-qualified dedup key (s_flood_dedup, not the packet_id-
          * only s_dedup already consulted at the mesh_process_rx_packet
          * dispatch gate): see s_flood_dedup's doc comment for why a plain
@@ -2033,6 +2063,19 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             ESP_LOGD(TAG, "Channel flood relay denied by airtime budget, pkt=%08" PRIX32,
                      rx_hdr.packet_id);
         }
+    }
+
+    /* Task 1: a unicast frame addressed to someone else is a relay-only
+     * pass-through under the flood toggle (handled above); it is never
+     * decrypted or delivered here (we have no session/channel-key basis for
+     * doing so on someone else's behalf, and doing so would risk spurious
+     * local-delivery side effects: msg_store, an outgoing ACK, replay-window
+     * updates, none of which belong to a frame that is not ours). Broadcast
+     * (dest_is_broadcast) and unicast-to-self (dest_is_self) both fall
+     * through to the decrypt/deliver code below exactly as before this
+     * task. */
+    if (!dest_is_broadcast && !dest_is_self) {
+        return;
     }
 
     /* AAD excludes hop_limit (relays decrement it in flight) but binds
@@ -3195,8 +3238,19 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
                           ROUTE_SRC_BREADCRUMB, now_ms());
         }
 
+        /* Flooding F1 Task 1: DATA_RX_FORWARD means this is unicast for
+         * someone else. Reactive (s_flood_transport off, default): unchanged
+         * route-lookup forward. Flood (on): route it through handle_data
+         * instead, which now relays it via the shared flood engine
+         * (channel_flood_decide) rather than looking up a route; it never
+         * calls forward_data_packet in flood mode. DATA_RX_DELIVER (dest ==
+         * self or broadcast) is unaffected by the toggle: always handle_data. */
         if (data_rx.action == DATA_RX_FORWARD) {
-            forward_data_packet(pkt->data, pkt->len, &header);
+            if (s_flood_transport) {
+                handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+            } else {
+                forward_data_packet(pkt->data, pkt->len, &header);
+            }
         } else {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
@@ -5074,6 +5128,20 @@ void mesh_task_start(bramble_identity_t* identity) {
                  MAILBOX_MAX_ENTRIES, MAILBOX_MAX_PER_DEST, MAILBOX_MAX_PER_SOURCE);
     }
 
+    /* Flooding F1 Task 1: load the flood-transport toggle from NVS. */
+    {
+        nvs_handle_t fl_nvs;
+        if (nvs_open(NVS_NS_FLOOD, NVS_READONLY, &fl_nvs) == ESP_OK) {
+            uint8_t enabled = 0;
+            if (nvs_get_u8(fl_nvs, "enabled", &enabled) == ESP_OK) {
+                s_flood_transport = (enabled != 0);
+                ESP_LOGI(TAG, "Flood transport: %s (from NVS)",
+                         s_flood_transport ? "enabled" : "disabled");
+            }
+            nvs_close(fl_nvs);
+        }
+    }
+
     s_state_mutex = xSemaphoreCreateMutex();
     s_delivery_event_mutex = xSemaphoreCreateMutex();
     /* Try PSRAM first (T-Deck Plus), fall back to internal RAM (Heltec V3/V4) */
@@ -5348,6 +5416,13 @@ void mesh_set_mailbox(bool enabled) {
 }
 
 bool mesh_get_mailbox(void) { return s_mailbox_enabled; }
+
+void mesh_set_flood_transport(bool enabled) {
+    s_flood_transport = enabled;
+    ESP_LOGI(TAG, "Flood transport runtime: %s", enabled ? "enabled" : "disabled");
+}
+
+bool mesh_get_flood_transport(void) { return s_flood_transport; }
 
 /* ── Probe tracking ──────────────────────────────────────────────────── */
 

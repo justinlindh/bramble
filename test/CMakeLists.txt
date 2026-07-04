@@ -175,6 +175,30 @@ target_include_directories(test_data_auth PRIVATE
 )
 target_link_libraries(test_data_auth ssl crypto)
 
+# Flooding F1 Task 1: unicast DATA floods (relay + deliver) under
+# s_flood_transport, reusing the SAME channel_flood_decide engine broadcast
+# DATA already uses. Mirrors mesh_process_rx_packet's PKT_TYPE_DATA dispatch
+# + handle_data's flood-relay gate with the real component functions (see
+# test_data_auth.c's identical rationale for why mesh_task.c itself is never
+# host-compiled).
+add_executable(test_unicast_flood
+    test_unicast_flood.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+)
+target_include_directories(test_unicast_flood PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+)
+target_link_libraries(test_unicast_flood ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
