@@ -2469,32 +2469,38 @@ static void handle_rrep(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
-    /* Install route to the destination (RREP source) via the sender. The
-     * link penalty subtracts from the higher-is-better path metric. */
+    /* The route-install and deliver/forward/drop decision lives in
+     * rrep_rx_decide, a pure host-testable function in components/routing.
+     * The link penalty subtracts from the higher-is-better path metric. */
     uint8_t metric = metric_apply_link_penalty(rrep.route_metric, (int8_t)rssi, snr);
-    route_install(&s_routes, rrep.src_addr, rrep.header.dest_addr == s_identity->address
-                  ? rrep.src_addr : rrep.next_hop,
-                  rrep.hop_count, metric, ROUTE_ACTIVE, now_ms());
+    rrep_rx_decision_t d =
+        rrep_rx_decide(&rrep, s_identity->address, metric, &s_pending_disc, &s_reverse_routes);
 
-    /* Is this RREP for us (we originated the RREQ)? */
-    pending_discovery_t *pd = discovery_lookup_by_query(&s_pending_disc, rrep.query_id);
-    if (pd) {
-        ESP_LOGI(TAG, "Route discovered to %08" PRIX32 " (hops=%u, metric=%u)",
-                 pd->dest_addr, rrep.hop_count, metric);
-        discovery_remove(&s_pending_disc, pd->dest_addr);
-
-        /* Flush queued messages waiting for this route */
-        flush_queued_messages(pd->dest_addr);
-        return;
+    if (d.install_route) {
+        route_install(&s_routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
+                      ROUTE_ACTIVE, now_ms());
     }
 
-    /* Not for us — forward RREP toward the originator via reverse route */
-    reverse_route_t *rev = reverse_route_lookup(&s_reverse_routes, rrep.query_id);
-    if (rev) {
-        bramble_rrep_t fwd = rrep_forward(&rrep, rev->prev_hop);
+    switch (d.action) {
+    case RREP_RX_DELIVER:
+        /* This RREP is for us: we originated the RREQ. */
+        ESP_LOGI(TAG, "Route discovered to %08" PRIX32 " (hops=%u, metric=%u)",
+                 d.deliver_dest, d.route_hops, d.route_metric);
+        discovery_remove(&s_pending_disc, d.deliver_dest);
+
+        /* Flush queued messages waiting for this route */
+        flush_queued_messages(d.deliver_dest);
+        break;
+    case RREP_RX_FORWARD: {
+        /* Not for us: forward the RREP toward the originator via the reverse route. */
+        bramble_rrep_t fwd = rrep_forward(&rrep, d.forward_to, s_identity->address);
         send_rrep(&fwd);
-    } else {
+        break;
+    }
+    case RREP_RX_DROP:
+    default:
         ESP_LOGW(TAG, "No reverse route for RREP query=%08" PRIX32, rrep.query_id);
+        break;
     }
 }
 

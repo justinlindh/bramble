@@ -24,6 +24,7 @@ void tearDown(void) {}
 #define ADDR_A 0x0A0A0A0A
 #define ADDR_B 0x0B0B0B0B
 #define ADDR_C 0x0C0C0C0C
+#define ADDR_D 0x0D0D0D0D
 #define QUERY 0xDEAD0001
 #define QUERY2 0xDEAD0002
 #define QUERY3 0xDEAD0003
@@ -202,7 +203,11 @@ void test_rrep_build_destination(void) {
     TEST_ASSERT_EQUAL(ADDR_C, rrep.src_addr);
     TEST_ASSERT_EQUAL(2, rrep.hop_count); /* fwd.hop_count(1) + 1 */
     TEST_ASSERT_EQUAL(fwd.metric, rrep.route_metric);
-    TEST_ASSERT_EQUAL(ADDR_B, rrep.next_hop);
+    /* next_hop is the destination's OWN address: it is the first hop toward
+     * itself. header.dest_addr (unchanged) still carries the frame-routing
+     * target (fwd.prev_hop == ADDR_B). */
+    TEST_ASSERT_EQUAL(ADDR_C, rrep.next_hop);
+    TEST_ASSERT_EQUAL(ADDR_B, rrep.header.dest_addr);
     /* RREP must be able to return along an expanded-ring path */
     TEST_ASSERT_EQUAL(ROUTE_HOP_LIMIT_MAX, rrep.header.hop_limit);
 }
@@ -210,10 +215,77 @@ void test_rrep_build_destination(void) {
 void test_rrep_forward(void) {
     bramble_rrep_t rrep;
     memset(&rrep, 0, sizeof(rrep));
-    rrep.next_hop = ADDR_B;
-    bramble_rrep_t fwd = rrep_forward(&rrep, ADDR_A);
-    TEST_ASSERT_EQUAL(ADDR_A, fwd.next_hop);
-    TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr);
+    rrep.next_hop = ADDR_C; /* whatever the incoming next_hop was, gets overwritten */
+    bramble_rrep_t fwd = rrep_forward(&rrep, ADDR_A, ADDR_B);
+    TEST_ASSERT_EQUAL(ADDR_B, fwd.next_hop);        /* the forwarder's own address */
+    TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr); /* frame routing target, unchanged role */
+}
+
+/* --- rrep_rx_decide: behavior-preserving extraction of handle_rrep --- */
+
+void test_rrep_rx_decide_originator_delivers(void) {
+    bramble_rrep_t rrep;
+    memset(&rrep, 0, sizeof(rrep));
+    rrep.header.dest_addr = ADDR_A;
+    rrep.query_id = QUERY;
+    rrep.src_addr = ADDR_C;
+    rrep.next_hop = ADDR_B; /* the forwarder that delivered this RREP to us */
+    rrep.hop_count = 3;
+
+    discovery_start(&dtbl, ADDR_C, QUERY, 1000);
+
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_A, 210, &dtbl, &rev_a);
+
+    TEST_ASSERT_EQUAL(RREP_RX_DELIVER, d.action);
+    TEST_ASSERT_EQUAL(ADDR_C, d.deliver_dest);
+    TEST_ASSERT_TRUE(d.install_route);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
+    TEST_ASSERT_EQUAL(ADDR_B, d.route_next_hop); /* rrep.next_hop: the forwarder, not src_addr */
+    TEST_ASSERT_EQUAL(3, d.route_hops);
+    TEST_ASSERT_EQUAL(210, d.route_metric);
+}
+
+void test_rrep_rx_decide_intermediate_forwards(void) {
+    bramble_rrep_t rrep;
+    memset(&rrep, 0, sizeof(rrep));
+    rrep.header.dest_addr = ADDR_A; /* framed toward the originator, not us */
+    rrep.query_id = QUERY;
+    rrep.src_addr = ADDR_C;
+    rrep.next_hop = ADDR_D; /* the forwarder that delivered this RREP to us */
+    rrep.hop_count = 2;
+
+    reverse_route_add(&rev_b, QUERY, ADDR_A, 1000);
+
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 180, &dtbl, &rev_b);
+
+    TEST_ASSERT_EQUAL(RREP_RX_FORWARD, d.action);
+    TEST_ASSERT_EQUAL(ADDR_A, d.forward_to);
+    TEST_ASSERT_TRUE(d.install_route);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
+    TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop); /* rrep.next_hop directly */
+    TEST_ASSERT_EQUAL(2, d.route_hops);
+    TEST_ASSERT_EQUAL(180, d.route_metric);
+}
+
+void test_rrep_rx_decide_unsolicited_drops_without_install(void) {
+    bramble_rrep_t rrep;
+    memset(&rrep, 0, sizeof(rrep));
+    rrep.header.dest_addr = ADDR_A;
+    rrep.query_id = QUERY;
+    rrep.src_addr = ADDR_C;
+    rrep.next_hop = ADDR_D;
+    rrep.hop_count = 1;
+
+    /* No pd, no reverse route for this query: we never participated in this
+     * discovery, so the participation gate drops before install. */
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 150, &dtbl, &rev_b);
+
+    TEST_ASSERT_EQUAL(RREP_RX_DROP, d.action);
+    TEST_ASSERT_FALSE(d.install_route);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
+    TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop);
+    TEST_ASSERT_EQUAL(1, d.route_hops);
+    TEST_ASSERT_EQUAL(150, d.route_metric);
 }
 
 /* --- Integration: 3-node route discovery A -> B -> C --- */
@@ -247,7 +319,7 @@ void test_three_node_discovery(void) {
     reverse_route_t* rev = reverse_route_lookup(&rev_b, rrep_c.query_id);
     TEST_ASSERT_NOT_NULL(rev);
     TEST_ASSERT_EQUAL(ADDR_A, rev->prev_hop);
-    bramble_rrep_t rrep_b = rrep_forward(&rrep_c, rev->prev_hop);
+    bramble_rrep_t rrep_b = rrep_forward(&rrep_c, rev->prev_hop, ADDR_B);
 
     /* Step 5: A receives RREP */
     route_install(&rt_a, ADDR_C, ADDR_B, rrep_b.hop_count, rrep_b.route_metric, ROUTE_ACTIVE, now);
@@ -326,6 +398,9 @@ int main(void) {
     RUN_TEST(test_rreq_forward);
     RUN_TEST(test_rrep_build_destination);
     RUN_TEST(test_rrep_forward);
+    RUN_TEST(test_rrep_rx_decide_originator_delivers);
+    RUN_TEST(test_rrep_rx_decide_intermediate_forwards);
+    RUN_TEST(test_rrep_rx_decide_unsolicited_drops_without_install);
     RUN_TEST(test_three_node_discovery);
     RUN_TEST(test_retry_discovery_succeeds_through_warm_dedup);
     return UNITY_END();
