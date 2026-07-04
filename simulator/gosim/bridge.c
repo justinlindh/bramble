@@ -445,7 +445,7 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
 
     if (d.install_route) {
         route_install(&rx->routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
-                      ROUTE_ACTIVE, now_ms);
+                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms);
         emit_route_added(stdout, now_us, rx->id, d.route_dest, d.route_next_hop, d.route_hops);
         anomaly_check_route_flap(&anomaly[node_idx].flap, d.route_dest, d.route_next_hop, now_us,
                                  stdout, rx->id);
@@ -600,7 +600,8 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                                                 hdr.hop_limit, data_link_metric);
     if (data_rx.install_reverse_route && orig_sender != 0) {
         route_install(&rx->routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
-                      data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE, now_ms);
+                      data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE,
+                      ROUTE_SRC_BREADCRUMB, now_ms);
         emit_route_added(stdout, now_us, rx->id, data_rx.reverse_dest, data_rx.reverse_next_hop,
                          data_rx.reverse_hop_count);
     }

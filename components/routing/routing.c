@@ -88,19 +88,32 @@ static void route_remove(routing_table_t* table, int idx) {
 }
 
 int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint8_t hop_count,
-                  uint8_t metric, route_state_t state, uint32_t now_ms) {
+                  uint8_t metric, route_state_t state, route_source_t source, uint32_t now_ms) {
     /* Check existing */
     for (int i = 0; i < table->count; i++) {
         if (table->entries[i].dest_addr == dest) {
             route_entry_t* e = &table->entries[i];
-            /* Replace if: current is broken/stale, or new metric is better, or same metric fewer
-             * hops */
-            if (e->state == ROUTE_BROKEN || e->state == ROUTE_STALE || metric > e->metric ||
-                (metric == e->metric && hop_count < e->hop_count)) {
+            bool replace;
+            /* Task 4-fix F2: trust class dominates. A DISCOVERED
+             * (control-plane, HMAC-gated) install always reclaims a
+             * BREADCRUMB entry, and a BREADCRUMB install can never displace
+             * a DISCOVERED one -- otherwise a forged/maxed breadcrumb
+             * (metric 255, 1 hop) would permanently lock out the real
+             * route. Same-class installs keep the usual metric/hop rule. */
+            if (source != e->source) {
+                replace = (source == ROUTE_SRC_DISCOVERED);
+            } else {
+                /* Replace if: current is broken/stale, or new metric is
+                 * better, or same metric fewer hops */
+                replace = (e->state == ROUTE_BROKEN || e->state == ROUTE_STALE ||
+                           metric > e->metric || (metric == e->metric && hop_count < e->hop_count));
+            }
+            if (replace) {
                 e->next_hop = next_hop;
                 e->hop_count = hop_count;
                 e->metric = metric;
                 e->state = state;
+                e->source = source;
                 e->fail_count = 0;
                 e->last_used = now_ms;
                 e->last_confirmed = now_ms;
@@ -143,6 +156,7 @@ int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint
     table->entries[idx].hop_count = hop_count;
     table->entries[idx].metric = metric;
     table->entries[idx].state = state;
+    table->entries[idx].source = source;
     table->entries[idx].last_used = now_ms;
     table->entries[idx].last_confirmed = now_ms;
     return idx;

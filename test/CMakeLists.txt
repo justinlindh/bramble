@@ -160,6 +160,21 @@ target_include_directories(test_ack_auth PRIVATE
 )
 target_link_libraries(test_ack_auth ssl crypto)
 
+# DATA origin authentication (Task 4-fix F1, Critical): the 8-byte network-key
+# auth_hmac over the masked header + src_addr that gates reverse-route
+# learning, plus the keyless-forged-DATA poisoning attack regression.
+add_executable(test_data_auth
+    test_data_auth.c
+    unity/unity.c
+)
+target_include_directories(test_data_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+)
+target_link_libraries(test_data_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c
