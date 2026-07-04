@@ -112,6 +112,30 @@ func (h *radioHarness) budgetDeniedBroadcast(node *C.sim_node_t) uint32 {
 	return uint32(node.budget_denied[C.AIRTIME_IDX_BROADCAST])
 }
 
+// applyDutyCap calls the REAL airtime_budget_set_duty_cap on a node's
+// airtime budget (Task 5), exactly what bridge_apply_duty_cycle_cap does
+// for a live scenario with a "radio.duty_cycle_pct" set. No sim-side duty
+// math: this is a direct passthrough to the real component.
+func (h *radioHarness) applyDutyCap(node *C.sim_node_t, maxDutyCyclePct uint8) {
+	C.airtime_budget_set_duty_cap(&node.airtime, C.uint8_t(maxDutyCyclePct), C.bool(true))
+}
+
+// dutyCycleSet/dutyCycleCapPct read the harness's shared radio_config_t
+// duty-cycle fields (Task 5 scenario schema), populated by loadScenario
+// parsing a "radio.duty_cycle_pct" scenario JSON field.
+func (h *radioHarness) dutyCycleSet() bool     { return bool(h.radio.duty_cycle_set) }
+func (h *radioHarness) dutyCycleCapPct() uint8 { return uint8(h.radio.duty_cycle_pct) }
+
+// applyBridgeDutyCycleCap calls the real bridge_apply_duty_cycle_cap
+// (Task 5), exactly the function sim.go's cmdLoad/handleNodeJoin/cmdAddNode
+// call after every node_activate. No-ops if the harness's shared radio
+// config has no duty cap set, matching sim.go's own guard.
+func (h *radioHarness) applyBridgeDutyCycleCap(node *C.sim_node_t) {
+	if h.dutyCycleSet() {
+		C.bridge_apply_duty_cycle_cap(node, h.radio.duty_cycle_pct)
+	}
+}
+
 // forceBeaconDue makes the node's next beacon due at nowUs, so the very next
 // tick() call attempts a beacon deterministically instead of waiting on the
 // randomized first-beacon phase from node_activate.

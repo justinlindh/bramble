@@ -64,6 +64,9 @@ void radio_config_init(radio_config_t* config) {
     config->capture_db = 6.0f;
     config->path_loss_exp = 2.9f;
     config->path_loss_d0_db = 52.0f;
+
+    config->duty_cycle_set = false; /* unlimited: today's behavior */
+    config->duty_cycle_pct = 0;
 }
 
 float radio_distance(const sim_node_t* a, const sim_node_t* b) {
