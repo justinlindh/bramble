@@ -160,19 +160,28 @@ bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_ad
     r.header.packet_id = rreq->query_id;
     r.query_id = rreq->query_id;
     r.src_addr = my_addr;
-    r.next_hop = rreq->prev_hop;
+    /* next_hop carries the FORWARDER's own address, not the frame-routing
+     * target: the destination is its own first hop toward itself. Every
+     * relay hop overwrites this with its own address in rrep_forward, so a
+     * receiver installs next_hop = whoever actually delivered the RREP,
+     * fixing the multi-hop bug (see the harness design doc). */
+    r.next_hop = my_addr;
     r.hop_count = rreq->hop_count + 1;
     r.route_metric = rreq->metric;
     rrep_sign(&r);
     return r;
 }
 
-bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back) {
+bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back,
+                            uint32_t my_addr) {
     /* Copies the whole struct, including auth_hmac, unchanged: only
      * next_hop and header.dest_addr are relay-mutable, exactly the two
-     * fields rrep_sign/rrep_verify exclude from the MAC. */
+     * fields rrep_sign/rrep_verify exclude from the MAC. next_hop becomes
+     * THIS relay's own address (the node the next receiver should install
+     * as its next hop); header.dest_addr stays the frame-routing target
+     * (next_hop_back), unicasting the packet itself toward the originator. */
     bramble_rrep_t r = *incoming;
-    r.next_hop = next_hop_back;
+    r.next_hop = my_addr;
     r.header.dest_addr = next_hop_back;
     return r;
 }
@@ -183,12 +192,21 @@ rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr
     rrep_rx_decision_t d;
     memset(&d, 0, sizeof(d));
 
-    /* Behavior-preserving extraction of the current handle_rrep logic:
-     * install runs unconditionally, and next_hop keeps the pre-fix ternary
-     * (correct only when self_addr is a direct neighbor of the source). */
+    /* self_addr is currently unused: it only fed the pre-fix next_hop
+     * ternary, removed now that rrep.next_hop directly carries the
+     * forwarder's address (see rrep_forward/rrep_build_destination). Kept
+     * in the signature since it is part of the documented interface and
+     * callers already pass it. */
+    (void)self_addr;
+
+    /* install still runs unconditionally (the unsolicited-RREP gate is a
+     * separate, later fix). next_hop is whichever node actually delivered
+     * this RREP to us: rrep_build_destination/rrep_forward write the
+     * sender's own address there on every hop, so this is correct at any
+     * hop count, not just one hop from the destination. */
     d.install_route = true;
     d.route_dest = rrep->src_addr;
-    d.route_next_hop = (rrep->header.dest_addr == self_addr) ? rrep->src_addr : rrep->next_hop;
+    d.route_next_hop = rrep->next_hop;
     d.route_hops = rrep->hop_count;
     d.route_metric = link_metric;
 

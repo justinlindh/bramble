@@ -58,7 +58,13 @@ bramble_rreq_t rreq_build_originator(uint32_t my_addr, uint32_t dest_addr, uint3
 bramble_rreq_t rreq_forward(const bramble_rreq_t* incoming, uint32_t my_addr, int8_t rx_rssi,
                             int8_t rx_snr);
 bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_addr);
-bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back);
+/* next_hop_back is the frame-routing target (header.dest_addr): the next
+ * physical node this RREP unicasts to, toward the originator. my_addr is
+ * THIS relay's own address, written into next_hop so the receiver installs
+ * a route via the node that actually delivered the RREP (fixes multi-hop
+ * next_hop; see rrep_rx_decide). */
+bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back,
+                            uint32_t my_addr);
 
 /*
  * SEC-H1 (Task 3.2, STAGED, NOT closed: see network_key.h). Authenticates
@@ -79,11 +85,12 @@ int rrep_verify(const bramble_rrep_t* r);
  * operates only on the already-host-testable routing tables, taking crypto
  * verification (rrep_verify, control_replay_ok) as done by the caller.
  *
- * This first extraction is BEHAVIOR-PRESERVING: it replicates the current
- * handle_rrep logic exactly, buggy bits included. route_next_hop keeps the
- * dest_addr==self_addr ternary (wrong beyond 1 hop, see the harness design
- * doc), and install_route is unconditionally true (a later fix gates it on
- * pd/rev participation). */
+ * route_next_hop is rrep->next_hop directly: the node that actually
+ * delivered this RREP, correct at any hop count (see rrep_forward). This
+ * replaced an earlier dest_addr==self_addr ternary that was only correct
+ * one hop from the destination (see the harness design doc). install_route
+ * is still unconditionally true; the unsolicited-RREP gate on pd/rev
+ * participation is a separate, later fix. */
 typedef enum {
     RREP_RX_DROP = 0,
     RREP_RX_DELIVER,
