@@ -20,7 +20,21 @@ void test_pending_ack_add_and_remove(void) {
     TEST_ASSERT_FALSE(pending_ack_remove(&table, 42));
 }
 
-void test_key_exchange_critical_tier_retries(void) {
+/*
+ * Task 6 (GAP B): the mesh_task.c real KE send path (send_ke_envelope ->
+ * send_data_packet) decides its reliability tier by calling
+ * msg_tier_for_send(app_type == APP_TYPE_KE) -- this is the SAME function
+ * exercised below, not a re-implementation of its logic. Before this task,
+ * this test hardcoded MSG_TIER_CRITICAL directly into pending_ack_add,
+ * which proved the pending-ack MECHANISM honors Critical tier but said
+ * nothing about whether the real send path ever actually chose that tier
+ * (it didn't: send_data_packet always passed MSG_TIER_NORMAL, regardless
+ * of app_type). Driving the tier through msg_tier_for_send here means a
+ * regression in that decision (e.g. someone flipping the ternary, or a new
+ * caller forgetting to pass is_key_exchange=true) fails THIS test, not just
+ * a silently-still-green mechanism test.
+ */
+void test_key_exchange_send_path_uses_critical_tier(void) {
     /* KEY_EXCHANGE should use Critical tier (8 retries, exponential backoff) */
     pending_ack_table_t table;
     pending_ack_init(&table);
@@ -28,8 +42,11 @@ void test_key_exchange_critical_tier_retries(void) {
     uint8_t pkt[101]; /* KEY_EXCHANGE_SIZE */
     memset(pkt, 0xAA, sizeof(pkt));
 
-    /* Add KEY_EXCHANGE as Critical tier */
-    int idx = pending_ack_add(&table, 0xAE01, 0x1234, MSG_TIER_CRITICAL, pkt, sizeof(pkt), 1000);
+    /* The real decision send_data_packet makes for an APP_TYPE_KE payload. */
+    uint8_t tier = msg_tier_for_send(true);
+    TEST_ASSERT_EQUAL_UINT8(MSG_TIER_CRITICAL, tier);
+
+    int idx = pending_ack_add(&table, 0xAE01, 0x1234, tier, pkt, sizeof(pkt), 1000);
     TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
     TEST_ASSERT_EQUAL_UINT8(8, table.entries[idx].max_attempts);
     TEST_ASSERT_EQUAL_UINT8(MSG_TIER_CRITICAL, table.entries[idx].tier);
@@ -46,6 +63,14 @@ void test_key_exchange_critical_tier_retries(void) {
     }
     /* Should have retried multiple times before giving up */
     TEST_ASSERT_GREATER_OR_EQUAL(1, retries);
+}
+
+/* Companion to test_key_exchange_send_path_uses_critical_tier: every
+ * non-KE app_type (chat, location, ...) must keep getting MSG_TIER_NORMAL,
+ * so this task's fix is scoped to KE and does not silently upgrade every
+ * DATA send to Critical tier. */
+void test_non_key_exchange_send_path_uses_normal_tier(void) {
+    TEST_ASSERT_EQUAL_UINT8(MSG_TIER_NORMAL, msg_tier_for_send(false));
 }
 
 void test_pending_ack_table_full(void) {
@@ -73,7 +98,8 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
     RUN_TEST(test_pending_ack_add_and_remove);
-    RUN_TEST(test_key_exchange_critical_tier_retries);
+    RUN_TEST(test_key_exchange_send_path_uses_critical_tier);
+    RUN_TEST(test_non_key_exchange_send_path_uses_normal_tier);
     RUN_TEST(test_pending_ack_table_full);
     return UNITY_END();
 }

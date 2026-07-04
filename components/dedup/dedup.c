@@ -48,3 +48,13 @@ void dedup_purge(dedup_buffer_t* buf, uint32_t now_ms) {
 }
 
 int dedup_count(const dedup_buffer_t* buf) { return buf->count; }
+
+bool dedup_contains(const dedup_buffer_t* buf, uint32_t packet_id, uint32_t now_ms) {
+    for (int i = 0; i < buf->count; i++) {
+        if (buf->entries[i].packet_id == packet_id &&
+            (now_ms - buf->entries[i].timestamp_ms) < DEDUP_EXPIRY_MS) {
+            return true;
+        }
+    }
+    return false;
+}

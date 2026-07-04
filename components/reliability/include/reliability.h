@@ -32,4 +32,17 @@ bool pending_ack_remove(pending_ack_table_t* table, uint32_t packet_id);
 void pending_ack_tick(pending_ack_table_t* table, uint32_t now_ms);
 uint8_t tier_max_retries(uint8_t tier);
 uint32_t tier_base_delay_ms(uint8_t tier);
+/*
+ * Task 6 (GAP B): the single source of truth for which reliability tier a
+ * DATA send registers under. Key exchange (handshake-in-DATA, APP_TYPE_KE)
+ * must use MSG_TIER_CRITICAL (8 retries) per spec: losing a handshake
+ * message stalls session establishment entirely, unlike an ordinary chat
+ * send. Takes a plain bool rather than the channel component's APP_TYPE_KE
+ * constant so components/reliability has no dependency on components/
+ * channel; the caller (mesh_task.c's send_data_packet) passes
+ * `app_type == APP_TYPE_KE`. This is the ONLY place tier-for-send is
+ * decided, so a caller cannot silently regress back to MSG_TIER_NORMAL for
+ * KE without this function (and its test) catching it.
+ */
+uint8_t msg_tier_for_send(bool is_key_exchange);
 #endif

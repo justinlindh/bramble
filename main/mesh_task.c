@@ -129,6 +129,19 @@ static dedup_buffer_t s_dedup;
  * the flood path and cannot change dedup behavior for RREQ/PROBE_ACK/other
  * control traffic that already relies on s_dedup's existing key shape. */
 static dedup_buffer_t s_flood_dedup;
+/* Task 6 (GAP A): tracks unicast DATA we have already delivered locally
+ * (ACK already sent), keyed the same src_addr-qualified way s_flood_dedup
+ * is (packet_id ^ src_addr, collision-safe for the same reason). Consulted
+ * ONLY at mesh_process_rx_packet's s_dedup duplicate-hit branch: without
+ * this, a duplicate unicast DATA (the sender's own retransmit after its
+ * first ACK was lost) is silently dropped there and NEVER re-ACKed, making
+ * a single lost ACK terminal (the message was delivered, but the sender
+ * eventually marks it FAILED). Recorded once, right after send_ack, for
+ * every genuinely new unicast delivery in handle_data; a later duplicate is
+ * recognized via dedup_contains (a pure peek, never inserts on a miss) and
+ * re-triggers send_ack WITHOUT re-entering handle_data's decrypt/deliver
+ * path, so local delivery stays exactly-once. */
+static dedup_buffer_t s_delivered_dedup;
 static replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
 static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
                                            replay window, keyed on the authenticated signer address,
@@ -2234,6 +2247,15 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                          */
                         if (dir == MSG_DIR_INCOMING) {
                             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+                            /* Task 6 (GAP A): record this delivery so a later
+                             * duplicate of THIS fragment (same packet_id,
+                             * the sender's retransmit after a lost ACK) is
+                             * recognized at mesh_process_rx_packet's dedup
+                             * gate and re-ACKed instead of silently dropped.
+                             * Keyed like s_flood_dedup (packet_id ^
+                             * src_addr). */
+                            dedup_check_and_add(&s_delivered_dedup, rx_hdr.packet_id ^ src_addr,
+                                                now_ms());
                         } else if (mesh_should_emit_broadcast_delivery_receipt(
                                        rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
                             queue_broadcast_delivery_receipt(info.src_addr, first_frag_pkt_id);
@@ -2310,6 +2332,12 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         /* Send ACK for unicast messages (not broadcasts) */
         if (dir == MSG_DIR_INCOMING) {
             send_ack(info.src_addr, rx_hdr.packet_id, rssi);
+            /* Task 6 (GAP A): record this delivery so a later duplicate
+             * (same packet_id, the sender's retransmit after a lost ACK) is
+             * recognized at mesh_process_rx_packet's dedup gate and
+             * re-ACKed instead of silently dropped. Keyed like
+             * s_flood_dedup (packet_id ^ src_addr). */
+            dedup_check_and_add(&s_delivered_dedup, rx_hdr.packet_id ^ src_addr, now_ms());
         } else if (mesh_should_emit_broadcast_delivery_receipt(
                        rx_hdr.dest_addr, (uint8_t)neighbor_count(&s_neighbors))) {
             queue_broadcast_delivery_receipt(info.src_addr, rx_hdr.packet_id);
@@ -2962,6 +2990,36 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
 
     if (dedup_check_and_add(&s_dedup, dedup_key, now_ms())) {
         maybe_emit_implicit_broadcast_delivery(&header, pkt);
+
+        /* Task 6 (GAP A): a duplicate unicast DATA addressed to us is the
+         * sender's retransmit of an already-delivered message (its first
+         * ACK was lost in transit). Re-send the ACK (idempotent, gives the
+         * retransmit's sender another chance to hear the confirmation)
+         * WITHOUT touching handle_data's decrypt/deliver path, so local
+         * delivery stays exactly-once. src_addr is read directly off the
+         * still-plaintext wire prefix here (SEC-M2), unauthenticated at
+         * this point, but that is fine for this decision: s_delivered_dedup
+         * only ever gains an entry AFTER a frame with that exact
+         * (src_addr, packet_id) pair already passed full auth_hmac
+         * verification, decrypt, and local delivery (handle_data), so a
+         * hit here can only be produced by replaying bytes that already
+         * cleared that bar once. Worst case an attacker forces a resend of
+         * an ACK that was already sent, bounded by the same ACK-tier
+         * airtime budget every other ACK send goes through. */
+        if (header.type == PKT_TYPE_DATA && header.dest_addr == s_identity->address &&
+            pkt->len >= BRAMBLE_DATA_SRC_ADDR_OFFSET + 4) {
+            uint32_t dup_src_addr;
+            memcpy(&dup_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+            uint32_t delivered_key = header.packet_id ^ dup_src_addr;
+            if (dedup_contains(&s_delivered_dedup, delivered_key, now_ms())) {
+                ESP_LOGI(TAG,
+                         "Re-sending ACK for already-delivered duplicate pkt=%08" PRIX32
+                         " from %08" PRIX32,
+                         header.packet_id, dup_src_addr);
+                send_ack(dup_src_addr, header.packet_id, pkt->rssi);
+            }
+        }
+
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -3344,6 +3402,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         neighbor_purge(&s_neighbors, t);
         dedup_purge(&s_dedup, t);
         dedup_purge(&s_flood_dedup, t);
+        dedup_purge(&s_delivered_dedup, t);
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
         reassembly_purge(&s_reassembly, t);
@@ -3763,10 +3822,16 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
     tx_kind_t kind = (dest_addr == 0xFFFFFFFF) ? TX_KIND_DATA_BROADCAST : TX_KIND_DATA;
     int ret = mesh_tx(buf, (uint8_t)total, kind);
     if (ret == TX_GATE_OK) {
-        /* Register for ACK tracking (unicast only) */
+        /* Register for ACK tracking (unicast only). Task 6 (GAP B): tier is
+         * decided by msg_tier_for_send, the single source of truth for
+         * this -- key exchange (APP_TYPE_KE, the handshake TRANSPORT) must
+         * retry at MSG_TIER_CRITICAL (8 attempts), not the MSG_TIER_NORMAL
+         * (3 attempts) every other app_type gets, per spec: losing a
+         * handshake message stalls session establishment entirely. */
         if (dest_addr != 0xFFFFFFFF) {
-            pending_ack_add(&s_pending_acks, pkt_id, dest_addr, MSG_TIER_NORMAL, buf,
-                            (uint16_t)total, now_ms());
+            uint8_t tier = msg_tier_for_send(app_type == APP_TYPE_KE);
+            pending_ack_add(&s_pending_acks, pkt_id, dest_addr, tier, buf, (uint16_t)total,
+                            now_ms());
         }
         return pkt_id;
     }
@@ -4815,6 +4880,7 @@ void mesh_task_start(bramble_identity_t* identity) {
 
     dedup_init(&s_dedup);
     dedup_init(&s_flood_dedup);
+    dedup_init(&s_delivered_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
     replay_deferred_init(&s_deferred);
