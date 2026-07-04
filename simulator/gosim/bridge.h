@@ -90,6 +90,10 @@ sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index);
  * radio_check_reception sees no occupancy window to overlap against. */
 sim_event_t bridge_make_receive_packet_event(uint64_t ts_us, uint32_t src_addr, uint32_t dest_addr,
                                              const uint8_t* data, uint16_t len);
+/* Phase 2 Task 0 (managed-flooding routing mode): see bridge.c for the full
+ * comment. Used only by gosim/flood.go's own EVT_SEND_PACKET handling. */
+sim_event_t bridge_make_flood_relay_event(uint64_t due_us, uint32_t node_addr, const uint8_t* frame,
+                                          uint16_t len);
 
 /* ─── Message tracking ─────────────────────────────────────────────────── */
 #define MAX_MSG_TRACK 1024
@@ -101,6 +105,15 @@ typedef struct {
     uint64_t sent_us;
     uint8_t attempt; /* retransmission count */
     bool active;
+    /* Phase 2 "save reactive routing" Part A: set once the delivery
+     * receipt for this packet_id has been observed back at the true
+     * originator (bridge_msg_track_confirm). Tracked separately from
+     * `active` because `active` already flips false the moment DATA
+     * reaches the destination (bridge_msg_track_complete, called from
+     * _handle_data on arrival) -- well before any receipt has traveled
+     * back, often before it even exists. Reset to false whenever a slot is
+     * reused for a new scripted message (bridge_msg_track_add). */
+    bool confirmed;
 } msg_tracker_t;
 
 void bridge_msg_track_init(msg_tracker_t* track, int count);
@@ -108,6 +121,16 @@ int bridge_msg_track_add(msg_tracker_t* track, int count, uint32_t packet_id, ui
                          uint32_t dest_addr, uint64_t sent_us);
 bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_id, uint64_t now_us,
                                metrics_state_t* metrics);
+/* Marks packet_id as confirmed (its delivery receipt reached the true
+ * originator) and records it in metrics exactly once, regardless of the
+ * entry's `active` state (which is normally already false by the time this
+ * runs; see the struct doc comment above). Looks the entry up by packet_id
+ * alone, not `active`, since track_add's dest_addr/sent_us fields on that
+ * entry are still meaningful here. Returns true iff this call is the one
+ * that recorded the confirmation (false if the entry was not found, or was
+ * already confirmed). */
+bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_id,
+                              metrics_state_t* metrics);
 
 /* ─── Packet handling wrappers ─────────────────────────────────────────── */
 /*
@@ -150,5 +173,21 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
  *   Initialize bridge-level state (relay path tracker, etc.)
  */
 void bridge_init(void);
+
+/*
+ * Phase 2 "save reactive routing" Part B: intermediate-node RREP
+ * (components/routing/include/discovery.h's rrep_build_intermediate /
+ * intermediate_rrep_route_usable). Firmware (main/mesh_task.c's
+ * handle_rreq) always has this on; gosim exposes a runtime on/off switch
+ * purely so a scenario can A/B the SAME topology/traffic with and without
+ * the feature for measurement (see internal-planning plans/2026-07-04
+ * phase2-scale-framework.md's before/after requirement), without needing
+ * two firmware builds. Defaults to true (the shipped firmware behavior);
+ * gosim/sim.go resets this explicitly on every run (see the scenario's
+ * optional "intermediate_rrep" JSON field), so no run leaks a previous
+ * run's setting.
+ */
+void bridge_set_intermediate_rrep_enabled(bool enabled);
+bool bridge_get_intermediate_rrep_enabled(void);
 
 #endif /* BRIDGE_H */

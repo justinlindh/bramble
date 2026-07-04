@@ -66,8 +66,22 @@ The shared LoRa medium is modeled in `engine/sim_radio.c`:
   deterministic energy detection within the range disk.
 - **RSSI.** Log-distance path loss: `RSSI(d) = tx_power - 52 dB - 29 log10(d)`
   with d in grid units (1 unit = 10 m), exponent n = 2.9, 52 dB free-space
-  reference loss at 10 m / 915 MHz. Deliverability stays disk-range gated;
-  RSSI feeds capture comparisons and link metrics.
+  reference loss at 10 m / 915 MHz. RSSI feeds capture comparisons and link
+  metrics.
+- **Range derives from SF/BW, not a fixed disk.** Deliverability is gated on
+  distance vs. `config->range`, but `range` itself is computed from the link
+  budget: the distance at which the RSSI gradient above crosses
+  `radio_sensitivity_dbm(sf, bw_hz)`, the SX127x/SX126x datasheet sensitivity
+  (SF7 -123 dBm ... SF12 -137 dBm at 125 kHz, worsening by
+  `10*log10(bw/125000)` dB at wider bandwidth) plus a calibration constant
+  (`NOISE_MARGIN_DB` in `sim_radio.c`) chosen so the firmware's default PHY
+  (SF10/125 kHz) reproduces the simulator's long-standing ~150-unit baseline
+  range under the default path-loss params. Higher SF has more link budget
+  and longer range; wider bandwidth raises the noise floor and shortens it.
+  A scenario's `radio.range` field, if present, overrides the derivation
+  (an escape hatch for topology tests that want range decoupled from
+  SF/BW); otherwise range is recomputed from whatever `sf`/`bw_hz`/
+  `tx_power_dbm`/`path_loss_*` the scenario configured.
 
 Collision outcomes are evaluated at end-of-packet (delivery time), when every
 transmission that could overlap the packet's air window is known. Overlap is
@@ -76,8 +90,8 @@ against ToA of hundreds of milliseconds).
 
 Per-scenario overrides in the `radio` JSON object: `sf`, `bw_hz`, `cr`,
 `tx_power_dbm`, `capture_db`, `path_loss_exp`, `collisions` (bool), `lbt`
-(bool), plus the existing `range`, `loss_pct`,
-`propagation_speed_ms_per_unit`.
+(bool), plus the existing `range` (explicit override; omit to derive from
+`sf`/`bw_hz`), `loss_pct`, `propagation_speed_ms_per_unit`.
 
 The model is validated by unit tests (overlap, capture timing, half-duplex,
 TX serialization, LBT) and an ALOHA calibration test that reproduces the

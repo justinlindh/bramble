@@ -8,18 +8,23 @@ simulator/engine/sim_scenario.c's scenario_load_file, including the
 Task 3 "beacon" block and Task 5 "radio.duty_cycle_pct" field.
 
 Design rule: every schema field that has a real firmware/sim default
-(sf, bw_hz, beacon.*, radio.duty_cycle_pct, seed) is emitted ONLY if its
-CLI flag was explicitly given. Omitted fields let the sim apply its own
+(sf, bw_hz, range, beacon.*, radio.duty_cycle_pct, seed) is emitted ONLY if
+its CLI flag was explicitly given. Omitted fields let the sim apply its own
 default (radio_config_init / sim_beacon_policy_init / scenario_load_file's
 seed=42 fallback), exactly as if the scenario file had never mentioned
-them. This is what makes --legacy reproduce the old files byte-for-byte:
-the old generator never wrote sf/bw_hz/beacon/duty_cycle_pct/seed at all.
+them. This is what makes --legacy reproduce the old files byte-for-byte
+(modulo "range": the old generator hardcoded "range": 150; this one omits it
+so range derives from the sf/bw link budget instead of being a fixed disk
+decoupled from them -- at the default PHY, SF10/125 kHz, that derivation
+still lands at ~150 units, so --legacy's runtime behavior is unchanged even
+though the emitted JSON no longer has the literal field). Pass --range to
+force the old fixed-disk field back on.
 
 Legacy mapping (--legacy {10,50,100,200}), matching the deleted
-generate-adaptive-scenarios.py exactly:
+generate-adaptive-scenarios.py's behavior:
     --topology grid --spacing 120 --duration-s 600
     --traffic-msgs-per-min 2 --nodes {10,50,100,200}
-    (sf/bw/beacon/duty/seed all omitted)
+    (sf/bw/beacon/duty/seed/range all omitted)
     name: airtime-adaptive-{N}, out: airtime-adaptive-{N}.json
 """
 
@@ -117,10 +122,17 @@ def build_scenario(args):
     events = generate_messages(nodes, duration_ms, args.traffic_msgs_per_min)
 
     radio = {
-        "range": 150,
         "loss_pct": 0,
         "propagation_speed_ms_per_unit": 0.1,
     }
+    # "range" is omitted unless explicitly given: the sim derives it from the
+    # link budget implied by sf/bw_hz (simulator/engine/sim_radio.c
+    # radio_derive_range), so a radio-knob scenario gets SF/BW physically
+    # coupled to reception range instead of a fixed disk. Pass --range to
+    # keep the old fixed-disk behavior for topology tests that want range
+    # decoupled from SF/BW.
+    if args.range is not None:
+        radio["range"] = args.range
     if args.sf is not None:
         radio["sf"] = args.sf
     if args.bw is not None:
@@ -138,6 +150,22 @@ def build_scenario(args):
     }
     if args.seed is not None:
         scenario["seed"] = args.seed
+
+    # Phase 2 Task 0 (flood-comparison baseline): "routing" selects gosim's
+    # routing mode ("reactive", the default, or "flood", the Meshtastic-
+    # style managed-flooding mode, simulator/gosim/flood.go); omitted unless
+    # explicitly given, same emit-only-if-explicit rule as everything else
+    # in this generator, so existing scenarios' interpretation never changes.
+    if args.routing is not None:
+        scenario["routing"] = args.routing
+    if args.flood_hop_limit is not None:
+        scenario["flood_hop_limit"] = args.flood_hop_limit
+
+    # Phase 2 "save reactive routing" Part B: "intermediate_rrep" A/B
+    # switch (gosim/bridge.h's bridge_set_intermediate_rrep_enabled);
+    # omitted unless explicitly given, same emit-only-if-explicit rule.
+    if args.intermediate_rrep is not None:
+        scenario["intermediate_rrep"] = bool(args.intermediate_rrep)
 
     beacon = {}
     if args.beacon_adaptive is not None:
@@ -166,6 +194,10 @@ def parse_args(argv):
                   help="LoRa spreading factor; omitted (sim default SF10) unless given")
     p.add_argument("--bw", type=int, choices=[125000, 250000], default=None,
                   help="LoRa bandwidth Hz; omitted (sim default 125000) unless given")
+    p.add_argument("--range", type=float, default=None,
+                  help="fixed reception-range override, grid units; omitted (sim derives range "
+                       "from the sf/bw link budget, see sim_radio.c radio_derive_range) unless "
+                       "given. Set this to decouple range from sf/bw, e.g. for topology tests")
     p.add_argument("--beacon-interval-ms", type=int, default=None,
                   help="fixed/base beacon interval ms; omitted (sim default 60000) unless given")
     p.add_argument("--beacon-adaptive", type=int, choices=[0, 1], default=None,
@@ -174,6 +206,17 @@ def parse_args(argv):
     p.add_argument("--duty-cycle-pct", type=float, default=None,
                   help="optional regulatory duty-cycle cap 0-100; omitted (unlimited, today's "
                        "behavior) unless given")
+    p.add_argument("--routing", choices=["reactive", "flood"], default=None,
+                  help="gosim routing mode; omitted (sim default: reactive, Bramble's real "
+                       "firmware AODV path) unless given. 'flood' selects the Phase 2 Task 0 "
+                       "Meshtastic-style managed-flooding sim-layer mode (simulator/gosim/flood.go)")
+    p.add_argument("--flood-hop-limit", type=int, default=None,
+                  help="flood mode's hop_limit; omitted (sim default: 3, Meshtastic's shipped "
+                       "default) unless given. Ignored when --routing is not 'flood'")
+    p.add_argument("--intermediate-rrep", type=int, choices=[0, 1], default=None,
+                  help="Phase 2 Part B A/B switch: 1 = intermediate-node RREP on, 0 = off; "
+                       "omitted (sim default: on, matching firmware's always-on shipped "
+                       "behavior) unless given. Ignored in flood mode (reactive-only feature)")
     p.add_argument("--traffic-msgs-per-min", type=float, default=LEGACY_TRAFFIC_MSGS_PER_MIN,
                   help=f"message generation rate (default: {LEGACY_TRAFFIC_MSGS_PER_MIN})")
     p.add_argument("--duration-s", type=int, default=LEGACY_DURATION_S,

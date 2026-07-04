@@ -2664,9 +2664,65 @@ static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
-    /* Not for us: schedule a jittered forward while the hop budget lasts.
-     * The > 1 bound makes hop_limit N mean N-hop reach exactly (a relay
-     * receiving 1 does not forward), matching the spec and the simulator. */
+    /* Not for us: check whether we already hold a fresh, trustworthy route
+     * to the destination (Phase 2 "save reactive routing": intermediate-
+     * node RREP; see discovery.h's rrep_build_intermediate/
+     * intermediate_rrep_route_usable doc comments for the trust/freshness
+     * rules). Answering here short-circuits discovery for this whole
+     * subtree instead of needing the flood to reach D itself.
+     *
+     * Having replied, this node does NOT also forward the RREQ onward:
+     * that is the airtime-saving half of the tradeoff (the point of this
+     * feature is to cut RREQ flood cost, not just add RREP traffic on top
+     * of an unchanged flood), and it is safe because the RREQ is a
+     * broadcast: every OTHER neighbor that heard the same RREQ still makes
+     * its own independent forward decision, so a subtree this node cannot
+     * vouch for still gets flooded through other paths. If this node's
+     * cached route turns out to be stale/wrong beyond what
+     * intermediate_rrep_route_usable already guards against, the
+     * originator's expanding-ring retry (a fresh query_id, see
+     * discovery.h) still reaches D normally. */
+    route_entry_t* cached_route = route_lookup(&s_routes, rreq.header.dest_addr);
+    if (cached_route && intermediate_rrep_route_usable(cached_route, now_ms())) {
+        ESP_LOGI(TAG, "Intermediate RREP for dest=%08" PRIX32 " via cached route (hops=%u)",
+                 rreq.header.dest_addr, cached_route->hop_count);
+        bramble_rrep_t rrep =
+            rrep_build_intermediate(&rreq, cached_route, s_identity->address, (int8_t)rssi, snr);
+
+        /* Same seq draw + re-sign convention as the "RREQ is for us"
+         * branch above: this node is a fresh RREP signer (answering on D's
+         * behalf), so it needs its own origin sequence number, not D's. */
+        uint64_t rrep_seq;
+        if (control_seq_next(&rrep_seq) != 0) {
+            ESP_LOGE(TAG,
+                     "Seq counter unavailable, dropping intermediate RREP for query=%08" PRIX32,
+                     rreq.query_id);
+            return;
+        }
+        rrep.seq[0] = (uint8_t)(rrep_seq >> 40);
+        rrep.seq[1] = (uint8_t)(rrep_seq >> 32);
+        rrep.seq[2] = (uint8_t)(rrep_seq >> 24);
+        rrep.seq[3] = (uint8_t)(rrep_seq >> 16);
+        rrep.seq[4] = (uint8_t)(rrep_seq >> 8);
+        rrep.seq[5] = (uint8_t)rrep_seq;
+        rrep_sign(&rrep);
+
+        send_rrep(&rrep);
+
+        /* Same as the "RREQ is for us" branch: install a route to the
+         * RREQ's ultimate source via prev_hop, since this node is now
+         * answering on D's behalf and should be just as reachable from the
+         * source as the real destination would have been. */
+        uint8_t src_metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
+        route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, src_metric,
+                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms());
+        return;
+    }
+
+    /* Not for us, and no usable cached route: schedule a jittered forward
+     * while the hop budget lasts. The > 1 bound makes hop_limit N mean
+     * N-hop reach exactly (a relay receiving 1 does not forward), matching
+     * the spec and the simulator. */
     if (rreq.header.hop_limit > 1) {
         if (!rreq_fwd_allow(&s_rreq_fwd_rl, now_ms())) {
             ESP_LOGW(TAG, "Forwarded RREQ rate limited (query=%08" PRIX32 ")", rreq.query_id);

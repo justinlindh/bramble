@@ -20,6 +20,15 @@
 static bridge_node_ext_t g_node_ext[MAX_NODES];
 static bridge_ext_metrics_t g_ext_metrics;
 
+/* ─── Intermediate-node RREP on/off switch (Phase 2 Part B) ─────────────── */
+/* See bridge.h's doc comment: firmware always has this on; this exists so
+ * gosim scenarios can A/B it. Defaults to true (the shipped behavior). */
+static bool g_intermediate_rrep_enabled = true;
+
+void bridge_set_intermediate_rrep_enabled(bool enabled) { g_intermediate_rrep_enabled = enabled; }
+
+bool bridge_get_intermediate_rrep_enabled(void) { return g_intermediate_rrep_enabled; }
+
 /* Public channel state (one global instance) */
 static bramble_channel_t g_pub_channels[16];
 static int g_num_pub_channels = 0;
@@ -276,6 +285,36 @@ sim_event_t bridge_make_receive_packet_event(uint64_t ts_us, uint32_t src_addr, 
     return e;
 }
 
+/*
+ * bridge_make_flood_relay_event (Phase 2 Task 0, managed-flooding routing
+ * mode): builds a due-timestamped EVT_SEND_PACKET carrying a scheduled
+ * rebroadcast for gosim's Go-only flood.go, exactly the same event-union
+ * construction problem bridge_make_flood_relay_event's Task 5 sibling
+ * (_handle_data's broadcast branch) solves inline in C: cgo cannot set
+ * fields inside a C union from Go, so any code building a sim_event_t
+ * whose payload is the packet union needs a tiny C constructor. Unlike
+ * Task 5's relay (which is fired by bridge_handle_flood_relay, the AODV
+ * DATA-broadcast path), this event is only ever produced and consumed by
+ * flood.go's own EVT_SEND_PACKET handler (dispatchEvent branches on
+ * routing mode), so node_addr/frame are flood.go's own wire format, not
+ * bramble_header_t. data.packet.src_addr carries the RELAYING node's own
+ * address (which node this rebroadcast is due on), matching the Task 5
+ * convention.
+ */
+sim_event_t bridge_make_flood_relay_event(uint64_t due_us, uint32_t node_addr, const uint8_t* frame,
+                                          uint16_t len) {
+    sim_event_t e;
+    memset(&e, 0, sizeof(e));
+    e.type = EVT_SEND_PACKET;
+    e.timestamp_us = due_us;
+    e.data.packet.src_addr = node_addr;
+    if (len > sizeof(e.data.packet.data))
+        len = (uint16_t)sizeof(e.data.packet.data);
+    memcpy(e.data.packet.data, frame, len);
+    e.data.packet.len = len;
+    return e;
+}
+
 /* ─── Message tracking ─────────────────────────────────────────────────── */
 
 void bridge_msg_track_init(msg_tracker_t* track, int count) {
@@ -292,6 +331,7 @@ int bridge_msg_track_add(msg_tracker_t* track, int count, uint32_t packet_id, ui
             track[i].dest_addr = dest_addr;
             track[i].sent_us = sent_us;
             track[i].attempt = 1;
+            track[i].confirmed = false;
             return i;
         }
     }
@@ -314,6 +354,25 @@ bool bridge_msg_track_complete(msg_tracker_t* track, int count, uint32_t packet_
             uint64_t latency_us = now_us - track[i].sent_us;
             metrics_record_packet_delivered(metrics, latency_us);
             track[i].active = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool bridge_msg_track_confirm(msg_tracker_t* track, int count, uint32_t packet_id,
+                              metrics_state_t* metrics) {
+    for (int i = 0; i < count; i++) {
+        if (track[i].packet_id == packet_id && !track[i].confirmed) {
+            /* A freshly-memset (never-used) slot also has packet_id == 0
+             * and confirmed == false; guard against matching it when the
+             * real packet_id happens to be 0 by requiring the slot to have
+             * been used at least once (src_addr set at track_add time is
+             * never 0 for a real node address). */
+            if (track[i].src_addr == 0)
+                continue;
+            track[i].confirmed = true;
+            metrics_record_packet_confirmed(metrics);
             return true;
         }
     }
@@ -386,6 +445,46 @@ static void _handle_rreq(sim_node_t* rx, const uint8_t* buf, uint16_t len, int8_
         pkt.pkt_type = PKT_TYPE_RREP;
 
         /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+        budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                          now_us);
+    } else if (g_intermediate_rrep_enabled &&
+               intermediate_rrep_route_usable(route_lookup(&rx->routes, rreq.header.dest_addr),
+                                              now_ms)) {
+        /* Phase 2 "save reactive routing" Part B: intermediate-node RREP.
+         * Mirrors main/mesh_task.c's handle_rreq using the SAME real
+         * component functions (intermediate_rrep_route_usable,
+         * rrep_build_intermediate) so the sim cannot drift from firmware's
+         * trust/freshness rules. g_intermediate_rrep_enabled (default true)
+         * exists only so a gosim scenario can A/B this feature on identical
+         * topology/traffic (see bridge.h); firmware has no such switch, it
+         * is always on.
+         *
+         * Unlike firmware's handle_rreq, this does not redraw/re-sign a
+         * fresh seq: gosim's destination-reply branch just above never has
+         * either (rrep_build_destination's own internal rrep_sign, with
+         * seq left at its zeroed default, is what ships here), since gosim
+         * does not model the ws 1.3b replay window at all. Matching that
+         * existing simplification keeps this branch internally consistent
+         * with gosim's own destination path rather than firmware's fuller
+         * one. Same reasoning for skipping the reverse route_install to the
+         * RREQ source that firmware's destination AND intermediate
+         * branches both do: gosim's destination branch here does not do it
+         * either. */
+        route_entry_t* cached_route = route_lookup(&rx->routes, rreq.header.dest_addr);
+        bramble_rrep_t rrep = rrep_build_intermediate(&rreq, cached_route, rx->addr, rssi, 0);
+
+        outbound_packet_t pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        bramble_rrep_serialize(&rrep, pkt.data, RREP_SIZE);
+        pkt.len = RREP_SIZE;
+        pkt.is_broadcast = false;
+        pkt.dest_addr = rreq.prev_hop;
+        pkt.pkt_type = PKT_TYPE_RREP;
+
+        /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. Having
+         * replied, this node does NOT also forward the RREQ (see
+         * main/mesh_task.c's handle_rreq for the airtime-saving/safety
+         * rationale): no fall-through to the forward branch below. */
         budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
                           now_us);
     } else if (rreq.header.hop_limit > 1) {
@@ -504,6 +603,22 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         /* This receipt is for us — the original sender */
         bridge_msg_track_complete(msg_track, msg_track_count, receipt.orig_packet_id, now_us,
                                   metrics);
+
+        /* Phase 2 "save reactive routing" Part A: this is the TRUE
+         * confirmed-delivery signal (confirmed_packets, feeding
+         * confirmed_delivery_rate), distinct from the destination-reach
+         * signal (delivered_packets, feeding message_delivery_rate) the
+         * bridge_msg_track_complete call above records at DATA arrival, one
+         * call up the stack in _handle_data. That earlier call already
+         * deactivated this packet_id's tracker entry, so the
+         * bridge_msg_track_complete call right above (same packet_id) is a
+         * no-op by design; this is genuinely the only place a receipt
+         * reaching the ORIGINATOR can be observed. bridge_msg_track_confirm
+         * looks the entry up by packet_id regardless of `active` and
+         * de-dupes on its own `confirmed` flag, so a second receipt for the
+         * same message (e.g. both of two DATA retries succeeding) is not
+         * double-counted. */
+        bridge_msg_track_confirm(msg_track, msg_track_count, receipt.orig_packet_id, metrics);
 
         /* Check if this was a retried message */
         pending_ack_t* pa = NULL;

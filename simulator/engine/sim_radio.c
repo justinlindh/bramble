@@ -31,7 +31,17 @@
  * 52 dB (free-space loss at 10 m, 915 MHz) and n = 2.9 (typical suburban
  * outdoor value; log-distance exponents of 2.7-3.5 are standard for built-up
  * terrain). With the firmware default 22 dBm TX power this lands at about
- * -30 dBm at 10 m and -93 dBm at the default 150-unit (1.5 km) range edge.
+ * -30 dBm at 10 m and -93 dBm at the default ~150-unit (1.5 km) range edge.
+ *
+ * Range derives from SF/BW, not a fixed disk: config->range is the distance
+ * at which the RSSI gradient above crosses radio_sensitivity_dbm(sf, bw_hz)
+ * (see radio_derive_range). Higher SF has a lower (more negative) sensitivity
+ * threshold and therefore more link budget and longer range; wider bandwidth
+ * raises the noise floor and shortens it. A scenario that sets "range"
+ * explicitly overrides the derivation (sim_scenario.c load_radio); otherwise
+ * range is recomputed from whatever sf/bw_hz/tx_power_dbm/path_loss_* the
+ * scenario configured. See radio_sensitivity_dbm for the SF/BW sensitivity
+ * model and its NOISE_MARGIN_DB calibration constant.
  *
  * Not modeled, on purpose: real RF terrain/fading (range disk stands in for
  * it), external interference from other networks, inter-SF interference
@@ -49,7 +59,6 @@ extern uint32_t bramble_calculate_airtime_us(uint16_t payload_bytes, uint8_t sf,
 
 void radio_config_init(radio_config_t* config) {
     memset(config, 0, sizeof(*config));
-    config->range = 150.0f;
     config->loss_pct = 0.0f;
     config->propagation_speed_ms_per_unit = 0.1f;
 
@@ -67,6 +76,67 @@ void radio_config_init(radio_config_t* config) {
 
     config->duty_cycle_set = false; /* unlimited: today's behavior */
     config->duty_cycle_pct = 0;
+
+    /* Range derives from the PHY params just set (SF10/125 kHz), landing on
+     * the simulator's ~150-unit baseline; see radio_derive_range and
+     * NOISE_MARGIN_DB. Must run last: it reads sf/bw_hz/tx_power_dbm/
+     * path_loss_* above. */
+    config->range = radio_derive_range(config);
+}
+
+/* SX127x/SX126x datasheet receiver sensitivity at 125 kHz bandwidth, dBm,
+ * indexed by spreading factor 7..12 (kSfSensitivity125kDbm[sf - 7]). */
+static const float kSfSensitivity125kDbm[6] = {
+    -123.0f, /* SF7 */
+    -126.0f, /* SF8 */
+    -129.0f, /* SF9 */
+    -132.0f, /* SF10 */
+    -134.5f, /* SF11 */
+    -137.0f, /* SF12 */
+};
+
+/*
+ * NOISE_MARGIN_DB: single additive calibration constant folded into
+ * radio_sensitivity_dbm. This simulator's path-loss model (path_loss_d0_db =
+ * 52 dB, path_loss_exp = 2.9) is far lossier at short grid distances than a
+ * real link budget with -132 dBm SF10 sensitivity would imply (the raw
+ * budget would put the SF10/125 kHz range past 3000 grid units); the
+ * simulator's own ~150-unit range was tuned for gameplay/test scale, not
+ * physical realism. NOISE_MARGIN_DB folds that difference into a single
+ * "noise figure + implementation margin" offset so the derived SF10/125 kHz
+ * range reproduces the existing ~150-unit baseline exactly (every legacy
+ * scenario was tuned around that disk), while SF/BW deltas relative to that
+ * baseline now follow the real datasheet deltas.
+ *
+ * Derivation, with the default params above (tx_power 22 dBm, target range
+ * 150 units):
+ *   margin = tx_power - path_loss_d0_db - base_sens(SF10)
+ *            - 10 * path_loss_exp * log10(150)
+ *          = 22 - 52 - (-132) - 29 * log10(150)
+ *          = 102 - 63.107
+ *          = 38.89 dB (rounded to 38.9).
+ */
+#define NOISE_MARGIN_DB 38.9f
+
+float radio_sensitivity_dbm(uint8_t sf, uint32_t bw_hz) {
+    if (sf < 7 || sf > 12)
+        sf = 10;
+    if (bw_hz == 0)
+        bw_hz = 125000;
+    float base = kSfSensitivity125kDbm[sf - 7];
+    float bw_adj_db = 10.0f * log10f((float)bw_hz / 125000.0f);
+    return base + bw_adj_db + NOISE_MARGIN_DB;
+}
+
+float radio_derive_range(const radio_config_t* config) {
+    uint8_t sf = config->sf ? config->sf : 10;
+    uint32_t bw = config->bw_hz ? config->bw_hz : 125000;
+    float path_loss_exp = config->path_loss_exp > 0.0f ? config->path_loss_exp : 2.9f;
+    float sensitivity = radio_sensitivity_dbm(sf, bw);
+    float budget_db = (float)config->tx_power_dbm - config->path_loss_d0_db - sensitivity;
+    if (budget_db <= 0.0f)
+        return 1.0f; /* degenerate config: no usable link past d0 */
+    return powf(10.0f, budget_db / (10.0f * path_loss_exp));
 }
 
 float radio_distance(const sim_node_t* a, const sim_node_t* b) {
