@@ -113,10 +113,15 @@ static dedup_buffer_t      s_dedup;
 static replay_table_t      s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
 static replay_table_t      s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon) replay window, keyed on the authenticated signer address, separate from the data-plane s_replay above */
 static replay_deferred_t   s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
-/* RREQ origination gate only; forwarded RREQs are not yet rate limited (see
- * SECURITY-MODEL.md, known gaps). The routing-auth hardening workstream wires
- * this same limiter into the forward path. */
+/* RREQ origination gate. Forwarded RREQs are gated separately, by the global
+ * s_rreq_fwd_rl budget below (ws 1.3d, SEC-M4); see SECURITY-MODEL.md for the
+ * node-global-not-per-neighbor residual. */
 static rreq_rate_limiter_t s_rreq_rl;
+/* Global forwarded-RREQ token bucket (ws 1.3d, SEC-M4). Bounds this node's
+ * aggregate forwarded-RREQ rate regardless of the unauthenticated, spoofable
+ * rreq.prev_hop field; not keyed per-neighbor on purpose (see
+ * SECURITY-MODEL.md). */
+static rreq_fwd_limiter_t s_rreq_fwd_rl;
 static SemaphoreHandle_t   s_state_mutex;
 static SemaphoreHandle_t   s_delivery_event_mutex;
 /* Guards nonce_counter_next only: send_data_packet is reachable from the
@@ -2422,8 +2427,12 @@ static void handle_rreq(const uint8_t *data, uint8_t len, int16_t rssi, int8_t s
      * The > 1 bound makes hop_limit N mean N-hop reach exactly (a relay
      * receiving 1 does not forward), matching the spec and the simulator. */
     if (rreq.header.hop_limit > 1) {
-        bramble_rreq_t fwd = rreq_forward(&rreq, s_identity->address, (int8_t)rssi, snr);
-        schedule_rreq_forward(&fwd);
+        if (!rreq_fwd_allow(&s_rreq_fwd_rl, now_ms())) {
+            ESP_LOGW(TAG, "Forwarded RREQ rate limited (query=%08" PRIX32 ")", rreq.query_id);
+        } else {
+            bramble_rreq_t fwd = rreq_forward(&rreq, s_identity->address, (int8_t)rssi, snr);
+            schedule_rreq_forward(&fwd);
+        }
     }
 }
 
@@ -4476,6 +4485,7 @@ void mesh_task_start(bramble_identity_t *identity) {
     replay_table_init(&s_control_replay);
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
+    rreq_fwd_init(&s_rreq_fwd_rl, now_ms());
     route_init(&s_routes);
     rreq_dedup_init(&s_rreq_dedup);
     reverse_route_init(&s_reverse_routes);
