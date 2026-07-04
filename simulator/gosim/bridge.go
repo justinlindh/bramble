@@ -8,6 +8,11 @@ package main
 */
 import "C"
 import (
+	"fmt"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -201,6 +206,133 @@ func handleGenerateMessage(event *C.sim_event_t, nodes *C.node_array_t,
 	msgTrack *C.msg_tracker_t, msgTrackCount int) {
 	C.bridge_handle_generate_message(event, nodes, radio, rng, events, metrics,
 		anomaly, msgTrack, C.int(msgTrackCount))
+}
+
+// handleFloodRelay fires a jittered channel-flood relay (Task 5) once its
+// EVT_SEND_PACKET due time elapses.
+func handleFloodRelay(event *C.sim_event_t, nodes *C.node_array_t,
+	radio *C.radio_config_t, rng *C.pcg32_state_t,
+	events *C.event_queue_t, metrics *C.metrics_state_t) {
+	C.bridge_handle_flood_relay(event, nodes, radio, rng, events, metrics)
+}
+
+// --- Scenario-level test harness (Phase 1 Task 1) ---
+//
+// _test.go files in this package avoid "C" directly (see radio_harness.go),
+// so a full protocol-level scenario run (discovery + multi-hop forwarding +
+// delivery receipts, as opposed to the narrow radioHarness unit tests) needs
+// a Go-typed entry point. runScenarioHeadless below drives a scenario file
+// exactly like RunHeadless (main.go's --headless mode) but captures the
+// emitted JSON stream via an in-process callback instead of redirecting the
+// process's real stdout, and keeps the completed *Sim reachable so a test
+// can inspect terminal per-node state the JSON stream does not surface
+// (e.g. whether a sender's pending delivery acknowledgement was ever
+// cleared by a receipt).
+
+// scenarioRunResult is the outcome of a headless scenario run captured for
+// tests.
+type scenarioRunResult struct {
+	lines []string
+	sim   *Sim
+}
+
+// runScenarioHeadless loads scenarioPath and drains its event queue to
+// completion (or until the scenario's duration_ms elapses), matching
+// RunHeadless's own loop.
+func runScenarioHeadless(scenarioPath string) (*scenarioRunResult, error) {
+	var mu sync.Mutex
+	var lines []string
+	sim, err := NewSim("", func(b []byte) {
+		mu.Lock()
+		lines = append(lines, strings.TrimRight(string(b), "\n"))
+		mu.Unlock()
+	}, true)
+	if err != nil {
+		return nil, err
+	}
+
+	// C-side fprintf JSON (message_sent, message_delivered, etc.) only
+	// reaches our broadcast callback via the pipe reader goroutine, exactly
+	// as RunHeadless starts it; Go-side emitJSON calls (metrics, sim_ready)
+	// go straight to broadcast and do not depend on this.
+	go sim.readPipe()
+
+	sim.mu.Lock()
+	sim.cmdLoad(Command{Scenario: scenarioPath})
+	sim.mu.Unlock()
+
+	if sim.State() != StateLoaded {
+		return nil, fmt.Errorf("runScenarioHeadless: failed to load scenario %s", scenarioPath)
+	}
+
+	sim.mu.Lock()
+	sim.state = StateRunning
+	var evt C.sim_event_t
+	for eventQueuePop(&sim.events, &evt) {
+		ts := getEventTimestamp(&evt)
+		if sim.duration > 0 && ts > sim.duration {
+			// Drain remaining events past duration without dispatching them,
+			// same truncation RunHeadless applies.
+			for eventQueuePop(&sim.events, &evt) {
+			}
+			break
+		}
+		sim.simTime = ts
+		setSimTime(ts)
+		sim.dispatchEvent(&evt)
+	}
+	sim.complete()
+	sim.mu.Unlock()
+
+	sim.pipeW.Close()
+	syscall.Dup2(sim.origStdout, 1)
+	syscall.Close(sim.origStdout)
+	time.Sleep(50 * time.Millisecond) // let readPipe drain
+
+	return &scenarioRunResult{lines: lines, sim: sim}, nil
+}
+
+// Lines returns every JSON event line emitted during the run, in order.
+func (r *scenarioRunResult) Lines() []string { return r.lines }
+
+// PendingAckActive reports whether nodeID still has an active,
+// unacknowledged pending-ack entry for packetID: true means that node is
+// still waiting for (or exhausted retries without ever receiving) a
+// delivery confirmation for that packet, i.e. it never observed the
+// message as confirmed-delivered.
+func (r *scenarioRunResult) PendingAckActive(nodeID string, packetID uint32) bool {
+	node := nodeArrayFindByID(&r.sim.nodes, nodeID)
+	if node == nil {
+		return false
+	}
+	for i := 0; i < int(C.MAX_PENDING_ACKS); i++ {
+		e := node.pending_acks.entries[i]
+		if bool(e.active) && uint32(e.packet_id) == packetID {
+			return true
+		}
+	}
+	return false
+}
+
+// RouteNextHop reports whether nodeID's routing table has an entry for
+// destAddr, and if so, its next_hop. Reads the C route table directly
+// (like PendingAckActive reads pending_acks) rather than scraping the
+// route_added JSON log line: route_added is emitted via a C-side fprintf
+// through runScenarioHeadless's pipe-based stdout capture, which is only
+// built to be exercised once per test process and has been observed to
+// drop lines under load; a direct struct read has no such race.
+func (r *scenarioRunResult) RouteNextHop(nodeID string, destAddr uint32) (uint32, bool) {
+	node := nodeArrayFindByID(&r.sim.nodes, nodeID)
+	if node == nil {
+		return 0, false
+	}
+	for i := 0; i < int(node.routes.count); i++ {
+		e := node.routes.entries[i]
+		if uint32(e.dest_addr) == destAddr {
+			return uint32(e.next_hop), true
+		}
+	}
+	return 0, false
 }
 
 // Ensure imports are used

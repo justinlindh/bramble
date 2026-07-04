@@ -60,9 +60,47 @@ bramble_rerr_t rerr_build(uint32_t my_addr, uint32_t broken_dest, uint32_t broke
     return e;
 }
 
-void rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr) {
+bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr) {
     route_entry_t* r = route_lookup(table, rerr->broken_dest);
     if (r && r->next_hop == rerr->broken_next_hop) {
         r->state = ROUTE_BROKEN;
+        r->fail_count++;
+        return true;
     }
+    return false;
+}
+
+data_rx_decision_t data_rx_decide(uint32_t dest_addr, uint32_t self_addr, uint32_t src_addr,
+                                  uint32_t prev_hop, uint8_t received_hop_limit,
+                                  uint8_t link_metric) {
+    data_rx_decision_t d;
+    memset(&d, 0, sizeof(d));
+
+    if (dest_addr == self_addr || dest_addr == 0xFFFFFFFF) {
+        d.action = DATA_RX_DELIVER;
+    } else {
+        d.action = DATA_RX_FORWARD;
+    }
+
+    /* Wire v4 (Task 4): learn a route back to this DATA's originator via
+     * the verified last radio hop. See forwarding.h's doc comment for the
+     * full rationale; skip the two self-referential cases, and (Task 4-fix
+     * F3) skip broadcast DATA entirely: a broadcast implies no unicast
+     * return path worth learning, and installing off it lets a single
+     * forged broadcast poison the whole neighborhood at once. */
+    if (src_addr != self_addr && prev_hop != self_addr && dest_addr != 0xFFFFFFFF) {
+        d.install_reverse_route = true;
+        d.reverse_dest = src_addr;
+        d.reverse_next_hop = prev_hop;
+
+        int hops = (int)ROUTE_HOP_LIMIT_MAX - (int)received_hop_limit + 1;
+        if (hops < 1)
+            hops = 1;
+        if (hops > 255)
+            hops = 255;
+        d.reverse_hop_count = (uint8_t)hops;
+        d.reverse_metric = link_metric;
+    }
+
+    return d;
 }

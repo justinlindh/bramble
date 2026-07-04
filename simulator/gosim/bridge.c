@@ -3,6 +3,7 @@
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
 #include "../../components/routing/include/forwarding.h"
+#include "../../components/routing/include/channel_flood.h"
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
@@ -330,24 +331,20 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
 
     neighbor_update(&rx->neighbors, beacon.src_addr, rssi, 0, beacon.pubkey_hash, now_ms);
 
-    route_entry_t* existing = route_lookup(&rx->routes, beacon.src_addr);
-    bool new_or_broken = (!existing || existing->state == ROUTE_BROKEN);
-
-    /* Direct-neighbor route from the beacon, scored by link quality alone,
-     * matching the firmware's penalty-based metric (the composite scoring
-     * module was deleted as decorative; DES-4). */
+    /* Phase 1 Task 1 (delivery-core plan): firmware's handle_beacon
+     * (main/mesh_task.c) never installs a route on a heard beacon, only the
+     * neighbor_update above. The sim used to install a direct route to every
+     * beacon sender here, which accidentally supplied the reverse-hop route
+     * that relays never get in real firmware, masking the confirmation-return
+     * bug: relays only ever learn routes TOWARD a discovery target via RREP
+     * (see _handle_rrep / rrep_rx_decide), never back toward a message's
+     * originator. Route installation now happens exclusively via RREQ/RREP,
+     * matching firmware, so the sim can reproduce that bug instead of hiding
+     * it. anomaly is now unused here since the beacon-triggered route-flap
+     * check went away with the route_install it guarded. */
+    (void)anomaly;
     int node_idx = (int)(rx - nodes->nodes);
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
-    uint8_t metric = metric_apply_link_penalty(255, rssi, 0);
-
-    route_install(&rx->routes, beacon.src_addr, beacon.src_addr, 1, metric, ROUTE_ACTIVE, now_ms);
-
-    if (new_or_broken) {
-        emit_route_added(stdout, now_us, rx->id, beacon.src_addr, beacon.src_addr, 1);
-
-        anomaly_check_route_flap(&anomaly[node_idx].flap, beacon.src_addr, beacon.src_addr, now_us,
-                                 stdout, rx->id);
-    }
 
     /* Phase 6: Mailbox — check if we have stored messages for the beacon sender */
     if (ext && ext->mailbox.count > 0) {
@@ -449,7 +446,7 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
 
     if (d.install_route) {
         route_install(&rx->routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
-                      ROUTE_ACTIVE, now_ms);
+                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms);
         emit_route_added(stdout, now_us, rx->id, d.route_dest, d.route_next_hop, d.route_hops);
         anomaly_check_route_flap(&anomaly[node_idx].flap, d.route_dest, d.route_next_hop, now_us,
                                  stdout, rx->id);
@@ -566,9 +563,10 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
     }
 }
 
-static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
-                         uint32_t now_ms, node_array_t* nodes, radio_config_t* radio,
-                         pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics,
+static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
+                         int8_t rssi, int8_t snr, uint64_t now_us, uint32_t now_ms,
+                         node_array_t* nodes, radio_config_t* radio, pcg32_state_t* rng,
+                         event_queue_t* events, metrics_state_t* metrics,
                          node_anomaly_tracker_t* anomaly, msg_tracker_t* msg_track,
                          int msg_track_count) {
     bramble_header_t hdr;
@@ -580,9 +578,138 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
     anomaly_record_rx(&anomaly[node_idx].blackhole, now_us);
     anomaly_check_loop(&anomaly[node_idx].loop, hdr.packet_id, now_us, stdout, rx->id);
 
-    if (hdr.dest_addr == rx->addr) {
-        /* Message reached destination — send delivery receipt back to source */
-        uint32_t orig_sender = bridge_msg_track_find_src(msg_track, msg_track_count, hdr.packet_id);
+    /* Gosim has no wire-embedded src_addr/prev_hop for DATA (its framing
+     * already diverges from firmware's, see task-4-report.md): the DATA's
+     * ORIGINATOR is tracked out-of-band by packet_id
+     * (bridge_msg_track_add, set once at origination), and prev_hop is the
+     * radio layer's own notion of "who transmitted this specific frame"
+     * (pkt_src_addr == event->data.packet.src_addr, set by sim_radio.c on
+     * every single broadcast/retransmit; a relay's retransmit is a new
+     * broadcast from the relay, so this is already exactly prev_hop
+     * semantics with zero extra plumbing needed on the TX side). */
+    uint32_t orig_sender = bridge_msg_track_find_src(msg_track, msg_track_count, hdr.packet_id);
+
+    /* Same data_rx_decide the firmware calls (main/mesh_task.c,
+     * mesh_process_rx_packet's PKT_TYPE_DATA case): no parallel
+     * deliver/forward-vs-reverse-route logic here. orig_sender == 0 means
+     * this packet_id was never tracked (should not happen for in-flight
+     * traffic; guarded defensively so a lookup miss cannot install a
+     * dest=0 route, a gosim-only concern since firmware always has a real
+     * wire src_addr and never sees "unknown"). */
+    uint8_t data_link_metric = metric_apply_link_penalty(255, rssi, snr);
+    data_rx_decision_t data_rx = data_rx_decide(hdr.dest_addr, rx->addr, orig_sender, pkt_src_addr,
+                                                hdr.hop_limit, data_link_metric);
+    if (data_rx.install_reverse_route && orig_sender != 0) {
+        route_install(&rx->routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
+                      data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE,
+                      ROUTE_SRC_BREADCRUMB, now_ms);
+        emit_route_added(stdout, now_us, rx->id, data_rx.reverse_dest, data_rx.reverse_next_hop,
+                         data_rx.reverse_hop_count);
+    }
+
+    /* Task 5 (channel flood): a broadcast dest (0xFFFFFFFF) also decides
+     * DATA_RX_DELIVER above, but it is NOT the unicast case the block below
+     * handles -- there is no single destination, no pair-key to decrypt
+     * under, and no private delivery receipt to send home. Split here,
+     * BEFORE the unicast-only logic, exactly like main/mesh_task.c's
+     * handle_data places its flood-relay decision before the decrypt fork:
+     * relaying does not require decrypting (data_rx_decide's auth gate --
+     * modeled in firmware by data_auth_verify -- already establishes this
+     * frame is genuine before we ever get here), so a node without this
+     * channel's key still floods the exact bytes onward for members
+     * further out in the mesh. */
+    if (data_rx.action == DATA_RX_DELIVER && hdr.dest_addr == 0xFFFFFFFF) {
+        /* Src_addr-qualified dedup key (rx->flood_dedup, a SEPARATE buffer
+         * from rx->dedup) for the same cross-source collision reason
+         * firmware's s_flood_dedup documents; orig_sender is the true
+         * originator (msg_track), not pkt_src_addr (the last radio hop).
+         * Checked BEFORE "delivering": a flood fans out, so this exact node
+         * legitimately hears the same broadcast again via a different
+         * neighbor, and (like firmware's s_dedup gate ahead of handle_data)
+         * a repeat hearing must not re-notify or re-relay. */
+        uint32_t flood_key = hdr.packet_id ^ orig_sender;
+        bool is_dup = dedup_check_and_add(&rx->flood_dedup, flood_key, now_ms);
+
+        /* A mesh flood means a node hears its own originated broadcast
+         * echoed back once some neighbor rebroadcasts it; folded into
+         * is_duplicate for channel_flood_decide (same "already seen,
+         * nothing to gain by relaying again" rule), mirroring firmware's
+         * identical is_own_echo guard in main/mesh_task.c's handle_data.
+         * Also gates the message_delivered emit just below: the originator
+         * hearing its own flood echoed back is not a new delivery anywhere,
+         * it is the same node that already originated (and locally
+         * delivered) this message, so it must not be counted or reported as
+         * a fresh delivery (mirrors main/mesh_task.c's handle_data
+         * src_addr == s_identity->address self-guard). */
+        bool is_own_echo = (orig_sender != 0 && orig_sender == rx->addr);
+
+        if (!is_dup && !is_own_echo) {
+            /* Every hearer "delivers" locally (a broadcast has no single
+             * destination); emit a message_delivered signal per hearer so a
+             * scenario can prove reach at a far node, whether or not that
+             * node holds the channel key gosim does not model.
+             *
+             * Deliberately does NOT call bridge_msg_track_complete (unlike
+             * the unicast path below): that call deactivates the shared
+             * msg_track entry globally on its first invocation from ANY
+             * node, and orig_sender resolution above depends on that same
+             * entry staying active for the rest of the flood's lifetime
+             * (every hop still needs to resolve the true originator for its
+             * OWN dedup key). Completing it early would silently start
+             * returning orig_sender == 0 to every later hop, corrupting the
+             * dedup key mid-flood. Consequence: message_delivery_rate (the
+             * legacy scenarios' headline metric, unicast-oriented) does not
+             * count broadcast deliveries; reach is observed instead via
+             * these message_delivered events, matching how the gosim test
+             * for Task 5 asserts >=3-hop delivery. */
+            fprintf(stdout,
+                    "{\"type\":\"message_delivered\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"packet_id\":\"0x%08X\"}\n",
+                    (unsigned long long)now_us, rx->id, hdr.packet_id);
+            fflush(stdout);
+        }
+
+        /* Non-mutating pre-check against the real BROADCAST-lane airtime
+         * budget (tx_gate_kind_tier: TX_KIND_DATA_BROADCAST ->
+         * AIRTIME_TIER_BROADCAST), same tier the jittered relay send below
+         * debits from for real. */
+        airtime_budget_set_mesh_size(&rx->airtime, (uint8_t)neighbor_count(&rx->neighbors));
+        uint32_t relay_airtime_ms = radio_frame_airtime_ms(radio, len);
+        bool budget_permits =
+            airtime_budget_can_transmit(&rx->airtime, AIRTIME_TIER_BROADCAST, relay_airtime_ms);
+
+        channel_flood_decision_t flood = channel_flood_decide(hdr.hop_limit, is_dup || is_own_echo,
+                                                              budget_permits, pcg32_random(rng));
+
+        if (flood.should_relay) {
+            uint8_t relay_buf[256];
+            memcpy(relay_buf, buf, len);
+            bramble_header_t relay_hdr = hdr;
+            relay_hdr.hop_limit = flood.new_hop_limit;
+            bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+
+            /* Schedule the jittered relay by pushing a due-timestamped
+             * event, the sim's natural equivalent of main/mesh_task.c's
+             * polled due_at_ms queue. Repurposes EVT_SEND_PACKET (declared
+             * in sim_event.h, never previously used anywhere in the sim):
+             * its packet_event_data_t.src_addr carries the RELAYING node's
+             * OWN address (which node fires this event, not a radio
+             * source), so bridge_handle_flood_relay can look the node back
+             * up by address when the jitter elapses. */
+            sim_event_t relay_evt;
+            memset(&relay_evt, 0, sizeof(relay_evt));
+            relay_evt.timestamp_us = now_us + (uint64_t)flood.jitter_ms * 1000ULL;
+            relay_evt.type = EVT_SEND_PACKET;
+            relay_evt.data.packet.src_addr = rx->addr;
+            relay_evt.data.packet.len = len;
+            memcpy(relay_evt.data.packet.data, relay_buf, len);
+            event_queue_push(events, &relay_evt);
+        }
+        return;
+    }
+
+    if (data_rx.action == DATA_RX_DELIVER) {
+        /* Message reached destination: send delivery receipt back to source */
 
         /* Crypto: decrypt payload if present (Phase 5) */
         uint8_t decrypted_payload[256];
@@ -752,12 +879,12 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
          * This relay node volunteers to hold the message until the dest rejoins. */
         bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
         if (ext && len > HEADER_SIZE) {
-            /* Store the raw packet payload (everything after the header) */
-            uint32_t orig_src =
-                bridge_msg_track_find_src(msg_track, msg_track_count, hdr.packet_id);
-            if (orig_src != 0) {
+            /* Store the raw packet payload (everything after the header).
+             * orig_sender is the tracker lookup hoisted to the top of this
+             * function (Task 4); this branch used to repeat it. */
+            if (orig_sender != 0) {
                 int stored =
-                    mailbox_store(&ext->mailbox, orig_src, hdr.dest_addr, buf + HEADER_SIZE,
+                    mailbox_store(&ext->mailbox, orig_sender, hdr.dest_addr, buf + HEADER_SIZE,
                                   len - HEADER_SIZE, hdr.packet_id, now_ms);
                 if (stored == 0) {
                     g_ext_metrics.mailbox_stored++;
@@ -800,6 +927,43 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint6
     if (budget_gated_send(rx, &pkt, AIRTIME_TIER_NORMAL, nodes, radio, rng, events, metrics,
                           now_us)) {
         rx->packets_forwarded++;
+    }
+}
+
+/*
+ * bridge_handle_flood_relay: fires when a jittered channel-flood relay
+ * (scheduled by the broadcast branch of _handle_data above) comes due.
+ * event->data.packet.src_addr is the RELAYING node's own address (not a
+ * radio source -- see the scheduling comment in _handle_data);
+ * event->data.packet.data/len is the exact relay-mutated frame (hop_limit
+ * already decremented, header already re-serialized) to transmit.
+ *
+ * The real airtime budget gets the final say here, exactly like
+ * main/mesh_task.c's process_flood_relay_queue -> mesh_tx: a node that had
+ * budget when it decided to relay but has since spent it (its own traffic,
+ * or other jittered relays firing first) still yields instead of
+ * transmitting -- the airtime-aware stop that keeps a saturated node from
+ * amplifying a storm.
+ */
+void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events,
+                               metrics_state_t* metrics) {
+    sim_node_t* tx = node_array_find_by_addr(nodes, event->data.packet.src_addr);
+    if (!tx || !tx->active)
+        return;
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    memcpy(pkt.data, event->data.packet.data, event->data.packet.len);
+    pkt.len = event->data.packet.len;
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_DATA;
+
+    /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
+    if (budget_gated_send(tx, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
+                          event->timestamp_us)) {
+        tx->packets_forwarded++;
     }
 }
 
@@ -877,8 +1041,9 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
         _handle_rerr(rx, buf, len, event->timestamp_us, now_ms);
         break;
     case PKT_TYPE_DATA:
-        _handle_data(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics,
-                     anomaly, msg_track, msg_track_count);
+        _handle_data(rx, buf, len, event->data.packet.src_addr, rssi, event->data.packet.snr,
+                     event->timestamp_us, now_ms, nodes, radio, rng, events, metrics, anomaly,
+                     msg_track, msg_track_count);
         break;
     case PKT_TYPE_DELIVERY_RECEIPT:
         _handle_delivery_receipt(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng,
@@ -915,6 +1080,68 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
 
     uint32_t dest_addr = event->data.node.addr;
     uint32_t now_ms = (uint32_t)(event->timestamp_us / 1000);
+
+    /* Task 5 (channel flood): broadcast/channel message origination. There
+     * is no destination route to discover (a broadcast has no single next
+     * hop) and no retry ladder (mesh_send_broadcast/mesh_send_channel in
+     * main/mesh_task.c are fire-and-forget too): one BROADCAST-lane
+     * budget-gated transmission, tracked via msg_track so a relay's
+     * src_addr-qualified flood dedup (bridge_handle_receive_packet's
+     * _handle_data, below) can resolve the true originator, mirroring how
+     * firmware carries src_addr directly on the DATA wire.
+     *
+     * The payload is sent in the clear (no derive_pair_key encryption):
+     * that helper derives a key from a single (src, dest) pair, which does
+     * not exist for a broadcast with N recipients, and gosim's DATA framing
+     * already diverges from firmware's wire layout for this exact reason
+     * (see the _handle_data comment on orig_sender tracking). Airtime is
+     * still charged honestly off the real wire_len (header + payload). */
+    if (dest_addr == 0xFFFFFFFF) {
+        int payload_size = (int)event->data.node.x;
+        if (payload_size <= 0)
+            payload_size = 20; /* representative chat-sized payload */
+        if (payload_size > 200)
+            payload_size = 200;
+
+        bramble_header_t hdr;
+        memset(&hdr, 0, sizeof(hdr));
+        hdr.version = BRAMBLE_VERSION;
+        hdr.type = PKT_TYPE_DATA;
+        hdr.flags = 0;
+        hdr.hop_limit = ROUTE_HOP_LIMIT_MAX;
+        hdr.dest_addr = 0xFFFFFFFF;
+        hdr.packet_id = pcg32_random(rng);
+
+        bridge_msg_track_add(msg_track, msg_track_count, hdr.packet_id, src->addr, 0xFFFFFFFF,
+                             event->timestamp_us);
+
+        outbound_packet_t pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        bramble_header_serialize(&hdr, pkt.data, HEADER_SIZE);
+        for (int i = 0; i < payload_size; i++) {
+            pkt.data[HEADER_SIZE + i] = (uint8_t)(pcg32_random(rng) & 0xFF);
+        }
+        pkt.len = (uint16_t)(HEADER_SIZE + payload_size);
+        pkt.is_broadcast = true;
+        pkt.dest_addr = 0xFFFFFFFF;
+        pkt.pkt_type = PKT_TYPE_DATA;
+        src->packets_originated++;
+
+        /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
+        if (budget_gated_send(src, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
+                              event->timestamp_us)) {
+            metrics_record_message_sent(metrics);
+            fprintf(stdout,
+                    "{\"type\":\"message_sent\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"dest\":\"broadcast\",\"packet_id\":\"0x%08X\"}\n",
+                    (unsigned long long)event->timestamp_us, src->id, hdr.packet_id);
+        } else {
+            metrics_record_packet_dropped(metrics);
+            emit_packet_dropped(stdout, event->timestamp_us, src->id, "airtime_budget");
+        }
+        fflush(stdout);
+        return;
+    }
 
 /* Retry limit: y field counts retry attempts (x is unused for generate_message).
  * After MAX_MSG_RETRIES attempts (~30s at 1.5s intervals), drop the message. */

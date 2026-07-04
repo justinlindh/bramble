@@ -13,7 +13,7 @@ const STATUS_META: Record<DeliveryStatus, { label: string; cls: string }> = {
   sent:      { label: 'Sent to next hop',       cls: 'pending'   },
   delivered: { label: 'Delivered',              cls: 'delivered' },
   failed:    { label: 'Failed – not delivered', cls: 'failed'    },
-  timeout:   { label: 'No receipt (timeout)',   cls: 'warning'   },
+  timeout:   { label: 'No confirmation yet',    cls: 'warning'   },
 };
 
 export function DeliveryBadge({ status, tier: _tier, broadcastRecipientCount }: DeliveryBadgeProps) {

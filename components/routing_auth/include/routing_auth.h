@@ -74,4 +74,28 @@ int ack_verify(const bramble_ack_t* a);
 void receipt_sign(bramble_delivery_receipt_t* r);
 int receipt_verify(const bramble_delivery_receipt_t* r);
 
+/*
+ * Task 4-fix F1 (wire v4 DATA reverse-route poisoning). Authenticates a DATA
+ * frame's ORIGIN-STABLE fields under the network key with label
+ * "bramble-data-v1", so a relay -- which never decrypts DATA and therefore
+ * never checks the AEAD tag -- can still confirm the frame came from a
+ * network-key holder before learning a reverse route off it (dest=src_addr,
+ * next_hop=prev_hop). The covered bytes are exactly bramble_build_aead_aad's
+ * output: the masked header (hop_limit zeroed) followed by little-endian
+ * src_addr (HEADER_SIZE + 4 bytes). This EXCLUDES prev_hop and hop_limit,
+ * the two relay-mutable fields, so the MAC survives every forward hop
+ * unchanged, exactly as the AEAD tag does. The originator calls
+ * data_auth_sign once at TX (send_data_packet/send_dm_packet/
+ * mesh_send_location_packet), writing the 8 bytes at
+ * BRAMBLE_DATA_AUTH_HMAC_OFFSET; forwarders and the mailbox flusher copy
+ * those bytes through verbatim. data_auth_verify recomputes the same MAC and
+ * constant-time-compares; returns nonzero (true) iff it matches.
+ *
+ * Forgeable under network_key.h's unprovisioned public-PSK fallback, same as
+ * every other helper here; this closes the keyless-poisoning attack, not the
+ * keyed-insider residual.
+ */
+void data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]);
+int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]);
+
 #endif

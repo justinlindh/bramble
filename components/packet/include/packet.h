@@ -12,8 +12,11 @@
 #include "esp_stubs.h"
 #endif
 
-/* Protocol version */
-#define BRAMBLE_VERSION 3 /* was 2; ws 1.3b flag day: control-plane messages now carry a seq */
+/* Protocol version.
+ * was 3; Phase 1 delivery-core flag day: DATA/LOCATION now carry a
+ * relay-mutated prev_hop for reverse-route learning (see
+ * BRAMBLE_DATA_PREV_HOP_OFFSET below). */
+#define BRAMBLE_VERSION 4
 
 /* Packet types */
 #define PKT_TYPE_ACK 0x01
@@ -253,6 +256,63 @@ esp_err_t bramble_header_build_aad(const bramble_header_t* h, uint8_t* buf, size
  */
 esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, uint8_t* buf,
                                  size_t len);
+
+/*
+ * DATA/LOCATION envelope layout (wire v4):
+ *   header(HEADER_SIZE) + src_addr(4) + prev_hop(4) + auth_hmac(8)
+ *   + nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)
+ * (main/mesh_task.c's send_data_packet/send_dm_packet/mesh_send_location_packet
+ * build this layout; handle_data/handle_location parse it; gosim's bridge.c
+ * uses its own out-of-band src_addr/prev_hop tracking instead of these wire
+ * bytes, since its DATA framing already diverges from firmware's -- see
+ * task-4-report.md).
+ *
+ * prev_hop is RELAY-MUTABLE and MAC-EXCLUDED, mirroring RREP's relay-mutable
+ * next_hop (#119): every node that transmits this frame -- the originator on
+ * first TX, then each relay before it retransmits -- overwrites prev_hop
+ * with its OWN address, so any receiver always knows the address of the
+ * radio it just heard this specific frame from, regardless of how many hops
+ * it has already travelled. Because every hop rewrites it, prev_hop cannot
+ * live under the AEAD tag. It also is NOT fed into bramble_build_aead_aad:
+ * that helper's AAD buffer is unchanged by this field's addition (still
+ * HEADER_SIZE + 4 bytes: the masked header plus src_addr only), so prev_hop
+ * simply sits at a wire offset the AAD build never reads, exactly the way
+ * nonce/ciphertext/tag already sit outside it. There is nothing to "zero":
+ * exclusion here is structural (prev_hop's offset is never copied into the
+ * AAD buffer at all), not a masked-in-place byte like hop_limit.
+ *
+ * auth_hmac (Task 4-fix F1, wire v4) is an 8-byte NETWORK-KEY MAC the
+ * ORIGINATOR writes and never mutates in flight (relays and the mailbox
+ * flusher copy it through verbatim, exactly like the AEAD tag). It covers
+ * the ORIGIN-STABLE authenticated fields -- the masked header (hop_limit
+ * zeroed) plus src_addr, i.e. the same HEADER_SIZE + 4 byte buffer
+ * bramble_build_aead_aad produces -- and EXCLUDES prev_hop and hop_limit
+ * (both relay-mutable). It is the DATA analogue of ack/rrep/rerr's
+ * auth_hmac[8] (routing_auth.h): a relay never decrypts a DATA frame, so the
+ * AEAD tag (checked only at the destination) cannot gate reverse-route
+ * learning. Without this MAC a keyless attacker could inject a DATA frame
+ * with a spoofed src_addr and poison every node's route toward that victim.
+ * data_auth_sign/data_auth_verify (routing_auth.h) build and check it;
+ * mesh_process_rx_packet verifies it BEFORE learning a breadcrumb or
+ * forwarding, so only network-key holders can lay breadcrumbs (RREP parity).
+ * Like all control-plane auth here it is forgeable under the unprovisioned
+ * public-PSK fallback key (network_key.h) -- the accepted, documented
+ * baseline, not closed by this field.
+ *
+ * src_addr stays AAD-bound, so the reverse route's TARGET (who a returning
+ * confirmation is ultimately for) cannot be spoofed by an on-path relay;
+ * only the NEXT-HOP hint is unauthenticated. Residual (see
+ * docs/SECURITY-MODEL.md): a malicious relay can lie about prev_hop to
+ * attract or blackhole reverse traffic -- the same insider-forwarding
+ * residual already accepted for the RREP control plane.
+ */
+#define BRAMBLE_DATA_SRC_ADDR_OFFSET (HEADER_SIZE)
+#define BRAMBLE_DATA_PREV_HOP_OFFSET (HEADER_SIZE + 4)
+#define BRAMBLE_DATA_AUTH_HMAC_OFFSET (HEADER_SIZE + 8)
+#define BRAMBLE_DATA_AUTH_HMAC_SIZE 8
+#define BRAMBLE_DATA_NONCE_OFFSET (HEADER_SIZE + 16)
+/* header + src_addr + prev_hop + auth_hmac, i.e. where the AEAD nonce begins */
+#define BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE (HEADER_SIZE + 16)
 
 esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len);
 esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t len);

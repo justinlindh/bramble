@@ -185,12 +185,26 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                 return false;
 
             sim_node_t* src_node = node_array_find_by_id(nodes, src->valuestring);
-            sim_node_t* dest_node = node_array_find_by_id(nodes, dest->valuestring);
-            if (!src_node || !dest_node)
+            if (!src_node)
                 return false;
 
+            uint32_t dest_addr;
+            if (strcmp(dest->valuestring, "*") == 0) {
+                /* Broadcast/channel message (Task 5, channel flood): no
+                 * single destination node to resolve. 0xFFFFFFFF mirrors
+                 * firmware's mesh_send_broadcast/mesh_send_channel dest
+                 * sentinel; bridge_handle_generate_message (gosim) branches
+                 * on it the same way. */
+                dest_addr = 0xFFFFFFFF;
+            } else {
+                sim_node_t* dest_node = node_array_find_by_id(nodes, dest->valuestring);
+                if (!dest_node)
+                    return false;
+                dest_addr = dest_node->addr;
+            }
+
             strncpy(event.data.node.node_id, src->valuestring, NODE_ID_LEN - 1);
-            event.data.node.addr = dest_node->addr;
+            event.data.node.addr = dest_addr;
 
             /* payload_size stored in x field (Phase 4: fragmentation) */
             cJSON* ps = cJSON_GetObjectItem(evt_json, "payload_size");

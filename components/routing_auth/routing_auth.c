@@ -116,3 +116,29 @@ int receipt_verify(const bramble_delivery_receipt_t* r) {
     network_key_mac("bramble-receipt-v2", buf, sizeof(buf), expect);
     return ct_eq(expect, r->auth_hmac, sizeof(expect));
 }
+
+/* DATA origin authentication (Task 4-fix F1). The MAC covers exactly the
+ * bytes bramble_build_aead_aad emits -- masked header (hop_limit zeroed) ||
+ * LE src_addr, HEADER_SIZE + 4 bytes -- which structurally excludes the two
+ * relay-mutable fields (prev_hop lives further out in the wire envelope and
+ * is never copied into this buffer; hop_limit is masked to zero here). Reuse
+ * of that helper guarantees the sign path and the AEAD AAD masking cannot
+ * diverge. */
+static void data_build_auth_buf(const bramble_header_t* h, uint32_t src_addr,
+                                uint8_t buf[HEADER_SIZE + 4]) {
+    bramble_build_aead_aad(h, src_addr, buf, HEADER_SIZE + 4);
+}
+
+void data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]) {
+    uint8_t buf[HEADER_SIZE + 4];
+    data_build_auth_buf(h, src_addr, buf);
+    network_key_mac("bramble-data-v1", buf, sizeof(buf), out);
+}
+
+int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]) {
+    uint8_t buf[HEADER_SIZE + 4];
+    data_build_auth_buf(h, src_addr, buf);
+    uint8_t expect[8];
+    network_key_mac("bramble-data-v1", buf, sizeof(buf), expect);
+    return ct_eq(expect, hmac, sizeof(expect));
+}

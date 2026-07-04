@@ -86,6 +86,30 @@ typedef enum {
     ROUTE_BROKEN,
 } route_state_t;
 
+/* Trust class of a route install (Task 4-fix F2). A DATA breadcrumb
+ * (dest=src_addr, next_hop=prev_hop, learned off a forwarded DATA frame)
+ * carries only immediate-link quality and, critically, an UNAUTHENTICATED
+ * next-hop hint (prev_hop is relay-mutable, MAC-excluded). Without a trust
+ * class a nearby breadcrumb with a maxed-out (255,1) metric could lock out
+ * and never yield to a real DISCOVERED route (RREQ/RREP/beacon), which is
+ * HMAC-gated end to end. route_install arbitrates on this first:
+ *   - a DISCOVERED install ALWAYS wins over an existing BREADCRUMB entry
+ *     (installs/reclaims regardless of metric or hop count);
+ *   - a BREADCRUMB install NEVER displaces an existing DISCOVERED entry;
+ *   - same-class installs fall through to the usual metric/hop arbitration.
+ *
+ * The same trust class also governs capacity-eviction victim selection when
+ * MAX_ROUTES is full and a new dest needs a slot (route_install): eviction
+ * prefers a BREADCRUMB victim (broken -> stale -> LRU, in that order) over a
+ * DISCOVERED one; if the table holds no BREADCRUMB entry at all, a
+ * BREADCRUMB install is refused rather than evicting a DISCOVERED route,
+ * while a DISCOVERED install may still evict any entry.
+ */
+typedef enum {
+    ROUTE_SRC_DISCOVERED = 0, /* RREQ/RREP/beacon: control-plane, HMAC-gated */
+    ROUTE_SRC_BREADCRUMB,     /* DATA reverse-route learning (wire v4) */
+} route_source_t;
+
 typedef struct {
     uint32_t dest_addr;
     uint32_t next_hop;
@@ -96,6 +120,7 @@ typedef struct {
     uint32_t last_used;
     uint32_t last_confirmed;
     uint16_t use_count;
+    route_source_t source; /* trust class; see route_source_t + route_install */
 } route_entry_t;
 
 typedef struct {
@@ -105,7 +130,7 @@ typedef struct {
 
 void route_init(routing_table_t* table);
 int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint8_t hop_count,
-                  uint8_t metric, route_state_t state, uint32_t now_ms);
+                  uint8_t metric, route_state_t state, route_source_t source, uint32_t now_ms);
 route_entry_t* route_lookup(routing_table_t* table, uint32_t dest_addr);
 void route_maintenance(routing_table_t* table, uint32_t now_ms);
 int route_count(const routing_table_t* table);
