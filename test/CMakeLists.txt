@@ -485,6 +485,21 @@ target_include_directories(test_data_delivery_e2e PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
 )
 
+# Phase 1 delivery-core Task 5: multi-hop channel flood relay decision
+add_executable(test_channel_flood
+    test_channel_flood.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_channel_flood PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_channel_flood ssl crypto)
+
 # Fragment tests
 add_executable(test_fragment
     test_fragment.c

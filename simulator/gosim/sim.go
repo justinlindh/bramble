@@ -281,6 +281,8 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		s.handleReceivePacket(evt)
 	case C.EVT_GENERATE_MESSAGE:
 		s.handleGenerateMessage(evt)
+	case C.EVT_SEND_PACKET:
+		s.handleFloodRelay(evt)
 	case C.EVT_NODE_JOIN:
 		s.handleNodeJoin(evt)
 	case C.EVT_NODE_LEAVE:
@@ -333,6 +335,13 @@ func (s *Sim) handleReceivePacket(evt *C.sim_event_t) {
 func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 	handleGenerateMessage(evt, &s.nodes, &s.radio, &s.rng, &s.events,
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
+}
+
+// handleFloodRelay fires a jittered channel-flood relay (Task 5): see
+// bridge.c's _handle_data broadcast branch, which schedules these via
+// EVT_SEND_PACKET (repurposed; previously declared but unused).
+func (s *Sim) handleFloodRelay(evt *C.sim_event_t) {
+	handleFloodRelay(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // applyDutyCycleCap re-applies the scenario's optional regulatory

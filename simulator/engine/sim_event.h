@@ -7,6 +7,11 @@
 #define MAX_EVENT_QUEUE 100000
 
 typedef enum {
+    /* Repurposed (Task 5, channel flood): a due-timestamped jittered
+     * channel-flood relay. data.packet.src_addr carries the RELAYING
+     * node's own address (which node fires this event, not a radio
+     * source); data.packet.data/len is the exact relay-mutated frame to
+     * transmit. See simulator/gosim/bridge.c's bridge_handle_flood_relay. */
     EVT_SEND_PACKET = 0,
     EVT_RECEIVE_PACKET,
     EVT_TIMER_FIRE,

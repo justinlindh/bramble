@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "routing.c" "discovery.c" "beacon.c" "forwarding.c"
+    SRCS "routing.c" "discovery.c" "beacon.c" "forwarding.c" "channel_flood.c"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES packet crypto network_key
 )

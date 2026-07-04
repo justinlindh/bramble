@@ -3,6 +3,7 @@
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
 #include "../../components/routing/include/forwarding.h"
+#include "../../components/routing/include/channel_flood.h"
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
@@ -606,14 +607,101 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                          data_rx.reverse_hop_count);
     }
 
-    /* NOTE (red-team, Task 4): DATA_RX_DELIVER is also the decision for a
-     * broadcast dest (0xFFFFFFFF). Today gosim never originates a
-     * broadcast-dest PKT_TYPE_DATA (only RREQ/RERR use 0xFFFFFFFF), so
-     * this branch only ever runs for dest == rx->addr, identical to the
-     * pre-Task-4 condition. When Task 5 (channel flood) introduces real
-     * broadcast DATA, the unicast-only logic below (pair-key decrypt,
-     * private delivery receipt) MUST NOT run for it; split on
-     * hdr.dest_addr == 0xFFFFFFFF here when that lands. */
+    /* Task 5 (channel flood): a broadcast dest (0xFFFFFFFF) also decides
+     * DATA_RX_DELIVER above, but it is NOT the unicast case the block below
+     * handles -- there is no single destination, no pair-key to decrypt
+     * under, and no private delivery receipt to send home. Split here,
+     * BEFORE the unicast-only logic, exactly like main/mesh_task.c's
+     * handle_data places its flood-relay decision before the decrypt fork:
+     * relaying does not require decrypting (data_rx_decide's auth gate --
+     * modeled in firmware by data_auth_verify -- already establishes this
+     * frame is genuine before we ever get here), so a node without this
+     * channel's key still floods the exact bytes onward for members
+     * further out in the mesh. */
+    if (data_rx.action == DATA_RX_DELIVER && hdr.dest_addr == 0xFFFFFFFF) {
+        /* Src_addr-qualified dedup key (rx->flood_dedup, a SEPARATE buffer
+         * from rx->dedup) for the same cross-source collision reason
+         * firmware's s_flood_dedup documents; orig_sender is the true
+         * originator (msg_track), not pkt_src_addr (the last radio hop).
+         * Checked BEFORE "delivering": a flood fans out, so this exact node
+         * legitimately hears the same broadcast again via a different
+         * neighbor, and (like firmware's s_dedup gate ahead of handle_data)
+         * a repeat hearing must not re-notify or re-relay. */
+        uint32_t flood_key = hdr.packet_id ^ orig_sender;
+        bool is_dup = dedup_check_and_add(&rx->flood_dedup, flood_key, now_ms);
+
+        if (!is_dup) {
+            /* Every hearer "delivers" locally (a broadcast has no single
+             * destination); emit a message_delivered signal per hearer so a
+             * scenario can prove reach at a far node, whether or not that
+             * node holds the channel key gosim does not model.
+             *
+             * Deliberately does NOT call bridge_msg_track_complete (unlike
+             * the unicast path below): that call deactivates the shared
+             * msg_track entry globally on its first invocation from ANY
+             * node, and orig_sender resolution above depends on that same
+             * entry staying active for the rest of the flood's lifetime
+             * (every hop still needs to resolve the true originator for its
+             * OWN dedup key). Completing it early would silently start
+             * returning orig_sender == 0 to every later hop, corrupting the
+             * dedup key mid-flood. Consequence: message_delivery_rate (the
+             * legacy scenarios' headline metric, unicast-oriented) does not
+             * count broadcast deliveries; reach is observed instead via
+             * these message_delivered events, matching how the gosim test
+             * for Task 5 asserts >=3-hop delivery. */
+            fprintf(stdout,
+                    "{\"type\":\"message_delivered\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"packet_id\":\"0x%08X\"}\n",
+                    (unsigned long long)now_us, rx->id, hdr.packet_id);
+            fflush(stdout);
+        }
+
+        /* A mesh flood means a node hears its own originated broadcast
+         * echoed back once some neighbor rebroadcasts it; folded into
+         * is_duplicate for channel_flood_decide (same "already seen,
+         * nothing to gain by relaying again" rule), mirroring firmware's
+         * identical is_own_echo guard in main/mesh_task.c's handle_data. */
+        bool is_own_echo = (orig_sender != 0 && orig_sender == rx->addr);
+
+        /* Non-mutating pre-check against the real BROADCAST-lane airtime
+         * budget (tx_gate_kind_tier: TX_KIND_DATA_BROADCAST ->
+         * AIRTIME_TIER_BROADCAST), same tier the jittered relay send below
+         * debits from for real. */
+        airtime_budget_set_mesh_size(&rx->airtime, (uint8_t)neighbor_count(&rx->neighbors));
+        uint32_t relay_airtime_ms = radio_frame_airtime_ms(radio, len);
+        bool budget_permits =
+            airtime_budget_can_transmit(&rx->airtime, AIRTIME_TIER_BROADCAST, relay_airtime_ms);
+
+        channel_flood_decision_t flood = channel_flood_decide(hdr.hop_limit, is_dup || is_own_echo,
+                                                              budget_permits, pcg32_random(rng));
+
+        if (flood.should_relay) {
+            uint8_t relay_buf[256];
+            memcpy(relay_buf, buf, len);
+            bramble_header_t relay_hdr = hdr;
+            relay_hdr.hop_limit = flood.new_hop_limit;
+            bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+
+            /* Schedule the jittered relay by pushing a due-timestamped
+             * event, the sim's natural equivalent of main/mesh_task.c's
+             * polled due_at_ms queue. Repurposes EVT_SEND_PACKET (declared
+             * in sim_event.h, never previously used anywhere in the sim):
+             * its packet_event_data_t.src_addr carries the RELAYING node's
+             * OWN address (which node fires this event, not a radio
+             * source), so bridge_handle_flood_relay can look the node back
+             * up by address when the jitter elapses. */
+            sim_event_t relay_evt;
+            memset(&relay_evt, 0, sizeof(relay_evt));
+            relay_evt.timestamp_us = now_us + (uint64_t)flood.jitter_ms * 1000ULL;
+            relay_evt.type = EVT_SEND_PACKET;
+            relay_evt.data.packet.src_addr = rx->addr;
+            relay_evt.data.packet.len = len;
+            memcpy(relay_evt.data.packet.data, relay_buf, len);
+            event_queue_push(events, &relay_evt);
+        }
+        return;
+    }
+
     if (data_rx.action == DATA_RX_DELIVER) {
         /* Message reached destination: send delivery receipt back to source */
 
@@ -836,6 +924,43 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
     }
 }
 
+/*
+ * bridge_handle_flood_relay: fires when a jittered channel-flood relay
+ * (scheduled by the broadcast branch of _handle_data above) comes due.
+ * event->data.packet.src_addr is the RELAYING node's own address (not a
+ * radio source -- see the scheduling comment in _handle_data);
+ * event->data.packet.data/len is the exact relay-mutated frame (hop_limit
+ * already decremented, header already re-serialized) to transmit.
+ *
+ * The real airtime budget gets the final say here, exactly like
+ * main/mesh_task.c's process_flood_relay_queue -> mesh_tx: a node that had
+ * budget when it decided to relay but has since spent it (its own traffic,
+ * or other jittered relays firing first) still yields instead of
+ * transmitting -- the airtime-aware stop that keeps a saturated node from
+ * amplifying a storm.
+ */
+void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events,
+                               metrics_state_t* metrics) {
+    sim_node_t* tx = node_array_find_by_addr(nodes, event->data.packet.src_addr);
+    if (!tx || !tx->active)
+        return;
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    memcpy(pkt.data, event->data.packet.data, event->data.packet.len);
+    pkt.len = event->data.packet.len;
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_DATA;
+
+    /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
+    if (budget_gated_send(tx, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
+                          event->timestamp_us)) {
+        tx->packets_forwarded++;
+    }
+}
+
 /* ─── Public packet handling wrappers ──────────────────────────────────── */
 
 void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
@@ -949,6 +1074,68 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
 
     uint32_t dest_addr = event->data.node.addr;
     uint32_t now_ms = (uint32_t)(event->timestamp_us / 1000);
+
+    /* Task 5 (channel flood): broadcast/channel message origination. There
+     * is no destination route to discover (a broadcast has no single next
+     * hop) and no retry ladder (mesh_send_broadcast/mesh_send_channel in
+     * main/mesh_task.c are fire-and-forget too): one BROADCAST-lane
+     * budget-gated transmission, tracked via msg_track so a relay's
+     * src_addr-qualified flood dedup (bridge_handle_receive_packet's
+     * _handle_data, below) can resolve the true originator, mirroring how
+     * firmware carries src_addr directly on the DATA wire.
+     *
+     * The payload is sent in the clear (no derive_pair_key encryption):
+     * that helper derives a key from a single (src, dest) pair, which does
+     * not exist for a broadcast with N recipients, and gosim's DATA framing
+     * already diverges from firmware's wire layout for this exact reason
+     * (see the _handle_data comment on orig_sender tracking). Airtime is
+     * still charged honestly off the real wire_len (header + payload). */
+    if (dest_addr == 0xFFFFFFFF) {
+        int payload_size = (int)event->data.node.x;
+        if (payload_size <= 0)
+            payload_size = 20; /* representative chat-sized payload */
+        if (payload_size > 200)
+            payload_size = 200;
+
+        bramble_header_t hdr;
+        memset(&hdr, 0, sizeof(hdr));
+        hdr.version = BRAMBLE_VERSION;
+        hdr.type = PKT_TYPE_DATA;
+        hdr.flags = 0;
+        hdr.hop_limit = ROUTE_HOP_LIMIT_MAX;
+        hdr.dest_addr = 0xFFFFFFFF;
+        hdr.packet_id = pcg32_random(rng);
+
+        bridge_msg_track_add(msg_track, msg_track_count, hdr.packet_id, src->addr, 0xFFFFFFFF,
+                             event->timestamp_us);
+
+        outbound_packet_t pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        bramble_header_serialize(&hdr, pkt.data, HEADER_SIZE);
+        for (int i = 0; i < payload_size; i++) {
+            pkt.data[HEADER_SIZE + i] = (uint8_t)(pcg32_random(rng) & 0xFF);
+        }
+        pkt.len = (uint16_t)(HEADER_SIZE + payload_size);
+        pkt.is_broadcast = true;
+        pkt.dest_addr = 0xFFFFFFFF;
+        pkt.pkt_type = PKT_TYPE_DATA;
+        src->packets_originated++;
+
+        /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
+        if (budget_gated_send(src, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
+                              event->timestamp_us)) {
+            metrics_record_message_sent(metrics);
+            fprintf(stdout,
+                    "{\"type\":\"message_sent\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"dest\":\"broadcast\",\"packet_id\":\"0x%08X\"}\n",
+                    (unsigned long long)event->timestamp_us, src->id, hdr.packet_id);
+        } else {
+            metrics_record_packet_dropped(metrics);
+            emit_packet_dropped(stdout, event->timestamp_us, src->id, "airtime_budget");
+        }
+        fflush(stdout);
+        return;
+    }
 
 /* Retry limit: y field counts retry attempts (x is unused for generate_message).
  * After MAX_MSG_RETRIES attempts (~30s at 1.5s intervals), drop the message. */
