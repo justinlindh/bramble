@@ -1470,9 +1470,19 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         return;
     }
 
-    route_entry_t* route = route_lookup(&src->routes, dest_addr);
+    /* Flooding F1 Task 3: send-side flood origination. Under
+     * g_flood_transport_enabled there is NO route discovery (mirrors firmware's
+     * mesh_send_message gate): skip the reactive route_lookup + RREQ/retry
+     * ladder entirely. The DATA is flooded immediately below (broadcast at
+     * ROUTE_HOP_LIMIT_MAX with header.dest_addr = D), every relay floods it
+     * (bridge_flood_relay), the destination floods a receipt back (Task 2), and
+     * the pending_ack retry re-floods on no-confirmation
+     * (bridge_handle_retransmit). When the toggle is off the reactive discovery
+     * path is exactly as before. */
+    route_entry_t* route = g_flood_transport_enabled ? NULL : route_lookup(&src->routes, dest_addr);
 
-    if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
+    if (!g_flood_transport_enabled &&
+        (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING)) {
         /* Discovery cadence mirrors firmware (mesh_task discovery retries +
          * discovery_should_retry): first RREQ immediately, retries after 5 s
          * then 15 s, each retry under a FRESH query_id with an expanded hop
@@ -1540,7 +1550,17 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     /* Route exists — build and send DATA packet */
 
     uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
-    forward_result_t fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
+    forward_result_t fwd_res;
+    if (g_flood_transport_enabled) {
+        /* Flood origination: no route to resolve. Send at the full hop budget
+         * and broadcast; header.dest_addr stays D so only D delivers while
+         * every relay floods it onward. */
+        memset(&fwd_res, 0, sizeof(fwd_res));
+        fwd_res.should_send = true;
+        fwd_res.next_hop = 0xFFFFFFFF;
+    } else {
+        fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
+    }
     if (!fwd_res.should_send)
         return;
 
@@ -1639,8 +1659,10 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             memset(&pkt, 0, sizeof(pkt));
             memcpy(pkt.data, enc_buf, enc_offset);
             pkt.len = (uint16_t)enc_offset;
-            pkt.is_broadcast = false;
-            pkt.dest_addr = fwd_res.next_hop;
+            /* Flooding F1 Task 3: flood origination broadcasts (dest
+             * 0xFFFFFFFF); reactive sends to the resolved next hop. */
+            pkt.is_broadcast = g_flood_transport_enabled;
+            pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
             pkt.pkt_type = PKT_TYPE_DATA;
 
             airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, frag_toa_ms);
@@ -1722,8 +1744,10 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     memset(&pkt, 0, sizeof(pkt));
     memcpy(pkt.data, data_buf, total_len);
     pkt.len = total_len;
-    pkt.is_broadcast = false;
-    pkt.dest_addr = fwd_res.next_hop;
+    /* Flooding F1 Task 3: flood origination broadcasts (dest 0xFFFFFFFF) so
+     * every relay floods it; reactive sends to the resolved next hop. */
+    pkt.is_broadcast = g_flood_transport_enabled;
+    pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
     pkt.pkt_type = PKT_TYPE_DATA;
     src->packets_originated++;
 
@@ -1783,9 +1807,21 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
             continue;
         }
 
-        /* Retransmit */
+        /* Retransmit. Flooding F1 Task 3: a flood-originated pending entry
+         * retries by RE-FLOODING the stored broadcast frame (same packet_id),
+         * NOT by a routed retransmit. forward_data needs a route (none exist
+         * under flood), so bypass it and re-broadcast at the full hop budget;
+         * the destination's re-ACK-on-duplicate gives another confirmation
+         * chance. Reactive (toggle off) is unchanged. */
         uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
-        forward_result_t fwd_res = forward_data(&node->routes, pa->dest_addr, &hop_limit, now_ms);
+        forward_result_t fwd_res;
+        if (g_flood_transport_enabled) {
+            memset(&fwd_res, 0, sizeof(fwd_res));
+            fwd_res.should_send = true;
+            fwd_res.next_hop = 0xFFFFFFFF;
+        } else {
+            fwd_res = forward_data(&node->routes, pa->dest_addr, &hop_limit, now_ms);
+        }
         if (!fwd_res.should_send)
             continue;
 
@@ -1802,8 +1838,8 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         memcpy(pkt.data, pa->packet_data, pa->packet_len);
         pkt.data[3] = hop_limit; /* update hop_limit */
         pkt.len = pa->packet_len;
-        pkt.is_broadcast = false;
-        pkt.dest_addr = fwd_res.next_hop;
+        pkt.is_broadcast = g_flood_transport_enabled;
+        pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
         pkt.pkt_type = PKT_TYPE_DATA;
 
         airtime_budget_debit(&node->airtime, MSG_TIER_NORMAL, retx_toa_ms);

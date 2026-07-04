@@ -4963,9 +4963,29 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) 
         return 0;
     }
 
+    /* Flooding F1 Task 3: send-side flood origination. Under s_flood_transport
+     * there is NO route discovery: a unicast message FLOODS immediately, like a
+     * broadcast. Gate the whole reactive neighbor/route + RREQ/queue block on
+     * the toggle so that under flood we fall straight through to
+     * mesh_send_channel, which builds the DATA (dest = D, hop_limit =
+     * ROUTE_HOP_LIMIT_MAX, the flood hop budget that broadcast floods already
+     * originate at; network-key auth-signed, AEAD-encrypted under the DM
+     * session key for D) and hands it to mesh_tx as one budget-gated
+     * transmission. Every relay then floods it (Task 1); D's flooded ACK
+     * (Task 2) confirms it. send_data_packet/send_dm_packet register the
+     * pending-confirmation whose pending_ack_tick retry re-transmits the SAME
+     * stored broadcast frame (same packet_id) on no-ACK, which IS a re-flood
+     * (mesh_tx never route-looks-up: relays flood it, and the destination's
+     * Phase 1 s_delivered_dedup re-ACK-on-duplicate gives another confirmation
+     * chance), bounded by the tier max retries then FAILED. If no DM session to
+     * D exists yet, mesh_send_dm still kicks off the KE handshake, whose
+     * APP_TYPE_KE envelope rides this same DATA flood path (send_ke_envelope ->
+     * send_data_packet), so key establishment floods too and stays CRITICAL
+     * tier. Toggle OFF (default): the reactive discovery+queue path is exactly
+     * as before this task. */
     /* For non-neighbor destinations, check route table */
-    neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, dest_addr);
-    if (!nb) {
+    neighbor_entry_t* nb = s_flood_transport ? NULL : neighbor_lookup(&s_neighbors, dest_addr);
+    if (!s_flood_transport && !nb) {
         /* Not a direct neighbor — need routing */
         route_entry_t* route = route_lookup(&s_routes, dest_addr);
         if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
