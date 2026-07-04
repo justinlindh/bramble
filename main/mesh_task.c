@@ -28,6 +28,7 @@
 #include "msg_store.h"
 #include "discovery.h"
 #include "forwarding.h"
+#include "channel_flood.h"
 #include "reliability.h"
 #include "rerr_ack_fastfail.h"
 #include "battery.h"
@@ -82,6 +83,10 @@ static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t
  * needs both before its own definition. */
 static int control_seq_next(uint64_t* out);
 static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
+/* Task 5 (channel flood): handle_data (near the top of the file) schedules
+ * a jittered rebroadcast of a broadcast DATA frame; the queue it schedules
+ * onto is defined near its sibling schedule_rreq_forward, further down. */
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -111,6 +116,19 @@ static bramble_identity_t* s_identity;
 static uint8_t s_beacon_key[BRAMBLE_KEY_SIZE]; /* shared key for beacon HMAC */
 static neighbor_table_t s_neighbors;
 static dedup_buffer_t s_dedup;
+/* Task 5 (channel flood): a SEPARATE dedup buffer from s_dedup, keyed
+ * src_addr-qualified (packet_id ^ src_addr), not just packet_id. s_dedup's
+ * key (header.packet_id ^ (type << 24), mesh_process_rx_packet) has no
+ * src_addr component; two different originators whose broadcasts happen to
+ * collide on packet_id would otherwise have one silently treated as a
+ * duplicate of the other's at every shared relay -- harmless for the
+ * existing unicast-only traffic s_dedup gates today (a collision there just
+ * delays a retry), but a real correctness risk once broadcasts flood
+ * multiple hops (the delivery-path audit's flagged concern). Kept as its
+ * own instance rather than widening s_dedup's key so this stays scoped to
+ * the flood path and cannot change dedup behavior for RREQ/PROBE_ACK/other
+ * control traffic that already relies on s_dedup's existing key shape. */
+static dedup_buffer_t s_flood_dedup;
 static replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counter replay window */
 static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
                                            replay window, keyed on the authenticated signer address,
@@ -271,6 +289,19 @@ typedef struct {
     bramble_key_exchange_t msg;
 } dm_handshake_work_item_t;
 static QueueHandle_t s_handshake_work_q;
+
+/* Jittered channel-flood relay queue (Task 5). Same shape and drain cadence
+ * as the RREQ forward queue below, holding the exact relay-mutated wire
+ * bytes (hop_limit decremented, prev_hop rewritten to us) a broadcast DATA
+ * frame is rebroadcast with once its jitter elapses. */
+#define FLOOD_RELAY_QUEUE_CAPACITY 8
+typedef struct {
+    bool used;
+    uint32_t due_at_ms;
+    uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
+    uint8_t len;
+} pending_flood_relay_t;
+static pending_flood_relay_t s_flood_relay_queue[FLOOD_RELAY_QUEUE_CAPACITY];
 
 /* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
  * random 50-300ms so same-hop relays do not key up at the same instant; the
@@ -1907,6 +1938,75 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* Task 5: multi-hop channel flood. A broadcast/channel DATA (dest ==
+     * 0xFFFFFFFF) is "delivered" locally below regardless of whether THIS
+     * node can decrypt it (public broadcast vs. a secret channel this node
+     * may not belong to) -- that is orthogonal to whether it should be
+     * relayed onward. Relaying does not require decrypting: mesh_process_
+     * rx_packet already verified the frame's network-key auth_hmac before
+     * ever reaching data_rx_decide/handle_data (routing_auth.h), so this
+     * frame is known to come from a genuine network-key holder regardless
+     * of decrypt outcome. Deliberately placed BEFORE the decrypt fork
+     * below, so a node without this channel's key still relays the exact
+     * ciphertext onward for members further out in the mesh -- the entire
+     * point of a flood is that relays do not need to understand the
+     * payload, exactly like RREQ/RERR relays never decrypt anything. */
+    if (rx_hdr.dest_addr == 0xFFFFFFFF) {
+        /* Src_addr-qualified dedup key (s_flood_dedup, not the packet_id-
+         * only s_dedup already consulted at the mesh_process_rx_packet
+         * dispatch gate): see s_flood_dedup's doc comment for why a plain
+         * packet_id key risks a cross-source collision on the flood path. */
+        uint32_t flood_key = rx_hdr.packet_id ^ src_addr;
+        bool is_dup = dedup_check_and_add(&s_flood_dedup, flood_key, now_ms());
+
+        /* A mesh flood means a relay hears its own originated broadcast
+         * echoed back once some neighbor rebroadcasts it; re-relaying that
+         * echo would burn airtime without ever helping the message reach
+         * anywhere new (we already delivered it locally the instant we
+         * sent it). Folded into is_duplicate rather than a separate
+         * channel_flood_decide input: from a relay decision's point of
+         * view "already seen, nothing to gain by relaying again" is
+         * exactly the same rule for both cases. Mirrors data_rx_decide's
+         * own src_addr == self_addr guard on reverse-route learning, same
+         * self-referential-is-meaningless reasoning. */
+        bool is_own_echo = (src_addr == s_identity->address);
+
+        /* Non-mutating pre-check against the real BROADCAST-lane airtime
+         * budget (same tier TX_KIND_DATA_BROADCAST debits); the actual
+         * mesh_tx() at the jittered send time re-checks and debits for
+         * real, so a node that goes from "had budget" to "spent it" before
+         * its jitter elapses still yields there too. */
+        bool budget_permits = tx_gate_check(len, TX_KIND_DATA_BROADCAST);
+
+        channel_flood_decision_t flood = channel_flood_decide(
+            rx_hdr.hop_limit, is_dup || is_own_echo, budget_permits, esp_random());
+
+        if (flood.should_relay) {
+            uint8_t relay_buf[BRAMBLE_MAX_PACKET_SIZE];
+            memcpy(relay_buf, data, len);
+
+            bramble_header_t relay_hdr = rx_hdr;
+            relay_hdr.hop_limit = flood.new_hop_limit;
+            bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+
+            /* Wire v4: overwrite prev_hop with OUR OWN address before
+             * rebroadcast, exactly like forward_data_packet does for
+             * unicast forwards -- relay-mutable/MAC-excluded, so this never
+             * touches anything under auth_hmac or the AEAD tag. */
+            if (len >= BRAMBLE_DATA_PREV_HOP_OFFSET + 4) {
+                memcpy(relay_buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+            }
+
+            ESP_LOGI(TAG,
+                     "Channel flood relay from %08" PRIX32 " pkt=%08" PRIX32 " hop_limit %u->%u",
+                     src_addr, rx_hdr.packet_id, rx_hdr.hop_limit, flood.new_hop_limit);
+            schedule_flood_relay(relay_buf, len, flood.jitter_ms);
+        } else if (!budget_permits) {
+            ESP_LOGD(TAG, "Channel flood relay denied by airtime budget, pkt=%08" PRIX32,
+                     rx_hdr.packet_id);
+        }
+    }
+
     /* AAD excludes hop_limit (relays decrement it in flight) but binds
      * src_addr (SEC-M2 residual); must match the masked, src-bound AAD the
      * originator built in send_data_packet/send_dm_packet. */
@@ -2390,6 +2490,60 @@ static void process_rreq_forward_queue(uint32_t t) {
 }
 
 /* ── End jittered RREQ forwarding ──────────────────────────────── */
+
+/* ── Jittered channel-flood relay (Task 5) ──────────────────────── */
+
+/**
+ * Queue a broadcast/channel DATA rebroadcast with random jitter, exactly
+ * like schedule_rreq_forward: same-hop relays that all decided to flood the
+ * same frame should not key up at the same instant. Falls back to immediate
+ * transmission when the queue is full (a forward storm makes the jitter
+ * moot, and dropping the relay could be the only path further out).
+ *
+ * buf/len are the ALREADY relay-mutated wire bytes (hop_limit decremented,
+ * prev_hop rewritten to this node -- see the caller in handle_data): this
+ * function only owns the timing, not the frame content.
+ */
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!s_flood_relay_queue[i].used) {
+            s_flood_relay_queue[i].used = true;
+            s_flood_relay_queue[i].due_at_ms = now_ms() + jitter_ms;
+            memcpy(s_flood_relay_queue[i].buf, buf, len);
+            s_flood_relay_queue[i].len = len;
+            ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
+            return;
+        }
+    }
+    ESP_LOGW(TAG, "Flood relay queue full; relaying immediately");
+    if (mesh_tx(buf, len, TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+        ESP_LOGW(TAG, "Immediate flood relay denied by airtime budget");
+    }
+}
+
+/**
+ * Transmit any due jittered flood relays. Called from the mesh task main
+ * loop alongside process_rreq_forward_queue, so relays stay scheduled
+ * rather than blocking packet handling. The airtime budget gets the final,
+ * authoritative say here (mesh_tx -> tx_gate_send): a node that was under
+ * budget when it decided to relay but has since spent it (e.g. its own
+ * traffic, or other jittered relays firing first) still yields instead of
+ * transmitting -- the airtime-aware stop that keeps a saturated node from
+ * amplifying a storm.
+ */
+static void process_flood_relay_queue(uint32_t t) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (s_flood_relay_queue[i].used && (int32_t)(t - s_flood_relay_queue[i].due_at_ms) >= 0) {
+            if (mesh_tx(s_flood_relay_queue[i].buf, s_flood_relay_queue[i].len,
+                        TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+                ESP_LOGD(TAG, "Jittered flood relay denied by airtime budget");
+            }
+            s_flood_relay_queue[i].used = false;
+        }
+    }
+}
+
+/* ── End jittered channel-flood relay ───────────────────────────── */
 
 static void flush_queued_messages(uint32_t dest_addr) {
     /* Route-established trigger only. QUEUE_REASON_SESSION entries are
@@ -3189,6 +3343,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
         neighbor_purge(&s_neighbors, t);
         dedup_purge(&s_dedup, t);
+        dedup_purge(&s_flood_dedup, t);
         route_maintenance(&s_routes, t);
         reverse_route_purge(&s_reverse_routes, t);
         reassembly_purge(&s_reassembly, t);
@@ -3234,6 +3389,9 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 
     /* Drain due jittered RREQ forwards every loop iteration (10ms cadence) */
     process_rreq_forward_queue(t);
+
+    /* Drain due jittered channel-flood relays (Task 5) every loop iteration */
+    process_flood_relay_queue(t);
 
     /* Discovery retries (check every 5s) */
     static uint32_t last_disc_check = 0;
@@ -4656,6 +4814,7 @@ void mesh_task_start(bramble_identity_t* identity) {
     mesh_rederive_beacon_key();
 
     dedup_init(&s_dedup);
+    dedup_init(&s_flood_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
     replay_deferred_init(&s_deferred);
@@ -4681,6 +4840,8 @@ void mesh_task_start(bramble_identity_t* identity) {
     location_init(&s_location_mgr);
     memset(s_queued_msgs, 0, sizeof(s_queued_msgs));
     memset(s_rreq_fwd_queue, 0, sizeof(s_rreq_fwd_queue)); /* Init jittered RREQ forward queue */
+    memset(s_flood_relay_queue, 0,
+           sizeof(s_flood_relay_queue)); /* Init jittered channel-flood relay queue (Task 5) */
     memset(&s_shared, 0, sizeof(s_shared));
     tx_gate_snapshot(&s_shared.airtime);
 

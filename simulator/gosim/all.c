@@ -26,6 +26,7 @@
 #include "../../components/routing/routing.c"
 #include "../../components/routing/discovery.c"
 #include "../../components/routing/forwarding.c"
+#include "../../components/routing/channel_flood.c"
 #include "../../components/packet/packet.c"
 #include "../../components/reliability/reliability.c"
 #include "../../components/dedup/dedup.c"

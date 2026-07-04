@@ -106,6 +106,11 @@ typedef struct {
 
     /* Dedup state */
     dedup_buffer_t dedup;
+    /* Task 5 (channel flood): separate, src_addr-qualified dedup for the
+     * broadcast/channel DATA flood path -- mirrors main/mesh_task.c's
+     * s_flood_dedup. Kept apart from `dedup` above (which the RREQ path
+     * uses keyed on raw packet_id) for the same collision-safety reason. */
+    dedup_buffer_t flood_dedup;
 
     /* Airtime budget */
     airtime_budget_t airtime;

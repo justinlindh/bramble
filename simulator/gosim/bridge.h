@@ -130,6 +130,14 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
                                     msg_tracker_t* msg_track, int msg_track_count);
 
 /*
+ * bridge_handle_flood_relay:
+ *   Fires a jittered channel-flood relay (Task 5) scheduled by _handle_data's
+ *   broadcast branch, once its EVT_SEND_PACKET due time elapses.
+ */
+void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics);
+
+/*
  * bridge_handle_retransmit:
  *   Checks pending_acks for entries needing retransmission and re-broadcasts.
  */

@@ -208,6 +208,14 @@ func handleGenerateMessage(event *C.sim_event_t, nodes *C.node_array_t,
 		anomaly, msgTrack, C.int(msgTrackCount))
 }
 
+// handleFloodRelay fires a jittered channel-flood relay (Task 5) once its
+// EVT_SEND_PACKET due time elapses.
+func handleFloodRelay(event *C.sim_event_t, nodes *C.node_array_t,
+	radio *C.radio_config_t, rng *C.pcg32_state_t,
+	events *C.event_queue_t, metrics *C.metrics_state_t) {
+	C.bridge_handle_flood_relay(event, nodes, radio, rng, events, metrics)
+}
+
 // --- Scenario-level test harness (Phase 1 Task 1) ---
 //
 // _test.go files in this package avoid "C" directly (see radio_harness.go),
