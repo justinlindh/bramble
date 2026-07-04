@@ -32,6 +32,7 @@
 #include "../../components/airtime/airtime_budget.c"
 #include "../../components/fragment/fragment.c"
 #include "../../components/crypto/crypto_host.c"
+#include "../../components/security/security.c"
 
 /* New components (Phase 6) */
 #include "../../components/mailbox/mailbox.c"

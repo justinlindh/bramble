@@ -71,6 +71,13 @@ sim_event_t bridge_make_node_event(event_type_t type, uint64_t ts_us, const char
 sim_event_t bridge_make_generate_msg_event(uint64_t ts_us, const char* node_id, uint32_t dest_addr);
 sim_event_t bridge_make_interference_start(uint64_t ts_us, float cx, float cy, float radius);
 sim_event_t bridge_make_interference_end(uint64_t ts_us, int zone_index);
+/* Test-only injection: builds an EVT_RECEIVE_PACKET event directly (normally
+ * only sim_radio_broadcast produces these), so Go tests can drive
+ * bridge_handle_receive_packet with a hand-built frame without going through
+ * the full radio model. air_start_us/air_end_us are set to [ts_us, ts_us], so
+ * radio_check_reception sees no occupancy window to overlap against. */
+sim_event_t bridge_make_receive_packet_event(uint64_t ts_us, uint32_t src_addr, uint32_t dest_addr,
+                                             const uint8_t* data, uint16_t len);
 
 /* ─── Message tracking ─────────────────────────────────────────────────── */
 #define MAX_MSG_TRACK 1024

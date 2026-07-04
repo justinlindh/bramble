@@ -63,6 +63,11 @@ void node_activate(sim_node_t* node) {
     pending_ack_init(&node->pending_acks);
     dedup_init(&node->dedup);
     airtime_budget_init(&node->airtime, 0);
+    /* Same instances mesh_task_start initializes (main/mesh_task.c:4536-4537). */
+    rreq_rate_init(&node->rreq_rate);
+    rreq_fwd_init(&node->rreq_fwd, 0);
+    node->rreq_rate_denied = 0;
+    node->rreq_fwd_denied = 0;
     reassembly_init(&node->reassembly);
     /* Crypto: generate identity but keep sim-defined address */
     {

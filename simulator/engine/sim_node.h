@@ -10,6 +10,7 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
+#include "../../components/security/include/security.h"
 #include "sim_random.h"
 
 /* Forward declaration only: the full definition lives in sim_radio.h, which
@@ -82,6 +83,15 @@ typedef struct {
 
     /* Airtime budget */
     airtime_budget_t airtime;
+
+    /* RREQ rate limiters (components/security), same instances mesh_task_start
+     * initializes: rreq_rate gates fresh discovery origination (per
+     * neighbor/dest, 30s), rreq_fwd gates this node's aggregate forwarded-RREQ
+     * rate (global token bucket, BURST 16 / 2s refill). */
+    rreq_rate_limiter_t rreq_rate;
+    rreq_fwd_limiter_t rreq_fwd;
+    uint32_t rreq_rate_denied;
+    uint32_t rreq_fwd_denied;
 
     /* Fragment reassembly */
     reassembly_ctx_t reassembly;
