@@ -44,18 +44,22 @@ if [[ "$mode" == "changed" ]]; then
   if [[ -n "$diff_range" ]]; then
     mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$diff_range" 2>/dev/null | grep -E '\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
   else
+    # Single-star globs, not DIR/**/*.c: git pathspec wildcards already span
+    # '/', so 'main/*.c' matches every .c under main/ at any depth, while
+    # 'main/**/*.c' requires an intervening directory and silently skips files
+    # directly under main/ (mesh_task.c and 122 others). Do not "fix" to **.
     mapfile -t files < <(git ls-files \
-      'main/**/*.c' 'main/**/*.h' \
-      'components/**/*.c' 'components/**/*.h' \
-      'test/**/*.c' 'test/**/*.h' \
-      'simulator/**/*.c' 'simulator/**/*.h')
+      'main/*.c' 'main/*.h' \
+      'components/*.c' 'components/*.h' \
+      'test/*.c' 'test/*.h' \
+      'simulator/*.c' 'simulator/*.h')
   fi
 else
   mapfile -t files < <(git ls-files \
-    'main/**/*.c' 'main/**/*.h' \
-    'components/**/*.c' 'components/**/*.h' \
-    'test/**/*.c' 'test/**/*.h' \
-    'simulator/**/*.c' 'simulator/**/*.h')
+    'main/*.c' 'main/*.h' \
+    'components/*.c' 'components/*.h' \
+    'test/*.c' 'test/*.h' \
+    'simulator/*.c' 'simulator/*.h')
 fi
 
 if [[ ${#files[@]} -eq 0 ]]; then
