@@ -22,6 +22,7 @@ type radioHarness struct {
 	metrics  *C.metrics_state_t
 	anomaly  *C.node_anomaly_tracker_t // MAX_NODES-sized, indexed like nodes.nodes
 	msgTrack *C.msg_tracker_t          // MAX_MSG_TRACK-sized
+	beacon   *C.sim_beacon_policy_t    // firmware-default beacon policy (Task 3); mutate via setters below
 }
 
 // rxResult is one reception attempt evaluated under the collision model.
@@ -41,6 +42,7 @@ func newRadioHarness() *radioHarness {
 		metrics:  (*C.metrics_state_t)(C.calloc(1, C.sizeof_metrics_state_t)),
 		anomaly:  (*C.node_anomaly_tracker_t)(C.calloc(C.MAX_NODES, C.sizeof_node_anomaly_tracker_t)),
 		msgTrack: (*C.msg_tracker_t)(C.calloc(C.MAX_MSG_TRACK, C.sizeof_msg_tracker_t)),
+		beacon:   (*C.sim_beacon_policy_t)(C.calloc(1, C.sizeof_sim_beacon_policy_t)),
 	}
 	C.sim_emitter_set_quiet(C.bool(true))
 	C.node_array_init(h.nodes)
@@ -48,6 +50,7 @@ func newRadioHarness() *radioHarness {
 	C.event_queue_init(h.events)
 	C.metrics_init(h.metrics)
 	C.pcg32_seed(h.rng, C.uint64_t(42))
+	C.sim_beacon_policy_init(h.beacon)
 	return h
 }
 
@@ -59,6 +62,7 @@ func (h *radioHarness) free() {
 	C.free(unsafe.Pointer(h.metrics))
 	C.free(unsafe.Pointer(h.anomaly))
 	C.free(unsafe.Pointer(h.msgTrack))
+	C.free(unsafe.Pointer(h.beacon))
 }
 
 func (h *radioHarness) addNode(addr uint32, x, y float32) {
@@ -86,7 +90,7 @@ func (h *radioHarness) activateNode(addr uint32) *C.sim_node_t {
 // the node actually put on the air this tick (0 if the gate denied them).
 func (h *radioHarness) tick(node *C.sim_node_t, nowUs uint64) int {
 	var result C.node_tick_result_t
-	C.node_tick(node, C.uint64_t(nowUs), h.radio, &result)
+	C.node_tick(node, C.uint64_t(nowUs), h.radio, h.beacon, &result)
 	for i := 0; i < int(result.count); i++ {
 		C.sim_radio_broadcast(node, &result.pkts[i], h.nodes, h.radio, h.rng, h.events, h.metrics,
 			C.uint64_t(nowUs))
@@ -124,6 +128,32 @@ func (h *radioHarness) nextBeaconDue(node *C.sim_node_t) uint64 {
 // beaconWireSize is the serialized beacon frame length (components/packet
 // BEACON_SIZE), for computing the real ToA of a beacon in tests.
 func beaconWireSize() int { return int(C.BEACON_SIZE) }
+
+// setBeaconAdaptive toggles the harness's shared beacon policy between
+// firmware's shipped fixed cadence (false, the default) and the opt-in
+// adaptive policy driven by beacon_interval_decide (true).
+func (h *radioHarness) setBeaconAdaptive(adaptive bool) {
+	h.beacon.adaptive = C.bool(adaptive)
+}
+
+// setBeaconIntervalMs sets the fixed/base interval (ms) of the harness's
+// shared beacon policy.
+func (h *radioHarness) setBeaconIntervalMs(ms uint32) {
+	h.beacon.interval_ms = C.uint32_t(ms)
+}
+
+// setNeighborCount inflates or shrinks a node's neighbor table to exactly n
+// distinct entries via the real neighbor_update, so beacon_interval_decide
+// (called from node_tick with the real neighbor_count()) sees a genuine
+// reading rather than a stubbed one.
+func (h *radioHarness) setNeighborCount(node *C.sim_node_t, n int, nowUs uint64) {
+	C.neighbor_init(&node.neighbors)
+	nowMs := C.uint32_t(nowUs / 1000)
+	for i := 0; i < n; i++ {
+		C.neighbor_update(&node.neighbors, C.uint32_t(0xE0000000+uint32(i)), C.int8_t(-60),
+			C.int8_t(0), C.uint32_t(0), nowMs)
+	}
+}
 
 func (h *radioHarness) setRange(r float32) {
 	h.radio._range = C.float(r)
