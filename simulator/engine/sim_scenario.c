@@ -60,8 +60,6 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
     cJSON* loss = cJSON_GetObjectItem(radio_json, "loss_pct");
     cJSON* speed = cJSON_GetObjectItem(radio_json, "propagation_speed_ms_per_unit");
 
-    if (range && cJSON_IsNumber(range))
-        radio->range = (float)range->valuedouble;
     if (loss && cJSON_IsNumber(loss))
         radio->loss_pct = (float)loss->valuedouble;
     if (speed && cJSON_IsNumber(speed))
@@ -94,6 +92,17 @@ static bool load_radio(cJSON* radio_json, radio_config_t* radio) {
         radio->collisions_enabled = cJSON_IsTrue(col);
     if (lbt && cJSON_IsBool(lbt))
         radio->lbt_enabled = cJSON_IsTrue(lbt);
+
+    /* Range: an explicit "range" always wins, preserving the disk-range
+     * escape hatch topology tests rely on. Otherwise derive it from the link
+     * budget implied by whatever sf/bw_hz/tx_power_dbm/path_loss_* this
+     * scenario just set, so SF/BW changes couple to range instead of a fixed
+     * disk independent of the radio's own settings (must run after the PHY
+     * overrides above). */
+    if (range && cJSON_IsNumber(range))
+        radio->range = (float)range->valuedouble;
+    else
+        radio->range = radio_derive_range(radio);
 
     /* Optional regulatory duty-cycle cap (DES-8): absent = unlimited,
      * matching today's behavior (radio_config_init already left

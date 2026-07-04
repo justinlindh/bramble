@@ -92,6 +92,31 @@ typedef struct radio_config {
 void radio_config_init(radio_config_t* config);
 float radio_distance(const sim_node_t* a, const sim_node_t* b);
 int8_t radio_compute_rssi(const radio_config_t* config, float distance);
+
+/*
+ * radio_sensitivity_dbm: LoRa receiver sensitivity for spreading factor sf at
+ * bandwidth bw_hz, dBm. Datasheet SX127x/SX126x values at 125 kHz (SF7 -123
+ * ... SF12 -137), adjusted for bandwidth (+10*log10(bw/125000) dB: wider
+ * bandwidth admits more noise) plus NOISE_MARGIN_DB, a single additive
+ * calibration constant (see sim_radio.c) chosen so the derived range at the
+ * firmware's default PHY (SF10/125 kHz) reproduces the simulator's
+ * long-standing ~150-unit baseline range under the default link-budget
+ * params. sf outside 7..12 or bw_hz == 0 fall back to the SF10/125 kHz
+ * default, mirroring radio_frame_airtime_us's fallback convention.
+ */
+float radio_sensitivity_dbm(uint8_t sf, uint32_t bw_hz);
+
+/*
+ * radio_derive_range: the maximum distance (grid units) at which
+ * path_rssi_dbm(config, distance) is still at or above
+ * radio_sensitivity_dbm(config->sf, config->bw_hz), i.e. the link-budget
+ * range implied by config's PHY and path-loss params. This is what
+ * config->range is set to whenever a scenario does not explicitly override
+ * "range" (sim_scenario.c load_radio), so changing sf/bw_hz changes
+ * deliverable range the way a real link budget would, instead of range
+ * being a fixed disk independent of the radio's own settings.
+ */
+float radio_derive_range(const radio_config_t* config);
 bool radio_can_receive(const radio_config_t* config, const sim_node_t* tx, const sim_node_t* rx,
                        pcg32_state_t* rng);
 uint64_t radio_propagation_delay_us(const radio_config_t* config, float distance);
