@@ -75,4 +75,36 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
 void rrep_sign(bramble_rrep_t* r);
 int rrep_verify(const bramble_rrep_t* r);
 
+/* The routing decision an RREP receipt resolves to. Pure and host-testable:
+ * operates only on the already-host-testable routing tables, taking crypto
+ * verification (rrep_verify, control_replay_ok) as done by the caller.
+ *
+ * This first extraction is BEHAVIOR-PRESERVING: it replicates the current
+ * handle_rrep logic exactly, buggy bits included. route_next_hop keeps the
+ * dest_addr==self_addr ternary (wrong beyond 1 hop, see the harness design
+ * doc), and install_route is unconditionally true (a later fix gates it on
+ * pd/rev participation). */
+typedef enum {
+    RREP_RX_DROP = 0,
+    RREP_RX_DELIVER,
+    RREP_RX_FORWARD,
+} rrep_rx_action_t;
+
+typedef struct {
+    rrep_rx_action_t action;
+    bool install_route;
+    uint32_t route_dest;
+    uint32_t route_next_hop;
+    uint8_t route_hops;
+    uint8_t route_metric;
+    uint32_t forward_to;   /* RREP_RX_FORWARD: reverse-route prev_hop */
+    uint32_t deliver_dest; /* RREP_RX_DELIVER: pd->dest_addr to flush */
+} rrep_rx_decision_t;
+
+/* self_addr, link_metric (already link-penalized by the caller), and the
+ * node's pending-discovery / reverse-route tables. */
+rrep_rx_decision_t rrep_rx_decide(const bramble_rrep_t* rrep, uint32_t self_addr,
+                                  uint8_t link_metric, pending_discovery_table_t* pd,
+                                  reverse_route_table_t* rev);
+
 #endif

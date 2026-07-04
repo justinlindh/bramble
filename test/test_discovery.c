@@ -24,6 +24,7 @@ void tearDown(void) {}
 #define ADDR_A 0x0A0A0A0A
 #define ADDR_B 0x0B0B0B0B
 #define ADDR_C 0x0C0C0C0C
+#define ADDR_D 0x0D0D0D0D
 #define QUERY 0xDEAD0001
 #define QUERY2 0xDEAD0002
 #define QUERY3 0xDEAD0003
@@ -216,6 +217,74 @@ void test_rrep_forward(void) {
     TEST_ASSERT_EQUAL(ADDR_A, fwd.header.dest_addr);
 }
 
+/* --- rrep_rx_decide: behavior-preserving extraction of handle_rrep --- */
+
+void test_rrep_rx_decide_originator_delivers(void) {
+    bramble_rrep_t rrep;
+    memset(&rrep, 0, sizeof(rrep));
+    rrep.header.dest_addr = ADDR_A; /* addressed to us: ternary picks src_addr */
+    rrep.query_id = QUERY;
+    rrep.src_addr = ADDR_C;
+    rrep.next_hop = ADDR_B; /* must be ignored by the current ternary */
+    rrep.hop_count = 3;
+
+    discovery_start(&dtbl, ADDR_C, QUERY, 1000);
+
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_A, 210, &dtbl, &rev_a);
+
+    TEST_ASSERT_EQUAL(RREP_RX_DELIVER, d.action);
+    TEST_ASSERT_EQUAL(ADDR_C, d.deliver_dest);
+    TEST_ASSERT_TRUE(d.install_route);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_next_hop); /* current ternary: dest==self -> src_addr */
+    TEST_ASSERT_EQUAL(3, d.route_hops);
+    TEST_ASSERT_EQUAL(210, d.route_metric);
+}
+
+void test_rrep_rx_decide_intermediate_forwards(void) {
+    bramble_rrep_t rrep;
+    memset(&rrep, 0, sizeof(rrep));
+    rrep.header.dest_addr = ADDR_A; /* framed toward the originator, not us */
+    rrep.query_id = QUERY;
+    rrep.src_addr = ADDR_C;
+    rrep.next_hop = ADDR_D; /* current ternary uses this since dest != self */
+    rrep.hop_count = 2;
+
+    reverse_route_add(&rev_b, QUERY, ADDR_A, 1000);
+
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 180, &dtbl, &rev_b);
+
+    TEST_ASSERT_EQUAL(RREP_RX_FORWARD, d.action);
+    TEST_ASSERT_EQUAL(ADDR_A, d.forward_to);
+    TEST_ASSERT_TRUE(d.install_route);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
+    TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop); /* current ternary: dest!=self -> rrep.next_hop */
+    TEST_ASSERT_EQUAL(2, d.route_hops);
+    TEST_ASSERT_EQUAL(180, d.route_metric);
+}
+
+void test_rrep_rx_decide_unsolicited_drops_but_still_installs(void) {
+    bramble_rrep_t rrep;
+    memset(&rrep, 0, sizeof(rrep));
+    rrep.header.dest_addr = ADDR_A;
+    rrep.query_id = QUERY;
+    rrep.src_addr = ADDR_C;
+    rrep.next_hop = ADDR_D;
+    rrep.hop_count = 1;
+
+    /* No pd, no reverse route for this query: nothing to deliver or forward. */
+    rrep_rx_decision_t d = rrep_rx_decide(&rrep, ADDR_B, 150, &dtbl, &rev_b);
+
+    TEST_ASSERT_EQUAL(RREP_RX_DROP, d.action);
+    /* This is the documented current bug: install still runs unconditionally.
+     * A later task gates this on pd/rev participation. */
+    TEST_ASSERT_TRUE(d.install_route);
+    TEST_ASSERT_EQUAL(ADDR_C, d.route_dest);
+    TEST_ASSERT_EQUAL(ADDR_D, d.route_next_hop);
+    TEST_ASSERT_EQUAL(1, d.route_hops);
+    TEST_ASSERT_EQUAL(150, d.route_metric);
+}
+
 /* --- Integration: 3-node route discovery A -> B -> C --- */
 
 void test_three_node_discovery(void) {
@@ -326,6 +395,9 @@ int main(void) {
     RUN_TEST(test_rreq_forward);
     RUN_TEST(test_rrep_build_destination);
     RUN_TEST(test_rrep_forward);
+    RUN_TEST(test_rrep_rx_decide_originator_delivers);
+    RUN_TEST(test_rrep_rx_decide_intermediate_forwards);
+    RUN_TEST(test_rrep_rx_decide_unsolicited_drops_but_still_installs);
     RUN_TEST(test_three_node_discovery);
     RUN_TEST(test_retry_discovery_succeeds_through_warm_dedup);
     return UNITY_END();
