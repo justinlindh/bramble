@@ -22,6 +22,7 @@
 #include "../engine/cJSON.c"
 
 /* Bramble components */
+#include "../../components/network_key/network_key.c"
 #include "../../components/routing/routing.c"
 #include "../../components/routing/discovery.c"
 #include "../../components/routing/forwarding.c"
