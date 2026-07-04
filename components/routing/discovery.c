@@ -172,6 +172,43 @@ bramble_rrep_t rrep_build_destination(const bramble_rreq_t* rreq, uint32_t my_ad
     return r;
 }
 
+bool intermediate_rrep_route_usable(const route_entry_t* route, uint32_t now_ms) {
+    if (!route)
+        return false;
+    if (route->source != ROUTE_SRC_DISCOVERED)
+        return false;
+    if (route->state != ROUTE_ACTIVE)
+        return false;
+    if (now_ms - route->last_confirmed > INTERMEDIATE_RREP_MAX_AGE_MS)
+        return false;
+    return true;
+}
+
+bramble_rrep_t rrep_build_intermediate(const bramble_rreq_t* rreq,
+                                       const route_entry_t* route_to_dest, uint32_t my_addr,
+                                       int8_t rx_rssi, int8_t rx_snr) {
+    bramble_rrep_t r;
+    memset(&r, 0, sizeof(r));
+    r.header.version = BRAMBLE_VERSION;
+    r.header.type = PKT_TYPE_RREP;
+    r.header.flags = 0;
+    r.header.hop_limit = ROUTE_HOP_LIMIT_MAX;
+    r.header.dest_addr = rreq->prev_hop; /* unicast back toward the RREQ sender */
+    r.query_id = rreq->query_id;
+    r.src_addr = route_to_dest->dest_addr; /* answering ON BEHALF OF this destination */
+    r.next_hop = my_addr;                  /* this relay is the first hop back, from itself */
+
+    uint8_t hops_to_me = (uint8_t)(rreq->hop_count + 1);
+    r.hop_count = (uint8_t)(hops_to_me + route_to_dest->hop_count);
+
+    uint8_t metric_to_me = metric_apply_link_penalty(rreq->metric, rx_rssi, rx_snr);
+    uint16_t dest_penalty = (uint16_t)(255 - route_to_dest->metric);
+    r.route_metric = (dest_penalty >= metric_to_me) ? 0 : (uint8_t)(metric_to_me - dest_penalty);
+
+    rrep_sign(&r);
+    return r;
+}
+
 bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_back,
                             uint32_t my_addr) {
     /* Copies the whole struct, including auth_hmac, unchanged: only

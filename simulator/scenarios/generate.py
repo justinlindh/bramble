@@ -161,6 +161,12 @@ def build_scenario(args):
     if args.flood_hop_limit is not None:
         scenario["flood_hop_limit"] = args.flood_hop_limit
 
+    # Phase 2 "save reactive routing" Part B: "intermediate_rrep" A/B
+    # switch (gosim/bridge.h's bridge_set_intermediate_rrep_enabled);
+    # omitted unless explicitly given, same emit-only-if-explicit rule.
+    if args.intermediate_rrep is not None:
+        scenario["intermediate_rrep"] = bool(args.intermediate_rrep)
+
     beacon = {}
     if args.beacon_adaptive is not None:
         beacon["adaptive"] = bool(args.beacon_adaptive)
@@ -207,6 +213,10 @@ def parse_args(argv):
     p.add_argument("--flood-hop-limit", type=int, default=None,
                   help="flood mode's hop_limit; omitted (sim default: 3, Meshtastic's shipped "
                        "default) unless given. Ignored when --routing is not 'flood'")
+    p.add_argument("--intermediate-rrep", type=int, choices=[0, 1], default=None,
+                  help="Phase 2 Part B A/B switch: 1 = intermediate-node RREP on, 0 = off; "
+                       "omitted (sim default: on, matching firmware's always-on shipped "
+                       "behavior) unless given. Ignored in flood mode (reactive-only feature)")
     p.add_argument("--traffic-msgs-per-min", type=float, default=LEGACY_TRAFFIC_MSGS_PER_MIN,
                   help=f"message generation rate (default: {LEGACY_TRAFFIC_MSGS_PER_MIN})")
     p.add_argument("--duration-s", type=int, default=LEGACY_DURATION_S,
