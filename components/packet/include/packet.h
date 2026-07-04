@@ -259,8 +259,8 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
 
 /*
  * DATA/LOCATION envelope layout (wire v4):
- *   header(HEADER_SIZE) + src_addr(4) + prev_hop(4) + nonce(BRAMBLE_NONCE_SIZE)
- *   + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)
+ *   header(HEADER_SIZE) + src_addr(4) + prev_hop(4) + auth_hmac(8)
+ *   + nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)
  * (main/mesh_task.c's send_data_packet/send_dm_packet/mesh_send_location_packet
  * build this layout; handle_data/handle_location parse it; gosim's bridge.c
  * uses its own out-of-band src_addr/prev_hop tracking instead of these wire
@@ -281,6 +281,24 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
  * exclusion here is structural (prev_hop's offset is never copied into the
  * AAD buffer at all), not a masked-in-place byte like hop_limit.
  *
+ * auth_hmac (Task 4-fix F1, wire v4) is an 8-byte NETWORK-KEY MAC the
+ * ORIGINATOR writes and never mutates in flight (relays and the mailbox
+ * flusher copy it through verbatim, exactly like the AEAD tag). It covers
+ * the ORIGIN-STABLE authenticated fields -- the masked header (hop_limit
+ * zeroed) plus src_addr, i.e. the same HEADER_SIZE + 4 byte buffer
+ * bramble_build_aead_aad produces -- and EXCLUDES prev_hop and hop_limit
+ * (both relay-mutable). It is the DATA analogue of ack/rrep/rerr's
+ * auth_hmac[8] (routing_auth.h): a relay never decrypts a DATA frame, so the
+ * AEAD tag (checked only at the destination) cannot gate reverse-route
+ * learning. Without this MAC a keyless attacker could inject a DATA frame
+ * with a spoofed src_addr and poison every node's route toward that victim.
+ * data_auth_sign/data_auth_verify (routing_auth.h) build and check it;
+ * mesh_process_rx_packet verifies it BEFORE learning a breadcrumb or
+ * forwarding, so only network-key holders can lay breadcrumbs (RREP parity).
+ * Like all control-plane auth here it is forgeable under the unprovisioned
+ * public-PSK fallback key (network_key.h) -- the accepted, documented
+ * baseline, not closed by this field.
+ *
  * src_addr stays AAD-bound, so the reverse route's TARGET (who a returning
  * confirmation is ultimately for) cannot be spoofed by an on-path relay;
  * only the NEXT-HOP hint is unauthenticated. Residual (see
@@ -290,9 +308,11 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
  */
 #define BRAMBLE_DATA_SRC_ADDR_OFFSET (HEADER_SIZE)
 #define BRAMBLE_DATA_PREV_HOP_OFFSET (HEADER_SIZE + 4)
-#define BRAMBLE_DATA_NONCE_OFFSET (HEADER_SIZE + 8)
-/* header + src_addr + prev_hop, i.e. where the AEAD nonce begins */
-#define BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE (HEADER_SIZE + 8)
+#define BRAMBLE_DATA_AUTH_HMAC_OFFSET (HEADER_SIZE + 8)
+#define BRAMBLE_DATA_AUTH_HMAC_SIZE 8
+#define BRAMBLE_DATA_NONCE_OFFSET (HEADER_SIZE + 16)
+/* header + src_addr + prev_hop + auth_hmac, i.e. where the AEAD nonce begins */
+#define BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE (HEADER_SIZE + 16)
 
 esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len);
 esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t len);

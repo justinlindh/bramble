@@ -53,7 +53,7 @@ static data_rx_decision_t receive_data(node_t* node, uint32_t dest_addr, uint32_
         data_rx_decide(dest_addr, node->addr, src_addr, prev_hop, received_hop_limit, link_metric);
     if (d.install_reverse_route) {
         route_install(&node->routes, d.reverse_dest, d.reverse_next_hop, d.reverse_hop_count,
-                      d.reverse_metric, ROUTE_ACTIVE, now_ms);
+                      d.reverse_metric, ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, now_ms);
     }
     return d;
 }
@@ -74,7 +74,7 @@ void test_data_transit_installs_reverse_routes_and_ack_forwards_home(void) {
     uint32_t now = 5000;
 
     /* Simulate prior discovery: B already knows how to reach C directly. */
-    route_install(&B.routes, ADDR_C, ADDR_C, 1, 200, ROUTE_ACTIVE, now);
+    route_install(&B.routes, ADDR_C, ADDR_C, 1, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now);
 
     /* --- Hop 1: A originates, B receives --- */
     /* A writes its own address as both src_addr and prev_hop (send_data_packet's

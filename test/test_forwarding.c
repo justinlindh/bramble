@@ -8,7 +8,7 @@ void setUp(void) { route_init(&rt); }
 void tearDown(void) {}
 
 void test_forward_active_route(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     uint8_t hl = 4;
     forward_result_t r = forward_data(&rt, 0xCCCC, &hl, 2000);
     TEST_ASSERT_TRUE(r.should_send);
@@ -18,7 +18,7 @@ void test_forward_active_route(void) {
 }
 
 void test_forward_stale_promotion(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_STALE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_STALE, ROUTE_SRC_DISCOVERED, 1000);
     uint8_t hl = 4;
     forward_result_t r = forward_data(&rt, 0xCCCC, &hl, 2000);
     TEST_ASSERT_TRUE(r.should_send);
@@ -27,7 +27,7 @@ void test_forward_stale_promotion(void) {
 }
 
 void test_forward_ttl_expiry(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     uint8_t hl = 1;
     forward_result_t r = forward_data(&rt, 0xCCCC, &hl, 2000);
     TEST_ASSERT_FALSE(r.should_send);
@@ -42,7 +42,7 @@ void test_forward_unknown_dest(void) {
 }
 
 void test_forward_broken_after_failures(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     forward_record_failure(&rt, 0xCCCC);
     forward_record_failure(&rt, 0xCCCC);
     forward_record_failure(&rt, 0xCCCC);
@@ -56,7 +56,7 @@ void test_forward_broken_after_failures(void) {
 }
 
 void test_rerr_build_and_handle(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     bramble_rerr_t rerr = rerr_build(0xAAAA, 0xCCCC, 0xBBBB);
     TEST_ASSERT_EQUAL(PKT_TYPE_RERR, rerr.header.type);
     TEST_ASSERT_EQUAL(0xAAAA, rerr.reporter_addr);
@@ -70,7 +70,7 @@ void test_rerr_build_and_handle(void) {
 }
 
 void test_rerr_wrong_next_hop_ignored(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     bramble_rerr_t rerr = rerr_build(0xAAAA, 0xCCCC, 0x9999); /* wrong next_hop */
     bool marked = rerr_handle(&rt, &rerr);
     TEST_ASSERT_FALSE(marked);
@@ -83,7 +83,7 @@ void test_rerr_wrong_next_hop_ignored(void) {
  * rerr_handle so firmware and gosim both get it instead of only whichever
  * hand-copy happened to remember it. */
 void test_rerr_handle_bumps_fail_count(void) {
-    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, 1000);
+    route_install(&rt, 0xCCCC, 0xBBBB, 2, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     bramble_rerr_t rerr = rerr_build(0xAAAA, 0xCCCC, 0xBBBB);
     rerr_handle(&rt, &rerr);
     route_entry_t* e = route_lookup(&rt, 0xCCCC);
@@ -116,11 +116,10 @@ void test_data_rx_decide_deliver_broadcast(void) {
     data_rx_decision_t d =
         data_rx_decide(0xFFFFFFFF, SELF_ADDR, ORIGIN_ADDR, PREV_HOP_ADDR, ROUTE_HOP_LIMIT_MAX, 150);
     TEST_ASSERT_EQUAL(DATA_RX_DELIVER, d.action);
-    /* Broadcast DATA's sender is just as reachable via prev_hop as a
-     * unicast sender is; install_reverse_route does not depend on action. */
-    TEST_ASSERT_TRUE(d.install_reverse_route);
-    TEST_ASSERT_EQUAL_UINT32(ORIGIN_ADDR, d.reverse_dest);
-    TEST_ASSERT_EQUAL_UINT32(PREV_HOP_ADDR, d.reverse_next_hop);
+    /* Task 4-fix F3: broadcast DATA learns NO reverse route. A broadcast
+     * implies no unicast return path worth learning, and installing off it
+     * lets one forged broadcast poison the whole neighborhood at once. */
+    TEST_ASSERT_FALSE(d.install_reverse_route);
 }
 
 void test_data_rx_decide_forward_other_unicast(void) {
@@ -161,6 +160,20 @@ void test_data_rx_decide_hop_count_two_hops_from_origin(void) {
     TEST_ASSERT_EQUAL(2, d.reverse_hop_count);
 }
 
+/* Task 4-fix F3 (Medium) attack regression: red-team forged BROADCAST DATA.
+ * An attacker sends a broadcast-dest DATA claiming to originate at a victim,
+ * hoping every node in range installs a breadcrumb route(victim)->attacker
+ * at once (neighborhood-wide poison + table-flush DoS). data_rx_decide must
+ * refuse to learn ANY reverse route from a broadcast frame, so no such
+ * breadcrumb is ever offered to route_install. */
+void test_f3_forged_broadcast_installs_no_breadcrumb(void) {
+    uint32_t victim = 0x0A0A0A0Au;
+    uint32_t attacker = 0x0E0E0E0Eu;
+    data_rx_decision_t d =
+        data_rx_decide(0xFFFFFFFF, SELF_ADDR, victim, attacker, ROUTE_HOP_LIMIT_MAX, 255);
+    TEST_ASSERT_FALSE(d.install_reverse_route);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_forward_active_route);
@@ -178,5 +191,6 @@ int main(void) {
     RUN_TEST(test_data_rx_decide_skips_when_prev_hop_is_self);
     RUN_TEST(test_data_rx_decide_hop_count_one_hop_from_origin);
     RUN_TEST(test_data_rx_decide_hop_count_two_hops_from_origin);
+    RUN_TEST(test_f3_forged_broadcast_installs_no_breadcrumb);
     return UNITY_END();
 }

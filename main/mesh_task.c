@@ -601,6 +601,10 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
         /* Wire v4: originator writes its own address as prev_hop, same as
          * send_data_packet/send_dm_packet. */
         memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+        /* Wire v4 (F1): origin-authenticate; see send_data_packet. LOCATION
+         * shares the envelope so it carries the field, though it is never
+         * relayed today (handle_location delivers dest==self/broadcast only). */
+        data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
         memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
         memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext,
                sizeof(ciphertext));
@@ -659,6 +663,8 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
     memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
     /* Wire v4: originator writes its own address as prev_hop. */
     memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    /* Wire v4 (F1): origin-authenticate; see send_data_packet. */
+    data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
     memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
     memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
@@ -2457,7 +2463,7 @@ static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
          * subtracts from the higher-is-better path metric. */
         uint8_t metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, metric, ROUTE_ACTIVE,
-                      now_ms());
+                      ROUTE_SRC_DISCOVERED, now_ms());
         return;
     }
 
@@ -2516,7 +2522,7 @@ static void handle_rrep(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
 
     if (d.install_route) {
         route_install(&s_routes, d.route_dest, d.route_next_hop, d.route_hops, d.route_metric,
-                      ROUTE_ACTIVE, now_ms());
+                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms());
     }
 
     switch (d.action) {
@@ -2845,16 +2851,36 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * go home to instead of dying at route_lookup(src_addr) == NULL.
          *
          * src_addr/prev_hop are read directly off the wire here (both are
-         * plaintext outside the AEAD ciphertext; see packet.h): a length
-         * guard covers a too-short/malformed frame by falling back to
-         * self_addr as src_addr, which data_rx_decide's own src==self skip
-         * turns into "do not learn" -- there is no valid v4 DATA/LOCATION
-         * frame this short. */
-        uint32_t data_src_addr = s_identity->address;
-        uint32_t data_prev_hop = 0;
-        if (pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
-            memcpy(&data_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
-            memcpy(&data_prev_hop, pkt->data + BRAMBLE_DATA_PREV_HOP_OFFSET, 4);
+         * plaintext outside the AEAD ciphertext; see packet.h). A frame too
+         * short to hold the full envelope prefix (through the auth_hmac and
+         * up to the nonce) is dropped outright: there is no valid v4
+         * DATA/LOCATION frame this short. */
+        if (pkt->len < BRAMBLE_DATA_NONCE_OFFSET) {
+            ESP_LOGW(TAG, "DATA frame too short for v4 envelope: %u", pkt->len);
+            break;
+        }
+        uint32_t data_src_addr;
+        uint32_t data_prev_hop;
+        memcpy(&data_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+        memcpy(&data_prev_hop, pkt->data + BRAMBLE_DATA_PREV_HOP_OFFSET, 4);
+
+        /* Task 4-fix F1 (Critical): authenticate the frame's origin BEFORE
+         * learning any reverse route or forwarding. A relay never decrypts
+         * DATA, so the AEAD tag cannot gate this; the network-key auth_hmac
+         * over the masked header + src_addr is the DATA analogue of
+         * RREP/ACK/RERR's control-plane MAC. A keyless attacker (no network
+         * key) cannot forge it, so it can no longer inject a frame that
+         * poisons every node's route toward a spoofed victim. On failure we
+         * neither learn nor forward nor deliver -- a bad-MAC DATA frame is
+         * treated exactly like any unauthenticated control frame. A
+         * legitimate frame always carries a valid MAC (every originator
+         * signs; all provisioned nodes share the key), so this drops nothing
+         * real. Forgeable only under the unprovisioned public-PSK fallback,
+         * the accepted baseline for all control-plane auth (network_key.h). */
+        if (!data_auth_verify(&header, data_src_addr, pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
+            ESP_LOGW(TAG, "DATA auth_hmac failed (src=%08" PRIX32 " prev_hop=%08" PRIX32 "), drop",
+                     data_src_addr, data_prev_hop);
+            break;
         }
 
         /* Metric mirrors handle_rrep's pattern (metric_apply_link_penalty
@@ -2868,9 +2894,12 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
                            header.hop_limit, data_link_metric);
 
         if (data_rx.install_reverse_route) {
+            /* Task 4-fix F2: breadcrumbs install as ROUTE_SRC_BREADCRUMB so
+             * they can never displace an HMAC-gated DISCOVERED route (and a
+             * later DISCOVERED route always reclaims this entry). */
             route_install(&s_routes, data_rx.reverse_dest, data_rx.reverse_next_hop,
                           data_rx.reverse_hop_count, data_rx.reverse_metric, ROUTE_ACTIVE,
-                          now_ms());
+                          ROUTE_SRC_BREADCRUMB, now_ms());
         }
 
         if (data_rx.action == DATA_RX_FORWARD) {
@@ -3561,6 +3590,10 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
      * (the first relay's receiver learns a 1-hop route to us via this).
      * Relay-mutable/MAC-excluded; see packet.h. */
     memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    /* Wire v4 (F1): network-key MAC over the origin-stable fields (masked
+     * header + src_addr), so relays can gate reverse-route learning without
+     * decrypting. Origin-written, carried through every forward unchanged. */
+    data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
@@ -3639,6 +3672,8 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
     /* Wire v4: ORIGINATOR writes its own address as prev_hop; see
      * send_data_packet's identical comment. */
     memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
+    /* Wire v4 (F1): origin-authenticate; see send_data_packet. */
+    data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + payload_len, tag,

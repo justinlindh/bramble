@@ -39,12 +39,14 @@ bool rerr_handle(routing_table_t* table, const bramble_rerr_t* rerr);
  * route home, so a destination's ACK/receipt has somewhere to go instead of
  * dying at route_lookup(src_addr) == NULL.
  *
- * install_reverse_route fires for received AND forwarded unicast DATA, and
- * for broadcast DATA too (a broadcast's sender is just as reachable via
- * prev_hop as a unicast sender is) -- it does not depend on `action`.  It
- * does NOT fire when src_addr == self_addr (an echo of our own packet) or
- * prev_hop == self_addr (the last hop was somehow ourselves); either would
- * install a self-referential route.
+ * install_reverse_route fires for received AND forwarded UNICAST DATA -- it
+ * does not depend on `action`. It does NOT fire when src_addr == self_addr
+ * (an echo of our own packet) or prev_hop == self_addr (the last hop was
+ * somehow ourselves); either would install a self-referential route. Task
+ * 4-fix F3: it also does NOT fire for broadcast DATA (dest_addr ==
+ * 0xFFFFFFFF). A broadcast implies no unicast return path worth learning,
+ * and learning off it would let one forged broadcast poison every neighbor's
+ * route toward a spoofed victim in a single frame (plus a table-flush DoS).
  *
  * reverse_hop_count is derived from received_hop_limit: the originator
  * always sends at ROUTE_HOP_LIMIT_MAX, and every forwarder decrements
