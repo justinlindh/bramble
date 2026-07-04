@@ -864,7 +864,17 @@ func (s *Sim) complete() {
 		"offered_load_erlangs": offeredLoadErlangs,
 		"channel_util_pct":     channelUtilPct,
 		"avg_latency_ms":       metricsAvgLatencyMs(&s.metrics),
-		"delivery_rate":        metricsDeliveryRate(&s.metrics),
+		// delivery_rate divides delivered by total_packets (every frame of
+		// every type on the air, beacons included), which is NOT a message
+		// delivery figure and understates end-to-end delivery by an order of
+		// magnitude in control-heavy runs. Kept under its old name for
+		// continuity; use message_delivery_rate for the honest number.
+		"delivery_rate": metricsDeliveryRate(&s.metrics),
+		// message_delivery_rate is the end-to-end scripted-message outcome:
+		// delivered / all scripted messages that reached a terminal state
+		// (delivered + dropped + undelivered). THE delivery number for
+		// baseline and scale comparisons.
+		"message_delivery_rate": messageDeliveryRate(delivered, dropped, undelivered),
 		// control_airtime_pct is now genuinely ToA-weighted:
 		// ToA(beacon+RREQ+RREP+RERR) / ToA(all). control_packet_pct is the
 		// OLD formula (beacon+RREQ+RREP packet COUNT / total packet count,
@@ -879,6 +889,18 @@ func (s *Sim) complete() {
 		"rreq_fwd_denied":       rreqFwdDenied,
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ended"})
+}
+
+// messageDeliveryRate is delivered / (delivered + dropped + undelivered):
+// the fraction of scripted messages that reached their destination, out of
+// all messages that reached any terminal state. Zero-denominator (a run
+// with no scripted messages) reports 0.
+func messageDeliveryRate(delivered, dropped, undelivered uint64) float64 {
+	total := delivered + dropped + undelivered
+	if total == 0 {
+		return 0.0
+	}
+	return float64(delivered) / float64(total)
 }
 
 // emitJSON marshals and broadcasts a JSON event.
