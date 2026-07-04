@@ -90,6 +90,20 @@ func TestPhase1ChannelFloodReachesFarNode(t *testing.T) {
 		t.Fatalf("A never sent a broadcast DATA message (no message_sent/broadcast event seen)")
 	}
 
+	// Self-echo guard (final whole-branch review finding 1): once B relays
+	// A's broadcast back out, A itself is in range of B and hears its own
+	// message echoed back. That is not a delivery anywhere new -- A already
+	// locally delivered this message the instant it originated it -- so
+	// bridge.c's _handle_data broadcast branch must not emit a
+	// message_delivered for A on that echo (mirrors main/mesh_task.c's
+	// handle_data src_addr == s_identity->address self-guard). Before that
+	// guard, A's own echo would be indistinguishable from a genuine
+	// far-node delivery in this exact event stream.
+	if delivered["A"] {
+		t.Fatalf("originator A received a spurious message_delivered for its own broadcast %s "+
+			"(self-echo from the channel flood was not suppressed)", packetIDHex)
+	}
+
 	// Direct neighbor: proves the base case still works (this passed even
 	// before Task 5, since B is one hop from A).
 	if !delivered["B"] {

@@ -630,7 +630,20 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
         uint32_t flood_key = hdr.packet_id ^ orig_sender;
         bool is_dup = dedup_check_and_add(&rx->flood_dedup, flood_key, now_ms);
 
-        if (!is_dup) {
+        /* A mesh flood means a node hears its own originated broadcast
+         * echoed back once some neighbor rebroadcasts it; folded into
+         * is_duplicate for channel_flood_decide (same "already seen,
+         * nothing to gain by relaying again" rule), mirroring firmware's
+         * identical is_own_echo guard in main/mesh_task.c's handle_data.
+         * Also gates the message_delivered emit just below: the originator
+         * hearing its own flood echoed back is not a new delivery anywhere,
+         * it is the same node that already originated (and locally
+         * delivered) this message, so it must not be counted or reported as
+         * a fresh delivery (mirrors main/mesh_task.c's handle_data
+         * src_addr == s_identity->address self-guard). */
+        bool is_own_echo = (orig_sender != 0 && orig_sender == rx->addr);
+
+        if (!is_dup && !is_own_echo) {
             /* Every hearer "delivers" locally (a broadcast has no single
              * destination); emit a message_delivered signal per hearer so a
              * scenario can prove reach at a far node, whether or not that
@@ -655,13 +668,6 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                     (unsigned long long)now_us, rx->id, hdr.packet_id);
             fflush(stdout);
         }
-
-        /* A mesh flood means a node hears its own originated broadcast
-         * echoed back once some neighbor rebroadcasts it; folded into
-         * is_duplicate for channel_flood_decide (same "already seen,
-         * nothing to gain by relaying again" rule), mirroring firmware's
-         * identical is_own_echo guard in main/mesh_task.c's handle_data. */
-        bool is_own_echo = (orig_sender != 0 && orig_sender == rx->addr);
 
         /* Non-mutating pre-check against the real BROADCAST-lane airtime
          * budget (tx_gate_kind_tier: TX_KIND_DATA_BROADCAST ->

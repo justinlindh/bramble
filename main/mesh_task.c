@@ -1934,6 +1934,21 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
     uint32_t src_addr;
     memcpy(&src_addr, data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
 
+    /* Self-originated guard (mirrors handle_location): the Task 5 channel
+     * flood means a node now hears its OWN broadcast/channel DATA echoed
+     * back by a neighbor's rebroadcast. Without this, the frame below would
+     * still get trial-decrypted (this node holds the key it encrypted with)
+     * and re-delivered as a spurious incoming onMessage/msg_store_add, plus
+     * a self-ACK and an s_delivered_dedup record for channel messages. The
+     * flood relay decision a few lines down already independently forces
+     * should_relay=false for a self-echo via is_own_echo, so returning here
+     * before that logic runs does not change relay behavior for this frame;
+     * it only skips the decrypt/deliver path that follows. Frames from
+     * other sources are completely unaffected by this check. */
+    if (src_addr == s_identity->address) {
+        return;
+    }
+
     const uint8_t* nonce = data + BRAMBLE_DATA_NONCE_OFFSET;
     size_t ct_len = len - BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE - BRAMBLE_NONCE_SIZE - BRAMBLE_TAG_SIZE;
     const uint8_t* ciphertext = nonce + BRAMBLE_NONCE_SIZE;
@@ -2997,21 +3012,31 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * retransmit's sender another chance to hear the confirmation)
          * WITHOUT touching handle_data's decrypt/deliver path, so local
          * delivery stays exactly-once. src_addr is read directly off the
-         * still-plaintext wire prefix here (SEC-M2), unauthenticated at
-         * this point, but that is fine for this decision: s_delivered_dedup
-         * only ever gains an entry AFTER a frame with that exact
-         * (src_addr, packet_id) pair already passed full auth_hmac
-         * verification, decrypt, and local delivery (handle_data), so a
-         * hit here can only be produced by replaying bytes that already
-         * cleared that bar once. Worst case an attacker forces a resend of
-         * an ACK that was already sent, bounded by the same ACK-tier
-         * airtime budget every other ACK send goes through. */
+         * still-plaintext wire prefix here (SEC-M2); s_delivered_dedup only
+         * ever gains an entry AFTER a frame with that exact (src_addr,
+         * packet_id) pair already passed full auth_hmac verification,
+         * decrypt, and local delivery (handle_data), so a hit here can only
+         * be produced by replaying bytes that already cleared that bar
+         * once. Finding 3 (final whole-branch review): for consistency with
+         * the Task-5 lesson of never acting on unauthenticated wire bytes,
+         * the re-ACK itself is additionally gated on data_auth_verify here
+         * (same network-key MAC check the PKT_TYPE_DATA case below runs),
+         * so a re-ACK can only be triggered by a frame that is ALSO a valid,
+         * currently-authenticated DATA frame, not merely one whose src_addr/
+         * packet_id happen to collide with a past delivery. On auth
+         * failure this falls through to the normal duplicate-drop below
+         * (no ACK, no re-verification retry) exactly as if this dup-ACK
+         * carve-out didn't exist. Length-guarded the same way the
+         * PKT_TYPE_DATA case guards its own data_auth_verify call, since
+         * auth_hmac lives at BRAMBLE_DATA_AUTH_HMAC_OFFSET..NONCE_OFFSET. */
         if (header.type == PKT_TYPE_DATA && header.dest_addr == s_identity->address &&
-            pkt->len >= BRAMBLE_DATA_SRC_ADDR_OFFSET + 4) {
+            pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
             uint32_t dup_src_addr;
             memcpy(&dup_src_addr, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
             uint32_t delivered_key = header.packet_id ^ dup_src_addr;
-            if (dedup_contains(&s_delivered_dedup, delivered_key, now_ms())) {
+            if (dedup_contains(&s_delivered_dedup, delivered_key, now_ms()) &&
+                data_auth_verify(&header, dup_src_addr,
+                                 pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
                 ESP_LOGI(TAG,
                          "Re-sending ACK for already-delivered duplicate pkt=%08" PRIX32
                          " from %08" PRIX32,

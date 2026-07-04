@@ -97,6 +97,13 @@ typedef enum {
  *     (installs/reclaims regardless of metric or hop count);
  *   - a BREADCRUMB install NEVER displaces an existing DISCOVERED entry;
  *   - same-class installs fall through to the usual metric/hop arbitration.
+ *
+ * The same trust class also governs capacity-eviction victim selection when
+ * MAX_ROUTES is full and a new dest needs a slot (route_install): eviction
+ * prefers a BREADCRUMB victim (broken -> stale -> LRU, in that order) over a
+ * DISCOVERED one; if the table holds no BREADCRUMB entry at all, a
+ * BREADCRUMB install is refused rather than evicting a DISCOVERED route,
+ * while a DISCOVERED install may still evict any entry.
  */
 typedef enum {
     ROUTE_SRC_DISCOVERED = 0, /* RREQ/RREP/beacon: control-plane, HMAC-gated */
