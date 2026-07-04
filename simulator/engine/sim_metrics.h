@@ -3,6 +3,23 @@
 
 #include <stdint.h>
 
+/* Per-packet-type ToA buckets for airtime_us_by_type. Indices, not wire
+ * PKT_TYPE_* codes (there are more PKT_TYPE_* values than categories worth
+ * breaking out); SIM_PKT_METRIC_OTHER catches anything not explicitly
+ * modeled as a TX in the sim (e.g. mailbox/probe/key-exchange payloads). */
+typedef enum {
+    SIM_PKT_METRIC_BEACON = 0,
+    SIM_PKT_METRIC_RREQ,
+    SIM_PKT_METRIC_RREP,
+    SIM_PKT_METRIC_RERR,
+    SIM_PKT_METRIC_DATA,
+    SIM_PKT_METRIC_ACK,
+    SIM_PKT_METRIC_RECEIPT,
+    SIM_PKT_METRIC_PROBE,
+    SIM_PKT_METRIC_OTHER,
+    SIM_PKT_METRIC_TYPE_COUNT,
+} sim_pkt_metric_type_t;
+
 typedef struct {
     uint64_t total_packets;
     uint64_t messages_sent;
@@ -30,6 +47,12 @@ typedef struct {
     uint64_t receptions_ok;            /* receptions that passed the collision model */
     uint64_t airtime_total_us;         /* sum of real time-on-air across all TX */
     int active_nodes;
+
+    /* Real time-on-air (us), by packet type (sim_pkt_metric_type_t), charged
+     * at the single TX chokepoint (sim_radio_broadcast) using the SAME ToA
+     * value (radio_frame_airtime_us) the collision/channel model uses: one
+     * source of truth, never recomputed. Sums to airtime_total_us. */
+    uint64_t airtime_us_by_type[SIM_PKT_METRIC_TYPE_COUNT];
 } metrics_state_t;
 
 void metrics_init(metrics_state_t* metrics);
@@ -41,8 +64,22 @@ void metrics_record_beacon_sent(metrics_state_t* metrics);
 void metrics_record_rreq_sent(metrics_state_t* metrics);
 void metrics_record_rrep_sent(metrics_state_t* metrics);
 void metrics_update_active_nodes(metrics_state_t* metrics, int count);
+/* Charges airtime_us of real time-on-air (the exact value the radio medium
+ * model computed for this transmission) to the bucket for pkt_type. Called
+ * once per actual (post-budget-gate) transmission, from sim_radio_broadcast. */
+void metrics_record_tx_airtime(metrics_state_t* metrics, uint8_t pkt_type, uint32_t airtime_us);
 double metrics_delivery_rate(const metrics_state_t* metrics);
 double metrics_avg_latency_ms(const metrics_state_t* metrics);
+/* ToA-weighted control-plane share: ToA(beacon+RREQ+RREP+RERR) / ToA(all).
+ * This is the HONEST replacement for the packet-count ratio this function
+ * used to compute; see metrics_control_packet_pct for that old semantic,
+ * kept under its own honest name. */
 double metrics_control_airtime_pct(const metrics_state_t* metrics);
+/* Packet-COUNT control-plane share (beacon+RREQ+RREP sent / total packets
+ * sent): the exact formula metrics_control_airtime_pct used to compute
+ * before it was fixed to be ToA-weighted. Kept for continuity under an
+ * honest name; note it does not include RERR, unlike the ToA-weighted
+ * version, since it is a frozen copy of the old (mislabeled) formula. */
+double metrics_control_packet_pct(const metrics_state_t* metrics);
 
 #endif /* SIM_METRICS_H */

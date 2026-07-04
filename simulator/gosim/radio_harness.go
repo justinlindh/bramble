@@ -206,6 +206,24 @@ func (h *radioHarness) transmit(srcAddr, destAddr uint32, frameBytes int, nowUs 
 		C.uint64_t(nowUs))
 }
 
+// transmitTyped is transmit with a caller-chosen wire packet type, so tests
+// can drive metrics_record_tx_airtime's per-type bucketing through the real
+// sim_radio_broadcast chokepoint with a known packet mix.
+func (h *radioHarness) transmitTyped(srcAddr, destAddr uint32, frameBytes int, pktType byte,
+	nowUs uint64) {
+	src := C.node_array_find_by_addr(h.nodes, C.uint32_t(srcAddr))
+	if src == nil {
+		panic("radioHarness: unknown src node")
+	}
+	var pkt C.outbound_packet_t
+	pkt.len = C.uint16_t(frameBytes)
+	pkt.is_broadcast = C.bool(destAddr == 0xFFFFFFFF)
+	pkt.dest_addr = C.uint32_t(destAddr)
+	pkt.pkt_type = C.uint8_t(pktType)
+	C.sim_radio_broadcast(src, &pkt, h.nodes, h.radio, h.rng, h.events, h.metrics,
+		C.uint64_t(nowUs))
+}
+
 // receptions drains the event queue and evaluates every scheduled reception
 // under the collision model, in timestamp order.
 func (h *radioHarness) receptions() []rxResult {
@@ -306,4 +324,39 @@ func (h *radioHarness) generateMessage(node *C.sim_node_t, destAddr uint32, nowU
 // simulating an abandoned/exhausted discovery.
 func (h *radioHarness) removePendingDiscovery(node *C.sim_node_t, destAddr uint32) {
 	C.discovery_remove(&node.pending_discoveries, C.uint32_t(destAddr))
+}
+
+// Wire packet types and sim_pkt_metric_type_t indices, exposed as plain Go
+// values (packet.h/sim_metrics.h constants) so _test.go files (no cgo) can
+// drive transmitTyped and read airtimeUsByType without touching "C.".
+var (
+	pktTypeBeacon = byte(C.PKT_TYPE_BEACON)
+	pktTypeRREQ   = byte(C.PKT_TYPE_RREQ)
+	pktTypeRREP   = byte(C.PKT_TYPE_RREP)
+	pktTypeRERR   = byte(C.PKT_TYPE_RERR)
+	pktTypeData   = byte(C.PKT_TYPE_DATA)
+
+	metricBeacon = int(C.SIM_PKT_METRIC_BEACON)
+	metricRREQ   = int(C.SIM_PKT_METRIC_RREQ)
+	metricRREP   = int(C.SIM_PKT_METRIC_RREP)
+	metricRERR   = int(C.SIM_PKT_METRIC_RERR)
+	metricData   = int(C.SIM_PKT_METRIC_DATA)
+)
+
+// airtimeUsByType reads the harness's shared metrics_state_t per-type ToA
+// accumulator (Task 4), in microseconds, indexed by the metric* constants
+// above.
+func (h *radioHarness) airtimeUsByType(idx int) uint64 {
+	return uint64(h.metrics.airtime_us_by_type[idx])
+}
+
+// controlAirtimePct reads the ToA-weighted control-plane share.
+func (h *radioHarness) controlAirtimePct() float64 {
+	return float64(C.metrics_control_airtime_pct(h.metrics))
+}
+
+// controlPacketPct reads the packet-COUNT-weighted control-plane share (the
+// old, now-honestly-named, formula).
+func (h *radioHarness) controlPacketPct() float64 {
+	return float64(C.metrics_control_packet_pct(h.metrics))
 }
