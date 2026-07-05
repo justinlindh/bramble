@@ -1732,6 +1732,117 @@ latency change on the 10- and 50-node scenarios
 (`docs/results/simulation-2026-06.md`, DES-4), so the module was deleted
 rather than shipped as decoration.
 
+### 6.9 Optional Flooding Transport (Flooding F1)
+
+> **Status: optional, default OFF, and reactive routing still ships.** Sections
+> 6.1 through 6.8 (AODV-style reactive route discovery, unicast forwarding along
+> installed routes, reverse-route learning) are the default and unchanged
+> transport. The flooding transport described here is a separate, opt-in
+> extension gated on a single runtime toggle (`s_flood_transport` in
+> `main/mesh_task.c`, default `false`). With the toggle off, unicast DATA and
+> ACK behave exactly as sections 6.6 and 7.2 describe; nothing below is on the
+> path. The broadcast/channel flood of section 6.7 is always active and is not
+> gated by this toggle: the toggle only extends that same one flood relay engine
+> to cover **unicast** DATA and the flooded ACK.
+
+**What the toggle turns on.** When `s_flood_transport` is set, a unicast DATA
+frame addressed to someone other than the receiving node is relayed by the
+same hop-limited, source-qualified-deduplicated, airtime-budget-gated flood
+engine that broadcast DATA already uses (`channel_flood_decide`,
+`components/routing/channel_flood.c`), instead of being forwarded along an
+installed route. There is no second flood implementation: unicast flooding is
+the broadcast relay gate with its "broadcast dest" condition widened to "dest
+is not me". Origination likewise floods the frame outward rather than requiring
+a route-discovery round trip first, so a message can start propagating with no
+prior RREQ/RREP.
+
+**Rebroadcast suppression (`FLOOD_SUPPRESS_AFTER = 2`).** A node that has a
+flood rebroadcast still waiting out its jitter cancels it once it has overheard
+`FLOOD_SUPPRESS_AFTER` **other authenticated** copies of the same frame
+(matched on the source-qualified key `packet_id XOR src_addr`, so a duplicate
+from a different originator never cancels an unrelated relay). Those copies
+already covered the airspace this node's relay would have, so keying up again
+would only add a redundant collision. Bramble's threshold is **2**; Meshtastic's
+managed flooding effectively cancels on the **first** overheard copy (an
+effective threshold of 1). Bramble uses 2 deliberately: in a small or sparse
+mesh, one overheard copy is not yet evidence that every onward neighbor is
+already covered, and cancelling that eagerly leaves coverage holes. This mirrors
+the Go model's `floodSuppressAfterHeard = 2` (`simulator/gosim/flood.go`) so the
+firmware reproduces the model's measured delivery.
+
+*Overheard copies must authenticate before they count.* The dispatch-gate
+deduplicator inserts a frame's dedup key on its **first** copy, before the
+network-key MAC is verified, so the suppression counter is gated on verifying
+each overheard duplicate's network-key MAC first (`data_auth_verify` for DATA,
+`bramble_ack_deserialize` + `ack_verify` for the flooded ACK) before it may
+increment `heard` or cancel a pending relay. Without that gate a keyless party
+could replay garbage-MAC duplicates carrying a matching plaintext
+`packet_id`/`src_addr` to drive a legitimate node's `heard` to the threshold
+and cancel its genuine relay, punching a targeted coverage hole. Only genuine,
+network-key-signed copies suppress.
+
+**Flooded acknowledgement (route-free confirmation).** Under the toggle, the
+destination's ACK is likewise flooded back rather than routed home, which gives
+the original sender sender-confirmation with no route table consulted anywhere
+on the path. A relay verifies the ACK's network-key MAC (`ack_verify`) **and**
+its per-message freshness against the control-replay window (section 3 of
+`docs/SECURITY-MODEL.md`) before it will rebroadcast it, and the original sender
+correlates a received flooded ACK to a pending message purely by
+`ack_packet_id`. This is the concrete reliability win of the transport:
+confirmed delivery of a broadcast-style flood, which fire-and-forget flooding
+does not offer.
+
+**Validated numbers (honest).** On a fast, dense radio profile (SF7 / 250 kHz,
+approximately 45-unit node spacing) the firmware flood measured **75 to 100
+percent reach and 60 to 90 percent confirmed delivery at 25 to 100 nodes**.
+These are the profile and density the transport is designed for; they are not
+the shipping default (which is LongRange, SF10 / 125 kHz, section 3.2) and they
+do not replace reactive routing.
+
+**Accepted residuals and limitations (documented, not papered over):**
+
+- **Suppression only fires when the jitter window exceeds a frame's
+  time-on-air**, i.e. on a fast radio profile. At the long-range default
+  (SF10 / 125 kHz) a frame's air time exceeds the rebroadcast jitter, so a
+  node's own relay has already gone out before it can overhear enough copies to
+  cancel it, and flooding relays **without** suppression. This ties transport
+  efficiency to matching the radio profile to a dense deployment (see the
+  SF-to-density deployment guidance).
+- **Retry re-floods the same `packet_id`**, which is suppressed at every relay
+  still holding the 60-second dedup key for that frame. Retry therefore mainly
+  helps the single-hop / lost-ACK case, not multi-hop propagation failures; a
+  retry that needs to reach further than the first flood did is dropped as a
+  duplicate along the way. Improving this is an F2 tuning item.
+- **A full flood relay queue (capacity 8) falls back to immediate,
+  uncancellable transmission**, so under burst load suppression silently stops
+  and the flood reverts to unsuppressed rebroadcast.
+- **Suppression is global; only the unicast extension is toggled.** The
+  broadcast/channel flood suppression (section 6.7) applies regardless of the
+  toggle. `s_flood_transport` gates only the unicast DATA + flooded ACK
+  extension; with it off, the reactive routing path of sections 6.6 and 7.2 is
+  entirely unchanged.
+- **Keyed-insider residual is unchanged.** Every MAC here proves "signed by a
+  network-key holder", not "by a specific node", so a network-key insider can
+  still forge a flood frame or ACK; replay of a captured valid frame is caught
+  by the control-replay window, but insider forgery is inherent to a shared
+  symmetric key (`docs/SECURITY-MODEL.md`, section 5).
+
+**Competitive delta (flooding transport only).** Relative to Meshtastic and
+Meshcore, and scoped strictly to this transport:
+
+- *vs Meshtastic.* Distinct advantages: the flood is **authenticated**, so only
+  network-key holders' traffic propagates and only their copies can affect
+  suppression (post-fix), where Meshtastic channel traffic is unauthenticated;
+  **route-free confirmed delivery** via the flooded ACK, where Meshtastic is
+  fire-and-forget; and small-mesh reliability from `suppress = 2` versus
+  Meshtastic's aggressive effective-1 default.
+- *vs Meshcore.* Meshcore ships per-node keys, end-to-end encryption, and
+  efficient routing, so against it the edge narrows to **confirmed broadcast**
+  plus **authenticated-flood membership gating** (only members' traffic
+  propagates and can suppress). That gap, Meshcore's per-node-key and routing
+  efficiency versus Bramble's shared-key flood, is the honest weaker axis and
+  the one to watch.
+
 ---
 
 ## 7. Reliability Layer
@@ -2328,6 +2439,14 @@ function rreq_rate_check(source_neighbor, dest_addr, query_id):
 
 RREQ rate table: max 64 entries × 12 bytes = 768 bytes.
 
+Under the optional flooding transport (section 6.9), one further layer applies:
+the rebroadcast-suppression counter that cancels a node's pending relay only
+counts an overheard duplicate after that copy's network-key MAC verifies
+(`data_auth_verify` for DATA, `ack_verify` for the flooded ACK). Without it a
+keyless party could replay garbage-MAC duplicates carrying a matching plaintext
+`packet_id`/`src_addr` to cancel a legitimate node's genuine relay, a targeted
+coverage-hole attack in a sparse mesh. Only authenticated copies suppress.
+
 ### 10.6 Sybil Attack Mitigation
 
 A Sybil attack (one attacker creating many fake node identities) is partially mitigated:
@@ -2780,6 +2899,14 @@ replay_window_s       = 30
 max_channels          = 16
 channel_default_hops  = 3                  // Hop limit for channel messages
 
+// Flooding transport (optional, section 6.9)
+s_flood_transport     = false              // Default OFF; reactive routing ships.
+                                           // On: unicast DATA + ACK use the flood engine
+flood_suppress_after  = 2                  // Overheard AUTHENTICATED copies before a
+                                           // node cancels its own pending relay
+                                           // (Meshtastic effective 1; 2 aids small meshes)
+flood_relay_queue_cap = 8                  // Full queue -> immediate uncancellable relay
+
 // Fragmentation
 max_fragments         = 4
 fragment_timeout_ms   = 30000              // 30 seconds to reassemble
@@ -2850,3 +2977,5 @@ Native mobile application (iOS/Android) for richer interaction beyond Web BLE ca
 | 2026-02-15 | Initial design document (v0.1-draft) |
 | 2026-02-16 | **Adversarial review fixes:** Dedup buffer 128→256 entries. RREP HMAC 4→8 bytes (RREP_SIZE 30→34). RREQ salt field added (RREQ_SIZE 26→30) to prevent temporal correlation. Max fragments 8→4 (max reassembled 616B). Long-term pubkey added to KEY_EXCHANGE (69→101 bytes). KEY_EXCHANGE now Critical-tier (8 retries). Nonce counter persistence for reboot safety. Constant-time channel trial decryption. TX power reduction removed from congestion response (replaced with increased backoff). **New features:** NVS key backup via BLE with physical button authorization. Dummy traffic generation (privacy mode). Route advertisements in beacons. |
 | 2026-02-17 | **Packet type renumbering:** Types renumbered to match implementation (ACK=0x01 through DATA=0x0A, see §4.3). **New packet types (§4.15–4.23):** STORE_REQUEST (0x0B), STORE_ACK (0x0C), MAILBOX_DELIVERY (0x0D), MAILBOX_QUERY (0x0E) for store-and-forward; EMERGENCY (0x0F), EMERGENCY_CANCEL (0x10) for distress signaling; CODED (0x11) for XOR network coding; PKT_TYPE_PROBE (0x12), PKT_TYPE_PROBE_ACK (0x13) for delivery tracking. **Beacon flag extensions (§4.9):** BEACON_FLAG_MAILBOX (0x01), BEACON_FLAG_PROBE_ACK (0x02). **Header flag extension:** HEADER_FLAG_EMERGENCY (0x04) for emergency relay priority. **New channel features (§5.3):** Public channel "Bramble Common" with well-known PSK; Group DM key derivation with FNV-1a and epoch rotation. **Private location sharing (§4.24):** Three-tier privacy (full/coarse/presence), 17-byte full format, per-contact config. **Adaptive routing metrics (§6.8):** Composite metric with delivery rate, airtime, latency factors; EMA tracking; hysteresis. **Security analysis (§10.9):** New section covering security properties of all new features. **RAM budget update (§11.1):** Added ~13 KB for new components (mailbox 7KB, emergency 0.4KB, location 1KB, group 2.2KB, coding 1.5KB, probe 0.6KB). |
+
+<!-- ci-retrigger after runner restart 2026-07-05 -->

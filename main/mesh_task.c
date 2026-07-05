@@ -86,7 +86,8 @@ static bool control_replay_ok(uint32_t signer_addr, uint64_t seq);
 /* Task 5 (channel flood): handle_data (near the top of the file) schedules
  * a jittered rebroadcast of a broadcast DATA frame; the queue it schedules
  * onto is defined near its sibling schedule_rreq_forward, further down. */
-static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms);
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
+                                 uint32_t flood_key, tx_kind_t tx_kind);
 
 /* ── Configuration ──────────────────────────────────────────────────── */
 
@@ -306,14 +307,9 @@ static QueueHandle_t s_handshake_work_q;
 /* Jittered channel-flood relay queue (Task 5). Same shape and drain cadence
  * as the RREQ forward queue below, holding the exact relay-mutated wire
  * bytes (hop_limit decremented, prev_hop rewritten to us) a broadcast DATA
- * frame is rebroadcast with once its jitter elapses. */
-#define FLOOD_RELAY_QUEUE_CAPACITY 8
-typedef struct {
-    bool used;
-    uint32_t due_at_ms;
-    uint8_t buf[BRAMBLE_MAX_PACKET_SIZE];
-    uint8_t len;
-} pending_flood_relay_t;
+ * frame is rebroadcast with once its jitter elapses. pending_flood_relay_t,
+ * FLOOD_RELAY_QUEUE_CAPACITY and the rebroadcast-suppression helper live in
+ * channel_flood.h (Flooding F1) so they are unit-testable in isolation. */
 static pending_flood_relay_t s_flood_relay_queue[FLOOD_RELAY_QUEUE_CAPACITY];
 
 /* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
@@ -377,6 +373,14 @@ static broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMET
 static bool s_mailbox_enabled = false;
 #define MAILBOX_BEACON_FLAG 0x01
 static mailbox_t s_mailbox;
+
+/* Flooding F1 Task 1: runtime toggle for the unicast flood transport. OFF
+ * (default) preserves today's reactive route-lookup forward for unicast
+ * DATA; ON routes unicast DATA not addressed to us through the same
+ * multi-hop flood engine broadcast DATA already uses (channel_flood_decide +
+ * s_flood_dedup) instead of forward_data_packet. See mesh_process_rx_packet's
+ * PKT_TYPE_DATA case. NVS-persisted, same pattern as s_mailbox_enabled. */
+static bool s_flood_transport = false;
 
 /* Location policy engine tick state */
 static uint32_t s_location_last_policy_tick_ms = 0;
@@ -1781,7 +1785,62 @@ static void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t sn
 
     /* Not for us — forward it */
     if (ack.header.dest_addr != s_identity->address) {
-        forward_ack(&ack, rssi);
+        if (s_flood_transport) {
+            /* Flooding F1 Task 2: under s_flood_transport there are no routes,
+             * so the ACK cannot be route-forwarded home. It FLOODS back
+             * through the SAME engine the DATA flood uses (channel_flood_decide
+             * + the jittered schedule_flood_relay queue + FLOOD_SUPPRESS_AFTER
+             * suppression + airtime budget), authenticated: ack_verify above
+             * already gated this branch, so a bad-MAC ACK was dropped before
+             * ever reaching here and is never rebroadcast (the same "never act
+             * on unauthenticated wire bytes" rule the DATA flood applies via
+             * data_auth_verify). The dispatch s_dedup gate (packet_id ^ type)
+             * already dedups the flooded ACK's own packet_id: copies 2+ never
+             * reach handle_ack; they are counted at the dispatch gate for
+             * suppression instead (see mesh_process_rx_packet). A re-ACK of a
+             * duplicate DATA carries a FRESH header.packet_id (send_ack draws
+             * next_packet_id every call), so it is not deduped and floods
+             * anew, preserving the Phase 1 re-ACK-on-duplicate second chance.
+             *
+             * The flood dedup key mirrors the DATA flood's packet_id ^ src:
+             * both fields are stable across relay hops (only relay_path/
+             * hop_count/hop_limit are forward-mutated) and identify this ACK
+             * for the suppression bookkeeping at the dispatch gate. A node that
+             * hears its OWN originated ACK echoed back (ack.src_addr == self)
+             * must not rebroadcast it, exactly like the DATA flood's
+             * is_own_echo guard. */
+            uint32_t ack_flood_key = ack.header.packet_id ^ ack.src_addr;
+            bool is_own_echo = (ack.src_addr == s_identity->address);
+            size_t cur_wire = bramble_ack_wire_size(&ack);
+            bool budget_permits = tx_gate_check((uint8_t)cur_wire, TX_KIND_ACK);
+            channel_flood_decision_t flood = channel_flood_decide(ack.header.hop_limit, is_own_echo,
+                                                                  budget_permits, esp_random());
+            if (flood.should_relay) {
+                /* Append our address to the relay trail (relay_path/hop_count
+                 * are MAC-excluded, mutated per hop exactly as forward_ack
+                 * does) and decrement the hop limit to the flood engine's
+                 * value, then re-serialize the mutated ACK for rebroadcast. */
+                if (ack.hop_count < ACK_MAX_HOPS) {
+                    ack.relay_path[ack.hop_count++] = s_identity->address;
+                }
+                ack.header.hop_limit = flood.new_hop_limit;
+                uint8_t relay_buf[ACK_MAX_SIZE];
+                if (bramble_ack_serialize(&ack, relay_buf, sizeof(relay_buf)) == ESP_OK) {
+                    size_t wlen = bramble_ack_wire_size(&ack);
+                    ESP_LOGI(TAG,
+                             "Flooding ACK for pkt %08" PRIX32 " toward %08" PRIX32
+                             " hop_limit->%u",
+                             ack.ack_packet_id, ack.header.dest_addr, flood.new_hop_limit);
+                    schedule_flood_relay(relay_buf, (uint8_t)wlen, flood.jitter_ms, ack_flood_key,
+                                         TX_KIND_ACK);
+                }
+            } else if (!budget_permits) {
+                ESP_LOGD(TAG, "Flooded ACK relay denied by airtime budget, pkt=%08" PRIX32,
+                         ack.ack_packet_id);
+            }
+        } else {
+            forward_ack(&ack, rssi);
+        }
         return;
     }
 
@@ -1966,6 +2025,19 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         return;
     }
 
+    /* Flooding F1 Task 1: dest filter for the ONE flood relay path shared by
+     * broadcast and (when s_flood_transport is on) unicast DATA not
+     * addressed to us. dest_is_broadcast is always flood-eligible (Task 5,
+     * unchanged); dest_is_self never relays (it is delivered below instead,
+     * hop_limit is irrelevant once a message has arrived). A unicast frame
+     * for someone else only enters the relay block when the toggle is on;
+     * when it is off, mesh_process_rx_packet's PKT_TYPE_DATA case never
+     * calls handle_data for that frame at all (it calls forward_data_packet,
+     * the reactive route-lookup path), so this flag is a belt-and-suspenders
+     * check, not the only gate. */
+    bool dest_is_broadcast = (rx_hdr.dest_addr == 0xFFFFFFFF);
+    bool dest_is_self = (rx_hdr.dest_addr == s_identity->address);
+
     /* Task 5: multi-hop channel flood. A broadcast/channel DATA (dest ==
      * 0xFFFFFFFF) is "delivered" locally below regardless of whether THIS
      * node can decrypt it (public broadcast vs. a secret channel this node
@@ -1978,8 +2050,17 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
      * below, so a node without this channel's key still relays the exact
      * ciphertext onward for members further out in the mesh -- the entire
      * point of a flood is that relays do not need to understand the
-     * payload, exactly like RREQ/RERR relays never decrypt anything. */
-    if (rx_hdr.dest_addr == 0xFFFFFFFF) {
+     * payload, exactly like RREQ/RERR relays never decrypt anything.
+     *
+     * Task 1 extends this same block to unicast: when s_flood_transport is
+     * on and this frame is unicast for someone else, it goes through the
+     * identical dedup + channel_flood_decide + rebroadcast dance as a
+     * broadcast flood, reusing channel_flood_decide rather than a second
+     * flood implementation. The only difference from broadcast is that a
+     * relayed-only unicast frame returns right after this block (see the
+     * "not for us" check below) instead of falling into the decrypt/deliver
+     * code, since a relay is never the intended recipient. */
+    if (dest_is_broadcast || (s_flood_transport && !dest_is_self)) {
         /* Src_addr-qualified dedup key (s_flood_dedup, not the packet_id-
          * only s_dedup already consulted at the mesh_process_rx_packet
          * dispatch gate): see s_flood_dedup's doc comment for why a plain
@@ -2028,11 +2109,25 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             ESP_LOGI(TAG,
                      "Channel flood relay from %08" PRIX32 " pkt=%08" PRIX32 " hop_limit %u->%u",
                      src_addr, rx_hdr.packet_id, rx_hdr.hop_limit, flood.new_hop_limit);
-            schedule_flood_relay(relay_buf, len, flood.jitter_ms);
+            schedule_flood_relay(relay_buf, len, flood.jitter_ms, flood_key,
+                                 TX_KIND_DATA_BROADCAST);
         } else if (!budget_permits) {
             ESP_LOGD(TAG, "Channel flood relay denied by airtime budget, pkt=%08" PRIX32,
                      rx_hdr.packet_id);
         }
+    }
+
+    /* Task 1: a unicast frame addressed to someone else is a relay-only
+     * pass-through under the flood toggle (handled above); it is never
+     * decrypted or delivered here (we have no session/channel-key basis for
+     * doing so on someone else's behalf, and doing so would risk spurious
+     * local-delivery side effects: msg_store, an outgoing ACK, replay-window
+     * updates, none of which belong to a frame that is not ours). Broadcast
+     * (dest_is_broadcast) and unicast-to-self (dest_is_self) both fall
+     * through to the decrypt/deliver code below exactly as before this
+     * task. */
+    if (!dest_is_broadcast && !dest_is_self) {
+        return;
     }
 
     /* AAD excludes hop_limit (relays decrement it in flight) but binds
@@ -2546,20 +2641,36 @@ static void process_rreq_forward_queue(uint32_t t) {
  * buf/len are the ALREADY relay-mutated wire bytes (hop_limit decremented,
  * prev_hop rewritten to this node -- see the caller in handle_data): this
  * function only owns the timing, not the frame content.
+ *
+ * flood_key = packet_id ^ src_addr (the caller already computed it for the
+ * src-qualified flood dedup) is recorded on the queued entry so an overheard
+ * duplicate of the SAME frame can find and suppress this pending relay before
+ * it fires (Flooding F1; see channel_flood_note_overheard). heard starts at 0
+ * -- the copy that triggered this schedule is the FIRST copy, never counted
+ * as an overheard one.
+ *
+ * tx_kind is the airtime lane the relay is sent on: TX_KIND_DATA_BROADCAST
+ * for a flooded DATA frame, TX_KIND_ACK for a flooded ACK (Flooding F1
+ * Task 2). One queue + one suppression engine serves both; only the lane the
+ * final mesh_tx debits differs.
  */
-static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms) {
+static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
+                                 uint32_t flood_key, tx_kind_t tx_kind) {
     for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
         if (!s_flood_relay_queue[i].used) {
             s_flood_relay_queue[i].used = true;
             s_flood_relay_queue[i].due_at_ms = now_ms() + jitter_ms;
             memcpy(s_flood_relay_queue[i].buf, buf, len);
             s_flood_relay_queue[i].len = len;
+            s_flood_relay_queue[i].flood_key = flood_key;
+            s_flood_relay_queue[i].heard = 0;
+            s_flood_relay_queue[i].tx_kind = (uint8_t)tx_kind;
             ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
             return;
         }
     }
     ESP_LOGW(TAG, "Flood relay queue full; relaying immediately");
-    if (mesh_tx(buf, len, TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+    if (mesh_tx(buf, len, tx_kind) == TX_GATE_ERR_BUDGET) {
         ESP_LOGW(TAG, "Immediate flood relay denied by airtime budget");
     }
 }
@@ -2578,7 +2689,7 @@ static void process_flood_relay_queue(uint32_t t) {
     for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
         if (s_flood_relay_queue[i].used && (int32_t)(t - s_flood_relay_queue[i].due_at_ms) >= 0) {
             if (mesh_tx(s_flood_relay_queue[i].buf, s_flood_relay_queue[i].len,
-                        TX_KIND_DATA_BROADCAST) == TX_GATE_ERR_BUDGET) {
+                        (tx_kind_t)s_flood_relay_queue[i].tx_kind) == TX_GATE_ERR_BUDGET) {
                 ESP_LOGD(TAG, "Jittered flood relay denied by airtime budget");
             }
             s_flood_relay_queue[i].used = false;
@@ -3101,6 +3212,88 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             }
         }
 
+        /* Flooding F1 rebroadcast suppression: the dispatch dedup gate above
+         * catches the 2nd/3rd... copies of a flooded DATA frame and returns
+         * BEFORE handle_data, so this is the one place a node can COUNT the
+         * OTHER relays it overhears while its own rebroadcast still waits out
+         * its jitter. On a duplicate DATA that is on the flood relay path
+         * (broadcast, or -- under s_flood_transport -- unicast for someone
+         * else), find the matching queued relay by its src-qualified key
+         * (packet_id ^ src_addr, recomputed here from the wire the same way
+         * schedule_flood_relay recorded it) and register the overheard copy;
+         * channel_flood_note_overheard cancels the relay once FLOOD_SUPPRESS_
+         * AFTER copies are in. This is disjoint from the re-ACK carve-out
+         * above, which only fires for unicast-to-SELF duplicates. */
+        bool flood_relay_active = (header.dest_addr == 0xFFFFFFFF ||
+                                   (s_flood_transport && header.dest_addr != s_identity->address));
+        if (header.type == PKT_TYPE_DATA && flood_relay_active &&
+            pkt->len >= BRAMBLE_DATA_NONCE_OFFSET) {
+            uint32_t flood_dup_src;
+            memcpy(&flood_dup_src, pkt->data + BRAMBLE_DATA_SRC_ADDR_OFFSET, 4);
+            /* Finding (final whole-branch review): only an AUTHENTICATED
+             * duplicate copy may count toward suppression. The first
+             * legitimate copy inserts the s_dedup key ABOVE (dedup_check_and_
+             * add) BEFORE the network-key MAC is ever checked, so without this
+             * gate a keyless party could replay a garbage-MAC frame carrying a
+             * matching plaintext packet_id + src_addr, hit this dedup branch,
+             * and bump `heard` to FLOOD_SUPPRESS_AFTER -- cancelling a genuine
+             * node's pending relay and punching a targeted coverage hole in a
+             * sparse mesh. Verify the copy's network-key MAC first, mirroring
+             * the re-ACK carve-out above and handle_data's own data_auth_verify
+             * gate, so only genuine overheard copies suppress. Costs one HMAC
+             * per overheard flood duplicate (precedented, acceptable). The
+             * length guard is widened to BRAMBLE_DATA_NONCE_OFFSET so the 8
+             * auth_hmac bytes at BRAMBLE_DATA_AUTH_HMAC_OFFSET are in range. */
+            if (data_auth_verify(&header, flood_dup_src,
+                                 pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
+                uint32_t flood_dup_key = header.packet_id ^ flood_dup_src;
+                if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                                 flood_dup_key)) {
+                    ESP_LOGD(TAG,
+                             "Flood relay suppressed after %d overheard copies, pkt=%08" PRIX32,
+                             FLOOD_SUPPRESS_AFTER, header.packet_id);
+                }
+            }
+        }
+
+        /* Flooding F1 Task 2: the same suppression bookkeeping for a flooded
+         * ACK. A flooded ACK addressed to someone else (i.e. NOT consumed by
+         * this node) is relayed via handle_ack's flood branch, which queues a
+         * jittered rebroadcast keyed on ack.header.packet_id ^ ack.src_addr.
+         * The 2nd/3rd... copies land here at the dispatch dedup gate; recompute
+         * that same key from the wire and register the overheard copy so the
+         * pending ACK relay cancels once FLOOD_SUPPRESS_AFTER copies are in.
+         * ACK.src_addr is big-endian on the wire at HEADER_SIZE (packet.c's
+         * put_be32), unlike DATA's little-endian src_addr, so it is read
+         * big-endian here to match handle_ack's host-order ack.src_addr. */
+        if (header.type == PKT_TYPE_ACK && s_flood_transport &&
+            header.dest_addr != s_identity->address && pkt->len >= HEADER_SIZE + 4) {
+            /* Finding (final whole-branch review): as with the DATA flood
+             * above, only an AUTHENTICATED overheard copy may count toward
+             * suppression. handle_ack inserts the s_dedup key at the dispatch
+             * gate BEFORE ack_verify runs, so without this gate a garbage-MAC
+             * duplicate carrying a matching plaintext packet_id + src_addr
+             * would reach this counter and cancel a genuine node's pending ACK
+             * relay. Deserialize and verify the network-key MAC here, mirroring
+             * handle_ack's ack_verify gate, so only genuine copies suppress.
+             * dup_ack.src_addr (host order) equals the big-endian wire read
+             * this block previously did by hand (proven by
+             * test_flood_ack_wire_suppression_key_matches). Costs one
+             * deserialize + HMAC per overheard flooded-ACK duplicate. */
+            bramble_ack_t dup_ack;
+            if (bramble_ack_deserialize(&dup_ack, pkt->data, pkt->len) == ESP_OK &&
+                ack_verify(&dup_ack)) {
+                uint32_t ack_dup_key = dup_ack.header.packet_id ^ dup_ack.src_addr;
+                if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                                 ack_dup_key)) {
+                    ESP_LOGD(
+                        TAG,
+                        "Flooded ACK relay suppressed after %d overheard copies, pkt=%08" PRIX32,
+                        FLOOD_SUPPRESS_AFTER, header.packet_id);
+                }
+            }
+        }
+
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -3195,8 +3388,19 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
                           ROUTE_SRC_BREADCRUMB, now_ms());
         }
 
+        /* Flooding F1 Task 1: DATA_RX_FORWARD means this is unicast for
+         * someone else. Reactive (s_flood_transport off, default): unchanged
+         * route-lookup forward. Flood (on): route it through handle_data
+         * instead, which now relays it via the shared flood engine
+         * (channel_flood_decide) rather than looking up a route; it never
+         * calls forward_data_packet in flood mode. DATA_RX_DELIVER (dest ==
+         * self or broadcast) is unaffected by the toggle: always handle_data. */
         if (data_rx.action == DATA_RX_FORWARD) {
-            forward_data_packet(pkt->data, pkt->len, &header);
+            if (s_flood_transport) {
+                handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+            } else {
+                forward_data_packet(pkt->data, pkt->len, &header);
+            }
         } else {
             handle_data(pkt->data, pkt->len, pkt->rssi, pkt->snr);
         }
@@ -4790,9 +4994,29 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) 
         return 0;
     }
 
+    /* Flooding F1 Task 3: send-side flood origination. Under s_flood_transport
+     * there is NO route discovery: a unicast message FLOODS immediately, like a
+     * broadcast. Gate the whole reactive neighbor/route + RREQ/queue block on
+     * the toggle so that under flood we fall straight through to
+     * mesh_send_channel, which builds the DATA (dest = D, hop_limit =
+     * ROUTE_HOP_LIMIT_MAX, the flood hop budget that broadcast floods already
+     * originate at; network-key auth-signed, AEAD-encrypted under the DM
+     * session key for D) and hands it to mesh_tx as one budget-gated
+     * transmission. Every relay then floods it (Task 1); D's flooded ACK
+     * (Task 2) confirms it. send_data_packet/send_dm_packet register the
+     * pending-confirmation whose pending_ack_tick retry re-transmits the SAME
+     * stored broadcast frame (same packet_id) on no-ACK, which IS a re-flood
+     * (mesh_tx never route-looks-up: relays flood it, and the destination's
+     * Phase 1 s_delivered_dedup re-ACK-on-duplicate gives another confirmation
+     * chance), bounded by the tier max retries then FAILED. If no DM session to
+     * D exists yet, mesh_send_dm still kicks off the KE handshake, whose
+     * APP_TYPE_KE envelope rides this same DATA flood path (send_ke_envelope ->
+     * send_data_packet), so key establishment floods too and stays CRITICAL
+     * tier. Toggle OFF (default): the reactive discovery+queue path is exactly
+     * as before this task. */
     /* For non-neighbor destinations, check route table */
-    neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, dest_addr);
-    if (!nb) {
+    neighbor_entry_t* nb = s_flood_transport ? NULL : neighbor_lookup(&s_neighbors, dest_addr);
+    if (!s_flood_transport && !nb) {
         /* Not a direct neighbor — need routing */
         route_entry_t* route = route_lookup(&s_routes, dest_addr);
         if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
@@ -5074,6 +5298,20 @@ void mesh_task_start(bramble_identity_t* identity) {
                  MAILBOX_MAX_ENTRIES, MAILBOX_MAX_PER_DEST, MAILBOX_MAX_PER_SOURCE);
     }
 
+    /* Flooding F1 Task 1: load the flood-transport toggle from NVS. */
+    {
+        nvs_handle_t fl_nvs;
+        if (nvs_open(NVS_NS_FLOOD, NVS_READONLY, &fl_nvs) == ESP_OK) {
+            uint8_t enabled = 0;
+            if (nvs_get_u8(fl_nvs, "enabled", &enabled) == ESP_OK) {
+                s_flood_transport = (enabled != 0);
+                ESP_LOGI(TAG, "Flood transport: %s (from NVS)",
+                         s_flood_transport ? "enabled" : "disabled");
+            }
+            nvs_close(fl_nvs);
+        }
+    }
+
     s_state_mutex = xSemaphoreCreateMutex();
     s_delivery_event_mutex = xSemaphoreCreateMutex();
     /* Try PSRAM first (T-Deck Plus), fall back to internal RAM (Heltec V3/V4) */
@@ -5348,6 +5586,13 @@ void mesh_set_mailbox(bool enabled) {
 }
 
 bool mesh_get_mailbox(void) { return s_mailbox_enabled; }
+
+void mesh_set_flood_transport(bool enabled) {
+    s_flood_transport = enabled;
+    ESP_LOGI(TAG, "Flood transport runtime: %s", enabled ? "enabled" : "disabled");
+}
+
+bool mesh_get_flood_transport(void) { return s_flood_transport; }
 
 /* ── Probe tracking ──────────────────────────────────────────────────── */
 

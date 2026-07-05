@@ -516,6 +516,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetMailboxResponse'
 
+  /rpc/bramble.setFloodTransport:
+    post:
+      operationId: setFloodTransport
+      summary: Enable or disable the flood transport
+      description: >-
+        Toggles the unicast flood transport (Flooding F1 Task 1). When on, a
+        received unicast DATA not addressed to this node is relayed through
+        the same multi-hop flood engine broadcast DATA already uses, instead
+        of the reactive route-lookup forward. Default off (reactive
+        unchanged); NVS-persisted.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetFloodTransportParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Flood transport setting updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetFloodTransportResponse'
+
   /rpc/bramble.setLocationConfig:
     post:
       operationId: setLocationConfig
@@ -1780,6 +1806,7 @@ components:
         - location
         - broadcast_telemetry_mode
         - mailboxEnabled
+        - floodTransportEnabled
       properties:
         node_name:
           type: string
@@ -1825,6 +1852,9 @@ components:
         mailboxEnabled:
           type: boolean
           description: Whether store-and-forward mailbox is enabled.
+        floodTransportEnabled:
+          type: boolean
+          description: Whether the unicast flood transport is enabled.
 
     # ── Request Params ───────────────────────────────────────────────────────
 
@@ -2063,6 +2093,24 @@ components:
         enabled:
           type: boolean
           description: The applied mailbox state.
+
+    SetFloodTransportParams:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether to enable the unicast flood transport.
+
+    SetFloodTransportResponse:
+      type: object
+      required: [ok, enabled]
+      properties:
+        ok:
+          type: boolean
+        enabled:
+          type: boolean
+          description: The applied flood transport state.
 
     SetLocationConfigParams:
       type: object

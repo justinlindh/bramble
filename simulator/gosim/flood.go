@@ -283,6 +283,39 @@ func loadIntermediateRREPConfig(path string) bool {
 	return *cfg.IntermediateRREP
 }
 
+// floodTransportConfigJSON is Flooding F1 Task 1's scenario-level switch for
+// the REAL firmware flood transport (main/mesh_task.c's s_flood_transport,
+// driven here through bridge_set_flood_transport_enabled), read the same way
+// as intermediateRREPConfigJSON above: a pointer so "field omitted" (default
+// false, matching firmware's shipped NVS default) is distinguishable from
+// "explicitly false". This is unrelated to routingConfigJSON's "routing":
+// "flood" above (that selects the Go-only floodSim MODEL used as a
+// benchmark); "flood_transport" instead makes bridge.c's normal packet path
+// call the real firmware flood decide for unicast DATA.
+type floodTransportConfigJSON struct {
+	FloodTransport *bool `json:"flood_transport"`
+}
+
+// loadFloodTransportConfig reads a scenario file's optional "flood_transport"
+// field (default false, matching s_flood_transport's shipped NVS default).
+// Any read/parse failure or omitted field returns false, the same
+// fail-open-to-today's-default convention as loadRoutingConfig /
+// loadIntermediateRREPConfig.
+func loadFloodTransportConfig(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var cfg floodTransportConfigJSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return false
+	}
+	if cfg.FloodTransport == nil {
+		return false
+	}
+	return *cfg.FloodTransport
+}
+
 // --- Event handlers (dispatched from sim.go's dispatchEvent when
 // s.routingMode == "flood") ---
 

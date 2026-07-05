@@ -169,6 +169,9 @@ void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
 bool g_stub_mailbox_enabled = false;
 void mesh_set_mailbox(bool e) { g_stub_mailbox_enabled = e; }
 bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
+bool g_stub_flood_transport_enabled = false;
+void mesh_set_flood_transport(bool e) { g_stub_flood_transport_enabled = e; }
+bool mesh_get_flood_transport(void) { return g_stub_flood_transport_enabled; }
 void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
 void mesh_rederive_beacon_key(void) {}

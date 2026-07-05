@@ -29,6 +29,15 @@ void bridge_set_intermediate_rrep_enabled(bool enabled) { g_intermediate_rrep_en
 
 bool bridge_get_intermediate_rrep_enabled(void) { return g_intermediate_rrep_enabled; }
 
+/* ─── Flood transport on/off switch (Flooding F1 Task 1) ────────────────── */
+/* See bridge.h's doc comment: mirrors firmware's s_flood_transport. Default
+ * false (reactive unchanged, matching firmware's shipped NVS default). */
+static bool g_flood_transport_enabled = false;
+
+void bridge_set_flood_transport_enabled(bool enabled) { g_flood_transport_enabled = enabled; }
+
+bool bridge_get_flood_transport_enabled(void) { return g_flood_transport_enabled; }
+
 /* Public channel state (one global instance) */
 static bramble_channel_t g_pub_channels[16];
 static int g_num_pub_channels = 0;
@@ -40,6 +49,14 @@ bridge_node_ext_t* bridge_node_ext_get(int node_idx) {
 }
 
 bridge_ext_metrics_t* bridge_ext_metrics_get(void) { return &g_ext_metrics; }
+
+/* Flooding F1 Task 2: _handle_delivery_receipt (defined above bridge_flood_
+ * relay) floods the confirmation receipt back through the shared flood engine
+ * under flood transport, so it needs this forward declaration. */
+static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
+                               const bramble_header_t* hdr, uint32_t orig_sender, bool is_own_echo,
+                               uint64_t now_us, uint32_t now_ms, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events);
 
 void bridge_node_ext_init_all(void) {
     memset(&g_node_ext, 0, sizeof(g_node_ext));
@@ -652,6 +669,25 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         return;
     }
 
+    /* Flooding F1 Task 2: under flood transport there are no routes, so the
+     * confirmation (gosim's delivery receipt, the packet that feeds
+     * confirmed_delivery_rate exactly as the firmware ACK does) FLOODS back to
+     * the originator through the SAME engine DATA floods with (bridge_flood_
+     * relay: src-qualified dedup + channel_flood_decide + jittered relay +
+     * FLOOD_SUPPRESS_AFTER). receipt.src_addr is the destination that
+     * originated the receipt; a node hearing its OWN receipt echoed back
+     * (is_own_echo) never rebroadcasts it. The re-injected relay dispatches on
+     * the wire header type (PKT_TYPE_DELIVERY_RECEIPT), so it re-enters this
+     * handler at the next hop with no route table consulted anywhere. When
+     * flood transport is off, the reactive route-lookup forward below is
+     * unchanged. */
+    if (g_flood_transport_enabled) {
+        bool is_own_echo = (receipt.src_addr == rx->addr);
+        bridge_flood_relay(rx, buf, len, &receipt.header, receipt.src_addr, is_own_echo, now_us,
+                           now_ms, radio, rng, events);
+        return;
+    }
+
     /* Forward the receipt toward its destination */
     uint8_t hop_limit = receipt.header.hop_limit;
     forward_result_t fwd_res =
@@ -676,6 +712,148 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
                           now_us)) {
         rx->packets_forwarded++;
     }
+}
+
+/* Flooding F1 rebroadcast suppression (gosim-bridge parity with firmware's
+ * channel_flood_note_overheard + s_flood_relay_queue and flood.go's
+ * floodSim.pending): record a node's scheduled relay so a later overheard
+ * duplicate can find and cancel it. */
+static void bridge_flood_pending_add(sim_node_t* rx, uint32_t flood_key) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!rx->flood_pending[i].used) {
+            rx->flood_pending[i].used = true;
+            rx->flood_pending[i].flood_key = flood_key;
+            rx->flood_pending[i].heard = 0;
+            rx->flood_pending[i].canceled = false;
+            return;
+        }
+    }
+    /* Queue full: leave the relay uncancellable (it still fires), matching
+     * firmware's fall-back-to-immediate-relay-when-full posture. */
+}
+
+/* Register one overheard duplicate of flood_key against rx's pending relays;
+ * cancel the matching entry once FLOOD_SUPPRESS_AFTER copies are in. The key
+ * is src-qualified (packet_id ^ orig_sender), so a duplicate from a different
+ * originator never matches. Mirrors channel_flood_note_overheard /
+ * floodSim.noteHeardDuplicate exactly. */
+static void bridge_flood_pending_note_overheard(sim_node_t* rx, uint32_t flood_key) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!rx->flood_pending[i].used || rx->flood_pending[i].flood_key != flood_key ||
+            rx->flood_pending[i].canceled) {
+            continue;
+        }
+        rx->flood_pending[i].heard++;
+        if (rx->flood_pending[i].heard >= FLOOD_SUPPRESS_AFTER) {
+            rx->flood_pending[i].canceled = true;
+        }
+        return;
+    }
+}
+
+/* When rx's relay for flood_key comes due, report whether it was canceled by
+ * overheard copies and release the slot. Returns true iff the caller must
+ * SKIP the send (relay was suppressed). A miss (no matching slot, e.g. queue
+ * was full at schedule time) returns false -> relay fires, matching the
+ * uncancellable fallback in bridge_flood_pending_add. */
+static bool bridge_flood_pending_take_canceled(sim_node_t* rx, uint32_t flood_key) {
+    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
+        if (!rx->flood_pending[i].used || rx->flood_pending[i].flood_key != flood_key) {
+            continue;
+        }
+        bool canceled = rx->flood_pending[i].canceled;
+        rx->flood_pending[i].used = false;
+        return canceled;
+    }
+    return false;
+}
+
+/* Flooding F1 Task 1: the ONE flood relay engine shared by broadcast DATA
+ * (always flood-eligible) and, when g_flood_transport_enabled, unicast DATA
+ * not addressed to the receiving node. Mirrors main/mesh_task.c's handle_data
+ * exactly (same dedup key, same channel_flood_decide call, same jittered
+ * relay scheduling): no parallel flood implementation in gosim either.
+ * is_own_echo is a caller-supplied input (rather than recomputed here)
+ * because the broadcast caller also needs it to gate its own per-hearer
+ * "delivered" notification. Returns the dedup result (is_dup) for the same
+ * reason. */
+static bool bridge_flood_relay(sim_node_t* rx, const uint8_t* buf, uint16_t len,
+                               const bramble_header_t* hdr, uint32_t orig_sender, bool is_own_echo,
+                               uint64_t now_us, uint32_t now_ms, radio_config_t* radio,
+                               pcg32_state_t* rng, event_queue_t* events) {
+    /* Src_addr-qualified dedup key (rx->flood_dedup): see the broadcast
+     * caller's original comment (and firmware's s_flood_dedup) for why a
+     * plain packet_id key risks a cross-source collision on the flood
+     * path. */
+    uint32_t flood_key = hdr->packet_id ^ orig_sender;
+    bool is_dup = dedup_check_and_add(&rx->flood_dedup, flood_key, now_ms);
+
+    /* Flooding F1 suppression: unlike firmware, bridge's dispatch-gate dedup
+     * (rx->dedup) is RREQ-only, so a duplicate DATA reaches here every time
+     * with is_dup==true (firmware instead counts these at its s_dedup gate,
+     * see mesh_task.c). This IS the overheard-copy the pending relay counts:
+     * bump heard on the matching src-qualified entry and cancel it once
+     * FLOOD_SUPPRESS_AFTER copies are in. The FIRST copy is not a duplicate
+     * (is_dup false -> schedules below), so it is never counted here.
+     *
+     * Whole-branch review note: firmware gates its two overheard-copy counters
+     * on the copy's network-key MAC verifying first (data_auth_verify /
+     * ack_verify in mesh_task.c), so a keyless party cannot forge a duplicate
+     * to cancel a genuine relay. No equivalent gate is needed here because
+     * gosim models only honest, key-holding nodes and never injects forged /
+     * bad-MAC frames: every duplicate that reaches this path is a genuine
+     * re-flood by another honest relay (data_rx_decide's auth gate is assumed
+     * already passed, see the DATA_RX_DELIVER comment below). The firmware MAC
+     * gate is the load-bearing fix; this stays a faithful honest-node model. */
+    if (is_dup) {
+        bridge_flood_pending_note_overheard(rx, flood_key);
+    }
+
+    /* Non-mutating pre-check against the real BROADCAST-lane airtime budget
+     * (tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST),
+     * same tier the jittered relay send below debits from for real. */
+    airtime_budget_set_mesh_size(&rx->airtime, (uint8_t)neighbor_count(&rx->neighbors));
+    uint32_t relay_airtime_ms = radio_frame_airtime_ms(radio, len);
+    bool budget_permits =
+        airtime_budget_can_transmit(&rx->airtime, AIRTIME_TIER_BROADCAST, relay_airtime_ms);
+
+    channel_flood_decision_t flood = channel_flood_decide(hdr->hop_limit, is_dup || is_own_echo,
+                                                          budget_permits, pcg32_random(rng));
+
+    if (flood.should_relay) {
+        uint8_t relay_buf[256];
+        memcpy(relay_buf, buf, len);
+        bramble_header_t relay_hdr = *hdr;
+        relay_hdr.hop_limit = flood.new_hop_limit;
+        bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+
+        /* Schedule the jittered relay by pushing a due-timestamped event,
+         * the sim's natural equivalent of main/mesh_task.c's polled
+         * due_at_ms queue (see the original broadcast-only comment this was
+         * lifted from). */
+        sim_event_t relay_evt;
+        memset(&relay_evt, 0, sizeof(relay_evt));
+        relay_evt.timestamp_us = now_us + (uint64_t)flood.jitter_ms * 1000ULL;
+        relay_evt.type = EVT_SEND_PACKET;
+        relay_evt.data.packet.src_addr = rx->addr;
+        /* Flooding F1: carry the src-qualified flood_key on the relay event's
+         * otherwise-unused dest_addr field (bridge_handle_flood_relay always
+         * rewrites dest to 0xFFFFFFFF on TX), so the due handler can look up
+         * this node's pending entry and honor a cancellation. gosim DATA has
+         * no wire-embedded src_addr to recompute the key from at due time (the
+         * originator is tracked out-of-band by packet_id), so it must ride the
+         * event. */
+        relay_evt.data.packet.dest_addr = flood_key;
+        relay_evt.data.packet.len = len;
+        memcpy(relay_evt.data.packet.data, relay_buf, len);
+        event_queue_push(events, &relay_evt);
+
+        /* Track the scheduled relay so an overheard duplicate can cancel it
+         * (mirrors firmware's schedule_flood_relay recording flood_key/heard
+         * and flood.go's floodScheduleRelay populating floodSim.pending). */
+        bridge_flood_pending_add(rx, flood_key);
+    }
+    return is_dup;
 }
 
 static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint32_t pkt_src_addr,
@@ -734,17 +912,6 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
      * channel's key still floods the exact bytes onward for members
      * further out in the mesh. */
     if (data_rx.action == DATA_RX_DELIVER && hdr.dest_addr == 0xFFFFFFFF) {
-        /* Src_addr-qualified dedup key (rx->flood_dedup, a SEPARATE buffer
-         * from rx->dedup) for the same cross-source collision reason
-         * firmware's s_flood_dedup documents; orig_sender is the true
-         * originator (msg_track), not pkt_src_addr (the last radio hop).
-         * Checked BEFORE "delivering": a flood fans out, so this exact node
-         * legitimately hears the same broadcast again via a different
-         * neighbor, and (like firmware's s_dedup gate ahead of handle_data)
-         * a repeat hearing must not re-notify or re-relay. */
-        uint32_t flood_key = hdr.packet_id ^ orig_sender;
-        bool is_dup = dedup_check_and_add(&rx->flood_dedup, flood_key, now_ms);
-
         /* A mesh flood means a node hears its own originated broadcast
          * echoed back once some neighbor rebroadcasts it; folded into
          * is_duplicate for channel_flood_decide (same "already seen,
@@ -757,6 +924,15 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
          * a fresh delivery (mirrors main/mesh_task.c's handle_data
          * src_addr == s_identity->address self-guard). */
         bool is_own_echo = (orig_sender != 0 && orig_sender == rx->addr);
+
+        /* bridge_flood_relay (above) owns the dedup check + channel_flood_
+         * decide + jittered relay scheduling, shared verbatim with the Task
+         * 1 unicast-flood branch below (no parallel flood implementation);
+         * it returns is_dup so the per-hearer "delivered" notification below
+         * (broadcast-only: a flood has no single destination) can gate on
+         * the SAME dedup result instead of re-checking. */
+        bool is_dup = bridge_flood_relay(rx, buf, len, &hdr, orig_sender, is_own_echo, now_us,
+                                         now_ms, radio, rng, events);
 
         if (!is_dup && !is_own_echo) {
             /* Every hearer "delivers" locally (a broadcast has no single
@@ -783,43 +959,26 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                     (unsigned long long)now_us, rx->id, hdr.packet_id);
             fflush(stdout);
         }
+        return;
+    }
 
-        /* Non-mutating pre-check against the real BROADCAST-lane airtime
-         * budget (tx_gate_kind_tier: TX_KIND_DATA_BROADCAST ->
-         * AIRTIME_TIER_BROADCAST), same tier the jittered relay send below
-         * debits from for real. */
-        airtime_budget_set_mesh_size(&rx->airtime, (uint8_t)neighbor_count(&rx->neighbors));
-        uint32_t relay_airtime_ms = radio_frame_airtime_ms(radio, len);
-        bool budget_permits =
-            airtime_budget_can_transmit(&rx->airtime, AIRTIME_TIER_BROADCAST, relay_airtime_ms);
-
-        channel_flood_decision_t flood = channel_flood_decide(hdr.hop_limit, is_dup || is_own_echo,
-                                                              budget_permits, pcg32_random(rng));
-
-        if (flood.should_relay) {
-            uint8_t relay_buf[256];
-            memcpy(relay_buf, buf, len);
-            bramble_header_t relay_hdr = hdr;
-            relay_hdr.hop_limit = flood.new_hop_limit;
-            bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
-
-            /* Schedule the jittered relay by pushing a due-timestamped
-             * event, the sim's natural equivalent of main/mesh_task.c's
-             * polled due_at_ms queue. Repurposes EVT_SEND_PACKET (declared
-             * in sim_event.h, never previously used anywhere in the sim):
-             * its packet_event_data_t.src_addr carries the RELAYING node's
-             * OWN address (which node fires this event, not a radio
-             * source), so bridge_handle_flood_relay can look the node back
-             * up by address when the jitter elapses. */
-            sim_event_t relay_evt;
-            memset(&relay_evt, 0, sizeof(relay_evt));
-            relay_evt.timestamp_us = now_us + (uint64_t)flood.jitter_ms * 1000ULL;
-            relay_evt.type = EVT_SEND_PACKET;
-            relay_evt.data.packet.src_addr = rx->addr;
-            relay_evt.data.packet.len = len;
-            memcpy(relay_evt.data.packet.data, relay_buf, len);
-            event_queue_push(events, &relay_evt);
-        }
+    /* Flooding F1 Task 1: g_flood_transport_enabled turns a unicast frame
+     * NOT addressed to this node into a relay-only pass-through through the
+     * SAME flood engine as the broadcast branch above (bridge_flood_relay),
+     * instead of falling into the forward_data route lookup further below.
+     * This node is never the destination here (data_rx.action ==
+     * DATA_RX_FORWARD means dest_addr is neither self nor broadcast), so
+     * there is nothing to decrypt or deliver locally, no delivery receipt to
+     * send, and no message_delivered notification to emit; it only
+     * propagates the frame onward, mirroring main/mesh_task.c's handle_data
+     * returning right after its relay decision for a frame that is not
+     * addressed to self. When g_flood_transport_enabled is false, this
+     * branch does not trigger and behavior is exactly the pre-Task-1
+     * reactive route lookup below. */
+    if (data_rx.action == DATA_RX_FORWARD && g_flood_transport_enabled) {
+        bool is_own_echo = (orig_sender != 0 && orig_sender == rx->addr);
+        bridge_flood_relay(rx, buf, len, &hdr, orig_sender, is_own_echo, now_us, now_ms, radio, rng,
+                           events);
         return;
     }
 
@@ -942,22 +1101,42 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
             uint16_t receipt_len = DELIVERY_RECEIPT_MIN_SIZE + receipt.hop_count * 4;
             if (bramble_delivery_receipt_serialize(&receipt, receipt_buf, sizeof(receipt_buf)) ==
                 ESP_OK) {
-                /* Route receipt back to sender */
-                uint8_t rcpt_hop = 32;
-                forward_result_t fwd_res =
-                    forward_data(&rx->routes, orig_sender, &rcpt_hop, now_ms);
-                if (fwd_res.should_send) {
+                if (g_flood_transport_enabled) {
+                    /* Flooding F1 Task 2: originate the confirmation as a
+                     * flood, not a routed unicast. There are no routes back to
+                     * the sender under flood transport, so the destination
+                     * broadcasts the receipt once (header.dest_addr stays the
+                     * originator, so only it consumes) and every neighbor
+                     * flood-relays it via _handle_delivery_receipt. This is the
+                     * exact analogue of firmware send_ack's single mesh_tx that
+                     * neighbors then flood. */
                     outbound_packet_t pkt;
                     memset(&pkt, 0, sizeof(pkt));
                     memcpy(pkt.data, receipt_buf, receipt_len);
                     pkt.len = receipt_len;
-                    pkt.is_broadcast = false;
-                    pkt.dest_addr = fwd_res.next_hop;
+                    pkt.is_broadcast = true;
+                    pkt.dest_addr = 0xFFFFFFFF;
                     pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
-
-                    /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
-                    budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events,
+                    budget_gated_send(rx, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events,
                                       metrics, now_us);
+                } else {
+                    /* Route receipt back to sender */
+                    uint8_t rcpt_hop = 32;
+                    forward_result_t fwd_res =
+                        forward_data(&rx->routes, orig_sender, &rcpt_hop, now_ms);
+                    if (fwd_res.should_send) {
+                        outbound_packet_t pkt;
+                        memset(&pkt, 0, sizeof(pkt));
+                        memcpy(pkt.data, receipt_buf, receipt_len);
+                        pkt.len = receipt_len;
+                        pkt.is_broadcast = false;
+                        pkt.dest_addr = fwd_res.next_hop;
+                        pkt.pkt_type = PKT_TYPE_DELIVERY_RECEIPT;
+
+                        /* tx_gate_kind_tier: TX_KIND_RECEIPT -> AIRTIME_TIER_RECEIPT. */
+                        budget_gated_send(rx, &pkt, AIRTIME_TIER_RECEIPT, nodes, radio, rng, events,
+                                          metrics, now_us);
+                    }
                 }
             }
         }
@@ -1067,13 +1246,40 @@ void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_co
     if (!tx || !tx->active)
         return;
 
+    /* Flooding F1 rebroadcast suppression: the scheduling side stashed this
+     * relay's src-qualified flood_key on the event's dest_addr field. If
+     * enough OTHER copies were overheard while it waited out its jitter
+     * (FLOOD_SUPPRESS_AFTER), skip the now-redundant send -- exactly what
+     * firmware's process_flood_relay_queue does by finding used==false, and
+     * flood.go's handleFloodRelayDue does via p.canceled. Emit a
+     * flood_relay_suppressed signal so scenarios can prove the cancellation
+     * fired and count it against the model's flood_relays_canceled. */
+    if (bridge_flood_pending_take_canceled(tx, event->data.packet.dest_addr)) {
+        fprintf(stdout,
+                "{\"type\":\"flood_relay_suppressed\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\"}\n",
+                (unsigned long long)event->timestamp_us, tx->id);
+        fflush(stdout);
+        return;
+    }
+
     outbound_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
     memcpy(pkt.data, event->data.packet.data, event->data.packet.len);
     pkt.len = event->data.packet.len;
     pkt.is_broadcast = true;
     pkt.dest_addr = 0xFFFFFFFF;
-    pkt.pkt_type = PKT_TYPE_DATA;
+    /* Flooding F1 Task 2: the flood engine now carries both DATA and the
+     * confirmation receipt, so derive the emitter/airtime pkt_type from the
+     * wire header rather than assuming DATA. Dispatch at the receiver is on
+     * the wire type regardless; this only keeps TX metrics/logs accurate. */
+    bramble_header_t relay_hdr;
+    if (bramble_header_deserialize(&relay_hdr, event->data.packet.data, event->data.packet.len) ==
+        ESP_OK) {
+        pkt.pkt_type = relay_hdr.type;
+    } else {
+        pkt.pkt_type = PKT_TYPE_DATA;
+    }
 
     /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST. */
     if (budget_gated_send(tx, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
@@ -1274,9 +1480,19 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         return;
     }
 
-    route_entry_t* route = route_lookup(&src->routes, dest_addr);
+    /* Flooding F1 Task 3: send-side flood origination. Under
+     * g_flood_transport_enabled there is NO route discovery (mirrors firmware's
+     * mesh_send_message gate): skip the reactive route_lookup + RREQ/retry
+     * ladder entirely. The DATA is flooded immediately below (broadcast at
+     * ROUTE_HOP_LIMIT_MAX with header.dest_addr = D), every relay floods it
+     * (bridge_flood_relay), the destination floods a receipt back (Task 2), and
+     * the pending_ack retry re-floods on no-confirmation
+     * (bridge_handle_retransmit). When the toggle is off the reactive discovery
+     * path is exactly as before. */
+    route_entry_t* route = g_flood_transport_enabled ? NULL : route_lookup(&src->routes, dest_addr);
 
-    if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
+    if (!g_flood_transport_enabled &&
+        (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING)) {
         /* Discovery cadence mirrors firmware (mesh_task discovery retries +
          * discovery_should_retry): first RREQ immediately, retries after 5 s
          * then 15 s, each retry under a FRESH query_id with an expanded hop
@@ -1344,7 +1560,17 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     /* Route exists — build and send DATA packet */
 
     uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
-    forward_result_t fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
+    forward_result_t fwd_res;
+    if (g_flood_transport_enabled) {
+        /* Flood origination: no route to resolve. Send at the full hop budget
+         * and broadcast; header.dest_addr stays D so only D delivers while
+         * every relay floods it onward. */
+        memset(&fwd_res, 0, sizeof(fwd_res));
+        fwd_res.should_send = true;
+        fwd_res.next_hop = 0xFFFFFFFF;
+    } else {
+        fwd_res = forward_data(&src->routes, dest_addr, &hop_limit, now_ms);
+    }
     if (!fwd_res.should_send)
         return;
 
@@ -1443,8 +1669,10 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
             memset(&pkt, 0, sizeof(pkt));
             memcpy(pkt.data, enc_buf, enc_offset);
             pkt.len = (uint16_t)enc_offset;
-            pkt.is_broadcast = false;
-            pkt.dest_addr = fwd_res.next_hop;
+            /* Flooding F1 Task 3: flood origination broadcasts (dest
+             * 0xFFFFFFFF); reactive sends to the resolved next hop. */
+            pkt.is_broadcast = g_flood_transport_enabled;
+            pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
             pkt.pkt_type = PKT_TYPE_DATA;
 
             airtime_budget_debit(&src->airtime, MSG_TIER_NORMAL, frag_toa_ms);
@@ -1526,8 +1754,10 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     memset(&pkt, 0, sizeof(pkt));
     memcpy(pkt.data, data_buf, total_len);
     pkt.len = total_len;
-    pkt.is_broadcast = false;
-    pkt.dest_addr = fwd_res.next_hop;
+    /* Flooding F1 Task 3: flood origination broadcasts (dest 0xFFFFFFFF) so
+     * every relay floods it; reactive sends to the resolved next hop. */
+    pkt.is_broadcast = g_flood_transport_enabled;
+    pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
     pkt.pkt_type = PKT_TYPE_DATA;
     src->packets_originated++;
 
@@ -1587,9 +1817,21 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
             continue;
         }
 
-        /* Retransmit */
+        /* Retransmit. Flooding F1 Task 3: a flood-originated pending entry
+         * retries by RE-FLOODING the stored broadcast frame (same packet_id),
+         * NOT by a routed retransmit. forward_data needs a route (none exist
+         * under flood), so bypass it and re-broadcast at the full hop budget;
+         * the destination's re-ACK-on-duplicate gives another confirmation
+         * chance. Reactive (toggle off) is unchanged. */
         uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
-        forward_result_t fwd_res = forward_data(&node->routes, pa->dest_addr, &hop_limit, now_ms);
+        forward_result_t fwd_res;
+        if (g_flood_transport_enabled) {
+            memset(&fwd_res, 0, sizeof(fwd_res));
+            fwd_res.should_send = true;
+            fwd_res.next_hop = 0xFFFFFFFF;
+        } else {
+            fwd_res = forward_data(&node->routes, pa->dest_addr, &hop_limit, now_ms);
+        }
         if (!fwd_res.should_send)
             continue;
 
@@ -1606,8 +1848,8 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         memcpy(pkt.data, pa->packet_data, pa->packet_len);
         pkt.data[3] = hop_limit; /* update hop_limit */
         pkt.len = pa->packet_len;
-        pkt.is_broadcast = false;
-        pkt.dest_addr = fwd_res.next_hop;
+        pkt.is_broadcast = g_flood_transport_enabled;
+        pkt.dest_addr = g_flood_transport_enabled ? 0xFFFFFFFF : fwd_res.next_hop;
         pkt.pkt_type = PKT_TYPE_DATA;
 
         airtime_budget_debit(&node->airtime, MSG_TIER_NORMAL, retx_toa_ms);
@@ -1653,6 +1895,25 @@ void bridge_apply_duty_cycle_cap(sim_node_t* node, uint8_t max_duty_cycle_pct) {
 
 /* ─── Init relay path tracker + extended state ────────────────────────── */
 void bridge_init(void) {
+    /* Flooding F1 Task 1 fix: sim_emitter's g_emitter_quiet is a process-wide
+     * global (engine/sim_emitter.c), never reset anywhere else. radio_
+     * harness.go's newRadioHarness() sets it true for the low-level radio-
+     * model tests (collision/budget/duty-cycle/etc.) and never restores it;
+     * since Go test binaries run every test in one process, ANY later
+     * protocol-bridge test (this file's normal path, used by every Sim())
+     * that happened to run after one of those in test order silently lost
+     * packet_sent/packet_received/route_added/packet_dropped/route_removed
+     * events for the rest of the process, with no per-test symptom other
+     * than "these events are just missing" -- exactly what broke
+     * TestFloodTransportRelaysAsBroadcastNotUnicastForward the first time it
+     * ran as part of the full suite (passed alone, failed after an earlier
+     * radioHarness-based test). bridge_init() runs at the start of every
+     * NewSim(), so resetting it here makes every protocol-bridge sim start
+     * from "verbose", independent of what any earlier radioHarness test left
+     * behind; radioHarness itself is unaffected (it always sets quiet=true
+     * itself in newRadioHarness(), regardless of this call). */
+    sim_emitter_set_quiet(false);
+
     relay_path_init();
 
     /* Phase 6: Initialize all per-node extended state */

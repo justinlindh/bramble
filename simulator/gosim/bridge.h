@@ -190,4 +190,21 @@ void bridge_init(void);
 void bridge_set_intermediate_rrep_enabled(bool enabled);
 bool bridge_get_intermediate_rrep_enabled(void);
 
+/*
+ * Flooding F1 Task 1: the unicast flood transport toggle (firmware's
+ * s_flood_transport, main/mesh_task.c). Default false (reactive unchanged,
+ * matching firmware's NVS default). When true, bridge.c's DATA handling
+ * relays a unicast frame not addressed to the receiving node through the
+ * SAME flood engine (channel_flood_decide + flood_dedup) broadcast DATA
+ * already uses, instead of forward_data's route lookup -- exactly the
+ * firmware behavior, not a parallel model. Distinct from the "routing":
+ * "flood" scenario field / flood.go's floodSim: that is a Go-only
+ * Meshtastic-style MODEL used as a benchmark; this drives the REAL firmware
+ * flood decide through bridge.c's normal packet path. gosim/sim.go resets
+ * this explicitly on every scenario load (the scenario's optional
+ * "flood_transport" JSON field), so no run leaks a previous run's setting.
+ */
+void bridge_set_flood_transport_enabled(bool enabled);
+bool bridge_get_flood_transport_enabled(void);
+
 #endif /* BRIDGE_H */
