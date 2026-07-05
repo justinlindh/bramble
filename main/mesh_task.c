@@ -24,6 +24,7 @@
 #include "dm_session.h"
 #include "network_key.h"
 #include "routing_auth.h"
+#include "identity_store.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -147,6 +148,10 @@ static replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counte
 static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
                                            replay window, keyed on the authenticated signer address,
                                            separate from the data-plane s_replay above */
+/* Per-node identity Phase 3 (Part C): this node's verified TOFU pin table
+ * (address -> Ed25519/X25519 pubs), fed by handle_identity_attestation
+ * below. RAM only; pins reset on reboot and TOFU re-establishes. */
+static identity_store_t s_identity_pins;
 static replay_deferred_t s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate. Forwarded RREQs are gated separately, by the global
  * s_rreq_fwd_rl budget below (ws 1.3d, SEC-M4); see SECURITY-MODEL.md for the
@@ -3243,6 +3248,112 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
     }
 }
 
+/*
+ * Per-node identity Phase 3 (Part B): receive, pin, and flood-relay an
+ * identity attestation. Verification ORDER is the security design:
+ *
+ *   1. exact-length deserialize;
+ *   2. ident_relay_verify: the CHEAP network-key MAC, checked before
+ *      anything else. Fail = drop: no relay, no pinning, no Ed25519
+ *      verify ever runs. Keyless frames die at the first hop, so an
+ *      outsider can neither get spam flooded nor grind this node's CPU
+ *      with Ed25519 verifies;
+ *   3. control_replay_ok on (src_addr, seq), both MAC-covered, so a
+ *      captured attestation cannot be re-injected (packet_id is NOT
+ *      MAC-covered, so the dispatch s_dedup gate alone would not stop a
+ *      replay with a rewritten packet_id; this does);
+ *   4. flood dedup (s_flood_dedup, packet_id ^ src_addr, the same
+ *      src-qualified key the DATA flood uses);
+ *   5. DELIVER to the identity module regardless of the relay decision:
+ *      identity_store_handle_attestation runs the one receive-side
+ *      Ed25519 verify and TOFU-pins (see identity_store.h);
+ *   6. RELAY exactly like the broadcast DATA flood: channel_flood_decide
+ *      (hop-limit floor, duplicate/own-echo suppression, airtime budget)
+ *      + the shared jittered schedule_flood_relay queue. The frame
+ *      rebroadcasts UNMODIFIED except the hop_limit decrement (the MAC
+ *      excludes the header, so pass-through is valid; seq is never
+ *      re-drawn by relays).
+ *
+ * Residual (accepted): relays do NOT Ed25519-verify, so a MAC-valid
+ * frame with a garbage sig (a keyed insider misbehaving) still floods,
+ * bounded by the airtime budget; every RECEIVER rejects it at the
+ * Ed25519 check and counts it (identity_store's sig_failures).
+ */
+static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
+    bramble_identity_attestation_t att;
+    if (bramble_identity_attestation_deserialize(&att, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Invalid identity attestation (len=%u)", len);
+        return;
+    }
+
+    if (!ident_relay_verify(&att)) {
+        ESP_LOGW(TAG, "Identity attestation auth failed src=%08" PRIX32 ", drop", att.src_addr);
+        return;
+    }
+
+    uint64_t att_seq = ((uint64_t)att.seq[0] << 40) | ((uint64_t)att.seq[1] << 32) |
+                       ((uint64_t)att.seq[2] << 24) | ((uint64_t)att.seq[3] << 16) |
+                       ((uint64_t)att.seq[4] << 8) | (uint64_t)att.seq[5];
+    if (!control_replay_ok(att.src_addr, att_seq)) {
+        ESP_LOGW(TAG, "Identity attestation replay src=%08" PRIX32, att.src_addr);
+        return;
+    }
+
+    uint32_t flood_key = att.header.packet_id ^ att.src_addr;
+    bool is_dup = dedup_check_and_add(&s_flood_dedup, flood_key, now_ms());
+
+    /* Deliver locally regardless of the relay decision below. */
+    identity_pin_result_t pin =
+        identity_store_handle_attestation(&s_identity_pins, &att, s_identity->address, now_ms());
+    switch (pin) {
+    case IDENTITY_PIN_NEW:
+        ESP_LOGI(TAG, "Identity pinned: %08" PRIX32 " (%d pinned)", att.src_addr,
+                 identity_store_count(&s_identity_pins));
+        break;
+    case IDENTITY_PIN_CONFLICT:
+        /* Impersonation detected: a network-key holder attested this
+         * address under DIFFERENT keys than the pinned binding. First
+         * seen wins; the original binding survives. */
+        ESP_LOGW(TAG,
+                 "IDENTITY CONFLICT for %08" PRIX32 ": attestation with different keys REFUSED"
+                 " (conflicts=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.conflicts);
+        break;
+    case IDENTITY_PIN_BAD_SIG:
+        ESP_LOGW(TAG,
+                 "Identity attestation Ed25519 sig invalid src=%08" PRIX32 " (keyed garbage,"
+                 " sig_failures=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.sig_failures);
+        break;
+    case IDENTITY_PIN_REFRESHED:
+    case IDENTITY_PIN_SELF:
+    default:
+        break;
+    }
+
+    /* Relay through the SAME engine as the broadcast DATA flood
+     * (handle_data): channel_flood_decide + schedule_flood_relay, on the
+     * BROADCAST budget lane. Own-echo folds into is_duplicate exactly like
+     * the DATA flood's is_own_echo. */
+    bool is_own_echo = (att.src_addr == s_identity->address);
+    bool budget_permits = tx_gate_check(len, TX_KIND_DATA_BROADCAST);
+    channel_flood_decision_t flood = channel_flood_decide(
+        att.header.hop_limit, is_dup || is_own_echo, budget_permits, esp_random());
+    if (flood.should_relay) {
+        uint8_t relay_buf[IDENTITY_ATTESTATION_SIZE];
+        memcpy(relay_buf, data, len);
+        bramble_header_t relay_hdr = att.header;
+        relay_hdr.hop_limit = flood.new_hop_limit;
+        bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+        ESP_LOGI(TAG, "Identity attestation relay from %08" PRIX32 " hop_limit %u->%u",
+                 att.src_addr, att.header.hop_limit, flood.new_hop_limit);
+        schedule_flood_relay(relay_buf, len, flood.jitter_ms, flood_key, TX_KIND_DATA_BROADCAST);
+    } else if (!budget_permits) {
+        ESP_LOGD(TAG, "Identity attestation relay denied by airtime budget, src=%08" PRIX32,
+                 att.src_addr);
+    }
+}
+
 static void mesh_process_rx_packet(const rx_packet_t* pkt) {
     if (pkt->len < HEADER_SIZE) {
         ESP_LOGW(TAG, "Packet too short: %u bytes", pkt->len);
@@ -3414,6 +3525,32 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             }
         }
 
+        /* Per-node identity Phase 3: the same suppression bookkeeping for a
+         * flooded identity attestation. Copies 2+ of a relayed attestation
+         * land here at the dispatch dedup gate (same packet_id: the frame
+         * relays unmodified except hop_limit); count each AUTHENTICATED
+         * copy against any pending relay of ours so it cancels after
+         * FLOOD_SUPPRESS_AFTER overheard copies. Mirrors the flooded-ACK
+         * block above, including the MAC-before-counting rule: without
+         * ident_relay_verify here a keyless party could replay a
+         * garbage-MAC copy to cancel a genuine relay and punch a coverage
+         * hole. Relays still never Ed25519-verify; this is the cheap MAC
+         * only. */
+        if (header.type == PKT_TYPE_IDENTITY_ATTESTATION) {
+            bramble_identity_attestation_t dup_att;
+            if (bramble_identity_attestation_deserialize(&dup_att, pkt->data, pkt->len) == ESP_OK &&
+                ident_relay_verify(&dup_att)) {
+                uint32_t att_dup_key = dup_att.header.packet_id ^ dup_att.src_addr;
+                if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                                 att_dup_key)) {
+                    ESP_LOGD(TAG,
+                             "Attestation relay suppressed after %d overheard copies,"
+                             " pkt=%08" PRIX32,
+                             FLOOD_SUPPRESS_AFTER, header.packet_id);
+                }
+            }
+        }
+
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -3536,6 +3673,11 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         break;
     case PKT_TYPE_PROBE_ACK:
         handle_probe_ack(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
+    case PKT_TYPE_IDENTITY_ATTESTATION:
+        /* Phase 3: verify (cheap MAC first) + TOFU-pin + flood relay.
+         * See handle_identity_attestation for the full order contract. */
+        handle_identity_attestation(pkt->data, pkt->len);
         break;
     default:
         ESP_LOGD(TAG, "Unhandled packet type 0x%02X", header.type);
@@ -5322,6 +5464,7 @@ void mesh_task_start(bramble_identity_t* identity) {
     dedup_init(&s_delivered_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
+    identity_store_init(&s_identity_pins);
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     rreq_fwd_init(&s_rreq_fwd_rl, now_ms());

@@ -176,6 +176,32 @@ target_include_directories(test_ident_relay_auth PRIVATE
 )
 target_link_libraries(test_ident_relay_auth ssl crypto)
 
+# Identity attestation relay gate + delivery order (Phase 3, Part B):
+# mirrors mesh_task.c's handle_identity_attestation with the real
+# components in the real order (MAC first, then replay, then dedup, then
+# deliver-regardless, then channel_flood_decide), including the
+# bad-MAC-drop, rewritten-packet-id-replay, and relays-never-Ed-verify
+# properties.
+add_executable(test_ident_relay_gate
+    test_ident_relay_gate.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/replay_window.c
+)
+target_include_directories(test_ident_relay_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+)
+target_link_libraries(test_ident_relay_gate ssl crypto)
+
 # DATA origin authentication (Task 4-fix F1, Critical): the 8-byte network-key
 # auth_hmac over the masked header + src_addr that gates reverse-route
 # learning, plus the keyless-forged-DATA poisoning attack regression.
