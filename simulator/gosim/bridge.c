@@ -38,6 +38,19 @@ void bridge_set_flood_transport_enabled(bool enabled) { g_flood_transport_enable
 
 bool bridge_get_flood_transport_enabled(void) { return g_flood_transport_enabled; }
 
+/* ─── Flood-transport origination hop budget (Flooding F1 finalize) ──────── */
+/* Mirrors firmware's s_flood_hop_limit: the operator-settable hop_limit a
+ * freshly-originated flood DATA / flooded receipt is stamped with under
+ * g_flood_transport_enabled (via flood_origination_hop_limit, the SAME helper
+ * the firmware originators use). Default FLOOD_HOP_LIMIT_DEFAULT (8) so no
+ * scenario that omits the field changes. Driven by the scenario's optional
+ * "flood_hop_limit" field (sim.go). */
+static uint8_t g_flood_hop_limit = FLOOD_HOP_LIMIT_DEFAULT;
+
+void bridge_set_flood_hop_limit(uint8_t hops) { g_flood_hop_limit = flood_hop_limit_clamp(hops); }
+
+uint8_t bridge_get_flood_hop_limit(void) { return g_flood_hop_limit; }
+
 /* Public channel state (one global instance) */
 static bramble_channel_t g_pub_channels[16];
 static int g_num_pub_channels = 0;
@@ -1080,7 +1093,11 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
             receipt.header.version = BRAMBLE_VERSION;
             receipt.header.type = PKT_TYPE_DELIVERY_RECEIPT;
             receipt.header.flags = 0;
-            receipt.header.hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware receipt budget */
+            /* Reactive: ROUTE_HOP_LIMIT_MAX. Flood transport: the flooded
+             * receipt originates at the operator-settable flood hop budget,
+             * mirroring firmware's send_ack. */
+            receipt.header.hop_limit =
+                flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
             receipt.header.dest_addr = orig_sender;
             receipt.header.packet_id = pcg32_random(rng);
             receipt.src_addr = rx->addr;
@@ -1429,7 +1446,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         hdr.version = BRAMBLE_VERSION;
         hdr.type = PKT_TYPE_DATA;
         hdr.flags = 0;
-        hdr.hop_limit = ROUTE_HOP_LIMIT_MAX;
+        hdr.hop_limit = flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
         hdr.dest_addr = 0xFFFFFFFF;
         hdr.packet_id = pcg32_random(rng);
 
@@ -1559,10 +1576,12 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
 
     /* Route exists — build and send DATA packet */
 
-    uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
+    /* Reactive: forward_data overwrites this from the route. Flood transport:
+     * originate at the operator-settable flood hop budget. */
+    uint8_t hop_limit = flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
     forward_result_t fwd_res;
     if (g_flood_transport_enabled) {
-        /* Flood origination: no route to resolve. Send at the full hop budget
+        /* Flood origination: no route to resolve. Send at the flood hop budget
          * and broadcast; header.dest_addr stays D so only D delivers while
          * every relay floods it onward. */
         memset(&fwd_res, 0, sizeof(fwd_res));
@@ -1823,7 +1842,8 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
          * under flood), so bypass it and re-broadcast at the full hop budget;
          * the destination's re-ACK-on-duplicate gives another confirmation
          * chance. Reactive (toggle off) is unchanged. */
-        uint8_t hop_limit = ROUTE_HOP_LIMIT_MAX; /* firmware DATA hop budget */
+        uint8_t hop_limit =
+            flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
         forward_result_t fwd_res;
         if (g_flood_transport_enabled) {
             memset(&fwd_res, 0, sizeof(fwd_res));

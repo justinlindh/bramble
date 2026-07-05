@@ -382,6 +382,16 @@ static mailbox_t s_mailbox;
  * PKT_TYPE_DATA case. NVS-persisted, same pattern as s_mailbox_enabled. */
 static bool s_flood_transport = false;
 
+/* Flooding F1 finalize: operator-settable flood-transport origination hop
+ * budget. Under s_flood_transport, a freshly-originated flood DATA and its
+ * flooded-ACK are stamped with this hop_limit (via flood_origination_hop_limit)
+ * instead of the hardcoded ROUTE_HOP_LIMIT_MAX, so reach can be matched to the
+ * expected network diameter. Default FLOOD_HOP_LIMIT_DEFAULT (8) leaves shipped
+ * behavior unchanged; NVS-persisted (NVS_NS_FLOOD "hop_limit"); clamped to
+ * [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]. SEPARATE from ROUTE_HOP_LIMIT_MAX
+ * (the reactive path is untouched). */
+static uint8_t s_flood_hop_limit = FLOOD_HOP_LIMIT_DEFAULT;
+
 /* Location policy engine tick state */
 static uint32_t s_location_last_policy_tick_ms = 0;
 static uint32_t s_location_last_send_ms = 0;
@@ -1670,7 +1680,11 @@ static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
                 .version = BRAMBLE_VERSION,
                 .type = PKT_TYPE_ACK,
                 .flags = 0,
-                .hop_limit = 8,
+                /* Reactive: ROUTE_HOP_LIMIT_MAX (8). Flood transport: the
+                 * flooded-ACK originates at the operator-settable flood hop
+                 * budget so a confirmation can traverse the same diameter its
+                 * DATA did. */
+                .hop_limit = flood_origination_hop_limit(s_flood_transport, s_flood_hop_limit),
                 .dest_addr = dest_addr,
                 .packet_id = next_packet_id(),
             },
@@ -4052,7 +4066,9 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_DATA,
         .flags = FLAG_ENCRYPT | FLAG_CHANNEL,
-        .hop_limit = ROUTE_HOP_LIMIT_MAX, /* must traverse expanded-ring routes */
+        /* Reactive: ROUTE_HOP_LIMIT_MAX (must traverse expanded-ring routes).
+         * Flood transport: the operator-settable flood hop budget. */
+        .hop_limit = flood_origination_hop_limit(s_flood_transport, s_flood_hop_limit),
         .dest_addr = dest_addr,
         .packet_id = pkt_id,
     };
@@ -4155,7 +4171,7 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
         .version = BRAMBLE_VERSION,
         .type = PKT_TYPE_DATA,
         .flags = FLAG_ENCRYPT, /* no FLAG_CHANNEL: session-keyed DM (SEC-C2) */
-        .hop_limit = ROUTE_HOP_LIMIT_MAX,
+        .hop_limit = flood_origination_hop_limit(s_flood_transport, s_flood_hop_limit),
         .dest_addr = dest_addr,
         .packet_id = pkt_id,
     };
@@ -5308,6 +5324,14 @@ void mesh_task_start(bramble_identity_t* identity) {
                 ESP_LOGI(TAG, "Flood transport: %s (from NVS)",
                          s_flood_transport ? "enabled" : "disabled");
             }
+            /* Flooding F1 finalize: operator-settable flood hop budget. Clamp
+             * on load so a stale/out-of-range NVS value can never originate an
+             * invalid hop_limit. */
+            uint8_t hop_limit = 0;
+            if (nvs_get_u8(fl_nvs, "hop_limit", &hop_limit) == ESP_OK) {
+                s_flood_hop_limit = flood_hop_limit_clamp(hop_limit);
+                ESP_LOGI(TAG, "Flood hop limit: %u (from NVS)", (unsigned)s_flood_hop_limit);
+            }
             nvs_close(fl_nvs);
         }
     }
@@ -5593,6 +5617,10 @@ void mesh_set_flood_transport(bool enabled) {
 }
 
 bool mesh_get_flood_transport(void) { return s_flood_transport; }
+
+void mesh_set_flood_hop_limit(uint32_t hops) { s_flood_hop_limit = flood_hop_limit_clamp(hops); }
+
+uint8_t mesh_get_flood_hop_limit(void) { return s_flood_hop_limit; }
 
 /* ── Probe tracking ──────────────────────────────────────────────────── */
 
