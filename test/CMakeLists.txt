@@ -674,6 +674,22 @@ target_include_directories(test_ed25519 PRIVATE
 )
 target_link_libraries(test_ed25519 ssl crypto)
 
+# Identity attestation frame: wire layout + canonical signed message +
+# tamper-fails-verify (per-node identity Phase 2)
+add_executable(test_identity_attestation
+    test_identity_attestation.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_identity_attestation PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_identity_attestation ssl crypto)
+
 # Integration test (3-node routing)
 add_executable(test_integration
     test_integration.c
