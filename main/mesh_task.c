@@ -1205,6 +1205,88 @@ static int send_beacon(void) {
     return ret;
 }
 
+/* ── Identity attestation TX (per-node identity Phase 2) ────────────── */
+
+/* Low-cadence self-signed identity broadcast: 144 bytes every 15 minutes
+ * is the design's approved airtime budget; do not raise the cadence
+ * without re-flagging that budget. */
+#define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
+/* Short retry after a failed/denied send, so a boot-time budget denial
+ * does not leave the node unattested for a full interval. */
+#define ATTESTATION_RETRY_MS 60000u
+
+static uint32_t s_attestation_last_ms;
+static uint32_t s_attestation_wait_ms; /* 0 = boot send not attempted yet */
+
+/*
+ * Build, self-sign and broadcast this node's identity attestation
+ * (PKT_TYPE_IDENTITY_ATTESTATION): {address, X25519 pub, Ed25519 pub}
+ * signed by the node's OWN Ed25519 key over the canonical message
+ * bramble_identity_attestation_signed_msg builds (packet.h). Deliberately
+ * no network-key MAC: the frame is self-authenticating and must be
+ * checkable by any member (see the struct comment in packet.h).
+ *
+ * Broadcast on the BROADCAST budget lane (TX_KIND_DATA_BROADCAST, the
+ * same tier the beacon and the flood relay debit). hop_limit uses the
+ * same origination helper as flood DATA/ACK sends: ROUTE_HOP_LIMIT_MAX
+ * reactive, the configured flood hop budget under s_flood_transport.
+ * NOTE (Phase 2 reach): the RX dispatch relays broadcasts per-type, and
+ * no relay handles this type yet, so only direct neighbors hear it this
+ * phase; Phase 3 extends relay alongside receiver verification.
+ */
+static int send_identity_attestation(void) {
+    if (!s_identity)
+        return -1;
+
+    bramble_identity_attestation_t att = {0};
+    att.header.version = BRAMBLE_VERSION;
+    att.header.type = PKT_TYPE_IDENTITY_ATTESTATION;
+    att.header.flags = 0;
+    att.header.hop_limit = flood_origination_hop_limit(s_flood_transport, s_flood_hop_limit);
+    att.header.dest_addr = 0xFFFFFFFF; /* broadcast */
+    att.header.packet_id = next_packet_id();
+
+    att.src_addr = s_identity->address;
+    memcpy(att.x25519_pub, s_identity->public_key, sizeof(att.x25519_pub));
+    memcpy(att.ed25519_pub, s_identity->ed25519_public_key, sizeof(att.ed25519_pub));
+
+    uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
+    if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK) {
+        ESP_LOGE(TAG, "Attestation message build failed");
+        return -1;
+    }
+    if (crypto_ed25519_sign(s_identity->ed25519_private_key, msg, sizeof(msg), att.sig) != 0) {
+        ESP_LOGE(TAG, "Attestation sign failed");
+        return -1;
+    }
+
+    uint8_t buf[IDENTITY_ATTESTATION_SIZE];
+    if (bramble_identity_attestation_serialize(&att, buf, sizeof(buf)) != ESP_OK) {
+        ESP_LOGE(TAG, "Attestation serialize failed");
+        return -1;
+    }
+
+    int ret = mesh_tx(buf, IDENTITY_ATTESTATION_SIZE, TX_KIND_DATA_BROADCAST);
+    if (ret == TX_GATE_OK) {
+        ESP_LOGI(TAG, "Identity attestation TX (addr=%08" PRIX32 ")", att.src_addr);
+    } else if (ret == TX_GATE_ERR_BUDGET) {
+        ESP_LOGD(TAG, "Identity attestation deferred: airtime budget exhausted");
+    } else {
+        ESP_LOGE(TAG, "Identity attestation TX failed: %d", ret);
+    }
+    return ret;
+}
+
+/* Send now and schedule the next attempt: the full interval on success,
+ * the short retry on budget denial / radio failure. Called from the
+ * post-boot send hook, the periodic maintenance tick, and identity
+ * regeneration (so a new identity is announced promptly). */
+static void attempt_identity_attestation(uint32_t t) {
+    int rc = send_identity_attestation();
+    s_attestation_last_ms = t;
+    s_attestation_wait_ms = (rc == TX_GATE_OK) ? ATTESTATION_INTERVAL_MS : ATTESTATION_RETRY_MS;
+}
+
 /*
  * ws 1.3b infra: control-plane seq draw + replay check. No callers yet
  * (tasks 2-6 wire these into the five control-plane build/handle sites);
@@ -1288,6 +1370,10 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
             return;
         }
         ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
+        /* Announce the regenerated identity promptly (Phase 2): new
+         * address + keys mean the old attestation no longer describes
+         * this node. Budget-gated like every attestation send. */
+        attempt_identity_attestation(now_ms());
         /* Notify webapp */
         cJSON* params = cJSON_CreateObject();
         char addr_buf[12];
@@ -3696,6 +3782,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         *beacon_interval = base_interval + jitter;
     }
 
+    /* Periodic identity attestation (Phase 2): low cadence, budget-gated.
+     * s_attestation_wait_ms stays 0 until the post-boot send hook arms the
+     * schedule, so this never fires before the radio-up boot send. */
+    if (s_attestation_wait_ms != 0 && (t - s_attestation_last_ms) >= s_attestation_wait_ms) {
+        attempt_identity_attestation(t);
+    }
+
     /* Periodic neighbor purge + route maintenance */
     if ((t - *last_purge_ms) >= NEIGHBOR_PURGE_INTERVAL) {
         neighbor_purge(&s_neighbors, t);
@@ -3972,6 +4065,11 @@ static void mesh_task(void* param) {
     ESP_LOGI(TAG, "=== BOOT STAGE: sending first beacon ===");
     send_beacon();
     last_beacon_ms = now_ms();
+
+    /* Post-boot identity attestation (Phase 2): radio is up and the beacon
+     * jitter already spread us out; announce {addr, X25519, Ed25519} once
+     * now, then every ATTESTATION_INTERVAL_MS via periodic maintenance. */
+    attempt_identity_attestation(now_ms());
 
     ESP_LOGI(TAG, "=== BOOT STAGE: entering main mesh loop ===");
 
