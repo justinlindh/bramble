@@ -5584,9 +5584,10 @@ void mesh_task_start(bramble_identity_t* identity) {
     xTaskCreate(handshake_worker_task, "dm_hs_worker", DM_HANDSHAKE_WORKER_STACK, NULL,
                 DM_HANDSHAKE_WORKER_PRIORITY, NULL);
 
-    /* PART 3 (staged, not closed): loads a provisioned network key if one
-     * has been set; otherwise network_key_get() falls back to the
-     * PSK-derived key on its own. */
+    /* Loads a provisioned network key from NVS if one has been set. If none
+     * has, the node stays UNPROVISIONED and inert: network_key_get() fails
+     * closed (no PSK fallback), so nothing authenticated is sent or accepted
+     * until a real per-fleet key is provisioned. */
     mesh_load_network_key();
     mesh_rederive_beacon_key();
 
