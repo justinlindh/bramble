@@ -78,7 +78,11 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
  * forgeable by anyone who knows that public constant: it does NOT close
  * SEC-H1 on its own, closure waits on real key provisioning.
  */
-void rrep_sign(bramble_rrep_t* r);
+/* Fail-closed (mandatory-provisioning Task 2): rrep_sign returns 0 on success
+ * and nonzero when UNPROVISIONED (emits the all-zero sentinel, do not send);
+ * rrep_verify checks that return and REJECTS before the compare, so an
+ * unprovisioned verifier never accepts a frame (never matches the sentinel). */
+int rrep_sign(bramble_rrep_t* r);
 int rrep_verify(const bramble_rrep_t* r);
 
 /*
