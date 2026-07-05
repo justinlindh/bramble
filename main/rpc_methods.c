@@ -768,17 +768,10 @@ static int rpc_set_network_key(const cJSON* params, cJSON* result) {
         key[i] = (uint8_t)((hi << 4) | lo);
     }
 
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS_NETKEY, NVS_READWRITE, &h) != ESP_OK) {
-        return RPC_ERR_INTERNAL;
-    }
-    nvs_set_blob(h, NVS_KEY_NETKEY, key, sizeof(key));
-    esp_err_t commit_err = nvs_commit(h);
-    nvs_close(h);
-    if (commit_err != ESP_OK) {
-        return RPC_ERR_INTERNAL;
-    }
-
+    /* Mandatory-provisioning (Task 2): single source of truth. The network_key
+     * component persists to NVS (NVS_NS_NETKEY) on set, so this no longer
+     * hand-rolls its own NVS write; that removes the double-write and the risk
+     * of the RPC and the component disagreeing on the stored key. */
     network_key_set_provisioned(key);
     mesh_rederive_beacon_key(); /* beacons pick up the new key live, no reboot */
     cJSON_AddBoolToObject(result, "ok", true);

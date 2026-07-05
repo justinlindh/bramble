@@ -672,8 +672,13 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
         memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
         /* Wire v4 (F1): origin-authenticate; see send_data_packet. LOCATION
          * shares the envelope so it carries the field, though it is never
-         * relayed today (handle_location delivers dest==self/broadcast only). */
-        data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+         * relayed today (handle_location delivers dest==self/broadcast only).
+         * Mandatory-provisioning (Task 2): abort if unprovisioned. */
+        if (data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET) !=
+            0) {
+            ESP_LOGD(TAG, "unprovisioned: inert, dropping location (session) send");
+            return 0;
+        }
         memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
         memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext,
                sizeof(ciphertext));
@@ -732,8 +737,12 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
     memcpy(pkt + BRAMBLE_DATA_SRC_ADDR_OFFSET, &s_identity->address, 4);
     /* Wire v4: originator writes its own address as prev_hop. */
     memcpy(pkt + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
-    /* Wire v4 (F1): origin-authenticate; see send_data_packet. */
-    data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+    /* Wire v4 (F1): origin-authenticate; see send_data_packet. Mandatory-
+     * provisioning (Task 2): abort if unprovisioned. */
+    if (data_auth_sign(&header, s_identity->address, pkt + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
+        ESP_LOGD(TAG, "unprovisioned: inert, dropping location (channel) send");
+        return 0;
+    }
     memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, sizeof(ciphertext));
     memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
@@ -1126,6 +1135,14 @@ static void on_tx_done(void) { ESP_LOGD(TAG, "TX complete"); }
 /* ── Beacon TX ──────────────────────────────────────────────────────── */
 
 static int send_beacon(void) {
+    /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT. It has
+     * no beacon key (mesh_rederive_beacon_key zeroes it) and must emit no
+     * network-key-authenticated frame, so skip the beacon entirely. */
+    if (!network_key_is_provisioned()) {
+        ESP_LOGD(TAG, "unprovisioned: inert, skipping beacon");
+        return -1;
+    }
+
     bramble_beacon_t beacon = {0};
 
     beacon.header.version = BRAMBLE_VERSION;
@@ -1251,6 +1268,13 @@ static int send_identity_attestation(void) {
     if (!s_identity)
         return -1;
 
+    /* Mandatory-provisioning (Task 2): inert when unprovisioned. The relay-gate
+     * MAC (ident_relay_sign) requires the network key; emit nothing without it. */
+    if (!network_key_is_provisioned()) {
+        ESP_LOGD(TAG, "unprovisioned: inert, skipping identity attestation");
+        return -1;
+    }
+
     /* ws 1.3b pattern (send_ack): draw the 48-bit origin seq up front,
      * fail-closed. No seq means no attestation goes out; the retry timer
      * covers it exactly like a budget denial. */
@@ -1356,6 +1380,14 @@ static bool control_replay_ok(uint32_t signer_addr, uint64_t seq) {
 /* ── Packet handlers ────────────────────────────────────────────────── */
 
 static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
+    /* Mandatory-provisioning (Task 2): an unprovisioned node has no beacon key
+     * (mesh_rederive_beacon_key zeroes it), so it cannot authenticate a beacon.
+     * Drop before any verify/effect: accepting one would mean trusting an HMAC
+     * over an all-zero key (a forgery). Fail closed, accept nothing. */
+    if (!network_key_is_provisioned()) {
+        return;
+    }
+
     bramble_beacon_t beacon;
     if (bramble_beacon_deserialize(&beacon, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid beacon (len=%u)", len);
@@ -1534,6 +1566,13 @@ static void mesh_schedule_next_receipt_timer(void) {
 
 static void queue_broadcast_delivery_receipt(uint32_t original_src_addr,
                                              uint32_t original_packet_id) {
+    /* Mandatory-provisioning (Task 2): inert when unprovisioned (the receipt is
+     * receipt_sign'd with the network key inside the builder). */
+    if (!network_key_is_provisioned()) {
+        ESP_LOGD(TAG, "unprovisioned: inert, skipping delivery receipt");
+        return;
+    }
+
     uint8_t buf[DELIVERY_RECEIPT_MAX_SIZE];
     size_t wire_len = 0;
 
@@ -1793,6 +1832,13 @@ static void mesh_probe_reply_timer_cb(void* arg) {
 }
 
 static void send_ack(uint32_t dest_addr, uint32_t ack_packet_id, int8_t rssi) {
+    /* Mandatory-provisioning (Task 2): inert when unprovisioned (ack_sign
+     * needs the network key). The sender's retransmission timer covers the
+     * missing ACK exactly like a lost one. */
+    if (!network_key_is_provisioned()) {
+        ESP_LOGD(TAG, "unprovisioned: inert, skipping ACK");
+        return;
+    }
     /* ws 1.3b: draw the 48-bit origin seq before building the struct, so it
      * can go straight into the designated initializer below instead of a
      * second pass. Fail-closed: no seq means no ACK goes out; the sender's
@@ -2657,6 +2703,13 @@ static void send_rreq(const bramble_rreq_t* rreq) {
 }
 
 static void send_rrep(const bramble_rrep_t* rrep) {
+    /* Mandatory-provisioning (Task 2): inert when unprovisioned. The RREP was
+     * built and rrep_sign'd elsewhere; without the network key that MAC is the
+     * all-zero sentinel, so do not transmit. */
+    if (!network_key_is_provisioned()) {
+        ESP_LOGD(TAG, "unprovisioned: inert, skipping RREP");
+        return;
+    }
     /* Red-team audit: was buf[64], a hand-counted constant. RREP_SIZE (40
      * as of ws 1.3b) always fit, but macro-ized for the same reason as
      * the other TX buffers in this file. */
@@ -2678,6 +2731,12 @@ static void send_rrep(const bramble_rrep_t* rrep) {
 }
 
 static void send_rerr(uint32_t broken_dest, uint32_t broken_next_hop) {
+    /* Mandatory-provisioning (Task 2): inert when unprovisioned (rerr_sign
+     * needs the network key). */
+    if (!network_key_is_provisioned()) {
+        ESP_LOGD(TAG, "unprovisioned: inert, skipping RERR");
+        return;
+    }
     /* components/routing/forwarding.c: rerr_build fills version/type/flags/
      * hop_limit/dest_addr/reporter_addr/broken_dest/broken_next_hop
      * identically to the struct literal this replaced. packet_id and seq
@@ -4396,8 +4455,13 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
     memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
     /* Wire v4 (F1): network-key MAC over the origin-stable fields (masked
      * header + src_addr), so relays can gate reverse-route learning without
-     * decrypting. Origin-written, carried through every forward unchanged. */
-    data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+     * decrypting. Origin-written, carried through every forward unchanged.
+     * Mandatory-provisioning (Task 2): abort if unprovisioned (INERT node
+     * originates no authenticated DATA). */
+    if (data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
+        ESP_LOGD(TAG, "unprovisioned: inert, dropping DATA send");
+        return 0;
+    }
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, ct_len);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + ct_len, tag, BRAMBLE_TAG_SIZE);
@@ -4482,8 +4546,12 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
     /* Wire v4: ORIGINATOR writes its own address as prev_hop; see
      * send_data_packet's identical comment. */
     memcpy(buf + BRAMBLE_DATA_PREV_HOP_OFFSET, &s_identity->address, 4);
-    /* Wire v4 (F1): origin-authenticate; see send_data_packet. */
-    data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET);
+    /* Wire v4 (F1): origin-authenticate; see send_data_packet. Mandatory-
+     * provisioning (Task 2): abort if unprovisioned. */
+    if (data_auth_sign(&header, s_identity->address, buf + BRAMBLE_DATA_AUTH_HMAC_OFFSET) != 0) {
+        ESP_LOGD(TAG, "unprovisioned: inert, dropping DM send");
+        return 0;
+    }
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + payload_len, tag,
@@ -5411,33 +5479,34 @@ static int mesh_nonce_write(uint64_t ceiling, void* ctx) {
 }
 
 /*
- * PART 3 (staged, not closed; see network_key.h). Loads a provisioned
- * network key from NVS if one has been set (via the setNetworkKey RPC).
- * Not-found is the expected, common case, the shipped default is
- * unprovisioned, so this falls through silently to network_key_get()'s
- * own PSK-derived fallback rather than logging an error.
+ * Mandatory-provisioning (Task 2): consolidate boot-time key load onto the
+ * network_key component (single source of truth for the NVS namespace/key and
+ * the in-memory provisioning state). A stored key -> provisioned; none stored
+ * -> the node stays UNPROVISIONED and INERT (no public-PSK fallback), which is
+ * the shipped default until an operator provisions one. Logged clearly so the
+ * boot state is unambiguous (a status field for Task 3's provisioning UX).
  */
 static void mesh_load_network_key(void) {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS_NETKEY, NVS_READONLY, &h) != ESP_OK) {
-        return;
-    }
-    uint8_t key[32];
-    size_t len = sizeof(key);
-    if (nvs_get_blob(h, NVS_KEY_NETKEY, key, &len) == ESP_OK && len == sizeof(key)) {
-        network_key_set_provisioned(key);
+    if (network_key_load_from_nvs() == 0) {
         ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");
+    } else {
+        ESP_LOGW(TAG, "No network key provisioned: node is INERT until provisioned "
+                      "(setNetworkKey or generate)");
     }
-    nvs_close(h);
 }
 
 void mesh_rederive_beacon_key(void) {
-    /* SEC-H2 (STAGED, not closed): derive the beacon HMAC subkey from the
-     * current network key with domain-separation label "bramble-beacon-v2".
-     * Called at init AND after a runtime setNetworkKey so provisioning takes
-     * effect for beacons without a reboot. When unprovisioned, falls back to
-     * the public-PSK-derived key (integrity-only; not exclusive to the
-     * network). */
+    /* SEC-H2: derive the beacon HMAC subkey from the current network key with
+     * domain-separation label "bramble-beacon-v2". Called at init AND after a
+     * runtime setNetworkKey so provisioning takes effect for beacons without a
+     * reboot.
+     *
+     * Mandatory-provisioning (Task 2): the public-PSK fallback is GONE. When
+     * unprovisioned there is no beacon key -- zero it so a stale key can never
+     * be reused, and the node neither beacons (send_beacon is gated) nor
+     * accepts beacons (handle_beacon is gated). Do NOT derive from
+     * BRAMBLE_PUBLIC_CHANNEL_PSK: that would re-introduce a control-plane
+     * fallback key. */
     if (network_key_is_provisioned()) {
         uint8_t net_key[32];
         network_key_get(net_key);
@@ -5446,10 +5515,8 @@ void mesh_rederive_beacon_key(void) {
                            s_beacon_key, sizeof(s_beacon_key));
         ESP_LOGI(TAG, "Beacon HMAC key derived from the provisioned network key");
     } else {
-        bramble_channel_t beacon_ch;
-        channel_derive_key(BRAMBLE_PUBLIC_CHANNEL_PSK, &beacon_ch);
-        memcpy(s_beacon_key, beacon_ch.key, BRAMBLE_KEY_SIZE);
-        ESP_LOGW(TAG, "beacon HMAC integrity-only (no network key provisioned)");
+        memset(s_beacon_key, 0, sizeof(s_beacon_key));
+        ESP_LOGW(TAG, "unprovisioned: no beacon key (node inert until provisioned)");
     }
 }
 
