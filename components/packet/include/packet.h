@@ -39,6 +39,11 @@
 #define PKT_TYPE_PROBE 0x12     /* Network reachability probe */
 #define PKT_TYPE_PROBE_ACK 0x13 /* Probe acknowledgement */
 #define PKT_TYPE_LOCATION 0x14  /* Location share */
+/* Self-signed identity attestation (per-node identity Phase 2): a node's
+ * broadcast claim binding {address, X25519 pub, Ed25519 pub} under its own
+ * Ed25519 key. Additive on wire v4: un-upgraded peers drop it at the RX
+ * dispatch switch's default case. */
+#define PKT_TYPE_IDENTITY_ATTESTATION 0x15
 
 #define BEACON_FLAG_MAILBOX 0x01 /* Node willing to store messages */
 
@@ -73,6 +78,18 @@
 #define DELIVERY_RECEIPT_MAX_SIZE 68 /* was 62; +6 for seq (ws 1.3b control-plane freshness) */
 
 #define DELIVERY_RECEIPT_MAX_HOPS 8
+
+/* Identity attestation wire size: header(12) + src_addr(4) + x25519_pub(32)
+ * + ed25519_pub(32) + sig(64). Fixed-size frame; the deserializer rejects
+ * anything that is not EXACTLY this long. */
+#define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64) /* 144 */
+
+/* Canonical signed message for the attestation (see
+ * bramble_identity_attestation_signed_msg): context(16) + src_addr(4)
+ * + x25519_pub(32) + ed25519_pub(32) = 84 bytes. */
+#define IDENTITY_ATTESTATION_MSG_CONTEXT "bramble-ident-v1"
+#define IDENTITY_ATTESTATION_MSG_CONTEXT_LEN 16
+#define IDENTITY_ATTESTATION_MSG_SIZE (IDENTITY_ATTESTATION_MSG_CONTEXT_LEN + 4 + 32 + 32)
 
 /* Common header (12 bytes) */
 typedef struct {
@@ -222,6 +239,34 @@ typedef struct {
     uint32_t relay_path[DELIVERY_RECEIPT_MAX_HOPS];
 } bramble_delivery_receipt_t;
 
+/*
+ * Identity attestation (per-node identity Phase 2): a self-signed, flooded
+ * (low-cadence) binding of {src_addr, X25519 pub, Ed25519 pub}.
+ *
+ * sig is Ed25519 over the domain-separated canonical message
+ *
+ *   "bramble-ident-v1" || src_addr(4, big-endian) || x25519_pub(32)
+ *                      || ed25519_pub(32)
+ *
+ * (bramble_identity_attestation_signed_msg builds it; Phase 3's verifier
+ * MUST pin these same bytes). The header is deliberately NOT covered:
+ * hop_limit is relay-mutable and packet_id is per-send, while the identity
+ * claim itself is stable across re-sends and relays.
+ *
+ * Deliberately NO network-key MAC on this frame: the attestation is
+ * self-authenticating (the Ed25519 signature is checkable by ANY member
+ * against the embedded ed25519_pub, with no shared secret needed), so a
+ * network-key MAC would add nothing to the claim's truth. The network key
+ * gates RELAY/acceptance policy, not the attestation's authenticity.
+ */
+typedef struct {
+    bramble_header_t header;
+    uint32_t src_addr;
+    uint8_t x25519_pub[32];
+    uint8_t ed25519_pub[32];
+    uint8_t sig[64];
+} bramble_identity_attestation_t;
+
 /* Serialize/deserialize functions. Return ESP_OK or ESP_ERR_INVALID_SIZE. */
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len);
 esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, size_t len);
@@ -339,5 +384,16 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
                                              size_t len);
 esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, const uint8_t* buf,
                                                size_t len);
+
+esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestation_t* p,
+                                                 uint8_t* buf, size_t len);
+/* Exact-length check: len must be IDENTITY_ATTESTATION_SIZE, not merely >=. */
+esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_t* p,
+                                                   const uint8_t* buf, size_t len);
+/* Write the IDENTITY_ATTESTATION_MSG_SIZE-byte canonical message the sig
+ * covers (see the struct comment). Signer and verifier both use this, so
+ * the signed bytes can never diverge between them. */
+esp_err_t bramble_identity_attestation_signed_msg(const bramble_identity_attestation_t* p,
+                                                  uint8_t* buf, size_t len);
 
 #endif /* BRAMBLE_PACKET_H */
