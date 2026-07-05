@@ -1792,12 +1792,61 @@ correlates a received flooded ACK to a pending message purely by
 confirmed delivery of a broadcast-style flood, which fire-and-forget flooding
 does not offer.
 
+**Configurable origination hop limit.** The flood originates each DATA and its
+flooded ACK at an operator-settable hop budget (`s_flood_hop_limit`, RPC
+`bramble.setFloodHopLimit {hops}`, NVS-persisted, reflected in `getConfig` as
+`floodHopLimit`), clamped to `1..32` and defaulting to **8**. This is a separate
+value from `ROUTE_HOP_LIMIT_MAX`, which the reactive path still uses unchanged;
+raising the flood hop limit never touches reactive reach. The default 8 covers
+small and moderate-diameter meshes. A large-diameter mesh needs a larger value,
+because a flood reaches a node only within its hop budget and a flood's diameter
+grows with node count: a hop limit of `N` reaches exactly `N` radio hops.
+Measured in gosim: at 200 nodes on a dense grid (45-unit spacing) the scripted
+source/destination pairs are 11 to 17 hops apart, so at the default hop 8
+delivery is **0 percent**, while at hop 20 it is **100 percent** -- but at
+roughly **3x the airtime and about 13x the collisions** of hop 8. Reach at any
+scale is therefore a deliberate operator choice traded against airtime: covering
+about **2.5x more hops costs about 3x more airtime** and many more collisions.
+The setting exists precisely so the hop budget can be matched to the expected
+network diameter rather than pinned at a constant that is wrong at both ends of
+the scale range.
+
 **Validated numbers (honest).** On a fast, dense radio profile (SF7 / 250 kHz,
 approximately 45-unit node spacing) the firmware flood measured **75 to 100
 percent reach and 60 to 90 percent confirmed delivery at 25 to 100 nodes**.
 These are the profile and density the transport is designed for; they are not
 the shipping default (which is LongRange, SF10 / 125 kHz, section 3.2) and they
 do not replace reactive routing.
+
+**Operating envelope (honest).** The reach and confirmation halves of the
+transport have different scaling limits, and it is worth being explicit about
+each rather than quoting a single headline number:
+
+- *Best-effort REACH holds at any scale within the hop budget.* A flood reaches
+  every node inside its (now configurable) hop limit regardless of node count;
+  raising the hop limit covers a larger diameter at the documented airtime cost
+  above (about 3x airtime and many more collisions to cover about 2.5x more
+  hops). Reach is bounded by the hop budget and airtime, not by a saturation
+  cliff, so it is the robust half of the transport.
+- *CONFIRMED delivery (the flooded ACK) holds at LOW-TO-MODERATE message load
+  and degrades at high load.* Flood airtime scales as (messages x nodes): every
+  message floods across every node, and the confirmation round trip is a second
+  flood on top of that. When the shared channel saturates, the confirmation is
+  the first casualty, because the ACK flood competes with the DATA floods still
+  in the air. Measured envelope at **100 nodes dense**: confirmed delivery is
+  about **80 percent at 2 to 10 messages/min**, falling to **single digits by 30
+  to 60 messages/min**. This degradation is close to fundamental to flooding --
+  it is the O(messages x nodes) airtime cost, not a tuning bug -- so confirmed
+  flood delivery is explicitly **not** a high-load guarantee. Do not deploy
+  flooding expecting confirmed unicast under sustained high load.
+- *DUAL-SUBSTRATE guidance.* Bramble ships both substrates and the
+  `s_flood_transport` toggle selects between them. **Flooding** is the choice for
+  broadcast, best-effort reach, and large-diameter meshes, where its per-message
+  O(nodes) cost buys scale-independent reach. **Reactive routing (the default)**
+  is the choice for confirmed unicast at small-to-moderate dense scale, where its
+  per-message O(hops) cost holds confirmed delivery under load that flooding's
+  O(nodes) cost cannot. Neither dominates: they occupy different corners of the
+  scale/load/diameter space, which is why both ship.
 
 **Accepted residuals and limitations (documented, not papered over):**
 
@@ -1835,13 +1884,26 @@ Meshcore, and scoped strictly to this transport:
   suppression (post-fix), where Meshtastic channel traffic is unauthenticated;
   **route-free confirmed delivery** via the flooded ACK, where Meshtastic is
   fire-and-forget; and small-mesh reliability from `suppress = 2` versus
-  Meshtastic's aggressive effective-1 default.
+  Meshtastic's aggressive effective-1 default. Across the load range the honest
+  framing is: at **high load** Bramble's flood **reach** is comparable to
+  Meshtastic's (both pay the same O(nodes) airtime), but Bramble **honestly
+  reports the delivery failure** through the confirmed-delivery metric where
+  Meshtastic is fire-and-forget and simply hides it; at **low-to-moderate load**
+  Bramble's confirmed delivery is a **genuine, distinct advantage** Meshtastic
+  has no equivalent of.
 - *vs Meshcore.* Meshcore ships per-node keys, end-to-end encryption, and
-  efficient routing, so against it the edge narrows to **confirmed broadcast**
-  plus **authenticated-flood membership gating** (only members' traffic
-  propagates and can suppress). That gap, Meshcore's per-node-key and routing
-  efficiency versus Bramble's shared-key flood, is the honest weaker axis and
-  the one to watch.
+  efficient routing, so against it the edge stays **narrow**: **confirmed
+  broadcast** plus **authenticated-flood membership gating** (only members'
+  traffic propagates and can suppress). That gap, Meshcore's per-node-key and
+  routing efficiency versus Bramble's shared-key flood, is the honest weaker
+  axis and the one to watch.
+- *The load ceiling is the honest limit to watch.* The confirmed-delivery
+  advantage above is real only up to the load ceiling of the operating envelope;
+  past it, confirmed flood delivery collapses toward single digits and the
+  advantage over fire-and-forget flooding is only that Bramble tells you it
+  failed. This is why reactive routing remains the default for confirmed unicast
+  and why flooding is positioned as the best-effort / broadcast / large-diameter
+  substrate, not a high-load confirmed-unicast replacement.
 
 ---
 

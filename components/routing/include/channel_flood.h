@@ -70,6 +70,42 @@ channel_flood_decision_t channel_flood_decide(uint8_t hop_limit, bool is_duplica
                                               bool budget_permits, uint32_t random_value);
 
 /*
+ * Flood-transport origination hop budget (Flooding F1 finalize).
+ *
+ * The flood transport originates a DATA frame (and the flooded-ACK that
+ * confirms it) at an OPERATOR-SETTABLE hop limit so its best-effort reach can
+ * be matched to the expected network diameter. 8 (the default, unchanged from
+ * the shipped ROUTE_HOP_LIMIT_MAX the flood used to originate at) covers a
+ * small/moderate-diameter mesh; a larger value covers a larger-diameter mesh
+ * at a documented airtime cost (roughly 3x airtime / many more collisions to
+ * cover ~2.5x more hops -- see docs/bramble-protocol-spec.md's flood
+ * operating-envelope section). This is a SEPARATE value from
+ * ROUTE_HOP_LIMIT_MAX: the reactive routing path still originates and forwards
+ * at ROUTE_HOP_LIMIT_MAX unchanged, so raising the flood hop limit never
+ * touches reactive reach.
+ */
+#define FLOOD_HOP_LIMIT_DEFAULT 8
+#define FLOOD_HOP_LIMIT_MIN 1
+#define FLOOD_HOP_LIMIT_CEIL 32
+
+/*
+ * Clamp an operator-supplied flood hop limit into [FLOOD_HOP_LIMIT_MIN,
+ * FLOOD_HOP_LIMIT_CEIL]. Pure; shared by the RPC setter, the NVS load, and
+ * the origination selector below so all three agree on the valid range.
+ */
+uint8_t flood_hop_limit_clamp(uint32_t hops);
+
+/*
+ * The hop_limit an ORIGINATOR stamps on a freshly-originated frame. Under the
+ * flood transport it is the clamped operator-settable flood hop limit;
+ * otherwise it is ROUTE_HOP_LIMIT_MAX, the reactive path's unchanged
+ * full-depth budget. Shared by send_data_packet / send_dm_packet / send_ack
+ * so every originator agrees, and directly unit-testable (it is what proves
+ * flood origination uses the configured value, not a constant).
+ */
+uint8_t flood_origination_hop_limit(bool flood_transport, uint32_t flood_hop_limit);
+
+/*
  * Rebroadcast suppression (Flooding F1). A node that has a flood rebroadcast
  * still waiting out its jitter CANCELS it once it has overheard enough OTHER
  * copies of the same frame from neighbors: those copies already covered the

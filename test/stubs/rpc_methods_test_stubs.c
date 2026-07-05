@@ -211,6 +211,12 @@ bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
 bool g_stub_flood_transport_enabled = false;
 void mesh_set_flood_transport(bool e) { g_stub_flood_transport_enabled = e; }
 bool mesh_get_flood_transport(void) { return g_stub_flood_transport_enabled; }
+uint8_t g_stub_flood_hop_limit = 8;
+void mesh_set_flood_hop_limit(uint32_t h) {
+    /* Mirror the real clamp to [1,32] so the RPC test sees the applied value. */
+    g_stub_flood_hop_limit = (uint8_t)(h < 1 ? 1 : (h > 32 ? 32 : h));
+}
+uint8_t mesh_get_flood_hop_limit(void) { return g_stub_flood_hop_limit; }
 void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
 void mesh_rederive_beacon_key(void) {}

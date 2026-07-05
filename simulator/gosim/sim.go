@@ -571,7 +571,13 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Defaults to false (firmware's shipped NVS default); re-applied on every
 	// load so one scenario's setting never leaks into the next run in the
 	// same process.
-	C.bridge_set_flood_transport_enabled(C.bool(loadFloodTransportConfig(scenarioPath)))
+	floodTransport, floodTransportHopLimit := loadFloodTransportConfig(scenarioPath)
+	C.bridge_set_flood_transport_enabled(C.bool(floodTransport))
+	// Flooding F1 finalize: optional "flood_hop_limit" scenario field drives the
+	// flood-transport origination hop budget (firmware's s_flood_hop_limit),
+	// re-applied on every load. bridge_set_flood_hop_limit clamps to the
+	// firmware range; a farther-reaching flood needs a larger value here.
+	C.bridge_set_flood_hop_limit(C.uint8_t(floodTransportHopLimit))
 
 	// Seed the RNG (scenario_load_file only seeds for stochastic mode)
 	C.pcg32_seed(&s.rng, scenario.metadata.seed)

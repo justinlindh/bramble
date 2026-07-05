@@ -542,6 +542,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/SetFloodTransportResponse'
 
+  /rpc/bramble.setFloodHopLimit:
+    post:
+      operationId: setFloodHopLimit
+      summary: Set the flood-transport origination hop budget
+      description: >-
+        Sets the operator-settable hop limit a freshly-originated flood DATA
+        (and its flooded-ACK) is stamped with under the flood transport, so
+        best-effort reach can be matched to the expected network diameter. The
+        value is clamped to 1..32; the clamped value that took effect is echoed
+        back and persisted. Default 8 (shipped behavior unchanged). This is
+        separate from the reactive routing hop budget, which is untouched.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetFloodHopLimitParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Flood hop limit updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetFloodHopLimitResponse'
+
   /rpc/bramble.setLocationConfig:
     post:
       operationId: setLocationConfig
@@ -1807,6 +1834,7 @@ components:
         - broadcast_telemetry_mode
         - mailboxEnabled
         - floodTransportEnabled
+        - floodHopLimit
       properties:
         node_name:
           type: string
@@ -1855,6 +1883,11 @@ components:
         floodTransportEnabled:
           type: boolean
           description: Whether the unicast flood transport is enabled.
+        floodHopLimit:
+          type: integer
+          description: >-
+            Flood-transport origination hop budget (1..32, default 8). Only
+            the flood transport uses it; reactive routing is unaffected.
 
     # ── Request Params ───────────────────────────────────────────────────────
 
@@ -2111,6 +2144,28 @@ components:
         enabled:
           type: boolean
           description: The applied flood transport state.
+
+    SetFloodHopLimitParams:
+      type: object
+      required: [hops]
+      properties:
+        hops:
+          type: integer
+          minimum: 1
+          maximum: 32
+          description: >-
+            Flood-transport origination hop budget. Clamped to 1..32; the
+            clamped value is what takes effect and is returned.
+
+    SetFloodHopLimitResponse:
+      type: object
+      required: [ok, hops]
+      properties:
+        ok:
+          type: boolean
+        hops:
+          type: integer
+          description: The applied (clamped) flood hop limit.
 
     SetLocationConfigParams:
       type: object
