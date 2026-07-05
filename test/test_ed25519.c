@@ -216,6 +216,30 @@ void test_keypair_sign_verify_roundtrip(void) {
     TEST_ASSERT_FALSE(crypto_ed25519_verify(pk_a, msg, sizeof(msg), sig));
 }
 
+/* -- Deterministic keypair from seed (gosim node identities): RFC 8032
+ * TEST 1's seed must expand to TEST 1's public key, sk layout seed||pk,
+ * and the expansion must be bit-stable across calls -- */
+void test_keypair_from_seed_deterministic_rfc_vector(void) {
+    uint8_t seed[32], want_pk[32];
+    hex_to_bytes("9d61b19deffd5a60ba844af492ec2cc4"
+                 "4449c5697b326919703bac031cae7f60",
+                 seed, 32);
+    hex_to_bytes("d75a980182b10ab7d54bfed3c964073a"
+                 "0ee172f3daa62325af021a68f707511a",
+                 want_pk, 32);
+
+    uint8_t pk[BRAMBLE_ED25519_PUBKEY_SIZE], sk[BRAMBLE_ED25519_SECKEY_SIZE];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(seed, pk, sk));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(want_pk, pk, 32);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(seed, sk, 32);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(pk, sk + 32, 32);
+
+    uint8_t pk2[BRAMBLE_ED25519_PUBKEY_SIZE], sk2[BRAMBLE_ED25519_SECKEY_SIZE];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(seed, pk2, sk2));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(pk, pk2, 32);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(sk, sk2, 64);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rfc8032_test1_empty_message);
@@ -225,5 +249,6 @@ int main(void) {
     RUN_TEST(test_malleated_signature_s_plus_l_rejected);
     RUN_TEST(test_tampered_signature_byte_rejected);
     RUN_TEST(test_keypair_sign_verify_roundtrip);
+    RUN_TEST(test_keypair_from_seed_deterministic_rfc_vector);
     return UNITY_END();
 }

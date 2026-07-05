@@ -110,10 +110,12 @@ func TestDutyCycleCapScenarioSchemaAppliesThroughBridge(t *testing.T) {
 		t.Fatalf("radio.duty_cycle_pct = %d, want 1", got)
 	}
 
-	// load_nodes assigns addresses starting at 0x01000000; this scenario has
-	// exactly one node, so it gets that address deterministically.
-	const firstNodeAddr = 0x01000000
-	n := h.activateNode(firstNodeAddr)
+	// Since the Phase 4 rebind, scenario-loaded nodes get addresses derived
+	// from their Ed25519 identity keys (deterministic per node id, not a
+	// fixed constant); this scenario has exactly one node, so take it by
+	// index and activate it the way cmdLoad does.
+	n := h.nodeAtIndex(0)
+	nodeActivate(n)
 	h.applyBridgeDutyCycleCap(n) // exactly what cmdLoad does after nodeActivate
 	h.forceBeaconDue(n, 0)
 

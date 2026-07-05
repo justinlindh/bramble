@@ -139,10 +139,16 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
 /* Ed25519 via libsodium (espressif/libsodium managed component); ESP-IDF
  * mbedtls has no Ed25519. sodium_init() is idempotent (returns 1 when
  * already initialized) and only fails on catastrophic misconfiguration. */
-int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
-                           uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {
+int crypto_ed25519_keypair_from_seed(const uint8_t seed[32],
+                                     uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                     uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {
     if (sodium_init() < 0)
         return -1;
+    return (crypto_sign_seed_keypair(public_key, private_key, seed) == 0) ? 0 : -1;
+}
+
+int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {
     /* Seed from crypto_random(): the SEC-L1 entropy-gated source
      * (crypto_entropy_fill + esp_random, see crypto_random() above). Draw
      * into a scratch buffer and fail closed before touching the caller's
@@ -152,9 +158,9 @@ int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
         /* Entropy gate shut: refuse rather than derive from a zeroed seed. */
         return -1;
     }
-    int ret = crypto_sign_seed_keypair(public_key, private_key, seed);
+    int ret = crypto_ed25519_keypair_from_seed(seed, public_key, private_key);
     mbedtls_platform_zeroize(seed, sizeof(seed));
-    return (ret == 0) ? 0 : -1;
+    return ret;
 }
 
 int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,

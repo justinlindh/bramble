@@ -68,6 +68,14 @@ int crypto_random(uint8_t* buf, size_t len);
  * entropy gate (crypto_entropy_fill); returns nonzero and writes no key
  * material when the gate is shut. Verify rejects non-canonical (S >= L)
  * signatures on both backends. */
+/* Deterministic Ed25519 keypair from a caller-supplied 32-byte seed (RFC
+ * 8032 key expansion; the libsodium sk layout seed||pub applies). Used
+ * where reproducibility matters (gosim node identities); crypto_ed25519_
+ * keypair below is the entropy-gated production path. The caller owns the
+ * seed's lifetime and cleanup. */
+int crypto_ed25519_keypair_from_seed(const uint8_t seed[32],
+                                     uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                     uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]);
 int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
                            uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]);
 int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,

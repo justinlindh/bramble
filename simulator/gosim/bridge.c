@@ -1364,6 +1364,16 @@ static void _handle_identity_attestation(sim_node_t* rx, const uint8_t* buf, uin
                     kept->ed25519_pub[1], kept->ed25519_pub[2], kept->ed25519_pub[3],
                     att.ed25519_pub[0], att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
             fflush(stdout);
+        } else if (pin == IDENTITY_PIN_ADDR_MISMATCH) {
+            /* Phase 4 addr<->key binding: the claimed address is not the
+             * one the frame's own Ed25519 key derives to. Refused on
+             * first contact, no pin required. */
+            fprintf(stdout,
+                    "{\"type\":\"identity_addr_mismatch\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"addr\":\"0x%08X\",\"ed8\":\"%02X%02X%02X%02X\"}\n",
+                    (unsigned long long)now_us, rx->id, att.src_addr, att.ed25519_pub[0],
+                    att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
+            fflush(stdout);
         }
     }
 
@@ -1971,8 +1981,12 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
  * claims that address instead of the node's own: the frame is then a keyed
  * insider's impersonation attempt, internally valid (its Ed25519 sig
  * verifies against its OWN embedded key) but bound to someone else's
- * address, which pinning receivers that heard the genuine node first
- * detect and refuse (identity_conflict).
+ * address; post-Phase-4 EVERY receiver refuses it at the addr<->key check
+ * (identity_addr_mismatch), pin or no pin. event->data.node.x != 0
+ * rotates the node's X25519 pub before attesting: the frame then passes
+ * the addr check (same Ed key) but re-binds the address to a different
+ * X25519 key, which receivers holding the original pin refuse as a TOFU
+ * CONFLICT (the DM-continuity red flag).
  */
 void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
                                         radio_config_t* radio, pcg32_state_t* rng,
@@ -1987,6 +2001,15 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
 
     uint32_t claimed = event->data.node.addr ? event->data.node.addr : src->addr;
 
+    /* Scripted X25519 rotation (see the doc comment above): mutate the
+     * PERSISTENT pattern so subsequent attestations keep the rotated key,
+     * exactly like a node whose DM key really changed. */
+    if (event->data.node.x != 0) {
+        for (int i = 0; i < 32; i++) {
+            ext->ident_x25519_pub[i] ^= 0xA5;
+        }
+    }
+
     bramble_identity_attestation_t att;
     memset(&att, 0, sizeof(att));
     att.header.version = BRAMBLE_VERSION;
@@ -1998,12 +2021,12 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
     att.header.packet_id = pcg32_random(rng);
     att.src_addr = claimed;
     memcpy(att.x25519_pub, ext->ident_x25519_pub, 32);
-    memcpy(att.ed25519_pub, ext->ident_ed25519_pub, 32);
+    memcpy(att.ed25519_pub, src->ident_ed_pub, 32);
 
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
     if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK)
         return;
-    if (crypto_ed25519_sign(ext->ident_ed25519_priv, msg, sizeof(msg), att.sig) != 0)
+    if (crypto_ed25519_sign(src->ident_ed_priv, msg, sizeof(msg), att.sig) != 0)
         return;
 
     /* Fresh origin seq per origination (mirrors control_seq_next), written
@@ -2052,29 +2075,22 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
     /* Set initial simulated position from node coordinates */
     node_ext_set_sim_position(ext, x, y);
 
-    /* Per-node identity Phase 3: give the node a real Ed25519 identity on
-     * FIRST join only (a rejoin keeps its keys, exactly as firmware
-     * persists identity in NVS across resets; regenerating here would make
-     * every rejoin look like an impersonation to its peers). The X25519
-     * pub is a deterministic pattern off the address: gosim does not model
-     * the DM key exchange, and the attestation binds whatever bytes are
+    /* Per-node identity Phase 3/4: the Ed25519 keypair itself lives on
+     * sim_node_t (created once at node_array_add, the NVS-persistence
+     * analog; node->addr derives from it, the Phase 4 rebind). FIRST join
+     * initializes the remaining identity state here; a rejoin keeps it
+     * (resetting the X25519 pattern or seq would make a rejoin look like
+     * an impersonation / replay to its peers). The X25519 pub is a
+     * deterministic pattern off the address: gosim does not model the DM
+     * key exchange, and the attestation binds whatever bytes are
      * attested. */
-    bool have_identity = false;
-    for (int i = 0; i < 32; i++) {
-        if (ext->ident_ed25519_pub[i] != 0) {
-            have_identity = true;
-            break;
-        }
-    }
-    if (!have_identity) {
-        if (crypto_ed25519_keypair(ext->ident_ed25519_pub, ext->ident_ed25519_priv) != 0) {
-            memset(ext->ident_ed25519_pub, 0, sizeof(ext->ident_ed25519_pub));
-        }
+    if (!ext->ident_initialized) {
         for (int i = 0; i < 32; i++) {
             ext->ident_x25519_pub[i] = (uint8_t)((addr >> ((i % 4) * 8)) ^ (uint8_t)i);
         }
         ext->ident_seq = 0;
         identity_store_init(&ext->ident_pins);
+        ext->ident_initialized = true;
     }
 
     fprintf(stdout,
