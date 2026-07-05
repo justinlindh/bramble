@@ -706,6 +706,23 @@ target_include_directories(test_identity_attestation PRIVATE
 )
 target_link_libraries(test_identity_attestation ssl crypto)
 
+# Verified TOFU identity pin store (per-node identity Phase 3, Part C):
+# first-seen-wins pinning, idempotent refresh, impersonation-conflict
+# rejection, LRU-by-last-confirmed eviction, Ed25519 verify on delivery.
+# The test file #includes the component sources directly (same pattern as
+# test_ident_relay_auth.c / test_flooded_ack.c).
+add_executable(test_identity_store
+    test_identity_store.c
+    unity/unity.c
+)
+target_include_directories(test_identity_store PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+)
+target_link_libraries(test_identity_store ssl crypto)
+
 # Integration test (3-node routing)
 add_executable(test_integration
     test_integration.c
