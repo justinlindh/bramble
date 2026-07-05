@@ -39,17 +39,24 @@ static void rerr_build_auth_buf(const bramble_rerr_t* r, uint8_t buf[18]) {
     memcpy(buf + 12, r->seq, 6);
 }
 
-void rerr_sign(bramble_rerr_t* r) {
+int rerr_sign(bramble_rerr_t* r) {
     uint8_t buf[18];
     rerr_build_auth_buf(r, buf);
-    network_key_mac("bramble-rerr-v2", buf, sizeof(buf), r->auth_hmac);
+    /* Fail-closed: when unprovisioned network_key_mac writes the all-zero
+     * sentinel and returns nonzero; propagate so the caller does not emit a
+     * frame carrying a bogus MAC. */
+    return network_key_mac("bramble-rerr-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 int rerr_verify(const bramble_rerr_t* r) {
     uint8_t buf[18];
     rerr_build_auth_buf(r, buf);
     uint8_t expect[8];
-    network_key_mac("bramble-rerr-v2", buf, sizeof(buf), expect);
+    /* CRITICAL: reject BEFORE the constant-time compare. Unprovisioned
+     * network_key_mac emits the all-zero sentinel, so comparing it against a
+     * received all-zero MAC would otherwise ACCEPT a forgery. */
+    if (network_key_mac("bramble-rerr-v2", buf, sizeof(buf), expect) != 0)
+        return 0;
     return ct_eq(expect, r->auth_hmac, sizeof(expect));
 }
 
@@ -71,17 +78,19 @@ static void ack_build_auth_buf(const bramble_ack_t* a, uint8_t buf[14]) {
     memcpy(buf + 8, a->seq, 6);
 }
 
-void ack_sign(bramble_ack_t* a) {
+int ack_sign(bramble_ack_t* a) {
     uint8_t buf[14];
     ack_build_auth_buf(a, buf);
-    network_key_mac("bramble-ack-v2", buf, sizeof(buf), a->auth_hmac);
+    return network_key_mac("bramble-ack-v2", buf, sizeof(buf), a->auth_hmac);
 }
 
 int ack_verify(const bramble_ack_t* a) {
     uint8_t buf[14];
     ack_build_auth_buf(a, buf);
     uint8_t expect[8];
-    network_key_mac("bramble-ack-v2", buf, sizeof(buf), expect);
+    /* Reject before compare (see rerr_verify): unprovisioned cannot verify. */
+    if (network_key_mac("bramble-ack-v2", buf, sizeof(buf), expect) != 0)
+        return 0;
     return ct_eq(expect, a->auth_hmac, sizeof(expect));
 }
 
@@ -103,17 +112,19 @@ static void receipt_build_auth_buf(const bramble_delivery_receipt_t* r, uint8_t 
     memcpy(buf + 8, r->seq, 6);
 }
 
-void receipt_sign(bramble_delivery_receipt_t* r) {
+int receipt_sign(bramble_delivery_receipt_t* r) {
     uint8_t buf[14];
     receipt_build_auth_buf(r, buf);
-    network_key_mac("bramble-receipt-v2", buf, sizeof(buf), r->auth_hmac);
+    return network_key_mac("bramble-receipt-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 int receipt_verify(const bramble_delivery_receipt_t* r) {
     uint8_t buf[14];
     receipt_build_auth_buf(r, buf);
     uint8_t expect[8];
-    network_key_mac("bramble-receipt-v2", buf, sizeof(buf), expect);
+    /* Reject before compare (see rerr_verify): unprovisioned cannot verify. */
+    if (network_key_mac("bramble-receipt-v2", buf, sizeof(buf), expect) != 0)
+        return 0;
     return ct_eq(expect, r->auth_hmac, sizeof(expect));
 }
 
@@ -129,17 +140,21 @@ static void data_build_auth_buf(const bramble_header_t* h, uint32_t src_addr,
     bramble_build_aead_aad(h, src_addr, buf, HEADER_SIZE + 4);
 }
 
-void data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]) {
+int data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]) {
     uint8_t buf[HEADER_SIZE + 4];
     data_build_auth_buf(h, src_addr, buf);
-    network_key_mac("bramble-data-v1", buf, sizeof(buf), out);
+    return network_key_mac("bramble-data-v1", buf, sizeof(buf), out);
 }
 
 int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]) {
     uint8_t buf[HEADER_SIZE + 4];
     data_build_auth_buf(h, src_addr, buf);
     uint8_t expect[8];
-    network_key_mac("bramble-data-v1", buf, sizeof(buf), expect);
+    /* Reject before compare (see rerr_verify): unprovisioned cannot verify,
+     * so a keyless attacker's all-zero MAC never lays a reverse-route
+     * breadcrumb. */
+    if (network_key_mac("bramble-data-v1", buf, sizeof(buf), expect) != 0)
+        return 0;
     return ct_eq(expect, hmac, sizeof(expect));
 }
 
@@ -159,16 +174,19 @@ static void ident_relay_build_auth_buf(const bramble_identity_attestation_t* a, 
     memcpy(buf + 132, a->seq, 6);
 }
 
-void ident_relay_sign(bramble_identity_attestation_t* a) {
+int ident_relay_sign(bramble_identity_attestation_t* a) {
     uint8_t buf[138];
     ident_relay_build_auth_buf(a, buf);
-    network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), a->auth_hmac);
+    return network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), a->auth_hmac);
 }
 
 int ident_relay_verify(const bramble_identity_attestation_t* a) {
     uint8_t buf[138];
     ident_relay_build_auth_buf(a, buf);
     uint8_t expect[8];
-    network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), expect);
+    /* Reject before compare (see rerr_verify): unprovisioned cannot verify,
+     * so an unprovisioned relay never propagates an attestation. */
+    if (network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), expect) != 0)
+        return 0;
     return ct_eq(expect, a->auth_hmac, sizeof(expect));
 }

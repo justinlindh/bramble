@@ -135,17 +135,23 @@ static void rrep_build_auth_buf(const bramble_rrep_t* r, uint8_t buf[16]) {
     memcpy(buf + 10, r->seq, 6);
 }
 
-void rrep_sign(bramble_rrep_t* r) {
+int rrep_sign(bramble_rrep_t* r) {
     uint8_t buf[16];
     rrep_build_auth_buf(r, buf);
-    network_key_mac("bramble-rrep-v2", buf, sizeof(buf), r->auth_hmac);
+    /* Fail-closed: unprovisioned writes the all-zero sentinel and returns
+     * nonzero; propagate so the caller does not emit a bogus-MAC RREP. */
+    return network_key_mac("bramble-rrep-v2", buf, sizeof(buf), r->auth_hmac);
 }
 
 int rrep_verify(const bramble_rrep_t* r) {
     uint8_t buf[16];
     rrep_build_auth_buf(r, buf);
     uint8_t expect[8];
-    network_key_mac("bramble-rrep-v2", buf, sizeof(buf), expect);
+    /* CRITICAL: reject BEFORE the constant-time compare. Unprovisioned emits
+     * the all-zero sentinel, so comparing it against a received all-zero MAC
+     * would otherwise ACCEPT a forgery. */
+    if (network_key_mac("bramble-rrep-v2", buf, sizeof(buf), expect) != 0)
+        return 0;
     return ct_eq(expect, r->auth_hmac, sizeof(expect));
 }
 
