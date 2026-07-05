@@ -19,27 +19,24 @@ void network_key_clear(void) {
 int network_key_is_provisioned(void) { return s_provisioned; }
 
 int network_key_get(uint8_t key_out[32]) {
-    if (s_provisioned) {
-        memcpy(key_out, s_key, 32);
-        return 0;
-    }
-    /* UNPROVISIONED FALLBACK (staging, not a fix; see network_key.h): every
-     * node ships with the identical BRAMBLE_PUBLIC_CHANNEL_PSK, a public
-     * compile-time constant, so this derived key is not a secret. It exists
-     * so the MAC machinery has a key to run against before real
-     * provisioning lands, not to authenticate anything against an
-     * adversary who has read this source. */
-    const char* salt = "bramble-netkey-fallback";
-    const char* psk = BRAMBLE_PUBLIC_CHANNEL_PSK;
-    return crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), (const uint8_t*)psk, strlen(psk),
-                              NULL, 0, key_out, 32);
+    if (!s_provisioned)
+        return -1; /* fail-closed: no fallback, write nothing to key_out */
+    memcpy(key_out, s_key, 32);
+    return 0;
 }
 
 /* Longest label in use today ("bramble-receipt-v2") is 18 bytes; 32 is
  * generous headroom for future per-type labels of the same shape. */
 #define NETWORK_KEY_MAC_MAX_LABEL_LEN 32
 
-void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]) {
+int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]) {
+    uint8_t key[32];
+    if (network_key_get(key) != 0) {
+        /* Fail-closed: unprovisioned. Emit the all-zero sentinel instead of an
+         * HMAC over a fallback/zeroed key, and signal the caller to refuse. */
+        memset(out, 0, 8);
+        return -1;
+    }
     assert(len <= 255);
     size_t label_len = strlen(label);
     assert(label_len <= NETWORK_KEY_MAC_MAX_LABEL_LEN);
@@ -47,16 +44,19 @@ void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t
     memcpy(buf, label, label_len);
     memcpy(buf + label_len, data, len);
 
-    uint8_t key[32];
-    network_key_get(key);
     uint8_t full_mac[32];
     crypto_hmac_sha256(key, sizeof(key), buf, label_len + len, full_mac);
     memcpy(out, full_mac, 8);
+    return 0;
 }
 
 void network_key_fingerprint(uint8_t out[4]) {
     uint8_t key[32];
-    network_key_get(key);
+    if (network_key_get(key) != 0) {
+        /* Unprovisioned sentinel: all-zero explicitly means "no key". */
+        memset(out, 0, 4);
+        return;
+    }
     uint8_t hash[32];
     crypto_sha256(key, sizeof(key), hash);
     memcpy(out, hash, 4);
