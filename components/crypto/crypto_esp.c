@@ -35,7 +35,16 @@ uint32_t crypto_derive_address(const uint8_t* public_key) {
 }
 
 uint32_t crypto_derive_pubkey_hash(const uint8_t* public_key) {
-    return crypto_derive_address(public_key);
+    /* SHA256(pub)[4:8]: an independent slice, distinct from the address
+     * (SHA256(pub)[0:4]), so identity_check_collision can tell two keys with
+     * the same derived address apart. MUST match crypto_host.c; the exact
+     * bytes are pinned by test_identity.c. Historically this returned
+     * crypto_derive_address(), which made the collision check a no-op on
+     * device. */
+    uint8_t hash[32];
+    crypto_sha256(public_key, 32, hash);
+    return ((uint32_t)hash[4] << 24) | ((uint32_t)hash[5] << 16) | ((uint32_t)hash[6] << 8) |
+           (uint32_t)hash[7];
 }
 
 int crypto_aes256gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* plaintext,
