@@ -19,8 +19,10 @@ document; file it.
 board running modified firmware, logging every LoRa frame on Bramble's
 frequencies. They capture all traffic but transmit nothing. Defended against
 for message *content* on configured private channels (AES-256-GCM, section 3).
-Not defended against for most *metadata* and, today, not for location packets
-(sections 4 and 5).
+Not defended against for most *metadata* (sections 4 and 5). Location
+*content* is now encrypted end to end (AES-256-GCM, SEC-C1, section 3); what
+remains observable is location *metadata*: the timing of an update and the
+fact that a node shares location at all.
 
 **Active RF injector.** The same attacker, now transmitting: forging packets,
 replaying captured frames, jamming. Partially defended against today.
@@ -55,8 +57,10 @@ same. Only forgery, not replay, remains open to this adversary.
 **Mailbox or relay operator.** Any node forwards packets, and a node with
 mailbox mode enabled stores ciphertext for offline peers. The design intends
 relays and mailboxes to learn nothing beyond ciphertext, sizes, timing, and
-the cleartext header fields. That holds for channel messages today; it does
-not hold for location packets, which a relay reads in cleartext (section 4).
+the cleartext header fields. That holds for both channel messages and
+location packets today (LOCATION is AES-256-GCM encrypted end to end,
+SEC-C1, section 3); a relay still sees only their cleartext header fields,
+sizes, and timing.
 
 **Device thief with flash access.** Someone with the physical device, or just
 its flash chip, and standard ESP32 tooling (`esptool.py`, NVS partition
@@ -1082,7 +1086,10 @@ These do not go away when section 4 empties out.
   arbitrary offset; ws 1.3c raises the bar and time-boxes the damage but
   cannot make Sybil identities scarce without an asymmetric identity
   primitive the crypto component does not have (X25519 ECDH plus HMAC
-  only; adding one is novel crypto, out of scope) and, even with one,
+  only; no per-node signature primitive ships today. The project's earlier
+  no-novel-crypto rule was loosened on 2026-07-04 to permit a vetted
+  signature scheme, Ed25519, but none is implemented yet, so this stays a
+  design gap, not a shipped capability) and, even with one,
   without a cost or rate limit on identity minting, which nothing in this
   codebase enforces. Closing NEW-SEC-4 for real needs a trust anchor
   (GPS-authoritative nodes or a pre-shared trusted-node list), out of
