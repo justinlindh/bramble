@@ -411,7 +411,9 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	anomalyInit(&s.anomaly[idx])
 
 	// Phase 6: Initialize extended node state (mailbox, location, etc.)
-	C.bridge_handle_node_join_ext(C.int(idx), C.uint32_t(nd.addr),
+	// node.addr, not nd.addr: node_array_add derives the address from the
+	// node's Ed25519 identity key (Phase 4 rebind).
+	C.bridge_handle_node_join_ext(C.int(idx), node.addr,
 		nd.x, nd.y, C.uint64_t(ts))
 
 	// Schedule first tick
@@ -422,7 +424,7 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 
 	s.emitJSON(map[string]interface{}{
 		"type": "node_joined", "timestamp_us": ts,
-		"node": nodeID, "addr": fmt.Sprintf("0x%08X", nd.addr),
+		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
 		"x": nd.x, "y": nd.y,
 	})
 }
@@ -759,7 +761,9 @@ func (s *Sim) cmdAddNode(cmd Command) {
 
 	s.emitJSON(map[string]interface{}{
 		"type": "node_joined", "timestamp_us": s.simTime,
-		"node": nodeID, "addr": fmt.Sprintf("0x%08X", addr),
+		// node.addr: derived from the node's Ed25519 identity key at
+		// node_array_add (Phase 4 rebind), not the sequential fallback.
+		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
 		"x": x, "y": y,
 	})
 }

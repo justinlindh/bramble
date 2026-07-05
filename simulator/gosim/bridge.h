@@ -29,15 +29,16 @@ typedef struct {
     mailbox_t mailbox;           /* store-and-forward for offline destinations */
     location_manager_t location; /* position sharing manager */
     bool initialized;
-    /* Per-node identity Phase 3: each simulated node gets a real Ed25519
-     * keypair at join (crypto_ed25519_keypair, the same primitive firmware
-     * identities use), a pattern X25519 pub (gosim does not model the DM
-     * key exchange; the attestation binds whatever bytes are attested), a
-     * monotonically drawn origin seq (mirrors firmware's control_seq_next
-     * counter; gosim does not model the replay window, see _handle_rreq's
-     * ws 1.3b note in bridge.c), and its own TOFU pin store. */
-    uint8_t ident_ed25519_pub[32];
-    uint8_t ident_ed25519_priv[64];
+    /* Per-node identity Phase 3/4: the Ed25519 identity keypair lives on
+     * sim_node_t itself since the Phase 4 rebind (node->addr derives from
+     * it; see sim_node.h). Here: a pattern X25519 pub (gosim does not
+     * model the DM key exchange; the attestation binds whatever bytes are
+     * attested), a monotonically drawn origin seq (mirrors firmware's
+     * control_seq_next counter; gosim does not model the replay window,
+     * see _handle_rreq's ws 1.3b note in bridge.c), and the node's own
+     * TOFU pin store. ident_initialized guards first-join initialization
+     * so a rejoin keeps seq and pin state. */
+    bool ident_initialized;
     uint8_t ident_x25519_pub[32];
     uint64_t ident_seq;
     identity_store_t ident_pins;

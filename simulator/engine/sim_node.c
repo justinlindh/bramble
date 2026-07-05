@@ -3,6 +3,7 @@
 #include "../../components/packet/include/packet.h"
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
+#include <stdio.h>
 #include <string.h>
 
 void sim_beacon_policy_init(sim_beacon_policy_t* policy) {
@@ -29,6 +30,25 @@ int node_array_add(node_array_t* array, const char* id, uint32_t addr, float x, 
     node->x = x;
     node->y = y;
     node->active = true;
+
+    /* Per-node identity Phase 4: create the node's persistent Ed25519
+     * identity here (node creation = first boot; a rejoin reuses the
+     * existing entry and keeps it, like firmware keeps NVS keys) and
+     * DERIVE the address from it exactly as firmware does post-rebind.
+     * Deterministic seed from the node id keeps runs reproducible. The
+     * caller-supplied addr stays only as a fallback if keygen fails; such
+     * a node has no identity and cannot originate attestations. */
+    {
+        char seed_input[NODE_ID_LEN + 32];
+        int n = snprintf(seed_input, sizeof(seed_input), "bramble-gosim-ident-v1:%s", node->id);
+        uint8_t seed[32];
+        crypto_sha256((const uint8_t*)seed_input, (size_t)n, seed);
+        if (crypto_ed25519_keypair_from_seed(seed, node->ident_ed_pub, node->ident_ed_priv) == 0) {
+            node->addr = crypto_derive_address(node->ident_ed_pub);
+        } else {
+            memset(node->ident_ed_pub, 0, sizeof(node->ident_ed_pub));
+        }
+    }
 
     /* Initialize Bramble state */
     route_init(&node->routes);
