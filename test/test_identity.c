@@ -83,6 +83,79 @@ void test_two_identities_have_distinct_ed25519_keys(void) {
         memcmp(a.ed25519_public_key, b.ed25519_public_key, BRAMBLE_ED25519_PUBKEY_SIZE) != 0);
 }
 
+/* --- Persistence (identity_save / identity_load) ---------------------------
+ * These run against the host blob-store backend of identity.c; the save/load
+ * and migration logic itself is shared with the device (NVS) backend. */
+
+void test_identity_load_fails_on_empty_store(void) {
+    identity_host_store_reset();
+    bramble_identity_t id;
+    TEST_ASSERT_EQUAL(-1, identity_load(&id));
+}
+
+void test_identity_save_load_roundtrips_all_keys(void) {
+    identity_host_store_reset();
+    bramble_identity_t saved, loaded;
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&saved));
+    TEST_ASSERT_EQUAL(0, identity_save(&saved));
+
+    memset(&loaded, 0, sizeof(loaded));
+    TEST_ASSERT_EQUAL(0, identity_load(&loaded));
+    TEST_ASSERT_EQUAL_MEMORY(saved.private_key, loaded.private_key, BRAMBLE_KEY_SIZE);
+    TEST_ASSERT_EQUAL_MEMORY(saved.public_key, loaded.public_key, BRAMBLE_KEY_SIZE);
+    TEST_ASSERT_EQUAL_MEMORY(saved.ed25519_public_key, loaded.ed25519_public_key,
+                             BRAMBLE_ED25519_PUBKEY_SIZE);
+    TEST_ASSERT_EQUAL_MEMORY(saved.ed25519_private_key, loaded.ed25519_private_key,
+                             BRAMBLE_ED25519_SECKEY_SIZE);
+    TEST_ASSERT_EQUAL_HEX32(saved.address, loaded.address);
+    TEST_ASSERT_EQUAL_HEX32(saved.pubkey_hash, loaded.pubkey_hash);
+
+    /* The reloaded Ed25519 keypair still signs/verifies. */
+    const uint8_t msg[] = "roundtrip";
+    uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(loaded.ed25519_private_key, msg, sizeof(msg), sig));
+    TEST_ASSERT_TRUE(crypto_ed25519_verify(loaded.ed25519_public_key, msg, sizeof(msg), sig));
+}
+
+/* Migration: a pre-Phase-1 store holds only the X25519 blobs. identity_load
+ * must keep the existing X25519 identity (address stays stable), generate a
+ * fresh Ed25519 keypair for it, and persist that keypair so the next load
+ * returns the same Ed keys. */
+void test_identity_migration_from_x25519_only_store(void) {
+    identity_host_store_reset();
+    bramble_identity_t old_id;
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&old_id));
+    /* Simulate the old on-flash layout: only "priv"/"pub" blobs present. */
+    TEST_ASSERT_EQUAL(0, id_store_write("priv", old_id.private_key, BRAMBLE_KEY_SIZE));
+    TEST_ASSERT_EQUAL(0, id_store_write("pub", old_id.public_key, BRAMBLE_KEY_SIZE));
+
+    bramble_identity_t migrated;
+    memset(&migrated, 0, sizeof(migrated));
+    TEST_ASSERT_EQUAL(0, identity_load(&migrated));
+
+    /* X25519 identity and address are preserved. */
+    TEST_ASSERT_EQUAL_MEMORY(old_id.private_key, migrated.private_key, BRAMBLE_KEY_SIZE);
+    TEST_ASSERT_EQUAL_MEMORY(old_id.public_key, migrated.public_key, BRAMBLE_KEY_SIZE);
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(old_id.public_key), migrated.address);
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_pubkey_hash(old_id.public_key), migrated.pubkey_hash);
+
+    /* A working Ed25519 keypair was generated for the old identity... */
+    const uint8_t msg[] = "migrated";
+    uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(migrated.ed25519_private_key, msg, sizeof(msg), sig));
+    TEST_ASSERT_TRUE(crypto_ed25519_verify(migrated.ed25519_public_key, msg, sizeof(msg), sig));
+
+    /* ...and persisted: a second load returns the SAME Ed keys, not fresh
+     * ones. */
+    bramble_identity_t again;
+    memset(&again, 0, sizeof(again));
+    TEST_ASSERT_EQUAL(0, identity_load(&again));
+    TEST_ASSERT_EQUAL_MEMORY(migrated.ed25519_public_key, again.ed25519_public_key,
+                             BRAMBLE_ED25519_PUBKEY_SIZE);
+    TEST_ASSERT_EQUAL_MEMORY(migrated.ed25519_private_key, again.ed25519_private_key,
+                             BRAMBLE_ED25519_SECKEY_SIZE);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_collision_same_addr_different_hash);
@@ -92,5 +165,8 @@ int main(void) {
     RUN_TEST(test_generated_identity_hash_distinct_from_address);
     RUN_TEST(test_generated_identity_has_working_ed25519_keypair);
     RUN_TEST(test_two_identities_have_distinct_ed25519_keys);
+    RUN_TEST(test_identity_load_fails_on_empty_store);
+    RUN_TEST(test_identity_save_load_roundtrips_all_keys);
+    RUN_TEST(test_identity_migration_from_x25519_only_store);
     return UNITY_END();
 }

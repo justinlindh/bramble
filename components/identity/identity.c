@@ -9,6 +9,20 @@ bool identity_check_collision(const bramble_identity_t* my_id, uint32_t beacon_s
     return my_id->pubkey_hash != beacon_pubkey_hash;
 }
 
+/* Blob store keys. "priv"/"pub" (X25519) predate Phase 1; a store holding
+ * only those two is an old identity and gets the Ed25519 migration in
+ * identity_load(). */
+#define ID_KEY_X25519_PRIV "priv"
+#define ID_KEY_X25519_PUB "pub"
+#define ID_KEY_ED25519_PUB "ed_pub"
+#define ID_KEY_ED25519_PRIV "ed_priv"
+
+/* Per-platform blob store: device = NVS, host = in-memory (unit tests).
+ * id_store_read() is exact-length and fail-closed: a missing key or a
+ * length mismatch is an error. */
+static int id_store_read(const char* key, uint8_t* buf, size_t len);
+static int id_store_write(const char* key, const uint8_t* buf, size_t len);
+
 #ifdef ESP_PLATFORM
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -18,35 +32,23 @@ bool identity_check_collision(const bramble_identity_t* my_id, uint32_t beacon_s
 
 #define NVS_NAMESPACE NVS_NS_IDENTITY
 
-int identity_save(const bramble_identity_t* id) {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
-        return -1;
-    nvs_set_blob(h, "priv", id->private_key, 32);
-    nvs_set_blob(h, "pub", id->public_key, 32);
-    nvs_commit(h);
-    nvs_close(h);
-    return 0;
-}
-
-int identity_load(bramble_identity_t* id) {
+static int id_store_read(const char* key, uint8_t* buf, size_t len) {
     nvs_handle_t h;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK)
         return -1;
-    size_t len = 32;
-    if (nvs_get_blob(h, "priv", id->private_key, &len) != ESP_OK) {
-        nvs_close(h);
-        return -1;
-    }
-    len = 32;
-    if (nvs_get_blob(h, "pub", id->public_key, &len) != ESP_OK) {
-        nvs_close(h);
-        return -1;
-    }
+    size_t got = len;
+    int ret = (nvs_get_blob(h, key, buf, &got) == ESP_OK && got == len) ? 0 : -1;
     nvs_close(h);
-    id->address = crypto_derive_address(id->public_key);
-    id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
-    return 0;
+    return ret;
+}
+
+static int id_store_write(const char* key, const uint8_t* buf, size_t len) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+        return -1;
+    int ret = (nvs_set_blob(h, key, buf, len) == ESP_OK && nvs_commit(h) == ESP_OK) ? 0 : -1;
+    nvs_close(h);
+    return ret;
 }
 
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
@@ -119,16 +121,54 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     return 1;
 }
 
-#else /* Host stubs */
+#else
 
-int identity_save(const bramble_identity_t* id) {
-    (void)id;
-    return 0; /* no-op on host */
+/* Host: in-memory blob store so unit tests exercise the shared
+ * save/load/migration logic below. Starts empty, like a fresh flash. */
+
+#define ID_HOST_BLOB_MAX 4
+#define ID_HOST_BLOB_CAP 64
+
+static struct {
+    char key[16];
+    uint8_t data[ID_HOST_BLOB_CAP];
+    size_t len;
+} s_host_blobs[ID_HOST_BLOB_MAX];
+static int s_host_blob_count;
+
+void identity_host_store_reset(void) { s_host_blob_count = 0; }
+
+static int id_store_read(const char* key, uint8_t* buf, size_t len) {
+    for (int i = 0; i < s_host_blob_count; i++) {
+        if (strcmp(s_host_blobs[i].key, key) == 0) {
+            if (s_host_blobs[i].len != len)
+                return -1;
+            memcpy(buf, s_host_blobs[i].data, len);
+            return 0;
+        }
+    }
+    return -1;
 }
 
-int identity_load(bramble_identity_t* id) {
-    (void)id;
-    return -1; /* no stored identity on host */
+static int id_store_write(const char* key, const uint8_t* buf, size_t len) {
+    if (len > ID_HOST_BLOB_CAP || strlen(key) >= sizeof(s_host_blobs[0].key))
+        return -1;
+    int slot = s_host_blob_count;
+    for (int i = 0; i < s_host_blob_count; i++) {
+        if (strcmp(s_host_blobs[i].key, key) == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == s_host_blob_count) {
+        if (s_host_blob_count == ID_HOST_BLOB_MAX)
+            return -1;
+        s_host_blob_count++;
+        strcpy(s_host_blobs[slot].key, key);
+    }
+    memcpy(s_host_blobs[slot].data, buf, len);
+    s_host_blobs[slot].len = len;
+    return 0;
 }
 
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
@@ -138,6 +178,51 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
 }
 
 #endif
+
+/* --- Shared save/load/migration (device NVS and host store) -------------- */
+
+int identity_save(const bramble_identity_t* id) {
+    if (id_store_write(ID_KEY_X25519_PRIV, id->private_key, BRAMBLE_KEY_SIZE) != 0 ||
+        id_store_write(ID_KEY_X25519_PUB, id->public_key, BRAMBLE_KEY_SIZE) != 0 ||
+        id_store_write(ID_KEY_ED25519_PUB, id->ed25519_public_key, BRAMBLE_ED25519_PUBKEY_SIZE) !=
+            0 ||
+        id_store_write(ID_KEY_ED25519_PRIV, id->ed25519_private_key, BRAMBLE_ED25519_SECKEY_SIZE) !=
+            0) {
+        return -1;
+    }
+    return 0;
+}
+
+int identity_load(bramble_identity_t* id) {
+    if (id_store_read(ID_KEY_X25519_PRIV, id->private_key, BRAMBLE_KEY_SIZE) != 0 ||
+        id_store_read(ID_KEY_X25519_PUB, id->public_key, BRAMBLE_KEY_SIZE) != 0) {
+        return -1;
+    }
+
+    if (id_store_read(ID_KEY_ED25519_PUB, id->ed25519_public_key, BRAMBLE_ED25519_PUBKEY_SIZE) !=
+            0 ||
+        id_store_read(ID_KEY_ED25519_PRIV, id->ed25519_private_key, BRAMBLE_ED25519_SECKEY_SIZE) !=
+            0) {
+        /* MIGRATION (Phase 1): an old store holds only the X25519 identity.
+         * Keep it (the address stays X25519-derived and thus stable) and
+         * generate + persist a fresh Ed25519 keypair for it. Fail closed:
+         * no keygen or persist success, no identity. */
+        if (crypto_ed25519_keypair(id->ed25519_public_key, id->ed25519_private_key) != 0)
+            return -1;
+        if (id_store_write(ID_KEY_ED25519_PUB, id->ed25519_public_key,
+                           BRAMBLE_ED25519_PUBKEY_SIZE) != 0 ||
+            id_store_write(ID_KEY_ED25519_PRIV, id->ed25519_private_key,
+                           BRAMBLE_ED25519_SECKEY_SIZE) != 0) {
+            return -1;
+        }
+    }
+
+    /* Address/pubkey_hash stay X25519-derived this phase (Phase 3 rebinds
+     * the address to the Ed25519 key together with the attestation). */
+    id->address = crypto_derive_address(id->public_key);
+    id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
+    return 0;
+}
 
 int identity_generate_and_save(bramble_identity_t* id) {
     if (crypto_generate_identity(id) != 0)
