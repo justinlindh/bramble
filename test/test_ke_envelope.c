@@ -84,7 +84,7 @@ void test_ke_envelope_round_trip_to_session(void) {
                       bramble_key_exchange_deserialize(&recv_init, info1.data, info1.data_len));
 
     /* B verifies INIT (first contact: have_peer_id = 0). */
-    TEST_ASSERT_EQUAL(0, dm_verify_init(&recv_init, &b, 0, NULL));
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&recv_init, &b, 0, NULL, NULL));
 
     /* B builds RESP. */
     bramble_key_exchange_t resp;
@@ -94,7 +94,8 @@ void test_ke_envelope_round_trip_to_session(void) {
 
     /* A verifies RESP; both sides now hold the same session key. */
     uint8_t ka[32];
-    TEST_ASSERT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+    TEST_ASSERT_EQUAL(0,
+                      dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, NULL, ka));
     TEST_ASSERT_EQUAL_MEMORY(ka, kb, 32);
 
     /* Establish both sides' session_t and round-trip a chat payload under

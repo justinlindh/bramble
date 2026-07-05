@@ -1532,6 +1532,10 @@ components:
         - battery_pct
         - gps_available
         - supports_delivery_event_sync
+        - identity_pins
+        - identity_conflicts
+        - identity_sig_failures
+        - identity_addr_mismatches
       properties:
         address:
           type: string
@@ -1581,6 +1585,28 @@ components:
         supports_delivery_event_sync:
           type: boolean
           description: True when bramble.getDeliveryEvents incremental replay is supported.
+        identity_pins:
+          type: integer
+          description: >-
+            Verified per-node identity pins currently held (TOFU pin store,
+            RAM-only; resets on reboot).
+        identity_conflicts:
+          type: integer
+          description: >-
+            Delivered identity attestations refused because a pinned address
+            re-attested under different keys (impersonation / DM-key-change
+            signal).
+        identity_sig_failures:
+          type: integer
+          description: >-
+            Delivered (network-key-valid) identity attestations whose Ed25519
+            signature failed to verify (keyed-insider misbehavior signal).
+        identity_addr_mismatches:
+          type: integer
+          description: >-
+            Delivered identity attestations refused because their source
+            address did not derive from their own Ed25519 key (address
+            impersonation attempts; rejected even on first contact).
 
     WifiStatusResponse:
       type: object

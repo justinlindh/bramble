@@ -314,6 +314,12 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		s.handleInterferenceEnd(evt)
 	case C.EVT_METRICS_TICK:
 		s.handleMetricsTick(evt)
+	case C.EVT_GENERATE_ATTESTATION:
+		// Per-node identity Phase 3: attestations always go through the
+		// real firmware C path in bridge.c (there is no Go-model flood
+		// equivalent; scenarios that script send_attestation use the
+		// default routing mode).
+		s.handleGenerateAttestation(evt)
 	}
 }
 
@@ -366,6 +372,10 @@ func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
 }
 
+func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
+	handleGenerateAttestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+}
+
 // handleFloodRelay fires a jittered channel-flood relay (Task 5): see
 // bridge.c's _handle_data broadcast branch, which schedules these via
 // EVT_SEND_PACKET (repurposed; previously declared but unused).
@@ -401,7 +411,9 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 	anomalyInit(&s.anomaly[idx])
 
 	// Phase 6: Initialize extended node state (mailbox, location, etc.)
-	C.bridge_handle_node_join_ext(C.int(idx), C.uint32_t(nd.addr),
+	// node.addr, not nd.addr: node_array_add derives the address from the
+	// node's Ed25519 identity key (Phase 4 rebind).
+	C.bridge_handle_node_join_ext(C.int(idx), node.addr,
 		nd.x, nd.y, C.uint64_t(ts))
 
 	// Schedule first tick
@@ -412,7 +424,7 @@ func (s *Sim) handleNodeJoin(evt *C.sim_event_t) {
 
 	s.emitJSON(map[string]interface{}{
 		"type": "node_joined", "timestamp_us": ts,
-		"node": nodeID, "addr": fmt.Sprintf("0x%08X", nd.addr),
+		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
 		"x": nd.x, "y": nd.y,
 	})
 }
@@ -605,6 +617,14 @@ func (s *Sim) cmdLoad(cmd Command) {
 		s.applyDutyCycleCap(node)
 		anomalyInit(&s.anomaly[i])
 
+		// Initialize extended node state exactly like a dynamic join does
+		// (handleNodeJoin): position, and (per-node identity Phase 3) the
+		// node's Ed25519 identity keypair. Initial scenario nodes used to
+		// skip this, which left them without identities and unable to
+		// originate or pin attestations.
+		C.bridge_handle_node_join_ext(C.int(i), C.uint32_t(node.addr),
+			node.x, node.y, C.uint64_t(0))
+
 		// Schedule initial tick (staggered by 100ms per node)
 		tick := C.bridge_make_tick_event(C.uint64_t(uint64(i)*100000), &node.id[0], 0)
 		eventQueuePush(&s.events, &tick)
@@ -741,7 +761,9 @@ func (s *Sim) cmdAddNode(cmd Command) {
 
 	s.emitJSON(map[string]interface{}{
 		"type": "node_joined", "timestamp_us": s.simTime,
-		"node": nodeID, "addr": fmt.Sprintf("0x%08X", addr),
+		// node.addr: derived from the node's Ed25519 identity key at
+		// node_array_add (Phase 4 rebind), not the sequential fallback.
+		"node": nodeID, "addr": fmt.Sprintf("0x%08X", uint32(node.addr)),
 		"x": x, "y": y,
 	})
 }

@@ -40,7 +40,7 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 | **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Not documented. Likely relies on GPS or companion device time. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
 | **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
 | **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte base header, compact binary (no protobuf/JSON). Authenticated DATA adds a 28-byte envelope prefix (src_addr, relay-mutable prev_hop, 8-byte auth HMAC) plus a 12-byte nonce and 16-byte GCM tag. |
-| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | X25519 public key → SHA-256 → 4-byte address. Cryptographic identity, but no per-node signature or trust anchor, so cross-fleet Sybil/impersonation is not closed. |
+| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | Ed25519 identity key per node; address = SHA-256(key)[0:4]. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. No trust anchor yet: identities are unforgeable but free to mint (Sybil scarcity NOT claimed). |
 | **Max hops** | 7 (configurable) | 3–7 default, up to 64 theoretical | Reactive: expanding-ring discovery 4 then 8, max route depth 8. Flood transport: configurable 1..32, default 8. |
 
 ---
@@ -132,11 +132,29 @@ Bramble's privacy and authentication posture is ambitious relative to Meshtastic
 
 1. **Authenticated traffic**: DATA and the control plane carry a network-key HMAC that relays verify before acting, so an outsider on a provisioned network cannot forge or replay control/DATA frames. Meshtastic's channel traffic is unauthenticated (any PSK holder can impersonate). Residual: a network-key insider can still forge, and an unprovisioned network falls back to a public PSK (see [SECURITY-MODEL.md](SECURITY-MODEL.md)).
 2. **Confirmed delivery**: acknowledged tiers report DELIVERED vs FAILED to the sender, a genuine edge over Meshtastic's fire-and-forget at low-to-moderate load. The flooded-confirmation half degrades under high load (airtime scales O(messages x nodes)), so it is not a high-load guarantee.
-3. **End-to-end DMs**: per-peer quad-DH X25519 AES-256-GCM sessions, not channel-key DMs. This is parity with MeshCore and ahead of pre-2.5 Meshtastic.
+3. **End-to-end DMs**: per-peer quad-DH X25519 AES-256-GCM sessions, not channel-key DMs, with DM key continuity against pinned identities (a known peer showing up with a different long-term key is refused, not silently accepted). This is parity-plus with MeshCore and ahead of pre-2.5 Meshtastic; the first-contact window before a peer's attestation is pinned remains TOFU-grade.
 4. **Metadata hygiene**: RREQ source pseudonymization and fixed-size, tiered LOCATION ciphertext. Integrity comes from AEAD (GCM); Meshtastic channels still lack integrity checking. Data packets still carry a cleartext source address.
 5. **Channel privacy**: Bramble hides which channel a message belongs to. Meshtastic and MeshCore don't.
 
 Versus MeshCore specifically the remaining edge is thin: confirmed broadcast delivery and authenticated-flood membership gating, weighed against MeshCore's more mature ecosystem and more efficient routing.
+
+### Per-node identity delta (2026-07, honest)
+
+The per-node identity campaign (Ed25519 identity keys, signed attestations,
+TOFU pinning, address-key binding, identity-gated timesync and DM
+continuity) narrows the MeshCore gap on its historical strong suit:
+MeshCore has per-node Ed25519 keys and signed adverts; Bramble now has
+per-node Ed25519 keys, signed attestations, AND an address that is a hash
+of the signing key, so an insider cannot claim another node's address at
+all (a property MeshCore's MAC-style short IDs do not provide, and
+Meshtastic has nothing comparable: its identities are unauthenticated
+hardware MACs). Stated honestly: neither Bramble nor MeshCore has a trust
+anchor, so identities in both systems are free to mint and
+Sybil-with-fresh-identities is not closed; Bramble's pins are RAM-only
+(reset on reboot, re-established by TOFU); and Bramble's DM first contact
+remains TOFU-grade until the peer's attestation is pinned. A trust anchor
+(pre-shared trusted-node list or equivalent) is deferred work, not a
+shipped capability, and no Sybil-scarcity claim is made.
 
 ---
 

@@ -440,13 +440,74 @@ solely through the authenticated `bramble.otaSetOrigin` RPC.
 
 ### Identity generation
 
-X25519 keypairs are generated from the hardware RNG with correct clamping,
-and scalar multiplication uses mbedtls with the RNG callback supplied for
-side-channel blinding (`crypto_generate_identity` in
-`components/crypto/crypto_esp.c`). Address collisions (two nodes hashing to
-the same 4-byte address with different pubkeys) are detected from beacons and
-resolved by regenerating the local identity (`identity_check_collision` in
+Every node holds two keypairs (`crypto_generate_identity` in
+`components/crypto/crypto_esp.c` / `crypto_host.c`, persisted in NVS by
+`components/identity/identity.c`): an Ed25519 signing identity and an
+X25519 DH keypair for DM sessions. X25519 keys are generated from the
+hardware RNG with correct clamping, and scalar multiplication uses mbedtls
+with the RNG callback supplied for side-channel blinding; Ed25519 uses
+libsodium on device (entropy-gated seed, fail-closed). The 4-byte node
+address and the beacon `pubkey_hash` derive from the **Ed25519** public
+key (SHA256[0:4] / [4:8]): the address is bound to the signing key, which
+is what lets the attestation system below make address claims unforgeable.
+Address collisions (two nodes hashing to the same 4-byte address with
+different keys) are detected from beacons and resolved by regenerating the
+local identity (`identity_check_collision` in
 `components/identity/identity.c`, handled in `main/mesh_task.c`).
+
+### Per-node cryptographic identity: attestations, TOFU pins, address-key binding, identity-gated timesync and DM continuity
+
+What ships (the 2026-07 per-node identity campaign, Phases 0-4):
+
+- **Self-signed identity attestations.** Every node broadcasts a 158-byte
+  attestation frame binding `{address, x25519_pub}` under an Ed25519
+  signature by its own identity key (canonical signed bytes built by
+  `bramble_identity_attestation_signed_msg` in `components/packet`), at
+  boot and on a 15-minute cadence (`send_identity_attestation` in
+  `main/mesh_task.c`), budget-gated like all broadcast traffic.
+- **Relay-gated flood.** The frame carries a cheap network-key MAC
+  (context `bramble-ident-relay-v1`) plus a 48-bit origin sequence checked
+  against the per-signer control replay window; relays verify ONLY the MAC
+  (membership gates relay privilege; no Ed25519 on the relay path) and
+  flood the frame unmodified through the shared channel-flood engine.
+  Keyless outsiders cannot get an attestation propagated at all.
+- **Verified TOFU pinning with conflict detection.** Each receiver
+  Ed25519-verifies the delivered frame against its own embedded key and
+  pins the first verified binding per address
+  (`components/identity/identity_store.c`, RAM-only, 32 entries, LRU by
+  re-confirmation). A later attestation for a pinned address under
+  different keys is a refused, counted CONFLICT: first seen wins.
+- **Address-key binding (the Phase 4 rebind payoff).** Because the address
+  derives from the Ed25519 key, `identity_store_handle_attestation` also
+  requires `src_addr == crypto_derive_address(ed25519_pub)` and rejects
+  mismatches even on first contact. An insider cannot attest someone
+  else's address at all: doing so would require a key whose SHA256[0:4]
+  equals the victim's address, a preimage search. Address impersonation is
+  cryptographically infeasible rather than merely losing a TOFU race.
+- **Identity-gated timesync quorum.** Once ANY pin exists, only pinned,
+  established neighbors count toward the timesync pre-commit corroboration
+  quorum (`identity_store_quorum_eligible`); with zero pins the gate falls
+  back to tenure alone so a fresh mesh converges (graceful degradation,
+  never brick). See the NEW-SEC-4 residual in section 5 for exactly how
+  far this does and does not go.
+- **DM key continuity.** When a DM handshake arrives from an address with
+  a pinned identity, the handshake's long-term X25519 key must equal the
+  pinned `x25519_pub`; a mismatch refuses the session with a loud
+  key-change warning (`dm_verify_init`/`dm_verify_resp` +
+  `handle_ke_envelope`'s pin snapshot in `main/mesh_task.c`). No pin means
+  unchanged TOFU-grade first contact.
+
+Residuals, stated plainly (see also section 5): identities are unforgeable
+but **free to mint** (no trust anchor, no cost function; Sybil scarcity is
+NOT claimed, and quorum gating only raises the bar to "must attest and be
+pinned"); pins are **RAM-only** and reset on reboot, re-established by
+TOFU; DM continuity has a **first-contact window** until the peer's
+attestation is heard and pinned; identity keys sit in **plaintext NVS**
+(section 4's physical-capture item); a keyed insider can still flood
+MAC-valid frames with garbage signatures that relays carry (bounded by the
+airtime budget, counted by every receiver as `sig_failures`); and there is
+**no revocation**: a compromised identity stays valid until the fleet
+excludes it out of band.
 
 ### Sybil heuristic (log-only)
 
@@ -852,8 +913,8 @@ same PR that fixes it.
   genuinely-valid message on all five types; a network-key insider can
   still forge on behalf of any other holder (section 5, inherent and
   accepted), and NEW-SEC-4's bootstrap-quorum race is only mitigated, not
-  closed, by ws 1.3c (section 5); closing it needs a trust anchor, out of
-  scope for pre-alpha. Treat all five as unauthenticated against an
+  closed, by ws 1.3c plus the per-node-identity quorum gate (sections 3
+  and 5); closing it needs a trust anchor, out of scope for pre-alpha. Treat all five as unauthenticated against an
   unprovisioned deployment, and as insider-forgeable even once
   provisioned, until that follow-up work lands.
 - **RREQ forwarding rate limiting is node-global, not per-neighbor (SEC-M4,
@@ -1080,20 +1141,25 @@ These do not go away when section 4 empties out.
   pool bounded to +/-`MAX_TIME_SHIFT_MS` (2 seconds) per step, so a thin or
   attacker-influenced bootstrap offset drifts toward the honest majority as
   real beacons arrive and stale entries purge, provided honest traffic
-  keeps arriving. **None of this closes NEW-SEC-4.** A network-key insider
-  willing to sustain multiple fabricated established identities
-  continuously over the tenure window still wins the quorum and commits an
-  arbitrary offset; ws 1.3c raises the bar and time-boxes the damage but
-  cannot make Sybil identities scarce without an asymmetric identity
-  primitive the crypto component does not have (X25519 ECDH plus HMAC
-  only; no per-node signature primitive ships today. The project's earlier
-  no-novel-crypto rule was loosened on 2026-07-04 to permit a vetted
-  signature scheme, Ed25519, but none is implemented yet, so this stays a
-  design gap, not a shipped capability) and, even with one,
-  without a cost or rate limit on identity minting, which nothing in this
-  codebase enforces. Closing NEW-SEC-4 for real needs a trust anchor
-  (GPS-authoritative nodes or a pre-shared trusted-node list), out of
-  scope for pre-alpha. Cold start is intentionally fail-closed under this
+  keeps arriving. The per-node identity campaign (Phases 0-4, section 3)
+  tightened this further: the quorum now also requires a PINNED identity
+  once any pin exists (`identity_store_quorum_eligible`), and the address
+  rebind makes impersonating an EXISTING node's address in an attestation
+  cryptographically infeasible (`src_addr` must derive from the frame's
+  own Ed25519 key). What an insider can no longer do: corroborate time
+  from fabricated bare addresses (unpinnable: no deriving key exists), or
+  attest a victim's address. **None of this closes NEW-SEC-4.** Ed25519
+  identities are unforgeable but FREE TO MINT: a network-key insider can
+  still generate N real keypairs, attest each one's own (real, derived)
+  address, let every receiver pin them, sustain their beacons over the
+  tenure window, and win the quorum with N pinned, established,
+  fully-verified Sybil identities. The gate raises the bar from
+  "fabricate addresses" to "mint, attest, pin and sustain real
+  identities"; it does not create scarcity, and nothing in this codebase
+  rate-limits or prices identity minting. Closing NEW-SEC-4 for real
+  needs a trust anchor (GPS-authoritative nodes or a pre-shared
+  trusted-node list), deferred to a later phase and out of scope for
+  pre-alpha. Cold start is intentionally fail-closed under this
   design: a freshly booted node has no established neighbors, so it cannot
   reach `CORROBORATION_REQUIRED` established sources and stays
   unsynchronized, and therefore `timesync_is_confident`-false, until it

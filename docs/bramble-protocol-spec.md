@@ -291,9 +291,10 @@ Value  Name               Description
 0x12   PKT_TYPE_PROBE    Broadcast delivery probe (see §4.22)
 0x13   PKT_TYPE_PROBE_ACK      Broadcast probe acknowledgment (see §4.23)
 0x14   LOCATION           Location sharing packet
+0x15   IDENTITY_ATTESTATION  Self-signed per-node identity attestation (see section 4.28)
 ```
 
-> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. `KEY_EXCHANGE` and the mailbox types (`0x0B`-`0x0E`) are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon. The retired codes (`0x08`, `0x09`, `0x0F`-`0x11`) belonged to machinery that was removed unshipped; they stay reserved so a future wire version can reassign them deliberately.
+> **Firmware reality.** Of the types above, the mesh RX path (`mesh_process_rx_packet` in `main/mesh_task.c`) sends and handles only `ACK`, `ROUTE_REQUEST`, `ROUTE_REPLY`, `ROUTE_ERROR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, `PROBE_ACK`, and `IDENTITY_ATTESTATION`. `KEY_EXCHANGE` and the mailbox types (`0x0B`-`0x0E`) are defined in `components/packet/include/packet.h` and unit-tested at component level but are never transmitted or dispatched today. Mailbox store-and-forward ships without its dedicated packet types: relays store undeliverable `DATA` and flush on the destination's beacon. The retired codes (`0x08`, `0x09`, `0x0F`-`0x11`) belonged to machinery that was removed unshipped; they stay reserved so a future wire version can reassign them deliberately.
 
 ### 4.4 DATA Packet
 
@@ -795,6 +796,67 @@ This section is the wire v4 change inventory for the Phase 1 delivery-core plan.
 4. **DATA/LOCATION envelope prefix grows by 12 bytes.** The wire v2/v3 prefix was `header(12) + src_addr(4)` (16 bytes) before the nonce; wire v4 inserts `prev_hop(4) + auth_hmac(8)` between `src_addr` and the nonce, making the prefix `header(12) + src_addr(4) + prev_hop(4) + auth_hmac(8)` = 28 bytes (`BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE`) before `nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)`. `BRAMBLE_DATA_SRC_ADDR_OFFSET`, `BRAMBLE_DATA_PREV_HOP_OFFSET`, `BRAMBLE_DATA_AUTH_HMAC_OFFSET`, and `BRAMBLE_DATA_NONCE_OFFSET` in `components/packet/include/packet.h` give the exact byte offsets; see §4.4's firmware-reality note above for the layout in the DATA-packet-format context.
 5. **DATA-driven reverse-route learning turned on.** Every unicast DATA frame a node receives or forwards, after `auth_hmac` verifies, installs a route back to that frame's originator: `dest = src_addr`, `next_hop = prev_hop`, trust class `ROUTE_SRC_BREADCRUMB` (`data_rx_decide` in `components/routing/forwarding.c`, `route_install` in `components/routing/routing.c`). A `ROUTE_SRC_DISCOVERED` route (from RREQ/RREP/beacon) always reclaims an existing breadcrumb for the same destination; a breadcrumb never displaces a discovered route; same-class installs use the pre-existing metric/hop-count arbitration. Broadcast DATA (`dest_addr == 0xFFFFFFFF`) never installs a reverse route. This breadcrumb is what gives a destination's returning ACK/delivery receipt a route home at every relay on the forward path, closing the confirmation-return bug described above. Full residual analysis (the `prev_hop`/`hop_limit` exclusion, and why it is narrower than the pre-v4 gap rather than a closure of route-learning trust generally) is in `docs/SECURITY-MODEL.md`, not repeated here.
 
+### 4.28 IDENTITY_ATTESTATION Packet (0x15)
+
+Self-signed per-node identity attestation (per-node identity campaign,
+Phases 2-4). Broadcast at boot and every 15 minutes
+(`send_identity_attestation` in `main/mesh_task.c`), flooded through the
+shared channel-flood engine, budget-gated on the broadcast airtime tier.
+
+```
+Offset  Size  Field            Description
+------  ----  -----            -----------
+0       12    header           Common header (packet_type=0x15, dest=0xFFFFFFFF)
+12      4     src_addr         Attested node address (big-endian)
+16      32    x25519_pub       Node's X25519 DM public key
+48      32    ed25519_pub      Node's Ed25519 identity public key
+80      64    sig              Ed25519 signature over the canonical message
+144     8     auth_hmac        Network-key relay-gate MAC ("bramble-ident-relay-v1")
+152     6     seq              48-bit origin sequence, big-endian
+----------------------------------------------------------
+Total: 158 bytes
+```
+
+**Canonical signed bytes** (84 bytes, built identically by signer and
+verifier via `bramble_identity_attestation_signed_msg`):
+
+```
+"bramble-ident-v1" (16 bytes, no NUL) || src_addr (4, big-endian)
+    || x25519_pub (32) || ed25519_pub (32)
+```
+
+**Two authenticators, two jobs.** `sig` carries the identity claim's
+truth: self-authenticating against the frame's own embedded `ed25519_pub`,
+checkable by any receiver with no shared secret. `auth_hmac` gates RELAY
+privilege only: relays verify this cheap network-key MAC (covering
+`src_addr || x25519_pub || ed25519_pub || sig || seq`, NOT the
+relay-mutable header) and never run the Ed25519 verify; a keyless outsider
+can neither get a frame flooded nor grind relays with signature checks.
+`seq` is drawn once at origination from the node's control-plane counter
+and replay-checked (src-scoped) by receivers after the MAC verifies.
+
+**Address-key binding (Phase 4).** The node address derives from the
+Ed25519 identity public key (section 5.1), and receivers additionally require
+`src_addr == SHA256(ed25519_pub)[0:4]` before verifying or pinning
+(`identity_store_handle_attestation`). An attestation claiming an address
+its own key does not derive to is rejected even on first contact: address
+impersonation requires a hash preimage, not just the network key.
+
+**Receiver behavior.** After MAC, replay and address checks, the receiver
+verifies `sig` and TOFU-pins the first verified `{address -> ed25519_pub,
+x25519_pub}` binding (RAM-only, 32 entries). A re-attestation with
+identical keys refreshes the pin; different keys for a pinned address are
+a refused, counted CONFLICT (reachable post-rebind via an X25519 rotation
+under the same Ed key, or a 2^32-work address-colliding Ed key). Pinned
+identities gate the timesync corroboration quorum and DM key continuity
+(`docs/SECURITY-MODEL.md`).
+
+**Airtime.** The frame grew 144 -> 158 bytes when the Phase 3 relay gate
+added `auth_hmac + seq`. At the 15-minute cadence one attestation costs a
+node roughly 0.02-0.05% duty cycle (SF/BW dependent), negligible against
+the 10% regulatory budget and debited from the same broadcast tier as all
+flooded traffic.
+
 ## 5. Node Identity & Key Management
 
 ### 5.1 Identity Generation
@@ -803,21 +865,40 @@ Each node generates a persistent identity on first boot:
 
 ```
 function generate_identity():
-    // Generate X25519 long-term key pair
-    private_key = random_bytes(32)              // From ESP32 hardware RNG
-    public_key = x25519_base_point_mult(private_key)
-    
-    // Derive 4-byte node address from public key
-    addr_hash = sha256(public_key)
-    node_addr = addr_hash[0..3]                 // First 4 bytes = node address
-    
-    // Store in NVS (non-volatile storage)
-    nvs_write("bramble_privkey", private_key)   // 32 bytes
-    nvs_write("bramble_pubkey", public_key)     // 32 bytes
-    nvs_write("bramble_addr", node_addr)        // 4 bytes
-    
-    return (private_key, public_key, node_addr)
+    // X25519 long-term key pair (DM sessions / DH only)
+    x_private = random_bytes(32)                // From ESP32 hardware RNG
+    x_public  = x25519_base_point_mult(x_private)
+
+    // Ed25519 signing identity (THE identity key since the Phase 4 rebind)
+    ed_seed = random_bytes(32)                  // Entropy-gated, fail-closed
+    (ed_public, ed_private) = ed25519_keypair(ed_seed)
+
+    // Derive the 4-byte node address (and beacon pubkey_hash) from the
+    // Ed25519 PUBLIC key: an address claim is only satisfiable by the
+    // holder of the key it hashes from (see section 4.28).
+    node_addr   = sha256(ed_public)[0..3]
+    pubkey_hash = sha256(ed_public)[4..7]
+
+    // Store in NVS (namespace "identity"); the address is DERIVED on
+    // every load, never stored.
+    nvs_write("priv",    x_private)             // 32 bytes
+    nvs_write("pub",     x_public)              // 32 bytes
+    nvs_write("ed_priv", ed_private)            // 64 bytes (seed || pub)
+    nvs_write("ed_pub",  ed_public)             // 32 bytes
+
+    return (x_private, x_public, ed_private, ed_public, node_addr)
 ```
+
+**Flag day (pre-alpha, owner-approved).** Before the Phase 4 rebind the
+address derived from the X25519 public key. A pre-rebind identity store
+(X25519 blobs only) is migrated in place on first post-upgrade boot: the
+X25519 keys are kept, a fresh Ed25519 keypair is generated and persisted,
+and the node comes up with a NEW, Ed25519-derived address. A fleet upgrade
+therefore renumbers every migrated node once; peers' identity pins are
+RAM-only and re-establish via attestation TOFU, and stale references to
+old addresses (routes, neighbor entries, stored conversations) age out or
+are orphaned. No v-old/v-new address shim exists, the same policy as the
+wire-version flag days (sections 4.25-4.27).
 
 **Key Backup:** Node identity keys can be exported via BLE for backup purposes. Export requires physical button authorization (30-second window after button press). The exported blob is encrypted with AES-256-GCM using a user-provided passphrase, preventing extraction by BLE eavesdroppers or unauthorized apps.
 
@@ -2522,7 +2603,7 @@ coverage-hole attack in a sparse mesh. Only authenticated copies suppress.
 
 A Sybil attack (one attacker creating many fake node identities) is partially mitigated:
 
-1. **Computational cost:** Each identity requires an X25519 key pair. Generating many is cheap (ESP32 does ~50/sec), but *using* them requires separate radio transmissions for each.
+1. **Computational cost:** Each identity requires an Ed25519 + X25519 key pair. Generating many is cheap (ESP32 does ~50/sec), but *using* them requires separate radio transmissions for each; and since Phase 4 a usable identity must also originate its own attestations (section 4.28) and sustain beacons to become pinned + established before it counts toward the timesync quorum. Identities are still FREE to mint: unforgeable, not scarce (no trust anchor yet).
 2. **Airtime cost:** Each Sybil identity must transmit its own beacons, consuming attacker's airtime. With 10% duty cycle per identity, one radio can support ~3-4 active Sybil identities before airtime exhaustion.
 3. **Neighbor suspicion:** Nodes track per-neighbor behavior metrics. If one physical neighbor produces packets from many identities (indicated by identical RSSI/timing patterns), a heuristic flags them:
 
@@ -2616,7 +2697,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 |--------|-----------|
 | Content confidentiality | **None** — well-known PSK means anyone can decrypt. By design. |
 | Spam flooding | Broadcast-tier airtime budget at the TX chokepoint (section 8.2.1). A dedicated public-channel TX/RX rate limiter was removed unshipped. |
-| Impersonation | Source address is identity-derived; spoofer must know victim's private key |
+| Impersonation | Source address derives from the node's Ed25519 identity key; an identity attestation claiming an address without the deriving key is rejected by every receiver (section 4.28) |
 
 **Warning:** Public Channel provides **no confidentiality**. It exists for community broadcast and new-node introduction. Use private channels or DMs for sensitive content.
 

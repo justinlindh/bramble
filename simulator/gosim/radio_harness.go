@@ -6,6 +6,8 @@ package main
 */
 import "C"
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"unsafe"
 )
@@ -67,9 +69,46 @@ func (h *radioHarness) free() {
 
 func (h *radioHarness) addNode(addr uint32, x, y float32) {
 	id := fmt.Sprintf("N%08X", addr)
-	if nodeArrayAdd(h.nodes, id, addr, x, y) < 0 {
+	idx := nodeArrayAdd(h.nodes, id, addr, x, y)
+	if idx < 0 {
 		panic("radioHarness: node array full")
 	}
+	// Unit-test scaffold only: pin the caller's address back. Since the
+	// Phase 4 rebind, node_array_add derives the address from the node's
+	// Ed25519 identity key; every FULL-SIM path (scenario load, node
+	// join, add_node) keeps that derived address, but these radio/budget
+	// harness tests key nodes by their own constants and never exercise
+	// attestation delivery, where the addr<->key binding matters.
+	C.node_array_get(h.nodes, C.int(idx)).addr = C.uint32_t(addr)
+}
+
+// nodeAtIndex returns the i-th added node (scenario-load order), for tests
+// that go through the full loadScenario path, where addresses are derived
+// from each node's Ed25519 identity key rather than caller-chosen.
+func (h *radioHarness) nodeAtIndex(i int) *C.sim_node_t {
+	n := C.node_array_get(h.nodes, C.int(i))
+	if n == nil {
+		panic("radioHarness: no node at index")
+	}
+	return n
+}
+
+// nodeCount returns the number of nodes currently in the array.
+func (h *radioHarness) nodeCount() int { return int(h.nodes.count) }
+
+// nodeAddrAndDerived returns node i's assigned address alongside the
+// address its Ed25519 identity pub derives to, computed INDEPENDENTLY in
+// Go (SHA256[0:4], big-endian) so the test cross-checks the C derivation
+// rather than calling it. The Phase 4 invariant: the two must be equal
+// for every full-sim node.
+func (h *radioHarness) nodeAddrAndDerived(i int) (uint32, uint32) {
+	n := h.nodeAtIndex(i)
+	var pub [32]byte
+	for j := 0; j < 32; j++ {
+		pub[j] = byte(n.ident_ed_pub[j])
+	}
+	sum := sha256.Sum256(pub[:])
+	return uint32(n.addr), binary.BigEndian.Uint32(sum[0:4])
 }
 
 // activateNode runs node_activate (routing/neighbor/airtime-budget init,

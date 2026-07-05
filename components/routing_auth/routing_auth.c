@@ -142,3 +142,33 @@ int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t
     network_key_mac("bramble-data-v1", buf, sizeof(buf), expect);
     return ct_eq(expect, hmac, sizeof(expect));
 }
+
+/* src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64) || seq(6)
+ * = 138 bytes: every origin-stable field of the attestation, excluding
+ * only the header (hop_limit is the one relay-mutated field; packet_id is
+ * per-send and already outside every stable authenticator on this frame,
+ * matching the Ed25519 sig's own header exclusion in packet.c). */
+static void ident_relay_build_auth_buf(const bramble_identity_attestation_t* a, uint8_t buf[138]) {
+    buf[0] = (uint8_t)(a->src_addr >> 24);
+    buf[1] = (uint8_t)(a->src_addr >> 16);
+    buf[2] = (uint8_t)(a->src_addr >> 8);
+    buf[3] = (uint8_t)a->src_addr;
+    memcpy(buf + 4, a->x25519_pub, 32);
+    memcpy(buf + 36, a->ed25519_pub, 32);
+    memcpy(buf + 68, a->sig, 64);
+    memcpy(buf + 132, a->seq, 6);
+}
+
+void ident_relay_sign(bramble_identity_attestation_t* a) {
+    uint8_t buf[138];
+    ident_relay_build_auth_buf(a, buf);
+    network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), a->auth_hmac);
+}
+
+int ident_relay_verify(const bramble_identity_attestation_t* a) {
+    uint8_t buf[138];
+    ident_relay_build_auth_buf(a, buf);
+    uint8_t expect[8];
+    network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), expect);
+    return ct_eq(expect, a->auth_hmac, sizeof(expect));
+}
