@@ -32,6 +32,7 @@
 #include "crypto.h"
 #include "network_key.h"
 #include "routing_auth.h"
+#include "test_net_key.h"
 #include "packet.h"
 #include "dedup.h"
 #include "replay_window.h"
@@ -48,7 +49,9 @@
 
 #define SELF_ADDR 0xCCCC0001u
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the
+ * relay-gate MAC path runs against a PROVISIONED node. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 /* One receiving node's relay-relevant state, mirroring mesh_task.c's
