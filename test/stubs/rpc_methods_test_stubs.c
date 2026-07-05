@@ -205,6 +205,17 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
+                                 uint32_t* addr_mismatches) {
+    if (pins)
+        *pins = 0;
+    if (conflicts)
+        *conflicts = 0;
+    if (sig_failures)
+        *sig_failures = 0;
+    if (addr_mismatches)
+        *addr_mismatches = 0;
+}
 bool g_stub_mailbox_enabled = false;
 void mesh_set_mailbox(bool e) { g_stub_mailbox_enabled = e; }
 bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
