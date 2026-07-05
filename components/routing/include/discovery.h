@@ -73,12 +73,18 @@ bramble_rrep_t rrep_forward(const bramble_rrep_t* incoming, uint32_t next_hop_ba
  * next_hop and header.dest_addr, the only two fields rrep_forward mutates
  * on each relay hop. rrep_sign fills r->auth_hmac; call it once, at the
  * end of rrep_build_destination. rrep_verify recomputes the same MAC and
- * constant-time-compares; returns nonzero (true) iff it matches. With the
- * unprovisioned public-PSK fallback key (network_key_get), this MAC is
- * forgeable by anyone who knows that public constant: it does NOT close
- * SEC-H1 on its own, closure waits on real key provisioning.
+ * constant-time-compares; returns nonzero (true) iff it matches. When
+ * unprovisioned there is no key: network_key_get fails, network_key_mac
+ * returns the all-zero sentinel, and rrep_verify rejects before the compare
+ * (fail-closed inert, no public-PSK fallback). Provisioning is mandatory, so
+ * under a provisioned key this closes the keyless-outsider case for SEC-H1;
+ * the keyed-insider residual remains.
  */
-void rrep_sign(bramble_rrep_t* r);
+/* Fail-closed (mandatory-provisioning Task 2): rrep_sign returns 0 on success
+ * and nonzero when UNPROVISIONED (emits the all-zero sentinel, do not send);
+ * rrep_verify checks that return and REJECTS before the compare, so an
+ * unprovisioned verifier never accepts a frame (never matches the sentinel). */
+int rrep_sign(bramble_rrep_t* r);
 int rrep_verify(const bramble_rrep_t* r);
 
 /*

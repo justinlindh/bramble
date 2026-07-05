@@ -8,6 +8,7 @@
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
 #include "../../components/routing_auth/include/routing_auth.h"
+#include "../../components/network_key/include/network_key.h"
 /* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
@@ -79,7 +80,29 @@ void bridge_node_ext_init_all(void) {
         mailbox_init(&g_node_ext[i].mailbox);
         location_init(&g_node_ext[i].location);
         g_node_ext[i].initialized = true;
+        /* Mandatory-provisioning (Task 2): every node is provisioned by default
+         * (fleet shares bridge_init's default key); a scenario opts a node out. */
+        g_node_ext[i].provisioned = true;
     }
+}
+
+/*
+ * Mandatory-provisioning (Task 2): shared default network key for the sim
+ * fleet. The real network_key.c is a process-global (one address space for all
+ * sim nodes), so provisioning it once at bridge_init makes every node's
+ * control-plane MACs sign/verify consistently -- the sim analog of a fleet
+ * whose nodes all hold the same provisioned key. Per-node inertness is modeled
+ * by bridge_node_ext_t.provisioned, not by clearing this global. Value is
+ * arbitrary but fixed and distinct from the host suites' key.
+ */
+static const uint8_t BRIDGE_DEFAULT_NET_KEY[32] = {
+    0x51, 0x4d, 0x2a, 0x9e, 0x0c, 0xb7, 0x63, 0xf8, 0x11, 0xa4, 0xd0, 0x3c, 0x77, 0x8b, 0x2e, 0x59,
+    0x40, 0x96, 0xe1, 0x1f, 0xcd, 0x84, 0x6a, 0x22, 0xb3, 0x5e, 0x08, 0xf7, 0x9c, 0x30, 0xab, 0x67};
+
+void bridge_node_set_provisioned(int node_idx, bool provisioned) {
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (ext)
+        ext->provisioned = provisioned;
 }
 
 /* ─── Location sim helper: map (x,y) grid coords → pseudo lat/lon ─────── */
@@ -1395,6 +1418,17 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
     if (!rx || !rx->active)
         return;
 
+    /* Mandatory-provisioning (Task 2): an unprovisioned receiver is INERT. It
+     * holds no network key, so every network-key-authenticated frame fails its
+     * verify (beacon/DATA-origin/RREP/RERR/ACK/receipt/attestation). Drop at
+     * the door so it accepts nothing, mirroring firmware's per-verify rejects
+     * plus the handle_beacon gate. */
+    {
+        bridge_node_ext_t* rext = bridge_node_ext_get((int)(rx - nodes->nodes));
+        if (rext && !rext->provisioned)
+            return;
+    }
+
     uint32_t now_ms = (uint32_t)(event->timestamp_us / 1000);
     const uint8_t* buf = event->data.packet.data;
     uint16_t len = event->data.packet.len;
@@ -1499,6 +1533,20 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
     sim_node_t* src = node_array_find_by_id(nodes, event->data.node.node_id);
     if (!src || !src->active)
         return;
+
+    /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT -- it
+     * holds no network key, so it originates no authenticated DATA. */
+    {
+        bridge_node_ext_t* sext = bridge_node_ext_get((int)(src - nodes->nodes));
+        if (sext && !sext->provisioned) {
+            fprintf(stdout,
+                    "{\"type\":\"unprovisioned_inert\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"frame\":\"data\"}\n",
+                    (unsigned long long)event->timestamp_us, src->id);
+            fflush(stdout);
+            return;
+        }
+    }
 
     uint32_t dest_addr = event->data.node.addr;
     uint32_t now_ms = (uint32_t)(event->timestamp_us / 1000);
@@ -1999,6 +2047,17 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
     if (!ext)
         return;
 
+    /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT -- the
+     * relay-gate MAC needs the network key, so it emits no attestation. */
+    if (!ext->provisioned) {
+        fprintf(stdout,
+                "{\"type\":\"unprovisioned_inert\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"frame\":\"attestation\"}\n",
+                (unsigned long long)event->timestamp_us, src->id);
+        fflush(stdout);
+        return;
+    }
+
     uint32_t claimed = event->data.node.addr ? event->data.node.addr : src->addr;
 
     /* Scripted X25519 rotation (see the doc comment above): mutate the
@@ -2091,6 +2150,11 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
         ext->ident_seq = 0;
         identity_store_init(&ext->ident_pins);
         ext->ident_initialized = true;
+        /* Mandatory-provisioning (Task 2): a freshly joined node holds the
+         * fleet key by default. A scenario opts a node out via
+         * bridge_node_set_provisioned(idx, false) AFTER this join. Kept in the
+         * first-init guard so a rejoin preserves an intentionally-inert node. */
+        ext->provisioned = true;
     }
 
     fprintf(stdout,
@@ -2129,6 +2193,13 @@ void bridge_init(void) {
     sim_emitter_set_quiet(false);
 
     relay_path_init();
+
+    /* Mandatory-provisioning (Task 2): provision the shared default network key
+     * for the whole sim fleet BEFORE any node originates, so control-plane
+     * MACs (routing_auth / discovery / attestation relay gate) sign and verify
+     * exactly as a provisioned firmware node would. Without this every sim
+     * node would be inert and no scenario would mesh. */
+    network_key_set_provisioned(BRIDGE_DEFAULT_NET_KEY);
 
     /* Phase 6: Initialize all per-node extended state */
     bridge_node_ext_init_all();

@@ -360,9 +360,11 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
  * data_auth_sign/data_auth_verify (routing_auth.h) build and check it;
  * mesh_process_rx_packet verifies it BEFORE learning a breadcrumb or
  * forwarding, so only network-key holders can lay breadcrumbs (RREP parity).
- * Like all control-plane auth here it is forgeable under the unprovisioned
- * public-PSK fallback key (network_key.h) -- the accepted, documented
- * baseline, not closed by this field.
+ * Like all control-plane auth here, when unprovisioned there is no key
+ * (fail-closed inert: network_key_mac is the all-zero sentinel and verify
+ * rejects before the compare, no public-PSK fallback), so only provisioned
+ * network-key holders can lay breadcrumbs. The keyed-insider residual
+ * remains.
  *
  * src_addr stays AAD-bound, so the reverse route's TARGET (who a returning
  * confirmation is ultimately for) cannot be spoofed by an on-path relay;

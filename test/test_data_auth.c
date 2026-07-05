@@ -5,6 +5,7 @@
 #include "routing_auth.h"
 #include "packet.h"
 #include "routing.h"
+#include "test_net_key.h"
 
 #include "../components/crypto/crypto_host.c"
 #include "../components/network_key/network_key.c"
@@ -27,7 +28,10 @@
  * red-team attack against the actual dispatch gate logic.
  */
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the
+ * DATA-origin auth round trip and forgery rejection run against a PROVISIONED
+ * node (unprovisioned is inert; see test_unprovisioned_is_inert below). */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 #define VICTIM 0x0A0A0A0Au
@@ -139,28 +143,57 @@ void test_covered_header_fields_are_bound(void) {
     TEST_ASSERT_FALSE(data_auth_verify(&tampered, VICTIM, hmac));
 }
 
-/* When a real per-fleet network key is provisioned, an attacker's MAC forged
- * under the public-PSK fallback no longer verifies: the fix has real teeth
- * once provisioning lands (network_key.h's documented baseline). */
-void test_provisioned_key_rejects_psk_forged_mac(void) {
+/* Mandatory-provisioning (Task 2): an UNPROVISIONED outsider can no longer
+ * compute any MAC -- data_auth_sign fails closed and emits the all-zero
+ * sentinel -- so whatever it produces fails verification on a provisioned
+ * fleet. (Pre-campaign this outsider could forge under the public-PSK
+ * fallback; that fallback is gone.) */
+void test_provisioned_key_rejects_outsider_mac(void) {
     bramble_header_t h = make_data_header(0xDEADBEEF, 0x77777777);
-    /* Attacker signs under the unprovisioned PSK fallback. */
+    /* Outsider is unprovisioned: sign fails and writes the all-zero sentinel. */
     network_key_clear();
-    uint8_t psk_forged[8];
-    data_auth_sign(&h, VICTIM, psk_forged);
+    uint8_t outsider_forged[8];
+    TEST_ASSERT_NOT_EQUAL(0, data_auth_sign(&h, VICTIM, outsider_forged));
 
-    /* Fleet is provisioned with a real key the attacker does not have. */
+    /* Fleet is provisioned with a real key the outsider does not have. */
     uint8_t fleet_key[32];
     for (int i = 0; i < 32; i++)
         fleet_key[i] = (uint8_t)(i + 1);
     network_key_set_provisioned(fleet_key);
 
-    TEST_ASSERT_FALSE(data_auth_verify(&h, VICTIM, psk_forged));
+    TEST_ASSERT_FALSE(data_auth_verify(&h, VICTIM, outsider_forged));
 
     /* A frame signed under the fleet key does verify on the fleet. */
     uint8_t fleet_hmac[8];
-    data_auth_sign(&h, VICTIM, fleet_hmac);
+    TEST_ASSERT_EQUAL(0, data_auth_sign(&h, VICTIM, fleet_hmac));
     TEST_ASSERT_TRUE(data_auth_verify(&h, VICTIM, fleet_hmac));
+}
+
+/* Mandatory-provisioning (Task 2): the INERT-node contract for DATA origin
+ * auth. An unprovisioned node's data_auth_sign fails (returns nonzero) and
+ * writes the all-zero sentinel, and data_auth_verify rejects everything --
+ * including that all-zero sentinel, checked BEFORE the constant-time compare,
+ * so a keyless attacker's all-zero MAC never verifies and never lays a
+ * reverse-route breadcrumb. */
+void test_unprovisioned_is_inert(void) {
+    network_key_clear();
+    bramble_header_t h = make_data_header(0xDEADBEEF, 0xABABABAB);
+
+    uint8_t hmac[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    TEST_ASSERT_NOT_EQUAL(0, data_auth_sign(&h, VICTIM, hmac)); /* sign fails closed */
+    uint8_t zero[8] = {0};
+    TEST_ASSERT_EQUAL_MEMORY(zero, hmac, sizeof(zero)); /* emits the all-zero sentinel */
+
+    /* Verify rejects the sentinel it just emitted (no all-zero self-forgery). */
+    TEST_ASSERT_FALSE(data_auth_verify(&h, VICTIM, hmac));
+    /* And a genuinely all-zero MAC from an outsider is rejected too. */
+    TEST_ASSERT_FALSE(data_auth_verify(&h, VICTIM, zero));
+
+    /* No breadcrumb is ever learned while unprovisioned. */
+    routing_table_t rt;
+    route_init(&rt);
+    TEST_ASSERT_FALSE(dispatch_learns_breadcrumb(&rt, &h, VICTIM, ATTACKER, zero));
+    TEST_ASSERT_EQUAL(0, route_count(&rt));
 }
 
 int main(void) {
@@ -171,6 +204,7 @@ int main(void) {
     RUN_TEST(test_f1_src_addr_tamper_breaks_mac);
     RUN_TEST(test_hop_limit_decrement_preserves_mac);
     RUN_TEST(test_covered_header_fields_are_bound);
-    RUN_TEST(test_provisioned_key_rejects_psk_forged_mac);
+    RUN_TEST(test_provisioned_key_rejects_outsider_mac);
+    RUN_TEST(test_unprovisioned_is_inert);
     return UNITY_END();
 }

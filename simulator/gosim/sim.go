@@ -606,6 +606,11 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Broadcast sim_reset
 	s.emitJSON(map[string]interface{}{"type": "sim_reset"})
 
+	// Mandatory-provisioning (Task 2): optional per-node "unprovisioned"
+	// scenario field, read Go-side like flood_transport/intermediate_rrep
+	// (no C-side sim_scenario change). Defaults to provisioned for every node.
+	unprovisioned := loadUnprovisionedNodeIDs(scenarioPath)
+
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
 	for i := 0; i < count; i++ {
@@ -624,6 +629,16 @@ func (s *Sim) cmdLoad(cmd Command) {
 		// originate or pin attestations.
 		C.bridge_handle_node_join_ext(C.int(i), C.uint32_t(node.addr),
 			node.x, node.y, C.uint64_t(0))
+
+		// Apply the unprovisioned override AFTER join (join defaults the node
+		// to provisioned). An unprovisioned node is inert for the whole run.
+		if unprovisioned[C.GoString(&node.id[0])] {
+			nodeSetProvisioned(i, false)
+			s.emitJSON(map[string]interface{}{
+				"type": "node_unprovisioned", "timestamp_us": 0,
+				"node": C.GoString(&node.id[0]),
+			})
+		}
 
 		// Schedule initial tick (staggered by 100ms per node)
 		tick := C.bridge_make_tick_event(C.uint64_t(uint64(i)*100000), &node.id[0], 0)

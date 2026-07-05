@@ -844,6 +844,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/OkResponse'
 
+  /rpc/bramble.generateNetworkKey:
+    post:
+      operationId: generateNetworkKey
+      summary: Mint and provision a fresh control-plane network key
+      description: >
+        Generates a fresh entropy-gated 32-byte network key on the device,
+        provisions THIS node with it (persisted to NVS, beacon subkey
+        re-derived live), and returns the raw key so the operator can copy it
+        to the other nodes in the fleet. This makes the local node the fleet
+        founder. Returning the raw key is deliberate: it crosses only the
+        operator's own local control channel, the same trust boundary
+        setNetworkKey already relies on to accept a raw key. The key is never
+        broadcast or logged. Authenticated callers only. Calling this on an
+        already-provisioned node RE-KEYS it. On entropy failure the node
+        provisions nothing and returns a JSON-RPC error (fail closed).
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Network key generated and provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateNetworkKeyResponse'
+
   /rpc/bramble.getNetworkKeyStatus:
     post:
       operationId: getNetworkKeyStatus
@@ -852,9 +883,9 @@ paths:
         Returns whether a real per-fleet network key is provisioned and a
         one-way fingerprint (SHA256(key)[0:4] as 8 lowercase hex) so an
         operator can confirm a fleet converged on the same key without the key
-        ever being read back. An unprovisioned node reports the fingerprint of
-        the public-PSK fallback key (a known value that marks it as
-        unprotected).
+        ever being read back. An unprovisioned node has NO usable key (there is
+        no public-PSK fallback) and reports the all-zero fingerprint
+        "00000000", which marks it as inert (not meshing) until a key is set.
       tags: [config]
       requestBody:
         content:
@@ -2615,6 +2646,25 @@ components:
           description: >
             SHA256(network_key)[0:4] as 8 lowercase hex characters. Matches
             across nodes that share a key; never reveals the key.
+          pattern: '^[0-9a-f]{8}$'
+
+    GenerateNetworkKeyResponse:
+      type: object
+      description: Response from bramble.generateNetworkKey.
+      required: [key, fingerprint]
+      properties:
+        key:
+          type: string
+          description: >
+            The freshly-minted raw 32-byte network key as 64 lowercase hex
+            characters, for the operator to copy to the other nodes. This node
+            is already provisioned with it.
+          pattern: '^[0-9a-f]{64}$'
+        fingerprint:
+          type: string
+          description: >
+            SHA256(network_key)[0:4] as 8 lowercase hex characters, matching
+            bramble.getNetworkKeyStatus on every node provisioned with this key.
           pattern: '^[0-9a-f]{8}$'
 
     SetAllowedOriginsParams:

@@ -24,6 +24,7 @@
 #include "network_key.h"
 #include "routing_auth.h"
 #include "packet.h"
+#include "test_net_key.h"
 
 #include "../components/crypto/crypto_host.c"
 #include "../components/network_key/network_key.c"
@@ -32,7 +33,9 @@
 
 #include <string.h>
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the
+ * relay-gate MAC sign/verify runs against a PROVISIONED node. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 /* Fully populated, Ed25519-signed, relay-gate-MACed attestation: the exact
@@ -65,8 +68,8 @@ static void make_signed_attestation(bramble_identity_attestation_t* p, uint8_t s
     ident_relay_sign(p);
 }
 
-/* Control: a freshly signed frame verifies (unprovisioned PSK-fallback
- * network key, the same default every other control-plane MAC test uses). */
+/* Control: a freshly signed frame verifies (under the provisioned shared test
+ * key setUp installs; unprovisioned is inert, covered elsewhere). */
 static void test_good_mac_verifies(void) {
     bramble_identity_attestation_t p;
     uint8_t sk[BRAMBLE_ED25519_SECKEY_SIZE];
@@ -135,7 +138,7 @@ static void test_header_fields_excluded_from_mac(void) {
 static void test_wrong_network_key_fails(void) {
     bramble_identity_attestation_t p;
     uint8_t sk[BRAMBLE_ED25519_SECKEY_SIZE];
-    make_signed_attestation(&p, sk); /* signed under the PSK fallback key */
+    make_signed_attestation(&p, sk); /* signed under the provisioned shared test key */
     TEST_ASSERT_TRUE(ident_relay_verify(&p));
 
     uint8_t fleet_key[32];

@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "../components/routing/discovery.c"
 #include "../components/routing/routing.c"
+#include "test_net_key.h"
 
 static pending_discovery_table_t dtbl;
 static routing_table_t rt_a, rt_b, rt_c;
@@ -8,6 +9,10 @@ static reverse_route_table_t rev_a, rev_b, rev_c;
 static rreq_dedup_t dedup_b, dedup_c;
 
 void setUp(void) {
+    /* Mandatory-provisioning (Task 2): RREP sign/verify in the discovery e2e
+     * flows need the network key; provision the shared fixed key so a
+     * provisioned mesh discovers routes exactly as before. */
+    bramble_test_provision_net_key();
     discovery_init(&dtbl);
     route_init(&rt_a);
     route_init(&rt_b);

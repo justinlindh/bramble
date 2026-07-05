@@ -387,4 +387,17 @@ export interface AppState {
   mapFocusAddr: number | null;
   trafficDebugStatus: TrafficDebugStatus | null;
   trafficEvents: TrafficEvent[];
+  networkKeyStatus: NetworkKeyStatus | null;
+}
+
+/**
+ * Provisioning status of the control-plane network key. An unprovisioned node
+ * has no usable key and is INERT (not meshing) until one is set; the webapp
+ * surfaces this as a prominent top-level banner. The fingerprint is a one-way
+ * SHA256(key)[0:4] (8 hex chars) that matches across nodes sharing a key, so an
+ * operator can confirm the fleet converged; it is "00000000" when unprovisioned.
+ */
+export interface NetworkKeyStatus {
+  provisioned: boolean;
+  fingerprint: string;
 }
