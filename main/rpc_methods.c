@@ -1023,6 +1023,37 @@ static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* Flooding F1 finalize: bramble.setFloodHopLimit {hops}. Sets the operator-
+ * settable flood-transport origination hop budget. mesh_set_flood_hop_limit
+ * clamps to [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]; the CLAMPED value is
+ * what we persist and echo back, so a client always sees exactly what took
+ * effect. Only the flood transport uses this; ROUTE_HOP_LIMIT_MAX (reactive)
+ * is untouched. */
+static int handle_set_flood_hop_limit(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    cJSON* hops = cJSON_GetObjectItem(params, "hops");
+    if (!hops || !cJSON_IsNumber(hops))
+        return RPC_ERR_INVALID_PARAMS;
+
+    /* Clamp inside mesh_set_flood_hop_limit, then read back the applied value. */
+    mesh_set_flood_hop_limit((uint32_t)hops->valuedouble);
+    uint8_t applied = mesh_get_flood_hop_limit();
+
+    /* Persist the clamped value to NVS. */
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "hop_limit", applied);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
+    ESP_LOGI("rpc", "Flood hop limit set to %u", (unsigned)applied);
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddNumberToObject(result, "hops", applied);
+    return 0;
+}
+
 static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_t* policy) {
     if (!policy)
         return ESP_ERR_INVALID_ARG;
@@ -1783,6 +1814,9 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     /* Flooding F1 Task 1: flood transport toggle state */
     cJSON_AddBoolToObject(result, "floodTransportEnabled", mesh_get_flood_transport());
 
+    /* Flooding F1 finalize: operator-settable flood origination hop budget. */
+    cJSON_AddNumberToObject(result, "floodHopLimit", mesh_get_flood_hop_limit());
+
     return 0;
 }
 
@@ -2407,6 +2441,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.setDefaultChannel", handle_set_default_channel);
     rpc_register("bramble.setMailbox", handle_set_mailbox);
     rpc_register("bramble.setFloodTransport", handle_set_flood_transport);
+    rpc_register("bramble.setFloodHopLimit", handle_set_flood_hop_limit);
     rpc_register("bramble.setBroadcastTelemetryMode", handle_set_broadcast_telemetry_mode);
     rpc_register("bramble.setLocationConfig", handle_set_location_config);
     rpc_register("bramble.setLocationContact", handle_set_location_contact);

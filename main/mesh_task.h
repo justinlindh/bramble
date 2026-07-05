@@ -164,6 +164,18 @@ void mesh_set_flood_transport(bool enabled);
 bool mesh_get_flood_transport(void);
 
 /**
+ * Set/get the flood-transport origination hop budget (Flooding F1 finalize).
+ * mesh_set_flood_hop_limit clamps to [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]
+ * and stores the clamped value (read it back with mesh_get_flood_hop_limit).
+ * Under s_flood_transport this is the hop_limit a freshly-originated flood DATA
+ * and its flooded-ACK are stamped with; the reactive path (ROUTE_HOP_LIMIT_MAX)
+ * is unaffected. Default FLOOD_HOP_LIMIT_DEFAULT (8); NVS-persisted by the RPC
+ * setter, same pattern as mesh_set_flood_transport above.
+ */
+void mesh_set_flood_hop_limit(uint32_t hops);
+uint8_t mesh_get_flood_hop_limit(void);
+
+/**
  * Get the current node name (returns NULL if not set).
  */
 const char* mesh_get_node_name(void);

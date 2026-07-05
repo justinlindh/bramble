@@ -406,6 +406,65 @@ void test_get_config_reflects_flood_transport_enabled_after_set_true(void) {
     cJSON_Delete(get_resp);
 }
 
+/* ── bramble.setFloodHopLimit (Flooding F1 finalize) ─────────────────────
+ * Sets the operator-settable flood origination hop budget; clamps to 1..32;
+ * echoes and (via getConfig) reflects the applied value.
+ * ──────────────────────────────────────────────────────────────────── */
+
+extern uint8_t g_stub_flood_hop_limit;
+
+void test_set_flood_hop_limit_applies_and_echoes_value(void) {
+    g_stub_flood_hop_limit = 8;
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":63,\"method\":\"bramble.setFloodHopLimit\","
+                           "\"params\":{\"hops\":20}}");
+    cJSON* r = assert_result(resp);
+    TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")), "ok should be true");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(20, cJSON_GetObjectItem(r, "hops")->valueint,
+                                  "response hops should echo the applied value");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(20, g_stub_flood_hop_limit,
+                                    "mesh_set_flood_hop_limit(20) should have been called");
+    cJSON_Delete(resp);
+}
+
+void test_set_flood_hop_limit_clamps_out_of_range(void) {
+    g_stub_flood_hop_limit = 8;
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"bramble.setFloodHopLimit\","
+                           "\"params\":{\"hops\":99}}");
+    cJSON* r = assert_result(resp);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(32, cJSON_GetObjectItem(r, "hops")->valueint,
+                                  "hops above 32 should clamp to 32");
+    TEST_ASSERT_EQUAL_UINT8(32, g_stub_flood_hop_limit);
+    cJSON_Delete(resp);
+}
+
+void test_set_flood_hop_limit_missing_hops_returns_invalid_params(void) {
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"bramble.setFloodHopLimit\","
+                           "\"params\":{}}");
+    TEST_ASSERT_EQUAL_INT(RPC_ERR_INVALID_PARAMS, assert_error_code(resp));
+    cJSON_Delete(resp);
+}
+
+void test_get_config_reflects_flood_hop_limit(void) {
+    g_stub_flood_hop_limit = 8;
+    cJSON* set_resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"bramble.setFloodHopLimit\","
+                           "\"params\":{\"hops\":15}}");
+    assert_result(set_resp);
+    cJSON_Delete(set_resp);
+
+    cJSON* get_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":67,\"method\":\"bramble.getConfig\",\"params\":{}}");
+    cJSON* r = assert_result(get_resp);
+    cJSON* hop_limit = cJSON_GetObjectItem(r, "floodHopLimit");
+    TEST_ASSERT_NOT_NULL_MESSAGE(hop_limit, "getConfig should include floodHopLimit field");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(15, hop_limit->valueint,
+                                  "floodHopLimit should reflect the applied value");
+    cJSON_Delete(get_resp);
+}
+
 /* ── bramble.setAuthToken ──────────────────────────────────────────────
  * Validates the token param strictly before writing to NVS.
  * ──────────────────────────────────────────────────────────────────── */
@@ -531,6 +590,10 @@ int main(void) {
     RUN_TEST(test_set_flood_transport_enabled_false_calls_mesh_and_returns_ok);
     RUN_TEST(test_set_flood_transport_missing_enabled_returns_invalid_params);
     RUN_TEST(test_get_config_reflects_flood_transport_enabled_after_set_true);
+    RUN_TEST(test_set_flood_hop_limit_applies_and_echoes_value);
+    RUN_TEST(test_set_flood_hop_limit_clamps_out_of_range);
+    RUN_TEST(test_set_flood_hop_limit_missing_hops_returns_invalid_params);
+    RUN_TEST(test_get_config_reflects_flood_hop_limit);
 
     /* setAuthToken */
     RUN_TEST(test_set_auth_token_missing_token_field_returns_invalid_params);
