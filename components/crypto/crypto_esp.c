@@ -205,18 +205,26 @@ int crypto_generate_identity(bramble_identity_t* id) {
     mbedtls_mpi_read_binary_le(&d, id->private_key, 32);
 
     /* RNG callback required for side-channel blinding on ESP-IDF mbedtls */
-    int ret = mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, crypto_rng_callback, NULL);
-    if (ret == 0) {
-        mbedtls_mpi_write_binary_le(&Q.MBEDTLS_PRIVATE(X), id->public_key, 32);
-    }
+    int ok = (mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, crypto_rng_callback, NULL) == 0) &&
+             (mbedtls_mpi_write_binary_le(&Q.MBEDTLS_PRIVATE(X), id->public_key, 32) == 0);
 
-    id->address = crypto_derive_address(id->public_key);
-    id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
+    /* Ed25519 signing identity alongside X25519 (Phase 1). Fail closed: if
+     * keygen fails (e.g. entropy gate shut), propagate failure rather than
+     * hand back a partial identity. */
+    if (ok && crypto_ed25519_keypair(id->ed25519_public_key, id->ed25519_private_key) != 0)
+        ok = 0;
+
+    if (ok) {
+        /* Address stays X25519-derived this phase (Phase 3 rebinds to
+         * Ed25519 together with the attestation). */
+        id->address = crypto_derive_address(id->public_key);
+        id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
+    }
 
     mbedtls_ecp_group_free(&grp);
     mbedtls_mpi_free(&d);
     mbedtls_ecp_point_free(&Q);
-    return (ret == 0) ? 0 : -1;
+    return ok ? 0 : -1;
 }
 
 #endif // ESP_PLATFORM

@@ -51,6 +51,38 @@ void test_generated_identity_hash_distinct_from_address(void) {
     TEST_ASSERT_NOT_EQUAL(me.address, me.pubkey_hash);
 }
 
+/* Phase 1: every identity also carries a working Ed25519 keypair. The address
+ * stays X25519-derived this phase (rebind to Ed25519 is Phase 3). */
+void test_generated_identity_has_working_ed25519_keypair(void) {
+    bramble_identity_t me;
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&me));
+
+    /* Sign with the identity's Ed25519 private key, verify with its public. */
+    const uint8_t msg[] = "bramble identity phase 1";
+    uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(me.ed25519_private_key, msg, sizeof(msg), sig));
+    TEST_ASSERT_TRUE(crypto_ed25519_verify(me.ed25519_public_key, msg, sizeof(msg), sig));
+    /* Wrong message must not verify (real keypair, not garbage bytes). */
+    TEST_ASSERT_FALSE(crypto_ed25519_verify(me.ed25519_public_key, msg, sizeof(msg) - 1, sig));
+
+    /* libsodium secret-key layout: seed(32) || public(32). */
+    TEST_ASSERT_EQUAL_MEMORY(me.ed25519_public_key, me.ed25519_private_key + 32,
+                             BRAMBLE_ED25519_PUBKEY_SIZE);
+
+    /* Address is STILL X25519-derived: from the X25519 public key, and NOT
+     * from the Ed25519 public key (Phase 3 will rebind). */
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(me.public_key), me.address);
+    TEST_ASSERT_NOT_EQUAL(crypto_derive_address(me.ed25519_public_key), me.address);
+}
+
+void test_two_identities_have_distinct_ed25519_keys(void) {
+    bramble_identity_t a, b;
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&a));
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&b));
+    TEST_ASSERT_TRUE(
+        memcmp(a.ed25519_public_key, b.ed25519_public_key, BRAMBLE_ED25519_PUBKEY_SIZE) != 0);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_collision_same_addr_different_hash);
@@ -58,5 +90,7 @@ int main(void) {
     RUN_TEST(test_no_collision_different_addr);
     RUN_TEST(test_pubkey_hash_pinned_to_independent_slice);
     RUN_TEST(test_generated_identity_hash_distinct_from_address);
+    RUN_TEST(test_generated_identity_has_working_ed25519_keypair);
+    RUN_TEST(test_two_identities_have_distinct_ed25519_keys);
     return UNITY_END();
 }

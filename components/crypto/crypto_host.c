@@ -201,7 +201,11 @@ int crypto_generate_identity(bramble_identity_t* id) {
     if (EVP_PKEY_keygen_init(ctx) == 1 && EVP_PKEY_keygen(ctx, &pkey) == 1) {
         size_t len = 32;
         if (EVP_PKEY_get_raw_private_key(pkey, id->private_key, &len) == 1 &&
-            EVP_PKEY_get_raw_public_key(pkey, id->public_key, &len) == 1) {
+            EVP_PKEY_get_raw_public_key(pkey, id->public_key, &len) == 1 &&
+            /* Ed25519 signing identity alongside X25519; fail closed (no
+             * partial identity) if keygen fails. */
+            crypto_ed25519_keypair(id->ed25519_public_key, id->ed25519_private_key) == 0) {
+            /* Address stays X25519-derived this phase (Phase 3 rebinds). */
             id->address = crypto_derive_address(id->public_key);
             id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
             ret = 0;
