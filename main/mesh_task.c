@@ -306,6 +306,12 @@ typedef struct {
     uint32_t src_addr;
     int channel_idx;
     bramble_key_exchange_t msg;
+    /* Phase 4 DM key continuity: the pinned X25519 key for src_addr,
+     * SNAPSHOTTED by handle_ke_envelope on the mesh task (the only task
+     * that mutates s_identity_pins) so the worker never touches the pin
+     * store cross-thread. have_pin false = no pin known (TOFU-grade). */
+    bool have_pin;
+    uint8_t pinned_x25519[32];
 } dm_handshake_work_item_t;
 static QueueHandle_t s_handshake_work_q;
 
@@ -4793,8 +4799,8 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
  * INIT can never be accepted as first-contact against an already-known
  * identity.
  */
-static void process_ke_init(uint32_t src_addr, int channel_idx,
-                            const bramble_key_exchange_t* init) {
+static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t* init,
+                            const uint8_t* pinned_x25519_or_null) {
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
     dm_session_t* existing = dm_lookup(&s_dm_table, src_addr);
     int have_peer_id = dm_session_has_peer_id(existing);
@@ -4807,10 +4813,21 @@ static void process_ke_init(uint32_t src_addr, int channel_idx,
         memcpy(peer_id_pub, existing->peer_id_pub, 32);
     xSemaphoreGive(s_dm_mutex);
 
-    /* Pin continuity wiring lands with the Phase 4 DM-continuity commit;
-     * NULL = no pin known here yet (TOFU-grade, pre-rebind behavior). */
-    if (dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL, NULL) !=
-        0) {
+    int vrc = dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL,
+                             pinned_x25519_or_null);
+    if (vrc == DM_VERIFY_ERR_PIN_MISMATCH) {
+        /* Phase 4 DM key continuity RED FLAG: this address has an
+         * attestation-verified pinned X25519 key and the handshake showed
+         * up with a DIFFERENT one. Refuse the session loudly; a silent
+         * accept here would let a keyed insider splice itself into a
+         * known peer's DMs. */
+        ESP_LOGW(TAG,
+                 "DM KEY CONTINUITY: INIT from %08" PRIX32 " does not match its pinned identity"
+                 " key, session REFUSED",
+                 src_addr);
+        return;
+    }
+    if (vrc != 0) {
         ESP_LOGW(TAG, "INIT verify failed from %08" PRIX32, src_addr);
         return;
     }
@@ -4858,7 +4875,8 @@ static void process_ke_init(uint32_t src_addr, int channel_idx,
  * we sent the matching INIT (dm_pending_eph_t; dm_session_t itself has no
  * field for in-flight handshake material, see its declaration above).
  */
-static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp) {
+static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp,
+                            const uint8_t* pinned_x25519_or_null) {
     dm_pending_eph_t* pe = pending_eph_lookup(src_addr);
     if (!pe) {
         ESP_LOGW(TAG, "RESP from %08" PRIX32 " with no matching pending INIT", src_addr);
@@ -4867,8 +4885,17 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
 
     uint16_t ke_epoch = (uint16_t)resp->key_id;
     uint8_t session_key[32];
-    if (dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch, NULL, session_key) !=
-        0) {
+    int vrc = dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch,
+                             pinned_x25519_or_null, session_key);
+    if (vrc == DM_VERIFY_ERR_PIN_MISMATCH) {
+        /* Same red flag as process_ke_init: pinned peer, different DM key. */
+        ESP_LOGW(TAG,
+                 "DM KEY CONTINUITY: RESP from %08" PRIX32 " does not match its pinned identity"
+                 " key, session REFUSED",
+                 src_addr);
+        return;
+    }
+    if (vrc != 0) {
         ESP_LOGW(TAG, "RESP verify failed from %08" PRIX32, src_addr);
         return;
     }
@@ -4907,10 +4934,11 @@ static void handshake_worker_task(void* arg) {
         if (xQueueReceive(s_handshake_work_q, &item, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        const uint8_t* pinned = item.have_pin ? item.pinned_x25519 : NULL;
         if (item.msg.ke_type == KE_TYPE_INIT) {
-            process_ke_init(item.src_addr, item.channel_idx, &item.msg);
+            process_ke_init(item.src_addr, item.channel_idx, &item.msg, pinned);
         } else if (item.msg.ke_type == KE_TYPE_RESP) {
-            process_ke_resp(item.src_addr, &item.msg);
+            process_ke_resp(item.src_addr, &item.msg, pinned);
         }
     }
 }
@@ -4957,9 +4985,21 @@ static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t
     }
 
     dm_handshake_work_item_t item;
+    memset(&item, 0, sizeof(item));
     item.src_addr = src_addr;
     item.channel_idx = channel_idx;
     item.msg = msg;
+    /* Phase 4 DM key continuity: snapshot the pinned X25519 key for this
+     * peer HERE, on the mesh task (the only mutator of s_identity_pins),
+     * so the handshake worker verifies against an immutable copy instead
+     * of reading the pin store cross-thread. No pin = NULL downstream =
+     * TOFU-grade first contact (stated residual until the peer's
+     * attestation is heard and pinned). */
+    const identity_pin_t* pin = identity_store_lookup(&s_identity_pins, src_addr);
+    if (pin) {
+        item.have_pin = true;
+        memcpy(item.pinned_x25519, pin->x25519_pub, sizeof(item.pinned_x25519));
+    }
     if (xQueueSend(s_handshake_work_q, &item, 0) != pdTRUE) {
         ESP_LOGW(TAG, "Handshake work queue full, dropping KE from %08" PRIX32, src_addr);
     }
