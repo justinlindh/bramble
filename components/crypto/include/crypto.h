@@ -11,11 +11,24 @@
 #define BRAMBLE_TAG_SIZE 16
 #define BRAMBLE_HMAC_TRUNC 4
 
+/* Ed25519 signature primitive (RFC 8032). The 64-byte secret key uses the
+ * libsodium layout: seed (32) || public key (32). Both backends (device
+ * libsodium, host OpenSSL) produce and consume this same layout, pinned by
+ * the shared RFC 8032 vectors in test/test_ed25519.c. */
+#define BRAMBLE_ED25519_PUBKEY_SIZE 32
+#define BRAMBLE_ED25519_SECKEY_SIZE 64
+#define BRAMBLE_ED25519_SIG_SIZE 64
+
 typedef struct {
-    uint8_t private_key[BRAMBLE_KEY_SIZE];
-    uint8_t public_key[BRAMBLE_KEY_SIZE];
-    uint32_t address;
-    uint32_t pubkey_hash;
+    uint8_t private_key[BRAMBLE_KEY_SIZE]; /* X25519 (DM sessions / DH only) */
+    uint8_t public_key[BRAMBLE_KEY_SIZE];  /* X25519 (DM sessions / DH only) */
+    /* Ed25519 signing identity (Phase 1). Since the Phase 4 rebind this is
+     * THE identity key: the node address derives from it, and identity
+     * attestations are signed with it, binding address to keyholder. */
+    uint8_t ed25519_public_key[BRAMBLE_ED25519_PUBKEY_SIZE];
+    uint8_t ed25519_private_key[BRAMBLE_ED25519_SECKEY_SIZE];
+    uint32_t address;     /* crypto_derive_address(ed25519_public_key), SHA256[0:4] */
+    uint32_t pubkey_hash; /* crypto_derive_pubkey_hash(ed25519_public_key), SHA256[4:8] */
 } bramble_identity_t;
 
 int crypto_generate_identity(bramble_identity_t* id);
@@ -49,6 +62,27 @@ uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uin
                                    size_t data_len);
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash);
 int crypto_random(uint8_t* buf, size_t len);
+
+/* Ed25519 sign/verify/keypair. Keygen draws its 32-byte seed from
+ * crypto_random(), so on device it sits behind the SEC-L1 fail-closed
+ * entropy gate (crypto_entropy_fill); returns nonzero and writes no key
+ * material when the gate is shut. Verify rejects non-canonical (S >= L)
+ * signatures on both backends. */
+/* Deterministic Ed25519 keypair from a caller-supplied 32-byte seed (RFC
+ * 8032 key expansion; the libsodium sk layout seed||pub applies). Used
+ * where reproducibility matters (gosim node identities); crypto_ed25519_
+ * keypair below is the entropy-gated production path. The caller owns the
+ * seed's lifetime and cleanup. */
+int crypto_ed25519_keypair_from_seed(const uint8_t seed[32],
+                                     uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                     uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]);
+int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]);
+int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,
+                        size_t msg_len, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
+bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           const uint8_t* msg, size_t msg_len,
+                           const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
 
 /* Default public channel PSK — well-known, not secret */
 #define BRAMBLE_PUBLIC_CHANNEL_PSK "bramble-default"

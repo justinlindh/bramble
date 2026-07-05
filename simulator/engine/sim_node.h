@@ -95,6 +95,17 @@ typedef struct {
     float y;
     bool active;
 
+    /* Per-node identity Phase 4: the node's PERSISTENT Ed25519 identity
+     * keypair, the sim analog of firmware's NVS-stored identity. Created
+     * ONCE in node_array_add and surviving leave/rejoin (node_activate
+     * models a reboot and must not touch it), deterministic from the node
+     * id so scenario runs are reproducible. addr above is DERIVED from
+     * ident_ed_pub exactly as firmware derives it post-rebind
+     * (crypto_derive_address = SHA256[0:4]), which is what lets the REAL
+     * identity_store addr<->key check accept sim attestations. */
+    uint8_t ident_ed_pub[32];
+    uint8_t ident_ed_priv[64];
+
     /* Bramble protocol state */
     routing_table_t routes;
     neighbor_table_t neighbors;

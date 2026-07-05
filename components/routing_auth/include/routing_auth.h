@@ -98,4 +98,34 @@ int receipt_verify(const bramble_delivery_receipt_t* r);
 void data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]);
 int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]);
 
+/*
+ * Per-node identity Phase 3 (relay gate). Authenticates an identity
+ * attestation's origin-stable fields
+ *   src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64)
+ *                   || seq(6)
+ * under the network key with label "bramble-ident-relay-v1", excluding
+ * only the header: hop_limit is the single field a relay mutates, so the
+ * MAC survives every flood hop unchanged and relays pass the frame
+ * through byte-identical except that decrement.
+ *
+ * Division of labor (see packet.h's attestation struct comment): the
+ * frame's Ed25519 sig carries the identity claim's TRUTH; this MAC gates
+ * RELAY PRIVILEGE only. Relays verify THIS (cheap, one HMAC) and never
+ * run the Ed25519 verify; pinning receivers verify both, MAC first. seq
+ * is drawn once at origination (control_seq_next) and MAC-covered, so
+ * receivers can replay-check (src_addr, seq) on authenticated values.
+ *
+ * ident_relay_sign fills a->auth_hmac; the originator calls it once,
+ * AFTER crypto_ed25519_sign fills a->sig and after seq is written (both
+ * are MAC-covered), right before serializing. ident_relay_verify
+ * recomputes and constant-time-compares; returns nonzero (true) iff it
+ * matches. Forgeable under network_key.h's unprovisioned public-PSK
+ * fallback, same as every other helper here: this closes the KEYLESS
+ * propagation/grinding vector, not the keyed-insider residual (a keyed
+ * insider's garbage-sig frame still floods, bounded by budget; receivers
+ * reject it at the Ed25519 check).
+ */
+void ident_relay_sign(bramble_identity_attestation_t* a);
+int ident_relay_verify(const bramble_identity_attestation_t* a);
+
 #endif

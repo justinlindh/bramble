@@ -21,12 +21,27 @@
 /* public_channel.h includes channel_key.h which includes crypto.h (via -I) */
 #include "../../components/channel/include/channel_key.h"
 #include "../../components/channel/include/public_channel.h"
+/* Per-node identity Phase 3: verified TOFU pin store + attestation frame */
+#include "../../components/identity/include/identity_store.h"
 
 /* ─── Extended per-node state (new components) ──────────────────────────── */
 typedef struct {
     mailbox_t mailbox;           /* store-and-forward for offline destinations */
     location_manager_t location; /* position sharing manager */
     bool initialized;
+    /* Per-node identity Phase 3/4: the Ed25519 identity keypair lives on
+     * sim_node_t itself since the Phase 4 rebind (node->addr derives from
+     * it; see sim_node.h). Here: a pattern X25519 pub (gosim does not
+     * model the DM key exchange; the attestation binds whatever bytes are
+     * attested), a monotonically drawn origin seq (mirrors firmware's
+     * control_seq_next counter; gosim does not model the replay window,
+     * see _handle_rreq's ws 1.3b note in bridge.c), and the node's own
+     * TOFU pin store. ident_initialized guards first-join initialization
+     * so a rejoin keeps seq and pin state. */
+    bool ident_initialized;
+    uint8_t ident_x25519_pub[32];
+    uint64_t ident_seq;
+    identity_store_t ident_pins;
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
@@ -48,6 +63,19 @@ void bridge_node_ext_init_all(void);
  *   (set simulated position, assign simulated group membership, etc.)
  */
 void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, uint64_t now_us);
+
+/*
+ * bridge_handle_generate_attestation (per-node identity Phase 3):
+ *   Fires a scripted EVT_GENERATE_ATTESTATION: the named node originates a
+ *   signed, relay-gate-MACed identity attestation exactly as firmware's
+ *   send_identity_attestation does (Ed25519 sign over the canonical
+ *   message, then seq, then ident_relay_sign, then broadcast on the
+ *   BROADCAST budget lane). event->data.node.addr != 0 claims that address
+ *   instead of the node's own (the impersonation scenario).
+ */
+void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
+                                        radio_config_t* radio, pcg32_state_t* rng,
+                                        event_queue_t* events, metrics_state_t* metrics);
 
 /*
  * bridge_apply_duty_cycle_cap:

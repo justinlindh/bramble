@@ -389,3 +389,52 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     }
     return ESP_OK;
 }
+
+/* IDENTITY_ATTESTATION (158 bytes, fixed) */
+esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestation_t* p,
+                                                 uint8_t* buf, size_t len) {
+    if (len < IDENTITY_ATTESTATION_SIZE)
+        return ESP_ERR_INVALID_SIZE;
+    esp_err_t r = bramble_header_serialize(&p->header, buf, len);
+    if (r != ESP_OK)
+        return r;
+    put_be32(buf + B, p->src_addr);
+    memcpy(buf + B + 4, p->x25519_pub, 32);
+    memcpy(buf + B + 36, p->ed25519_pub, 32);
+    memcpy(buf + B + 68, p->sig, 64);
+    memcpy(buf + B + 132, p->auth_hmac, 8);
+    memcpy(buf + B + 140, p->seq, 6);
+    return ESP_OK;
+}
+esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_t* p,
+                                                   const uint8_t* buf, size_t len) {
+    /* Exact length: the frame is fixed-size, so a trailing-garbage frame is
+     * as malformed as a truncated one. */
+    if (len != IDENTITY_ATTESTATION_SIZE)
+        return ESP_ERR_INVALID_SIZE;
+    esp_err_t r = bramble_header_deserialize(&p->header, buf, len);
+    if (r != ESP_OK)
+        return r;
+    p->src_addr = get_be32(buf + B);
+    memcpy(p->x25519_pub, buf + B + 4, 32);
+    memcpy(p->ed25519_pub, buf + B + 36, 32);
+    memcpy(p->sig, buf + B + 68, 64);
+    memcpy(p->auth_hmac, buf + B + 132, 8);
+    memcpy(p->seq, buf + B + 140, 6);
+    return ESP_OK;
+}
+
+/* Canonical signed message: "bramble-ident-v1" || src_addr(4, big-endian)
+ * || x25519_pub(32) || ed25519_pub(32). Header fields are deliberately
+ * absent (hop_limit/packet_id are relay-mutable/per-send); the context
+ * prefix domain-separates this from every other Ed25519 use. */
+esp_err_t bramble_identity_attestation_signed_msg(const bramble_identity_attestation_t* p,
+                                                  uint8_t* buf, size_t len) {
+    if (len < IDENTITY_ATTESTATION_MSG_SIZE)
+        return ESP_ERR_INVALID_SIZE;
+    memcpy(buf, IDENTITY_ATTESTATION_MSG_CONTEXT, IDENTITY_ATTESTATION_MSG_CONTEXT_LEN);
+    put_be32(buf + IDENTITY_ATTESTATION_MSG_CONTEXT_LEN, p->src_addr);
+    memcpy(buf + IDENTITY_ATTESTATION_MSG_CONTEXT_LEN + 4, p->x25519_pub, 32);
+    memcpy(buf + IDENTITY_ATTESTATION_MSG_CONTEXT_LEN + 36, p->ed25519_pub, 32);
+    return ESP_OK;
+}

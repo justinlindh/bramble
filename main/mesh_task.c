@@ -24,6 +24,7 @@
 #include "dm_session.h"
 #include "network_key.h"
 #include "routing_auth.h"
+#include "identity_store.h"
 #include "public_channel.h"
 #include "msg_store.h"
 #include "discovery.h"
@@ -147,6 +148,10 @@ static replay_table_t s_replay; /* SEC-M1: per-sender authenticated nonce-counte
 static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK/receipt/beacon)
                                            replay window, keyed on the authenticated signer address,
                                            separate from the data-plane s_replay above */
+/* Per-node identity Phase 3 (Part C): this node's verified TOFU pin table
+ * (address -> Ed25519/X25519 pubs), fed by handle_identity_attestation
+ * below. RAM only; pins reset on reboot and TOFU re-establishes. */
+static identity_store_t s_identity_pins;
 static replay_deferred_t s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate. Forwarded RREQs are gated separately, by the global
  * s_rreq_fwd_rl budget below (ws 1.3d, SEC-M4); see SECURITY-MODEL.md for the
@@ -301,6 +306,12 @@ typedef struct {
     uint32_t src_addr;
     int channel_idx;
     bramble_key_exchange_t msg;
+    /* Phase 4 DM key continuity: the pinned X25519 key for src_addr,
+     * SNAPSHOTTED by handle_ke_envelope on the mesh task (the only task
+     * that mutates s_identity_pins) so the worker never touches the pin
+     * store cross-thread. have_pin false = no pin known (TOFU-grade). */
+    bool have_pin;
+    uint8_t pinned_x25519[32];
 } dm_handshake_work_item_t;
 static QueueHandle_t s_handshake_work_q;
 
@@ -1205,6 +1216,109 @@ static int send_beacon(void) {
     return ret;
 }
 
+/* ── Identity attestation TX (per-node identity Phase 2) ────────────── */
+
+/* Low-cadence self-signed identity broadcast: 158 bytes (the relay-gated
+ * frame, IDENTITY_ATTESTATION_SIZE) every 15 minutes is the design's
+ * approved airtime budget (~0.02-0.05% duty per node at the shipping
+ * profiles); do not raise the cadence without re-flagging that budget. */
+#define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
+/* Short retry after a failed/denied send, so a boot-time budget denial
+ * does not leave the node unattested for a full interval. */
+#define ATTESTATION_RETRY_MS 60000u
+
+static uint32_t s_attestation_last_ms;
+static uint32_t s_attestation_wait_ms; /* 0 = boot send not attempted yet */
+
+/*
+ * Build, self-sign and broadcast this node's identity attestation
+ * (PKT_TYPE_IDENTITY_ATTESTATION): {address, X25519 pub, Ed25519 pub}
+ * signed by the node's OWN Ed25519 key over the canonical message
+ * bramble_identity_attestation_signed_msg builds (packet.h), then
+ * relay-gated under the network-key MAC (Phase 3, ident_relay_sign): the
+ * Ed25519 sig carries the claim's truth, the MAC carries relay privilege
+ * (see the struct comment in packet.h). Ordering is load-bearing: seq is
+ * drawn and the Ed25519 sig computed BEFORE ident_relay_sign, because the
+ * MAC covers both. seq is drawn once here at origination and never
+ * re-drawn by relays (the frame floods unmodified except hop_limit).
+ *
+ * Broadcast on the BROADCAST budget lane (TX_KIND_DATA_BROADCAST, the
+ * same tier the beacon and the flood relay debit). hop_limit uses the
+ * same origination helper as flood DATA/ACK sends: ROUTE_HOP_LIMIT_MAX
+ * reactive, the configured flood hop budget under s_flood_transport.
+ */
+static int send_identity_attestation(void) {
+    if (!s_identity)
+        return -1;
+
+    /* ws 1.3b pattern (send_ack): draw the 48-bit origin seq up front,
+     * fail-closed. No seq means no attestation goes out; the retry timer
+     * covers it exactly like a budget denial. */
+    uint64_t att_seq;
+    if (control_seq_next(&att_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, skipping identity attestation");
+        return -1;
+    }
+
+    bramble_identity_attestation_t att = {0};
+    att.header.version = BRAMBLE_VERSION;
+    att.header.type = PKT_TYPE_IDENTITY_ATTESTATION;
+    att.header.flags = 0;
+    att.header.hop_limit = flood_origination_hop_limit(s_flood_transport, s_flood_hop_limit);
+    att.header.dest_addr = 0xFFFFFFFF; /* broadcast */
+    att.header.packet_id = next_packet_id();
+
+    att.src_addr = s_identity->address;
+    memcpy(att.x25519_pub, s_identity->public_key, sizeof(att.x25519_pub));
+    memcpy(att.ed25519_pub, s_identity->ed25519_public_key, sizeof(att.ed25519_pub));
+
+    uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
+    if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK) {
+        ESP_LOGE(TAG, "Attestation message build failed");
+        return -1;
+    }
+    if (crypto_ed25519_sign(s_identity->ed25519_private_key, msg, sizeof(msg), att.sig) != 0) {
+        ESP_LOGE(TAG, "Attestation sign failed");
+        return -1;
+    }
+
+    /* Relay gate (Phase 3): write seq, then MAC. Both after the Ed25519
+     * sign above, since the MAC covers sig and seq. */
+    att.seq[0] = (uint8_t)(att_seq >> 40);
+    att.seq[1] = (uint8_t)(att_seq >> 32);
+    att.seq[2] = (uint8_t)(att_seq >> 24);
+    att.seq[3] = (uint8_t)(att_seq >> 16);
+    att.seq[4] = (uint8_t)(att_seq >> 8);
+    att.seq[5] = (uint8_t)att_seq;
+    ident_relay_sign(&att);
+
+    uint8_t buf[IDENTITY_ATTESTATION_SIZE];
+    if (bramble_identity_attestation_serialize(&att, buf, sizeof(buf)) != ESP_OK) {
+        ESP_LOGE(TAG, "Attestation serialize failed");
+        return -1;
+    }
+
+    int ret = mesh_tx(buf, IDENTITY_ATTESTATION_SIZE, TX_KIND_DATA_BROADCAST);
+    if (ret == TX_GATE_OK) {
+        ESP_LOGI(TAG, "Identity attestation TX (addr=%08" PRIX32 ")", att.src_addr);
+    } else if (ret == TX_GATE_ERR_BUDGET) {
+        ESP_LOGD(TAG, "Identity attestation deferred: airtime budget exhausted");
+    } else {
+        ESP_LOGE(TAG, "Identity attestation TX failed: %d", ret);
+    }
+    return ret;
+}
+
+/* Send now and schedule the next attempt: the full interval on success,
+ * the short retry on budget denial / radio failure. Called from the
+ * post-boot send hook, the periodic maintenance tick, and identity
+ * regeneration (so a new identity is announced promptly). */
+static void attempt_identity_attestation(uint32_t t) {
+    int rc = send_identity_attestation();
+    s_attestation_last_ms = t;
+    s_attestation_wait_ms = (rc == TX_GATE_OK) ? ATTESTATION_INTERVAL_MS : ATTESTATION_RETRY_MS;
+}
+
 /*
  * ws 1.3b infra: control-plane seq draw + replay check. No callers yet
  * (tasks 2-6 wire these into the five control-plane build/handle sites);
@@ -1288,6 +1402,10 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
             return;
         }
         ESP_LOGW(TAG, "New identity: %08" PRIX32, s_identity->address);
+        /* Announce the regenerated identity promptly (Phase 2): new
+         * address + keys mean the old attestation no longer describes
+         * this node. Budget-gated like every attestation send. */
+        attempt_identity_attestation(now_ms());
         /* Notify webapp */
         cJSON* params = cJSON_CreateObject();
         char addr_buf[12];
@@ -1320,10 +1438,20 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
         /* ws 1.3c: only established neighbors count toward the pre-commit
          * corroboration quorum (NEW-SEC-4 anti-Sybil lever). Computed after
          * neighbor_update above so the current beacon's tenure (beacon_count,
-         * first_seen_ms) is reflected before the established check. */
+         * first_seen_ms) is reflected before the established check.
+         *
+         * Phase 4 identity gate on top: once ANY verified identity is
+         * pinned, only PINNED peers corroborate (a fabricated source
+         * address cannot be pinned post-rebind: it has no deriving Ed
+         * key); with zero pins the gate falls back to tenure alone so a
+         * fresh mesh still converges. Full semantics + tests:
+         * identity_store_quorum_eligible (identity_store.h). Runs on the
+         * same task as handle_identity_attestation, so no locking. */
         bool established = neighbor_is_established(&s_neighbors, beacon.src_addr, t);
+        bool quorum_ok =
+            identity_store_quorum_eligible(&s_identity_pins, beacon.src_addr, established);
         timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
-                             (uint8_t)beacon.time_confidence, beacon.src_addr, established, t);
+                             (uint8_t)beacon.time_confidence, beacon.src_addr, quorum_ok, t);
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -3137,6 +3265,121 @@ static void forward_data_packet(const uint8_t* data, uint8_t len, const bramble_
     }
 }
 
+/*
+ * Per-node identity Phase 3 (Part B): receive, pin, and flood-relay an
+ * identity attestation. Verification ORDER is the security design:
+ *
+ *   1. exact-length deserialize;
+ *   2. ident_relay_verify: the CHEAP network-key MAC, checked before
+ *      anything else. Fail = drop: no relay, no pinning, no Ed25519
+ *      verify ever runs. Keyless frames die at the first hop, so an
+ *      outsider can neither get spam flooded nor grind this node's CPU
+ *      with Ed25519 verifies;
+ *   3. control_replay_ok on (src_addr, seq), both MAC-covered, so a
+ *      captured attestation cannot be re-injected (packet_id is NOT
+ *      MAC-covered, so the dispatch s_dedup gate alone would not stop a
+ *      replay with a rewritten packet_id; this does);
+ *   4. flood dedup (s_flood_dedup, packet_id ^ src_addr, the same
+ *      src-qualified key the DATA flood uses);
+ *   5. DELIVER to the identity module regardless of the relay decision:
+ *      identity_store_handle_attestation runs the one receive-side
+ *      Ed25519 verify and TOFU-pins (see identity_store.h);
+ *   6. RELAY exactly like the broadcast DATA flood: channel_flood_decide
+ *      (hop-limit floor, duplicate/own-echo suppression, airtime budget)
+ *      + the shared jittered schedule_flood_relay queue. The frame
+ *      rebroadcasts UNMODIFIED except the hop_limit decrement (the MAC
+ *      excludes the header, so pass-through is valid; seq is never
+ *      re-drawn by relays).
+ *
+ * Residual (accepted): relays do NOT Ed25519-verify, so a MAC-valid
+ * frame with a garbage sig (a keyed insider misbehaving) still floods,
+ * bounded by the airtime budget; every RECEIVER rejects it at the
+ * Ed25519 check and counts it (identity_store's sig_failures).
+ */
+static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
+    bramble_identity_attestation_t att;
+    if (bramble_identity_attestation_deserialize(&att, data, len) != ESP_OK) {
+        ESP_LOGW(TAG, "Invalid identity attestation (len=%u)", len);
+        return;
+    }
+
+    if (!ident_relay_verify(&att)) {
+        ESP_LOGW(TAG, "Identity attestation auth failed src=%08" PRIX32 ", drop", att.src_addr);
+        return;
+    }
+
+    uint64_t att_seq = ((uint64_t)att.seq[0] << 40) | ((uint64_t)att.seq[1] << 32) |
+                       ((uint64_t)att.seq[2] << 24) | ((uint64_t)att.seq[3] << 16) |
+                       ((uint64_t)att.seq[4] << 8) | (uint64_t)att.seq[5];
+    if (!control_replay_ok(att.src_addr, att_seq)) {
+        ESP_LOGW(TAG, "Identity attestation replay src=%08" PRIX32, att.src_addr);
+        return;
+    }
+
+    uint32_t flood_key = att.header.packet_id ^ att.src_addr;
+    bool is_dup = dedup_check_and_add(&s_flood_dedup, flood_key, now_ms());
+
+    /* Deliver locally regardless of the relay decision below. */
+    identity_pin_result_t pin =
+        identity_store_handle_attestation(&s_identity_pins, &att, s_identity->address, now_ms());
+    switch (pin) {
+    case IDENTITY_PIN_NEW:
+        ESP_LOGI(TAG, "Identity pinned: %08" PRIX32 " (%d pinned)", att.src_addr,
+                 identity_store_count(&s_identity_pins));
+        break;
+    case IDENTITY_PIN_CONFLICT:
+        /* Impersonation detected: a network-key holder attested this
+         * address under DIFFERENT keys than the pinned binding. First
+         * seen wins; the original binding survives. */
+        ESP_LOGW(TAG,
+                 "IDENTITY CONFLICT for %08" PRIX32 ": attestation with different keys REFUSED"
+                 " (conflicts=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.conflicts);
+        break;
+    case IDENTITY_PIN_BAD_SIG:
+        ESP_LOGW(TAG,
+                 "Identity attestation Ed25519 sig invalid src=%08" PRIX32 " (keyed garbage,"
+                 " sig_failures=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.sig_failures);
+        break;
+    case IDENTITY_PIN_ADDR_MISMATCH:
+        /* Phase 4 address<->key binding: a keyed member attested an
+         * address its own Ed25519 key does not derive to. Impersonation
+         * attempt (or a badly broken sender), refused on first contact. */
+        ESP_LOGW(TAG,
+                 "IDENTITY ADDR MISMATCH: %08" PRIX32 " claimed without the deriving key,"
+                 " REFUSED (addr_mismatches=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.addr_mismatches);
+        break;
+    case IDENTITY_PIN_REFRESHED:
+    case IDENTITY_PIN_SELF:
+    default:
+        break;
+    }
+
+    /* Relay through the SAME engine as the broadcast DATA flood
+     * (handle_data): channel_flood_decide + schedule_flood_relay, on the
+     * BROADCAST budget lane. Own-echo folds into is_duplicate exactly like
+     * the DATA flood's is_own_echo. */
+    bool is_own_echo = (att.src_addr == s_identity->address);
+    bool budget_permits = tx_gate_check(len, TX_KIND_DATA_BROADCAST);
+    channel_flood_decision_t flood = channel_flood_decide(
+        att.header.hop_limit, is_dup || is_own_echo, budget_permits, esp_random());
+    if (flood.should_relay) {
+        uint8_t relay_buf[IDENTITY_ATTESTATION_SIZE];
+        memcpy(relay_buf, data, len);
+        bramble_header_t relay_hdr = att.header;
+        relay_hdr.hop_limit = flood.new_hop_limit;
+        bramble_header_serialize(&relay_hdr, relay_buf, HEADER_SIZE);
+        ESP_LOGI(TAG, "Identity attestation relay from %08" PRIX32 " hop_limit %u->%u",
+                 att.src_addr, att.header.hop_limit, flood.new_hop_limit);
+        schedule_flood_relay(relay_buf, len, flood.jitter_ms, flood_key, TX_KIND_DATA_BROADCAST);
+    } else if (!budget_permits) {
+        ESP_LOGD(TAG, "Identity attestation relay denied by airtime budget, src=%08" PRIX32,
+                 att.src_addr);
+    }
+}
+
 static void mesh_process_rx_packet(const rx_packet_t* pkt) {
     if (pkt->len < HEADER_SIZE) {
         ESP_LOGW(TAG, "Packet too short: %u bytes", pkt->len);
@@ -3308,6 +3551,32 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
             }
         }
 
+        /* Per-node identity Phase 3: the same suppression bookkeeping for a
+         * flooded identity attestation. Copies 2+ of a relayed attestation
+         * land here at the dispatch dedup gate (same packet_id: the frame
+         * relays unmodified except hop_limit); count each AUTHENTICATED
+         * copy against any pending relay of ours so it cancels after
+         * FLOOD_SUPPRESS_AFTER overheard copies. Mirrors the flooded-ACK
+         * block above, including the MAC-before-counting rule: without
+         * ident_relay_verify here a keyless party could replay a
+         * garbage-MAC copy to cancel a genuine relay and punch a coverage
+         * hole. Relays still never Ed25519-verify; this is the cheap MAC
+         * only. */
+        if (header.type == PKT_TYPE_IDENTITY_ATTESTATION) {
+            bramble_identity_attestation_t dup_att;
+            if (bramble_identity_attestation_deserialize(&dup_att, pkt->data, pkt->len) == ESP_OK &&
+                ident_relay_verify(&dup_att)) {
+                uint32_t att_dup_key = dup_att.header.packet_id ^ dup_att.src_addr;
+                if (channel_flood_note_overheard(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY,
+                                                 att_dup_key)) {
+                    ESP_LOGD(TAG,
+                             "Attestation relay suppressed after %d overheard copies,"
+                             " pkt=%08" PRIX32,
+                             FLOOD_SUPPRESS_AFTER, header.packet_id);
+                }
+            }
+        }
+
         ESP_LOGD(TAG, "Duplicate packet key=%08" PRIX32 " (pkt=%08" PRIX32 " type=0x%02X)",
                  dedup_key, header.packet_id, header.type);
         /* Note: dedup drop already recorded in initial RX event - no separate event needed */
@@ -3430,6 +3699,11 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
         break;
     case PKT_TYPE_PROBE_ACK:
         handle_probe_ack(pkt->data, pkt->len, pkt->rssi, pkt->snr);
+        break;
+    case PKT_TYPE_IDENTITY_ATTESTATION:
+        /* Phase 3: verify (cheap MAC first) + TOFU-pin + flood relay.
+         * See handle_identity_attestation for the full order contract. */
+        handle_identity_attestation(pkt->data, pkt->len);
         break;
     default:
         ESP_LOGD(TAG, "Unhandled packet type 0x%02X", header.type);
@@ -3694,6 +3968,13 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         int32_t jitter =
             ((int32_t)(j[0] | (j[1] << 8)) % (BEACON_JITTER_MS * 2)) - BEACON_JITTER_MS;
         *beacon_interval = base_interval + jitter;
+    }
+
+    /* Periodic identity attestation (Phase 2): low cadence, budget-gated.
+     * s_attestation_wait_ms stays 0 until the post-boot send hook arms the
+     * schedule, so this never fires before the radio-up boot send. */
+    if (s_attestation_wait_ms != 0 && (t - s_attestation_last_ms) >= s_attestation_wait_ms) {
+        attempt_identity_attestation(t);
     }
 
     /* Periodic neighbor purge + route maintenance */
@@ -3972,6 +4253,11 @@ static void mesh_task(void* param) {
     ESP_LOGI(TAG, "=== BOOT STAGE: sending first beacon ===");
     send_beacon();
     last_beacon_ms = now_ms();
+
+    /* Post-boot identity attestation (Phase 2): radio is up and the beacon
+     * jitter already spread us out; announce {addr, X25519, Ed25519} once
+     * now, then every ATTESTATION_INTERVAL_MS via periodic maintenance. */
+    attempt_identity_attestation(now_ms());
 
     ESP_LOGI(TAG, "=== BOOT STAGE: entering main mesh loop ===");
 
@@ -4514,8 +4800,8 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
  * INIT can never be accepted as first-contact against an already-known
  * identity.
  */
-static void process_ke_init(uint32_t src_addr, int channel_idx,
-                            const bramble_key_exchange_t* init) {
+static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t* init,
+                            const uint8_t* pinned_x25519_or_null) {
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
     dm_session_t* existing = dm_lookup(&s_dm_table, src_addr);
     int have_peer_id = dm_session_has_peer_id(existing);
@@ -4528,7 +4814,21 @@ static void process_ke_init(uint32_t src_addr, int channel_idx,
         memcpy(peer_id_pub, existing->peer_id_pub, 32);
     xSemaphoreGive(s_dm_mutex);
 
-    if (dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL) != 0) {
+    int vrc = dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL,
+                             pinned_x25519_or_null);
+    if (vrc == DM_VERIFY_ERR_PIN_MISMATCH) {
+        /* Phase 4 DM key continuity RED FLAG: this address has an
+         * attestation-verified pinned X25519 key and the handshake showed
+         * up with a DIFFERENT one. Refuse the session loudly; a silent
+         * accept here would let a keyed insider splice itself into a
+         * known peer's DMs. */
+        ESP_LOGW(TAG,
+                 "DM KEY CONTINUITY: INIT from %08" PRIX32 " does not match its pinned identity"
+                 " key, session REFUSED",
+                 src_addr);
+        return;
+    }
+    if (vrc != 0) {
         ESP_LOGW(TAG, "INIT verify failed from %08" PRIX32, src_addr);
         return;
     }
@@ -4576,7 +4876,8 @@ static void process_ke_init(uint32_t src_addr, int channel_idx,
  * we sent the matching INIT (dm_pending_eph_t; dm_session_t itself has no
  * field for in-flight handshake material, see its declaration above).
  */
-static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp) {
+static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* resp,
+                            const uint8_t* pinned_x25519_or_null) {
     dm_pending_eph_t* pe = pending_eph_lookup(src_addr);
     if (!pe) {
         ESP_LOGW(TAG, "RESP from %08" PRIX32 " with no matching pending INIT", src_addr);
@@ -4585,7 +4886,17 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
 
     uint16_t ke_epoch = (uint16_t)resp->key_id;
     uint8_t session_key[32];
-    if (dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch, session_key) != 0) {
+    int vrc = dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch,
+                             pinned_x25519_or_null, session_key);
+    if (vrc == DM_VERIFY_ERR_PIN_MISMATCH) {
+        /* Same red flag as process_ke_init: pinned peer, different DM key. */
+        ESP_LOGW(TAG,
+                 "DM KEY CONTINUITY: RESP from %08" PRIX32 " does not match its pinned identity"
+                 " key, session REFUSED",
+                 src_addr);
+        return;
+    }
+    if (vrc != 0) {
         ESP_LOGW(TAG, "RESP verify failed from %08" PRIX32, src_addr);
         return;
     }
@@ -4624,10 +4935,11 @@ static void handshake_worker_task(void* arg) {
         if (xQueueReceive(s_handshake_work_q, &item, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        const uint8_t* pinned = item.have_pin ? item.pinned_x25519 : NULL;
         if (item.msg.ke_type == KE_TYPE_INIT) {
-            process_ke_init(item.src_addr, item.channel_idx, &item.msg);
+            process_ke_init(item.src_addr, item.channel_idx, &item.msg, pinned);
         } else if (item.msg.ke_type == KE_TYPE_RESP) {
-            process_ke_resp(item.src_addr, &item.msg);
+            process_ke_resp(item.src_addr, &item.msg, pinned);
         }
     }
 }
@@ -4674,9 +4986,21 @@ static void handle_ke_envelope(uint32_t src_addr, int channel_idx, const uint8_t
     }
 
     dm_handshake_work_item_t item;
+    memset(&item, 0, sizeof(item));
     item.src_addr = src_addr;
     item.channel_idx = channel_idx;
     item.msg = msg;
+    /* Phase 4 DM key continuity: snapshot the pinned X25519 key for this
+     * peer HERE, on the mesh task (the only mutator of s_identity_pins),
+     * so the handshake worker verifies against an immutable copy instead
+     * of reading the pin store cross-thread. No pin = NULL downstream =
+     * TOFU-grade first contact (stated residual until the peer's
+     * attestation is heard and pinned). */
+    const identity_pin_t* pin = identity_store_lookup(&s_identity_pins, src_addr);
+    if (pin) {
+        item.have_pin = true;
+        memcpy(item.pinned_x25519, pin->x25519_pub, sizeof(item.pinned_x25519));
+    }
     if (xQueueSend(s_handshake_work_q, &item, 0) != pdTRUE) {
         ESP_LOGW(TAG, "Handshake work queue full, dropping KE from %08" PRIX32, src_addr);
     }
@@ -5204,6 +5528,7 @@ void mesh_task_start(bramble_identity_t* identity) {
     dedup_init(&s_delivered_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
+    identity_store_init(&s_identity_pins);
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     rreq_fwd_init(&s_rreq_fwd_rl, now_ms());
@@ -5850,6 +6175,22 @@ int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]) {
     memcpy(pubkey_out, s_identity->public_key, 32);
     xSemaphoreGive(s_state_mutex);
     return 0;
+}
+
+void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
+                                 uint32_t* addr_mismatches) {
+    /* Diagnostics-only reads of word-sized counters mutated exclusively on
+     * the mesh task (handle_identity_attestation); a momentarily stale
+     * value is fine for getStatus, so no mutex, matching the other
+     * counter-style getters. */
+    if (pins)
+        *pins = (uint32_t)identity_store_count(&s_identity_pins);
+    if (conflicts)
+        *conflicts = s_identity_pins.conflicts;
+    if (sig_failures)
+        *sig_failures = s_identity_pins.sig_failures;
+    if (addr_mismatches)
+        *addr_mismatches = s_identity_pins.addr_mismatches;
 }
 
 const char* mesh_get_peer_name(uint32_t addr) {

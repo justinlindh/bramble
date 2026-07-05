@@ -240,23 +240,27 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
 }
 
 int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* my_id,
-                   int have_peer_id, const uint8_t peer_id_pub[32]) {
+                   int have_peer_id, const uint8_t peer_id_pub[32],
+                   const uint8_t* pinned_peer_x25519_or_null) {
     /* Dispatch-confusion guard: without this, a message built as RESP
-     * (or any other type) but presented to dm_verify_init would still
-     * pass address binding, and on a first-contact call (have_peer_id==0,
-     * no tag to check at all) would be accepted outright as if it were a
-     * valid INIT. Domain-separated HKDF labels already prevent tag
-     * forgery across message types, but asserting ke_type closes the
-     * dispatch confusion itself rather than relying on that as the only
-     * defense. */
+     * (or any other type) but presented to dm_verify_init would, on a
+     * first-contact call (have_peer_id==0, no tag to check at all), be
+     * accepted outright as if it were a valid INIT. Domain-separated HKDF
+     * labels already prevent tag forgery across message types, but
+     * asserting ke_type closes the dispatch confusion itself rather than
+     * relying on that as the only defense. */
     if (msg->ke_type != KE_TYPE_INIT)
         return -1;
 
-    /* Address binding: without this an attacker could claim any address
-     * with an identity key of its own choosing. Applies on every message,
-     * first-contact included. */
-    if (crypto_derive_address(msg->long_term_pubkey) != msg->src_addr)
-        return -1;
+    /* Phase 4 pin continuity (replaces the pre-rebind
+     * derive_address(long_term_pubkey) == src_addr binding, which cannot
+     * hold now that the address derives from the Ed25519 identity key):
+     * when the caller holds an attestation-verified pin for src_addr, the
+     * handshake's X25519 identity key MUST be the pinned one. A public-key
+     * compare, not a secret: memcmp is fine. */
+    if (pinned_peer_x25519_or_null &&
+        memcmp(msg->long_term_pubkey, pinned_peer_x25519_or_null, 32) != 0)
+        return DM_VERIFY_ERR_PIN_MISMATCH;
 
     if (!have_peer_id) {
         /* First contact: no tag to check by design. */
@@ -345,15 +349,20 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
 
 int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
                    const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32], uint16_t ke_epoch,
-                   uint8_t session_key_out[32]) {
+                   const uint8_t* pinned_peer_x25519_or_null, uint8_t session_key_out[32]) {
     /* Dispatch-confusion guard, same rationale as dm_verify_init: reject a
      * message that isn't actually a RESP before doing anything else with
      * it. */
     if (resp->ke_type != KE_TYPE_RESP)
         return -1;
 
-    if (crypto_derive_address(resp->long_term_pubkey) != resp->src_addr)
-        return -1;
+    /* Phase 4 pin continuity, same semantics as dm_verify_init. src_addr
+     * tampering is caught below by the K_confirm tag (transcript_2 binds
+     * both addresses); this check is about a KNOWN peer showing up with a
+     * DIFFERENT X25519 key than its attested, pinned one. */
+    if (pinned_peer_x25519_or_null &&
+        memcmp(resp->long_term_pubkey, pinned_peer_x25519_or_null, 32) != 0)
+        return DM_VERIFY_ERR_PIN_MISMATCH;
 
     uint8_t ikm[128];
     if (dm_compute_ikm(my_id->private_key, my_eph_priv, resp->long_term_pubkey,

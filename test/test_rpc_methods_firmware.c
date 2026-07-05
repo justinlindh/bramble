@@ -85,6 +85,12 @@ void test_get_status_returns_expected_fields(void) {
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "battery_pct"));
     TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "peers"));
 
+    /* Per-node identity Phase 4 diagnostics (additive fields). */
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_pins"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_conflicts"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_sig_failures"));
+    TEST_ASSERT_NOT_NULL(cJSON_GetObjectItem(r, "identity_addr_mismatches"));
+
     cJSON_Delete(resp);
 }
 

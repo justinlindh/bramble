@@ -33,19 +33,37 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
                   const uint8_t my_eph_priv[32], uint32_t peer_addr, uint16_t ke_epoch,
                   const uint8_t* peer_id_pub_or_null, bramble_key_exchange_t* out);
 
+/* Distinct failure code for the Phase 4 pin-continuity check below, so the
+ * caller can log a key-change red flag differently from a generic verify
+ * failure. */
+#define DM_VERIFY_ERR_PIN_MISMATCH (-2)
+
 /*
- * Verifies message 1 from the responder's side. Always checks address
- * binding (crypto_derive_address(msg->long_term_pubkey) == msg->src_addr):
- * without this an attacker could claim any address with a key of its own
- * choosing. have_peer_id/peer_id_pub select the rekey path: when set, also
- * verifies the HMAC(K_ke_init, transcript_1) tag (constant-time), computing
- * DH3 as X25519(my_id_priv, msg->ephemeral_pubkey), the responder's own
- * identity bound to the initiator's ephemeral just received; by X25519
- * symmetry this equals the initiator's X25519(my_eph_priv, peer_id_pub),
- * so no responder ephemeral is needed to verify it. Returns 0 on success.
+ * Verifies message 1 from the responder's side.
+ *
+ * Address<->key binding (Phase 4 rebind): the node address derives from
+ * the Ed25519 identity key, NOT from long_term_pubkey (X25519), so the
+ * pre-rebind check crypto_derive_address(long_term_pubkey) == src_addr is
+ * gone; an X25519 key no longer proves an address by hashing. In its place
+ * pinned_peer_x25519_or_null carries the identity store's pinned X25519
+ * key for msg->src_addr when one exists (mesh_task snapshots it from the
+ * attestation-verified pin store): non-NULL means REQUIRE
+ * msg->long_term_pubkey to equal it byte for byte, else fail with
+ * DM_VERIFY_ERR_PIN_MISMATCH (a pinned peer whose DM key changed is a red
+ * flag, never silently accepted). NULL means no pin exists: proceed
+ * TOFU-grade (stated residual: the first-contact window is unauthenticated
+ * until the peer's attestation is heard and pinned).
+ *
+ * have_peer_id/peer_id_pub select the rekey path: when set, also verifies
+ * the HMAC(K_ke_init, transcript_1) tag (constant-time), computing DH3 as
+ * X25519(my_id_priv, msg->ephemeral_pubkey), the responder's own identity
+ * bound to the initiator's ephemeral just received; by X25519 symmetry
+ * this equals the initiator's X25519(my_eph_priv, peer_id_pub), so no
+ * responder ephemeral is needed to verify it. Returns 0 on success.
  */
 int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* my_id,
-                   int have_peer_id, const uint8_t peer_id_pub[32]);
+                   int have_peer_id, const uint8_t peer_id_pub[32],
+                   const uint8_t* pinned_peer_x25519_or_null);
 
 /*
  * Builds message 2 (RESP): computes the full quad-DH session key (the same
@@ -59,14 +77,18 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
                   uint16_t ke_epoch, bramble_key_exchange_t* out, uint8_t session_key_out[32]);
 
 /*
- * Verifies message 2 from the initiator's side: recomputes the session key,
- * verifies the K_confirm tag (constant-time), and address-checks
- * crypto_derive_address(resp->long_term_pubkey) == resp->src_addr. Returns
- * 0 and fills session_key_out on success.
+ * Verifies message 2 from the initiator's side: recomputes the session key
+ * and verifies the K_confirm tag (constant-time). src_addr integrity comes
+ * from transcript_2 (the tag binds both addresses), and the Phase 4
+ * pin-continuity check applies exactly as in dm_verify_init:
+ * pinned_peer_x25519_or_null non-NULL requires resp->long_term_pubkey to
+ * match the pinned key (DM_VERIFY_ERR_PIN_MISMATCH otherwise), NULL is the
+ * no-pin TOFU-grade residual. Returns 0 and fills session_key_out on
+ * success.
  */
 int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
                    const uint8_t my_eph_priv[32], const uint8_t my_eph_pub[32], uint16_t ke_epoch,
-                   uint8_t session_key_out[32]);
+                   const uint8_t* pinned_peer_x25519_or_null, uint8_t session_key_out[32]);
 
 /*
  * DM session table (Task 1.2). State-priority LRU with a bounded

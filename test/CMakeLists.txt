@@ -160,6 +160,48 @@ target_include_directories(test_ack_auth PRIVATE
 )
 target_link_libraries(test_ack_auth ssl crypto)
 
+# Identity attestation relay-gate MAC (per-node identity Phase 3, Part A):
+# the network-key MAC ("bramble-ident-relay-v1") over src_addr || x25519_pub
+# || ed25519_pub || sig || seq that gates relay privilege, excluding the
+# relay-mutable header. The test file #includes the component sources
+# directly (same pattern as test_flooded_ack.c).
+add_executable(test_ident_relay_auth
+    test_ident_relay_auth.c
+    unity/unity.c
+)
+target_include_directories(test_ident_relay_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+)
+target_link_libraries(test_ident_relay_auth ssl crypto)
+
+# Identity attestation relay gate + delivery order (Phase 3, Part B):
+# mirrors mesh_task.c's handle_identity_attestation with the real
+# components in the real order (MAC first, then replay, then dedup, then
+# deliver-regardless, then channel_flood_decide), including the
+# bad-MAC-drop, rewritten-packet-id-replay, and relays-never-Ed-verify
+# properties.
+add_executable(test_ident_relay_gate
+    test_ident_relay_gate.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/replay_window.c
+)
+target_include_directories(test_ident_relay_gate PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+)
+target_link_libraries(test_ident_relay_gate ssl crypto)
+
 # DATA origin authentication (Task 4-fix F1, Critical): the 8-byte network-key
 # auth_hmac over the masked header + src_addr that gates reverse-route
 # learning, plus the keyless-forged-DATA poisoning attack regression.
@@ -661,6 +703,51 @@ target_include_directories(test_crypto_vectors PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
 )
 target_link_libraries(test_crypto_vectors ssl crypto)
+
+# Ed25519 signature primitive vectors (RFC 8032 KAT + malleability)
+add_executable(test_ed25519
+    test_ed25519.c
+    unity/unity.c
+)
+target_include_directories(test_ed25519 PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_ed25519 ssl crypto)
+
+# Identity attestation frame: wire layout + canonical signed message +
+# tamper-fails-verify (per-node identity Phase 2)
+add_executable(test_identity_attestation
+    test_identity_attestation.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_identity_attestation PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_identity_attestation ssl crypto)
+
+# Verified TOFU identity pin store (per-node identity Phase 3, Part C):
+# first-seen-wins pinning, idempotent refresh, impersonation-conflict
+# rejection, LRU-by-last-confirmed eviction, Ed25519 verify on delivery.
+# The test file #includes the component sources directly (same pattern as
+# test_ident_relay_auth.c / test_flooded_ack.c).
+add_executable(test_identity_store
+    test_identity_store.c
+    unity/unity.c
+)
+target_include_directories(test_identity_store PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+)
+target_link_libraries(test_identity_store ssl crypto)
 
 # Integration test (3-node routing)
 add_executable(test_integration

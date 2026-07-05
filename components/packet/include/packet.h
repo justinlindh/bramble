@@ -39,6 +39,11 @@
 #define PKT_TYPE_PROBE 0x12     /* Network reachability probe */
 #define PKT_TYPE_PROBE_ACK 0x13 /* Probe acknowledgement */
 #define PKT_TYPE_LOCATION 0x14  /* Location share */
+/* Self-signed identity attestation (per-node identity Phase 2): a node's
+ * broadcast claim binding {address, X25519 pub, Ed25519 pub} under its own
+ * Ed25519 key. Additive on wire v4: un-upgraded peers drop it at the RX
+ * dispatch switch's default case. */
+#define PKT_TYPE_IDENTITY_ATTESTATION 0x15
 
 #define BEACON_FLAG_MAILBOX 0x01 /* Node willing to store messages */
 
@@ -73,6 +78,20 @@
 #define DELIVERY_RECEIPT_MAX_SIZE 68 /* was 62; +6 for seq (ws 1.3b control-plane freshness) */
 
 #define DELIVERY_RECEIPT_MAX_HOPS 8
+
+/* Identity attestation wire size: header(12) + src_addr(4) + x25519_pub(32)
+ * + ed25519_pub(32) + sig(64) + auth_hmac(8) + seq(6). Fixed-size frame;
+ * the deserializer rejects anything that is not EXACTLY this long.
+ * Phase 3 grew the frame by the relay-gate MAC + seq (144 -> 158); the
+ * canonical SIGNED message below is unchanged. */
+#define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 6) /* 158 */
+
+/* Canonical signed message for the attestation (see
+ * bramble_identity_attestation_signed_msg): context(16) + src_addr(4)
+ * + x25519_pub(32) + ed25519_pub(32) = 84 bytes. */
+#define IDENTITY_ATTESTATION_MSG_CONTEXT "bramble-ident-v1"
+#define IDENTITY_ATTESTATION_MSG_CONTEXT_LEN 16
+#define IDENTITY_ATTESTATION_MSG_SIZE (IDENTITY_ATTESTATION_MSG_CONTEXT_LEN + 4 + 32 + 32)
 
 /* Common header (12 bytes) */
 typedef struct {
@@ -222,6 +241,52 @@ typedef struct {
     uint32_t relay_path[DELIVERY_RECEIPT_MAX_HOPS];
 } bramble_delivery_receipt_t;
 
+/*
+ * Identity attestation (per-node identity Phase 2, relay-gated in Phase 3):
+ * a self-signed, flooded (low-cadence) binding of {src_addr, X25519 pub,
+ * Ed25519 pub}.
+ *
+ * sig is Ed25519 over the domain-separated canonical message
+ *
+ *   "bramble-ident-v1" || src_addr(4, big-endian) || x25519_pub(32)
+ *                      || ed25519_pub(32)
+ *
+ * (bramble_identity_attestation_signed_msg builds it; the Phase 3 pinning
+ * verifier checks these same bytes). The header is deliberately NOT
+ * covered: hop_limit is relay-mutable and packet_id is per-send, while the
+ * identity claim itself is stable across re-sends and relays.
+ *
+ * TWO authenticators, two jobs (Phase 3):
+ *   - sig (Ed25519) carries the identity claim's TRUTH: it is
+ *     self-authenticating, checkable by ANY member against the embedded
+ *     ed25519_pub with no shared secret needed. A network-key MAC adds
+ *     nothing to the claim's truth.
+ *   - auth_hmac (network-key MAC, label "bramble-ident-relay-v1",
+ *     routing_auth.h's ident_relay_sign/verify) gates RELAY PRIVILEGE,
+ *     preserving the branch invariant that keyless traffic never
+ *     propagates: an outsider without the network key can neither get its
+ *     spam flooded through the mesh nor grind relays with Ed25519
+ *     verifies, because relays check this CHEAP MAC first and never run
+ *     the Ed25519 verify at all (only pinning receivers do).
+ *   It covers src_addr || x25519_pub || ed25519_pub || sig || seq and NOT
+ *   the header (relay-mutable): a relay decrements hop_limit and passes
+ *   the frame through otherwise unmodified.
+ *
+ * seq is a fresh control-plane sequence (control_seq_next) drawn once at
+ * ORIGINATION and never re-drawn by relays; receivers replay-check it
+ * (src_addr-scoped) after the MAC verifies, so a captured attestation
+ * cannot be re-injected to burn relay airtime.
+ */
+typedef struct {
+    bramble_header_t header;
+    uint32_t src_addr;
+    uint8_t x25519_pub[32];
+    uint8_t ed25519_pub[32];
+    uint8_t sig[64];
+    uint8_t auth_hmac[8]; /* network-key relay gate (Phase 3) */
+    uint8_t seq[6];       /* 48-bit origin seq, big-endian (Phase 3) */
+} bramble_identity_attestation_t;
+
 /* Serialize/deserialize functions. Return ESP_OK or ESP_ERR_INVALID_SIZE. */
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len);
 esp_err_t bramble_header_deserialize(bramble_header_t* h, const uint8_t* buf, size_t len);
@@ -339,5 +404,16 @@ esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p
                                              size_t len);
 esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, const uint8_t* buf,
                                                size_t len);
+
+esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestation_t* p,
+                                                 uint8_t* buf, size_t len);
+/* Exact-length check: len must be IDENTITY_ATTESTATION_SIZE, not merely >=. */
+esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_t* p,
+                                                   const uint8_t* buf, size_t len);
+/* Write the IDENTITY_ATTESTATION_MSG_SIZE-byte canonical message the sig
+ * covers (see the struct comment). Signer and verifier both use this, so
+ * the signed bytes can never diverge between them. */
+esp_err_t bramble_identity_attestation_signed_msg(const bramble_identity_attestation_t* p,
+                                                  uint8_t* buf, size_t len);
 
 #endif /* BRAMBLE_PACKET_H */
