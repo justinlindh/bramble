@@ -4,6 +4,7 @@
 #include "network_key.h"
 #include "routing_auth.h"
 #include "packet.h"
+#include "test_net_key.h"
 
 #include "../components/crypto/crypto_host.c"
 #include "../components/network_key/network_key.c"
@@ -26,7 +27,9 @@
  * by reading send_rerr directly before writing any code here.
  */
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the RERR
+ * sign/verify + forgery asserts run against a PROVISIONED node. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) {}
 
 static bramble_rerr_t make_rerr(uint32_t reporter_addr, uint32_t packet_id) {
@@ -146,7 +149,8 @@ void test_rerr_verify_rejects_wrong_key_forgery(void) {
     network_key_set_provisioned(attacker_key);
     rerr_sign(&r);
 
-    network_key_clear();
+    /* Verifier holds the real fleet key, not the attacker's. */
+    network_key_set_provisioned(BRAMBLE_TEST_NET_KEY);
     TEST_ASSERT_FALSE(rerr_verify(&r));
 }
 

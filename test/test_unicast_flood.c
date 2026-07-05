@@ -4,6 +4,7 @@
 #include "packet.h"
 #include "dedup.h"
 #include "channel_flood.h"
+#include "test_net_key.h"
 
 #include "../components/crypto/crypto_host.c"
 #include "../components/network_key/network_key.c"
@@ -36,7 +37,9 @@
 #define OTHER_DEST 0xCCCCCCCCu
 #define ORIGIN 0x0A0A0A0Au
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the
+ * DATA-origin auth in the unicast-flood path runs against a PROVISIONED node. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 static bramble_header_t make_unicast_header(uint32_t dest, uint32_t pkt_id, uint8_t hop_limit) {

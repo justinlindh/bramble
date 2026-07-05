@@ -3,6 +3,7 @@
 #include "crypto.h"
 #include "network_key.h"
 #include "routing_auth.h"
+#include "test_net_key.h"
 #include "routing.h"
 #include "channel_flood.h"
 #include "packet.h"
@@ -44,7 +45,10 @@
 #define SELF 0xAAAAAAAAu
 #define DEST 0xDDDDDDDDu
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the
+ * DATA-origin auth in the flood-origination path runs against a PROVISIONED
+ * node. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 /* Build the exact flood DATA an originator floods: header (dest = D, hop_limit
