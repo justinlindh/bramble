@@ -1,0 +1,45 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.65rem 1rem;
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg));
+  border-bottom: 2px solid var(--danger);
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.icon {
+  color: var(--danger);
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  color: var(--danger);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.action {
+  flex-shrink: 0;
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.action:hover {
+  opacity: 0.88;
+}
