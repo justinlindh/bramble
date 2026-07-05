@@ -118,6 +118,14 @@ const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t 
     return NULL;
 }
 
+bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established) {
+    if (!established)
+        return false; /* tenure requirement is never relaxed */
+    if (identity_store_count(s) == 0)
+        return true; /* fresh mesh / fresh boot: fall back to tenure only */
+    return identity_store_lookup(s, address) != NULL;
+}
+
 int identity_store_count(const identity_store_t* s) {
     int n = 0;
     for (int i = 0; i < IDENTITY_STORE_CAPACITY; i++) {
