@@ -132,6 +132,66 @@ uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uin
            (uint32_t)mac[3];
 }
 
+int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {
+    /* Seed from crypto_random() (mirrors the device path, where the same call
+     * is the SEC-L1 entropy-gated source); fail closed on RNG failure. */
+    uint8_t seed[32];
+    if (crypto_random(seed, sizeof(seed)) != 0)
+        return -1;
+
+    int ret = -1;
+    EVP_PKEY* pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, seed, sizeof(seed));
+    if (pkey) {
+        size_t len = BRAMBLE_ED25519_PUBKEY_SIZE;
+        if (EVP_PKEY_get_raw_public_key(pkey, public_key, &len) == 1 &&
+            len == BRAMBLE_ED25519_PUBKEY_SIZE) {
+            /* libsodium secret-key layout: seed || public key. */
+            memcpy(private_key, seed, 32);
+            memcpy(private_key + 32, public_key, 32);
+            ret = 0;
+        }
+        EVP_PKEY_free(pkey);
+    }
+    OPENSSL_cleanse(seed, sizeof(seed));
+    return ret;
+}
+
+int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,
+                        size_t msg_len, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    /* OpenSSL takes the 32-byte seed half of the libsodium-format key. */
+    EVP_PKEY* pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, private_key, 32);
+    if (!pkey)
+        return -1;
+    int ret = -1;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    if (md && EVP_DigestSignInit(md, NULL, NULL, NULL, pkey) == 1) {
+        size_t sig_len = BRAMBLE_ED25519_SIG_SIZE;
+        if (EVP_DigestSign(md, sig, &sig_len, msg, msg_len) == 1 &&
+            sig_len == BRAMBLE_ED25519_SIG_SIZE)
+            ret = 0;
+    }
+    EVP_MD_CTX_free(md);
+    EVP_PKEY_free(pkey);
+    return ret;
+}
+
+bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           const uint8_t* msg, size_t msg_len,
+                           const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    EVP_PKEY* pkey = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, public_key,
+                                                 BRAMBLE_ED25519_PUBKEY_SIZE);
+    if (!pkey)
+        return false;
+    bool ok = false;
+    EVP_MD_CTX* md = EVP_MD_CTX_new();
+    if (md && EVP_DigestVerifyInit(md, NULL, NULL, NULL, pkey) == 1)
+        ok = EVP_DigestVerify(md, sig, BRAMBLE_ED25519_SIG_SIZE, msg, msg_len) == 1;
+    EVP_MD_CTX_free(md);
+    EVP_PKEY_free(pkey);
+    return ok;
+}
+
 int crypto_generate_identity(bramble_identity_t* id) {
     EVP_PKEY* pkey = NULL;
     EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, NULL);

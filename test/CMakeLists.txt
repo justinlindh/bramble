@@ -662,6 +662,18 @@ target_include_directories(test_crypto_vectors PRIVATE
 )
 target_link_libraries(test_crypto_vectors ssl crypto)
 
+# Ed25519 signature primitive vectors (RFC 8032 KAT + malleability)
+add_executable(test_ed25519
+    test_ed25519.c
+    unity/unity.c
+)
+target_include_directories(test_ed25519 PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_ed25519 ssl crypto)
+
 # Integration test (3-node routing)
 add_executable(test_integration
     test_integration.c
