@@ -1220,8 +1220,8 @@ static int send_beacon(void) {
 
 /* Low-cadence self-signed identity broadcast: 158 bytes (the relay-gated
  * frame, IDENTITY_ATTESTATION_SIZE) every 15 minutes is the design's
- * approved airtime budget; do not raise the cadence without re-flagging
- * that budget. */
+ * approved airtime budget (~0.02-0.05% duty per node at the shipping
+ * profiles); do not raise the cadence without re-flagging that budget. */
 #define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
 /* Short retry after a failed/denied send, so a boot-time budget denial
  * does not leave the node unattested for a full interval. */
