@@ -3325,6 +3325,15 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                  " sig_failures=%" PRIu32 ")",
                  att.src_addr, s_identity_pins.sig_failures);
         break;
+    case IDENTITY_PIN_ADDR_MISMATCH:
+        /* Phase 4 address<->key binding: a keyed member attested an
+         * address its own Ed25519 key does not derive to. Impersonation
+         * attempt (or a badly broken sender), refused on first contact. */
+        ESP_LOGW(TAG,
+                 "IDENTITY ADDR MISMATCH: %08" PRIX32 " claimed without the deriving key,"
+                 " REFUSED (addr_mismatches=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.addr_mismatches);
+        break;
     case IDENTITY_PIN_REFRESHED:
     case IDENTITY_PIN_SELF:
     default:

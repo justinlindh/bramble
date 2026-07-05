@@ -47,7 +47,6 @@
 #include <string.h>
 
 #define SELF_ADDR 0xCCCC0001u
-#define ORIGIN_ADDR 0xAAAA0001u
 
 void setUp(void) { network_key_clear(); }
 void tearDown(void) { network_key_clear(); }
@@ -120,9 +119,12 @@ static dispatch_result_t dispatch_attestation(node_state_t* n, const uint8_t* bu
 }
 
 /* Origination exactly as send_identity_attestation does it: canonical
- * message -> Ed25519 sign -> seq -> ident_relay_sign -> serialize. */
-static void originate(uint8_t out[IDENTITY_ATTESTATION_SIZE], uint32_t src_addr, uint64_t seq,
-                      uint32_t packet_id, uint8_t hop_limit, uint8_t ed_pub_out[32]) {
+ * message -> Ed25519 sign -> seq -> ident_relay_sign -> serialize.
+ * Post-rebind, src_addr IS derive(ed_pub) (any other claim is refused by
+ * the store's addr check, pinned in test_identity_store.c); the honest
+ * origin address is therefore derived here and returned. */
+static uint32_t originate(uint8_t out[IDENTITY_ATTESTATION_SIZE], uint64_t seq, uint32_t packet_id,
+                          uint8_t hop_limit, uint8_t ed_pub_out[32]) {
     bramble_identity_attestation_t att;
     memset(&att, 0, sizeof(att));
     att.header.version = BRAMBLE_VERSION;
@@ -130,11 +132,11 @@ static void originate(uint8_t out[IDENTITY_ATTESTATION_SIZE], uint32_t src_addr,
     att.header.hop_limit = hop_limit;
     att.header.dest_addr = 0xFFFFFFFFu;
     att.header.packet_id = packet_id;
-    att.src_addr = src_addr;
     for (int i = 0; i < 32; i++)
         att.x25519_pub[i] = (uint8_t)(0x40 + i);
     uint8_t sk[BRAMBLE_ED25519_SECKEY_SIZE];
     TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair(att.ed25519_pub, sk));
+    att.src_addr = crypto_derive_address(att.ed25519_pub);
     if (ed_pub_out)
         memcpy(ed_pub_out, att.ed25519_pub, 32);
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
@@ -149,6 +151,7 @@ static void originate(uint8_t out[IDENTITY_ATTESTATION_SIZE], uint32_t src_addr,
     ident_relay_sign(&att);
     TEST_ASSERT_EQUAL(ESP_OK,
                       bramble_identity_attestation_serialize(&att, out, IDENTITY_ATTESTATION_SIZE));
+    return att.src_addr;
 }
 
 /* Good frame: delivered (pinned) AND relayed, byte-identical except the
@@ -158,7 +161,7 @@ static void test_good_frame_delivered_and_relayed_unmodified(void) {
     node_init(&n);
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
     uint8_t ed_pub[32];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 8, ed_pub);
+    uint32_t origin = originate(frame, 0x0102030405u, 0x11112222u, 8, ed_pub);
 
     dispatch_result_t r =
         dispatch_attestation(&n, frame, sizeof(frame), SELF_ADDR, 1000, true, 12345);
@@ -168,7 +171,7 @@ static void test_good_frame_delivered_and_relayed_unmodified(void) {
     TEST_ASSERT_TRUE(r.relayed);
 
     /* Pinned the frame's own keys. */
-    const identity_pin_t* e = identity_store_lookup(&n.pins, ORIGIN_ADDR);
+    const identity_pin_t* e = identity_store_lookup(&n.pins, origin);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(ed_pub, e->ed25519_pub, 32);
 
@@ -186,7 +189,7 @@ static void test_bad_mac_dropped_not_relayed_not_pinned(void) {
     node_state_t n;
     node_init(&n);
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 8, NULL);
+    uint32_t origin = originate(frame, 0x0102030405u, 0x11112222u, 8, NULL);
 
     /* Control: good copy on a fresh node pins + relays. */
     node_state_t control;
@@ -202,7 +205,7 @@ static void test_bad_mac_dropped_not_relayed_not_pinned(void) {
         dispatch_attestation(&n, frame, sizeof(frame), SELF_ADDR, 1000, true, 12345);
     TEST_ASSERT_FALSE(r.mac_ok);
     TEST_ASSERT_FALSE(r.relayed);
-    TEST_ASSERT_NULL(identity_store_lookup(&n.pins, ORIGIN_ADDR));
+    TEST_ASSERT_NULL(identity_store_lookup(&n.pins, origin));
     /* The replay window was never fed: the SAME (src, seq) still passes
      * later when the genuine frame arrives (a bad-MAC frame must not be
      * able to pre-burn a victim's seq). */
@@ -220,7 +223,7 @@ static void test_replayed_seq_dropped_despite_fresh_packet_id(void) {
     node_state_t n;
     node_init(&n);
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 8, NULL);
+    originate(frame, 0x0102030405u, 0x11112222u, 8, NULL);
 
     dispatch_result_t first =
         dispatch_attestation(&n, frame, sizeof(frame), SELF_ADDR, 1000, true, 12345);
@@ -245,7 +248,7 @@ static void test_duplicate_suppressed_fresh_origination_relays(void) {
     node_state_t n;
     node_init(&n);
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 8, NULL);
+    uint32_t origin = originate(frame, 0x0102030405u, 0x11112222u, 8, NULL);
 
     dispatch_result_t first =
         dispatch_attestation(&n, frame, sizeof(frame), SELF_ADDR, 1000, true, 12345);
@@ -271,7 +274,7 @@ static void test_duplicate_suppressed_fresh_origination_relays(void) {
         dispatch_attestation(&n, frame2, sizeof(frame2), SELF_ADDR, 2000, true, 12345);
     TEST_ASSERT_TRUE(next.relayed);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_REFRESHED, next.pin);
-    const identity_pin_t* e = identity_store_lookup(&n.pins, ORIGIN_ADDR);
+    const identity_pin_t* e = identity_store_lookup(&n.pins, origin);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL_UINT32(2000, e->last_confirmed_ms);
 }
@@ -284,7 +287,7 @@ static void test_mac_valid_sig_invalid_relays_but_never_pins(void) {
     node_init(&n);
     bramble_identity_attestation_t att;
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 8, NULL);
+    uint32_t origin = originate(frame, 0x0102030405u, 0x11112222u, 8, NULL);
     TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_deserialize(&att, frame, sizeof(frame)));
 
     /* Keyed insider: garbage sig, then a VALID relay MAC over it. */
@@ -297,7 +300,7 @@ static void test_mac_valid_sig_invalid_relays_but_never_pins(void) {
     TEST_ASSERT_TRUE(r.mac_ok);
     TEST_ASSERT_TRUE(r.relayed); /* relays check the MAC only */
     TEST_ASSERT_EQUAL(IDENTITY_PIN_BAD_SIG, r.pin);
-    TEST_ASSERT_NULL(identity_store_lookup(&n.pins, ORIGIN_ADDR));
+    TEST_ASSERT_NULL(identity_store_lookup(&n.pins, origin));
     TEST_ASSERT_EQUAL_UINT32(1, n.pins.sig_failures);
 }
 
@@ -307,14 +310,14 @@ static void test_own_echo_not_relayed_not_pinned(void) {
     node_state_t n;
     node_init(&n);
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 7, NULL);
+    uint32_t origin = originate(frame, 0x0102030405u, 0x11112222u, 7, NULL);
 
     dispatch_result_t r =
-        dispatch_attestation(&n, frame, sizeof(frame), /*self=*/ORIGIN_ADDR, 1000, true, 12345);
+        dispatch_attestation(&n, frame, sizeof(frame), /*self=*/origin, 1000, true, 12345);
     TEST_ASSERT_TRUE(r.mac_ok);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_SELF, r.pin);
     TEST_ASSERT_FALSE(r.relayed);
-    TEST_ASSERT_NULL(identity_store_lookup(&n.pins, ORIGIN_ADDR));
+    TEST_ASSERT_NULL(identity_store_lookup(&n.pins, origin));
 }
 
 /* Budget-denied and hop-limit-exhausted frames still DELIVER (pin), just
@@ -323,7 +326,7 @@ static void test_no_budget_or_exhausted_hops_still_delivers(void) {
     node_state_t n;
     node_init(&n);
     uint8_t frame[IDENTITY_ATTESTATION_SIZE];
-    originate(frame, ORIGIN_ADDR, 0x0102030405u, 0x11112222u, 8, NULL);
+    originate(frame, 0x0102030405u, 0x11112222u, 8, NULL);
 
     dispatch_result_t r =
         dispatch_attestation(&n, frame, sizeof(frame), SELF_ADDR, 1000, /*budget=*/false, 12345);
@@ -333,7 +336,7 @@ static void test_no_budget_or_exhausted_hops_still_delivers(void) {
     node_state_t n2;
     node_init(&n2);
     uint8_t frame2[IDENTITY_ATTESTATION_SIZE];
-    originate(frame2, ORIGIN_ADDR + 1, 0x0102030405u, 0x2222u, /*hop_limit=*/1, NULL);
+    originate(frame2, 0x0102030405u, 0x2222u, /*hop_limit=*/1, NULL);
     dispatch_result_t r2 =
         dispatch_attestation(&n2, frame2, sizeof(frame2), SELF_ADDR, 1000, true, 12345);
     TEST_ASSERT_FALSE(r2.relayed); /* hop budget exhausted at this hop */
