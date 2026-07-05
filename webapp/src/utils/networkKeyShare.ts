@@ -34,28 +34,3 @@ export function parseNetworkKeyShare(input: string): ParseResult<{ key: string }
     return { ok: false, error: 'Malformed share string.' };
   }
 }
-
-function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
-
-/** SHA256(key)[0:4] as 8 lowercase hex chars, matching network_key_fingerprint on device. */
-export async function networkKeyFingerprint(keyHex: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', hexToBytes(keyHex)));
-  return Array.from(digest.slice(0, 4))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/** Generate a fresh random 32-byte network key as 64 lowercase hex chars. */
-export function generateNetworkKeyHex(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
