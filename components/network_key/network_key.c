@@ -6,9 +6,78 @@
 static uint8_t s_key[32];
 static int s_provisioned = 0;
 
-void network_key_set_provisioned(const uint8_t key[32]) {
+/*
+ * Per-platform persisted key store: device = NVS (NVS_NS_NETKEY), host =
+ * in-memory so network_key_load_from_nvs round-trips in unit tests. Both are
+ * exact-length and fail-closed: a missing or wrong-length blob is "no key".
+ */
+static int netkey_store_read(uint8_t key_out[32]);
+static int netkey_store_write(const uint8_t key[32]);
+
+#ifdef ESP_PLATFORM
+#include "nvs.h"
+#include "nvs_keys.h"
+
+static int netkey_store_read(uint8_t key_out[32]) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NETKEY, NVS_READONLY, &h) != ESP_OK)
+        return -1;
+    size_t len = 32;
+    int ret = (nvs_get_blob(h, NVS_KEY_NETKEY, key_out, &len) == ESP_OK && len == 32) ? 0 : -1;
+    nvs_close(h);
+    return ret;
+}
+
+static int netkey_store_write(const uint8_t key[32]) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_NETKEY, NVS_READWRITE, &h) != ESP_OK)
+        return -1;
+    int ret =
+        (nvs_set_blob(h, NVS_KEY_NETKEY, key, 32) == ESP_OK && nvs_commit(h) == ESP_OK) ? 0 : -1;
+    nvs_close(h);
+    return ret;
+}
+
+#else
+
+/* Host: in-memory persisted key so load_from_nvs is unit-testable. Starts
+ * empty, like a fresh flash; network_key_host_store_reset() clears it between
+ * tests. */
+static uint8_t s_host_key[32];
+static int s_host_has_key = 0;
+
+void network_key_host_store_reset(void) {
+    memset(s_host_key, 0, sizeof(s_host_key));
+    s_host_has_key = 0;
+}
+
+static int netkey_store_read(uint8_t key_out[32]) {
+    if (!s_host_has_key)
+        return -1;
+    memcpy(key_out, s_host_key, 32);
+    return 0;
+}
+
+static int netkey_store_write(const uint8_t key[32]) {
+    memcpy(s_host_key, key, 32);
+    s_host_has_key = 1;
+    return 0;
+}
+
+#endif
+
+/* Provision in memory only (no persist); shared by the set path and the
+ * load-from-store path (which must not re-write what it just read). */
+static void netkey_set_inmem(const uint8_t key[32]) {
     memcpy(s_key, key, 32);
     s_provisioned = 1;
+}
+
+void network_key_set_provisioned(const uint8_t key[32]) {
+    netkey_set_inmem(key);
+    /* Persist so the key survives reboot. In-memory state is authoritative
+     * for the running node; a store-write failure does not un-provision. */
+    netkey_store_write(key);
 }
 
 void network_key_clear(void) {
@@ -22,6 +91,26 @@ int network_key_get(uint8_t key_out[32]) {
     if (!s_provisioned)
         return -1; /* fail-closed: no fallback, write nothing to key_out */
     memcpy(key_out, s_key, 32);
+    return 0;
+}
+
+int network_key_generate_provision(uint8_t key_out[32]) {
+    /* Draw into a scratch buffer first so an entropy-gate failure (SEC-L1)
+     * provisions nothing and leaves key_out untouched, mirroring
+     * crypto_generate_identity's fail-closed pattern. */
+    uint8_t key[32];
+    if (crypto_random(key, sizeof(key)) != 0)
+        return -1; /* entropy gate shut: provision nothing */
+    network_key_set_provisioned(key);
+    memcpy(key_out, key, sizeof(key));
+    return 0;
+}
+
+int network_key_load_from_nvs(void) {
+    uint8_t key[32];
+    if (netkey_store_read(key) != 0)
+        return -1; /* none stored */
+    netkey_set_inmem(key);
     return 0;
 }
 
