@@ -488,12 +488,15 @@ What ships (the 2026-07 per-node identity campaign, Phases 0-4):
   else's address at all: doing so would require a key whose SHA256[0:4]
   equals the victim's address, a preimage search. Address impersonation is
   cryptographically infeasible rather than merely losing a TOFU race.
-- **Identity-gated timesync quorum.** Once ANY pin exists, only pinned,
-  established neighbors count toward the timesync pre-commit corroboration
-  quorum (`identity_store_quorum_eligible`); with zero pins the gate falls
-  back to tenure alone so a fresh mesh converges (graceful degradation,
-  never brick). See the NEW-SEC-4 residual in section 5 for exactly how
-  far this does and does not go.
+- **Identity-gated timesync quorum.** Only pinned, established neighbors
+  count toward the timesync pre-commit corroboration quorum
+  (`identity_store_quorum_eligible`); an unpinned established neighbor
+  counts ONLY within a bounded per-boot grace
+  (`QUORUM_BOOTSTRAP_GRACE_MS`, 5 minutes) so a fresh mesh can bootstrap
+  time, and NEVER after it (graceful degradation, never brick). This
+  closed the old unbounded "zero pins held, trust every established peer"
+  bootstrap-quorum race. See the NEW-SEC-4 residual in section 5 for
+  exactly how far this does and does not go.
 - **DM key continuity.** When a DM handshake arrives from an address with
   a pinned identity, the handshake's long-term X25519 key must equal the
   pinned `x25519_pub`; a mismatch refuses the session with a loud
@@ -504,7 +507,8 @@ What ships (the 2026-07 per-node identity campaign, Phases 0-4):
 Residuals, stated plainly (see also section 5): identities are unforgeable
 but **free to mint** (no trust anchor, no cost function; Sybil scarcity is
 NOT claimed, and quorum gating only raises the bar to "must attest and be
-pinned"); pins are **RAM-only** and reset on reboot, re-established by
+pinned" outside a bounded per-boot grace); pins are **RAM-only** and reset
+on reboot, re-established by
 TOFU; DM continuity has a **first-contact window** until the peer's
 attestation is heard and pinned; identity keys sit in **plaintext NVS**
 (section 4's physical-capture item); a keyed insider can still flood
@@ -527,6 +531,40 @@ ciphertext; the mailbox never holds plaintext it could not already read
 (`forward_data_packet` to `mesh_mailbox_store` in `main/mesh_task.c`,
 `components/mailbox/mailbox.c`). Entries are RAM-only, capped per
 destination, and expire.
+
+**Store-and-forward custody from an unattested peer is deliberately NOT
+identity-gated (assessed, left open).** A mailbox node stores a DATA frame
+on behalf of an offline destination when it has no route. Custody
+acceptance is not gated on the source being pinned, and that is a
+deliberate, bounded choice, not an oversight:
+- **Opt-in.** Mailbox mode is off by default (`s_mailbox_enabled`, NVS,
+  default false); a node stores nothing for anyone unless its operator
+  turned it on.
+- **Outsider-proof already.** Custody only ever stores a DATA frame that
+  already passed the wire-v4 network-key HMAC: `data_auth_verify` runs at
+  the RX gate BEFORE `forward_data_packet` reaches `mesh_mailbox_store`
+  (`main/mesh_task.c`). A keyless outsider cannot inject a custody entry at
+  all; only a network-key insider can, which is the inherent shared-key
+  residual (section 5), not a new surface.
+- **Self-bounded storage.** Storage is a fixed 32-entry static array
+  (`MAILBOX_MAX_ENTRIES`), capped at 8 per source (`MAILBOX_MAX_PER_SOURCE`)
+  and 8 per destination (`MAILBOX_MAX_PER_DEST`), with a 24-hour TTL, LRU
+  eviction, and no dynamic allocation (`components/mailbox/mailbox.c`). A
+  single source, Sybil or not, can occupy at most 8 of 32 slots; the worst
+  case is eviction of other pending entries (a bounded availability cost on
+  an opt-in feature), never memory exhaustion.
+- **Custody grants no trust.** A stored entry is a deferred DATA packet
+  re-transmitted verbatim; the destination independently authenticates and
+  decrypts it. Holding a message for a source does not make the mesh trust
+  that source for any gated decision (timesync quorum, DM continuity).
+
+Gating custody on a pinned source would HARM liveness (store-and-forward
+exists precisely for partitioned or bootstrapping meshes where a source's
+attestation may not have propagated yet) while buying no real exhaustion
+protection: because Sybil minting is free (the NEW-SEC-4 residual in
+section 5), an attacker satisfies a pin requirement by pinning fake
+identities. A gate the attacker trivially clears, at a liveness cost, is
+worse than no gate. Left open by design.
 
 ### Direct message end-to-end encryption (SEC-C2, closed)
 
@@ -624,7 +662,7 @@ oldest tracked sender under load, which loses replay history for an
 evicted-then-later-returning sender (needs 64, respectively 128,
 concurrent distinct senders to matter).
 
-### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge and replay closed under a provisioned key, insider forgery and NEW-SEC-4's bootstrap race remain)
+### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge and replay closed under a provisioned key, insider forgery and NEW-SEC-4's Sybil-minting residual remain, its bootstrap race closed by the per-boot grace)
 
 Every routing and reliability control message that previously carried no
 authentication now carries a network-key HMAC, verified before the message
@@ -673,9 +711,10 @@ the provisioned key) can still forge a control message on behalf of any
 other holder: this is inherent to a shared symmetric key, accepted, and
 UNCHANGED by mandatory provisioning (section 5). Per-node Ed25519 identity
 from the prior campaign (section 3) is what narrows the insider case, not
-this work. Provisioning also does not by itself close NEW-SEC-4's
-bootstrap-quorum race (raised in cost, not closed, by ws 1.3c plus the
-per-node-identity quorum gate; section 5).
+this work. Provisioning also does not by itself address NEW-SEC-4: the
+bootstrap-quorum race is now closed by the bounded per-boot grace on the
+quorum gate (ws 1.3c plus the per-node-identity gate), but Sybil identity
+minting stays free (section 5).
 
 Provisioning and distribution now exist end to end: a node mints a random
 32-byte founder key on-device (`bramble.generateNetworkKey`), the webapp
@@ -717,10 +756,12 @@ outsider replay for all five message types. They do **not** close
 SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8 outright: a network-key insider
 can still forge a message on behalf of any other holder (inherent to a
 shared symmetric key, accepted, see section 5), and NEW-SEC-4's
-bootstrap-quorum race is raised in cost, not closed, by ws 1.3c's
-established-source quorum, revertible confidence, and self-healing offset
-(see section 5); full closure needs a trust anchor (GPS-authoritative
-nodes or a pre-shared trusted-node list), out of scope for pre-alpha.
+bootstrap-quorum race is now closed by the bounded per-boot grace on the
+quorum gate (ws 1.3c's established-source quorum, revertible confidence,
+and self-healing offset remain the supporting mitigations); what stays
+open is Sybil identity minting (see section 5), whose full closure needs a
+trust anchor (GPS-authoritative nodes or a pre-shared trusted-node list),
+out of scope for pre-alpha.
 State precisely which half, forge vs. replay, outsider vs. insider, is
 closed when citing any of these four findings; neither provisioning nor
 freshness alone is sufficient for full closure of any of them.
@@ -933,15 +974,16 @@ same PR that fixes it.
 - **RREP, RERR, ACK, delivery receipt, and beacon authentication is closed
   against outsiders by mandatory provisioning; the insider half remains**
   (SEC-H1, SEC-H2 outsider halves closed by construction; insider forgery
-  and NEW-SEC-4 open): there is no public-PSK fallback, so an unprovisioned
+  open, NEW-SEC-4 bootstrap race closed but Sybil minting open): there is no public-PSK fallback, so an unprovisioned
   node is inert (fail-closed, section 3) and every verify rejects before
   compare, and no outsider can forge or replay any of the five types without
   the provisioned per-fleet key. Once provisioned, ws 1.3b's per-message
   freshness (section 3) closes replay of a captured, genuinely-valid message
   on all five types; a network-key insider can still forge on behalf of any
   other holder (section 5, inherent and accepted), and NEW-SEC-4's
-  bootstrap-quorum race is only mitigated, not closed, by ws 1.3c plus the
-  per-node-identity quorum gate (sections 3 and 5); closing it needs a trust
+  bootstrap-quorum race is now closed by the bounded per-boot grace on the
+  quorum gate (ws 1.3c plus the per-node-identity gate, sections 3 and 5),
+  though Sybil identity minting remains free; closing that needs a trust
   anchor, out of scope for pre-alpha. An unprovisioned node emits and accepts
   none of these five types at all; treat all five as insider-forgeable even
   once provisioned, until that follow-up work lands.
@@ -1080,8 +1122,9 @@ These do not go away when section 4 empties out.
   for this before. Two things this does **not** do: it does not stop a
   network-key insider from forging a message with a fresh, self-issued
   sequence (see the insider-forgery residual above, unchanged by this
-  work), and it does not close NEW-SEC-4 (below), whose bootstrap-quorum
-  race is about distinguishing identities, not freshness.
+  work), and freshness alone does not address NEW-SEC-4 (below): the
+  bootstrap-quorum race is about distinguishing identities, not freshness,
+  and is closed separately by the per-boot grace on the quorum gate.
 - **A control message reordered more than 64 counter-values behind a newer
   one from the same signer is a bounded false-reject, reachable under
   normal data-plane load, not just an edge case.** The per-signer replay
@@ -1135,9 +1178,9 @@ These do not go away when section 4 empties out.
   `test/test_rrep_discovery_e2e.c` harness drives real multi-hop
   discoveries through the real routing components and is the durable
   coverage that caught this and will catch any regression.
-- **The timesync bootstrap quorum can still be won by one key holder who
-  sustains multiple established addresses (NEW-SEC-4, mitigated by ws 1.3c,
-  NOT closed).** The beacon HMAC gate and the bootstrap-offset clamp
+- **The timesync bootstrap-quorum RACE is now closed by a bounded per-boot
+  grace; what remains open is Sybil identity MINTING, not the race
+  (NEW-SEC-4).** The beacon HMAC gate and the bootstrap-offset clamp
   (section 3) both require holding the network key, but neither requires
   holding a *distinct* identity per beacon. Ws 1.3b's beacon replay closure
   (above) means a captured beacon can no longer re-feed a stale time
@@ -1171,29 +1214,62 @@ These do not go away when section 4 empties out.
   attacker-influenced bootstrap offset drifts toward the honest majority as
   real beacons arrive and stale entries purge, provided honest traffic
   keeps arriving. The per-node identity campaign (Phases 0-4, section 3)
-  tightened this further: the quorum now also requires a PINNED identity
-  once any pin exists (`identity_store_quorum_eligible`), and the address
-  rebind makes impersonating an EXISTING node's address in an attestation
-  cryptographically infeasible (`src_addr` must derive from the frame's
-  own Ed25519 key). What an insider can no longer do: corroborate time
-  from fabricated bare addresses (unpinnable: no deriving key exists), or
-  attest a victim's address. **None of this closes NEW-SEC-4.** Ed25519
-  identities are unforgeable but FREE TO MINT: a network-key insider can
-  still generate N real keypairs, attest each one's own (real, derived)
-  address, let every receiver pin them, sustain their beacons over the
-  tenure window, and win the quorum with N pinned, established,
-  fully-verified Sybil identities. The gate raises the bar from
-  "fabricate addresses" to "mint, attest, pin and sustain real
-  identities"; it does not create scarcity, and nothing in this codebase
-  rate-limits or prices identity minting. Closing NEW-SEC-4 for real
-  needs a trust anchor (GPS-authoritative nodes or a pre-shared
-  trusted-node list), deferred to a later phase and out of scope for
-  pre-alpha. Cold start is intentionally fail-closed under this
-  design: a freshly booted node has no established neighbors, so it cannot
-  reach `CORROBORATION_REQUIRED` established sources and stays
-  unsynchronized, and therefore `timesync_is_confident`-false, until it
-  has integrated real, sustained neighbors. That is the intended posture,
-  not a bug.
+  plus the mandatory-attestation campaign closed the bootstrap-quorum RACE
+  itself. `identity_store_quorum_eligible` now gates the quorum as: an
+  established PINNED peer always corroborates (the address rebind makes
+  impersonating an EXISTING node's address cryptographically infeasible,
+  `src_addr` must derive from the frame's own Ed25519 key); an established
+  UNPINNED peer corroborates ONLY within a bounded per-boot grace
+  (`QUORUM_BOOTSTRAP_GRACE_MS`, 5 minutes, measured from this node's boot),
+  and NEVER after it. That replaces the old UNBOUNDED "zero pins held,
+  trust every established peer" fallback: previously a node holding zero
+  verified pins would corroborate time from any established peer forever,
+  so an unattested or Sybil node could dominate the quorum and skew the
+  mesh clock indefinitely. The window is now bounded to a fresh mesh's
+  first few minutes post-boot (pins are RAM-only, so also post-reboot),
+  which is enough for a real mesh to bootstrap timesync before any
+  attestation is verified but shuts permanently once the grace ends.
+  Because every node attests on boot and every 15 minutes, genuine pins
+  arrive within seconds-to-minutes, so the gate has typically already
+  tightened to pinned-only well before the grace expires; the grace is a
+  liveness backstop, not the normal path.
+
+  **This closes the RACE, not Sybil scarcity.** Three residuals remain,
+  stated precisely:
+  1. **Sybil MINTING is still free.** Ed25519 identities are unforgeable
+     but there is no trust anchor and no cost function: a network-key
+     insider can generate N real keypairs, attest each one's own (real,
+     derived) address, let every receiver pin them, sustain their beacons
+     over the tenure window, and win the quorum with N pinned, established,
+     fully-verified Sybil identities. The gate raises the bar from
+     "fabricate bare addresses" to "mint, attest, pin and sustain real
+     identities"; it does not create scarcity, and nothing in this codebase
+     rate-limits or prices identity minting. Closing this needs a trust
+     anchor (GPS-authoritative nodes or a pre-shared trusted-node list),
+     deferred to a later campaign and out of scope for pre-alpha.
+  2. **The per-boot grace is a bounded residual exposure window.** A Sybil
+     present and established during a node's first
+     `QUORUM_BOOTSTRAP_GRACE_MS` post-boot can still corroborate the quorum
+     as unpinned. This is a deliberate liveness trade (a fresh mesh must be
+     able to converge time before any attestation is heard); it is bounded
+     per boot, not unbounded, but it is not zero.
+  3. **Route/RREP trust is not identity-gated.** Route installation and
+     control-plane trust are network-key-authenticated (section 3), not
+     pinned-identity-gated; this campaign does not add identity gating to
+     routing, and it is out of scope (see the RREP items in this section).
+
+  **Uniform attestation.** There is no UNATTESTED path into the trust
+  decisions that ARE identity-gated (the timesync quorum after the grace,
+  and DM key continuity): every participant in a gated trust decision has
+  at least attested and been pinned. What is deliberately left open is
+  minting scarcity (residual 1) and the bounded grace window (residual 2),
+  not an unattested bypass of a gate.
+
+  Cold start is intentionally fail-closed under this design: a freshly
+  booted node has no established neighbors, so it cannot reach
+  `CORROBORATION_REQUIRED` established sources and stays unsynchronized,
+  and therefore `timesync_is_confident`-false, until it has integrated
+  real, sustained neighbors. That is the intended posture, not a bug.
 - **RREP `next_hop` poisoning is inherent, not a bug this batch can close.**
   `next_hop` is necessarily a relay-mutated, unauthenticated field: each
   forwarder must be able to rewrite it to route the reply back toward the
