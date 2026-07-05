@@ -79,6 +79,14 @@ func nodeMove(node *C.sim_node_t, x, y float32) {
 	C.node_move(node, C.float(x), C.float(y))
 }
 
+// nodeSetProvisioned drives bridge_node_ext_t.provisioned (mandatory-
+// provisioning Task 2). false makes the node inert (originates nothing
+// authenticated, drops all inbound frames); the rest of the fleet is
+// unaffected.
+func nodeSetProvisioned(idx int, provisioned bool) {
+	C.bridge_node_set_provisioned(C.int(idx), C.bool(provisioned))
+}
+
 // --- Event queue ---
 
 func eventQueueInit(q *C.event_queue_t) {

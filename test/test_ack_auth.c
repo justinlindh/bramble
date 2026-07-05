@@ -4,6 +4,7 @@
 #include "network_key.h"
 #include "routing_auth.h"
 #include "packet.h"
+#include "test_net_key.h"
 
 #include "../components/crypto/crypto_host.c"
 #include "../components/network_key/network_key.c"
@@ -21,7 +22,9 @@
  * any code here.
  */
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so these
+ * sign/verify + forgery asserts run against a PROVISIONED node again. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) {}
 
 /* ws 1.3b: the seq is set by the caller (send_ack/the receipt builder
@@ -136,7 +139,9 @@ void test_ack_verify_rejects_wrong_key_forgery(void) {
     network_key_set_provisioned(attacker_key);
     ack_sign(&a);
 
-    network_key_clear();
+    /* Verifier is a provisioned node holding the real fleet key, not the
+     * attacker's: the forged MAC must not verify. */
+    network_key_set_provisioned(BRAMBLE_TEST_NET_KEY);
     TEST_ASSERT_FALSE(ack_verify(&a));
 }
 
@@ -197,12 +202,28 @@ void test_receipt_verify_rejects_wrong_key_forgery(void) {
     network_key_set_provisioned(attacker_key);
     receipt_sign(&r);
 
-    network_key_clear();
+    /* Verifier holds the real fleet key, not the attacker's. */
+    network_key_set_provisioned(BRAMBLE_TEST_NET_KEY);
     TEST_ASSERT_FALSE(receipt_verify(&r));
+}
+
+/* Mandatory-provisioning (Task 2): an UNPROVISIONED node is inert. ack_sign
+ * emits no MAC (returns nonzero, writes the all-zero sentinel) and ack_verify
+ * rejects everything -- crucially it rejects the all-zero sentinel BEFORE the
+ * compare, so an attacker's all-zero MAC is never accepted as a forgery. */
+void test_ack_unprovisioned_is_inert(void) {
+    network_key_clear();
+    bramble_ack_t a = make_ack(0x11111111, 0x2222);
+    TEST_ASSERT_NOT_EQUAL(0, ack_sign(&a)); /* sign fails: does not emit a real MAC */
+    uint8_t zero[8] = {0};
+    TEST_ASSERT_EQUAL_MEMORY(zero, a.auth_hmac, sizeof(zero)); /* the all-zero sentinel */
+    TEST_ASSERT_FALSE(ack_verify(&a));                         /* verify rejects the sentinel */
+    bramble_test_provision_net_key();                          /* restore for any later test */
 }
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_ack_unprovisioned_is_inert);
     RUN_TEST(test_ack_sign_verify_round_trip);
     RUN_TEST(test_ack_verify_rejects_tampered_ack_packet_id);
     RUN_TEST(test_ack_verify_survives_forwarding);

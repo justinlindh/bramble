@@ -11,8 +11,14 @@
  * exists purely so these can be. mesh_task.c includes this header and
  * calls these functions; it defines none of them.
  *
- * Every helper here is forgeable under network_key.h's unprovisioned
- * public-PSK fallback key: none of them close SEC-H1 on their own.
+ * Fail-closed contract (mandatory-provisioning campaign, Task 2): the network
+ * key is now mandatory, with NO public-PSK fallback. Every *_sign returns 0 on
+ * success and nonzero when the node is UNPROVISIONED (it emits the all-zero
+ * sentinel MAC, never a fallback HMAC); the caller must treat nonzero as
+ * "do not transmit". Every *_verify checks that same return and REJECTS
+ * (returns 0) before the constant-time compare, so an unprovisioned verifier
+ * can never accept a frame -- in particular it never matches a received
+ * all-zero MAC against the sentinel.
  */
 
 /*
@@ -34,7 +40,7 @@
  * and must re-draw a fresh seq for it). rerr_verify recomputes the same
  * MAC and constant-time-compares; returns nonzero (true) iff it matches.
  */
-void rerr_sign(bramble_rerr_t* r);
+int rerr_sign(bramble_rerr_t* r);
 int rerr_verify(const bramble_rerr_t* r);
 
 /*
@@ -56,7 +62,7 @@ int rerr_verify(const bramble_rerr_t* r);
  * (msg_store_update_status), plus forwarding: callers must reject before
  * any of those, on both the for-us and forward branches of handle_ack.
  */
-void ack_sign(bramble_ack_t* a);
+int ack_sign(bramble_ack_t* a);
 int ack_verify(const bramble_ack_t* a);
 
 /*
@@ -71,7 +77,7 @@ int ack_verify(const bramble_ack_t* a);
  * hop_count-independent offset as auth_hmac. Same fixed-offset,
  * constant-time-compare contract.
  */
-void receipt_sign(bramble_delivery_receipt_t* r);
+int receipt_sign(bramble_delivery_receipt_t* r);
 int receipt_verify(const bramble_delivery_receipt_t* r);
 
 /*
@@ -91,11 +97,13 @@ int receipt_verify(const bramble_delivery_receipt_t* r);
  * those bytes through verbatim. data_auth_verify recomputes the same MAC and
  * constant-time-compares; returns nonzero (true) iff it matches.
  *
- * Forgeable under network_key.h's unprovisioned public-PSK fallback, same as
- * every other helper here; this closes the keyless-poisoning attack, not the
- * keyed-insider residual.
+ * When unprovisioned there is no key: network_key_mac returns the all-zero
+ * sentinel and data_auth_verify rejects before the constant-time compare
+ * (fail-closed inert, no public-PSK fallback), so this closes the
+ * keyless-poisoning attack by construction. The keyed-insider residual
+ * remains (narrowed by per-node identity, not this component).
  */
-void data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]);
+int data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]);
 int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]);
 
 /*
@@ -119,13 +127,15 @@ int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t
  * AFTER crypto_ed25519_sign fills a->sig and after seq is written (both
  * are MAC-covered), right before serializing. ident_relay_verify
  * recomputes and constant-time-compares; returns nonzero (true) iff it
- * matches. Forgeable under network_key.h's unprovisioned public-PSK
- * fallback, same as every other helper here: this closes the KEYLESS
- * propagation/grinding vector, not the keyed-insider residual (a keyed
+ * matches. When unprovisioned there is no key: network_key_mac returns the
+ * all-zero sentinel and ident_relay_verify rejects before the compare
+ * (fail-closed inert, no public-PSK fallback), so this closes the KEYLESS
+ * propagation/grinding vector by construction, not the keyed-insider
+ * residual (a keyed
  * insider's garbage-sig frame still floods, bounded by budget; receivers
  * reject it at the Ed25519 check).
  */
-void ident_relay_sign(bramble_identity_attestation_t* a);
+int ident_relay_sign(bramble_identity_attestation_t* a);
 int ident_relay_verify(const bramble_identity_attestation_t* a);
 
 #endif

@@ -32,11 +32,13 @@ are now encrypted end to end (section 3), and routing control traffic
 (RREP, RERR, beacon, ACK, delivery receipt) now carries a network-key HMAC
 plus a per-message freshness sequence (ws 1.3b, section 3): against a
 provisioned fleet, this attacker can neither forge nor replay any of the
-five control-plane message types. Against an unprovisioned fleet the HMAC
-key is still the public fallback, so this attacker can forge routing
-control traffic freely (section 4). Mailbox triggers ride the same staged
-beacon key. Jamming is not defendable at this layer and is accepted
-(section 5).
+five control-plane message types. Against an unprovisioned fleet there is
+no HMAC key at all: an unprovisioned node is inert (fail-closed, section
+3), so it emits no authenticated control traffic and rejects every control
+frame before comparing, and there is no public fallback key an outsider
+could derive to forge one. This attacker gains nothing against an
+unprovisioned node beyond the fact that it, too, transmits nothing. Jamming
+is not defendable at this layer and is accepted (section 5).
 
 **Malicious mesh member.** A node that legitimately holds one or more channel
 keys: an invited member gone bad, or a stolen key. They decrypt everything on
@@ -278,7 +280,7 @@ cleartext `prev_hop` field equals the originator's real address while
 transmission identifies the originator anyway. The pseudonym helps only
 against observers who hear the RREQ after at least one forward.
 
-### Beacon integrity check, staged toward authentication (SEC-H2)
+### Beacon authentication (SEC-H2, outsider forgery closed under mandatory provisioning)
 
 Beacons carry a 16-byte truncated HMAC-SHA256 computed over the 32 fixed
 beacon fields (header, source address, pubkey hash, telemetry, flags, and
@@ -296,14 +298,16 @@ Verification happens on
 receipt (`handle_beacon` in `main/mesh_task.c`) and is now constant-time
 (`beacon_verify_hmac`, XOR-accumulate, no early exit). When a network key
 is provisioned, the key is a distinct HKDF subkey of it (salt
-`"bramble-beacon-v2"`), not the channel PSK; unprovisioned, the key still
-derives from the *public, well-known* `BRAMBLE_PUBLIC_CHANNEL_PSK`
-(`"bramble-default"` in `components/crypto/include/crypto.h`), logged
-explicitly as integrity-only in that case. Unprovisioned, the HMAC still
-proves only that the sender runs Bramble-compatible code, not that it is a
-trusted member. Provisioned, it proves the sender holds the network key,
-which is real authentication against outsiders, but not against another
-key holder forging a fresh beacon (section 5). Freshness (ws 1.3b, below)
+`"bramble-beacon-v2"`), not the channel PSK. Unprovisioned, the beacon path
+is inert: the send side zeroes `s_beacon_key` and skips beacon origination
+(`mesh_rederive_beacon_key` / `send_beacon` in `main/mesh_task.c`), and the
+receive side drops every beacon before it reaches `beacon_verify_hmac`
+(`handle_beacon`), because an unprovisioned node holds no beacon key and
+there is *no* public-PSK fallback to derive one from
+(`mesh_rederive_beacon_key` explicitly refuses to derive from
+`BRAMBLE_PUBLIC_CHANNEL_PSK`). Provisioned, the HMAC proves the sender
+holds the network key, which is real authentication against outsiders, but
+not against another key holder forging a fresh beacon (section 5). Freshness (ws 1.3b, below)
 closes replay of a captured, genuinely valid beacon, but not forgery by
 another key holder. Do not treat a provisioned beacon HMAC as more than
 that.
@@ -638,24 +642,44 @@ excluding exactly the fields it legitimately mutates in flight (`next_hop`,
 so a legitimate forward never breaks verification and a relay-mutated field
 is never trusted as authenticated.
 
-**This does not close SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8.** The key
-behind every one of these MACs comes from `components/network_key`, which
-ships unprovisioned by default: `network_key_get()` falls back to a key
-derived from `BRAMBLE_PUBLIC_CHANNEL_PSK`, a public, compile-time constant
-(`"bramble-default"`). Anyone who reads that constant, which is checked
-into this repository, derives the identical fallback key and forges a
-valid MAC for any of these five message types. A real per-fleet key can be
-loaded via the authenticated `bramble.setNetworkKey` RPC (gated the same
-way as `bramble.setAuthToken`) or from NVS at boot. RREP, RERR, ACK, and
+**The keyless-outsider residual is closed by construction: provisioning is
+mandatory and there is no public fallback key.** The key behind every one
+of these MACs comes from `components/network_key`, which has *no* fallback.
+An unprovisioned node fails closed: `network_key_get()` returns an error
+and writes nothing (`components/network_key/network_key.c`), so
+`network_key_mac()` emits an all-zero sentinel and returns nonzero, and
+every verify function refuses that sentinel *before* the constant-time
+compare (`rerr_verify`, `ack_verify`, `receipt_verify`, `data_auth_verify`,
+`ident_relay_verify` in `components/routing_auth/routing_auth.c` each
+`return 0` on a nonzero `network_key_mac`, so a received all-zero MAC can
+never match the emitted all-zero sentinel; the beacon path drops before
+`beacon_verify_hmac`, above). There is no compile-time constant an outsider
+can read to derive the key, because there is no fallback key to derive:
+`BRAMBLE_PUBLIC_CHANNEL_PSK` is used *only* by the opt-in public broadcast
+channel (`components/channel/public_channel.c`, below), never in the
+control plane, and `mesh_rederive_beacon_key` explicitly refuses to derive
+a beacon key from it. A real per-fleet key is provisioned three ways, all
+NVS-persisted: minted on-device and displayed once by the authenticated
+`bramble.generateNetworkKey` RPC (a fleet founder key), pasted or joined
+via `bramble.setNetworkKey`, or loaded from NVS at boot; both RPCs are
+gated the same way as `bramble.setAuthToken`. RREP, RERR, ACK, and
 delivery-receipt verification read `network_key_get()` live on every call,
-so a runtime-provisioned key protects them immediately; the beacon HMAC key
-used to be derived once at init and cached, so it kept using the old key
-until reboot, but the RPC handler now also calls `mesh_rederive_beacon_key`
-(`main/mesh_task.c`), so beacons pick up a runtime-provisioned key live too
-(the earlier "beacon key needs a reboot" gap is resolved).
+so a runtime-provisioned key protects them immediately; the RPC handler
+also calls `mesh_rederive_beacon_key` (`main/mesh_task.c`), so beacons pick
+up a runtime-provisioned key live too.
 
-Provisioning and distribution now exist end to end: the webapp generates a
-random 32-byte key, carries it out-of-band as a `bramble://net/v1?k=` QR
+**What this does NOT close.** A network-key INSIDER (a legitimate holder of
+the provisioned key) can still forge a control message on behalf of any
+other holder: this is inherent to a shared symmetric key, accepted, and
+UNCHANGED by mandatory provisioning (section 5). Per-node Ed25519 identity
+from the prior campaign (section 3) is what narrows the insider case, not
+this work. Provisioning also does not by itself close NEW-SEC-4's
+bootstrap-quorum race (raised in cost, not closed, by ws 1.3c plus the
+per-node-identity quorum gate; section 5).
+
+Provisioning and distribution now exist end to end: a node mints a random
+32-byte founder key on-device (`bramble.generateNetworkKey`), the webapp
+displays it once and carries it out-of-band as a `bramble://net/v1?k=` QR
 code or copy-paste string (write-only; the key is never read back from a
 device), and an operator confirms fleet convergence with
 `bramble.getNetworkKeyStatus`, which reports whether a node is provisioned
@@ -734,9 +758,11 @@ which is the same bar RREP, RERR, ACK, and delivery receipt already clear
 above) means the identity a reverse route resolves to cannot be spoofed by
 an on-path relay either; only the unauthenticated next-hop hint can be lied
 about (residual, below). Like every other control-plane MAC in this
-document, `auth_hmac` is forgeable by anyone who reads the public,
-compile-time `BRAMBLE_PUBLIC_CHANNEL_PSK` fallback until a real network key
-is provisioned; it closes the *keyless* attacker, not the keyed insider.
+document, `auth_hmac` cannot be produced at all without the provisioned
+per-fleet network key: an unprovisioned node fails closed (`data_auth_sign`
+returns nonzero and the send is dropped; `data_auth_verify` rejects before
+compare), and there is no public fallback key to forge with. It closes the
+*keyless* outsider, not the keyed insider.
 
 **Reverse-route learning trust model.** Every unicast DATA frame a node
 receives or forwards (after `auth_hmac` verifies) teaches it a route back to
@@ -904,19 +930,21 @@ bridge stays a faithful honest-node model.
 Facts of the code on `main` today. Each entry shrinks or disappears in the
 same PR that fixes it.
 
-- **RREP, RERR, ACK, delivery receipt, and beacon authentication is staged,
-  not fully closed** (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8): the verify
-  logic described in section 3 is real, but every key it checks against is
-  forgeable by anyone who reads the public `BRAMBLE_PUBLIC_CHANNEL_PSK`
-  fallback until a real network key is provisioned. Once provisioned, ws
-  1.3b's per-message freshness (section 3) closes replay of a captured,
-  genuinely-valid message on all five types; a network-key insider can
-  still forge on behalf of any other holder (section 5, inherent and
-  accepted), and NEW-SEC-4's bootstrap-quorum race is only mitigated, not
-  closed, by ws 1.3c plus the per-node-identity quorum gate (sections 3
-  and 5); closing it needs a trust anchor, out of scope for pre-alpha. Treat all five as unauthenticated against an
-  unprovisioned deployment, and as insider-forgeable even once
-  provisioned, until that follow-up work lands.
+- **RREP, RERR, ACK, delivery receipt, and beacon authentication is closed
+  against outsiders by mandatory provisioning; the insider half remains**
+  (SEC-H1, SEC-H2 outsider halves closed by construction; insider forgery
+  and NEW-SEC-4 open): there is no public-PSK fallback, so an unprovisioned
+  node is inert (fail-closed, section 3) and every verify rejects before
+  compare, and no outsider can forge or replay any of the five types without
+  the provisioned per-fleet key. Once provisioned, ws 1.3b's per-message
+  freshness (section 3) closes replay of a captured, genuinely-valid message
+  on all five types; a network-key insider can still forge on behalf of any
+  other holder (section 5, inherent and accepted), and NEW-SEC-4's
+  bootstrap-quorum race is only mitigated, not closed, by ws 1.3c plus the
+  per-node-identity quorum gate (sections 3 and 5); closing it needs a trust
+  anchor, out of scope for pre-alpha. An unprovisioned node emits and accepts
+  none of these five types at all; treat all five as insider-forgeable even
+  once provisioned, until that follow-up work lands.
 - **RREQ forwarding rate limiting is node-global, not per-neighbor (SEC-M4,
   closed by ws 1.3d).** A flood of foreign RREQs is now bounded by a global
   token bucket (`rreq_fwd_allow`, section 3), not forwarded without
@@ -936,8 +964,9 @@ same PR that fixes it.
   carries an authenticated 48-bit sequence checked against a per-signer
   replay window (section 3); the old dedup remains underneath it as loop
   suppression, now redundant for these five types but still load-bearing
-  for packet types with no per-message MAC. Unprovisioned, the same
-  forgery caveat as the bullet above applies.
+  for packet types with no per-message MAC. Unprovisioned, the node is inert
+  (section 3) and sends or accepts none of these five types, so there is
+  nothing to replay against an unprovisioned deployment.
 - **The identity private key, all channel keys, the RPC auth token, and,
   once provisioned, the network key are stored as plaintext NVS entries,
   and message history is plaintext SPIFFS**, with flash encryption, NVS
@@ -959,15 +988,15 @@ same PR that fixes it.
   anti-rollback closes this; it is staged behind bench validation on a
   sacrificial board (human-gated). Consistent with the device-as-secret
   posture above, physical possession is already treated as compromise.
-- **Mailbox flush trust follows the same staged beacon key as everything
-  else in section 3's control-plane entry**: unprovisioned, the beacon key
-  is still public-PSK-derived, so a forged beacon for a victim address makes
-  a mailbox transmit that victim's queued ciphertext (`handle_beacon`
-  mailbox flush in `main/mesh_task.c`); provisioned, forgery requires the
-  network key, and ws 1.3b's beacon replay closure (section 5) means a
-  captured valid beacon can no longer be replayed to trigger this either,
-  but a network-key insider can still fabricate a fresh, correctly-signed
-  beacon for the victim address (section 5, inherent and accepted).
+- **Mailbox flush trust follows the beacon authentication in section 3's
+  control-plane entry.** Unprovisioned, the node is inert: it neither sends
+  nor accepts beacons (section 3), so no mailbox flush can be triggered at
+  all. Provisioned, a mailbox flush requires a beacon carrying a valid
+  network-key HMAC (`handle_beacon` mailbox flush in `main/mesh_task.c`),
+  and ws 1.3b's beacon replay closure (section 5) means a captured valid
+  beacon can no longer be replayed to trigger this, but a network-key
+  insider can still fabricate a fresh, correctly-signed beacon for the
+  victim address (section 5, inherent and accepted).
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
   and mailbox capability in cleartext** (`mesh_send_beacon` in
   `main/mesh_task.c`).

@@ -121,9 +121,31 @@ describe('network key actions', () => {
     expect(rpcMock).toHaveBeenCalledWith('bramble.getNetworkKeyStatus', undefined, undefined);
   });
 
+  it('generateNetworkKey mints on-device and returns key + fingerprint', async () => {
+    const { connect, generateNetworkKey } = await import('../actions');
+    await connect('serial');
+
+    rpcMock.mockResolvedValueOnce({ key: 'cd'.repeat(32), fingerprint: 'feedface' });
+    const r = await generateNetworkKey();
+    expect(r).toEqual({ key: 'cd'.repeat(32), fingerprint: 'feedface' });
+    expect(rpcMock).toHaveBeenCalledWith('bramble.generateNetworkKey', undefined, undefined);
+  });
+
+  it('loadNetworkKeyStatus pushes provisioning status into the store', async () => {
+    const { connect, loadNetworkKeyStatus } = await import('../actions');
+    const { useStore } = await import('../index');
+    await connect('serial');
+
+    rpcMock.mockResolvedValueOnce({ provisioned: false, fingerprint: '00000000' });
+    await loadNetworkKeyStatus();
+    expect(useStore.getState().networkKeyStatus).toEqual({ provisioned: false, fingerprint: '00000000' });
+    expect(rpcMock).toHaveBeenCalledWith('bramble.getNetworkKeyStatus', undefined, undefined);
+  });
+
   it('rejects when not connected', async () => {
-    const { setNetworkKey, getNetworkKeyStatus } = await import('../actions');
+    const { setNetworkKey, getNetworkKeyStatus, generateNetworkKey } = await import('../actions');
     await expect(setNetworkKey('ab'.repeat(32))).rejects.toThrow('Not connected');
     await expect(getNetworkKeyStatus()).rejects.toThrow('Not connected');
+    await expect(generateNetworkKey()).rejects.toThrow('Not connected');
   });
 });

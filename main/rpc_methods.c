@@ -768,17 +768,10 @@ static int rpc_set_network_key(const cJSON* params, cJSON* result) {
         key[i] = (uint8_t)((hi << 4) | lo);
     }
 
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS_NETKEY, NVS_READWRITE, &h) != ESP_OK) {
-        return RPC_ERR_INTERNAL;
-    }
-    nvs_set_blob(h, NVS_KEY_NETKEY, key, sizeof(key));
-    esp_err_t commit_err = nvs_commit(h);
-    nvs_close(h);
-    if (commit_err != ESP_OK) {
-        return RPC_ERR_INTERNAL;
-    }
-
+    /* Mandatory-provisioning (Task 2): single source of truth. The network_key
+     * component persists to NVS (NVS_NS_NETKEY) on set, so this no longer
+     * hand-rolls its own NVS write; that removes the double-write and the risk
+     * of the RPC and the component disagreeing on the stored key. */
     network_key_set_provisioned(key);
     mesh_rederive_beacon_key(); /* beacons pick up the new key live, no reboot */
     cJSON_AddBoolToObject(result, "ok", true);
@@ -803,6 +796,52 @@ static int handle_get_network_key_status(const cJSON* params, cJSON* result) {
     }
     hex[8] = '\0';
     cJSON_AddStringToObject(result, "fingerprint", hex);
+    return 0;
+}
+
+/* bramble.generateNetworkKey: params none. Result:
+ *   {"key": "<64 lowercase hex>", "fingerprint": "<8 lowercase hex>"}
+ * Mints a fresh entropy-gated 32-byte network key via
+ * network_key_generate_provision (mandatory-provisioning Task 1), which
+ * provisions THIS node (in memory + NVS) atomically and copies the key out.
+ * This makes the local node the fleet "founder": the operator then copies the
+ * displayed key to the other nodes (via setNetworkKey / the QR share).
+ *
+ * Returning the RAW key here is deliberate and acceptable: this is the
+ * operator's own LOCAL control channel (WiFi/BLE/serial to their own node),
+ * the identical trust boundary setNetworkKey already relies on to ACCEPT a
+ * raw key over the same channel. The key is never broadcast and never logged;
+ * the local stack copy is wiped before returning. Authenticated callers only
+ * (registered normally, so not in rpc_auth's unauth allowlist).
+ *
+ * On entropy failure network_key_generate_provision provisions NOTHING and
+ * returns nonzero; we surface a JSON-RPC internal error and leave the prior
+ * provisioning state untouched (fail closed). */
+static int handle_generate_network_key(const cJSON* params, cJSON* result) {
+    (void)params;
+    uint8_t key[32];
+    if (network_key_generate_provision(key) != 0) {
+        return RPC_ERR_INTERNAL;
+    }
+
+    char key_hex[65];
+    for (int i = 0; i < 32; i++) {
+        snprintf(key_hex + i * 2, 3, "%02x", key[i]);
+    }
+    key_hex[64] = '\0';
+    memset(key, 0, sizeof(key)); /* wipe local copy; never log the key */
+    cJSON_AddStringToObject(result, "key", key_hex);
+
+    mesh_rederive_beacon_key(); /* beacons pick up the new key live, no reboot */
+
+    uint8_t fp[4];
+    network_key_fingerprint(fp);
+    char fp_hex[9];
+    for (int i = 0; i < 4; i++) {
+        snprintf(fp_hex + i * 2, 3, "%02x", fp[i]);
+    }
+    fp_hex[8] = '\0';
+    cJSON_AddStringToObject(result, "fingerprint", fp_hex);
     return 0;
 }
 
@@ -2443,6 +2482,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.setAuthToken", rpc_set_auth_token);
     rpc_register("bramble.getAuthToken", rpc_get_auth_token);
     rpc_register("bramble.setNetworkKey", rpc_set_network_key);
+    rpc_register("bramble.generateNetworkKey", handle_generate_network_key);
     rpc_register("bramble.getNetworkKeyStatus", handle_get_network_key_status);
     rpc_register("bramble.setAllowedOrigins", rpc_set_allowed_origins);
     rpc_register("bramble.getAllowedOrigins", rpc_get_allowed_origins);

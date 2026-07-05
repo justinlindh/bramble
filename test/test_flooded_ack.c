@@ -3,6 +3,7 @@
 #include "crypto.h"
 #include "network_key.h"
 #include "routing_auth.h"
+#include "test_net_key.h"
 #include "packet.h"
 #include "dedup.h"
 #include "channel_flood.h"
@@ -44,7 +45,9 @@
 #define RELAY 0xCCCCCCCCu       /* an intermediate flood relay */
 #define DATA_PKT_ID 0x0BADF00Du /* the delivered DATA's packet_id == ack_packet_id */
 
-void setUp(void) { network_key_clear(); }
+/* Mandatory-provisioning (Task 2): provision the shared fixed key so the
+ * flooded-ACK auth path runs against a PROVISIONED node. */
+void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 static void set_ack_seq(bramble_ack_t* a, uint64_t seq) {
@@ -157,7 +160,7 @@ void test_flood_ack_bad_mac_never_relays(void) {
 }
 
 /* --- A keyless attacker who signs with the WRONG network key cannot get an
- * ACK flooded: ack_verify fails under the real (cleared/public) key. --- */
+ * ACK flooded: ack_verify fails under the relay's real fleet key. --- */
 void test_flood_ack_wrong_key_never_relays(void) {
     uint8_t attacker_key[32];
     crypto_random(attacker_key, 32);
@@ -167,7 +170,9 @@ void test_flood_ack_wrong_key_never_relays(void) {
     TEST_ASSERT_EQUAL(ESP_OK, bramble_ack_serialize(&a, buf, sizeof(buf)));
     size_t len = bramble_ack_wire_size(&a);
 
-    network_key_clear(); /* relay does not hold the attacker's key */
+    /* Relay is a provisioned node holding the real fleet key, not the
+     * attacker's. */
+    network_key_set_provisioned(BRAMBLE_TEST_NET_KEY);
     pending_ack_table_t pending;
     pending_ack_init(&pending);
     ack_dispatch_result_t r = dispatch_ack(buf, (uint16_t)len, RELAY, true, &pending, true, 42);

@@ -4,56 +4,77 @@
 #include <stddef.h>
 
 /*
- * Task 3.1 (PART 3, control-plane authentication): the minimal network key
- * provider. This is STAGED INFRASTRUCTURE, not a closed finding. It supplies
- * the key and MAC primitive that RREP/RERR/ACK/delivery-receipt/beacon
- * verification will build on, but the shipped default is UNPROVISIONED:
- * network_key_get() derives a fallback key from BRAMBLE_PUBLIC_CHANNEL_PSK,
- * a PUBLIC compile-time constant checked into this repository. Anyone who
- * reads that constant derives the identical fallback key and can forge a
- * valid MAC for any label this component knows about. Do NOT describe this
- * component, on its own, as closing SEC-H1, SEC-H2, NEW-SEC-4, or
- * NEW-SEC-8: those findings stay open until real per-fleet key
- * provisioning lands (a separate workstream; distribution UX is an open
- * question, not addressed here).
+ * Fail-closed control-plane network key provider (mandatory-provisioning
+ * campaign). An UNPROVISIONED node has NO usable network key: there is no
+ * public-PSK fallback. network_key_get() fails, network_key_mac() emits no
+ * valid MAC, and network_key_fingerprint() reports the all-zero sentinel.
+ * A node becomes provisioned only by generating a fresh key
+ * (network_key_generate_provision), loading a persisted one
+ * (network_key_load_from_nvs), or having an operator set one
+ * (network_key_set_provisioned via the setNetworkKey RPC). The key is
+ * persisted to NVS on the set and generate paths so it survives reboot.
+ *
+ * This component is the fail-closed FOUNDATION; it does not on its own make
+ * an unprovisioned node inert. The control-plane call sites that build MACs
+ * (routing_auth, discovery, mesh_task) must check network_key_mac()'s return
+ * value and refuse to originate/verify when it is nonzero: that hardening is
+ * the campaign's Task 2.
  */
 
-/* Marks the node as provisioned with a real, non-public network key
- * (e.g. loaded from NVS at boot, or set via the setNetworkKey RPC). */
+/* Marks the node as provisioned with a real, non-public network key and
+ * persists it to non-volatile storage (device NVS; in-memory on host) so it
+ * survives reboot. Called by generate_provision and the setNetworkKey RPC. */
 void network_key_set_provisioned(const uint8_t key[32]);
 
-/* Reverts to unprovisioned: network_key_get() falls back to the
- * PSK-derived key again. */
+/* Reverts to unprovisioned IN MEMORY (does NOT erase persisted storage).
+ * After this, network_key_get() fails closed until a key is set, generated,
+ * or loaded again. */
 void network_key_clear(void);
 
-/* Fills key_out with the provisioned key if network_key_is_provisioned(),
- * else derives and returns the PSK fallback (see the staging note above).
- * Returns 0 on success, matching this codebase's other crypto primitives'
- * convention; the only failure mode is an internal HKDF size error, which
- * cannot happen with these fixed-size arguments. */
+/* Copies the provisioned key into key_out and returns 0 IFF provisioned.
+ * When unprovisioned, returns nonzero and writes NOTHING to key_out
+ * (fail-closed: there is no fallback key material). */
 int network_key_get(uint8_t key_out[32]);
 
-/* 1 if a real key has been set via network_key_set_provisioned since boot
- * (or since the last network_key_clear), 0 if still on the PSK fallback. */
+/* 1 if a real key is currently provisioned (set, generated, or loaded since
+ * boot and not since network_key_clear'd), 0 otherwise. */
 int network_key_is_provisioned(void);
 
 /*
- * Domain-separated control-plane MAC: HMAC(network_key, label || data)[0:8].
- * The per-type label (e.g. "bramble-rrep-v2") prevents a MAC computed for
- * one message type from being replayed as if it authenticated a different
- * type, even when the underlying bytes happen to coincide. len is the
- * caller's data length only (not including the label); callers are trusted
- * internal code building a MAC over a message body they just serialized,
- * so an assert bounds it defensively rather than failing at runtime.
+ * Generates a fresh 32-byte network key from the entropy-gated crypto_random
+ * source (the SEC-L1 fail-closed source crypto_generate_identity uses),
+ * provisions it (in memory + NVS), and copies it into key_out. Returns 0 on
+ * success. On entropy failure returns nonzero and provisions NOTHING
+ * (fail-closed): the previous provisioning state and key_out are left
+ * untouched.
  */
-void network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]);
+int network_key_generate_provision(uint8_t key_out[32]);
 
 /*
- * One-way fingerprint of the current network key: SHA256(network_key_get())[0:4].
- * Safe to expose (does not reveal the key); identical on nodes that share a
- * key, so an operator can confirm a fleet converged on one network key
- * without transmitting the secret. Returns the fallback key's fingerprint
- * when unprovisioned (a known value that marks "still on the public default").
+ * Loads a persisted network key from storage and provisions it in memory.
+ * Returns 0 if a key was loaded, nonzero if none is stored. Does NOT
+ * re-persist (load is a read). Boot wiring is the campaign's Task 2.
+ */
+int network_key_load_from_nvs(void);
+
+/*
+ * Fail-closed domain-separated control-plane MAC: HMAC(network_key,
+ * label || data)[0:8]. Returns 0 and writes the MAC to out when provisioned.
+ * When UNPROVISIONED, returns nonzero and writes the all-zero sentinel to out
+ * (it never computes an HMAC over a fallback or zeroed key). Callers MUST
+ * check the return value: on nonzero they must refuse to originate or verify
+ * the message rather than trust the sentinel bytes (Task 2 hardening). The
+ * per-type label (e.g. "bramble-rrep-v2") domain-separates message types.
+ * len is the data length only (not the label); an assert bounds it.
+ */
+int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]);
+
+/*
+ * One-way fingerprint of the current network key: SHA256(key)[0:4] when
+ * provisioned. Safe to expose (does not reveal the key); identical on nodes
+ * that share a key, so an operator can confirm a fleet converged without
+ * transmitting the secret. When UNPROVISIONED, writes the all-zero sentinel
+ * (0x00000000), which explicitly means "no key provisioned".
  */
 void network_key_fingerprint(uint8_t out[4]);
 
