@@ -4788,7 +4788,10 @@ static void process_ke_init(uint32_t src_addr, int channel_idx,
         memcpy(peer_id_pub, existing->peer_id_pub, 32);
     xSemaphoreGive(s_dm_mutex);
 
-    if (dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL) != 0) {
+    /* Pin continuity wiring lands with the Phase 4 DM-continuity commit;
+     * NULL = no pin known here yet (TOFU-grade, pre-rebind behavior). */
+    if (dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL, NULL) !=
+        0) {
         ESP_LOGW(TAG, "INIT verify failed from %08" PRIX32, src_addr);
         return;
     }
@@ -4845,7 +4848,8 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
 
     uint16_t ke_epoch = (uint16_t)resp->key_id;
     uint8_t session_key[32];
-    if (dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch, session_key) != 0) {
+    if (dm_verify_resp(resp, s_identity, pe->eph_priv, pe->eph_pub, ke_epoch, NULL, session_key) !=
+        0) {
         ESP_LOGW(TAG, "RESP verify failed from %08" PRIX32, src_addr);
         return;
     }

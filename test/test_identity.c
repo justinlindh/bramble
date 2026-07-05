@@ -27,13 +27,16 @@ void test_no_collision_different_addr(void) {
 }
 
 /* Pin the address/pubkey_hash derivation spec to exact bytes so BOTH backends
- * are held to the same definition. For public_key = 00 01 02 ... 1f:
+ * are held to the same definition. For an input key of 00 01 02 ... 1f:
  *   SHA256 = 630dcd29 66c43366 91125448 bbb25b4f f412a49c 732db2c8 abc1b858 1bd710dd
  *   address     = SHA256[0:4] = 0x630DCD29
  *   pubkey_hash = SHA256[4:8] = 0x66C43366  (independent slice, NOT the address)
- * The device backend (crypto_esp.c) historically returned the address as the
- * pubkey_hash, which made identity_check_collision a no-op on device; these
- * constants pin the fix on both sides. */
+ * The DERIVATION FUNCTION is unchanged by the Phase 4 rebind: only the input
+ * key changed (Ed25519 identity public key instead of the X25519 one), which
+ * the identity-level tests below pin. The device backend (crypto_esp.c)
+ * historically returned the address as the pubkey_hash, which made
+ * identity_check_collision a no-op on device; these constants pin the fix on
+ * both sides. */
 void test_pubkey_hash_pinned_to_independent_slice(void) {
     uint8_t pk[BRAMBLE_KEY_SIZE];
     for (int i = 0; i < BRAMBLE_KEY_SIZE; i++)
@@ -46,13 +49,13 @@ void test_pubkey_hash_pinned_to_independent_slice(void) {
 void test_generated_identity_hash_distinct_from_address(void) {
     bramble_identity_t me;
     TEST_ASSERT_EQUAL(0, crypto_generate_identity(&me));
-    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(me.public_key), me.address);
-    TEST_ASSERT_EQUAL_HEX32(crypto_derive_pubkey_hash(me.public_key), me.pubkey_hash);
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(me.ed25519_public_key), me.address);
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_pubkey_hash(me.ed25519_public_key), me.pubkey_hash);
     TEST_ASSERT_NOT_EQUAL(me.address, me.pubkey_hash);
 }
 
-/* Phase 1: every identity also carries a working Ed25519 keypair. The address
- * stays X25519-derived this phase (rebind to Ed25519 is Phase 3). */
+/* Phase 1 gave every identity a working Ed25519 keypair; Phase 4 rebinds the
+ * address to it. */
 void test_generated_identity_has_working_ed25519_keypair(void) {
     bramble_identity_t me;
     TEST_ASSERT_EQUAL(0, crypto_generate_identity(&me));
@@ -69,10 +72,12 @@ void test_generated_identity_has_working_ed25519_keypair(void) {
     TEST_ASSERT_EQUAL_MEMORY(me.ed25519_public_key, me.ed25519_private_key + 32,
                              BRAMBLE_ED25519_PUBKEY_SIZE);
 
-    /* Address is STILL X25519-derived: from the X25519 public key, and NOT
-     * from the Ed25519 public key (Phase 3 will rebind). */
-    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(me.public_key), me.address);
-    TEST_ASSERT_NOT_EQUAL(crypto_derive_address(me.ed25519_public_key), me.address);
+    /* THE PHASE 4 REBIND: the address derives from the Ed25519 identity
+     * public key, and NOT from the X25519 key anymore. This is what makes
+     * an attested address unforgeable: claiming an address means exhibiting
+     * a valid signature under the exact key the address hashes from. */
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(me.ed25519_public_key), me.address);
+    TEST_ASSERT_NOT_EQUAL(crypto_derive_address(me.public_key), me.address);
 }
 
 void test_two_identities_have_distinct_ed25519_keys(void) {
@@ -118,9 +123,12 @@ void test_identity_save_load_roundtrips_all_keys(void) {
 }
 
 /* Migration: a pre-Phase-1 store holds only the X25519 blobs. identity_load
- * must keep the existing X25519 identity (address stays stable), generate a
- * fresh Ed25519 keypair for it, and persist that keypair so the next load
- * returns the same Ed keys. */
+ * must keep the existing X25519 identity, generate a fresh Ed25519 keypair
+ * for it, and persist that keypair so the next load returns the same Ed
+ * keys. THE FLAG DAY (Phase 4, owner-approved, pre-alpha): the address is
+ * Ed25519-derived, so an upgrading node gets a NEW address; the old
+ * X25519-derived address is gone. Peers' stale pins for the old address
+ * are RAM-only and simply age out. */
 void test_identity_migration_from_x25519_only_store(void) {
     identity_host_store_reset();
     bramble_identity_t old_id;
@@ -133,11 +141,15 @@ void test_identity_migration_from_x25519_only_store(void) {
     memset(&migrated, 0, sizeof(migrated));
     TEST_ASSERT_EQUAL(0, identity_load(&migrated));
 
-    /* X25519 identity and address are preserved. */
+    /* X25519 keys are preserved; the address and pubkey_hash now derive
+     * from the freshly generated Ed25519 key (the flag day: NOT the old
+     * X25519-derived address). */
     TEST_ASSERT_EQUAL_MEMORY(old_id.private_key, migrated.private_key, BRAMBLE_KEY_SIZE);
     TEST_ASSERT_EQUAL_MEMORY(old_id.public_key, migrated.public_key, BRAMBLE_KEY_SIZE);
-    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(old_id.public_key), migrated.address);
-    TEST_ASSERT_EQUAL_HEX32(crypto_derive_pubkey_hash(old_id.public_key), migrated.pubkey_hash);
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_address(migrated.ed25519_public_key), migrated.address);
+    TEST_ASSERT_EQUAL_HEX32(crypto_derive_pubkey_hash(migrated.ed25519_public_key),
+                            migrated.pubkey_hash);
+    TEST_ASSERT_NOT_EQUAL(crypto_derive_address(old_id.public_key), migrated.address);
 
     /* A working Ed25519 keypair was generated for the old identity... */
     const uint8_t msg[] = "migrated";

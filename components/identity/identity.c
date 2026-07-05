@@ -217,10 +217,13 @@ int identity_load(bramble_identity_t* id) {
         }
     }
 
-    /* Address/pubkey_hash stay X25519-derived this phase (Phase 3 rebinds
-     * the address to the Ed25519 key together with the attestation). */
-    id->address = crypto_derive_address(id->public_key);
-    id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
+    /* Phase 4 rebind: address/pubkey_hash derive from the Ed25519 identity
+     * key. For a migrated (previously X25519-only) store this is the flag
+     * day: the node comes up with a NEW address derived from its freshly
+     * generated Ed key. Deliberate and owner-approved (pre-alpha): peers'
+     * pins are RAM-only and re-establish via attestation TOFU. */
+    id->address = crypto_derive_address(id->ed25519_public_key);
+    id->pubkey_hash = crypto_derive_pubkey_hash(id->ed25519_public_key);
     return 0;
 }
 

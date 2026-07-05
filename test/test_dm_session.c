@@ -236,9 +236,10 @@ void test_lru_eviction_prefers_oldest_handshaking_over_verified_active(void) {
  * main/mesh_task.c allocates a first-contact INIT straight to
  * DM_STATE_ACTIVE with verified=0 (SAS confirmation is a separate UX step,
  * not gating establishment), never touching DM_STATE_HANDSHAKING or its
- * DM_MAX_HANDSHAKING cap. dm_verify_init's address-binding check passes for
- * ANY self-chosen keypair (no secret required, no real victim address
- * needed), so an attacker can mint DM_MAX_SESSIONS forged first-contact
+ * DM_MAX_HANDSHAKING cap. A first-contact INIT (no pin for the claimed
+ * address) verifies for ANY self-chosen keypair (no secret required, no
+ * real victim address needed, and post-Phase-4 the address is not bound to
+ * the X25519 key at all), so an attacker can mint DM_MAX_SESSIONS forged first-contact
  * INITs from freshly-generated identities. Before this fix, dm_alloc's
  * eviction excluded every DM_STATE_ACTIVE slot regardless of `verified`, so
  * those forged slots were permanently unevictable: all future DM
@@ -320,12 +321,12 @@ void test_rekey_init_tag_verifies_and_fails_on_flip(void) {
     /* Non-zero tag: this is the rekey path, not first contact. */
     uint8_t zero16[16] = {0};
     TEST_ASSERT_NOT_EQUAL(0, memcmp(zero16, init.auth_tag, 16));
-    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 1, a.public_key));
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 1, a.public_key, NULL));
 
     /* Flip a single tag byte: must be rejected. */
     bramble_key_exchange_t tampered = init;
     tampered.auth_tag[0] ^= 0x01;
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&tampered, &b, 1, a.public_key));
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&tampered, &b, 1, a.public_key, NULL));
 }
 
 /* Fix 1: explicit zero-tag-downgrade case, distinct from the flipped-tag
@@ -347,10 +348,10 @@ void test_rekey_init_zero_tag_rejected(void) {
 
     bramble_key_exchange_t downgraded = init;
     memset(downgraded.auth_tag, 0, sizeof(downgraded.auth_tag));
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&downgraded, &b, 1, a.public_key));
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&downgraded, &b, 1, a.public_key, NULL));
 }
 
-void test_first_contact_init_zero_tag_and_address_check(void) {
+void test_first_contact_init_zero_tag_accepted_without_pin(void) {
     bramble_identity_t a, b;
     crypto_generate_identity(&a);
     crypto_generate_identity(&b);
@@ -363,14 +364,39 @@ void test_first_contact_init_zero_tag_and_address_check(void) {
 
     uint8_t zero16[16] = {0};
     TEST_ASSERT_EQUAL_MEMORY(zero16, init.auth_tag, 16);
-    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL));
+    /* No pin for the peer: first contact proceeds TOFU-grade (the Phase 4
+     * rebind removed the derive_address(long_term_pubkey) binding; the
+     * address now derives from the Ed25519 identity key, which this X25519
+     * handshake message does not carry). The stated residual: this window
+     * closes only once the peer's attestation is heard and pinned. */
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL, NULL));
+}
 
-    /* Address binding still applies on first contact: a message claiming
-     * an address that doesn't match its embedded identity key must be
-     * rejected even though there is no tag to check. */
-    bramble_key_exchange_t spoofed = init;
-    spoofed.src_addr ^= 0x1; /* no longer crypto_derive_address(long_term_pubkey) */
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&spoofed, &b, 0, NULL));
+/* Phase 4 DM key continuity: when the responder holds an
+ * attestation-verified pin for the initiator's address, the handshake's
+ * long-term X25519 key must BE the pinned one. Control first (matching pin
+ * accepted, non-vacuous), then a mismatched pin is refused with the
+ * distinct red-flag code even though the message is otherwise identical
+ * and would verify with no pin. */
+void test_verify_init_enforces_pinned_x25519_continuity(void) {
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph;
+    crypto_generate_identity(&a_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
+
+    /* Control: pin matches the handshake's long-term key -> accepted. */
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL, a.public_key));
+
+    /* Pinned key differs (peer's DM key "changed"): refused, distinct code. */
+    uint8_t other_pin[32];
+    memcpy(other_pin, a.public_key, 32);
+    other_pin[0] ^= 0x01;
+    TEST_ASSERT_EQUAL(DM_VERIFY_ERR_PIN_MISMATCH, dm_verify_init(&init, &b, 0, NULL, other_pin));
 }
 
 /* Fix 1: dispatch-confusion guard. The first-contact path (have_peer_id=0)
@@ -400,7 +426,7 @@ void test_verify_init_rejects_resp_relabeled_as_init(void) {
      * the INIT verifier: address binding alone would accept it (a RESP's
      * address binding is exactly as valid as an INIT's), so only the
      * ke_type assertion can catch the mismatch. */
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&resp, &a, 0, NULL));
+    TEST_ASSERT_NOT_EQUAL(0, dm_verify_init(&resp, &a, 0, NULL, NULL));
 }
 
 void test_init_resp_roundtrip_session_key(void) {
@@ -414,7 +440,7 @@ void test_init_resp_roundtrip_session_key(void) {
     bramble_key_exchange_t init;
     TEST_ASSERT_EQUAL(
         0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
-    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL));
+    TEST_ASSERT_EQUAL(0, dm_verify_init(&init, &b, 0, NULL, NULL));
 
     bramble_key_exchange_t resp;
     uint8_t kb[32];
@@ -422,7 +448,8 @@ void test_init_resp_roundtrip_session_key(void) {
                       dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
     uint8_t ka[32];
-    TEST_ASSERT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+    TEST_ASSERT_EQUAL(0,
+                      dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, NULL, ka));
     TEST_ASSERT_EQUAL_MEMORY(ka, kb, 32);
 }
 
@@ -445,7 +472,8 @@ void test_verify_resp_rejects_tampered_tag(void) {
 
     resp.auth_tag[0] ^= 0x01; /* flip a single byte of the confirm tag */
     uint8_t ka[32];
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+    TEST_ASSERT_NOT_EQUAL(
+        0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, NULL, ka));
 }
 
 /* Fix 1: dispatch-confusion guard for dm_verify_resp. ke_type is not part
@@ -476,15 +504,15 @@ void test_verify_resp_rejects_wrong_ke_type(void) {
     confused.ke_type = KE_TYPE_INIT; /* only field changed; tag is still valid */
     uint8_t ka[32];
     TEST_ASSERT_NOT_EQUAL(
-        0, dm_verify_resp(&confused, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+        0, dm_verify_resp(&confused, &a, a_eph.private_key, a_eph.public_key, 0, NULL, ka));
 }
 
-/* Fix 1: spoofed-address mutation case. A RESP claiming an address that no
- * longer matches its own embedded long_term_pubkey must be rejected by the
- * address-binding check, independent of and before the confirm-tag check
- * (which would also fail here, since the tag was computed over the
- * original, unmutated src_addr, but the address check must catch it on
- * its own). */
+/* Spoofed-address mutation case, post-rebind edition: the pre-Phase-4
+ * derive_address(long_term_pubkey) check is gone (the address derives from
+ * the Ed25519 identity key now), so src_addr integrity on a RESP rests on
+ * the K_confirm tag: transcript_2 binds both addresses, so a mutated
+ * src_addr recomputes a different expected tag and the message is
+ * rejected. This test pins that the tag really does carry that binding. */
 void test_verify_resp_rejects_spoofed_address(void) {
     bramble_identity_t a, b;
     crypto_generate_identity(&a);
@@ -502,9 +530,42 @@ void test_verify_resp_rejects_spoofed_address(void) {
     TEST_ASSERT_EQUAL(0,
                       dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
 
-    resp.src_addr ^= 0x1; /* no longer crypto_derive_address(long_term_pubkey) */
+    resp.src_addr ^= 0x1; /* transcript_2 no longer matches the tag */
     uint8_t ka[32];
-    TEST_ASSERT_NOT_EQUAL(0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, ka));
+    TEST_ASSERT_NOT_EQUAL(
+        0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, NULL, ka));
+}
+
+/* Phase 4 DM key continuity on the initiator side, same shape as the INIT
+ * test: matching pin accepted (control), mismatched pin refused with the
+ * red-flag code. */
+void test_verify_resp_enforces_pinned_x25519_continuity(void) {
+    bramble_identity_t a, b;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
+
+    bramble_key_exchange_t init;
+    TEST_ASSERT_EQUAL(
+        0, dm_build_init(&a, a_eph.public_key, a_eph.private_key, b.address, 0, NULL, &init));
+    bramble_key_exchange_t resp;
+    uint8_t kb[32];
+    TEST_ASSERT_EQUAL(0,
+                      dm_build_resp(&b, b_eph.public_key, b_eph.private_key, &init, 0, &resp, kb));
+
+    uint8_t ka[32];
+    TEST_ASSERT_EQUAL(
+        0, dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, b.public_key, ka));
+    TEST_ASSERT_EQUAL_MEMORY(ka, kb, 32);
+
+    uint8_t other_pin[32];
+    memcpy(other_pin, b.public_key, 32);
+    other_pin[0] ^= 0x01;
+    TEST_ASSERT_EQUAL(
+        DM_VERIFY_ERR_PIN_MISMATCH,
+        dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, other_pin, ka));
 }
 
 int main(void) {
@@ -524,11 +585,13 @@ int main(void) {
     RUN_TEST(test_recently_active_unverified_session_survives_eviction);
     RUN_TEST(test_rekey_init_tag_verifies_and_fails_on_flip);
     RUN_TEST(test_rekey_init_zero_tag_rejected);
-    RUN_TEST(test_first_contact_init_zero_tag_and_address_check);
+    RUN_TEST(test_first_contact_init_zero_tag_accepted_without_pin);
+    RUN_TEST(test_verify_init_enforces_pinned_x25519_continuity);
     RUN_TEST(test_verify_init_rejects_resp_relabeled_as_init);
     RUN_TEST(test_init_resp_roundtrip_session_key);
     RUN_TEST(test_verify_resp_rejects_tampered_tag);
     RUN_TEST(test_verify_resp_rejects_wrong_ke_type);
     RUN_TEST(test_verify_resp_rejects_spoofed_address);
+    RUN_TEST(test_verify_resp_enforces_pinned_x25519_continuity);
     return UNITY_END();
 }
