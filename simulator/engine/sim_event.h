@@ -24,6 +24,12 @@ typedef enum {
     EVT_METRICS_TICK,
     EVT_TICK_NODE,          /* per-node periodic tick */
     EVT_BROADCAST_DELIVERY, /* synthetic bramble.onBroadcastDelivery notification */
+    /* Per-node identity Phase 3: a scripted identity-attestation
+     * origination ("send_attestation" scenario event). data.node.node_id
+     * is the ORIGINATING node; data.node.addr is the CLAIMED address (0 =
+     * the node's own address; a nonzero different address models a keyed
+     * insider impersonating another node, the conflict-detection case). */
+    EVT_GENERATE_ATTESTATION,
 } event_type_t;
 
 /* Packet event data */

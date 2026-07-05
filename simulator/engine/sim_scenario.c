@@ -221,6 +221,29 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                 event.data.node.x = (float)ps->valuedouble;
             }
 
+        } else if (strcmp(type, "send_attestation") == 0) {
+            /* Per-node identity Phase 3: scripted identity-attestation
+             * origination. "src" is the attesting node; optional "claim"
+             * names the node whose ADDRESS is claimed (default: src
+             * itself). claim != src is the impersonation scenario: a keyed
+             * insider attesting someone else's address under its own keys. */
+            event.type = EVT_GENERATE_ATTESTATION;
+            cJSON* src = cJSON_GetObjectItem(evt_json, "src");
+            if (!cJSON_IsString(src))
+                return false;
+            sim_node_t* src_node = node_array_find_by_id(nodes, src->valuestring);
+            if (!src_node)
+                return false;
+            strncpy(event.data.node.node_id, src->valuestring, NODE_ID_LEN - 1);
+            event.data.node.addr = 0; /* 0 = claim own address */
+            cJSON* claim = cJSON_GetObjectItem(evt_json, "claim");
+            if (cJSON_IsString(claim)) {
+                sim_node_t* claim_node = node_array_find_by_id(nodes, claim->valuestring);
+                if (!claim_node)
+                    return false;
+                event.data.node.addr = claim_node->addr;
+            }
+
         } else if (strcmp(type, "move_node") == 0) {
             event.type = EVT_NODE_MOVE;
             cJSON* node_id = cJSON_GetObjectItem(evt_json, "node");
