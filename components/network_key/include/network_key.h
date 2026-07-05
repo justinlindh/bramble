@@ -8,8 +8,11 @@
  * campaign). An UNPROVISIONED node has NO usable network key: there is no
  * public-PSK fallback. network_key_get() fails, network_key_mac() emits no
  * valid MAC, and network_key_fingerprint() reports the all-zero sentinel.
- * A node becomes provisioned only when an operator sets a real key via
- * network_key_set_provisioned (the setNetworkKey RPC).
+ * A node becomes provisioned only by generating a fresh key
+ * (network_key_generate_provision), loading a persisted one
+ * (network_key_load_from_nvs), or having an operator set one
+ * (network_key_set_provisioned via the setNetworkKey RPC). The key is
+ * persisted to NVS on the set and generate paths so it survives reboot.
  *
  * This component is the fail-closed FOUNDATION; it does not on its own make
  * an unprovisioned node inert. The control-plane call sites that build MACs
@@ -18,11 +21,14 @@
  * the campaign's Task 2.
  */
 
-/* Marks the node as provisioned with a real, non-public network key. */
+/* Marks the node as provisioned with a real, non-public network key and
+ * persists it to non-volatile storage (device NVS; in-memory on host) so it
+ * survives reboot. Called by generate_provision and the setNetworkKey RPC. */
 void network_key_set_provisioned(const uint8_t key[32]);
 
-/* Reverts to unprovisioned. After this, network_key_get() fails closed until
- * a key is set again. */
+/* Reverts to unprovisioned IN MEMORY (does NOT erase persisted storage).
+ * After this, network_key_get() fails closed until a key is set, generated,
+ * or loaded again. */
 void network_key_clear(void);
 
 /* Copies the provisioned key into key_out and returns 0 IFF provisioned.
@@ -30,9 +36,26 @@ void network_key_clear(void);
  * (fail-closed: there is no fallback key material). */
 int network_key_get(uint8_t key_out[32]);
 
-/* 1 if a real key is currently provisioned (set since boot and not since
- * network_key_clear'd), 0 otherwise. */
+/* 1 if a real key is currently provisioned (set, generated, or loaded since
+ * boot and not since network_key_clear'd), 0 otherwise. */
 int network_key_is_provisioned(void);
+
+/*
+ * Generates a fresh 32-byte network key from the entropy-gated crypto_random
+ * source (the SEC-L1 fail-closed source crypto_generate_identity uses),
+ * provisions it (in memory + NVS), and copies it into key_out. Returns 0 on
+ * success. On entropy failure returns nonzero and provisions NOTHING
+ * (fail-closed): the previous provisioning state and key_out are left
+ * untouched.
+ */
+int network_key_generate_provision(uint8_t key_out[32]);
+
+/*
+ * Loads a persisted network key from storage and provisions it in memory.
+ * Returns 0 if a key was loaded, nonzero if none is stored. Does NOT
+ * re-persist (load is a read). Boot wiring is the campaign's Task 2.
+ */
+int network_key_load_from_nvs(void);
 
 /*
  * Fail-closed domain-separated control-plane MAC: HMAC(network_key,
