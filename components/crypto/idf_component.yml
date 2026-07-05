@@ -1,0 +1,4 @@
+dependencies:
+  # Ed25519 (crypto_sign_*): ESP-IDF mbedtls has no Ed25519, so the device
+  # backend uses the libsodium managed component. Host tests use OpenSSL.
+  espressif/libsodium: "^1.0.20"

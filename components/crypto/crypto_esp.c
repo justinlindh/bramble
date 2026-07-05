@@ -12,6 +12,7 @@
 #include "esp_random.h"
 #include "esp_log.h"
 #include "crypto_entropy.h"
+#include "sodium.h"
 #include <string.h>
 
 /* RNG callback for mbedtls_ecp_mul (required for side-channel blinding) */
@@ -124,6 +125,42 @@ int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
     if (ret == 0 && crypto_x25519_check_shared(shared_secret) != 0)
         ret = -1;
     return ret;
+}
+
+/* Ed25519 via libsodium (espressif/libsodium managed component); ESP-IDF
+ * mbedtls has no Ed25519. sodium_init() is idempotent (returns 1 when
+ * already initialized) and only fails on catastrophic misconfiguration. */
+int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {
+    if (sodium_init() < 0)
+        return -1;
+    /* Seed from crypto_random(): the SEC-L1 entropy-gated source
+     * (crypto_entropy_fill + esp_random, see crypto_random() above). Draw
+     * into a scratch buffer and fail closed before touching the caller's
+     * key buffers, mirroring crypto_generate_identity(). */
+    uint8_t seed[32];
+    if (crypto_random(seed, sizeof(seed)) != 0) {
+        /* Entropy gate shut: refuse rather than derive from a zeroed seed. */
+        return -1;
+    }
+    int ret = crypto_sign_seed_keypair(public_key, private_key, seed);
+    mbedtls_platform_zeroize(seed, sizeof(seed));
+    return (ret == 0) ? 0 : -1;
+}
+
+int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,
+                        size_t msg_len, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    if (sodium_init() < 0)
+        return -1;
+    return (crypto_sign_detached(sig, NULL, msg, msg_len, private_key) == 0) ? 0 : -1;
+}
+
+bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           const uint8_t* msg, size_t msg_len,
+                           const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    if (sodium_init() < 0)
+        return false;
+    return crypto_sign_verify_detached(sig, msg, msg_len, public_key) == 0;
 }
 
 int crypto_generate_identity(bramble_identity_t* id) {

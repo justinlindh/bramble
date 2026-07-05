@@ -11,6 +11,14 @@
 #define BRAMBLE_TAG_SIZE 16
 #define BRAMBLE_HMAC_TRUNC 4
 
+/* Ed25519 signature primitive (RFC 8032). The 64-byte secret key uses the
+ * libsodium layout: seed (32) || public key (32). Both backends (device
+ * libsodium, host OpenSSL) produce and consume this same layout, pinned by
+ * the shared RFC 8032 vectors in test/test_ed25519.c. */
+#define BRAMBLE_ED25519_PUBKEY_SIZE 32
+#define BRAMBLE_ED25519_SECKEY_SIZE 64
+#define BRAMBLE_ED25519_SIG_SIZE 64
+
 typedef struct {
     uint8_t private_key[BRAMBLE_KEY_SIZE];
     uint8_t public_key[BRAMBLE_KEY_SIZE];
@@ -49,6 +57,19 @@ uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uin
                                    size_t data_len);
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash);
 int crypto_random(uint8_t* buf, size_t len);
+
+/* Ed25519 sign/verify/keypair. Keygen draws its 32-byte seed from
+ * crypto_random(), so on device it sits behind the SEC-L1 fail-closed
+ * entropy gate (crypto_entropy_fill); returns nonzero and writes no key
+ * material when the gate is shut. Verify rejects non-canonical (S >= L)
+ * signatures on both backends. */
+int crypto_ed25519_keypair(uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]);
+int crypto_ed25519_sign(const uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE], const uint8_t* msg,
+                        size_t msg_len, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
+bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
+                           const uint8_t* msg, size_t msg_len,
+                           const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
 
 /* Default public channel PSK — well-known, not secret */
 #define BRAMBLE_PUBLIC_CHANNEL_PSK "bramble-default"
