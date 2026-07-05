@@ -1222,21 +1222,31 @@ static uint32_t s_attestation_wait_ms; /* 0 = boot send not attempted yet */
  * Build, self-sign and broadcast this node's identity attestation
  * (PKT_TYPE_IDENTITY_ATTESTATION): {address, X25519 pub, Ed25519 pub}
  * signed by the node's OWN Ed25519 key over the canonical message
- * bramble_identity_attestation_signed_msg builds (packet.h). Deliberately
- * no network-key MAC: the frame is self-authenticating and must be
- * checkable by any member (see the struct comment in packet.h).
+ * bramble_identity_attestation_signed_msg builds (packet.h), then
+ * relay-gated under the network-key MAC (Phase 3, ident_relay_sign): the
+ * Ed25519 sig carries the claim's truth, the MAC carries relay privilege
+ * (see the struct comment in packet.h). Ordering is load-bearing: seq is
+ * drawn and the Ed25519 sig computed BEFORE ident_relay_sign, because the
+ * MAC covers both. seq is drawn once here at origination and never
+ * re-drawn by relays (the frame floods unmodified except hop_limit).
  *
  * Broadcast on the BROADCAST budget lane (TX_KIND_DATA_BROADCAST, the
  * same tier the beacon and the flood relay debit). hop_limit uses the
  * same origination helper as flood DATA/ACK sends: ROUTE_HOP_LIMIT_MAX
  * reactive, the configured flood hop budget under s_flood_transport.
- * NOTE (Phase 2 reach): the RX dispatch relays broadcasts per-type, and
- * no relay handles this type yet, so only direct neighbors hear it this
- * phase; Phase 3 extends relay alongside receiver verification.
  */
 static int send_identity_attestation(void) {
     if (!s_identity)
         return -1;
+
+    /* ws 1.3b pattern (send_ack): draw the 48-bit origin seq up front,
+     * fail-closed. No seq means no attestation goes out; the retry timer
+     * covers it exactly like a budget denial. */
+    uint64_t att_seq;
+    if (control_seq_next(&att_seq) != 0) {
+        ESP_LOGE(TAG, "Seq counter unavailable, skipping identity attestation");
+        return -1;
+    }
 
     bramble_identity_attestation_t att = {0};
     att.header.version = BRAMBLE_VERSION;
@@ -1259,6 +1269,16 @@ static int send_identity_attestation(void) {
         ESP_LOGE(TAG, "Attestation sign failed");
         return -1;
     }
+
+    /* Relay gate (Phase 3): write seq, then MAC. Both after the Ed25519
+     * sign above, since the MAC covers sig and seq. */
+    att.seq[0] = (uint8_t)(att_seq >> 40);
+    att.seq[1] = (uint8_t)(att_seq >> 32);
+    att.seq[2] = (uint8_t)(att_seq >> 24);
+    att.seq[3] = (uint8_t)(att_seq >> 16);
+    att.seq[4] = (uint8_t)(att_seq >> 8);
+    att.seq[5] = (uint8_t)att_seq;
+    ident_relay_sign(&att);
 
     uint8_t buf[IDENTITY_ATTESTATION_SIZE];
     if (bramble_identity_attestation_serialize(&att, buf, sizeof(buf)) != ESP_OK) {

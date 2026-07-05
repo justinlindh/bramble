@@ -390,7 +390,7 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     return ESP_OK;
 }
 
-/* IDENTITY_ATTESTATION (144 bytes, fixed) */
+/* IDENTITY_ATTESTATION (158 bytes, fixed) */
 esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestation_t* p,
                                                  uint8_t* buf, size_t len) {
     if (len < IDENTITY_ATTESTATION_SIZE)
@@ -402,6 +402,8 @@ esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestat
     memcpy(buf + B + 4, p->x25519_pub, 32);
     memcpy(buf + B + 36, p->ed25519_pub, 32);
     memcpy(buf + B + 68, p->sig, 64);
+    memcpy(buf + B + 132, p->auth_hmac, 8);
+    memcpy(buf + B + 140, p->seq, 6);
     return ESP_OK;
 }
 esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_t* p,
@@ -417,6 +419,8 @@ esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_
     memcpy(p->x25519_pub, buf + B + 4, 32);
     memcpy(p->ed25519_pub, buf + B + 36, 32);
     memcpy(p->sig, buf + B + 68, 64);
+    memcpy(p->auth_hmac, buf + B + 132, 8);
+    memcpy(p->seq, buf + B + 140, 6);
     return ESP_OK;
 }
 
