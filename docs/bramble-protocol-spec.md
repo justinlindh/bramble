@@ -42,7 +42,7 @@ Meshtastic pioneered consumer LoRa mesh networking, but its protocol has fundame
 | **Routing** | Naive flooding — every node rebroadcasts every packet. O(N) airtime per message. Network saturates at ~30 nodes. | Reactive AODV-style routing with cached routes. O(path_length) airtime per message after route discovery. |
 | **Reliability** | "Best effort" with optional ACKs but no retry intelligence, no flow control, no congestion awareness. | Three-tier reliability model with exponential backoff, sliding window flow control, and congestion-aware scheduling. |
 | **Privacy** | All nodes in a channel share one PSK. Any channel member can impersonate any other. Relay nodes see all content. | Per-node X25519 key exchange for DMs. Relay nodes route ciphertext they cannot decrypt. Privacy-preserving route discovery. |
-| **Scalability** | Flooding creates O(N²) total transmissions per message. Beacon storms. Channel congestion above ~30 nodes. | Route-based forwarding scales to 200+ nodes. Adaptive airtime budgets prevent congestion. |
+| **Scalability** | Flooding creates O(N²) total transmissions per message. Beacon storms. Channel congestion above ~30 nodes. | Reactive routing keeps DM airtime at O(path_length) rather than O(N); token-bucket airtime budgets pace every transmission. Honest scale is bounded by radio profile, node density, and hop budget: a single shared channel still saturates under load at large node counts (see [docs/results/](results/)). Not a demonstrated 200-node property, and no multi-node field test has been run. |
 | **Airtime management** | None. Nodes transmit whenever they want. One chatty node can monopolize the channel. | Token-bucket airtime budget per node with priority queuing and congestion backoff. |
 
 ### 1.3 Design Goals
@@ -216,6 +216,8 @@ for attempt in 0..2:
 ```
 
 The combination of wide slot spacing, hardware channel sensing, and aggressive retries achieves near-100% delivery receipt rates in meshes of 5+ nodes.
+
+> **Firmware reality.** This is a design-target statement, not a measured field result. Under the honest collision-modeled simulator, delivery holds high only at small, dense scale (about 95% at 10 nodes) and collapses as a single SF10 channel saturates under offered load and node count (roughly 10 to 12% at 50 to 100 nodes, 0% at 200); see [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md). No multi-node field test has been run. Treat the delivery-receipt layering here as a reliability mechanism, not a scale guarantee.
 
 ---
 
@@ -831,7 +833,7 @@ function on_beacon_received(beacon):
 
 ### 5.2 X25519 Key Exchange for DMs
 
-> **Firmware reality.** This exchange is not implemented on the wire: `PKT_TYPE_KEY_EXCHANGE` is never sent and never handled, and DMs are encrypted with the shared channel key, readable by every holder of that key ([SECURITY-MODEL.md](SECURITY-MODEL.md), section 4).
+> **Firmware reality (wire v4).** The standalone `PKT_TYPE_KEY_EXCHANGE` (0x06) packet drawn below is never sent and never handled; it was formally retired from the wire (§4.10, §4.25 item 3). Direct messages are NOT encrypted with the shared channel key. The DM handshake now travels inside `PKT_TYPE_DATA` envelopes with `app_type = APP_TYPE_KE`, and each peer pair establishes its own AES-256-GCM session key from a role-symmetric quad-DH X25519 exchange (four X25519 DHs mixed via HKDF-SHA256, label `"bramble-dm-v2"`) plus a 7-digit SAS for out-of-band verification (`components/dm_session`; [SECURITY-MODEL.md](SECURITY-MODEL.md), SEC-C2). The pseudocode below is retained as historical design context only and does not reflect the shipped quad-DH construction.
 
 When node A wants to send a DM to node B for the first time, they perform a key exchange:
 
@@ -1816,7 +1818,12 @@ approximately 45-unit node spacing) the firmware flood measured **75 to 100
 percent reach and 60 to 90 percent confirmed delivery at 25 to 100 nodes**.
 These are the profile and density the transport is designed for; they are not
 the shipping default (which is LongRange, SF10 / 125 kHz, section 3.2) and they
-do not replace reactive routing.
+do not replace reactive routing. (Caveat: these figures are modeled from gosim
+sweeps. The committed scenarios and result docs fix message load at 2/min and
+this exact profile-and-node-count grid is not reproduced by a standalone
+committed result file, so treat the range as a projection, not a published
+measurement. The committed 2/min baseline is in
+[results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md).)
 
 **Operating envelope (honest).** The reach and confirmation halves of the
 transport have different scaling limits, and it is worth being explicit about
@@ -1833,7 +1840,9 @@ each rather than quoting a single headline number:
   message floods across every node, and the confirmation round trip is a second
   flood on top of that. When the shared channel saturates, the confirmation is
   the first casualty, because the ACK flood competes with the DATA floods still
-  in the air. Measured envelope at **100 nodes dense**: confirmed delivery is
+  in the air. Modeled envelope at **100 nodes dense** (from gosim sweeps; the
+  committed scenarios fix message load at 2/min, so the wider per-minute load
+  axis here is a projection, not a reproduced measurement): confirmed delivery is
   about **80 percent at 2 to 10 messages/min**, falling to **single digits by 30
   to 60 messages/min**. This degradation is close to fundamental to flooding --
   it is the O(messages x nodes) airtime cost, not a tuning bug -- so confirmed
