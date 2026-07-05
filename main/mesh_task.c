@@ -1431,10 +1431,20 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
         /* ws 1.3c: only established neighbors count toward the pre-commit
          * corroboration quorum (NEW-SEC-4 anti-Sybil lever). Computed after
          * neighbor_update above so the current beacon's tenure (beacon_count,
-         * first_seen_ms) is reflected before the established check. */
+         * first_seen_ms) is reflected before the established check.
+         *
+         * Phase 4 identity gate on top: once ANY verified identity is
+         * pinned, only PINNED peers corroborate (a fabricated source
+         * address cannot be pinned post-rebind: it has no deriving Ed
+         * key); with zero pins the gate falls back to tenure alone so a
+         * fresh mesh still converges. Full semantics + tests:
+         * identity_store_quorum_eligible (identity_store.h). Runs on the
+         * same task as handle_identity_attestation, so no locking. */
         bool established = neighbor_is_established(&s_neighbors, beacon.src_addr, t);
+        bool quorum_ok =
+            identity_store_quorum_eligible(&s_identity_pins, beacon.src_addr, established);
         timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
-                             (uint8_t)beacon.time_confidence, beacon.src_addr, established, t);
+                             (uint8_t)beacon.time_confidence, beacon.src_addr, quorum_ok, t);
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);

@@ -110,6 +110,32 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
 /* Phase 4 query surface: the pinned entry for address, or NULL. */
 const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t address);
 
+/*
+ * Phase 4 timesync-quorum gate: whether a peer may count toward the
+ * pre-commit corroboration quorum (timesync_handle_sync's
+ * source_established input, ws 1.3c / NEW-SEC-4).
+ *
+ * CHOSEN SEMANTIC (documented here, tested in test_identity_store.c):
+ *   eligible = established AND (pinned OR store holds ZERO pins).
+ *
+ * - `established` is the existing neighbor-tenure signal
+ *   (neighbor_is_established); it is ALWAYS required, never relaxed.
+ * - Once ANY verified identity is pinned, only PINNED peers corroborate
+ *   time: an insider fabricating fresh source addresses can no longer
+ *   quorum the clock, because a fabricated address cannot be pinned at
+ *   all post-rebind (it would need the deriving Ed25519 key).
+ * - With ZERO pins the gate falls back to tenure alone: a fresh mesh (or
+ *   any node right after boot, since pins are RAM-only) must still
+ *   converge with no attestations heard yet. Degrade, never brick.
+ *   Transient window accepted: between the first pin arriving and the
+ *   rest of the neighbors' attestations (boot-hook + 15 min cadence),
+ *   unpinned established neighbors drop out of the quorum; the
+ *   post-commit timesync path (stratum/shift gates) is unaffected.
+ * - Unpinned peers lose ONLY quorum membership; they remain neighbors,
+ *   relays and DM peers.
+ */
+bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established);
+
 /* Number of used entries (diagnostics). */
 int identity_store_count(const identity_store_t* s);
 

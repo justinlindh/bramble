@@ -318,6 +318,41 @@ static void test_x25519_rotation_is_conflict_via_delivery(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(att.x25519_pub, e->x25519_pub, 32); /* original kept */
 }
 
+/* ── identity_store_quorum_eligible: the Phase 4 timesync gate ──────── */
+
+/* Semantics under test (documented on the function): established tenure
+ * is ALWAYS required (unchanged ws 1.3c behavior); on top of that, once
+ * ANY pin exists only pinned peers are quorum-eligible, and with ZERO
+ * pins (fresh mesh / fresh boot: pins are RAM-only) eligibility falls
+ * back to tenure alone so a mesh with no attestations still converges
+ * (graceful degradation, never brick). */
+static void test_quorum_no_pins_falls_back_to_tenure_only(void) {
+    identity_store_init(&s_store);
+    /* Fresh mesh: nothing pinned anywhere. Established peers must remain
+     * quorum-eligible or timesync could never bootstrap. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true));
+    /* Tenure still required: never eligible without it. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false));
+}
+
+static void test_quorum_with_pins_requires_pinned_identity(void) {
+    identity_store_init(&s_store);
+    uint8_t ed[32], x[32];
+    fill_key(ed, 0x10);
+    fill_key(x, 0x50);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 0xA1u, ed, x, 1000));
+
+    /* Pinned + established: full trust. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true));
+    /* Pinned but not established: tenure requirement is not relaxed. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false));
+    /* Established but UNPINNED while pins exist: excluded from the quorum
+     * (the Sybil lever NEW-SEC-4 wanted: an insider's fabricated source
+     * addresses cannot corroborate time once real identities are known).
+     * Still a neighbor, still relays: only quorum membership tightens. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xB2u, true));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_first_pin_stores_and_lookup_returns_it);
@@ -330,5 +365,7 @@ int main(void) {
     RUN_TEST(test_self_attestation_ignored);
     RUN_TEST(test_impersonation_via_delivery_detected_and_refused);
     RUN_TEST(test_x25519_rotation_is_conflict_via_delivery);
+    RUN_TEST(test_quorum_no_pins_falls_back_to_tenure_only);
+    RUN_TEST(test_quorum_with_pins_requires_pinned_identity);
     return UNITY_END();
 }
