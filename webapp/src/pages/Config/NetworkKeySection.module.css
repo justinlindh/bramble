@@ -122,3 +122,34 @@
 .fingerprint {
   font-family: var(--font-mono);
 }
+
+.warnBox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 12%, var(--bg));
+}
+
+.dangerBtn {
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+  transition: opacity 0.15s;
+}
+
+.dangerBtn:hover {
+  opacity: 0.88;
+}
+
+.dangerBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

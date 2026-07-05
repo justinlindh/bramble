@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
-import {
-  encodeNetworkKeyShare,
-  parseNetworkKeyShare,
-  networkKeyFingerprint,
-  generateNetworkKeyHex,
-} from '../../utils/networkKeyShare';
-import { setNetworkKey, getNetworkKeyStatus } from '../../store/actions';
+import { encodeNetworkKeyShare, parseNetworkKeyShare } from '../../utils/networkKeyShare';
+import { setNetworkKey, generateNetworkKey, loadNetworkKeyStatus } from '../../store/actions';
+import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { QRScanModal } from '../../components/QRScanModal';
 import type { ScanResult } from '../../components/QRScanModal';
@@ -13,16 +9,24 @@ import styles from './NetworkKeySection.module.css';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
-// The network key is a write-only secret: this section can generate one and
-// carry it out-of-band (QR / copy-paste) to each node, or provision this node
-// from a share made elsewhere. It never reads a key back from the device,
+// Provisioning the control-plane network key. Two honest paths:
+//   - FOUND a network: this node mints a fresh key on-device (entropy-gated,
+//     provisioned + persisted immediately) and shows it once so the operator
+//     can copy it to every other node. This node becomes the fleet founder.
+//   - JOIN a network: paste or scan a key from a node that already has one.
+// The key is a write-only secret: the device never reads a stored key back,
 // only the one-way fingerprint used to confirm nodes are on the same key.
 export function NetworkKeySection() {
-  const [status, setStatus] = useState<{ provisioned: boolean; fingerprint: string } | null>(null);
+  // The provisioning status lives in the global store (polled by the app shell
+  // to drive the top-level UNPROVISIONED banner); read it here so this section
+  // and the banner never disagree.
+  const status = useStore((s) => s.networkKeyStatus);
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const [generated, setGenerated] = useState<{ hex: string; uri: string; fp: string } | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [confirmRekey, setConfirmRekey] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [showGeneratedShare, setShowGeneratedShare] = useState(false);
   const [hexCopied, setHexCopied] = useState(false);
 
@@ -34,7 +38,7 @@ export function NetworkKeySection() {
 
   const refreshStatus = async () => {
     try {
-      setStatus(await getNetworkKeyStatus());
+      await loadNetworkKeyStatus();
       setStatusError(null);
     } catch (e) {
       setStatusError((e as Error).message);
@@ -45,14 +49,23 @@ export function NetworkKeySection() {
     void refreshStatus();
   }, []);
 
-  // ── Generate ──────────────────────────────────────────────────────────────
+  // ── Found (generate on-device) ─────────────────────────────────────────────
   const onGenerate = async () => {
+    // Re-keying an already-provisioned node is destructive: warn first.
+    if (status?.provisioned && !confirmRekey) {
+      setConfirmRekey(true);
+      return;
+    }
+    setConfirmRekey(false);
     setGenerating(true);
+    setGenerateError(null);
     try {
-      const hex = generateNetworkKeyHex();
-      const fp = await networkKeyFingerprint(hex);
-      setGenerated({ hex, uri: encodeNetworkKeyShare(hex), fp });
+      const { key, fingerprint } = await generateNetworkKey();
+      setGenerated({ hex: key, uri: encodeNetworkKeyShare(key), fp: fingerprint });
       setHexCopied(false);
+      await refreshStatus();
+    } catch (e) {
+      setGenerateError((e as Error).message);
     } finally {
       setGenerating(false);
     }
@@ -69,7 +82,7 @@ export function NetworkKeySection() {
     }
   };
 
-  // ── Provision ─────────────────────────────────────────────────────────────
+  // ── Join (paste/scan an existing key) ──────────────────────────────────────
   const onProvision = async (input: string) => {
     const parsed = parseNetworkKeyShare(input);
     const keyHex = parsed.ok
@@ -88,7 +101,7 @@ export function NetworkKeySection() {
       const ok = await setNetworkKey(keyHex);
       if (ok) {
         setPasteInput('');
-        setProvisionSuccess('Network key provisioned.');
+        setProvisionSuccess('Network key provisioned. This node joined the network.');
         await refreshStatus();
       } else {
         setProvisionError('Device rejected the key.');
@@ -121,33 +134,54 @@ export function NetworkKeySection() {
         <h3 className={styles.subheading}>Status</h3>
         {statusError && <p className={styles.error}>{statusError}</p>}
         {!statusError && !status && <p className={styles.muted}>Loading status...</p>}
-        {status && (
-          status.provisioned ? (
+        {status &&
+          (status.provisioned ? (
             <p className={styles.notice}>
-              Provisioned (fingerprint <span className={styles.fingerprint}>{status.fingerprint}</span>)
+              Provisioned. Fingerprint{' '}
+              <span className={styles.fingerprint}>{status.fingerprint}</span>. Every node in this
+              network should show this same fingerprint.
             </p>
           ) : (
             <p className={styles.warning}>
-              UNPROVISIONED: control plane is forgeable on the public fallback key
-              (fingerprint <span className={styles.fingerprint}>{status.fingerprint}</span>). Generate and
-              provision a network key on every node to close this off.
+              UNPROVISIONED: this node has no network key, so it is INERT (not meshing). Found a
+              network below, or join one, to bring it online.
             </p>
-          )
-        )}
+          ))}
       </div>
 
-      {/* ── Generate ── */}
+      {/* ── Found a network (generate on-device) ── */}
       <div className={styles.subsection}>
-        <h3 className={styles.subheading}>Generate a new key</h3>
+        <h3 className={styles.subheading}>Found a new network</h3>
         <p className={styles.hint}>
-          Creates a random 32-byte key in this browser. It is never sent anywhere until you
-          provision it below, and it is never shown again after you navigate away.
+          Mints a fresh key on this node and provisions it here immediately, making this node the
+          founder. Copy the key it shows to every other node (below) so they can join. The key is
+          shown once and never read back.
         </p>
-        <div className={styles.row}>
-          <button className={styles.primaryBtn} onClick={onGenerate} disabled={generating}>
-            {generating ? 'Generating...' : 'Generate key'}
-          </button>
-        </div>
+        {confirmRekey ? (
+          <div className={styles.warnBox}>
+            <p className={styles.warning}>
+              This node is already provisioned (fingerprint{' '}
+              <span className={styles.fingerprint}>{status?.fingerprint}</span>). Generating a new
+              key RE-KEYS this node and cuts it off from any node still on the old key until you copy
+              the new key to them. Continue?
+            </p>
+            <div className={styles.row}>
+              <button className={styles.dangerBtn} type="button" onClick={onGenerate} disabled={generating}>
+                {generating ? 'Re-keying...' : 'Re-key this node'}
+              </button>
+              <button className={styles.ghostBtn} type="button" onClick={() => setConfirmRekey(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.row}>
+            <button className={styles.primaryBtn} onClick={onGenerate} disabled={generating}>
+              {generating ? 'Generating...' : status?.provisioned ? 'Generate new key (re-key)' : 'Generate key'}
+            </button>
+          </div>
+        )}
+        {generateError && <p className={styles.error}>{generateError}</p>}
         {generated && (
           <>
             <div className={styles.row}>
@@ -165,8 +199,8 @@ export function NetworkKeySection() {
               </button>
             </div>
             <p className={styles.hint}>
-              Fingerprint <span className={styles.fingerprint}>{generated.fp}</span>. Verify this matches
-              every node's status after you provision them.
+              Fingerprint <span className={styles.fingerprint}>{generated.fp}</span>. Copy this key
+              to your other nodes and confirm each one reports this fingerprint.
             </p>
             <div className={styles.row}>
               <button className={styles.primaryBtn} type="button" onClick={() => setShowGeneratedShare(true)}>
@@ -177,10 +211,10 @@ export function NetworkKeySection() {
         )}
       </div>
 
-      {/* ── Provision ── */}
+      {/* ── Join a network (paste/scan) ── */}
       <div className={styles.subsection}>
-        <h3 className={styles.subheading}>Provision this node</h3>
-        <p className={styles.hint}>Scan or paste a network-key share to set this node's key.</p>
+        <h3 className={styles.subheading}>Join an existing network</h3>
+        <p className={styles.hint}>Scan or paste the key from a node that already has one.</p>
         <div className={styles.row}>
           <button className={styles.primaryBtn} type="button" onClick={() => { setProvisionError(null); setShowScan(true); }}>
             Scan QR

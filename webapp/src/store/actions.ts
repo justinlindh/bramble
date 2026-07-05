@@ -1553,6 +1553,28 @@ export async function getNetworkKeyStatus(): Promise<{ provisioned: boolean; fin
   return await client.rpc<{ provisioned: boolean; fingerprint: string }>('bramble.getNetworkKeyStatus');
 }
 
+/**
+ * Mint a fresh network key on the device and provision THIS node as the fleet
+ * founder. The device generates the key from its entropy-gated source and
+ * persists it; the raw key is returned once so the operator can copy it to the
+ * other nodes. On an already-provisioned node this RE-KEYS it, so callers must
+ * confirm first. The returned key is a secret: never log it.
+ */
+export async function generateNetworkKey(): Promise<{ key: string; fingerprint: string }> {
+  if (!client) throw new Error('Not connected');
+  return await client.rpc<{ key: string; fingerprint: string }>('bramble.generateNetworkKey');
+}
+
+/**
+ * Refresh the global network-key provisioning status in the store. Polled from
+ * the app shell so the UNPROVISIONED (inert) banner stays live on every tab.
+ */
+export async function loadNetworkKeyStatus(): Promise<void> {
+  if (!client) return;
+  const s = await client.rpc<{ provisioned: boolean; fingerprint: string }>('bramble.getNetworkKeyStatus');
+  useStore.getState().setNetworkKeyStatus(s);
+}
+
 export function decodePacketType(pktType: number | string | undefined): string {
   if (typeof pktType === 'string') return pktType;
   switch (pktType) {

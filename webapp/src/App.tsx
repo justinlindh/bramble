@@ -1,8 +1,9 @@
 import { type ReactNode, Suspense, lazy, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
-import { disconnect, loadConnectionCapabilities, loadNeighbors } from './store/actions';
+import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeyStatus } from './store/actions';
 import { usePoll } from './hooks/usePoll';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
+import { UnprovisionedBanner } from './components/UnprovisionedBanner';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, showToast, dismissToast } from './components/Toast';
@@ -67,6 +68,10 @@ export default function App() {
 
   // Global neighbor poll for presence status (works from any tab)
   usePoll(isConnected ? loadNeighbors : () => Promise.resolve(), 10_000);
+
+  // Global provisioning poll: keeps the UNPROVISIONED (inert) banner live on
+  // every tab and makes it vanish the moment a key is set on this node.
+  usePoll(isConnected ? loadNetworkKeyStatus : () => Promise.resolve(), 10_000);
 
   useEffect(() => {
     loadConnectionCapabilities();
@@ -185,6 +190,9 @@ export default function App() {
           </button>
         )}
       </header>
+
+      {/* Prominent, always-visible warning when this node has no network key */}
+      <UnprovisionedBanner />
 
       {/* Body: sidebar (desktop) + content */}
       <div className={styles.body}>
