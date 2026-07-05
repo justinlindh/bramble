@@ -347,6 +347,65 @@ void test_get_config_reflects_mailbox_disabled_after_set_mailbox_false(void) {
     cJSON_Delete(get_resp);
 }
 
+/* ── bramble.setFloodTransport (Flooding F1 Task 1) ──────────────────────
+ * Same shape as bramble.setMailbox above: validates the enabled bool param
+ * and delegates to mesh_set_flood_transport(); getConfig reflects the
+ * current state via floodTransportEnabled.
+ * ──────────────────────────────────────────────────────────────────── */
+
+extern bool g_stub_flood_transport_enabled;
+
+void test_set_flood_transport_enabled_true_calls_mesh_and_returns_ok(void) {
+    g_stub_flood_transport_enabled = false;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":58,\"method\":\"bramble.setFloodTransport\","
+        "\"params\":{\"enabled\":true}}");
+    cJSON* r = assert_result(resp);
+    TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")), "ok should be true");
+    TEST_ASSERT_TRUE_MESSAGE(g_stub_flood_transport_enabled,
+                             "mesh_set_flood_transport(true) should have been called");
+    cJSON_Delete(resp);
+}
+
+void test_set_flood_transport_enabled_false_calls_mesh_and_returns_ok(void) {
+    g_stub_flood_transport_enabled = true;
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":59,\"method\":\"bramble.setFloodTransport\","
+        "\"params\":{\"enabled\":false}}");
+    cJSON* r = assert_result(resp);
+    TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")), "ok should be true");
+    TEST_ASSERT_FALSE_MESSAGE(g_stub_flood_transport_enabled,
+                              "mesh_set_flood_transport(false) should have been called");
+    cJSON_Delete(resp);
+}
+
+void test_set_flood_transport_missing_enabled_returns_invalid_params(void) {
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"bramble.setFloodTransport\","
+        "\"params\":{}}");
+    TEST_ASSERT_EQUAL_INT(RPC_ERR_INVALID_PARAMS, assert_error_code(resp));
+    cJSON_Delete(resp);
+}
+
+void test_get_config_reflects_flood_transport_enabled_after_set_true(void) {
+    g_stub_flood_transport_enabled = false;
+    cJSON* set_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"bramble.setFloodTransport\","
+        "\"params\":{\"enabled\":true}}");
+    assert_result(set_resp);
+    cJSON_Delete(set_resp);
+
+    cJSON* get_resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"bramble.getConfig\",\"params\":{}}");
+    cJSON* r = assert_result(get_resp);
+    cJSON* flood_enabled = cJSON_GetObjectItem(r, "floodTransportEnabled");
+    TEST_ASSERT_NOT_NULL_MESSAGE(flood_enabled,
+                                 "getConfig should include floodTransportEnabled field");
+    TEST_ASSERT_TRUE_MESSAGE(cJSON_IsTrue(flood_enabled),
+                             "floodTransportEnabled should be true after setFloodTransport(true)");
+    cJSON_Delete(get_resp);
+}
+
 /* ── bramble.setAuthToken ──────────────────────────────────────────────
  * Validates the token param strictly before writing to NVS.
  * ──────────────────────────────────────────────────────────────────── */
@@ -466,6 +525,12 @@ int main(void) {
     RUN_TEST(test_set_mailbox_string_enabled_returns_invalid_params);
     RUN_TEST(test_get_config_reflects_mailbox_enabled_after_set_mailbox_true);
     RUN_TEST(test_get_config_reflects_mailbox_disabled_after_set_mailbox_false);
+
+    /* setFloodTransport (Flooding F1 Task 1) */
+    RUN_TEST(test_set_flood_transport_enabled_true_calls_mesh_and_returns_ok);
+    RUN_TEST(test_set_flood_transport_enabled_false_calls_mesh_and_returns_ok);
+    RUN_TEST(test_set_flood_transport_missing_enabled_returns_invalid_params);
+    RUN_TEST(test_get_config_reflects_flood_transport_enabled_after_set_true);
 
     /* setAuthToken */
     RUN_TEST(test_set_auth_token_missing_token_field_returns_invalid_params);

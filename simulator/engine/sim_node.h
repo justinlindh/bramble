@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "../../components/routing/include/routing.h"
 #include "../../components/routing/include/discovery.h"
+#include "../../components/routing/include/channel_flood.h" /* FLOOD_RELAY_QUEUE_CAPACITY, FLOOD_SUPPRESS_AFTER */
 #include "../../components/reliability/include/reliability.h"
 #include "../../components/dedup/include/dedup.h"
 #include "../../components/airtime/include/airtime_budget.h"
@@ -111,6 +112,21 @@ typedef struct {
      * s_flood_dedup. Kept apart from `dedup` above (which the RREQ path
      * uses keyed on raw packet_id) for the same collision-safety reason. */
     dedup_buffer_t flood_dedup;
+
+    /* Flooding F1 rebroadcast suppression: per-node pending flood relays,
+     * mirroring flood.go's floodSim.pending (keyed by flood_key) and
+     * firmware's s_flood_relay_queue heard/cancel fields. A scheduled relay is
+     * an EVT_SEND_PACKET already in the event queue with no cancel handle, so
+     * cancellation is tracked HERE: an overheard duplicate bumps heard and, at
+     * FLOOD_SUPPRESS_AFTER, sets canceled; bridge_handle_flood_relay checks the
+     * flag when the relay comes due and skips the send. Kept the same
+     * structure + threshold as the model so the two stay identical. */
+    struct {
+        bool used;
+        uint32_t flood_key;
+        uint8_t heard;
+        bool canceled;
+    } flood_pending[FLOOD_RELAY_QUEUE_CAPACITY];
 
     /* Airtime budget */
     airtime_budget_t airtime;

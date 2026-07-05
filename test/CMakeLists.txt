@@ -175,6 +175,106 @@ target_include_directories(test_data_auth PRIVATE
 )
 target_link_libraries(test_data_auth ssl crypto)
 
+# Flooding F1 Task 1: unicast DATA floods (relay + deliver) under
+# s_flood_transport, reusing the SAME channel_flood_decide engine broadcast
+# DATA already uses. Mirrors mesh_process_rx_packet's PKT_TYPE_DATA dispatch
+# + handle_data's flood-relay gate with the real component functions (see
+# test_data_auth.c's identical rationale for why mesh_task.c itself is never
+# host-compiled).
+add_executable(test_unicast_flood
+    test_unicast_flood.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+)
+target_include_directories(test_unicast_flood PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+)
+target_link_libraries(test_unicast_flood ssl crypto)
+
+# Flooding F1 Task 2: flooded-ACK sender-confirmation without routes. Mirrors
+# handle_ack's flood-relay branch + the sender's pending-ack consume path with
+# the real ack_sign/ack_verify, channel_flood_decide, and pending_ack
+# functions (mesh_task.c itself is never host-compiled, same rationale as
+# test_unicast_flood.c / test_data_auth.c).
+add_executable(test_flooded_ack
+    test_flooded_ack.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/reliability.c
+)
+target_include_directories(test_flooded_ack PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
+)
+target_link_libraries(test_flooded_ack ssl crypto)
+
+# Flooding F1 Task 3: send-side flood origination + confirmation/retry
+# lifecycle. Mirrors mesh_send_message's flood-vs-reactive origination gate and
+# the pending_ack retry-by-re-flood loop with the real reliability, data_auth,
+# and packet functions (mesh_task.c itself is never host-compiled, same
+# rationale as test_unicast_flood.c / test_flooded_ack.c).
+add_executable(test_flood_origination
+    test_flood_origination.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/reliability.c
+)
+target_include_directories(test_flood_origination PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/reliability/include
+)
+target_link_libraries(test_flood_origination ssl crypto)
+
+# Flooding F1 hardening (whole-branch review): the rebroadcast-suppression
+# overheard-copy counter must act ONLY on AUTHENTICATED duplicates. Mirrors the
+# two mesh_task.c dispatch-gate suppression branches (DATA via data_auth_verify,
+# flooded ACK via bramble_ack_deserialize + ack_verify) with the real component
+# functions, proving a bad-MAC duplicate never bumps `heard` / cancels a genuine
+# pending relay while a valid one does (single flipped auth byte is the only
+# difference). mesh_task.c itself is never host-compiled (same rationale as
+# test_unicast_flood.c / test_flooded_ack.c).
+add_executable(test_flood_suppression_auth
+    test_flood_suppression_auth.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/dedup.c
+)
+target_include_directories(test_flood_suppression_auth PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing_auth/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+)
+target_link_libraries(test_flood_suppression_auth ssl crypto)
+
 # Dedup tests
 add_executable(test_dedup
     test_dedup.c

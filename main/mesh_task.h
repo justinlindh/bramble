@@ -153,6 +153,17 @@ void mesh_set_mailbox(bool enabled);
 bool mesh_get_mailbox(void);
 
 /**
+ * Enable/disable the flood transport (Flooding F1, Task 1): when on, a
+ * received unicast DATA not addressed to us is relayed through the same
+ * multi-hop flood engine broadcast DATA already uses (channel_flood_decide +
+ * s_flood_dedup), instead of the reactive route-lookup forward
+ * (forward_data_packet). Default false (reactive unchanged); NVS-persisted
+ * so the setting survives reboot, same pattern as mesh_set_mailbox above.
+ */
+void mesh_set_flood_transport(bool enabled);
+bool mesh_get_flood_transport(void);
+
+/**
  * Get the current node name (returns NULL if not set).
  */
 const char* mesh_get_node_name(void);

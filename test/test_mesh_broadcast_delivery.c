@@ -26,7 +26,7 @@ void setUp(void) {
 void tearDown(void) {}
 
 void test_send_broadcast_returns_broadcast_id(void) {
-    char response[512];
+    char response[768];
     const char* req = "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"bramble.sendBroadcast\","
                       "\"params\":{\"text\":\"hi\"}}";
     int len = rpc_dispatch(req, response, sizeof(response));
@@ -55,7 +55,7 @@ void test_broadcast_delivery_emits_notification(void) {
 }
 
 void test_recipient_only_mode_omits_path(void) {
-    char response[512];
+    char response[768];
     const char* set_req = "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"bramble."
                           "setBroadcastTelemetryMode\",\"params\":{\"mode\":\"recipient_only\"}}";
     int len = rpc_dispatch(set_req, response, sizeof(response));

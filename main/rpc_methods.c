@@ -997,6 +997,32 @@ static int handle_set_mailbox(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* Flooding F1 Task 1: bramble.setFloodTransport. Same shape/pattern as
+ * handle_set_mailbox above (NVS_NS_FLOOD instead of NVS_NS_MAILBOX). */
+static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    cJSON* enabled = cJSON_GetObjectItem(params, "enabled");
+    if (!enabled || !cJSON_IsBool(enabled))
+        return RPC_ERR_INVALID_PARAMS;
+
+    /* Persist to NVS */
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+
+    bool en = cJSON_IsTrue(enabled);
+    mesh_set_flood_transport(en);
+
+    ESP_LOGI("rpc", "Flood transport %s", en ? "enabled" : "disabled");
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddBoolToObject(result, "enabled", en);
+    return 0;
+}
+
 static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_t* policy) {
     if (!policy)
         return ESP_ERR_INVALID_ARG;
@@ -1754,6 +1780,9 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     /* Mailbox enabled state */
     cJSON_AddBoolToObject(result, "mailboxEnabled", mesh_get_mailbox());
 
+    /* Flooding F1 Task 1: flood transport toggle state */
+    cJSON_AddBoolToObject(result, "floodTransportEnabled", mesh_get_flood_transport());
+
     return 0;
 }
 
@@ -2377,6 +2406,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.removeChannel", handle_remove_channel);
     rpc_register("bramble.setDefaultChannel", handle_set_default_channel);
     rpc_register("bramble.setMailbox", handle_set_mailbox);
+    rpc_register("bramble.setFloodTransport", handle_set_flood_transport);
     rpc_register("bramble.setBroadcastTelemetryMode", handle_set_broadcast_telemetry_mode);
     rpc_register("bramble.setLocationConfig", handle_set_location_config);
     rpc_register("bramble.setLocationContact", handle_set_location_contact);
