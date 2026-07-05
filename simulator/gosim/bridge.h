@@ -42,6 +42,14 @@ typedef struct {
     uint8_t ident_x25519_pub[32];
     uint64_t ident_seq;
     identity_store_t ident_pins;
+    /* Mandatory-provisioning (Task 2): per-node "holds the network key" flag.
+     * The real network_key.c state is a single process-global (all sim nodes
+     * share one address space), so a per-node flag stands in for "this node is
+     * provisioned". Defaults true (bridge_init provisions the shared default
+     * key for the whole fleet, mirroring firmware boot); a scenario can mark a
+     * node false to make it INERT (originates nothing authenticated, drops
+     * everything authenticated) while the rest of the mesh runs normally. */
+    bool provisioned;
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
@@ -63,6 +71,17 @@ void bridge_node_ext_init_all(void);
  *   (set simulated position, assign simulated group membership, etc.)
  */
 void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, uint64_t now_us);
+
+/*
+ * bridge_node_set_provisioned (mandatory-provisioning Task 2):
+ *   Sets a node's per-node provisioned flag. Scenario nodes marked
+ *   "unprovisioned": true call this with provisioned=false after join, making
+ *   the node INERT: bridge_handle_generate_message / _generate_attestation
+ *   originate nothing, and bridge_handle_receive_packet drops all inbound
+ *   frames for that node. Every other node stays provisioned and meshes as
+ *   before. Idempotent; safe to call before or after a node has joined.
+ */
+void bridge_node_set_provisioned(int node_idx, bool provisioned);
 
 /*
  * bridge_handle_generate_attestation (per-node identity Phase 3):
