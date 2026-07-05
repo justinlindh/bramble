@@ -1,7 +1,7 @@
 package main
 
 /*
-#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/network_key/include -I../../components/security/include
+#cgo CFLAGS: -DBRAMBLE_SIM -std=c11 -O2 -I../../test/stubs -I../engine -I../../components/packet/include -I../../components/routing/include -I../../components/reliability/include -I../../components/dedup/include -I../../components/airtime/include -I../../components/airtime -I../../components/fragment/include -I../../components/fragment -I../../components/crypto/include -I../../components/crypto -I../../components/mailbox/include -I../../components/location/include -I../../components/channel/include -I../../components/nvs_keys/include -I../../components/radio/include -I../../components/network_key/include -I../../components/security/include -I../../components/routing_auth/include -I../../components/identity/include
 #cgo LDFLAGS: -lm -lssl -lcrypto
 #include <stdlib.h>
 #include "bridge.h"
@@ -214,6 +214,17 @@ func handleFloodRelay(event *C.sim_event_t, nodes *C.node_array_t,
 	radio *C.radio_config_t, rng *C.pcg32_state_t,
 	events *C.event_queue_t, metrics *C.metrics_state_t) {
 	C.bridge_handle_flood_relay(event, nodes, radio, rng, events, metrics)
+}
+
+// handleGenerateAttestation fires a scripted identity-attestation
+// origination (per-node identity Phase 3, "send_attestation" scenario
+// event): the named node signs and broadcasts its (or, for the
+// impersonation scenario, someone else's) address binding through the real
+// firmware origination path in bridge.c.
+func handleGenerateAttestation(event *C.sim_event_t, nodes *C.node_array_t,
+	radio *C.radio_config_t, rng *C.pcg32_state_t,
+	events *C.event_queue_t, metrics *C.metrics_state_t) {
+	C.bridge_handle_generate_attestation(event, nodes, radio, rng, events, metrics)
 }
 
 // --- Scenario-level test harness (Phase 1 Task 1) ---

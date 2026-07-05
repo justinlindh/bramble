@@ -314,6 +314,12 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		s.handleInterferenceEnd(evt)
 	case C.EVT_METRICS_TICK:
 		s.handleMetricsTick(evt)
+	case C.EVT_GENERATE_ATTESTATION:
+		// Per-node identity Phase 3: attestations always go through the
+		// real firmware C path in bridge.c (there is no Go-model flood
+		// equivalent; scenarios that script send_attestation use the
+		// default routing mode).
+		s.handleGenerateAttestation(evt)
 	}
 }
 
@@ -364,6 +370,10 @@ func (s *Sim) handleReceivePacket(evt *C.sim_event_t) {
 func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 	handleGenerateMessage(evt, &s.nodes, &s.radio, &s.rng, &s.events,
 		&s.metrics, &s.anomaly[0], &s.msgTrack[0], C.MAX_MSG_TRACK)
+}
+
+func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
+	handleGenerateAttestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
 }
 
 // handleFloodRelay fires a jittered channel-flood relay (Task 5): see
@@ -604,6 +614,14 @@ func (s *Sim) cmdLoad(cmd Command) {
 		nodeActivate(node)
 		s.applyDutyCycleCap(node)
 		anomalyInit(&s.anomaly[i])
+
+		// Initialize extended node state exactly like a dynamic join does
+		// (handleNodeJoin): position, and (per-node identity Phase 3) the
+		// node's Ed25519 identity keypair. Initial scenario nodes used to
+		// skip this, which left them without identities and unable to
+		// originate or pin attestations.
+		C.bridge_handle_node_join_ext(C.int(i), C.uint32_t(node.addr),
+			node.x, node.y, C.uint64_t(0))
 
 		// Schedule initial tick (staggered by 100ms per node)
 		tick := C.bridge_make_tick_event(C.uint64_t(uint64(i)*100000), &node.id[0], 0)

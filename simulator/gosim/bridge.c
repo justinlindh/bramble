@@ -7,6 +7,7 @@
 #include "../../components/airtime/include/airtime_budget.h"
 #include "../../components/fragment/include/fragment.h"
 #include "../../components/crypto/include/crypto.h"
+#include "../../components/routing_auth/include/routing_auth.h"
 /* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
@@ -1305,6 +1306,75 @@ void bridge_handle_flood_relay(sim_event_t* event, node_array_t* nodes, radio_co
     }
 }
 
+/* ─── Identity attestation RX (per-node identity Phase 3) ──────────────── */
+/*
+ * Mirrors main/mesh_task.c's handle_identity_attestation with the same
+ * verification ORDER: exact-length deserialize, then the CHEAP network-key
+ * relay-gate MAC (ident_relay_verify) before anything else (fail = drop:
+ * no relay, no pinning, no Ed25519 verify), then deliver to the node's
+ * TOFU pin store REGARDLESS of the relay decision, then flood-relay
+ * through the shared engine (bridge_flood_relay: same dedup key, same
+ * channel_flood_decide, same jittered schedule; frame unmodified except
+ * hop_limit). Relays never Ed25519-verify; only the pin store does.
+ *
+ * Divergence from firmware, both precedented in this file: no
+ * control-replay window (gosim does not model ws 1.3b replay at all, see
+ * _handle_rreq's intermediate-RREP note), and suppression counting happens
+ * inside bridge_flood_relay's is_dup branch rather than at a dispatch
+ * dedup gate (gosim's dispatch dedup is RREQ-only, see bridge_flood_relay).
+ */
+static void _handle_identity_attestation(sim_node_t* rx, const uint8_t* buf, uint16_t len,
+                                         uint64_t now_us, uint32_t now_ms, node_array_t* nodes,
+                                         radio_config_t* radio, pcg32_state_t* rng,
+                                         event_queue_t* events) {
+    bramble_identity_attestation_t att;
+    if (bramble_identity_attestation_deserialize(&att, buf, len) != ESP_OK)
+        return;
+
+    /* Relay gate: the cheap MAC, FIRST. A keyless frame dies here at its
+     * first hop: never pinned, never relayed, never Ed25519-verified. */
+    if (!ident_relay_verify(&att))
+        return;
+
+    int node_idx = (int)(rx - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (ext) {
+        /* Deliver locally regardless of the relay decision below: the one
+         * receive-side Ed25519 verify + TOFU pin (identity_store.h). */
+        identity_pin_result_t pin =
+            identity_store_handle_attestation(&ext->ident_pins, &att, rx->addr, now_ms);
+        if (pin == IDENTITY_PIN_NEW) {
+            fprintf(stdout,
+                    "{\"type\":\"identity_pinned\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"addr\":\"0x%08X\",\"ed8\":\"%02X%02X%02X%02X\"}\n",
+                    (unsigned long long)now_us, rx->id, att.src_addr, att.ed25519_pub[0],
+                    att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
+            fflush(stdout);
+        } else if (pin == IDENTITY_PIN_CONFLICT) {
+            /* Impersonation detected: first-seen wins, the original
+             * binding survives; report both sides so scenarios can assert
+             * WHICH keys were kept. */
+            const identity_pin_t* kept = identity_store_lookup(&ext->ident_pins, att.src_addr);
+            fprintf(stdout,
+                    "{\"type\":\"identity_conflict\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"addr\":\"0x%08X\""
+                    ",\"kept_ed8\":\"%02X%02X%02X%02X\""
+                    ",\"rejected_ed8\":\"%02X%02X%02X%02X\"}\n",
+                    (unsigned long long)now_us, rx->id, att.src_addr, kept->ed25519_pub[0],
+                    kept->ed25519_pub[1], kept->ed25519_pub[2], kept->ed25519_pub[3],
+                    att.ed25519_pub[0], att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
+            fflush(stdout);
+        }
+    }
+
+    /* Flood relay through the ONE shared engine (no second flood
+     * implementation): orig_sender is the frame's own MAC-covered src_addr
+     * (unlike DATA, which tracks it out-of-band by packet_id). */
+    bool is_own_echo = (att.src_addr == rx->addr);
+    bridge_flood_relay(rx, buf, len, &att.header, att.src_addr, is_own_echo, now_us, now_ms, radio,
+                       rng, events);
+}
+
 /* ─── Public packet handling wrappers ──────────────────────────────────── */
 
 void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
@@ -1386,6 +1456,10 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
     case PKT_TYPE_DELIVERY_RECEIPT:
         _handle_delivery_receipt(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng,
                                  events, metrics, anomaly, msg_track, msg_track_count);
+        break;
+    case PKT_TYPE_IDENTITY_ATTESTATION:
+        _handle_identity_attestation(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng,
+                                     events);
         break;
     default:
         break;
@@ -1888,6 +1962,85 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
     }
 }
 
+/* ─── Identity attestation origination (per-node identity Phase 3) ───── */
+/*
+ * Mirrors firmware's send_identity_attestation (main/mesh_task.c) step for
+ * step, order included: canonical message -> Ed25519 sign -> seq draw ->
+ * ident_relay_sign (the MAC covers sig and seq) -> serialize -> one
+ * BROADCAST-lane budget-gated transmission. event->data.node.addr != 0
+ * claims that address instead of the node's own: the frame is then a keyed
+ * insider's impersonation attempt, internally valid (its Ed25519 sig
+ * verifies against its OWN embedded key) but bound to someone else's
+ * address, which pinning receivers that heard the genuine node first
+ * detect and refuse (identity_conflict).
+ */
+void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
+                                        radio_config_t* radio, pcg32_state_t* rng,
+                                        event_queue_t* events, metrics_state_t* metrics) {
+    sim_node_t* src = node_array_find_by_id(nodes, event->data.node.node_id);
+    if (!src || !src->active)
+        return;
+    int node_idx = (int)(src - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+
+    uint32_t claimed = event->data.node.addr ? event->data.node.addr : src->addr;
+
+    bramble_identity_attestation_t att;
+    memset(&att, 0, sizeof(att));
+    att.header.version = BRAMBLE_VERSION;
+    att.header.type = PKT_TYPE_IDENTITY_ATTESTATION;
+    att.header.flags = 0;
+    att.header.hop_limit =
+        flood_origination_hop_limit(g_flood_transport_enabled, g_flood_hop_limit);
+    att.header.dest_addr = 0xFFFFFFFF;
+    att.header.packet_id = pcg32_random(rng);
+    att.src_addr = claimed;
+    memcpy(att.x25519_pub, ext->ident_x25519_pub, 32);
+    memcpy(att.ed25519_pub, ext->ident_ed25519_pub, 32);
+
+    uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
+    if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK)
+        return;
+    if (crypto_ed25519_sign(ext->ident_ed25519_priv, msg, sizeof(msg), att.sig) != 0)
+        return;
+
+    /* Fresh origin seq per origination (mirrors control_seq_next), written
+     * before the MAC since the MAC covers it. */
+    uint64_t seq = ++ext->ident_seq;
+    att.seq[0] = (uint8_t)(seq >> 40);
+    att.seq[1] = (uint8_t)(seq >> 32);
+    att.seq[2] = (uint8_t)(seq >> 24);
+    att.seq[3] = (uint8_t)(seq >> 16);
+    att.seq[4] = (uint8_t)(seq >> 8);
+    att.seq[5] = (uint8_t)seq;
+    ident_relay_sign(&att);
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    if (bramble_identity_attestation_serialize(&att, pkt.data, sizeof(pkt.data)) != ESP_OK)
+        return;
+    pkt.len = IDENTITY_ATTESTATION_SIZE;
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_IDENTITY_ATTESTATION;
+
+    /* tx_gate_kind_tier: TX_KIND_DATA_BROADCAST -> AIRTIME_TIER_BROADCAST,
+     * the same lane firmware's attestation TX debits. */
+    if (budget_gated_send(src, &pkt, AIRTIME_TIER_BROADCAST, nodes, radio, rng, events, metrics,
+                          event->timestamp_us)) {
+        src->packets_originated++;
+        fprintf(stdout,
+                "{\"type\":\"attestation_sent\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"addr\":\"0x%08X\",\"packet_id\":\"0x%08X\""
+                ",\"ed8\":\"%02X%02X%02X%02X\"}\n",
+                (unsigned long long)event->timestamp_us, src->id, claimed, att.header.packet_id,
+                att.ed25519_pub[0], att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
+        fflush(stdout);
+    }
+}
+
 /* ─── Node join extended initializer ────────────────────────────────────── */
 void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, uint64_t now_us) {
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
@@ -1898,6 +2051,31 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
 
     /* Set initial simulated position from node coordinates */
     node_ext_set_sim_position(ext, x, y);
+
+    /* Per-node identity Phase 3: give the node a real Ed25519 identity on
+     * FIRST join only (a rejoin keeps its keys, exactly as firmware
+     * persists identity in NVS across resets; regenerating here would make
+     * every rejoin look like an impersonation to its peers). The X25519
+     * pub is a deterministic pattern off the address: gosim does not model
+     * the DM key exchange, and the attestation binds whatever bytes are
+     * attested. */
+    bool have_identity = false;
+    for (int i = 0; i < 32; i++) {
+        if (ext->ident_ed25519_pub[i] != 0) {
+            have_identity = true;
+            break;
+        }
+    }
+    if (!have_identity) {
+        if (crypto_ed25519_keypair(ext->ident_ed25519_pub, ext->ident_ed25519_priv) != 0) {
+            memset(ext->ident_ed25519_pub, 0, sizeof(ext->ident_ed25519_pub));
+        }
+        for (int i = 0; i < 32; i++) {
+            ext->ident_x25519_pub[i] = (uint8_t)((addr >> ((i % 4) * 8)) ^ (uint8_t)i);
+        }
+        ext->ident_seq = 0;
+        identity_store_init(&ext->ident_pins);
+    }
 
     fprintf(stdout,
             "{\"type\":\"node_ext_initialized\",\"timestamp_us\":%llu"
