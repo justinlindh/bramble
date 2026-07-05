@@ -227,6 +227,45 @@ static void test_wrong_key_fails_verify(void) {
     TEST_ASSERT_FALSE(crypto_ed25519_verify(other_pk, msg, sizeof(msg), p.sig));
 }
 
+/* Origination contract: an attestation built from a node's own
+ * bramble_identity_t, using exactly the field mapping
+ * send_identity_attestation (main/mesh_task.c) uses, verifies against the
+ * frame's embedded key after a wire round trip. mesh_task.c itself is
+ * never host-compiled (see test/CMakeLists.txt), so this is the host-side
+ * pin of the identity-to-frame mapping. */
+static void test_origination_from_node_identity_verifies(void) {
+    bramble_identity_t id;
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&id));
+
+    bramble_identity_attestation_t att;
+    memset(&att, 0, sizeof(att));
+    att.header.version = BRAMBLE_VERSION;
+    att.header.type = PKT_TYPE_IDENTITY_ATTESTATION;
+    att.header.flags = 0;
+    att.header.hop_limit = 8;
+    att.header.dest_addr = 0xFFFFFFFFu;
+    att.header.packet_id = 42;
+    att.src_addr = id.address;
+    memcpy(att.x25519_pub, id.public_key, sizeof(att.x25519_pub));
+    memcpy(att.ed25519_pub, id.ed25519_public_key, sizeof(att.ed25519_pub));
+
+    uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)));
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(id.ed25519_private_key, msg, sizeof(msg), att.sig));
+
+    uint8_t buf[IDENTITY_ATTESTATION_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_serialize(&att, buf, sizeof(buf)));
+    bramble_identity_attestation_t rx;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_deserialize(&rx, buf, sizeof(buf)));
+
+    TEST_ASSERT_EQUAL_HEX32(id.address, rx.src_addr);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(id.public_key, rx.x25519_pub, 32);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(id.ed25519_public_key, rx.ed25519_pub, 32);
+    uint8_t msg2[IDENTITY_ATTESTATION_MSG_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_signed_msg(&rx, msg2, sizeof(msg2)));
+    TEST_ASSERT_TRUE(crypto_ed25519_verify(rx.ed25519_pub, msg2, sizeof(msg2), rx.sig));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_wire_size_is_144);
@@ -241,5 +280,6 @@ int main(void) {
     RUN_TEST(test_tampered_ed25519_pub_fails_verify);
     RUN_TEST(test_tampered_sig_fails_verify);
     RUN_TEST(test_wrong_key_fails_verify);
+    RUN_TEST(test_origination_from_node_identity_verifies);
     return UNITY_END();
 }
