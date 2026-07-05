@@ -34,9 +34,12 @@
  *   - RAM only this phase (residual): pins reset on reboot and TOFU
  *     re-establishes; NVS persistence is Phase 4+ material.
  *
- * NOT in scope this phase (Phase 4): no address rebind, no gating of any
- * operation on pin state. identity_store_lookup is the query surface
- * Phase 4 builds on.
+ * Phase 4 (address rebind): the node address derives from the Ed25519
+ * identity key, and identity_store_handle_attestation additionally
+ * REQUIRES src_addr == crypto_derive_address(ed25519_pub), rejecting
+ * mismatched claims even on first contact (IDENTITY_PIN_ADDR_MISMATCH).
+ * identity_store_lookup is the query surface the Phase 4 gates
+ * (timesync-quorum eligibility, DM key continuity) build on.
  */
 
 #define IDENTITY_STORE_CAPACITY 32
@@ -55,9 +58,13 @@ typedef struct {
     /* Diagnostics counters (impersonation signal): conflicts counts
      * rejected re-bind attempts against a pinned address; sig_failures
      * counts delivered (MAC-valid) attestations whose Ed25519 signature
-     * did not verify, i.e. a keyed member sent garbage. */
+     * did not verify, i.e. a keyed member sent garbage; addr_mismatches
+     * counts delivered attestations whose src_addr is not the address
+     * their own Ed25519 key derives to (Phase 4 rebind), i.e. a keyed
+     * member tried to attest an address it does not hold the key for. */
     uint32_t conflicts;
     uint32_t sig_failures;
+    uint32_t addr_mismatches;
 } identity_store_t;
 
 typedef enum {
@@ -66,6 +73,12 @@ typedef enum {
     IDENTITY_PIN_CONFLICT,  /* different keys for a pinned address: REJECTED */
     IDENTITY_PIN_SELF,      /* our own address: ignored */
     IDENTITY_PIN_BAD_SIG,   /* Ed25519 signature invalid: not pinned */
+    /* src_addr != crypto_derive_address(ed25519_pub): rejected even on
+     * first contact. The Phase 4 payoff: an insider cannot attest an
+     * address without holding the key it hashes from (SHA256 preimage),
+     * so address impersonation is cryptographically infeasible rather
+     * than merely losing the TOFU race. */
+    IDENTITY_PIN_ADDR_MISMATCH,
 } identity_pin_result_t;
 
 void identity_store_init(identity_store_t* s);

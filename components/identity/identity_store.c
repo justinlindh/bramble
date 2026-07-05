@@ -81,6 +81,19 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
     if (att->src_addr == self_addr)
         return IDENTITY_PIN_SELF;
 
+    /* Phase 4 address<->key binding, checked BEFORE the expensive Ed25519
+     * verify (one SHA256): the claimed src_addr must BE the address the
+     * frame's own Ed25519 key derives to. Without this, any keyed insider
+     * could attest any address under its own (validly signing) key and
+     * win wherever it was heard first; with it, claiming an address means
+     * holding a key whose SHA256[0:4] equals it, i.e. a preimage search.
+     * Counted separately: a delivered (MAC-valid) mismatch is a keyed
+     * member misbehaving, not line noise. */
+    if (crypto_derive_address(att->ed25519_pub) != att->src_addr) {
+        s->addr_mismatches++;
+        return IDENTITY_PIN_ADDR_MISMATCH;
+    }
+
     /* The ONLY receive-side Ed25519 verify (relays never run this): the
      * canonical message is rebuilt from the frame's own fields and checked
      * against the frame's embedded ed25519_pub. A failure here on a
