@@ -187,6 +187,16 @@ const char* mesh_get_node_name(void);
 int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]);
 
 /**
+ * Per-node identity Phase 4 diagnostics: current verified-pin count and
+ * the impersonation-signal counters (TOFU conflicts, delivered
+ * attestations with invalid Ed25519 sigs, delivered attestations whose
+ * src_addr did not match their key's derived address). Any out-pointer
+ * may be NULL. Lock-free word reads; values are diagnostics-grade.
+ */
+void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
+                                 uint32_t* addr_mismatches);
+
+/**
  * Get a peer's name from the neighbor table (returns NULL if not found or no name).
  */
 const char* mesh_get_peer_name(uint32_t addr);

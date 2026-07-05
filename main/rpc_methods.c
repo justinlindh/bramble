@@ -107,6 +107,16 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
     cJSON_AddBoolToObject(result, "gps_available", board_has_cap(BOARD_CAP_GPS));
     cJSON_AddBoolToObject(result, "supports_delivery_event_sync",
                           mesh_supports_delivery_event_sync());
+
+    /* Per-node identity Phase 4 diagnostics: verified-pin count plus the
+     * impersonation-signal counters. Additive response fields (no new
+     * method); mirrored in api/openapi.yaml's StatusResponse. */
+    uint32_t id_pins = 0, id_conflicts = 0, id_sig_failures = 0, id_addr_mismatches = 0;
+    mesh_get_identity_pin_stats(&id_pins, &id_conflicts, &id_sig_failures, &id_addr_mismatches);
+    cJSON_AddNumberToObject(result, "identity_pins", id_pins);
+    cJSON_AddNumberToObject(result, "identity_conflicts", id_conflicts);
+    cJSON_AddNumberToObject(result, "identity_sig_failures", id_sig_failures);
+    cJSON_AddNumberToObject(result, "identity_addr_mismatches", id_addr_mismatches);
     return 0;
 }
 

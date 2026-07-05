@@ -6176,6 +6176,22 @@ int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]) {
     return 0;
 }
 
+void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
+                                 uint32_t* addr_mismatches) {
+    /* Diagnostics-only reads of word-sized counters mutated exclusively on
+     * the mesh task (handle_identity_attestation); a momentarily stale
+     * value is fine for getStatus, so no mutex, matching the other
+     * counter-style getters. */
+    if (pins)
+        *pins = (uint32_t)identity_store_count(&s_identity_pins);
+    if (conflicts)
+        *conflicts = s_identity_pins.conflicts;
+    if (sig_failures)
+        *sig_failures = s_identity_pins.sig_failures;
+    if (addr_mismatches)
+        *addr_mismatches = s_identity_pins.addr_mismatches;
+}
+
 const char* mesh_get_peer_name(uint32_t addr) {
     static char s_name_buf[17];
 
