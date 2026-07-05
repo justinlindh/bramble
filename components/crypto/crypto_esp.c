@@ -215,10 +215,11 @@ int crypto_generate_identity(bramble_identity_t* id) {
         ok = 0;
 
     if (ok) {
-        /* Address stays X25519-derived this phase (Phase 3 rebinds to
-         * Ed25519 together with the attestation). */
-        id->address = crypto_derive_address(id->public_key);
-        id->pubkey_hash = crypto_derive_pubkey_hash(id->public_key);
+        /* Phase 4 rebind: the address (and pubkey_hash) derive from the
+         * Ed25519 identity key, the key attestations are signed with, so an
+         * address claim is only satisfiable by the keyholder. */
+        id->address = crypto_derive_address(id->ed25519_public_key);
+        id->pubkey_hash = crypto_derive_pubkey_hash(id->ed25519_public_key);
     }
 
     mbedtls_ecp_group_free(&grp);

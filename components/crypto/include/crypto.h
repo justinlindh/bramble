@@ -20,14 +20,15 @@
 #define BRAMBLE_ED25519_SIG_SIZE 64
 
 typedef struct {
-    uint8_t private_key[BRAMBLE_KEY_SIZE]; /* X25519 */
-    uint8_t public_key[BRAMBLE_KEY_SIZE];  /* X25519 */
-    /* Ed25519 signing identity (Phase 1). The node address stays derived
-     * from the X25519 public key until Phase 3 rebinds it to Ed25519. */
+    uint8_t private_key[BRAMBLE_KEY_SIZE]; /* X25519 (DM sessions / DH only) */
+    uint8_t public_key[BRAMBLE_KEY_SIZE];  /* X25519 (DM sessions / DH only) */
+    /* Ed25519 signing identity (Phase 1). Since the Phase 4 rebind this is
+     * THE identity key: the node address derives from it, and identity
+     * attestations are signed with it, binding address to keyholder. */
     uint8_t ed25519_public_key[BRAMBLE_ED25519_PUBKEY_SIZE];
     uint8_t ed25519_private_key[BRAMBLE_ED25519_SECKEY_SIZE];
-    uint32_t address;     /* crypto_derive_address(public_key), X25519-derived */
-    uint32_t pubkey_hash; /* crypto_derive_pubkey_hash(public_key), SHA256[4:8] */
+    uint32_t address;     /* crypto_derive_address(ed25519_public_key), SHA256[0:4] */
+    uint32_t pubkey_hash; /* crypto_derive_pubkey_hash(ed25519_public_key), SHA256[4:8] */
 } bramble_identity_t;
 
 int crypto_generate_identity(bramble_identity_t* id);
