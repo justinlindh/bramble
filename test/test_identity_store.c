@@ -88,7 +88,7 @@ static void resign_attestation(bramble_identity_attestation_t* p, const uint8_t 
 /* ── identity_store_pin: raw TOFU semantics ─────────────────────────── */
 
 static void test_first_pin_stores_and_lookup_returns_it(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     uint8_t ed[32], x[32];
     fill_key(ed, 0x10);
     fill_key(x, 0x50);
@@ -106,7 +106,7 @@ static void test_first_pin_stores_and_lookup_returns_it(void) {
 }
 
 static void test_identical_repin_is_idempotent_refresh(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     uint8_t ed[32], x[32];
     fill_key(ed, 0x10);
     fill_key(x, 0x50);
@@ -127,7 +127,7 @@ static void test_identical_repin_is_idempotent_refresh(void) {
 /* THE impersonation test: a conflicting binding for a pinned address is
  * rejected and the ORIGINAL binding survives, byte for byte. */
 static void test_conflicting_keys_rejected_original_survives(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     uint8_t ed1[32], x1[32], ed2[32], x2[32];
     fill_key(ed1, 0x10);
     fill_key(x1, 0x50);
@@ -157,7 +157,7 @@ static void test_conflicting_keys_rejected_original_survives(void) {
 }
 
 static void test_lru_evicts_least_recently_confirmed(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     uint8_t ed[32], x[32];
     fill_key(x, 0x50);
 
@@ -185,7 +185,7 @@ static void test_lru_evicts_least_recently_confirmed(void) {
 /* ── identity_store_handle_attestation: the delivery path ───────────── */
 
 static void test_delivered_attestation_pins(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     bramble_identity_attestation_t att;
     uint8_t ed[32], sk[64];
     uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
@@ -199,7 +199,7 @@ static void test_delivered_attestation_pins(void) {
 }
 
 static void test_bad_ed_sig_not_pinned_and_counted(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     bramble_identity_attestation_t att;
     uint8_t ed[32], sk[64];
     uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
@@ -222,7 +222,7 @@ static void test_bad_ed_sig_not_pinned_and_counted(void) {
  * preimage under a key you hold. Non-vacuous: the control shows the same
  * keypair's HONEST claim pins fine through the identical code path. */
 static void test_addr_mismatch_rejected_even_on_first_contact(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     bramble_identity_attestation_t att;
     uint8_t ed[32], sk[64];
 
@@ -234,7 +234,7 @@ static void test_addr_mismatch_rejected_even_on_first_contact(void) {
     /* First-contact forgery: a fresh store, a victim address NOBODY has
      * pinned, an internally valid (validly signed) frame; only the
      * address<->key binding can reject it, and it must. */
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     uint32_t victim = honest ^ 0x1u;
     make_signed_attestation(&att, victim, ed, sk, 0x40);
     /* The fresh key's derived address is effectively random; assert the
@@ -248,7 +248,7 @@ static void test_addr_mismatch_rejected_even_on_first_contact(void) {
 }
 
 static void test_self_attestation_ignored(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
     bramble_identity_attestation_t att;
     uint8_t ed[32], sk[64];
     /* Claiming OUR address (necessarily a mismatched claim for the
@@ -268,7 +268,7 @@ static void test_self_attestation_ignored(void) {
  * had been heard first (TOFU CONFLICT); now the address<->key binding
  * rejects it unconditionally, and the victim's pin is untouched. */
 static void test_impersonation_via_delivery_detected_and_refused(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
 
     bramble_identity_attestation_t genuine, forged;
     uint8_t ed_victim[32], sk_victim[64], ed_attacker[32], sk_attacker[64];
@@ -296,7 +296,7 @@ static void test_impersonation_via_delivery_detected_and_refused(void) {
  * change), and it also covers the 2^32-work case of an attacker minting
  * an Ed key that collides with a victim's 4-byte address. */
 static void test_x25519_rotation_is_conflict_via_delivery(void) {
-    identity_store_init(&s_store);
+    identity_store_init(&s_store, 0);
 
     bramble_identity_attestation_t att;
     uint8_t ed[32], sk[64];
@@ -321,36 +321,75 @@ static void test_x25519_rotation_is_conflict_via_delivery(void) {
 /* ── identity_store_quorum_eligible: the Phase 4 timesync gate ──────── */
 
 /* Semantics under test (documented on the function): established tenure
- * is ALWAYS required (unchanged ws 1.3c behavior); on top of that, once
- * ANY pin exists only pinned peers are quorum-eligible, and with ZERO
- * pins (fresh mesh / fresh boot: pins are RAM-only) eligibility falls
- * back to tenure alone so a mesh with no attestations still converges
- * (graceful degradation, never brick). */
-static void test_quorum_no_pins_falls_back_to_tenure_only(void) {
-    identity_store_init(&s_store);
-    /* Fresh mesh: nothing pinned anywhere. Established peers must remain
-     * quorum-eligible or timesync could never bootstrap. */
-    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true));
-    /* Tenure still required: never eligible without it. */
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false));
+ * is ALWAYS required; a PINNED peer is always eligible (subject to
+ * tenure); an UNPINNED peer is eligible ONLY within the bounded per-boot
+ * grace (QUORUM_BOOTSTRAP_GRACE_MS from identity_store_init's now_ms), and
+ * NEVER after it. That bounds the old unbounded "zero pins -> trust every
+ * established peer" hole to a per-boot liveness window and closes the
+ * NEW-SEC-4 bootstrap-quorum race. Boot reference here is 1000 ms. */
+#define QBOOT 1000u
+
+/* LIVENESS: a fresh mesh (zero pins) within the grace must still let an
+ * established unpinned peer corroborate, or timesync could never bootstrap.
+ * Non-vacuous: asserts TRUE at boot and just before the grace boundary. */
+static void test_quorum_within_grace_unpinned_is_eligible(void) {
+    identity_store_init(&s_store, QBOOT);
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store)); /* zero pins: fresh mesh */
+    /* Right at boot. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true, QBOOT));
+    /* One millisecond before the grace expires: still inside. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true,
+                                                    QBOOT + QUORUM_BOOTSTRAP_GRACE_MS - 1u));
 }
 
-static void test_quorum_with_pins_requires_pinned_identity(void) {
-    identity_store_init(&s_store);
+/* SECURITY (the race closed): once the grace has expired, an established
+ * UNPINNED peer is NOT quorum-eligible even with ZERO pins held. An
+ * unattested or Sybil node can no longer dominate the quorum and skew the
+ * clock. Non-vacuous: asserts FALSE at the exact boundary and beyond. */
+static void test_quorum_after_grace_unpinned_excluded_even_with_zero_pins(void) {
+    identity_store_init(&s_store, QBOOT);
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store)); /* still zero pins */
+    /* Exactly at the boundary (now - boot == GRACE): already excluded. */
+    TEST_ASSERT_FALSE(
+        identity_store_quorum_eligible(&s_store, 0xA1u, true, QBOOT + QUORUM_BOOTSTRAP_GRACE_MS));
+    /* Well after: still excluded. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, true,
+                                                     QBOOT + QUORUM_BOOTSTRAP_GRACE_MS + 60000u));
+}
+
+/* A pinned peer corroborates both inside AND long after the grace: holding
+ * a verified binding is what the gate ultimately wants. */
+static void test_quorum_pinned_peer_eligible_within_and_after_grace(void) {
+    identity_store_init(&s_store, QBOOT);
     uint8_t ed[32], x[32];
     fill_key(ed, 0x10);
     fill_key(x, 0x50);
-    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 0xA1u, ed, x, 1000));
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 0xA1u, ed, x, QBOOT));
 
-    /* Pinned + established: full trust. */
-    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true));
-    /* Pinned but not established: tenure requirement is not relaxed. */
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false));
-    /* Established but UNPINNED while pins exist: excluded from the quorum
-     * (the Sybil lever NEW-SEC-4 wanted: an insider's fabricated source
-     * addresses cannot corroborate time once real identities are known).
-     * Still a neighbor, still relays: only quorum membership tightens. */
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xB2u, true));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true, QBOOT));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true,
+                                                    QBOOT + QUORUM_BOOTSTRAP_GRACE_MS + 60000u));
+    /* Meanwhile an established UNPINNED peer is already excluded once the
+     * grace is over, even though a pin exists for a different address. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xB2u, true,
+                                                     QBOOT + QUORUM_BOOTSTRAP_GRACE_MS + 60000u));
+}
+
+/* Tenure is never relaxed: an UNestablished peer is ineligible regardless
+ * of the grace or pin state (inside grace, after grace, pinned). */
+static void test_quorum_unestablished_never_eligible(void) {
+    identity_store_init(&s_store, QBOOT);
+    /* Unpinned, inside grace, but not established. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false, QBOOT));
+    /* Unpinned, after grace, not established. */
+    TEST_ASSERT_FALSE(
+        identity_store_quorum_eligible(&s_store, 0xA1u, false, QBOOT + QUORUM_BOOTSTRAP_GRACE_MS));
+    /* Even pinned but not established stays out. */
+    uint8_t ed[32], x[32];
+    fill_key(ed, 0x10);
+    fill_key(x, 0x50);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 0xA1u, ed, x, QBOOT));
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false, QBOOT));
 }
 
 int main(void) {
@@ -365,7 +404,9 @@ int main(void) {
     RUN_TEST(test_self_attestation_ignored);
     RUN_TEST(test_impersonation_via_delivery_detected_and_refused);
     RUN_TEST(test_x25519_rotation_is_conflict_via_delivery);
-    RUN_TEST(test_quorum_no_pins_falls_back_to_tenure_only);
-    RUN_TEST(test_quorum_with_pins_requires_pinned_identity);
+    RUN_TEST(test_quorum_within_grace_unpinned_is_eligible);
+    RUN_TEST(test_quorum_after_grace_unpinned_excluded_even_with_zero_pins);
+    RUN_TEST(test_quorum_pinned_peer_eligible_within_and_after_grace);
+    RUN_TEST(test_quorum_unestablished_never_eligible);
     return UNITY_END();
 }

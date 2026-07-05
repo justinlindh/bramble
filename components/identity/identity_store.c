@@ -10,7 +10,10 @@
 
 #include "crypto.h" /* crypto_ed25519_verify */
 
-void identity_store_init(identity_store_t* s) { memset(s, 0, sizeof(*s)); }
+void identity_store_init(identity_store_t* s, uint32_t now_ms) {
+    memset(s, 0, sizeof(*s));
+    s->boot_ms = now_ms;
+}
 
 static identity_pin_t* find_entry(identity_store_t* s, uint32_t address) {
     for (int i = 0; i < IDENTITY_STORE_CAPACITY; i++) {
@@ -118,12 +121,19 @@ const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t 
     return NULL;
 }
 
-bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established) {
+bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established,
+                                    uint32_t now_ms) {
     if (!established)
         return false; /* tenure requirement is never relaxed */
-    if (identity_store_count(s) == 0)
-        return true; /* fresh mesh / fresh boot: fall back to tenure only */
-    return identity_store_lookup(s, address) != NULL;
+    if (identity_store_lookup(s, address) != NULL)
+        return true; /* pinned: always eligible (subject to tenure) */
+    /* Unpinned: eligible ONLY inside the bounded per-boot grace, so a fresh
+     * mesh can bootstrap timesync before any attestation is verified. The
+     * subtraction is uint32 wraparound-safe, the same now_ms idiom used for
+     * LRU age above. */
+    if ((uint32_t)(now_ms - s->boot_ms) < QUORUM_BOOTSTRAP_GRACE_MS)
+        return true;
+    return false; /* after the grace: an unpinned peer NEVER corroborates */
 }
 
 int identity_store_count(const identity_store_t* s) {
