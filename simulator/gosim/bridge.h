@@ -207,4 +207,18 @@ bool bridge_get_intermediate_rrep_enabled(void);
 void bridge_set_flood_transport_enabled(bool enabled);
 bool bridge_get_flood_transport_enabled(void);
 
+/*
+ * Flooding F1 finalize: the flood-transport origination hop budget (firmware's
+ * s_flood_hop_limit). Default FLOOD_HOP_LIMIT_DEFAULT (8). Under
+ * bridge_set_flood_transport_enabled(true) a freshly-originated flood DATA /
+ * flooded receipt is stamped with this hop_limit (via the shared
+ * flood_origination_hop_limit); reactive origination stays at
+ * ROUTE_HOP_LIMIT_MAX. bridge_set_flood_hop_limit clamps to
+ * [FLOOD_HOP_LIMIT_MIN, FLOOD_HOP_LIMIT_CEIL]. gosim/sim.go resets this on
+ * every scenario load from the optional "flood_hop_limit" JSON field, so no
+ * run leaks a previous run's value.
+ */
+void bridge_set_flood_hop_limit(uint8_t hops);
+uint8_t bridge_get_flood_hop_limit(void);
+
 #endif /* BRIDGE_H */

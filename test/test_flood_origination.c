@@ -4,6 +4,7 @@
 #include "network_key.h"
 #include "routing_auth.h"
 #include "routing.h"
+#include "channel_flood.h"
 #include "packet.h"
 #include "reliability.h"
 
@@ -313,6 +314,60 @@ void test_flood_ke_origination_critical_tier(void) {
     TEST_ASSERT_TRUE(failed);
 }
 
+/* --- Flooding F1 finalize: the flood origination hop_limit is the CONFIGURED
+ * operator-settable value, not a constant. flood_origination_hop_limit is the
+ * exact selector send_data_packet / send_dm_packet / send_ack call, so testing
+ * it proves the originators stamp the configured hop budget. --- */
+void test_flood_origination_uses_configured_hop_limit(void) {
+    /* Under flood transport the originator stamps the configured value... */
+    TEST_ASSERT_EQUAL_UINT8(20, flood_origination_hop_limit(true, 20));
+    TEST_ASSERT_EQUAL_UINT8(11, flood_origination_hop_limit(true, 11));
+    /* ...and the default (8) reproduces the pre-change constant exactly. */
+    TEST_ASSERT_EQUAL_UINT8(FLOOD_HOP_LIMIT_DEFAULT, flood_origination_hop_limit(true, 8));
+    TEST_ASSERT_EQUAL_UINT8(ROUTE_HOP_LIMIT_MAX, flood_origination_hop_limit(true, 8));
+}
+
+/* --- Reactive origination is UNAFFECTED by the flood hop limit: it always
+ * stamps ROUTE_HOP_LIMIT_MAX regardless of the configured flood value, proving
+ * the two hop budgets are independent (the reactive path is untouched). --- */
+void test_reactive_origination_ignores_flood_hop_limit(void) {
+    TEST_ASSERT_EQUAL_UINT8(ROUTE_HOP_LIMIT_MAX, flood_origination_hop_limit(false, 20));
+    TEST_ASSERT_EQUAL_UINT8(ROUTE_HOP_LIMIT_MAX, flood_origination_hop_limit(false, 1));
+    TEST_ASSERT_EQUAL_UINT8(ROUTE_HOP_LIMIT_MAX, flood_origination_hop_limit(false, 8));
+}
+
+/* --- The configured value is clamped to [MIN, CEIL] so a stale NVS / bad RPC
+ * value can never originate an out-of-range hop_limit. --- */
+void test_flood_hop_limit_clamped_to_range(void) {
+    TEST_ASSERT_EQUAL_UINT8(FLOOD_HOP_LIMIT_MIN, flood_hop_limit_clamp(0));
+    TEST_ASSERT_EQUAL_UINT8(FLOOD_HOP_LIMIT_CEIL, flood_hop_limit_clamp(9999));
+    TEST_ASSERT_EQUAL_UINT8(FLOOD_HOP_LIMIT_CEIL, flood_hop_limit_clamp(FLOOD_HOP_LIMIT_CEIL + 1));
+    TEST_ASSERT_EQUAL_UINT8(1, flood_hop_limit_clamp(1));
+    TEST_ASSERT_EQUAL_UINT8(32, flood_hop_limit_clamp(32));
+    /* Origination applies the same clamp: an over-range config never escapes. */
+    TEST_ASSERT_EQUAL_UINT8(FLOOD_HOP_LIMIT_CEIL, flood_origination_hop_limit(true, 100));
+    TEST_ASSERT_EQUAL_UINT8(FLOOD_HOP_LIMIT_MIN, flood_origination_hop_limit(true, 0));
+}
+
+/* --- A flood DATA built with the configured hop limit carries it on the wire:
+ * the serialized header's hop_limit is exactly the configured budget, which is
+ * what relays decrement and what sets the flood's reach. --- */
+void test_flood_data_wire_carries_configured_hop_limit(void) {
+    uint8_t frame[BRAMBLE_DATA_NONCE_OFFSET];
+    bramble_header_t h = {0};
+    h.version = BRAMBLE_VERSION;
+    h.type = PKT_TYPE_DATA;
+    h.flags = FLAG_ENCRYPT | FLAG_CHANNEL;
+    h.hop_limit = flood_origination_hop_limit(true, 17); /* operator set 17 */
+    h.dest_addr = DEST;
+    h.packet_id = 0xC0FFEE07u;
+    bramble_header_serialize(&h, frame, HEADER_SIZE);
+
+    bramble_header_t got;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_header_deserialize(&got, frame, HEADER_SIZE));
+    TEST_ASSERT_EQUAL_UINT8(17, got.hop_limit); /* configured value on the wire */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_flood_origination_no_discovery_registers_pending);
@@ -321,5 +376,9 @@ int main(void) {
     RUN_TEST(test_flood_ack_first_confirmation_delivered);
     RUN_TEST(test_flood_dropped_first_ack_retry_delivered);
     RUN_TEST(test_flood_ke_origination_critical_tier);
+    RUN_TEST(test_flood_origination_uses_configured_hop_limit);
+    RUN_TEST(test_reactive_origination_ignores_flood_hop_limit);
+    RUN_TEST(test_flood_hop_limit_clamped_to_range);
+    RUN_TEST(test_flood_data_wire_carries_configured_hop_limit);
     return UNITY_END();
 }

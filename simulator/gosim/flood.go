@@ -294,26 +294,41 @@ func loadIntermediateRREPConfig(path string) bool {
 // call the real firmware flood decide for unicast DATA.
 type floodTransportConfigJSON struct {
 	FloodTransport *bool `json:"flood_transport"`
+	FloodHopLimit  *int  `json:"flood_hop_limit"`
 }
 
+// floodTransportDefaultHopLimit mirrors firmware's FLOOD_HOP_LIMIT_DEFAULT (8),
+// the shipped flood-transport origination hop budget. Distinct from
+// floodDefaultHopLimit (3) above, which is the Go-only floodSim MODEL's
+// Meshtastic-style default. Kept as a plain Go const so this loader stays
+// cgo-free; the C side clamps the value it is handed.
+const floodTransportDefaultHopLimit = 8
+
 // loadFloodTransportConfig reads a scenario file's optional "flood_transport"
-// field (default false, matching s_flood_transport's shipped NVS default).
-// Any read/parse failure or omitted field returns false, the same
-// fail-open-to-today's-default convention as loadRoutingConfig /
-// loadIntermediateRREPConfig.
-func loadFloodTransportConfig(path string) bool {
+// field (default false, matching s_flood_transport's shipped NVS default) and
+// the optional "flood_hop_limit" field (default floodTransportDefaultHopLimit,
+// matching firmware's s_flood_hop_limit default). Any read/parse failure or
+// omitted field returns those defaults, the same fail-open-to-today's-default
+// convention as loadRoutingConfig / loadIntermediateRREPConfig. The hop limit
+// is returned unclamped; bridge_set_flood_hop_limit clamps it to the firmware
+// range, so operators/tests can sweep it to match a network's diameter.
+func loadFloodTransportConfig(path string) (transport bool, hopLimit int) {
+	hopLimit = floodTransportDefaultHopLimit
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return false, hopLimit
 	}
 	var cfg floodTransportConfigJSON
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return false
+		return false, hopLimit
+	}
+	if cfg.FloodHopLimit != nil {
+		hopLimit = *cfg.FloodHopLimit
 	}
 	if cfg.FloodTransport == nil {
-		return false
+		return false, hopLimit
 	}
-	return *cfg.FloodTransport
+	return *cfg.FloodTransport, hopLimit
 }
 
 // --- Event handlers (dispatched from sim.go's dispatchEvent when
