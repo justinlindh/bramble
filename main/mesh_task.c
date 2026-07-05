@@ -3703,8 +3703,9 @@ static void mesh_process_rx_packet(const rx_packet_t* pkt) {
          * treated exactly like any unauthenticated control frame. A
          * legitimate frame always carries a valid MAC (every originator
          * signs; all provisioned nodes share the key), so this drops nothing
-         * real. Forgeable only under the unprovisioned public-PSK fallback,
-         * the accepted baseline for all control-plane auth (network_key.h). */
+         * real. When unprovisioned there is no key, so the verify fails
+         * closed (all-zero sentinel, rejected before compare) and the node is
+         * inert; only a keyed insider can forge (the remaining residual). */
         if (!data_auth_verify(&header, data_src_addr, pkt->data + BRAMBLE_DATA_AUTH_HMAC_OFFSET)) {
             ESP_LOGW(TAG, "DATA auth_hmac failed (src=%08" PRIX32 " prev_hop=%08" PRIX32 "), drop",
                      data_src_addr, data_prev_hop);

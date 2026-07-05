@@ -97,9 +97,11 @@ int receipt_verify(const bramble_delivery_receipt_t* r);
  * those bytes through verbatim. data_auth_verify recomputes the same MAC and
  * constant-time-compares; returns nonzero (true) iff it matches.
  *
- * Forgeable under network_key.h's unprovisioned public-PSK fallback, same as
- * every other helper here; this closes the keyless-poisoning attack, not the
- * keyed-insider residual.
+ * When unprovisioned there is no key: network_key_mac returns the all-zero
+ * sentinel and data_auth_verify rejects before the constant-time compare
+ * (fail-closed inert, no public-PSK fallback), so this closes the
+ * keyless-poisoning attack by construction. The keyed-insider residual
+ * remains (narrowed by per-node identity, not this component).
  */
 int data_auth_sign(const bramble_header_t* h, uint32_t src_addr, uint8_t out[8]);
 int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t hmac[8]);
@@ -125,9 +127,11 @@ int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t
  * AFTER crypto_ed25519_sign fills a->sig and after seq is written (both
  * are MAC-covered), right before serializing. ident_relay_verify
  * recomputes and constant-time-compares; returns nonzero (true) iff it
- * matches. Forgeable under network_key.h's unprovisioned public-PSK
- * fallback, same as every other helper here: this closes the KEYLESS
- * propagation/grinding vector, not the keyed-insider residual (a keyed
+ * matches. When unprovisioned there is no key: network_key_mac returns the
+ * all-zero sentinel and ident_relay_verify rejects before the compare
+ * (fail-closed inert, no public-PSK fallback), so this closes the KEYLESS
+ * propagation/grinding vector by construction, not the keyed-insider
+ * residual (a keyed
  * insider's garbage-sig frame still floods, bounded by budget; receivers
  * reject it at the Ed25519 check).
  */
