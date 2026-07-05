@@ -80,9 +80,11 @@
 #define DELIVERY_RECEIPT_MAX_HOPS 8
 
 /* Identity attestation wire size: header(12) + src_addr(4) + x25519_pub(32)
- * + ed25519_pub(32) + sig(64). Fixed-size frame; the deserializer rejects
- * anything that is not EXACTLY this long. */
-#define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64) /* 144 */
+ * + ed25519_pub(32) + sig(64) + auth_hmac(8) + seq(6). Fixed-size frame;
+ * the deserializer rejects anything that is not EXACTLY this long.
+ * Phase 3 grew the frame by the relay-gate MAC + seq (144 -> 158); the
+ * canonical SIGNED message below is unchanged. */
+#define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 6) /* 158 */
 
 /* Canonical signed message for the attestation (see
  * bramble_identity_attestation_signed_msg): context(16) + src_addr(4)
@@ -240,24 +242,40 @@ typedef struct {
 } bramble_delivery_receipt_t;
 
 /*
- * Identity attestation (per-node identity Phase 2): a self-signed, flooded
- * (low-cadence) binding of {src_addr, X25519 pub, Ed25519 pub}.
+ * Identity attestation (per-node identity Phase 2, relay-gated in Phase 3):
+ * a self-signed, flooded (low-cadence) binding of {src_addr, X25519 pub,
+ * Ed25519 pub}.
  *
  * sig is Ed25519 over the domain-separated canonical message
  *
  *   "bramble-ident-v1" || src_addr(4, big-endian) || x25519_pub(32)
  *                      || ed25519_pub(32)
  *
- * (bramble_identity_attestation_signed_msg builds it; Phase 3's verifier
- * MUST pin these same bytes). The header is deliberately NOT covered:
- * hop_limit is relay-mutable and packet_id is per-send, while the identity
- * claim itself is stable across re-sends and relays.
+ * (bramble_identity_attestation_signed_msg builds it; the Phase 3 pinning
+ * verifier checks these same bytes). The header is deliberately NOT
+ * covered: hop_limit is relay-mutable and packet_id is per-send, while the
+ * identity claim itself is stable across re-sends and relays.
  *
- * Deliberately NO network-key MAC on this frame: the attestation is
- * self-authenticating (the Ed25519 signature is checkable by ANY member
- * against the embedded ed25519_pub, with no shared secret needed), so a
- * network-key MAC would add nothing to the claim's truth. The network key
- * gates RELAY/acceptance policy, not the attestation's authenticity.
+ * TWO authenticators, two jobs (Phase 3):
+ *   - sig (Ed25519) carries the identity claim's TRUTH: it is
+ *     self-authenticating, checkable by ANY member against the embedded
+ *     ed25519_pub with no shared secret needed. A network-key MAC adds
+ *     nothing to the claim's truth.
+ *   - auth_hmac (network-key MAC, label "bramble-ident-relay-v1",
+ *     routing_auth.h's ident_relay_sign/verify) gates RELAY PRIVILEGE,
+ *     preserving the branch invariant that keyless traffic never
+ *     propagates: an outsider without the network key can neither get its
+ *     spam flooded through the mesh nor grind relays with Ed25519
+ *     verifies, because relays check this CHEAP MAC first and never run
+ *     the Ed25519 verify at all (only pinning receivers do).
+ *   It covers src_addr || x25519_pub || ed25519_pub || sig || seq and NOT
+ *   the header (relay-mutable): a relay decrements hop_limit and passes
+ *   the frame through otherwise unmodified.
+ *
+ * seq is a fresh control-plane sequence (control_seq_next) drawn once at
+ * ORIGINATION and never re-drawn by relays; receivers replay-check it
+ * (src_addr-scoped) after the MAC verifies, so a captured attestation
+ * cannot be re-injected to burn relay airtime.
  */
 typedef struct {
     bramble_header_t header;
@@ -265,6 +283,8 @@ typedef struct {
     uint8_t x25519_pub[32];
     uint8_t ed25519_pub[32];
     uint8_t sig[64];
+    uint8_t auth_hmac[8]; /* network-key relay gate (Phase 3) */
+    uint8_t seq[6];       /* 48-bit origin seq, big-endian (Phase 3) */
 } bramble_identity_attestation_t;
 
 /* Serialize/deserialize functions. Return ESP_OK or ESP_ERR_INVALID_SIZE. */

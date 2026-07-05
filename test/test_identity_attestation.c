@@ -11,6 +11,13 @@
  * and NOT the header (hop_limit/packet_id are relay-mutable/per-send).
  * Phase 3's verifier pins these same bytes, so the tamper tests here are
  * the contract: flipping any covered field must fail verification.
+ *
+ * Phase 3 grew the OUTER frame by the relay-gate MAC + seq (auth_hmac(8)
+ * + seq(6), 144 -> 158 bytes); the canonical SIGNED bytes above are
+ * UNCHANGED, and the tests below additionally pin that the two new outer
+ * fields do NOT feed the signed message (they are relay-privilege
+ * plumbing, not part of the identity claim). The MAC itself is covered in
+ * test_ident_relay_auth.c.
  */
 #include "unity.h"
 #include "packet.h"
@@ -33,6 +40,10 @@ static void make_attestation(bramble_identity_attestation_t* p, uint8_t sk[64], 
     p->src_addr = 0x11223344u;
     for (int i = 0; i < 32; i++)
         p->x25519_pub[i] = (uint8_t)(0x40 + i);
+    for (int i = 0; i < 8; i++)
+        p->auth_hmac[i] = (uint8_t)(0xC0 + i); /* pattern; real MAC in test_ident_relay_auth.c */
+    for (int i = 0; i < 6; i++)
+        p->seq[i] = (uint8_t)(0xD0 + i);
     TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair(p->ed25519_pub, sk));
     if (sign) {
         uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
@@ -43,9 +54,9 @@ static void make_attestation(bramble_identity_attestation_t* p, uint8_t sk[64], 
 
 /* ── Wire layout ────────────────────────────────────────────────────── */
 
-static void test_wire_size_is_144(void) {
-    TEST_ASSERT_EQUAL(144, IDENTITY_ATTESTATION_SIZE);
-    TEST_ASSERT_EQUAL(HEADER_SIZE + 4 + 32 + 32 + 64, IDENTITY_ATTESTATION_SIZE);
+static void test_wire_size_is_158(void) {
+    TEST_ASSERT_EQUAL(158, IDENTITY_ATTESTATION_SIZE);
+    TEST_ASSERT_EQUAL(HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 6, IDENTITY_ATTESTATION_SIZE);
 }
 
 static void test_serialize_exact_offsets(void) {
@@ -69,10 +80,13 @@ static void test_serialize_exact_offsets(void) {
     TEST_ASSERT_EQUAL_HEX8(0x22, buf[13]);
     TEST_ASSERT_EQUAL_HEX8(0x33, buf[14]);
     TEST_ASSERT_EQUAL_HEX8(0x44, buf[15]);
-    /* x25519_pub at 16, ed25519_pub at 48, sig at 80 */
+    /* x25519_pub at 16, ed25519_pub at 48, sig at 80, auth_hmac at 144,
+     * seq at 152 (Phase 3 relay-gate extension) */
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.x25519_pub, buf + 16, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.ed25519_pub, buf + 48, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.sig, buf + 80, 64);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.auth_hmac, buf + 144, 8);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.seq, buf + 152, 6);
 }
 
 static void test_round_trip(void) {
@@ -93,6 +107,8 @@ static void test_round_trip(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.x25519_pub, q.x25519_pub, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.ed25519_pub, q.ed25519_pub, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.sig, q.sig, 64);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.auth_hmac, q.auth_hmac, 8);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.seq, q.seq, 6);
 }
 
 static void test_serialize_short_buffer_rejected(void) {
@@ -144,12 +160,16 @@ static void test_signed_msg_exact_bytes(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.ed25519_pub, msg + 52, 32);
 
     /* Header bytes must NOT influence the message: mutate every header
-     * field and re-derive; bytes are identical. */
+     * field and re-derive; bytes are identical. Phase 3: the outer
+     * relay-gate fields (auth_hmac/seq) must not influence it either; the
+     * canonical SIGNED bytes are the P2 contract, unchanged. */
     bramble_identity_attestation_t p2 = p;
     p2.header.hop_limit = 1;
     p2.header.packet_id = 0xDEADBEEFu;
     p2.header.flags = 0xFF;
     p2.header.dest_addr = 0x12345678u;
+    memset(p2.auth_hmac, 0x5A, sizeof(p2.auth_hmac));
+    memset(p2.seq, 0xA5, sizeof(p2.seq));
     uint8_t msg2[IDENTITY_ATTESTATION_MSG_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_signed_msg(&p2, msg2, sizeof(msg2)));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(msg, msg2, IDENTITY_ATTESTATION_MSG_SIZE);
@@ -268,7 +288,7 @@ static void test_origination_from_node_identity_verifies(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_wire_size_is_144);
+    RUN_TEST(test_wire_size_is_158);
     RUN_TEST(test_serialize_exact_offsets);
     RUN_TEST(test_round_trip);
     RUN_TEST(test_serialize_short_buffer_rejected);
