@@ -44,6 +44,26 @@
 
 #define IDENTITY_STORE_CAPACITY 32
 
+/*
+ * Bootstrap-quorum grace (NEW-SEC-4 "1.3c" race close). Within this window
+ * after THIS node's boot, an established-but-unpinned peer may still count
+ * toward the timesync corroboration quorum, so a fresh mesh with no verified
+ * attestations pinned yet can still bootstrap its clock (liveness). After
+ * the window ONLY pinned peers ever corroborate: an unattested or Sybil node
+ * can no longer dominate the quorum and skew the mesh clock (the race is
+ * closed).
+ *
+ * Tradeoff on the value: a LONGER grace gives more liveness margin on large
+ * or slow meshes where propagating and verifying the first attestations
+ * takes longer, at the cost of a wider window in which an unattested peer
+ * could skew time; a SHORTER grace tightens that exposure but risks a slow
+ * mesh failing to bootstrap timesync at all. 5 minutes is a backstop, not
+ * the normal path: every node attests on boot (immediate) and every 15 min,
+ * so genuine pins normally arrive within seconds-to-minutes and the gate has
+ * already tightened to pinned-only well before the grace expires.
+ */
+#define QUORUM_BOOTSTRAP_GRACE_MS 300000u
+
 typedef struct {
     bool used;
     uint32_t address;
@@ -55,6 +75,10 @@ typedef struct {
 
 typedef struct {
     identity_pin_t entries[IDENTITY_STORE_CAPACITY];
+    /* This node's boot reference (identity_store_init's now_ms). The
+     * bounded bootstrap-quorum grace is measured from here; RAM-only like
+     * the pins, so it resets with them on reboot. */
+    uint32_t boot_ms;
     /* Diagnostics counters (impersonation signal): conflicts counts
      * rejected re-bind attempts against a pinned address; sig_failures
      * counts delivered (MAC-valid) attestations whose Ed25519 signature
@@ -81,7 +105,10 @@ typedef enum {
     IDENTITY_PIN_ADDR_MISMATCH,
 } identity_pin_result_t;
 
-void identity_store_init(identity_store_t* s);
+/* now_ms is recorded as this node's boot reference for the bootstrap-quorum
+ * grace (see QUORUM_BOOTSTRAP_GRACE_MS / identity_store_quorum_eligible).
+ * Tests control the clock by choosing this value. */
+void identity_store_init(identity_store_t* s, uint32_t now_ms);
 
 /*
  * Raw TOFU pin of an already-VERIFIED binding (callers must have checked
@@ -116,25 +143,32 @@ const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t 
  * source_established input, ws 1.3c / NEW-SEC-4).
  *
  * CHOSEN SEMANTIC (documented here, tested in test_identity_store.c):
- *   eligible = established AND (pinned OR store holds ZERO pins).
+ *   if (!established)                          -> false  (tenure never relaxed)
+ *   else if (pinned)                           -> true   (always eligible)
+ *   else if (now_ms - boot_ms < GRACE_MS)      -> true   (bounded boot grace)
+ *   else                                       -> false  (race closed)
  *
  * - `established` is the existing neighbor-tenure signal
  *   (neighbor_is_established); it is ALWAYS required, never relaxed.
- * - Once ANY verified identity is pinned, only PINNED peers corroborate
- *   time: an insider fabricating fresh source addresses can no longer
- *   quorum the clock, because a fabricated address cannot be pinned at
- *   all post-rebind (it would need the deriving Ed25519 key).
- * - With ZERO pins the gate falls back to tenure alone: a fresh mesh (or
- *   any node right after boot, since pins are RAM-only) must still
- *   converge with no attestations heard yet. Degrade, never brick.
- *   Transient window accepted: between the first pin arriving and the
- *   rest of the neighbors' attestations (boot-hook + 15 min cadence),
- *   unpinned established neighbors drop out of the quorum; the
- *   post-commit timesync path (stratum/shift gates) is unaffected.
+ * - A PINNED peer is always eligible (subject to tenure): once we hold a
+ *   peer's verified binding it corroborates time regardless of the grace.
+ * - An UNPINNED peer is eligible ONLY within QUORUM_BOOTSTRAP_GRACE_MS of
+ *   this node's boot. This bounds the old unbounded "zero pins -> trust
+ *   every established peer" fallback to a per-boot window: a fresh mesh
+ *   (pins are RAM-only, so also any node right after reboot) can bootstrap
+ *   timesync before any attestation is verified, but AFTER the grace an
+ *   unpinned peer NEVER corroborates even with zero pins held. That closes
+ *   NEW-SEC-4's bootstrap-quorum race: an unattested or Sybil node can no
+ *   longer dominate the quorum and skew the mesh clock once the window ends.
+ * - Because every node attests on boot + every 15 min, genuine pins arrive
+ *   within seconds-to-minutes, so the gate has typically already tightened
+ *   to pinned-only well before the grace expires; the grace is a liveness
+ *   backstop, not the normal path.
  * - Unpinned peers lose ONLY quorum membership; they remain neighbors,
  *   relays and DM peers.
  */
-bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established);
+bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established,
+                                    uint32_t now_ms);
 
 /* Number of used entries (diagnostics). */
 int identity_store_count(const identity_store_t* s);

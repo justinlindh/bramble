@@ -1410,8 +1410,9 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
      * it). Checked immediately after HMAC verify and strictly before every
      * effect below: address-collision handling, neighbor_update, name
      * store, and timesync_handle_sync. Gating timesync closes the part of
-     * NEW-SEC-4 where a replayed beacon re-feeds stale network_time; it
-     * does NOT close NEW-SEC-4's bootstrap-quorum race, which is 1.3c. */
+     * NEW-SEC-4 where a replayed beacon re-feeds stale network_time; the
+     * bootstrap-quorum race (1.3c) is closed separately by the bounded
+     * per-boot grace in identity_store_quorum_eligible. */
     uint64_t beacon_seq = ((uint64_t)beacon.seq[0] << 40) | ((uint64_t)beacon.seq[1] << 32) |
                           ((uint64_t)beacon.seq[2] << 24) | ((uint64_t)beacon.seq[3] << 16) |
                           ((uint64_t)beacon.seq[4] << 8) | (uint64_t)beacon.seq[5];
@@ -1472,16 +1473,17 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
          * neighbor_update above so the current beacon's tenure (beacon_count,
          * first_seen_ms) is reflected before the established check.
          *
-         * Phase 4 identity gate on top: once ANY verified identity is
-         * pinned, only PINNED peers corroborate (a fabricated source
-         * address cannot be pinned post-rebind: it has no deriving Ed
-         * key); with zero pins the gate falls back to tenure alone so a
-         * fresh mesh still converges. Full semantics + tests:
+         * Phase 4 identity gate on top: a PINNED peer always corroborates
+         * (a fabricated source address cannot be pinned post-rebind: it has
+         * no deriving Ed key); an UNPINNED peer corroborates only within the
+         * bounded per-boot bootstrap grace (QUORUM_BOOTSTRAP_GRACE_MS) so a
+         * fresh mesh still converges, and NEVER after it (NEW-SEC-4 1.3c
+         * bootstrap-quorum race closed). Full semantics + tests:
          * identity_store_quorum_eligible (identity_store.h). Runs on the
          * same task as handle_identity_attestation, so no locking. */
         bool established = neighbor_is_established(&s_neighbors, beacon.src_addr, t);
         bool quorum_ok =
-            identity_store_quorum_eligible(&s_identity_pins, beacon.src_addr, established);
+            identity_store_quorum_eligible(&s_identity_pins, beacon.src_addr, established, t);
         timesync_handle_sync(&s_timesync, (int64_t)beacon.network_time,
                              (uint8_t)beacon.time_confidence, beacon.src_addr, quorum_ok, t);
     }
@@ -5597,7 +5599,7 @@ void mesh_task_start(bramble_identity_t* identity) {
     dedup_init(&s_delivered_dedup);
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
-    identity_store_init(&s_identity_pins);
+    identity_store_init(&s_identity_pins, now_ms());
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     rreq_fwd_init(&s_rreq_fwd_rl, now_ms());
