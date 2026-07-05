@@ -28,16 +28,19 @@ The firmware currently runs on real hardware (including T-Deck Plus and Heltec V
 
 ## What Makes Bramble Different
 
-Compared to Meshtastic and MeshCore-style systems, Bramble prioritizes privacy and scalability at the protocol level:
+Compared to Meshtastic and MeshCore-style systems, Bramble leans on privacy and on authenticated, confirmable delivery at the protocol level. It is pre-alpha and has not been field-tested at scale; the claims below are what the code on `main` does, with the honest limits stated alongside.
 
-- **Privacy-first routing:** route-request sources are pseudonymized per query, so forwarded route requests do not carry the originator's address.
-- **Reactive AODV routing:** direct message delivery scales with path length (`O(path_length)`) rather than flooding to all nodes (`O(N)`). Discovery uses expanding-ring search (4 hops first, 8 on retries) with jittered rebroadcasts, and every retry is a fresh, unlinkable query.
-- **AES-256-GCM with AEAD:** message payloads (direct and channel) are encrypted with shared channel keys, giving confidentiality and integrity in one pass; this avoids CTR-only designs without authentication. There are no pairwise end-to-end keys and no forward secrecy today; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) has the honest detail.
+- **Dual-substrate routing.** Two forwarding substrates ship, and a runtime toggle (`s_flood_transport`, default off) selects between them. **Reactive AODV is the default:** RREQ/RREP discovery, a cached route table, reverse-route breadcrumbs learned from DATA, intermediate-node RREP, and route-forwarded ACKs. DM airtime is `O(path_length)`, not `O(N)`. **Flooding is the opt-in alternative:** hop-limited (configurable, default 8, range 1..32), deduplicated, airtime-budget-gated unicast/channel floods with a flooded ACK for route-free sender confirmation. Reactive is not going away; the toggle picks one.
+- **Authenticated traffic (wire v4).** DATA frames and the control plane (RREP, RERR, ACK, delivery receipt, beacon) carry a network-key HMAC that relays verify before acting; a captured frame cannot be forged or replayed by an outsider on a provisioned network. Residual: any network-key holder is an insider and can still forge these MACs, and an unprovisioned network falls back to a public PSK ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)).
+- **Confirmed delivery.** Acknowledged tiers report DELIVERED vs FAILED to the sender rather than fire-and-forget. Honest envelope: reactive holds confirmed delivery at small, dense scale; the flooded confirmation holds at low-to-moderate message load and **degrades at high load** because flood airtime scales as `O(messages x nodes)`. It is explicitly not a high-load guarantee.
+- **End-to-end direct messages.** DMs use per-peer AES-256-GCM sessions keyed by a role-symmetric quad-DH X25519 exchange (`components/dm_session`), with a 7-digit SAS for out-of-band verification. They are not readable by other channel members. No forward secrecy yet; the SAS-comparison UX does not ship yet ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)).
+- **Channel encryption + multi-hop channels.** Channel messages use AES-256-GCM (AEAD) with the channel ID hidden inside the ciphertext, and they now relay multi-hop via the flood relay rather than being single-hop only.
+- **Privacy-first routing.** Route-request sources are pseudonymized per query, so forwarded route requests do not carry the originator's address.
 - **Airtime budgeting:** every transmission goes through one budget-gated TX path (`components/radio/tx_gate.c`) with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps enforced where the frequency plan requires them (for example EU 868 at 1%).
 - **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged, 3 retries with backoff), and Critical (8 retries plus delivery receipts carrying the relay path).
-- **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable, verifiable identity primitives.
+- **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable identity primitives. Note there is no per-node signature or trust anchor, so Sybil/impersonation across the fleet is not closed.
 - **Store-and-forward mailbox:** offline nodes receive queued messages when they rejoin the mesh.
-- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact; per-peer control over what you share and with whom. Location packets are not yet encrypted on the air ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)); do not share sensitive locations today.
+- **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact; per-peer control over what you share and with whom. Location payloads are now AES-256-GCM encrypted end to end and padded to a fixed size so the ciphertext does not leak which tier was chosen; timing and the fact that a node shares location remain observable ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)).
 - **Browser-based flashing:** flash firmware to new devices directly from the web, no toolchain required.
 
 For a deeper feature-by-feature analysis, see [docs/COMPARISON.md](docs/COMPARISON.md).
@@ -66,7 +69,7 @@ See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior a
 
 Bramble ships with a mesh simulator that runs real protocol code against a virtual radio layer and renders topology/traffic in a browser. The radio layer models the shared LoRa medium (real time-on-air, collisions, capture, half-duplex, listen-before-talk), making it the primary proving ground for scale and routing behavior before field deployment.
 
-See [simulator/README.md](simulator/README.md) for setup and scenarios, and [docs/results/simulation-2026-06.md](docs/results/simulation-2026-06.md) for measured scale results under the collision model.
+See [simulator/README.md](simulator/README.md) for setup and scenarios. For measured scale results under the collision model, [docs/results/simulation-2026-07-honest-baseline.md](docs/results/simulation-2026-07-honest-baseline.md) is the current source of truth (it supersedes the June numbers for planning; the earlier collision-free "100% at 200 nodes" figures were retracted as sim artifacts). In short: about 95% delivery at 10 nodes, collapsing to roughly 10-12% at 50-100 nodes and 0% at 200 as a single SF10 channel saturates under control-plane load. Scale is bounded by radio profile, node density, and hop budget; there is no field-tested-at-scale result.
 
 ## Getting Started
 

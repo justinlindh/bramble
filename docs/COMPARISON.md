@@ -20,9 +20,9 @@ MeshCore is a newer open-source project (emerged ~early 2025) created by "ripple
 
 ### Bramble
 
-Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 hardware (Heltec V3, T-Deck Plus, Heltec V4) and prioritizes privacy-first design, reactive routing, tiered reliability, and airtime management. The project includes firmware, a Go SDK (`bramble-go`), a CLI (`bramble-cli`), and a web companion app.
+Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 hardware (Heltec V3, T-Deck Plus, Heltec V4) and prioritizes privacy-first design, dual-substrate routing (reactive AODV by default with an opt-in flood transport), authenticated traffic, confirmable delivery, end-to-end DMs, tiered reliability, and airtime management. The project includes firmware, a Go SDK (`bramble-go`), a CLI (`bramble-cli`), and a web companion app.
 
-**Maturity:** Active development. Running on 3+ boards, functional firmware with working mesh, RPC, BLE, Wi-Fi, GPS, location sharing, mailbox store-and-forward, and a web companion app. Small user base (solo developer project).
+**Maturity:** Pre-alpha, solo developer project. Running on 3 boards, with working mesh, RPC, BLE, Wi-Fi, GPS, location sharing, mailbox store-and-forward, and a web companion app. No field deployments and no user base yet.
 
 ---
 
@@ -30,17 +30,18 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 
 | Feature | Meshtastic | MeshCore | Bramble |
 |---|---|---|---|
-| **Routing approach** | Managed flooding (all nodes rebroadcast). DMs getting next-hop routing in v2.6. | Flood-based route discovery, then data follows the learned direct path. Companion nodes don't repeat. | Reactive AODV-style routing with cached routes. Flooding only for channel/group messages (hop-limited). |
+| **Routing approach** | Managed flooding (all nodes rebroadcast). DMs getting next-hop routing in v2.6. | Flood-based route discovery, then data follows the learned direct path. Companion nodes don't repeat. | Dual-substrate. Reactive AODV (default): RREQ/RREP discovery, cached routes, reverse-route breadcrumbs from DATA, intermediate-node RREP, route-forwarded ACKs. Opt-in flooding transport (`s_flood_transport`, default off): hop-limited, deduplicated, airtime-budget-gated floods with a flooded ACK. Channel/group messages relay multi-hop via the flood relay. |
 | **Encryption: channels** | AES256-CTR with PSK. No integrity check (no AEAD: issue #4030 open). Known-plaintext attacks possible. | AES-256 with PSK (details sparse; encrypt-then-MAC with shared secret per the codebase). | AES-256-GCM (AEAD) with PSK. Channel ID encrypted inside ciphertext. |
-| **Encryption: DMs** | Since v2.5: X25519 PKC + AES-CCM. Prior: just channel PSK (no real DM privacy). | Ed25519 identity + ECDH key exchange → AES-128 encrypt-then-MAC. Signed adverts prevent spoofing. | Encrypted with the shared channel key (AES-256-GCM), not pairwise end-to-end keys; every holder of the channel key can read DMs on it (see [SECURITY-MODEL.md](SECURITY-MODEL.md)). |
-| **Scalability target** | ~80–100 nodes practical ceiling (flooding). Degrades above ~30 active senders. | Flood-based discovery with direct-path data delivery. Claims up to 64 hops theoretically. | Route-based forwarding scales O(path_length) per DM, not O(N). Measured under a collision-model simulation, current scale results are honest: with the routing fixes a 10-node multi-hop grid delivers 85% and a 10-node cluster 90%, but delivery still collapses to 5% at 50/100 nodes (channel saturated by control traffic at SF10 defaults) and 0% at 200 nodes, whose scripted pairs sit beyond the protocol's 8-hop route depth ([results/simulation-2026-06.md](results/simulation-2026-06.md)). |
+| **Encryption: DMs** | Since v2.5: X25519 PKC + AES-CCM. Prior: just channel PSK (no real DM privacy). | Ed25519 identity + ECDH key exchange → AES-128 encrypt-then-MAC. Signed adverts prevent spoofing. | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange with a 7-digit SAS (`components/dm_session`). Not readable by other channel members. No forward secrecy; SAS-comparison UX not yet shipped (see [SECURITY-MODEL.md](SECURITY-MODEL.md)). |
+| **Traffic authentication** | Channel traffic is unauthenticated: any PSK holder can forge/impersonate. DMs (v2.5+) are authenticated. | Per-node Ed25519 signatures; signed adverts. | DATA frames and the control plane (RREP, RERR, ACK, delivery receipt, beacon) carry a network-key HMAC that relays verify before acting. Residual: any network-key holder is an insider and can forge these MACs; an unprovisioned network falls back to a public PSK ([SECURITY-MODEL.md](SECURITY-MODEL.md)). |
+| **Scalability target** | ~80–100 nodes practical ceiling (flooding). Degrades above ~30 active senders. | Flood-based discovery with direct-path data delivery. Claims up to 64 hops theoretically. | Reactive DM forwarding is O(path_length), not O(N). Honest measured scale under the collision-modeled simulator (the source of truth): ~95% delivery at 10 nodes, collapsing to ~10-12% at 50-100 and 0% at 200 as a single SF10 channel saturates under control-plane load ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md)). The earlier collision-free "100% at 200 nodes" figures were retracted as sim artifacts. No field test has been run. |
 | **Reliability model** | Optional ACKs. Basic retries. No flow control. No congestion awareness. | ACK mechanism. Basic retry logic. No formal congestion management. | Three tiers (Broadcast/Normal/Critical). Exponential backoff retries with jitter, end-to-end ACKs, delivery receipts with relay path. Flow-control and congestion-signaling designs were removed unshipped; sender pacing comes from the per-tier airtime budget at the TX chokepoint and the bounded pending-ACK table. |
 | **Airtime management** | None built-in. Nodes transmit freely. Some duty cycle awareness in EU regions. | Flood advert interval configurable (default 12h for repeaters). Companion nodes don't repeat. | Enforced: every transmission passes one budget-gated TX path with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps where the frequency plan requires them (EU868 1%). No transmit path bypasses the budget. |
 | **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Not documented. Likely relies on GPS or companion device time. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
 | **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
-| **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte header. Compact binary. No protobuf/JSON. |
-| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | X25519 public key → SHA-256 → 4-byte address. Cryptographic identity. |
-| **Max hops** | 7 (configurable) | 3–7 default, up to 64 theoretical | 4 (fixed in current firmware) |
+| **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte base header, compact binary (no protobuf/JSON). Authenticated DATA adds a 28-byte envelope prefix (src_addr, relay-mutable prev_hop, 8-byte auth HMAC) plus a 12-byte nonce and 16-byte GCM tag. |
+| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | X25519 public key → SHA-256 → 4-byte address. Cryptographic identity, but no per-node signature or trust anchor, so cross-fleet Sybil/impersonation is not closed. |
+| **Max hops** | 7 (configurable) | 3–7 default, up to 64 theoretical | Reactive: expanding-ring discovery 4 then 8, max route depth 8. Flood transport: configurable 1..32, default 8. |
 
 ---
 
@@ -77,7 +78,9 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 3. Subsequent data packets follow the discovered route: only nodes on the path transmit
 4. Routes are cached with soft/hard timeouts and maintained via broken-link detection
 
-**Channel messages** still use controlled flooding (hop-limited), since group messages inherently need to reach all members.
+**Channel/group messages** use controlled flooding (hop-limited, default 8, configurable 1..32) and now relay multi-hop rather than the earlier single-hop-only behavior, since group messages inherently need to reach all members.
+
+**Opt-in flood transport.** A runtime toggle (`s_flood_transport`, default off) can also route unicast DMs by the same hop-limited, deduplicated, budget-gated flood instead of reactive discovery, with a flooded ACK for route-free sender confirmation. It trades airtime for reach and is best-effort within the hop budget. Both substrates ship; the toggle selects one; reactive stays the default and is not removed.
 
 **Privacy enhancement:** RREQ packets carry a per-query pseudonym instead of the originator's address, so forwarded route requests do not identify who is asking. The destination address stays cleartext, and the first hop can still infer the originator (a fresh RREQ has hop_count 0); see [SECURITY-MODEL.md](SECURITY-MODEL.md) for the precise scope.
 
@@ -117,19 +120,23 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 | Aspect | Details |
 |---|---|
 | **Channel encryption** | AES-256-GCM (AEAD: provides both confidentiality and integrity). Channel ID is inside the ciphertext, so non-members cannot determine which channel a message belongs to. Keys derive deterministically from the channel passphrase, so a passphrase holder can compute every epoch key. |
-| **DM encryption** | Encrypted with the shared channel key (AES-256-GCM), not pairwise end-to-end keys. Every holder of the channel key can read every DM on it. A `KEY_EXCHANGE` packet type is defined on the wire but is never sent and never handled. |
-| **Forward secrecy** | None. Channel epoch keys derive from the previous epoch's key, and everything derives from the passphrase, so a passphrase holder can compute every epoch. |
-| **Metadata leakage** | The cleartext header carries the destination address, packet id, and flags, and DATA packets carry a cleartext 4-byte source address. RREQ sources are pseudonymized per query; channel ID is inside the ciphertext. |
-| **Key management** | Auto-generated X25519 identity on first boot. No automatic key rotation; a channel epoch mechanism exists, and receivers catch up across epoch advances via trial decryption. |
-| **Authentication** | Messages: implicit via the AES-GCM auth tag (any holder of the channel key can produce a valid tag). Beacons: HMAC'd with a shared key derived from the public channel PSK, so they are forgeable by anyone who knows that PSK. RREPs: unauthenticated. |
+| **DM encryption** | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange (four X25519 DHs mixed via HKDF-SHA256) with a 7-digit SAS for out-of-band verification (`components/dm_session`). The handshake travels inside DATA envelopes (`app_type = APP_TYPE_KE`); the standalone `KEY_EXCHANGE` packet type was retired from the wire. Other channel members cannot read a DM. |
+| **Forward secrecy** | None. DM session keys are derived once per handshake and never ratcheted (rekey requires a new handshake). Channel epoch keys derive from the previous epoch's key, and everything derives from the passphrase, so a passphrase holder can compute every epoch. |
+| **Metadata leakage** | The cleartext header carries the destination address, packet id, and flags, and DATA packets carry a cleartext 4-byte source address plus a relay-mutable prev_hop. RREQ sources are pseudonymized per query; channel ID is inside the ciphertext; LOCATION ciphertext is padded to a fixed size so it does not leak the sharing tier. |
+| **Key management** | Auto-generated X25519 identity on first boot. No automatic key rotation; a channel epoch mechanism exists, and receivers catch up across epoch advances via rate-limited trial decryption. |
+| **Authentication** | Channel/DM payloads: the AES-GCM auth tag (a channel tag is producible by any channel-key holder; a DM tag requires the per-peer session key). Control plane and DATA (RREP, RERR, ACK, delivery receipt, beacon, plus DATA's `auth_hmac`): network-key HMAC, verified by relays before acting. Residual: forgeable by any network-key insider, and by anyone under the public-PSK fallback before a network key is provisioned. RREQ itself carries no MAC (a broadcast route request has no pre-shared per-flow context). |
 
 ### Summary
 
-Bramble's privacy design is significantly more ambitious than both Meshtastic and MeshCore. Key differentiators:
+Bramble's privacy and authentication posture is ambitious relative to Meshtastic; relative to MeshCore (which already has per-node keys and end-to-end DMs) the edge is narrower. Distinct points:
 
-1. **Route-discovery source privacy**: Bramble pseudonymizes RREQ sources. Data packets still carry a cleartext source address (see [SECURITY-MODEL.md](SECURITY-MODEL.md)).
-2. **Channel privacy**: Bramble hides which channel a message belongs to. Meshtastic and MeshCore don't.
-3. **Integrity**: Bramble uses AEAD (GCM) for message payloads. Meshtastic channels still lack integrity checking. MeshCore uses encrypt-then-MAC.
+1. **Authenticated traffic**: DATA and the control plane carry a network-key HMAC that relays verify before acting, so an outsider on a provisioned network cannot forge or replay control/DATA frames. Meshtastic's channel traffic is unauthenticated (any PSK holder can impersonate). Residual: a network-key insider can still forge, and an unprovisioned network falls back to a public PSK (see [SECURITY-MODEL.md](SECURITY-MODEL.md)).
+2. **Confirmed delivery**: acknowledged tiers report DELIVERED vs FAILED to the sender, a genuine edge over Meshtastic's fire-and-forget at low-to-moderate load. The flooded-confirmation half degrades under high load (airtime scales O(messages x nodes)), so it is not a high-load guarantee.
+3. **End-to-end DMs**: per-peer quad-DH X25519 AES-256-GCM sessions, not channel-key DMs. This is parity with MeshCore and ahead of pre-2.5 Meshtastic.
+4. **Metadata hygiene**: RREQ source pseudonymization and fixed-size, tiered LOCATION ciphertext. Integrity comes from AEAD (GCM); Meshtastic channels still lack integrity checking. Data packets still carry a cleartext source address.
+5. **Channel privacy**: Bramble hides which channel a message belongs to. Meshtastic and MeshCore don't.
+
+Versus MeshCore specifically the remaining edge is thin: confirmed broadcast delivery and authenticated-flood membership gating, weighed against MeshCore's more mature ecosystem and more efficient routing.
 
 ---
 
@@ -177,9 +184,9 @@ MeshCore's role system (companions don't repeat) means the effective flooding fa
 
 ### Bramble
 
-DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. Discovery uses an expanding ring (hop limit 4 first, 8 on retries); routes up to 8 hops deep are usable end-to-end. The token-bucket airtime budget caps each node's transmission time per hour with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages still flood (hop-limited), but channels are explicitly a lower-tier service.
+Reactive DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. Discovery uses an expanding ring (hop limit 4 first, 8 on retries); routes up to 8 hops deep are usable end-to-end. The token-bucket airtime budget caps each node's transmission time with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages flood (hop-limited, multi-hop), and the opt-in flood transport (`s_flood_transport`, default off) can route DMs the same way when enabled, trading airtime for reach.
 
-**Validation status:** scale behavior has not been validated in a real-world deployment. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT), and the published numbers are honest: with the routing fixes (fresh-query retries, jittered forwards, expanding-ring discovery), a 10-node single-collision-domain cluster delivers 18/20 under gentle load and a 10-node multi-hop grid 17/20 (85%, up from 11/20 before the fixes). The 50/100-node scenarios still collapse to 1/20 (5%) because route-discovery floods at the SF10 default cannot complete on a channel already saturated by control traffic, and the 200-node scenario delivers 0/20 because every scripted pair sits 11 to 17 hops apart, beyond the protocol's 8-hop maximum route depth. Full numbers, methodology, and the failure analysis are in [results/simulation-2026-06.md](results/simulation-2026-06.md). The design's scaling argument is currently a goal under active investigation, not a demonstrated property.
+**Validation status:** scale behavior has not been validated in a real-world deployment; no multi-node field test has been run. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT) and is the source of truth. The honest July baseline ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md), which supersedes the June numbers for planning): about 95% message delivery at 10 nodes, collapsing to ~12% at 50, ~10% at 100, and 0% at 200. A single SF10 channel saturates under control-plane load (RREQ discovery storms amplifying a beacon floor) well before traffic flows, and the 200-node grid also spans 11 to 17 hops, beyond the 8-hop route ceiling. The earlier collision-free "100% at 200 nodes" numbers were retracted as sim artifacts. The design's scaling argument is a goal under active investigation, not a demonstrated property.
 
 ---
 
@@ -213,7 +220,7 @@ DM traffic scales as O(path_length) after route discovery: one transmission per 
 
 ### Where Bramble Aims to Improve
 
-1. **Routing scalability.** The fundamental architectural difference. Reactive routing means DM traffic doesn't flood the mesh. This is the single biggest design win: it's the difference between O(N) and O(path_length) transmissions per message.
+1. **Routing scalability, honestly bounded.** Reactive routing (the default) keeps DM traffic at O(path_length) instead of O(N), the core architectural bet. The payoff has not materialized at scale yet: a single SF10 channel still saturates on control traffic by ~50 nodes (see Scalability above), so this is a design argument under investigation, not a demonstrated win. An opt-in flood transport trades that argument for best-effort reach within a hop budget.
 
 2. **Privacy by design.** Bramble's pseudonymized RREQ sources and encrypted channel IDs represent a meaningfully different privacy posture; [SECURITY-MODEL.md](SECURITY-MODEL.md) documents exactly what is and is not hidden today. Meshtastic and MeshCore carry source and destination in plaintext headers.
 
@@ -221,7 +228,11 @@ DM traffic scales as O(path_length) after route discovery: one transmission per 
 
 4. **Reliability tiers.** Three tiers with different retry strategies, end-to-end ACKs, and path-tracing delivery receipts give applications fine-grained control (sliding-window flow control and congestion signaling were removed unshipped). Meshtastic's "optional ACK with fixed retries" is a blunt instrument by comparison.
 
-5. **AEAD for message payloads.** AES-256-GCM provides both confidentiality and integrity in a single pass. Meshtastic's channel encryption (AES256-CTR without MAC) is notably weaker: it lacks integrity checking entirely.
+5. **Authenticated traffic and AEAD payloads.** AES-256-GCM gives channel and DM payloads confidentiality and integrity in one pass (Meshtastic's AES256-CTR channels lack integrity entirely), and a network-key HMAC on DATA and the control plane lets relays reject forged or replayed frames from outsiders. The honest limit: a network-key insider can still forge, and an unprovisioned network uses a public-PSK fallback.
+
+6. **Confirmable delivery.** Acknowledged tiers report DELIVERED vs FAILED rather than fire-and-forget. This is a real edge at low-to-moderate load; the flooded-confirmation half degrades under high message load (airtime scales O(messages x nodes)), so it is bounded, not a high-load guarantee.
+
+7. **End-to-end DMs.** Per-peer quad-DH X25519 AES-256-GCM sessions, so channel members cannot read each other's DMs (parity with MeshCore, ahead of pre-2.5 Meshtastic).
 
 ### Where Bramble Is at a Disadvantage
 
@@ -235,7 +246,7 @@ DM traffic scales as O(path_length) after route discovery: one transmission per 
 
 5. **Single developer.** Both Meshtastic and MeshCore benefit from community contributions and diverse perspectives. A solo project carries bus-factor risk and limited testing capacity.
 
-6. **Channel messages still flood.** Bramble's routing improvements only help DMs. Channel/group messages still use controlled flooding (albeit hop-limited). For networks where most traffic is channel-based (many Meshtastic deployments), the routing advantage narrows.
+6. **Channel traffic and flooded confirmation are airtime-bound.** Channel/group messages relay multi-hop by controlled flooding, so the reactive routing advantage applies mainly to DMs. The flood-based confirmed-delivery mode's airtime scales as O(messages x nodes): it holds confirmation only at low-to-moderate load and collapses under sustained high load. That load ceiling is close to fundamental to flooding, not a tuning bug.
 
 7. **First-message latency.** Route discovery takes time: potentially 5–15 seconds for the RREQ/RREP round trip before the first DM can be sent. Meshtastic's flooding delivers (or drops) immediately. For time-sensitive first contact, this matters.
 
