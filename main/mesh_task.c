@@ -3462,6 +3462,41 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
         break;
     }
 
+    /* M2 TOFU-session teardown (identity-campaign follow-up): whenever this
+     * attestation left a TRUSTED pinned binding for att.src_addr (NEW,
+     * REFRESHED, or CONFLICT - the first-seen binding survives a CONFLICT and
+     * is authoritative), drop any ESTABLISHED DM session whose cached peer
+     * X25519 key disagrees with that pin. Such a session was a first-contact
+     * TOFU handshake pointed at an impostor: the attestation is self-signed,
+     * address-bound, and on an anchored node ALSO anchor-endorsed, so the pin
+     * is authoritative and the stale session is dropped (recovered by a fresh,
+     * now pin-continuity-checked handshake). This closes "a TOFU DM with a
+     * Sybil that never endorses gets torn down the instant the real endorsed
+     * peer pins." Fail-safe: it only ever DROPS; it never touches a
+     * key-MATCHING (healthy) session or a non-ACTIVE handshaking slot. The
+     * lookup+compare+teardown run as ONE critical section under s_dm_mutex
+     * because process_ke_init/resp on the handshake worker mutate the same
+     * slot; logging is deferred until after the lock is released, matching the
+     * s_dm_mutex convention elsewhere in this file. */
+    if (pin == IDENTITY_PIN_NEW || pin == IDENTITY_PIN_REFRESHED || pin == IDENTITY_PIN_CONFLICT) {
+        const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, att.src_addr);
+        if (pinned) {
+            bool torn_down = false;
+            xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+            dm_session_t* sess = dm_lookup(&s_dm_table, att.src_addr);
+            if (sess && dm_pin_disagrees(sess, pinned->x25519_pub)) {
+                dm_session_teardown(&s_dm_table, att.src_addr);
+                torn_down = true;
+            }
+            xSemaphoreGive(s_dm_mutex);
+            if (torn_down)
+                ESP_LOGW(TAG,
+                         "DM session torn down: pinned identity for %08" PRIX32
+                         " disagrees with the TOFU session key",
+                         att.src_addr);
+        }
+    }
+
     /* Relay through the SAME engine as the broadcast DATA flood
      * (handle_data): channel_flood_decide + schedule_flood_relay, on the
      * BROADCAST budget lane. Own-echo folds into is_duplicate exactly like
