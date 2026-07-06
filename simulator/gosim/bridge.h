@@ -50,6 +50,15 @@ typedef struct {
      * node false to make it INERT (originates nothing authenticated, drops
      * everything authenticated) while the rest of the mesh runs normally. */
     bool provisioned;
+    /* Trust-anchor campaign (P2): whether this node carries a valid fleet-anchor
+     * endorsement cert on its attestations. Defaults true (bridge_init endorses
+     * the whole fleet with the fixed test anchor so existing scenarios still
+     * mesh under the endorsed-only pin gate); a scenario marks a node false
+     * ("unendorsed": true) so it attests with not_after=0 and every anchored
+     * receiver refuses to pin it (IDENTITY_PIN_UNENDORSED) while still relaying
+     * its MAC-valid frame. Kept in the first-init guard like provisioned so a
+     * rejoin preserves an intentionally-unendorsed node. */
+    bool endorsed;
 } bridge_node_ext_t;
 
 /* ─── Extended bridge-level metrics ────────────────────────────────────── */
@@ -82,6 +91,35 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
  *   before. Idempotent; safe to call before or after a node has joined.
  */
 void bridge_node_set_provisioned(int node_idx, bool provisioned);
+
+/*
+ * bridge_node_set_endorsed (trust-anchor campaign P2):
+ *   Sets a node's per-node endorsed flag. Scenario nodes marked
+ *   "unendorsed": true call this with endorsed=false after join, so the node
+ *   attests with no fleet-anchor cert (not_after=0) and every anchored receiver
+ *   refuses to PIN it (IDENTITY_PIN_UNENDORSED) while still relaying its
+ *   MAC-valid frame. Every other node stays endorsed and pins normally.
+ *   Idempotent; safe to call before or after a node has joined.
+ */
+void bridge_node_set_endorsed(int node_idx, bool endorsed);
+
+/*
+ * bridge_node_set_anchored (trust-anchor campaign P2 red-team):
+ *   Force a node's pin store anchored/un-anchored. Scenario nodes marked
+ *   "unanchored": true call this with anchored=false after join, so the node
+ *   boots un-anchored (pins on self-sig alone, TOFU) until a provision_anchor
+ *   event hardens it. Idempotent; safe before or after join.
+ */
+void bridge_node_set_anchored(int node_idx, bool anchored);
+
+/*
+ * bridge_handle_provision_anchor (trust-anchor campaign P2 red-team):
+ *   Fires a scripted EVT_PROVISION_ANCHOR: (re-)anchors the named node to the
+ *   fleet test anchor via the real identity_store_set_anchor, dropping any
+ *   stale pins the node held while un-anchored. Emits an "anchor_provisioned"
+ *   event with the dropped-pin count.
+ */
+void bridge_handle_provision_anchor(sim_event_t* event, node_array_t* nodes);
 
 /*
  * bridge_handle_generate_attestation (per-node identity Phase 3):

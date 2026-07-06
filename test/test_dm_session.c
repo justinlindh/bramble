@@ -568,6 +568,91 @@ void test_verify_resp_enforces_pinned_x25519_continuity(void) {
         dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, other_pin, ka));
 }
 
+/*
+ * M2 TOFU-session teardown (P3b). dm_session_teardown drops one peer's slot
+ * so a stale first-contact session can be reclaimed the instant the peer's
+ * real (endorsed) identity pins under a different key.
+ */
+void test_teardown_removes_active_session(void) {
+    dm_table_t t;
+    dm_table_init(&t);
+    dm_session_t* s = dm_alloc(&t, 0xAA, 0);
+    s->state = DM_STATE_ACTIVE;
+    s->verified = 1;
+    TEST_ASSERT_TRUE(dm_session_teardown(&t, 0xAA));
+    /* Slot is gone: state reset and no longer findable. */
+    TEST_ASSERT_NULL(dm_lookup(&t, 0xAA));
+    TEST_ASSERT_EQUAL(DM_STATE_NONE, s->state);
+}
+
+void test_teardown_absent_addr_returns_false(void) {
+    dm_table_t t;
+    dm_table_init(&t);
+    dm_session_t* s = dm_alloc(&t, 0xAA, 0);
+    s->state = DM_STATE_ACTIVE;
+    TEST_ASSERT_FALSE(dm_session_teardown(&t, 0xBB)); /* no slot for 0xBB */
+    TEST_ASSERT_NOT_NULL(dm_lookup(&t, 0xAA));        /* the present one untouched */
+}
+
+void test_teardown_leaves_other_sessions(void) {
+    dm_table_t t;
+    dm_table_init(&t);
+    dm_session_t* keep = dm_alloc(&t, 0x1111, 0);
+    keep->state = DM_STATE_ACTIVE;
+    keep->verified = 1;
+    memset(keep->session_key, 0xAB, 32);
+    dm_session_t* drop = dm_alloc(&t, 0x2222, 0);
+    drop->state = DM_STATE_ACTIVE;
+
+    TEST_ASSERT_TRUE(dm_session_teardown(&t, 0x2222));
+    TEST_ASSERT_NULL(dm_lookup(&t, 0x2222));
+    /* The sibling session is byte-for-byte intact. */
+    dm_session_t* still = dm_lookup(&t, 0x1111);
+    TEST_ASSERT_EQUAL_PTR(keep, still);
+    TEST_ASSERT_EQUAL(DM_STATE_ACTIVE, still->state);
+    for (int i = 0; i < 32; i++)
+        TEST_ASSERT_EQUAL_HEX8(0xAB, still->session_key[i]);
+}
+
+/*
+ * dm_pin_disagrees is the pure M2 decision the mesh_task hook applies under
+ * s_dm_mutex: an ACTIVE session whose cached peer X25519 key differs from
+ * the freshly-pinned (authenticated) binding is a stale TOFU session and
+ * must be torn down. A matching key is the healthy case; a non-ACTIVE slot
+ * is never a teardown target (dm_alloc's LRU reclaims handshaking slots).
+ */
+void test_pin_disagrees_differing_key_true(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    s.state = DM_STATE_ACTIVE;
+    memset(s.peer_id_pub, 0x11, 32);
+    uint8_t pinned[32];
+    memset(pinned, 0x22, 32); /* a different key than the session holds */
+    TEST_ASSERT_TRUE(dm_pin_disagrees(&s, pinned));
+}
+
+void test_pin_disagrees_matching_key_false(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    s.state = DM_STATE_ACTIVE;
+    memset(s.peer_id_pub, 0x11, 32);
+    uint8_t pinned[32];
+    memset(pinned, 0x11, 32); /* identical: the healthy pinned session */
+    TEST_ASSERT_FALSE(dm_pin_disagrees(&s, pinned));
+}
+
+void test_pin_disagrees_non_active_false(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    memset(s.peer_id_pub, 0x11, 32);
+    uint8_t pinned[32];
+    memset(pinned, 0x22, 32); /* would differ, but slot is not ACTIVE */
+    s.state = DM_STATE_HANDSHAKING;
+    TEST_ASSERT_FALSE(dm_pin_disagrees(&s, pinned));
+    s.state = DM_STATE_NONE;
+    TEST_ASSERT_FALSE(dm_pin_disagrees(&s, pinned));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_quad_dh_both_sides_agree);
@@ -593,5 +678,11 @@ int main(void) {
     RUN_TEST(test_verify_resp_rejects_wrong_ke_type);
     RUN_TEST(test_verify_resp_rejects_spoofed_address);
     RUN_TEST(test_verify_resp_enforces_pinned_x25519_continuity);
+    RUN_TEST(test_teardown_removes_active_session);
+    RUN_TEST(test_teardown_absent_addr_returns_false);
+    RUN_TEST(test_teardown_leaves_other_sessions);
+    RUN_TEST(test_pin_disagrees_differing_key_true);
+    RUN_TEST(test_pin_disagrees_matching_key_false);
+    RUN_TEST(test_pin_disagrees_non_active_false);
     return UNITY_END();
 }

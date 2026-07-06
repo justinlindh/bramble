@@ -463,12 +463,15 @@ local identity (`identity_check_collision` in
 
 What ships (the 2026-07 per-node identity campaign, Phases 0-4):
 
-- **Self-signed identity attestations.** Every node broadcasts a 158-byte
+- **Self-signed identity attestations.** Every node broadcasts a 230-byte
   attestation frame binding `{address, x25519_pub}` under an Ed25519
   signature by its own identity key (canonical signed bytes built by
-  `bramble_identity_attestation_signed_msg` in `components/packet`), at
-  boot and on a 15-minute cadence (`send_identity_attestation` in
-  `main/mesh_task.c`), budget-gated like all broadcast traffic.
+  `bramble_identity_attestation_signed_msg` in `components/packet`), and now
+  also carrying the anchor endorsement cert (`not_after` plus the anchor's
+  64-byte signature over this node's Ed25519 key) that lets an anchored
+  receiver decide whether to pin it, at boot and on a 15-minute cadence
+  (`send_identity_attestation` in `main/mesh_task.c`), budget-gated like all
+  broadcast traffic.
 - **Relay-gated flood.** The frame carries a cheap network-key MAC
   (context `bramble-ident-relay-v1`) plus a 48-bit origin sequence checked
   against the per-signer control replay window; relays verify ONLY the MAC
@@ -504,18 +507,21 @@ What ships (the 2026-07 per-node identity campaign, Phases 0-4):
   `handle_ke_envelope`'s pin snapshot in `main/mesh_task.c`). No pin means
   unchanged TOFU-grade first contact.
 
-Residuals, stated plainly (see also section 5): identities are unforgeable
-but **free to mint** (no trust anchor, no cost function; Sybil scarcity is
-NOT claimed, and quorum gating only raises the bar to "must attest and be
-pinned" outside a bounded per-boot grace); pins are **RAM-only** and reset
-on reboot, re-established by
-TOFU; DM continuity has a **first-contact window** until the peer's
-attestation is heard and pinned; identity keys sit in **plaintext NVS**
-(section 4's physical-capture item); a keyed insider can still flood
-MAC-valid frames with garbage signatures that relays carry (bounded by the
-airtime budget, counted by every receiver as `sig_failures`); and there is
-**no revocation**: a compromised identity stays valid until the fleet
-excludes it out of band.
+Residuals, stated plainly (see also section 5): identities are unforgeable,
+and on an **ANCHORED** mesh Sybil scarcity is now CLOSED (pinning requires an
+anchor endorsement a Sybil cannot forge; see section 5's NEW-SEC-4 close),
+but on an **un-anchored** mesh identities remain **free to mint** (no cost
+function; quorum gating only raises the bar to "must attest and be pinned"
+outside a bounded per-boot grace); pins are **RAM-only** and reset on reboot,
+re-established by TOFU; DM continuity has a **first-contact window** until the
+peer's attestation is heard and pinned, after which a disagreeing pin tears
+the stale TOFU session down (`dm_session_teardown`, P3b); identity keys sit
+in **plaintext NVS** (section 4's physical-capture item); a keyed insider can
+still flood MAC-valid frames with garbage signatures that relays carry
+(bounded by the airtime budget, counted by every receiver and surfaced in
+getStatus as `identity_sig_failures`); and there is **no active revocation**
+in v1 (certs are permanent): a compromised identity stays valid until the
+fleet re-anchors or excludes it out of band.
 
 ### Sybil heuristic (log-only)
 
@@ -1178,9 +1184,9 @@ These do not go away when section 4 empties out.
   `test/test_rrep_discovery_e2e.c` harness drives real multi-hop
   discoveries through the real routing components and is the durable
   coverage that caught this and will catch any regression.
-- **The timesync bootstrap-quorum RACE is now closed by a bounded per-boot
-  grace; what remains open is Sybil identity MINTING, not the race
-  (NEW-SEC-4).** The beacon HMAC gate and the bootstrap-offset clamp
+- **The timesync bootstrap-quorum RACE is closed by a bounded per-boot
+  grace, and Sybil identity SCARCITY is now closed on ANCHORED meshes by the
+  trust anchor (NEW-SEC-4).** The beacon HMAC gate and the bootstrap-offset clamp
   (section 3) both require holding the network key, but neither requires
   holding a *distinct* identity per beacon. Ws 1.3b's beacon replay closure
   (above) means a captured beacon can no longer re-feed a stale time
@@ -1234,36 +1240,108 @@ These do not go away when section 4 empties out.
   tightened to pinned-only well before the grace expires; the grace is a
   liveness backstop, not the normal path.
 
-  **This closes the RACE, not Sybil scarcity.** Three residuals remain,
-  stated precisely:
-  1. **Sybil MINTING is still free.** Ed25519 identities are unforgeable
-     but there is no trust anchor and no cost function: a network-key
-     insider can generate N real keypairs, attest each one's own (real,
-     derived) address, let every receiver pin them, sustain their beacons
-     over the tenure window, and win the quorum with N pinned, established,
-     fully-verified Sybil identities. The gate raises the bar from
-     "fabricate bare addresses" to "mint, attest, pin and sustain real
-     identities"; it does not create scarcity, and nothing in this codebase
-     rate-limits or prices identity minting. Closing this needs a trust
-     anchor (GPS-authoritative nodes or a pre-shared trusted-node list),
-     deferred to a later campaign and out of scope for pre-alpha.
-  2. **The per-boot grace is a bounded residual exposure window.** A Sybil
-     present and established during a node's first
-     `QUORUM_BOOTSTRAP_GRACE_MS` post-boot can still corroborate the quorum
-     as unpinned. This is a deliberate liveness trade (a fresh mesh must be
-     able to converge time before any attestation is heard); it is bounded
-     per boot, not unbounded, but it is not zero.
-  3. **Route/RREP trust is not identity-gated.** Route installation and
-     control-plane trust are network-key-authenticated (section 3), not
-     pinned-identity-gated; this campaign does not add identity gating to
-     routing, and it is out of scope (see the RREP items in this section).
+  **Sybil SCARCITY is now CLOSED on anchored meshes (NEW-SEC-4).** The
+  trust-anchor campaign (P0-P3b) delivered the real close the identity,
+  provisioning, and bootstrap-race campaigns set up. On an ANCHORED fleet,
+  every trusted (pinned) identity was explicitly endorsed by the offline
+  fleet anchor: `identity_store_handle_attestation` on an anchored node pins
+  ONLY an attestation carrying a valid `bramble-endorse-v1` certificate the
+  anchor's Ed25519 key signed over this node's own Ed25519 key. A Sybil can
+  still mint unlimited Ed25519 keypairs and attest each one's own derived
+  address, but NONE of them pins: it cannot forge the anchor's Ed25519
+  signature, so it cannot manufacture even one trusted identity, let alone
+  the quorum-dominating fleet the pre-anchor design left open. Minting stays
+  free; trust is anchor-scarce. That is the NEW-SEC-4 close: on an anchored
+  mesh a network-key insider can no longer mint, attest, and pin N Sybil
+  identities to dominate the quorum or forge DM continuity, because pinning
+  now requires an endorsement it cannot produce.
+
+  **Honest non-closures / residuals (anchored meshes).** The close is real
+  but narrow; each residual is stated plainly rather than overclaimed as
+  "Sybil solved":
+  a. **Compromised ENDORSED insider.** A node holding a valid stamp is still
+     an insider. Endorsement gates admission, not behavior: a genuinely
+     endorsed node that later misbehaves is a detection-and-revocation
+     problem, not one this mechanism prevents.
+  b. **Anchor-holder compromise.** Whoever holds the anchor PRIVATE key can
+     endorse arbitrary keys and admit Sybils at will. Anchor custody is the
+     trust root; the guarantee reduces to keeping that key offline and
+     controlled.
+  c. **Anchor loss / leak.** If the anchor private key is LOST, nobody can
+     enroll again and the fleet needs a re-anchor flag day to move to a new
+     anchor. If it LEAKS, an attacker-endorsed Sybil returns until the fleet
+     re-anchors. Both are operational recovery events, not automatic
+     mitigations.
+  d. **No active revocation in v1.** Certificates are PERMANENT
+     (`not_after == UINT64_MAX`); there is no revocation list, so un-trusting
+     one specific endorsed node also means a re-anchor. The wire format and
+     firmware already carry `not_after` and an implemented-but-inert expiry
+     check, so moving to expiring certs is a webapp-only change (issue
+     shorter-lived certs); this is deliberately DEFERRED, not missing.
+  e. **Bounded-grace unpinned residual.** During the per-boot
+     timesync-quorum grace an established but UNPINNED peer still corroborates
+     the clock (both a silent Sybil and a self-revealing one), bounded by
+     `QUORUM_BOOTSTRAP_GRACE_MS` and cut short by the early-exit at
+     `QUORUM_GRACE_MIN_PINS` genuine pins. A negative-intel reject ring
+     (remembering addresses seen misbehaving) was considered and DROPPED: it
+     is flushable by cycling fresh keypairs, and a ~2^32 address grind lets an
+     insider aim it at an honest peer as a targeted timesync-denial, so it
+     added attack surface without adding a guarantee. Recorded here so the
+     decision is not silently re-litigated.
+  f. **Insider cert-strip / downgrade (P1 red-team).** A keyed insider
+     relaying an attestation can zero or graft the cert bytes and re-MAC the
+     frame with the shared network key, making a genuinely-endorsed node look
+     UNENDORSED to downstream receivers (a trust-DoS, not a trust-forge).
+     This is inherent to shared-key relay: the relay MAC stops KEYLESS
+     outsiders from flipping cert bits, and a cross-node cert graft gains
+     nothing because the cert is bound to the node's own Ed25519 key. Insider
+     containment is the gate/quorum work, not this endorsement mechanism.
+  g. **Expired-cert grandfathering during unsynced windows (P2 red-team,
+     LATENT).** Once expiring certs ship, a cert accepted while the clock is
+     unsynced (`epoch_ms == 0` disables the expiry check) would be
+     grandfathered permanently, because pinned entries are never re-validated
+     after the clock later syncs. This is INERT in v1 (all certs are
+     permanent, so the expiry check never fires), but the wire format is
+     frozen, so the fix belongs to whoever ships expiring certs: re-validate
+     pinned-entry expiry on the unsynced->synced transition, or withhold
+     quorum/DM trust from `epoch_ms == 0` pins until they are re-checked.
+  h. **No-anchor meshes keep TOFU semantics.** The anchor is OPT-IN
+     strictness. A fleet with no anchor provisioned behaves exactly as before
+     the campaign: first-contact TOFU pinning, no endorsement gate, cert
+     fields ignored. Sybil scarcity is NOT claimed on an un-anchored mesh; the
+     minting residual the pre-anchor analysis described still applies there in
+     full (a network-key insider can mint, attest, pin, and sustain N real
+     identities and win the quorum).
+
+  Separately, **route/RREP trust is not identity-gated**: route installation
+  and control-plane trust are network-key-authenticated (section 3), not
+  pinned-identity-gated; this campaign does not add identity gating to
+  routing, and it is out of scope (see the RREP items in this section).
+
+  **Grace early-exit applies to ALL meshes.** The #131 bootstrap-quorum
+  early-exit (stop leaning on unpinned peers the moment `QUORUM_GRACE_MIN_PINS`
+  genuine pins corroborate) is a deliberate strict improvement that applies to
+  anchored AND un-anchored meshes alike: even a TOFU-only fleet stops trusting
+  the unpinned grace as soon as enough real pins arrive.
+
+  **M2 DM-session teardown (P3b).** Complementing the pin gate on the DM
+  path: when a peer's real identity pins under a different X25519 key than an
+  existing first-contact TOFU DM session cached, that stale session is torn
+  down (`dm_session_teardown`) the instant the authoritative attestation is
+  heard. On an anchored mesh the pin is anchor-endorsed, so a TOFU DM with a
+  Sybil that never earns an endorsement is dropped the moment the real
+  endorsed peer attests. This is fail-safe defense-in-depth: it only ever
+  DROPS a stale session (recovered by a fresh, pin-continuity-checked
+  handshake), never a healthy key-matching session or a mid-handshake slot.
 
   **Uniform attestation.** There is no UNATTESTED path into the trust
-  decisions that ARE identity-gated (the timesync quorum after the grace,
-  and DM key continuity): every participant in a gated trust decision has
-  at least attested and been pinned. What is deliberately left open is
-  minting scarcity (residual 1) and the bounded grace window (residual 2),
-  not an unattested bypass of a gate.
+  decisions that ARE identity-gated (the timesync quorum after the grace, DM
+  key continuity, and now DM-session teardown): every participant in a gated
+  trust decision has at least attested and been pinned, and on an anchored
+  mesh been anchor-endorsed. What is deliberately left open is the residual
+  list above (compromised insiders, anchor custody, deferred revocation, the
+  bounded grace, and un-anchored TOFU meshes), not an unattested bypass of a
+  gate.
 
   Cold start is intentionally fail-closed under this design: a freshly
   booted node has no established neighbors, so it cannot reach

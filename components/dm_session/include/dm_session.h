@@ -146,6 +146,29 @@ void dm_table_init(dm_table_t* t);
 dm_session_t* dm_lookup(dm_table_t* t, uint32_t peer_addr);
 
 /*
+ * M2 TOFU-session teardown (P3b): drop the slot for peer_addr (same match
+ * dm_lookup uses), zeroing it back to DM_STATE_NONE. Returns true if a slot
+ * was found and torn down, false if none existed. Operates on the passed
+ * table only (no globals), so it is host-testable; the mesh_task caller
+ * holds s_dm_mutex across the lookup+decision+teardown. This is fail-safe
+ * defense-in-depth: it only ever DROPS a session (recovered by re-handshake),
+ * never establishes or mutates one in place.
+ */
+bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr);
+
+/*
+ * The pure M2 decision, extracted so it is host-testable (the mesh_task hook
+ * that calls it is board-build-only): true iff s is an ESTABLISHED session
+ * (DM_STATE_ACTIVE) whose cached peer X25519 key (s->peer_id_pub, the
+ * long_term_pubkey accepted at first contact) DISAGREES with the pinned,
+ * attestation-authenticated binding pinned_x25519. A matching key is the
+ * healthy pinned session (false); a non-ACTIVE slot is never a teardown
+ * target (false) since dm_alloc's LRU already reclaims handshaking slots and
+ * a mid-handshake worker holds its own assumptions about the slot.
+ */
+bool dm_pin_disagrees(const dm_session_t* s, const uint8_t pinned_x25519[32]);
+
+/*
  * Returns a slot for peer_addr: an existing slot for that peer if one
  * already exists (no cap check; not a new handshake), else a free
  * (DM_STATE_NONE) slot, else the slot with the smallest last_active_ms that

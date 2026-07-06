@@ -35,6 +35,11 @@
 #include "../components/crypto/crypto_host.c"
 #include "../components/packet/packet.c"
 #include "../components/identity/identity_store.c"
+/* identity_store.c now calls identity_endorsement_verify (trust-anchor P2),
+ * defined in identity.c. identity.c is compiled as a SEPARATE source in
+ * CMakeLists (not #included here) because its static put_be64/get_be64 helpers
+ * would collide with packet.c's identically named statics in this TU. */
+#include "identity.h"
 
 #include <string.h>
 
@@ -191,7 +196,7 @@ static void test_delivered_attestation_pins(void) {
     uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
 
     TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000));
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
     const identity_pin_t* e = identity_store_lookup(&s_store, addr);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(ed, e->ed25519_pub, 32);
@@ -209,7 +214,7 @@ static void test_bad_ed_sig_not_pinned_and_counted(void) {
      * MAC-valid-but-sig-invalid case: a keyed member sent garbage. */
     att.x25519_pub[0] ^= 0x01;
     TEST_ASSERT_EQUAL(IDENTITY_PIN_BAD_SIG,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000));
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
     TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
     TEST_ASSERT_EQUAL_UINT32(1, s_store.sig_failures);
 }
@@ -229,7 +234,7 @@ static void test_addr_mismatch_rejected_even_on_first_contact(void) {
     /* Control: honest claim (src_addr == derive(ed_pub)) pins. */
     uint32_t honest = make_signed_attestation(&att, 0, ed, sk, 0x40);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000));
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
 
     /* First-contact forgery: a fresh store, a victim address NOBODY has
      * pinned, an internally valid (validly signed) frame; only the
@@ -241,7 +246,7 @@ static void test_addr_mismatch_rejected_even_on_first_contact(void) {
      * mismatch explicitly so the test can never pass vacuously. */
     TEST_ASSERT_TRUE(crypto_derive_address(att.ed25519_pub) != victim);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_ADDR_MISMATCH,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 2000));
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 2000, 0));
     TEST_ASSERT_NULL(identity_store_lookup(&s_store, victim));
     TEST_ASSERT_EQUAL_UINT32(1, s_store.addr_mismatches);
     TEST_ASSERT_EQUAL_UINT32(0, s_store.conflicts);
@@ -257,7 +262,7 @@ static void test_self_attestation_ignored(void) {
     make_signed_attestation(&att, SELF_ADDR, ed, sk, 0x40);
 
     TEST_ASSERT_EQUAL(IDENTITY_PIN_SELF,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000));
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
     TEST_ASSERT_NULL(identity_store_lookup(&s_store, SELF_ADDR));
 }
 
@@ -274,13 +279,13 @@ static void test_impersonation_via_delivery_detected_and_refused(void) {
     uint8_t ed_victim[32], sk_victim[64], ed_attacker[32], sk_attacker[64];
     uint32_t victim_addr = make_signed_attestation(&genuine, 0, ed_victim, sk_victim, 0x40);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
-                      identity_store_handle_attestation(&s_store, &genuine, SELF_ADDR, 1000));
+                      identity_store_handle_attestation(&s_store, &genuine, SELF_ADDR, 1000, 0));
 
     /* Attacker: victim's address, attacker's keys, attacker's valid sig. */
     make_signed_attestation(&forged, victim_addr, ed_attacker, sk_attacker, 0x77);
     TEST_ASSERT_TRUE(crypto_derive_address(forged.ed25519_pub) != victim_addr);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_ADDR_MISMATCH,
-                      identity_store_handle_attestation(&s_store, &forged, SELF_ADDR, 2000));
+                      identity_store_handle_attestation(&s_store, &forged, SELF_ADDR, 2000, 0));
 
     const identity_pin_t* e = identity_store_lookup(&s_store, victim_addr);
     TEST_ASSERT_NOT_NULL(e);
@@ -302,7 +307,7 @@ static void test_x25519_rotation_is_conflict_via_delivery(void) {
     uint8_t ed[32], sk[64];
     uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000));
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
 
     /* Same keyholder (or an address-colliding key): rotated X25519,
      * re-signed, internally valid, addr check passes. */
@@ -310,12 +315,295 @@ static void test_x25519_rotation_is_conflict_via_delivery(void) {
     fill_key(rotated.x25519_pub, 0x99);
     resign_attestation(&rotated, sk);
     TEST_ASSERT_EQUAL(IDENTITY_PIN_CONFLICT,
-                      identity_store_handle_attestation(&s_store, &rotated, SELF_ADDR, 2000));
+                      identity_store_handle_attestation(&s_store, &rotated, SELF_ADDR, 2000, 0));
     TEST_ASSERT_EQUAL_UINT32(1, s_store.conflicts);
 
     const identity_pin_t* e = identity_store_lookup(&s_store, addr);
     TEST_ASSERT_NOT_NULL(e);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(att.x25519_pub, e->x25519_pub, 32); /* original kept */
+}
+
+/* -- trust-anchor endorsement gate (P2) ------------------------------ */
+
+/* Fixed anchor keypairs (deterministic, RFC 8032 seed expansion). ANCHOR is
+ * the fleet anchor an anchored store is set to; OTHER stands in for a
+ * different fleet's anchor to prove a wrong-anchor cert is refused. */
+static const uint8_t ANCHOR_SEED[32] = {
+    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+    0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf};
+static const uint8_t OTHER_ANCHOR_SEED[32] = {
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
+    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf};
+
+/* Sign an endorsement of ed25519_pub with not_after under anchor_sk and write
+ * the resulting cert (not_after + endorsement_sig) into att. Models the
+ * offline anchor holder vouching for a node; the device never does this. */
+static void endorse_into(bramble_identity_attestation_t* att, const uint8_t anchor_sk[64],
+                         const uint8_t ed25519_pub[32], uint64_t not_after) {
+    uint8_t emsg[IDENTITY_ENDORSEMENT_MSG_SIZE];
+    TEST_ASSERT_EQUAL(IDENTITY_ENDORSEMENT_MSG_SIZE,
+                      identity_endorsement_msg(ed25519_pub, not_after, emsg, sizeof(emsg)));
+    att->not_after = not_after;
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(anchor_sk, emsg, sizeof(emsg), att->endorsement_sig));
+}
+
+/* THE opt-in guarantee: a store with NO anchor pins on the self-sig alone and
+ * IGNORES the cert fields entirely, exactly as before P2. A frame with
+ * not_after == 0 (no cert) still pins NEW. */
+static void test_no_anchor_ignores_cert_and_pins(void) {
+    identity_store_init(&s_store, 0);
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    /* No cert on the wire (the default from make_signed_attestation's memset). */
+    TEST_ASSERT_EQUAL_UINT64(IDENTITY_ENDORSEMENT_NOT_AFTER_NONE, att.not_after);
+    TEST_ASSERT_FALSE(s_store.has_anchor);
+
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL_UINT32(0, s_store.unendorsed);
+    TEST_ASSERT_EQUAL_UINT32(0, s_store.expired);
+}
+
+/* Anchored + validly endorsed (permanent cert, real anchor sig): pins NEW. */
+static void test_anchored_endorsed_pins(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_TRUE(s_store.has_anchor);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL_UINT32(0, s_store.unendorsed);
+}
+
+/* Anchored + no cert (not_after == 0): UNENDORSED, not pinned, counted once. */
+static void test_anchored_unendorsed_rejected(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40); /* no cert */
+
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL_UINT32(1, s_store.unendorsed);
+}
+
+/* Anchored + a cert that verifies against the WRONG anchor: UNENDORSED. The
+ * cert is internally well-formed (a real signature by OTHER over this node's
+ * key) but not by OUR anchor, so we refuse it. */
+static void test_anchored_wrong_anchor_rejected(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64], other_pub[32], other_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(OTHER_ANCHOR_SEED, other_pub, other_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    /* Signed by OTHER, not our anchor. */
+    endorse_into(&att, other_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL_UINT32(1, s_store.unendorsed);
+}
+
+/* Anchored + a cert our anchor really signed, but for a DIFFERENT node's key
+ * (cross-node graft): UNENDORSED. The endorsement message binds the exact
+ * ed25519_pub, so a cert minted for node V cannot be lifted onto node A's
+ * attestation. Non-vacuous: the SAME cert would verify for its true owner. */
+static void test_anchored_cross_node_graft_rejected(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    /* Victim node V gets a real cert from our anchor. */
+    bramble_identity_attestation_t victim;
+    uint8_t ed_v[32], sk_v[64];
+    make_signed_attestation(&victim, 0, ed_v, sk_v, 0x22);
+    uint8_t v_cert_sig[64];
+    {
+        uint8_t emsg[IDENTITY_ENDORSEMENT_MSG_SIZE];
+        TEST_ASSERT_EQUAL(IDENTITY_ENDORSEMENT_MSG_SIZE,
+                          identity_endorsement_msg(ed_v, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT,
+                                                   emsg, sizeof(emsg)));
+        TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(anchor_sk, emsg, sizeof(emsg), v_cert_sig));
+    }
+
+    /* Attacker A graft's V's cert onto its own (validly self-signed) frame. */
+    bramble_identity_attestation_t att;
+    uint8_t ed_a[32], sk_a[64];
+    uint32_t addr_a = make_signed_attestation(&att, 0, ed_a, sk_a, 0x40);
+    att.not_after = IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT;
+    memcpy(att.endorsement_sig, v_cert_sig, 64);
+
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr_a));
+    TEST_ASSERT_EQUAL_UINT32(1, s_store.unendorsed);
+
+    /* Non-vacuous: V's cert DOES verify for V (same anchor, same key). */
+    victim.not_after = IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT;
+    memcpy(victim.endorsement_sig, v_cert_sig, 64);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &victim, SELF_ADDR, 1100, 0));
+}
+
+/* Expiry (v1 never issues a non-permanent cert, but the format is frozen now):
+ *   - non-sentinel not_after in the past + a synced clock past it -> EXPIRED
+ *   - the SAME cert with epoch_ms == 0 (unsynced) -> NOT enforced, pins
+ *   - the permanent sentinel + any epoch -> never expires, pins */
+static void test_anchored_expiry(void) {
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    const uint64_t not_after = 1000000ull; /* ms epoch, arbitrary non-sentinel */
+
+    /* Expired: clock is past not_after. */
+    identity_store_init(&s_store, 0);
+    identity_store_set_anchor(&s_store, anchor_pub);
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, not_after);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_EXPIRED, identity_store_handle_attestation(
+                                                &s_store, &att, SELF_ADDR, 1000, not_after + 1));
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL_UINT32(1, s_store.expired);
+
+    /* Same cert, unsynced clock (epoch_ms == 0): expiry not enforced, pins. */
+    identity_store_init(&s_store, 0);
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL_UINT32(0, s_store.expired);
+
+    /* Permanent sentinel is never expired, even with a clock far in the future. */
+    identity_store_init(&s_store, 0);
+    identity_store_set_anchor(&s_store, anchor_pub);
+    bramble_identity_attestation_t perm;
+    uint8_t ed2[32], sk2[64];
+    uint32_t addr2 = make_signed_attestation(&perm, 0, ed2, sk2, 0x60);
+    endorse_into(&perm, anchor_sk, ed2, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_handle_attestation(
+                                            &s_store, &perm, SELF_ADDR, 1000, 0xFFFFFFFFull));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr2));
+    TEST_ASSERT_EQUAL_UINT32(0, s_store.expired);
+}
+
+/* Ordering: step 1 (addr<->key, self-sig) runs BEFORE the endorsement gate,
+ * so a frame that is BOTH unendorsed AND addr-mismatched returns the existing
+ * ADDR_MISMATCH code and increments addr_mismatches, not unendorsed. */
+static void test_addr_mismatch_precedes_endorsement(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    /* Claim a victim address the frame's own key does not derive to, and carry
+     * no cert: both gates would reject, but addr-mismatch must win. */
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t victim = 0xDEADBEEFu;
+    make_signed_attestation(&att, victim, ed, sk, 0x40);
+    TEST_ASSERT_TRUE(crypto_derive_address(att.ed25519_pub) != victim);
+    TEST_ASSERT_EQUAL_UINT64(IDENTITY_ENDORSEMENT_NOT_AFTER_NONE, att.not_after);
+
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_ADDR_MISMATCH,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, s_store.addr_mismatches);
+    TEST_ASSERT_EQUAL_UINT32(0, s_store.unendorsed);
+}
+
+/* -- identity_store_set_anchor: stale-pin drop on anchor change (P2 red-team) - */
+
+/* THE runtime-hardening bug (P2 red-team): a fleet deployed un-anchored lets a
+ * Sybil TOFU-pin normally; a later setAnchor to harden WITHOUT reboot must DROP
+ * that un-endorsed pin, else it survives in entries[] and still feeds lookup /
+ * quorum / DM continuity. First-ever anchoring clears the pin table. */
+static void test_set_anchor_first_time_drops_tofu_pins(void) {
+    identity_store_init(&s_store, 0);
+    TEST_ASSERT_FALSE(s_store.has_anchor);
+
+    /* An un-anchored node TOFU-pins a peer (the Sybil, pre-hardening). */
+    uint8_t ed[32], x[32];
+    fill_key(ed, 0x10);
+    fill_key(x, 0x50);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 0xA1u, ed, x, 1000));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, 0xA1u));
+
+    /* Operator hardens at runtime: the stale un-endorsed pin must be dropped. */
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_TRUE(s_store.has_anchor);
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, 0xA1u));
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store));
+}
+
+/* Idempotent re-provision of the SAME anchor must KEEP the endorsed pins (the
+ * P1 idempotency concern): re-running setAnchor with the current key is a no-op
+ * for the pin table. */
+static void test_set_anchor_same_key_keeps_pins(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    /* Pin an ENDORSED peer through the full gate. */
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+
+    /* Same key again: the endorsed pin SURVIVES. */
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL(1, identity_store_count(&s_store));
+}
+
+/* Rotation to a DIFFERENT anchor drops the pins: an endorsed pin under the OLD
+ * anchor is dead under the new key, so it must not survive the rotation. */
+static void test_set_anchor_rotation_drops_pins(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64], other_pub[32], other_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(OTHER_ANCHOR_SEED, other_pub, other_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+
+    /* Rotate to a new anchor: the old endorsed pin is dropped, key updated. */
+    identity_store_set_anchor(&s_store, other_pub);
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(other_pub, s_store.anchor_pub, 32);
 }
 
 /* ── identity_store_quorum_eligible: the Phase 4 timesync gate ──────── */
@@ -392,6 +680,259 @@ static void test_quorum_unestablished_never_eligible(void) {
     TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xA1u, false, QBOOT));
 }
 
+/* -- P3a: grace hardening + endorsed-only gate verification ----------- */
+
+/* Helper: set the store's anchor to the fixed test anchor and hand back the
+ * anchor secret key so the caller can mint endorsements. Leaves boot_ms as
+ * init set it (set_anchor never resets it). */
+static void anchor_store(identity_store_t* s, uint8_t anchor_sk_out[64]) {
+    uint8_t anchor_pub[32];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk_out));
+    identity_store_set_anchor(s, anchor_pub);
+    TEST_ASSERT_TRUE(s->has_anchor);
+}
+
+/* EARLY-EXIT (deliverable 1), and the FLAGGED no-anchor behavior change: on a
+ * NO-anchor mesh the grace still tightens to pinned-only the instant the pin
+ * count reaches QUORUM_GRACE_MIN_PINS, even inside the time window. Below the
+ * threshold the unpinned fallback stays open (liveness). This is the
+ * anchor-INDEPENDENT strict improvement to the #131 grace, called out for the
+ * reviewer and the P3b docs: the grace behavior changed for ALL meshes. */
+static void test_quorum_early_exit_pins_tighten_gate_no_anchor(void) {
+    identity_store_init(&s_store, QBOOT);
+    TEST_ASSERT_FALSE(s_store.has_anchor); /* pure TOFU mesh */
+    const uint32_t in_grace = QBOOT + 1000u;
+
+    uint8_t ed[32], x[32];
+    fill_key(x, 0x50);
+
+    /* Zero pins: the unpinned fallback is open (liveness baseline). */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* Seat 2 TOFU pins (count = 2 < 3): still below the floor, fallback open. */
+    for (uint32_t i = 1; i <= 2u; i++) {
+        fill_key(ed, (uint8_t)(0x10 + i));
+        TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, i, ed, x, QBOOT));
+    }
+    TEST_ASSERT_EQUAL(2, identity_store_count(&s_store));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* Seat the 3rd pin (count = 3 == QUORUM_GRACE_MIN_PINS): early-exit fires,
+     * an unpinned peer is no longer grace-eligible even inside the window. */
+    fill_key(ed, 0x13);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 3u, ed, x, QBOOT));
+    TEST_ASSERT_EQUAL((int)QUORUM_GRACE_MIN_PINS, identity_store_count(&s_store));
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* The pinned peers themselves stay eligible via the pinned branch. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 1u, true, in_grace));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 3u, true, in_grace));
+}
+
+/* LIVENESS, the critical non-brick proof (deliverable 3): a FRESH ANCHORED
+ * mesh (zero pins, within grace, count < threshold) must still let an
+ * established unpinned peer corroborate, or an anchored fleet could never
+ * bootstrap timesync from cold. Asserted at boot and just before the grace
+ * boundary. This is the accepted residual made safe: the bounded window admits
+ * an unpinned peer, which is exactly what lets a cold mesh converge. */
+static void test_quorum_fresh_anchored_mesh_bootstraps_liveness(void) {
+    identity_store_init(&s_store, QBOOT);
+    uint8_t anchor_sk[64];
+    anchor_store(&s_store, anchor_sk);
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store)); /* zero endorsed pins yet */
+
+    /* Established, unpinned peer -> eligible (grace open). */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true, QBOOT));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true,
+                                                    QBOOT + QUORUM_BOOTSTRAP_GRACE_MS - 1u));
+}
+
+/* EARLY-EXIT on an ANCHORED mesh (deliverable 3 sub-case c): install
+ * QUORUM_GRACE_MIN_PINS ENDORSED pins, then an established but unpinned peer
+ * INSIDE the time window is NOT eligible -- the count early-exit has tightened
+ * the gate to pinned-only. Complements the no-anchor early-exit test above:
+ * the tightening is anchor-independent, proven here through the endorsement
+ * gate (real endorsed pins), not raw TOFU pins. */
+static void test_quorum_early_exit_anchored_endorsed_pins(void) {
+    identity_store_init(&s_store, QBOOT);
+    uint8_t anchor_sk[64];
+    anchor_store(&s_store, anchor_sk);
+    const uint32_t in_grace = QBOOT + 1000u;
+
+    /* Below the floor (zero pins): the unpinned fallback is open. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* Install exactly QUORUM_GRACE_MIN_PINS endorsed pins through the full gate. */
+    for (uint32_t i = 0; i < QUORUM_GRACE_MIN_PINS; i++) {
+        bramble_identity_attestation_t att;
+        uint8_t ed[32], sk[64];
+        make_signed_attestation(&att, 0, ed, sk, (uint8_t)(0x40 + i));
+        endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+        TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_handle_attestation(
+                                                &s_store, &att, SELF_ADDR, in_grace, 0));
+    }
+    TEST_ASSERT_EQUAL((int)QUORUM_GRACE_MIN_PINS, identity_store_count(&s_store));
+
+    /* Early-exit fired: an unpinned peer inside the window is now excluded. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+}
+
+/* AFTER-GRACE (deliverable 3 sub-case a): once the time window closes, an
+ * established but unpinned peer whose attestation was UNENDORSED is excluded
+ * (it is unpinned and the grace is over). Non-vacuous: an ENDORSED peer pinned
+ * in the same store IS eligible after the grace via the pinned branch. */
+static void test_quorum_anchored_unendorsed_excluded_after_grace(void) {
+    identity_store_init(&s_store, QBOOT);
+    uint8_t anchor_sk[64];
+    anchor_store(&s_store, anchor_sk);
+    const uint32_t after_grace = QBOOT + QUORUM_BOOTSTRAP_GRACE_MS + 60000u;
+
+    /* Endorsed peer: pins, and stays eligible after the grace (pinned branch). */
+    bramble_identity_attestation_t good;
+    uint8_t edg[32], skg[64];
+    uint32_t good_addr = make_signed_attestation(&good, 0, edg, skg, 0x22);
+    endorse_into(&good, anchor_sk, edg, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &good, SELF_ADDR, QBOOT, 0));
+
+    /* Unendorsed peer: refused, never pins. */
+    bramble_identity_attestation_t bad;
+    uint8_t edb[32], skb[64];
+    uint32_t bad_addr = make_signed_attestation(&bad, 0, edb, skb, 0x40);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
+                      identity_store_handle_attestation(&s_store, &bad, SELF_ADDR, QBOOT, 0));
+
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, good_addr, true, after_grace));
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, bad_addr, true, after_grace));
+}
+
+/* ENDORSED-ONLY GATE (deliverable 3): an endorsed peer that pins is
+ * quorum-eligible both INSIDE and AFTER the grace (the pinned branch), tying
+ * the endorsement gate directly to trust-gate membership. */
+static void test_quorum_endorsed_peer_eligible_before_and_after_grace(void) {
+    identity_store_init(&s_store, QBOOT);
+    uint8_t anchor_sk[64];
+    anchor_store(&s_store, anchor_sk);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, QBOOT, 0));
+
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, addr, true, QBOOT));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, addr, true,
+                                                    QBOOT + QUORUM_BOOTSTRAP_GRACE_MS + 60000u));
+}
+
+/* DM KEY-CONTINUITY is endorsed-only via the pin store (deliverable 3): on an
+ * anchored node an unendorsed peer has NO pin, so the DM snapshot path
+ * (handle_ke_envelope reads identity_store_lookup) sees have_pin == false and
+ * treats the peer as TOFU first-contact, NOT pin-continuity-protected. The
+ * substantive proof is the pin store returning NULL, which the DM gate
+ * consumes; no DM harness is built for this. */
+static void test_anchored_unendorsed_has_no_pin_for_dm_continuity(void) {
+    identity_store_init(&s_store, QBOOT);
+    uint8_t anchor_sk[64];
+    anchor_store(&s_store, anchor_sk);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40); /* no cert */
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, QBOOT, 0));
+
+    /* The DM gate's continuity input: no pin -> have_pin=false -> TOFU. */
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
+}
+
+/* -- P4b: runtime re-hardening force-closes the bootstrap grace -------- */
+
+/* THE grace-reopen bug (P4b): a runtime anchor CHANGE that DROPS existing pins
+ * resets the pin count to 0, which by itself would re-open the bootstrap
+ * grace's unpinned fallback (count < MIN_PINS flips true) whenever it runs
+ * inside the per-boot window. A node that already held pins and then gets
+ * re-hardened must NOT re-extend unpinned trust: it corroborates timesync from
+ * ENDORSED pins only. Proven here by rotating the anchor INSIDE the grace after
+ * a pin existed, then asserting an unpinned peer is excluded while a re-pinned
+ * endorsed peer stays eligible. Contrast the liveness test above: the boot-time
+ * FIRST anchoring (count 0, no drop) leaves the grace open. */
+static void test_quorum_grace_forced_closed_after_rehardening_drops_pins(void) {
+    identity_store_init(&s_store, QBOOT);
+    const uint32_t in_grace = QBOOT + 1000u;
+    TEST_ASSERT_TRUE((uint32_t)(in_grace - QBOOT) < QUORUM_BOOTSTRAP_GRACE_MS);
+
+    uint8_t anchor_pub[32], anchor_sk[64], other_pub[32], other_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(OTHER_ANCHOR_SEED, other_pub, other_sk));
+
+    /* First anchoring under anchor A: count 0 -> grace preserved. An unpinned
+     * peer is eligible here (grace open, below the pin floor). */
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_FALSE(s_store.grace_forced_closed);
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* Pin one endorsed peer so the store has actually held a pin. */
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, in_grace, 0));
+    TEST_ASSERT_EQUAL(1, identity_store_count(&s_store));
+
+    /* Runtime re-hardening: rotate to anchor B INSIDE the grace. Drops the pin
+     * (had_pins true) and must force the grace closed. */
+    identity_store_set_anchor(&s_store, other_pub);
+    TEST_ASSERT_TRUE(s_store.grace_forced_closed);
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store));
+
+    /* An established UNPINNED peer is now excluded even though we are still in
+     * the time window and the count reset to 0 (which would otherwise re-open
+     * the fallback). */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* A PINNED peer stays eligible via the pinned branch: re-pin an endorsed
+     * peer under the new anchor B and confirm it corroborates. */
+    bramble_identity_attestation_t att2;
+    uint8_t ed2[32], sk2[64];
+    uint32_t addr2 = make_signed_attestation(&att2, 0, ed2, sk2, 0x60);
+    endorse_into(&att2, other_sk, ed2, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att2, SELF_ADDR, in_grace, 0));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, addr2, true, in_grace));
+}
+
+/* Idempotent same-key set_anchor with pins present is NOT a change: it drops no
+ * pins and must NOT force the grace closed. An unpinned peer inside the window
+ * stays eligible per the normal count<MIN_PINS rule (the grace-reopen guard
+ * fires only on a change that actually cleared pins, not on a no-op re-set). */
+static void test_quorum_grace_not_closed_on_idempotent_set_anchor(void) {
+    identity_store_init(&s_store, QBOOT);
+    const uint32_t in_grace = QBOOT + 1000u;
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    /* Seat one endorsed pin (count 1 < MIN_PINS: unpinned fallback still open). */
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, in_grace, 0));
+    TEST_ASSERT_EQUAL(1, identity_store_count(&s_store));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+
+    /* Re-provision the SAME anchor: not a change, drops nothing, grace stays
+     * open, pin survives. */
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_FALSE(s_store.grace_forced_closed);
+    TEST_ASSERT_EQUAL(1, identity_store_count(&s_store));
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_first_pin_stores_and_lookup_returns_it);
@@ -404,9 +945,27 @@ int main(void) {
     RUN_TEST(test_self_attestation_ignored);
     RUN_TEST(test_impersonation_via_delivery_detected_and_refused);
     RUN_TEST(test_x25519_rotation_is_conflict_via_delivery);
+    RUN_TEST(test_no_anchor_ignores_cert_and_pins);
+    RUN_TEST(test_anchored_endorsed_pins);
+    RUN_TEST(test_anchored_unendorsed_rejected);
+    RUN_TEST(test_anchored_wrong_anchor_rejected);
+    RUN_TEST(test_anchored_cross_node_graft_rejected);
+    RUN_TEST(test_anchored_expiry);
+    RUN_TEST(test_addr_mismatch_precedes_endorsement);
+    RUN_TEST(test_set_anchor_first_time_drops_tofu_pins);
+    RUN_TEST(test_set_anchor_same_key_keeps_pins);
+    RUN_TEST(test_set_anchor_rotation_drops_pins);
     RUN_TEST(test_quorum_within_grace_unpinned_is_eligible);
     RUN_TEST(test_quorum_after_grace_unpinned_excluded_even_with_zero_pins);
     RUN_TEST(test_quorum_pinned_peer_eligible_within_and_after_grace);
     RUN_TEST(test_quorum_unestablished_never_eligible);
+    RUN_TEST(test_quorum_early_exit_pins_tighten_gate_no_anchor);
+    RUN_TEST(test_quorum_fresh_anchored_mesh_bootstraps_liveness);
+    RUN_TEST(test_quorum_early_exit_anchored_endorsed_pins);
+    RUN_TEST(test_quorum_anchored_unendorsed_excluded_after_grace);
+    RUN_TEST(test_quorum_endorsed_peer_eligible_before_and_after_grace);
+    RUN_TEST(test_anchored_unendorsed_has_no_pin_for_dm_continuity);
+    RUN_TEST(test_quorum_grace_forced_closed_after_rehardening_drops_pins);
+    RUN_TEST(test_quorum_grace_not_closed_on_idempotent_set_anchor);
     return UNITY_END();
 }

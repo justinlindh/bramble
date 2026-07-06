@@ -206,7 +206,8 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
-                                 uint32_t* addr_mismatches) {
+                                 uint32_t* addr_mismatches, uint32_t* unendorsed,
+                                 uint32_t* expired) {
     if (pins)
         *pins = 0;
     if (conflicts)
@@ -215,7 +216,12 @@ void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* 
         *sig_failures = 0;
     if (addr_mismatches)
         *addr_mismatches = 0;
+    if (unendorsed)
+        *unendorsed = 0;
+    if (expired)
+        *expired = 0;
 }
+void mesh_set_pin_anchor(const uint8_t* anchor_pub) { (void)anchor_pub; }
 bool g_stub_mailbox_enabled = false;
 void mesh_set_mailbox(bool e) { g_stub_mailbox_enabled = e; }
 bool mesh_get_mailbox(void) { return g_stub_mailbox_enabled; }
@@ -231,6 +237,7 @@ uint8_t mesh_get_flood_hop_limit(void) { return g_stub_flood_hop_limit; }
 void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
 void mesh_rederive_beacon_key(void) {}
+void mesh_trigger_attestation(void) {}
 bool mesh_get_beacon_status(void) { return true; }
 int mesh_set_beacon_policy(beacon_policy_mode_t m) {
     (void)m;

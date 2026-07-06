@@ -185,6 +185,7 @@ target_link_libraries(test_ident_relay_auth ssl crypto)
 add_executable(test_ident_relay_gate
     test_ident_relay_gate.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
@@ -199,6 +200,7 @@ target_include_directories(test_ident_relay_gate PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_link_libraries(test_ident_relay_gate ssl crypto)
 
@@ -354,8 +356,27 @@ add_executable(test_identity
 target_include_directories(test_identity PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_link_libraries(test_identity ssl crypto)
+
+# Trust-anchor endorsement primitive + anchor-pubkey provisioning (P0):
+# canonical 58-byte message KAT, tamper rejection, and anchor set/get/
+# fingerprint/persistence. Includes crypto_host.c + identity.c directly (same
+# pattern as test_identity.c).
+add_executable(test_identity_endorsement
+    test_identity_endorsement.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
+target_include_directories(test_identity_endorsement PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+)
+target_link_libraries(test_identity_endorsement ssl crypto)
 
 # Channel key tests
 add_executable(test_channel_key
@@ -740,12 +761,14 @@ target_link_libraries(test_identity_attestation ssl crypto)
 add_executable(test_identity_store
     test_identity_store.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
 )
 target_include_directories(test_identity_store PRIVATE
     stubs
     ${OPENSSL_ROOT}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_link_libraries(test_identity_store ssl crypto)
 
@@ -866,6 +889,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
@@ -881,6 +905,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
@@ -896,6 +921,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
@@ -911,6 +937,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
 )
@@ -952,7 +979,7 @@ target_include_directories(test_rpc_add_channel_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_add_channel_contract PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 )
 target_compile_options(test_rpc_add_channel_contract PRIVATE
     -Wno-error=unused-parameter
@@ -986,12 +1013,65 @@ target_include_directories(test_rpc_set_auth_token_contract PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_set_auth_token_contract PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 )
 target_compile_options(test_rpc_set_auth_token_contract PRIVATE
     -Wno-error=unused-parameter
 )
 target_link_libraries(test_rpc_set_auth_token_contract m ssl crypto)
+
+# Trust-anchor RPC surface (P0): setAnchor / getAnchorStatus / getIdentity
+# ed25519_pub, driven through the real rpc_methods.c + the real identity.c
+# anchor store (same firmware-link harness as the other RPC contract tests).
+add_executable(test_rpc_anchor_contract
+    test_rpc_anchor_contract.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    stubs/rpc_methods_link_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
+)
+target_include_directories(test_rpc_anchor_contract PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+)
+target_compile_definitions(test_rpc_anchor_contract PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+)
+target_compile_options(test_rpc_anchor_contract PRIVATE
+    -Wno-error=unused-parameter
+)
+target_link_libraries(test_rpc_anchor_contract m ssl crypto)
 
 target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -1020,7 +1100,7 @@ target_include_directories(test_rpc_get_config_channel_export PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_get_config_channel_export PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 )
 target_compile_options(test_rpc_get_config_channel_export PRIVATE
     -Wno-error=unused-parameter
@@ -1054,7 +1134,7 @@ target_include_directories(test_mesh_broadcast_delivery PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_mesh_broadcast_delivery PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 )
 target_compile_options(test_mesh_broadcast_delivery PRIVATE
     -Wno-error=unused-parameter
@@ -1199,6 +1279,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
@@ -1230,7 +1311,7 @@ target_include_directories(test_rpc_methods_firmware PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_rpc_methods_firmware PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 )
 target_compile_options(test_rpc_methods_firmware PRIVATE
     -Wno-error=unused-parameter
@@ -1373,6 +1454,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
@@ -1404,7 +1486,7 @@ target_include_directories(test_host_rpc_methods PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
 )
 target_compile_definitions(test_host_rpc_methods PRIVATE
-    CONFIG_BRAMBLE_RPC_MAX_METHODS=40
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 )
 target_compile_options(test_host_rpc_methods PRIVATE
     -Wno-error=unused-parameter

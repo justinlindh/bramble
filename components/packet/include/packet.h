@@ -80,11 +80,14 @@
 #define DELIVERY_RECEIPT_MAX_HOPS 8
 
 /* Identity attestation wire size: header(12) + src_addr(4) + x25519_pub(32)
- * + ed25519_pub(32) + sig(64) + auth_hmac(8) + seq(6). Fixed-size frame;
- * the deserializer rejects anything that is not EXACTLY this long.
- * Phase 3 grew the frame by the relay-gate MAC + seq (144 -> 158); the
- * canonical SIGNED message below is unchanged. */
-#define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 6) /* 158 */
+ * + ed25519_pub(32) + sig(64) + not_after(8) + endorsement_sig(64)
+ * + auth_hmac(8) + seq(6). Fixed-size frame; the deserializer rejects
+ * anything that is not EXACTLY this long. Phase 3 grew the frame by the
+ * relay-gate MAC + seq (144 -> 158); the trust-anchor campaign (P1) grew it
+ * again by the inline endorsement cert (not_after + endorsement_sig,
+ * 158 -> 230) as a deliberate pre-alpha wire flag day (old 158-byte frames
+ * are rejected). The canonical SIGNED message below is unchanged. */
+#define IDENTITY_ATTESTATION_SIZE (HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 64 + 8 + 6) /* 230 */
 
 /* Canonical signed message for the attestation (see
  * bramble_identity_attestation_signed_msg): context(16) + src_addr(4)
@@ -283,6 +286,17 @@ typedef struct {
     uint8_t x25519_pub[32];
     uint8_t ed25519_pub[32];
     uint8_t sig[64];
+    /* Endorsement certificate (trust-anchor campaign, P1): the anchor's
+     * signature vouching for ed25519_pub, carried inline so a receiver can
+     * later (P2) verify fleet membership from the frame alone. not_after is
+     * big-endian ms epoch; UINT64_MAX = permanent, 0 = "no cert present"
+     * (endorsement_sig then all-zero). The node NEVER signs this; it is the
+     * anchor's signature, provisioned via setEndorsement. Not part of the
+     * self-signed canonical message (bramble_identity_attestation_signed_msg
+     * is unchanged); it IS covered by the relay-gate MAC (ident_relay_sign)
+     * so an outsider cannot flip cert bits in flight. */
+    uint64_t not_after;
+    uint8_t endorsement_sig[64];
     uint8_t auth_hmac[8]; /* network-key relay gate (Phase 3) */
     uint8_t seq[6];       /* 48-bit origin seq, big-endian (Phase 3) */
 } bramble_identity_attestation_t;

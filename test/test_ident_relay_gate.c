@@ -44,6 +44,10 @@
 #include "../components/packet/packet.c"
 #include "../components/routing_auth/routing_auth.c"
 #include "../components/identity/identity_store.c"
+/* identity.c (identity_endorsement_verify, called by identity_store.c since
+ * trust-anchor P2) is a SEPARATE source in CMakeLists, not #included here: its
+ * static put_be64/get_be64 would collide with packet.c's in this TU. */
+#include "identity.h"
 
 #include <string.h>
 
@@ -105,8 +109,9 @@ static dispatch_result_t dispatch_attestation(node_state_t* n, const uint8_t* bu
     uint32_t flood_key = att.header.packet_id ^ att.src_addr;
     bool is_dup = dedup_check_and_add(&n->flood_dedup, flood_key, now_ms);
 
-    /* Deliver regardless of the relay decision. */
-    r.pin = identity_store_handle_attestation(&n->pins, &att, self_addr, now_ms);
+    /* Deliver regardless of the relay decision. These nodes set no anchor, so
+     * the endorsement gate is skipped and epoch_ms is irrelevant (pass 0). */
+    r.pin = identity_store_handle_attestation(&n->pins, &att, self_addr, now_ms, 0);
 
     bool is_own_echo = (att.src_addr == self_addr);
     channel_flood_decision_t flood = channel_flood_decide(

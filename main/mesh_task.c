@@ -24,6 +24,7 @@
 #include "dm_session.h"
 #include "network_key.h"
 #include "routing_auth.h"
+#include "identity.h"
 #include "identity_store.h"
 #include "public_channel.h"
 #include "msg_store.h"
@@ -1235,10 +1236,14 @@ static int send_beacon(void) {
 
 /* ── Identity attestation TX (per-node identity Phase 2) ────────────── */
 
-/* Low-cadence self-signed identity broadcast: 158 bytes (the relay-gated
- * frame, IDENTITY_ATTESTATION_SIZE) every 15 minutes is the design's
- * approved airtime budget (~0.02-0.05% duty per node at the shipping
- * profiles); do not raise the cadence without re-flagging that budget. */
+/* Low-cadence self-signed identity broadcast: 230 bytes (the relay-gated
+ * frame carrying the endorsement cert, IDENTITY_ATTESTATION_SIZE) every 15
+ * minutes is the design's approved airtime budget. At the shipping profiles
+ * one frame is 2123.8 us (LONG_RANGE SF10/125k) or 181.9 us (MEDIUM_RANGE
+ * SF7/250k), so the per-node duty at this cadence is ~0.236% and ~0.0202%
+ * respectively (computed via components/radio/radio_airtime.c; the trust-anchor
+ * cert grew the frame 158 -> 230, a ~40% airtime bump that stays negligible).
+ * Do not raise the cadence without re-flagging that budget. */
 #define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
 /* Short retry after a failed/denied send, so a boot-time budget denial
  * does not leave the node unattested for a full interval. */
@@ -1295,6 +1300,14 @@ static int send_identity_attestation(void) {
     att.src_addr = s_identity->address;
     memcpy(att.x25519_pub, s_identity->public_key, sizeof(att.x25519_pub));
     memcpy(att.ed25519_pub, s_identity->ed25519_public_key, sizeof(att.ed25519_pub));
+
+    /* Endorsement cert (trust-anchor campaign, P1): carry our own cert when we
+     * have one, else leave the zero-initialized fields (not_after == 0 ==
+     * "no cert"). Set before ident_relay_sign below, which MACs the cert. The
+     * cert is NOT part of the Ed25519 self-signature (that stays the 84-byte
+     * canonical message); it is the anchor's signature, verified by receivers
+     * in a later phase. */
+    identity_endorsement_get(&att.not_after, att.endorsement_sig);
 
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
     if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK) {
@@ -3380,9 +3393,24 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
     uint32_t flood_key = att.header.packet_id ^ att.src_addr;
     bool is_dup = dedup_check_and_add(&s_flood_dedup, flood_key, now_ms());
 
+    /* Trust-anchor campaign (P2): the wall-clock epoch for the endorsement
+     * expiry check. Use network time ONLY when timesync is confident (the same
+     * fail-closed gate handle_data uses for deferred replay); otherwise pass 0
+     * so the store does not enforce expiry against an untrusted clock. v1 certs
+     * are permanent (UINT64_MAX) so this never fires live, but the pin gate is
+     * ready for expiring certs the frozen wire format allows. */
+    int64_t net_time_ms = timesync_get_network_time(&s_timesync, now_ms());
+    /* Only pass a positive, confident epoch; otherwise 0 (the "unsynced"
+     * sentinel the store treats as "do not enforce expiry"). The > 0 guard
+     * stops a non-positive int64 from casting to a huge uint64 that would
+     * spuriously expire a future non-permanent cert. */
+    uint64_t epoch_ms = (timesync_is_confident(&s_timesync, now_ms()) && net_time_ms > 0)
+                            ? (uint64_t)net_time_ms
+                            : 0;
+
     /* Deliver locally regardless of the relay decision below. */
-    identity_pin_result_t pin =
-        identity_store_handle_attestation(&s_identity_pins, &att, s_identity->address, now_ms());
+    identity_pin_result_t pin = identity_store_handle_attestation(
+        &s_identity_pins, &att, s_identity->address, now_ms(), epoch_ms);
     switch (pin) {
     case IDENTITY_PIN_NEW:
         ESP_LOGI(TAG, "Identity pinned: %08" PRIX32 " (%d pinned)", att.src_addr,
@@ -3412,10 +3440,61 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                  " REFUSED (addr_mismatches=%" PRIu32 ")",
                  att.src_addr, s_identity_pins.addr_mismatches);
         break;
+    case IDENTITY_PIN_UNENDORSED:
+        /* Trust-anchor gate (P2): this node is anchored and the attestation
+         * carried no cert (or one not signed by our anchor for this key).
+         * NOT pinned; the frame was still relayed (endorsement gates pinning
+         * only, never liveness). */
+        ESP_LOGW(TAG,
+                 "Identity attestation UNENDORSED src=%08" PRIX32 " (no valid anchor cert,"
+                 " unendorsed=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.unendorsed);
+        break;
+    case IDENTITY_PIN_EXPIRED:
+        /* Anchored + a valid but EXPIRED cert (not_after past the synced
+         * clock). v1 certs are permanent so this is not expected live. */
+        ESP_LOGW(TAG, "Identity attestation EXPIRED cert src=%08" PRIX32 " (expired=%" PRIu32 ")",
+                 att.src_addr, s_identity_pins.expired);
+        break;
     case IDENTITY_PIN_REFRESHED:
     case IDENTITY_PIN_SELF:
     default:
         break;
+    }
+
+    /* M2 TOFU-session teardown (identity-campaign follow-up): whenever this
+     * attestation left a TRUSTED pinned binding for att.src_addr (NEW,
+     * REFRESHED, or CONFLICT - the first-seen binding survives a CONFLICT and
+     * is authoritative), drop any ESTABLISHED DM session whose cached peer
+     * X25519 key disagrees with that pin. Such a session was a first-contact
+     * TOFU handshake pointed at an impostor: the attestation is self-signed,
+     * address-bound, and on an anchored node ALSO anchor-endorsed, so the pin
+     * is authoritative and the stale session is dropped (recovered by a fresh,
+     * now pin-continuity-checked handshake). This closes "a TOFU DM with a
+     * Sybil that never endorses gets torn down the instant the real endorsed
+     * peer pins." Fail-safe: it only ever DROPS; it never touches a
+     * key-MATCHING (healthy) session or a non-ACTIVE handshaking slot. The
+     * lookup+compare+teardown run as ONE critical section under s_dm_mutex
+     * because process_ke_init/resp on the handshake worker mutate the same
+     * slot; logging is deferred until after the lock is released, matching the
+     * s_dm_mutex convention elsewhere in this file. */
+    if (pin == IDENTITY_PIN_NEW || pin == IDENTITY_PIN_REFRESHED || pin == IDENTITY_PIN_CONFLICT) {
+        const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, att.src_addr);
+        if (pinned) {
+            bool torn_down = false;
+            xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+            dm_session_t* sess = dm_lookup(&s_dm_table, att.src_addr);
+            if (sess && dm_pin_disagrees(sess, pinned->x25519_pub)) {
+                dm_session_teardown(&s_dm_table, att.src_addr);
+                torn_down = true;
+            }
+            xSemaphoreGive(s_dm_mutex);
+            if (torn_down)
+                ESP_LOGW(TAG,
+                         "DM session torn down: pinned identity for %08" PRIX32
+                         " disagrees with the TOFU session key",
+                         att.src_addr);
+        }
     }
 
     /* Relay through the SAME engine as the broadcast DATA flood
@@ -5523,6 +5602,15 @@ void mesh_rederive_beacon_key(void) {
     }
 }
 
+void mesh_trigger_attestation(void) {
+    /* Re-announce with the current identity + cert. Budget-gated like every
+     * attestation (attempt_identity_attestation applies the same TX gate as
+     * the periodic path), so a burst of setEndorsement calls cannot flood the
+     * air. Inert until provisioned (send_identity_attestation gates on the
+     * network key). */
+    attempt_identity_attestation(now_ms());
+}
+
 /* ── Public API ──────────────────────────────────────────────────────── */
 
 void mesh_task_start(bramble_identity_t* identity) {
@@ -5600,6 +5688,17 @@ void mesh_task_start(bramble_identity_t* identity) {
     replay_table_init(&s_replay);
     replay_table_init(&s_control_replay);
     identity_store_init(&s_identity_pins, now_ms());
+    /* Trust-anchor campaign (P2): if the fleet anchor was provisioned (loaded
+     * from NVS in main.c before this task starts), mark the pin store ANCHORED
+     * so it pins ONLY anchor-endorsed identities. Absent = not anchored = the
+     * default TOFU behavior, untouched. setAnchor at runtime refreshes this via
+     * mesh_set_pin_anchor without a reboot. */
+    if (identity_anchor_is_set()) {
+        uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+        if (identity_anchor_get(anchor_pub) == 0) {
+            identity_store_set_anchor(&s_identity_pins, anchor_pub);
+        }
+    }
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     rreq_fwd_init(&s_rreq_fwd_rl, now_ms());
@@ -6249,7 +6348,8 @@ int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]) {
 }
 
 void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
-                                 uint32_t* addr_mismatches) {
+                                 uint32_t* addr_mismatches, uint32_t* unendorsed,
+                                 uint32_t* expired) {
     /* Diagnostics-only reads of word-sized counters mutated exclusively on
      * the mesh task (handle_identity_attestation); a momentarily stale
      * value is fine for getStatus, so no mutex, matching the other
@@ -6262,6 +6362,23 @@ void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* 
         *sig_failures = s_identity_pins.sig_failures;
     if (addr_mismatches)
         *addr_mismatches = s_identity_pins.addr_mismatches;
+    if (unendorsed)
+        *unendorsed = s_identity_pins.unendorsed;
+    if (expired)
+        *expired = s_identity_pins.expired;
+}
+
+/* Trust-anchor campaign (P2): refresh the live pin store's anchor after a
+ * runtime setAnchor, so provisioning an anchor takes effect on the pin gate
+ * without a reboot. Called from the RPC path (rpc_set_anchor). The pin store
+ * is otherwise mutated only on the mesh task; a setAnchor write here races an
+ * in-flight attestation read benignly (has_anchor only ever goes false->true,
+ * and the 32-byte key copy resolves within one attestation cadence), matching
+ * the lock-free convention mesh_trigger_attestation already uses cross-thread.
+ * The boot path (mesh_task_start) also loads the anchor, so a reboot is never
+ * required for correctness; this just avoids waiting for one. */
+void mesh_set_pin_anchor(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE]) {
+    identity_store_set_anchor(&s_identity_pins, anchor_pub);
 }
 
 const char* mesh_get_peer_name(uint32_t addr) {

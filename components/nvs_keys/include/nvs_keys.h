@@ -46,5 +46,18 @@
 /* ── NVS_NS_NONCE keys ───────────────────────────────────────────────────── */
 #define NVS_KEY_NONCE_CEILING "ceiling"
 
+/* -- NVS_NS_IDENTITY keys -------------------------------------------------- */
+/* Fleet trust-anchor PUBLIC key (trust-anchor campaign, P0). Persisted per
+ * node; the device never holds the anchor private key. Name must be <= 15
+ * chars. */
+#define ID_KEY_ANCHOR_PUB "anchor_pub"
+
+/* Own endorsement certificate (trust-anchor campaign, P1): the anchor's
+ * signature vouching for THIS node's identity key, provisioned via
+ * setEndorsement. not_after is an 8-byte big-endian blob; the signature is a
+ * 64-byte blob. Names must be <= 15 chars. */
+#define ID_KEY_ENDORSE_NA "endorse_na"
+#define ID_KEY_ENDORSE_SIG "endorse_sig"
+
 /* ── NVS_NS_NETKEY keys ──────────────────────────────────────────────────── */
 #define NVS_KEY_NETKEY "key"

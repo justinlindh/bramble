@@ -50,3 +50,6 @@ webapp/node_modules
 keys/*
 !keys/README.md
 !keys/ota-release-pub.pem
+
+# session scratch (never commit)
+.superpowers/

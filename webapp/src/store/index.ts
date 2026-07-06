@@ -18,6 +18,7 @@ import type {
   TrafficEvent,
   ConnectionCapabilities,
   NetworkKeyStatus,
+  AnchorStatus,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 
@@ -127,6 +128,7 @@ interface Actions {
   addTrafficEvents: (events: TrafficEvent[]) => void;
   clearTrafficEvents: () => void;
   setNetworkKeyStatus: (s: NetworkKeyStatus | null) => void;
+  setAnchorStatus: (s: AnchorStatus | null) => void;
 }
 
 export const useStore = create<AppState & Actions>((set) => ({
@@ -159,6 +161,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   trafficDebugStatus: null,
   trafficEvents: [],
   networkKeyStatus: null,
+  anchorStatus: null,
 
   // ─── Actions ─────────────────────────────────────────────────────────
   setConnectionState: (s, err?) =>
@@ -350,6 +353,7 @@ export const useStore = create<AppState & Actions>((set) => ({
     peerLocations: [],
     mapFocusAddr: null,
     networkKeyStatus: null,
+    anchorStatus: null,
   }),
 
   setProbeResult: (r) => set({ probeResult: r }),
@@ -429,4 +433,5 @@ export const useStore = create<AppState & Actions>((set) => ({
   clearTrafficEvents: () => set({ trafficEvents: [] }),
 
   setNetworkKeyStatus: (s) => set({ networkKeyStatus: s }),
+  setAnchorStatus: (s) => set({ anchorStatus: s }),
 }));
