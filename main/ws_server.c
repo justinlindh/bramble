@@ -724,6 +724,13 @@ int ws_server_start(void) {
     config.max_open_sockets = MAX_WS_CLIENTS + 2; /* +2 for HTTP clients */
     config.lru_purge_enable = true;               /* close stale connections when slots full */
     config.close_fn = ws_close_fn;                /* clean up tracked client FDs on close */
+    /* rpc_dispatch runs on this httpd task. Trust-anchor RPCs
+     * (setEndorsement, and getAnchorStatus once anchored) run an Ed25519
+     * verify, which overflowed the default 4096-byte httpd stack and rebooted
+     * the node (WS closed 1006, no response) - the same class of failure as
+     * the DM handshake worker. Serial RPC has a larger console-task stack and
+     * was unaffected. 8192 gives the verify headroom. */
+    config.stack_size = 8192;
 
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) {
