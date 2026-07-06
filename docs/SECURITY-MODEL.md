@@ -1426,3 +1426,5 @@ Plain words, current state:
 The honest one-line summary of today's build: Bramble encrypts channel
 message content well, and most of its other privacy properties do not hold
 in the current code. This document must keep matching the code.
+
+<!-- ci-retrigger attestation -->
