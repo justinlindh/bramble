@@ -136,6 +136,16 @@ typedef struct {
     uint8_t anchor_pub[32];
     uint32_t unendorsed;
     uint32_t expired;
+    /* Trust-anchor campaign (P3a/P4b): set true when a runtime anchor CHANGE
+     * dropped existing pins (a re-hardening of a node that had already
+     * accumulated pins). While set, the bootstrap-quorum grace's unpinned
+     * fallback is force-closed: a re-hardened node must corroborate timesync
+     * from ENDORSED pins only, never from the unpinned window it would
+     * otherwise re-open by having its pin count reset to 0 inside the boot
+     * grace. It stays false through the boot-time FIRST anchoring (count 0, no
+     * pins dropped), so a fresh anchored mesh keeps the bootstrap grace it
+     * needs for liveness. Reset to false by the memset in identity_store_init. */
+    bool grace_forced_closed;
 } identity_store_t;
 
 typedef enum {

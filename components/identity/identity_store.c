@@ -24,6 +24,10 @@ void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]
      * rotation to a different key. An idempotent same-key re-provision is NOT a
      * change (P1 idempotency concern), so it must keep the endorsed pins. */
     bool changed = !s->has_anchor || memcmp(s->anchor_pub, anchor_pub, 32) != 0;
+    /* Snapshot whether pins existed BEFORE we clear anything: this decides
+     * whether the anchor change is a re-hardening (had pins, now dropping them)
+     * or the boot-time first anchoring (no pins yet). */
+    bool had_pins = identity_store_count(s) > 0;
 
     /* memcpy the key BEFORE raising has_anchor: a concurrent reader (the mesh
      * task in handle_attestation) must never see has_anchor=true over a
@@ -36,15 +40,26 @@ void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]
      * a rotation) are not endorsed under the new key, so keeping them would be
      * exactly "an un-endorsed identity pinned on an anchored node". Clearing
      * entries here is what makes runtime setAnchor actually harden the store,
-     * not just future attestations. boot_ms and the counters are NOT reset: the
-     * bootstrap grace stays expired (an anchored, freshly-cleared store must
-     * corroborate timesync only from re-pinned ENDORSED peers, never re-open the
-     * unpinned-trust window; the fleet re-attests on the boot+15min cadence),
-     * and the diagnostic counters are cumulative. Idempotent same-key re-set
-     * leaves the endorsed pins in place. */
+     * not just future attestations. boot_ms and the counters are NOT reset (the
+     * diagnostic counters are cumulative); idempotent same-key re-set leaves the
+     * endorsed pins in place.
+     *
+     * Bootstrap-grace interaction (P4b): clearing the pins resets the pin count
+     * to 0, which would by itself RE-OPEN the timesync bootstrap grace's
+     * unpinned fallback (the count < QUORUM_GRACE_MIN_PINS clause flips true
+     * again) whenever this runs inside the per-boot grace window. To stop a
+     * runtime re-hardening from re-extending unpinned trust, force the grace
+     * closed -- but ONLY when the change actually DROPPED EXISTING pins
+     * (had_pins). The boot-time FIRST anchoring has count 0, so had_pins is
+     * false and the grace is preserved: a fresh anchored mesh legitimately needs
+     * the unpinned window to bootstrap timesync before endorsed pins propagate
+     * (liveness). Once real pins existed and a runtime anchor change wipes them,
+     * the node has been hardened and must corroborate from ENDORSED pins only. */
     if (changed) {
         for (int i = 0; i < IDENTITY_STORE_CAPACITY; i++)
             s->entries[i].used = false;
+        if (had_pins)
+            s->grace_forced_closed = true;
     }
 }
 
@@ -213,6 +228,12 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
      * The subtraction is uint32 wraparound-safe, the same now_ms idiom used for
      * LRU age above. (A negative-intel reject ring was considered and dropped;
      * see QUORUM_GRACE_MIN_PINS for why.) */
+    if (s->grace_forced_closed)
+        return false; /* a runtime re-hardening (anchor change that dropped
+                       * pins) closes the unpinned fallback permanently: a node
+                       * that already had pins wiped must corroborate from
+                       * ENDORSED pins only, never re-open the unpinned window
+                       * just because its count reset to 0 inside the grace. */
     if ((uint32_t)(now_ms - s->boot_ms) < QUORUM_BOOTSTRAP_GRACE_MS &&
         identity_store_count(s) < (int)QUORUM_GRACE_MIN_PINS)
         return true;
