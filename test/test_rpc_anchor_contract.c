@@ -218,6 +218,51 @@ void test_get_anchor_status_reports_endorsed_false_by_default(void) {
     cJSON_Delete(j);
 }
 
+/* endorsed reports LIVE trust state, not mere cert presence: after an anchor
+ * rotation (setAnchor A2 while the cert signed by A1 is still stored) the old
+ * cert no longer verifies, so endorsed must flip to false even though a cert is
+ * still stored and the node is still anchored. Guards P3's endorsed-only gates
+ * and P4's webapp against reporting a dead cert as valid enrollment. */
+void test_endorsed_flips_false_after_anchor_rotation(void) {
+    /* A1 + a valid cert over this node's key: endorsed true. */
+    uint8_t anchor_priv[64];
+    provision_anchor(anchor_priv);
+    uint8_t sig[64];
+    sign_cert(anchor_priv, s_id.ed25519_public_key, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT, sig);
+    char sig_hex[129];
+    to_hex(sig, 64, sig_hex);
+    cJSON* j = dispatch_set_endorsement("ffffffffffffffff", sig_hex);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(result_of(j), "ok")));
+    cJSON_Delete(j);
+    TEST_ASSERT_TRUE(status_endorsed());
+
+    /* Rotate to a DIFFERENT anchor A2, provisioning no new cert. */
+    uint8_t a2_seed[32];
+    memset(a2_seed, 0x5c, sizeof(a2_seed)); /* != ANCHOR_SEED */
+    uint8_t a2_pub[32], a2_priv[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(a2_seed, a2_pub, a2_priv));
+    char a2_hex[65];
+    to_hex(a2_pub, 32, a2_hex);
+    char req[256];
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bramble.setAnchor\","
+             "\"params\":{\"anchor_pubkey\":\"%s\"}}",
+             a2_hex);
+    j = dispatch(req);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(result_of(j), "ok")));
+    cJSON_Delete(j);
+
+    /* The stored cert is still present (not cleared on rotation)... */
+    TEST_ASSERT_TRUE(identity_endorsement_is_set());
+    /* ...but it no longer verifies under A2, so endorsed is false while the
+     * node reports anchored true. */
+    j = dispatch("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"bramble.getAnchorStatus\"}");
+    cJSON* res = result_of(j);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(res, "anchored")));
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(res, "endorsed")));
+    cJSON_Delete(j);
+}
+
 /* Dispatch a request and return the parsed response (caller frees). */
 static cJSON* dispatch(const char* req) {
     char response[1024];
@@ -337,5 +382,6 @@ int main(void) {
     RUN_TEST(test_set_endorsement_rejects_wrong_node_key);
     RUN_TEST(test_set_endorsement_rejects_malformed_hex);
     RUN_TEST(test_get_anchor_status_reports_endorsed_false_by_default);
+    RUN_TEST(test_endorsed_flips_false_after_anchor_rotation);
     return UNITY_END();
 }

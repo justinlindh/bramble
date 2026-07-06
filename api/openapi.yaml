@@ -2791,8 +2791,11 @@ components:
         endorsed:
           type: boolean
           description: >
-            True when this node holds its own endorsement certificate
-            (provisioned via bramble.setEndorsement). Reports enrollment state.
+            True when this node holds its own endorsement certificate AND that
+            certificate still verifies against the currently provisioned anchor
+            and this node's identity key. Reports live enrollment state, so it
+            flips to false after an anchor rotation that invalidates the stored
+            cert (never true when anchored is false).
 
     SetEndorsementParams:
       type: object

@@ -907,7 +907,25 @@ static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
         hex[8] = '\0';
         cJSON_AddStringToObject(result, "anchor_fingerprint", hex);
     }
-    cJSON_AddBoolToObject(result, "endorsed", identity_endorsement_is_set());
+    /* endorsed = we hold a cert that ACTUALLY verifies against the CURRENT
+     * anchor + this node's own identity key, not mere presence. After an
+     * anchor rotation (setAnchor A2 while a cert signed by A1 is still stored)
+     * the old cert is dead, so this must report false. P3's gates and P4's
+     * webapp read this as live enrollment state. The stored cert is NOT
+     * cleared here: idempotent re-provisioning of the same anchor must keep
+     * working; only what we REPORT changes. */
+    bool endorsed = false;
+    if (anchored && identity_endorsement_is_set()) {
+        uint64_t not_after;
+        uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
+        uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+        if (identity_endorsement_get(&not_after, sig) == 0 &&
+            identity_anchor_get(anchor_pub) == 0) {
+            endorsed = identity_endorsement_verify(anchor_pub, s_identity->ed25519_public_key,
+                                                   not_after, sig);
+        }
+    }
+    cJSON_AddBoolToObject(result, "endorsed", endorsed);
     return 0;
 }
 
