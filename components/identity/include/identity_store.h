@@ -89,6 +89,21 @@ typedef struct {
     uint32_t conflicts;
     uint32_t sig_failures;
     uint32_t addr_mismatches;
+    /* Trust-anchor campaign (P2): when has_anchor is set this node pins ONLY
+     * anchor-endorsed identities; anchor_pub is the fleet anchor's Ed25519
+     * public key the endorsement is verified against. has_anchor false (the
+     * default from identity_store_init) = NOT anchored = today's TOFU
+     * behavior, bit-for-bit: the endorsement gate is skipped entirely and
+     * cert fields on the wire are ignored. The store stays PURE: the anchor
+     * is pushed in via identity_store_set_anchor (never read from NVS here),
+     * and the wall-clock epoch for the expiry check is a call parameter
+     * (never a timesync read here). unendorsed counts delivered attestations
+     * refused for a missing/invalid endorsement; expired counts ones refused
+     * because the cert's not_after has passed the synced wall clock. */
+    bool has_anchor;
+    uint8_t anchor_pub[32];
+    uint32_t unendorsed;
+    uint32_t expired;
 } identity_store_t;
 
 typedef enum {
@@ -103,6 +118,16 @@ typedef enum {
      * so address impersonation is cryptographically infeasible rather
      * than merely losing the TOFU race. */
     IDENTITY_PIN_ADDR_MISMATCH,
+    /* Trust-anchor campaign (P2), fire ONLY on an anchored node (has_anchor):
+     * UNENDORSED = the attestation carried no cert (not_after == 0) or one
+     * that does not verify against our anchor for this exact ed25519_pub (a
+     * missing, wrong-anchor, or cross-node-grafted cert); EXPIRED = the cert
+     * verified but its not_after has passed the synced wall clock. Both gate
+     * PINNING only: the relay/flood path is untouched, so an anchored relay
+     * still forwards an unendorsed neighbor's MAC-valid frame, it just does
+     * not pin it. A node with no anchor never returns either code. */
+    IDENTITY_PIN_UNENDORSED,
+    IDENTITY_PIN_EXPIRED,
 } identity_pin_result_t;
 
 /* now_ms is recorded as this node's boot reference for the bootstrap-quorum
@@ -129,10 +154,34 @@ identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
  * (bramble_identity_attestation_signed_msg) against the frame's embedded
  * ed25519_pub, then TOFU-pin. This is the ONLY place the expensive
  * Ed25519 verify runs on the receive side; relays never call it.
+ *
+ * now_ms is MONOTONIC boot-relative ms (LRU + bootstrap grace). epoch_ms is
+ * the current network WALL-CLOCK in ms, or 0 when the clock is not
+ * synced/confident: it is used ONLY for the endorsement expiry check on an
+ * anchored node, and only when non-zero (an unsynced clock never expires a
+ * cert; a permanent cert is unaffected either way). The store never reads
+ * timesync itself: the caller passes epoch_ms.
+ *
+ * On an ANCHORED node (identity_store_set_anchor was called) the endorsement
+ * gate runs AFTER the existing self/addr/self-sig checks and BEFORE the TOFU
+ * pin: a missing/invalid cert -> IDENTITY_PIN_UNENDORSED, an expired one ->
+ * IDENTITY_PIN_EXPIRED, neither pinned. On a node with no anchor the gate is
+ * skipped and behavior is identical to before this parameter existed.
  */
 identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
                                                         const bramble_identity_attestation_t* att,
-                                                        uint32_t self_addr, uint32_t now_ms);
+                                                        uint32_t self_addr, uint32_t now_ms,
+                                                        uint64_t epoch_ms);
+
+/*
+ * Trust-anchor campaign (P2): mark this store ANCHORED and record the fleet
+ * anchor's Ed25519 public key. After this call identity_store_handle_
+ * attestation pins ONLY identities the anchor has endorsed. Pure: copies the
+ * key into the caller-owned struct, reads no NVS. identity_store_init leaves
+ * a store UN-anchored (has_anchor false), so the anchored behavior is strictly
+ * opt-in; a store that never sees this call keeps today's TOFU behavior.
+ */
+void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]);
 
 /* Phase 4 query surface: the pinned entry for address, or NULL. */
 const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t address);

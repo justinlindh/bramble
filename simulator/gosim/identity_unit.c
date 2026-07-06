@@ -5,4 +5,9 @@
  * both land in one translation unit.
  */
 #include "../../components/routing_auth/routing_auth.c"
+/* identity.c supplies identity_endorsement_verify/_msg + identity_anchor_set,
+ * which identity_store.c and bridge.c now use for the trust-anchor endorsement
+ * gate (P2). Safe in this TU: its static put_be64/get_be64 do not collide here
+ * (packet.c lives in all.c, a different translation unit). */
+#include "../../components/identity/identity.c"
 #include "../../components/identity/identity_store.c"

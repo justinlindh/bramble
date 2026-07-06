@@ -185,6 +185,7 @@ target_link_libraries(test_ident_relay_auth ssl crypto)
 add_executable(test_ident_relay_gate
     test_ident_relay_gate.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/channel_flood.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/discovery.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/routing.c
@@ -199,6 +200,7 @@ target_include_directories(test_ident_relay_gate PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/replay_window/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_link_libraries(test_ident_relay_gate ssl crypto)
 
@@ -759,12 +761,14 @@ target_link_libraries(test_identity_attestation ssl crypto)
 add_executable(test_identity_store
     test_identity_store.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
 )
 target_include_directories(test_identity_store PRIVATE
     stubs
     ${OPENSSL_ROOT}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_link_libraries(test_identity_store ssl crypto)
 
