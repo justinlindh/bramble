@@ -190,11 +190,22 @@ int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]);
  * Per-node identity Phase 4 diagnostics: current verified-pin count and
  * the impersonation-signal counters (TOFU conflicts, delivered
  * attestations with invalid Ed25519 sigs, delivered attestations whose
- * src_addr did not match their key's derived address). Any out-pointer
- * may be NULL. Lock-free word reads; values are diagnostics-grade.
+ * src_addr did not match their key's derived address). The trust-anchor
+ * campaign (P2) adds two more: unendorsed (delivered attestations refused
+ * on an anchored node for a missing/invalid endorsement cert) and expired
+ * (refused for a cert past the synced wall clock). Any out-pointer may be
+ * NULL. Lock-free word reads; values are diagnostics-grade.
  */
 void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
-                                 uint32_t* addr_mismatches);
+                                 uint32_t* addr_mismatches, uint32_t* unendorsed,
+                                 uint32_t* expired);
+
+/*
+ * Trust-anchor campaign (P2): push a newly provisioned fleet anchor into the
+ * live pin store so a runtime bramble.setAnchor takes effect on the pin gate
+ * without a reboot. anchor_pub is the fleet anchor's Ed25519 public key.
+ */
+void mesh_set_pin_anchor(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE]);
 
 /**
  * Get a peer's name from the neighbor table (returns NULL if not found or no name).

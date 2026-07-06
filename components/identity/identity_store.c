@@ -8,11 +8,20 @@
 
 #include <string.h>
 
-#include "crypto.h" /* crypto_ed25519_verify */
+#include "crypto.h"           /* crypto_ed25519_verify */
+#include "include/identity.h" /* identity_endorsement_verify (trust-anchor P2) */
 
 void identity_store_init(identity_store_t* s, uint32_t now_ms) {
     memset(s, 0, sizeof(*s));
     s->boot_ms = now_ms;
+    /* has_anchor stays false: a fresh store is NOT anchored, so the
+     * endorsement gate is skipped and behavior is today's TOFU exactly.
+     * Anchoring is opt-in via identity_store_set_anchor. */
+}
+
+void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]) {
+    s->has_anchor = true;
+    memcpy(s->anchor_pub, anchor_pub, 32);
 }
 
 static identity_pin_t* find_entry(identity_store_t* s, uint32_t address) {
@@ -76,7 +85,8 @@ identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
 
 identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
                                                         const bramble_identity_attestation_t* att,
-                                                        uint32_t self_addr, uint32_t now_ms) {
+                                                        uint32_t self_addr, uint32_t now_ms,
+                                                        uint64_t epoch_ms) {
     /* Our own attestation echoed back through the flood: nothing to pin
      * (we ARE the binding). Also covers the impersonation-of-self case:
      * an insider attesting OUR address never touches our store; the rest
@@ -108,6 +118,44 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
         !crypto_ed25519_verify(att->ed25519_pub, msg, sizeof(msg), att->sig)) {
         s->sig_failures++;
         return IDENTITY_PIN_BAD_SIG;
+    }
+
+    /* Trust-anchor endorsement gate (P2): runs ONLY on an anchored node, and
+     * ONLY after the existing self/addr/self-sig checks above (so BAD_SIG and
+     * ADDR_MISMATCH still take precedence: a frame that is both unendorsed and
+     * addr-mismatched returns ADDR_MISMATCH). A node with no anchor skips this
+     * block entirely and its behavior is today's TOFU, bit-for-bit: the opt-in
+     * guarantee. This gates PINNING only; the caller still relays the frame. */
+    if (s->has_anchor) {
+        /* (a) cert present: not_after == 0 is the "no cert" sentinel (the
+         * endorsement_sig is then all-zero). An anchored node refuses to pin
+         * an unendorsed identity. */
+        if (att->not_after == IDENTITY_ENDORSEMENT_NOT_AFTER_NONE) {
+            s->unendorsed++;
+            return IDENTITY_PIN_UNENDORSED;
+        }
+        /* (b) the anchor's signature must vouch for THIS frame's ed25519_pub
+         * under THIS not_after. Rejects a wrong-anchor cert and a cert minted
+         * for a different node's key (cross-node graft): the endorsement
+         * message binds the exact ed25519_pub. */
+        if (!identity_endorsement_verify(s->anchor_pub, att->ed25519_pub, att->not_after,
+                                         att->endorsement_sig)) {
+            s->unendorsed++;
+            return IDENTITY_PIN_UNENDORSED;
+        }
+        /* (c) expiry: a non-permanent cert is expired once the SYNCED wall
+         * clock is past its not_after. v1 always issues UINT64_MAX (permanent)
+         * so this never fires live, but the wire format is frozen now, so it
+         * is implemented and tested for P-future expiring certs. epoch_ms == 0
+         * means the clock is unsynced: expiry is NOT enforced (a would-be
+         * expiring cert is provisionally accepted until the clock syncs,
+         * matching the design's "expiry only after sync" resolution; a
+         * permanent cert is unaffected regardless). */
+        if (att->not_after != IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT && epoch_ms != 0 &&
+            epoch_ms > att->not_after) {
+            s->expired++;
+            return IDENTITY_PIN_EXPIRED;
+        }
     }
 
     return identity_store_pin(s, att->src_addr, att->ed25519_pub, att->x25519_pub, now_ms);

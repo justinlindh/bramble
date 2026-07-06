@@ -112,11 +112,17 @@ static int handle_get_status(const cJSON* params, cJSON* result) {
      * impersonation-signal counters. Additive response fields (no new
      * method); mirrored in api/openapi.yaml's StatusResponse. */
     uint32_t id_pins = 0, id_conflicts = 0, id_sig_failures = 0, id_addr_mismatches = 0;
-    mesh_get_identity_pin_stats(&id_pins, &id_conflicts, &id_sig_failures, &id_addr_mismatches);
+    uint32_t id_unendorsed = 0, id_expired = 0;
+    mesh_get_identity_pin_stats(&id_pins, &id_conflicts, &id_sig_failures, &id_addr_mismatches,
+                                &id_unendorsed, &id_expired);
     cJSON_AddNumberToObject(result, "identity_pins", id_pins);
     cJSON_AddNumberToObject(result, "identity_conflicts", id_conflicts);
     cJSON_AddNumberToObject(result, "identity_sig_failures", id_sig_failures);
     cJSON_AddNumberToObject(result, "identity_addr_mismatches", id_addr_mismatches);
+    /* Trust-anchor campaign (P2): endorsement-gate rejection counters. Both
+     * stay 0 on an unanchored node (the gate never runs). */
+    cJSON_AddNumberToObject(result, "identity_unendorsed", id_unendorsed);
+    cJSON_AddNumberToObject(result, "identity_expired", id_expired);
     return 0;
 }
 
@@ -881,6 +887,11 @@ static int rpc_set_anchor(const cJSON* params, cJSON* result) {
         pub[i] = (uint8_t)((hi << 4) | lo);
     }
     identity_anchor_set(pub);
+    /* Trust-anchor campaign (P2): push the anchor into the live pin store so it
+     * pins only endorsed identities immediately, without waiting for a reboot.
+     * The boot path also loads it, so a reboot is never required for
+     * correctness; this just makes runtime provisioning take effect at once. */
+    mesh_set_pin_anchor(pub);
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }

@@ -87,6 +87,14 @@ func nodeSetProvisioned(idx int, provisioned bool) {
 	C.bridge_node_set_provisioned(C.int(idx), C.bool(provisioned))
 }
 
+// nodeSetEndorsed drives bridge_node_ext_t.endorsed (trust-anchor campaign P2).
+// false makes the node attest with no fleet-anchor cert, so every anchored
+// receiver refuses to pin it (identity_unendorsed) while still relaying its
+// MAC-valid frame; the rest of the fleet is unaffected.
+func nodeSetEndorsed(idx int, endorsed bool) {
+	C.bridge_node_set_endorsed(C.int(idx), C.bool(endorsed))
+}
+
 // --- Event queue ---
 
 func eventQueueInit(q *C.event_queue_t) {

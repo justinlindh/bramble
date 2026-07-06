@@ -1654,6 +1654,8 @@ components:
         - identity_conflicts
         - identity_sig_failures
         - identity_addr_mismatches
+        - identity_unendorsed
+        - identity_expired
       properties:
         address:
           type: string
@@ -1725,6 +1727,19 @@ components:
             Delivered identity attestations refused because their source
             address did not derive from their own Ed25519 key (address
             impersonation attempts; rejected even on first contact).
+        identity_unendorsed:
+          type: integer
+          description: >-
+            Trust-anchor campaign (P2): delivered identity attestations refused
+            on an anchored node because they carried no valid fleet-anchor
+            endorsement cert. Always 0 on a node with no anchor provisioned.
+        identity_expired:
+          type: integer
+          description: >-
+            Trust-anchor campaign (P2): delivered identity attestations refused
+            on an anchored node because their endorsement cert had expired
+            against the synced wall clock. Always 0 on a node with no anchor
+            provisioned (and for v1 permanent certs).
 
     WifiStatusResponse:
       type: object

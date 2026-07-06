@@ -611,6 +611,12 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// (no C-side sim_scenario change). Defaults to provisioned for every node.
 	unprovisioned := loadUnprovisionedNodeIDs(scenarioPath)
 
+	// Trust-anchor campaign (P2): optional per-node "unendorsed" scenario field,
+	// read the same Go-side way. Defaults to endorsed for every node (the fleet
+	// anchor vouches for all), so existing scenarios still pin under the
+	// endorsed-only gate.
+	unendorsed := loadUnendorsedNodeIDs(scenarioPath)
+
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
 	for i := 0; i < count; i++ {
@@ -636,6 +642,18 @@ func (s *Sim) cmdLoad(cmd Command) {
 			nodeSetProvisioned(i, false)
 			s.emitJSON(map[string]interface{}{
 				"type": "node_unprovisioned", "timestamp_us": 0,
+				"node": C.GoString(&node.id[0]),
+			})
+		}
+
+		// Trust-anchor campaign (P2): apply the unendorsed override AFTER join
+		// (join defaults the node to endorsed). An unendorsed node attests with
+		// no fleet-anchor cert for the whole run, so anchored receivers never
+		// pin it.
+		if unendorsed[C.GoString(&node.id[0])] {
+			nodeSetEndorsed(i, false)
+			s.emitJSON(map[string]interface{}{
+				"type": "node_unendorsed", "timestamp_us": 0,
 				"node": C.GoString(&node.id[0]),
 			})
 		}
