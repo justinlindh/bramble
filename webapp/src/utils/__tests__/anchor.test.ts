@@ -22,7 +22,12 @@ const KAT_SIG_PERMANENT =
   '7a36afd28bc2f36869f2bba54b601c79cc81213dcc2c41b76ec32ab74740b903';
 // The anchor pubkey KAT_ANCHOR_SEED derives to. This is the RFC 8032 expansion
 // of the seed and MUST match crypto_ed25519_keypair_from_seed(KAT_ANCHOR_SEED)
-// in the firmware (same expansion as libsodium/OpenSSL).
+// in the firmware (same expansion as libsodium/OpenSSL). Do NOT "fix" these
+// bytes: they are pinned to the firmware, transitively guarded by the signature
+// KAT above (KAT_SIG_PERMANENT is produced by this same seed expansion), and a
+// change here that still passed would mean the webapp and firmware had silently
+// diverged on key derivation. If this constant ever mismatches, the seed
+// expansion is wrong, not the vector.
 const KAT_ANCHOR_PUB =
   '03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8';
 
