@@ -65,7 +65,7 @@ typedef struct {
 static void node_init(node_state_t* n) {
     replay_table_init(&n->control_replay);
     dedup_init(&n->flood_dedup);
-    identity_store_init(&n->pins);
+    identity_store_init(&n->pins, 0);
 }
 
 typedef struct {
