@@ -64,6 +64,44 @@
  */
 #define QUORUM_BOOTSTRAP_GRACE_MS 300000u
 
+/*
+ * Bootstrap-grace early-exit threshold (trust-anchor P3a). Once this node
+ * holds at least this many verified pins it has real corroboration from
+ * PINNED peers alone, so the unpinned-peer fallback is no longer needed: an
+ * unpinned peer stops being grace-eligible the instant the pin count reaches
+ * this floor, even if the QUORUM_BOOTSTRAP_GRACE_MS time window is still open.
+ * The time bound stays as a backstop for the not-yet-3-pins case.
+ *
+ * Tradeoff on the value: a HIGHER threshold keeps the unpinned fallback open
+ * longer (more liveness margin before enough pins arrive) at the cost of a
+ * wider residual window; a LOWER threshold tightens to pinned-only sooner but
+ * risks closing the fallback before a slow mesh has corroboration. 3 is a
+ * small quorum: it is enough real corroboration to no longer need the unpinned
+ * fallback, while a single lucky pin (1) would close the grace too eagerly.
+ *
+ * This early-exit is anchor-INDEPENDENT: it also tightens a NO-anchor TOFU
+ * mesh to pinned-only once 3 TOFU pins exist. That is a deliberate strict
+ * improvement (real corroboration removes the need for the unpinned fallback
+ * whether or not the mesh is anchored), and a documented behavior change to
+ * the #131 grace for ALL meshes, not just anchored ones.
+ */
+#define QUORUM_GRACE_MIN_PINS 3u
+
+/*
+ * Negative-intel reject ring (trust-anchor P3a). A small fixed-size FIFO of
+ * recently rejected peer addresses: when an ANCHORED node refuses an
+ * attestation for a failed endorsement verdict (UNENDORSED or EXPIRED) it
+ * records the src_addr here, so a self-revealing Sybil that attested and was
+ * refused can never ride the bootstrap grace as an established-but-unpinned
+ * peer (it is KNOWN not endorsed). Plain RAM, reset by identity_store_init's
+ * memset, self-overwriting once full. Empty slots read as address 0; a real
+ * address colliding with 0 is a SHA256[0:4] preimage non-concern. This is
+ * defense-in-depth, NOT a close: a SILENT Sybil that never attests is never
+ * recorded and can still ride the bounded grace (an inherent, documented
+ * residual of the unpinned-trust window).
+ */
+#define IDENTITY_REJECT_RING 16
+
 typedef struct {
     bool used;
     uint32_t address;
@@ -104,6 +142,13 @@ typedef struct {
     uint8_t anchor_pub[32];
     uint32_t unendorsed;
     uint32_t expired;
+    /* Negative-intel reject ring (trust-anchor P3a): a bounded FIFO of peer
+     * addresses this anchored node refused for a failed endorsement verdict
+     * (UNENDORSED/EXPIRED). Consulted by identity_store_quorum_eligible so a
+     * self-revealing Sybil cannot ride the bootstrap grace. Plain RAM, reset
+     * by identity_store_init's memset. See IDENTITY_REJECT_RING. */
+    uint32_t reject_ring[IDENTITY_REJECT_RING];
+    uint8_t reject_ring_head;
 } identity_store_t;
 
 typedef enum {
@@ -192,32 +237,53 @@ const identity_pin_t* identity_store_lookup(const identity_store_t* s, uint32_t 
  * source_established input, ws 1.3c / NEW-SEC-4).
  *
  * CHOSEN SEMANTIC (documented here, tested in test_identity_store.c):
- *   if (!established)                          -> false  (tenure never relaxed)
- *   else if (pinned)                           -> true   (always eligible)
- *   else if (now_ms - boot_ms < GRACE_MS)      -> true   (bounded boot grace)
- *   else                                       -> false  (race closed)
+ *   if (!established)                       -> false  (tenure never relaxed)
+ *   else if (pinned)                        -> true   (always eligible)
+ *   else if (within-grace && count<MIN_PINS && !rejected)
+ *                                           -> true   (bounded boot grace)
+ *   else                                    -> false  (race closed)
  *
  * - `established` is the existing neighbor-tenure signal
  *   (neighbor_is_established); it is ALWAYS required, never relaxed.
  * - A PINNED peer is always eligible (subject to tenure): once we hold a
  *   peer's verified binding it corroborates time regardless of the grace.
- * - An UNPINNED peer is eligible ONLY within QUORUM_BOOTSTRAP_GRACE_MS of
- *   this node's boot. This bounds the old unbounded "zero pins -> trust
- *   every established peer" fallback to a per-boot window: a fresh mesh
- *   (pins are RAM-only, so also any node right after reboot) can bootstrap
- *   timesync before any attestation is verified, but AFTER the grace an
- *   unpinned peer NEVER corroborates even with zero pins held. That closes
- *   NEW-SEC-4's bootstrap-quorum race: an unattested or Sybil node can no
- *   longer dominate the quorum and skew the mesh clock once the window ends.
+ * - An UNPINNED peer is eligible ONLY inside the bounded per-boot grace,
+ *   which P3a tightens with two further conditions beyond the time window:
+ *     (time)  now_ms - boot_ms < QUORUM_BOOTSTRAP_GRACE_MS -- the backstop,
+ *             so a fresh mesh can bootstrap timesync before any pin exists;
+ *     (count) fewer than QUORUM_GRACE_MIN_PINS pins held -- early-exit: once
+ *             real pinned corroboration exists the unpinned fallback closes,
+ *             typically well before the time bound. Anchor-INDEPENDENT (it
+ *             tightens no-anchor TOFU meshes too: a documented change to the
+ *             #131 grace for ALL meshes, see QUORUM_GRACE_MIN_PINS);
+ *     (intel) address NOT in the reject ring -- a self-revealing Sybil that
+ *             attested and failed endorsement (UNENDORSED/EXPIRED) is barred.
+ *   After the grace (or once enough pins, or if rejected) an unpinned peer
+ *   NEVER corroborates, even with zero pins held. That closes NEW-SEC-4's
+ *   bootstrap-quorum race: an unattested or Sybil node can no longer dominate
+ *   the quorum and skew the mesh clock.
+ * - RESIDUAL (documented, not closed): a SILENT Sybil that never attests is
+ *   not in the reject ring, so within a fresh grace with < MIN_PINS pins it
+ *   can still ride the unpinned fallback. The reject ring is defense-in-depth
+ *   against self-revealing Sybils, not a full close of the bounded window.
  * - Because every node attests on boot + every 15 min, genuine pins arrive
- *   within seconds-to-minutes, so the gate has typically already tightened
- *   to pinned-only well before the grace expires; the grace is a liveness
- *   backstop, not the normal path.
+ *   within seconds-to-minutes, so the count early-exit has typically already
+ *   tightened the gate to pinned-only well before the grace expires; the
+ *   grace is a liveness backstop, not the normal path.
  * - Unpinned peers lose ONLY quorum membership; they remain neighbors,
  *   relays and DM peers.
  */
 bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address, bool established,
                                     uint32_t now_ms);
+
+/*
+ * Negative-intel query (trust-anchor P3a): whether address is in the reject
+ * ring, i.e. this anchored node has SEEN it attest and refused it for a failed
+ * endorsement verdict (UNENDORSED/EXPIRED). Used by quorum_eligible to bar a
+ * self-revealing Sybil from the bootstrap grace. Always false on a no-anchor
+ * node (the endorsement gate never runs, so nothing is ever recorded).
+ */
+bool identity_store_addr_rejected(const identity_store_t* s, uint32_t address);
 
 /* Number of used entries (diagnostics). */
 int identity_store_count(const identity_store_t* s);
