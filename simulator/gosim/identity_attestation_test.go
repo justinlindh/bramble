@@ -19,9 +19,10 @@ import (
 //   - t=1s: A attests its own identity. The frame must cross B, C, D to
 //     reach E (4 hops): every one of them relays it (MAC-gated, hop_limit
 //     decremented, otherwise unmodified) AND pins A's binding.
-//   - t=9s (after the first flood has fully settled: a 158-byte frame
-//     costs ~1.5s of airtime at the sim datarate, and an earlier TX from E
-//     half-duplex-collides with D's relay of the genuine attestation):
+//   - t=13s (after the first flood has fully settled: a 230-byte frame
+//     costs ~2.1s of airtime at the sim datarate, so a 4-hop flood needs
+//     well over 8s, and an earlier TX from E half-duplex-collides with D's
+//     relay of the genuine attestation):
 //     E (a keyed insider: it holds the network key, so its frame relays
 //     fine) attests A's ADDRESS under E's OWN Ed25519 key. The frame is
 //     internally valid (its sig verifies against its embedded key), but
@@ -34,7 +35,7 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 	const scenarioJSON = `{
 		"name": "phase4-identity-attestation-line",
 		"mode": "deterministic",
-		"duration_ms": 22000,
+		"duration_ms": 30000,
 		"nodes": [
 			{"id": "A", "x": 0,   "y": 0},
 			{"id": "B", "x": 100, "y": 0},
@@ -49,7 +50,7 @@ func TestIdentityAttestationMultiHopPinAndAddrMismatch(t *testing.T) {
 		},
 		"events": [
 			{"at_ms": 1000, "type": "send_attestation", "src": "A"},
-			{"at_ms": 9000, "type": "send_attestation", "src": "E", "claim": "A"}
+			{"at_ms": 13000, "type": "send_attestation", "src": "E", "claim": "A"}
 		]
 	}`
 

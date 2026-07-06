@@ -890,7 +890,9 @@ static int rpc_set_anchor(const cJSON* params, cJSON* result) {
  * Reports whether a fleet trust anchor is provisioned and, when it is, a
  * one-way fingerprint (SHA256(anchor_pub)[0:4]) so an operator can confirm a
  * fleet shares one anchor without the key being echoed. The fingerprint field
- * is present only when anchored. Mirrors getNetworkKeyStatus. */
+ * is present only when anchored. The "endorsed" flag reports whether THIS node
+ * holds its own endorsement cert (trust-anchor campaign, P1) so an operator
+ * can see enrollment state. Mirrors getNetworkKeyStatus. */
 static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
     (void)params;
     bool anchored = identity_anchor_is_set();
@@ -905,6 +907,83 @@ static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
         hex[8] = '\0';
         cJSON_AddStringToObject(result, "anchor_fingerprint", hex);
     }
+    cJSON_AddBoolToObject(result, "endorsed", identity_endorsement_is_set());
+    return 0;
+}
+
+/* bramble.setEndorsement: params
+ *   {"not_after": "<16 hex chars, big-endian uint64>",
+ *    "endorsement_sig": "<128 hex chars>"}.
+ * Provisions THIS node's own endorsement cert (trust-anchor campaign, P1):
+ * the anchor's signature vouching for this node's Ed25519 identity key.
+ * not_after is a HEX STRING, not a JSON number, because UINT64_MAX (the
+ * permanent sentinel, "ffffffffffffffff") does not survive JSON double
+ * precision. The device never SIGNS an endorsement; it only accepts one the
+ * anchor already signed, and verifies it against this node's own identity key
+ * and the provisioned anchor before persisting. Rejected when no anchor is
+ * provisioned, when not_after == 0 (the "no cert" sentinel), when either field
+ * is malformed, or when the signature does not verify. On success the cert is
+ * persisted and a fresh attestation is triggered so the fleet learns it
+ * promptly. Authenticated callers only (registered normally), mirroring
+ * setAnchor. */
+static int rpc_set_endorsement(const cJSON* params, cJSON* result) {
+    /* No anchor provisioned: there is nothing to verify the cert against, so
+     * a cert cannot be meaningfully accepted. Reject before parsing. */
+    if (!identity_anchor_is_set()) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    const cJSON* na_j = cJSON_GetObjectItem(params, "not_after");
+    const cJSON* sig_j = cJSON_GetObjectItem(params, "endorsement_sig");
+    if (!na_j || !cJSON_IsString(na_j) || !sig_j || !cJSON_IsString(sig_j)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    const char* na_hex = na_j->valuestring;
+    const char* sig_hex = sig_j->valuestring;
+    if (strlen(na_hex) != 16 || strlen(sig_hex) != 128) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    /* not_after: 16 hex chars, big-endian uint64. */
+    uint64_t not_after = 0;
+    for (int i = 0; i < 16; i++) {
+        int nib = hex_nibble(na_hex[i]);
+        if (nib < 0) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        not_after = (not_after << 4) | (uint64_t)nib;
+    }
+    /* 0 is the "no cert present" sentinel; refuse to store it as a cert. */
+    if (not_after == IDENTITY_ENDORSEMENT_NOT_AFTER_NONE) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
+    for (int i = 0; i < BRAMBLE_ED25519_SIG_SIZE; i++) {
+        int hi = hex_nibble(sig_hex[i * 2]);
+        int lo = hex_nibble(sig_hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        sig[i] = (uint8_t)((hi << 4) | lo);
+    }
+
+    /* Verify against this node's own identity key + the provisioned anchor
+     * before persisting: the device stores only a cert the anchor genuinely
+     * signed over this exact key and window. */
+    uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+    if (identity_anchor_get(anchor_pub) != 0) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    if (!identity_endorsement_verify(anchor_pub, s_identity->ed25519_public_key, not_after, sig)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    identity_endorsement_set(not_after, sig);
+    /* Re-announce so the fleet learns the cert promptly (mirrors the attest-on
+     * -address/key-change hook in mesh_task.c). */
+    mesh_trigger_attestation();
+    cJSON_AddBoolToObject(result, "ok", true);
     return 0;
 }
 
@@ -2549,6 +2628,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getNetworkKeyStatus", handle_get_network_key_status);
     rpc_register("bramble.setAnchor", rpc_set_anchor);
     rpc_register("bramble.getAnchorStatus", handle_get_anchor_status);
+    rpc_register("bramble.setEndorsement", rpc_set_endorsement);
     rpc_register("bramble.setAllowedOrigins", rpc_set_allowed_origins);
     rpc_register("bramble.getAllowedOrigins", rpc_get_allowed_origins);
     rpc_register("bramble.addChannel", handle_add_channel);
