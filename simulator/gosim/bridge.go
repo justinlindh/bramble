@@ -95,6 +95,13 @@ func nodeSetEndorsed(idx int, endorsed bool) {
 	C.bridge_node_set_endorsed(C.int(idx), C.bool(endorsed))
 }
 
+// nodeSetAnchored drives bridge_node_ext_t.ident_pins.has_anchor (trust-anchor
+// campaign P2 red-team). false boots the node un-anchored (TOFU pinning) until
+// a provision_anchor event hardens it.
+func nodeSetAnchored(idx int, anchored bool) {
+	C.bridge_node_set_anchored(C.int(idx), C.bool(anchored))
+}
+
 // --- Event queue ---
 
 func eventQueueInit(q *C.event_queue_t) {

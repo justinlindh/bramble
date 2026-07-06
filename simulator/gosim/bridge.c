@@ -130,6 +130,23 @@ void bridge_node_set_endorsed(int node_idx, bool endorsed) {
         ext->endorsed = endorsed;
 }
 
+/* Trust-anchor campaign (P2 red-team): force a node's pin store un-anchored
+ * (the "unanchored": true boot flag), undoing the join-time anchoring. The sim
+ * analog of a node deployed BEFORE the operator provisioned a fleet anchor: it
+ * pins on self-sig alone (TOFU) until a later provision_anchor event hardens
+ * it. Touches the store struct directly (bridge is test scaffolding); no pins
+ * exist yet at boot, so this only clears has_anchor. */
+void bridge_node_set_anchored(int node_idx, bool anchored) {
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+    if (anchored) {
+        identity_store_set_anchor(&ext->ident_pins, g_bridge_anchor_pub);
+    } else {
+        ext->ident_pins.has_anchor = false;
+    }
+}
+
 /* ─── Location sim helper: map (x,y) grid coords → pseudo lat/lon ─────── */
 /* Treat grid origin as (37.0000000 N, -122.0000000 W), scale 1 unit = 10m */
 #define LOC_REF_LAT_E7 370000000
@@ -2176,6 +2193,35 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
                 att.ed25519_pub[0], att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
         fflush(stdout);
     }
+}
+
+/* ─── Runtime anchor provisioning (P2 red-team) ─────────────────────────── */
+/*
+ * Scripted "provision_anchor" event: the sim analog of an operator running
+ * bramble.setAnchor mid-life to harden the fleet without a reboot. (Re-)anchors
+ * the named node to the fleet test anchor via the REAL identity_store_set_anchor
+ * -- so if the node was un-anchored ("unanchored": true) its stale TOFU pins are
+ * DROPPED, exactly like firmware's mesh_set_pin_anchor path. Emits how many pins
+ * were dropped so a scenario can assert the hardening actually purged them.
+ */
+void bridge_handle_provision_anchor(sim_event_t* event, node_array_t* nodes) {
+    sim_node_t* node = node_array_find_by_id(nodes, event->data.node.node_id);
+    if (!node)
+        return;
+    int node_idx = (int)(node - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+
+    int before = identity_store_count(&ext->ident_pins);
+    identity_store_set_anchor(&ext->ident_pins, g_bridge_anchor_pub);
+    int after = identity_store_count(&ext->ident_pins);
+
+    fprintf(stdout,
+            "{\"type\":\"anchor_provisioned\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"dropped_pins\":%d}\n",
+            (unsigned long long)event->timestamp_us, node->id, before - after);
+    fflush(stdout);
 }
 
 /* ─── Node join extended initializer ────────────────────────────────────── */

@@ -532,6 +532,80 @@ static void test_addr_mismatch_precedes_endorsement(void) {
     TEST_ASSERT_EQUAL_UINT32(0, s_store.unendorsed);
 }
 
+/* ── identity_store_set_anchor: stale-pin drop on anchor change (P2 red-team) ─ */
+
+/* THE runtime-hardening bug (P2 red-team): a fleet deployed un-anchored lets a
+ * Sybil TOFU-pin normally; a later setAnchor to harden WITHOUT reboot must DROP
+ * that un-endorsed pin, else it survives in entries[] and still feeds lookup /
+ * quorum / DM continuity. First-ever anchoring clears the pin table. */
+static void test_set_anchor_first_time_drops_tofu_pins(void) {
+    identity_store_init(&s_store, 0);
+    TEST_ASSERT_FALSE(s_store.has_anchor);
+
+    /* An un-anchored node TOFU-pins a peer (the Sybil, pre-hardening). */
+    uint8_t ed[32], x[32];
+    fill_key(ed, 0x10);
+    fill_key(x, 0x50);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s_store, 0xA1u, ed, x, 1000));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, 0xA1u));
+
+    /* Operator hardens at runtime: the stale un-endorsed pin must be dropped. */
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_TRUE(s_store.has_anchor);
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, 0xA1u));
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store));
+}
+
+/* Idempotent re-provision of the SAME anchor must KEEP the endorsed pins (the
+ * P1 idempotency concern): re-running setAnchor with the current key is a no-op
+ * for the pin table. */
+static void test_set_anchor_same_key_keeps_pins(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    /* Pin an ENDORSED peer through the full gate. */
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+
+    /* Same key again: the endorsed pin SURVIVES. */
+    identity_store_set_anchor(&s_store, anchor_pub);
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL(1, identity_store_count(&s_store));
+}
+
+/* Rotation to a DIFFERENT anchor drops the pins: an endorsed pin under the OLD
+ * anchor is dead under the new key, so it must not survive the rotation. */
+static void test_set_anchor_rotation_drops_pins(void) {
+    identity_store_init(&s_store, 0);
+    uint8_t anchor_pub[32], anchor_sk[64], other_pub[32], other_sk[64];
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(ANCHOR_SEED, anchor_pub, anchor_sk));
+    TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair_from_seed(OTHER_ANCHOR_SEED, other_pub, other_sk));
+    identity_store_set_anchor(&s_store, anchor_pub);
+
+    bramble_identity_attestation_t att;
+    uint8_t ed[32], sk[64];
+    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
+    endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW,
+                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, 1000, 0));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s_store, addr));
+
+    /* Rotate to a new anchor: the old endorsed pin is dropped, key updated. */
+    identity_store_set_anchor(&s_store, other_pub);
+    TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
+    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(other_pub, s_store.anchor_pub, 32);
+}
+
 /* ── identity_store_quorum_eligible: the Phase 4 timesync gate ──────── */
 
 /* Semantics under test (documented on the function): established tenure
@@ -625,6 +699,9 @@ int main(void) {
     RUN_TEST(test_anchored_cross_node_graft_rejected);
     RUN_TEST(test_anchored_expiry);
     RUN_TEST(test_addr_mismatch_precedes_endorsement);
+    RUN_TEST(test_set_anchor_first_time_drops_tofu_pins);
+    RUN_TEST(test_set_anchor_same_key_keeps_pins);
+    RUN_TEST(test_set_anchor_rotation_drops_pins);
     RUN_TEST(test_quorum_within_grace_unpinned_is_eligible);
     RUN_TEST(test_quorum_after_grace_unpinned_excluded_even_with_zero_pins);
     RUN_TEST(test_quorum_pinned_peer_eligible_within_and_after_grace);

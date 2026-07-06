@@ -20,8 +20,32 @@ void identity_store_init(identity_store_t* s, uint32_t now_ms) {
 }
 
 void identity_store_set_anchor(identity_store_t* s, const uint8_t anchor_pub[32]) {
-    s->has_anchor = true;
+    /* Whether this call changes the effective anchor: first-ever anchoring, or a
+     * rotation to a different key. An idempotent same-key re-provision is NOT a
+     * change (P1 idempotency concern), so it must keep the endorsed pins. */
+    bool changed = !s->has_anchor || memcmp(s->anchor_pub, anchor_pub, 32) != 0;
+
+    /* memcpy the key BEFORE raising has_anchor: a concurrent reader (the mesh
+     * task in handle_attestation) must never see has_anchor=true over a
+     * half-copied key. */
     memcpy(s->anchor_pub, anchor_pub, 32);
+    s->has_anchor = true;
+
+    /* When the anchor changes, DROP every pin: the un-endorsed TOFU pins a node
+     * accumulated while un-anchored (or endorsed pins under the OLD anchor after
+     * a rotation) are not endorsed under the new key, so keeping them would be
+     * exactly "an un-endorsed identity pinned on an anchored node". Clearing
+     * entries here is what makes runtime setAnchor actually harden the store,
+     * not just future attestations. boot_ms and the counters are NOT reset: the
+     * bootstrap grace stays expired (an anchored, freshly-cleared store must
+     * corroborate timesync only from re-pinned ENDORSED peers, never re-open the
+     * unpinned-trust window; the fleet re-attests on the boot+15min cadence),
+     * and the diagnostic counters are cumulative. Idempotent same-key re-set
+     * leaves the endorsed pins in place. */
+    if (changed) {
+        for (int i = 0; i < IDENTITY_STORE_CAPACITY; i++)
+            s->entries[i].used = false;
+    }
 }
 
 static identity_pin_t* find_entry(identity_store_t* s, uint32_t address) {

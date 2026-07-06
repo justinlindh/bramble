@@ -169,3 +169,134 @@ func TestIdentityAnchorEndorsedPinsUnendorsedRejected(t *testing.T) {
 		t.Fatalf("D pinned its own address %s: self-attestations must be ignored", addrD)
 	}
 }
+
+// TestRuntimeSetAnchorDropsStalePins is the system-level proof for the P2
+// red-team fix: a fleet deployed un-anchored lets a node TOFU-pin its peers;
+// when an operator later provisions the fleet anchor at runtime (bramble.
+// setAnchor without a reboot, modeled by the provision_anchor event), those
+// un-endorsed stale pins MUST be dropped, not survive into the anchored store.
+//
+// B boots un-anchored. A (endorsed) attests -> B TOFU-pins A on the self-sig
+// alone (ignoring the cert). Then B is anchored at runtime: A's stale pin is
+// dropped (anchor_provisioned reports dropped_pins=1). A attests again -> B, now
+// anchored, verifies A's endorsement and re-pins A as a fresh NEW binding. So B
+// emits identity_pinned for A exactly TWICE: the drop is what makes the second
+// attestation a NEW pin instead of a silent idempotent refresh. Without the fix
+// the stale pin would survive and the re-attestation would be a REFRESH (one
+// pin event, and an un-endorsed binding left pinned on an anchored node).
+func TestRuntimeSetAnchorDropsStalePins(t *testing.T) {
+	const scenarioJSON = `{
+		"name": "p2-runtime-setanchor",
+		"mode": "deterministic",
+		"duration_ms": 30000,
+		"nodes": [
+			{"id": "A", "x": 0,   "y": 0},
+			{"id": "B", "x": 100, "y": 0, "unanchored": true}
+		],
+		"radio": {
+			"range": 150,
+			"loss_pct": 0,
+			"propagation_speed_ms_per_unit": 0.1
+		},
+		"events": [
+			{"at_ms": 1000,  "type": "send_attestation", "src": "A"},
+			{"at_ms": 13000, "type": "provision_anchor", "node": "B"},
+			{"at_ms": 20000, "type": "send_attestation", "src": "A"}
+		]
+	}`
+
+	tmp, err := os.CreateTemp("", "p2-runtime-setanchor-*.json")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(scenarioJSON); err != nil {
+		t.Fatalf("write scenario file: %v", err)
+	}
+	tmp.Close()
+
+	result, err := runScenarioHeadless(tmp.Name())
+	if err != nil {
+		t.Fatalf("runScenarioHeadless: %v", err)
+	}
+
+	var addrA string
+	sawUnanchored := false
+	pinnedACount := 0
+	droppedPins := -1
+	provisionTsUs := uint64(0)
+	var lastPinTsUs uint64
+	for _, line := range result.Lines() {
+		var evt map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			continue
+		}
+		typ, _ := evt["type"].(string)
+		node, _ := evt["node"].(string)
+		switch typ {
+		case "node_unanchored":
+			if node == "B" {
+				sawUnanchored = true
+			}
+		case "attestation_sent":
+			if node == "A" && addrA == "" {
+				addrA, _ = evt["addr"].(string)
+			}
+		case "anchor_provisioned":
+			if node == "B" {
+				if v, ok := evt["dropped_pins"].(float64); ok {
+					droppedPins = int(v)
+				}
+				if ts, ok := evt["timestamp_us"].(float64); ok {
+					provisionTsUs = uint64(ts)
+				}
+			}
+		}
+	}
+	if !sawUnanchored {
+		t.Fatalf("B was never marked unanchored: the scenario override did not apply")
+	}
+	if addrA == "" {
+		t.Fatalf("A never emitted attestation_sent")
+	}
+
+	// Count B's pins of A, and note the last one's timestamp.
+	for _, line := range result.Lines() {
+		var evt map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			continue
+		}
+		if typ, _ := evt["type"].(string); typ != "identity_pinned" {
+			continue
+		}
+		if node, _ := evt["node"].(string); node != "B" {
+			continue
+		}
+		if addr, _ := evt["addr"].(string); addr != addrA {
+			continue
+		}
+		pinnedACount++
+		if ts, ok := evt["timestamp_us"].(float64); ok {
+			lastPinTsUs = uint64(ts)
+		}
+	}
+
+	// The fix: provisioning dropped exactly the one stale TOFU pin.
+	if droppedPins != 1 {
+		t.Fatalf("anchor_provisioned dropped_pins = %d, want 1 (the stale TOFU pin of A must be "+
+			"dropped when B is anchored at runtime)", droppedPins)
+	}
+	// The observable consequence: B re-pins A as a fresh NEW binding AFTER the
+	// drop, so there are two pin events, and the second is post-provision. A
+	// surviving pin would have made the re-attestation a silent refresh (one
+	// event only).
+	if pinnedACount != 2 {
+		t.Fatalf("B pinned A %d time(s), want 2 (TOFU pin, then a fresh NEW re-pin after the "+
+			"stale pin was dropped at provision); one pin means the stale pin wrongly survived",
+			pinnedACount)
+	}
+	if lastPinTsUs <= provisionTsUs {
+		t.Fatalf("B's last pin of A (t=%d us) was not after provision (t=%d us): the endorsed "+
+			"re-pin must follow the anchor provisioning", lastPinTsUs, provisionTsUs)
+	}
+}

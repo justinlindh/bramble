@@ -104,6 +104,24 @@ void bridge_node_set_provisioned(int node_idx, bool provisioned);
 void bridge_node_set_endorsed(int node_idx, bool endorsed);
 
 /*
+ * bridge_node_set_anchored (trust-anchor campaign P2 red-team):
+ *   Force a node's pin store anchored/un-anchored. Scenario nodes marked
+ *   "unanchored": true call this with anchored=false after join, so the node
+ *   boots un-anchored (pins on self-sig alone, TOFU) until a provision_anchor
+ *   event hardens it. Idempotent; safe before or after join.
+ */
+void bridge_node_set_anchored(int node_idx, bool anchored);
+
+/*
+ * bridge_handle_provision_anchor (trust-anchor campaign P2 red-team):
+ *   Fires a scripted EVT_PROVISION_ANCHOR: (re-)anchors the named node to the
+ *   fleet test anchor via the real identity_store_set_anchor, dropping any
+ *   stale pins the node held while un-anchored. Emits an "anchor_provisioned"
+ *   event with the dropped-pin count.
+ */
+void bridge_handle_provision_anchor(sim_event_t* event, node_array_t* nodes);
+
+/*
  * bridge_handle_generate_attestation (per-node identity Phase 3):
  *   Fires a scripted EVT_GENERATE_ATTESTATION: the named node originates a
  *   signed, relay-gate-MACed identity attestation exactly as firmware's
