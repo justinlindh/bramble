@@ -40,7 +40,8 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 | **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Not documented. Likely relies on GPS or companion device time. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
 | **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
 | **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte base header, compact binary (no protobuf/JSON). Authenticated DATA adds a 28-byte envelope prefix (src_addr, relay-mutable prev_hop, 8-byte auth HMAC) plus a 12-byte nonce and 16-byte GCM tag. |
-| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | Ed25519 identity key per node; address = SHA-256(key)[0:4]. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. No trust anchor yet: identities are unforgeable but free to mint (Sybil scarcity NOT claimed). |
+| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | Ed25519 identity key per node; address = SHA-256(key)[0:4]. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. |
+| **Membership / Sybil control** | None. Any device on the channel PSK is a member; identities are unauthenticated MACs. | Per-node keys and a per-peer contact list / ACL: trust is decided locally by each node's operator adding contacts. No fleet membership authority; no Sybil-scarcity story; un-trusting a node fleet-wide means every peer editing its own contact list. | Optional per-fleet **trust anchor**: an operator-held Ed25519 anchor endorses node identities with a signed cert (`docs/trust-anchor.md`). An anchored mesh pins ONLY peers carrying an anchor-signed cert, so un-admitted Sybils cannot join, corroborate the timesync quorum, or pass DM key-continuity. The anchor private seed is operator-held and offline (never on a node, never over RPC). Honest bound: this stops outsiders and un-admitted Sybils, NOT a compromised admitted insider; anchor custody is the trust root; certs are permanent in v1 (no active revocation short of re-anchor). |
 | **Max hops** | 7 (configurable) | 3–7 default, up to 64 theoretical | Reactive: expanding-ring discovery 4 then 8, max route depth 8. Flood transport: configurable 1..32, default 8. |
 
 ---
@@ -148,13 +149,12 @@ per-node Ed25519 keys, signed attestations, AND an address that is a hash
 of the signing key, so an insider cannot claim another node's address at
 all (a property MeshCore's MAC-style short IDs do not provide, and
 Meshtastic has nothing comparable: its identities are unauthenticated
-hardware MACs). Stated honestly: neither Bramble nor MeshCore has a trust
-anchor, so identities in both systems are free to mint and
-Sybil-with-fresh-identities is not closed; Bramble's pins are RAM-only
-(reset on reboot, re-established by TOFU); and Bramble's DM first contact
-remains TOFU-grade until the peer's attestation is pinned. A trust anchor
-(pre-shared trusted-node list or equivalent) is deferred work, not a
-shipped capability, and no Sybil-scarcity claim is made.
+hardware MACs). Stated honestly for an UN-anchored mesh: identities are
+free to mint and Sybil-with-fresh-identities is not closed; Bramble's pins
+are RAM-only (reset on reboot, re-established by TOFU); and Bramble's DM
+first contact remains TOFU-grade until the peer's attestation is pinned.
+The optional trust anchor (next subsection) is what closes Sybil scarcity
+on an anchored mesh; without it, no Sybil-scarcity claim is made.
 
 The mandatory-attestation campaign (2026-07) closes the bootstrap-quorum
 RACE on top of this: the old unbounded "a node holding zero pins trusts
@@ -166,8 +166,37 @@ participation: there is no unattested path into the gated trust decisions
 identity is now a visible, counted, airtime-costing attestation, and the
 trivial no-attestation-needed quorum attack is gone. Honest scope: this is
 the bootstrap-race close plus a uniform-attestation prerequisite, a
-bounded step, not the Sybil solution. Full Sybil scarcity still awaits the
-trust anchor and is not claimed.
+bounded step. Full Sybil scarcity is closed only on an ANCHORED mesh, by
+the trust anchor below.
+
+### Trust anchor delta (2026-07)
+
+The trust-anchor campaign (2026-07) adds the piece neither competitor has:
+per-node cryptographic identity WITH explicit, fleet-wide membership
+control. Meshtastic has no per-node identity to govern at all. MeshCore has
+per-node keys and a per-peer contact-list / ACL model, but trust is decided
+locally at each node: there is no membership authority, no Sybil-scarcity
+story, and no way to un-trust a node fleet-wide short of every peer editing
+its own contacts. Anchored Bramble is per-node identity + explicit endorsed
+membership + confirmed delivery: an operator holds one offline anchor
+keypair per fleet, provisions its public key to each node, and signs a
+permanent endorsement cert over each node's identity key. An anchored node
+pins ONLY peers carrying an anchor-signed cert, so an outsider or an
+un-admitted Sybil cannot get pinned, join the identity-gated timesync
+quorum, or pass DM key-continuity. This is the NEW-SEC-4 close in
+[SECURITY-MODEL.md](SECURITY-MODEL.md) section 5; the operator ceremony is
+[trust-anchor.md](trust-anchor.md).
+
+Honest bounds, stated plainly: the anchor protects against outsiders and
+un-admitted Sybils, NOT a compromised ADMITTED insider (a node you endorsed
+that is later captured stays a valid member; endorsement is admission
+control, not behavioral trust). The anchor private seed is the trust root:
+it is operator-held and offline (localStorage in the operator's browser,
+never sent to a node or over any RPC), and whoever holds it can admit any
+node. Certs are permanent in v1 with no active revocation: a compromised
+endorsed node cannot be individually un-trusted fleet-wide short of a
+re-anchor flag day. Anchoring is opt-in per fleet; an un-anchored mesh keeps
+the free-to-mint identity model above.
 
 ---
 
