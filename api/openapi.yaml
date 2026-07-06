@@ -956,6 +956,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetAnchorStatusResponse'
 
+  /rpc/bramble.setEndorsement:
+    post:
+      operationId: setEndorsement
+      summary: Provision this node's own endorsement certificate
+      description: >
+        Provisions THIS node's own endorsement certificate (trust-anchor
+        campaign, P1): the fleet anchor's Ed25519 signature vouching for this
+        node's identity key, bound to a validity window. The device never
+        SIGNS an endorsement; it only accepts one the anchor already signed,
+        and verifies it against this node's own identity key and the
+        provisioned anchor before persisting. Rejected when no anchor is
+        provisioned, when not_after is 0 (the "no cert" sentinel), when either
+        field is malformed, or when the signature does not verify. On success
+        the cert is persisted to NVS and a fresh attestation is triggered so
+        the fleet learns the cert promptly. Authenticated callers only.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetEndorsementParams'
+      responses:
+        '400':
+          description: >
+            Bad request (no anchor provisioned, not_after 0, malformed
+            not_after/endorsement_sig, or signature verification failed)
+        '200':
+          description: Endorsement certificate provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
   /rpc/bramble.setAllowedOrigins:
     post:
       operationId: setAllowedOrigins
@@ -2743,7 +2776,7 @@ components:
     GetAnchorStatusResponse:
       type: object
       description: Response from bramble.getAnchorStatus.
-      required: [anchored]
+      required: [anchored, endorsed]
       properties:
         anchored:
           type: boolean
@@ -2755,6 +2788,31 @@ components:
             when anchored; matches across nodes that share an anchor and never
             reveals the key.
           pattern: '^[0-9a-f]{8}$'
+        endorsed:
+          type: boolean
+          description: >
+            True when this node holds its own endorsement certificate
+            (provisioned via bramble.setEndorsement). Reports enrollment state.
+
+    SetEndorsementParams:
+      type: object
+      description: Parameters for bramble.setEndorsement.
+      required: [not_after, endorsement_sig]
+      properties:
+        not_after:
+          type: string
+          description: >
+            Certificate validity bound as a big-endian uint64 in exactly 16 hex
+            characters (a hex string, NOT a JSON number: UINT64_MAX does not
+            survive JSON double precision). Milliseconds since the Unix epoch;
+            "ffffffffffffffff" means permanent. Must not be 0.
+          pattern: '^[0-9a-fA-F]{16}$'
+        endorsement_sig:
+          type: string
+          description: >
+            The anchor's raw 64-byte Ed25519 signature over this node's
+            identity key and not_after, as exactly 128 hex characters.
+          pattern: '^[0-9a-fA-F]{128}$'
 
     SetAllowedOriginsParams:
       type: object

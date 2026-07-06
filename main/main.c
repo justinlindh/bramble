@@ -885,6 +885,17 @@ void app_main(void) {
     ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")", my_addr,
              g_identity.pubkey_hash);
 
+    /* Trust-anchor campaign: load the provisioned fleet anchor pubkey (P0) and
+     * this node's own endorsement cert (P1) into module memory. Both are
+     * absent by default and neither is ever synthesized; a fresh node stays
+     * unanchored and un-endorsed until an operator provisions them. */
+    if (identity_anchor_load() == 0) {
+        ESP_LOGI(TAG, "Fleet trust anchor loaded from NVS");
+    }
+    if (identity_endorsement_load() == 0) {
+        ESP_LOGI(TAG, "Own endorsement certificate loaded from NVS");
+    }
+
     /* Identity generated. Release the bootloader RNG before the battery ADC
      * (SAR-ADC is shared) and CLOSE the gate: there is no strong entropy source
      * again until an RF subsystem comes up, so crypto_random() must fail closed

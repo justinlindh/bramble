@@ -290,4 +290,10 @@ void mesh_beacon_policy_load_config(void);
  * a reboot (routing/ACK MACs already re-read the key per call). */
 void mesh_rederive_beacon_key(void);
 
+/* Trigger a fresh identity attestation now (budget-gated). Called after a
+ * runtime setEndorsement so the node re-announces with its new cert without
+ * waiting for the next periodic attestation (trust-anchor campaign, P1);
+ * mirrors the attest-on-address/key-change hook. */
+void mesh_trigger_attestation(void);
+
 #endif

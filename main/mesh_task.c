@@ -1235,10 +1235,12 @@ static int send_beacon(void) {
 
 /* ── Identity attestation TX (per-node identity Phase 2) ────────────── */
 
-/* Low-cadence self-signed identity broadcast: 158 bytes (the relay-gated
- * frame, IDENTITY_ATTESTATION_SIZE) every 15 minutes is the design's
- * approved airtime budget (~0.02-0.05% duty per node at the shipping
- * profiles); do not raise the cadence without re-flagging that budget. */
+/* Low-cadence self-signed identity broadcast: 230 bytes (the relay-gated
+ * frame carrying the endorsement cert, IDENTITY_ATTESTATION_SIZE) every 15
+ * minutes is the design's approved airtime budget (~0.03-0.07% duty per node
+ * at the shipping profiles; the trust-anchor cert grew the frame 158 -> 230,
+ * a ~40% airtime bump that stays in the same negligible band). Do not raise
+ * the cadence without re-flagging that budget. */
 #define ATTESTATION_INTERVAL_MS (15u * 60u * 1000u)
 /* Short retry after a failed/denied send, so a boot-time budget denial
  * does not leave the node unattested for a full interval. */
@@ -1295,6 +1297,14 @@ static int send_identity_attestation(void) {
     att.src_addr = s_identity->address;
     memcpy(att.x25519_pub, s_identity->public_key, sizeof(att.x25519_pub));
     memcpy(att.ed25519_pub, s_identity->ed25519_public_key, sizeof(att.ed25519_pub));
+
+    /* Endorsement cert (trust-anchor campaign, P1): carry our own cert when we
+     * have one, else leave the zero-initialized fields (not_after == 0 ==
+     * "no cert"). Set before ident_relay_sign below, which MACs the cert. The
+     * cert is NOT part of the Ed25519 self-signature (that stays the 84-byte
+     * canonical message); it is the anchor's signature, verified by receivers
+     * in a later phase. */
+    identity_endorsement_get(&att.not_after, att.endorsement_sig);
 
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
     if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK) {
@@ -5521,6 +5531,15 @@ void mesh_rederive_beacon_key(void) {
         memset(s_beacon_key, 0, sizeof(s_beacon_key));
         ESP_LOGW(TAG, "unprovisioned: no beacon key (node inert until provisioned)");
     }
+}
+
+void mesh_trigger_attestation(void) {
+    /* Re-announce with the current identity + cert. Budget-gated like every
+     * attestation (attempt_identity_attestation applies the same TX gate as
+     * the periodic path), so a burst of setEndorsement calls cannot flood the
+     * air. Inert until provisioned (send_identity_attestation gates on the
+     * network key). */
+    attempt_identity_attestation(now_ms());
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
