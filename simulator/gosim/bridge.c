@@ -2148,7 +2148,7 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
             ext->ident_x25519_pub[i] = (uint8_t)((addr >> ((i % 4) * 8)) ^ (uint8_t)i);
         }
         ext->ident_seq = 0;
-        identity_store_init(&ext->ident_pins);
+        identity_store_init(&ext->ident_pins, now_ms);
         ext->ident_initialized = true;
         /* Mandatory-provisioning (Task 2): a freshly joined node holds the
          * fleet key by default. A scenario opts a node out via

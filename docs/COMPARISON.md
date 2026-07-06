@@ -156,6 +156,19 @@ remains TOFU-grade until the peer's attestation is pinned. A trust anchor
 (pre-shared trusted-node list or equivalent) is deferred work, not a
 shipped capability, and no Sybil-scarcity claim is made.
 
+The mandatory-attestation campaign (2026-07) closes the bootstrap-quorum
+RACE on top of this: the old unbounded "a node holding zero pins trusts
+every established peer" window on the timesync quorum is replaced by a
+bounded per-boot grace (5 minutes), after which an unpinned peer never
+corroborates the quorum. Attestation is now a prerequisite for trusted
+participation: there is no unattested path into the gated trust decisions
+(the timesync quorum after the grace, and DM key continuity), every Sybil
+identity is now a visible, counted, airtime-costing attestation, and the
+trivial no-attestation-needed quorum attack is gone. Honest scope: this is
+the bootstrap-race close plus a uniform-attestation prerequisite, a
+bounded step, not the Sybil solution. Full Sybil scarcity still awaits the
+trust anchor and is not claimed.
+
 ---
 
 ## Reliability
