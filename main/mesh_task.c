@@ -3399,8 +3399,13 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
      * so the store does not enforce expiry against an untrusted clock. v1 certs
      * are permanent (UINT64_MAX) so this never fires live, but the pin gate is
      * ready for expiring certs the frozen wire format allows. */
-    uint64_t epoch_ms = timesync_is_confident(&s_timesync, now_ms())
-                            ? (uint64_t)timesync_get_network_time(&s_timesync, now_ms())
+    int64_t net_time_ms = timesync_get_network_time(&s_timesync, now_ms());
+    /* Only pass a positive, confident epoch; otherwise 0 (the "unsynced"
+     * sentinel the store treats as "do not enforce expiry"). The > 0 guard
+     * stops a non-positive int64 from casting to a huge uint64 that would
+     * spuriously expire a future non-permanent cert. */
+    uint64_t epoch_ms = (timesync_is_confident(&s_timesync, now_ms()) && net_time_ms > 0)
+                            ? (uint64_t)net_time_ms
                             : 0;
 
     /* Deliver locally regardless of the relay decision below. */

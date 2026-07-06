@@ -83,3 +83,40 @@ func loadUnendorsedNodeIDs(path string) map[string]bool {
 	}
 	return out
 }
+
+// unanchoredConfigJSON reads the scenario's optional per-node "unanchored" flag
+// (trust-anchor campaign P2 red-team). A node marked
+//
+//	{"id": "X", "x": 0, "y": 0, "unanchored": true}
+//
+// boots WITHOUT a fleet anchor: it pins on self-sig alone (TOFU), ignoring cert
+// fields, exactly like a node deployed before the operator provisioned an
+// anchor. A later "provision_anchor" event anchors it and DROPS those stale
+// pins. Default false (anchored, the P2 harness default).
+type unanchoredConfigJSON struct {
+	Nodes []struct {
+		ID         string `json:"id"`
+		Unanchored bool   `json:"unanchored"`
+	} `json:"nodes"`
+}
+
+// loadUnanchoredNodeIDs returns the set of node IDs marked unanchored in the
+// scenario file. Any read/parse failure (or no such field) returns an empty set
+// (all nodes anchored), the same fail-open convention as the loaders above.
+func loadUnanchoredNodeIDs(path string) map[string]bool {
+	out := map[string]bool{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	var cfg unanchoredConfigJSON
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return out
+	}
+	for _, n := range cfg.Nodes {
+		if n.Unanchored {
+			out[n.ID] = true
+		}
+	}
+	return out
+}

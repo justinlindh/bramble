@@ -320,6 +320,10 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 		// equivalent; scenarios that script send_attestation use the
 		// default routing mode).
 		s.handleGenerateAttestation(evt)
+	case C.EVT_PROVISION_ANCHOR:
+		// Trust-anchor campaign (P2 red-team): runtime setAnchor equivalent;
+		// (re-)anchors a node and drops any stale un-endorsed pins.
+		s.handleProvisionAnchor(evt)
 	}
 }
 
@@ -374,6 +378,13 @@ func (s *Sim) handleGenerateMessage(evt *C.sim_event_t) {
 
 func (s *Sim) handleGenerateAttestation(evt *C.sim_event_t) {
 	handleGenerateAttestation(evt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics)
+}
+
+// handleProvisionAnchor (trust-anchor campaign P2 red-team): a scripted runtime
+// setAnchor. Re-anchors the node to the fleet test anchor via the real
+// identity_store_set_anchor, dropping any stale pins it held while un-anchored.
+func (s *Sim) handleProvisionAnchor(evt *C.sim_event_t) {
+	C.bridge_handle_provision_anchor(evt, &s.nodes)
 }
 
 // handleFloodRelay fires a jittered channel-flood relay (Task 5): see
@@ -617,6 +628,11 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// endorsed-only gate.
 	unendorsed := loadUnendorsedNodeIDs(scenarioPath)
 
+	// Trust-anchor campaign (P2 red-team): optional per-node "unanchored" field.
+	// Defaults to anchored (the harness default); a marked node boots un-anchored
+	// and TOFU-pins until a provision_anchor event hardens it.
+	unanchored := loadUnanchoredNodeIDs(scenarioPath)
+
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
 	for i := 0; i < count; i++ {
@@ -654,6 +670,17 @@ func (s *Sim) cmdLoad(cmd Command) {
 			nodeSetEndorsed(i, false)
 			s.emitJSON(map[string]interface{}{
 				"type": "node_unendorsed", "timestamp_us": 0,
+				"node": C.GoString(&node.id[0]),
+			})
+		}
+
+		// Trust-anchor campaign (P2 red-team): apply the unanchored override
+		// AFTER join (join anchors the node to the fleet anchor). An unanchored
+		// node TOFU-pins until a provision_anchor event hardens it.
+		if unanchored[C.GoString(&node.id[0])] {
+			nodeSetAnchored(i, false)
+			s.emitJSON(map[string]interface{}{
+				"type": "node_unanchored", "timestamp_us": 0,
 				"node": C.GoString(&node.id[0]),
 			})
 		}
