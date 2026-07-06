@@ -107,19 +107,6 @@ identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
     return IDENTITY_PIN_NEW;
 }
 
-/* Push a rejected address into the negative-intel FIFO (trust-anchor P3a).
- * De-duplicates against the WHOLE ring, not just the head: a Sybil replaying
- * its rejected attestation on the boot+15min cadence (or two Sybils
- * alternating) must not collapse the 16-slot ring to one or two addresses and
- * evict other nodes' negative intel. A 16-entry linear scan per rejection is
- * negligible and only runs on the rejection path. */
-static void reject_ring_push(identity_store_t* s, uint32_t address) {
-    if (identity_store_addr_rejected(s, address))
-        return;
-    s->reject_ring[s->reject_ring_head] = address;
-    s->reject_ring_head = (uint8_t)((s->reject_ring_head + 1u) % IDENTITY_REJECT_RING);
-}
-
 identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
                                                         const bramble_identity_attestation_t* att,
                                                         uint32_t self_addr, uint32_t now_ms,
@@ -169,13 +156,6 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
          * an unendorsed identity. */
         if (att->not_after == IDENTITY_ENDORSEMENT_NOT_AFTER_NONE) {
             s->unendorsed++;
-            /* Negative intel (P3a): we have now SEEN this address attest and
-             * reveal itself as not-endorsed. Record it so it can never ride the
-             * bootstrap grace as an established-but-unpinned quorum source. Only
-             * the endorsement verdicts (UNENDORSED/EXPIRED) are recorded; the
-             * pre-endorsement failures (BAD_SIG/ADDR_MISMATCH) above are not,
-             * since they are not evidence about endorsement status. */
-            reject_ring_push(s, att->src_addr);
             return IDENTITY_PIN_UNENDORSED;
         }
         /* (b) the anchor's signature must vouch for THIS frame's ed25519_pub
@@ -185,7 +165,6 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
         if (!identity_endorsement_verify(s->anchor_pub, att->ed25519_pub, att->not_after,
                                          att->endorsement_sig)) {
             s->unendorsed++;
-            reject_ring_push(s, att->src_addr); /* negative intel (see above) */
             return IDENTITY_PIN_UNENDORSED;
         }
         /* (c) expiry: a non-permanent cert is expired once the SYNCED wall
@@ -199,7 +178,6 @@ identity_pin_result_t identity_store_handle_attestation(identity_store_t* s,
         if (att->not_after != IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT && epoch_ms != 0 &&
             epoch_ms > att->not_after) {
             s->expired++;
-            reject_ring_push(s, att->src_addr); /* negative intel (see above) */
             return IDENTITY_PIN_EXPIRED;
         }
     }
@@ -222,7 +200,7 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
     if (identity_store_lookup(s, address) != NULL)
         return true; /* pinned: always eligible (subject to tenure) */
     /* Unpinned: eligible ONLY inside the bounded per-boot grace, and P3a
-     * tightens that fallback with two further conditions so the residual
+     * tightens that fallback with the count early-exit so the residual
      * unpinned-trust window is as small as possible:
      *   (1) within QUORUM_BOOTSTRAP_GRACE_MS of boot -- the time backstop, so a
      *       fresh mesh can bootstrap timesync before any attestation is pinned;
@@ -231,28 +209,15 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
      *       is no longer needed, so the gate tightens to pinned-only the instant
      *       enough pins exist, typically well before the time bound. This is
      *       anchor-INDEPENDENT (it applies to no-anchor TOFU meshes too, a
-     *       deliberate strict improvement to the #131 grace: see the header);
-     *   (3) this address is NOT in the reject ring -- negative intel: a
-     *       self-revealing Sybil that attested and was refused for a failed
-     *       endorsement is known not-endorsed and never rides the grace. (A
-     *       SILENT Sybil that never attests is not in the ring and can still
-     *       ride the bounded grace: an inherent, documented residual.)
+     *       deliberate strict improvement to the #131 grace: see the header).
      * The subtraction is uint32 wraparound-safe, the same now_ms idiom used for
-     * LRU age above. */
+     * LRU age above. (A negative-intel reject ring was considered and dropped;
+     * see QUORUM_GRACE_MIN_PINS for why.) */
     if ((uint32_t)(now_ms - s->boot_ms) < QUORUM_BOOTSTRAP_GRACE_MS &&
-        identity_store_count(s) < (int)QUORUM_GRACE_MIN_PINS &&
-        !identity_store_addr_rejected(s, address))
+        identity_store_count(s) < (int)QUORUM_GRACE_MIN_PINS)
         return true;
-    /* After the grace, once enough pins corroborate, or for a known-rejected
-     * address: an unpinned peer NEVER corroborates. */
-    return false;
-}
-
-bool identity_store_addr_rejected(const identity_store_t* s, uint32_t address) {
-    for (int i = 0; i < IDENTITY_REJECT_RING; i++) {
-        if (s->reject_ring[i] == address)
-            return true;
-    }
+    /* After the grace or once enough pins corroborate: an unpinned peer NEVER
+     * corroborates. */
     return false;
 }
 
