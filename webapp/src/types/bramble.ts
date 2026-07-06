@@ -388,6 +388,7 @@ export interface AppState {
   trafficDebugStatus: TrafficDebugStatus | null;
   trafficEvents: TrafficEvent[];
   networkKeyStatus: NetworkKeyStatus | null;
+  anchorStatus: AnchorStatus | null;
 }
 
 /**
@@ -400,4 +401,29 @@ export interface AppState {
 export interface NetworkKeyStatus {
   provisioned: boolean;
   fingerprint: string;
+}
+
+/**
+ * Trust-anchor provisioning status of a node, from bramble.getAnchorStatus.
+ * `anchored` is whether the node pins to a fleet anchor at all; the fingerprint
+ * (SHA256(anchor_pub)[0:4], 8 hex) is present only when anchored so an operator
+ * can confirm the whole fleet points at the same anchor. `endorsed` reports
+ * whether THIS node holds a cert that verifies against the CURRENT anchor.
+ */
+export interface AnchorStatus {
+  anchored: boolean;
+  anchor_fingerprint?: string;
+  endorsed: boolean;
+}
+
+/**
+ * A node's identity as returned raw by bramble.getIdentity, used by the anchor
+ * enrollment flow. Distinct from NodeIdentity (the normalized display shape):
+ * these are the on-the-wire hex fields, and ed25519_pub (64 hex) is the key the
+ * operator endorses. address / pubkey_hash are hex strings.
+ */
+export interface NodeIdentityWire {
+  address: string;
+  pubkey_hash: string;
+  ed25519_pub: string;
 }

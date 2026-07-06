@@ -416,6 +416,20 @@ dm_session_t* dm_lookup(dm_table_t* t, uint32_t peer_addr) {
     return NULL;
 }
 
+bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr) {
+    dm_session_t* s = dm_lookup(t, peer_addr);
+    if (!s)
+        return false;
+    memset(s, 0, sizeof(*s)); /* state -> DM_STATE_NONE, key + peer_id_pub wiped */
+    return true;
+}
+
+bool dm_pin_disagrees(const dm_session_t* s, const uint8_t pinned_x25519[32]) {
+    /* Only an ESTABLISHED session is authoritative to compare against; a
+     * public-key compare (peer_id_pub is not secret), so memcmp is fine. */
+    return s->state == DM_STATE_ACTIVE && memcmp(s->peer_id_pub, pinned_x25519, 32) != 0;
+}
+
 dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
     /* Reuse an existing slot for this peer: not a new handshake, so no cap
      * check. The slot's existing state already counts toward the cap if it

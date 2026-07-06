@@ -253,6 +253,20 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                 event.data.node.x = 1.0f;
             }
 
+        } else if (strcmp(type, "provision_anchor") == 0) {
+            /* Trust-anchor campaign (P2 red-team): runtime anchor provisioning,
+             * the sim analog of an operator running bramble.setAnchor mid-life.
+             * "node" is (re-)anchored to the fleet test anchor; if it was
+             * un-anchored ("unanchored": true at boot) its stale TOFU pins are
+             * dropped by identity_store_set_anchor. */
+            event.type = EVT_PROVISION_ANCHOR;
+            cJSON* node_id = cJSON_GetObjectItem(evt_json, "node");
+            if (!cJSON_IsString(node_id))
+                return false;
+            if (!node_array_find_by_id(nodes, node_id->valuestring))
+                return false;
+            strncpy(event.data.node.node_id, node_id->valuestring, NODE_ID_LEN - 1);
+
         } else if (strcmp(type, "move_node") == 0) {
             event.type = EVT_NODE_MOVE;
             cJSON* node_id = cJSON_GetObjectItem(evt_json, "node");

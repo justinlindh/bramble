@@ -30,6 +30,13 @@ typedef enum {
      * the node's own address; a nonzero different address models a keyed
      * insider impersonating another node, the conflict-detection case). */
     EVT_GENERATE_ATTESTATION,
+    /* Trust-anchor campaign (P2 red-team): a scripted runtime anchor
+     * provisioning ("provision_anchor" scenario event), the sim analog of an
+     * operator running bramble.setAnchor mid-life to harden an un-anchored
+     * fleet. data.node.node_id is the node being (re-)anchored to the fleet
+     * test anchor; the drop-stale-pins behavior of identity_store_set_anchor is
+     * what the event exercises. */
+    EVT_PROVISION_ANCHOR,
 } event_type_t;
 
 /* Packet event data */

@@ -12,7 +12,9 @@
  *
  * This file pins the MAC's exact coverage:
  *   src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64)
- *                   || seq(6)
+ *                   || not_after(8, BE) || endorsement_sig(64) || seq(6)
+ * (the trust-anchor campaign P1 extended the coverage to include the inline
+ * endorsement cert, so a keyless outsider cannot flip cert bits in flight)
  * and its exact EXCLUSION of the header (hop_limit is relay-mutable; a
  * relay decrements it and passes the frame through otherwise UNMODIFIED,
  * so the MAC must survive the hop unchanged). Every tamper test is
@@ -51,6 +53,12 @@ static void make_signed_attestation(bramble_identity_attestation_t* p, uint8_t s
     p->src_addr = 0xAABBCCDDu;
     for (int i = 0; i < 32; i++)
         p->x25519_pub[i] = (uint8_t)(0x40 + i);
+    /* Non-zero endorsement cert so the coverage tamper tests are non-vacuous
+     * (flipping a bit of an all-zero field pattern would still be a real
+     * change, but a genuine-looking cert models the on-wire case). */
+    p->not_after = 0x00000190A1B2C3D4ULL; /* plausible ms epoch, not the sentinel */
+    for (int i = 0; i < 64; i++)
+        p->endorsement_sig[i] = (uint8_t)(0x20 + i);
     TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair(p->ed25519_pub, sk));
 
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
@@ -107,6 +115,13 @@ static void mutate_ed25519(bramble_identity_attestation_t* p) { p->ed25519_pub[0
 static void mutate_sig(bramble_identity_attestation_t* p) { p->sig[63] ^= 0x01; }
 static void mutate_seq(bramble_identity_attestation_t* p) { p->seq[5] ^= 0x01; }
 static void mutate_mac(bramble_identity_attestation_t* p) { p->auth_hmac[0] ^= 0x01; }
+/* Cert coverage (P1): the MAC must bind the inline endorsement cert so a
+ * keyless in-flight attacker cannot flip cert bits (that would let it spray
+ * UNENDORSED rejections once P2 acts on the cert). */
+static void mutate_not_after(bramble_identity_attestation_t* p) { p->not_after ^= 1ULL; }
+static void mutate_endorsement_sig(bramble_identity_attestation_t* p) {
+    p->endorsement_sig[63] ^= 0x01;
+}
 
 static void test_tampered_src_addr_fails(void) { tamper_and_expect_fail(mutate_src_addr); }
 static void test_tampered_x25519_fails(void) { tamper_and_expect_fail(mutate_x25519); }
@@ -114,6 +129,10 @@ static void test_tampered_ed25519_fails(void) { tamper_and_expect_fail(mutate_ed
 static void test_tampered_sig_fails(void) { tamper_and_expect_fail(mutate_sig); }
 static void test_tampered_seq_fails(void) { tamper_and_expect_fail(mutate_seq); }
 static void test_tampered_mac_fails(void) { tamper_and_expect_fail(mutate_mac); }
+static void test_tampered_not_after_fails(void) { tamper_and_expect_fail(mutate_not_after); }
+static void test_tampered_endorsement_sig_fails(void) {
+    tamper_and_expect_fail(mutate_endorsement_sig);
+}
 
 /* Header exclusion: every header field a relay or the packet layer touches
  * (hop_limit decrement, per-send packet_id, flags, dest) mutates WITHOUT
@@ -161,6 +180,8 @@ int main(void) {
     RUN_TEST(test_tampered_sig_fails);
     RUN_TEST(test_tampered_seq_fails);
     RUN_TEST(test_tampered_mac_fails);
+    RUN_TEST(test_tampered_not_after_fails);
+    RUN_TEST(test_tampered_endorsement_sig_fails);
     RUN_TEST(test_header_fields_excluded_from_mac);
     RUN_TEST(test_wrong_network_key_fails);
     return UNITY_END();

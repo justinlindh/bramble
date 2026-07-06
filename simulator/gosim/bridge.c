@@ -9,6 +9,7 @@
 #include "../../components/crypto/include/crypto.h"
 #include "../../components/routing_auth/include/routing_auth.h"
 #include "../../components/network_key/include/network_key.h"
+#include "../../components/identity/include/identity.h"
 /* Note: mailbox.h, location.h,
  * channel_key.h, public_channel.h are all pulled in transitively via
  * bridge.h (Phase 6 headers). */
@@ -83,6 +84,10 @@ void bridge_node_ext_init_all(void) {
         /* Mandatory-provisioning (Task 2): every node is provisioned by default
          * (fleet shares bridge_init's default key); a scenario opts a node out. */
         g_node_ext[i].provisioned = true;
+        /* Trust-anchor campaign (P2): every node is endorsed by default (the
+         * fixed test anchor vouches for the whole fleet), so existing scenarios
+         * still pin under the endorsed-only gate; a scenario opts a node out. */
+        g_node_ext[i].endorsed = true;
     }
 }
 
@@ -99,10 +104,47 @@ static const uint8_t BRIDGE_DEFAULT_NET_KEY[32] = {
     0x51, 0x4d, 0x2a, 0x9e, 0x0c, 0xb7, 0x63, 0xf8, 0x11, 0xa4, 0xd0, 0x3c, 0x77, 0x8b, 0x2e, 0x59,
     0x40, 0x96, 0xe1, 0x1f, 0xcd, 0x84, 0x6a, 0x22, 0xb3, 0x5e, 0x08, 0xf7, 0x9c, 0x30, 0xab, 0x67};
 
+/*
+ * Trust-anchor campaign (P2): the sim fleet's fixed test anchor. bridge_init
+ * expands this seed (RFC 8032) into the anchor keypair; the PUBLIC key is set
+ * on every node's pin store (so nodes pin endorsed-only), and the PRIVATE key
+ * signs each endorsed node's cert host-side (the offline anchor holder's job;
+ * the device never signs endorsements). Fixed + distinct from the KAT anchor
+ * so runs are deterministic.
+ */
+static const uint8_t BRIDGE_TEST_ANCHOR_SEED[32] = {
+    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+    0x0f, 0x1e, 0x2d, 0x3c, 0x4b, 0x5a, 0x69, 0x78, 0x87, 0x96, 0xa5, 0xb4, 0xc3, 0xd2, 0xe1, 0xf0};
+static uint8_t g_bridge_anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+static uint8_t g_bridge_anchor_priv[BRAMBLE_ED25519_SECKEY_SIZE];
+
 void bridge_node_set_provisioned(int node_idx, bool provisioned) {
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
     if (ext)
         ext->provisioned = provisioned;
+}
+
+void bridge_node_set_endorsed(int node_idx, bool endorsed) {
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (ext)
+        ext->endorsed = endorsed;
+}
+
+/* Trust-anchor campaign (P2 red-team): force a node's pin store un-anchored
+ * (the "unanchored": true boot flag), undoing the join-time anchoring. The sim
+ * analog of a node deployed BEFORE the operator provisioned a fleet anchor: it
+ * pins on self-sig alone (TOFU) until a later provision_anchor event hardens
+ * it. Touches the store struct directly (bridge is test scaffolding); no pins
+ * exist yet at boot, so this only clears has_anchor. */
+void bridge_node_set_anchored(int node_idx, bool anchored) {
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+    if (anchored) {
+        identity_store_set_anchor(&ext->ident_pins, g_bridge_anchor_pub);
+    } else {
+        ext->ident_pins.has_anchor = false;
+    }
 }
 
 /* ─── Location sim helper: map (x,y) grid coords → pseudo lat/lon ─────── */
@@ -1363,9 +1405,11 @@ static void _handle_identity_attestation(sim_node_t* rx, const uint8_t* buf, uin
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
     if (ext) {
         /* Deliver locally regardless of the relay decision below: the one
-         * receive-side Ed25519 verify + TOFU pin (identity_store.h). */
+         * receive-side Ed25519 verify + TOFU pin (identity_store.h). epoch_ms=0:
+         * gosim does not model a synced wall clock, so cert expiry is not
+         * enforced (v1 certs are permanent anyway; see identity_store.h). */
         identity_pin_result_t pin =
-            identity_store_handle_attestation(&ext->ident_pins, &att, rx->addr, now_ms);
+            identity_store_handle_attestation(&ext->ident_pins, &att, rx->addr, now_ms, 0);
         if (pin == IDENTITY_PIN_NEW) {
             fprintf(stdout,
                     "{\"type\":\"identity_pinned\",\"timestamp_us\":%llu"
@@ -1393,6 +1437,16 @@ static void _handle_identity_attestation(sim_node_t* rx, const uint8_t* buf, uin
              * first contact, no pin required. */
             fprintf(stdout,
                     "{\"type\":\"identity_addr_mismatch\",\"timestamp_us\":%llu"
+                    ",\"node\":\"%s\",\"addr\":\"0x%08X\",\"ed8\":\"%02X%02X%02X%02X\"}\n",
+                    (unsigned long long)now_us, rx->id, att.src_addr, att.ed25519_pub[0],
+                    att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
+            fflush(stdout);
+        } else if (pin == IDENTITY_PIN_UNENDORSED) {
+            /* Trust-anchor gate (P2): this receiver is anchored and the
+             * attestation carried no valid fleet-anchor cert. NOT pinned; the
+             * frame is still relayed below (endorsement gates pinning only). */
+            fprintf(stdout,
+                    "{\"type\":\"identity_unendorsed\",\"timestamp_us\":%llu"
                     ",\"node\":\"%s\",\"addr\":\"0x%08X\",\"ed8\":\"%02X%02X%02X%02X\"}\n",
                     (unsigned long long)now_us, rx->id, att.src_addr, att.ed25519_pub[0],
                     att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
@@ -2082,6 +2136,24 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
     memcpy(att.x25519_pub, ext->ident_x25519_pub, 32);
     memcpy(att.ed25519_pub, src->ident_ed_pub, 32);
 
+    /* Trust-anchor campaign (P2): carry the fleet-anchor endorsement cert when
+     * this node is endorsed (the default). The offline anchor holder's job,
+     * done host-side: sign the P0 canonical endorsement message over this
+     * node's real Ed25519 key with not_after=PERMANENT using the test anchor
+     * private key. An unendorsed node leaves not_after=0 (no cert), so anchored
+     * receivers refuse to pin it. Firmware fills these fields from
+     * identity_endorsement_get; gosim signs per-node because the process-global
+     * cert store cannot hold a distinct cert per simulated node. */
+    if (ext->endorsed) {
+        uint8_t emsg[IDENTITY_ENDORSEMENT_MSG_SIZE];
+        if (identity_endorsement_msg(src->ident_ed_pub, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT,
+                                     emsg, sizeof(emsg)) == IDENTITY_ENDORSEMENT_MSG_SIZE &&
+            crypto_ed25519_sign(g_bridge_anchor_priv, emsg, sizeof(emsg), att.endorsement_sig) ==
+                0) {
+            att.not_after = IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT;
+        }
+    }
+
     uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
     if (bramble_identity_attestation_signed_msg(&att, msg, sizeof(msg)) != ESP_OK)
         return;
@@ -2123,6 +2195,35 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
     }
 }
 
+/* --- Runtime anchor provisioning (P2 red-team) --------------------------- */
+/*
+ * Scripted "provision_anchor" event: the sim analog of an operator running
+ * bramble.setAnchor mid-life to harden the fleet without a reboot. (Re-)anchors
+ * the named node to the fleet test anchor via the REAL identity_store_set_anchor
+ * -- so if the node was un-anchored ("unanchored": true) its stale TOFU pins are
+ * DROPPED, exactly like firmware's mesh_set_pin_anchor path. Emits how many pins
+ * were dropped so a scenario can assert the hardening actually purged them.
+ */
+void bridge_handle_provision_anchor(sim_event_t* event, node_array_t* nodes) {
+    sim_node_t* node = node_array_find_by_id(nodes, event->data.node.node_id);
+    if (!node)
+        return;
+    int node_idx = (int)(node - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+
+    int before = identity_store_count(&ext->ident_pins);
+    identity_store_set_anchor(&ext->ident_pins, g_bridge_anchor_pub);
+    int after = identity_store_count(&ext->ident_pins);
+
+    fprintf(stdout,
+            "{\"type\":\"anchor_provisioned\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"dropped_pins\":%d}\n",
+            (unsigned long long)event->timestamp_us, node->id, before - after);
+    fflush(stdout);
+}
+
 /* ─── Node join extended initializer ────────────────────────────────────── */
 void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, uint64_t now_us) {
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
@@ -2149,12 +2250,21 @@ void bridge_handle_node_join_ext(int node_idx, uint32_t addr, float x, float y, 
         }
         ext->ident_seq = 0;
         identity_store_init(&ext->ident_pins, now_ms);
+        /* Trust-anchor campaign (P2): every node is ANCHORED to the fixed test
+         * anchor, so it pins ONLY endorsed identities (bridge_init endorses the
+         * whole fleet by default, so scenarios still mesh). This is the sim
+         * analog of a firmware node that loaded a provisioned anchor at boot. */
+        identity_store_set_anchor(&ext->ident_pins, g_bridge_anchor_pub);
         ext->ident_initialized = true;
         /* Mandatory-provisioning (Task 2): a freshly joined node holds the
          * fleet key by default. A scenario opts a node out via
          * bridge_node_set_provisioned(idx, false) AFTER this join. Kept in the
          * first-init guard so a rejoin preserves an intentionally-inert node. */
         ext->provisioned = true;
+        /* Trust-anchor campaign (P2): endorsed by default; a scenario opts a
+         * node out via bridge_node_set_endorsed(idx, false) AFTER this join.
+         * In the first-init guard so a rejoin preserves the setting. */
+        ext->endorsed = true;
     }
 
     fprintf(stdout,
@@ -2200,6 +2310,16 @@ void bridge_init(void) {
      * exactly as a provisioned firmware node would. Without this every sim
      * node would be inert and no scenario would mesh. */
     network_key_set_provisioned(BRIDGE_DEFAULT_NET_KEY);
+
+    /* Trust-anchor campaign (P2): expand the fixed test anchor seed into the
+     * fleet anchor keypair BEFORE any node joins (join sets it on the pin store
+     * and attestation TX signs the per-node cert with it). identity_anchor_set
+     * records the PUBLIC key in the process-global module memory too, mirroring
+     * a provisioned firmware node (harmless; the pin gate reads the per-node
+     * store's copy, set at join). */
+    crypto_ed25519_keypair_from_seed(BRIDGE_TEST_ANCHOR_SEED, g_bridge_anchor_pub,
+                                     g_bridge_anchor_priv);
+    identity_anchor_set(g_bridge_anchor_pub);
 
     /* Phase 6: Initialize all per-node extended state */
     bridge_node_ext_init_all();

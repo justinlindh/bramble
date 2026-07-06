@@ -902,6 +902,93 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetNetworkKeyStatusResponse'
 
+  /rpc/bramble.setAnchor:
+    post:
+      operationId: setAnchor
+      summary: Provision the fleet trust-anchor public key
+      description: >
+        Provisions the fleet trust anchor's Ed25519 PUBLIC key (trust-anchor
+        campaign, P0). The anchor holder is an offline operator client that
+        endorses each node's identity key; the device only ever holds the
+        anchor public key, never the private key, and never signs
+        endorsements. Pass the raw 32-byte public key as 64 hex characters.
+        Persisted to NVS. Authenticated callers only. P0 is inert: nothing
+        reads the anchor for a trust decision yet (later phases pin
+        endorsed-only identities).
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAnchorParams'
+      responses:
+        '400':
+          description: Bad request (anchor_pubkey not 64 hex characters)
+        '200':
+          description: Anchor public key provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
+  /rpc/bramble.getAnchorStatus:
+    post:
+      operationId: getAnchorStatus
+      summary: Report trust-anchor provisioning status
+      description: >
+        Returns whether a fleet trust anchor is provisioned and, when it is, a
+        one-way fingerprint (SHA256(anchor_pub)[0:4] as 8 lowercase hex) so an
+        operator can confirm a fleet shares one anchor without the key being
+        echoed. The anchor_fingerprint field is present only when anchored.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Anchor status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAnchorStatusResponse'
+
+  /rpc/bramble.setEndorsement:
+    post:
+      operationId: setEndorsement
+      summary: Provision this node's own endorsement certificate
+      description: >
+        Provisions THIS node's own endorsement certificate (trust-anchor
+        campaign, P1): the fleet anchor's Ed25519 signature vouching for this
+        node's identity key, bound to a validity window. The device never
+        SIGNS an endorsement; it only accepts one the anchor already signed,
+        and verifies it against this node's own identity key and the
+        provisioned anchor before persisting. Rejected when no anchor is
+        provisioned, when not_after is 0 (the "no cert" sentinel), when either
+        field is malformed, or when the signature does not verify. On success
+        the cert is persisted to NVS and a fresh attestation is triggered so
+        the fleet learns the cert promptly. Authenticated callers only.
+      tags: [config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetEndorsementParams'
+      responses:
+        '400':
+          description: >
+            Bad request (no anchor provisioned, not_after 0, malformed
+            not_after/endorsement_sig, or signature verification failed)
+        '200':
+          description: Endorsement certificate provisioned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
   /rpc/bramble.setAllowedOrigins:
     post:
       operationId: setAllowedOrigins
@@ -1567,6 +1654,8 @@ components:
         - identity_conflicts
         - identity_sig_failures
         - identity_addr_mismatches
+        - identity_unendorsed
+        - identity_expired
       properties:
         address:
           type: string
@@ -1638,6 +1727,19 @@ components:
             Delivered identity attestations refused because their source
             address did not derive from their own Ed25519 key (address
             impersonation attempts; rejected even on first contact).
+        identity_unendorsed:
+          type: integer
+          description: >-
+            Trust-anchor campaign (P2): delivered identity attestations refused
+            on an anchored node because they carried no valid fleet-anchor
+            endorsement cert. Always 0 on a node with no anchor provisioned.
+        identity_expired:
+          type: integer
+          description: >-
+            Trust-anchor campaign (P2): delivered identity attestations refused
+            on an anchored node because their endorsement cert had expired
+            against the synced wall clock. Always 0 on a node with no anchor
+            provisioned (and for v1 permanent certs).
 
     WifiStatusResponse:
       type: object
@@ -1733,7 +1835,7 @@ components:
     IdentityResponse:
       type: object
       description: Node identity information.
-      required: [address, pubkey_hash]
+      required: [address, pubkey_hash, ed25519_pub]
       properties:
         address:
           type: string
@@ -1741,6 +1843,13 @@ components:
         pubkey_hash:
           type: string
           description: Public key hash as hex string.
+        ed25519_pub:
+          type: string
+          description: >
+            The full identity Ed25519 public key as 64 lowercase hex
+            characters. Enrollment uses this to request a trust-anchor
+            endorsement (address/pubkey_hash are only truncated hashes).
+          pattern: '^[0-9a-f]{64}$'
 
     VersionResponse:
       type: object
@@ -2666,6 +2775,62 @@ components:
             SHA256(network_key)[0:4] as 8 lowercase hex characters, matching
             bramble.getNetworkKeyStatus on every node provisioned with this key.
           pattern: '^[0-9a-f]{8}$'
+
+    SetAnchorParams:
+      type: object
+      description: Parameters for bramble.setAnchor.
+      required: [anchor_pubkey]
+      properties:
+        anchor_pubkey:
+          type: string
+          description: >
+            The fleet trust anchor's raw 32-byte Ed25519 public key as exactly
+            64 hex characters (case-insensitive).
+          pattern: '^[0-9a-fA-F]{64}$'
+
+    GetAnchorStatusResponse:
+      type: object
+      description: Response from bramble.getAnchorStatus.
+      required: [anchored, endorsed]
+      properties:
+        anchored:
+          type: boolean
+          description: True when a fleet trust anchor public key is provisioned.
+        anchor_fingerprint:
+          type: string
+          description: >
+            SHA256(anchor_pub)[0:4] as 8 lowercase hex characters. Present only
+            when anchored; matches across nodes that share an anchor and never
+            reveals the key.
+          pattern: '^[0-9a-f]{8}$'
+        endorsed:
+          type: boolean
+          description: >
+            True when this node holds its own endorsement certificate AND that
+            certificate still verifies against the currently provisioned anchor
+            and this node's identity key. Reports live enrollment state, so it
+            flips to false after an anchor rotation that invalidates the stored
+            cert (never true when anchored is false).
+
+    SetEndorsementParams:
+      type: object
+      description: Parameters for bramble.setEndorsement.
+      required: [not_after, endorsement_sig]
+      properties:
+        not_after:
+          type: string
+          description: >
+            Certificate validity bound as a big-endian uint64 in exactly 16 hex
+            characters (a hex string, NOT a JSON number: UINT64_MAX does not
+            survive JSON double precision). Milliseconds since the Unix epoch;
+            "ffffffffffffffff" means permanent. Must not be 0.
+          pattern: '^[0-9a-fA-F]{16}$'
+        endorsement_sig:
+          type: string
+          description: >
+            The anchor's raw 64-byte Ed25519 signature over this node's
+            identity key and not_after, as exactly 128 hex characters.
+          pattern: '^[0-9a-fA-F]{128}$'
 
     SetAllowedOriginsParams:
       type: object

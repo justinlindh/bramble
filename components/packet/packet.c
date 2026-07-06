@@ -18,6 +18,16 @@ static inline uint32_t get_be32(const uint8_t* buf) {
     return (uint32_t)buf[0] << 24 | (uint32_t)buf[1] << 16 | (uint32_t)buf[2] << 8 |
            (uint32_t)buf[3];
 }
+static inline void put_be64(uint8_t* buf, uint64_t v) {
+    for (int i = 0; i < 8; i++)
+        buf[i] = (uint8_t)(v >> (56 - 8 * i));
+}
+static inline uint64_t get_be64(const uint8_t* buf) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++)
+        v = (v << 8) | (uint64_t)buf[i];
+    return v;
+}
 
 /* Header */
 esp_err_t bramble_header_serialize(const bramble_header_t* h, uint8_t* buf, size_t len) {
@@ -390,7 +400,11 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
     return ESP_OK;
 }
 
-/* IDENTITY_ATTESTATION (158 bytes, fixed) */
+/* IDENTITY_ATTESTATION (230 bytes, fixed). Wire layout (offsets from B):
+ * src_addr(4) || x25519_pub(32) || ed25519_pub(32) || sig(64) ||
+ * not_after(8, BE) || endorsement_sig(64) || auth_hmac(8) || seq(6). The
+ * cert (not_after + endorsement_sig, P1) sits between the self-signature and
+ * the relay-gate MAC; adding it was a deliberate pre-alpha wire flag day. */
 esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestation_t* p,
                                                  uint8_t* buf, size_t len) {
     if (len < IDENTITY_ATTESTATION_SIZE)
@@ -402,14 +416,17 @@ esp_err_t bramble_identity_attestation_serialize(const bramble_identity_attestat
     memcpy(buf + B + 4, p->x25519_pub, 32);
     memcpy(buf + B + 36, p->ed25519_pub, 32);
     memcpy(buf + B + 68, p->sig, 64);
-    memcpy(buf + B + 132, p->auth_hmac, 8);
-    memcpy(buf + B + 140, p->seq, 6);
+    put_be64(buf + B + 132, p->not_after);
+    memcpy(buf + B + 140, p->endorsement_sig, 64);
+    memcpy(buf + B + 204, p->auth_hmac, 8);
+    memcpy(buf + B + 212, p->seq, 6);
     return ESP_OK;
 }
 esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_t* p,
                                                    const uint8_t* buf, size_t len) {
     /* Exact length: the frame is fixed-size, so a trailing-garbage frame is
-     * as malformed as a truncated one. */
+     * as malformed as a truncated one. The old 158-byte frame is rejected
+     * here (pre-alpha flag day, intended). */
     if (len != IDENTITY_ATTESTATION_SIZE)
         return ESP_ERR_INVALID_SIZE;
     esp_err_t r = bramble_header_deserialize(&p->header, buf, len);
@@ -419,8 +436,10 @@ esp_err_t bramble_identity_attestation_deserialize(bramble_identity_attestation_
     memcpy(p->x25519_pub, buf + B + 4, 32);
     memcpy(p->ed25519_pub, buf + B + 36, 32);
     memcpy(p->sig, buf + B + 68, 64);
-    memcpy(p->auth_hmac, buf + B + 132, 8);
-    memcpy(p->seq, buf + B + 140, 6);
+    p->not_after = get_be64(buf + B + 132);
+    memcpy(p->endorsement_sig, buf + B + 140, 64);
+    memcpy(p->auth_hmac, buf + B + 204, 8);
+    memcpy(p->seq, buf + B + 212, 6);
     return ESP_OK;
 }
 
