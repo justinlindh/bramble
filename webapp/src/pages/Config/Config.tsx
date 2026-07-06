@@ -70,7 +70,7 @@ export function Config() {
         <NetworkKeySection />
       </section>
 
-      {/* ── Trust Anchor ── */}
+      {/* -- Trust Anchor -- */}
       <section className={styles.section}>
         <h2><IconLock size={18} /> Trust Anchor</h2>
         <AnchorSection />
