@@ -811,10 +811,12 @@ Offset  Size  Field            Description
 16      32    x25519_pub       Node's X25519 DM public key
 48      32    ed25519_pub      Node's Ed25519 identity public key
 80      64    sig              Ed25519 signature over the canonical message
-144     8     auth_hmac        Network-key relay-gate MAC ("bramble-ident-relay-v1")
-152     6     seq              48-bit origin sequence, big-endian
+144     8     not_after        Endorsement cert validity bound (ms epoch, big-endian; 0 = no cert)
+152     64    endorsement_sig  Anchor's Ed25519 signature over the endorsement message
+216     8     auth_hmac        Network-key relay-gate MAC ("bramble-ident-relay-v1")
+224     6     seq              48-bit origin sequence, big-endian
 ----------------------------------------------------------
-Total: 158 bytes
+Total: 230 bytes
 ```
 
 **Canonical signed bytes** (84 bytes, built identically by signer and
@@ -829,9 +831,16 @@ verifier via `bramble_identity_attestation_signed_msg`):
 truth: self-authenticating against the frame's own embedded `ed25519_pub`,
 checkable by any receiver with no shared secret. `auth_hmac` gates RELAY
 privilege only: relays verify this cheap network-key MAC (covering
-`src_addr || x25519_pub || ed25519_pub || sig || seq`, NOT the
-relay-mutable header) and never run the Ed25519 verify; a keyless outsider
-can neither get a frame flooded nor grind relays with signature checks.
+`src_addr || x25519_pub || ed25519_pub || sig || not_after ||
+endorsement_sig || seq`, NOT the relay-mutable header) and never run the
+Ed25519 verify; a keyless outsider can neither get a frame flooded nor grind
+relays with signature checks. The MAC's coverage of the cert bytes
+(`not_after || endorsement_sig`) is the ONLY authenticator binding the
+endorsement in flight: the cert is the anchor's signature, not the node's
+self-signature, so without MAC coverage a keyless outsider could flip cert
+bits on a relayed frame and spray spurious UNENDORSED rejections. (A KEYED
+insider can still strip or graft the cert and re-MAC; that trust-DoS is
+inherent to shared-key relay, see `docs/SECURITY-MODEL.md`.)
 `seq` is drawn once at origination from the node's control-plane counter
 and replay-checked (src-scoped) by receivers after the MAC verifies.
 
@@ -847,15 +856,45 @@ verifies `sig` and TOFU-pins the first verified `{address -> ed25519_pub,
 x25519_pub}` binding (RAM-only, 32 entries). A re-attestation with
 identical keys refreshes the pin; different keys for a pinned address are
 a refused, counted CONFLICT (reachable post-rebind via an X25519 rotation
-under the same Ed key, or a 2^32-work address-colliding Ed key). Pinned
-identities gate the timesync corroboration quorum and DM key continuity
-(`docs/SECURITY-MODEL.md`).
+under the same Ed key, or a 2^32-work address-colliding Ed key). On an
+ANCHORED receiver the endorsement gate runs BEFORE the pin: the cert
+(`not_after || endorsement_sig`) must verify against the fleet anchor's key
+for this exact `ed25519_pub`, else the frame is refused UNENDORSED (no cert /
+`not_after == 0` / wrong-anchor / grafted) or EXPIRED, and still relayed but
+not pinned. A node with no anchor ignores the cert fields entirely and keeps
+pure TOFU semantics. Pinned identities gate the timesync corroboration quorum
+and DM key continuity, and a disagreeing pin tears down a stale TOFU DM
+session (`docs/SECURITY-MODEL.md`).
 
-**Airtime.** The frame grew 144 -> 158 bytes when the Phase 3 relay gate
-added `auth_hmac + seq`. At the 15-minute cadence one attestation costs a
-node roughly 0.02-0.05% duty cycle (SF/BW dependent), negligible against
-the 10% regulatory budget and debited from the same broadcast tier as all
-flooded traffic.
+**Endorsement cert.** The `not_after || endorsement_sig` pair is the fleet
+anchor's offline endorsement of this node's identity key. `endorsement_sig`
+is the anchor's Ed25519 signature over the canonical 58-byte message
+
+```
+"bramble-endorse-v1" (18 bytes, no NUL) || node_ed25519_pub (32)
+    || not_after (8, big-endian, ms epoch)
+```
+
+built identically by signer and verifier
+(`identity_endorsement_msg`/`identity_endorsement_verify` in
+`components/identity`). The anchor is an OFFLINE fleet key (never on the
+mesh); operators enroll a node by signing its `ed25519_pub`, and an anchored
+receiver pins ONLY identities carrying a cert that verifies against its
+configured anchor key. `not_after` is the cert's validity bound: v1 always
+issues PERMANENT certs (`not_after == UINT64_MAX`), and a node with no cert
+transmits `not_after == 0`, which an anchored receiver treats as UNENDORSED.
+An anchored receiver enforces expiry only against a confident synced wall
+clock (unsynced = do-not-enforce); the check is implemented but inert while
+all certs are permanent.
+
+**Airtime.** The frame grew 158 -> 230 bytes when the trust-anchor campaign
+(P1) added the inline endorsement cert (`not_after + endorsement_sig`, 72
+bytes) between the self-signature and the relay-gate MAC; it had previously
+grown 144 -> 158 when the Phase 3 relay gate added `auth_hmac + seq`. At the
+15-minute cadence one 230-byte attestation costs a node roughly 0.236% duty
+cycle on LONG_RANGE (SF10/125 kHz) and roughly 0.0202% on MEDIUM (SF7/250
+kHz), negligible against the 10% regulatory budget and debited from the same
+broadcast tier as all flooded traffic.
 
 ## 5. Node Identity & Key Management
 
