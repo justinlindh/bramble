@@ -730,108 +730,57 @@ static void test_quorum_early_exit_pins_tighten_gate_no_anchor(void) {
 }
 
 /* LIVENESS, the critical non-brick proof (deliverable 3): a FRESH ANCHORED
- * mesh (zero pins, within grace, count < threshold, address never rejected)
- * must still let an established unpinned peer corroborate, or an anchored
- * fleet could never bootstrap timesync from cold. Asserted at boot and just
- * before the grace boundary. Non-vacuous against the reject-ring test below,
- * which shows the SAME conditions bar an address that DID attest-and-fail. */
+ * mesh (zero pins, within grace, count < threshold) must still let an
+ * established unpinned peer corroborate, or an anchored fleet could never
+ * bootstrap timesync from cold. Asserted at boot and just before the grace
+ * boundary. This is the accepted residual made safe: the bounded window admits
+ * an unpinned peer, which is exactly what lets a cold mesh converge. */
 static void test_quorum_fresh_anchored_mesh_bootstraps_liveness(void) {
     identity_store_init(&s_store, QBOOT);
     uint8_t anchor_sk[64];
     anchor_store(&s_store, anchor_sk);
     TEST_ASSERT_EQUAL(0, identity_store_count(&s_store)); /* zero endorsed pins yet */
 
-    /* Established, unpinned, never-rejected peer -> eligible (grace open). */
+    /* Established, unpinned peer -> eligible (grace open). */
     TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true, QBOOT));
     TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xA1u, true,
                                                     QBOOT + QUORUM_BOOTSTRAP_GRACE_MS - 1u));
 }
 
-/* NEGATIVE-INTEL (deliverable 2), the reject-ring payoff: an anchored node
- * still INSIDE its grace with FEWER than the pin floor sees a Sybil attest
- * WITHOUT a valid endorsement. That reveals the Sybil as not-endorsed, so it
- * is recorded and must never ride the grace, even though the time window is
- * open and the pin count is below the early-exit floor. Isolates the ring:
- * zero pins (early-exit does NOT fire) and now_ms within the window (time does
- * NOT exclude). */
-static void test_quorum_reject_ring_bars_unendorsed_in_grace(void) {
+/* EARLY-EXIT on an ANCHORED mesh (deliverable 3 sub-case c): install
+ * QUORUM_GRACE_MIN_PINS ENDORSED pins, then an established but unpinned peer
+ * INSIDE the time window is NOT eligible -- the count early-exit has tightened
+ * the gate to pinned-only. Complements the no-anchor early-exit test above:
+ * the tightening is anchor-independent, proven here through the endorsement
+ * gate (real endorsed pins), not raw TOFU pins. */
+static void test_quorum_early_exit_anchored_endorsed_pins(void) {
     identity_store_init(&s_store, QBOOT);
     uint8_t anchor_sk[64];
     anchor_store(&s_store, anchor_sk);
     const uint32_t in_grace = QBOOT + 1000u;
 
-    bramble_identity_attestation_t att;
-    uint8_t ed[32], sk[64];
-    uint32_t sybil = make_signed_attestation(&att, 0, ed, sk, 0x40); /* no cert */
+    /* Below the floor (zero pins): the unpinned fallback is open. */
+    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
 
-    /* Control: BEFORE it attests, the Sybil's address is grace-eligible (zero
-     * pins, within window) -- proves the exclusion below comes from the ring. */
-    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, sybil, true, in_grace));
+    /* Install exactly QUORUM_GRACE_MIN_PINS endorsed pins through the full gate. */
+    for (uint32_t i = 0; i < QUORUM_GRACE_MIN_PINS; i++) {
+        bramble_identity_attestation_t att;
+        uint8_t ed[32], sk[64];
+        make_signed_attestation(&att, 0, ed, sk, (uint8_t)(0x40 + i));
+        endorse_into(&att, anchor_sk, ed, IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT);
+        TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_handle_attestation(
+                                                &s_store, &att, SELF_ADDR, in_grace, 0));
+    }
+    TEST_ASSERT_EQUAL((int)QUORUM_GRACE_MIN_PINS, identity_store_count(&s_store));
 
-    /* The Sybil attests and is refused for a missing endorsement: recorded. */
-    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, in_grace, 0));
-    TEST_ASSERT_TRUE(identity_store_addr_rejected(&s_store, sybil));
-    TEST_ASSERT_EQUAL(0, identity_store_count(&s_store)); /* still zero pins */
-
-    /* Now barred from the grace despite the window still being open and the
-     * pin count still below the early-exit floor. */
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, sybil, true, in_grace));
-
-    /* A DIFFERENT, never-attested address in the same conditions is still
-     * eligible: the bar is targeted, not a blanket grace close. */
-    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, sybil ^ 0x5u, true, in_grace));
-}
-
-/* An EXPIRED verdict is negative intel too: a cert that verified but is past
- * its not_after proves the peer is not currently endorsed, so its address is
- * ringed and barred from the grace. */
-static void test_quorum_reject_ring_records_expired(void) {
-    identity_store_init(&s_store, QBOOT);
-    uint8_t anchor_sk[64];
-    anchor_store(&s_store, anchor_sk);
-    const uint32_t in_grace = QBOOT + 1000u;
-    const uint64_t not_after = 1000000ull;
-
-    bramble_identity_attestation_t att;
-    uint8_t ed[32], sk[64];
-    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
-    endorse_into(&att, anchor_sk, ed, not_after);
-
-    /* Synced clock past not_after -> EXPIRED, recorded. */
-    TEST_ASSERT_EQUAL(
-        IDENTITY_PIN_EXPIRED,
-        identity_store_handle_attestation(&s_store, &att, SELF_ADDR, in_grace, not_after + 1));
-    TEST_ASSERT_TRUE(identity_store_addr_rejected(&s_store, addr));
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, addr, true, in_grace));
-}
-
-/* A pre-endorsement failure (BAD_SIG / ADDR_MISMATCH) is NOT negative intel
- * about endorsement and must NOT be ringed (scope: endorsement verdicts only).
- * A bad-sig peer that later sends a VALID endorsed attestation must still be
- * able to pin and corroborate; ringing it here would wrongly bar it. */
-static void test_quorum_reject_ring_ignores_pre_endorsement_failures(void) {
-    identity_store_init(&s_store, QBOOT);
-    uint8_t anchor_sk[64];
-    anchor_store(&s_store, anchor_sk);
-    const uint32_t in_grace = QBOOT + 1000u;
-
-    bramble_identity_attestation_t att;
-    uint8_t ed[32], sk[64];
-    uint32_t addr = make_signed_attestation(&att, 0, ed, sk, 0x40);
-    att.x25519_pub[0] ^= 0x01; /* corrupt a covered field -> BAD_SIG */
-    TEST_ASSERT_EQUAL(IDENTITY_PIN_BAD_SIG,
-                      identity_store_handle_attestation(&s_store, &att, SELF_ADDR, in_grace, 0));
-    TEST_ASSERT_FALSE(identity_store_addr_rejected(&s_store, addr));
-    /* Not ringed: still grace-eligible (zero pins, within window). */
-    TEST_ASSERT_TRUE(identity_store_quorum_eligible(&s_store, addr, true, in_grace));
+    /* Early-exit fired: an unpinned peer inside the window is now excluded. */
+    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, 0xC0FFEEu, true, in_grace));
 }
 
 /* AFTER-GRACE (deliverable 3 sub-case a): once the time window closes, an
  * established but unpinned peer whose attestation was UNENDORSED is excluded
- * -- both because it is unpinned-after-grace and because it is ringed.
- * Non-vacuous: an ENDORSED peer pinned in the same store IS eligible after the
- * grace via the pinned branch. */
+ * (it is unpinned and the grace is over). Non-vacuous: an ENDORSED peer pinned
+ * in the same store IS eligible after the grace via the pinned branch. */
 static void test_quorum_anchored_unendorsed_excluded_after_grace(void) {
     identity_store_init(&s_store, QBOOT);
     uint8_t anchor_sk[64];
@@ -898,41 +847,6 @@ static void test_anchored_unendorsed_has_no_pin_for_dm_continuity(void) {
     TEST_ASSERT_NULL(identity_store_lookup(&s_store, addr));
 }
 
-/* Reject-ring DEDUP: a Sybil replaying its rejected attestation on the cadence
- * must not flood the 16-slot ring down to a single address and evict other
- * nodes' negative intel. Ring three distinct rejects, then flood one address
- * well past the ring size; the other two rejects must SURVIVE (still barred). */
-static void test_reject_ring_dedup_preserves_other_rejections(void) {
-    identity_store_init(&s_store, QBOOT);
-    uint8_t anchor_sk[64];
-    anchor_store(&s_store, anchor_sk);
-    const uint32_t in_grace = QBOOT + 1000u;
-
-    bramble_identity_attestation_t a, b, flood;
-    uint8_t eda[32], ska[64], edb[32], skb[64], edf[32], skf[64];
-    uint32_t addr_a = make_signed_attestation(&a, 0, eda, ska, 0x40);
-    uint32_t addr_b = make_signed_attestation(&b, 0, edb, skb, 0x60);
-    uint32_t addr_f = make_signed_attestation(&flood, 0, edf, skf, 0x80);
-
-    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
-                      identity_store_handle_attestation(&s_store, &a, SELF_ADDR, in_grace, 0));
-    TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED,
-                      identity_store_handle_attestation(&s_store, &b, SELF_ADDR, in_grace, 0));
-
-    /* Flood one rejected address many times past the ring capacity. */
-    for (int i = 0; i < IDENTITY_REJECT_RING * 3; i++) {
-        TEST_ASSERT_EQUAL(IDENTITY_PIN_UNENDORSED, identity_store_handle_attestation(
-                                                       &s_store, &flood, SELF_ADDR, in_grace, 0));
-    }
-
-    /* Dedup held: the flood consumed ONE slot, so A and B survive. */
-    TEST_ASSERT_TRUE(identity_store_addr_rejected(&s_store, addr_a));
-    TEST_ASSERT_TRUE(identity_store_addr_rejected(&s_store, addr_b));
-    TEST_ASSERT_TRUE(identity_store_addr_rejected(&s_store, addr_f));
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, addr_a, true, in_grace));
-    TEST_ASSERT_FALSE(identity_store_quorum_eligible(&s_store, addr_b, true, in_grace));
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_first_pin_stores_and_lookup_returns_it);
@@ -961,12 +875,9 @@ int main(void) {
     RUN_TEST(test_quorum_unestablished_never_eligible);
     RUN_TEST(test_quorum_early_exit_pins_tighten_gate_no_anchor);
     RUN_TEST(test_quorum_fresh_anchored_mesh_bootstraps_liveness);
-    RUN_TEST(test_quorum_reject_ring_bars_unendorsed_in_grace);
-    RUN_TEST(test_quorum_reject_ring_records_expired);
-    RUN_TEST(test_quorum_reject_ring_ignores_pre_endorsement_failures);
+    RUN_TEST(test_quorum_early_exit_anchored_endorsed_pins);
     RUN_TEST(test_quorum_anchored_unendorsed_excluded_after_grace);
     RUN_TEST(test_quorum_endorsed_peer_eligible_before_and_after_grace);
     RUN_TEST(test_anchored_unendorsed_has_no_pin_for_dm_continuity);
-    RUN_TEST(test_reject_ring_dedup_preserves_other_rejections);
     return UNITY_END();
 }
