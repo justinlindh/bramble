@@ -7,6 +7,7 @@ import { LocationSection } from './LocationSection';
 import { TrafficDebugSection } from './TrafficDebugSection';
 import { DeviceManagementSection } from './DeviceManagementSection';
 import { NetworkKeySection } from './NetworkKeySection';
+import { AnchorSection } from './AnchorSection';
 import { IconIdentity, IconRadio, IconNodes, IconPeers, IconLocation, IconWarning, IconDatabase, IconLock } from '../../components/Icons';
 import { messageDb } from '../../store/messageDb';
 import styles from './Config.module.css';
@@ -67,6 +68,12 @@ export function Config() {
       <section className={styles.section}>
         <h2><IconLock size={18} /> Network Key</h2>
         <NetworkKeySection />
+      </section>
+
+      {/* ── Trust Anchor ── */}
+      <section className={styles.section}>
+        <h2><IconLock size={18} /> Trust Anchor</h2>
+        <AnchorSection />
       </section>
 
       {/* ── Device Management ── */}
