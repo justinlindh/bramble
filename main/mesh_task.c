@@ -301,7 +301,12 @@ static dm_pending_eph_t s_pending_eph[DM_MAX_HANDSHAKING];
  * handle_ke_envelope does only cheap parsing/validation and posts a work
  * item here; handshake_worker_task drains it on a low-priority task. */
 #define HANDSHAKE_WORK_QUEUE_LEN 8
-#define DM_HANDSHAKE_WORKER_STACK 4096
+/* The DM handshake is a quad-DH X25519 exchange plus HKDF and an Ed25519
+ * identity verify, not a single "periodic X25519": at 4096 bytes the
+ * dm_hs_worker task stack-overflowed and rebooted the receiver on the first
+ * incoming key exchange (found in 2-node on-device testing 2026-07-06;
+ * host/gosim have no real FreeRTOS task stacks so never hit it). */
+#define DM_HANDSHAKE_WORKER_STACK 8192
 #define DM_HANDSHAKE_WORKER_PRIORITY (MESH_TASK_PRIORITY - 2)
 typedef struct {
     uint32_t src_addr;
