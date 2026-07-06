@@ -1,4 +1,5 @@
 #include "include/identity.h"
+#include "nvs_keys.h"
 #include <string.h>
 
 /* Platform-independent collision check */
@@ -126,7 +127,8 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
 /* Host: in-memory blob store so unit tests exercise the shared
  * save/load/migration logic below. Starts empty, like a fresh flash. */
 
-#define ID_HOST_BLOB_MAX 4
+/* priv, pub, ed_pub, ed_priv, and the anchor public key (P0). */
+#define ID_HOST_BLOB_MAX 5
 #define ID_HOST_BLOB_CAP 64
 
 static struct {
@@ -231,4 +233,83 @@ int identity_generate_and_save(bramble_identity_t* id) {
     if (crypto_generate_identity(id) != 0)
         return -1;
     return identity_save(id);
+}
+
+/* --- Trust-anchor endorsement primitive (trust-anchor campaign, P0) --------
+ * Pure helpers: build/verify the canonical endorsement message. No NVS, no
+ * state, no device-side signing. Layout is LOCKED (see identity.h). */
+
+static void put_be64(uint8_t* p, uint64_t v) {
+    for (int i = 0; i < 8; i++)
+        p[i] = (uint8_t)(v >> (56 - 8 * i));
+}
+
+size_t identity_endorsement_msg(const uint8_t ed25519_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                uint64_t not_after, uint8_t* buf, size_t buf_len) {
+    if (buf_len < IDENTITY_ENDORSEMENT_MSG_SIZE)
+        return 0;
+    memcpy(buf, IDENTITY_ENDORSEMENT_MSG_CONTEXT, IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN);
+    memcpy(buf + IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN, ed25519_pub, BRAMBLE_ED25519_PUBKEY_SIZE);
+    put_be64(buf + IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN + BRAMBLE_ED25519_PUBKEY_SIZE, not_after);
+    return IDENTITY_ENDORSEMENT_MSG_SIZE;
+}
+
+bool identity_endorsement_verify(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                 const uint8_t ed25519_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                 uint64_t not_after, const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    uint8_t msg[IDENTITY_ENDORSEMENT_MSG_SIZE];
+    if (identity_endorsement_msg(ed25519_pub, not_after, msg, sizeof(msg)) !=
+        IDENTITY_ENDORSEMENT_MSG_SIZE)
+        return false;
+    return crypto_ed25519_verify(anchor_pub, msg, sizeof(msg), sig);
+}
+
+/* --- Anchor public-key provisioning (trust-anchor campaign, P0) ------------
+ * In-memory state mirrored to the per-platform blob store (id_store_read/
+ * write), fail-closed and exact-length like the identity keypair above.
+ * Absent = not anchored = the default; load never creates one. */
+
+static uint8_t s_anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+static bool s_anchor_set;
+
+int identity_anchor_set(const uint8_t pub[BRAMBLE_ED25519_PUBKEY_SIZE]) {
+    memcpy(s_anchor_pub, pub, BRAMBLE_ED25519_PUBKEY_SIZE);
+    s_anchor_set = true;
+    /* Persist so the anchor survives reboot. In-memory state is authoritative;
+     * a store-write failure does not un-anchor (mirrors network_key). */
+    id_store_write(ID_KEY_ANCHOR_PUB, pub, BRAMBLE_ED25519_PUBKEY_SIZE);
+    return 0;
+}
+
+int identity_anchor_get(uint8_t out[BRAMBLE_ED25519_PUBKEY_SIZE]) {
+    if (!s_anchor_set)
+        return -1; /* fail-closed: write nothing to out */
+    memcpy(out, s_anchor_pub, BRAMBLE_ED25519_PUBKEY_SIZE);
+    return 0;
+}
+
+bool identity_anchor_is_set(void) { return s_anchor_set; }
+
+void identity_anchor_fingerprint(uint8_t out[4]) {
+    if (!s_anchor_set) {
+        memset(out, 0, 4); /* all-zero sentinel: not anchored */
+        return;
+    }
+    uint8_t hash[32];
+    crypto_sha256(s_anchor_pub, BRAMBLE_ED25519_PUBKEY_SIZE, hash);
+    memcpy(out, hash, 4);
+}
+
+int identity_anchor_load(void) {
+    uint8_t pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+    if (id_store_read(ID_KEY_ANCHOR_PUB, pub, BRAMBLE_ED25519_PUBKEY_SIZE) != 0)
+        return -1; /* none stored: stays unanchored, never auto-created */
+    memcpy(s_anchor_pub, pub, BRAMBLE_ED25519_PUBKEY_SIZE);
+    s_anchor_set = true;
+    return 0;
+}
+
+void identity_anchor_clear(void) {
+    memset(s_anchor_pub, 0, sizeof(s_anchor_pub));
+    s_anchor_set = false;
 }

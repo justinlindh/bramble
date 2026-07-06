@@ -3,6 +3,7 @@
 
 #include "crypto.h"
 #include <stddef.h>
+#include <stdint.h>
 
 int identity_load(bramble_identity_t* id);
 int identity_save(const bramble_identity_t* id);
@@ -10,6 +11,70 @@ int identity_generate_and_save(bramble_identity_t* id);
 bool identity_check_collision(const bramble_identity_t* my_id, uint32_t beacon_src_addr,
                               uint32_t beacon_pubkey_hash);
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len);
+
+/* --- Trust-anchor endorsement primitive (trust-anchor campaign, P0) --------
+ * A fleet has one Ed25519 ANCHOR keypair. The anchor holder (an offline
+ * operator client) signs an endorsement over each node's Ed25519 identity
+ * public key, binding "this key is a member of my fleet" to a validity
+ * window. The DEVICE never signs endorsements and never holds the anchor
+ * PRIVATE key; signing happens only in tests/host/webapp via
+ * crypto_ed25519_sign. These helpers are pure (no NVS, no state). */
+
+/* Canonical endorsement signed message: context(18) || node_ed25519_pub(32)
+ * || not_after(8, big-endian, ms epoch) = 58 bytes. The context prefix
+ * domain-separates this from every other Ed25519 use (the attestation
+ * self-signature uses "bramble-ident-v1"; see packet.h). */
+#define IDENTITY_ENDORSEMENT_MSG_CONTEXT "bramble-endorse-v1"
+#define IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN 18
+#define IDENTITY_ENDORSEMENT_MSG_SIZE (IDENTITY_ENDORSEMENT_MSG_CONTEXT_LEN + 32 + 8) /* 58 */
+
+/* Endorsement certificate as stored/transmitted (wired in later phases):
+ * not_after(8, big-endian) || endorsement_sig(64) = 72 bytes. */
+#define IDENTITY_ENDORSEMENT_CERT_SIZE (8 + 64) /* 72 */
+
+/* not_after sentinels: UINT64_MAX = PERMANENT (v1 always issues this);
+ * 0 = "no cert present". */
+#define IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT UINT64_MAX
+#define IDENTITY_ENDORSEMENT_NOT_AFTER_NONE 0
+
+/* Build the 58-byte canonical endorsement message into buf. Returns
+ * IDENTITY_ENDORSEMENT_MSG_SIZE on success, 0 if buf_len is too small. */
+size_t identity_endorsement_msg(const uint8_t ed25519_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                uint64_t not_after, uint8_t* buf, size_t buf_len);
+
+/* Rebuild the canonical message and verify sig under anchor_pub. Pure. */
+bool identity_endorsement_verify(const uint8_t anchor_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                 const uint8_t ed25519_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
+                                 uint64_t not_after, const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
+
+/* --- Anchor public-key provisioning (trust-anchor campaign, P0) ------------
+ * The fleet anchor PUBLIC key, persisted per node (device NVS, host in-memory)
+ * and mirrored in module memory. Absent = not anchored = the default; nothing
+ * loads or creates one implicitly. Mirrors the network_key provider. */
+
+/* Provision the anchor public key: sets module memory and persists it.
+ * Returns 0 on success. In-memory state is authoritative, so a persist
+ * failure does not un-anchor (mirrors network_key_set_provisioned). */
+int identity_anchor_set(const uint8_t pub[BRAMBLE_ED25519_PUBKEY_SIZE]);
+
+/* Copy the provisioned anchor public key out. Returns 0 iff an anchor is
+ * set; on failure returns -1 and leaves out untouched (fail-closed). */
+int identity_anchor_get(uint8_t out[BRAMBLE_ED25519_PUBKEY_SIZE]);
+
+/* True iff an anchor public key is provisioned in module memory. */
+bool identity_anchor_is_set(void);
+
+/* SHA256(anchor_pub)[0:4] into out. Emits the all-zero sentinel when no
+ * anchor is set (mirrors network_key_fingerprint). */
+void identity_anchor_fingerprint(uint8_t out[4]);
+
+/* Load the persisted anchor public key into module memory. Returns 0 if one
+ * was stored, -1 if none (which must NOT create one). */
+int identity_anchor_load(void);
+
+/* Clear the in-memory anchor (does not touch persistence); mirrors
+ * network_key_clear. */
+void identity_anchor_clear(void);
 
 #ifndef ESP_PLATFORM
 /* Host builds back identity_save/identity_load with an in-memory blob store
