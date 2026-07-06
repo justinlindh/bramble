@@ -11,6 +11,22 @@
  *   Notification: { jsonrpc: "2.0", method: "bramble.X", params: {...} }
  */
 
+import { createHash } from 'node:crypto';
+
+// ─── Trust-anchor mock state ─────────────────────────────────────────────────
+// This node's Ed25519 identity public key (64 hex). Fixed so getIdentity is
+// stable across a session. The anchor flow signs a cert OVER this key.
+const MOCK_ED25519_PUB = '8f500a6dbab3786da3eb56d5146157fa26577a361f2e3b52907f2acdc344fefa';
+let mockAnchorPub = null; // 64-hex anchor public key, or null when unanchored
+let mockEndorsed = false; // whether a well-formed cert has been applied
+// NOTE: this mock tracks anchor/endorsement STATE and validates cert shape,
+// but does not cryptographically verify the endorsement signature (the real
+// firmware and the webapp's own anchor.ts tests cover the crypto). It exists
+// so the webapp's device-gated anchor UI flow works end to end without hardware.
+const anchorFingerprint = (pubHex) =>
+  createHash('sha256').update(Buffer.from(pubHex, 'hex')).digest('hex').slice(0, 8);
+const isHex = (s, len) => typeof s === 'string' && s.length === len && /^[0-9a-fA-F]+$/.test(s);
+
 // ─── Node identities ─────────────────────────────────────────────────────────
 // Our node — Justin's house in Example, Example NV
 const SELF_ADDR  = 0x1A2B3C4D;  // "JUST"
@@ -219,6 +235,53 @@ function notify(method, params) {
 // ─── RPC handlers ────────────────────────────────────────────────────────────
 
 export const handlers = {
+  'bramble.getIdentity'(_params) {
+    return {
+      address: hex8(SELF_ADDR >>> 0).slice(2),
+      pubkey_hash: '1118D963',
+      ed25519_pub: MOCK_ED25519_PUB,
+    };
+  },
+
+  'bramble.setAnchor'(params) {
+    const pub = params?.anchor_pubkey;
+    if (!isHex(pub, 64)) {
+      throw { code: -32602, message: 'anchor_pubkey must be 64 hex chars' };
+    }
+    if (pub.toLowerCase() !== mockAnchorPub) {
+      mockAnchorPub = pub.toLowerCase();
+      mockEndorsed = false; // anchor change drops the old endorsement
+    }
+    return { ok: true };
+  },
+
+  'bramble.getAnchorStatus'(_params) {
+    if (!mockAnchorPub) {
+      return { anchored: false, endorsed: false };
+    }
+    return {
+      anchored: true,
+      anchor_fingerprint: anchorFingerprint(mockAnchorPub),
+      endorsed: mockEndorsed,
+    };
+  },
+
+  'bramble.setEndorsement'(params) {
+    if (!mockAnchorPub) {
+      throw { code: -32602, message: 'no anchor provisioned' };
+    }
+    const na = params?.not_after;
+    const sig = params?.endorsement_sig;
+    if (!isHex(na, 16) || na === '0000000000000000') {
+      throw { code: -32602, message: 'not_after must be 16 hex chars and non-zero' };
+    }
+    if (!isHex(sig, 128)) {
+      throw { code: -32602, message: 'endorsement_sig must be 128 hex chars' };
+    }
+    mockEndorsed = true;
+    return { ok: true };
+  },
+
   'bramble.getStatus'(_params) {
     const uptimeSec = Math.floor((Date.now() - BOOT_TIME) / 1000);
     return {
