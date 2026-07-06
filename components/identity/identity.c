@@ -127,8 +127,9 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
 /* Host: in-memory blob store so unit tests exercise the shared
  * save/load/migration logic below. Starts empty, like a fresh flash. */
 
-/* priv, pub, ed_pub, ed_priv, and the anchor public key (P0). */
-#define ID_HOST_BLOB_MAX 5
+/* priv, pub, ed_pub, ed_priv, the anchor public key (P0), and the own-cert
+ * not_after + endorsement_sig blobs (P1). */
+#define ID_HOST_BLOB_MAX 7
 #define ID_HOST_BLOB_CAP 64
 
 static struct {
@@ -244,6 +245,13 @@ static void put_be64(uint8_t* p, uint64_t v) {
         p[i] = (uint8_t)(v >> (56 - 8 * i));
 }
 
+static uint64_t get_be64(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++)
+        v = (v << 8) | (uint64_t)p[i];
+    return v;
+}
+
 size_t identity_endorsement_msg(const uint8_t ed25519_pub[BRAMBLE_ED25519_PUBKEY_SIZE],
                                 uint64_t not_after, uint8_t* buf, size_t buf_len) {
     if (buf_len < IDENTITY_ENDORSEMENT_MSG_SIZE)
@@ -312,4 +320,56 @@ int identity_anchor_load(void) {
 void identity_anchor_clear(void) {
     memset(s_anchor_pub, 0, sizeof(s_anchor_pub));
     s_anchor_set = false;
+}
+
+/* --- Own endorsement certificate (trust-anchor campaign, P1) ----------------
+ * The node's own cert (the anchor's signature over this node's identity key)
+ * mirrored to the per-platform blob store: not_after as an 8-byte big-endian
+ * blob, sig as a 64-byte blob. Same in-memory-authoritative, fail-closed,
+ * exact-length pattern as the anchor. The device never SIGNS this; it only
+ * stores and re-transmits what setEndorsement provisioned. */
+
+static uint64_t s_endorse_not_after;
+static uint8_t s_endorse_sig[BRAMBLE_ED25519_SIG_SIZE];
+static bool s_endorse_set;
+
+int identity_endorsement_set(uint64_t not_after, const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    s_endorse_not_after = not_after;
+    memcpy(s_endorse_sig, sig, BRAMBLE_ED25519_SIG_SIZE);
+    s_endorse_set = true;
+    /* Persist so the cert survives reboot. In-memory state is authoritative;
+     * a store-write failure does not un-set (mirrors the anchor). */
+    uint8_t na_be[8];
+    put_be64(na_be, not_after);
+    id_store_write(ID_KEY_ENDORSE_NA, na_be, sizeof(na_be));
+    id_store_write(ID_KEY_ENDORSE_SIG, sig, BRAMBLE_ED25519_SIG_SIZE);
+    return 0;
+}
+
+int identity_endorsement_get(uint64_t* not_after, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]) {
+    if (!s_endorse_set)
+        return -1; /* fail-closed: leave outputs untouched */
+    *not_after = s_endorse_not_after;
+    memcpy(sig, s_endorse_sig, BRAMBLE_ED25519_SIG_SIZE);
+    return 0;
+}
+
+bool identity_endorsement_is_set(void) { return s_endorse_set; }
+
+int identity_endorsement_load(void) {
+    uint8_t na_be[8];
+    uint8_t sig[BRAMBLE_ED25519_SIG_SIZE];
+    if (id_store_read(ID_KEY_ENDORSE_NA, na_be, sizeof(na_be)) != 0 ||
+        id_store_read(ID_KEY_ENDORSE_SIG, sig, BRAMBLE_ED25519_SIG_SIZE) != 0)
+        return -1; /* none stored: stays un-endorsed, never synthesized */
+    s_endorse_not_after = get_be64(na_be);
+    memcpy(s_endorse_sig, sig, BRAMBLE_ED25519_SIG_SIZE);
+    s_endorse_set = true;
+    return 0;
+}
+
+void identity_endorsement_clear_mem(void) {
+    s_endorse_not_after = 0;
+    memset(s_endorse_sig, 0, sizeof(s_endorse_sig));
+    s_endorse_set = false;
 }

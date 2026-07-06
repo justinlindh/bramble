@@ -13,11 +13,14 @@
  * the contract: flipping any covered field must fail verification.
  *
  * Phase 3 grew the OUTER frame by the relay-gate MAC + seq (auth_hmac(8)
- * + seq(6), 144 -> 158 bytes); the canonical SIGNED bytes above are
- * UNCHANGED, and the tests below additionally pin that the two new outer
- * fields do NOT feed the signed message (they are relay-privilege
- * plumbing, not part of the identity claim). The MAC itself is covered in
- * test_ident_relay_auth.c.
+ * + seq(6), 144 -> 158 bytes); the trust-anchor campaign (P1) grew it
+ * again by the inline endorsement cert (not_after(8) + endorsement_sig(64),
+ * 158 -> 230 bytes). The canonical SIGNED bytes above are UNCHANGED, and
+ * the tests below additionally pin that neither the relay-privilege fields
+ * (auth_hmac/seq) NOR the cert fields (not_after/endorsement_sig) feed the
+ * signed message: the cert is the ANCHOR's signature over ed25519_pub, not
+ * part of what the node self-signs. The MAC's coverage of the cert is
+ * pinned in test_ident_relay_auth.c.
  */
 #include "unity.h"
 #include "packet.h"
@@ -44,6 +47,11 @@ static void make_attestation(bramble_identity_attestation_t* p, uint8_t sk[64], 
         p->auth_hmac[i] = (uint8_t)(0xC0 + i); /* pattern; real MAC in test_ident_relay_auth.c */
     for (int i = 0; i < 6; i++)
         p->seq[i] = (uint8_t)(0xD0 + i);
+    /* Endorsement cert (P1): pattern-filled so round-trip/offset tests are
+     * non-vacuous. not_after = 0x0102...08 big-endian. */
+    p->not_after = 0x0102030405060708ULL;
+    for (int i = 0; i < 64; i++)
+        p->endorsement_sig[i] = (uint8_t)(0x20 + i);
     TEST_ASSERT_EQUAL(0, crypto_ed25519_keypair(p->ed25519_pub, sk));
     if (sign) {
         uint8_t msg[IDENTITY_ATTESTATION_MSG_SIZE];
@@ -54,9 +62,9 @@ static void make_attestation(bramble_identity_attestation_t* p, uint8_t sk[64], 
 
 /* ── Wire layout ────────────────────────────────────────────────────── */
 
-static void test_wire_size_is_158(void) {
-    TEST_ASSERT_EQUAL(158, IDENTITY_ATTESTATION_SIZE);
-    TEST_ASSERT_EQUAL(HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 6, IDENTITY_ATTESTATION_SIZE);
+static void test_wire_size_is_230(void) {
+    TEST_ASSERT_EQUAL(230, IDENTITY_ATTESTATION_SIZE);
+    TEST_ASSERT_EQUAL(HEADER_SIZE + 4 + 32 + 32 + 64 + 8 + 64 + 8 + 6, IDENTITY_ATTESTATION_SIZE);
 }
 
 static void test_serialize_exact_offsets(void) {
@@ -80,13 +88,23 @@ static void test_serialize_exact_offsets(void) {
     TEST_ASSERT_EQUAL_HEX8(0x22, buf[13]);
     TEST_ASSERT_EQUAL_HEX8(0x33, buf[14]);
     TEST_ASSERT_EQUAL_HEX8(0x44, buf[15]);
-    /* x25519_pub at 16, ed25519_pub at 48, sig at 80, auth_hmac at 144,
-     * seq at 152 (Phase 3 relay-gate extension) */
+    /* x25519_pub at 16, ed25519_pub at 48, sig at 80, not_after at 144,
+     * endorsement_sig at 152 (P1 cert), auth_hmac at 216, seq at 224. */
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.x25519_pub, buf + 16, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.ed25519_pub, buf + 48, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.sig, buf + 80, 64);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.auth_hmac, buf + 144, 8);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.seq, buf + 152, 6);
+    /* not_after big-endian at 144 */
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[144]);
+    TEST_ASSERT_EQUAL_HEX8(0x02, buf[145]);
+    TEST_ASSERT_EQUAL_HEX8(0x03, buf[146]);
+    TEST_ASSERT_EQUAL_HEX8(0x04, buf[147]);
+    TEST_ASSERT_EQUAL_HEX8(0x05, buf[148]);
+    TEST_ASSERT_EQUAL_HEX8(0x06, buf[149]);
+    TEST_ASSERT_EQUAL_HEX8(0x07, buf[150]);
+    TEST_ASSERT_EQUAL_HEX8(0x08, buf[151]);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.endorsement_sig, buf + 152, 64);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.auth_hmac, buf + 216, 8);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.seq, buf + 224, 6);
 }
 
 static void test_round_trip(void) {
@@ -107,6 +125,8 @@ static void test_round_trip(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.x25519_pub, q.x25519_pub, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.ed25519_pub, q.ed25519_pub, 32);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.sig, q.sig, 64);
+    TEST_ASSERT_EQUAL_HEX64(p.not_after, q.not_after);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(p.endorsement_sig, q.endorsement_sig, 64);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.auth_hmac, q.auth_hmac, 8);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(p.seq, q.seq, 6);
 }
@@ -134,6 +154,11 @@ static void test_deserialize_length_must_be_exact(void) {
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_identity_attestation_deserialize(
                                                 &q, buf, IDENTITY_ATTESTATION_SIZE + 1));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_identity_attestation_deserialize(&q, buf, 0));
+    /* Flag day: the old 158-byte frame and the off-by-one neighbours 229/231
+     * are all rejected. 230 is the only accepted length. */
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_identity_attestation_deserialize(&q, buf, 158));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_identity_attestation_deserialize(&q, buf, 229));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, bramble_identity_attestation_deserialize(&q, buf, 231));
     TEST_ASSERT_EQUAL(ESP_OK,
                       bramble_identity_attestation_deserialize(&q, buf, IDENTITY_ATTESTATION_SIZE));
 }
@@ -170,6 +195,10 @@ static void test_signed_msg_exact_bytes(void) {
     p2.header.dest_addr = 0x12345678u;
     memset(p2.auth_hmac, 0x5A, sizeof(p2.auth_hmac));
     memset(p2.seq, 0xA5, sizeof(p2.seq));
+    /* P1: the endorsement cert (anchor's signature) is NOT part of what the
+     * node self-signs, so mutating it must not perturb the signed message. */
+    p2.not_after = 0xFFFFFFFFFFFFFFFFULL;
+    memset(p2.endorsement_sig, 0x77, sizeof(p2.endorsement_sig));
     uint8_t msg2[IDENTITY_ATTESTATION_MSG_SIZE];
     TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_signed_msg(&p2, msg2, sizeof(msg2)));
     TEST_ASSERT_EQUAL_HEX8_ARRAY(msg, msg2, IDENTITY_ATTESTATION_MSG_SIZE);
@@ -288,7 +317,7 @@ static void test_origination_from_node_identity_verifies(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_wire_size_is_158);
+    RUN_TEST(test_wire_size_is_230);
     RUN_TEST(test_serialize_exact_offsets);
     RUN_TEST(test_round_trip);
     RUN_TEST(test_serialize_short_buffer_rejected);

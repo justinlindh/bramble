@@ -76,6 +76,35 @@ int identity_anchor_load(void);
  * network_key_clear. */
 void identity_anchor_clear(void);
 
+/* --- Own endorsement certificate (trust-anchor campaign, P1) ----------------
+ * The node's OWN cert: the anchor's signature over this node's Ed25519
+ * identity key, plus its not_after validity bound. Provisioned via the
+ * setEndorsement RPC (after verifying the cert against the node's key and the
+ * provisioned anchor), mirrored to the per-platform blob store, and put on
+ * the wire in the attestation frame. The device never signs this. Mirrors the
+ * anchor functions above (in-memory authoritative, fail-closed, exact-length).
+ */
+
+/* Provision the node's own cert: sets module memory and persists it (not_after
+ * as an 8-byte big-endian blob, sig as a 64-byte blob). Returns 0 on success.
+ * In-memory state is authoritative, so a persist failure does not un-set. */
+int identity_endorsement_set(uint64_t not_after, const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
+
+/* Copy the stored cert out. Returns 0 iff a cert is present; on failure
+ * returns -1 and leaves the outputs untouched (fail-closed). */
+int identity_endorsement_get(uint64_t* not_after, uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
+
+/* True iff the node holds its own endorsement cert in module memory. */
+bool identity_endorsement_is_set(void);
+
+/* Load the persisted cert into module memory. Returns 0 if one was stored,
+ * -1 if none (which must NOT synthesize one). */
+int identity_endorsement_load(void);
+
+/* Clear the in-memory cert (does not touch persistence); mirrors
+ * identity_anchor_clear. */
+void identity_endorsement_clear_mem(void);
+
 #ifndef ESP_PLATFORM
 /* Host builds back identity_save/identity_load with an in-memory blob store
  * (unit tests). Reset it to simulate a fresh flash. */

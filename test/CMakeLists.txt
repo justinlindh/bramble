@@ -365,11 +365,14 @@ target_link_libraries(test_identity ssl crypto)
 add_executable(test_identity_endorsement
     test_identity_endorsement.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
 )
 target_include_directories(test_identity_endorsement PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
 )
 target_link_libraries(test_identity_endorsement ssl crypto)
 
