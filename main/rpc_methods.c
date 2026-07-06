@@ -223,6 +223,15 @@ static int handle_get_identity(const cJSON* params, cJSON* result) {
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
     cJSON_AddStringToObject(result, "pubkey_hash",
                             addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
+    /* Full identity Ed25519 public key (64 lowercase hex). Enrollment needs
+     * the whole key to request an anchor endorsement; address/pubkey_hash are
+     * only truncated hashes. */
+    char ed_hex[2 * BRAMBLE_ED25519_PUBKEY_SIZE + 1];
+    for (int i = 0; i < BRAMBLE_ED25519_PUBKEY_SIZE; i++) {
+        snprintf(ed_hex + i * 2, 3, "%02x", s_identity->ed25519_public_key[i]);
+    }
+    ed_hex[2 * BRAMBLE_ED25519_PUBKEY_SIZE] = '\0';
+    cJSON_AddStringToObject(result, "ed25519_pub", ed_hex);
     return 0;
 }
 
@@ -842,6 +851,60 @@ static int handle_generate_network_key(const cJSON* params, cJSON* result) {
     }
     fp_hex[8] = '\0';
     cJSON_AddStringToObject(result, "fingerprint", fp_hex);
+    return 0;
+}
+
+/* bramble.setAnchor: params {"anchor_pubkey": "<64 hex chars>"}.
+ * Provisions the fleet trust-anchor PUBLIC key (trust-anchor campaign, P0).
+ * The anchor holder is an offline operator client; the device only ever holds
+ * the anchor PUBLIC key, never the private key, and never signs endorsements.
+ * Persisted via identity_anchor_set (NVS on device). P0 is inert: nothing
+ * reads the anchor for a trust decision yet (later phases pin endorsed-only).
+ * Authenticated callers only (registered normally, so not in rpc_auth's
+ * unauth allowlist), mirroring setNetworkKey. */
+static int rpc_set_anchor(const cJSON* params, cJSON* result) {
+    const cJSON* key_j = cJSON_GetObjectItem(params, "anchor_pubkey");
+    if (!key_j || !cJSON_IsString(key_j)) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    const char* hex = key_j->valuestring;
+    if (strlen(hex) != 64) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    uint8_t pub[BRAMBLE_ED25519_PUBKEY_SIZE];
+    for (int i = 0; i < BRAMBLE_ED25519_PUBKEY_SIZE; i++) {
+        int hi = hex_nibble(hex[i * 2]);
+        int lo = hex_nibble(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        pub[i] = (uint8_t)((hi << 4) | lo);
+    }
+    identity_anchor_set(pub);
+    cJSON_AddBoolToObject(result, "ok", true);
+    return 0;
+}
+
+/* bramble.getAnchorStatus: params none. Result:
+ *   {"anchored": bool, "anchor_fingerprint": "<8 lowercase hex>"}
+ * Reports whether a fleet trust anchor is provisioned and, when it is, a
+ * one-way fingerprint (SHA256(anchor_pub)[0:4]) so an operator can confirm a
+ * fleet shares one anchor without the key being echoed. The fingerprint field
+ * is present only when anchored. Mirrors getNetworkKeyStatus. */
+static int handle_get_anchor_status(const cJSON* params, cJSON* result) {
+    (void)params;
+    bool anchored = identity_anchor_is_set();
+    cJSON_AddBoolToObject(result, "anchored", anchored);
+    if (anchored) {
+        uint8_t fp[4];
+        identity_anchor_fingerprint(fp);
+        char hex[9];
+        for (int i = 0; i < 4; i++) {
+            snprintf(hex + i * 2, 3, "%02x", fp[i]);
+        }
+        hex[8] = '\0';
+        cJSON_AddStringToObject(result, "anchor_fingerprint", hex);
+    }
     return 0;
 }
 
@@ -2484,6 +2547,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.setNetworkKey", rpc_set_network_key);
     rpc_register("bramble.generateNetworkKey", handle_generate_network_key);
     rpc_register("bramble.getNetworkKeyStatus", handle_get_network_key_status);
+    rpc_register("bramble.setAnchor", rpc_set_anchor);
+    rpc_register("bramble.getAnchorStatus", handle_get_anchor_status);
     rpc_register("bramble.setAllowedOrigins", rpc_set_allowed_origins);
     rpc_register("bramble.getAllowedOrigins", rpc_get_allowed_origins);
     rpc_register("bramble.addChannel", handle_add_channel);
