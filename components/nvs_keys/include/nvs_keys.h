@@ -46,7 +46,7 @@
 /* ── NVS_NS_NONCE keys ───────────────────────────────────────────────────── */
 #define NVS_KEY_NONCE_CEILING "ceiling"
 
-/* ── NVS_NS_IDENTITY keys ────────────────────────────────────────────────── */
+/* -- NVS_NS_IDENTITY keys -------------------------------------------------- */
 /* Fleet trust-anchor PUBLIC key (trust-anchor campaign, P0). Persisted per
  * node; the device never holds the anchor private key. Name must be <= 15
  * chars. */

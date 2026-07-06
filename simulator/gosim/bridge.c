@@ -2195,7 +2195,7 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
     }
 }
 
-/* ─── Runtime anchor provisioning (P2 red-team) ─────────────────────────── */
+/* --- Runtime anchor provisioning (P2 red-team) --------------------------- */
 /*
  * Scripted "provision_anchor" event: the sim analog of an operator running
  * bramble.setAnchor mid-life to harden the fleet without a reboot. (Re-)anchors

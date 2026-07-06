@@ -1575,7 +1575,7 @@ export async function loadNetworkKeyStatus(): Promise<void> {
   useStore.getState().setNetworkKeyStatus(s);
 }
 
-// ─── Trust anchor ──────────────────────────────────────────────────────────
+// --- Trust anchor ----------------------------------------------------------
 
 /**
  * Pin THIS node to a fleet trust anchor by its PUBLIC key. The anchor private
