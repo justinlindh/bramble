@@ -158,12 +158,18 @@ int data_auth_verify(const bramble_header_t* h, uint32_t src_addr, const uint8_t
     return ct_eq(expect, hmac, sizeof(expect));
 }
 
-/* src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64) || seq(6)
- * = 138 bytes: every origin-stable field of the attestation, excluding
- * only the header (hop_limit is the one relay-mutated field; packet_id is
- * per-send and already outside every stable authenticator on this frame,
- * matching the Ed25519 sig's own header exclusion in packet.c). */
-static void ident_relay_build_auth_buf(const bramble_identity_attestation_t* a, uint8_t buf[138]) {
+/* src_addr(4, BE) || x25519_pub(32) || ed25519_pub(32) || sig(64) ||
+ * not_after(8, BE) || endorsement_sig(64) || seq(6) = 210 bytes: every
+ * origin-stable field of the attestation, excluding only the header
+ * (hop_limit is the one relay-mutated field; packet_id is per-send and
+ * already outside every stable authenticator on this frame, matching the
+ * Ed25519 sig's own header exclusion in packet.c). The trust-anchor
+ * campaign (P1) extended coverage to the inline endorsement cert
+ * (not_after + endorsement_sig): the cert is NOT self-signed (it is the
+ * anchor's signature, not the node's), so this MAC is the ONLY authenticator
+ * binding it in flight. Without it a keyless outsider could flip cert bits on
+ * a relayed frame and spray UNENDORSED rejections once P2 acts on the cert. */
+static void ident_relay_build_auth_buf(const bramble_identity_attestation_t* a, uint8_t buf[210]) {
     buf[0] = (uint8_t)(a->src_addr >> 24);
     buf[1] = (uint8_t)(a->src_addr >> 16);
     buf[2] = (uint8_t)(a->src_addr >> 8);
@@ -171,17 +177,20 @@ static void ident_relay_build_auth_buf(const bramble_identity_attestation_t* a, 
     memcpy(buf + 4, a->x25519_pub, 32);
     memcpy(buf + 36, a->ed25519_pub, 32);
     memcpy(buf + 68, a->sig, 64);
-    memcpy(buf + 132, a->seq, 6);
+    for (int i = 0; i < 8; i++)
+        buf[132 + i] = (uint8_t)(a->not_after >> (56 - 8 * i));
+    memcpy(buf + 140, a->endorsement_sig, 64);
+    memcpy(buf + 204, a->seq, 6);
 }
 
 int ident_relay_sign(bramble_identity_attestation_t* a) {
-    uint8_t buf[138];
+    uint8_t buf[210];
     ident_relay_build_auth_buf(a, buf);
     return network_key_mac("bramble-ident-relay-v1", buf, sizeof(buf), a->auth_hmac);
 }
 
 int ident_relay_verify(const bramble_identity_attestation_t* a) {
-    uint8_t buf[138];
+    uint8_t buf[210];
     ident_relay_build_auth_buf(a, buf);
     uint8_t expect[8];
     /* Reject before compare (see rerr_verify): unprovisioned cannot verify,

@@ -15,6 +15,7 @@
 #include "unity.h"
 #include "crypto.h"
 #include "identity.h"
+#include "packet.h"
 
 #include "../components/crypto/crypto_host.c"
 #include "../components/identity/identity.c"
@@ -39,6 +40,7 @@ static const uint8_t KAT_SIG_PERMANENT[64] = {
 void setUp(void) {
     identity_host_store_reset();
     identity_anchor_clear();
+    identity_endorsement_clear_mem();
 }
 void tearDown(void) {}
 
@@ -215,6 +217,123 @@ void test_anchor_load_finds_nothing_on_fresh_flash(void) {
     TEST_ASSERT_FALSE(identity_anchor_is_set());
 }
 
+/* --- Own-cert persistence (P1): the node's OWN endorsement cert, provisioned
+ * via setEndorsement and mirrored to the blob store, same fail-closed/
+ * exact-length pattern as the anchor above. --------------------------------*/
+
+void test_endorsement_unset_by_default(void) {
+    TEST_ASSERT_FALSE(identity_endorsement_is_set());
+    uint64_t na = 0x1122334455667788ULL;
+    uint8_t sig[64];
+    memset(sig, 0x5a, sizeof(sig));
+    TEST_ASSERT_EQUAL(-1, identity_endorsement_get(&na, sig));
+    /* Fail-closed: outputs untouched on the miss. */
+    TEST_ASSERT_EQUAL_HEX64(0x1122334455667788ULL, na);
+    for (int i = 0; i < 64; i++)
+        TEST_ASSERT_EQUAL_UINT8(0x5a, sig[i]);
+}
+
+void test_endorsement_set_then_get_roundtrip(void) {
+    uint8_t sig[64];
+    for (int i = 0; i < 64; i++)
+        sig[i] = (uint8_t)(0x20 + i);
+    TEST_ASSERT_EQUAL(0, identity_endorsement_set(IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT, sig));
+    TEST_ASSERT_TRUE(identity_endorsement_is_set());
+
+    uint64_t na = 0;
+    uint8_t out[64];
+    TEST_ASSERT_EQUAL(0, identity_endorsement_get(&na, out));
+    TEST_ASSERT_EQUAL_HEX64(IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT, na);
+    TEST_ASSERT_EQUAL_MEMORY(sig, out, 64);
+}
+
+/* NVS round-trip: the cert survives a simulated reboot (clear in-memory, then
+ * load from the blob store), including the full 64-bit not_after value. */
+void test_endorsement_persists_across_reboot(void) {
+    uint8_t sig[64];
+    for (int i = 0; i < 64; i++)
+        sig[i] = (uint8_t)(0xC0 ^ i);
+    const uint64_t na = 0x0000019012345678ULL;               /* a real ms epoch, not a sentinel */
+    TEST_ASSERT_EQUAL(0, identity_endorsement_set(na, sig)); /* writes the blob store */
+
+    identity_endorsement_clear_mem(); /* reboot: in-memory only, store intact */
+    TEST_ASSERT_FALSE(identity_endorsement_is_set());
+
+    TEST_ASSERT_EQUAL(0, identity_endorsement_load());
+    TEST_ASSERT_TRUE(identity_endorsement_is_set());
+    uint64_t got = 0;
+    uint8_t out[64];
+    TEST_ASSERT_EQUAL(0, identity_endorsement_get(&got, out));
+    TEST_ASSERT_EQUAL_HEX64(na, got); /* big-endian blob round-trips exactly */
+    TEST_ASSERT_EQUAL_MEMORY(sig, out, 64);
+}
+
+void test_endorsement_load_finds_nothing_on_fresh_flash(void) {
+    TEST_ASSERT_EQUAL(-1, identity_endorsement_load());
+    TEST_ASSERT_FALSE(identity_endorsement_is_set());
+}
+
+/* clear_mem is in-memory only: the store keeps the cert, so a subsequent load
+ * restores it (mirrors the anchor's reboot semantics). */
+void test_endorsement_clear_mem_does_not_erase_store(void) {
+    uint8_t sig[64];
+    memset(sig, 0x33, sizeof(sig));
+    TEST_ASSERT_EQUAL(0, identity_endorsement_set(IDENTITY_ENDORSEMENT_NOT_AFTER_PERMANENT, sig));
+    identity_endorsement_clear_mem();
+    TEST_ASSERT_FALSE(identity_endorsement_is_set());
+    TEST_ASSERT_EQUAL(0, identity_endorsement_load());
+    TEST_ASSERT_TRUE(identity_endorsement_is_set());
+}
+
+/* --- TX-path cert fill (P1) ----------------------------------------------- *
+ * Mirrors exactly what send_identity_attestation (main/mesh_task.c) does:
+ * zero-initialize the frame, then identity_endorsement_get() its cert fields.
+ * mesh_task.c is never host-compiled, so this pins that the built-and-serialized
+ * frame carries the stored cert when present and all-zeros ("no cert") when
+ * absent. */
+
+void test_tx_frame_carries_stored_cert(void) {
+    uint8_t sig[64];
+    for (int i = 0; i < 64; i++)
+        sig[i] = (uint8_t)(0x20 + i);
+    const uint64_t na = 0x0000019055667788ULL;
+    TEST_ASSERT_EQUAL(0, identity_endorsement_set(na, sig));
+
+    /* Build the frame the mesh_task way: zero-init, then fill from the store. */
+    bramble_identity_attestation_t att;
+    memset(&att, 0, sizeof(att));
+    att.header.version = BRAMBLE_VERSION;
+    att.header.type = PKT_TYPE_IDENTITY_ATTESTATION;
+    identity_endorsement_get(&att.not_after, att.endorsement_sig);
+
+    uint8_t buf[IDENTITY_ATTESTATION_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_serialize(&att, buf, sizeof(buf)));
+    bramble_identity_attestation_t rx;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_deserialize(&rx, buf, sizeof(buf)));
+
+    TEST_ASSERT_EQUAL_HEX64(na, rx.not_after);
+    TEST_ASSERT_EQUAL_MEMORY(sig, rx.endorsement_sig, 64);
+}
+
+void test_tx_frame_without_cert_carries_zeros(void) {
+    /* No cert stored (setUp cleared it). */
+    bramble_identity_attestation_t att;
+    memset(&att, 0, sizeof(att));
+    att.header.version = BRAMBLE_VERSION;
+    att.header.type = PKT_TYPE_IDENTITY_ATTESTATION;
+    /* get() must not touch the fields on a miss, leaving the zero-init intact. */
+    TEST_ASSERT_EQUAL(-1, identity_endorsement_get(&att.not_after, att.endorsement_sig));
+
+    uint8_t buf[IDENTITY_ATTESTATION_SIZE];
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_serialize(&att, buf, sizeof(buf)));
+    bramble_identity_attestation_t rx;
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_deserialize(&rx, buf, sizeof(buf)));
+
+    TEST_ASSERT_EQUAL_HEX64(IDENTITY_ENDORSEMENT_NOT_AFTER_NONE, rx.not_after);
+    const uint8_t zeros[64] = {0};
+    TEST_ASSERT_EQUAL_MEMORY(zeros, rx.endorsement_sig, 64);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_endorsement_msg_exact_layout);
@@ -231,5 +350,12 @@ int main(void) {
     RUN_TEST(test_anchor_fingerprint_matches_sha256_prefix);
     RUN_TEST(test_anchor_persists_across_reboot);
     RUN_TEST(test_anchor_load_finds_nothing_on_fresh_flash);
+    RUN_TEST(test_endorsement_unset_by_default);
+    RUN_TEST(test_endorsement_set_then_get_roundtrip);
+    RUN_TEST(test_endorsement_persists_across_reboot);
+    RUN_TEST(test_endorsement_load_finds_nothing_on_fresh_flash);
+    RUN_TEST(test_endorsement_clear_mem_does_not_erase_store);
+    RUN_TEST(test_tx_frame_carries_stored_cert);
+    RUN_TEST(test_tx_frame_without_cert_carries_zeros);
     return UNITY_END();
 }
