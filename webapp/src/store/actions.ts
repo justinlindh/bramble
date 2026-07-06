@@ -1575,6 +1575,55 @@ export async function loadNetworkKeyStatus(): Promise<void> {
   useStore.getState().setNetworkKeyStatus(s);
 }
 
+// ─── Trust anchor ──────────────────────────────────────────────────────────
+
+/**
+ * Pin THIS node to a fleet trust anchor by its PUBLIC key. The anchor private
+ * seed stays offline on the operator's client and is NEVER sent: setAnchor
+ * carries the public key only. Returns false rather than throwing on rejection
+ * so callers can show an inline error.
+ */
+export async function setAnchor(anchorPubHex: string): Promise<boolean> {
+  if (!client) throw new Error('Not connected');
+  const result = await client.rpc<{ ok: boolean; error?: string }>('bramble.setAnchor', { anchor_pubkey: anchorPubHex });
+  return !!result?.ok;
+}
+
+export async function getAnchorStatus(): Promise<import('../types/bramble').AnchorStatus> {
+  if (!client) throw new Error('Not connected');
+  return await client.rpc<import('../types/bramble').AnchorStatus>('bramble.getAnchorStatus');
+}
+
+export async function getIdentity(): Promise<import('../types/bramble').NodeIdentityWire> {
+  if (!client) throw new Error('Not connected');
+  return await client.rpc<import('../types/bramble').NodeIdentityWire>('bramble.getIdentity');
+}
+
+/**
+ * Install the endorsement cert the operator signed for this node. The cert is
+ * public (the signature over the node's own identity key); it travels back to
+ * the node so an anchored fleet will pin this identity. Returns false rather
+ * than throwing on rejection.
+ */
+export async function setEndorsement(notAfterHex: string, sigHex: string): Promise<boolean> {
+  if (!client) throw new Error('Not connected');
+  const result = await client.rpc<{ ok: boolean; error?: string }>('bramble.setEndorsement', {
+    not_after: notAfterHex,
+    endorsement_sig: sigHex,
+  });
+  return !!result?.ok;
+}
+
+/**
+ * Refresh the node's anchor provisioning status in the store, mirroring
+ * loadNetworkKeyStatus so the enrollment UI can reflect anchored/endorsed live.
+ */
+export async function loadAnchorStatus(): Promise<void> {
+  if (!client) return;
+  const s = await client.rpc<import('../types/bramble').AnchorStatus>('bramble.getAnchorStatus');
+  useStore.getState().setAnchorStatus(s);
+}
+
 export function decodePacketType(pktType: number | string | undefined): string {
   if (typeof pktType === 'string') return pktType;
   switch (pktType) {
