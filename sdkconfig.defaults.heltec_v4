@@ -14,3 +14,21 @@ CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 CONFIG_BT_ENABLED=y
 CONFIG_BT_CONTROLLER_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
+# NimBLE host task runs GATT callbacks and NVS persist writes; 4096 is the
+# stack size that has overflowed twice before in this firmware (DM handshake
+# worker, WS RPC task). Same class of task, same fix.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+CONFIG_BT_NIMBLE_TASK_STACK_SIZE=8192
+
+# PSRAM: the V4 has external SPI RAM that the base profile left disabled, so
+# the mesh delivery ring (~28KB) and other SPIRAM allocations fell back to
+# internal SRAM. In BLE mode that starved internal heap to a few hundred
+# bytes, so cJSON RPC responses failed to allocate (dispatch returned -1) and
+# the node crashed under load. Quad PSRAM at 80MHz, integrated into the heap.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
