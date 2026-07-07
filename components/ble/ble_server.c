@@ -102,24 +102,56 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
     }
 
     /*
-     * Send JSON + newline as a single mbuf chain.
-     * NimBLE handles L2CAP fragmentation internally based on negotiated MTU,
-     * so we don't need to chunk manually — just build one mbuf with the full payload.
+     * ATT notifications do NOT fragment: the payload of one notification is
+     * capped at ATT_MTU-3 and NimBLE silently truncates anything longer.
+     * (L2CAP fragmentation below that is transparent, which is what the
+     * previous single-mbuf version wrongly relied on.) Split the JSON line
+     * across as many notifications as needed; every client reassembles by
+     * newline, and notifications are delivered in order per connection.
      */
-    ESP_LOGI(TAG, "Sending notify %u bytes (mtu=%u)", (unsigned)(len + 1), s_mtu);
+    size_t max_chunk = (s_mtu > 3) ? (size_t)(s_mtu - 3) : 20;
+    size_t total = len + 1; /* JSON + trailing newline */
+    ESP_LOGI(TAG, "Sending notify %u bytes in %u-byte chunks (mtu=%u)", (unsigned)total,
+             (unsigned)max_chunk, s_mtu);
 
-    struct os_mbuf* om = ble_hs_mbuf_from_flat(json, len);
-    if (!om) {
-        ESP_LOGW(TAG, "Failed to allocate mbuf for notify");
-        return;
-    }
-    /* Append newline */
-    uint8_t nl = '\n';
-    os_mbuf_append(om, &nl, 1);
+    size_t off = 0;
+    while (off < total) {
+        size_t n = total - off;
+        if (n > max_chunk)
+            n = max_chunk;
 
-    int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
-    if (rc != 0) {
-        ESP_LOGW(TAG, "Notify failed: %d (%u bytes)", rc, (unsigned)(len + 1));
+        struct os_mbuf* om = NULL;
+        /* Bounded retry: the msys pool refills as the stack drains queued
+         * notifications; dropping a chunk would corrupt the JSON stream. */
+        for (int attempt = 0; attempt < 10 && om == NULL; attempt++) {
+            if (off + n <= len) {
+                om = ble_hs_mbuf_from_flat(json + off, n);
+            } else if (off < len) {
+                om = ble_hs_mbuf_from_flat(json + off, len - off);
+                if (om != NULL) {
+                    uint8_t nl = '\n';
+                    os_mbuf_append(om, &nl, 1);
+                }
+            } else {
+                uint8_t nl = '\n';
+                om = ble_hs_mbuf_from_flat(&nl, 1);
+            }
+            if (om == NULL) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
+        }
+        if (om == NULL) {
+            ESP_LOGW(TAG, "Notify chunk alloc failed at %u/%u; dropping rest", (unsigned)off,
+                     (unsigned)total);
+            return;
+        }
+
+        int rc = ble_gatts_notify_custom(s_conn_handle, s_rx_attr_handle, om);
+        if (rc != 0) {
+            ESP_LOGW(TAG, "Notify chunk failed: %d at %u/%u", rc, (unsigned)off, (unsigned)total);
+            return;
+        }
+        off += n;
     }
 }
 
