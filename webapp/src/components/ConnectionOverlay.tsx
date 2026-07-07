@@ -25,13 +25,15 @@ export function connectingLabelFor(transportType: TransportType): string {
   return 'Connecting…';
 }
 
-export function shouldAutoConnect(_savedIp: string, _autoTried: boolean, _connectionState: string, _manualDisconnect: boolean): boolean {
-  // Explicit policy: never auto-connect. User must press Connect.
-  return false;
-}
-
+// Connection policy: never auto-connect. The user presses Connect or picks a
+// saved device. The "last IP" below is only a convenience prefill for the form
+// (a single global value, distinct from the per-address device book).
 function loadSavedIp(): string {
   try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
+}
+
+function saveLastIp(ip: string): void {
+  try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
 }
 
 export function ConnectionOverlay() {
@@ -42,11 +44,9 @@ export function ConnectionOverlay() {
   const [wifiRemember, setWifiRemember] = useState(false);
   const [wifiName, setWifiName] = useState('');
   const [showToken, setShowToken] = useState(false);
-  const [autoTried, setAutoTried] = useState(false);
   const devices = useStore(s => s.devices);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
-  const manualDisconnect = useStore(s => s.manualDisconnect);
   const connectionCapabilities = useStore(s => s.connectionCapabilities);
 
   const isConnecting = connectionState === 'connecting';
@@ -63,7 +63,7 @@ export function ConnectionOverlay() {
       if (!ip) return;
       // The device book owns per-device tokens (saved by address post-connect);
       // here we only persist the IP so the empty form prefills it next time.
-      try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
+      saveLastIp(ip);
       const url = buildWifiUrl(ip, location.protocol, location.host, token || undefined);
       connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
     } else {
