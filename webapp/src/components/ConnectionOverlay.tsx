@@ -69,6 +69,8 @@ export function ConnectionOverlay() {
   const [wifiRemember, setWifiRemember] = useState(false);
   const [wifiName, setWifiName] = useState('');
   const [showToken, setShowToken] = useState(false);
+  const [bleToken, setBleToken] = useState('');
+  const [showBleToken, setShowBleToken] = useState(false);
   const devices = useStore(s => s.devices);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
@@ -91,6 +93,9 @@ export function ConnectionOverlay() {
       saveLastIp(ip);
       const url = buildWifiUrl(ip, location.protocol, location.host, token || undefined);
       connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
+    } else if (transportType === 'ble') {
+      const token = bleToken.trim();
+      connect(transportType, { token: token || undefined });
     } else {
       connect(transportType);
     }
@@ -185,6 +190,38 @@ export function ConnectionOverlay() {
         >
           <IconMonitor size={16} /> Mock Node (WebSocket)
         </button>
+
+        {/* Bluetooth connection settings */}
+        {transportType === 'ble' && (
+          <div className={styles.wifiInput}>
+            <div className={styles.field}>
+              <label htmlFor="ble-token" className={styles.wifiLabel}>Auth Token</label>
+              <div className={styles.tokenRow}>
+                <input
+                  id="ble-token"
+                  aria-label="Auth Token"
+                  type={showBleToken ? 'text' : 'password'}
+                  className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
+                  value={bleToken}
+                  onChange={e => setBleToken(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleConnect()}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className={styles.showHideBtn}
+                  onClick={() => setShowBleToken(v => !v)}
+                  aria-label={showBleToken ? 'Hide token' : 'Show token'}
+                >
+                  {showBleToken ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <span className={styles.wifiHint}>
+                Read it over USB with the bramble CLI (pair command), or from the node's Config page. Leave blank if the node has auth disabled.
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* WiFi connection settings */}
         {transportType === 'wifi' && (

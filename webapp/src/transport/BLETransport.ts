@@ -11,6 +11,13 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface AuthWaiter {
+  resolve: () => void;
+  reject: (e: Error) => void;
+}
+
+const AUTH_HANDSHAKE_TIMEOUT_MS = 5000;
+
 export class BLETransport implements Transport {
   private device: BluetoothDevice | null = null;
   private txChar: BluetoothRemoteGATTCharacteristic | null = null;
@@ -20,6 +27,16 @@ export class BLETransport implements Transport {
   private pending = new Map<number, Pending>();
   private notifyCb: ((method: string, params: unknown) => void) | null = null;
   private lineBuf = '';
+  private readonly token?: string;
+  // Set only while the one-shot auth handshake line is outstanding. The very
+  // next parsed RX line is treated as the handshake result and consumed here
+  // instead of the normal id/notification routing below, then cleared so
+  // routing resumes as usual.
+  private pendingAuth: AuthWaiter | null = null;
+
+  constructor(token?: string) {
+    this.token = token;
+  }
 
   get connected() { return this._connected; }
 
@@ -46,7 +63,33 @@ export class BLETransport implements Transport {
       'characteristicvaluechanged',
       this.onBLEData.bind(this) as EventListener
     );
+
+    // Fresh connections with auth enabled require the bare token (not JSON-RPC)
+    // as the first TX write, before any sendRPC call is allowed to run.
+    if (this.token) {
+      await this.performAuthHandshake(this.token);
+    }
+
     this._connected = true;
+  }
+
+  // Writes the token line directly, bypassing sendRPC (it carries no id and
+  // is not JSON-RPC), then waits for the single RX line the firmware answers
+  // with. Rejects with a message the existing auth-error UI matches
+  // (/1008|unauthorized|auth/i), mirroring the WiFi path's wording.
+  private async performAuthHandshake(token: string): Promise<void> {
+    await this.writeChunked(new TextEncoder().encode(token + '\n'));
+
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingAuth = null;
+        reject(new Error('Authentication handshake timed out'));
+      }, AUTH_HANDSHAKE_TIMEOUT_MS);
+      this.pendingAuth = {
+        resolve: () => { clearTimeout(timer); resolve(); },
+        reject: (err: Error) => { clearTimeout(timer); reject(err); },
+      };
+    });
   }
 
   private onBLEData(e: Event): void {
@@ -64,6 +107,19 @@ export class BLETransport implements Transport {
       let msg: Record<string, unknown>;
       try { msg = JSON.parse(line); } catch { continue; }
 
+      if (this.pendingAuth) {
+        const waiter = this.pendingAuth;
+        this.pendingAuth = null;
+        const result = msg.result as { ok?: boolean } | undefined;
+        if (result?.ok === true) {
+          waiter.resolve();
+        } else {
+          const errMsg = (msg.error as { message?: string } | undefined)?.message ?? 'unauthorized';
+          waiter.reject(new Error(`Authentication required: ${errMsg}`));
+        }
+        continue;
+      }
+
       if ('id' in msg && typeof msg.id === 'number' && this.pending.has(msg.id)) {
         const { resolve, reject, timer } = this.pending.get(msg.id)!;
         clearTimeout(timer);
@@ -76,17 +132,23 @@ export class BLETransport implements Transport {
     }
   }
 
+  // BLE MTU ~= 20 bytes on most implementations; chunk writes. Shared by
+  // sendRPC and the auth handshake, which writes a bare token line instead
+  // of a JSON-RPC payload.
+  private async writeChunked(payload: Uint8Array): Promise<void> {
+    if (!this.txChar) throw new Error('Not connected');
+    for (let i = 0; i < payload.length; i += BLE_CHUNK_SIZE) {
+      await this.txChar.writeValueWithResponse(payload.slice(i, i + BLE_CHUNK_SIZE));
+    }
+  }
+
   async sendRPC<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<T> {
     if (!this._connected || !this.txChar) throw new Error('Not connected');
     const id = ++this.rpcId;
     const payload = new TextEncoder().encode(
       JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'
     );
-
-    // BLE MTU ≈ 20 bytes on most implementations; chunk writes
-    for (let i = 0; i < payload.length; i += BLE_CHUNK_SIZE) {
-      await this.txChar.writeValueWithResponse(payload.slice(i, i + BLE_CHUNK_SIZE));
-    }
+    await this.writeChunked(payload);
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -111,6 +173,11 @@ export class BLETransport implements Transport {
       reject(err);
     }
     this.pending.clear();
+    if (this.pendingAuth) {
+      const waiter = this.pendingAuth;
+      this.pendingAuth = null;
+      waiter.reject(err);
+    }
   }
 
   async disconnect(): Promise<void> {
