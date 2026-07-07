@@ -57,6 +57,8 @@ Bramble includes a web client for live network operation and monitoring. It prov
 
 See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior and usage notes.
 
+A desktop app (Linux, Windows, macOS) is also available, built from the same webapp. It connects directly to nodes on your local network instead of going through a hosted proxy, and can discover nodes on the LAN automatically. See [docs/webapp/desktop.md](docs/webapp/desktop.md).
+
 ## Hardware Targets
 
 | Board | MCU | Display | Input | Radio | Audio | Status |

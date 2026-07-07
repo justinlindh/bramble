@@ -33,6 +33,7 @@
 #include "esp_wifi.h"
 #include "ws_server.h"
 #include "network_key.h"
+#include "mdns.h"
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -696,6 +697,11 @@ static int handle_set_node_name(const cJSON* params, cJSON* result) {
 
     /* Update runtime name so beacons immediately reflect the change */
     mesh_set_node_name(name);
+
+    /* Best-effort: reflect the new name in the mDNS TXT record so discovery
+     * shows it without a reboot. Fails harmlessly when mDNS is not running
+     * (AP mode / WiFi off). */
+    (void)mdns_service_txt_item_set("_bramble", "_tcp", "name", name);
 
     ESP_LOGI(TAG, "Node name set to: %s", name);
     cJSON_AddBoolToObject(result, "ok", true);

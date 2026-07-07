@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { connect, refreshDevices } from '../store/actions';
 import { useStore } from '../store/index';
+import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
 import { DeviceList } from './DeviceList';
+import { NearbyNodes } from './NearbyNodes';
+import type { NearbyNode } from '../lib/nearbyNodes';
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
@@ -16,6 +19,23 @@ export function buildWifiUrl(ip: string, protocol: string, host: string, _token?
 
   // Token is NOT embedded in the URL (NEW-SEC-6): it rides the WS subprotocol.
   return url;
+}
+
+// One-click connect to a device-book entry. The IP is a parameter because the
+// caller may know a fresher one than the book (mDNS discovery vs saved lastIp);
+// expectAddressHex keeps the DHCP guard: connect() drops the session if that
+// IP now answers as a different node.
+export function connectToSavedDevice(d: SavedDevice, ip: string): void {
+  const tok = getDeviceToken(d.address);
+  const url = buildWifiUrl(ip, location.protocol, location.host, tok || undefined);
+  connect('wifi', {
+    url,
+    token: tok || undefined,
+    ip,
+    remember: d.remember,
+    name: d.name,
+    expectAddressHex: d.address,
+  });
 }
 
 export function connectingLabelFor(transportType: TransportType): string {
@@ -161,6 +181,10 @@ export function ConnectionOverlay() {
         {/* WiFi connection settings */}
         {transportType === 'wifi' && (
           <div className={styles.wifiInput}>
+            <NearbyNodes onPickUnknown={(n: NearbyNode) => {
+              setWifiIp(n.ip);
+              setWifiName(n.txtName ?? '');
+            }} />
             <div className={styles.field}>
               <label htmlFor="wifi-ip" className={styles.wifiLabel}>Node address</label>
               <input

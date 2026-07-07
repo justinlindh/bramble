@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../store/index';
-import { connect, forgetSavedDevice, renameSavedDevice } from '../store/actions';
-import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
-import { buildWifiUrl } from './ConnectionOverlay';
+import { forgetSavedDevice, renameSavedDevice } from '../store/actions';
+import type { SavedDevice } from '../lib/deviceBook';
+import { connectToSavedDevice } from './ConnectionOverlay';
 import styles from './DeviceList.module.css';
 
 export function DeviceList() {
@@ -13,9 +13,7 @@ export function DeviceList() {
 
   const onConnect = (d: SavedDevice) => {
     if (d.transport !== 'wifi' || !d.lastIp) return;
-    const tok = getDeviceToken(d.address);
-    const url = buildWifiUrl(d.lastIp, location.protocol, location.host, tok || undefined);
-    connect('wifi', { url, token: tok || undefined, ip: d.lastIp, remember: d.remember, name: d.name, expectAddressHex: d.address });
+    connectToSavedDevice(d, d.lastIp);
   };
 
   return (
