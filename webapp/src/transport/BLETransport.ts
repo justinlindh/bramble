@@ -132,14 +132,28 @@ export class BLETransport implements Transport {
     }
   }
 
+  // Serialize whole-line writes: the firmware reassembles requests from a
+  // byte stream, so two concurrent sendRPC calls (a user send racing the 10s
+  // background polls, say) interleaving their 20-byte chunks corrupt BOTH
+  // lines and both RPCs time out. Same hazard SerialTransport guards with
+  // its writeQueue.
+  private writeQueue: Promise<void> = Promise.resolve();
+
   // BLE MTU ~= 20 bytes on most implementations; chunk writes. Shared by
   // sendRPC and the auth handshake, which writes a bare token line instead
-  // of a JSON-RPC payload.
-  private async writeChunked(payload: Uint8Array): Promise<void> {
-    if (!this.txChar) throw new Error('Not connected');
-    for (let i = 0; i < payload.length; i += BLE_CHUNK_SIZE) {
-      await this.txChar.writeValueWithResponse(payload.slice(i, i + BLE_CHUNK_SIZE));
-    }
+  // of a JSON-RPC payload. One payload's chunks are written atomically with
+  // respect to other writeChunked callers.
+  private writeChunked(payload: Uint8Array): Promise<void> {
+    const run = this.writeQueue.then(async () => {
+      if (!this.txChar) throw new Error('Not connected');
+      for (let i = 0; i < payload.length; i += BLE_CHUNK_SIZE) {
+        await this.txChar.writeValueWithResponse(payload.slice(i, i + BLE_CHUNK_SIZE));
+      }
+    });
+    // The queue must advance even when a write fails, or one error would
+    // wedge every later write behind a rejected promise.
+    this.writeQueue = run.catch(() => {});
+    return run;
   }
 
   async sendRPC<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<T> {

@@ -149,4 +149,37 @@ describe('BLETransport auth handshake', () => {
 
     await expect(rpcPromise).resolves.toEqual({ pong: true });
   });
+
+  it('serializes concurrent sendRPC writes so chunks never interleave', async () => {
+    const { bluetooth, txChar, writes, emitLine } = makeFakeBleStack();
+    // Yield to the event loop inside each write so unserialized concurrent
+    // callers WOULD interleave their chunks (reproduces the corrupted-line
+    // failure that made sends time out while background polls ran).
+    txChar.writeValueWithResponse.mockImplementation(async (data: BufferSource) => {
+      await new Promise(r => setTimeout(r, 0));
+      writes.push(new Uint8Array(data as ArrayBuffer));
+    });
+    vi.stubGlobal('navigator', { bluetooth });
+
+    const transport = new BLETransport();
+    await transport.connect();
+
+    const a = transport.sendRPC('bramble.sendBroadcast', { text: 'a'.repeat(80) }, 2000).catch(() => {});
+    const b = transport.sendRPC('bramble.getStatus', { filler: 'b'.repeat(80) }, 2000).catch(() => {});
+    await vi.waitFor(() => {
+      const lines = writesAsText(writes).split('\n').filter(l => l.length > 0);
+      expect(lines).toHaveLength(2);
+    });
+
+    // Every reassembled line must be intact JSON: interleaved chunks would
+    // corrupt both.
+    const lines = writesAsText(writes).split('\n').filter(l => l.length > 0);
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+    // Settle the pending RPCs so no timers leak into other tests.
+    emitLine('{"jsonrpc":"2.0","id":1,"result":{}}\n');
+    emitLine('{"jsonrpc":"2.0","id":2,"result":{}}\n');
+    await Promise.all([a, b]);
+  });
 });
