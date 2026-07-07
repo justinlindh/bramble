@@ -1,5 +1,5 @@
 #include "unity.h"
-#include "../main/ct_strcmp.h"
+#include "../components/security/include/ct_strcmp.h"
 #include "rpc_auth.h"
 
 void setUp(void) {}
