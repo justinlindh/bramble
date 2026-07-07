@@ -257,13 +257,18 @@ export async function connect(
     }
 
     // Load config first to get node address for IndexedDB namespacing
-    // Retry once if first attempt fails — node address is critical for correct DB namespace
+    // Retry once if the first attempt fails: the node address namespaces the
+    // message DB. Read it from the LIVE store, not the `store` snapshot taken
+    // at the top of connect(): loadConfig() replaces the store config, and the
+    // stale snapshot still holds the PREVIOUS node's config. Reading it stale
+    // namespaced the DB under the old node's address, leaking its messages and
+    // DMs into this node's view (the bookAddrNum read below already reads fresh).
     await opt(loadConfig());
-    let nodeAddr = store.config?.identity?.address;
+    let nodeAddr = useStore.getState().config?.identity?.address;
     if (!nodeAddr) {
       await new Promise(r => setTimeout(r, 500));
       await opt(loadConfig());
-      nodeAddr = store.config?.identity?.address;
+      nodeAddr = useStore.getState().config?.identity?.address;
     }
     const configAddrHex = nodeAddr ? formatAddrHex(nodeAddr) : undefined;
     // Persist last-known address so we can recover if config fails on next connect
