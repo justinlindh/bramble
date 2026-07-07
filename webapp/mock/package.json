@@ -8,6 +8,7 @@
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "ws": "^8.18.0"
   }
 }

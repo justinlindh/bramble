@@ -1,11 +1,14 @@
 import { SerialTransport } from './SerialTransport';
 import { BLETransport } from './BLETransport';
 import { WebSocketTransport } from './WebSocketTransport';
+import { MockTransport } from './MockTransport';
+import { isEmbeddedShell } from '../utils/platform';
 import type { Transport, TransportType } from '../types/bramble';
 
 export { SerialTransport } from './SerialTransport';
 export { BLETransport } from './BLETransport';
 export { WebSocketTransport } from './WebSocketTransport';
+export { MockTransport } from './MockTransport';
 
 function resolveMockWsUrl(): string {
   if (typeof location === 'undefined') return 'ws://localhost:3099';
@@ -18,7 +21,14 @@ function resolveMockWsUrl(): string {
 
 export function createTransport(type: TransportType, options?: { url?: string; token?: string }): Transport {
   if (type === 'ble') return new BLETransport();
-  if (type === 'websocket') return new WebSocketTransport(resolveMockWsUrl());
+  if (type === 'websocket') {
+    // Embedded shells (Android WebView, Electron under file://) load the app
+    // from a local origin with no mock WebSocket server reachable behind it
+    // (resolveMockWsUrl() would build e.g. wss://appassets.androidplatform.net:443/ws,
+    // which has nothing listening). Drive the mock handler in page instead.
+    if (isEmbeddedShell()) return new MockTransport();
+    return new WebSocketTransport(resolveMockWsUrl());
+  }
   if (type === 'wifi') return new WebSocketTransport(options?.url ?? 'ws://192.168.4.1/ws', options?.token);
   return new SerialTransport();
 }
