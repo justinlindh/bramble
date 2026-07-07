@@ -4,14 +4,16 @@
   flex-direction: column;
   gap: 0.5rem;
   text-align: left;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .heading {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.05em;
 }
 
 .list {
@@ -31,10 +33,11 @@
 
 .connectBtn {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.75rem;
   padding: 0.55rem 0.75rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -42,22 +45,52 @@
   color: var(--text);
   font-size: 0.9rem;
   text-align: left;
-  transition: border-color 0.15s, color 0.15s;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
 }
 
 .connectBtn:hover {
   border-color: var(--accent-blue);
-  color: var(--text);
+  background: rgba(31, 111, 235, 0.08);
 }
 
 .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .meta {
   font-family: var(--font-mono, monospace);
   font-size: 0.75rem;
   color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* A small chevron so the row reads as "click to connect". */
+.chevron {
+  width: 7px;
+  height: 7px;
+  border-top: 2px solid var(--text-muted);
+  border-right: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+  flex-shrink: 0;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.connectBtn:hover .chevron {
+  border-color: var(--accent-blue);
+  transform: rotate(45deg) translate(1px, -1px);
 }
 
 .renameForm {
@@ -78,7 +111,7 @@
 .action {
   padding: 0.4rem 0.6rem;
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 0.75rem;
@@ -88,4 +121,10 @@
 .action:hover {
   border-color: var(--accent-blue);
   color: var(--text);
+}
+
+/* Forget is destructive: keep it quiet until hover, then signal danger. */
+.danger:hover {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
 }
