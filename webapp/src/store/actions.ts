@@ -3,6 +3,7 @@ import { createTransport, BrambleClient } from '../transport';
 import { messageDb } from './messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventStore';
 import { fetchConnectionCapabilities } from '../lib/connectionMode';
+import { listDevices, forgetDevice, renameDevice } from '../lib/deviceBook';
 import type {
   TransportType,
   BrambleConfig,
@@ -1729,4 +1730,16 @@ export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
 
 export function getClient(): BrambleClient | null {
   return client;
+}
+
+export function refreshDevices(): void {
+  useStore.getState().setDevices(listDevices());
+}
+export function forgetSavedDevice(address: string): void {
+  forgetDevice(address);
+  refreshDevices();
+}
+export function renameSavedDevice(address: string, name: string): void {
+  renameDevice(address, name);
+  refreshDevices();
 }
