@@ -35,14 +35,15 @@ void test_receipt_policy_adapts_to_mesh_size(void) {
 
 void test_slot_delay_is_bounded_and_identity_sensitive(void) {
     uint32_t pkt_id = 0xCAFEBABEu;
-    uint32_t d1 = mesh_broadcast_receipt_slot_delay_ms(0x01020304u, pkt_id);
+    uint32_t d1 =
+        mesh_broadcast_receipt_slot_delay_ms(0x01020304u, pkt_id, 40u /* dense: full 32 buckets */);
 
     TEST_ASSERT_TRUE(d1 >= 300u);
     TEST_ASSERT_TRUE(d1 <= (300u + 500u * 31u));
 
     bool found_different_slot = false;
     for (uint32_t i = 1; i <= 16u; i++) {
-        uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, pkt_id);
+        uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, pkt_id, 40u);
         TEST_ASSERT_TRUE(d >= 300u);
         TEST_ASSERT_TRUE(d <= (300u + 500u * 31u));
         if (d != d1) {
@@ -58,6 +59,29 @@ void test_retry_count_default_three_attempts(void) {
     TEST_ASSERT_EQUAL_UINT8(3u, mesh_broadcast_receipt_retry_count());
 }
 
+void test_slot_window_scales_down_for_small_mesh(void) {
+    /* A small mesh must confirm fast: with 1 neighbor the window is clamped
+     * to the 4-bucket minimum, so the worst-case slot delay is far below the
+     * dense-mesh ceiling. */
+    uint32_t max_small = 300u + 500u * 3u; /* 4 buckets => slots 0..3 */
+    for (uint32_t i = 0; i < 64u; i++) {
+        uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, 0xCAFEBABEu, 1u);
+        TEST_ASSERT_TRUE(d >= 300u);
+        TEST_ASSERT_TRUE(d <= max_small);
+    }
+    /* Dense mesh keeps the wider spread (a value above the small ceiling is
+     * reachable). */
+    bool saw_wide = false;
+    for (uint32_t i = 0; i < 256u; i++) {
+        uint32_t d = mesh_broadcast_receipt_slot_delay_ms(0x01020304u + i, 0xCAFEBABEu, 40u);
+        if (d > max_small) {
+            saw_wide = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(saw_wide);
+}
+
 void test_slot_distribution_no_collision_for_typical_mesh(void) {
     uint32_t addrs[] = {0x196F8E71u, 0xE3CF8D24u, 0x0D941BEAu, 0xD4813079u, 0x6CBF8FE3u};
     int collision_count = 0;
@@ -65,7 +89,7 @@ void test_slot_distribution_no_collision_for_typical_mesh(void) {
     for (uint32_t pkt_id = 0; pkt_id < 1000u; pkt_id++) {
         uint32_t slots[5];
         for (int i = 0; i < 5; i++) {
-            slots[i] = mesh_broadcast_receipt_slot_delay_ms(addrs[i], pkt_id);
+            slots[i] = mesh_broadcast_receipt_slot_delay_ms(addrs[i], pkt_id, 40u);
         }
         for (int i = 0; i < 5; i++) {
             for (int j = i + 1; j < 5; j++) {
@@ -135,6 +159,7 @@ int main(void) {
     RUN_TEST(test_receipt_policy_adapts_to_mesh_size);
     RUN_TEST(test_slot_delay_is_bounded_and_identity_sensitive);
     RUN_TEST(test_retry_count_default_three_attempts);
+    RUN_TEST(test_slot_window_scales_down_for_small_mesh);
     RUN_TEST(test_slot_distribution_no_collision_for_typical_mesh);
     RUN_TEST(test_retry_delay_scaling_from_airtime_utilization);
     RUN_TEST(test_retry_delay_scaling_integer_math_bounds);
