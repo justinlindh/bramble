@@ -11,7 +11,8 @@
  *   Notification: { jsonrpc: "2.0", method: "bramble.X", params: {...} }
  */
 
-import { createHash } from 'node:crypto';
+import { sha256 } from '@noble/hashes/sha2';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
 
 // ─── Trust-anchor mock state ─────────────────────────────────────────────────
 // This node's Ed25519 identity public key (64 hex). Fixed so getIdentity is
@@ -23,8 +24,11 @@ let mockEndorsed = false; // whether a well-formed cert has been applied
 // but does not cryptographically verify the endorsement signature (the real
 // firmware and the webapp's own anchor.ts tests cover the crypto). It exists
 // so the webapp's device-gated anchor UI flow works end to end without hardware.
+// @noble/hashes is pure JS (no node:crypto), so this works unmodified whether
+// handler.mjs runs under node (mock/server.mjs, server/unified-server.mjs) or
+// gets bundled straight into the webapp for the in-page MockTransport.
 const anchorFingerprint = (pubHex) =>
-  createHash('sha256').update(Buffer.from(pubHex, 'hex')).digest('hex').slice(0, 8);
+  bytesToHex(sha256(hexToBytes(pubHex))).slice(0, 8);
 const isHex = (s, len) => typeof s === 'string' && s.length === len && /^[0-9a-fA-F]+$/.test(s);
 
 // ─── Node identities ─────────────────────────────────────────────────────────
@@ -81,7 +85,10 @@ let msgIdCounter = 1;
 // ping/getVersion allowlist, a wrong ?token= closes the WS with 1008, and
 // notifications are withheld from unauthenticated connections. Default off so
 // existing dev flows keep working; export MOCK_AUTH_TOKEN=secret to enable.
-let authToken = process.env.MOCK_AUTH_TOKEN || '';
+// `process` does not exist when this module is bundled into the webapp for
+// the in-page MockTransport, so guard the lookup with typeof (a plain
+// `process.env` reference would throw ReferenceError in that environment).
+let authToken = (typeof process !== 'undefined' && process.env?.MOCK_AUTH_TOKEN) || '';
 const AUTH_ALLOWLIST = new Set(['bramble.ping', 'bramble.getVersion']);
 const UNAUTHORIZED = { code: -1005, message: 'Unauthorized' };
 function authRequired() { return authToken.length > 0; }
