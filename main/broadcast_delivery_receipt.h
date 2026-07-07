@@ -27,7 +27,10 @@ uint8_t mesh_broadcast_receipt_policy(uint32_t dest_addr, uint8_t peer_count);
 bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr, uint8_t peer_count);
 
 /* Deterministic responder slot base (ms) to spread receipt TX among recipients. */
-uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id);
+/* peer_count: this node's current neighbor count; sizes the anti-collision
+ * slot window (2 slots per peer, clamped to [4, 32] buckets). */
+uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id,
+                                              uint8_t peer_count);
 
 /* Number of on-air attempts for a broadcast delivery receipt. */
 uint8_t mesh_broadcast_receipt_retry_count(void);

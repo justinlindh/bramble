@@ -1638,8 +1638,8 @@ static void queue_broadcast_delivery_receipt(uint32_t original_src_addr,
         return;
     }
 
-    uint32_t slot_delay_ms =
-        mesh_broadcast_receipt_slot_delay_ms(s_identity->address, original_packet_id);
+    uint32_t slot_delay_ms = mesh_broadcast_receipt_slot_delay_ms(
+        s_identity->address, original_packet_id, (uint8_t)neighbor_count(&s_neighbors));
     uint32_t initial_delay_ms = slot_delay_ms + (esp_random() % 400u); /* +0..399ms jitter */
 
     pending_receipt_t* item = &s_receipt_queue[slot];

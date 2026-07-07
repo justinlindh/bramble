@@ -10,7 +10,8 @@
  * airtime, so slots need to be wider than that. */
 #define BROADCAST_RECEIPT_DELAY_BASE_MS 300u
 #define BROADCAST_RECEIPT_SLOT_SPACING_MS 500u
-#define BROADCAST_RECEIPT_SLOT_BUCKETS 32u
+#define BROADCAST_RECEIPT_SLOT_BUCKETS_MIN 4u
+#define BROADCAST_RECEIPT_SLOT_BUCKETS_MAX 32u
 #define BROADCAST_RECEIPT_RETRY_COUNT 3u
 
 #define RECEIPT_POLICY_FULL_MAX_PEERS 15u
@@ -31,8 +32,21 @@ bool mesh_should_emit_broadcast_delivery_receipt(uint32_t dest_addr, uint8_t pee
     return mesh_broadcast_receipt_policy(dest_addr, peer_count) > 0;
 }
 
-uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id) {
-    uint32_t slot = (local_addr ^ original_packet_id) % BROADCAST_RECEIPT_SLOT_BUCKETS;
+uint32_t mesh_broadcast_receipt_slot_delay_ms(uint32_t local_addr, uint32_t original_packet_id,
+                                              uint8_t peer_count) {
+    /* Scale the contention window to the mesh actually present: the number
+     * of nodes that can answer the same broadcast is bounded by how many
+     * peers this node hears (its neighbor count is a proxy with the right
+     * order of magnitude). The fixed 32-bucket window put 0.3-15.8s of dead
+     * air before every delivery confirmation even on a 2-node bench. Two
+     * slots per peer, clamped to [4, 32]: a small mesh confirms in under
+     * ~2s while dense meshes keep the full anti-collision spread. */
+    uint32_t buckets = 2u * (uint32_t)peer_count;
+    if (buckets < BROADCAST_RECEIPT_SLOT_BUCKETS_MIN)
+        buckets = BROADCAST_RECEIPT_SLOT_BUCKETS_MIN;
+    if (buckets > BROADCAST_RECEIPT_SLOT_BUCKETS_MAX)
+        buckets = BROADCAST_RECEIPT_SLOT_BUCKETS_MAX;
+    uint32_t slot = (local_addr ^ original_packet_id) % buckets;
     return BROADCAST_RECEIPT_DELAY_BASE_MS + (slot * BROADCAST_RECEIPT_SLOT_SPACING_MS);
 }
 
