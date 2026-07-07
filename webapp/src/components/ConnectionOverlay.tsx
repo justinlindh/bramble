@@ -7,7 +7,6 @@ import { DeviceList } from './DeviceList';
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
-const WIFI_TOKEN_KEY = 'bramble_wifi_token';
 
 export function buildWifiUrl(ip: string, protocol: string, host: string, _token?: string): string {
   let url: string;
@@ -35,36 +34,11 @@ function loadSavedIp(): string {
   try { return localStorage.getItem(WIFI_IP_KEY) || ''; } catch { return ''; }
 }
 
-// Migrate any token left in localStorage from before S19 fix
-try {
-  const legacyToken = localStorage.getItem(WIFI_TOKEN_KEY);
-  if (legacyToken) {
-    sessionStorage.setItem(WIFI_TOKEN_KEY, legacyToken);
-    localStorage.removeItem(WIFI_TOKEN_KEY);
-  }
-} catch { /* noop */ }
-
-function loadSavedToken(): string {
-  // S19 fix: auth token uses sessionStorage (not localStorage) to limit
-  // persistence window and reduce XSS exfiltration risk
-  try { return sessionStorage.getItem(WIFI_TOKEN_KEY) || ''; } catch { return ''; }
-}
-
-function saveWifiSettings(ip: string, token: string) {
-  try {
-    localStorage.setItem(WIFI_IP_KEY, ip); // IP is non-sensitive, keep persistent
-    sessionStorage.setItem(WIFI_TOKEN_KEY, token); // Token: session-only
-  } catch {
-    /* noop */
-  }
-}
-
 export function ConnectionOverlay() {
   const savedIp = loadSavedIp();
-  const savedToken = loadSavedToken();
   const [transportType, setTransportType] = useState<TransportType>(savedIp ? 'wifi' : 'serial');
   const [wifiIp, setWifiIp] = useState(savedIp);
-  const [wifiToken, setWifiToken] = useState(savedToken);
+  const [wifiToken, setWifiToken] = useState('');
   const [wifiRemember, setWifiRemember] = useState(false);
   const [wifiName, setWifiName] = useState('');
   const [showToken, setShowToken] = useState(false);
@@ -87,25 +61,15 @@ export function ConnectionOverlay() {
       const ip = wifiIp.trim();
       const token = wifiToken.trim();
       if (!ip) return;
-      // Do NOT call the legacy saveWifiSettings here: it wrote the token to the
-      // legacy sessionStorage key that the device book now supersedes, recreating
-      // a key forgetDevice() deletes. The book saves lastIp per device on connect
-      // (Task 3). Persist only the IP for the empty-form prefill convenience.
-      try { localStorage.setItem('bramble_wifi_ip', ip); } catch { /* noop */ }
+      // The device book owns per-device tokens (saved by address post-connect);
+      // here we only persist the IP so the empty form prefills it next time.
+      try { localStorage.setItem(WIFI_IP_KEY, ip); } catch { /* noop */ }
       const url = buildWifiUrl(ip, location.protocol, location.host, token || undefined);
       connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
     } else {
       connect(transportType);
     }
   };
-
-  useEffect(() => {
-    if (!shouldAutoConnect(savedIp, autoTried, connectionState, manualDisconnect)) return;
-    setAutoTried(true);
-    const token = savedToken.trim();
-    const url = buildWifiUrl(savedIp, location.protocol, location.host, token || undefined);
-    connect('wifi', { url, token: token || undefined });
-  }, [autoTried, savedIp, savedToken, connectionState, manualDisconnect]);
 
   // Check browser support
   const hasSerial = 'serial' in navigator;
