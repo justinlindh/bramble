@@ -27,8 +27,19 @@ export const DISCOVERY_CHANNELS = {
   update: 'discovery:update',
 } as const;
 
+/**
+ * Native bridge injected by the Android WebView shell (bramble-android,
+ * BrambleAndroidBridge). The webapp hands it the active node connection so
+ * the shell's background notification service can open its own
+ * authenticated WebSocket.
+ */
+export type BrambleAndroidNativeApi = {
+  updateConnection(wsUrl: string, token: string): void;
+};
+
 declare global {
   interface Window {
     brambleDesktop?: BrambleDesktopApi;
+    brambleAndroidNative?: BrambleAndroidNativeApi;
   }
 }

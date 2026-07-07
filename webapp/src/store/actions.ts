@@ -5,6 +5,7 @@ import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventSto
 import { fetchConnectionCapabilities } from '../lib/connectionMode';
 import { listDevices, forgetDevice, renameDevice, upsertDevice, setDeviceToken } from '../lib/deviceBook';
 import { formatAddrHex } from '../utils/address';
+import { isAndroidShell } from '../utils/platform';
 import type {
   TransportType,
   BrambleConfig,
@@ -334,6 +335,13 @@ export async function connect(
     await opt(syncDeliveryEventReplay());
 
     store.setConnectionState('connected');
+
+    // Android shell: hand the live connection to the native notification
+    // service so it can open its own authenticated WebSocket. No-op on
+    // web and Electron, which have no such bridge.
+    if (type === 'wifi' && options?.url && isAndroidShell()) {
+      try { window.brambleAndroidNative?.updateConnection(options.url, options.token ?? ''); } catch { /* noop */ }
+    }
   } catch (e) {
     // Clean up any partially-initialised client so we start fresh on retry
     client?.clearSubscriptions();
