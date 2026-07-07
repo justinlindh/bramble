@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store/index';
 import { connect, forgetSavedDevice, renameSavedDevice } from '../store/actions';
-import { getDeviceToken } from '../lib/deviceBook';
+import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
 import { buildWifiUrl } from './ConnectionOverlay';
 import styles from './DeviceList.module.css';
 
@@ -11,9 +11,8 @@ export function DeviceList() {
   const [draftName, setDraftName] = useState('');
   if (devices.length === 0) return null;
 
-  const onConnect = (address: string) => {
-    const d = devices.find(x => x.address === address);
-    if (!d || d.transport !== 'wifi' || !d.lastIp) return;
+  const onConnect = (d: SavedDevice) => {
+    if (d.transport !== 'wifi' || !d.lastIp) return;
     const tok = getDeviceToken(d.address);
     const url = buildWifiUrl(d.lastIp, location.protocol, location.host, tok || undefined);
     connect('wifi', { url, token: tok || undefined, ip: d.lastIp, remember: d.remember, name: d.name, expectAddressHex: d.address });
@@ -42,7 +41,7 @@ export function DeviceList() {
               <button
                 type="button"
                 className={styles.connectBtn}
-                onClick={() => onConnect(d.address)}
+                onClick={() => onConnect(d)}
                 aria-label={`Connect to ${d.name}`}
               >
                 <span className={styles.name}>{d.name}</span>
