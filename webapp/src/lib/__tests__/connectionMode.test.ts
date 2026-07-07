@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fetchConnectionCapabilities, DEFAULT_CAPABILITIES, ELECTRON_CAPABILITIES } from '../connectionMode';
+import { fetchConnectionCapabilities, DEFAULT_CAPABILITIES, EMBEDDED_CAPABILITIES } from '../connectionMode';
 
 describe('fetchConnectionCapabilities', () => {
   afterEach(() => {
@@ -10,14 +10,23 @@ describe('fetchConnectionCapabilities', () => {
     vi.stubGlobal('isElectron', true);
     const fetchSpy = vi.fn();
     const caps = await fetchConnectionCapabilities(fetchSpy as unknown as typeof fetch);
-    expect(caps).toEqual(ELECTRON_CAPABILITIES);
+    expect(caps).toEqual(EMBEDDED_CAPABILITIES);
     expect(caps.mode).toBe('local');
     expect(caps.localLanAllowed).toBe(true);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('falls back to the capabilities fetch outside Electron', async () => {
+  it('short-circuits to local capabilities in the Android shell without fetching', async () => {
+    vi.stubGlobal('brambleAndroid', true);
+    const fetchSpy = vi.fn();
+    const caps = await fetchConnectionCapabilities(fetchSpy as unknown as typeof fetch);
+    expect(caps).toEqual(EMBEDDED_CAPABILITIES);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the capabilities fetch outside embedded shells', async () => {
     vi.stubGlobal('isElectron', undefined);
+    vi.stubGlobal('brambleAndroid', undefined);
     const fetchSpy = vi.fn().mockRejectedValue(new Error('no server'));
     const caps = await fetchConnectionCapabilities(fetchSpy as unknown as typeof fetch);
     expect(caps).toEqual(DEFAULT_CAPABILITIES);
