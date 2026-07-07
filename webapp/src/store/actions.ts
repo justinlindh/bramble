@@ -315,7 +315,7 @@ export async function connect(
         try { await client?.disconnect(); } catch { /* noop */ }
         client = null;
         store.setTransport(null);
-        store.setConnectionState('error', 'That address now belongs to a different node. Update the device IP.');
+        store.setConnectionState('error', 'That address now belongs to a different node. Check the device and reconnect.');
         return;
       }
       // A book write must never break a live connection.
@@ -328,6 +328,18 @@ export async function connect(
             token: options.token ?? '',
             remember: options.remember ?? false,
             transport: 'wifi',
+          });
+        } else if (type === 'ble') {
+          // BLE has no address until after connect (like serial), but unlike
+          // serial it needs the auth token, so persist it per the Remember
+          // choice. No IP: reconnect still goes through the system picker.
+          saveConnectedDevice({
+            addr: bookAddrNum,
+            name: options?.name,
+            ip: '',
+            token: options?.token ?? '',
+            remember: options?.remember ?? false,
+            transport: 'ble',
           });
         } else if (type === 'serial') {
           saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', token: '', remember: false, transport: 'serial' });
@@ -370,10 +382,17 @@ export async function connect(
       try { window.brambleAndroidNative?.updateConnection(options.url, options.token ?? ''); } catch { /* noop */ }
     }
   } catch (e) {
-    // Clean up any partially-initialised client so we start fresh on retry
-    client?.clearSubscriptions();
+    // Clean up any partially-initialised client so we start fresh on retry.
+    // DISCONNECT the transport, do not just drop the reference: a BLE
+    // peripheral stops advertising while a GATT link is open, so a connect
+    // that fails after the link is established (the auth probe rejecting, say)
+    // would otherwise leave the node connected-but-unusable and invisible to
+    // the system picker on the next attempt.
+    try { client?.clearSubscriptions(); } catch { /* noop */ }
+    try { await client?.disconnect(); } catch { /* noop */ }
     client = null;
-    // Show overlay so user can retry — 'disconnected' shows the connect UI
+    store.setTransport(null);
+    // Show the overlay so the user can retry: 'disconnected' shows connect UI.
     store.setConnectionState('disconnected', friendlyError((e as Error).message));
   }
 }
@@ -1818,7 +1837,7 @@ export function saveConnectedDevice(args: {
   ip: string;
   token: string;
   remember: boolean;
-  transport: 'wifi' | 'serial';
+  transport: 'wifi' | 'serial' | 'ble';
 }): void {
   const address = formatAddrHex(args.addr);
   upsertDevice({ address, name: args.name, lastIp: args.ip, transport: args.transport, remember: args.remember });

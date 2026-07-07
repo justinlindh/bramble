@@ -68,10 +68,15 @@ describe('ConnectionOverlay Bluetooth auth token field', () => {
     expect(screen.getByLabelText(/auth token/i)).toBeInTheDocument();
   });
 
-  it('does not show WiFi-only fields (node address, remember) for Bluetooth', () => {
+  it('does not show the WiFi-only node address field for Bluetooth', () => {
     render(<ConnectionOverlay />);
     selectBluetooth();
     expect(screen.queryByLabelText(/node address/i)).toBeNull();
-    expect(screen.queryByLabelText(/remember this device/i)).toBeNull();
+  });
+
+  it('shows a Remember this device checkbox for Bluetooth so the token can be saved', () => {
+    render(<ConnectionOverlay />);
+    selectBluetooth();
+    expect(screen.getByLabelText(/remember this device/i)).toBeInTheDocument();
   });
 });
