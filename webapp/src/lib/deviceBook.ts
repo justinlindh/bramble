@@ -5,7 +5,7 @@ export type SavedDevice = {
   address: string;
   name: string;
   lastIp: string;
-  transport: 'wifi' | 'serial';
+  transport: 'wifi' | 'serial' | 'ble';
   remember: boolean;
   lastConnectedAt: number;
 };
@@ -38,7 +38,7 @@ export function listDevices(): SavedDevice[] {
 
 export function upsertDevice(input: {
   address: string; name?: string; lastIp?: string;
-  transport: 'wifi' | 'serial'; remember: boolean; nowMs?: number;
+  transport: 'wifi' | 'serial' | 'ble'; remember: boolean; nowMs?: number;
 }): SavedDevice {
   const book = readBook();
   const now = input.nowMs ?? Date.now();

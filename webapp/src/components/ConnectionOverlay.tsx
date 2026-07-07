@@ -43,6 +43,20 @@ export function connectToSavedDevice(d: SavedDevice, ip: string): void {
   });
 }
 
+// Reconnect to a saved Bluetooth device: reuse its stored token so the user
+// does not retype it. The system picker still appears (Web Bluetooth requires
+// a chooser gesture), and expectAddressHex verifies the picked node is the one
+// the user chose here, dropping the session on a mismatch.
+export function connectToSavedBleDevice(d: SavedDevice): void {
+  const tok = getDeviceToken(d.address);
+  connect('ble', {
+    token: tok || undefined,
+    remember: d.remember,
+    name: d.name,
+    expectAddressHex: d.address,
+  });
+}
+
 export function connectingLabelFor(transportType: TransportType): string {
   if (transportType === 'ble') return 'Scanning…';
   if (transportType === 'serial') return 'Opening serial…';
@@ -71,6 +85,8 @@ export function ConnectionOverlay() {
   const [showToken, setShowToken] = useState(false);
   const [bleToken, setBleToken] = useState('');
   const [showBleToken, setShowBleToken] = useState(false);
+  const [bleRemember, setBleRemember] = useState(false);
+  const [bleName, setBleName] = useState('');
   const devices = useStore(s => s.devices);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
@@ -82,6 +98,19 @@ export function ConnectionOverlay() {
   useEffect(() => {
     refreshDevices();
   }, []);
+
+  // Prefill the BLE token and name from the most recently used Bluetooth
+  // device so a returning user does not retype the token. BLE cannot key by
+  // address before connecting (the node is chosen in the system picker), so
+  // the most-recent saved BLE device is the best available default.
+  useEffect(() => {
+    const lastBle = devices.find(d => d.transport === 'ble');
+    if (!lastBle) return;
+    const saved = getDeviceToken(lastBle.address);
+    setBleToken(prev => (prev ? prev : saved));
+    setBleName(prev => (prev ? prev : lastBle.name));
+    if (saved) setBleRemember(true);
+  }, [devices]);
 
   const handleConnect = () => {
     if (transportType === 'wifi') {
@@ -95,7 +124,7 @@ export function ConnectionOverlay() {
       connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
     } else if (transportType === 'ble') {
       const token = bleToken.trim();
-      connect(transportType, { token: token || undefined });
+      connect(transportType, { token: token || undefined, remember: bleRemember, name: bleName.trim() || undefined });
     } else {
       connect(transportType);
     }
@@ -218,6 +247,33 @@ export function ConnectionOverlay() {
               </div>
               <span className={styles.wifiHint}>
                 Read it over USB with the bramble CLI (pair command), or from the node's Config page. Leave blank if the node has auth disabled.
+              </span>
+            </div>
+
+            <div className={styles.field}>
+              <label htmlFor="ble-name" className={styles.wifiLabel}>Name (optional)</label>
+              <input
+                id="ble-name"
+                type="text"
+                className={styles.wifiField}
+                value={bleName}
+                onChange={e => setBleName(e.target.value)}
+                placeholder="e.g. Garage node"
+                onKeyDown={e => e.key === 'Enter' && handleConnect()}
+              />
+            </div>
+
+            <div className={styles.field}>
+              <label className={styles.rememberRow}>
+                <input
+                  type="checkbox"
+                  checked={bleRemember}
+                  onChange={e => setBleRemember(e.target.checked)}
+                />
+                <span>Remember this device</span>
+              </label>
+              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>
+                Stores the token in this browser so you do not retype it; leave off on shared devices.
               </span>
             </div>
           </div>

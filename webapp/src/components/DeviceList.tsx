@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store/index';
 import { forgetSavedDevice, renameSavedDevice } from '../store/actions';
 import type { SavedDevice } from '../lib/deviceBook';
-import { connectToSavedDevice } from './ConnectionOverlay';
+import { connectToSavedDevice, connectToSavedBleDevice } from './ConnectionOverlay';
 import styles from './DeviceList.module.css';
 
 export function DeviceList() {
@@ -12,8 +12,11 @@ export function DeviceList() {
   if (devices.length === 0) return null;
 
   const onConnect = (d: SavedDevice) => {
-    if (d.transport !== 'wifi' || !d.lastIp) return;
-    connectToSavedDevice(d, d.lastIp);
+    if (d.transport === 'ble') {
+      connectToSavedBleDevice(d);
+    } else if (d.transport === 'wifi' && d.lastIp) {
+      connectToSavedDevice(d, d.lastIp);
+    }
   };
 
   return (
@@ -44,7 +47,7 @@ export function DeviceList() {
               >
                 <span className={styles.name}>{d.name}</span>
                 <span className={styles.right}>
-                  <span className={styles.meta}>{d.transport === 'wifi' ? d.lastIp : 'USB'}</span>
+                  <span className={styles.meta}>{d.transport === 'wifi' ? d.lastIp : d.transport === 'ble' ? 'Bluetooth' : 'USB'}</span>
                   <span className={styles.chevron} aria-hidden="true" />
                 </span>
               </button>
