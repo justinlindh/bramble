@@ -64,7 +64,8 @@ export function ConnectionOverlay() {
   const [transportType, setTransportType] = useState<TransportType>(savedIp ? 'wifi' : 'serial');
   const [wifiIp, setWifiIp] = useState(savedIp);
   const [wifiToken, setWifiToken] = useState(savedToken);
-  const [showAuth, setShowAuth] = useState(Boolean(savedToken));
+  const [wifiRemember, setWifiRemember] = useState(false);
+  const [wifiName, setWifiName] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [autoTried, setAutoTried] = useState(false);
   const connectionState = useStore(s => s.connectionState);
@@ -80,9 +81,13 @@ export function ConnectionOverlay() {
       const ip = wifiIp.trim();
       const token = wifiToken.trim();
       if (!ip) return;
-      saveWifiSettings(ip, token);
+      // Do NOT call the legacy saveWifiSettings here: it wrote the token to the
+      // legacy sessionStorage key that the device book now supersedes, recreating
+      // a key forgetDevice() deletes. The book saves lastIp per device on connect
+      // (Task 3). Persist only the IP for the empty-form prefill convenience.
+      try { localStorage.setItem('bramble_wifi_ip', ip); } catch { /* noop */ }
       const url = buildWifiUrl(ip, location.protocol, location.host, token || undefined);
-      connect(transportType, { url, token: token || undefined });
+      connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
     } else {
       connect(transportType);
     }
@@ -192,43 +197,53 @@ export function ConnectionOverlay() {
               AP mode: 192.168.4.1 · Station mode: check your router
             </span>
 
-            <button
-              type="button"
-              className={styles.authToggle}
-              onClick={() => setShowAuth(v => !v)}
-              aria-expanded={showAuth}
-            >
-              Authentication
-            </button>
-
-            {showAuth && (
-              <div className={styles.authPanel}>
-                <label htmlFor="wifi-token" className={styles.authLabel}>Auth Token</label>
-                <div className={styles.tokenRow}>
-                  <input
-                    id="wifi-token"
-                    aria-label="Auth Token"
-                    type={showToken ? 'text' : 'password'}
-                    className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
-                    value={wifiToken}
-                    onChange={e => setWifiToken(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleConnect()}
-                    autoComplete="off"
-                  />
-                  <button
-                    type="button"
-                    className={styles.showHideBtn}
-                    onClick={() => setShowToken(v => !v)}
-                    aria-label={showToken ? 'Hide token' : 'Show token'}
-                  >
-                    {showToken ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-                <span className={styles.wifiHint}>
-                  Required by default. Get the token via: bramble pair
-                </span>
+            <div className={styles.authPanel}>
+              <label htmlFor="wifi-token" className={styles.authLabel}>Auth Token</label>
+              <div className={styles.tokenRow}>
+                <input
+                  id="wifi-token"
+                  aria-label="Auth Token"
+                  type={showToken ? 'text' : 'password'}
+                  className={`${styles.wifiField} ${authError ? styles.authErrorField : ''}`}
+                  value={wifiToken}
+                  onChange={e => setWifiToken(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleConnect()}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className={styles.showHideBtn}
+                  onClick={() => setShowToken(v => !v)}
+                  aria-label={showToken ? 'Hide token' : 'Show token'}
+                >
+                  {showToken ? 'Hide' : 'Show'}
+                </button>
               </div>
-            )}
+              <span className={styles.wifiHint}>
+                Auth token: read it over USB with the bramble CLI (pair command), or from the node's Config page.
+              </span>
+            </div>
+
+            <label className={styles.rememberRow}>
+              <input
+                type="checkbox"
+                checked={wifiRemember}
+                onChange={e => setWifiRemember(e.target.checked)}
+              />
+              <span>Remember this device</span>
+            </label>
+            <p className={styles.hint}>Remembered tokens are stored in this browser; leave off for shared/public computers.</p>
+
+            <label htmlFor="wifi-name" className={styles.wifiLabel}>Name (optional)</label>
+            <input
+              id="wifi-name"
+              type="text"
+              className={styles.wifiField}
+              value={wifiName}
+              onChange={e => setWifiName(e.target.value)}
+              placeholder="e.g. Node A node"
+              onKeyDown={e => e.key === 'Enter' && handleConnect()}
+            />
           </div>
         )}
 
