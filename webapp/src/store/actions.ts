@@ -38,7 +38,7 @@ const ERROR_MAP: Array<[RegExp, string]> = [
   [/NotFoundError/i, 'No device found. Make sure your node is powered on and in range.'],
   [/already.*connect/i, 'Already connected to a device.'],
   [/serial rpc handshake failed/i, 'Serial link is up, but RPC is still starting. Please retry in a moment.'],
-  [/1008|unauthorized|auth/i, 'Authentication required. Enter your device token in the WiFi connection settings.'],
+  [/1008|unauthorized|auth/i, 'Authentication required. Enter this node\'s auth token, then reconnect.'],
   [/not a bramble node/i, 'Connected, but the endpoint did not respond as a Bramble node. Check the address and port.'],
 ];
 
@@ -195,6 +195,28 @@ export async function connect(
       const reachable = await verifyBrambleNode();
       if (!reachable) {
         throw new Error('Endpoint is not a Bramble node');
+      }
+    }
+
+    // Fail closed on missing or wrong auth. verifyBrambleNode only proves the
+    // endpoint is a Bramble node: it uses the allowlisted getVersion, which an
+    // auth-required node answers even to an unauthenticated client. Without
+    // this probe a blank BLE/WiFi token would look Connected and then silently
+    // reject every real RPC (issue: BLE connects with no token then Unauthorized).
+    // A non-allowlisted RPC returns Unauthorized when the session did not
+    // authenticate (wrong WiFi token closes 1008 earlier; a wrong BLE token is
+    // rejected during the transport handshake, so this specifically catches the
+    // no-token-on-an-auth-required-node case). Serial is a trusted link.
+    if (type === 'ble' || type === 'wifi') {
+      try {
+        await client.rpc('bramble.getStatus', {}, 4000);
+      } catch (e) {
+        const msg = (e as Error)?.message ?? '';
+        if (/unauthorized|1008|auth/i.test(msg) || /-1005/.test(msg)) {
+          throw new Error('This node requires an auth token. Enter the token and reconnect.');
+        }
+        // Any other failure is not an auth problem; let the normal init below
+        // surface it rather than blocking the connection here.
       }
     }
 
