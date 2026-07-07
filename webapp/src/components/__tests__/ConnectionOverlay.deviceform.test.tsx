@@ -45,3 +45,33 @@ describe('ConnectionOverlay new-device form', () => {
     expect(screen.getByLabelText(/name/i)).toBeInTheDocument();
   });
 });
+
+// Web Bluetooth is not present in jsdom by default; add it directly on the
+// real navigator (rather than replacing the whole object) so the Bluetooth
+// picker button is enabled without disturbing other navigator-dependent code.
+function selectBluetooth() {
+  fireEvent.click(screen.getByRole('button', { name: /bluetooth/i }));
+}
+
+describe('ConnectionOverlay Bluetooth auth token field', () => {
+  beforeEach(() => {
+    (navigator as unknown as { bluetooth: unknown }).bluetooth = {};
+  });
+
+  afterEach(() => {
+    delete (navigator as unknown as { bluetooth?: unknown }).bluetooth;
+  });
+
+  it('shows the Auth Token field when Bluetooth is selected', () => {
+    render(<ConnectionOverlay />);
+    selectBluetooth();
+    expect(screen.getByLabelText(/auth token/i)).toBeInTheDocument();
+  });
+
+  it('does not show WiFi-only fields (node address, remember) for Bluetooth', () => {
+    render(<ConnectionOverlay />);
+    selectBluetooth();
+    expect(screen.queryByLabelText(/node address/i)).toBeNull();
+    expect(screen.queryByLabelText(/remember this device/i)).toBeNull();
+  });
+});

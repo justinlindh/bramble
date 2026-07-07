@@ -1,0 +1,152 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BLETransport } from '../BLETransport';
+
+// Minimal fake Web Bluetooth stack: a TX characteristic that records writes
+// and an RX characteristic that fires 'characteristicvaluechanged' the same
+// way the real one does, so BLETransport's real connect()/processLines()
+// logic runs unmodified against it.
+function makeFakeBleStack() {
+  const writes: Uint8Array[] = [];
+  const rxListeners: Array<(e: Event) => void> = [];
+
+  const txChar = {
+    writeValueWithResponse: vi.fn(async (data: BufferSource) => {
+      writes.push(new Uint8Array(data as ArrayBuffer));
+    }),
+  };
+
+  const rxChar = {
+    startNotifications: vi.fn(async () => rxChar),
+    addEventListener: vi.fn((_type: string, cb: (e: Event) => void) => {
+      rxListeners.push(cb);
+    }),
+  };
+
+  function emitLine(line: string) {
+    const bytes = new TextEncoder().encode(line);
+    const event = {
+      target: { value: bytes.buffer },
+    } as unknown as Event;
+    for (const cb of rxListeners) cb(event);
+  }
+
+  const service = {
+    getCharacteristic: vi.fn(async (uuid: string) => {
+      if (uuid === '6e400002-b5a3-f393-e0a9-e50e24dcca9e') return txChar;
+      if (uuid === '6e400003-b5a3-f393-e0a9-e50e24dcca9e') return rxChar;
+      throw new Error(`unknown characteristic ${uuid}`);
+    }),
+  };
+
+  const gattServer = {
+    connect: vi.fn(async () => gattServer),
+    getPrimaryService: vi.fn(async () => service),
+    connected: true,
+    disconnect: vi.fn(),
+  };
+
+  const device = {
+    gatt: gattServer,
+    addEventListener: vi.fn(),
+  };
+
+  const bluetooth = {
+    requestDevice: vi.fn(async () => device),
+  };
+
+  return { bluetooth, txChar, rxChar, writes, emitLine };
+}
+
+function writesAsText(writes: Uint8Array[]): string {
+  return writes.map(w => new TextDecoder().decode(w)).join('');
+}
+
+describe('BLETransport auth handshake', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('writes the token line first and resolves connect() on an ok result', async () => {
+    const { bluetooth, writes, emitLine } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    const transport = new BLETransport('secret-token');
+    const connectPromise = transport.connect();
+
+    // Let requestDevice/gatt.connect/getCharacteristic/startNotifications settle.
+    await vi.waitFor(() => expect(writesAsText(writes)).toBe('secret-token\n'));
+    expect(transport.connected).toBe(false); // not yet resolved: awaiting auth result
+
+    emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+
+    await connectPromise;
+    expect(transport.connected).toBe(true);
+    expect(writesAsText(writes)).toBe('secret-token\n');
+  });
+
+  it('rejects connect() on an auth error result', async () => {
+    const { bluetooth, writes, emitLine } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    const transport = new BLETransport('wrong-token');
+    const connectPromise = transport.connect();
+
+    await vi.waitFor(() => expect(writesAsText(writes)).toBe('wrong-token\n'));
+
+    emitLine('{"jsonrpc":"2.0","error":{"code":-32000,"message":"unauthorized"},"id":null}\n');
+
+    await expect(connectPromise).rejects.toThrow(/unauthorized|auth/i);
+    expect(transport.connected).toBe(false);
+  });
+
+  it('times out and rejects connect() if no auth result arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const { bluetooth } = makeFakeBleStack();
+      vi.stubGlobal('navigator', { bluetooth });
+
+      const transport = new BLETransport('slow-token');
+      const connectPromise = transport.connect();
+      connectPromise.catch(() => {});
+
+      // Flush the microtask chain (requestDevice -> gatt.connect -> ... ->
+      // writeChunked) so the auth-timeout timer is armed before advancing.
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(6000);
+
+      await expect(connectPromise).rejects.toThrow(/timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not write a handshake when no token is provided', async () => {
+    const { bluetooth, writes } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    const transport = new BLETransport();
+    await transport.connect();
+
+    expect(transport.connected).toBe(true);
+    expect(writes.length).toBe(0);
+  });
+
+  it('routes a normal RPC response correctly after a successful handshake', async () => {
+    const { bluetooth, writes, emitLine } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    const transport = new BLETransport('secret-token');
+    const connectPromise = transport.connect();
+    await vi.waitFor(() => expect(writesAsText(writes)).toBe('secret-token\n'));
+    emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+    await connectPromise;
+
+    const rpcPromise = transport.sendRPC<{ pong: boolean }>('bramble.ping', {}, 1000);
+    // Wait for sendRPC to finish writing all chunks and register the pending
+    // request before delivering the response line.
+    await vi.waitFor(() => expect((transport as unknown as { pending: Map<number, unknown> }).pending.size).toBe(1));
+    emitLine('{"jsonrpc":"2.0","id":1,"result":{"pong":true}}\n');
+
+    await expect(rpcPromise).resolves.toEqual({ pong: true });
+  });
+});
