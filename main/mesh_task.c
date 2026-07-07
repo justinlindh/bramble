@@ -311,6 +311,12 @@ static dm_pending_eph_t s_pending_eph[DM_MAX_HANDSHAKING];
 typedef struct {
     uint32_t src_addr;
     int channel_idx;
+    /* Self-heal (DM session desync): when true the worker INITIATES a fresh
+     * handshake to src_addr instead of processing a received msg. Lets the
+     * DH-heavy initiate_dm_handshake run off the mesh RX task (M7), the same
+     * reason process_ke_init/resp do. handle_ke_envelope memsets its item to
+     * 0, so received-KE work items leave this false. */
+    bool initiate;
     bramble_key_exchange_t msg;
     /* Phase 4 DM key continuity: the pinned X25519 key for src_addr,
      * SNAPSHOTTED by handle_ke_envelope on the mesh task (the only task
@@ -2188,6 +2194,62 @@ static void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rs
                                               receipt.hop_count, receipt.relay_path);
 }
 
+/* Self-heal for a desynced DM session. handle_data calls this when it cannot
+ * decrypt a directed DM from a peer: the peer's session has diverged from ours
+ * (typically it rebooted and lost the session while we kept our stale one), so
+ * every DM it sends would fail forever with no recovery. Re-initiate the
+ * handshake so DMs recover on their own. Guards against abuse: only for a peer
+ * we currently neighbor with, and at most once per interval per peer, so a
+ * spray of undecryptable packets cannot be turned into a re-key / airtime DoS.
+ * The DH-heavy INIT is queued to handshake_worker_task, never run on this (mesh
+ * RX) task -- the same M7 rule process_ke_init/resp follow. */
+#define DM_REHANDSHAKE_MIN_INTERVAL_MS 15000u
+#define DM_REHANDSHAKE_TRACK 8
+static struct {
+    uint32_t addr;
+    uint32_t last_ms;
+} s_dm_rehs[DM_REHANDSHAKE_TRACK];
+
+static bool dm_rehandshake_rate_ok(uint32_t peer, uint32_t now) {
+    int free_slot = -1, oldest = 0;
+    for (int i = 0; i < DM_REHANDSHAKE_TRACK; i++) {
+        if (s_dm_rehs[i].addr == peer) {
+            if ((uint32_t)(now - s_dm_rehs[i].last_ms) < DM_REHANDSHAKE_MIN_INTERVAL_MS)
+                return false;
+            s_dm_rehs[i].last_ms = now;
+            return true;
+        }
+        if (s_dm_rehs[i].addr == 0 && free_slot < 0)
+            free_slot = i;
+        if (s_dm_rehs[i].last_ms < s_dm_rehs[oldest].last_ms)
+            oldest = i;
+    }
+    int slot = (free_slot >= 0) ? free_slot : oldest;
+    s_dm_rehs[slot].addr = peer;
+    s_dm_rehs[slot].last_ms = now;
+    return true;
+}
+
+static void maybe_trigger_dm_rehandshake(uint32_t peer) {
+    if (peer == 0 || peer == s_identity->address)
+        return;
+    if (!neighbor_lookup(&s_neighbors, peer))
+        return; /* only real, currently-neighboring peers */
+    if (!dm_rehandshake_rate_ok(peer, now_ms()))
+        return;
+    dm_handshake_work_item_t item;
+    memset(&item, 0, sizeof(item));
+    item.src_addr = peer;
+    item.channel_idx = s_default_channel_idx;
+    item.initiate = true;
+    if (xQueueSend(s_handshake_work_q, &item, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Rehandshake queue full, self-heal dropped for %08" PRIX32, peer);
+        return;
+    }
+    ESP_LOGI(TAG, "DM session desync with %08" PRIX32 "; re-initiating handshake (self-heal)",
+             peer);
+}
+
 static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Data packet layout (wire v4): header(12) + src_addr(4) + prev_hop(4) +
      * nonce(12) + ciphertext(N) + tag(16). prev_hop is relay-mutable/
@@ -2374,6 +2436,11 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         xSemaphoreGive(s_dm_mutex);
         if (!ok) {
             ESP_LOGW(TAG, "Failed session decrypt from %08" PRIX32, src_addr);
+            /* Our DM session with this peer has desynced (no session, or a stale
+             * key it no longer holds). Silently returning here is what made DMs
+             * fail permanently after one side rebooted; instead, kick a
+             * rate-limited re-handshake so the session self-heals. */
+            maybe_trigger_dm_rehandshake(src_addr);
             return;
         }
         /* Session payloads are always chat in this wiring: there is no
@@ -4984,8 +5051,34 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
         return;
     }
     if (vrc != 0) {
-        ESP_LOGW(TAG, "INIT verify failed from %08" PRIX32, src_addr);
-        return;
+        /* One-sided desync recovery (DM self-heal PART 2). We hold a cached
+         * peer_id for src_addr (have_peer_id) so we took dm_verify_init's
+         * strict tag path, yet the INIT is from an ATTESTATION-PINNED peer:
+         * pinned_x25519_or_null is set and, since we are past the
+         * PIN_MISMATCH gate above, the INIT's long_term_pubkey MATCHED it.
+         * So this is cryptographically that peer re-initiating fresh (it
+         * rebooted / lost its half of the session, e.g. after the receiver
+         * self-heal triggers a first-contact INIT). Tear our stale session
+         * down and re-accept as first contact so DMs heal instead of failing
+         * forever. Rate-limited: long_term_pubkey is public, so a spoofed
+         * INIT naming a pinned peer must not be spammable into a
+         * session-teardown DoS; the worst case is one bounded teardown that
+         * the next genuine handshake repairs (the resulting session is only
+         * usable by whoever can complete the DH, i.e. the real peer). */
+        if (have_peer_id && pinned_x25519_or_null && dm_rehandshake_rate_ok(src_addr, now_ms())) {
+            xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+            dm_session_teardown(&s_dm_table, src_addr);
+            xSemaphoreGive(s_dm_mutex);
+            ESP_LOGI(TAG,
+                     "DM session desync: pinned peer %08" PRIX32 " re-initiated; tore down stale"
+                     " session, re-accepting as first contact (self-heal)",
+                     src_addr);
+            vrc = dm_verify_init(init, s_identity, 0, NULL, pinned_x25519_or_null);
+        }
+        if (vrc != 0) {
+            ESP_LOGW(TAG, "INIT verify failed from %08" PRIX32, src_addr);
+            return;
+        }
     }
 
     bramble_identity_t my_eph;
@@ -5088,6 +5181,12 @@ static void handshake_worker_task(void* arg) {
     dm_handshake_work_item_t item;
     for (;;) {
         if (xQueueReceive(s_handshake_work_q, &item, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        if (item.initiate) {
+            /* DM self-heal: our session with this peer desynced (we could not
+             * decrypt its DM), so re-initiate a fresh handshake off the RX task. */
+            initiate_dm_handshake(item.src_addr, item.channel_idx);
             continue;
         }
         const uint8_t* pinned = item.have_pin ? item.pinned_x25519 : NULL;
