@@ -7,6 +7,9 @@ const connectMock = vi.fn();
 
 vi.mock('../../src/store/actions', () => ({
   connect: (...args: unknown[]) => connectMock(...args),
+  refreshDevices: vi.fn(),
+  forgetSavedDevice: vi.fn(),
+  renameSavedDevice: vi.fn(),
 }));
 
 describe('ConnectionOverlay auth token flow', () => {
@@ -32,31 +35,28 @@ describe('ConnectionOverlay auth token flow', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows token controls only for WiFi transport', () => {
+  it('shows the auth token field inline for WiFi (no collapse toggle)', () => {
     render(<ConnectionOverlay />);
-    expect(screen.queryByText('Authentication')).not.toBeInTheDocument();
-
+    // The old collapsed "Authentication" toggle is gone; selecting WiFi shows the field directly.
     fireEvent.click(screen.getByRole('button', { name: /wifi/i }));
-    expect(screen.getByRole('button', { name: 'Authentication' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Authentication' }));
+    expect(screen.queryByRole('button', { name: 'Authentication' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Auth Token')).toBeInTheDocument();
   });
 
-  it('passes token in connect flow and persists it', () => {
+  it('passes the token to the connect flow', () => {
     render(<ConnectionOverlay />);
     fireEvent.click(screen.getByRole('button', { name: /wifi/i }));
 
     fireEvent.change(screen.getByLabelText(/node address/i), { target: { value: '192.168.4.1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Authentication' }));
     fireEvent.change(screen.getByLabelText('Auth Token'), { target: { value: 'secret-token' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
-    expect(connectMock).toHaveBeenCalledWith('wifi', expect.objectContaining({ token: 'secret-token' }));
+    expect(connectMock).toHaveBeenCalledWith('wifi', expect.objectContaining({ token: 'secret-token', ip: '192.168.4.1' }));
     expect(localStorage.getItem('bramble_wifi_ip')).toBe('192.168.4.1');
-    // S19: token now stored in sessionStorage, not localStorage
-    expect(sessionStorage.getItem('bramble_wifi_token')).toBe('secret-token');
+    // The legacy single-token key is no longer written; the device book persists a
+    // token per-address post-connect (opt-in), not from the form submit.
+    expect(sessionStorage.getItem('bramble_wifi_token')).toBeNull();
     expect(localStorage.getItem('bramble_wifi_token')).toBeNull();
   });
 
@@ -65,7 +65,6 @@ describe('ConnectionOverlay auth token flow', () => {
     render(<ConnectionOverlay />);
 
     fireEvent.click(screen.getByRole('button', { name: /wifi/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Authentication' }));
 
     const tokenInput = screen.getByLabelText('Auth Token');
     expect(tokenInput.className).toMatch(/authErrorField/);
