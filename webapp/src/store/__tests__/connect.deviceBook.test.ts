@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStore } from '../index';
-import { connect, formatAddrHex, saveConnectedDevice } from '../actions';
+import { connect, saveConnectedDevice } from '../actions';
+import { formatAddrHex } from '../../utils/address';
 import { listDevices, getDeviceToken } from '../../lib/deviceBook';
 
 // connect() opens a transport and runs RPCs; stub both so we can drive the

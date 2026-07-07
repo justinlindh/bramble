@@ -4,6 +4,7 @@ import { messageDb } from './messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventStore';
 import { fetchConnectionCapabilities } from '../lib/connectionMode';
 import { listDevices, forgetDevice, renameDevice, upsertDevice, setDeviceToken } from '../lib/deviceBook';
+import { formatAddrHex } from '../utils/address';
 import type {
   TransportType,
   BrambleConfig,
@@ -367,7 +368,7 @@ export function normalizeConfig(raw: any): BrambleConfig {
   const rawLocation = raw.location ?? {};
   const legacyContacts = (rawLocation.contacts ?? []) as Array<{ addr: number; tier: LocationTier; intervalSec?: number }>;
   const contactRules = (rawLocation.contact_rules ?? legacyContacts.map((c) => ({
-    address: c.addr.toString(16).toUpperCase().padStart(8, '0'),
+    address: formatAddrHex(c.addr),
     enabled: c.tier !== 'off',
     tier: c.tier,
     interval_s: c.intervalSec ?? rawLocation.interval_s ?? 300,
@@ -662,7 +663,8 @@ function retentionCutoffTs(nowMs = Date.now()): number {
 }
 
 function currentNodeAddrHex(): string {
-  return useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default';
+  const addr = useStore.getState().config?.identity?.address;
+  return addr != null ? formatAddrHex(addr) : 'default';
 }
 
 function lastDeliverySeqKey(nodeAddr: string): string {
@@ -958,7 +960,7 @@ function applyBroadcastDelivery(event: BroadcastDeliveryNotification): void {
     messageId: msgId,
     conversationKey: message ? conversationKeyForMessage(message) : 'broadcast',
     ts: recipient.deliveredAtMs,
-    nodeAddr: useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default',
+    nodeAddr: currentNodeAddrHex(),
     eventType: 'broadcast_delivery',
     payload: recipient,
   }).catch(() => {});
@@ -1056,7 +1058,7 @@ export async function sendMessage(
     const params = isBroadcast
       ? { text }
       : {
-          dest: wireDest.toString(16).toUpperCase().padStart(8, '0'),
+          dest: formatAddrHex(wireDest),
           text,
           ...(isChannelScoped ? { channel: channelIndex } : {}),
         };
@@ -1125,7 +1127,7 @@ export function handleAck(params: unknown): void {
       packetId,
       conversationKey: message ? conversationKeyForMessage(message) : `dm:${msgId}`,
       ts: nowTs,
-      nodeAddr: useStore.getState().config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0') ?? 'default',
+      nodeAddr: currentNodeAddrHex(),
       eventType: 'ack',
       payload: { status: newStatus, relayPath },
     }).catch(() => {});
@@ -1770,13 +1772,6 @@ export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
 
 export function getClient(): BrambleClient | null {
   return client;
-}
-
-// 8-char uppercase hex form of a numeric node address (config.identity.address
-// is a NUMBER). `>>> 0` normalizes to uint32 so a high-bit address does not
-// stringify as negative.
-export function formatAddrHex(addr: number): string {
-  return (addr >>> 0).toString(16).toUpperCase().padStart(8, '0');
 }
 
 // Persist a device to the book once its real node address is known (post-connect).
