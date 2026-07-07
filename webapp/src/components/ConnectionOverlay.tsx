@@ -119,7 +119,10 @@ export function ConnectionOverlay() {
   return (
     <div className={styles.overlay}>
       <div className={styles.card}>
-        <img src="/bramble-logo.png" alt="Bramble" className={styles.logoImg} />
+        {/* Relative path: embedded shells serve the app from a subpath
+            (appassets .../assets/webapp/, electron file://), where an
+            absolute /bramble-logo.png resolves outside the bundle. */}
+        <img src="./bramble-logo.png" alt="Bramble" className={styles.logoImg} />
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
         <div className={styles.metaRow}>
