@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { connect } from '../store/actions';
+import { connect, refreshDevices } from '../store/actions';
 import { useStore } from '../store/index';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
+import { DeviceList } from './DeviceList';
 import styles from './ConnectionOverlay.module.css';
 
 const WIFI_IP_KEY = 'bramble_wifi_ip';
@@ -76,6 +77,10 @@ export function ConnectionOverlay() {
   const isConnecting = connectionState === 'connecting';
   const authError = /1008|unauthorized|auth/i.test(connectionError ?? '');
 
+  useEffect(() => {
+    refreshDevices();
+  }, []);
+
   const handleConnect = () => {
     if (transportType === 'wifi') {
       const ip = wifiIp.trim();
@@ -129,6 +134,8 @@ export function ConnectionOverlay() {
         <p className={styles.subtitle}>LoRa mesh companion</p>
         <span className={styles.version}>{__APP_VERSION__}</span>
         <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
+
+        <DeviceList />
 
         <div className={styles.transportSelect}>
           <div className={styles.transportOption}>
