@@ -3,6 +3,7 @@ import { createTransport, BrambleClient } from '../transport';
 import { messageDb } from './messageDb';
 import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventStore';
 import { fetchConnectionCapabilities } from '../lib/connectionMode';
+import { listDevices, forgetDevice, renameDevice, upsertDevice, setDeviceToken } from '../lib/deviceBook';
 import type {
   TransportType,
   BrambleConfig,
@@ -164,7 +165,10 @@ async function ensureSerialRpcReady(): Promise<boolean> {
   return false;
 }
 
-export async function connect(type: TransportType, options?: { url?: string; token?: string }): Promise<void> {
+export async function connect(
+  type: TransportType,
+  options?: { url?: string; token?: string; ip?: string; remember?: boolean; name?: string; expectAddressHex?: string },
+): Promise<void> {
   const store = useStore.getState();
 
   // Guard against duplicate/re-entrant connects creating multiple active WS clients.
@@ -208,7 +212,7 @@ export async function connect(type: TransportType, options?: { url?: string; tok
             await opt(loadConfig());
             const nodeAddr = useStore.getState().config?.identity?.address;
             const addrHex = nodeAddr
-              ? nodeAddr.toString(16).toUpperCase().padStart(8, '0')
+              ? formatAddrHex(nodeAddr)
               : readLastKnownNodeAddrHex();
             await initMessageStore(addrHex);
             await Promise.all([loadNeighbors(), loadRoutes(), loadAirtime()]);
@@ -259,12 +263,49 @@ export async function connect(type: TransportType, options?: { url?: string; tok
       await opt(loadConfig());
       nodeAddr = store.config?.identity?.address;
     }
-    const configAddrHex = nodeAddr ? nodeAddr.toString(16).toUpperCase().padStart(8, '0') : undefined;
+    const configAddrHex = nodeAddr ? formatAddrHex(nodeAddr) : undefined;
     // Persist last-known address so we can recover if config fails on next connect
     if (configAddrHex) {
       try { localStorage.setItem(LAST_NODE_ADDR_KEY, configAddrHex); } catch {}
     }
     const addrHex = configAddrHex ?? readLastKnownNodeAddrHex();
+
+    // Device book: the node's real address is only knowable post-connect. Read it
+    // fresh (the captured `store` snapshot predates loadConfig) and, on a TRUTHY
+    // address, persist this device. Truthiness guards a partial loadConfig
+    // failure that leaves config.identity.address at 0: a 0 address must never
+    // create a "00000000" book entry.
+    const bookAddrNum = useStore.getState().config?.identity?.address;
+    if (bookAddrNum) {
+      const bookAddrHex = formatAddrHex(bookAddrNum);
+      // DHCP guard: one-click connect carries the address it expects for this
+      // saved IP. If the IP now answers as a different node, drop the connection
+      // instead of adopting the wrong node or rebinding its lastIp/token.
+      if (options?.expectAddressHex && options.expectAddressHex.toUpperCase() !== bookAddrHex) {
+        try { client?.clearSubscriptions(); } catch { /* noop */ }
+        try { await client?.disconnect(); } catch { /* noop */ }
+        client = null;
+        store.setTransport(null);
+        store.setConnectionState('error', 'That address now belongs to a different node. Update the device IP.');
+        return;
+      }
+      // A book write must never break a live connection.
+      try {
+        if (type === 'wifi' && options?.ip) {
+          saveConnectedDevice({
+            addr: bookAddrNum,
+            name: options.name,
+            ip: options.ip,
+            token: options.token ?? '',
+            remember: options.remember ?? false,
+            transport: 'wifi',
+          });
+        } else if (type === 'serial') {
+          saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', token: '', remember: false, transport: 'serial' });
+        }
+      } catch { /* noop */ }
+    }
+
     await initMessageStore(addrHex);
 
     if (type === 'serial') {
@@ -1729,4 +1770,40 @@ export function __clearDeliveryEventSyncStateForTests(nodeAddr?: string): void {
 
 export function getClient(): BrambleClient | null {
   return client;
+}
+
+// 8-char uppercase hex form of a numeric node address (config.identity.address
+// is a NUMBER). `>>> 0` normalizes to uint32 so a high-bit address does not
+// stringify as negative.
+export function formatAddrHex(addr: number): string {
+  return (addr >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
+// Persist a device to the book once its real node address is known (post-connect).
+// A book write must never break a live connection, so callers wrap this in the
+// same try/catch used around the rest of the post-connect save path.
+export function saveConnectedDevice(args: {
+  addr: number;
+  name?: string;
+  ip: string;
+  token: string;
+  remember: boolean;
+  transport: 'wifi' | 'serial';
+}): void {
+  const address = formatAddrHex(args.addr);
+  upsertDevice({ address, name: args.name, lastIp: args.ip, transport: args.transport, remember: args.remember });
+  if (args.token) setDeviceToken(address, args.token, args.remember);
+  refreshDevices();
+}
+
+export function refreshDevices(): void {
+  useStore.getState().setDevices(listDevices());
+}
+export function forgetSavedDevice(address: string): void {
+  forgetDevice(address);
+  refreshDevices();
+}
+export function renameSavedDevice(address: string, name: string): void {
+  renameDevice(address, name);
+  refreshDevices();
 }

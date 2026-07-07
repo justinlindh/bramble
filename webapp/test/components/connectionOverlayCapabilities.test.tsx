@@ -5,6 +5,9 @@ import { useStore } from '../../src/store/index';
 
 vi.mock('../../src/store/actions', () => ({
   connect: vi.fn(),
+  refreshDevices: vi.fn(),
+  forgetSavedDevice: vi.fn(),
+  renameSavedDevice: vi.fn(),
 }));
 
 describe('ConnectionOverlay capability gating', () => {
