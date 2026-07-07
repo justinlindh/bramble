@@ -159,7 +159,7 @@ export default function App() {
       {/* Topbar */}
       <header className={styles.topbar}>
         <span className={styles.brand}>
-          <img src="/bramble-logo.png" alt="" className={styles.brandLogo} />
+          <img src="./bramble-logo.png" alt="" className={styles.brandLogo} />
           Bramble
         </span>
 
