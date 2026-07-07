@@ -289,3 +289,17 @@
   border-color: var(--danger);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent);
 }
+
+.rememberRow {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rememberRow input {
+  cursor: pointer;
+}
