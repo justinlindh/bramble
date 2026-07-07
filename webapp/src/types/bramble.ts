@@ -1,3 +1,5 @@
+import type { SavedDevice } from '../lib/deviceBook';
+
 // ─── Identity ──────────────────────────────────────────────────────────
 
 export interface NodeIdentity {
@@ -383,6 +385,7 @@ export interface AppState {
   activeTab: string;
   probeResult: ProbeResult | null;
   probeCollecting: boolean;
+  devices: SavedDevice[];
   peerLocations: PeerLocation[];
   mapFocusAddr: number | null;
   trafficDebugStatus: TrafficDebugStatus | null;

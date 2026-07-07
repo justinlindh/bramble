@@ -21,6 +21,7 @@ import type {
   AnchorStatus,
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
+import type { SavedDevice } from '../lib/deviceBook';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -117,6 +118,7 @@ interface Actions {
   setShowRoutes: (show: boolean) => void;
   setProbeResult: (r: ProbeResult | null) => void;
   setProbeCollecting: (c: boolean) => void;
+  setDevices: (d: SavedDevice[]) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
   setMapFocusAddr: (addr: number | null) => void;
   loadCachedMessages: (msgs: Message[]) => void;
@@ -156,6 +158,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   probeResult: null,
   peerNames: new Map(),
   probeCollecting: false,
+  devices: [],
   peerLocations: [],
   mapFocusAddr: null,
   trafficDebugStatus: null,
@@ -358,6 +361,7 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setProbeResult: (r) => set({ probeResult: r }),
   setProbeCollecting: (c) => set({ probeCollecting: c }),
+  setDevices: (devices) => set({ devices }),
 
   setPeerLocations: (locs) => set({ peerLocations: locs }),
   setMapFocusAddr: (addr) => set({ mapFocusAddr: addr }),
