@@ -1,6 +1,8 @@
-import { app, BrowserWindow, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
+import { startDiscovery, stopDiscovery } from './discovery';
+import { DISCOVERY_CHANNELS } from '../src/types/desktop';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -138,6 +140,7 @@ function createWindow(): void {
   mainWindow.setTitle(`Bramble ${app.getVersion()}`);
 
   mainWindow.on('closed', () => {
+    stopDiscovery();
     mainWindow = null;
   });
 }
@@ -145,6 +148,15 @@ function createWindow(): void {
 app.whenReady().then(() => {
   createMenu();
   createWindow();
+
+  ipcMain.on(DISCOVERY_CHANNELS.start, (event) => {
+    startDiscovery((nodes) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send(DISCOVERY_CHANNELS.update, nodes);
+      }
+    });
+  });
+  ipcMain.on(DISCOVERY_CHANNELS.stop, () => stopDiscovery());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

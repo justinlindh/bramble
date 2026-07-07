@@ -1067,7 +1067,18 @@ void app_main(void) {
                 snprintf(hostname, sizeof(hostname), "bramble-%04" PRIx32, my_addr & 0xFFFF);
                 mdns_hostname_set(hostname);
                 mdns_instance_name_set("Bramble Mesh Node");
-                mdns_service_add("Bramble", "_bramble", "_tcp", 80, NULL, 0);
+                /* TXT records let the desktop app identify nodes before
+                 * connecting: addr is the full address (the hostname only
+                 * carries the low 16 bits), name is the friendly name. */
+                char addr_txt[9];
+                snprintf(addr_txt, sizeof(addr_txt), "%08" PRIX32, my_addr);
+                const char* node_name = mesh_get_node_name();
+                mdns_txt_item_t txt[2] = {
+                    {"addr", addr_txt},
+                    {"name", node_name},
+                };
+                size_t txt_count = (node_name != NULL && node_name[0] != '\0') ? 2 : 1;
+                mdns_service_add("Bramble", "_bramble", "_tcp", 80, txt, txt_count);
                 ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
             } else {
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL

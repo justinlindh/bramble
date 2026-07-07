@@ -1,0 +1,82 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, act, fireEvent } from '@testing-library/react';
+import { NearbyNodes } from '../NearbyNodes';
+import { useStore } from '../../store/index';
+import type { DiscoveredNode } from '../../types/desktop';
+import type { SavedDevice } from '../../lib/deviceBook';
+
+vi.mock('../../store/actions', () => ({ connect: vi.fn() }));
+import { connect } from '../../store/actions';
+
+let discoveryCb: ((nodes: DiscoveredNode[]) => void) | null = null;
+
+const garage: SavedDevice = {
+  address: 'F2BE6EEE', name: 'Garage', lastIp: '192.168.1.9',
+  transport: 'wifi', remember: true, lastConnectedAt: 1,
+};
+
+beforeEach(() => {
+  window.brambleDesktop = {
+    startDiscovery: vi.fn(),
+    stopDiscovery: vi.fn(),
+    onDiscovered: vi.fn((cb) => { discoveryCb = cb; return () => { discoveryCb = null; }; }),
+  };
+  useStore.setState({ devices: [] });
+  localStorage.clear();
+});
+
+afterEach(() => {
+  delete window.brambleDesktop;
+  vi.clearAllMocks();
+});
+
+describe('NearbyNodes', () => {
+  it('renders nothing on web (no brambleDesktop bridge)', () => {
+    delete window.brambleDesktop;
+    const { container } = render(<NearbyNodes onPickUnknown={vi.fn()} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('starts discovery on mount and stops on unmount', () => {
+    const { unmount } = render(<NearbyNodes onPickUnknown={vi.fn()} />);
+    expect(window.brambleDesktop!.startDiscovery).toHaveBeenCalledTimes(1);
+    unmount();
+    expect(window.brambleDesktop!.stopDiscovery).toHaveBeenCalledTimes(1);
+  });
+
+  it('one-click connects a saved node with token, current IP, and DHCP guard', () => {
+    useStore.setState({ devices: [garage] });
+    localStorage.setItem('bramble.deviceToken.F2BE6EEE', 'sekrit');
+    render(<NearbyNodes onPickUnknown={vi.fn()} />);
+    act(() => discoveryCb!([
+      { addrHex: 'F2BE6EEE', name: 'Garage (fw)', hostname: 'bramble-6eee', ip: '192.168.1.21' },
+    ]));
+    fireEvent.click(screen.getByRole('button', { name: /connect to garage/i }));
+    expect(connect).toHaveBeenCalledWith('wifi', expect.objectContaining({
+      url: 'ws://192.168.1.21/ws',
+      token: 'sekrit',
+      ip: '192.168.1.21',
+      remember: true,
+      name: 'Garage',
+      expectAddressHex: 'F2BE6EEE',
+    }));
+  });
+
+  it('hands unknown nodes to onPickUnknown instead of connecting', () => {
+    const onPickUnknown = vi.fn();
+    render(<NearbyNodes onPickUnknown={onPickUnknown} />);
+    act(() => discoveryCb!([
+      { addrHex: '11112222', name: 'Attic', hostname: 'bramble-2222', ip: '192.168.1.30' },
+    ]));
+    fireEvent.click(screen.getByRole('button', { name: /connect to attic/i }));
+    expect(connect).not.toHaveBeenCalled();
+    expect(onPickUnknown).toHaveBeenCalledWith(expect.objectContaining({
+      ip: '192.168.1.30', txtName: 'Attic',
+    }));
+  });
+
+  it('renders nothing while the snapshot is empty', () => {
+    const { container } = render(<NearbyNodes onPickUnknown={vi.fn()} />);
+    expect(container.firstChild).toBeNull();
+  });
+});

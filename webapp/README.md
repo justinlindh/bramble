@@ -45,6 +45,8 @@ fall back to hosted mode (USB and BLE remain available).
 
 The webapp can be packaged as a cross-platform desktop application using Electron.
 
+For user-facing docs (installing, connecting to a node, Nearby nodes, troubleshooting), see [../docs/webapp/desktop.md](../docs/webapp/desktop.md).
+
 ### Development
 
 ```bash
@@ -78,3 +80,12 @@ Build output goes to `release/`.
 | Windows  | exe (NSIS)| ✅ | ✅ | ✅ |
 
 All three transport types (USB Serial, Bluetooth LE, WiFi WebSocket) work in the Electron app because it uses Chromium's Web Serial and Web Bluetooth APIs natively.
+
+### LAN discovery
+
+The desktop app discovers Bramble nodes on the local network via mDNS
+(`_bramble._tcp`) and lists them under "Nearby nodes" in the WiFi connect
+panel. Nodes running firmware with mDNS TXT records (addr/name) are matched
+against the device book for one-click reconnect with the saved token. The
+desktop app connects directly to `ws://<node-ip>/ws`; no ws-proxy or unified
+server is involved.
