@@ -46,7 +46,10 @@ export function DeviceList() {
                 aria-label={`Connect to ${d.name}`}
               >
                 <span className={styles.name}>{d.name}</span>
-                <span className={styles.meta}>{d.transport === 'wifi' ? d.lastIp : 'USB'}</span>
+                <span className={styles.right}>
+                  <span className={styles.meta}>{d.transport === 'wifi' ? d.lastIp : 'USB'}</span>
+                  <span className={styles.chevron} aria-hidden="true" />
+                </span>
               </button>
             )}
             <button
@@ -59,7 +62,7 @@ export function DeviceList() {
             </button>
             <button
               type="button"
-              className={styles.action}
+              className={`${styles.action} ${styles.danger}`}
               onClick={() => forgetSavedDevice(d.address)}
               aria-label={`Forget ${d.name}`}
             >

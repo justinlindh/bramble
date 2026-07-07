@@ -69,6 +69,7 @@ export function ConnectionOverlay() {
   const [wifiName, setWifiName] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [autoTried, setAutoTried] = useState(false);
+  const devices = useStore(s => s.devices);
   const connectionState = useStore(s => s.connectionState);
   const connectionError = useStore(s => s.connectionError);
   const manualDisconnect = useStore(s => s.manualDisconnect);
@@ -123,7 +124,7 @@ export function ConnectionOverlay() {
     serial: 'Connect your Bramble node via USB cable, then click Connect.',
     ble: 'Enable Bluetooth on your device, then click Connect to scan.',
     websocket: 'Connects to the local mock node for development and demos.',
-    wifi: 'Enter the IP address of your Bramble node. The node must be on the same network (Station mode) or you must be connected to its hotspot (AP mode).',
+    wifi: 'The node must be on the same network (Station mode), or connect to its hotspot first (AP mode).',
   };
 
   return (
@@ -132,10 +133,16 @@ export function ConnectionOverlay() {
         <img src="/bramble-logo.png" alt="Bramble" className={styles.logoImg} />
         <h1 className={styles.title}>Bramble</h1>
         <p className={styles.subtitle}>LoRa mesh companion</p>
-        <span className={styles.version}>{__APP_VERSION__}</span>
-        <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
+        <div className={styles.metaRow}>
+          <span className={styles.version}>{__APP_VERSION__}</span>
+          <span className={styles.runtimeBadge} title={`Runtime context: ${runtimeBadge}`}>{runtimeBadge}</span>
+        </div>
 
         <DeviceList />
+
+        {devices.length > 0 && (
+          <h3 className={styles.sectionHeading}>Add a device</h3>
+        )}
 
         <div className={styles.transportSelect}>
           <div className={styles.transportOption}>
@@ -145,7 +152,7 @@ export function ConnectionOverlay() {
               disabled={!hasSerial}
               title={hasSerial ? 'Connect via USB cable' : 'Web Serial not supported in this browser. Use Chrome or Edge 120+.'}
             >
-              <IconUsb size={16} /> USB / Serial
+              <IconUsb size={16} /> USB
             </button>
             {!hasSerial && (
               <span className={styles.unsupportedCaption}>Not supported in this browser</span>
@@ -179,7 +186,7 @@ export function ConnectionOverlay() {
           </div>
         </div>
 
-        <div className={styles.mockDivider}>— or —</div>
+        <div className={styles.mockDivider}><span>or</span></div>
         <button
           className={`${styles.transportBtn} ${styles.mockBtn} ${transportType === 'websocket' ? styles.active : ''}`}
           onClick={() => setTransportType('websocket')}
@@ -190,22 +197,24 @@ export function ConnectionOverlay() {
         {/* WiFi connection settings */}
         {transportType === 'wifi' && (
           <div className={styles.wifiInput}>
-            <label htmlFor="wifi-ip" className={styles.wifiLabel}>Node address (not web UI)</label>
-            <input
-              id="wifi-ip"
-              type="text"
-              className={styles.wifiField}
-              value={wifiIp}
-              onChange={e => setWifiIp(e.target.value)}
-              placeholder="192.168.4.1"
-              onKeyDown={e => e.key === 'Enter' && handleConnect()}
-            />
-            <span className={styles.wifiHint}>
-              AP mode: 192.168.4.1 · Station mode: check your router
-            </span>
+            <div className={styles.field}>
+              <label htmlFor="wifi-ip" className={styles.wifiLabel}>Node address</label>
+              <input
+                id="wifi-ip"
+                type="text"
+                className={styles.wifiField}
+                value={wifiIp}
+                onChange={e => setWifiIp(e.target.value)}
+                placeholder="192.168.4.1"
+                onKeyDown={e => e.key === 'Enter' && handleConnect()}
+              />
+              <span className={styles.wifiHint}>
+                The node's IP, not this web UI. AP mode: 192.168.4.1, Station mode: check your router.
+              </span>
+            </div>
 
-            <div className={styles.authPanel}>
-              <label htmlFor="wifi-token" className={styles.authLabel}>Auth Token</label>
+            <div className={styles.field}>
+              <label htmlFor="wifi-token" className={styles.wifiLabel}>Auth Token</label>
               <div className={styles.tokenRow}>
                 <input
                   id="wifi-token"
@@ -227,30 +236,36 @@ export function ConnectionOverlay() {
                 </button>
               </div>
               <span className={styles.wifiHint}>
-                Auth token: read it over USB with the bramble CLI (pair command), or from the node's Config page.
+                Read it over USB with the bramble CLI (pair command), or from the node's Config page.
               </span>
             </div>
 
-            <label className={styles.rememberRow}>
+            <div className={styles.field}>
+              <label htmlFor="wifi-name" className={styles.wifiLabel}>Name (optional)</label>
               <input
-                type="checkbox"
-                checked={wifiRemember}
-                onChange={e => setWifiRemember(e.target.checked)}
+                id="wifi-name"
+                type="text"
+                className={styles.wifiField}
+                value={wifiName}
+                onChange={e => setWifiName(e.target.value)}
+                placeholder="e.g. Node A node"
+                onKeyDown={e => e.key === 'Enter' && handleConnect()}
               />
-              <span>Remember this device</span>
-            </label>
-            <p className={styles.hint}>Remembered tokens are stored in this browser; leave off for shared/public computers.</p>
+            </div>
 
-            <label htmlFor="wifi-name" className={styles.wifiLabel}>Name (optional)</label>
-            <input
-              id="wifi-name"
-              type="text"
-              className={styles.wifiField}
-              value={wifiName}
-              onChange={e => setWifiName(e.target.value)}
-              placeholder="e.g. Node A node"
-              onKeyDown={e => e.key === 'Enter' && handleConnect()}
-            />
+            <div className={styles.field}>
+              <label className={styles.rememberRow}>
+                <input
+                  type="checkbox"
+                  checked={wifiRemember}
+                  onChange={e => setWifiRemember(e.target.checked)}
+                />
+                <span>Remember this device</span>
+              </label>
+              <span className={`${styles.wifiHint} ${styles.rememberHint}`}>
+                Stores the token in this browser; leave off on shared computers.
+              </span>
+            </div>
           </div>
         )}
 
