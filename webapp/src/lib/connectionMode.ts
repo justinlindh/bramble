@@ -1,5 +1,5 @@
 import type { ConnectionCapabilities, RuntimeMode } from '../types/bramble';
-import { isElectron } from '../utils/platform';
+import { isEmbeddedShell } from '../utils/platform';
 
 interface CapabilitiesResponse {
   mode?: RuntimeMode;
@@ -13,10 +13,10 @@ export const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   localLanReason: 'LAN direct connect is unavailable in hosted mode. Use USB or Bluetooth.',
 };
 
-// Electron loads the renderer from file:// where /api/capabilities does not
-// exist. Desktop is always local mode: the renderer may open ws:// LAN
-// sockets directly (no mixed-content or PNA restrictions under file://).
-export const ELECTRON_CAPABILITIES: ConnectionCapabilities = {
+// Embedded shells (Electron file://, Android WebView asset origin) load the
+// app from a local origin where /api/capabilities does not exist. They are
+// always local mode: the shell may open ws:// LAN sockets directly.
+export const EMBEDDED_CAPABILITIES: ConnectionCapabilities = {
   mode: 'local',
   localLanAllowed: true,
 };
@@ -33,7 +33,7 @@ export function normalizeCapabilities(input: unknown): ConnectionCapabilities {
 }
 
 export async function fetchConnectionCapabilities(fetchImpl: typeof fetch = fetch): Promise<ConnectionCapabilities> {
-  if (isElectron()) return ELECTRON_CAPABILITIES;
+  if (isEmbeddedShell()) return EMBEDDED_CAPABILITIES;
   try {
     const res = await fetchImpl('/api/capabilities');
     if (!res.ok) return DEFAULT_CAPABILITIES;

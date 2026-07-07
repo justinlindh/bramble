@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildWifiUrl } from '../../src/components/ConnectionOverlay';
 
 describe('ConnectionOverlay URL logic', () => {
@@ -22,5 +22,15 @@ describe('ConnectionOverlay URL logic', () => {
   it('leaves an explicit ws:// URL untouched and adds no token', () => {
     expect(buildWifiUrl('ws://10.0.0.5/ws?foo=bar', 'http:', 'app.local', 'tok'))
       .toBe('ws://10.0.0.5/ws?foo=bar');
+  });
+
+  it('uses direct ws URL in an embedded shell even on an https origin', () => {
+    vi.stubGlobal('brambleAndroid', true);
+    try {
+      expect(buildWifiUrl('192.168.4.1', 'https:', 'appassets.androidplatform.net'))
+        .toBe('ws://192.168.4.1/ws');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

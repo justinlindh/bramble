@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { connect, refreshDevices } from '../store/actions';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
+import { isEmbeddedShell } from '../utils/platform';
 import type { TransportType } from '../types/bramble';
 import { IconUsb, IconBluetooth, IconMonitor, IconWifi, IconWarning } from './Icons';
 import { DeviceList } from './DeviceList';
@@ -14,6 +15,10 @@ const WIFI_IP_KEY = 'bramble_wifi_ip';
 export function buildWifiUrl(ip: string, protocol: string, host: string, _token?: string): string {
   let url: string;
   if (ip.includes('://')) url = ip;
+  // Embedded shells talk to the node directly regardless of page origin.
+  // The Android shell serves from https://appassets.androidplatform.net,
+  // which would otherwise take the hosted wss-proxy branch below.
+  else if (isEmbeddedShell()) url = `ws://${ip}/ws`;
   else if (protocol === 'https:') url = `wss://${host}/proxy/${ip}`;
   else url = `ws://${ip}/ws`;
 
