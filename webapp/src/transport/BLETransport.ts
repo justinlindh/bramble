@@ -114,6 +114,11 @@ export class BLETransport implements Transport {
     }
     this.intentionalClose = false;
 
+    // Chromium caches BluetoothDevice objects per origin, and gatt.disconnect()
+    // is fire-and-forget: a quick disconnect/reconnect cycle can hand us a
+    // device whose GATT session is half-dead (connect resolves, writes vanish,
+    // the handshake times out; only an app restart used to clear it). Reset a
+    // stale session first, and retry the whole link once after teardown.
     this.device.addEventListener('gattserverdisconnected', () => {
       this._connected = false;
       this.rejectAll(new Error('BLE disconnected'));
@@ -126,6 +131,23 @@ export class BLETransport implements Transport {
       }
     });
 
+    if (this.device.gatt?.connected) {
+      try { this.device.gatt.disconnect(); } catch { /* best effort */ }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    try {
+      await this.establishLink();
+      return;
+    } catch (e) {
+      if (/auth|unauthorized/i.test((e as Error)?.message ?? '') &&
+          !/timed out/i.test((e as Error)?.message ?? '')) {
+        throw e; // a real token rejection will not improve on retry
+      }
+      try {
+        if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+      } catch { /* best effort */ }
+      await new Promise(r => setTimeout(r, 1500));
+    }
     await this.establishLink();
   }
 
