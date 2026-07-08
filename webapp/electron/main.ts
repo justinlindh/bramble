@@ -27,67 +27,6 @@ function resolvePicker(deviceId: string): void {
   cb?.(deviceId);
 }
 
-function createMenu(): void {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: 'Bramble',
-      submenu: [
-        { role: 'about' },
-        { type: 'separator' },
-        {
-          label: 'Check for Updates...',
-          click: () => {
-            shell.openExternal('https://bramblemesh.org/downloads');
-          },
-        },
-        { type: 'separator' },
-        { role: 'quit' },
-      ],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
-    {
-      label: 'Help',
-      submenu: [
-        {
-          label: 'Bramble Documentation',
-          click: () => shell.openExternal('https://bramblemesh.org/docs'),
-        },
-        {
-          label: 'Report Issue',
-          click: () => shell.openExternal('https://github.com/bramble/bramble/issues'),
-        },
-      ],
-    },
-  ];
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1024,
@@ -127,7 +66,11 @@ function createWindow(): void {
     })));
   });
 
-  session.defaultSession.on('select-bluetooth-device', (event, devices, callback) => {
+  // NOTE the asymmetry: select-serial-port is a session event, but
+  // select-bluetooth-device is a webContents event. Registering it on the
+  // session compiles fine and never fires, so Electron's default handler
+  // cancelled every Web Bluetooth request instantly.
+  mainWindow.webContents.on('select-bluetooth-device', (event, devices, callback) => {
     event.preventDefault();
     // Fires again as scanning finds more devices: keep the newest callback
     // and refresh the list; the request stays open until the user picks.
@@ -152,6 +95,13 @@ function createWindow(): void {
     return false;
   });
 
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown') return;
+    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+      mainWindow?.webContents.toggleDevTools();
+    }
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) {
       shell.openExternal(url);
@@ -174,7 +124,11 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  createMenu();
+  // No application menu: the app is a single-page companion and the
+  // Bramble/Edit/View/Help bar reads as browser chrome. Clipboard shortcuts
+  // work natively in Chromium on Linux/Windows without menu accelerators;
+  // DevTools stays reachable below for debugging.
+  Menu.setApplicationMenu(null);
   createWindow();
 
   ipcMain.on(DISCOVERY_CHANNELS.start, (event) => {
