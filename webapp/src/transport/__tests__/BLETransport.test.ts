@@ -20,6 +20,10 @@ function makeFakeBleStack() {
     addEventListener: vi.fn((_type: string, cb: (e: Event) => void) => {
       rxListeners.push(cb);
     }),
+    removeEventListener: vi.fn((_type: string, cb: (e: Event) => void) => {
+      const i = rxListeners.indexOf(cb);
+      if (i >= 0) rxListeners.splice(i, 1);
+    }),
   };
 
   function emitLine(line: string) {
@@ -45,16 +49,22 @@ function makeFakeBleStack() {
     disconnect: vi.fn(),
   };
 
+  const deviceListeners: Record<string, Array<() => void>> = {};
   const device = {
     gatt: gattServer,
-    addEventListener: vi.fn(),
+    addEventListener: vi.fn((type: string, cb: () => void) => {
+      (deviceListeners[type] ??= []).push(cb);
+    }),
   };
+  function fireGattDisconnected() {
+    for (const cb of deviceListeners['gattserverdisconnected'] ?? []) cb();
+  }
 
   const bluetooth = {
     requestDevice: vi.fn(async () => device),
   };
 
-  return { bluetooth, txChar, rxChar, writes, emitLine };
+  return { bluetooth, txChar, rxChar, gattServer, writes, emitLine, fireGattDisconnected, rxListeners };
 }
 
 function writesAsText(writes: Uint8Array[]): string {
@@ -181,5 +191,88 @@ describe('BLETransport auth handshake', () => {
     emitLine('{"jsonrpc":"2.0","id":1,"result":{}}\n');
     emitLine('{"jsonrpc":"2.0","id":2,"result":{}}\n');
     await Promise.all([a, b]);
+  });
+});
+
+describe('BLETransport auto-reconnect', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  async function connectWithAuth(stack: ReturnType<typeof makeFakeBleStack>) {
+    const transport = new BLETransport('secret-token');
+    const p = transport.connect();
+    await vi.waitFor(() => expect(writesAsText(stack.writes)).toContain('secret-token\n'));
+    stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+    await p;
+    return transport;
+  }
+
+  it('re-establishes the link (including re-auth) after an unexpected drop', async () => {
+    const stack = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+    const transport = await connectWithAuth(stack);
+
+    const onDisconnect = vi.fn();
+    const onReconnect = vi.fn();
+    transport.enableAutoReconnect({ onDisconnect, onReconnect });
+
+    expect(stack.gattServer.connect).toHaveBeenCalledTimes(1);
+    stack.fireGattDisconnected();
+    expect(transport.connected).toBe(false);
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+
+    // First retry fires after the initial backoff and redoes the handshake.
+    await vi.waitFor(() => expect(stack.gattServer.connect).toHaveBeenCalledTimes(2), { timeout: 5000 });
+    await vi.waitFor(() => {
+      const tokenWrites = writesAsText(stack.writes).split('secret-token\n').length - 1;
+      expect(tokenWrites).toBe(2);
+    });
+    stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+
+    await vi.waitFor(() => expect(onReconnect).toHaveBeenCalledTimes(1));
+    expect(transport.connected).toBe(true);
+    // The reconnect must not have stacked a duplicate RX listener (the
+    // polyfill returns the same characteristic object across reconnects).
+    expect(stack.rxListeners.length).toBe(1);
+  });
+
+  it('keeps retrying with backoff while the node stays out of range', async () => {
+    const stack = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+    const transport = await connectWithAuth(stack);
+    transport.enableAutoReconnect({});
+
+    // Every reconnect attempt fails: still out of range.
+    stack.gattServer.connect.mockRejectedValue(new Error('out of range'));
+    stack.fireGattDisconnected();
+
+    await vi.waitFor(() => expect(stack.gattServer.connect.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 10000 });
+    expect(transport.connected).toBe(false);
+
+    // Node back in range: next attempt succeeds and re-auths.
+    stack.gattServer.connect.mockImplementation(async () => stack.gattServer);
+    await vi.waitFor(() => {
+      const tokenWrites = writesAsText(stack.writes).split('secret-token\n').length - 1;
+      expect(tokenWrites).toBe(2);
+    }, { timeout: 10000 });
+    stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+    await vi.waitFor(() => expect(transport.connected).toBe(true));
+  }, 20000);
+
+  it('does not reconnect after an intentional disconnect()', async () => {
+    const stack = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+    const transport = await connectWithAuth(stack);
+    const onDisconnect = vi.fn();
+    transport.enableAutoReconnect({ onDisconnect });
+
+    await transport.disconnect();
+    stack.fireGattDisconnected();
+
+    await new Promise(r => setTimeout(r, 50));
+    expect(onDisconnect).not.toHaveBeenCalled();
+    expect(stack.gattServer.connect).toHaveBeenCalledTimes(1);
   });
 });
