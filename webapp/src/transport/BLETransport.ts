@@ -30,6 +30,10 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 // there killed the retry loop silently in the field. Static so tests can
 // shrink it.
 const ESTABLISH_LINK_TIMEOUT_MS = 20000;
+// Bounds a single GATT chunk write. Desktop BlueZ occasionally never
+// resolves writeValueWithResponse; the serialized write queue then wedges
+// silently (outgoing RPCs stop, incoming notifications keep flowing).
+const WRITE_CHUNK_TIMEOUT_MS = 6000;
 
 export class BLETransport implements Transport {
   private device: BluetoothDevice | null = null;
@@ -173,6 +177,7 @@ export class BLETransport implements Transport {
   }
 
   static establishLinkTimeoutMs = ESTABLISH_LINK_TIMEOUT_MS;
+  static writeChunkTimeoutMs = WRITE_CHUNK_TIMEOUT_MS;
 
   // Background timers are throttled aggressively on Android, so a 30s-capped
   // backoff can stretch much longer while the screen is off. When the user
@@ -276,13 +281,33 @@ export class BLETransport implements Transport {
     const run = this.writeQueue.then(async () => {
       if (!this.txChar) throw new Error('Not connected');
       for (let i = 0; i < payload.length; i += BLE_CHUNK_SIZE) {
-        await this.txChar.writeValueWithResponse(payload.slice(i, i + BLE_CHUNK_SIZE));
+        await this.writeWithTimeout(payload.slice(i, i + BLE_CHUNK_SIZE));
       }
     });
     // The queue must advance even when a write fails, or one error would
     // wedge every later write behind a rejected promise.
     this.writeQueue = run.catch(() => {});
     return run;
+  }
+
+  // A write that never completes means the link is functionally dead even if
+  // GATT still claims connected (field case: outgoing RPCs stopped while
+  // notifications kept arriving for 11 minutes). Fail the write AND drop the
+  // link so gattserverdisconnected fires and the auto-reconnect loop heals it.
+  private writeWithTimeout(chunk: Uint8Array<ArrayBuffer>): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timeoutMs = (this.constructor as typeof BLETransport).writeChunkTimeoutMs;
+      const timer = setTimeout(() => {
+        reject(new Error('BLE write timed out'));
+        try {
+          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+        } catch { /* best effort */ }
+      }, timeoutMs);
+      this.txChar!.writeValueWithResponse(chunk).then(
+        () => { clearTimeout(timer); resolve(); },
+        (e) => { clearTimeout(timer); reject(e as Error); }
+      );
+    });
   }
 
   async sendRPC<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 5000): Promise<T> {
@@ -334,11 +359,10 @@ export class BLETransport implements Transport {
     }
     this._connected = false;
     this.rejectAll(new Error('Disconnected'));
-    try {
-      if (this.rxChar) {
-        await this.rxChar.stopNotifications();
-      }
-    } catch { /* ignore */ }
+    // No stopNotifications here: it is a GATT round-trip that can hang on a
+    // wedged link, and awaiting it before gatt.disconnect() leaked a live
+    // connection for 11 minutes in the field (the node stops advertising the
+    // whole time). Dropping the GATT link implicitly ends the subscription.
     try {
       if (this.device?.gatt?.connected) {
         this.device.gatt.disconnect();
