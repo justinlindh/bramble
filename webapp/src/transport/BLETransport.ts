@@ -169,6 +169,15 @@ export class BLETransport implements Transport {
     const service = await server.getPrimaryService(NUS_SERVICE);
     this.txChar = await service.getCharacteristic(NUS_TX);
     this.rxChar = await service.getCharacteristic(NUS_RX);
+    // Chromium tracks notifications-active per characteristic across GATT
+    // sessions. After an unclean previous session, startNotifications can
+    // resolve without re-arming event delivery (node logs CCCD enabled and
+    // sends the auth reply; the renderer never sees it). Reset the flag
+    // first, bounded so a wedged link cannot hang the connect.
+    await Promise.race([
+      Promise.resolve(this.rxChar.stopNotifications?.()).catch(() => {}),
+      new Promise(r => setTimeout(r, 1500)),
+    ]);
     await this.rxChar.startNotifications();
     // The Android polyfill hands back the SAME characteristic object across
     // reconnects, so a plain addEventListener per attempt would stack
@@ -409,10 +418,11 @@ export class BLETransport implements Transport {
     }
     this._connected = false;
     this.rejectAll(new Error('Disconnected'));
-    // No stopNotifications here: it is a GATT round-trip that can hang on a
-    // wedged link, and awaiting it before gatt.disconnect() leaked a live
-    // connection for 11 minutes in the field (the node stops advertising the
-    // whole time). Dropping the GATT link implicitly ends the subscription.
+    // Fire-and-forget (NOT awaited: a GATT round-trip can hang on a wedged
+    // link, and awaiting it here once leaked a live connection for 11
+    // minutes). The call still clears Chromium's notifications-active flag
+    // so the next session re-arms event delivery.
+    try { Promise.resolve(this.rxChar?.stopNotifications?.()).catch(() => {}); } catch { /* ignore */ }
     try {
       if (this.device?.gatt?.connected) {
         this.device.gatt.disconnect();
