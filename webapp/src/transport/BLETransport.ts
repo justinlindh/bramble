@@ -16,7 +16,14 @@ interface AuthWaiter {
   reject: (e: Error) => void;
 }
 
+interface BleReconnectCallbacks {
+  onDisconnect?: () => void;
+  onReconnect?: () => void;
+}
+
 const AUTH_HANDSHAKE_TIMEOUT_MS = 5000;
+const RECONNECT_INITIAL_DELAY_MS = 2000;
+const RECONNECT_MAX_DELAY_MS = 30000;
 
 export class BLETransport implements Transport {
   private device: BluetoothDevice | null = null;
@@ -34,11 +41,27 @@ export class BLETransport implements Transport {
   // routing resumes as usual.
   private pendingAuth: AuthWaiter | null = null;
 
+  // Auto-reconnect: mirrors WebSocketTransport so the store's duck-typed
+  // enableAutoReconnect wiring (banner + full state refetch) works unchanged.
+  // The device handle survives a GATT drop, so re-establishing the link needs
+  // no new device picker: reconnect re-runs gatt.connect + service discovery +
+  // the auth handshake against the SAME BluetoothDevice.
+  private autoReconnect = false;
+  private reconnectCbs: BleReconnectCallbacks = {};
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
+  private intentionalClose = false;
+
   constructor(token?: string) {
     this.token = token;
   }
 
   get connected() { return this._connected; }
+
+  enableAutoReconnect(cbs: BleReconnectCallbacks): void {
+    this.autoReconnect = true;
+    this.reconnectCbs = cbs;
+  }
 
   async connect(): Promise<void> {
     if (!('bluetooth' in navigator)) throw new Error('Web Bluetooth not supported');
@@ -48,21 +71,42 @@ export class BLETransport implements Transport {
       filters: [{ services: [NUS_SERVICE] }],
       optionalServices: [NUS_SERVICE],
     });
+    this.intentionalClose = false;
 
     this.device.addEventListener('gattserverdisconnected', () => {
       this._connected = false;
       this.rejectAll(new Error('BLE disconnected'));
+      // Walking out of range fires this within seconds (supervision
+      // timeout). Heal instead of dying silently: tell the UI and start
+      // retrying so walking back into range reconnects by itself.
+      if (this.autoReconnect && !this.intentionalClose) {
+        this.reconnectCbs.onDisconnect?.();
+        this.scheduleReconnect();
+      }
     });
+
+    await this.establishLink();
+  }
+
+  // The (re)connectable part of connect(): everything after device selection.
+  // Runs on first connect and on every reconnect attempt against the same
+  // BluetoothDevice, including the auth handshake (the firmware requires the
+  // token line first on every fresh GATT session).
+  private async establishLink(): Promise<void> {
+    if (!this.device) throw new Error('No device selected');
+    this.lineBuf = '';
 
     const server = await this.device.gatt!.connect();
     const service = await server.getPrimaryService(NUS_SERVICE);
     this.txChar = await service.getCharacteristic(NUS_TX);
     this.rxChar = await service.getCharacteristic(NUS_RX);
     await this.rxChar.startNotifications();
-    this.rxChar.addEventListener(
-      'characteristicvaluechanged',
-      this.onBLEData.bind(this) as EventListener
-    );
+    // The Android polyfill hands back the SAME characteristic object across
+    // reconnects, so a plain addEventListener per attempt would stack
+    // duplicate listeners and double-fire every notification. Remove first
+    // (no-op when the object is fresh, as in real Web Bluetooth).
+    this.rxChar.removeEventListener('characteristicvaluechanged', this.boundOnBLEData);
+    this.rxChar.addEventListener('characteristicvaluechanged', this.boundOnBLEData);
 
     // Fresh connections with auth enabled require the bare token (not JSON-RPC)
     // as the first TX write, before any sendRPC call is allowed to run.
@@ -71,6 +115,23 @@ export class BLETransport implements Transport {
     }
 
     this._connected = true;
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.autoReconnect || this.intentionalClose || this.reconnectTimer) return;
+    const delay = Math.min(this.reconnectDelay, RECONNECT_MAX_DELAY_MS);
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      if (this.intentionalClose) return;
+      try {
+        await this.establishLink();
+        this.reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
+        this.reconnectCbs.onReconnect?.();
+      } catch {
+        this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, RECONNECT_MAX_DELAY_MS);
+        this.scheduleReconnect();
+      }
+    }, delay);
   }
 
   // Writes the token line directly, bypassing sendRPC (it carries no id and
@@ -91,6 +152,8 @@ export class BLETransport implements Transport {
       };
     });
   }
+
+  private boundOnBLEData = this.onBLEData.bind(this) as EventListener;
 
   private onBLEData(e: Event): void {
     const target = e.target as BluetoothRemoteGATTCharacteristic;
@@ -195,6 +258,11 @@ export class BLETransport implements Transport {
   }
 
   async disconnect(): Promise<void> {
+    this.intentionalClose = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this._connected = false;
     this.rejectAll(new Error('Disconnected'));
     try {
