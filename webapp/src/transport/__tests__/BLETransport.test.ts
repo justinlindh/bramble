@@ -261,6 +261,52 @@ describe('BLETransport auto-reconnect', () => {
     await vi.waitFor(() => expect(transport.connected).toBe(true));
   }, 20000);
 
+  it('recovers even when a write was stuck in flight at disconnect (wedge regression)', async () => {
+    const stack = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+    const transport = await connectWithAuth(stack);
+    const onReconnect = vi.fn();
+    transport.enableAutoReconnect({ onReconnect });
+
+    // Simulate the Android bridge losing the link mid-write: the pending
+    // write promise NEVER settles. Without the queue reset in
+    // establishLink, the reconnect auth write queues behind it forever.
+    stack.txChar.writeValueWithResponse.mockImplementationOnce(
+      () => new Promise(() => {})
+    );
+    transport.sendRPC('bramble.getStatus', {}, 1000).catch(() => {});
+    await new Promise(r => setTimeout(r, 10)); // let the doomed write start
+    stack.fireGattDisconnected();
+
+    // Reconnect attempt must still write the token on the fresh session.
+    await vi.waitFor(() => {
+      const tokenWrites = writesAsText(stack.writes).split('secret-token\n').length - 1;
+      expect(tokenWrites).toBe(2);
+    }, { timeout: 8000 });
+    stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+    await vi.waitFor(() => expect(onReconnect).toHaveBeenCalledTimes(1));
+    expect(transport.connected).toBe(true);
+  }, 15000);
+
+  it('tears down a half-open GATT connection when a reconnect attempt fails', async () => {
+    const stack = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+    const transport = await connectWithAuth(stack);
+    transport.enableAutoReconnect({});
+
+    // gatt.connect succeeds but auth times out: half-open session. The
+    // retry loop must disconnect it so the node resumes advertising.
+    stack.fireGattDisconnected();
+    // Swallow the token write on the retry so the handshake times out, and
+    // report the gatt as connected so teardown has something to close.
+    stack.txChar.writeValueWithResponse.mockImplementation(() => new Promise(() => {}));
+    await vi.waitFor(
+      () => expect(stack.gattServer.disconnect).toHaveBeenCalled(),
+      { timeout: 12000 }
+    );
+    expect(transport.connected).toBe(false);
+  }, 20000);
+
   it('does not reconnect after an intentional disconnect()', async () => {
     const stack = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
