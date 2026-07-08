@@ -95,6 +95,12 @@ export class BLETransport implements Transport {
   private async establishLink(): Promise<void> {
     if (!this.device) throw new Error('No device selected');
     this.lineBuf = '';
+    // A write that was in flight when the link died may never settle (the
+    // Android bridge cannot deliver its completion callback for a dead GATT
+    // session). The queue chains on that promise, so without a reset every
+    // write on the NEW session - starting with the auth token - would queue
+    // behind it forever and the reconnect could never succeed.
+    this.writeQueue = Promise.resolve();
 
     const server = await this.device.gatt!.connect();
     const service = await server.getPrimaryService(NUS_SERVICE);
@@ -128,6 +134,14 @@ export class BLETransport implements Transport {
         this.reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
         this.reconnectCbs.onReconnect?.();
       } catch {
+        // A failed attempt can leave a half-open GATT connection standing
+        // (connected at the radio, auth never completed). Tear it down before
+        // retrying: a BLE peripheral stops advertising while a connection is
+        // open, so a zombie session blocks the node for everyone - including
+        // our own next attempt.
+        try {
+          if (this.device?.gatt?.connected) this.device.gatt.disconnect();
+        } catch { /* best effort */ }
         this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, RECONNECT_MAX_DELAY_MS);
         this.scheduleReconnect();
       }
@@ -138,9 +152,12 @@ export class BLETransport implements Transport {
   // is not JSON-RPC), then waits for the single RX line the firmware answers
   // with. Rejects with a message the existing auth-error UI matches
   // (/1008|unauthorized|auth/i), mirroring the WiFi path's wording.
-  private async performAuthHandshake(token: string): Promise<void> {
-    await this.writeChunked(new TextEncoder().encode(token + '\n'));
-
+  //
+  // The timeout is armed BEFORE the token write, bounding the whole
+  // handshake: on a half-dead link the GATT write itself can hang forever,
+  // and awaiting it first would freeze connect/reconnect with no timeout
+  // ever starting.
+  private performAuthHandshake(token: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingAuth = null;
@@ -150,6 +167,14 @@ export class BLETransport implements Transport {
         resolve: () => { clearTimeout(timer); resolve(); },
         reject: (err: Error) => { clearTimeout(timer); reject(err); },
       };
+      this.writeChunked(new TextEncoder().encode(token + '\n')).catch((e) => {
+        // Failed write: fail the handshake now instead of waiting out the timer.
+        if (this.pendingAuth) {
+          const waiter = this.pendingAuth;
+          this.pendingAuth = null;
+          waiter.reject(e as Error);
+        }
+      });
     });
   }
 
