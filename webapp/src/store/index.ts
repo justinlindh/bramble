@@ -409,10 +409,13 @@ export const useStore = create<AppState & Actions>((set) => ({
       const convs = new Map(state.conversations);
       const conv = convs.get(id);
       if (conv) convs.set(id, { ...conv, unreadCount: 0 });
-      
+
       // Persist unread counts to localStorage
       persistUnreads(convs, state.config);
-      
+
+      // Opening a conversation dismisses its native notification (Android shell).
+      try { window.brambleAndroidNotify?.clearConversation(id); } catch { /* best-effort */ }
+
       return { activeConversationId: id, conversations: convs };
     }),
 

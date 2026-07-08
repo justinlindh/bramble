@@ -1218,6 +1218,57 @@ function handleIncomingMessage(params: unknown): void {
   const store = useStore.getState();
   store.addMessage(msg);
   messageDb.saveMessage(msg).catch(() => {});
+  maybeNotifyIncoming(msg);
+}
+
+/** Test seam for the incoming-message + native-notification path. */
+export function handleIncomingForTest(params: unknown): void {
+  handleIncomingMessage(params);
+}
+
+/**
+ * Raise a native Android notification for an incoming message. No-op outside
+ * the Android shell (web and Electron have no bridge). Suppressed for a
+ * message from this node and, following common messaging-app behavior, for
+ * the conversation the user is currently looking at (app visible + that
+ * conversation open).
+ */
+function maybeNotifyIncoming(msg: Message): void {
+  if (!isAndroidShell()) return;
+  const notify = window.brambleAndroidNotify;
+  if (!notify) return;
+
+  const store = useStore.getState();
+  const selfAddr = store.config?.identity?.address;
+  if (selfAddr !== undefined && msg.from === selfAddr) return;
+
+  const conversationId = conversationKeyForMessage(msg);
+  const appVisible = typeof document !== 'undefined' && document.visibilityState === 'visible';
+  if (appVisible && store.activeConversationId === conversationId) return;
+
+  const senderName = store.peerNames.get(msg.from) ?? `0x${(msg.from >>> 0).toString(16).toUpperCase()}`;
+  const conversationTitle = conversationTitleFor(conversationId, senderName, store);
+
+  try {
+    notify.onMessage(JSON.stringify({
+      conversationId,
+      conversationTitle,
+      sender: senderName,
+      text: msg.text ?? '',
+      timestamp: msg.timestampMs ?? Date.now(),
+    }));
+  } catch { /* notification is best-effort */ }
+}
+
+function conversationTitleFor(conversationId: string, senderName: string, store: ReturnType<typeof useStore.getState>): string {
+  if (conversationId === 'broadcast') return 'Broadcast';
+  if (conversationId.startsWith('ch:')) {
+    const idx = Number(conversationId.slice(3));
+    const ch = store.config?.channels?.find(c => c.index === idx);
+    return ch?.name?.trim() ? ch.name : `Channel ${idx}`;
+  }
+  // dm: title is the peer, which is the sender for an incoming DM.
+  return senderName;
 }
 
 async function refreshNeighbors(): Promise<void> {
