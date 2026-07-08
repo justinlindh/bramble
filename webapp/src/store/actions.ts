@@ -26,6 +26,10 @@ import type {
 
 // Map technical error messages to human-friendly text
 const ERROR_MAP: Array<[RegExp, string]> = [
+  // Must precede the /auth/i rule: a handshake TIMEOUT means the node never
+  // answered (usually because another device, like the phone, holds its one
+  // BLE connection), not that the token is wrong.
+  [/handshake timed out/i, 'The node did not respond over Bluetooth. If it is connected to another device (like your phone), disconnect there first, then retry.'],
   [/cancelled.*requestDevice/i, 'Bluetooth pairing was cancelled.'],
   [/cancelled.*requestPort/i, 'Serial port selection was cancelled.'],
   [/user cancel/i, 'Connection was cancelled.'],
