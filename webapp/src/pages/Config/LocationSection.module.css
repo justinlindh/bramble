@@ -266,6 +266,29 @@
   color: var(--danger, #d73a49);
 }
 
+.contactRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.contactRow input[type="number"] {
+  width: 70px;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: var(--font-mono);
+}
+
 .removeLink {
   margin-left: auto;
   padding: 0;
