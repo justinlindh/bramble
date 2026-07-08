@@ -173,7 +173,11 @@ async function ensureSerialRpcReady(): Promise<boolean> {
 
 export async function connect(
   type: TransportType,
-  options?: { url?: string; token?: string; ip?: string; remember?: boolean; name?: string; expectAddressHex?: string },
+  options?: {
+    url?: string; token?: string; ip?: string; remember?: boolean; name?: string; expectAddressHex?: string;
+    /** Pick-first flow: a device already chosen via BLETransport.pickDevice(). */
+    bleDevice?: BluetoothDevice;
+  },
 ): Promise<void> {
   const store = useStore.getState();
 
@@ -344,7 +348,8 @@ export async function connect(
         } else if (type === 'ble') {
           // BLE has no address until after connect (like serial), but unlike
           // serial it needs the auth token, so persist it per the Remember
-          // choice. No IP: reconnect still goes through the system picker.
+          // choice. The BLE identity (device id + name) enables zero-prompt
+          // reconnect from the device book.
           saveConnectedDevice({
             addr: bookAddrNum,
             name: options?.name,
@@ -352,6 +357,8 @@ export async function connect(
             token: options?.token ?? '',
             remember: options?.remember ?? false,
             transport: 'ble',
+            bleDeviceId: options?.bleDevice?.id,
+            bleDeviceName: options?.bleDevice?.name ?? undefined,
           });
         } else if (type === 'serial') {
           saveConnectedDevice({ addr: bookAddrNum, name: options?.name, ip: '', token: '', remember: false, transport: 'serial' });
@@ -1907,9 +1914,14 @@ export function saveConnectedDevice(args: {
   token: string;
   remember: boolean;
   transport: 'wifi' | 'serial' | 'ble';
+  bleDeviceId?: string;
+  bleDeviceName?: string;
 }): void {
   const address = formatAddrHex(args.addr);
-  upsertDevice({ address, name: args.name, lastIp: args.ip, transport: args.transport, remember: args.remember });
+  upsertDevice({
+    address, name: args.name, lastIp: args.ip, transport: args.transport, remember: args.remember,
+    bleDeviceId: args.bleDeviceId, bleDeviceName: args.bleDeviceName,
+  });
   if (args.token) setDeviceToken(address, args.token, args.remember);
   refreshDevices();
 }

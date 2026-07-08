@@ -24,6 +24,12 @@ export type BrambleDesktopApi = {
   selectDevice(id: string): void;
   /** Dismiss the pending picker (the underlying request fails cleanly). */
   cancelDevicePicker(): void;
+  /**
+   * Arm one-shot auto-selection for the NEXT bluetooth chooser: when a
+   * candidate matching id or name appears, main resolves it without showing
+   * the picker (saved-device reconnect). Pass null to disarm.
+   */
+  autoSelectNextDevice(expected: { id?: string; name?: string } | null): void;
 };
 
 /** IPC channel names shared by the Electron main process and preload. */
@@ -57,6 +63,7 @@ export const DEVICE_PICKER_CHANNELS = {
   update: 'device-picker:update',
   select: 'device-picker:select',
   cancel: 'device-picker:cancel',
+  autoSelect: 'device-picker:auto-select',
 } as const;
 
 /**

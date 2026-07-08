@@ -62,8 +62,40 @@ export class BLETransport implements Transport {
   private reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
   private intentionalClose = false;
 
-  constructor(token?: string) {
+  constructor(token?: string, device?: BluetoothDevice) {
     this.token = token;
+    // A device chosen up front (pick-first flow / saved-device reconnect)
+    // skips the chooser inside connect().
+    this.device = device ?? null;
+  }
+
+  /**
+   * Runs the device chooser and returns the picked device. Separated from
+   * connect() so the UI can pick first and connect later. `expected` is the
+   * saved-device fast path: on Android the polyfill connects straight to the
+   * stored MAC (no chooser); on desktop the Electron main process auto-picks
+   * the matching candidate (renderer arms it via brambleDesktop).
+   */
+  static async pickDevice(expected?: { id?: string; name?: string }): Promise<BluetoothDevice> {
+    if (!('bluetooth' in navigator)) throw new Error('Web Bluetooth not supported');
+    const bluetooth = (navigator as { bluetooth: Bluetooth }).bluetooth;
+    if (expected && window.brambleDesktop?.autoSelectNextDevice) {
+      window.brambleDesktop.autoSelectNextDevice(expected);
+    }
+    try {
+      const options: RequestDeviceOptions & Record<string, unknown> = {
+        filters: [{ services: [NUS_SERVICE] }],
+        optionalServices: [NUS_SERVICE],
+      };
+      if (expected?.id) {
+        // Nonstandard passthrough consumed by the Android polyfill only.
+        options.brambleExpectedDeviceId = expected.id;
+        if (expected.name) options.brambleExpectedName = expected.name;
+      }
+      return await bluetooth.requestDevice(options as RequestDeviceOptions);
+    } finally {
+      window.brambleDesktop?.autoSelectNextDevice?.(null);
+    }
   }
 
   get connected() { return this._connected; }
@@ -77,13 +109,9 @@ export class BLETransport implements Transport {
   }
 
   async connect(): Promise<void> {
-    if (!('bluetooth' in navigator)) throw new Error('Web Bluetooth not supported');
-
-    const bluetooth = (navigator as { bluetooth: Bluetooth }).bluetooth;
-    this.device = await bluetooth.requestDevice({
-      filters: [{ services: [NUS_SERVICE] }],
-      optionalServices: [NUS_SERVICE],
-    });
+    if (!this.device) {
+      this.device = await BLETransport.pickDevice();
+    }
     this.intentionalClose = false;
 
     this.device.addEventListener('gattserverdisconnected', () => {

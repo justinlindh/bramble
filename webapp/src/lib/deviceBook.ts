@@ -8,6 +8,9 @@ export type SavedDevice = {
   transport: 'wifi' | 'serial' | 'ble';
   remember: boolean;
   lastConnectedAt: number;
+  /** BLE identity for reconnecting without the chooser (saved-device path). */
+  bleDeviceId?: string;
+  bleDeviceName?: string;
 };
 
 function safeGet(store: Storage, key: string): string | null {
@@ -39,6 +42,7 @@ export function listDevices(): SavedDevice[] {
 export function upsertDevice(input: {
   address: string; name?: string; lastIp?: string;
   transport: 'wifi' | 'serial' | 'ble'; remember: boolean; nowMs?: number;
+  bleDeviceId?: string; bleDeviceName?: string;
 }): SavedDevice {
   const book = readBook();
   const now = input.nowMs ?? Date.now();
@@ -51,6 +55,9 @@ export function upsertDevice(input: {
     transport: input.transport,
     remember: input.remember,
     lastConnectedAt: now,
+    // Preserve a known BLE identity when a later save omits it.
+    bleDeviceId: input.bleDeviceId ?? existing?.bleDeviceId,
+    bleDeviceName: input.bleDeviceName ?? existing?.bleDeviceName,
   };
   const next = book.filter(d => d.address !== input.address);
   next.push(merged);
