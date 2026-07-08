@@ -212,15 +212,23 @@ export async function connect(
     // rejected during the transport handshake, so this specifically catches the
     // no-token-on-an-auth-required-node case). Serial is a trusted link.
     if (type === 'ble' || type === 'wifi') {
+      // For BLE WITH a token, the transport handshake already validated auth
+      // (a wrong token rejects there), so a timeout here is a connectivity
+      // stall, not an auth problem. Mapping -1005 to auth-required in that
+      // case told a user with the CORRECT token that it was wrong.
+      const handshakeValidated = type === 'ble' && !!options?.token;
       try {
         await client.rpc('bramble.getStatus', {}, 4000);
       } catch (e) {
         const msg = (e as Error)?.message ?? '';
-        if (/unauthorized|1008|auth/i.test(msg) || /-1005/.test(msg)) {
+        const authy = /unauthorized|1008|auth/i.test(msg) || (!handshakeValidated && /-1005/.test(msg));
+        if (authy) {
           throw new Error('This node requires an auth token. Enter the token and reconnect.');
         }
-        // Any other failure is not an auth problem; let the normal init below
-        // surface it rather than blocking the connection here.
+        // A handshake-validated session's timeout is a connectivity stall,
+        // not an auth problem; a truly wedged link is now killed at the
+        // transport layer (write timeout), so let init proceed or fail on
+        // its own terms rather than blocking here.
       }
     }
 

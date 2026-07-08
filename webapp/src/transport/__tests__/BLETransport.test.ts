@@ -357,6 +357,26 @@ describe('BLETransport auto-reconnect', () => {
     await vi.waitFor(() => expect(stack.gattServer.connect.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 4000 });
   }, 20000);
 
+  it('times out a hung GATT write and drops the link (silent-wedge regression)', async () => {
+    (BLETransport as any).writeChunkTimeoutMs = 250;
+    try {
+      const stack = makeFakeBleStack();
+      vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+      const transport = await connectWithAuth(stack);
+      const onDisconnect = vi.fn();
+      transport.enableAutoReconnect({ onDisconnect });
+
+      // Desktop BlueZ failure mode: a write that never completes while the
+      // GATT link still claims connected. The RPC must fail (not hang) and
+      // the transport must drop the link so auto-reconnect can heal it.
+      stack.txChar.writeValueWithResponse.mockImplementation(() => new Promise(() => {}));
+      await expect(transport.sendRPC('bramble.getStatus', {}, 5000)).rejects.toThrow(/write timed out/i);
+      expect(stack.gattServer.disconnect).toHaveBeenCalled();
+    } finally {
+      (BLETransport as any).writeChunkTimeoutMs = 6000;
+    }
+  }, 10000);
+
   it('does not reconnect after an intentional disconnect()', async () => {
     const stack = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
