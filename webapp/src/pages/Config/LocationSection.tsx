@@ -328,7 +328,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
                 setChannelTargets(next);
               }}
             />
-            <button className={styles.removeBtn} onClick={() => setChannelTargets(channelTargets.filter(c => c.channel !== target.channel))}>Remove</button>
+            <button className={styles.removeLink} onClick={() => setChannelTargets(channelTargets.filter(c => c.channel !== target.channel))}>Remove</button>
           </div>
         ))}
       </div>
