@@ -24,6 +24,12 @@ interface BleReconnectCallbacks {
 const AUTH_HANDSHAKE_TIMEOUT_MS = 5000;
 const RECONNECT_INITIAL_DELAY_MS = 2000;
 const RECONNECT_MAX_DELAY_MS = 30000;
+// Bounds one whole reconnect attempt (GATT connect + discovery +
+// notifications + auth). Android's BLE stack can simply never deliver the
+// connect callback after a peer died mid-connection, and an unbounded await
+// there killed the retry loop silently in the field. Static so tests can
+// shrink it.
+const ESTABLISH_LINK_TIMEOUT_MS = 20000;
 
 export class BLETransport implements Transport {
   private device: BluetoothDevice | null = null;
@@ -61,6 +67,9 @@ export class BLETransport implements Transport {
   enableAutoReconnect(cbs: BleReconnectCallbacks): void {
     this.autoReconnect = true;
     this.reconnectCbs = cbs;
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onVisibilityKick);
+    }
   }
 
   async connect(): Promise<void> {
@@ -130,7 +139,7 @@ export class BLETransport implements Transport {
       this.reconnectTimer = null;
       if (this.intentionalClose) return;
       try {
-        await this.establishLink();
+        await this.withAttemptTimeout(this.establishLink());
         this.reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
         this.reconnectCbs.onReconnect?.();
       } catch {
@@ -147,6 +156,38 @@ export class BLETransport implements Transport {
       }
     }, delay);
   }
+
+  // The retry loop must be unkillable: every attempt settles, by result or
+  // by this timeout. Note the underlying native call is not cancelled; a
+  // late success is handled by the next attempt finding gatt.connected and
+  // the teardown in the catch path.
+  private withAttemptTimeout<T>(p: Promise<T>): Promise<T> {
+    const timeoutMs = (this.constructor as typeof BLETransport).establishLinkTimeoutMs;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('BLE reconnect attempt timed out')), timeoutMs);
+      p.then(
+        (v) => { clearTimeout(timer); resolve(v); },
+        (e) => { clearTimeout(timer); reject(e); }
+      );
+    });
+  }
+
+  static establishLinkTimeoutMs = ESTABLISH_LINK_TIMEOUT_MS;
+
+  // Background timers are throttled aggressively on Android, so a 30s-capped
+  // backoff can stretch much longer while the screen is off. When the user
+  // opens the app, retry immediately instead of waiting out the current
+  // backoff.
+  private onVisibilityKick = () => {
+    if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+    if (!this.autoReconnect || this.intentionalClose || this._connected) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectDelay = RECONNECT_INITIAL_DELAY_MS;
+    this.scheduleReconnect();
+  };
 
   // Writes the token line directly, bypassing sendRPC (it carries no id and
   // is not JSON-RPC), then waits for the single RX line the firmware answers
@@ -284,6 +325,9 @@ export class BLETransport implements Transport {
 
   async disconnect(): Promise<void> {
     this.intentionalClose = true;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityKick);
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
