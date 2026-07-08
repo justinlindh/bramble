@@ -17,6 +17,7 @@ function makeFakeBleStack() {
 
   const rxChar = {
     startNotifications: vi.fn(async () => rxChar),
+    stopNotifications: vi.fn(async () => rxChar),
     addEventListener: vi.fn((_type: string, cb: (e: Event) => void) => {
       rxListeners.push(cb);
     }),
