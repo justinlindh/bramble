@@ -1216,6 +1216,12 @@ function handleIncomingMessage(params: unknown): void {
   const p = params as any;
   const msg = normalizeIncomingRealtimeMessage(p);
   const store = useStore.getState();
+  // The firmware includes the sender's display name when its neighbor table
+  // knows it. Learn it BEFORE rendering anything (chat list, notification),
+  // so a first message from a peer never shows as a bare hex address.
+  if (typeof p.fromName === 'string' && p.fromName.length > 0) {
+    store.setPeerName(msg.from, p.fromName);
+  }
   store.addMessage(msg);
   messageDb.saveMessage(msg).catch(() => {});
   maybeNotifyIncoming(msg);

@@ -69,5 +69,10 @@ declare global {
     brambleDesktop?: BrambleDesktopApi;
     brambleAndroidNative?: BrambleAndroidNativeApi;
     brambleAndroidNotify?: BrambleAndroidNotifyApi;
+    /**
+     * Registered by the webapp in the Android shell; the native side calls it
+     * when the user taps a message notification, to open that conversation.
+     */
+    brambleOpenConversation?: (conversationId: string) => void;
   }
 }
