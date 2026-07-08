@@ -10,6 +10,7 @@ typedef enum {
     SCREEN_MESSAGES,
     SCREEN_NODES,
     SCREEN_COMPOSE, /* T-Deck: compose; Heltec: Stats */
+    SCREEN_GPS,     /* GPS status - only reachable when gps_available is set */
     SCREEN_SETTINGS,
     SCREEN_COUNT
 } ui_screen_t;
@@ -76,6 +77,7 @@ typedef struct {
     bool settings_confirmed;                 /* set true on long-press confirm */
     bool pending_message_notification; /* set when a message arrives during active navigation */
     uint32_t message_auto_switch_time; /* timestamp when idle auto-switch to messages happened */
+    bool gps_available; /* true when the board has GPS - gates SCREEN_GPS in the cycle */
 
     /* Compose state */
     char compose_buf[COMPOSE_BUF_SIZE];
@@ -88,6 +90,10 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms);
 ui_screen_t ui_get_screen(const ui_state_t* state);
 bool ui_needs_redraw(const ui_state_t* state);
 void ui_mark_drawn(ui_state_t* state);
+
+/* Mark SCREEN_GPS as reachable in the screen cycle. Defaults to false (unset by
+ * ui_init), so callers on non-GPS boards never need to touch this. */
+void ui_set_gps_available(ui_state_t* state, bool available);
 
 /* Connectivity mode — NVS-persisted, applied on next boot.
  * Implemented in main/main.c; declared here so any UI component can call them. */

@@ -19,6 +19,7 @@ static const char* TAG = "gps";
 #define GPS_TASK_STACK_SIZE 4096
 #define GPS_TASK_PRIORITY 5
 #define GPS_MAX_LINE_LEN 128
+#define GPS_ANTENNA_WARNING_TTL_MS 60000 /* how long an ANTENNA OPEN report stays "recent" */
 
 static TaskHandle_t s_gps_task = NULL;
 static gps_fix_cb_t s_callback = NULL;
@@ -28,6 +29,9 @@ static bool s_has_fix = false;
 static uint32_t s_rx_bytes_total = 0;
 static uint32_t s_rx_lines_total = 0;
 static uint32_t s_raw_log_lines = 0;
+static uint8_t s_sats_used = 0;
+static uint8_t s_sats_in_view = 0;
+static uint32_t s_antenna_warning_until_ms = 0; /* 0 = no active warning */
 
 static bool gps_probe_nmea_at_baud(int baud, uint32_t probe_ms) {
     ESP_ERROR_CHECK(uart_set_baudrate(GPS_UART_NUM, baud));
@@ -134,6 +138,20 @@ static void gps_task(void* arg) {
                         strncpy(sentence_copy, line_buf, sizeof(sentence_copy) - 1);
                         sentence_copy[sizeof(sentence_copy) - 1] = '\0';
                         parsed = nmea_parse_gga(sentence_copy, &nmea_pos);
+                        /* Satellites-used is reported even without a fix. */
+                        s_sats_used = nmea_pos.sats_used;
+                    } else if (strncmp(line_buf, "$GPGSV", 6) == 0 ||
+                               strncmp(line_buf, "$GNGSV", 6) == 0) {
+                        char sentence_copy[GPS_MAX_LINE_LEN];
+                        strncpy(sentence_copy, line_buf, sizeof(sentence_copy) - 1);
+                        sentence_copy[sizeof(sentence_copy) - 1] = '\0';
+                        uint8_t sats_in_view = 0;
+                        if (nmea_parse_gsv(sentence_copy, &sats_in_view)) {
+                            s_sats_in_view = sats_in_view;
+                        }
+                    } else if (nmea_is_antenna_open(line_buf)) {
+                        s_antenna_warning_until_ms =
+                            (uint32_t)(esp_timer_get_time() / 1000ULL) + GPS_ANTENNA_WARNING_TTL_MS;
                     }
 
                     if (parsed && nmea_pos.valid) {
@@ -267,6 +285,16 @@ bool gps_get_position(bramble_position_t* out) {
     return true;
 }
 
+void gps_get_stats(gps_stats_t* out) {
+    if (!out)
+        return;
+    out->sats_used = s_sats_used;
+    out->sats_in_view = s_sats_in_view;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    out->antenna_warning =
+        (s_antenna_warning_until_ms != 0) && (now_ms < s_antenna_warning_until_ms);
+}
+
 void gps_deinit(void) {
     if (s_gps_task) {
         vTaskDelete(s_gps_task);
@@ -274,6 +302,9 @@ void gps_deinit(void) {
     }
     uart_driver_delete(GPS_UART_NUM);
     s_has_fix = false;
+    s_sats_used = 0;
+    s_sats_in_view = 0;
+    s_antenna_warning_until_ms = 0;
     ESP_LOGI(TAG, "GPS deinitialized");
 }
 
@@ -288,6 +319,13 @@ bool gps_has_fix(void) { return false; }
 bool gps_get_position(bramble_position_t* out) {
     (void)out;
     return false;
+}
+void gps_get_stats(gps_stats_t* out) {
+    if (out) {
+        out->sats_used = 0;
+        out->sats_in_view = 0;
+        out->antenna_warning = false;
+    }
 }
 void gps_deinit(void) {}
 #endif /* ESP_PLATFORM */

@@ -14,6 +14,7 @@ typedef struct {
     uint8_t heading_deg2; /* heading / 2 (0-179 = 0-358) */
     uint32_t timestamp;
     bool valid;
+    uint8_t sats_used; /* GGA: satellites used in fix, set even when no fix (0 if unknown) */
 } nmea_position_t;
 
 /**
@@ -39,5 +40,21 @@ bool nmea_parse_rmc(char* sentence, nmea_position_t* pos);
  * @return true if valid fix parsed, false otherwise
  */
 bool nmea_parse_gga(char* sentence, nmea_position_t* pos);
+
+/**
+ * Parse NMEA GSV sentence for total satellites in view.
+ * @param sentence: mutable buffer containing "$GPGSV,..." or "$GNGSV,..."
+ * @param sats_in_view: output, set to the total-satellites-in-view field
+ * @return true if parsed successfully
+ */
+bool nmea_parse_gsv(char* sentence, uint8_t* sats_in_view);
+
+/**
+ * Check whether a raw NMEA line is a $GPTXT/$GNTXT antenna-open warning.
+ * Does not tokenize or modify the input.
+ * @param sentence: raw sentence
+ * @return true if the line reports an open/disconnected antenna
+ */
+bool nmea_is_antenna_open(const char* sentence);
 
 #endif /* BRAMBLE_NMEA_PARSER_H */

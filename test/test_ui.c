@@ -150,6 +150,48 @@ void test_trackball_up_prev_screen(void) {
     TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
 }
 
+void test_gps_screen_skipped_by_default(void) {
+    /* gps_available defaults to false (ui_init zeroes the struct); short-press
+     * cycling must go straight from Stats to Settings without landing on GPS. */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* MESSAGES */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 2000); /* NODES */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 3000); /* COMPOSE */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 4000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+}
+
+void test_gps_screen_reachable_when_available(void) {
+    ui_set_gps_available(&state, true);
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* MESSAGES */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 2000); /* NODES */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 3000); /* COMPOSE */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 4000);
+    TEST_ASSERT_EQUAL(SCREEN_GPS, ui_get_screen(&state));
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 5000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+}
+
+void test_gps_screen_skipped_going_backward_when_unavailable(void) {
+    /* From Settings, trackball-left should land on Stats (COMPOSE), not GPS. */
+    ui_handle_button(&state, BTN_LEFT, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+
+    ui_handle_button(&state, BTN_LEFT, 2000);
+    TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
+}
+
+void test_gps_screen_reachable_going_backward_when_available(void) {
+    ui_set_gps_available(&state, true);
+
+    ui_handle_button(&state, BTN_LEFT, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+
+    ui_handle_button(&state, BTN_LEFT, 2000);
+    TEST_ASSERT_EQUAL(SCREEN_GPS, ui_get_screen(&state));
+}
+
 void test_trackball_select_on_messages_opens_compose(void) {
     ui_handle_button(&state, BTN_SHORT_PRESS, 1000);
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
@@ -367,6 +409,10 @@ int main(void) {
     RUN_TEST(test_trackball_down_next_screen);
     RUN_TEST(test_trackball_left_prev_screen);
     RUN_TEST(test_trackball_up_prev_screen);
+    RUN_TEST(test_gps_screen_skipped_by_default);
+    RUN_TEST(test_gps_screen_reachable_when_available);
+    RUN_TEST(test_gps_screen_skipped_going_backward_when_unavailable);
+    RUN_TEST(test_gps_screen_reachable_going_backward_when_available);
     RUN_TEST(test_trackball_select_on_messages_opens_compose);
     RUN_TEST(test_conn_mode_resolve_boot_keeps_supported_modes);
     RUN_TEST(test_conn_mode_resolve_boot_normalizes_legacy_both);
