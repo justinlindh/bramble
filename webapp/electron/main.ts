@@ -2,9 +2,30 @@ import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { startDiscovery, stopDiscovery } from './discovery';
-import { DISCOVERY_CHANNELS } from '../src/types/desktop';
+import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, type PickerDevice } from '../src/types/desktop';
 
 let mainWindow: BrowserWindow | null = null;
+
+// Chromium on Linux ships Web Bluetooth behind a feature flag; without this
+// navigator.bluetooth does not exist and the webapp disables its BLE UI.
+app.commandLine.appendSwitch('enable-features', 'WebBluetooth');
+
+// Pending chooser state: Electron fires select-serial-port once per request
+// and select-bluetooth-device REPEATEDLY as scanning discovers devices. The
+// active callback resolves the request; each event refreshes the list shown
+// by the renderer's picker modal.
+let pendingPicker: ((deviceId: string) => void) | null = null;
+
+function sendPickerUpdate(kind: 'serial' | 'bluetooth', devices: PickerDevice[]): void {
+  mainWindow?.webContents.send(DEVICE_PICKER_CHANNELS.update, { kind, devices });
+}
+
+function resolvePicker(deviceId: string): void {
+  const cb = pendingPicker;
+  pendingPicker = null;
+  mainWindow?.webContents.send(DEVICE_PICKER_CHANNELS.update, null);
+  cb?.(deviceId);
+}
 
 function createMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -89,32 +110,39 @@ function createWindow(): void {
     return false;
   });
 
+  // No auto-picking: both handlers forward the candidates to an in-app
+  // picker so the user chooses. Auto-selecting by vendor id silently
+  // connected to the wrong node when two Bramble devices were attached.
   session.defaultSession.on('select-serial-port', (event, portList, _webContents, callback) => {
     event.preventDefault();
-    if (portList.length === 1) {
-      callback(portList[0].portId);
-      return;
-    }
-    const knownVendors = [0x303A, 0x10C4, 0x1A86, 0x0403];
-    const match = portList.find(p => knownVendors.includes(p.vendorId));
-    if (match) {
-      callback(match.portId);
-      return;
-    }
-    if (portList.length > 0) {
-      callback(portList[0].portId);
-    } else {
+    if (portList.length === 0) {
       callback('');
+      return;
     }
+    pendingPicker = callback;
+    sendPickerUpdate('serial', portList.map(p => ({
+      id: p.portId,
+      label: p.displayName && p.displayName !== p.portName ? `${p.displayName} (${p.portName})` : p.portName,
+      detail: p.vendorId ? `${Number(p.vendorId).toString(16).padStart(4, '0')}:${Number(p.productId ?? 0).toString(16).padStart(4, '0')}` : undefined,
+    })));
   });
 
   session.defaultSession.on('select-bluetooth-device', (event, devices, callback) => {
     event.preventDefault();
-    if (devices.length > 0) {
-      callback(devices[0].deviceId);
-    } else {
-      callback('');
-    }
+    // Fires again as scanning finds more devices: keep the newest callback
+    // and refresh the list; the request stays open until the user picks.
+    pendingPicker = callback;
+    sendPickerUpdate('bluetooth', devices.map(d => ({
+      id: d.deviceId,
+      label: d.deviceName || d.deviceId,
+    })));
+  });
+
+  ipcMain.on(DEVICE_PICKER_CHANNELS.select, (_event, id: string) => {
+    if (typeof id === 'string' && id.length > 0) resolvePicker(id);
+  });
+  ipcMain.on(DEVICE_PICKER_CHANNELS.cancel, () => {
+    resolvePicker('');
   });
 
   session.defaultSession.setDevicePermissionHandler((details) => {

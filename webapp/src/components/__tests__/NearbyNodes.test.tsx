@@ -20,6 +20,9 @@ beforeEach(() => {
     startDiscovery: vi.fn(),
     stopDiscovery: vi.fn(),
     onDiscovered: vi.fn((cb) => { discoveryCb = cb; return () => { discoveryCb = null; }; }),
+    onDevicePicker: vi.fn(() => () => {}),
+    selectDevice: vi.fn(),
+    cancelDevicePicker: vi.fn(),
   };
   useStore.setState({ devices: [] });
   localStorage.clear();

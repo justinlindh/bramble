@@ -4,6 +4,7 @@ import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeySt
 import { usePoll } from './hooks/usePoll';
 import { isAndroidShell } from './utils/platform';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
+import { DevicePickerModal } from './components/DevicePickerModal';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
 import { StatusDot } from './components/StatusDot';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -251,6 +252,7 @@ export default function App() {
 
       {/* Connection overlay (shown when disconnected/connecting) */}
       {showOverlay && <ConnectionOverlay />}
+      <DevicePickerModal />
     </div>
   );
 }
