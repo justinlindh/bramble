@@ -97,7 +97,11 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
     {
         ui_screen_t prev = state->current_screen;
         state->prev_screen = prev;
-        state->current_screen = (ui_screen_t)((prev + 1) % SCREEN_COUNT);
+        ui_screen_t next = (ui_screen_t)((prev + 1) % SCREEN_COUNT);
+        if (next == SCREEN_GPS && !state->gps_available) {
+            next = (ui_screen_t)((next + 1) % SCREEN_COUNT);
+        }
+        state->current_screen = next;
         state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         break;
@@ -107,7 +111,11 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
     {
         ui_screen_t prev = state->current_screen;
         state->prev_screen = prev;
-        state->current_screen = (ui_screen_t)((prev + SCREEN_COUNT - 1) % SCREEN_COUNT);
+        ui_screen_t next = (ui_screen_t)((prev + SCREEN_COUNT - 1) % SCREEN_COUNT);
+        if (next == SCREEN_GPS && !state->gps_available) {
+            next = (ui_screen_t)((next + SCREEN_COUNT - 1) % SCREEN_COUNT);
+        }
+        state->current_screen = next;
         state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         break;
@@ -148,6 +156,8 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         break;
     }
 }
+
+void ui_set_gps_available(ui_state_t* state, bool available) { state->gps_available = available; }
 
 ui_screen_t ui_get_screen(const ui_state_t* state) { return state->current_screen; }
 

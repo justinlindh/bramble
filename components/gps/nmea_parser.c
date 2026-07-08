@@ -142,6 +142,54 @@ bool nmea_parse_rmc(char* sentence, nmea_position_t* pos) {
     return true;
 }
 
+/* Parse $GPGSV or $GNGSV sentence for total satellites in view.
+ * Example: $GPGSV,3,1,11,10,63,137,17,07,61,308,17,05,59,169,18,30,54,042,*7D
+ * Fields: 0=GPGSV, 1=total_msgs, 2=msg_num, 3=sats_in_view, 4+=per-satellite groups. */
+bool nmea_parse_gsv(char* sentence, uint8_t* sats_in_view) {
+    if (!sentence || !sats_in_view)
+        return false;
+
+    char* fields[8];
+    int field_count = 0;
+
+    char* token = strtok(sentence, ",*");
+    while (token && field_count < 8) {
+        fields[field_count++] = token;
+        token = strtok(NULL, ",*");
+    }
+
+    if (field_count < 4)
+        return false;
+
+    if (strcmp(fields[0], "$GPGSV") != 0 && strcmp(fields[0], "$GNGSV") != 0) {
+        return false;
+    }
+
+    if (field_empty(fields[3]))
+        return false;
+
+    int sats = atoi(fields[3]);
+    if (sats < 0)
+        sats = 0;
+    if (sats > 99)
+        sats = 99;
+
+    *sats_in_view = (uint8_t)sats;
+    return true;
+}
+
+/* $GPTXT/$GNTXT carries free-form receiver diagnostics, e.g.
+ * "$GPTXT,01,01,02,ANTENNA OPEN*35". Match on the raw line rather than
+ * tokenizing, since the text field's content isn't otherwise structured. */
+bool nmea_is_antenna_open(const char* sentence) {
+    if (!sentence)
+        return false;
+    if (strncmp(sentence, "$GPTXT", 6) != 0 && strncmp(sentence, "$GNTXT", 6) != 0) {
+        return false;
+    }
+    return strstr(sentence, "ANTENNA OPEN") != NULL;
+}
+
 /* Parse $GPGGA or $GNGGA sentence */
 bool nmea_parse_gga(char* sentence, nmea_position_t* pos) {
     if (!sentence || !pos)
@@ -167,6 +215,19 @@ bool nmea_parse_gga(char* sentence, nmea_position_t* pos) {
     /* Check sentence type */
     if (strcmp(fields[0], "$GPGGA") != 0 && strcmp(fields[0], "$GNGGA") != 0) {
         return false;
+    }
+
+    /* Satellites-used is reported even without a fix (useful for a "searching,
+     * N sats" status), so capture it before the fix-quality gate below. */
+    if (field_count > 7 && !field_empty(fields[7])) {
+        int sats = atoi(fields[7]);
+        if (sats < 0)
+            sats = 0;
+        if (sats > 99)
+            sats = 99;
+        pos->sats_used = (uint8_t)sats;
+    } else {
+        pos->sats_used = 0;
     }
 
     /* Check fix quality (0=invalid, 1=GPS, 2=DGPS, etc.) */

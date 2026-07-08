@@ -183,10 +183,65 @@ void test_gps_parses_rmc_and_sets_fix(void) {
     TEST_ASSERT_INT_WITHIN(10000, 115166667, out.longitude_e7);
 }
 
+void test_gps_stats_default_zero(void) {
+    g_uart_stream = "$GPXXX,1,2,3\x0d\x0a";
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        (void)gps_init(NULL, NULL);
+        TEST_FAIL_MESSAGE("expected jump out of gps task loop");
+    }
+    gps_stats_t stats;
+    gps_get_stats(&stats);
+    TEST_ASSERT_EQUAL_UINT8(0, stats.sats_used);
+    TEST_ASSERT_EQUAL_UINT8(0, stats.sats_in_view);
+    TEST_ASSERT_FALSE(stats.antenna_warning);
+}
+
+void test_gps_stats_tracks_gga_sats_used_without_fix(void) {
+    g_uart_stream = "$GPGGA,123519,4807.038,N,01131.000,E,0,06,99.9,0.0,M,0.0,M,,*00\x0d\x0a";
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        (void)gps_init(NULL, NULL);
+        TEST_FAIL_MESSAGE("expected jump out of gps task loop");
+    }
+    TEST_ASSERT_FALSE(gps_has_fix());
+    gps_stats_t stats;
+    gps_get_stats(&stats);
+    TEST_ASSERT_EQUAL_UINT8(6, stats.sats_used);
+}
+
+void test_gps_stats_tracks_gsv_sats_in_view(void) {
+    g_uart_stream = "$GPGSV,1,1,09,10,63,137,17,07,61,308,17*70\x0d\x0a";
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        (void)gps_init(NULL, NULL);
+        TEST_FAIL_MESSAGE("expected jump out of gps task loop");
+    }
+    gps_stats_t stats;
+    gps_get_stats(&stats);
+    TEST_ASSERT_EQUAL_UINT8(9, stats.sats_in_view);
+}
+
+void test_gps_stats_tracks_antenna_warning(void) {
+    g_uart_stream = "$GPTXT,01,01,02,ANTENNA OPEN*35\x0d\x0a";
+    if (setjmp(g_jmp) == 0) {
+        g_allow_jump = 1;
+        (void)gps_init(NULL, NULL);
+        TEST_FAIL_MESSAGE("expected jump out of gps task loop");
+    }
+    gps_stats_t stats;
+    gps_get_stats(&stats);
+    TEST_ASSERT_TRUE(stats.antenna_warning);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gps_init_and_deinit_without_fix);
     RUN_TEST(test_gps_invalid_or_unparsed_sentence_keeps_no_fix);
     RUN_TEST(test_gps_parses_rmc_and_sets_fix);
+    RUN_TEST(test_gps_stats_default_zero);
+    RUN_TEST(test_gps_stats_tracks_gga_sats_used_without_fix);
+    RUN_TEST(test_gps_stats_tracks_gsv_sats_in_view);
+    RUN_TEST(test_gps_stats_tracks_antenna_warning);
     return UNITY_END();
 }

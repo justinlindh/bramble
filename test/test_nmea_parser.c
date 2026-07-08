@@ -215,6 +215,73 @@ void test_nmea_parse_gga_high_altitude(void) {
     TEST_ASSERT_INT16_WITHIN(1, 8848, pos.altitude_m); /* Mt. Everest */
 }
 
+/* Test GGA sentence captures satellites-used even without a fix */
+void test_nmea_parse_gga_sats_used_no_fix(void) {
+    char sentence[] = "$GPGGA,123519,4807.038,N,01131.000,E,0,05,99.9,0.0,M,0.0,M,,*00";
+    nmea_position_t pos = {0};
+
+    bool result = nmea_parse_gga(sentence, &pos);
+
+    TEST_ASSERT_FALSE(result);
+    TEST_ASSERT_EQUAL_UINT8(5, pos.sats_used);
+}
+
+/* Test GGA sentence captures satellites-used with a fix */
+void test_nmea_parse_gga_sats_used_with_fix(void) {
+    char sentence[] = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47";
+    nmea_position_t pos = {0};
+
+    bool result = nmea_parse_gga(sentence, &pos);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT8(8, pos.sats_used);
+}
+
+/* Test valid GSV sentence parsing */
+void test_nmea_parse_gsv_valid(void) {
+    char sentence[] = "$GPGSV,3,1,11,10,63,137,17,07,61,308,17,05,59,169,18,30,54,042,*7D";
+    uint8_t sats_in_view = 0;
+
+    bool result = nmea_parse_gsv(sentence, &sats_in_view);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT8(11, sats_in_view);
+}
+
+/* Test GNGSV (multi-constellation) sentence */
+void test_nmea_parse_gngsv_valid(void) {
+    char sentence[] = "$GNGSV,1,1,04,10,63,137,17,07,61,308,17*70";
+    uint8_t sats_in_view = 0;
+
+    bool result = nmea_parse_gsv(sentence, &sats_in_view);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT8(4, sats_in_view);
+}
+
+/* Test truncated GSV sentence is rejected */
+void test_nmea_parse_gsv_truncated(void) {
+    char sentence[] = "$GPGSV,3,1";
+    uint8_t sats_in_view = 0;
+
+    bool result = nmea_parse_gsv(sentence, &sats_in_view);
+
+    TEST_ASSERT_FALSE(result);
+}
+
+/* Test antenna-open detection */
+void test_nmea_is_antenna_open_detects_warning(void) {
+    TEST_ASSERT_TRUE(nmea_is_antenna_open("$GPTXT,01,01,02,ANTENNA OPEN*35"));
+    TEST_ASSERT_TRUE(nmea_is_antenna_open("$GNTXT,01,01,02,ANTENNA OPEN*35"));
+}
+
+/* Test antenna-open detection ignores unrelated TXT and other sentences */
+void test_nmea_is_antenna_open_ignores_other_text(void) {
+    TEST_ASSERT_FALSE(nmea_is_antenna_open("$GPTXT,01,01,02,ANTENNA OK*3B"));
+    TEST_ASSERT_FALSE(nmea_is_antenna_open("$GPRMC,123519,A,4807.038,N,01131.000,E,,*6A"));
+    TEST_ASSERT_FALSE(nmea_is_antenna_open(NULL));
+}
+
 /* Test high speed */
 void test_nmea_parse_rmc_high_speed(void) {
     char sentence[] = "$GPRMC,123519,A,4807.038,N,01131.000,E,100.0,270.0,010122,,,A*00";
@@ -269,6 +336,17 @@ int main(void) {
     RUN_TEST(test_nmea_parse_gga_no_fix);
     RUN_TEST(test_nmea_parse_gga_empty_altitude);
     RUN_TEST(test_nmea_parse_gga_high_altitude);
+    RUN_TEST(test_nmea_parse_gga_sats_used_no_fix);
+    RUN_TEST(test_nmea_parse_gga_sats_used_with_fix);
+
+    /* GSV parsing tests */
+    RUN_TEST(test_nmea_parse_gsv_valid);
+    RUN_TEST(test_nmea_parse_gngsv_valid);
+    RUN_TEST(test_nmea_parse_gsv_truncated);
+
+    /* TXT / antenna warning tests */
+    RUN_TEST(test_nmea_is_antenna_open_detects_warning);
+    RUN_TEST(test_nmea_is_antenna_open_ignores_other_text);
 
     /* Edge case tests */
     RUN_TEST(test_nmea_parse_near_dateline);

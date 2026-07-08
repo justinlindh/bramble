@@ -744,6 +744,59 @@ static void render_screen(ui_state_t* ui) {
         display_flush();
         break;
     }
+    case SCREEN_GPS: {
+        /* Only reachable when board_has_cap(BOARD_CAP_GPS) - see ui_set_gps_available() call
+         * in app_main and the gating in ui_handle_button(). Currently the only board with
+         * BOARD_CAP_GPS is Heltec V4 (non-graphical), so no T-Deck layout is needed here. */
+        display_clear();
+        display_draw_text(2, HEADER_Y, "GPS");
+        display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
+
+        int y = CONTENT_Y;
+        char line[32];
+
+        gps_stats_t stats = {0};
+        gps_get_stats(&stats);
+        bool has_fix = gps_has_fix();
+
+        /* Line 1: fix status */
+        display_draw_text(2, y, has_fix ? "GPS: fix" : "GPS: no fix");
+        y += LINE_H;
+
+        /* Line 2: satellites used / in view */
+        snprintf(line, sizeof(line), "Sats: %u/%u", (unsigned)stats.sats_used,
+                 (unsigned)stats.sats_in_view);
+        display_draw_text(2, y, line);
+        y += LINE_H;
+
+        bramble_position_t pos;
+        if (has_fix && gps_get_position(&pos)) {
+            /* Line 3: lat,lon to 5 decimal places */
+            snprintf(line, sizeof(line), "%.5f,%.5f", pos.latitude_e7 / 1e7,
+                     pos.longitude_e7 / 1e7);
+            display_draw_text(2, y, line);
+            y += LINE_H;
+
+            /* Line 4: antenna warning takes priority over alt/accuracy */
+            if (stats.antenna_warning) {
+                display_draw_text(2, y, "ANTENNA OPEN!");
+            } else {
+                snprintf(line, sizeof(line), "Alt:%dm Acc:%um", pos.altitude_m,
+                         (unsigned)pos.accuracy_m);
+                display_draw_text(2, y, line);
+            }
+        } else if (stats.antenna_warning) {
+            display_draw_text(2, y, "ANTENNA OPEN!");
+            y += LINE_H;
+            display_draw_text(2, y, "Searching...");
+        } else {
+            display_draw_text(2, y, "Searching...");
+        }
+
+        display_draw_text(2, FOOTER_Y, "[press] next screen");
+        display_flush();
+        break;
+    }
     default:
         display_clear();
         display_draw_text(0, 28, "Unknown screen");
@@ -1193,6 +1246,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "=== BOOT STAGE: ui_init ===");
     ui_state_t ui;
     ui_init(&ui);
+    ui_set_gps_available(&ui, board_has_cap(BOARD_CAP_GPS));
     int last_message_count = msg_store_count();
 
     /* Render initial screen */
