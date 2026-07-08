@@ -154,8 +154,9 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
     cJSON_AddNumberToObject(heap, "psram_min_ever_free",
                             (double)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
 
-    static const char* task_names[] = {"main",    "mesh",  "ui_gfx", "wifi", "sys_evt", "tiT",
-                                       "Tmr Svc", "IDLE0", "IDLE1",  "ipc0", "ipc1"};
+    static const char* task_names[] = {"main", "mesh",    "ui_gfx",     "wifi",  "sys_evt",
+                                       "tiT",  "Tmr Svc", "IDLE0",      "IDLE1", "ipc0",
+                                       "ipc1", "ble_rpc", "nimble_host"};
     cJSON* tasks = cJSON_AddArrayToObject(result, "task_stack_hwm");
     for (size_t i = 0; i < (sizeof(task_names) / sizeof(task_names[0])); i++) {
         TaskHandle_t h = xTaskGetHandle(task_names[i]);
