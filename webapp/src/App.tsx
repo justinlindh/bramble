@@ -2,6 +2,7 @@ import { type ReactNode, Suspense, lazy, useEffect, useRef } from 'react';
 import { useStore } from './store/index';
 import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeyStatus } from './store/actions';
 import { usePoll } from './hooks/usePoll';
+import { isAndroidShell } from './utils/platform';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
 import { StatusDot } from './components/StatusDot';
@@ -75,6 +76,19 @@ export default function App() {
 
   useEffect(() => {
     loadConnectionCapabilities();
+  }, []);
+
+  // Android shell: notification taps deep-link into the tapped conversation.
+  // The native side calls window.brambleOpenConversation(conversationId)
+  // once the WebView is ready.
+  useEffect(() => {
+    if (!isAndroidShell()) return;
+    window.brambleOpenConversation = (conversationId: string) => {
+      const s = useStore.getState();
+      s.setActiveTab('chat');
+      s.setActiveConversation(conversationId);
+    };
+    return () => { delete window.brambleOpenConversation; };
   }, []);
 
   // Toast notifications for connection state changes

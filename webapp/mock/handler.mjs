@@ -749,6 +749,7 @@ function scheduleIncoming() {
       console.log(`[mock-node] → incoming from ${name} (0x${source.from.toString(16).toUpperCase()})`);
       notify('bramble.onMessage', {
         from: source.from,
+        fromName: name !== '???' ? name : undefined,
         to: SELF_ADDR,
         text,
         tier,

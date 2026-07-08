@@ -2617,6 +2617,16 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
 
                             cJSON* params = cJSON_CreateObject();
                             cJSON_AddStringToObject(params, "from", addr_buf);
+                            /* Sender display name when the neighbor table
+                             * knows it (from beacons): clients then never
+                             * have to show a bare hex address for a peer
+                             * this node has already heard from. */
+                            {
+                                neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, info.src_addr);
+                                if (nb && nb->name[0] != '\0') {
+                                    cJSON_AddStringToObject(params, "fromName", nb->name);
+                                }
+                            }
                             cJSON_AddStringToObject(params, "text", text);
                             cJSON_AddNumberToObject(params, "rssi", rssi);
                             cJSON_AddNumberToObject(params, "snr", snr);
@@ -2704,6 +2714,13 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
 
             cJSON* params = cJSON_CreateObject();
             cJSON_AddStringToObject(params, "from", addr_buf);
+            /* Sender display name when the neighbor table knows it. */
+            {
+                neighbor_entry_t* nb = neighbor_lookup(&s_neighbors, info.src_addr);
+                if (nb && nb->name[0] != '\0') {
+                    cJSON_AddStringToObject(params, "fromName", nb->name);
+                }
+            }
             cJSON_AddStringToObject(params, "text", text);
             cJSON_AddNumberToObject(params, "rssi", rssi);
             cJSON_AddNumberToObject(params, "snr", snr);

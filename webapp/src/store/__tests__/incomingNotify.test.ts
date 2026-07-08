@@ -79,6 +79,15 @@ describe('incoming message native notification', () => {
     expect(payload).toMatchObject({ conversationId: 'ch:0', conversationTitle: 'Example SAR', sender: 'Node A' });
   });
 
+  it('learns the sender name from fromName so an unknown peer never titles as hex', async () => {
+    useStore.setState({ peerNames: new Map() } as any);
+    await deliver({ from: 'AABBCC04', to: 'AA11', text: 'hi', msgId: 'm7', fromName: 'Northside' });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(onMessage.mock.calls[0][0]);
+    expect(payload).toMatchObject({ sender: 'Northside', conversationTitle: 'Northside' });
+    expect(useStore.getState().peerNames.get(0xaabbcc04)).toBe('Northside');
+  });
+
   it('is a no-op outside the Android shell', async () => {
     vi.stubGlobal('brambleAndroid', undefined);
     await deliver({ from: 'DEADBEEF', to: 'AA11', text: 'web', msgId: 'm6' });
