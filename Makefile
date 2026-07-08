@@ -10,12 +10,42 @@ setup-hooks:
 	git config core.hooksPath githooks
 	@echo "Git hooks configured (githooks/)"
 
+# ── Packaging ────────────────────────────────────────────────────────────
+# Desktop (Electron) and Android builds. The Android app lives in a sibling
+# repo; point BRAMBLE_ANDROID_DIR at your checkout if it is somewhere else.
+BRAMBLE_ANDROID_DIR ?= $(HOME)/src/bramble-android
+
+.PHONY: package-linux package-win package-android package-all
+
+package-linux: ## Electron AppImage + deb + pacman into webapp/release/
+	cd webapp && npm run package:linux
+	@ls -1 webapp/release/*.AppImage webapp/release/*.deb webapp/release/*.pacman 2>/dev/null || true
+
+package-win: ## Electron Windows NSIS installer (needs wine for cross-build)
+	cd webapp && WINEDLLOVERRIDES="mscoree,mshtml=" WINEDEBUG=-all npm run package:win
+
+package-android: ## Sync webapp into the Android shell repo and build the APK
+	cd webapp && npm run build
+	bash $(BRAMBLE_ANDROID_DIR)/scripts/sync-webapp-assets.sh $(CURDIR)/webapp
+	cd $(BRAMBLE_ANDROID_DIR) && \
+		JAVA_HOME=$$(mise where java@temurin-17) \
+		ANDROID_HOME=$$(mise where android-sdk) \
+		./gradlew assembleDebug --no-daemon
+	@echo "APK: $(BRAMBLE_ANDROID_DIR)/app/build/outputs/apk/debug/app-debug.apk"
+
+package-all: package-linux package-android ## Everything installable (win excluded; see package-win)
+
 help:
 	@echo "CI parity targets"
 	@echo "  make ci                 # run all local CI parity checks"
 	@echo "  make ci-quality         # parity for .gitea/workflows/quality.yml"
 	@echo "  make ci-firmware-quality# parity for .gitea/workflows/firmware-quality.yml"
 	@echo "  make ci-webapp-quality  # parity for .gitea/workflows/webapp-quality.yml"
+	@echo "Packaging targets"
+	@echo "  make package-linux      # Electron AppImage + deb + pacman (webapp/release/)"
+	@echo "  make package-android    # webapp -> android assets -> debug APK"
+	@echo "  make package-win        # Electron Windows installer (wine)"
+	@echo "  make package-all        # linux + android"
 
 # Fast pre-commit gate: typecheck + unit tests only (no build/lint/smoke)
 check-fast: ci-web-typecheck ci-web-unit

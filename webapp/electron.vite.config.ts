@@ -4,7 +4,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // bonjour-service is bundled (not externalized): the packaged app ships
+    // no node_modules (electron-builder files excludes them), so any dep the
+    // main process needs at runtime must be inlined here. It is pure JS, so
+    // bundling is safe.
+    plugins: [externalizeDepsPlugin({ exclude: ['bonjour-service'] })],
     build: {
       outDir: 'out/main',
       rollupOptions: {
