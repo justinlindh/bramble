@@ -17,6 +17,9 @@ const brambleDesktop: BrambleDesktopApi = {
   },
   selectDevice: (id: string): void => { ipcRenderer.send(DEVICE_PICKER_CHANNELS.select, id); },
   cancelDevicePicker: (): void => { ipcRenderer.send(DEVICE_PICKER_CHANNELS.cancel); },
+  autoSelectNextDevice: (expected: { id?: string; name?: string } | null): void => {
+    ipcRenderer.send(DEVICE_PICKER_CHANNELS.autoSelect, expected);
+  },
 };
 
 if (process.contextIsolated) {

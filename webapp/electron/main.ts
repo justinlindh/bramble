@@ -15,6 +15,10 @@ app.commandLine.appendSwitch('enable-features', 'WebBluetooth');
 // active callback resolves the request; each event refreshes the list shown
 // by the renderer's picker modal.
 let pendingPicker: ((deviceId: string) => void) | null = null;
+// One-shot expected device for a saved-device reconnect: when the chooser
+// fires and a candidate matches, resolve silently instead of showing the
+// picker modal. Cleared on use or when the renderer disarms it.
+let autoSelectExpected: { id?: string; name?: string } | null = null;
 
 function sendPickerUpdate(kind: 'serial' | 'bluetooth', devices: PickerDevice[]): void {
   mainWindow?.webContents.send(DEVICE_PICKER_CHANNELS.update, { kind, devices });
@@ -72,6 +76,21 @@ function createWindow(): void {
   // cancelled every Web Bluetooth request instantly.
   mainWindow.webContents.on('select-bluetooth-device', (event, devices, callback) => {
     event.preventDefault();
+    if (autoSelectExpected) {
+      const match = devices.find(d =>
+        (autoSelectExpected!.id && d.deviceId === autoSelectExpected!.id) ||
+        (autoSelectExpected!.name && d.deviceName === autoSelectExpected!.name)
+      );
+      if (match) {
+        autoSelectExpected = null;
+        callback(match.deviceId);
+        return;
+      }
+      // No match yet: keep scanning silently; the renderer's connect
+      // timeout is the fallback if the saved device never appears.
+      pendingPicker = callback;
+      return;
+    }
     // Fires again as scanning finds more devices: keep the newest callback
     // and refresh the list; the request stays open until the user picks.
     pendingPicker = callback;
@@ -86,6 +105,9 @@ function createWindow(): void {
   });
   ipcMain.on(DEVICE_PICKER_CHANNELS.cancel, () => {
     resolvePicker('');
+  });
+  ipcMain.on(DEVICE_PICKER_CHANNELS.autoSelect, (_event, expected: { id?: string; name?: string } | null) => {
+    autoSelectExpected = expected;
   });
 
   session.defaultSession.setDevicePermissionHandler((details) => {

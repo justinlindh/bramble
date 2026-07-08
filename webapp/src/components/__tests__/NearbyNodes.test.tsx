@@ -23,6 +23,7 @@ beforeEach(() => {
     onDevicePicker: vi.fn(() => () => {}),
     selectDevice: vi.fn(),
     cancelDevicePicker: vi.fn(),
+    autoSelectNextDevice: vi.fn(),
   };
   useStore.setState({ devices: [] });
   localStorage.clear();

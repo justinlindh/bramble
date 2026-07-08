@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { connect, refreshDevices } from '../store/actions';
+import { BLETransport } from '../transport/BLETransport';
 import { useStore } from '../store/index';
 import { getDeviceToken, type SavedDevice } from '../lib/deviceBook';
 import { isEmbeddedShell } from '../utils/platform';
@@ -43,17 +44,26 @@ export function connectToSavedDevice(d: SavedDevice, ip: string): void {
   });
 }
 
-// Reconnect to a saved Bluetooth device: reuse its stored token so the user
-// does not retype it. The system picker still appears (Web Bluetooth requires
-// a chooser gesture), and expectAddressHex verifies the picked node is the one
-// the user chose here, dropping the session on a mismatch.
-export function connectToSavedBleDevice(d: SavedDevice): void {
+// Reconnect to a saved Bluetooth device with zero prompts: reuse the stored
+// token AND the stored BLE identity. pickDevice(expected) resolves silently
+// (desktop: main auto-selects the matching candidate; Android: direct connect
+// to the stored MAC) and falls back to the chooser when the identity is
+// missing or stale. expectAddressHex still verifies the node is the one the
+// user chose, dropping the session on a mismatch.
+export async function connectToSavedBleDevice(d: SavedDevice): Promise<void> {
   const tok = getDeviceToken(d.address);
-  connect('ble', {
+  let device: BluetoothDevice | undefined;
+  if (d.bleDeviceId || d.bleDeviceName) {
+    try {
+      device = await BLETransport.pickDevice({ id: d.bleDeviceId, name: d.bleDeviceName });
+    } catch { /* fall through to the chooser inside connect() */ }
+  }
+  await connect('ble', {
     token: tok || undefined,
     remember: d.remember,
     name: d.name,
     expectAddressHex: d.address,
+    bleDevice: device,
   });
 }
 
@@ -112,6 +122,30 @@ export function ConnectionOverlay() {
     if (saved) setBleRemember(true);
   }, [devices]);
 
+  const [bleDevice, setBleDevice] = useState<BluetoothDevice | null>(null);
+  const [blePickError, setBlePickError] = useState<string | null>(null);
+
+  const handlePickBleDevice = async () => {
+    setBlePickError(null);
+    try {
+      const device = await BLETransport.pickDevice();
+      setBleDevice(device);
+      // Prefill token/name when this BLE identity is already in the book.
+      const known = devices.find(d => d.bleDeviceId === device.id || (device.name && d.bleDeviceName === device.name));
+      if (known) {
+        const saved = getDeviceToken(known.address);
+        if (saved) { setBleToken(saved); setBleRemember(true); }
+        setBleName(prev => (prev ? prev : known.name));
+      } else if (device.name) {
+        setBleName(prev => (prev ? prev : device.name!));
+      }
+    } catch (e) {
+      const msg = (e as Error)?.message ?? '';
+      // Cancelling the chooser is not an error state.
+      if (!/cancel/i.test(msg)) setBlePickError(msg);
+    }
+  };
+
   const handleConnect = () => {
     if (transportType === 'wifi') {
       const ip = wifiIp.trim();
@@ -124,7 +158,12 @@ export function ConnectionOverlay() {
       connect(transportType, { url, token: token || undefined, ip, remember: wifiRemember, name: wifiName.trim() || undefined });
     } else if (transportType === 'ble') {
       const token = bleToken.trim();
-      connect(transportType, { token: token || undefined, remember: bleRemember, name: bleName.trim() || undefined });
+      connect(transportType, {
+        token: token || undefined,
+        remember: bleRemember,
+        name: bleName.trim() || undefined,
+        bleDevice: bleDevice ?? undefined,
+      });
     } else {
       connect(transportType);
     }
@@ -223,6 +262,34 @@ export function ConnectionOverlay() {
         {/* Bluetooth connection settings */}
         {transportType === 'ble' && (
           <div className={styles.wifiInput}>
+            <div className={styles.field}>
+              <label className={styles.wifiLabel}>Device</label>
+              {bleDevice ? (
+                <div className={styles.tokenRow}>
+                  <input
+                    type="text"
+                    className={styles.wifiField}
+                    value={bleDevice.name || bleDevice.id}
+                    readOnly
+                    aria-label="Selected device"
+                  />
+                  <button type="button" className={styles.showHideBtn} onClick={handlePickBleDevice}>
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className={styles.showHideBtn} onClick={handlePickBleDevice}>
+                  Select device…
+                </button>
+              )}
+              {blePickError && <span className={styles.wifiHint}>{blePickError}</span>}
+              {!bleDevice && (
+                <span className={styles.wifiHint}>
+                  Scans for nearby Bramble nodes; pick yours, then connect below.
+                </span>
+              )}
+            </div>
+
             <div className={styles.field}>
               <label htmlFor="ble-token" className={styles.wifiLabel}>Auth Token</label>
               <div className={styles.tokenRow}>
