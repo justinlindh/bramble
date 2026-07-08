@@ -1722,16 +1722,35 @@ static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
             nvs_get_i32(nvs, "lat_e6", &lat_e6);
             nvs_get_i32(nvs, "lon_e6", &lon_e6);
 
-            if (policy.enabled && (lat_e6 != 0 || lon_e6 != 0)) {
+            /* Prefer the live GPS fix over manually configured coordinates,
+             * mirroring mesh_location_policy_tick: a GPS-only node has
+             * lat_e6 == lon_e6 == 0 in NVS and was previously omitted
+             * entirely, leaving the map empty. */
+            bramble_position_t gps_pos;
+            bool has_gps = gps_get_position(&gps_pos) && gps_pos.valid;
+            /* Not gated on policy.enabled: the sharing policy governs what is
+             * broadcast to the mesh, not whether the owner sees their own
+             * position on their own map. */
+            (void)policy;
+            if (has_gps || lat_e6 != 0 || lon_e6 != 0) {
                 cJSON* self = cJSON_CreateObject();
                 char buf[12];
                 cJSON* position = cJSON_CreateObject();
-                cJSON_AddNumberToObject(position, "lat", lat_e6 / 1e6);
-                cJSON_AddNumberToObject(position, "lon", lon_e6 / 1e6);
-                cJSON_AddNumberToObject(position, "alt", 0);
-                cJSON_AddNumberToObject(position, "accuracy", 0);
-                cJSON_AddNumberToObject(position, "speed", 0);
-                cJSON_AddNumberToObject(position, "heading", 0);
+                if (has_gps) {
+                    cJSON_AddNumberToObject(position, "lat", gps_pos.latitude_e7 / 1e7);
+                    cJSON_AddNumberToObject(position, "lon", gps_pos.longitude_e7 / 1e7);
+                    cJSON_AddNumberToObject(position, "alt", gps_pos.altitude_m);
+                    cJSON_AddNumberToObject(position, "accuracy", gps_pos.accuracy_m);
+                    cJSON_AddNumberToObject(position, "speed", gps_pos.speed_kmh);
+                    cJSON_AddNumberToObject(position, "heading", gps_pos.heading_deg2 * 2);
+                } else {
+                    cJSON_AddNumberToObject(position, "lat", lat_e6 / 1e6);
+                    cJSON_AddNumberToObject(position, "lon", lon_e6 / 1e6);
+                    cJSON_AddNumberToObject(position, "alt", 0);
+                    cJSON_AddNumberToObject(position, "accuracy", 0);
+                    cJSON_AddNumberToObject(position, "speed", 0);
+                    cJSON_AddNumberToObject(position, "heading", 0);
+                }
                 cJSON_AddNumberToObject(position, "timestampMs",
                                         (double)(esp_timer_get_time() / 1000ULL));
 

@@ -655,9 +655,14 @@ export const handlers = {
   },
 
   'bramble.shareLocationOnce'(params) {
+    // Match firmware: address is a required hex string; addr was never
+    // accepted by real nodes and the mock's leniency masked the bug.
+    if (typeof params?.address !== 'string') {
+      return { error: { code: -32602, message: 'Invalid params' } };
+    }
     setTimeout(() => {
       notify('location.update', {
-        addr: params?.addr,
+        addr: params?.address,
         name: SELF_NAME,
         tier: 'full',
         position: {

@@ -274,6 +274,9 @@ export async function connect(
     );
     client.subscribe('bramble.onAck', (params) => handleAck(params));
     client.subscribe('bramble.onBroadcastDelivery', (params) => handleBroadcastDelivery(params));
+    // A GPS fix acquired mid-session must refresh the map: without this the
+    // self position only appears after a manual reload.
+    client.subscribe('bramble.onGpsEvent', () => { loadPeerLocations().catch(() => {}); });
     client.subscribe('delivery.update', (params) => handleDeliveryUpdate(params));
     client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
     client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
@@ -1566,7 +1569,8 @@ export async function setLocationContact(
   distanceTriggerM?: number
 ): Promise<void> {
   if (!client) throw new Error('Not connected');
-  const params: Record<string, unknown> = { addr, tier };
+  // Firmware expects address as a hex string, not a numeric addr.
+  const params: Record<string, unknown> = { address: formatAddrHex(addr), tier };
   if (intervalSec !== undefined) params.intervalSec = intervalSec;
   if (distanceTriggerM !== undefined) params.distanceTriggerM = distanceTriggerM;
   const result = await client.rpc('bramble.setLocationContact', params);
@@ -1576,14 +1580,14 @@ export async function setLocationContact(
 
 export async function removeLocationContact(addr: number): Promise<void> {
   if (!client) throw new Error('Not connected');
-  const result = await client.rpc('bramble.removeLocationContact', { addr });
+  const result = await client.rpc('bramble.removeLocationContact', { address: formatAddrHex(addr) });
   assertOk(result, 'Failed to remove location contact');
   await loadConfig();
 }
 
 export async function shareLocationOnce(addr: number, tier?: LocationTier): Promise<void> {
   if (!client) throw new Error('Not connected');
-  const params: Record<string, unknown> = { addr };
+  const params: Record<string, unknown> = { address: formatAddrHex(addr) };
   if (tier !== undefined) params.tier = tier;
   const result = await client.rpc('bramble.shareLocationOnce', params);
   assertOk(result, 'Failed to share location');

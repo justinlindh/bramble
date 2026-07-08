@@ -50,7 +50,7 @@ describe('MockTransport (in-page mock for embedded shells)', () => {
 
     // bramble.shareLocationOnce replies synchronously, then notify()s a
     // location.update 500ms later. A real handler code path, not a fake.
-    const ack = await transport.sendRPC<{ ok: boolean }>('bramble.shareLocationOnce', { addr: 0xAABBCC01 });
+    const ack = await transport.sendRPC<{ ok: boolean }>('bramble.shareLocationOnce', { address: 'AABBCC01' });
     expect(ack.ok).toBe(true);
     expect(received).toHaveLength(0);
 
@@ -58,7 +58,7 @@ describe('MockTransport (in-page mock for embedded shells)', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0].method).toBe('location.update');
-    expect(received[0].params).toMatchObject({ addr: 0xAABBCC01 });
+    expect(received[0].params).toMatchObject({ addr: 'AABBCC01' });
   });
 
   it('disconnect() tears down the fake socket and future RPCs fail', async () => {
