@@ -307,6 +307,56 @@ describe('BLETransport auto-reconnect', () => {
     expect(transport.connected).toBe(false);
   }, 20000);
 
+  it('survives a native connect that never settles (loop-death regression)', async () => {
+    (BLETransport as any).establishLinkTimeoutMs = 300;
+    try {
+      const stack = makeFakeBleStack();
+      vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+      const transport = await connectWithAuth(stack);
+      const onReconnect = vi.fn();
+      transport.enableAutoReconnect({ onReconnect });
+
+      // Android's BLE stack can never deliver the connect callback after a
+      // peer dies mid-connection: model it as a gatt.connect that hangs.
+      let hangs = 0;
+      stack.gattServer.connect.mockImplementation(() => {
+        if (hangs++ < 2) return new Promise(() => {});
+        return Promise.resolve(stack.gattServer);
+      });
+      stack.fireGattDisconnected();
+
+      // Two hanging attempts must both time out and the third succeed.
+      await vi.waitFor(() => {
+        const tokenWrites = writesAsText(stack.writes).split('secret-token\n').length - 1;
+        expect(tokenWrites).toBe(2);
+      }, { timeout: 15000 });
+      stack.emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+      await vi.waitFor(() => expect(onReconnect).toHaveBeenCalledTimes(1));
+      expect(transport.connected).toBe(true);
+    } finally {
+      (BLETransport as any).establishLinkTimeoutMs = 20000;
+    }
+  }, 20000);
+
+  it('retries immediately when the app becomes visible during backoff', async () => {
+    const stack = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
+    const transport = await connectWithAuth(stack);
+    transport.enableAutoReconnect({});
+
+    // Fail attempts so the backoff grows, then fire visibilitychange: the
+    // next attempt must come promptly, not after the stretched delay.
+    stack.gattServer.connect.mockRejectedValue(new Error('out of range'));
+    stack.fireGattDisconnected();
+    await vi.waitFor(() => expect(stack.gattServer.connect.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 10000 });
+
+    stack.gattServer.connect.mockImplementation(async () => stack.gattServer);
+    const callsBefore = stack.gattServer.connect.mock.calls.length;
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.waitFor(() => expect(stack.gattServer.connect.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 4000 });
+  }, 20000);
+
   it('does not reconnect after an intentional disconnect()', async () => {
     const stack = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth: stack.bluetooth });
