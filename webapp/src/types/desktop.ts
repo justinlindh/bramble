@@ -18,6 +18,12 @@ export type BrambleDesktopApi = {
   stopDiscovery(): void;
   /** Subscribes to discovery snapshots. Returns an unsubscribe function. */
   onDiscovered(cb: (nodes: DiscoveredNode[]) => void): () => void;
+  /** Subscribes to device-picker requests. Returns an unsubscribe function. */
+  onDevicePicker(cb: (req: DevicePickerRequest) => void): () => void;
+  /** Resolve the pending picker with the chosen device. */
+  selectDevice(id: string): void;
+  /** Dismiss the pending picker (the underlying request fails cleanly). */
+  cancelDevicePicker(): void;
 };
 
 /** IPC channel names shared by the Electron main process and preload. */
@@ -25,6 +31,32 @@ export const DISCOVERY_CHANNELS = {
   start: 'discovery:start',
   stop: 'discovery:stop',
   update: 'discovery:update',
+} as const;
+
+/** One selectable device in the in-app chooser. */
+export type PickerDevice = {
+  id: string;
+  /** Primary label, e.g. "/dev/ttyACM0" or "V4". */
+  label: string;
+  /** Secondary line, e.g. "303a:1001". */
+  detail?: string;
+};
+
+/**
+ * Electron has no built-in chooser UI for Web Serial / Web Bluetooth: the
+ * main process receives select-serial-port / select-bluetooth-device events
+ * and must decide. It forwards the candidate list here so the renderer can
+ * show a real picker; null means the request ended (selected or cancelled).
+ */
+export type DevicePickerRequest = {
+  kind: 'serial' | 'bluetooth';
+  devices: PickerDevice[];
+} | null;
+
+export const DEVICE_PICKER_CHANNELS = {
+  update: 'device-picker:update',
+  select: 'device-picker:select',
+  cancel: 'device-picker:cancel',
 } as const;
 
 /**

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
-import { DISCOVERY_CHANNELS, type BrambleDesktopApi, type DiscoveredNode } from '../src/types/desktop';
+import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, type BrambleDesktopApi, type DevicePickerRequest, type DiscoveredNode } from '../src/types/desktop';
 
 const brambleDesktop: BrambleDesktopApi = {
   startDiscovery: (): void => { ipcRenderer.send(DISCOVERY_CHANNELS.start); },
@@ -10,6 +10,13 @@ const brambleDesktop: BrambleDesktopApi = {
     ipcRenderer.on(DISCOVERY_CHANNELS.update, listener);
     return () => { ipcRenderer.removeListener(DISCOVERY_CHANNELS.update, listener); };
   },
+  onDevicePicker: (cb: (req: DevicePickerRequest) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, req: DevicePickerRequest) => cb(req);
+    ipcRenderer.on(DEVICE_PICKER_CHANNELS.update, listener);
+    return () => { ipcRenderer.removeListener(DEVICE_PICKER_CHANNELS.update, listener); };
+  },
+  selectDevice: (id: string): void => { ipcRenderer.send(DEVICE_PICKER_CHANNELS.select, id); },
+  cancelDevicePicker: (): void => { ipcRenderer.send(DEVICE_PICKER_CHANNELS.cancel); },
 };
 
 if (process.contextIsolated) {
