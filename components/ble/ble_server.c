@@ -456,7 +456,12 @@ int ble_server_init(void) {
         ESP_LOGE(TAG, "Failed to create RPC queue");
         return -1;
     }
-    xTaskCreate(ble_rpc_task, "ble_rpc", 8192, NULL, 5, NULL);
+    /* 16KB: a real phone session (MTU 256, sustained polls + sends + notify
+     * chunking) overflowed the previous 8192 after ~40 minutes - panic
+     * "stack overflow in task ble_rpc" on the bench V4, 2026-07-07. RPC
+     * handlers (cJSON trees, crypto, msg store) execute on this task, so
+     * size it for their worst case plus interrupt frames, not the average. */
+    xTaskCreate(ble_rpc_task, "ble_rpc", 16384, NULL, 5, NULL);
 
     int rc = nimble_port_init();
     if (rc != 0) {
