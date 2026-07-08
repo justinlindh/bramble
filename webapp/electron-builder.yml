@@ -22,9 +22,12 @@ extraResources:
       - "**/*.mjs"
 
 linux:
+  description: Desktop companion for the Bramble LoRa mesh - connect to nodes over LAN, WiFi, or serial.
+  synopsis: Bramble LoRa mesh companion
   target:
     - AppImage
     - deb
+    - pacman
   icon: public/bramble-logo.png
   category: Utility
   maintainer: bramblemesh.org
