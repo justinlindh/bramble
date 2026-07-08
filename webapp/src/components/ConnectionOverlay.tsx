@@ -278,7 +278,7 @@ export function ConnectionOverlay() {
                   </button>
                 </div>
               ) : (
-                <button type="button" className={styles.showHideBtn} onClick={handlePickBleDevice}>
+                <button type="button" className={styles.selectDeviceBtn} onClick={handlePickBleDevice}>
                   Select device…
                 </button>
               )}

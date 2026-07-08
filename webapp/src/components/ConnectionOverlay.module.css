@@ -329,3 +329,19 @@
 .rememberHint {
   margin-left: 1.45rem;
 }
+
+.selectDeviceBtn {
+  width: 100%;
+  padding: 0.65rem 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.selectDeviceBtn:hover {
+  border-color: var(--accent);
+}

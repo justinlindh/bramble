@@ -43,10 +43,11 @@ function makeFakeBleStack() {
   };
 
   const gattServer = {
-    connect: vi.fn(async () => gattServer),
+    connect: vi.fn(async () => { gattServer.connected = true; return gattServer; }),
     getPrimaryService: vi.fn(async () => service),
-    connected: true,
-    disconnect: vi.fn(),
+    // Models real Web Bluetooth: disconnected until connect() resolves.
+    connected: false,
+    disconnect: vi.fn(() => { gattServer.connected = false; }),
   };
 
   const deviceListeners: Record<string, Array<() => void>> = {};
@@ -57,6 +58,7 @@ function makeFakeBleStack() {
     }),
   };
   function fireGattDisconnected() {
+    gattServer.connected = false;
     for (const cb of deviceListeners['gattserverdisconnected'] ?? []) cb();
   }
 
@@ -121,7 +123,11 @@ describe('BLETransport auth handshake', () => {
 
       // Flush the microtask chain (requestDevice -> gatt.connect -> ... ->
       // writeChunked) so the auth-timeout timer is armed before advancing.
+      // connect() retries the link ONCE after a timeout (stale-session
+      // recovery), so advance through both attempts plus the retry delay.
       await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(6000);
+      await vi.advanceTimersByTimeAsync(2000);
       await vi.advanceTimersByTimeAsync(6000);
 
       await expect(connectPromise).rejects.toThrow(/timed out/i);
@@ -177,8 +183,10 @@ describe('BLETransport auth handshake', () => {
     const a = transport.sendRPC('bramble.sendBroadcast', { text: 'a'.repeat(80) }, 2000).catch(() => {});
     const b = transport.sendRPC('bramble.getStatus', { filler: 'b'.repeat(80) }, 2000).catch(() => {});
     await vi.waitFor(() => {
-      const lines = writesAsText(writes).split('\n').filter(l => l.length > 0);
-      expect(lines).toHaveLength(2);
+      const text = writesAsText(writes);
+      // Wait for COMPLETED lines: a trailing partial line would parse-fail below.
+      expect(text.endsWith('\n')).toBe(true);
+      expect(text.split('\n').filter(l => l.length > 0)).toHaveLength(2);
     });
 
     // Every reassembled line must be intact JSON: interleaved chunks would
