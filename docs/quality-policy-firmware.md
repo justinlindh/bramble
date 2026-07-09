@@ -41,10 +41,9 @@ Promoted to **required/blocking** in CI:
 - `required-shellcheck` → `bash scripts/lint/run-shellcheck.sh --strict`
 - `required-actionlint` → `actionlint -color -oneline -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml`
 
-Held as **advisory/non-blocking** until noise is reduced:
-
-- `advisory-clang-tidy` (heltec-v3 compile DB)
-- `advisory-markdownlint`
+clang-tidy and markdownlint are **not wired into CI** (neither blocking nor
+advisory); they exist only as local wrappers under `scripts/lint/`
+(`run-clang-tidy-advisory.sh`, `run-markdownlint.sh`).
 
 Rationale: clang-format/shellcheck/actionlint are stable and reproducible locally with low false-positive rate; broad clang-tidy remains noisy and should not block firmware delivery yet.
 

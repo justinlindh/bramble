@@ -11,6 +11,10 @@ and correlated with:
 Treat `(broadcastId, packetId)` as the primary correlation key
 across firmware, RPC, SDK, CLI, simulator, and web UI surfaces.
 
+Naming note: this doc uses logical camelCase names. On the firmware
+RPC wire the fields are snake_case (`broadcast_id`, `rssi_at_dest`);
+see `docs/rpc/events.md` for exact wire shapes.
+
 ### Mode tradeoffs
 
 #### Minimal mode (throughput-first)

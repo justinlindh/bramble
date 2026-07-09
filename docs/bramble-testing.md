@@ -41,7 +41,7 @@ bash scripts/run-scenario.sh ideal-10-node
 bash scripts/run-scenario.sh all
 ```
 
-Use this for routing/reliability/airtime behavior validation. The simulator runs the real protocol code over a radio model with real time-on-air, collisions, capture, half-duplex, and listen-before-talk, which makes it the primary proving ground for scale and multi-hop behavior; `--no-collisions` gives an ideal-channel baseline. Published scale results live in [results/simulation-2026-06.md](results/simulation-2026-06.md).
+Use this for routing/reliability/airtime behavior validation. The simulator runs the real protocol code over a radio model with real time-on-air, collisions, capture, half-duplex, and listen-before-talk, which makes it the primary proving ground for scale and multi-hop behavior; `--no-collisions` gives an ideal-channel baseline. Current scale results live in [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md) (which supersedes [results/simulation-2026-06.md](results/simulation-2026-06.md)).
 
 ---
 
@@ -60,7 +60,7 @@ bash scripts/flash.sh local heltec-v4 build
 bash scripts/flash.sh local tdeck-plus build
 ```
 
-For full flashing + board checks, see [BUILDING.md](BUILDING.md) and [heltec-v4-gnss-bringup.md](heltec-v4-gnss-bringup.md).
+For full flashing + board checks, see [BUILDING.md](BUILDING.md) and [archive/heltec-v4-gnss-bringup.md](archive/heltec-v4-gnss-bringup.md) (historical).
 
 ---
 

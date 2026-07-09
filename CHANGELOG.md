@@ -21,13 +21,19 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 ### Added
 
 - `docs/SECURITY-MODEL.md`: code-verified threat model documenting current protections and known gaps.
-- Simulator radio collision model: real time-on-air, collisions, capture effect, half-duplex, and listen-before-talk; honest scale results published in `docs/results/simulation-2026-06.md`.
+- Simulator radio collision model: real time-on-air, collisions, capture effect, half-duplex, and listen-before-talk; honest scale results published in `docs/results/simulation-2026-06.md` (superseded for planning by `docs/results/simulation-2026-07-honest-baseline.md`).
 - OTA RPCs `bramble.otaGetOrigin` / `bramble.otaSetOrigin`; `bramble.otaUpdate` switched from raw URLs to origin-relative artifact paths.
+- Electron desktop shell: device picker for serial/Bluetooth, Web Bluetooth, LAN direct connect with mDNS node discovery, and installable packages (AppImage/deb/pacman/NSIS via `make package-*`).
+- Webapp BLE transport: auth-token handshake on connect, serialized GATT writes, auto-reconnect after link loss, and per-device token memory in the device book.
+- Device book: remembered node connections with one-click reconnect, rename, and forget; message DB namespaced by connected node address.
+- Android WebView shell hooks: embedded-shell capability detection, native message notifications with deep links, and an in-page mock node for embedded shells.
+- GPS: own position reported from live GPS in `bramble.getPeerLocations`, GPS status screen on the OLED UI, and antenna-warning suppression while a fix is valid.
+- Mesh: desynced DM sessions heal via re-handshake instead of dropping messages forever; broadcast-receipt slot window scales with mesh size.
 
 ### Changed
 
 - All transmissions now route through one budget-gated TX path (`components/radio/tx_gate.c`) with real airtime costing; regional duty-cycle caps from the frequency plan are enforced where required (EU868 1%), and the raw radio transmit call is no longer reachable outside the radio component.
-- `api/openapi.yaml` is synced to the firmware RPC registry (49 methods) and enforced in CI by `scripts/check-rpc-contract.sh`.
+- `api/openapi.yaml` is synced to the firmware RPC registry (57 methods) and enforced in CI by `scripts/check-rpc-contract.sh`.
 
 ## [2026-03-01]
 

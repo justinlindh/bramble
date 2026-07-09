@@ -2,6 +2,13 @@
 
 ## Broadcast delivery telemetry events
 
+> **Status: parity spec, not as-built reference.** This documents the
+> intended simulator-side event shape. Note the field names here are
+> camelCase (`broadcastId`, `hopCount`, `deliveredAtMs`) while the
+> firmware wire payload is snake_case (`broadcast_id`, `rssi_at_dest`;
+> see `docs/rpc/events.md`). Verify against current gosim output before
+> relying on exact fields.
+
 The simulator should mirror firmware RPC semantics
 for broadcast delivery telemetry so client behavior
 can be validated before device deployment.

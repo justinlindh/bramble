@@ -132,7 +132,7 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 - [.gitea/workflows/webapp-quality.yml](.gitea/workflows/webapp-quality.yml) runs webapp required gates (lint/typecheck/unit/build/e2e smoke).
 - [.gitea/workflows/webapp-build-publish.yml](.gitea/workflows/webapp-build-publish.yml) builds/tests/publishes the web client image.
-- [.gitea/workflows/firmware-quality.yml](.gitea/workflows/firmware-quality.yml) runs firmware quality gates (Phase 2.3): required clang-format/shellcheck/actionlint plus advisory clang-tidy/markdownlint.
+- [.gitea/workflows/firmware-quality.yml](.gitea/workflows/firmware-quality.yml) runs firmware quality gates: required clang-format/shellcheck/actionlint.
 - Additional workflow definitions live in [.gitea/workflows](.gitea/workflows).
 
 ## Status

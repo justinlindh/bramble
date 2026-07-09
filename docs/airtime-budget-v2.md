@@ -41,10 +41,15 @@ This prevents hour-boundary cliffs and makes suppression behavior gradual/predic
 
 Peer count is used to adjust effective max tokens:
 
-- `<= 15` peers (small mesh)
+- `<= 8` peers (micro mesh)
+  - normal: 300%
+  - broadcast: 400%
+  - receipt: 500%
+  - critical: 100%
+- `9..15` peers (small mesh)
   - normal: 150%
-  - broadcast: 200%
-  - receipt: 200%
+  - broadcast: 250%
+  - receipt: 250%
   - critical: 100%
 - `16..40` peers (baseline)
   - all: 100%

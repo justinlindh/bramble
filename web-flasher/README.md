@@ -38,6 +38,9 @@ Only complete releases are shown. A release is considered complete only if it co
 - `release-index.js` — release index normalization/filtering logic (unchanged by flasher migration)
 - `flasher.js` — UI controller; uses `esptool.Transport` + `esptool.ESPLoader` for connect/sync/flash
 
+- `wifi-config.js`: WiFi credential provisioning during flash
+- `style.css`: styling
+
 ## Browser requirements
 
 Web Serial API is required. Supported in Chrome and Edge (desktop). Not supported in Firefox or Safari.

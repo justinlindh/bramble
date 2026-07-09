@@ -88,4 +88,4 @@ Uses `BR_COLOR_PRIMARY` (#238636) for the active tab background tint
 ## References
 - Web app global styles: `webapp/src/styles/global.css`
 - Firmware theme: `components/ui_graphics/theme/bramble_theme.h`
-- UI documentation: `docs/t-deck-plus-ui-documentation.md`
+- UI documentation: `docs/ui-reference.md`

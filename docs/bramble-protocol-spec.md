@@ -247,7 +247,7 @@ Offset  Size  Field           Description
 Total: 12 bytes
 ```
 
-> **Firmware reality (wire v2).** `version` is `2`, not `0x01` as shown above (`BRAMBLE_VERSION` in `components/packet/include/packet.h`). The RX path drops any packet whose header version does not match before any type-specific parsing (`bramble_header_is_supported_version`, checked in `mesh_process_rx_packet`). See §4.25 for the full wire v2 change inventory.
+> **Firmware reality (wire v4).** `version` is `4`, not `0x01` as shown above (`BRAMBLE_VERSION` in `components/packet/include/packet.h`). The RX path drops any packet whose header version does not match before any type-specific parsing (`bramble_header_is_supported_version`, checked in `mesh_process_rx_packet`). See §4.25 (v2), §4.26 (v3), and §4.27 (v4) for the layered change inventories.
 
 **Flags byte (bit fields):**
 
@@ -362,7 +362,7 @@ Total: 22 bytes
 
 ACKs are routed back along the reverse path. They are small and high-priority. The `rssi_at_dest` field lets the sender gauge link quality to the destination.
 
-> **Firmware reality (wire v2).** The current `bramble_ack_t` also carries a `hop_count` and a variable-length `relay_path[]` (for critical-tier ACKs) beyond the fields shown above, and as of this batch a fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, so the base size is 31 bytes (up to 63 with a full 8-hop path), not 22. See §4.25 item 6 and `components/packet/include/packet.h` for the current layout.
+> **Firmware reality (wire v2).** The current `bramble_ack_t` also carries a `hop_count` and a variable-length `relay_path[]` (for critical-tier ACKs) beyond the fields shown above, and as of this batch a fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, plus (since wire v3) a 6-byte origin `seq`, so the base size is 37 bytes (`ACK_BASE_SIZE`, up to 69 with a full 8-hop path), not 22. See §4.25 item 6, §4.26, and `components/packet/include/packet.h` for the current layout.
 
 ### 4.6 ROUTE_REQUEST Packet
 
@@ -409,7 +409,7 @@ Total: 34 bytes
 
 - Bit 5 (reserved in common header): `OPEN_SOURCE` — when set, `encrypted_source` contains the plaintext source address (not encrypted). Used for first-contact discovery when the destination's public key is unknown. See §5.4 for details.
 
-> **Firmware reality (wire v2).** `auth_hmac` is no longer dead or zeroed. It authenticates `query_id || src_addr || hop_count || route_metric` with a network-key HMAC (label `"bramble-rrep-v2"`), excluding `next_hop` and `header.dest_addr` (the two fields `rrep_forward` legitimately rewrites at each relay). The static-DH-shared-secret keying scheme described above was never implemented and does not reflect any shipped version of the code. `RREP_SIZE` is unchanged at 34 bytes (the field already existed on the wire, unused). See §4.25 item 7.
+> **Firmware reality (wire v2).** `auth_hmac` is no longer dead or zeroed. It authenticates `query_id || src_addr || hop_count || route_metric` with a network-key HMAC (label `"bramble-rrep-v2"`), excluding `next_hop` and `header.dest_addr` (the two fields `rrep_forward` legitimately rewrites at each relay). The static-DH-shared-secret keying scheme described above was never implemented and does not reflect any shipped version of the code. `RREP_SIZE` is 40 bytes (34 in wire v2; +6 for the origin `seq` added in wire v3). See §4.25 item 7 and §4.26 item 3.
 
 ### 4.8 ROUTE_ERROR Packet
 
@@ -426,7 +426,7 @@ Offset  Size  Field            Description
 Total: 24 bytes
 ```
 
-> **Firmware reality (wire v2).** `RERR_SIZE` is now 32 bytes (was 24). A trailing `auth_hmac[8]` authenticates `broken_dest || broken_next_hop` (the two origin-stable fields), excluding `reporter_addr` and `packet_id`, which every forwarder rewrites when it re-originates a RERR. Verified before any teardown action. See §4.25 item 5.
+> **Firmware reality (wire v4).** `RERR_SIZE` is 38 bytes (24 in the original design; 32 in wire v2; +6 for the origin `seq` added in wire v3). A trailing `auth_hmac[8]` authenticates `reporter_addr || broken_dest || broken_next_hop || seq` (see §4.26 item 4), excluding only `packet_id`. Verified before any teardown action. See §4.25 item 5 and §4.26 item 4.
 
 ### 4.9 BEACON Packet
 
@@ -468,7 +468,7 @@ RSVD    RSVD    RSVD    RSVD    RSVD     ACCEPT_DM    PROBE_ACK     MAILBOX
 
 **Route Advertisement Extension:** Removed unshipped. The passive route-learning extension (up to 4 route ads appended to the beacon) was deleted without ever being placed on the wire; beacons carry the optional node name after the fixed fields instead.
 
-> **Firmware reality (wire v2).** The HMAC key is now derived from the network key when one is provisioned (`HKDF-SHA256(salt="bramble-beacon-v2", ikm=network_key)`), a distinct subkey rather than a channel-PSK-derived key. When unprovisioned the node is inert: it sends no beacon and drops received beacons before verifying, and there is no public-PSK fallback key (the earlier fallback is removed). Verification (`beacon_verify_hmac`) is constant-time (XOR-accumulate, no early exit), not a fast-exit compare. See §4.25 item 8.
+> **Firmware reality (wire v4).** `BEACON_SIZE` is 54 bytes, not the 36 shown above (grew in wire v2, then +6 for the origin `seq` added in wire v3). The HMAC key is derived from the network key when one is provisioned (`HKDF-SHA256(salt="bramble-beacon-v2", ikm=network_key)`), a distinct subkey rather than a channel-PSK-derived key. When unprovisioned the node is inert: it sends no beacon and drops received beacons before verifying, and there is no public-PSK fallback key (the earlier fallback is removed). Verification (`beacon_verify_hmac`) is constant-time (XOR-accumulate, no early exit), not a fast-exit compare. See §4.25 item 8 and §4.26.
 
 ### 4.10 KEY_EXCHANGE Packet
 
@@ -512,7 +512,7 @@ Each relay node appends its own address to the relay_path as it forwards the rec
 
 **Relay path restriction:** Delivery receipts with relay paths (the full DELIVERY_RECEIPT packet above) are only generated for **Critical tier** messages. Normal tier messages receive simple ACKs only (§4.5) — no relay path data. The `RECEIPT` flag in the common header flags byte should only be set for Critical tier. This limits exposure of relay path data, which is visible to nodes on the return route. This is an acceptable tradeoff since those nodes already know they are relays for that specific delivery.
 
-> **Firmware reality (wire v2).** `DELIVERY_RECEIPT_MIN_SIZE`/`MAX_SIZE` are now 30/62 bytes (were 22/54). A fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, authenticating `src_addr || orig_packet_id`, so a verifier never has to trust the unauthenticated `hop_count` to locate the tag. Excludes `relay_path`/`hop_count`/`header.hop_limit`, which every relay hop mutates. See §4.25 item 6.
+> **Firmware reality (wire v4).** `DELIVERY_RECEIPT_MIN_SIZE`/`MAX_SIZE` are 36/68 bytes (22/54 in the original design; 30/62 in wire v2; +6 for the origin `seq` added in wire v3). A fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, authenticating `src_addr || orig_packet_id`, so a verifier never has to trust the unauthenticated `hop_count` to locate the tag. Excludes `relay_path`/`hop_count`/`header.hop_limit`, which every relay hop mutates. See §4.25 item 6 and §4.26.
 
 ### 4.12 CONGESTION Packet
 
@@ -755,7 +755,7 @@ Total: 1 byte
 
 ### 4.25 Wire Version 2 (Firmware Reality)
 
-`BRAMBLE_VERSION` is `2` (`components/packet/include/packet.h`). The RX path drops any packet whose header version does not match before body parsing (`bramble_header_is_supported_version`, checked in `mesh_process_rx_packet` before dedup or handler dispatch). There is no v1/v2 compatibility shim: a v1 node and a v2 node cannot talk to each other, and none was attempted.
+This batch bumped `BRAMBLE_VERSION` to `2` (current value: `4`; see §4.26 and §4.27). The RX path drops any packet whose header version does not match before body parsing (`bramble_header_is_supported_version`, checked in `mesh_process_rx_packet` before dedup or handler dispatch). There is no v1/v2 compatibility shim: a v1 node and a v2 node cannot talk to each other, and none was attempted.
 
 This section is the wire v2 change inventory for `feat/wire-format-security-batch`. It supersedes the packet tables above (§4.2 through §4.11) wherever they conflict; the per-section notes above point back here.
 

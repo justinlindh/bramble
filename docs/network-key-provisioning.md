@@ -10,35 +10,31 @@ network key uses the same authenticated-RPC gate as `setAuthToken`.
 
 ## Before you start
 
-**Every node ships unprovisioned**, using a key derived from a public,
-compile-time constant checked into this repository
-(`BRAMBLE_PUBLIC_CHANNEL_PSK`). Anyone who has read the Bramble source
-can compute that fallback key and forge a valid RREP, RERR, ACK, delivery
-receipt, or beacon HMAC against any unprovisioned node. Until you
-provision a real key, treat the control plane as **integrity-only**
-(proves "this is Bramble-compatible code," not "this is a fleet member")
-rather than authenticated.
+**Every node ships unprovisioned, and an unprovisioned node is inert on
+the control plane.** There is no fallback key: `network_key_get()` fails
+closed, MAC emission writes an all-zero sentinel, and every control-plane
+verifier (RREP, RERR, ACK, delivery receipt, beacon) rejects before
+comparing. An outsider cannot forge control traffic against an
+unprovisioned node; the node simply does not participate in the
+authenticated control plane until you provision it. (The compile-time
+`BRAMBLE_PUBLIC_CHANNEL_PSK` constant is used only by the public
+broadcast channel, never the control plane.)
 
-**Provisioning does not, by itself, close SEC-H1, SEC-H2, NEW-SEC-4, or
-NEW-SEC-8.** After every node in your fleet is provisioned on the same
-key:
+**What provisioning does and does not give you.** After every node in
+your fleet is provisioned on the same key:
 
 - a holder of that key can still forge control messages on behalf of any
   other holder (the key proves fleet membership, not per-node identity);
-- a captured, genuinely-valid RREP, RERR, ACK, delivery receipt, or beacon
-  can still be replayed, since none of the five MACs carries a freshness
-  or sequence check yet (tracked follow-on: per-message freshness,
-  RERR-replay-into-live-teardown is the worst case);
-- the NEW-SEC-4 timesync bootstrap race is still open: one key holder can
-  still satisfy the corroboration quorum under multiple fabricated source
-  addresses (tracked follow-on: per-node beacon identity).
+- replay of captured control messages is closed: all five MACs bind a
+  monotonic 48-bit origin sequence, checked against a per-signer replay
+  window;
+- on an **anchored** mesh (see `docs/trust-anchor.md`), Sybil identity
+  minting is also closed; on an un-anchored mesh, a key holder can still
+  mint additional identities at will.
 
-Provisioning closes the "no distribution mechanism, universally-known
-fallback key" hole. It is the foundation the freshness and per-node
-identity follow-on work builds on, not a substitute for it. See
-`docs/SECURITY-MODEL.md` §3 and §5 for the full picture, including why
-none of this claims a short-authentication-string comparison or forward
-secrecy for the network key.
+See `docs/SECURITY-MODEL.md` §3 and §5 for the full picture, including
+why none of this claims a short-authentication-string comparison or
+forward secrecy for the network key.
 
 ## Steps
 
@@ -69,10 +65,11 @@ secrecy for the network key.
 4. **Confirm convergence.** After provisioning, the Network Key section
    refreshes and shows `Provisioned (fingerprint XXXXXXXX)`. Repeat this
    check on every node in the fleet and compare fingerprints: they must
-   all match the fingerprint from step 1. **A node still reporting the
-   public-fallback fingerprint is unprotected** and will keep accepting
-   forged control-plane traffic from anyone who knows the compile-time
-   fallback constant, regardless of what the rest of the fleet is running.
+   all match the fingerprint from step 1. **A node still reporting
+   `Unprovisioned` (the all-zero fingerprint sentinel) is not part of the
+   authenticated control plane**: it neither emits nor accepts
+   control-plane MACs, so it cannot route for the fleet until it is
+   provisioned, regardless of what the rest of the fleet is running.
 
 ## What a matching fingerprint proves, and what it does not
 

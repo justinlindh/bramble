@@ -9,16 +9,18 @@ This policy defines which CI checks are blocking vs advisory, plus how advisory 
 - ShellCheck baseline scope (curated low-noise scripts)
 - Actionlint for `.gitea/workflows/quality.yml`
 - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
-- clang-format check on changed C/C++ files only
+- clang-format check (full strict scope)
+- cppcheck (`--error-exitcode=2`, blocking)
+- Go simulator integration (`gosim-integration`: builds and tests the simulator)
 
 ## Advisory checks (non-blocking)
 
-- cppcheck (broad static analysis signal)
-- clang-tidy sample run against heltec-v3 compile DB (non-PR infra-backed run)
+None currently wired into CI. clang-tidy exists only as a local wrapper
+(`scripts/lint/run-clang-tidy-advisory.sh`) and is not part of any workflow.
 
 ## Non-PR infra-backed required check
 
-- Board build smoke (`bash scripts/flash.sh local heltec-v3 build`) runs on `push main` / manual dispatch where `idf-node` runner is available.
+- Board build smoke (`bash scripts/flash.sh local heltec-v3 build`) runs on non-PR events (push to `main` and the standard branch prefixes, or manual dispatch) where the `idf-node` runner is available.
 
 ## Promotion (ratchet) criteria
 

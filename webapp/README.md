@@ -79,7 +79,7 @@ Build output goes to `release/`.
 | macOS    | dmg       | ✅ | ✅ | ✅ |
 | Windows  | exe (NSIS)| ✅ | ✅ | ✅ |
 
-All three transport types (USB Serial, Bluetooth LE, WiFi WebSocket) work in the Electron app because it uses Chromium's Web Serial and Web Bluetooth APIs natively.
+All three transport types (USB Serial, Bluetooth LE, WiFi WebSocket) work in the Electron app via Chromium's Web Serial and Web Bluetooth APIs. Web Bluetooth is not on by default in Electron: the shell enables it with `app.commandLine.appendSwitch('enable-features', 'WebBluetooth')` and handles `select-serial-port` / `select-bluetooth-device` events with its own device-picker modal (`electron/main.ts`, `DevicePickerModal.tsx`) instead of a browser chooser.
 
 ### LAN discovery
 

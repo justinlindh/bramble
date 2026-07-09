@@ -125,8 +125,9 @@ primary motivation for the hardware Secure Boot migration.
 
 `.gitea/workflows/firmware-build.yml`:
 
-1. Installs the `OTA_SIGNING_KEY` secret to `keys/ota_signing_key.pem`
-   (fails if unset).
+1. Writes the `OTA_SIGNING_KEY` secret to `/tmp/ota_signing_key.pem` and
+   exports `BRAMBLE_OTA_SIGNING_KEY` (fails if unset); the build's
+   `ensure-ota-signing-key.sh` copies it to `keys/ota_signing_key.pem`.
 2. Builds all boards; `idf.py` signs each `bramble.bin` during the build.
 3. **Verifies** each artifact's signature against the committed
    `keys/ota-release-pub.pem` with `espsecure.py verify_signature`; a
