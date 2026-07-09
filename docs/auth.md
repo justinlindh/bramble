@@ -157,7 +157,9 @@ async with websockets.connect(url, additional_headers=headers) as ws:
   you recover a forgotten token.
 - The token is stored in plaintext in NVS on the device. A flash dump
   extracts it (tracked in `docs/SECURITY-MODEL.md` known gaps).
-- BLE uses a first-write token handshake with throttled retries.
+- BLE uses a first-write token handshake with throttled retries. The web
+  app remembers BLE tokens per device in its device book and fails closed
+  (prompts for a token) when a node demands one it does not have.
 - If the token store fails (NVS error), the device fails closed: full RPC
   access is unavailable rather than silently open.
 

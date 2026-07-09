@@ -1,6 +1,6 @@
 # Bramble T-Deck Plus UI Reference
 
-> Auto-generated from source analysis of `components/ui_graphics/` on 2026-02-20.
+> Generated from source analysis of `components/ui_graphics/`; last reconciled with code 2026-07-08.
 > Use this as the canonical reference for UI iteration. Update when screens change.
 
 **Display:** 320×240 px, RGB565 IPS LCD (landscape)  
@@ -19,11 +19,12 @@
 5. [Chat Tab — Message List](#3-chat-tab--message-list)
 6. [Chat — Message Detail View](#4-chat--message-detail-view)
 7. [Nodes Tab](#5-nodes-tab)
-8. [Stats Tab](#6-stats-tab)
-9. [Settings Tab](#7-settings-tab)
-10. [User Flows](#user-flows)
-11. [Input Model](#input-model)
-12. [Known Limitations & TODOs](#known-limitations--todos)
+8. [Map Tab](#6-map-tab)
+9. [Stats Tab](#7-stats-tab)
+10. [Settings Tab](#8-settings-tab)
+11. [User Flows](#user-flows)
+12. [Input Model](#input-model)
+13. [Known Limitations & TODOs](#known-limitations--todos)
 
 ---
 
@@ -33,16 +34,22 @@ Dark theme. All colors defined in `components/ui_graphics/theme/bramble_theme.h`
 
 | Role          | Name             | Hex       | Usage                                         |
 |---------------|------------------|-----------|-----------------------------------------------|
-| Background    | `BR_COLOR_BG`    | `#1A1A2E` | Screen backgrounds                            |
-| Surface       | `BR_COLOR_SURFACE` | `#16213E` | Cards, list rows, compose bar, header rows  |
-| Primary       | `BR_COLOR_PRIMARY` | `#0F9B8E` | Tab active highlight, titles, peer address labels, primary buttons |
-| Accent        | `BR_COLOR_ACCENT` | `#F0A500` | Battery warning (30% threshold)             |
-| Text          | `BR_COLOR_TEXT`   | `#EAEAEA` | Primary body text                            |
-| Text Secondary| `BR_COLOR_TEXT_SEC` | `#8892A0` | Subtitles, hints, secondary info, GPS label |
-| Sent Bubble   | `BR_COLOR_SENT`   | `#0D7377` | Outgoing message bubbles; outgoing row indicators |
-| Recv Bubble   | `BR_COLOR_RECV`   | `#2C3E6B` | Incoming message bubbles                    |
-| Danger        | `BR_COLOR_DANGER` | `#E74C3C` | Error states, low battery (<15%), Reboot button |
-| Success       | `BR_COLOR_SUCCESS`| `#2ECC71` | Online node dot, signal bar fill            |
+| Background    | `BR_COLOR_BG`    | `#0D1117` | Screen backgrounds                            |
+| Surface       | `BR_COLOR_SURFACE` | `#161B22` | Cards, list rows, compose bar, header rows, status/tab bars |
+| Surface 2     | `BR_COLOR_SURFACE_2` | `#21262D` | Secondary surfaces, incoming bubbles      |
+| Border        | `BR_COLOR_BORDER` | `#30363D` | Card and control borders                    |
+| Primary       | `BR_COLOR_PRIMARY` | `#238636` | Tab active highlight, titles, peer address labels, primary buttons (green) |
+| Accent        | `BR_COLOR_ACCENT` | `#1F6FEB` | Battery warning (30% threshold) (blue)      |
+| Text          | `BR_COLOR_TEXT`   | `#E6EDF3` | Primary body text                            |
+| Text Secondary| `BR_COLOR_TEXT_SEC` | `#8B949E` | Subtitles, hints, secondary info, GPS label |
+| Sent Bubble   | `BR_COLOR_SENT`   | `#238636` | Outgoing message bubbles; outgoing row indicators |
+| Recv Bubble   | `BR_COLOR_RECV`   | `#21262D` | Incoming message bubbles                    |
+| Danger        | `BR_COLOR_DANGER` | `#DA3633` | Error states, low battery (<15%), Reboot button |
+| Success       | `BR_COLOR_SUCCESS`| `#238636` | Online node dot, signal bar fill            |
+| Warning       | `BR_COLOR_WARNING`| `#E3B341` | Warning states                               |
+| Critical      | `BR_COLOR_CRITICAL`| `#BC8CFF` | Critical-tier indicators                    |
+
+This is the GitHub-dark palette shared with the webapp; see `docs/color-scheme.md` for the cross-surface mapping and migration history.
 
 **Fonts:** Montserrat (bundled with LVGL). Sizes in use: 12, 14, 16, 18.
 
@@ -85,13 +92,13 @@ Defined in `bramble_theme.h`:
 │                                      │
 │                                      │
 └──────────────────────────────────────┘
-  Background: #1A1A2E (BR_COLOR_BG)
+  Background: #0D1117 (BR_COLOR_BG)
   All items centered horizontally and vertically as a column flex group, 8px row gap
 ```
 
 **Elements:**
 - Bramble logo image (`img_bramble_logo`, 100×100, from flash)
-- Title: "BRAMBLE" — Montserrat 18, primary teal
+- Title: "BRAMBLE" — Montserrat 18, primary green
 - Subtitle: "LoRa Mesh" — Montserrat 12, secondary gray
 - Version: "v{app_version}" from `esp_app_desc_t` — Montserrat 12, secondary gray, 50% opacity
 
@@ -106,7 +113,7 @@ Defined in `bramble_theme.h`:
 ## 2. Main Layout Shell
 
 **Source:** `screens/scr_layout.c`  
-**Applies to:** All tabs (Chat, Nodes, Stats, Settings)
+**Applies to:** All tabs (Chat, Nodes, Map, Stats, Settings)
 
 ```
 ┌──────────────────────────────────────┐  y=0
@@ -120,44 +127,45 @@ Defined in `bramble_theme.h`:
 │                                      │
 │                                      │
 ├──────────────────────────────────────┤  y=200
-│ ✉ Chat  📶Nodes  ≡ Stats  ⚙ Set    │  ← Tab Bar (h=40)
+│ ✉Chat 📶Nodes 🧭Map ≡Stats ⚙Set   │  ← Tab Bar (h=40)
 └──────────────────────────────────────┘  y=240
 ```
 
-### Status Bar (y=0, h=20, bg=`#111122`)
+### Status Bar (y=0, h=20, bg=`#161B22 (BR_COLOR_SURFACE)`)
 
 Horizontal flex row, space-between alignment, 2px padding all sides, Montserrat 12:
 
 | Position | Label          | Content                                | Color           |
 |----------|----------------|----------------------------------------|-----------------|
-| Left     | Battery        | `{sym} {pct}%` (sym varies by level)  | TEXT (green/amber/red by level) |
+| Left     | Battery        | `{sym} {pct}%` (sym varies by level)  | TEXT (colored by level; thresholds below) |
 | —        | Signal         | `📶 {neighbor_count}`                 | TEXT            |
 | —        | GPS            | `GPS` (static)                         | TEXT_SEC        |
 | —        | Time           | `--:--` (static placeholder)          | TEXT            |
-| Right    | Node Name      | `BRAMBLE` (static)                     | PRIMARY (teal)  |
+| Right    | Node Name      | `BRAMBLE` (static)                     | PRIMARY (green)  |
 
 Battery icon thresholds:
 - `>75%` → BATTERY_FULL, TEXT color
 - `>50%` → BATTERY_3, TEXT color
 - `>25%` → BATTERY_2, TEXT color
 - `≤25%` → BATTERY_1, TEXT color
-- `≤30%` → BATTERY_2, ACCENT (amber) color
+- `≤30%` → BATTERY_2, ACCENT (blue) color
 - `≤15%` → BATTERY_1, DANGER (red) color
 
 ### Content Area (y=20, h=180, bg=`BR_COLOR_BG`)
 
 Replaced in-place (via `lv_obj_clean()`) each time a tab is selected. No scroll on the container itself — scroll is handled per-tab.
 
-### Tab Bar (y=200, h=40, bg=`#111122`)
+### Tab Bar (y=200, h=40, bg=`#161B22 (BR_COLOR_SURFACE)`)
 
-Four equal buttons at 75×36 px each, space-evenly aligned, Montserrat 12:
+Five equal buttons at 60×36 px each, space-evenly aligned, Montserrat 12:
 
 | Index | Label            | Symbol       | Tab enum       |
 |-------|------------------|--------------|----------------|
 | 0     | `✉ Chat`         | ENVELOPE     | `TAB_CHAT`     |
 | 1     | `📶 Nodes`       | WIFI         | `TAB_NODES`    |
-| 2     | `≡ Stats`        | BARS         | `TAB_STATS`    |
-| 3     | `⚙ Set`          | SETTINGS     | `TAB_SETTINGS` |
+| 2     | `🧭 Map`         | GPS          | `TAB_MAP`      |
+| 3     | `≡ Stats`        | BARS         | `TAB_STATS`    |
+| 4     | `⚙ Set`          | SETTINGS     | `TAB_SETTINGS` |
 
 Active tab: background fills with PRIMARY at 30% opacity.  
 Inactive tabs: transparent background.
@@ -220,8 +228,8 @@ Tapping [+ New] → opens Chat Message Detail View (channel 0).
 └─────────────────────────────────────┘
 ```
 
-- Outgoing (`MSG_DIR_OUTGOING` / `MSG_DIR_BROADCAST_OUT`): indicator "→ You", SENT teal color
-- Incoming: indicator "← {8-char hex peer addr}", PRIMARY teal color
+- Outgoing (`MSG_DIR_OUTGOING` / `MSG_DIR_BROADCAST_OUT`): indicator "→ You", SENT green color
+- Incoming: indicator "← {8-char hex peer addr}", PRIMARY green color
 - Tapping a card → opens Chat Message Detail View (channel 0)
 - Trackball focus: PRIMARY bg at 30% opacity on focused card
 
@@ -274,14 +282,14 @@ Each bubble is a `row` container (304px wide, transparent) containing a `bubble`
 ┌─────────────────────────────┐   max-width: 220px
 │ {sender_hex_addr}            │   Montserrat 12, PRIMARY color
 │ {message text wrapping}      │   Montserrat 14, TEXT color
-└─────────────────────────────┘   RECV bg (#2C3E6B), radius=8
+└─────────────────────────────┘   RECV bg (#21262D), radius=8
 ```
 
 **Outgoing bubble (right-aligned):**
 ```
               ┌────────────────────────┐   max-width: 220px
               │ {message text wrapping} │   Montserrat 14, TEXT color
-              └────────────────────────┘   SENT bg (#0D7377), radius=8
+              └────────────────────────┘   SENT bg (#238636), radius=8
 ```
 
 After loading all messages, list auto-scrolls to bottom (`lv_obj_scroll_to_y(..., LV_COORD_MAX)`).
@@ -352,7 +360,20 @@ Cards are clickable (no action currently implemented).
 
 ---
 
-## 6. Stats Tab
+## 6. Map Tab
+
+**Source:** `screens/scr_map.c`
+
+Displays node positions from the location manager (`mesh_get_location_state()`) on a simple equirectangular projection, fixed 5 km radius centered on self.
+
+- Canvas 280x140 px inside a 312x148 px container, LVGL v9 static draw buffer, RGB565.
+- Self position: blue circle marker labeled "You"; peers: green circle markers labeled by node name/address.
+- Crosshair grid centered on self; status line shows current coordinates and peer count.
+- Shows "No GPS data" when no position is available.
+
+---
+
+## 7. Stats Tab
 
 **Source:** `screens/scr_stats.c`  
 **LVGL trigger:** `scr_stats_create()` from `layout_set_tab(TAB_STATS)`  
@@ -379,7 +400,7 @@ Cards are clickable (no action currently implemented).
 
 Each card: 96×52, SURFACE bg, vertical flex, centered:
 
-| Value label | Montserrat 18, PRIMARY teal    |
+| Value label | Montserrat 18, PRIMARY green    |
 |-------------|-------------------------------|
 | Unit label  | Montserrat 12, TEXT_SEC gray  |
 
@@ -401,7 +422,7 @@ Three cards: **TX pkts**, **RX pkts**, **peers** (from mesh state snapshot).
 
 ---
 
-## 7. Settings Tab
+## 8. Settings Tab
 
 **Source:** `screens/scr_settings.c`  
 **LVGL trigger:** `scr_settings_create()` from `layout_set_tab(TAB_SETTINGS)`  
@@ -459,8 +480,8 @@ Trackball focus: PRIMARY bg at 30% opacity.
 | Version      | Info       | Label (right-mid)    | Static `"0.9.1-tdeck"` — not from `esp_app_desc_t` here |
 | Reboot       | Button     | Full-width (DANGER)  | Calls `esp_restart()` immediately on click |
 
-**Slider styling:** track=`#333344`, indicator=PRIMARY teal, knob=TEXT white.  
-**Switch styling:** track off=`#333344`, track on=PRIMARY teal, knob=TEXT white.
+**Slider styling:** track=`#333344`, indicator=PRIMARY green, knob=TEXT white.  
+**Switch styling:** track off=`#333344`, track on=PRIMARY green, knob=TEXT white.
 
 ---
 

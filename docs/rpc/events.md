@@ -27,6 +27,7 @@ Emitted when a chat payload is successfully decoded and stored from mesh RX (sin
 | Field | Type | Description |
 |---|---|---|
 | `from` | string | Sender address (8-char uppercase hex). |
+| `fromName` | string | Sender's node name; present only when the neighbor table knows it. |
 | `text` | string | Decoded message text. |
 | `rssi` | integer | RSSI (dBm) at receiver. |
 | `snr` | number | SNR at receiver. |
@@ -45,6 +46,7 @@ Emitted when a chat payload is successfully decoded and stored from mesh RX (sin
   "method": "bramble.onMessage",
   "params": {
     "from": "A1B2C3D4",
+    "fromName": "basecamp",
     "text": "Hello from mesh",
     "rssi": -94,
     "snr": 7.5,

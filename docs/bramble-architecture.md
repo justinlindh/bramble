@@ -40,7 +40,7 @@ See also:
 | `fragment` | `components/fragment/` | Message fragmentation and reassembly |
 | `airtime` | `components/airtime/` | Duty cycle tracking and TX priority queue |
 | `dedup` | `components/dedup/` | Duplicate packet detection (sliding-window bloom filter) |
-| `identity` | `components/identity/` | Node identity, X25519 keypair generation and storage |
+| `identity` | `components/identity/` | Node identity: Ed25519 + X25519 keypair generation, storage, attestations, trust anchor |
 | `timesync` | `components/timesync/` | Stratum-based mesh time synchronization |
 | `radio` | `components/radio/` | SX1262 driver, airtime math, and the budget-gated TX gate (single transmit path) |
 | `mailbox` | `components/mailbox/` | Store-and-forward buffer for offline destinations |
@@ -121,13 +121,13 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 
 | Value | Name | Description | Size |
 |-------|------|-------------|------|
-| `0x01` | `PKT_TYPE_ACK` | End-to-end acknowledgement | 23–55 bytes |
+| `0x01` | `PKT_TYPE_ACK` | End-to-end acknowledgement | 37–69 bytes |
 | `0x02` | `PKT_TYPE_RREQ` | Route Request (AODV route discovery) | 30 bytes |
-| `0x03` | `PKT_TYPE_RREP` | Route Reply | 34 bytes |
-| `0x04` | `PKT_TYPE_RERR` | Route Error (broken link notification) | 24 bytes |
-| `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 44+ bytes (name optional) |
+| `0x03` | `PKT_TYPE_RREP` | Route Reply | 40 bytes |
+| `0x04` | `PKT_TYPE_RERR` | Route Error (broken link notification) | 38 bytes |
+| `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 54 bytes |
 | `0x06` | `PKT_TYPE_KEY_EXCHANGE` | X25519 key exchange (3-step) | 101 bytes |
-| `0x07` | `PKT_TYPE_DELIVERY_RECEIPT` | Path-tracing delivery receipt | 22–54 bytes |
+| `0x07` | `PKT_TYPE_DELIVERY_RECEIPT` | Path-tracing delivery receipt | 36–68 bytes |
 | `0x0A` | `PKT_TYPE_DATA` | Encrypted data payload | variable |
 | `0x0B` | `PKT_TYPE_STORE_REQUEST` | Request a mailbox node to store a message | variable |
 | `0x0C` | `PKT_TYPE_STORE_ACK` | Acknowledgement of successful mailbox storage | fixed |
@@ -136,8 +136,11 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x12` | `PKT_TYPE_PROBE` | Network reachability probe | variable |
 | `0x13` | `PKT_TYPE_PROBE_ACK` | Probe acknowledgement | variable |
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
+| `0x15` | `PKT_TYPE_IDENTITY_ATTESTATION` | Signed identity attestation | 230 bytes |
 
-Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, and `PROBE_ACK`. The remaining defined types (`KEY_EXCHANGE` and the four mailbox types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, `0x0F`, `0x10`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, `EMERGENCY`, `EMERGENCY_CANCEL`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+Sizes reflect wire version 4 (`BRAMBLE_VERSION`), where every control-plane packet carries a 48-bit origin sequence for replay protection (ws 1.3b).
+
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, `PROBE_ACK`, and `IDENTITY_ATTESTATION`. The remaining defined types (`KEY_EXCHANGE` and the four mailbox types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, `0x0F`, `0x10`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, `EMERGENCY`, `EMERGENCY_CANCEL`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
 
 ### Beacon Flags
 
@@ -182,7 +185,7 @@ The `bramble_header_t` struct maps directly onto the 12-byte on-wire format. Hig
 
 Implements AODV-inspired reactive unicast routing:
 
-1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt, 8 on the retries at +5 s and +15 s, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes have soft (30s inactivity) and hard (300s) timeouts.
+1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt and the +5 s retry, 8 on the +15 s retry, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes go stale after 300 s of inactivity and are evicted at 600 s (`ROUTE_ACTIVE_TIMEOUT_MS` / `ROUTE_STALE_TIMEOUT_MS`).
 2. **Forwarding** (`forwarding.c`): Looks up next-hop from route table; decrements `hop_limit`; emits RERR on unknown destination.
 3. **Beacons** (`beacon.c`): Periodic 60s neighbor discovery beacons carrying node status, public key hash, HMAC'd with pairwise session key for known peers.
 4. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
@@ -265,7 +268,7 @@ Every transmission is admitted and debited by the TX gate in `components/radio/t
 
 **Files:** `dedup.c`
 
-Sliding window of the last 64 `packet_id` values seen. Incoming packets with a duplicate ID are silently dropped before any processing. The window is per-node-address to handle ID collisions between different senders.
+Table of recently seen `(source, packet_id)` pairs (up to 256 entries, 60 s expiry; `DEDUP_MAX_ENTRIES` / `DEDUP_EXPIRY_MS`). Incoming packets with a duplicate ID are silently dropped before any processing. Entries are source-indexed to handle ID collisions between different senders.
 
 ---
 
@@ -273,7 +276,7 @@ Sliding window of the last 64 `packet_id` values seen. Incoming packets with a d
 
 **Files:** `identity.c`
 
-Generates and persists a node's X25519 keypair on first boot (stored in NVS). The 4-byte node address is derived as `SHA-256(long_term_pubkey)[0:4]`. Provides `identity_get_addr()` and `identity_sign()` for use by other components.
+Generates and persists the node's identity on first boot (stored in NVS): an Ed25519 signing keypair plus an X25519 keypair for DH. The 4-byte node address is derived as `SHA-256(ed25519_pubkey)[0:4]`. Core API is `identity_load` / `identity_save` / `identity_generate_and_save`, plus attestation, endorsement, and trust-anchor helpers (`identity_endorsement_*`, `identity_anchor_*`).
 
 ---
 

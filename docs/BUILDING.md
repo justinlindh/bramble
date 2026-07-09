@@ -120,4 +120,4 @@ npm test
 | Heltec WiFi LoRa 32 V4 | ESP32-S3 | SX1262 (+ optional L76K GNSS) | ✅ Running target (GNSS pin mapping validation ongoing) |
 | LilyGo T-Deck Plus | ESP32-S3 | SX1262 | ✅ Running target with LVGL v9 GUI |
 
-For V4 GNSS bring-up and validation details, see [heltec-v4-gnss-bringup.md](heltec-v4-gnss-bringup.md).
+For historical V4 GNSS bring-up notes, see [archive/heltec-v4-gnss-bringup.md](archive/heltec-v4-gnss-bringup.md); GNSS pins now live in `main/boards/heltec_v4.h`.

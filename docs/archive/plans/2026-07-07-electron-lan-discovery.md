@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (strict), React 19, Zustand, vitest + testing-library, Electron 41 + electron-vite, bonjour-service, ESP-IDF C firmware.
 
-**Design spec:** `docs/design/electron-lan-discovery.md`
+**Design spec:** `docs/archive/plans/2026-07-07-electron-lan-discovery-design.md`
 
 ## Global Constraints
 

@@ -824,10 +824,11 @@ paths:
         as 64 hex characters. Persisted to NVS and applied immediately (the
         beacon subkey is re-derived live). Authenticated callers only. This is
         a write-only secret: the key is never read back (see
-        bramble.getNetworkKeyStatus for a one-way fingerprint). Provisioning a
-        real key removes the universally-known public-PSK fallback but does not
-        by itself close SEC-H1/SEC-H2/NEW-SEC-4/NEW-SEC-8 (which also need
-        per-message freshness and per-node beacon identity).
+        bramble.getNetworkKeyStatus for a one-way fingerprint). Until
+        provisioned the node is inert on the control plane (no fallback key).
+        The key proves fleet membership, not per-node identity: any key holder
+        can still forge control messages on behalf of another holder (see
+        docs/SECURITY-MODEL.md section 3).
       tags: [config]
       requestBody:
         content:

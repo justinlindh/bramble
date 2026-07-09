@@ -2,7 +2,7 @@
 # Unified Bramble build/flash helper (serial flashing only; no OTA)
 #
 # Preferred usage:
-#   bash scripts/flash.sh [local] [heltec-v3|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
+#   bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ is_port() { [[ "$1" == /dev/* ]]; }
 print_usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/flash.sh [local] [heltec-v3|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
+  bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 Notes:
   - MODE defaults to: local

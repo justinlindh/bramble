@@ -364,7 +364,7 @@ scripts) pass through to the token gate, since they are not CSRF-able
 requires the token as the first write on a new connection, throttled to one
 attempt per 100 ms after failures (`components/ble/ble_server.c`).
 Comparison is constant-time and length-independent: a fixed 128-iteration
-padded compare shared by both transports (`main/ct_strcmp.h`).
+padded compare shared by both transports (`components/security/include/ct_strcmp.h`).
 
 Connections without credentials are accepted but may call only a
 two-method identification allowlist, `bramble.ping` and

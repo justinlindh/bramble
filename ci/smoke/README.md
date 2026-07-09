@@ -10,8 +10,6 @@ Workflow file: `.gitea/workflows/ci-smoke-artifacts.yml`
 - Trigger workflow in Gitea UI
 - Confirm successful run
 - Confirm `ci-smoke-artifact` is downloadable from run artifacts
-- rerun 2026-02-24T10:32:07Z
-- rerun2 2026-02-24T10:40:04Z
-- rerun3 2026-02-24T10:41:52Z
-- rerun4 2026-02-24T10:44:01Z
-- rerun5 2026-02-24T10:45:53Z
+
+Bring-up completed 2026-02-24; kept as a runner health check for future
+runner or infra changes.

@@ -6,6 +6,8 @@ Adversary class: device thief with physical flash access. Assets: identity
 private key, channel keys, WS/BLE auth token. Before this work all three were
 stored in plaintext NVS (components/identity/identity.c,
 components/channel/channel_storage.c) and dumpable with a flash reader.
+The network key (components/network_key, added after SEC-H4) is in the same
+plaintext-NVS class on non-secure builds; see `docs/SECURITY-MODEL.md` §4.
 
 ## What the secure build protects
 

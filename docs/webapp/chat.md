@@ -41,8 +41,10 @@ UI connection states:
 
 Transport-specific in overlay while connecting:
 
-- Wi‑Fi: `Connecting to Wi‑Fi node…`
-- BLE: `Connecting to BLE device…`
+- BLE: `Scanning…`
+- Serial: `Opening serial…`
+- Wi‑Fi: `Handshaking…`
+- Anything else: `Connecting…`
 
 ## Location tiers
 

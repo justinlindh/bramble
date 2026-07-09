@@ -399,7 +399,80 @@ All methods below are registered in firmware via `rpc_register(...)`.
 {"jsonrpc":"2.0","id":53,"method":"bramble.getAllowedOrigins","params":{}}
 ```
 
+### Network key (control-plane MACs)
+
+See `docs/network-key-provisioning.md` for the operator flow.
+
+#### `bramble.generateNetworkKey`
+- Description: Mints a fresh entropy-gated 32-byte network key on the device, provisions this node with it, and returns the raw key so the operator can copy it to the rest of the fleet. Re-keys an already-provisioned node. Fails closed (provisions nothing) on entropy failure. Authenticated callers only.
+- Params: none.
+- Response fields: `key` (string, 64 hex), `fingerprint` (string, 8 hex).
+- Example:
+```json
+{"jsonrpc":"2.0","id":54,"method":"bramble.generateNetworkKey","params":{}}
+```
+
+#### `bramble.setNetworkKey`
+- Description: Provisions the per-fleet network key behind the RREP/RERR/ACK/delivery-receipt/beacon control-plane MACs. Persisted to NVS, applied immediately (beacon subkey re-derived live). Write-only secret: never read back. Authenticated callers only.
+- Params: `key` (string, raw 32-byte key as 64 hex characters).
+- Response fields: `ok` (bool).
+- Example:
+```json
+{"jsonrpc":"2.0","id":55,"method":"bramble.setNetworkKey","params":{"key":"<64 hex chars>"}}
+```
+
+#### `bramble.getNetworkKeyStatus`
+- Description: Reports whether a network key is provisioned plus a one-way fingerprint (`SHA256(key)[0:4]`, 8 lowercase hex). Unprovisioned nodes report the all-zero fingerprint `"00000000"` and are inert on the control plane (no public-PSK fallback).
+- Params: none.
+- Response fields: `provisioned` (bool), `fingerprint` (string).
+- Example:
+```json
+{"jsonrpc":"2.0","id":56,"method":"bramble.getNetworkKeyStatus","params":{}}
+```
+
+### Trust anchor
+
+See `docs/trust-anchor.md` for the enrollment ceremony.
+
+#### `bramble.setAnchor`
+- Description: Provisions the fleet trust anchor's Ed25519 public key. The device only ever holds the anchor public key, never the private key. Persisted to NVS. Authenticated callers only.
+- Params: `anchor_pubkey` (string, 64 hex characters).
+- Response fields: `ok` (bool).
+- Example:
+```json
+{"jsonrpc":"2.0","id":57,"method":"bramble.setAnchor","params":{"anchor_pubkey":"<64 hex chars>"}}
+```
+
+#### `bramble.setEndorsement`
+- Description: Provisions this node's own anchor-signed endorsement certificate. Verified against this node's identity key and the provisioned anchor before persisting; triggers a fresh attestation on success. Authenticated callers only.
+- Params: `not_after` (string), `endorsement_sig` (string).
+- Response fields: `ok` (bool).
+- Errors: `-32602` when no anchor is provisioned, `not_after` is 0, fields are malformed, or the signature does not verify.
+- Example:
+```json
+{"jsonrpc":"2.0","id":58,"method":"bramble.setEndorsement","params":{"not_after":"18446744073709551615","endorsement_sig":"<128 hex chars>"}}
+```
+
+#### `bramble.getAnchorStatus`
+- Description: Reports whether a trust anchor is provisioned, the anchor fingerprint (`SHA256(anchor_pub)[0:4]`, present only when anchored), and whether this node holds an endorsement cert.
+- Params: none.
+- Response fields: `anchored` (bool), `anchor_fingerprint` (string, optional), `endorsed` (bool).
+- Example:
+```json
+{"jsonrpc":"2.0","id":59,"method":"bramble.getAnchorStatus","params":{}}
+```
+
 ### Location
+
+#### `bramble.setLocationConfig`
+- Description: Sets the node's location-sharing policy (enable, default tier, interval, source, manual coordinates). Full contract in the "Location policy RPC contract" section above.
+- Params: see above.
+- Response fields: `ok` (bool).
+
+#### `bramble.getPeerLocations`
+- Description: Returns known peer locations (and own position when available). Full response shape in the "Location policy RPC contract" section above.
+- Params: none.
+- Response fields: `peers` (array).
 
 #### `bramble.setLocationContact`
 - Description: Sets per-contact location sharing override.
@@ -556,4 +629,22 @@ All methods below are registered in firmware via `rpc_register(...)`.
 - Example:
 ```json
 {"jsonrpc":"2.0","id":87,"method":"bramble.getBeaconPolicy","params":{}}
+```
+
+#### `bramble.setFloodTransport`
+- Description: Toggles the unicast flood transport: when on, unicast DATA not addressed to this node relays through the multi-hop flood engine instead of the reactive route-lookup forward. Default off. NVS-persisted.
+- Params: `enabled` (bool).
+- Response fields: `ok` (bool), `enabled` (bool).
+- Example:
+```json
+{"jsonrpc":"2.0","id":88,"method":"bramble.setFloodTransport","params":{"enabled":true}}
+```
+
+#### `bramble.setFloodHopLimit`
+- Description: Sets the hop limit stamped on freshly-originated flood DATA (and its flooded ACK). Clamped to 1..32; the effective value is echoed back and persisted. Default 8. Separate from the reactive routing hop budget.
+- Params: `hops` (number).
+- Response fields: `ok` (bool), `hops` (number).
+- Example:
+```json
+{"jsonrpc":"2.0","id":89,"method":"bramble.setFloodHopLimit","params":{"hops":12}}
 ```

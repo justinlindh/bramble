@@ -1,7 +1,7 @@
 # Electron Desktop: Direct LAN Connect + Node Discovery
 
 **Date:** 2026-07-07
-**Status:** Approved design, pre-implementation
+**Status:** Shipped (PR #140, merged 2026-07-07). Archived design record; the capability short-circuit was later generalized from isElectron to isEmbeddedShell by the Android shell work. Current behavior is documented in docs/webapp/desktop.md.
 
 ## Problem
 

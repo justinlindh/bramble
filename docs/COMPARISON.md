@@ -2,25 +2,32 @@
 
 A technical comparison of three LoRa mesh networking approaches.
 
+> **Last verified against upstream sources: 2026-07-08** (Meshtastic firmware
+> 2.7.26 Beta, 2026-06-24; MeshCore firmware v1.16.0, 2026-06-06). Comparison
+> docs rot fast; both competitor projects ship monthly. Re-verify before
+> relying on competitor claims here. Key sources are listed at the bottom.
+
 ---
 
 ## Overview
 
 ### Meshtastic
 
-Meshtastic is the dominant open-source LoRa mesh networking project. Started around 2020, it has a large community (100k+ Discord members), broad hardware support (ESP32, nRF52, RP2040, Linux), and mature companion apps on Android, iOS, and web. Currently at v2.5.x stable with v2.6 in preview, it's the most battle-tested option and the default choice for consumer LoRa mesh. The project is community-driven with significant contributions from many developers.
+Meshtastic is the dominant open-source LoRa mesh networking project. Started around 2020, it has a large community (~51k Discord members as of 2026-07), broad hardware support (ESP32, nRF52, RP2040/RP2350, STM32WL, Linux), and mature companion apps on Android, iOS, and web. Currently on the 2.7 series (2.7.26 "Beta", its recommended channel, June 2026). Community-driven with institutional backing since 2025: Meshtastic Solutions Inc. supports development commercially while Meshtastic LLC holds the trademark.
 
-**Maturity:** Production-ready. Thousands of nodes deployed worldwide. Well-documented.
+**Maturity:** Production-ready. Thousands of nodes deployed worldwide; the largest known network was 2,000+ nodes at DEF CON 33 (Aug 2025), congested but functioning. Well-documented.
 
 ### MeshCore
 
-MeshCore is a newer open-source project (emerged ~early 2025) created by "ripplebiz" (Andy Kirby) and community contributors. It's a lightweight C++ library focused on multi-hop packet routing for LoRa radios. MeshCore positions itself between Meshtastic's consumer focus and Reticulum's advanced networking: aiming for simplicity with better scalability than pure flooding. It has companion apps on Android, iOS, and web, a web flasher, and growing community adoption (active Discord).
+MeshCore was started in late 2024 by Scott Powell ("ripplebiz", Ripple Radios, Australia) and launched publicly in early 2025 with Liam Cottle (companion apps) and Andy Kirby (promotion). It is a lightweight C++ library and firmware for multi-hop LoRa packet routing, positioned between Meshtastic's consumer focus and Reticulum's advanced networking: simplicity with better scalability than pure flooding.
 
-**Maturity:** Early but functional. Pre-1.0, rapidly evolving. No formal protocol spec: the code *is* the spec. V2 protocol spec is on the roadmap.
+**Governance fork (April 2026):** the core team (Powell, Cottle, and the main firmware contributors) publicly split from Kirby after he filed a "MeshCore" trademark application without telling the team and shipped undisclosed AI-generated code. The official open project now lives at `github.com/meshcore-dev/MeshCore` with sites at meshcore.io, docs.meshcore.io, and flasher.meshcore.io (Discord: meshcore.gg). Kirby runs **MeshOS**, a proprietary downstream fork sold per-device, from meshcore.co.uk; that domain no longer represents the open project.
+
+**Maturity:** Shipping and past the early-adopter stage for basic messaging: v1.16.0 with a regular release cadence, 50+ supported devices, an official protocol reference at docs.meshcore.io, large regional meshes (UK, NL, US metros, Australia), and vendors shipping MeshCore-preloaded hardware. Core firmware is MIT; the primary companion apps are closed-source freemium.
 
 ### Bramble
 
-Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 hardware (Heltec V3, T-Deck Plus, Heltec V4) and prioritizes privacy-first design, dual-substrate routing (reactive AODV by default with an opt-in flood transport), authenticated traffic, confirmable delivery, end-to-end DMs, tiered reliability, and airtime management. The project includes firmware, a Go SDK (`bramble-go`), a CLI (`bramble-cli`), and a web companion app.
+Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 hardware (Heltec V3, T-Deck Plus, Heltec V4) and prioritizes privacy-first design, dual-substrate routing (reactive AODV by default with an opt-in flood transport), authenticated traffic, confirmable delivery, end-to-end DMs, tiered reliability, and airtime management. The project includes firmware, a Go SDK (`bramble-go`), a CLI (`bramble-cli`), and a web companion app with an Electron desktop shell.
 
 **Maturity:** Pre-alpha, solo developer project. Running on 3 boards, with working mesh, RPC, BLE, Wi-Fi, GPS, location sharing, mailbox store-and-forward, and a web companion app. No field deployments and no user base yet.
 
@@ -30,45 +37,39 @@ Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 h
 
 | Feature | Meshtastic | MeshCore | Bramble |
 |---|---|---|---|
-| **Routing approach** | Managed flooding (all nodes rebroadcast). DMs getting next-hop routing in v2.6. | Flood-based route discovery, then data follows the learned direct path. Companion nodes don't repeat. | Dual-substrate. Reactive AODV (default): RREQ/RREP discovery, cached routes, reverse-route breadcrumbs from DATA, intermediate-node RREP, route-forwarded ACKs. Opt-in flooding transport (`s_flood_transport`, default off): hop-limited, deduplicated, airtime-budget-gated floods with a flooded ACK. Channel/group messages relay multi-hop via the flood relay. |
-| **Encryption: channels** | AES256-CTR with PSK. No integrity check (no AEAD: issue #4030 open). Known-plaintext attacks possible. | AES-256 with PSK (details sparse; encrypt-then-MAC with shared secret per the codebase). | AES-256-GCM (AEAD) with PSK. Channel ID encrypted inside ciphertext. |
-| **Encryption: DMs** | Since v2.5: X25519 PKC + AES-CCM. Prior: just channel PSK (no real DM privacy). | Ed25519 identity + ECDH key exchange → AES-128 encrypt-then-MAC. Signed adverts prevent spoofing. | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange with a 7-digit SAS (`components/dm_session`). Not readable by other channel members. No forward secrecy; SAS-comparison UX not yet shipped (see [SECURITY-MODEL.md](SECURITY-MODEL.md)). |
-| **Traffic authentication** | Channel traffic is unauthenticated: any PSK holder can forge/impersonate. DMs (v2.5+) are authenticated. | Per-node Ed25519 signatures; signed adverts. | DATA frames and the control plane (RREP, RERR, ACK, delivery receipt, beacon) carry a network-key HMAC that relays verify before acting. There is no public default key: an unprovisioned node is inert (fail-closed) and authenticates nothing until a real per-fleet key is provisioned. Residual: any network-key holder is an insider and can forge these MACs ([SECURITY-MODEL.md](SECURITY-MODEL.md)). |
-| **Scalability target** | ~80–100 nodes practical ceiling (flooding). Degrades above ~30 active senders. | Flood-based discovery with direct-path data delivery. Claims up to 64 hops theoretically. | Reactive DM forwarding is O(path_length), not O(N). Honest measured scale under the collision-modeled simulator (the source of truth): ~95% delivery at 10 nodes, collapsing to ~10-12% at 50-100 and 0% at 200 as a single SF10 channel saturates under control-plane load ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md)). The earlier collision-free "100% at 200 nodes" figures were retracted as sim artifacts. No field test has been run. |
-| **Reliability model** | Optional ACKs. Basic retries. No flow control. No congestion awareness. | ACK mechanism. Basic retry logic. No formal congestion management. | Three tiers (Broadcast/Normal/Critical). Exponential backoff retries with jitter, end-to-end ACKs, delivery receipts with relay path. Flow-control and congestion-signaling designs were removed unshipped; sender pacing comes from the per-tier airtime budget at the TX chokepoint and the bounded pending-ACK table. |
-| **Airtime management** | None built-in. Nodes transmit freely. Some duty cycle awareness in EU regions. | Flood advert interval configurable (default 12h for repeaters). Companion nodes don't repeat. | Enforced: every transmission passes one budget-gated TX path with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps where the frequency plan requires them (EU868 1%). No transmit path bypasses the budget. |
-| **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Not documented. Likely relies on GPS or companion device time. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
-| **Hardware targets** | ESP32, nRF52, RP2040, Linux. Dozens of boards. | ESP32, nRF52, various Heltec/LILYGO/RAK boards. Growing device list. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
-| **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 8-byte header + 2-byte CRC = 10 bytes overhead. Compact binary. | 12-byte base header, compact binary (no protobuf/JSON). Authenticated DATA adds a 28-byte envelope prefix (src_addr, relay-mutable prev_hop, 8-byte auth HMAC) plus a 12-byte nonce and 16-byte GCM tag. |
-| **Node identity** | Hardware MAC-based (4 bytes). Not cryptographically derived. Trivially spoofable on channels. | Ed25519 public key. Cryptographic identity. Signed adverts. | Ed25519 identity key per node; address = SHA-256(key)[0:4]. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. |
-| **Membership / Sybil control** | None. Any device on the channel PSK is a member; identities are unauthenticated MACs. | Per-node keys and a per-peer contact list / ACL: trust is decided locally by each node's operator adding contacts. No fleet membership authority; no Sybil-scarcity story; un-trusting a node fleet-wide means every peer editing its own contact list. | Optional per-fleet **trust anchor**: an operator-held Ed25519 anchor endorses node identities with a signed cert (`docs/trust-anchor.md`). An anchored mesh pins ONLY peers carrying an anchor-signed cert, so un-admitted Sybils cannot join, corroborate the timesync quorum, or pass DM key-continuity. The anchor private seed is operator-held and offline (never on a node, never over RPC). Honest bound: this stops outsiders and un-admitted Sybils, NOT a compromised admitted insider; anchor custody is the trust root; certs are permanent in v1 (no active revocation short of re-anchor). |
-| **Max hops** | 7 (configurable) | 3–7 default, up to 64 theoretical | Reactive: expanding-ring discovery 4 then 8, max route depth 8. Flood transport: configurable 1..32, default 8. |
+| **Routing approach** | Managed flooding (nodes rebroadcast up to hop limit). Next-hop routing for DMs shipped in 2.6. Zero-Cost Hops (2.7.11): hops between favorited router-class nodes do not decrement the hop limit, so router backbones count as one hop. | Flooding for discovery and group channels; DMs are **source-routed**: the sender embeds the learned repeater path (1 byte per hop) in the packet, with flood fallback on retry. Client nodes never repeat; only repeaters and room servers forward. | Dual-substrate. Reactive AODV (default): RREQ/RREP discovery, cached routes, reverse-route breadcrumbs from DATA, intermediate-node RREP, route-forwarded ACKs. Opt-in flooding transport (`s_flood_transport`, default off): hop-limited, deduplicated, airtime-budget-gated floods with a flooded ACK. Channel/group messages relay multi-hop via the flood relay. |
+| **Encryption: channels** | AES256-CTR with PSK. No integrity check (no AEAD: issue #4030 still open as of 2026-07). Known-plaintext forgery possible for any PSK holder. | **AES-128**-ECB with a 16-byte PSK plus an HMAC-SHA256 truncated to **2 bytes**. Hashtag channels derive the key as SHA-256("#name") truncated to 16 bytes, so the key is guessable from the channel name. | AES-256-GCM (AEAD) with PSK. Channel ID encrypted inside ciphertext. |
+| **Encryption: DMs** | Since v2.5: per-node X25519 keys + AES-CCM. v2.7 added **Key Verification**: a six-digit out-of-band code both sides confirm to verify DM keys. Note CVE-2025-52464 (June 2025, CVSS 9.5): cloned/low-entropy keypairs from vendor golden images and weak RNG seeding allowed DM decryption; patched in 2.6.11/2.6.12, hardware RNG in 2.7.23. | Ed25519 identity converted to X25519 for ECDH, then AES-128-ECB encrypt-then-MAC with a 2-byte truncated MAC and zero padding. Signed adverts prevent advert spoofing. ECB mode and the 2-byte MAC are real weaknesses. | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange with a 7-digit SAS (`components/dm_session`). Not readable by other channel members. No forward secrecy; SAS-comparison UX not yet shipped (Meshtastic's equivalent verification UX is shipped; see [SECURITY-MODEL.md](SECURITY-MODEL.md)). |
+| **Traffic authentication** | Channel traffic is unauthenticated: any PSK holder can forge/impersonate. DMs (v2.5+) are authenticated. | Per-node Ed25519 signatures on adverts; DM payload MACs are only 2 bytes. No relay-verified control-plane authentication. | DATA frames and the control plane (RREP, RERR, ACK, delivery receipt, beacon) carry a network-key HMAC that relays verify before acting. There is no public default key: an unprovisioned node is inert (fail-closed) and authenticates nothing until a real per-fleet key is provisioned. Residual: any network-key holder is an insider and can forge these MACs ([SECURITY-MODEL.md](SECURITY-MODEL.md)). |
+| **Scalability target** | Historically ~80-100 nodes practical for chat; now actively mitigated: broadcast intervals auto-scale above 40 online nodes, multi-message batching (2.7.18), transmit-history persistence (2.7.20), Zero-Cost Hops router backbones, and official guidance to move big meshes to faster presets. DEF CON 33 ran 2,000+ nodes (degraded but alive). Channel messages still flood. | Repeater-only flooding bounds fan-out to the repeater population; DMs follow embedded source routes. Default flooded-advert interval raised from 12h to **47h** in v1.16 to cut background load. Protocol supports up to 64 hops. | Reactive DM forwarding is O(path_length), not O(N). Honest measured scale under the collision-modeled simulator (the source of truth): ~95% delivery at 10 nodes, collapsing to ~10-12% at 50-100 and 0% at 200 as a single SF10 channel saturates under control-plane load ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md)). The earlier collision-free "100% at 200 nodes" figures were retracted as sim artifacts. No field test has been run. |
+| **Reliability model** | Optional ACKs. Basic retries. No backpressure protocol; congestion-motivated features exist (interval scaling, batching). | ACK mechanism; v1.16 added extended 6-byte ACKs (groundwork for multi-attempt delivery). Basic retry logic. No formal congestion protocol. | Three tiers (Broadcast/Normal/Critical). Exponential backoff retries with jitter, end-to-end ACKs, delivery receipts with relay path. Flow-control and congestion-signaling designs were removed unshipped; sender pacing comes from the per-tier airtime budget at the TX chokepoint and the bounded pending-ACK table. |
+| **Airtime management** | Regional duty-cycle limits are enforced (EU regions: 10% hourly rolling-window cutoff stops TX when exceeded), plus the congestion auto-scaling above. No per-node airtime budget or per-message costing. | Operator-set duty-cycle enforcement (`set dutycycle`, v1.14.1+), flood-hop caps (`flood.max.*`), SF-tuned preambles, 47h advert default. No per-tier budgeting. | Enforced: every transmission passes one budget-gated TX path with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps where the frequency plan requires them (EU868 1%). No transmit path bypasses the budget. Still the most comprehensive of the three, but no longer the only project with airtime controls. |
+| **Time sync** | GPS-based or NTP via WiFi/MQTT. No mesh-internal time sync protocol. | Repeaters support GPS clock sync (v1.14.1+); clocks can be set from the companion app/CLI. No mesh-internal sync protocol. | Stratum-based mesh time sync via beacon fields (corroboration-gated). GPS optional. |
+| **Hardware targets** | ESP32, nRF52, RP2040/RP2350, STM32WL, Linux. Dozens of boards, steady new-board cadence. | 50+ devices (ESP32/S3/C3, nRF52, RP2040); 80+ firmware binaries per release; OTA updates on nRF. | ESP32-S3 only (Heltec V3, T-Deck Plus, Heltec V4). Narrow focus by design. |
+| **Protocol overhead** | Protobuf-encoded. Header ~16 bytes + protobuf payload. | 1-byte header + 4-byte transport codes + 1-byte path length + 0-64-byte path; payload up to 184 bytes, max packet 255. No protocol-level CRC (relies on LoRa PHY). | 12-byte base header, compact binary (no protobuf/JSON). Authenticated DATA adds a 28-byte envelope prefix (src_addr, relay-mutable prev_hop, 8-byte auth HMAC) plus a 12-byte nonce and 16-byte GCM tag. |
+| **Node identity** | Node ID is MAC-derived (not cryptographic; spoofable on channels), but since 2.5 every node also has a per-node X25519 keypair for DM encryption/signing, with six-digit Key Verification since 2.7. | Ed25519 public key per node; signed adverts. On-air source/destination IDs are 1-byte public-key-prefix hashes (roughly 1-in-256 collision), so the on-air ID is key-derived but trivially collidable. | Ed25519 identity key per node; address = SHA-256(key)[0:4]. Self-signed, relay-gated identity attestations; receivers TOFU-pin verified bindings and reject any attestation whose address does not derive from its own key, so claiming another node's address is cryptographically infeasible. Pinned identities gate the timesync quorum and DM key continuity. |
+| **Membership / Sybil control** | None. Any device on the channel PSK is a member. | Per-node keys and a per-peer contact list / ACL: trust is decided locally by each node's operator adding contacts; repeater admin is password-based per-repeater ACL. No fleet membership authority; no Sybil-scarcity story. | Optional per-fleet **trust anchor**: an operator-held Ed25519 anchor endorses node identities with a signed cert (`docs/trust-anchor.md`). An anchored mesh pins ONLY peers carrying an anchor-signed cert, so un-admitted Sybils cannot join, corroborate the timesync quorum, or pass DM key-continuity. The anchor private seed is operator-held and offline (never on a node, never over RPC). Honest bound: this stops outsiders and un-admitted Sybils, NOT a compromised admitted insider; anchor custody is the trust root; certs are permanent in v1 (no active revocation short of re-anchor). |
+| **Max hops** | 7 max (default 3); Zero-Cost Hops make favorited-router hops free, stretching effective reach well past 7. | Protocol supports 64 (1-byte path hashes). Current firmware defaults: `flood.max.unscoped` 64 (effectively uncapped), `flood.max.advert` 8. | Reactive: expanding-ring discovery 4 then 8, max route depth 8. Flood transport: configurable 1..32, default 8. |
 
 ---
 
 ## Routing
 
-### Meshtastic: Managed Flooding
+### Meshtastic: Managed Flooding + Next-Hop DMs
 
-Meshtastic uses **managed flood routing** for all messages. Every node that receives a packet rebroadcasts it (up to the hop limit), with one key optimization: before rebroadcasting, a node listens briefly to see if another node has already rebroadcast the same packet. If so, it suppresses its own rebroadcast ("implicit ACK"). Nodes can be configured with roles (CLIENT, CLIENT_MUTE, ROUTER, ROUTER_LATE) to influence rebroadcast timing and priority.
+Meshtastic uses **managed flood routing** for channel messages. Every forwarding node rebroadcasts (up to the hop limit), with a key optimization: before rebroadcasting, a node listens briefly to see if another node already rebroadcast the same packet and suppresses its own copy ("implicit ACK"). Node roles (CLIENT, CLIENT_MUTE, CLIENT_BASE, ROUTER, ROUTER_LATE) influence rebroadcast timing and priority.
 
-**v2.6 addition:** Next-hop routing for DMs. After an initial flooded exchange, the node learns which neighbor successfully relayed the message, and subsequent DMs to that destination are sent directly to that next-hop. Falls back to flooding on the last retry attempt if next-hop fails. This is a significant improvement but only applies to unicast DMs, not channel messages.
+**Next-hop DM routing (shipped in 2.6, Feb 2025):** after an initial flooded exchange, the sender learns which neighbor successfully relayed to the destination and sends subsequent DMs directly to that next hop, falling back to flooding on the last retry. Applies to unicast DMs only, not channel messages.
 
-**Scalability implications:** O(N) transmissions per message (every node rebroadcasts). With N nodes, a single message generates up to N transmissions. For channel messages, this is unavoidable in any system. For DMs, next-hop routing (v2.6) reduces this to O(path_length) after route learning. In practice, networks above ~80 nodes experience airtime congestion, especially with many active senders. The lack of airtime budgeting means one chatty node can monopolize the channel.
+**Zero-Cost Hops (2.7.11, Nov 2025):** hops between mutually-favorited router-class nodes (ROUTER, ROUTER_LATE, CLIENT_BASE) do not decrement the hop limit, so a router backbone spans as a single logical hop; 300+ mile spans have been demonstrated. This materially changes the "7 hops max" reach story.
 
-### MeshCore: Flood Discovery, Then Direct Paths
+**Scalability implications:** channel messages are still O(N) transmissions per message. DMs are O(path_length) after route learning. Above ~40 online nodes the firmware auto-scales broadcast intervals; 2.7 added multi-message batching. Large meshes are officially advised onto faster modem presets. Congestion still degrades large meshes (DEF CON's 2,000+ node network was heavily congested), but "no mitigation" is no longer accurate.
 
-MeshCore uses **flooding for route discovery**, after which data for known destinations follows the learned direct path. The flooding side carries several optimizations:
+### MeshCore: Flood Discovery, Source-Routed Data
 
-- **Duplicate detection** via unique packet IDs and a recent-messages cache
-- **Hop count limiting** (default 3, configurable up to 7, protocol supports 64)
-- **Random backoff delays** before rebroadcast to reduce collisions
-- **RSSI-based prioritization**: weaker signals forwarded with lower priority
-- **Role-based forwarding**: "Companion" nodes don't repeat messages at all, reducing unnecessary rebroadcasts
+MeshCore floods **adverts** (identity/position broadcasts) and group-channel traffic through repeater nodes only; client (companion) nodes never repeat. DMs are **source-routed**: the sender embeds the full learned repeater path in the packet (1 byte per hop), learned from flooded adverts and delivery reports, with flood fallback when a path fails. Optimizations include duplicate detection via packet hashes, random backoff before rebroadcast, RSSI-based prioritization, and hop caps (`flood.max.*`).
 
-A key difference from Meshtastic is the explicit role system: companion nodes (user handsets connected to phones) never repeat, and only dedicated repeater nodes forward traffic. This reduces the amplification factor in networks with many end-user devices.
-
-**Scalability implications:** Discovery floods are O(N_repeaters), and only repeater nodes rebroadcast (companions don't repeat). Data to known destinations follows the learned path rather than re-flooding.
+**Scalability implications:** discovery floods are O(N_repeaters), and data to known destinations transmits once per path hop. The 47-hour default advert interval (raised from 12h in v1.16) keeps background flood load low. The role split (few repeaters, many non-repeating clients) bounds amplification in dense deployments.
 
 ### Bramble: Reactive AODV-Style Routing
 
@@ -77,15 +78,15 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 1. Source broadcasts RREQ (this *does* flood, similar to Meshtastic)
 2. Destination unicasts RREP back along the reverse path
 3. Subsequent data packets follow the discovered route: only nodes on the path transmit
-4. Routes are cached with soft/hard timeouts and maintained via broken-link detection
+4. Routes are cached with active/stale timeouts and maintained via broken-link detection
 
-**Channel/group messages** use controlled flooding (hop-limited, default 8, configurable 1..32) and now relay multi-hop rather than the earlier single-hop-only behavior, since group messages inherently need to reach all members.
+**Channel/group messages** use controlled flooding (hop-limited, default 8, configurable 1..32) and relay multi-hop, since group messages inherently need to reach all members.
 
-**Opt-in flood transport.** A runtime toggle (`s_flood_transport`, default off) can also route unicast DMs by the same hop-limited, deduplicated, budget-gated flood instead of reactive discovery, with a flooded ACK for route-free sender confirmation. It trades airtime for reach and is best-effort within the hop budget. Both substrates ship; the toggle selects one; reactive stays the default and is not removed.
+**Opt-in flood transport.** A runtime toggle (`s_flood_transport`, default off) can also route unicast DMs by the same hop-limited, deduplicated, budget-gated flood instead of reactive discovery, with a flooded ACK for route-free sender confirmation. It trades airtime for reach and is best-effort within the hop budget. Both substrates ship; the toggle selects one; reactive stays the default.
 
 **Privacy enhancement:** RREQ packets carry a per-query pseudonym instead of the originator's address, so forwarded route requests do not identify who is asking. The destination address stays cleartext, and the first hop can still infer the originator (a fresh RREQ has hop_count 0); see [SECURITY-MODEL.md](SECURITY-MODEL.md) for the precise scope.
 
-**Scalability implications:** Route discovery floods once. After that, DM traffic is O(path_length): one transmission per hop (discovery uses an expanding ring: hop limit 4 on the first attempt, 8 on retries, and 8 is the protocol's maximum route depth) vs. potentially hundreds in a large flooded mesh. This is where Bramble's design most differs from both Meshtastic and MeshCore. The tradeoff is complexity: route maintenance, broken-link detection, and the RREQ/RREP exchange add protocol overhead and implementation complexity.
+**Scalability implications:** route discovery floods once; after that DM traffic is O(path_length). Note the competitive landscape moved: Meshtastic DMs have been O(path_length) since 2.6, and MeshCore DMs are source-routed, so per-hop unicast delivery is now table stakes among all three. Bramble's remaining architectural distinctions are the cached bidirectional route state with broken-link maintenance, route-forwarded (non-flooded) ACKs, and the airtime-budgeted control plane. The tradeoff is complexity: route maintenance, broken-link detection, and the RREQ/RREP exchange add protocol overhead and implementation complexity.
 
 ---
 
@@ -95,26 +96,26 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 
 | Aspect | Details |
 |---|---|
-| **Channel encryption** | AES256-CTR with PSK. **No integrity check** (CTR mode without MAC). Vulnerable to known-plaintext attacks: anyone who knows the PSK can forge messages impersonating any node. Issue #4030 tracks adding AEAD. |
-| **DM encryption (v2.5+)** | X25519 key exchange + AES-CCM. PKC provides real E2E encryption. Messages signed with sender's private key for authentication. Major improvement over pre-2.5. |
-| **DM encryption (pre-2.5)** | DMs were just channel messages with a destination field. Same PSK. No privacy from other channel members. |
-| **Forward secrecy** | None for channels. DM key exchange provides some, but no session ratcheting or ephemeral key rotation. |
-| **Metadata leakage** | Header is always sent unencrypted: source node ID, destination node ID, hop count, packet ID. All relay nodes (and passive observers) see who is talking to whom. |
-| **Key management** | PSK shared out-of-band (QR code). No key rotation mechanism. Node identity based on MAC address (not cryptographic). |
-| **Authentication** | Channel: none. Anyone with PSK can impersonate. DMs (v2.5+): PKC provides authentication. |
+| **Channel encryption** | AES256-CTR with PSK. **No integrity check** (CTR without MAC). Anyone who knows the PSK can forge messages impersonating any node. Issue #4030 (AEAD) still open as of 2026-07. |
+| **DM encryption (v2.5+)** | Per-node X25519 keys + AES-CCM. Real E2E encryption with sender authentication. v2.7 added six-digit Key Verification UX. |
+| **Key incident (2025)** | CVE-2025-52464 (CVSS 9.5): vendor firmware cloning and weak RNG seeding produced duplicated/low-entropy keypairs, allowing DM decryption and remote-admin hijack. Fixed in 2.6.11/2.6.12 (deferred keygen, compromised-key wipe); hardware RNG in 2.7.23. |
+| **Forward secrecy** | None (officially documented limitation): static X25519 keys; "harvest now, decrypt later" applies to captured DM traffic. |
+| **Metadata leakage** | Header always cleartext: source node ID, destination node ID, hop count, packet ID. All relays and passive observers see who talks to whom. |
+| **Key management** | PSK shared out-of-band (QR code). No rotation mechanism. The default "LongFast" channel key (`AQ==`) is public knowledge, and the installed base depends on it for zero-config first contact. |
+| **Authentication** | Channel: none (any PSK holder can impersonate). DMs (v2.5+): authenticated. |
 
 ### MeshCore
 
 | Aspect | Details |
 |---|---|
-| **Identity** | Ed25519 key pair per node. Identity is cryptographic. Adverts (name/position/public key broadcasts) are signed to prevent spoofing. |
-| **DM encryption** | ECDH key exchange using Ed25519 keys → shared secret → AES-128 encrypt-then-MAC. Destination hash in packet header (not full address). |
-| **Channel/room encryption** | AES-256 mentioned in docs. Room servers provide shared communication spaces. Details on key management are sparse. |
-| **Forward secrecy** | Not documented. Likely no session ratcheting given the embedded focus. |
-| **Metadata leakage** | Packet header includes source address (2 bytes) and destination address (2 bytes). Observable by all relay nodes and passive listeners. 16-bit addresses are short but still identifying. |
-| **Key management** | Users manually broadcast "adverts" containing their name, position, and public key. No automatic key exchange: user-initiated. |
+| **Identity** | Ed25519 key pair per node. Adverts (name/position/public key) are signed, preventing advert spoofing. |
+| **DM encryption** | Ed25519 keys converted to X25519 for ECDH, then **AES-128-ECB** encrypt-then-MAC with an HMAC-SHA256 truncated to **2 bytes**, zero padding. ECB mode (identical plaintext blocks produce identical ciphertext blocks) and the 2-byte MAC (1-in-65536 forgery) are genuine cryptographic weaknesses. |
+| **Channel/room encryption** | AES-128-ECB with 16-byte PSK + 2-byte truncated MAC. Hashtag channels derive keys from the channel name (SHA-256("#name")[0:16]), so they are effectively public. Room servers are BBS-style store-and-forward spaces with history push. |
+| **Forward secrecy** | None: deterministic per-contact shared secret, no ratcheting or ephemeral keys. |
+| **Metadata leakage** | On-air source/destination are 1-byte public-key-prefix hashes (about 1-in-256 collision), plus the embedded source-route path in DMs. Observable by relays and passive listeners; short hashes give plausible deniability but also enable misdelivery/collision. |
+| **Key management** | Users broadcast signed "adverts" carrying name, position, and public key; contacts are added manually per node. No automatic rotation. |
 
-**Note:** MeshCore's crypto documentation is limited. The codebase uses the `orlp/ed25519` library for identity and ECDH, and custom encrypt-then-MAC for payloads. A V2 protocol spec is planned which may formalize encryption details.
+**Note:** MeshCore now has an official protocol reference at docs.meshcore.io (packet format, payload format, companion/KISS protocols). The best independent crypto analysis is Jack Kingsman's "A Hitchhiker's Guide to MeshCore Cryptography" (Jan 2026), which the MeshCore column above follows.
 
 ### Bramble
 
@@ -122,22 +123,20 @@ Bramble uses **on-demand (reactive) routing** for DMs. Routes are discovered onl
 |---|---|
 | **Channel encryption** | AES-256-GCM (AEAD: provides both confidentiality and integrity). Channel ID is inside the ciphertext, so non-members cannot determine which channel a message belongs to. Keys derive deterministically from the channel passphrase, so a passphrase holder can compute every epoch key. |
 | **DM encryption** | Per-peer end-to-end AES-256-GCM sessions, keyed by a role-symmetric quad-DH X25519 exchange (four X25519 DHs mixed via HKDF-SHA256) with a 7-digit SAS for out-of-band verification (`components/dm_session`). The handshake travels inside DATA envelopes (`app_type = APP_TYPE_KE`); the standalone `KEY_EXCHANGE` packet type was retired from the wire. Other channel members cannot read a DM. |
-| **Forward secrecy** | None. DM session keys are derived once per handshake and never ratcheted (rekey requires a new handshake). Channel epoch keys derive from the previous epoch's key, and everything derives from the passphrase, so a passphrase holder can compute every epoch. |
+| **Forward secrecy** | None. DM session keys are derived once per handshake and never ratcheted (rekey requires a new handshake). Channel epoch keys derive from the previous epoch's key, and everything derives from the passphrase, so a passphrase holder can compute every epoch. All three projects lack forward secrecy. |
 | **Metadata leakage** | The cleartext header carries the destination address, packet id, and flags, and DATA packets carry a cleartext 4-byte source address plus a relay-mutable prev_hop. RREQ sources are pseudonymized per query; channel ID is inside the ciphertext; LOCATION ciphertext is padded to a fixed size so it does not leak the sharing tier. |
-| **Key management** | Auto-generated X25519 identity on first boot. No automatic key rotation; a channel epoch mechanism exists, and receivers catch up across epoch advances via rate-limited trial decryption. |
+| **Key management** | Auto-generated identity on first boot. No automatic key rotation; a channel epoch mechanism exists, and receivers catch up across epoch advances via rate-limited trial decryption. |
 | **Authentication** | Channel/DM payloads: the AES-GCM auth tag (a channel tag is producible by any channel-key holder; a DM tag requires the per-peer session key). Control plane and DATA (RREP, RERR, ACK, delivery receipt, beacon, plus DATA's `auth_hmac`): network-key HMAC, verified by relays before acting. Residual: forgeable by any network-key insider. There is no public-PSK fallback: an unprovisioned node is inert (fail-closed) and authenticates nothing until a per-fleet key is provisioned. RREQ itself carries no MAC (a broadcast route request has no pre-shared per-flow context). |
 
 ### Summary
 
-Bramble's privacy and authentication posture is ambitious relative to Meshtastic; relative to MeshCore (which already has per-node keys and end-to-end DMs) the edge is narrower. Distinct points:
+Bramble's crypto edge over Meshtastic channels (AEAD vs unauthenticated CTR) is unchanged. The corrected MeshCore picture (AES-128-ECB, 2-byte truncated MACs, guessable hashtag-channel keys) actually **widens** Bramble's payload-crypto edge over MeshCore compared to what earlier revisions of this document claimed. Distinct points:
 
-1. **Authenticated traffic, no insecure bootstrap**: DATA and the control plane carry a network-key HMAC that relays verify before acting, so an outsider on a provisioned network cannot forge or replay control/DATA frames. Meshtastic's channel traffic is unauthenticated (any PSK holder can impersonate). There is no public default key: an unprovisioned node is inert (fail-closed) and refuses to emit or accept authenticated frames until a real per-fleet key is provisioned. Residual: a network-key insider can still forge (see [SECURITY-MODEL.md](SECURITY-MODEL.md)).
+1. **Authenticated traffic, no insecure bootstrap**: DATA and the control plane carry a network-key HMAC that relays verify before acting, so an outsider on a provisioned network cannot forge or replay control/DATA frames. Meshtastic's channel traffic is unauthenticated, and MeshCore's payload MACs are 2 bytes. There is no public default key: an unprovisioned node is inert (fail-closed). Residual: a network-key insider can still forge (see [SECURITY-MODEL.md](SECURITY-MODEL.md)).
 2. **Confirmed delivery**: acknowledged tiers report DELIVERED vs FAILED to the sender, a genuine edge over Meshtastic's fire-and-forget at low-to-moderate load. The flooded-confirmation half degrades under high load (airtime scales O(messages x nodes)), so it is not a high-load guarantee.
-3. **End-to-end DMs**: per-peer quad-DH X25519 AES-256-GCM sessions, not channel-key DMs, with DM key continuity against pinned identities (a known peer showing up with a different long-term key is refused, not silently accepted). This is parity-plus with MeshCore and ahead of pre-2.5 Meshtastic; the first-contact window before a peer's attestation is pinned remains TOFU-grade.
-4. **Metadata hygiene**: RREQ source pseudonymization and fixed-size, tiered LOCATION ciphertext. Integrity comes from AEAD (GCM); Meshtastic channels still lack integrity checking. Data packets still carry a cleartext source address.
+3. **End-to-end DMs**: per-peer quad-DH X25519 AES-256-GCM sessions with DM key continuity against pinned identities (a known peer showing up with a different long-term key is refused, not silently accepted). Ahead of MeshCore's AES-128-ECB/2-byte-MAC DMs on payload crypto. Versus Meshtastic: comparable in kind (both have per-node-key E2E DMs); Bramble's AEAD strength and key-continuity gating are ahead, but Meshtastic shipped its six-digit Key Verification UX in 2.7 while Bramble's 7-digit SAS still has no shipped comparison UX.
+4. **Metadata hygiene**: RREQ source pseudonymization and fixed-size, tiered LOCATION ciphertext. Meshtastic sends full source/dest IDs cleartext; MeshCore sends 1-byte key-hash IDs plus explicit source-route paths. Bramble data packets still carry a cleartext 4-byte source address.
 5. **Channel privacy**: Bramble hides which channel a message belongs to. Meshtastic and MeshCore don't.
-
-Versus MeshCore specifically the remaining edge is thin: confirmed broadcast delivery and authenticated-flood membership gating, weighed against MeshCore's more mature ecosystem and more efficient routing.
 
 ### Per-node identity delta (2026-07, honest)
 
@@ -147,14 +146,17 @@ continuity) narrows the MeshCore gap on its historical strong suit:
 MeshCore has per-node Ed25519 keys and signed adverts; Bramble now has
 per-node Ed25519 keys, signed attestations, AND an address that is a hash
 of the signing key, so an insider cannot claim another node's address at
-all (a property MeshCore's MAC-style short IDs do not provide, and
-Meshtastic has nothing comparable: its identities are unauthenticated
-hardware MACs). Stated honestly for an UN-anchored mesh: identities are
-free to mint and Sybil-with-fresh-identities is not closed; Bramble's pins
-are RAM-only (reset on reboot, re-established by TOFU); and Bramble's DM
-first contact remains TOFU-grade until the peer's attestation is pinned.
-The optional trust anchor (next subsection) is what closes Sybil scarcity
-on an anchored mesh; without it, no Sybil-scarcity claim is made.
+all. MeshCore's on-air IDs are 1-byte public-key-prefix hashes: key-derived
+(unlike a raw MAC) but trivially collidable, with no relay-verified
+address-key binding. Meshtastic's node ID remains an unauthenticated
+MAC-derived number on channels, though since 2.5 its nodes do carry
+per-node DM keys with a shipped verification UX (2.7). Stated honestly for
+an UN-anchored Bramble mesh: identities are free to mint and
+Sybil-with-fresh-identities is not closed; Bramble's pins are RAM-only
+(reset on reboot, re-established by TOFU); and Bramble's DM first contact
+remains TOFU-grade until the peer's attestation is pinned. The optional
+trust anchor (next subsection) is what closes Sybil scarcity on an
+anchored mesh; without it, no Sybil-scarcity claim is made.
 
 The mandatory-attestation campaign (2026-07) closes the bootstrap-quorum
 RACE on top of this: the old unbounded "a node holding zero pins trusts
@@ -173,7 +175,7 @@ the trust anchor below.
 
 The trust-anchor campaign (2026-07) adds the piece neither competitor has:
 per-node cryptographic identity WITH explicit, fleet-wide membership
-control. Meshtastic has no per-node identity to govern at all. MeshCore has
+control. Meshtastic has no membership control at all. MeshCore has
 per-node keys and a per-peer contact-list / ACL model, but trust is decided
 locally at each node: there is no membership authority, no Sybil-scarcity
 story, and no way to un-trust a node fleet-wide short of every peer editing
@@ -204,19 +206,19 @@ the free-to-mint identity model above.
 
 ### Meshtastic
 
-- **ACKs:** Optional, per-message. Only for DMs (unicast). No ACK for channel messages.
-- **Retries:** Basic retries (typically 3 attempts). Fixed timing, no exponential backoff.
-- **Flow control:** None. No awareness of downstream congestion.
+- **ACKs:** Optional, per-message, DMs only. No ACK for channel messages.
+- **Retries:** Basic retries. No exponential backoff protocol documented.
+- **Flow control:** None. No backpressure protocol.
 - **Delivery confirmation:** ACK tells sender the message arrived. No relay path information.
-- **Congestion handling:** None built-in. The managed flooding suppression helps somewhat (nodes skip rebroadcast if they hear another node rebroadcasting), but there's no explicit congestion signaling or backpressure.
+- **Congestion handling:** No explicit signaling, but real mitigations shipped: broadcast-interval auto-scaling above 40 online nodes, multi-message batching (2.7.18), transmit-history persistence (2.7.20), and implicit-ACK rebroadcast suppression.
 
 ### MeshCore
 
-- **ACKs:** Supported for unicast messages.
-- **Retries:** Basic retry logic with collision-avoidance delays.
-- **Flow control:** Not documented. Companion nodes not repeating acts as implicit flow control.
-- **Delivery confirmation:** ACK mechanism present.
-- **Congestion handling:** Flood advert intervals reduced to 12h to minimize repeater overhead. No explicit congestion protocol.
+- **ACKs:** Supported for unicast; v1.16 added extended 6-byte ACKs as groundwork for multi-attempt delivery.
+- **Retries:** Basic retry logic with collision-avoidance delays; flood fallback when a source route fails.
+- **Flow control:** None documented. Clients not repeating acts as implicit load limiting.
+- **Delivery confirmation:** ACK mechanism present; delivery reports also feed path learning.
+- **Congestion handling:** No explicit protocol; 47h advert default, flood-hop caps, and operator duty-cycle settings bound background load.
 
 ### Bramble
 
@@ -224,7 +226,7 @@ the free-to-mint identity model above.
 - **Retries:** Exponential backoff with ±25% jitter. Normal: 3 retries from a 2 s base. Critical: 8 retries from a 3 s base. A retry denied by the airtime budget burns the attempt, so a saturated mesh produces a visible FAILED status instead of a zombie pending message.
 - **Flow control:** Designed and component-tested (per-destination sliding window with AIMD), but not yet wired into the live mesh path.
 - **Delivery confirmation:** Critical tier includes delivery receipts with complete relay path: sender passively learns network topology.
-- **Congestion handling:** The dedicated CONGESTION packet type is defined but not yet transmitted or handled. What ships today is indirect: per-tier airtime budgets shed lower-tier traffic first, and control traffic (routing, ACKs) has a reserved budget lane that data load cannot starve.
+- **Congestion handling:** The dedicated CONGESTION packet type was removed unshipped. What ships is indirect: per-tier airtime budgets shed lower-tier traffic first, and control traffic (routing, ACKs) has a reserved budget lane that data load cannot starve.
 
 ---
 
@@ -232,21 +234,21 @@ the free-to-mint identity model above.
 
 ### Meshtastic
 
-**Realistic limit: ~80–100 nodes, ~30 active senders.**
+**Historically quoted ceiling: ~80-100 nodes for usable chat. Now higher with mitigations, but channel flooding remains the bound.**
 
-Every message from every sender generates up to N rebroadcasts. With 100 nodes and 10 messages/minute, that's ~1,000 transmissions/minute. At ~500ms per transmission (SF10), that's 500 seconds of airtime per minute: clearly impossible on a single channel. In practice, with SF7 (faster) and moderate traffic, Meshtastic works well up to ~80 nodes. Beyond that, airtime saturation causes packet loss, delayed delivery, and beacon storms. The v2.6 next-hop routing for DMs significantly helps by reducing DM traffic to O(path_length), but channel messages still flood.
+Channel messages still generate up to N rebroadcasts. The 2.6/2.7 series changed the picture: DMs are next-hop routed (O(path_length)), broadcast intervals auto-scale above 40 online nodes, messages batch, and Zero-Cost Hops let router backbones span without consuming hop budget. DEF CON 33 (Aug 2025) ran 2,000+ nodes on one network: heavily congested, but it functioned, which is a real-world stress datapoint no other LoRa mesh project has. Official guidance moves large meshes off LongFast to faster presets. The lack of per-node airtime budgeting still means chatty nodes degrade the channel for everyone.
 
 ### MeshCore
 
-**Realistic limit: Similar to Meshtastic, possibly slightly better.**
+**Bounded by repeater population, not total devices.**
 
-MeshCore's role system (companions don't repeat) means the effective flooding fan-out is limited to repeater nodes only. In a network with 100 devices where 80 are companions and 20 are repeaters, a message generates ~20 rebroadcasts instead of ~100. This is a meaningful practical improvement. However, discovery traffic still scales O(N_repeaters); data to known destinations follows the learned direct path. MeshCore's 12-hour flood advert interval also helps reduce background noise.
+Only repeaters and room servers forward, so a 100-device mesh with 20 repeaters floods through 20 nodes, not 100. DMs follow embedded source routes (one transmission per path hop). The 47-hour default advert interval keeps background discovery load minimal. Large regional meshes (UK, Netherlands, US metros, Australia) run on this model today. No formal published scale ceiling; congestion behavior at high simultaneous-sender counts is not documented.
 
 ### Bramble
 
 Reactive DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. Discovery uses an expanding ring (hop limit 4 first, 8 on retries); routes up to 8 hops deep are usable end-to-end. The token-bucket airtime budget caps each node's transmission time with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages flood (hop-limited, multi-hop), and the opt-in flood transport (`s_flood_transport`, default off) can route DMs the same way when enabled, trading airtime for reach.
 
-**Validation status:** scale behavior has not been validated in a real-world deployment; no multi-node field test has been run. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT) and is the source of truth. The honest July baseline ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md), which supersedes the June numbers for planning): about 95% message delivery at 10 nodes, collapsing to ~12% at 50, ~10% at 100, and 0% at 200. A single SF10 channel saturates under control-plane load (RREQ discovery storms amplifying a beacon floor) well before traffic flows, and the 200-node grid also spans 11 to 17 hops, beyond the 8-hop route ceiling. The earlier collision-free "100% at 200 nodes" numbers were retracted as sim artifacts. The design's scaling argument is a goal under active investigation, not a demonstrated property.
+**Validation status:** scale behavior has not been validated in a real-world deployment; no multi-node field test has been run. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT) and is the source of truth. The honest July baseline ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md), which supersedes the June numbers for planning): about 95% message delivery at 10 nodes, collapsing to ~12% at 50, ~10% at 100, and 0% at 200. A single SF10 channel saturates under control-plane load (RREQ discovery storms amplifying a beacon floor) well before traffic flows, and the 200-node grid also spans 11 to 17 hops, beyond the 8-hop route ceiling. The earlier collision-free "100% at 200 nodes" numbers were retracted as sim artifacts. The design's scaling argument is a goal under active investigation, not a demonstrated property. Both competitors have real-world scale evidence Bramble lacks.
 
 ---
 
@@ -254,10 +256,10 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 
 | Resource | Meshtastic | MeshCore | Bramble |
 |---|---|---|---|
-| **RAM** | ~100–200 KB (varies by platform and features enabled: BLE, WiFi, GPS all add overhead) | Lightweight: "no dynamic allocation except during setup." Designed for minimal footprint. Exact figures not published. | ~127 KB total (20 KB protocol, 5 KB app, 18 KB RTOS, 84 KB system). 60% headroom on ESP32-S3 (320 KB available). |
-| **Flash** | ~1.5–2 MB (ESP32 with all features) | Compact: prebuilt binaries available for many boards. Size not published. | ~1.75 MB projected (256 KB firmware, 512 KB ESP-IDF, OTA partitions). |
-| **Battery life** | Good with sleep modes. nRF52 boards excel (~days to weeks). ESP32 boards: ~1–3 days typical with screen. | Claims low power. Companion nodes (no repeating) save significant energy. | Designed for ESP32 deep sleep (~10µA). Airtime budgeting inherently conserves battery. No real-world battery data. |
-| **Platform breadth** | ESP32, nRF52, RP2040, Linux: very broad | ESP32, nRF52: growing | ESP32-S3 only: narrow by design |
+| **RAM** | ~100-200 KB (varies by platform and features enabled; unofficial figures, not published) | Lightweight: "no dynamic allocation except during setup." Exact figures not published. | ~127 KB total (20 KB protocol, 5 KB app, 18 KB RTOS, 84 KB system). 60% headroom on ESP32-S3 (320 KB available). |
+| **Flash** | ~1.5-2 MB (ESP32 with all features; unofficial) | Compact: prebuilt binaries for 50+ boards. Size not published. | ~1.75 MB projected (256 KB firmware, 512 KB ESP-IDF, OTA partitions). |
+| **Battery life** | Good with sleep modes. nRF52 boards excel (~days to weeks). ESP32 boards: ~1-3 days typical with screen. | Low power focus; clients never repeat, saving energy. v1.15/1.16 shipped measured ESP repeater and nRF companion power reductions; companion auto-shutdown off external power. | Designed for ESP32 deep sleep (~10µA). Airtime budgeting inherently conserves battery. No real-world battery data. |
+| **Platform breadth** | ESP32, nRF52, RP2040/RP2350, STM32WL, Linux: very broad | ESP32/S3/C3, nRF52, RP2040: 50+ devices | ESP32-S3 only: narrow by design |
 
 ---
 
@@ -265,14 +267,15 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 
 | Aspect | Meshtastic | MeshCore | Bramble |
 |---|---|---|---|
-| **Community size** | Very large (100k+ Discord, active subreddit, many YouTube creators) | Growing (active Discord, community contributors, emerging content creators) | Solo developer project |
-| **Companion apps** | Android, iOS, Web, Python CLI, extensive third-party tools | Android, iOS, Web, NodeJS library, Python CLI | Web companion app, Go SDK, CLI tool |
-| **Hardware support** | Dozens of boards across multiple architectures | ~15+ boards, growing. Web flasher available. | 3 boards (Heltec V3, T-Deck Plus, Heltec V4) |
-| **Documentation** | Excellent. Official docs, community guides, YouTube tutorials. | Growing. FAQ, community site (meshcore.co.uk, localmesh.nl). No formal protocol spec. | Protocol spec, architecture doc, code-verified security model, RPC reference, API docs |
-| **Production readiness** | Yes. Deployed in real emergencies, events, and daily use worldwide. | Early adopter stage. Functional for basic use. Evolving rapidly. | Pre-production. Functional firmware on dev boards, not field-tested at scale. |
-| **Protocol spec** | Documented (mesh-algo page, protobuf definitions) | No formal spec. V2 spec on roadmap. Code is the reference. | Detailed design doc with packet formats, algorithms, pseudocode. |
-| **MQTT/Internet bridge** | Yes, built-in. MQTT integration for internet bridging. | Not documented as a core feature. | Not planned initially. |
-| **Web flasher** | Yes (flasher.meshtastic.org) | Yes (flasher.meshcore.co.uk) | Yes (browser-based flasher in `web-flasher/`, hosted at bramblemesh.org) |
+| **Community size** | Very large (~51k Discord, active subreddit, many YouTube creators) | Large and growing fast (claimed 30,000+ users in 80+ countries, 3.2k GitHub stars, Wikipedia page, regional mesh orgs) | Solo developer project |
+| **Companion apps** | Android, iOS, Web, Python CLI, extensive third-party tools | Android, iOS, Web, Windows/Mac/Linux desktop (closed-source freemium), meshcore.js, Python `meshcore-cli`, Home Assistant integration | Web companion app, Electron desktop app, Go SDK, CLI tool |
+| **Hardware support** | Dozens of boards across six architectures | 50+ boards, 80+ binaries per release, nRF OTA updates | 3 boards (Heltec V3, T-Deck Plus, Heltec V4) |
+| **Documentation** | Excellent. Official docs, community guides, YouTube tutorials. | Official docs site (docs.meshcore.io) with a protocol reference (packet/payload/companion/KISS); community sites; independent crypto analysis exists. | Protocol spec, architecture doc, code-verified security model, RPC reference, API docs |
+| **Governance / licensing** | GPL firmware; Meshtastic LLC holds trademark; Meshtastic Solutions Inc. (2025) provides commercial backing and vendor partnerships. | Core firmware MIT (copyright Scott Powell / rippleradios.com). April 2026 split: trademark dispute + undisclosed AI-generated code; Kirby's proprietary MeshOS fork (paid per-device licenses) now competes from meshcore.co.uk. Companion apps closed-source freemium. | MIT-style single-owner repo. No trademark, no commercial entity. |
+| **Production readiness** | Yes. Deployed in real emergencies, events, and daily use worldwide; 2,000+ node stress event. | Shipping for daily use in large regional meshes; vendors preload it on hardware. Less battle-tested than Meshtastic at extreme scale. | Pre-production. Functional firmware on dev boards, not field-tested at scale. |
+| **Protocol spec** | Documented (mesh-algo page, protobuf definitions) | Official protocol reference at docs.meshcore.io (no RFC-style versioned spec) | Detailed design doc with packet formats, algorithms, pseudocode. |
+| **MQTT/Internet bridge** | Yes, built-in; note the project-hosted public broker was locked down in 2024 (no all-topic subscription, position precision limited). Self-hosted brokers unaffected. | Not a core feature; community tools (MeshMonitor, meshcore-ha, LetsMesh) fill the gap. | Not planned initially. |
+| **Web flasher** | Yes (flasher.meshtastic.org) | Yes (flasher.meshcore.io; the .co.uk flasher belongs to the MeshOS fork post-split) | Yes (browser-based flasher in `web-flasher/`, hosted at bramblemesh.org) |
 
 ---
 
@@ -280,42 +283,57 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 
 ### Where Bramble Aims to Improve
 
-1. **Routing scalability, honestly bounded.** Reactive routing (the default) keeps DM traffic at O(path_length) instead of O(N), the core architectural bet. The payoff has not materialized at scale yet: a single SF10 channel still saturates on control traffic by ~50 nodes (see Scalability above), so this is a design argument under investigation, not a demonstrated win. An opt-in flood transport trades that argument for best-effort reach within a hop budget.
+1. **Routing scalability, honestly bounded.** Reactive routing (the default) keeps DM traffic at O(path_length) instead of O(N), the core architectural bet. Two honest caveats. First, the payoff has not materialized at scale yet: a single SF10 channel still saturates on control traffic by ~50 nodes (see Scalability above), so this is a design argument under investigation, not a demonstrated win. Second, the landscape moved: Meshtastic DMs are next-hop routed since 2.6 and MeshCore DMs are source-routed, so O(path_length) unicast is no longer a differentiator by itself. What remains distinct is the maintained bidirectional route cache, route-forwarded ACKs, and budget-gated control plane.
 
-2. **Privacy by design.** Bramble's pseudonymized RREQ sources and encrypted channel IDs represent a meaningfully different privacy posture; [SECURITY-MODEL.md](SECURITY-MODEL.md) documents exactly what is and is not hidden today. Meshtastic and MeshCore carry source and destination in plaintext headers.
+2. **Privacy by design.** Bramble's pseudonymized RREQ sources and encrypted channel IDs represent a meaningfully different privacy posture; [SECURITY-MODEL.md](SECURITY-MODEL.md) documents exactly what is and is not hidden today. Meshtastic carries full source/destination IDs in plaintext headers; MeshCore carries 1-byte key-hash IDs plus explicit source-route paths.
 
-3. **Airtime economics.** The token-bucket airtime budget with per-tier sub-budgets, enforced at a single TX choke point with real time-on-air costing, is unique among the three. Neither Meshtastic nor MeshCore has any formal airtime management. In a large mesh, this is the difference between graceful degradation and chaotic congestion collapse.
+3. **Airtime economics.** The token-bucket airtime budget with per-tier sub-budgets, enforced at a single TX choke point with real time-on-air costing, remains the most comprehensive airtime model of the three. But the absolute claim is retired: Meshtastic enforces regional duty-cycle cutoffs and auto-scales broadcast intervals under load, and MeshCore ships operator duty-cycle settings and flood caps. Bramble's remaining distinction is per-message costing against per-tier budgets with a reserved control-plane lane, not the existence of airtime controls.
 
-4. **Reliability tiers.** Three tiers with different retry strategies, end-to-end ACKs, and path-tracing delivery receipts give applications fine-grained control (sliding-window flow control and congestion signaling were removed unshipped). Meshtastic's "optional ACK with fixed retries" is a blunt instrument by comparison.
+4. **Reliability tiers.** Three tiers with different retry strategies, end-to-end ACKs, and path-tracing delivery receipts give applications fine-grained control (sliding-window flow control and congestion signaling were removed unshipped). Meshtastic's "optional ACK with fixed retries" is a blunt instrument by comparison; MeshCore's extended ACKs (v1.16) are early groundwork in this direction.
 
-5. **Authenticated traffic and AEAD payloads.** AES-256-GCM gives channel and DM payloads confidentiality and integrity in one pass (Meshtastic's AES256-CTR channels lack integrity entirely), and a network-key HMAC on DATA and the control plane lets relays reject forged or replayed frames from outsiders. The honest limit: a network-key insider can still forge (narrowed by per-node identity, not by provisioning).
+5. **Authenticated traffic and AEAD payloads.** AES-256-GCM gives channel and DM payloads confidentiality and integrity in one pass. Meshtastic's AES256-CTR channels lack integrity entirely; MeshCore's AES-128-ECB with 2-byte truncated MACs is weak against both pattern leakage and forgery. A network-key HMAC on DATA and the control plane lets relays reject forged or replayed frames from outsiders. The honest limit: a network-key insider can still forge (narrowed by per-node identity, not by provisioning).
 
 6. **Confirmable delivery.** Acknowledged tiers report DELIVERED vs FAILED rather than fire-and-forget. This is a real edge at low-to-moderate load; the flooded-confirmation half degrades under high message load (airtime scales O(messages x nodes)), so it is bounded, not a high-load guarantee.
 
-7. **End-to-end DMs.** Per-peer quad-DH X25519 AES-256-GCM sessions, so channel members cannot read each other's DMs (parity with MeshCore, ahead of pre-2.5 Meshtastic).
+7. **End-to-end DMs.** Per-peer quad-DH X25519 AES-256-GCM sessions, so channel members cannot read each other's DMs. Stronger payload crypto than MeshCore's AES-128-ECB DMs; comparable in kind to Meshtastic's PKC DMs, with the honest note that Meshtastic shipped its key-verification UX (2.7) while Bramble's SAS UX has not shipped.
 
-8. **No insecure bootstrap, no public default key (greenfield property).** Bramble ships with no well-known default network key: an unprovisioned node is inert (fail-closed) and refuses to emit or accept a single authenticated control/DATA frame until it holds a real per-fleet key, either minted on-device as a fleet founder key or pasted/joined out of band. This is a structural advantage a greenfield project can take that Meshtastic cannot: Meshtastic ships a well-known public default channel/PSK ("Bramble Common" of that ecosystem) that its entire installed base relies on for zero-config first contact, so it must keep that insecure-by-construction default for backward compatibility. Honest boundaries: (a) this is control-plane *authentication*, not confidentiality of Bramble's own opt-in public broadcast channel (`components/channel/public_channel.c`), which is a deliberate unauthenticated-to-everyone feature with a public key and is NOT a control-plane default; and (b) it excludes non-members, not misbehaving members: a network-key insider can still forge control MACs (addressed by per-node Ed25519 identity, not by this provisioning work). See [SECURITY-MODEL.md](SECURITY-MODEL.md).
+8. **No insecure bootstrap, no public default key (greenfield property).** Bramble ships with no well-known default network key: an unprovisioned node is inert (fail-closed) and refuses to emit or accept a single authenticated control/DATA frame until it holds a real per-fleet key, either minted on-device as a fleet founder key or pasted/joined out of band. This is a structural advantage a greenfield project can take that Meshtastic cannot: Meshtastic ships the well-known public "LongFast" default channel key (`AQ==`) that its entire installed base relies on for zero-config first contact, so it must keep that insecure-by-construction default for backward compatibility. (MeshCore's hashtag channels have the same class of problem: keys derived from guessable channel names.) Honest boundaries: (a) this is control-plane *authentication*, not confidentiality of Bramble's own opt-in public broadcast channel (`components/channel/public_channel.c`), which is a deliberate unauthenticated-to-everyone feature with a public key and is NOT a control-plane default; and (b) it excludes non-members, not misbehaving members: a network-key insider can still forge control MACs (addressed by per-node Ed25519 identity, not by this provisioning work). See [SECURITY-MODEL.md](SECURITY-MODEL.md).
 
 ### Where Bramble Is at a Disadvantage
 
-1. **It's early.** Meshtastic has thousands of deployed nodes, years of real-world testing, and a thriving community. MeshCore is shipping firmware with a growing user base. Bramble has working firmware on 3 boards but no field deployments or community yet. The gap between a working prototype and a production mesh network is substantial.
+1. **It's early.** Meshtastic has thousands of deployed nodes, years of real-world testing, and a thriving community. MeshCore is past the early-adopter stage: v1.16, 50+ devices, tens of thousands of users, and vendors preloading it on hardware. Bramble has working firmware on 3 boards but no field deployments or community. The gap between a working prototype and a production mesh network is substantial, and it widened over the last year.
 
-2. **Reactive routing complexity.** AODV-style routing is well-understood in theory but tricky in practice over lossy LoRa links. Route discovery adds latency to the first message. Route maintenance (broken links, stale routes) adds implementation complexity. Meshtastic's managed flooding "just works": it's stupid but robust.
+2. **Reactive routing complexity.** AODV-style routing is well-understood in theory but tricky in practice over lossy LoRa links. Route discovery adds latency to the first message. Route maintenance (broken links, stale routes) adds implementation complexity. Meshtastic's managed flooding "just works", and MeshCore's source-routing keeps per-node state minimal (the sender carries the path).
 
-3. **Hardware breadth.** ESP32-S3 only (3 boards). No nRF52 (which has the best battery life in the LoRa ecosystem). No Linux. Meshtastic runs on everything.
+3. **Hardware breadth.** ESP32-S3 only (3 boards). No nRF52 (which has the best battery life in the LoRa ecosystem, and which both competitors support with OTA). No Linux. Meshtastic runs on six architectures; MeshCore ships 80+ binaries.
 
-4. **Small ecosystem.** Web app, Go SDK, and CLI exist, but no mobile apps, no MQTT bridge, no community contributors. Building an ecosystem from one developer is a significant challenge.
+4. **Small ecosystem.** Web app, desktop app, Go SDK, and CLI exist, but no mobile apps, no MQTT bridge, no community contributors. Building an ecosystem from one developer is a significant challenge.
 
-5. **Single developer.** Both Meshtastic and MeshCore benefit from community contributions and diverse perspectives. A solo project carries bus-factor risk and limited testing capacity.
+5. **Single developer.** Both Meshtastic and MeshCore benefit from community contributions and diverse perspectives (though MeshCore's 2026 governance split shows multi-party projects carry their own risks). A solo project carries bus-factor risk and limited testing capacity.
 
 6. **Channel traffic and flooded confirmation are airtime-bound.** Channel/group messages relay multi-hop by controlled flooding, so the reactive routing advantage applies mainly to DMs. The flood-based confirmed-delivery mode's airtime scales as O(messages x nodes): it holds confirmation only at low-to-moderate load and collapses under sustained high load. That load ceiling is close to fundamental to flooding, not a tuning bug.
 
-7. **First-message latency.** Route discovery takes time: potentially 5–15 seconds for the RREQ/RREP round trip before the first DM can be sent. Meshtastic's flooding delivers (or drops) immediately. For time-sensitive first contact, this matters.
+7. **First-message latency.** Route discovery takes time: potentially 5-15 seconds for the RREQ/RREP round trip before the first DM can be sent. Meshtastic's flooding delivers (or drops) immediately; a MeshCore sender with a known path transmits immediately too. For time-sensitive first contact, this matters.
 
 ### Honest Assessment
 
-Bramble's design addresses real, well-understood limitations of flooding-based mesh protocols. The privacy model is genuinely novel for the LoRa mesh space. The airtime budget system is sound engineering. If implemented correctly, it would handle larger meshes more gracefully than either Meshtastic or MeshCore.
+Bramble's design addresses real, well-understood limitations of flooding-based mesh protocols. The privacy model is genuinely novel for the LoRa mesh space, the payload crypto is the strongest of the three, and the airtime budget system is sound engineering. If implemented correctly, it would handle contention more gracefully than either competitor.
 
-But "if implemented correctly" is doing a lot of heavy lifting. Meshtastic's managed flooding has survived years of contact with reality that Bramble's running-but-young firmware has not. MeshCore's simplicity is a feature, not a bug: simple systems fail in predictable ways.
+But "if implemented correctly" is doing a lot of heavy lifting, and the competition did not stand still: Meshtastic shipped next-hop DM routing, zero-cost router backbones, congestion auto-scaling, and a DM key-verification UX; MeshCore went from a promising newcomer to a shipping ecosystem with tens of thousands of users. Several of Bramble's original differentiators (per-hop unicast routing, "any airtime management at all") are now matters of degree rather than kind. The durable differentiators are the authenticated fail-closed control plane, AEAD everywhere, channel-ID privacy, confirmed delivery, and the trust-anchor membership model.
 
 The most likely path to value: grow the testbed beyond 3 boards and prove the reactive routing, privacy-preserving RREQ, and airtime budgets work at scale in a 20+ node deployment. That empirical validation will close the gap between working firmware and a credible alternative.
+
+---
+
+## Key sources (verified 2026-07-08)
+
+- Meshtastic releases: https://github.com/meshtastic/firmware/releases (2.7.26 Beta, 2026-06-24)
+- Meshtastic mesh algorithm and encryption docs: https://meshtastic.org/docs/overview/mesh-algo/ , https://meshtastic.org/docs/overview/encryption/
+- Zero-Cost Hops: https://meshtastic.org/blog/zero-cost-hops-favorite-routers/
+- CVE-2025-52464: https://github.com/meshtastic/firmware/security/advisories/GHSA-gq7v-jr8c-mfr7
+- Channel AEAD issue (open): https://github.com/meshtastic/firmware/issues/4030
+- MeshCore repo and releases: https://github.com/meshcore-dev/MeshCore (v1.16.0, 2026-06-06)
+- MeshCore official docs: https://docs.meshcore.io/
+- MeshCore v1.16.0 / v1.15.0 notes: https://blog.meshcore.io/2026/06/06/release-1-16-0 , https://blog.meshcore.io/2026/04/19/release-1-15-0
+- MeshCore governance split: https://blog.meshcore.io/2026/04/23/the-split
+- MeshCore crypto analysis: https://jacksbrain.com/2026/01/a-hitchhiker-s-guide-to-meshcore-cryptography/

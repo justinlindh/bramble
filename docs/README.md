@@ -14,24 +14,25 @@ This index separates **operator/developer reference docs** from **historical pla
 - [network-key-provisioning.md](network-key-provisioning.md): generating, distributing, and verifying the control-plane network key across a fleet
 - [api/rpc.md](api/rpc.md): RPC method reference and wire-format notes
 - [COMPARISON.md](COMPARISON.md): comparison with Meshtastic and MeshCore
-- [results/simulation-2026-06.md](results/simulation-2026-06.md): measured scale results under the simulator collision model
+- [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md): current measured scale results (supersedes [results/simulation-2026-06.md](results/simulation-2026-06.md))
 
 ## Hardware & board bring-up
 
-- [heltec-v4-gnss-bringup.md](heltec-v4-gnss-bringup.md)
-- [tdeck-plus-display-notes.md](tdeck-plus-display-notes.md)
-- [heltec-v4-pinmap.md](heltec-v4-pinmap.md)
+- Board pin maps live in code: `main/boards/*.h` (source of truth)
+- [BUILDING.md](BUILDING.md): board-aware build/flash/monitor
+- Historical bring-up notes (pinmap research, GNSS bring-up, display debugging) are in [archive/](archive/)
 
 ## Operations / runbooks
 
 - [ota-rollout.md](ota-rollout.md)
 - [design/ota-signing.md](design/ota-signing.md): signed OTA trust model, key infrastructure, and rotation
 - [runbooks/ota-publish-endpoint-runbook.md](runbooks/ota-publish-endpoint-runbook.md)
-- [runbooks/delivery-event-persistence-e2e-validation.md](runbooks/delivery-event-persistence-e2e-validation.md)
 
 ## Webapp docs
 
 - [webapp/chat.md](webapp/chat.md)
+- [webapp/desktop.md](webapp/desktop.md): Electron desktop app (install, connect, Nearby nodes)
+- [../webapp/README.md](../webapp/README.md): webapp dev/build workflow and packaging
 
 ## Testing checklists
 

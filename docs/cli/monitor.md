@@ -29,5 +29,9 @@ append-only timeline events.
 
 ```bash
 # Monitor only broadcast delivery notifications and archive raw output
-bramble monitor --events bramble.onBroadcastDelivery | tee broadcast-telemetry.log
+bramble monitor --events broadcast-delivery | tee broadcast-telemetry.log
 ```
+
+`--events` takes short event names (`message`, `ack`, `neighbor`,
+`broadcast-delivery`), not RPC method names. A separate `--topic` flag
+filters topic streams (`wifi,gps,mesh,location,traffic`).
