@@ -2,6 +2,9 @@
 #include "airtime_budget.h"
 #include "scr_settings.h"
 #include "theme/bramble_theme.h"
+#include "ui_confirm.h"
+#include "esp_app_desc.h"
+#include "ui_toast.h"
 #include "display.h"
 #include "keyboard.h"
 #include "audio.h"
@@ -361,12 +364,18 @@ static void location_interval_changed_cb(lv_event_t* e) {
     location_ui_save_state(&s_loc_state);
 }
 
-static void location_panic_off_cb(lv_event_t* e) {
-    (void)e;
+static void do_panic_off(void* user_data) {
+    (void)user_data;
     location_ui_apply_action(&s_loc_state, LOCATION_UI_ACTION_PANIC_OFF, 0);
     location_ui_save_state(&s_loc_state);
     if (s_loc_share_sw)
         lv_obj_clear_state(s_loc_share_sw, LV_STATE_CHECKED);
+    ui_toast_show("Location sharing off");
+}
+
+static void location_panic_off_cb(lv_event_t* e) {
+    (void)e;
+    ui_confirm_show("Turn off all location sharing?", "Panic Off", do_panic_off, NULL);
 }
 
 /* ── Peer targets section builder ───────────────────────────────────── */
@@ -521,32 +530,40 @@ static void build_loc_peer_targets_section(lv_obj_t* cont, lv_group_t* g) {
 /* Store dropdown reference so the apply button can read it */
 static lv_obj_t* s_conn_dropdown = NULL;
 
+static void do_apply_conn_mode(void* user_data) {
+    (void)user_data;
+    if (!s_conn_dropdown)
+        return;
+    conn_mode_t new_mode = (conn_mode_t)lv_dropdown_get_selected(s_conn_dropdown);
+    conn_mode_set(new_mode);
+    ESP_LOGW(TAG, "Connectivity mode set to %d, rebooting...", (int)new_mode);
+    esp_restart();
+}
+
 static void conn_apply_cb(lv_event_t* e) {
     (void)e;
     if (!s_conn_dropdown)
         return;
 
-    uint16_t sel = lv_dropdown_get_selected(s_conn_dropdown);
-    conn_mode_t new_mode = (conn_mode_t)sel;
-    conn_mode_t cur_mode = conn_mode_get();
-
-    if (new_mode == cur_mode) {
-        ESP_LOGI(TAG, "Connectivity mode unchanged (%d) — skipping reboot", (int)new_mode);
+    conn_mode_t new_mode = (conn_mode_t)lv_dropdown_get_selected(s_conn_dropdown);
+    if (new_mode == conn_mode_get()) {
+        ui_toast_show("Mode unchanged");
         return;
     }
-
-    /* Persist before reboot */
-    conn_mode_set(new_mode);
-    ESP_LOGW(TAG, "Connectivity mode set to %d — rebooting...", (int)new_mode);
-    esp_restart();
+    ui_confirm_show("Switch connectivity mode and reboot?", "Apply", do_apply_conn_mode, NULL);
 }
 
 /* ── Reboot ──────────────────────────────────────────────────────────── */
 
-static void reboot_cb(lv_event_t* e) {
-    (void)e;
+static void do_reboot(void* user_data) {
+    (void)user_data;
     ESP_LOGW(TAG, "Rebooting by user request...");
     esp_restart();
+}
+
+static void reboot_cb(lv_event_t* e) {
+    (void)e;
+    ui_confirm_show("Reboot the device?", "Reboot", do_reboot, NULL);
 }
 
 /* ── Helper: labeled setting row ─────────────────────────────────────── */
@@ -738,12 +755,15 @@ static void name_edit_save_cb(lv_event_t* e) {
             if (s_name_label)
                 lv_label_set_text(s_name_label, new_name);
             ESP_LOGI(TAG, "Node name updated to: %s", new_name);
+            ui_toast_show("Name saved");
         } else {
             ESP_LOGW(TAG, "Failed to persist node name");
+            ui_toast_show("Save failed");
         }
+        name_edit_close();
+    } else {
+        ui_toast_show("Name required"); /* keep the modal open */
     }
-
-    name_edit_close();
 }
 
 static void name_edit_cb(lv_event_t* e) {
@@ -856,6 +876,7 @@ static void radio_save_and_apply(void) {
     int rc = radio_reconfigure(&cfg);
     if (rc != 0) {
         ESP_LOGE(TAG, "radio_reconfigure failed");
+        ui_toast_show("Radio apply failed");
         return;
     }
 
@@ -872,6 +893,7 @@ static void radio_save_and_apply(void) {
     }
     ESP_LOGI(TAG, "Radio config saved: SF%u BW%lu TX%d CR4/%u", cfg.sf, (unsigned long)cfg.bw_hz,
              cfg.tx_power, cfg.coding_rate);
+    ui_toast_show("Radio settings applied");
 }
 
 static void radio_tx_changed_cb(lv_event_t* e) {
@@ -1035,15 +1057,19 @@ static void channel_add_save_cb(lv_event_t* e) {
     const char* name = lv_textarea_get_text(s_ch_name_ta);
     const char* psk = s_ch_psk_ta ? lv_textarea_get_text(s_ch_psk_ta) : NULL;
 
-    if (!name || name[0] == '\0')
-        return;
+    if (!name || name[0] == '\0') {
+        ui_toast_show("Channel name required");
+        return; /* keep the modal open for correction */
+    }
 
     size_t psk_len = (psk && psk[0]) ? strlen(psk) : 0;
     int idx = mesh_add_channel(name, psk_len > 0 ? (const uint8_t*)psk : NULL, psk_len);
     if (idx >= 0) {
         ESP_LOGI(TAG, "Channel '%s' added at index %d", name, idx);
+        ui_toast_show("Channel created");
     } else {
         ESP_LOGE(TAG, "Failed to add channel '%s'", name);
+        ui_toast_show("Failed to add channel");
     }
     channel_add_close();
     channel_refresh_list();
@@ -1132,21 +1158,29 @@ static void channel_add_open_cb(lv_event_t* e) {
     }
 }
 
-static void channel_remove_cb(lv_event_t* e) {
-    int index = (int)(intptr_t)lv_event_get_user_data(e);
+static void do_remove_channel(void* user_data) {
+    int index = (int)(intptr_t)user_data;
     int rc = mesh_remove_channel(index);
     if (rc == 0) {
         ESP_LOGI(TAG, "Channel %d removed", index);
+        ui_toast_show("Channel removed");
     } else {
         ESP_LOGE(TAG, "Failed to remove channel %d", index);
+        ui_toast_show("Remove failed");
     }
     channel_refresh_list();
+}
+
+static void channel_remove_cb(lv_event_t* e) {
+    int index = (int)(intptr_t)lv_event_get_user_data(e);
+    ui_confirm_show("Remove this channel?", "Remove", do_remove_channel, (void*)(intptr_t)index);
 }
 
 static void channel_set_default_cb(lv_event_t* e) {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
     mesh_set_default_channel(index);
     ESP_LOGI(TAG, "Default channel set to %d", index);
+    ui_toast_show("Default channel set");
     channel_refresh_list();
 }
 
@@ -1666,7 +1700,7 @@ void scr_settings_create(bramble_layout_t* layout) {
     /* ── Version ── */
     lv_obj_t* ver_row = create_setting_row(cont, "Version");
     lv_obj_t* ver_val = lv_label_create(ver_row);
-    lv_label_set_text(ver_val, "0.9.1-tdeck");
+    lv_label_set_text(ver_val, esp_app_get_description()->version);
     lv_obj_set_style_text_color(ver_val, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(ver_val, &lv_font_montserrat_12, 0);
     lv_obj_align(ver_val, LV_ALIGN_RIGHT_MID, 0, 0);

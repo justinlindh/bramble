@@ -180,6 +180,10 @@ uint8_t mesh_get_flood_hop_limit(void);
  */
 const char* mesh_get_node_name(void);
 
+/* Network wall clock for display. Returns true and writes epoch ms only
+ * when mesh timesync is synchronized. */
+bool mesh_get_network_time_ms(int64_t* out_ms);
+
 /**
  * Get the local identity address and public key.
  * Returns 0 on success, -1 if identity not ready.
