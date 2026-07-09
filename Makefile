@@ -35,6 +35,21 @@ package-android: ## Sync webapp into the Android shell repo and build the APK
 
 package-all: package-linux package-android ## Everything installable (win excluded; see package-win)
 
+.PHONY: flash-fleet mirror-github
+
+flash-fleet: ## Flash every connected bench node (auto-applies the V3 --encrypt rule)
+	bash scripts/flash-fleet.sh build
+
+# Mirrors are manual-refresh; Gitea stays canonical. bramble-meta is exempt.
+MIRROR_REPOS ?= bramble bramble-android bramble-go bramble-cli bramblemesh.org-site
+mirror-github: ## Force-push all family repos to their private GitHub mirrors
+	@for r in $(MIRROR_REPOS); do \
+		echo "== $$r =="; \
+		git -C $(HOME)/src/$$r fetch -q origin && \
+		git -C $(HOME)/src/$$r push --force github 'refs/remotes/origin/*:refs/heads/*' && \
+		git -C $(HOME)/src/$$r push --force github --tags; \
+	done
+
 help:
 	@echo "CI parity targets"
 	@echo "  make ci                 # run all local CI parity checks"

@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Serial JSON-RPC client for bench nodes.
+
+Usage:
+  bramble-rpc PORT METHOD [PARAMS_JSON]
+  bramble-rpc /dev/ttyACM1 bramble.getStatus
+  bramble-rpc /dev/ttyACM1 bramble.sendBroadcast '{"text":"hi"}'
+
+Notes (hard-won):
+- Opens with exclusive=True and bounded reads: USB-JTAG ports HANG opens when
+  the chip is wedged, and two readers steal bytes from each other.
+- Matches the response by id AND presence of result/error: the console echoes
+  the request line back, which otherwise parses as a false match.
+- CP2102 ports (ttyUSB*) assert DTR/RTS on open and can reset the board into
+  the bootloader; pass --cp2102 to reset it back into run mode first.
+"""
+import argparse, json, sys, time
+
+try:
+    import serial
+except ImportError:
+    sys.stderr.write(
+        "pyserial not found. Run with an interpreter that has it, e.g.\n"
+        "  ~/.local/share/pipx/venvs/esptool/bin/python scripts/bramble-rpc ...\n")
+    sys.exit(2)
+
+p = argparse.ArgumentParser()
+p.add_argument('port')
+p.add_argument('method')
+p.add_argument('params', nargs='?')
+p.add_argument('--timeout', type=float, default=8.0)
+p.add_argument('--cp2102', action='store_true', help='reset into run mode after open')
+a = p.parse_args()
+
+s = serial.Serial(a.port, 115200, timeout=0.3, exclusive=True)
+if a.cp2102:
+    s.setDTR(False); s.setRTS(True); time.sleep(0.1); s.setRTS(False); time.sleep(4)
+time.sleep(0.3)
+s.reset_input_buffer()
+req = {"jsonrpc": "2.0", "id": 1, "method": a.method}
+if a.params:
+    req["params"] = json.loads(a.params)
+s.write((json.dumps(req) + "\r\n").encode())
+buf = ''
+t0 = time.time()
+while time.time() - t0 < a.timeout:
+    buf += s.read(4096).decode('utf-8', 'replace')
+    for line in buf.splitlines():
+        line = line.strip()
+        if not line.startswith('{'):
+            continue
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get('id') == 1 and ('result' in msg or 'error' in msg):
+            print(json.dumps(msg.get('result', msg.get('error')), indent=2))
+            s.close()
+            sys.exit(0)
+s.close()
+print("timeout: no response", file=sys.stderr)
+sys.exit(1)
