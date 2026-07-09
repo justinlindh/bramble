@@ -264,3 +264,5 @@ void display_set_backlight(uint8_t level) {
     (void)level;
     /* SSD1306 boards don't expose a backlight PWM path. */
 }
+
+uint8_t display_get_backlight(void) { return 255; }

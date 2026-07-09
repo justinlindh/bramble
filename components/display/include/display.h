@@ -61,6 +61,9 @@ void display_power(bool on);
 /** Set backlight brightness via LEDC PWM (0=off, 255=full). */
 void display_set_backlight(uint8_t level);
 
+/** Last level passed to display_set_backlight (255 before any call). */
+uint8_t display_get_backlight(void);
+
 /** Set display contrast (0-255). */
 void display_set_contrast(uint8_t val);
 

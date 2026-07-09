@@ -2,6 +2,7 @@
 #define CHAT_MESSAGE_UI_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "msg_store.h"
 
@@ -26,5 +27,8 @@ typedef struct {
 chat_delivery_badge_t chat_message_delivery_badge(msg_status_t status);
 bool chat_message_has_inline_route_toggle(bool is_outgoing, msg_status_t status,
                                           uint8_t route_hop_count, uint32_t packet_id);
+
+/* Compact age for message bubbles: "now", "5m", "3h", "2d". */
+int chat_format_age(uint32_t age_s, char* buf, size_t buf_len);
 
 #endif

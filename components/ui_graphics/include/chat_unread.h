@@ -10,6 +10,11 @@ extern "C" {
 void chat_unread_mark_for_message(const stored_msg_t* msg);
 int chat_unread_count_for_channel(int channel_idx);
 void chat_unread_clear_for_channel(int channel_idx);
+
+/* DM unread, keyed by peer address (up to 8 tracked peers). */
+int chat_unread_count_for_dm(uint32_t peer_addr);
+void chat_unread_clear_for_dm(uint32_t peer_addr);
+
 void chat_unread_reset(void);
 
 #ifdef __cplusplus

@@ -99,9 +99,7 @@ static void sleep_timer_cb(void* arg) {
 
         /* Save current backlight levels before turning off */
         s_sleep.saved_kbd_backlight = keyboard_get_backlight_percent();
-        /* Note: display backlight is controlled by LEDC PWM but we don't have
-         * a get_backlight() API yet. For now, we assume it's at max (255). */
-        s_sleep.saved_disp_backlight = 255;
+        s_sleep.saved_disp_backlight = display_get_backlight();
 
         /* Turn off display panel and both backlights */
         display_power(false);
