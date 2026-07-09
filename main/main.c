@@ -777,14 +777,14 @@ static void render_screen(ui_state_t* ui) {
             display_draw_text(2, y, line);
             y += LINE_H;
 
-            /* Line 4: antenna warning takes priority over alt/accuracy */
-            if (stats.antenna_warning) {
-                display_draw_text(2, y, "ANTENNA OPEN!");
-            } else {
-                snprintf(line, sizeof(line), "Alt:%dm Acc:%um", pos.altitude_m,
-                         (unsigned)pos.accuracy_m);
-                display_draw_text(2, y, line);
-            }
+            /* Line 4: alt/accuracy. The antenna-open report is suppressed
+             * while a fix is valid: passive antennas (e.g. the L76K's
+             * onboard ceramic patch) draw no bias current and trip the
+             * supervisor permanently even though reception is fine, so with
+             * a fix in hand the warning is noise, not signal. */
+            snprintf(line, sizeof(line), "Alt:%dm Acc:%um", pos.altitude_m,
+                     (unsigned)pos.accuracy_m);
+            display_draw_text(2, y, line);
         } else if (stats.antenna_warning) {
             display_draw_text(2, y, "ANTENNA OPEN!");
             y += LINE_H;
