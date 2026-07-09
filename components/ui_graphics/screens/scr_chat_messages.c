@@ -78,7 +78,7 @@ static void channel_cycle_click_cb(lv_event_t* e) {
 static void back_click_cb(lv_event_t* e) {
     bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
     /* Restore tab bar */
-    lv_obj_clear_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    layout_set_tab_bar_hidden(layout, false);
     /* Restore content area size */
     lv_obj_set_size(layout->content_area, 320, BR_CONTENT_H);
     lv_obj_set_pos(layout->content_area, 0, BR_STATUS_BAR_H);
@@ -485,7 +485,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     }
 
     /* Hide tab bar */
-    lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    layout_set_tab_bar_hidden(layout, true);
 
     /* Expand content area to fill space left by hidden tab bar */
     lv_obj_clean(layout->content_area);

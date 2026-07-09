@@ -3,6 +3,8 @@
 #include "scr_settings.h"
 #include "theme/bramble_theme.h"
 #include "ui_confirm.h"
+#include "ui_focus.h"
+#include "traffic_debug.h"
 #include "esp_app_desc.h"
 #include "ui_toast.h"
 #include "display.h"
@@ -33,6 +35,7 @@ static const char* TAG = "scr_settings";
 /* Get/set node name from mesh — extern since it's in main */
 extern int mesh_set_node_name_persist(const char* name);
 extern const char* mesh_get_node_name(void);
+extern traffic_debug_t* mesh_get_traffic_debug(void);
 extern int mesh_get_identity(uint32_t* addr_out, uint8_t pubkey_out[32]);
 
 /* Mesh state snapshot — mirrored from mesh_task.h to avoid include cycle */
@@ -555,6 +558,16 @@ static void conn_apply_cb(lv_event_t* e) {
 
 /* ── Reboot ──────────────────────────────────────────────────────────── */
 
+static void traffic_debug_changed_cb(lv_event_t* e) {
+    lv_obj_t* sw = lv_event_get_target(e);
+    bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    traffic_debug_t* td = mesh_get_traffic_debug();
+    if (td) {
+        traffic_debug_enable(td, on);
+        ui_toast_show(on ? "Traffic debug on" : "Traffic debug off");
+    }
+}
+
 static void do_reboot(void* user_data) {
     (void)user_data;
     ESP_LOGW(TAG, "Rebooting by user request...");
@@ -631,6 +644,7 @@ static size_t base64url_encode_no_pad(const uint8_t* in, size_t in_len, char* ou
 static void identity_qr_close(void) {
     if (!s_identity_qr_overlay)
         return;
+    ui_focus_pop_modal();
     lv_obj_delete(s_identity_qr_overlay);
     s_identity_qr_overlay = NULL;
 }
@@ -678,6 +692,7 @@ static void identity_qr_open_cb(lv_event_t* e) {
     snprintf(share, sizeof(share), "bramble://node/v1?n=%s&a=%08lX&pk=%s", name_sanitized,
              (unsigned long)addr, pubkey_b64url);
 
+    ui_focus_push_modal();
     lv_obj_t* scr = lv_screen_active();
     s_identity_qr_overlay = lv_obj_create(scr);
     lv_obj_set_size(s_identity_qr_overlay, LV_PCT(100), LV_PCT(100));
@@ -718,7 +733,7 @@ static void identity_qr_open_cb(lv_event_t* e) {
     lv_label_set_text(close_lbl, LV_SYMBOL_LEFT " Back");
     lv_obj_center(close_lbl);
 
-    lv_group_t* g = lv_group_get_default();
+    lv_group_t* g = ui_focus_active_group();
     if (g) {
         lv_group_add_obj(g, close_btn);
         lv_group_focus_obj(close_btn);
@@ -734,6 +749,7 @@ static lv_obj_t* s_name_edit_ta = NULL;
 static void name_edit_close(void) {
     if (!s_name_edit_overlay)
         return;
+    ui_focus_pop_modal();
     lv_obj_delete(s_name_edit_overlay);
     s_name_edit_overlay = NULL;
     s_name_edit_ta = NULL;
@@ -770,6 +786,8 @@ static void name_edit_cb(lv_event_t* e) {
     (void)e;
     if (s_name_edit_overlay)
         return;
+
+    ui_focus_push_modal();
 
     lv_obj_t* scr = lv_screen_active();
     s_name_edit_overlay = lv_obj_create(scr);
@@ -817,7 +835,7 @@ static void name_edit_cb(lv_event_t* e) {
     lv_label_set_text(save_lbl, "Save");
     lv_obj_center(save_lbl);
 
-    lv_group_t* g = lv_group_get_default();
+    lv_group_t* g = ui_focus_active_group();
     if (g) {
         lv_group_add_obj(g, s_name_edit_ta);
         lv_group_add_obj(g, cancel_btn);
@@ -1041,6 +1059,7 @@ static lv_obj_t* s_ch_psk_ta = NULL;
 
 static void channel_add_close(void) {
     if (s_ch_add_overlay) {
+        ui_focus_pop_modal();
         lv_obj_delete(s_ch_add_overlay);
         s_ch_add_overlay = NULL;
         s_ch_name_ta = NULL;
@@ -1084,6 +1103,8 @@ static void channel_add_open_cb(lv_event_t* e) {
     (void)e;
     if (s_ch_add_overlay)
         return;
+
+    ui_focus_push_modal();
 
     lv_obj_t* scr = lv_screen_active();
     s_ch_add_overlay = lv_obj_create(scr);
@@ -1148,7 +1169,7 @@ static void channel_add_open_cb(lv_event_t* e) {
     lv_label_set_text(save_lbl, "Add");
     lv_obj_center(save_lbl);
 
-    lv_group_t* g = lv_group_get_default();
+    lv_group_t* g = ui_focus_active_group();
     if (g) {
         lv_group_add_obj(g, s_ch_name_ta);
         lv_group_add_obj(g, s_ch_psk_ta);
@@ -1371,6 +1392,8 @@ void scr_settings_create(bramble_layout_t* layout) {
     lv_obj_set_style_pad_all(cont, BR_PADDING, 0);
     lv_obj_set_style_pad_row(cont, 4, 0);
 
+    /* Persistent settings widgets (and the cached channel group) bind to the
+     * default group; only the modal builders use ui_focus_active_group(). */
     lv_group_t* g = lv_group_get_default();
 
     /* ── Title ── */
@@ -1704,6 +1727,22 @@ void scr_settings_create(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(ver_val, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(ver_val, &lv_font_montserrat_12, 0);
     lv_obj_align(ver_val, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    /* ── Traffic debug toggle ── */
+    {
+        lv_obj_t* td_row = create_setting_row(cont, "Traffic Debug");
+        lv_obj_t* td_sw = lv_switch_create(td_row);
+        lv_obj_align(td_sw, LV_ALIGN_RIGHT_MID, 0, 0);
+        lv_obj_set_style_bg_color(td_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(td_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(td_sw, BR_COLOR_TEXT, LV_PART_KNOB);
+        traffic_debug_t* td = mesh_get_traffic_debug();
+        if (td && traffic_debug_is_enabled(td))
+            lv_obj_add_state(td_sw, LV_STATE_CHECKED);
+        lv_obj_add_event_cb(td_sw, traffic_debug_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        if (g)
+            lv_group_add_obj(g, td_sw);
+    }
 
     /* ── Reboot button ── */
     lv_obj_t* reboot_btn = lv_btn_create(cont);

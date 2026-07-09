@@ -1,4 +1,5 @@
 #include "ui_confirm.h"
+#include "ui_focus.h"
 #include "theme/bramble_theme.h"
 #include "lvgl.h"
 
@@ -8,7 +9,8 @@ static void* s_user_data = NULL;
 
 static void confirm_close(void) {
     if (s_overlay) {
-        lv_obj_delete(s_overlay); /* deletion drops children from the input group */
+        ui_focus_pop_modal();
+        lv_obj_delete(s_overlay);
         s_overlay = NULL;
     }
 }
@@ -33,6 +35,7 @@ void ui_confirm_show(const char* text, const char* confirm_label, ui_confirm_cb_
         return;
 
     confirm_close();
+    ui_focus_push_modal();
     s_on_confirm = on_confirm;
     s_user_data = user_data;
 
@@ -69,7 +72,7 @@ void ui_confirm_show(const char* text, const char* confirm_label, ui_confirm_cb_
     lv_obj_set_style_pad_all(btn_row, 0, 0);
     lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_group_t* g = lv_group_get_default();
+    lv_group_t* g = ui_focus_active_group();
 
     lv_obj_t* cancel_btn = lv_btn_create(btn_row);
     lv_obj_set_size(cancel_btn, 110, 32);

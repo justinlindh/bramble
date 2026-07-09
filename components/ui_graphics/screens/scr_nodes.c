@@ -6,21 +6,53 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
+#include <string.h>
 
 static const char* TAG = "scr_nodes";
 
 extern void mesh_get_location_state(location_manager_t* out);
 
-/* Per-card context for drill-down click handler */
+/* Per-card context for drill-down click handler and live refresh */
 typedef struct {
     bramble_layout_t* layout;
     neighbor_entry_t neighbor;
     uint32_t now_ms;
+    lv_obj_t* info_lbl;
+    lv_obj_t* bar;
+    lv_obj_t* dot;
 } node_card_ctx_t;
 
-#define MAX_CARD_CTX 16
+#define MAX_CARD_CTX MAX_NEIGHBORS
 static node_card_ctx_t s_card_ctx[MAX_CARD_CTX];
 static int s_card_ctx_count = 0;
+
+/* Live-refresh state (set by scr_nodes_create, cleared on list delete). */
+static lv_obj_t* s_node_list = NULL;
+static lv_obj_t* s_node_title = NULL;
+static bramble_layout_t* s_node_layout = NULL;
+static uint32_t s_node_sig = 0;
+
+static void populate_node_list(void);
+
+/* Cheap membership signature: count plus a rolling hash of addresses.
+ * Changes whenever a neighbor appears or is evicted (even count-stable
+ * swaps), which is when the card list must be rebuilt rather than aged. */
+static uint32_t neighbor_signature(const ui_mesh_state_t* state) {
+    uint32_t sig = (uint32_t)state->neighbors.count;
+    for (int i = 0; i < state->neighbors.count && i < MAX_NEIGHBORS; i++) {
+        sig = sig * 31u + state->neighbors.entries[i].addr;
+    }
+    return sig;
+}
+
+static void format_node_age(char* buf, size_t len, uint32_t age_s) {
+    if (age_s < 60)
+        snprintf(buf, len, "%lus", (unsigned long)age_s);
+    else if (age_s < 3600)
+        snprintf(buf, len, "%lum", (unsigned long)(age_s / 60));
+    else
+        snprintf(buf, len, "%luh", (unsigned long)(age_s / 3600));
+}
 
 static void node_open_cb(lv_event_t* e) {
     node_card_ctx_t* ctx = (node_card_ctx_t*)lv_event_get_user_data(e);
@@ -61,9 +93,10 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_obj_set_style_bg_color(card, BR_COLOR_PRIMARY, LV_STATE_FOCUSED);
     lv_obj_set_style_bg_opa(card, LV_OPA_30, LV_STATE_FOCUSED);
 
-    /* Set up drill-down click handler */
+    /* Set up drill-down click handler + live-refresh context */
+    node_card_ctx_t* ctx = NULL;
     if (s_card_ctx_count < MAX_CARD_CTX) {
-        node_card_ctx_t* ctx = &s_card_ctx[s_card_ctx_count++];
+        ctx = &s_card_ctx[s_card_ctx_count++];
         ctx->layout = layout;
         ctx->neighbor = *n;
         ctx->now_ms = now_ms;
@@ -92,8 +125,9 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     /* Info line */
     char info[48];
     uint32_t age_s = (now_ms - n->last_heard) / 1000;
-    (void)age_s;
-    snprintf(info, sizeof(info), "%ddBm  SNR:%d", n->rssi, n->snr);
+    char age_buf[12];
+    format_node_age(age_buf, sizeof(age_buf), age_s);
+    snprintf(info, sizeof(info), "%ddBm  SNR:%d  %s", n->rssi, n->snr, age_buf);
     lv_obj_t* info_lbl = lv_label_create(card);
     lv_label_set_text(info_lbl, info);
     lv_obj_set_style_text_font(info_lbl, &lv_font_montserrat_12, 0);
@@ -124,27 +158,105 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_obj_set_style_bg_color(dot, online ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(dot, 0, 0);
+
+    if (ctx) {
+        ctx->info_lbl = info_lbl;
+        ctx->bar = bar;
+        ctx->dot = dot;
+    }
+}
+
+static void nodes_refresh_cb(lv_timer_t* timer) {
+    (void)timer;
+    const ui_mesh_state_t* state = ui_shared_mesh_state();
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
+    /* Membership change (peer appeared or was evicted): rebuild the card
+     * list so gone nodes disappear and new ones show up, instead of aging
+     * a stale set forever. */
+    uint32_t sig = neighbor_signature(state);
+    if (sig != s_node_sig) {
+        s_node_sig = sig;
+        populate_node_list();
+        return;
+    }
+
+    for (int c = 0; c < s_card_ctx_count; c++) {
+        node_card_ctx_t* ctx = &s_card_ctx[c];
+        if (!ctx->info_lbl)
+            continue;
+        for (int i = 0; i < state->neighbors.count; i++) {
+            const neighbor_entry_t* n = &state->neighbors.entries[i];
+            if (n->addr != ctx->neighbor.addr)
+                continue;
+            ctx->neighbor = *n;
+            ctx->now_ms = now_ms;
+            uint32_t age_s = (now_ms - n->last_heard) / 1000;
+            char age_buf[12];
+            format_node_age(age_buf, sizeof(age_buf), age_s);
+            lv_label_set_text_fmt(ctx->info_lbl, "%ddBm  SNR:%d  %s", n->rssi, n->snr, age_buf);
+            int pct = (n->rssi + 120) * 100 / 70;
+            if (pct < 0)
+                pct = 0;
+            if (pct > 100)
+                pct = 100;
+            lv_bar_set_value(ctx->bar, pct, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(ctx->dot,
+                                      (age_s < 600) ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
+            break;
+        }
+    }
+}
+
+static void populate_node_list(void) {
+    const ui_mesh_state_t* state = ui_shared_mesh_state();
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    int count = state->neighbors.count;
+
+    lv_obj_clean(s_node_list);
+    s_card_ctx_count = 0;
+    memset(s_card_ctx, 0, sizeof(s_card_ctx));
+
+    char title_buf[32];
+    snprintf(title_buf, sizeof(title_buf), "Nodes (%d peer%s)", count, count != 1 ? "s" : "");
+    lv_label_set_text(s_node_title, title_buf);
+
+    if (count == 0) {
+        lv_obj_t* empty = lv_label_create(s_node_list);
+        lv_label_set_text(empty, "No peers discovered yet.\nWaiting for beacons...");
+        lv_obj_set_style_text_color(empty, BR_COLOR_TEXT_SEC, 0);
+        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(empty);
+        return;
+    }
+
+    for (int i = 0; i < count && i < MAX_NEIGHBORS; i++) {
+        const neighbor_entry_t* n = &state->neighbors.entries[i];
+        if (n->addr == 0)
+            continue;
+        create_node_card(s_node_list, n, now_ms, s_node_layout);
+    }
+}
+
+static void nodes_list_delete_cb(lv_event_t* e) {
+    lv_timer_t* timer = (lv_timer_t*)lv_event_get_user_data(e);
+    if (timer)
+        lv_timer_delete(timer);
+    s_card_ctx_count = 0;
+    s_node_list = NULL;
+    s_node_title = NULL;
 }
 
 void scr_nodes_create(bramble_layout_t* layout) {
     lv_obj_t* cont = layout_get_content(layout);
+    s_node_layout = layout;
 
-    const ui_mesh_state_t* state = ui_shared_mesh_state();
-
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    int count = state->neighbors.count;
-
-    /* Reset card context pool */
-    s_card_ctx_count = 0;
-
-    char title_buf[32];
-    snprintf(title_buf, sizeof(title_buf), "Nodes (%d peer%s)", count, count != 1 ? "s" : "");
     lv_obj_t* title = lv_label_create(cont);
-    lv_label_set_text(title, title_buf);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(title, BR_COLOR_TEXT, 0);
     lv_obj_set_style_pad_left(title, BR_PADDING, 0);
     lv_obj_set_style_pad_top(title, 4, 0);
+    s_node_title = title;
 
     lv_obj_t* list = lv_obj_create(cont);
     lv_obj_set_width(list, LV_PCT(100));
@@ -157,20 +269,14 @@ void scr_nodes_create(bramble_layout_t* layout) {
     lv_obj_set_style_pad_row(list, 4, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    s_node_list = list;
 
-    if (count == 0) {
-        lv_obj_t* empty = lv_label_create(list);
-        lv_label_set_text(empty, "No peers discovered yet.\nWaiting for beacons...");
-        lv_obj_set_style_text_color(empty, BR_COLOR_TEXT_SEC, 0);
-        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_center(empty);
-        return;
-    }
+    s_node_sig = neighbor_signature(ui_shared_mesh_state());
+    populate_node_list();
 
-    for (int i = 0; i < count && i < MAX_NEIGHBORS; i++) {
-        const neighbor_entry_t* n = &state->neighbors.entries[i];
-        if (n->addr == 0)
-            continue;
-        create_node_card(list, n, now_ms, layout);
-    }
+    /* Live refresh every 3 s: ages tick in place; a membership change
+     * (new or evicted peer) rebuilds the card list. The timer dies with the
+     * list (layout_set_tab cleans the content area). */
+    lv_timer_t* refresh = lv_timer_create(nodes_refresh_cb, 3000, NULL);
+    lv_obj_add_event_cb(list, nodes_list_delete_cb, LV_EVENT_DELETE, refresh);
 }

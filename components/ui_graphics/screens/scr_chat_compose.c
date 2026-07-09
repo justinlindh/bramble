@@ -15,7 +15,7 @@ extern const char* mesh_get_channel_name(int index);
 static void back_click_cb(lv_event_t* e) {
     bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
     /* Show tab bar */
-    lv_obj_clear_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    layout_set_tab_bar_hidden(layout, false);
     /* Return to chat list (layout_set_tab cleans and rebuilds) */
     scr_chat_list_refresh(layout);
 }
@@ -34,7 +34,7 @@ static void dm_target_click_cb(lv_event_t* e) {
 
 void scr_chat_compose_open(bramble_layout_t* layout) {
     /* Hide tab bar */
-    lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    layout_set_tab_bar_hidden(layout, true);
 
     /* Expand content area to fill space left by hidden tab bar */
     lv_obj_clean(layout->content_area);

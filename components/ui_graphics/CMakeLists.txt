@@ -25,6 +25,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "chat_message_ui.c"
         "ui_toast.c"
         "ui_confirm.c"
+        "ui_focus.c"
         "assets/img_bramble_logo.c"
     )
 else()

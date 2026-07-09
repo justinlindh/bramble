@@ -27,6 +27,8 @@ static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBO
 
 static void tab_click_cb(lv_event_t* e) {
     bramble_tab_t tab = (bramble_tab_t)(intptr_t)lv_event_get_user_data(e);
+    if (tab == TAB_MAP)
+        scr_map_clear_focus_peer(); /* direct visits start unfocused */
     layout_set_tab(&s_layout, tab);
 }
 
@@ -115,6 +117,9 @@ bramble_layout_t* layout_create(void) {
         lv_obj_add_event_cb(btn, tab_click_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
         s_layout.tab_btns[i] = btn;
+        lv_group_t* g = lv_group_get_default();
+        if (g)
+            lv_group_add_obj(g, btn);
     }
 
     s_layout.active_tab = TAB_CHAT;
@@ -128,6 +133,12 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
     layout->in_dm_view = false;
     if (tab >= TAB_COUNT)
         return;
+
+    /* Any tab switch means we are back on a full tab screen: a full-screen
+     * view (compose, channel create, DM) may have hidden the bar and pulled
+     * its buttons from the input group. Always restore both, so an incoming
+     * message that forces TAB_CHAT never strands the user with no tabs. */
+    layout_set_tab_bar_hidden(layout, false);
 
     for (int i = 0; i < TAB_COUNT; i++) {
         if (i == (int)tab) {
@@ -259,3 +270,26 @@ void layout_set_unread(bramble_layout_t* layout, int count) {
 }
 
 lv_obj_t* layout_get_content(bramble_layout_t* layout) { return layout->content_area; }
+
+void layout_set_tab_bar_hidden(bramble_layout_t* layout, bool hidden) {
+    /* Idempotent: re-adding buttons already in the group would reorder
+     * focus on every tab switch. */
+    bool already_hidden = lv_obj_has_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    if (hidden == already_hidden)
+        return;
+
+    lv_group_t* g = lv_group_get_default();
+    if (hidden) {
+        lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+        for (int i = 0; i < TAB_COUNT; i++) {
+            if (layout->tab_btns[i])
+                lv_group_remove_obj(layout->tab_btns[i]);
+        }
+    } else {
+        lv_obj_clear_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+        for (int i = 0; i < TAB_COUNT; i++) {
+            if (g && layout->tab_btns[i])
+                lv_group_add_obj(g, layout->tab_btns[i]);
+        }
+    }
+}
