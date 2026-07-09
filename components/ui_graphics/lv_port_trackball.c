@@ -1,11 +1,16 @@
 #include "lv_port_trackball.h"
 #include "trackball.h"
 #include "ui.h"
+#include "sleep_manager.h"
 #include "esp_log.h"
 
 static void trackball_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     (void)indev;
     ui_button_t btn = trackball_poll();
+
+    if (btn != BTN_NONE) {
+        sleep_manager_activity();
+    }
 
     data->state = LV_INDEV_STATE_RELEASED;
     data->enc_diff = 0;

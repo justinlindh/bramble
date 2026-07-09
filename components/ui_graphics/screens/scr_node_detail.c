@@ -3,6 +3,7 @@
 #include "scr_chat_messages.h"
 #include "scr_map.h"
 #include "theme/bramble_theme.h"
+#include "ui_toast.h"
 #include "node_detail_ui.h"
 #include "esp_log.h"
 #include <stdio.h>
@@ -52,6 +53,7 @@ static void share_loc_click_cb(lv_event_t* e) {
     if (!loc.my_position.valid) {
         ESP_LOGW(TAG, "No self location fix; cannot share to %08lX",
                  (unsigned long)s_neighbor.addr);
+        ui_toast_show("No position to share yet");
         return;
     }
 
@@ -59,6 +61,7 @@ static void share_loc_click_cb(lv_event_t* e) {
         mesh_send_location_packet(s_neighbor.addr, &loc.my_position, LOCATION_TIER_COARSE);
     ESP_LOGI(TAG, "Shared coarse location with %08lX (pkt=%lu)", (unsigned long)s_neighbor.addr,
              (unsigned long)pkt);
+    ui_toast_show("Location shared");
 }
 
 static void add_action_btn(lv_obj_t* parent, const char* text, lv_event_cb_t cb, bool focus) {

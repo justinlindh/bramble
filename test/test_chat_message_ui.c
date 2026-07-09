@@ -31,11 +31,29 @@ void test_route_toggle_available_only_for_outgoing_delivered_with_hops_and_packe
     TEST_ASSERT_FALSE(chat_message_has_inline_route_toggle(true, MSG_STATUS_DELIVERED, 2, 0));
 }
 
+void test_format_age_under_a_minute_is_now(void) {
+    char buf[8];
+    chat_format_age(45, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("now", buf);
+}
+
+void test_format_age_minutes_hours_days(void) {
+    char buf[8];
+    chat_format_age(300, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("5m", buf);
+    chat_format_age(7200, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("2h", buf);
+    chat_format_age(172800, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("2d", buf);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_delivery_badge_status_sent_is_single_check_and_undelivered_color);
     RUN_TEST(test_delivery_badge_status_delivered_is_double_check_and_delivered_color);
     RUN_TEST(test_delivery_badge_status_failed_is_close_and_failed_color);
     RUN_TEST(test_route_toggle_available_only_for_outgoing_delivered_with_hops_and_packet_id);
+    RUN_TEST(test_format_age_under_a_minute_is_now);
+    RUN_TEST(test_format_age_minutes_hours_days);
     return UNITY_END();
 }

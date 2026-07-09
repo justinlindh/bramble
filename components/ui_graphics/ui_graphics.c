@@ -49,6 +49,9 @@ static void status_refresh_timer_cb(lv_timer_t* timer) {
     uint32_t msg_received = __atomic_exchange_n(&s_pending_msg_received, 0, __ATOMIC_ACQ_REL);
 
     if ((events & UI_EVT_MSG_RECEIVED) && msg_received > 0) {
+        /* A message is user-relevant activity: wake the display so the
+         * unread badge is actually visible. */
+        sleep_manager_activity();
         process_new_message_unread(msg_received);
 
         if (s_layout) {

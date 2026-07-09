@@ -29,7 +29,8 @@ static uint16_t* fb = NULL; /* Allocated in PSRAM */
 /* SPI device handle */
 static spi_device_handle_t spi;
 static bool initialized = false;
-static bool s_rotated_180 = false; /* API compatibility; no behavior change in Task 1 */
+static bool s_rotated_180 = false;      /* API compatibility; no behavior change in Task 1 */
+static uint8_t s_backlight_level = 255; /* last level set; wake restore reads this */
 
 /* Color constants (RGB565) */
 #define COLOR_BLACK 0x0000
@@ -456,11 +457,14 @@ void display_power(bool on) {
 
 void display_set_backlight(uint8_t level) {
     /* level 0 = off, 255 = full brightness */
+    s_backlight_level = level;
     if (s_board && s_board->spi_display.backlight >= 0) {
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, level);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
     }
 }
+
+uint8_t display_get_backlight(void) { return s_backlight_level; }
 
 void display_set_contrast(uint8_t val) {
     /* ST7789 doesn't have a simple contrast command like SSD1306 */

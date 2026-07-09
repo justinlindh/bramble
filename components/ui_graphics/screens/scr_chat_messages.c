@@ -5,7 +5,9 @@
 #include "chat_target.h"
 #include "chat_unread.h"
 #include "chat_message_ui.h"
+#include "ui_toast.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -18,7 +20,7 @@ static lv_obj_t* s_compose_ta = NULL;
 static lv_obj_t* s_title = NULL;
 static uint32_t s_selected_packet_id = 0;
 
-static void render_messages_for_target(void);
+static void render_messages_for_target(bool scroll_to_bottom);
 
 /* Use extern for mesh_send — it's in main, not a component */
 extern int mesh_send_broadcast(const uint8_t* data, size_t len);
@@ -62,7 +64,7 @@ static void channel_cycle_click_cb(lv_event_t* e) {
     s_target = chat_target_cycle(s_target, mesh_get_channel_count());
     s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
     update_title();
-    render_messages_for_target();
+    render_messages_for_target(true);
 }
 
 static void back_click_cb(lv_event_t* e) {
@@ -109,10 +111,11 @@ static void send_current_message(void) {
 
     if (rc == 0) {
         lv_textarea_set_text(s_compose_ta, "");
-        render_messages_for_target();
+        render_messages_for_target(true);
     } else {
         ESP_LOGW(TAG, "send failed for target kind=%d ch=%d", (int)s_target.kind,
                  (int)s_target.channel_index);
+        ui_toast_show("Send failed");
     }
 }
 
@@ -137,7 +140,7 @@ static void msg_bubble_click_cb(lv_event_t* e) {
     } else {
         s_selected_packet_id = packet_id;
     }
-    render_messages_for_target();
+    render_messages_for_target(false);
 }
 
 static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr) {
@@ -280,7 +283,7 @@ static void add_action_line(lv_obj_t* parent, const char* sender, const stored_m
 }
 
 static void add_message_bubble(lv_obj_t* parent, const char* sender, const stored_msg_t* msg,
-                               bool is_mine) {
+                               bool is_mine, uint32_t age_s) {
     lv_obj_t* row = lv_obj_create(parent);
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, LV_SIZE_CONTENT);
@@ -386,15 +389,30 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
                                 (void*)(uintptr_t)msg->packet_id);
         }
     }
+
+    char age_buf[8];
+    chat_format_age(age_s, age_buf, sizeof(age_buf));
+    lv_obj_t* age_lbl = lv_label_create(bubble);
+    lv_label_set_text(age_lbl, age_buf);
+    lv_obj_set_style_text_font(age_lbl, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(age_lbl, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_set_style_text_align(age_lbl, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_width(age_lbl, LV_PCT(100));
 }
 
-static void render_messages_for_target(void) {
+static void render_messages_for_target(bool scroll_to_bottom) {
     if (!s_msg_list)
         return;
+
+    /* Preserve the reading position unless explicitly asked to jump: a
+     * reader scrolled into history must not be yanked by an arrival. */
+    int32_t prev_y = lv_obj_get_scroll_y(s_msg_list);
+    bool was_at_bottom = (lv_obj_get_scroll_bottom(s_msg_list) <= 8);
 
     lv_refr_now(lv_display_get_default());
     lv_obj_clean(s_msg_list);
 
+    uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     int count = msg_store_count();
     for (int i = 0; i < count; i++) {
         const stored_msg_t* msg = msg_store_get(i);
@@ -418,11 +436,16 @@ static void render_messages_for_target(void) {
         if (msg_is_action(msg)) {
             add_action_line(s_msg_list, sender, msg, is_mine);
         } else {
-            add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg, is_mine);
+            uint32_t age_s = (now_s >= msg->timestamp_s) ? (now_s - msg->timestamp_s) : 0;
+            add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg, is_mine, age_s);
         }
     }
 
-    lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
+    if (scroll_to_bottom || was_at_bottom) {
+        lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
+    } else {
+        lv_obj_scroll_to_y(s_msg_list, prev_y, LV_ANIM_OFF);
+    }
 }
 
 static void open_with_target(bramble_layout_t* layout, chat_target_t target,
@@ -500,7 +523,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     lv_obj_set_scrollbar_mode(s_msg_list, LV_SCROLLBAR_MODE_OFF); /* Hide stray bars */
 
     /* Load messages from store */
-    render_messages_for_target();
+    render_messages_for_target(true);
 
     /* Compose bar */
     lv_obj_t* compose_bar = lv_obj_create(layout->content_area);
@@ -549,7 +572,8 @@ void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx) {
 }
 
 void scr_chat_messages_open_dm(bramble_layout_t* layout, uint32_t peer_addr) {
+    chat_unread_clear_for_dm(peer_addr);
     open_with_target(layout, chat_target_dm(peer_addr), -1);
 }
 
-void scr_chat_messages_on_recv(void) { render_messages_for_target(); }
+void scr_chat_messages_on_recv(void) { render_messages_for_target(false); }

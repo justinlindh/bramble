@@ -211,6 +211,25 @@ void scr_chat_list_create(bramble_layout_t* layout) {
         lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
+        int dm_unread = chat_unread_count_for_dm(dm_peers[i]);
+        if (dm_unread > 0) {
+            lv_obj_t* badge = lv_obj_create(card);
+            lv_obj_set_size(badge, 26, 18);
+            lv_obj_align(badge, LV_ALIGN_RIGHT_MID, 0, 0);
+            lv_obj_set_style_bg_color(badge, BR_COLOR_PRIMARY, 0);
+            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(badge, 9, 0);
+            lv_obj_set_style_border_width(badge, 0, 0);
+            lv_obj_set_style_pad_all(badge, 0, 0);
+            lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+
+            lv_obj_t* badge_lbl = lv_label_create(badge);
+            lv_label_set_text_fmt(badge_lbl, "%d", dm_unread);
+            lv_obj_set_style_text_font(badge_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(badge_lbl, lv_color_white(), 0);
+            lv_obj_center(badge_lbl);
+        }
+
         lv_obj_add_event_cb(card, dm_item_click_cb, LV_EVENT_CLICKED,
                             (void*)(uintptr_t)dm_peers[i]);
         if (g)
