@@ -7,6 +7,9 @@
 #include "scr_settings.h"
 #include "theme/bramble_theme.h"
 #include "battery.h"
+#include "board_config.h"
+#include "gps.h"
+#include <time.h>
 #include "routing.h"
 #include "airtime_budget.h"
 #include "esp_log.h"
@@ -14,6 +17,9 @@
 
 static const char* TAG = "layout";
 static bramble_layout_t s_layout;
+
+extern const char* mesh_get_node_name(void);
+extern bool mesh_get_network_time_ms(int64_t* out_ms);
 
 static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBOL_WIFI " Nodes",
                                             LV_SYMBOL_GPS " Map", LV_SYMBOL_BARS " Stats",
@@ -190,8 +196,30 @@ void layout_update_status(bramble_layout_t* layout) {
     snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", state->neighbors.count);
     lv_label_set_text(layout->lbl_signal, buf);
 
-    /* Node name - keeping static "BRAMBLE" for now */
-    /* identity component doesn't provide a get_name() function yet */
+    /* Clock: network time when timesync has converged (UTC) */
+    int64_t net_ms;
+    if (mesh_get_network_time_ms(&net_ms)) {
+        time_t tt = (time_t)(net_ms / 1000);
+        struct tm tm_utc;
+        gmtime_r(&tt, &tm_utc);
+        snprintf(buf, sizeof(buf), "%02d:%02d", tm_utc.tm_hour, tm_utc.tm_min);
+        lv_label_set_text(layout->lbl_time, buf);
+    } else {
+        lv_label_set_text(layout->lbl_time, "--:--");
+    }
+
+    /* GPS: live fix state; hidden entirely on GPS-less boards */
+    if (board_has_cap(BOARD_CAP_GPS)) {
+        lv_obj_clear_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(layout->lbl_gps,
+                                    gps_has_fix() ? BR_COLOR_PRIMARY : BR_COLOR_TEXT_SEC, 0);
+    } else {
+        lv_obj_add_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Node name from the mesh (settable via Settings / bramble.setNodeName) */
+    const char* name = mesh_get_node_name();
+    lv_label_set_text(layout->lbl_node_name, (name && name[0]) ? name : "BRAMBLE");
 }
 
 void layout_set_unread(bramble_layout_t* layout, int count) {

@@ -44,8 +44,12 @@ static void update_title(void) {
     }
 
     static char buf[48];
-    if (peer_name) {
-        snprintf(buf, sizeof(buf), "%s", peer_name);
+    if (s_target.kind == CHAT_TARGET_DM) {
+        if (peer_name && peer_name[0]) {
+            snprintf(buf, sizeof(buf), "%s", peer_name);
+        } else {
+            snprintf(buf, sizeof(buf), "%08lX", (unsigned long)s_target.peer_addr);
+        }
     } else if (channel_name) {
         snprintf(buf, sizeof(buf), "#%s", channel_name);
     } else {
@@ -496,6 +500,13 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     lv_obj_set_size(target_btn, 108, 22);
     lv_obj_align(target_btn, LV_ALIGN_RIGHT_MID, -4, 0);
     lv_obj_set_style_bg_color(target_btn, BR_COLOR_SURFACE, 0);
+    lv_obj_set_style_border_color(target_btn, BR_COLOR_BORDER, 0);
+    lv_obj_set_style_border_width(target_btn, 1, 0);
+    lv_obj_t* tgt_lbl = lv_label_create(target_btn);
+    lv_label_set_text(tgt_lbl, LV_SYMBOL_REFRESH " channel");
+    lv_obj_set_style_text_font(tgt_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(tgt_lbl, BR_COLOR_TEXT_SEC, 0);
+    lv_obj_center(tgt_lbl);
     lv_obj_add_event_cb(target_btn, channel_cycle_click_cb, LV_EVENT_CLICKED, NULL);
     if (s_target.kind == CHAT_TARGET_DM) {
         lv_obj_add_flag(target_btn, LV_OBJ_FLAG_HIDDEN);
