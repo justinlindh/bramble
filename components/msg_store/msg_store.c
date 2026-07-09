@@ -9,7 +9,31 @@
 #include "msg_store_spiffs.h"
 #endif
 
-static stored_msg_t s_msgs[MSG_STORE_MAX];
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+static stored_msg_t* s_msgs = NULL;
+#else
+static stored_msg_t s_msgs_storage[MSG_STORE_MAX];
+static stored_msg_t* s_msgs = s_msgs_storage;
+#endif
+
+static void msg_store_ensure_alloc(void) {
+#ifdef ESP_PLATFORM
+    if (s_msgs)
+        return;
+    /* PSRAM-first: ~700 B per slot makes large caps unaffordable in
+     * internal SRAM. Fall back to the default heap on PSRAM-less boards
+     * (their cap stays small via the Kconfig default). */
+    s_msgs = heap_caps_calloc(MSG_STORE_MAX, sizeof(stored_msg_t), MALLOC_CAP_SPIRAM);
+    if (!s_msgs)
+        s_msgs = heap_caps_calloc(MSG_STORE_MAX, sizeof(stored_msg_t), MALLOC_CAP_DEFAULT);
+    if (!s_msgs) {
+        ESP_LOGE("msg_store", "ring alloc failed (%u slots x %u B); messages will be dropped",
+                 (unsigned)MSG_STORE_MAX, (unsigned)sizeof(stored_msg_t));
+    }
+#endif
+}
 static int s_head = 0;                /* Next write position */
 static int s_count = 0;               /* Number of stored messages */
 static uint32_t s_total_incoming = 0; /* Monotonic incoming counter, survives ring wrap */
@@ -23,7 +47,10 @@ static uint32_t get_uptime_s(void) {
 }
 
 void msg_store_init(void) {
-    memset(s_msgs, 0, sizeof(s_msgs));
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return;
+    memset(s_msgs, 0, MSG_STORE_MAX * sizeof(stored_msg_t));
     s_head = 0;
     s_count = 0;
     s_total_incoming = 0;
@@ -32,6 +59,11 @@ void msg_store_init(void) {
 void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                        int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status,
                        int16_t channel_index) {
+    /* Lazy retry: a failed boot-time alloc may succeed once the heap
+     * settles, instead of dropping messages for the whole session. */
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return;
     stored_msg_t* m = &s_msgs[s_head];
     memset(m, 0, sizeof(*m));
     m->peer_addr = peer_addr;
@@ -148,6 +180,12 @@ void msg_store_init_with_persistence(void) {
 
         s_count = count;
         s_head = count % MSG_STORE_MAX;
+
+        /* Restored timestamps are a PREVIOUS boot's uptime clock and would
+         * render as garbage ages; zero them so the UI hides the age. */
+        for (int i = 0; i < count; i++) {
+            s_msgs[i].timestamp_s = 0;
+        }
     }
 #endif
 }

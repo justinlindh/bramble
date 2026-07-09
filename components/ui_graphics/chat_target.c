@@ -61,7 +61,9 @@ bool chat_target_matches_message(chat_target_t target, const stored_msg_t* msg,
     }
 
     if (target.kind == CHAT_TARGET_DM) {
-        return is_dm_msg(msg) && msg->peer_addr == target.peer_addr;
+        /* Channel traffic is also stored with INCOMING/OUTGOING directions;
+         * a real DM carries no channel index. */
+        return is_dm_msg(msg) && message_channel_index < 0 && msg->peer_addr == target.peer_addr;
     }
 
     return false;

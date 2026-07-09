@@ -66,6 +66,15 @@ menu "Bramble Configuration"
             server authentication are lost. Never enable on release builds.
 
     menu "Bramble Message Persistence"
+        config BRAMBLE_MSG_STORE_CAP
+            int "In-RAM message ring capacity"
+            default 20
+            range 10 500
+            help
+                Number of messages held in RAM for the UI. The buffer is
+                allocated PSRAM-first at init (about 700 bytes per slot),
+                so large values are only appropriate on PSRAM boards.
+
         config BRAMBLE_MSG_PERSIST_ENABLED
             bool "Enable message persistence to SPIFFS"
             default y

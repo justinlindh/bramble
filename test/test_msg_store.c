@@ -1,5 +1,7 @@
 #include "unity.h"
 #include "msg_store.h"
+#include <stdio.h>
+#include <string.h>
 
 void setUp(void) { msg_store_init(); }
 void tearDown(void) {}
@@ -40,10 +42,27 @@ void test_total_incoming_is_monotonic_and_ignores_outgoing(void) {
     TEST_ASSERT_EQUAL(MSG_STORE_MAX, msg_store_count());
 }
 
+void test_ring_keeps_newest_window_at_capacity(void) {
+    msg_store_init();
+    char text[16];
+    for (int i = 0; i < MSG_STORE_MAX + 5; i++) {
+        snprintf(text, sizeof(text), "m%d", i);
+        msg_store_add(0x1111, MSG_DIR_INCOMING, text, strlen(text), -70, 5);
+    }
+    TEST_ASSERT_EQUAL(MSG_STORE_MAX, msg_store_count());
+    /* Oldest retained message is number 5; newest is MSG_STORE_MAX + 4 */
+    char expect[16];
+    snprintf(expect, sizeof(expect), "m%d", 5);
+    TEST_ASSERT_EQUAL_STRING(expect, msg_store_get(0)->text);
+    snprintf(expect, sizeof(expect), "m%d", MSG_STORE_MAX + 4);
+    TEST_ASSERT_EQUAL_STRING(expect, msg_store_get(msg_store_count() - 1)->text);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_msg_store_default_channel_index_is_minus_one);
     RUN_TEST(test_msg_store_add_ex2_persists_channel_index);
     RUN_TEST(test_total_incoming_is_monotonic_and_ignores_outgoing);
+    RUN_TEST(test_ring_keeps_newest_window_at_capacity);
     return UNITY_END();
 }

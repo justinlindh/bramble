@@ -20,6 +20,10 @@ static lv_obj_t* s_compose_ta = NULL;
 static lv_obj_t* s_title = NULL;
 static uint32_t s_selected_packet_id = 0;
 
+/* Render bound: newest matching messages built per pass. Keeps LVGL
+ * object count sane on deep stores. */
+#define CHAT_RENDER_MAX 60
+
 static void render_messages_for_target(bool scroll_to_bottom);
 
 /* Use extern for mesh_send — it's in main, not a component */
@@ -287,7 +291,7 @@ static void add_action_line(lv_obj_t* parent, const char* sender, const stored_m
 }
 
 static void add_message_bubble(lv_obj_t* parent, const char* sender, const stored_msg_t* msg,
-                               bool is_mine, uint32_t age_s) {
+                               bool is_mine, int age_s) {
     lv_obj_t* row = lv_obj_create(parent);
     lv_obj_set_width(row, LV_PCT(100));
     lv_obj_set_height(row, LV_SIZE_CONTENT);
@@ -394,8 +398,10 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         }
     }
 
+    if (age_s < 0)
+        return; /* restored from a previous boot: age unknowable, hide it */
     char age_buf[8];
-    chat_format_age(age_s, age_buf, sizeof(age_buf));
+    chat_format_age((uint32_t)age_s, age_buf, sizeof(age_buf));
     lv_obj_t* age_lbl = lv_label_create(bubble);
     lv_label_set_text(age_lbl, age_buf);
     lv_obj_set_style_text_font(age_lbl, &lv_font_montserrat_10, 0);
@@ -418,8 +424,21 @@ static void render_messages_for_target(bool scroll_to_bottom) {
 
     uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
     int count = msg_store_count();
-    for (int i = 0; i < count; i++) {
-        const stored_msg_t* msg = msg_store_get(i);
+
+    /* Collect the newest CHAT_RENDER_MAX matching messages, then render
+     * them oldest-first. Pass 2 re-checks the target: mesh_task can add a
+     * message between the passes, shifting ring indices, and a stale index
+     * must never leak another conversation's message into this one. */
+    int match_idx[CHAT_RENDER_MAX];
+    int n_match = 0;
+    for (int i = count - 1; i >= 0 && n_match < CHAT_RENDER_MAX; i--) {
+        const stored_msg_t* m = msg_store_get(i);
+        if (m && message_matches_target(m))
+            match_idx[n_match++] = i;
+    }
+
+    for (int k = n_match - 1; k >= 0; k--) {
+        const stored_msg_t* msg = msg_store_get(match_idx[k]);
         if (!msg || !message_matches_target(msg))
             continue;
 
@@ -440,7 +459,9 @@ static void render_messages_for_target(bool scroll_to_bottom) {
         if (msg_is_action(msg)) {
             add_action_line(s_msg_list, sender, msg, is_mine);
         } else {
-            uint32_t age_s = (now_s >= msg->timestamp_s) ? (now_s - msg->timestamp_s) : 0;
+            int age_s = (msg->timestamp_s == 0)
+                            ? -1
+                            : (now_s >= msg->timestamp_s ? (int)(now_s - msg->timestamp_s) : 0);
             add_message_bubble(s_msg_list, is_mine ? NULL : sender, msg, is_mine, age_s);
         }
     }

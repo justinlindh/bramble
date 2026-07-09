@@ -165,15 +165,19 @@ void scr_chat_list_create(bramble_layout_t* layout) {
     }
 
     /* DM conversations (peer-based) */
-    uint32_t dm_peers[6];
+#define DM_PEERS_MAX 12
+    uint32_t dm_peers[DM_PEERS_MAX];
     int dm_count = 0;
     int msg_count = msg_store_count();
-    for (int i = 0; i < msg_count && dm_count < 6; i++) {
+    /* Newest-first so active conversations rank above stale ones */
+    for (int i = msg_count - 1; i >= 0 && dm_count < DM_PEERS_MAX; i--) {
         const stored_msg_t* m = msg_store_get(i);
         if (!m)
             continue;
         if (m->direction != MSG_DIR_INCOMING && m->direction != MSG_DIR_OUTGOING)
             continue;
+        if (m->channel_index >= 0)
+            continue; /* channel traffic; not a DM conversation */
 
         bool exists = false;
         for (int j = 0; j < dm_count; j++) {

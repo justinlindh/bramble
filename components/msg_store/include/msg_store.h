@@ -9,7 +9,15 @@
 extern "C" {
 #endif
 
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#endif
+
+#ifdef CONFIG_BRAMBLE_MSG_STORE_CAP
+#define MSG_STORE_MAX CONFIG_BRAMBLE_MSG_STORE_CAP
+#else
 #define MSG_STORE_MAX 20
+#endif
 #define MSG_TEXT_MAX 640
 #define MSG_ROUTE_MAX_HOPS 10
 
