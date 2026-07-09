@@ -178,6 +178,35 @@ static void create_event_row(lv_obj_t* parent, const traffic_event_t* evt) {
 /* -------------------------------------------------------------------------
  * Back button callback — returns to Stats screen
  * ------------------------------------------------------------------------- */
+static lv_obj_t* s_count_lbl = NULL;
+static lv_obj_t* s_debug_lbl = NULL;
+
+/* Update only the header event count and the debug-state line in place.
+ * Rebuilding the whole screen on a timer would steal trackball focus off
+ * the Back button and race the ring buffer harder; the event rows stay a
+ * snapshot that refreshes on re-entry. */
+static void traffic_refresh_cb(lv_timer_t* timer) {
+    (void)timer;
+    traffic_debug_t* td = mesh_get_traffic_debug();
+    if (!td)
+        return;
+    if (s_count_lbl)
+        lv_label_set_text_fmt(s_count_lbl, "%u evts", traffic_debug_get_count(td));
+    if (s_debug_lbl) {
+        bool on = traffic_debug_is_enabled(td);
+        lv_label_set_text(s_debug_lbl, on ? "\xE2\x97\x8F Debug ON" : "\xE2\x97\x8F Debug OFF");
+        lv_obj_set_style_text_color(s_debug_lbl, on ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
+    }
+}
+
+static void traffic_delete_cb2(lv_event_t* e) {
+    lv_timer_t* timer = (lv_timer_t*)lv_event_get_user_data(e);
+    if (timer)
+        lv_timer_delete(timer);
+    s_count_lbl = NULL;
+    s_debug_lbl = NULL;
+}
+
 static void back_click_cb(lv_event_t* e) {
     bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
     lv_refr_now(lv_display_get_default());
@@ -224,6 +253,9 @@ void scr_traffic_create(bramble_layout_t* layout) {
     lv_obj_set_style_pad_all(back_btn, 2, 0);
     lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
 
+    lv_timer_t* refresh = lv_timer_create(traffic_refresh_cb, 2000, NULL);
+    lv_obj_add_event_cb(header, traffic_delete_cb2, LV_EVENT_DELETE, refresh);
+
     lv_obj_t* back_lbl = lv_label_create(back_btn);
     lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Bk");
     lv_obj_set_style_text_font(back_lbl, &lv_font_montserrat_12, 0);
@@ -245,6 +277,7 @@ void scr_traffic_create(bramble_layout_t* layout) {
     char cnt_buf[16];
     snprintf(cnt_buf, sizeof(cnt_buf), "%u evts", event_count);
     lv_obj_t* cnt_lbl = lv_label_create(header);
+    s_count_lbl = cnt_lbl;
     lv_label_set_text(cnt_lbl, cnt_buf);
     lv_obj_set_style_text_font(cnt_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(cnt_lbl, BR_COLOR_TEXT_SEC, 0);
@@ -264,6 +297,7 @@ void scr_traffic_create(bramble_layout_t* layout) {
 
     /* Debug on/off indicator */
     lv_obj_t* dbg_lbl = lv_label_create(status_row);
+    s_debug_lbl = dbg_lbl;
     lv_obj_set_style_text_font(dbg_lbl, &lv_font_montserrat_12, 0);
     if (debug_on) {
         lv_label_set_text(dbg_lbl, "● Debug ON");
@@ -329,7 +363,7 @@ void scr_traffic_create(bramble_layout_t* layout) {
             lv_label_set_text(empty, "No events yet.\nPackets will appear as they arrive.");
         } else {
             lv_label_set_text(empty,
-                              "Traffic debug is disabled.\nEnable it in Config → Traffic Debug.");
+                              "Traffic debug is disabled.\nEnable Traffic Debug in Settings.");
         }
         lv_obj_set_style_text_color(empty, BR_COLOR_TEXT_SEC, 0);
         lv_obj_set_style_text_font(empty, &lv_font_montserrat_12, 0);

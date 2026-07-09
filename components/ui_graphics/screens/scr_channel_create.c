@@ -18,7 +18,7 @@ static bramble_layout_t* s_layout = NULL;
 static void cancel_click_cb(lv_event_t* e) {
     bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
     /* Show tab bar */
-    lv_obj_clear_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    layout_set_tab_bar_hidden(layout, false);
     /* Return to chat list */
     scr_chat_list_refresh(layout);
     scr_chat_list_create(layout);
@@ -69,7 +69,7 @@ void scr_channel_create_open(bramble_layout_t* layout) {
     s_layout = layout;
 
     /* Hide tab bar */
-    lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
+    layout_set_tab_bar_hidden(layout, true);
 
     /* Expand content area */
     lv_obj_clean(layout->content_area);

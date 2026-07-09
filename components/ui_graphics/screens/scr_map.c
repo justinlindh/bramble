@@ -12,6 +12,56 @@ static uint32_t s_focus_peer_addr = 0;
 
 void scr_map_set_focus_peer(uint32_t peer_addr) { s_focus_peer_addr = peer_addr; }
 
+void scr_map_clear_focus_peer(void) { s_focus_peer_addr = 0; }
+
+static bramble_layout_t* s_map_layout = NULL;
+static uint32_t s_map_sig = 0;
+
+/* Signature of everything the map draws: self position, focus, and each
+ * active peer's position. Rebuild only when it changes, so a stationary
+ * mesh does not tear down and rebuild the whole tree every 5 s. */
+static uint32_t map_signature(void) {
+    const location_manager_t* loc = ui_shared_location_state();
+    uint32_t sig = s_focus_peer_addr;
+    if (loc->my_position.valid) {
+        sig = sig * 31u + (uint32_t)loc->my_position.latitude_e7;
+        sig = sig * 31u + (uint32_t)loc->my_position.longitude_e7;
+    }
+    for (int i = 0; i < loc->cache_count && i < LOCATION_MAX_CONTACTS; i++) {
+        const location_cache_entry_t* e = &loc->cache[i];
+        if (!e->active || !e->pos.valid)
+            continue;
+        sig = sig * 31u + e->peer_addr;
+        sig = sig * 31u + (uint32_t)e->pos.latitude_e7;
+        sig = sig * 31u + (uint32_t)e->pos.longitude_e7;
+    }
+    return sig;
+}
+
+static void map_refresh_cb(lv_timer_t* timer) {
+    (void)timer;
+    if (!s_map_layout)
+        return;
+    uint32_t sig = map_signature();
+    if (sig == s_map_sig)
+        return; /* nothing moved; keep the current markers */
+    lv_obj_t* cont = layout_get_content(s_map_layout);
+    lv_refr_now(lv_display_get_default());
+    lv_obj_clean(cont); /* kills the old timer via the DELETE hook */
+    scr_map_create(s_map_layout);
+}
+
+static void map_delete_cb(lv_event_t* e) {
+    lv_timer_t* timer = (lv_timer_t*)lv_event_get_user_data(e);
+    if (timer)
+        lv_timer_delete(timer);
+}
+
+static void map_arm_refresh(lv_obj_t* owner) {
+    lv_timer_t* refresh = lv_timer_create(map_refresh_cb, 5000, NULL);
+    lv_obj_add_event_cb(owner, map_delete_cb, LV_EVENT_DELETE, refresh);
+}
+
 /* Simple Mercator-like projection helpers */
 static void lat_lon_to_pixel(double lat, double lon, double center_lat, double center_lon,
                              double zoom_km, int* px, int* py) {
@@ -35,9 +85,9 @@ static void lat_lon_to_pixel(double lat, double lon, double center_lat, double c
     *py = (int)(70 - y_km * pixels_per_km); /* Invert Y for screen coords */
 }
 
-static void create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, const char* label) {
+static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, const char* label) {
     if (x < 5 || x >= 275 || y < 5 || y >= 135) {
-        return; /* Off-screen or too close to edge */
+        return false; /* Off-screen or too close to edge */
     }
 
     /* Create a simple marker object (small circle) */
@@ -64,10 +114,13 @@ static void create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, cons
         lv_obj_set_style_pad_all(lbl, 2, 0);
         lv_obj_set_pos(lbl, x + 8, y - 6);
     }
+    return true;
 }
 
 void scr_map_create(bramble_layout_t* layout) {
     lv_obj_t* cont = layout_get_content(layout);
+    s_map_layout = layout;
+    s_map_sig = map_signature();
 
     /* Get location state */
     const location_manager_t* loc_state = ui_shared_location_state();
@@ -94,6 +147,7 @@ void scr_map_create(bramble_layout_t* layout) {
         lv_obj_set_style_text_color(msg, BR_COLOR_TEXT_SEC, 0);
         lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(msg);
+        map_arm_refresh(msg); /* keep polling for a fix */
         return;
     }
 
@@ -147,7 +201,8 @@ void scr_map_create(bramble_layout_t* layout) {
 
     /* Draw peer positions from cache */
     int peer_count = 0;
-    bool focused_peer_visible = false;
+    int offmap_count = 0;
+    bool focused_peer_has_location = false;
     for (int i = 0; i < loc_state->cache_count && i < LOCATION_MAX_CONTACTS; i++) {
         const location_cache_entry_t* entry = &loc_state->cache[i];
         if (!entry->active || !entry->pos.valid)
@@ -180,17 +235,26 @@ void scr_map_create(bramble_layout_t* layout) {
 
         lv_color_t marker_color =
             (entry->peer_addr == s_focus_peer_addr) ? BR_COLOR_ACCENT : lv_color_hex(0x00CC00);
-        create_marker(map_cont, px + 4, py + 4, marker_color, label);
+        bool drawn = create_marker(map_cont, px + 4, py + 4, marker_color, label);
+        /* The peer HAS a location (valid cached pos) even if it fell off the
+         * visible window; the warning below is only for peers we cannot place
+         * at all, not for off-map ones. */
         if (entry->peer_addr == s_focus_peer_addr) {
-            focused_peer_visible = true;
+            focused_peer_has_location = true;
         }
-        peer_count++;
+        if (drawn)
+            peer_count++;
+        else
+            offmap_count++;
     }
 
-    /* Peer count label */
-    char count_str[32];
-    snprintf(count_str, sizeof(count_str), "%d peer%s visible", peer_count,
-             peer_count != 1 ? "s" : "");
+    /* Peer count label: only count what is actually drawn */
+    char count_str[48];
+    if (offmap_count > 0)
+        snprintf(count_str, sizeof(count_str), "%d shown (+%d off-map)", peer_count, offmap_count);
+    else
+        snprintf(count_str, sizeof(count_str), "%d peer%s visible", peer_count,
+                 peer_count != 1 ? "s" : "");
     lv_obj_t* count_lbl = lv_label_create(map_cont);
     lv_label_set_text(count_lbl, count_str);
     lv_obj_set_style_text_font(count_lbl, &lv_font_montserrat_12, 0);
@@ -200,7 +264,7 @@ void scr_map_create(bramble_layout_t* layout) {
     lv_obj_set_style_pad_all(count_lbl, 2, 0);
     lv_obj_align(count_lbl, LV_ALIGN_BOTTOM_LEFT, 2, -2);
 
-    if (s_focus_peer_addr != 0 && !focused_peer_visible) {
+    if (s_focus_peer_addr != 0 && !focused_peer_has_location) {
         char focus_info[160];
         snprintf(focus_info, sizeof(focus_info),
                  "Lat: %.6f  Lon: %.6f  Acc: %um  |  %08lX no location", center_lat, center_lon,
@@ -208,6 +272,8 @@ void scr_map_create(bramble_layout_t* layout) {
         lv_label_set_text(info_lbl, focus_info);
         lv_obj_set_style_text_color(info_lbl, BR_COLOR_WARNING, 0);
     }
+
+    map_arm_refresh(map_cont);
 
     ESP_LOGI(TAG, "Map created: center=(%.6f, %.6f), peers=%d", center_lat, center_lon, peer_count);
 }

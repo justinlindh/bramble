@@ -34,4 +34,8 @@ void layout_update_status(bramble_layout_t* layout);
 void layout_set_unread(bramble_layout_t* layout, int count);
 lv_obj_t* layout_get_content(bramble_layout_t* layout);
 
+/* Hide/show the tab bar AND remove/re-add its buttons from the input
+ * group, so hidden tabs cannot be focused by keyboard/trackball. */
+void layout_set_tab_bar_hidden(bramble_layout_t* layout, bool hidden);
+
 #endif
