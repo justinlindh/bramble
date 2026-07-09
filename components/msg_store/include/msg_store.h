@@ -83,6 +83,14 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
 int msg_store_count(void);
 
 /**
+ * Monotonic count of INCOMING messages ever stored (MSG_DIR_INCOMING or
+ * MSG_DIR_BROADCAST_IN). Unlike msg_store_count(), this never saturates at
+ * the ring capacity, so callers can detect arrivals by delta. Reset only by
+ * msg_store_init().
+ */
+uint32_t msg_store_total_incoming(void);
+
+/**
  * Get message at index (0 = oldest).  Returns NULL if out of range.
  * Returned pointer is valid until next msg_store_add.
  */

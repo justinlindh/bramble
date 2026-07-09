@@ -75,7 +75,9 @@ typedef struct {
     int settings_cursor;                     /* selected value while editing current row */
     bool settings_editing;                   /* true when in settings edit mode */
     bool settings_confirmed;                 /* set true on long-press confirm */
-    bool pending_message_notification; /* set when a message arrives during active navigation */
+    int unread_count; /* messages arrived but not yet seen; rendered as a header badge */
+    int msg_scroll;   /* messages scrolled back from newest on SCREEN_MESSAGES */
+    int msg_total;    /* snapshot of msg_store_count(), set by the main loop */
     uint32_t message_auto_switch_time; /* timestamp when idle auto-switch to messages happened */
     bool gps_available; /* true when the board has GPS - gates SCREEN_GPS in the cycle */
 
@@ -95,16 +97,40 @@ void ui_mark_drawn(ui_state_t* state);
  * ui_init), so callers on non-GPS boards never need to touch this. */
 void ui_set_gps_available(ui_state_t* state, bool available);
 
+/* Snapshot of msg_store_count(), fed by the main loop so the button
+ * handler can clamp scrollback without a msg_store dependency. */
+void ui_set_message_total(ui_state_t* state, int total);
+
 /* Connectivity mode — NVS-persisted, applied on next boot.
  * Implemented in main/main.c; declared here so any UI component can call them. */
 conn_mode_t conn_mode_get(void);
 void conn_mode_set(conn_mode_t mode);
 
 #define UI_INACTIVITY_TIMEOUT_MS 60000
+/* Reading is idle time: give the messages screen a much longer leash. */
+#define UI_MESSAGES_INACTIVITY_TIMEOUT_MS 300000
+#define UI_MSG_PAGE_LINES 4 /* message lines visible on the 128x64 OLED */
 #define UI_MESSAGE_IDLE_THRESHOLD_MS 10000
 #define UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS 30000
 void ui_check_timeout(ui_state_t* state, uint32_t now_ms);
 void ui_on_message_received(ui_state_t* state, uint32_t now_ms);
+
+/* One rendered message line for the text (OLED) UI. All lookups
+ * (beacon name, channel name, status badge) happen in the caller;
+ * this stays a pure, host-testable formatter. */
+typedef struct {
+    const char* text;
+    int text_len;
+    bool outgoing;
+    uint32_t peer_addr;
+    const char* peer_name;    /* NULL or "" when unknown */
+    int channel_index;        /* <= 0: default/none, no tag */
+    const char* channel_name; /* NULL or "": fall back to "#<index>" */
+    const char* badge;        /* "", " *", " +", "++", " x" */
+    int age_s;                /* seconds since stored; < 0 hides the age suffix */
+} ui_msg_line_t;
+
+int ui_format_msg_line(const ui_msg_line_t* m, char* buf, size_t buf_len);
 
 // Display formatters
 int ui_format_main_line1(const ui_main_data_t* data, char* buf, size_t buf_len);

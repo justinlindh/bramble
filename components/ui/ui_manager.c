@@ -16,10 +16,6 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         /* User took control while in auto-switched messages view; cancel timed restore. */
         state->message_auto_switch_time = 0;
     }
-    if (btn != BTN_NONE) {
-        state->pending_message_notification = false;
-    }
-
     /* Settings screen editing */
     if (state->current_screen == SCREEN_SETTINGS && state->settings_editing) {
         int value_count;
@@ -90,11 +86,40 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         }
     }
 
+    /* Messages screen: long-press pages into history, double-press
+     * returns to the newest page (instead of jumping screens). */
+    if (state->current_screen == SCREEN_MESSAGES) {
+        if (btn == BTN_LONG_PRESS) {
+            int max_scroll =
+                (state->msg_total > UI_MSG_PAGE_LINES) ? state->msg_total - UI_MSG_PAGE_LINES : 0;
+            int next = state->msg_scroll + UI_MSG_PAGE_LINES;
+            state->msg_scroll = (next > max_scroll) ? max_scroll : next;
+            state->screen_dirty = true;
+            return;
+        }
+        if (btn == BTN_DOUBLE_PRESS && state->msg_scroll > 0) {
+            state->msg_scroll = 0;
+            state->unread_count = 0; /* newest page is now visible */
+            state->screen_dirty = true;
+            return;
+        }
+    }
+
     switch (btn) {
     case BTN_SHORT_PRESS:
     case BTN_RIGHT: /* trackball right = next screen */
     case BTN_DOWN:  /* trackball down = next screen */
     {
+        /* Press-to-view: while anything is unread, a short press jumps
+         * straight to the messages screen instead of cycling. */
+        if (btn == BTN_SHORT_PRESS && state->unread_count > 0 &&
+            state->current_screen != SCREEN_MESSAGES) {
+            state->prev_screen = state->current_screen;
+            state->current_screen = SCREEN_MESSAGES;
+            state->screen_enter_time = now_ms;
+            state->screen_dirty = true;
+            break;
+        }
         ui_screen_t prev = state->current_screen;
         state->prev_screen = prev;
         ui_screen_t next = (ui_screen_t)((prev + 1) % SCREEN_COUNT);
@@ -155,9 +180,18 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
     default:
         break;
     }
+
+    if (state->current_screen == SCREEN_MESSAGES) {
+        state->unread_count = 0;
+        if (state->prev_screen != SCREEN_MESSAGES) {
+            state->msg_scroll = 0;
+        }
+    }
 }
 
 void ui_set_gps_available(ui_state_t* state, bool available) { state->gps_available = available; }
+
+void ui_set_message_total(ui_state_t* state, int total) { state->msg_total = total; }
 
 ui_screen_t ui_get_screen(const ui_state_t* state) { return state->current_screen; }
 
@@ -166,24 +200,44 @@ bool ui_needs_redraw(const ui_state_t* state) { return state->screen_dirty; }
 void ui_mark_drawn(ui_state_t* state) { state->screen_dirty = false; }
 
 void ui_on_message_received(ui_state_t* state, uint32_t now_ms) {
-    uint32_t idle_ms = now_ms - state->last_activity;
-
-    if (idle_ms >= UI_MESSAGE_IDLE_THRESHOLD_MS) {
-        if (state->current_screen != SCREEN_MESSAGES) {
-            state->prev_screen = state->current_screen;
-            state->current_screen = SCREEN_MESSAGES;
-            state->screen_enter_time = now_ms;
-            state->screen_dirty = true;
+    if (state->current_screen == SCREEN_MESSAGES && state->msg_scroll == 0) {
+        /* Reader is already looking at the newest page: nothing pending, but
+         * extend the auto-restore window if one is running and repaint. */
+        if (state->message_auto_switch_time != 0) {
+            state->message_auto_switch_time = now_ms;
         }
-        state->pending_message_notification = false;
+        state->screen_dirty = true;
+        return;
+    }
+    if (state->current_screen == SCREEN_MESSAGES) {
+        /* Scrolled into history: count it, do not yank the view. */
+        if (state->unread_count < 99) {
+            state->unread_count++;
+        }
+        state->screen_dirty = true;
+        return;
+    }
+
+    uint32_t idle_ms = now_ms - state->last_activity;
+    if (idle_ms >= UI_MESSAGE_IDLE_THRESHOLD_MS) {
+        state->prev_screen = state->current_screen;
+        state->current_screen = SCREEN_MESSAGES;
+        state->screen_enter_time = now_ms;
+        state->unread_count = 0;
+        state->msg_scroll = 0;
         state->message_auto_switch_time = now_ms;
+        state->screen_dirty = true;
     } else {
-        state->pending_message_notification = true;
+        if (state->unread_count < 99) {
+            state->unread_count++;
+        }
+        state->screen_dirty = true;
     }
 }
 
 void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
     if (state->message_auto_switch_time != 0 && state->current_screen == SCREEN_MESSAGES &&
+        state->msg_scroll == 0 &&
         (now_ms - state->message_auto_switch_time) >= UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS) {
         state->current_screen = state->prev_screen;
         state->screen_enter_time = now_ms;
@@ -192,8 +246,11 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         return;
     }
 
+    uint32_t inactivity_limit = (state->current_screen == SCREEN_MESSAGES)
+                                    ? UI_MESSAGES_INACTIVITY_TIMEOUT_MS
+                                    : UI_INACTIVITY_TIMEOUT_MS;
     if (state->current_screen != SCREEN_MAIN &&
-        (now_ms - state->last_activity) >= UI_INACTIVITY_TIMEOUT_MS) {
+        (now_ms - state->last_activity) >= inactivity_limit) {
         state->prev_screen = state->current_screen;
         state->current_screen = SCREEN_MAIN;
         state->screen_enter_time = now_ms;

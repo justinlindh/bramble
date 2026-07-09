@@ -275,7 +275,20 @@ static uint32_t boot_time_ms = 0;
 static mesh_shared_state_t s_render_mesh;
 static routing_table_t s_render_routes;
 
-static void render_main_screen(void) {
+/* "*N" unread badge, drawn right-aligned at the given x limit on every
+ * screen except Messages itself. */
+static void render_unread_badge(const ui_state_t* ui, int right_x) {
+    if (ui->unread_count <= 0 || ui->current_screen == SCREEN_MESSAGES)
+        return;
+    char b[8];
+    if (ui->unread_count > 9)
+        snprintf(b, sizeof(b), "*9+");
+    else
+        snprintf(b, sizeof(b), "*%d", ui->unread_count);
+    display_draw_text(right_x - (int)strlen(b) * FONT_W, HEADER_Y, b);
+}
+
+static void render_main_screen(const ui_state_t* ui) {
     display_clear();
 
     /* Header — name + battery, right-aligned battery */
@@ -291,6 +304,7 @@ static void render_main_screen(void) {
             snprintf(batt, sizeof(batt), "USB");
         int batt_x = DISPLAY_WIDTH - (strlen(batt) * FONT_W) - 2;
         display_draw_text(batt_x, HEADER_Y, batt);
+        render_unread_badge(ui, batt_x - FONT_W);
     }
     display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
@@ -368,13 +382,16 @@ static void render_main_screen(void) {
 static void render_screen(ui_state_t* ui) {
     switch (ui_get_screen(ui)) {
     case SCREEN_MAIN:
-        render_main_screen();
+        render_main_screen(ui);
         break;
     case SCREEN_MESSAGES: {
         display_clear();
         int mcount = msg_store_count();
         char hdr[32];
-        snprintf(hdr, sizeof(hdr), "Messages (%d)", mcount);
+        if (ui->msg_scroll > 0)
+            snprintf(hdr, sizeof(hdr), "Messages (%d) ^%d", mcount, ui->msg_scroll);
+        else
+            snprintf(hdr, sizeof(hdr), "Messages (%d)", mcount);
         display_draw_text(2, HEADER_Y, hdr);
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
@@ -384,27 +401,20 @@ static void render_screen(ui_state_t* ui) {
             int no_msg_x = (DISPLAY_WIDTH - strlen(no_msg) * FONT_W) / 2;
             display_draw_text(no_msg_x, no_msg_y, no_msg);
         } else {
-            /* Calculate how many messages fit */
+            mesh_get_state(&s_render_mesh); /* for beacon names */
+            uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
             int max_msgs = (FOOTER_Y - CONTENT_Y) / LINE_H;
-            int start = mcount > max_msgs ? mcount - max_msgs : 0;
+            int start = mcount - max_msgs - ui->msg_scroll;
+            if (start < 0)
+                start = 0;
             int y = CONTENT_Y;
             for (int i = start; i < mcount && y < FOOTER_Y; i++) {
                 const stored_msg_t* m = msg_store_get(i);
                 if (!m)
                     continue;
-                char line[CHARS_PER_LINE + 1];
+
                 bool outgoing =
                     (m->direction == MSG_DIR_OUTGOING || m->direction == MSG_DIR_BROADCAST_OUT);
-
-                char prefix[8];
-                if (m->channel_index > 0) {
-                    /* Non-default channel: include channel number with direction marker.
-                     * Outgoing: "1>", Incoming: "<1" */
-                    snprintf(prefix, sizeof(prefix), outgoing ? "%d>" : "<%d",
-                             (int)m->channel_index);
-                } else {
-                    snprintf(prefix, sizeof(prefix), "%s", outgoing ? ">" : "<");
-                }
 
                 /* Delivery badge for outgoing messages (2 chars at end) */
                 const char* badge = "";
@@ -420,45 +430,31 @@ static void render_screen(ui_state_t* ui) {
                         badge = " x";
                         break; /* failed */
                     default:
-                        badge = "";
                         break;
                     }
                 }
-                int badge_len = (int)strlen(badge);
 
-                /* Detect CTCP ACTION: \x01ACTION text\x01 */
-                bool is_action = (m->text_len > 9 && m->text[0] == 0x01 &&
-                                  strncmp(m->text + 1, "ACTION ", 7) == 0);
-
-                if (is_action) {
-                    /* Extract action text: skip \x01ACTION  (8 bytes), strip trailing \x01 */
-                    const char* act = m->text + 8;
-                    int act_len = (int)m->text_len - 8;
-                    if (act_len > 0 && act[act_len - 1] == 0x01)
-                        act_len--;
-                    if (act_len < 0)
-                        act_len = 0;
-
-                    if (outgoing) {
-                        /* "* me <action>" */
-                        int act_max = CHARS_PER_LINE - 5 /* "* me " */;
-                        if (act_max < 1)
-                            act_max = 1;
-                        snprintf(line, sizeof(line), "* me %.*s", act_max, act);
-                    } else {
-                        /* "* XXXX <action>" — last 4 hex digits of peer_addr */
-                        int act_max = CHARS_PER_LINE - 7 /* "* XXXX " */;
-                        if (act_max < 1)
-                            act_max = 1;
-                        snprintf(line, sizeof(line), "* %04X %.*s",
-                                 (unsigned)(m->peer_addr & 0xFFFF), act_max, act);
-                    }
-                } else {
-                    int text_max = CHARS_PER_LINE - (int)strlen(prefix) - 1 /* space */ - badge_len;
-                    if (text_max < 1)
-                        text_max = 1;
-                    snprintf(line, sizeof(line), "%s %.*s%s", prefix, text_max, m->text, badge);
+                const char* peer_name = NULL;
+                if (!outgoing) {
+                    neighbor_entry_t* nb = neighbor_lookup(&s_render_mesh.neighbors, m->peer_addr);
+                    if (nb && nb->name[0])
+                        peer_name = nb->name;
                 }
+
+                ui_msg_line_t li = {
+                    .text = m->text,
+                    .text_len = m->text_len,
+                    .outgoing = outgoing,
+                    .peer_addr = m->peer_addr,
+                    .peer_name = peer_name,
+                    .channel_index = m->channel_index,
+                    .channel_name =
+                        (m->channel_index > 0) ? mesh_get_channel_name(m->channel_index) : NULL,
+                    .badge = badge,
+                    .age_s = (now_s >= m->timestamp_s) ? (int)(now_s - m->timestamp_s) : 0,
+                };
+                char line[CHARS_PER_LINE + 1];
+                ui_format_msg_line(&li, line, sizeof(line));
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -466,7 +462,10 @@ static void render_screen(ui_state_t* ui) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
         display_draw_text(2, FOOTER_Y, "[o] compose  < > navigate");
 #else
-        display_draw_text(2, FOOTER_Y, "[press] next screen");
+        if (ui->msg_scroll > 0)
+            display_draw_text(2, FOOTER_Y, "[2x]new [hold]older");
+        else
+            display_draw_text(2, FOOTER_Y, "[hold]older reply:app");
 #endif
         display_flush();
         break;
@@ -494,6 +493,7 @@ static void render_screen(ui_state_t* ui) {
         char hdr[32];
         snprintf(hdr, sizeof(hdr), "Nodes (%d routes)", route_count);
         display_draw_text(2, HEADER_Y, hdr);
+        render_unread_badge(ui, DISPLAY_WIDTH - 2);
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         char summary[32];
@@ -531,8 +531,11 @@ static void render_screen(ui_state_t* ui) {
                 } else {
                     snprintf(age_str, sizeof(age_str), "%luh+", (unsigned long)(age_s / 3600));
                 }
-                /* Line: "AABBCCDD -70 12s" (~16 chars, fits 21-char display) */
-                snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s", e->addr, e->rssi, age_str);
+                /* Prefer the beacon name; fall back to the full address. */
+                if (e->name[0])
+                    snprintf(nl, sizeof(nl), "%.8s %d %s", e->name, e->rssi, age_str);
+                else
+                    snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s", e->addr, e->rssi, age_str);
                 display_draw_text(2, y, nl);
                 y += LINE_H;
             }
@@ -548,6 +551,7 @@ static void render_screen(ui_state_t* ui) {
     case SCREEN_SETTINGS: {
         display_clear();
         display_draw_text(2, HEADER_Y, "Settings");
+        render_unread_badge(ui, DISPLAY_WIDTH - 2);
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         if (ui->settings_editing) {
@@ -638,7 +642,7 @@ static void render_screen(ui_state_t* ui) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
             display_draw_text(2, FOOTER_Y, "[o] edit  < > navigate");
 #else
-            display_draw_text(2, FOOTER_Y, "[press]next [hold]edit");
+            display_draw_text(2, FOOTER_Y, "[hold]edit [2x]exit");
 #endif
         }
         display_flush();
@@ -686,6 +690,7 @@ static void render_screen(ui_state_t* ui) {
 #else
         /* Heltec: Stats screen */
         display_draw_text(2, HEADER_Y, "Stats  v0.1");
+        render_unread_badge(ui, DISPLAY_WIDTH - 2);
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         char line[64];
@@ -738,7 +743,8 @@ static void render_screen(ui_state_t* ui) {
         }
         display_draw_text(2, y, line);
 
-        display_draw_text(2, FOOTER_Y, "[press] next screen");
+        /* Delivery badge legend for the messages screen */
+        display_draw_text(2, FOOTER_Y, "*pend +ok ++mh x fail");
 #endif
 
         display_flush();
@@ -750,6 +756,7 @@ static void render_screen(ui_state_t* ui) {
          * BOARD_CAP_GPS is Heltec V4 (non-graphical), so no T-Deck layout is needed here. */
         display_clear();
         display_draw_text(2, HEADER_Y, "GPS");
+        render_unread_badge(ui, DISPLAY_WIDTH - 2);
         display_hline(0, DIVIDER_Y, DISPLAY_WIDTH);
 
         int y = CONTENT_Y;
@@ -1247,7 +1254,7 @@ void app_main(void) {
     ui_state_t ui;
     ui_init(&ui);
     ui_set_gps_available(&ui, board_has_cap(BOARD_CAP_GPS));
-    int last_message_count = msg_store_count();
+    uint32_t last_incoming_total = msg_store_total_incoming();
 
     /* Render initial screen */
     ESP_LOGI(TAG, "=== BOOT STAGE: initial render ===");
@@ -1316,13 +1323,16 @@ void app_main(void) {
         }
 #endif
 
-        /* Incoming message detection for text UI boards. */
+        /* Incoming message detection for text UI boards. Uses the monotonic
+         * incoming counter: msg_store_count() saturates at the ring capacity
+         * and outgoing sends must not trigger the notification path. */
         {
-            int current_message_count = msg_store_count();
-            if (current_message_count > last_message_count) {
+            uint32_t incoming_total = msg_store_total_incoming();
+            if (incoming_total != last_incoming_total) {
                 ui_on_message_received(&ui, now_ms);
+                last_incoming_total = incoming_total;
             }
-            last_message_count = current_message_count;
+            ui_set_message_total(&ui, msg_store_count());
         }
 
         /* Handle settings confirmation */
@@ -1400,7 +1410,7 @@ void app_main(void) {
 
         /* Periodic refresh of main screen (uptime counter) */
         if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % 1000) < 50) {
-            render_main_screen();
+            render_main_screen(&ui);
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));

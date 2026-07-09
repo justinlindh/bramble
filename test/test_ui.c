@@ -47,15 +47,28 @@ void test_double_press_back(void) {
 }
 
 void test_inactivity_timeout(void) {
+    /* Non-messages screens bounce to MAIN after 60s. */
     ui_handle_button(&state, BTN_SHORT_PRESS, 1000);
-    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1100); /* -> SCREEN_NODES */
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
 
-    // Not enough time
     ui_check_timeout(&state, 50000);
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
+
+    ui_check_timeout(&state, 61101);
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+}
+
+void test_messages_screen_gets_long_inactivity_timeout(void) {
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* -> SCREEN_MESSAGES */
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
 
-    // Enough time (60s from last activity at 1000)
-    ui_check_timeout(&state, 61001);
+    /* 60s inactivity must NOT bounce a reader off the messages screen. */
+    ui_check_timeout(&state, 62000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+
+    /* But 5 minutes does. */
+    ui_check_timeout(&state, 302000);
     TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
 }
 
@@ -348,19 +361,57 @@ void test_incoming_message_idle_auto_switches_to_messages(void) {
 
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
     TEST_ASSERT_EQUAL(SCREEN_NODES, state.prev_screen);
-    TEST_ASSERT_FALSE(state.pending_message_notification);
+    TEST_ASSERT_EQUAL(0, state.unread_count);
     TEST_ASSERT_TRUE(state.message_auto_switch_time > 0);
 }
 
-void test_incoming_message_while_active_sets_pending_flag_without_switch(void) {
+void test_incoming_message_while_active_increments_unread_without_switch(void) {
     state.current_screen = SCREEN_NODES;
     state.last_activity = 5000;
 
     ui_on_message_received(&state, 12000); /* 7s idle -> still active */
+    ui_on_message_received(&state, 12500);
 
     TEST_ASSERT_EQUAL(SCREEN_NODES, state.current_screen);
-    TEST_ASSERT_TRUE(state.pending_message_notification);
+    TEST_ASSERT_EQUAL(2, state.unread_count);
     TEST_ASSERT_EQUAL(0, state.message_auto_switch_time);
+    TEST_ASSERT_TRUE(state.screen_dirty); /* badge must render */
+}
+
+void test_short_press_with_unread_jumps_to_messages_and_clears(void) {
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 5000;
+    ui_on_message_received(&state, 12000);
+    TEST_ASSERT_EQUAL(1, state.unread_count);
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 12500);
+
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+    TEST_ASSERT_EQUAL(SCREEN_NODES, state.prev_screen);
+    TEST_ASSERT_EQUAL(0, state.unread_count);
+}
+
+void test_cycling_into_messages_clears_unread(void) {
+    state.current_screen = SCREEN_MAIN;
+    state.last_activity = 5000;
+    ui_on_message_received(&state, 12000);
+    TEST_ASSERT_EQUAL(1, state.unread_count);
+
+    /* Press-to-view fires from MAIN too; land on messages either way. */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 12500);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+    TEST_ASSERT_EQUAL(0, state.unread_count);
+}
+
+void test_message_while_viewing_messages_does_not_count_unread(void) {
+    state.current_screen = SCREEN_MESSAGES;
+    state.last_activity = 5000;
+
+    ui_on_message_received(&state, 12000);
+
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+    TEST_ASSERT_EQUAL(0, state.unread_count);
+    TEST_ASSERT_TRUE(state.screen_dirty);
 }
 
 void test_auto_restore_returns_to_previous_screen_after_timeout(void) {
@@ -377,6 +428,68 @@ void test_auto_restore_returns_to_previous_screen_after_timeout(void) {
     TEST_ASSERT_EQUAL(0, state.message_auto_switch_time);
 }
 
+void test_long_press_on_messages_pages_older_and_clamps(void) {
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* -> SCREEN_MESSAGES */
+    ui_set_message_total(&state, 10);
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 2000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(4, state.msg_scroll);
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 3000);
+    TEST_ASSERT_EQUAL(6, state.msg_scroll); /* clamp: 10 - 4 */
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 4000);
+    TEST_ASSERT_EQUAL(6, state.msg_scroll); /* stays clamped */
+}
+
+void test_double_press_returns_to_newest_when_scrolled(void) {
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* -> SCREEN_MESSAGES */
+    ui_set_message_total(&state, 10);
+    ui_handle_button(&state, BTN_LONG_PRESS, 2000);
+    TEST_ASSERT_EQUAL(4, state.msg_scroll);
+
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 3000);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state)); /* no screen jump */
+    TEST_ASSERT_EQUAL(0, state.msg_scroll);
+
+    /* A second double-press (not scrolled) is the normal back-jump. */
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 4000);
+    TEST_ASSERT_NOT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+}
+
+void test_message_while_scrolled_counts_unread_and_blocks_restore(void) {
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 1000;
+    ui_on_message_received(&state, 12050); /* idle -> auto-switch */
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+
+    ui_set_message_total(&state, 10);
+    ui_handle_button(&state, BTN_LONG_PRESS, 13000); /* scroll older */
+    TEST_ASSERT_EQUAL(4, state.msg_scroll);
+
+    /* New arrival while reading history: counted, no forced jump. */
+    ui_on_message_received(&state, 13500);
+    TEST_ASSERT_EQUAL(1, state.unread_count);
+    TEST_ASSERT_EQUAL(4, state.msg_scroll);
+}
+
+void test_entering_messages_resets_scroll(void) {
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* -> SCREEN_MESSAGES */
+    ui_set_message_total(&state, 10);
+    ui_handle_button(&state, BTN_LONG_PRESS, 2000);
+    TEST_ASSERT_EQUAL(4, state.msg_scroll);
+
+    /* Leave while scrolled, then jump back: history position must reset. */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 3000); /* -> SCREEN_NODES */
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(4, state.msg_scroll);
+
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 3500); /* back to messages */
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, ui_get_screen(&state));
+    TEST_ASSERT_EQUAL(0, state.msg_scroll);
+}
+
 void test_user_interaction_on_messages_cancels_auto_restore(void) {
     state.current_screen = SCREEN_NODES;
     state.last_activity = 1000;
@@ -390,12 +503,121 @@ void test_user_interaction_on_messages_cancels_auto_restore(void) {
     TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
 }
 
+void test_format_msg_line_incoming_named_sender(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "hello there",
+                       .text_len = 11,
+                       .outgoing = false,
+                       .peer_addr = 0xA1B2C3D4,
+                       .peer_name = "ally",
+                       .channel_index = 0,
+                       .channel_name = NULL,
+                       .badge = "",
+                       .age_s = -1};
+    ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("ally: hello there", buf);
+}
+
+void test_format_msg_line_age_suffix(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "hello",
+                       .text_len = 5,
+                       .outgoing = false,
+                       .peer_addr = 0xA1B2C3D4,
+                       .peer_name = "ally",
+                       .channel_index = 0,
+                       .channel_name = NULL,
+                       .badge = "",
+                       .age_s = 300};
+    ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("ally: hello 5m", buf);
+}
+
+void test_format_msg_line_unknown_sender_uses_hex(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "hi",
+                       .text_len = 2,
+                       .outgoing = false,
+                       .peer_addr = 0xA1B2C3D4,
+                       .peer_name = NULL,
+                       .channel_index = 0,
+                       .channel_name = NULL,
+                       .badge = "",
+                       .age_s = -1};
+    ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("C3D4: hi", buf);
+}
+
+void test_format_msg_line_outgoing_with_badge_and_truncation(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "a very long message that will not fit",
+                       .text_len = 38,
+                       .outgoing = true,
+                       .peer_addr = 0,
+                       .peer_name = NULL,
+                       .channel_index = 0,
+                       .channel_name = NULL,
+                       .badge = " +",
+                       .age_s = -1};
+    int n = ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_TRUE(n <= 21);
+    /* used = "me" + ": " + " +" = 6, so 15 text chars fit on the 21-char line */
+    TEST_ASSERT_EQUAL_STRING("me: a very long mes +", buf);
+}
+
+void test_format_msg_line_channel_tag(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "yo",
+                       .text_len = 2,
+                       .outgoing = false,
+                       .peer_addr = 0xA1B2C3D4,
+                       .peer_name = "ally",
+                       .channel_index = 2,
+                       .channel_name = "hiking",
+                       .badge = "",
+                       .age_s = -1};
+    ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("#hiki ally: yo", buf);
+}
+
+void test_format_msg_line_channel_tag_falls_back_to_index(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "yo",
+                       .text_len = 2,
+                       .outgoing = false,
+                       .peer_addr = 0xA1B2C3D4,
+                       .peer_name = NULL,
+                       .channel_index = 3,
+                       .channel_name = "",
+                       .badge = "",
+                       .age_s = -1};
+    ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("#3 C3D4: yo", buf);
+}
+
+void test_format_msg_line_action(void) {
+    char buf[22];
+    ui_msg_line_t m = {.text = "\x01"
+                               "ACTION waves\x01",
+                       .text_len = 14,
+                       .outgoing = false,
+                       .peer_addr = 0xA1B2C3D4,
+                       .peer_name = "ally",
+                       .channel_index = 0,
+                       .channel_name = NULL,
+                       .badge = "",
+                       .age_s = -1};
+    ui_format_msg_line(&m, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("* ally waves", buf);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
     RUN_TEST(test_short_press_cycles);
     RUN_TEST(test_double_press_back);
     RUN_TEST(test_inactivity_timeout);
+    RUN_TEST(test_messages_screen_gets_long_inactivity_timeout);
     RUN_TEST(test_screen_dirty_on_transition);
     RUN_TEST(test_long_press_dirty_no_change);
     RUN_TEST(test_format_main_line1);
@@ -426,7 +648,21 @@ int main(void) {
     RUN_TEST(test_location_ui_panic_off_disables_sharing);
     RUN_TEST(test_location_ui_status_indicators);
     RUN_TEST(test_incoming_message_idle_auto_switches_to_messages);
-    RUN_TEST(test_incoming_message_while_active_sets_pending_flag_without_switch);
+    RUN_TEST(test_incoming_message_while_active_increments_unread_without_switch);
+    RUN_TEST(test_short_press_with_unread_jumps_to_messages_and_clears);
+    RUN_TEST(test_cycling_into_messages_clears_unread);
+    RUN_TEST(test_message_while_viewing_messages_does_not_count_unread);
+    RUN_TEST(test_long_press_on_messages_pages_older_and_clamps);
+    RUN_TEST(test_double_press_returns_to_newest_when_scrolled);
+    RUN_TEST(test_message_while_scrolled_counts_unread_and_blocks_restore);
+    RUN_TEST(test_entering_messages_resets_scroll);
+    RUN_TEST(test_format_msg_line_incoming_named_sender);
+    RUN_TEST(test_format_msg_line_age_suffix);
+    RUN_TEST(test_format_msg_line_unknown_sender_uses_hex);
+    RUN_TEST(test_format_msg_line_outgoing_with_badge_and_truncation);
+    RUN_TEST(test_format_msg_line_channel_tag);
+    RUN_TEST(test_format_msg_line_channel_tag_falls_back_to_index);
+    RUN_TEST(test_format_msg_line_action);
     RUN_TEST(test_auto_restore_returns_to_previous_screen_after_timeout);
     RUN_TEST(test_user_interaction_on_messages_cancels_auto_restore);
     return UNITY_END();
