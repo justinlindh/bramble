@@ -46,16 +46,31 @@ void test_channel_target_includes_message_when_channel_matches(void) {
 void test_dm_target_matches_only_peer_dm(void) {
     chat_target_t t = chat_target_dm(0x12345678);
 
+    /* Real DMs are stored with channel_index -1 */
     stored_msg_t dm_match = {
-        .direction = MSG_DIR_INCOMING, .peer_addr = 0x12345678, .channel_index = 0};
+        .direction = MSG_DIR_INCOMING, .peer_addr = 0x12345678, .channel_index = -1};
     stored_msg_t dm_other = {
-        .direction = MSG_DIR_INCOMING, .peer_addr = 0xAABBCCDD, .channel_index = 0};
+        .direction = MSG_DIR_INCOMING, .peer_addr = 0xAABBCCDD, .channel_index = -1};
     stored_msg_t bcast = {
-        .direction = MSG_DIR_BROADCAST_IN, .peer_addr = 0x12345678, .channel_index = 0};
+        .direction = MSG_DIR_BROADCAST_IN, .peer_addr = 0x12345678, .channel_index = -1};
 
-    TEST_ASSERT_TRUE(chat_target_matches_message(t, &dm_match, 0));
-    TEST_ASSERT_FALSE(chat_target_matches_message(t, &dm_other, 0));
-    TEST_ASSERT_FALSE(chat_target_matches_message(t, &bcast, 0));
+    TEST_ASSERT_TRUE(chat_target_matches_message(t, &dm_match, -1));
+    TEST_ASSERT_FALSE(chat_target_matches_message(t, &dm_other, -1));
+    TEST_ASSERT_FALSE(chat_target_matches_message(t, &bcast, -1));
+}
+
+void test_dm_target_excludes_channel_messages_from_same_peer(void) {
+    chat_target_t t = chat_target_dm(0x12345678);
+
+    /* Channel messages are stored MSG_DIR_INCOMING with channel_index >= 0;
+     * a channel post from the peer must not leak into the DM thread. */
+    stored_msg_t ch_post = {
+        .direction = MSG_DIR_INCOMING, .peer_addr = 0x12345678, .channel_index = 2};
+    stored_msg_t ch_out = {
+        .direction = MSG_DIR_OUTGOING, .peer_addr = 0x12345678, .channel_index = 2};
+
+    TEST_ASSERT_FALSE(chat_target_matches_message(t, &ch_post, 2));
+    TEST_ASSERT_FALSE(chat_target_matches_message(t, &ch_out, 2));
 }
 
 void test_cycle_targets_walks_channels_then_wraps_to_broadcast(void) {
@@ -88,6 +103,7 @@ int main(void) {
     RUN_TEST(test_channel_target_excludes_other_channels);
     RUN_TEST(test_channel_target_includes_message_when_channel_matches);
     RUN_TEST(test_dm_target_matches_only_peer_dm);
+    RUN_TEST(test_dm_target_excludes_channel_messages_from_same_peer);
     RUN_TEST(test_cycle_targets_walks_channels_then_wraps_to_broadcast);
     RUN_TEST(test_cycle_from_dm_returns_broadcast);
     return UNITY_END();

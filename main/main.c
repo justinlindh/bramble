@@ -451,7 +451,9 @@ static void render_screen(ui_state_t* ui) {
                     .channel_name =
                         (m->channel_index > 0) ? mesh_get_channel_name(m->channel_index) : NULL,
                     .badge = badge,
-                    .age_s = (now_s >= m->timestamp_s) ? (int)(now_s - m->timestamp_s) : 0,
+                    .age_s = (m->timestamp_s == 0)
+                                 ? -1
+                                 : ((now_s >= m->timestamp_s) ? (int)(now_s - m->timestamp_s) : 0),
                 };
                 char line[CHARS_PER_LINE + 1];
                 ui_format_msg_line(&li, line, sizeof(line));
