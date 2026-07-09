@@ -10,8 +10,9 @@
 #endif
 
 static stored_msg_t s_msgs[MSG_STORE_MAX];
-static int s_head = 0;  /* Next write position */
-static int s_count = 0; /* Number of stored messages */
+static int s_head = 0;                /* Next write position */
+static int s_count = 0;               /* Number of stored messages */
+static uint32_t s_total_incoming = 0; /* Monotonic incoming counter, survives ring wrap */
 
 static uint32_t get_uptime_s(void) {
 #ifdef ESP_PLATFORM
@@ -25,6 +26,7 @@ void msg_store_init(void) {
     memset(s_msgs, 0, sizeof(s_msgs));
     s_head = 0;
     s_count = 0;
+    s_total_incoming = 0;
 }
 
 void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
@@ -51,6 +53,9 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
     s_head = (s_head + 1) % MSG_STORE_MAX;
     if (s_count < MSG_STORE_MAX) {
         s_count++;
+    }
+    if (dir == MSG_DIR_INCOMING || dir == MSG_DIR_BROADCAST_IN) {
+        s_total_incoming++;
     }
 
 #ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
@@ -105,6 +110,8 @@ bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
 }
 
 int msg_store_count(void) { return s_count; }
+
+uint32_t msg_store_total_incoming(void) { return s_total_incoming; }
 
 const stored_msg_t* msg_store_get(int index) {
     if (index < 0 || index >= s_count)
