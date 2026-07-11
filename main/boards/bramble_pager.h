@@ -14,17 +14,21 @@
  *   handled by the bramble_pager branch in components/gps/gps.c. GPIO35/36 are
  *   no longer reserved for an N8R8 octal-PSRAM option (dropped for GPS).
  *
+ * E-paper (SSD1680, GDEY0213B74 2.13" 250x122): shares the SPI bus with
+ *   the radio (BOARD_CAP_SHARED_SPI: board_init owns the bus + g_spi_mutex).
+ *   CS=4, DC=5, RST=6 (RES#, active low), BUSY=7 (active HIGH here,
+ *   opposite of UC8151). Driver: components/display/ssd1680_engine.c +
+ *   ssd1680_io.c.
+ *
  * Reserved for future drivers (not wired into this skeleton yet):
- *   E-paper (SSD1680): CS=4, DC=5, RST=6, BUSY=7 (BUSY is active HIGH here,
- *     opposite of UC8151). Arrives with BOARD_CAP_DISPLAY_EPAPER + a display
- *     pin struct variant in a later PR.
  *   Alert outputs: buzzer=15, vibra=16, LED=48.
  *   HMI buttons: UP=21, DOWN=47 (BOOT/SELECT is button_gpio=0 below).
  */
 static const bramble_board_config_t board_bramble_pager = {
     .name = "Bramble Pager v1",
     .short_name = "bramble_pager",
-    .capabilities = BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS,
+    .capabilities = BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS | BOARD_CAP_DISPLAY_EPAPER |
+                    BOARD_CAP_SHARED_SPI,
 
     .peripheral_power_pin = -1,
 
@@ -37,6 +41,11 @@ static const bramble_board_config_t board_bramble_pager = {
     .radio_tcxo_voltage = 2.7f,
     .radio_reg = RADIO_REG_DCDC,
     .radio_dio2_rf_switch = true,
+
+    /* SSD1680 e-paper, landscape as the firmware sees it */
+    .display_width = 250,
+    .display_height = 122,
+    .epd_display = {.cs = 4, .dc = 5, .rst = 6, .busy = 7},
 
     .button_gpio = 0,
 

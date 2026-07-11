@@ -19,7 +19,8 @@
 static const bramble_board_config_t board_virtual_pager = {
     .name = "Bramble Virtual Pager",
     .short_name = "virtual_pager",
-    .capabilities = BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS | BOARD_CAP_VIRTUAL,
+    .capabilities = BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS | BOARD_CAP_DISPLAY_EPAPER |
+                    BOARD_CAP_SHARED_SPI | BOARD_CAP_VIRTUAL,
 
     .peripheral_power_pin = -1,
 
@@ -32,6 +33,11 @@ static const bramble_board_config_t board_virtual_pager = {
     .radio_tcxo_voltage = 2.7f,
     .radio_reg = RADIO_REG_DCDC,
     .radio_dio2_rf_switch = true,
+
+    /* SSD1680 e-paper, landscape as the firmware sees it */
+    .display_width = 250,
+    .display_height = 122,
+    .epd_display = {.cs = 4, .dc = 5, .rst = 6, .busy = 7},
 
     .button_gpio = 0,
 
