@@ -54,3 +54,4 @@ keys/*
 
 # session scratch (never commit)
 .superpowers/
+.claude/worktrees/
