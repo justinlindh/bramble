@@ -23,6 +23,13 @@ func findDir(candidates []string) string {
 }
 
 func main() {
+	// Subcommands come before the server flags. `screen-assert` replays a
+	// headless event log and asserts rendered-screen content (cmd_screen_assert.go),
+	// the OCR-free check the scenario suite gates on.
+	if len(os.Args) > 1 && os.Args[1] == "screen-assert" {
+		os.Exit(runScreenAssert(os.Args[2:]))
+	}
+
 	port := flag.Int("port", 3000, "HTTP server port")
 	uiDir := flag.String("ui", "", "Path to UI static files")
 	scenarioDir := flag.String("scenarios", "", "Path to scenarios")
