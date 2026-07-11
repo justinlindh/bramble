@@ -17,9 +17,9 @@ idf.py build
 ```
 
 `./spike_check.sh` boots the node for 15 seconds and asserts the gate
-criteria: app_main reaches mesh_task, the null radio initializes, the first
-discovery beacon is attempted, and the process idles (< 20% CPU; measured
-0.0-0.2%).
+criteria: app_main reaches mesh_task, the null radio initializes, the beacon
+path is entered (INERT, no TX: node unprovisioned), and the process idles
+(< 20% CPU; measured 0.0-0.2%).
 
 AddressSanitizer build (separate build dir):
 
@@ -33,8 +33,8 @@ idf.py -B build-asan build -DCMAKE_C_FLAGS=-fsanitize=address \
 
 The IDF linux target is viable as the emulator's node runtime. The full
 firmware (mesh_task.c as-is, real crypto via mbedtls + libsodium, real NVS,
-real tx_gate) boots to the main mesh loop, attempts its first discovery
-beacon through the null radio, and idles at ~0% CPU. A 45 s AddressSanitizer
+real tx_gate) boots to the main mesh loop, enters the beacon path (INERT,
+no TX: node unprovisioned), and idles at ~0% CPU. A 45 s AddressSanitizer
 run is clean. No mesh_task logic was stubbed or forked; the only firmware
 source changes were gates at existing hardware seams plus three genuine
 portability fixes (listed below). Proceed with Tasks 2+ as planned (no
