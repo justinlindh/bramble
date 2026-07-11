@@ -262,6 +262,13 @@ void freq_plan_get_default(uint32_t* f, int8_t* p) {
         *p = 14;
 }
 void radio_get_config(radio_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
+/* PHY passthrough (phy.tx) routes through the tx gate; link stub only. */
+int tx_gate_send(const uint8_t* buf, uint8_t len, int kind) {
+    (void)buf;
+    (void)len;
+    (void)kind;
+    return 0; /* TX_GATE_OK */
+}
 int radio_reconfigure(const radio_config_t* cfg) {
     (void)cfg;
     return 0;
