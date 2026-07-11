@@ -108,6 +108,54 @@ Place JSON files in `scenarios/`. Supports:
 
 See `scenarios/` for examples. Upload custom scenarios via the UI or `POST /api/scenarios/upload`.
 
+## Emulator scenarios (real firmware nodes)
+
+A scenario may declare `firmware_nodes`: real Bramble firmware built for the
+ESP-IDF linux target (`emulator/node`), spawned as host processes that attach to
+the broker over emu-link and participate in the ether like any other node. These
+run in real-time mode (wall clock), so durations are seconds, not instant.
+
+```json
+"firmware_nodes": [
+  { "type": "firmware", "binary": "emulator/node/build/bramble-node.elf",
+    "count": 1, "positions": [[0,0]], "label": "sender",
+    "env": { "EMU_NETWORK_KEY": "<64 hex chars>", "EMU_AUTO_SEND": "HELLO" } }
+]
+```
+
+Per-node `env` knobs (host-only, honored only on the linux target):
+
+| Variable | Effect |
+|---|---|
+| `EMU_NETWORK_KEY` | 32-byte network key as 64 hex chars. Seeds provisioning at boot so the fleet meshes (there is no emu-link provisioning RPC). Unset means the node boots INERT. |
+| `EMU_AUTO_SEND` | Message text the node originates after a delay (via the real `mesh_send_broadcast`/`mesh_send_message`). The scripted stand-in for a button compose+send. |
+| `EMU_AUTO_SEND_TO` | DM target: `neighbor` (first learned neighbor), a hex address, or unset for a channel broadcast. |
+| `EMU_AUTO_SEND_DELAY_MS` / `_REPEAT` / `_INTERVAL_MS` | First-phase send timing (default 12000 / 3 / 4000). The delay must exceed the receiver's 10s message-idle threshold so an inbound message auto-opens its Messages screen. |
+| `EMU_AUTO_SEND2` + `EMU_AUTO_SEND2_DELAY_MS` / `_REPEAT` / `_INTERVAL_MS` | Optional second send phase (distinct text) after the first, for the DM-desync repro. |
+| `EMU_REBOOT_AT_MS` | The node exits once at this time so the supervisor restarts it (same identity, cleared RAM), which is the one-sided-session precondition. One-shot via a `NODE_DIR` marker. |
+
+### Assertion vocabulary
+
+`emulator/ci/run_scenarios.sh` runs the emulator scenarios headless and gates CI
+on their assertions. Two levels:
+
+- **Screen (OCR-free):** `bramble-gosim screen-assert -log <log> -text <str>`
+  with a node selector, one of `-node <hello-id>`, `-at <X,Y>` (the node that
+  joined at that position), or `-min-nodes <N>` (at least N distinct nodes). It
+  rasterizes `<str>` with the firmware's own `font_6x8` glyphs and blit rule and
+  searches every `device_fb` frame for a pixel-exact match (both ink polarities,
+  both panel orientations). "The message renders on the pager screen" is an
+  assertable fact; a near-miss string is rejected.
+- **Log signature:** the runner greps the scenario's event log for a firmware
+  console line (e.g. the DM-desync `Failed session decrypt` symptom and the #138
+  `re-initiating handshake (self-heal)` recovery), used where a behavior is
+  deterministic in the logs but its final on-screen effect has real-time timing
+  variance.
+
+Bundled emulator scenarios: `emulator-3-pagers` (attach/persistence smoke),
+`emu-channel-delivery` (broadcast renders on both receivers), `emu-dm-desync`
+(one-sided DM session desync plus self-heal).
+
 ## Interactive Controls
 
 Via the UI or WebSocket (`ws://host:port/ws`):
