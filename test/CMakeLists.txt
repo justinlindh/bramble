@@ -1614,3 +1614,15 @@ add_executable(test_probe_reply
 target_include_directories(test_probe_reply PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
 )
+
+# emu_link framing/dispatch/send tests (Task 2; whitebox include of emu_link.c)
+add_executable(test_emu_link
+    test_emu_link.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_emu_link PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+)
+target_link_libraries(test_emu_link pthread)
