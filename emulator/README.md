@@ -84,6 +84,23 @@ caveats, and `../simulator/README.md` ("Emulator scenarios" section) for the
 scenario schema, per-node env knobs (`EMU_NETWORK_KEY`, `EMU_AUTO_SEND`,
 ...), and the screen-assertion vocabulary CI gates on.
 
+## The device view
+
+After `make run`, open the URL and use the scenario dropdown to load
+`emu-channel-delivery` (three provisioned pagers that exchange a real channel
+message), then open the **DEVICES** tab. Each firmware node renders as the
+physical pager: a faithful SSD1680 e-paper panel (real partial/full refresh
+behavior, seeded from the GDEY0213B74 datasheet), clickable SEL/UP/DN/RST
+buttons that send real input to the firmware, LED/vibra indicators, and a
+live per-node console. `emu-dm-desync` demonstrates the DM session self-heal;
+`emulator-3-pagers` is a plain attach/boot/persistence smoke.
+
+Nodes boot unprovisioned (INERT) unless keyed up. The scenarios seed a shared
+network key via the `EMU_NETWORK_KEY` env at boot (the same 32-byte blob on
+every node) so they can send and receive channel traffic; per-node identity
+stays unique. Provisioning uses the real `network_key_set_provisioned` path,
+not a MAC-bypassing shortcut.
+
 ## CI-equivalent scenario suite
 
 ```
@@ -93,6 +110,22 @@ make headless
 Wraps `ci/run_scenarios.sh`: boots gosim headless for `emu-channel-delivery`
 and `emu-dm-desync`, asserts on rendered e-paper content and firmware log
 signatures. Exit code gates CI; budget under 5 minutes.
+
+## Browser end-to-end suite
+
+```
+make e2e
+```
+
+Drives a real headless Chromium through the full stack (Playwright) and
+asserts what a user actually sees: the device-view canvas pixels equal the
+firmware framebuffer for a delivered message (independent decode, pixel-exact),
+the full-refresh flash starts black before content, exactly N cards for N
+nodes, button clicks reach firmware with a visible reaction, RESET restarts a
+node with the same identity, and a channel message from node A renders on node
+B's e-paper. Wired into CI as a non-required job first. Teardown is scoped to
+the run's own gosim process group, so it will not disturb a separate
+`make run` serve on another port.
 
 ## Hardware bridge
 
