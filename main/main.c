@@ -53,6 +53,9 @@
 #include "emu_link.h"
 /* Provided by the emulator node's null_drivers component (emu_flash_persist.c). */
 void emu_node_flash_persist_init(void);
+/* Scripted-send hook (emu_autosend.c): originates a message on cue in a
+ * scenario. No-op unless EMU_AUTO_SEND is set. */
+int emu_node_start_autosend(void);
 #endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -1322,6 +1325,12 @@ void app_main(void) {
 #endif
 
     ESP_LOGI(TAG, "=== BOOT STAGE: main loop start ===");
+
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator only: arm the scripted sender (no-op unless EMU_AUTO_SEND is set)
+     * now that the mesh send path is live. */
+    emu_node_start_autosend();
+#endif
 
     while (1) {
         log_heap_diagnostics_periodic();
