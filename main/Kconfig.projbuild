@@ -13,6 +13,9 @@ menu "Bramble Configuration"
         config BRAMBLE_BOARD_TDECK_PLUS
             bool "LILYGO T-Deck Plus (ESP32-S3 + SX1262 + GPS + Keyboard)"
 
+        config BRAMBLE_BOARD_PAGER
+            bool "Bramble Pager v1 (ESP32-S3 + NiceRF LoRa1262 + SSD1680 e-paper)"
+
         config BRAMBLE_BOARD_TTGO_LORA32
             bool "TTGO LoRa32 (SX1276)"
 

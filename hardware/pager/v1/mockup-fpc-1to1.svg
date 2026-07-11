@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">
+<style>text{font-family:monospace;font-size:3px}.s{fill:none;stroke:#000;stroke-width:0.2}</style>
+<text x="10" y="12" style="font-size:5px">Bramble Pager v1 : FPC fold mockup (print at 100%, verify the 50mm bar!)</text>
+<rect x="10" y="16" width="50" height="4" class="s"/><text x="62" y="19">exactly 50.0 mm</text>
+<text x="10" y="30">1. Cut out the panel rectangle below (59.2 x 29.2) with its tail.</text>
+<text x="10" y="35">2. Fold the tail 180 deg UNDER along the dashed line (contacts face DOWN after fold).</text>
+<text x="10" y="40">3. Place display-up onto the connector drawing so the tail tip lands in the connector.</text>
+<text x="10" y="45">4. VERIFY: panel finger 1 (marked) must land on connector pin 24 (marked). Mirror = correct.</text>
+<!-- panel outline -->
+<g transform="translate(20,60)">
+<rect x="0" y="0" width="59.2" height="29.2" class="s"/>
+<text x="2" y="5">GDEY0213B74 (display side UP)</text>
+<rect x="23.35" y="29.2" width="12.5" height="12" class="s"/>
+<line x1="23.35" y1="29.2" x2="35.85" y2="29.2" stroke="#000" stroke-width="0.2" stroke-dasharray="1,1"/>
+<text x="24" y="36">tail (fold under)</text>
+<text x="24.5" y="40.5" style="font-size:2px">finger 1&#8594;</text>
+</g>
+<!-- board connector zone 1:1 -->
+<g transform="translate(20,130)">
+<text x="0" y="-3">Board top view (1:1): FH34SRJ connector at board (144.4..158.6, 75.6..79.7)</text>
+<rect x="0" y="0" width="96" height="50" class="s"/>
+<rect x="44.4" y="25.6" width="14.2" height="4.1" class="s"/>
+<text x="44.4" y="24">pin 1&#8595;</text>
+<text x="55" y="24">&#8595;pin 24</text>
+<rect x="22" y="1" width="59.2" height="29.2" class="s" stroke-dasharray="2,1"/>
+<text x="23" y="4" style="font-size:2.5px">panel lands here (deck)</text>
+</g>
+</svg>

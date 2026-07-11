@@ -267,6 +267,18 @@ int radio_init(const radio_config_t* config) {
         return -1;
     }
 
+    /* Some radio modules (e.g. NiceRF LoRa1262) route their RF switch off DIO2
+     * rather than exposing a separate control pin; the SX1262 must be told to
+     * drive DIO2 automatically during TX/RX or transmission is dead. */
+    if (board_get_config()->radio_dio2_rf_switch) {
+        rc = sx1262_set_dio2_as_rf_switch(true);
+        if (rc != 0) {
+            ESP_LOGE(TAG, "sx1262_set_dio2_as_rf_switch failed");
+            return -1;
+        }
+        ESP_LOGI(TAG, "DIO2 configured as RF switch control");
+    }
+
     /* Calibrate image for the configured frequency band */
     rc = sx1262_calibrate_image(config->frequency_mhz);
     if (rc != 0) {

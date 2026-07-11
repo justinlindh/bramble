@@ -128,6 +128,8 @@ typedef struct {
     radio_osc_type_t radio_osc;
     float radio_tcxo_voltage; /* Only used if radio_osc == TCXO_DIO3 */
     radio_reg_type_t radio_reg;
+    bool radio_dio2_rf_switch; /* Issue SetDio2AsRfSwitchCtrl(0x9D) at init when the
+                                  module's RF switch hangs off DIO2 (e.g. NiceRF LoRa1262) */
 
     /* Display */
     uint16_t display_width;

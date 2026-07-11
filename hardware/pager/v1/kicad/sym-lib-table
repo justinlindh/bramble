@@ -1,0 +1,11 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "nicerf_lora1262")(type "KiCad")(uri "${KIPRJMOD}/easyeda/nicerf_lora1262.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "fh34srj24")(type "KiCad")(uri "${KIPRJMOD}/easyeda/fh34srj24.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "fnr4030")(type "KiCad")(uri "${KIPRJMOD}/easyeda/fnr4030.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "tp4056")(type "KiCad")(uri "${KIPRJMOD}/easyeda/tp4056.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "fs8205a")(type "KiCad")(uri "${KIPRJMOD}/easyeda/fs8205a.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "ts1187a")(type "KiCad")(uri "${KIPRJMOD}/easyeda/ts1187a.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "mlt8530")(type "KiCad")(uri "${KIPRJMOD}/easyeda/mlt8530.kicad_sym")(options "")(descr "easyeda2kicad import"))
+  (lib (name "atgm336h")(type "KiCad")(uri "${KIPRJMOD}/easyeda/atgm336h.kicad_sym")(options "")(descr "easyeda2kicad import"))
+)

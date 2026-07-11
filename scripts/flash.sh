@@ -15,7 +15,7 @@ PORT=""
 EXTRA_ARGS=()
 
 is_mode() { [[ "$1" == "local" ]]; }
-is_board() { [[ "$1" == "heltec-v3" || "$1" == "heltec-v4" || "$1" == "tdeck-plus" ]]; }
+is_board() { [[ "$1" == "heltec-v3" || "$1" == "heltec-v4" || "$1" == "tdeck-plus" || "$1" == "bramble-pager" ]]; }
 is_action() { [[ "$1" == "flash" || "$1" == "monitor" || "$1" == "build" ]]; }
 is_port() { [[ "$1" == /dev/* ]]; }
 
@@ -91,6 +91,11 @@ set_board_vars() {
       BOARD_NAME="Heltec V4"
       BOARD_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.heltec_v4"
       BOARD_BUILD_DIR="build-heltec-v4"
+      ;;
+    bramble-pager)
+      BOARD_NAME="Bramble Pager v1"
+      BOARD_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.bramble_pager"
+      BOARD_BUILD_DIR="build-bramble-pager"
       ;;
     *)
       echo "Unsupported board: $BOARD"

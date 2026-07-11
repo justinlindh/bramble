@@ -34,6 +34,7 @@
 #define SX1262_CMD_CALIBRATE_IMAGE 0x98
 #define SX1262_CMD_SET_REGULATOR_MODE 0x96
 #define SX1262_CMD_SET_CAD_PARAMS 0x88
+#define SX1262_CMD_SET_DIO2_AS_RF_SWITCH 0x9D
 
 /* ---------- IRQ flags ---------- */
 #define SX1262_IRQ_TX_DONE (1 << 0)
@@ -96,5 +97,6 @@ int sx1262_set_dio3_as_tcxo(float voltage, uint32_t timeout_ms);
 int sx1262_calibrate(uint8_t cal_mask);
 int sx1262_calibrate_image(float freq_mhz);
 int sx1262_set_regulator_mode(uint8_t mode);
+int sx1262_set_dio2_as_rf_switch(bool enable);
 
 #endif /* BRAMBLE_SX1262_H */
