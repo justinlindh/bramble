@@ -1362,6 +1362,10 @@ void app_main(void) {
         if (btn != BTN_NONE) {
             ESP_LOGI(TAG, "Button event: %d", btn);
             ui_handle_button(&ui, btn, now_ms);
+            /* Any button press acknowledges a pending message alert and stops
+             * the notification LED blinking (classic pager confirm). */
+            if (board_has_cap(BOARD_CAP_ALERTS))
+                alerts_confirm();
         }
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -1502,10 +1506,8 @@ void app_main(void) {
 
         /* Alert outputs: advance the beep/vibra pattern and keep the
          * notification LED lit while unread messages exist. */
-        if (board_has_cap(BOARD_CAP_ALERTS)) {
+        if (board_has_cap(BOARD_CAP_ALERTS))
             alerts_tick(now_ms);
-            alerts_set_unread(ui.unread_count > 0);
-        }
 
         vTaskDelay(pdMS_TO_TICKS(50));
 #endif
