@@ -1677,6 +1677,16 @@ target_include_directories(test_indicators PRIVATE
 )
 target_link_libraries(test_indicators pthread)
 
+# Pager alert pattern: beep/vibra schedule + unread LED
+# (whitebox include of alerts.c against fake indicator_* backends)
+add_executable(test_alerts
+    test_alerts.c
+    unity/unity.c
+)
+target_include_directories(test_alerts PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/indicators/include
+)
+
 # Virtual button driver: btn-edge dispatch + reset-exits-process
 # (Task 6; whitebox include of button_virt.c + emu_link.c)
 add_executable(test_button_virt

@@ -38,6 +38,8 @@
 #include "ble_server.h"
 #include "esp_system.h"
 #include "battery.h"
+#include "alerts.h"
+#include "indicators.h"
 #include "board_config.h"
 #include "keyboard.h"
 #include "trackball.h"
@@ -1106,6 +1108,12 @@ void app_main(void) {
 
     /* Init audio (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: audio_init ===");
+    if (board_has_cap(BOARD_CAP_ALERTS)) {
+        indicator_init();
+        alerts_init();
+        ESP_LOGI(TAG, "Alert outputs initialized (buzzer/vibra/LED)");
+    }
+
     if (board_has_cap(BOARD_CAP_AUDIO)) {
         if (audio_init() == 0) {
             ESP_LOGI(TAG, "Audio initialized");
@@ -1399,6 +1407,8 @@ void app_main(void) {
             uint32_t incoming_total = msg_store_total_incoming();
             if (incoming_total != last_incoming_total) {
                 ui_on_message_received(&ui, now_ms);
+                if (board_has_cap(BOARD_CAP_ALERTS))
+                    alerts_message_received(now_ms);
                 last_incoming_total = incoming_total;
             }
             ui_set_message_total(&ui, msg_store_count());
@@ -1488,6 +1498,13 @@ void app_main(void) {
             board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
         if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % uptime_refresh_ms) < 50) {
             render_main_screen(&ui);
+        }
+
+        /* Alert outputs: advance the beep/vibra pattern and keep the
+         * notification LED lit while unread messages exist. */
+        if (board_has_cap(BOARD_CAP_ALERTS)) {
+            alerts_tick(now_ms);
+            alerts_set_unread(ui.unread_count > 0);
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
