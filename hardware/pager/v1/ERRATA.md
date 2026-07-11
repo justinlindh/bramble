@@ -47,14 +47,17 @@ and the `DESIGN.md` do-not-regress invariants.
   hierarchical net names (`/sheet/NET`), including the EPD rails, before every fab.
 
 - **DMM battery polarity check on every cell before first plug (assembly gate).** BATT1
-  pin 1 = BAT+ (Adafruit convention), with prominent silkscreen. Reversed Chinese cells
-  kill the TP4056 charger. This is a per-unit assembly invariant, not a one-time check:
-  meter every cell's polarity against the BATT1 silkscreen before the first connection.
+  now carries explicit "+" / "-" silkscreen marks (1mm, on F.Silkscreen beside pads 1/2)
+  as of the pre-fab pass; pin 1 = BAT+ (Adafruit convention). Reversed Chinese cells kill
+  the TP4056 charger, and the JST-PH polarity is vendor-random, so this stays a per-unit
+  invariant: meter every cell against the BATT1 silkscreen before the first connection.
+  (The silk reduces the wiring-error rate; it does not remove the need to meter.)
 
-- **U102 (TP4056) pin-7 via-in-pad solder inspection (assembly risk).** Inspect the pin-7
-  (CHRG_LED) solder joint on every assembled board. A via-in-pad here can wick solder and
-  leave a starved or open joint that JLC's optical check may pass; confirm the joint under
-  magnification (and reflow if starved) before trusting the CHRG indicator at bring-up.
+- **U102 (TP4056) pin-7 via-in-pad (assembly risk): RESOLVED pre-fab.** The pin-7
+  (CHRG_LED) via was relocated off the pad to an adjacent position via a short F.Cu dogbone
+  stub (via moved from the pad center to 116.88, 91.30). A board-wide pad-vs-via scan
+  confirms zero vias inside any component pad. No assembly-time inspection is needed; the
+  solder-wicking risk is designed out.
 
 - **GNSS RF feed (review B1): DONE.** ANT2, L201, and the U202 RF corner are now
   co-located in the GPS corner (short, direct feed away from the digital pads).
@@ -82,12 +85,16 @@ and the `DESIGN.md` do-not-regress invariants.
 These are dispositions, not open gates: they are accepted as-is but must be re-checked if
 the layout or the fab's capability changes.
 
-- **JLCPCB hole-to-copper clearance relaxed to 0.2mm board-wide (accepted disposition for
-  106 track-to-via-hole violations).** On a 2-layer board JLCPCB's via drill-to-copper
-  capability supports a 0.2mm hole-to-copper rule, so the design rule was relaxed to 0.2mm
-  board-wide. This clears the 106 track-to-via-hole findings that the stricter default
-  flagged; the relaxed value is within JLCPCB's stated 2-layer via capability. Re-confirm
-  against the fab's current capability spec before ordering if the fab or stackup changes.
+- **JLCPCB hole-to-copper clearance: margin partially restored to 0.23mm (was relaxed to
+  0.2mm).** The stricter default flagged track-to-via-hole violations that were originally
+  waived at a 0.2mm board-wide rule (within JLCPCB's 2-layer via capability, so always
+  manufacturable). A pre-fab margin-recovery pass collision-nudged 40 vias (clearing 62 of
+  96 violation instances) and raised the rule to 0.23mm, the highest value that yields zero
+  DRC violations. 11 vias
+  in parallel-track corridors (min actual 0.2317mm) still gate the rule at 0.23; clearing
+  them to 0.25 would require re-routing established nets and was judged not worth the risk
+  on an already-manufacturable board. Locked RF/USB routing was left untouched. Re-confirm
+  against the fab's capability spec before ordering if the fab or stackup changes.
 
 - **4 silkscreen edge-overhang findings waived (footprint-internal, cosmetic).** Four
   silkscreen-over-edge / edge-clearance findings are internal to their part footprints
