@@ -11,6 +11,10 @@
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
+#elif defined(CONFIG_BRAMBLE_BOARD_PAGER) || defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_PAGER)
+/* Bramble Pager: GDEY0213B74 SSD1680 e-paper, landscape */
+#define DISPLAY_WIDTH 250
+#define DISPLAY_HEIGHT 122
 #else
 /* Default: Heltec V3 and other SSD1306 boards */
 #define DISPLAY_WIDTH 128
