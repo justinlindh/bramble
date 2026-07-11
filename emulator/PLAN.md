@@ -200,3 +200,28 @@ const uint8_t *ssd1680_engine_fb(void);                /* 3904 bytes, row-major,
 - [ ] **Step 1:** Write README, execute it verbatim, fix drift.
 - [ ] **Step 2:** Check every exit criterion in DESIGN.md section 14; record evidence (scenario runs, screenshots, gateway session log).
 - [ ] **Step 3:** Final commit; PR(s) per merge policy; propose phase 2 (QEMU) spec kickoff.
+
+### Task 12: run targets (Makefile) + Docker packaging
+
+Added 2026-07-11 per user: simple run targets that verify prerequisites and launch.
+
+**Files:**
+- Create: `emulator/Makefile`, `emulator/Dockerfile`, `emulator/docker-compose.yml`
+- Modify: `emulator/README.md` (quick start becomes `make` targets)
+- Test: each target run on the workstation; compose brought up from scratch
+
+**Interfaces:**
+- Consumes: node binary build (Task 1), gosim (Task 7), UI build (Task 8), scenarios (Task 10).
+- Produces (exact target names):
+  - `make check`: verify prerequisites (idf.py + linux target, go, node, jq), print what is missing and how to get it, exit nonzero if unusable
+  - `make node`: build the linux firmware node binary
+  - `make broker`: build gosim
+  - `make ui`: build the React UI
+  - `make run`: check + build all + launch the 3-pager scenario with UI, print the URL
+  - `make headless`: run the CI scenario suite locally
+  - `make clean`
+- Docker: one image containing ESP-IDF (linux target only), Go, Node; compose service mirroring `simulator/docker-compose.yml` conventions so `docker compose up --build` inside `emulator/` is the zero-prerequisite path.
+
+- [ ] **Step 1:** Makefile with prereq-checking `check` target; every other target depends on it. Each target is a thin wrapper over the canonical commands documented in README (no logic that exists nowhere else).
+- [ ] **Step 2:** Dockerfile + compose; build from clean context; document image size expectation in README.
+- [ ] **Step 3:** Execute `make run` and `docker compose up --build` from scratch; fix drift; commit.
