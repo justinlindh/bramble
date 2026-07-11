@@ -225,3 +225,40 @@ Added 2026-07-11 per user: simple run targets that verify prerequisites and laun
 - [ ] **Step 1:** Makefile with prereq-checking `check` target; every other target depends on it. Each target is a thin wrapper over the canonical commands documented in README (no logic that exists nowhere else).
 - [ ] **Step 2:** Dockerfile + compose; build from clean context; document image size expectation in README.
 - [ ] **Step 3:** Execute `make run` and `docker compose up --build` from scratch; fix drift; commit.
+
+### Task 13: end-to-end acceptance test (browser-level display + functionality)
+
+Added 2026-07-11 per user: an automated E2E pass proving the display is correct and
+basic functionality behaves as expected, through the real UI, not just headless
+framebuffer assertions (Task 10 covers those; this task covers the full stack the
+user actually looks at).
+
+**Files:**
+- Create: `emulator/e2e/` (Playwright spec + config), `emulator/e2e/README.md`
+- Modify: `emulator/Makefile` (`make e2e` target), simulator/ui package.json (playwright dev dep if absent; webapp/ already uses playwright, reuse its version)
+- Test: the E2E suite itself, runnable via `make e2e`
+
+**Interfaces:**
+- Consumes: node binary (Task 1-6.5), gosim + scenarios + provisioning (Tasks 7/10), device view UI (Task 8), make targets (Task 12).
+- Produces: a repeatable acceptance run that launches the full stack (gosim + 3 firmware nodes + vite UI), drives a real browser, and asserts:
+  1. Display correctness: the canvas pixels for a known rendered string equal the
+     firmware framebuffer rendering of that string (decode both the fb ws message
+     and the canvas; a decode/orientation/inversion bug fails this), and a full
+     refresh plays the inversion flash (model frames observed in order).
+  2. Basic functionality: 3 device cards with distinct ids; boot screen text
+     appears; clicking UP/DOWN/SELECT produces the btn ws frame AND a visible
+     firmware reaction (console or screen change); RESET (hold-to-confirm)
+     restarts the node and the SAME identity reattaches; a channel message sent
+     from node A renders on node B's e-paper canvas (depends on Task 10
+     provisioning; if that scenario support slips, assert the delivery path at
+     the fb level and mark the UI-render assertion as the follow-up).
+  3. No regression sentinels: exactly N device cards for N nodes (the
+     split-identity class), mesh map still renders.
+- CI: `make e2e` runs headless-browser (chromium); wall-clock budget under 4
+  minutes; wire into CI as a non-required job first (flakiness bake-in), promote
+  to required after it proves stable.
+
+- [ ] **Step 1:** Playwright harness boots the stack via the Task 12 targets (or smoke_live.sh pieces) and tears it down reliably (trap, port cleanup).
+- [ ] **Step 2:** Display-correctness spec (fb-vs-canvas pixel compare + full-refresh flash sequence).
+- [ ] **Step 3:** Functionality spec (cards, buttons, reset-persistence, message delivery per Task 10 provisioning state).
+- [ ] **Step 4:** `make e2e` green three consecutive runs locally; add CI job (non-required); commit.
