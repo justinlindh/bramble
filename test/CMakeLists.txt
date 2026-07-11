@@ -1626,3 +1626,18 @@ target_include_directories(test_emu_link PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
 )
 target_link_libraries(test_emu_link pthread)
+
+# radio_virt tests (Task 4): the virtual radio over a socketpair fake broker.
+# Whitebox include of emu_link.c + radio_airtime.c + radio_profiles.c +
+# radio_virt.c into one TU (same pattern as test_emu_link.c).
+add_executable(test_radio_virt
+    test_radio_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_radio_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+target_link_libraries(test_radio_virt pthread m)
