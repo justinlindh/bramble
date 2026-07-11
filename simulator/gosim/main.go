@@ -33,6 +33,10 @@ func main() {
 	emuListen := flag.String("emu-listen", "",
 		"emu-link unix socket path for external firmware nodes (Task 7); "+
 			"when set, the broker starts for every scenario, not only those declaring firmware nodes")
+	gateway := flag.String("gateway", "",
+		"serial device of a PHY-passthrough gateway node (e.g. /dev/ttyUSB0); bridges the real "+
+			"RF channel into the ether (DESIGN.md section 10). Pair with --emu-listen so the "+
+			"gateway and the virtual nodes share a known broker socket")
 	flag.Parse()
 
 	disableCollisionModel = *noCollisions
@@ -76,6 +80,19 @@ func main() {
 	sim.broadcast = hub.Broadcast
 	sim.Start()
 	defer sim.Stop()
+
+	// PHY passthrough gateway (DESIGN.md section 10): bridge a real serial-
+	// attached node's RF channel into the ether. It dials the broker's emu-link
+	// socket like any other node, so it needs a known path; --emu-listen sets
+	// one, otherwise fall back to this process's default socket.
+	if *gateway != "" {
+		brokerPath := *emuListen
+		if brokerPath == "" {
+			brokerPath = defaultEmuSocketPath()
+		}
+		log.Printf("gateway: bridging %s into the ether at %s", *gateway, brokerPath)
+		go RunGatewaySupervised(*gateway, brokerPath)
+	}
 
 	// Routes
 	mux := http.NewServeMux()
