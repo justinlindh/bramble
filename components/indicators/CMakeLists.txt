@@ -6,13 +6,13 @@
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
     idf_component_register(
-        SRCS "indicator_virt.c"
+        SRCS "indicator_virt.c" "alerts.c"
         INCLUDE_DIRS "include"
         REQUIRES emu_link json
     )
 else()
     idf_component_register(
-        SRCS "indicators.c"
+        SRCS "indicators.c" "alerts.c"
         INCLUDE_DIRS "include"
         REQUIRES driver esp_driver_gpio esp_driver_ledc
     )

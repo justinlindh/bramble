@@ -35,6 +35,7 @@ typedef int gpio_num_t;
 #define BOARD_CAP_IO_EXPANDER (1 << 11)     /* PCA9535 or similar */
 #define BOARD_CAP_VIRTUAL (1 << 12)         /* Emulated node, no real hardware backs it */
 #define BOARD_CAP_DISPLAY_EPAPER (1 << 13)  /* SSD1680 e-paper (Bramble Pager) */
+#define BOARD_CAP_ALERTS (1 << 14)          /* buzzer/vibra/LED alert outputs (Bramble Pager) */
 
 /* Radio oscillator type */
 typedef enum {
