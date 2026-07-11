@@ -30,9 +30,13 @@ func main() {
 	scenario := flag.String("scenario", "", "Scenario file (headless)")
 	noCollisions := flag.Bool("no-collisions", false,
 		"Disable the collision/half-duplex model (ideal parallel channel; for baseline comparisons)")
+	emuListen := flag.String("emu-listen", "",
+		"emu-link unix socket path for external firmware nodes (Task 7); "+
+			"when set, the broker starts for every scenario, not only those declaring firmware nodes")
 	flag.Parse()
 
 	disableCollisionModel = *noCollisions
+	emuListenPath = *emuListen
 
 	// Auto-detect scenarios dir
 	if *scenarioDir == "" {
