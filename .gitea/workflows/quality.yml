@@ -15,6 +15,7 @@ on:
       - '.gitea/workflows/**'
       - 'api/**'
       - 'simulator/**'
+      - 'emulator/**'
       - 'scripts/**'
       - 'test/**'
       - 'main/**'
@@ -171,5 +172,43 @@ jobs:
           # -count=1 defeats go's test cache, which can serve stale results
           # across cgo-compiled C edits (observed on this runner setup).
           go test -count=1 ./...
+
+  emulator-scenarios:
+    name: Emulator scenario suite
+    # idf-node runner (has ESP-IDF) because the suite runs the REAL firmware built
+    # for the IDF linux target; gated off pull_request like the other idf-node
+    # jobs since that runner is a heavy self-hosted host.
+    if: github.event_name != 'pull_request'
+    runs-on: idf-node
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+      - name: Ensure ESP-IDF toolchain
+        run: bash scripts/ci-ensure-idf.sh
+      - name: Build the linux firmware node
+        env:
+          HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
+          # The node is a host binary; a throwaway signing key is fine here.
+          BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
+        run: |
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
+          # shellcheck disable=SC1091
+          source scripts/ci-source-idf.sh
+          cd emulator/node
+          idf.py --preview set-target linux
+          idf.py build
+      - name: Build gosim
+        run: |
+          cd simulator/gosim
+          go build -o bramble-gosim .
+      - name: Run headless scenario suite
+        # Real-time multi-node scenarios; the suite's own wall-clock budget is
+        # minutes (capped scenario durations). Gates CI on delivered/rendered
+        # content (channel message on screen; DM desync symptom + #138 self-heal).
+        run: bash emulator/ci/run_scenarios.sh
 
 # ci-sync-trigger 1772679720
