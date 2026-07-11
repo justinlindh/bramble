@@ -1626,3 +1626,13 @@ target_include_directories(test_emu_link PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
 )
 target_link_libraries(test_emu_link pthread)
+
+# SSD1680 e-paper engine tests (Task 5; datasheet-pinned command streams)
+add_executable(test_ssd1680_engine
+    test_ssd1680_engine.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/ssd1680_engine.c
+)
+target_include_directories(test_ssd1680_engine PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+)
