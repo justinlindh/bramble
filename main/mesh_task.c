@@ -1089,7 +1089,9 @@ static void mesh_load_channel_psk_flags(void) {
     for (int i = 0; i < s_num_channels; i++) {
         /* Missing metadata defaults to "no PSK lock" for deterministic export semantics. */
         uint8_t has_psk = 0;
-        char key[8];
+        /* Sized for a full int, so -Wformat-truncation holds on every target
+         * (NVS keys allow up to 15 chars). */
+        char key[16];
         snprintf(key, sizeof(key), "psk%d", i);
         if (nvs_get_u8(h, key, &has_psk) != ESP_OK) {
             has_psk = 0;
@@ -4420,7 +4422,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 static void mesh_task(void* param) {
     (void)param;
 
-    ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task start (core %d) ===", xPortGetCoreID());
+    /* Cast: BaseType_t is int on Xtensa but long on the POSIX port. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task start (core %d) ===", (int)xPortGetCoreID());
 
     /* Subscribe this task to the task watchdog timer.
      * If the main loop stalls (or radio_init hangs), the WDT will trigger
@@ -6007,8 +6010,16 @@ void mesh_task_start(bramble_identity_t* identity) {
     }
 
     /* Pin to CPU1 — leave CPU0 for UI/display */
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* The POSIX simulation has a single core; pinning to CPU1 trips the
+     * kernel's core-count assert. */
+    xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL,
+                            tskNO_AFFINITY);
+    ESP_LOGI(TAG, "Mesh task created (no core affinity: single-core simulator)");
+#else
     xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL, 1);
     ESP_LOGI(TAG, "Mesh task created (pinned to CPU1)");
+#endif
 }
 
 void mesh_get_state(mesh_shared_state_t* out) {

@@ -26,6 +26,7 @@ dependencies.lock
 # Temp/evidence artifacts
 tmp-e2e/
 *.log
+.cache/
 
 # Python cache
 __pycache__/

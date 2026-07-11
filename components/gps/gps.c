@@ -2,7 +2,9 @@
 #include "nmea_parser.h"
 #include "board_config.h"
 
-#ifdef ESP_PLATFORM
+/* The POSIX/Linux simulator has no UART driver: it compiles the host stub
+ * half below (gps_virt takes over in the emulator later). */
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 #include "esp_log.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
