@@ -30,6 +30,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include <string.h>
 
 static const char* TAG = "ssd1680";
 static const bramble_board_config_t* s_board = NULL;
@@ -73,23 +74,46 @@ static void epd_reset_pulse(void) {
     vTaskDelay(pdMS_TO_TICKS(10));
 }
 
-static void epd_write_cmd(uint8_t cmd) {
+static esp_err_t epd_write_cmd(uint8_t cmd) {
     gpio_set_level(s_board->epd_display.dc, 0);
-    spi_transaction_t t = {.length = 8, .tx_buffer = &cmd};
-    spi_device_polling_transmit(s_spi, &t);
+    /* The command byte fits inline: SPI_TRANS_USE_TXDATA skips the
+     * per-transaction DMA bounce alloc a flash-resident tx_buffer forces. */
+    spi_transaction_t t = {.length = 8, .flags = SPI_TRANS_USE_TXDATA};
+    t.tx_data[0] = cmd;
+    esp_err_t err = spi_device_polling_transmit(s_spi, &t);
+    if (err != ESP_OK)
+        ESP_LOGE(TAG, "cmd 0x%02x transmit failed: %s", cmd,
+                 esp_err_to_name(err));
+    return err;
 }
 
-static void epd_write_data(const uint8_t* data, size_t len) {
+static esp_err_t epd_write_data(uint8_t cmd, const uint8_t* data, size_t len) {
     if (len == 0)
-        return;
+        return ESP_OK;
     gpio_set_level(s_board->epd_display.dc, 1);
     while (len > 0) {
         size_t chunk = len > EPD_SPI_CHUNK ? EPD_SPI_CHUNK : len;
-        spi_transaction_t t = {.length = chunk * 8, .tx_buffer = data};
-        spi_device_polling_transmit(s_spi, &t);
+        spi_transaction_t t = {.length = chunk * 8};
+        if (chunk <= 4) {
+            /* Short const register payloads (every non-RAM op): inline into
+             * the transaction, killing the hidden DMA bounce alloc that a
+             * flash-resident tx_buffer would need. RAM writes stay large and
+             * take the buffer-pointer path below. */
+            t.flags = SPI_TRANS_USE_TXDATA;
+            memcpy(t.tx_data, data, chunk);
+        } else {
+            t.tx_buffer = data;
+        }
+        esp_err_t err = spi_device_polling_transmit(s_spi, &t);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "cmd 0x%02x data transmit failed: %s", cmd,
+                     esp_err_to_name(err));
+            return err;
+        }
         data += chunk;
         len -= chunk;
     }
+    return ESP_OK;
 }
 
 /* ── public API ──────────────────────────────────────────────────────── */
@@ -108,7 +132,11 @@ int display_init(void) {
                         (1ULL << s_board->epd_display.rst),
         .mode = GPIO_MODE_OUTPUT,
     };
-    gpio_config(&out_conf);
+    esp_err_t gerr = gpio_config(&out_conf);
+    if (gerr != ESP_OK) {
+        ESP_LOGE(TAG, "GPIO config (DC/RST) failed: %s", esp_err_to_name(gerr));
+        return -1;
+    }
     gpio_set_level(s_board->epd_display.rst, 1); /* not in reset */
 
     gpio_config_t busy_conf = {
@@ -117,7 +145,11 @@ int display_init(void) {
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
-    gpio_config(&busy_conf);
+    gerr = gpio_config(&busy_conf);
+    if (gerr != ESP_OK) {
+        ESP_LOGE(TAG, "GPIO config (BUSY) failed: %s", esp_err_to_name(gerr));
+        return -1;
+    }
 
     /* Attach to the shared SPI bus initialized by board_init. */
     spi_device_interface_config_t dev_cfg = {
@@ -183,8 +215,14 @@ void display_flush(void) {
         } else if (epd_wait_busy(EPD_BUSY_CMD_TIMEOUT_MS) != 0) {
             goto out;
         }
-        epd_write_cmd(ops[i].cmd);
-        epd_write_data(ops[i].data, ops[i].len);
+        /* A failed transmit leaves the panel with a partial command stream;
+         * abort the rest of the ops rather than push more onto a bad state.
+         * display_flush is void (display.h contract), so the engine's dirty
+         * state is left as-is and the next flush will retry the frame. */
+        if (epd_write_cmd(ops[i].cmd) != ESP_OK)
+            goto out;
+        if (epd_write_data(ops[i].cmd, ops[i].data, ops[i].len) != ESP_OK)
+            goto out;
         refreshing = (ops[i].cmd == SSD1680_CMD_MASTER_ACTIVATE);
         /* No wait after the final deep-sleep op: BUSY stays high in deep
          * sleep and the panel is done until the next flush. */
