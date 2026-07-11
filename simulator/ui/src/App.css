@@ -284,3 +284,14 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Face buttons: no browser focus oval on mouse click; keyboard users still
+ * get a visible focus indicator via :focus-visible. */
+.pager-face-btn:focus {
+  outline: none;
+}
+.pager-face-btn:focus-visible {
+  outline: 2px solid #4a90d9;
+  outline-offset: 2px;
+  border-radius: 50%;
+}

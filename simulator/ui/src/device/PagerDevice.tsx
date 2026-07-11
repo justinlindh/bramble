@@ -73,18 +73,39 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
   }, []);
 
   // ---- face buttons ----
-  const press = useCallback((id: EdgeButtonId) => onButton(id, 'down'), [onButton]);
-  const release = useCallback((id: EdgeButtonId) => onButton(id, 'up'), [onButton]);
+  const [pressedBtn, setPressedBtn] = useState<EdgeButtonId | null>(null);
+  const press = useCallback((id: EdgeButtonId) => {
+    setPressedBtn(id);
+    onButton(id, 'down');
+  }, [onButton]);
+  const release = useCallback((id: EdgeButtonId) => {
+    // Guarded: only emit the up edge for a button that is actually down, so a
+    // stray mouseleave or key auto-repeat cannot send unpaired edges.
+    setPressedBtn((cur) => {
+      if (cur === id) onButton(id, 'up');
+      return cur === id ? null : cur;
+    });
+  }, [onButton]);
 
   // ---- RESET hold-to-confirm ----
   const [resetProgress, setResetProgress] = useState(0); // 0..1
   const resetTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const resetStart = useRef(0);
+  const [resetHint, setResetHint] = useState(false);
   const clearReset = useCallback(() => {
     if (resetTimer.current) { clearInterval(resetTimer.current); resetTimer.current = null; }
-    setResetProgress(0);
+    // A released tap that never completed shows a brief "hold" hint so the
+    // pinhole does not read as dead.
+    setResetProgress((p) => {
+      if (p > 0 && p < 1) {
+        setResetHint(true);
+        setTimeout(() => setResetHint(false), 1200);
+      }
+      return 0;
+    });
   }, []);
   const beginReset = useCallback(() => {
+    setResetHint(false);
     resetStart.current = Date.now();
     resetTimer.current = setInterval(() => {
       const p = Math.min(1, (Date.now() - resetStart.current) / RESET_HOLD_MS);
@@ -98,6 +119,13 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
     }, 30);
   }, [onButton]);
   useEffect(() => () => { if (resetTimer.current) clearInterval(resetTimer.current); }, []);
+  useEffect(() => {
+    // Release anywhere ends a reset hold (replaces the old mouseleave cancel,
+    // which aborted the hold on a one-pixel drift off the tiny pinhole).
+    const up = () => clearReset();
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, [clearReset]);
 
   return (
     <div className="pager-device" data-testid={`device-card-${device.node}`} style={{ width: faceWidth }}>
@@ -157,6 +185,7 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
             <g
               key={b.id}
               data-testid={`btn-${b.id}`}
+              className="pager-face-btn"
               role="button"
               tabIndex={0}
               aria-label={`${b.label} button`}
@@ -168,7 +197,15 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
               onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); release(b.id); } }}
             >
               <circle cx={b.center.x} cy={b.center.y} r={b.r + 1.4} fill="#191b1e" stroke="#0c0d0f" strokeWidth={0.3} />
-              <circle cx={b.center.x} cy={b.center.y} r={b.r} fill="#4a5058" stroke="#5c636c" strokeWidth={0.3} />
+              {/* Cap: sinks and darkens while pressed (the depressed look). */}
+              <circle
+                cx={b.center.x}
+                cy={b.center.y + (pressedBtn === b.id ? 0.35 : 0)}
+                r={pressedBtn === b.id ? b.r - 0.25 : b.r}
+                fill={pressedBtn === b.id ? '#33383e' : '#4a5058'}
+                stroke={pressedBtn === b.id ? '#464c54' : '#5c636c'}
+                strokeWidth={0.3}
+              />
               <text x={b.center.x} y={b.center.y + b.r + 3.2} textAnchor="middle" fontSize={2.6} fill="#c9ccd1" fontFamily="sans-serif">{b.label}</text>
             </g>
           ))}
@@ -176,14 +213,18 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
           {/* RESET pinhole, hold-to-confirm */}
           <g
             data-testid="btn-reset"
+            className="pager-face-btn"
             role="button"
             tabIndex={0}
-            aria-label="reset (hold)"
+            aria-label="reset (hold 0.8s)"
             style={{ cursor: 'pointer' }}
             onMouseDown={beginReset}
             onMouseUp={clearReset}
-            onMouseLeave={clearReset}
           >
+            {/* Generous invisible hit area; the visible pinhole is tiny and a
+                one-pixel drift must not cancel the hold (no mouseleave cancel:
+                release anywhere ends it via the window listener below). */}
+            <circle cx={RESET.x} cy={RESET.y} r={5.5} fill="transparent" />
             <circle cx={RESET.x} cy={RESET.y} r={2.4} fill="#151719" stroke="#0c0d0f" strokeWidth={0.3} />
             <circle cx={RESET.x} cy={RESET.y} r={RESET.r} fill="#2a2d31" />
             {resetProgress > 0 && (
@@ -195,6 +236,9 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
               />
             )}
             <text x={RESET.x} y={RESET.y - 3.4} textAnchor="middle" fontSize={2.2} fill="#8a9099" fontFamily="sans-serif">RST</text>
+            {resetHint && (
+              <text x={RESET.x} y={RESET.y + 6.2} textAnchor="middle" fontSize={2.2} fill="#e0a030" fontFamily="sans-serif">hold to reset</text>
+            )}
           </g>
         </svg>
 

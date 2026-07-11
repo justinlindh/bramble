@@ -46,6 +46,8 @@ void alerts_message_received(uint32_t now_ms) {
     }
 }
 
+bool alerts_unconfirmed(void) { return s_unconfirmed; }
+
 void alerts_confirm(void) {
     s_unconfirmed = false;
     if (s_led_on) {

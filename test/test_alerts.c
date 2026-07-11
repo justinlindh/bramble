@@ -168,6 +168,19 @@ static void test_confirm_stops_the_blink(void) {
         TEST_ASSERT_NOT_EQUAL('l', s_calls[i].what);
 }
 
+static void test_unconfirmed_reflects_ack_state(void) {
+    TEST_ASSERT_FALSE(alerts_unconfirmed());
+    alerts_message_received(0);
+    TEST_ASSERT_TRUE(alerts_unconfirmed());
+    run_ticks(0, 1000); /* pattern ends; still unconfirmed until a press */
+    TEST_ASSERT_TRUE(alerts_unconfirmed());
+    alerts_confirm();
+    TEST_ASSERT_FALSE(alerts_unconfirmed());
+    /* A new message re-arms it. */
+    alerts_message_received(2000);
+    TEST_ASSERT_TRUE(alerts_unconfirmed());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_trigger_starts_buzzer_and_vibra_immediately);
@@ -176,5 +189,6 @@ int main(void) {
     RUN_TEST(test_retrigger_mid_pattern_restarts_buzzer);
     RUN_TEST(test_led_blinks_until_confirmed);
     RUN_TEST(test_confirm_stops_the_blink);
+    RUN_TEST(test_unconfirmed_reflects_ack_state);
     return UNITY_END();
 }
