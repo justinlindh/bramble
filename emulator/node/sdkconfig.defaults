@@ -2,8 +2,9 @@
 
 CONFIG_IDF_TARGET="linux"
 
-# The emulated device is the Bramble Pager v1.
-CONFIG_BRAMBLE_BOARD_PAGER=y
+# The emulated device is the Bramble Pager v1, via the virtual board profile
+# (mirrors bramble_pager.h pin-for-pin, adds BOARD_CAP_VIRTUAL).
+CONFIG_BRAMBLE_BOARD_VIRTUAL_PAGER=y
 
 # Mirror the device defaults the firmware relies on.
 CONFIG_FREERTOS_HZ=1000
