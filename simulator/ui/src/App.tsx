@@ -7,12 +7,15 @@ import { PathHistory } from './components/PathHistory';
 import { NodeHealthCard } from './components/NodeHealthCard';
 import { ScenarioLoader } from './components/ScenarioLoader';
 import { useSimulation } from './hooks/useSimulation';
+import DeviceView from './device/DeviceView';
 import type { NeighborRSSI } from './types';
 import './App.css';
 
 export default function App() {
-  const { state, ws, selectNode } = useSimulation();
+  const { state, ws, selectNode, sendButton } = useSimulation();
   const [bottomTab, setBottomTab] = useState<'events' | 'paths'>('events');
+  const [mainView, setMainView] = useState<'mesh' | 'devices'>('mesh');
+  const deviceCount = state.devices.size;
 
   function handleLoadScenario(scenario: string) {
     const sock = ws.current;
@@ -79,25 +82,43 @@ export default function App() {
             ws={ws.current}
           />
         </div>
+        <div className="app-view-tabs">
+          <button
+            className={`app-view-tab ${mainView === 'mesh' ? 'app-view-tab-active' : ''}`}
+            onClick={() => setMainView('mesh')}
+          >
+            Mesh
+          </button>
+          <button
+            className={`app-view-tab ${mainView === 'devices' ? 'app-view-tab-active' : ''}`}
+            onClick={() => setMainView('devices')}
+          >
+            Devices{deviceCount > 0 ? ` (${deviceCount})` : ''}
+          </button>
+        </div>
         <ScenarioLoader onLoad={handleLoadScenario} />
       </header>
 
       {/* Main content area */}
       <div className="app-body">
-        {/* Center: mesh canvas */}
+        {/* Center: mesh canvas or device view */}
         <div className="app-canvas">
-          <MeshCanvas
-            nodes={state.nodes}
-            radioRange={150}
-            events={state.events}
-            ws={ws.current}
-            deliveryPaths={state.deliveryPaths}
-            linkActivity={state.linkActivity}
-            brokenLinks={state.brokenLinks}
-            linkQuality={state.linkQuality}
-            selectedNodeId={state.selectedNodeId}
-            onNodeClick={handleNodeClick}
-          />
+          {mainView === 'mesh' ? (
+            <MeshCanvas
+              nodes={state.nodes}
+              radioRange={150}
+              events={state.events}
+              ws={ws.current}
+              deliveryPaths={state.deliveryPaths}
+              linkActivity={state.linkActivity}
+              brokenLinks={state.brokenLinks}
+              linkQuality={state.linkQuality}
+              selectedNodeId={state.selectedNodeId}
+              onNodeClick={handleNodeClick}
+            />
+          ) : (
+            <DeviceView devices={state.devices} onButton={sendButton} />
+          )}
         </div>
 
         {/* Right sidebar */}
