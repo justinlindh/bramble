@@ -1477,8 +1477,16 @@ void app_main(void) {
             ui_mark_drawn(&ui);
         }
 
-        /* Periodic refresh of main screen (uptime counter) */
-        if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % 1000) < 50) {
+        /* Periodic refresh of the main screen's uptime counter. On a fast
+         * display (OLED/LCD) this is a cheap 1 Hz tick. On e-paper it would
+         * flush the panel every second (busy roughly half the time) and force
+         * a ghost-clearing full-refresh flicker every ~10s, wearing the panel
+         * and looking broken, so slow it drastically there: the pager updates
+         * its status screen on real events (messages, neighbors), not a
+         * live-ticking clock. */
+        const uint32_t uptime_refresh_ms =
+            board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
+        if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % uptime_refresh_ms) < 50) {
             render_main_screen(&ui);
         }
 
