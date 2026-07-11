@@ -13,6 +13,8 @@
 #include "boards/tdeck_plus.h"
 #elif defined(CONFIG_BRAMBLE_BOARD_HELTEC_V4)
 #include "boards/heltec_v4.h"
+#elif defined(CONFIG_BRAMBLE_BOARD_PAGER)
+#include "boards/bramble_pager.h"
 #elif defined(CONFIG_BRAMBLE_BOARD_HELTEC_V3) || !defined(CONFIG_BRAMBLE_BOARD_CUSTOM)
 #include "boards/heltec_v3.h"
 #endif
@@ -32,6 +34,8 @@ const bramble_board_config_t* board_get_config(void) {
     return &board_tdeck_plus;
 #elif defined(CONFIG_BRAMBLE_BOARD_HELTEC_V4)
     return &board_heltec_v4;
+#elif defined(CONFIG_BRAMBLE_BOARD_PAGER)
+    return &board_bramble_pager;
 #else
     return &board_heltec_v3;
 #endif

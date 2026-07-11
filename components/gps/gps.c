@@ -239,6 +239,22 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
                  pin_standby);
     }
 
+    /* Bramble Pager GNSS power gate (single P-FET high-side switch, active low). */
+    if (board->short_name && strcmp(board->short_name, "bramble_pager") == 0) {
+        const int pin_en = 38; /* GNSS_EN, LOW = on (P-FET high-side) */
+
+        gpio_config_t gnss_ctrl = {
+            .pin_bit_mask = (1ULL << pin_en),
+            .mode = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&gnss_ctrl);
+
+        gpio_set_level(pin_en, 0); /* power GNSS on before the UART probe */
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        ESP_LOGI(TAG, "Bramble Pager GNSS ctrl: EN=%d(LOW=on)", pin_en);
+    }
+
     /* Configure UART */
     uart_config_t uart_config = {
         .baud_rate = board->gps.baud,
@@ -305,6 +321,19 @@ void gps_deinit(void) {
     s_sats_used = 0;
     s_sats_in_view = 0;
     s_antenna_warning_until_ms = 0;
+
+    /* Bramble Pager: cut GNSS power on stop (drive the P-FET gate HIGH = off). */
+    const bramble_board_config_t* board = board_get_config();
+    if (board->short_name && strcmp(board->short_name, "bramble_pager") == 0) {
+        const int pin_en = 38;
+
+        gpio_config_t gnss_ctrl = {
+            .pin_bit_mask = (1ULL << pin_en),
+            .mode = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&gnss_ctrl);
+        gpio_set_level(pin_en, 1); /* GNSS off */
+    }
     ESP_LOGI(TAG, "GPS deinitialized");
 }
 

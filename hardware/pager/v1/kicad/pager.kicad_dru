@@ -1,0 +1,54 @@
+(version 1)
+
+# Hard DRC backstops per the Digits v2 SW_NODE lesson: netclass patterns can
+# silently void against hierarchical net names, so the nets that carry real
+# current or RF get non-negotiable rules here. Net names below must match the
+# schematic's hierarchical names exactly; the pre-fab audit re-checks them.
+
+# LoRa antenna feed: coplanar waveguide on F.Cu only, no vias, >=1.0mm trace.
+# Run must stay <5mm (enforced by review, not expressible in DRU).
+(rule "rf_ant_no_vias"
+    (condition "A.Type == 'Via' && A.NetName == '/radio/RF_ANT'")
+    (constraint disallow via)
+    (severity error))
+
+(rule "rf_ant_front_only"
+    (condition "A.NetName == '/radio/RF_ANT' && A.Type == 'Track' && A.Layer != 'F.Cu'")
+    (constraint disallow track)
+    (severity error))
+
+(rule "rf_ant_min_width"
+    (condition "A.NetName == '/radio/RF_ANT' && A.Type == 'Track'")
+    (constraint track_width (min 1.0mm))
+    (severity error))
+
+# Current-carrying rails: 0.4mm minimum (IPC-2221). +3V3 is included here
+# (unlike digits) because worst-case concurrent draw is ~870mA on this board.
+(rule "power_rail_min_width"
+    (condition "A.NetName == '+3V3' || A.NetName == '/power/VBUS' || A.NetName == '/power/VSYS' || A.NetName == '/power/BAT_PLUS' || A.NetName == '/power/BAT_MINUS' || A.NetName == 'VBUS' || A.NetName == 'VSYS'")
+    (constraint track_width (min 0.4mm))
+    (severity error))
+
+# E-paper boost switch node: keep loop tight and copper adequate.
+(rule "epd_sw_min_width"
+    (condition "A.NetName == '/epaper/EPD_SW' && A.Type == 'Track'")
+    (constraint track_width (min 0.4mm))
+    (severity error))
+
+# GNSS RF feed: same discipline as the LoRa feed.
+(rule "gnss_rf_no_vias"
+    (condition "A.Type == 'Via' && A.NetName == '/radio/GNSS_RF'")
+    (constraint disallow via)
+    (severity error))
+
+(rule "gnss_rf_front_only"
+    (condition "A.NetName == '/radio/GNSS_RF' && A.Type == 'Track' && A.Layer != 'F.Cu'")
+    (constraint disallow track)
+    (severity error))
+
+# GNSS feed is <4mm total after the review-driven co-location; 0.5mm min because
+# the only legal lane between the module GND pad and the u.FL keepout is 0.56mm.
+(rule "gnss_rf_min_width"
+    (condition "A.NetName == '/radio/GNSS_RF' && A.Type == 'Track'")
+    (constraint track_width (min 0.5mm))
+    (severity error))

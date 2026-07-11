@@ -1,0 +1,9 @@
+# Bramble Pager v1 board defaults
+# Layer with: sdkconfig.defaults;sdkconfig.defaults.bramble_pager
+
+CONFIG_BRAMBLE_BOARD_PAGER=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+
+# Pager uses ESP32-S3 USB Serial/JTAG for console (no UART over USB)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_BRAMBLE_RPC_MAX_METHODS=64

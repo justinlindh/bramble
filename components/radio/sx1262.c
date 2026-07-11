@@ -612,6 +612,11 @@ int sx1262_set_regulator_mode(uint8_t mode) {
     return sx1262_write_command(SX1262_CMD_SET_REGULATOR_MODE, &mode, 1);
 }
 
+int sx1262_set_dio2_as_rf_switch(bool enable) {
+    uint8_t data = enable ? 0x01 : 0x00;
+    return sx1262_write_command(SX1262_CMD_SET_DIO2_AS_RF_SWITCH, &data, 1);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Init                                                               */
 /* ------------------------------------------------------------------ */
