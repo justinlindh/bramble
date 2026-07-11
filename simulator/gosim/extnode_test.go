@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"math/rand"
 	"net"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -238,5 +241,211 @@ func TestExtNodeSingleTxNoCollisionDelivered(t *testing.T) {
 	})
 	if rx == nil {
 		t.Fatal("R should hear a lone transmission")
+	}
+}
+
+// TestBrokerFindByNodeRouting is a fast, same-package regression test for the
+// gosim button-routing fix (Broker.findByNode, extnode.go): it must resolve a
+// bound emu-link hello id to that node's own connection, resolve distinct ids
+// to distinct connections, and return nil (not a stale/wrong connection) for
+// an id nothing has ever attached under. No firmware node, no browser --
+// this alone previously required the full E2E suite to exercise.
+func TestBrokerFindByNodeRouting(t *testing.T) {
+	h := newEmuHarness()
+	defer h.close()
+	path := filepath.Join(t.TempDir(), "emu.sock")
+	if err := h.startBroker(path); err != nil {
+		t.Fatal(err)
+	}
+
+	h.reserveSlot(0, 0, "A")
+	h.reserveSlot(10, 0, "B")
+	nodeA := dialFakeNode(t, path, "A")
+	defer nodeA.close()
+	nodeB := dialFakeNode(t, path, "B")
+	defer nodeB.close()
+
+	ecA := h.sim.broker.findByNode("A")
+	if ecA == nil || ecA.node != "A" {
+		t.Fatalf("findByNode(A) = %v, want the connection bound to A", ecA)
+	}
+	ecB := h.sim.broker.findByNode("B")
+	if ecB == nil || ecB.node != "B" {
+		t.Fatalf("findByNode(B) = %v, want the connection bound to B", ecB)
+	}
+	if ecA == ecB {
+		t.Fatal("findByNode(A) and findByNode(B) returned the same connection")
+	}
+
+	// An id nothing ever attached under must resolve to nil, not a stale hit.
+	if ec := h.sim.broker.findByNode("nonexistent"); ec != nil {
+		t.Fatalf("findByNode(nonexistent) = %v, want nil", ec)
+	}
+	if ec := h.sim.broker.findByNode(""); ec != nil {
+		t.Fatalf("findByNode(\"\") = %v, want nil", ec)
+	}
+}
+
+// TestCmdButtonRoutesToCorrectNodeOnly exercises the actual bug fix end to
+// end at the Go level: a "btn" Command (sim.go's cmdButton, wired into
+// handleCommand's "btn" case) must reach ONLY the external firmware
+// connection bound to the target node id, via sendButton, and must not
+// fan out to any other attached node. It also covers the pre-fix failure
+// shape (an unknown node id) as a silent no-op rather than a panic or a
+// misdelivery.
+func TestCmdButtonRoutesToCorrectNodeOnly(t *testing.T) {
+	h := newEmuHarness()
+	defer h.close()
+	path := filepath.Join(t.TempDir(), "emu.sock")
+	if err := h.startBroker(path); err != nil {
+		t.Fatal(err)
+	}
+
+	h.reserveSlot(0, 0, "A")
+	h.reserveSlot(10, 0, "B")
+	nodeA := dialFakeNode(t, path, "A")
+	defer nodeA.close()
+	nodeB := dialFakeNode(t, path, "B")
+	defer nodeB.close()
+
+	h.sim.handleCommand(Command{Type: "btn", Node: "A", BtnID: "select", Edge: "down"})
+
+	btn := nodeA.read(2 * time.Second)
+	if btn == nil {
+		t.Fatal("node A never received the button edge")
+	}
+	if btn["t"] != "btn" || btn["id"] != "select" || btn["edge"] != "down" {
+		t.Fatalf("node A btn = %v, want t=btn id=select edge=down", btn)
+	}
+
+	// The OTHER attached node must see nothing: routing must hit exactly the
+	// bound connection, not fan out or hit the wrong one.
+	if m := nodeB.read(200 * time.Millisecond); m != nil {
+		t.Fatalf("node B should not receive A's button edge, got %v", m)
+	}
+
+	// An id with no attached connection is a silent no-op: no panic, and it
+	// must not deliver to either attached node.
+	h.sim.handleCommand(Command{Type: "btn", Node: "does-not-exist", BtnID: "up", Edge: "up"})
+	if m := nodeA.read(150 * time.Millisecond); m != nil {
+		t.Fatalf("node A should not receive a button meant for an unknown node, got %v", m)
+	}
+	if m := nodeB.read(150 * time.Millisecond); m != nil {
+		t.Fatalf("node B should not receive a button meant for an unknown node, got %v", m)
+	}
+}
+
+// dialAndHello is a lower-level, *testing.T-free version of dialFakeNode's
+// dial+handshake, safe to call from a background goroutine (t.Fatalf must
+// only ever be called from the test's own goroutine; this returns an error
+// instead so goroutines can report failures back through a channel).
+func dialAndHello(path, node string) (net.Conn, error) {
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	b, _ := json.Marshal(map[string]any{"t": "hello", "node": node, "version": EmuLinkVersion})
+	if _, err := c.Write(append(b, '\n')); err != nil {
+		c.Close()
+		return nil, err
+	}
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := bufio.NewReader(c).ReadBytes('\n')
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(line, &m); err != nil || m["t"] != "time" {
+		c.Close()
+		return nil, fmt.Errorf("node %s: unexpected hello ack %v (err %v)", node, m, err)
+	}
+	return c, nil
+}
+
+// TestBrokerFindByNodeConcurrentWithHelloBind is a -race-friendly test for
+// the lock discipline findByNode and the hello-bind path share (both guarded
+// by Broker.mu, see extnode.go's handleHello and findByNode comments): a pool
+// of readers hammer findByNode (including for ids not yet attached) while
+// every reserved slot's node concurrently dials in and completes its hello
+// handshake. `go test -race` catches any unguarded access; the final
+// resolution check catches any bind that got lost or misrouted under
+// contention.
+func TestBrokerFindByNodeConcurrentWithHelloBind(t *testing.T) {
+	h := newEmuHarness()
+	defer h.close()
+	path := filepath.Join(t.TempDir(), "emu.sock")
+	if err := h.startBroker(path); err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 16
+	ids := make([]string, n)
+	for i := 0; i < n; i++ {
+		ids[i] = fmt.Sprintf("N%d", i)
+		h.reserveSlot(float32(i), 0, ids[i])
+	}
+
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				h.sim.broker.findByNode(ids[rand.Intn(n)])
+				h.sim.broker.findByNode("nonexistent")
+			}
+		}
+	}()
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	results := make([]dialResult, n)
+	var dialers sync.WaitGroup
+	for i := 0; i < n; i++ {
+		dialers.Add(1)
+		go func(i int) {
+			defer dialers.Done()
+			c, err := dialAndHello(path, ids[i])
+			results[i] = dialResult{conn: c, err: err}
+		}(i)
+	}
+	dialers.Wait()
+	close(stop)
+	readers.Wait()
+
+	defer func() {
+		for _, r := range results {
+			if r.conn != nil {
+				r.conn.Close()
+			}
+		}
+	}()
+
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("node %s: dial/hello failed: %v", ids[i], r.err)
+		}
+	}
+
+	// Every id must now resolve to its own distinct, correctly-bound
+	// connection: the concurrent readers must not have observed (or caused)
+	// a bind to land on the wrong slot.
+	seen := make(map[*extConn]string, n)
+	for _, id := range ids {
+		ec := h.sim.broker.findByNode(id)
+		if ec == nil || ec.node != id {
+			t.Fatalf("findByNode(%s) = %v, want the connection bound to %s", id, ec, id)
+		}
+		if other, dup := seen[ec]; dup {
+			t.Fatalf("findByNode(%s) and findByNode(%s) returned the same connection", id, other)
+		}
+		seen[ec] = id
 	}
 }
