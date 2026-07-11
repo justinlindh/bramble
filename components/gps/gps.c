@@ -339,8 +339,11 @@ void gps_deinit(void) {
     ESP_LOGI(TAG, "GPS deinitialized");
 }
 
-#else
-/* Host build stubs */
+#elif !defined(ESP_PLATFORM)
+/* Plain-gcc test harness (no ESP_PLATFORM, e.g. the RPC contract tests that
+ * link gps.c directly): minimal no-fix stubs. The IDF linux target does NOT
+ * take this branch; there gps_virt.c owns the gps.h implementation (see the
+ * #else below), so gps.c and gps_virt.c never both define these symbols. */
 int gps_init(gps_fix_cb_t cb, void* ctx) {
     (void)cb;
     (void)ctx;
@@ -359,4 +362,9 @@ void gps_get_stats(gps_stats_t* out) {
     }
 }
 void gps_deinit(void) {}
+#else
+/* IDF linux target (ESP_PLATFORM && CONFIG_IDF_TARGET_LINUX): the virtual
+ * GPS driver in gps_virt.c provides the gps.h implementation. This file
+ * contributes nothing there, so linking gps.c and gps_virt.c together does
+ * not clash. */
 #endif /* ESP_PLATFORM */

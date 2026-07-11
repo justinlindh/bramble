@@ -1,44 +1,21 @@
 /*
- * Spike-only no-op peripheral drivers for the IDF linux target: button,
- * battery, WiFi manager, and the device-only half of the OTA component.
- * Each implements an existing firmware header function-for-function; the
- * spike proved these symbols are required to link app_main -> mesh_task on
- * the simulator (their real drivers need esp_driver_gpio / esp_adc /
- * esp_wifi / app_update, none of which exist on the linux target).
- * Replaced by button_virt / battery_virt / emu_link drivers in later tasks.
+ * No-op peripheral drivers for the IDF linux target: WiFi manager and the
+ * device-only half of the OTA component. Each implements an existing firmware
+ * header function-for-function; the spike proved these symbols are required to
+ * link app_main -> mesh_task on the simulator (their real drivers need
+ * esp_wifi / app_update, neither of which exists on the linux target). These
+ * remain no-ops (Task 9+ territory).
+ *
+ * The button and battery halves that used to live here are gone: the real
+ * virtual drivers button_virt.c / battery_virt.c now own those symbols on the
+ * linux target (and gps_virt.c owns gps). Defining them here too would clash at
+ * link time.
  */
 #include <string.h>
 
-#include "battery.h"
-#include "button.h"
 #include "ota.h"
 #include "ota_rollback.h"
 #include "wifi_manager.h"
-
-/* ── button.h ───────────────────────────────────────────────────────── */
-
-void button_init(void) {}
-
-ui_button_t button_poll(uint32_t now_ms) {
-    (void)now_ms;
-    return BTN_NONE;
-}
-
-/* ── battery.h ──────────────────────────────────────────────────────── */
-
-void battery_init(void) {}
-
-uint32_t battery_read_mv(void) { return 4000; }
-
-uint8_t battery_mv_to_pct(uint32_t mv) {
-    if (mv >= 4200)
-        return 100;
-    if (mv <= 3300)
-        return 0;
-    return (uint8_t)((mv - 3300) * 100 / (4200 - 3300));
-}
-
-uint8_t battery_read_pct(void) { return battery_mv_to_pct(battery_read_mv()); }
 
 /* ── wifi_manager.h (no esp_wifi on the simulator: always "no wifi") ── */
 

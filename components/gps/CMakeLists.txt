@@ -1,12 +1,13 @@
-# The POSIX/Linux simulator has no UART driver: gps.c compiles its host stub
-# half there (see the CONFIG_IDF_TARGET_LINUX gate in gps.c) and the pure
-# nmea_parser.c builds as-is.
+# The POSIX/Linux simulator has no UART driver: on the IDF linux target the
+# virtual driver gps_virt.c implements gps.h (feeding the pure nmea_parser.c
+# from emu-link `nmea` messages and gating GNSS power via `gpsgate`); gps.c
+# itself contributes nothing there (see the CONFIG_IDF_TARGET_LINUX gate).
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
     idf_component_register(
-        SRCS "gps.c" "nmea_parser.c"
+        SRCS "gps.c" "gps_virt.c" "nmea_parser.c"
         INCLUDE_DIRS "include"
-        REQUIRES board_config location esp_timer
+        REQUIRES board_config location esp_timer emu_link json
     )
 else()
     idf_component_register(

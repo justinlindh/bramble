@@ -1641,3 +1641,46 @@ target_include_directories(test_radio_virt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
 )
 target_link_libraries(test_radio_virt pthread m)
+# Virtual GPS driver: power-gate (gpsgate on/off) + NMEA-to-fix behavior
+# (Task 6; whitebox include of gps_virt.c + emu_link.c + nmea_parser.c)
+add_executable(test_gps_virt
+    test_gps_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_gps_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+)
+target_link_libraries(test_gps_virt pthread)
+
+# Virtual indicators driver: full-state ind emission per change
+# (Task 6; whitebox include of indicator_virt.c + emu_link.c)
+add_executable(test_indicators
+    test_indicators.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_indicators PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/indicators/include
+)
+target_link_libraries(test_indicators pthread)
+
+# Virtual button driver: btn-edge dispatch + reset-exits-process
+# (Task 6; whitebox include of button_virt.c + emu_link.c)
+add_executable(test_button_virt
+    test_button_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_button_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/button/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+)
+target_link_libraries(test_button_virt pthread)
