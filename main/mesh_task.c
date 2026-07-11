@@ -12,6 +12,7 @@
 #include "rpc_dispatcher.h"
 #include "radio.h"
 #include "tx_gate.h"
+#include "phy_passthrough.h"
 #include "packet.h"
 #include "crypto.h"
 #include "security.h"
@@ -1131,6 +1132,22 @@ void mesh_reboot_delayed(int delay_ms) {
 /* ── Radio callbacks (ISR context → queue) ──────────────────────────── */
 
 static void on_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info) {
+    /* PHY passthrough pre-hook (DESIGN.md section 10): when the hardware-bridge
+     * mode is active, forward the raw frame up the RPC/serial link with its
+     * radio metadata BEFORE it is handed to the mesh. This is a tap, not a
+     * diversion: normal mesh processing still runs below. The intended gateway
+     * (a bare, unprovisioned Heltec) is inert to the mesh anyway, so the extra
+     * queue push is harmless; keeping the path additive avoids perturbing the
+     * firmware's own receive handling for anyone who force-enables on a live
+     * node. The carrier is read from the live radio config only while active,
+     * so the common (inactive) case adds a single flag check. */
+    if (phy_passthrough_is_active()) {
+        radio_config_t rcfg;
+        radio_get_config(&rcfg);
+        uint32_t freq_hz = (uint32_t)(rcfg.frequency_mhz * 1000000.0f);
+        phy_passthrough_forward_rx(data, len, info, freq_hz);
+    }
+
     rx_packet_t pkt;
     /* len is uint8_t (max 255), pkt.data is 256 bytes — always fits */
     memcpy(pkt.data, data, len);
