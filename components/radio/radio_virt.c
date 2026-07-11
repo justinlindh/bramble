@@ -61,6 +61,8 @@
  * not carry the debug log macros). */
 #if defined(ESP_PLATFORM)
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 static const char* TAG = "radio_virt";
 #else
 #define ESP_LOGI(...) ((void)0)
@@ -69,8 +71,14 @@ static const char* TAG = "radio_virt";
 #define ESP_LOGE(...) ((void)0)
 #endif
 
-#define RADIO_VIRT_TX_TIMEOUT_MS 5000u
+#define RADIO_VIRT_TX_TIMEOUT_MS 8000u
 #define RADIO_VIRT_CAD_TIMEOUT_MS 50u
+/* txdone poll interval on the node. The broker's reply is delivered by the
+ * emu_link reader thread (a raw pthread); signalling a condvar from it does not
+ * reliably wake a blocked FreeRTOS task under the IDF-linux port (the scheduler
+ * suspends non-running task pthreads), so the transmitting task polls the flag
+ * with vTaskDelay, a real scheduler yield, instead of blocking on the condvar. */
+#define RADIO_VIRT_TX_POLL_MS 5u
 
 /* ------------------------------------------------------------------ */
 /*  State                                                              */
@@ -293,14 +301,31 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
         return -1;
     }
 
+    bool done = false;
+#if defined(ESP_PLATFORM)
+    /* Node (FreeRTOS): poll the flag with vTaskDelay rather than block on the
+     * condvar, so the reader thread's flag write is observed promptly (see
+     * RADIO_VIRT_TX_POLL_MS). */
+    for (uint32_t waited = 0; waited < RADIO_VIRT_TX_TIMEOUT_MS; waited += RADIO_VIRT_TX_POLL_MS) {
+        pthread_mutex_lock(&s_mu);
+        done = s_tx_done;
+        pthread_mutex_unlock(&s_mu);
+        if (done)
+            break;
+        vTaskDelay(pdMS_TO_TICKS(RADIO_VIRT_TX_POLL_MS));
+    }
+#else
+    /* Plain-gcc test harness (no FreeRTOS): the condvar wait is correct and the
+     * signaller runs on an ordinary pthread. */
     struct timespec deadline;
     deadline_in_ms(&deadline, RADIO_VIRT_TX_TIMEOUT_MS);
     int wrc = 0;
     pthread_mutex_lock(&s_mu);
     while (!s_tx_done && wrc == 0)
         wrc = pthread_cond_timedwait(&s_tx_cv, &s_mu, &deadline);
-    bool done = s_tx_done;
+    done = s_tx_done;
     pthread_mutex_unlock(&s_mu);
+#endif
 
     if (!done) {
         ESP_LOGE(TAG, "tx timed out waiting for txdone");

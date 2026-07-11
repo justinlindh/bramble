@@ -1,0 +1,45 @@
+{
+  "name": "emu-dm-desync",
+  "description": "Reproduces the stale one-sided DM-session bug (issue this rig exists to catch) and exercises the #138 self-heal. A DMs B ('DM ALPHA') and the session establishes (asserted: ALPHA renders on B). B then reboots (EMU_REBOOT_AT_MS) losing its session half while A keeps its stale session; A keeps DMing ('DM BETA'), so B logs 'Failed session decrypt' (the desync symptom) and then 'DM session desync ... re-initiating handshake (self-heal)' (the #138 receiver-side heal). run_scenarios.sh asserts the ALPHA screen render plus both log signatures. The full heal-and-redeliver completes (A also tears down its stale session and a later BETA decrypts), but that end-to-end redelivery has run-to-run wall-clock variance in real-time mode, so CI gates on the deterministic symptom+heal-trigger rather than the final BETA render.",
+  "mode": "deterministic",
+  "duration_ms": 80000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [[0, 0]],
+      "label": "dm-a",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_AUTO_SEND": "DM ALPHA",
+        "EMU_AUTO_SEND_TO": "neighbor",
+        "EMU_AUTO_SEND_DELAY_MS": "10000",
+        "EMU_AUTO_SEND_REPEAT": "2",
+        "EMU_AUTO_SEND_INTERVAL_MS": "3000",
+        "EMU_AUTO_SEND2": "DM BETA",
+        "EMU_AUTO_SEND2_DELAY_MS": "6000",
+        "EMU_AUTO_SEND2_REPEAT": "16",
+        "EMU_AUTO_SEND2_INTERVAL_MS": "3000"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [[30, 0]],
+      "label": "dm-b",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_REBOOT_AT_MS": "20000"
+      }
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}
