@@ -9,6 +9,15 @@
 
 #include "emu_link.h"
 
+/* CONFIG_IDF_TARGET_LINUX lives in sdkconfig.h, not on the compiler command
+ * line: without this include the guard below cannot see it on the IDF linux
+ * target and silently compiles the device stubs there (making every virtual
+ * driver inert on the node). Guarded because the plain-gcc test harness has
+ * no sdkconfig.h. */
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
 /* Host-only: on-device (esp32s3) builds never compile this body (see
  * CMakeLists.txt, which only adds emu_link.c as a source on the IDF linux
  * target). This guard is defense in depth in case the file is ever pulled
