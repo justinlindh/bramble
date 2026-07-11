@@ -217,8 +217,9 @@ void display_flush(void) {
         }
         /* A failed transmit leaves the panel with a partial command stream;
          * abort the rest of the ops rather than push more onto a bad state.
-         * display_flush is void (display.h contract), so the engine's dirty
-         * state is left as-is and the next flush will retry the frame. */
+         * display_flush is void (display.h contract). Note: the engine already
+         * cleared its dirty state before the io layer ran, so an aborted flush
+         * is NOT retried; the frame is recovered on the next pixel change. */
         if (epd_write_cmd(ops[i].cmd) != ESP_OK)
             goto out;
         if (epd_write_data(ops[i].cmd, ops[i].data, ops[i].len) != ESP_OK)
