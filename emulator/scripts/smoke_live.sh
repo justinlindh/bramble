@@ -118,7 +118,10 @@ echo
 
 # --- report tx/delivery (level b) ----------------------------------------
 echo "[3/4] checking transmit pricing/delivery (level b)..."
-TX=$(grep -c '"t":"tx"\|"type":"packet\|txdone' "$LOG" 2>/dev/null)
+# The broker emits a deterministic emu_tx per external-node transmission and an
+# emu_rx per surviving PHY delivery (extnode.go). Match those exact event types;
+# the old pattern had an unterminated "type":"packet literal and matched neither.
+TX=$(grep -cE '"type":"emu_tx"|"type":"emu_rx"' "$LOG" 2>/dev/null)
 if [ "$TX" -gt 0 ]; then
     green "[3/4] (b) $TX tx/delivery events observed -- full beacon delivery reached"
 else

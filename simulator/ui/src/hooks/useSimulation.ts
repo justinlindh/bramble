@@ -67,10 +67,12 @@ const initialState: SimState = {
 };
 
 // resolveDeviceId maps a console/log node tag onto the device key it belongs to.
-// Framebuffer/indicator streams are tagged with the firmware hello id, but the
-// supervisor's stdout console is tagged with the process label "<label>-<i>".
-// Since firmware instances attach in declaration order, the i-th firmware hello
-// id in firmwareOrder is process "<label>-i", so a trailing "-<i>" routes there.
+// The broker now tags console events server-side with the node's bound emu-link
+// hello id (supervisor.go), so the identity match below is the primary path and
+// is correct even across multiple firmware groups. The label-suffix fallback
+// ("<label>-<i>" -> the i-th firmware hello id) remains only for pre-attach
+// lines or an unexpectedly untagged event; it can mis-route with multiple
+// groups, which is exactly why the server-side tagging exists.
 export function resolveDeviceId(
   node: string,
   devices: Map<string, DeviceState>,
