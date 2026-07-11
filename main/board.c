@@ -1,6 +1,8 @@
 #include "board_config.h"
 
-#ifdef ESP_PLATFORM
+/* The POSIX/Linux simulator has no SPI/GPIO drivers: rails/bus init below
+ * compiles out there just like on the plain host build. */
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,8 +24,10 @@
 #ifdef ESP_PLATFORM
 #include "freertos/semphr.h"
 
+#ifndef CONFIG_IDF_TARGET_LINUX
 static const char* TAG = "board";
 static bool s_initialized = false;
+#endif
 
 /* Shared SPI mutex — created for boards with BOARD_CAP_SHARED_SPI */
 SemaphoreHandle_t g_spi_mutex = NULL;
@@ -42,7 +46,7 @@ const bramble_board_config_t* board_get_config(void) {
 }
 
 int board_init(void) {
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
     const bramble_board_config_t* cfg = board_get_config();
     ESP_LOGI(TAG, "Board: %s", cfg->name);
 

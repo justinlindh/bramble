@@ -15,7 +15,9 @@
 #include "ui.h"
 #include "crypto.h"
 #include "crypto_entropy.h"
+#ifndef CONFIG_IDF_TARGET_LINUX
 #include "bootloader_random.h"
+#endif
 #include "secure_nvs.h"
 #include "esp_partition.h"
 #include "identity.h"
@@ -27,7 +29,12 @@
 #include "ws_server.h"
 #include "msg_store.h"
 #include "esp_spiffs.h"
+/* mdns is excluded on the POSIX/Linux simulator (see idf_component.yml);
+ * it is only reachable from the WiFi-connected path, which the simulator's
+ * wifi_manager stub never takes. */
+#ifndef CONFIG_IDF_TARGET_LINUX
 #include "mdns.h"
+#endif
 #include "ble_server.h"
 #include "esp_system.h"
 #include "battery.h"
@@ -280,7 +287,8 @@ static routing_table_t s_render_routes;
 static void render_unread_badge(const ui_state_t* ui, int right_x) {
     if (ui->unread_count <= 0 || ui->current_screen == SCREEN_MESSAGES)
         return;
-    char b[8];
+    /* Sized for a full int, so -Wformat-truncation holds on every target. */
+    char b[16];
     if (ui->unread_count > 9)
         snprintf(b, sizeof(b), "*9+");
     else
@@ -926,7 +934,9 @@ void app_main(void) {
      * generation runs long before that. bootloader_random_enable() turns on the
      * SAR-ADC entropy source; it MUST be disabled again before the first app
      * ADC user (battery_init, ~line 832) which shares the SAR-ADC. */
+#ifndef CONFIG_IDF_TARGET_LINUX
     bootloader_random_enable();
+#endif
     crypto_entropy_set_ready(true);
     ESP_LOGI(TAG, "=== BOOT STAGE: identity_load ===");
     if (identity_load(&g_identity) == 0) {
@@ -962,8 +972,14 @@ void app_main(void) {
      * (SAR-ADC is shared) and CLOSE the gate: there is no strong entropy source
      * again until an RF subsystem comes up, so crypto_random() must fail closed
      * in this window rather than emit weak esp_random() bytes. */
+#ifndef CONFIG_IDF_TARGET_LINUX
     bootloader_random_disable();
     crypto_entropy_set_ready(false);
+#else
+    /* POSIX/Linux simulator: esp_random() is getentropy(), a CSPRNG that is
+     * always ready; the weak-entropy window this gate fails closed against
+     * does not exist on the host. */
+#endif
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -1123,6 +1139,7 @@ void app_main(void) {
                 ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
                 ws_server_start();
 
+#ifndef CONFIG_IDF_TARGET_LINUX
                 ESP_LOGI(TAG, "=== BOOT STAGE: mdns_init ===");
                 mdns_init();
                 char hostname[32];
@@ -1142,6 +1159,7 @@ void app_main(void) {
                 size_t txt_count = (node_name != NULL && node_name[0] != '\0') ? 2 : 1;
                 mdns_service_add("Bramble", "_bramble", "_tcp", 80, txt, txt_count);
                 ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+#endif /* !CONFIG_IDF_TARGET_LINUX */
             } else {
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
                 show_boot_status("WiFi: AP 192.168.4.1");
@@ -1208,9 +1226,13 @@ void app_main(void) {
         ESP_LOGI(TAG, "BLE disabled by connectivity mode");
     }
 
-    /* Start serial CLI (with JSON-RPC auto-detect) */
+    /* Start serial CLI (with JSON-RPC auto-detect). The POSIX/Linux
+     * simulator has no UART/USB-serial console driver; cli.c is excluded
+     * from that build. */
+#ifndef CONFIG_IDF_TARGET_LINUX
     ESP_LOGI(TAG, "=== BOOT STAGE: cli_init ===");
     cli_init(&g_identity);
+#endif
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
     /* Initialize LVGL graphical UI */

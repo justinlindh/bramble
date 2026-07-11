@@ -21,19 +21,23 @@
 #include "ota_origin.h"
 #include "ota_rollback.h"
 #include "ota_url.h"
-#include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
 #include "board_config.h"
 #include "display.h"
 #include "gps.h"
 #include "location.h"
 #include "wifi_manager.h"
-#include "esp_wifi.h"
 #include "ws_server.h"
 #include "network_key.h"
+/* Deep sleep, GPIO wake, esp_wifi and mDNS do not exist on the POSIX/Linux
+ * simulator; the affected RPC handlers degrade there (see the gates below). */
+#ifndef CONFIG_IDF_TARGET_LINUX
+#include "esp_sleep.h"
+#include "driver/gpio.h"
+#include "esp_wifi.h"
 #include "mdns.h"
+#endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "audio.h"
@@ -197,16 +201,20 @@ static int handle_get_wifi_status(const cJSON* params, cJSON* result) {
     }
 
     uint8_t mac[6] = {0};
+    int clients = 0;
+#ifndef CONFIG_IDF_TARGET_LINUX
     esp_err_t mac_rc =
         esp_wifi_get_mac(status.mode == BRAMBLE_WIFI_AP ? WIFI_IF_AP : WIFI_IF_STA, mac);
 
-    int clients = 0;
     if (status.mode == BRAMBLE_WIFI_AP) {
         wifi_sta_list_t sta_list = {0};
         if (esp_wifi_ap_get_sta_list(&sta_list) == ESP_OK) {
             clients = sta_list.num;
         }
     }
+#else
+    esp_err_t mac_rc = ESP_FAIL; /* no esp_wifi on the simulator: mac stays empty */
+#endif
 
     char mac_str[18] = {0};
     if (mac_rc == ESP_OK) {
@@ -702,7 +710,9 @@ static int handle_set_node_name(const cJSON* params, cJSON* result) {
     /* Best-effort: reflect the new name in the mDNS TXT record so discovery
      * shows it without a reboot. Fails harmlessly when mDNS is not running
      * (AP mode / WiFi off). */
+#ifndef CONFIG_IDF_TARGET_LINUX
     (void)mdns_service_txt_item_set("_bramble", "_tcp", "name", name);
+#endif
 
     ESP_LOGI(TAG, "Node name set to: %s", name);
     cJSON_AddBoolToObject(result, "ok", true);
@@ -2268,6 +2278,10 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
     /* Delay to let RPC response flush, then sleep */
     vTaskDelay(pdMS_TO_TICKS(500));
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* No deep sleep on the POSIX/Linux simulator. */
+    ESP_LOGW(TAG, "bramble.sleep: deep sleep not supported on the simulator");
+#else
     if (wake_sec > 0) {
         esp_sleep_enable_timer_wakeup((uint64_t)wake_sec * 1000000ULL);
     }
@@ -2277,6 +2291,7 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
 
     esp_deep_sleep_start();
     /* never reached */
+#endif
     return 0;
 }
 

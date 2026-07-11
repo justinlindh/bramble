@@ -1,4 +1,9 @@
 dependencies:
   idf:
     version: '>=5.4.0'
-  espressif/mdns: '*'
+  espressif/mdns:
+    version: '*'
+    rules:
+      # mdns does not build on the POSIX/Linux simulator (it wants the
+      # esp_netif_linux test component from its own repo).
+      - if: target != linux

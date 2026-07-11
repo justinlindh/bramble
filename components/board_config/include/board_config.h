@@ -4,8 +4,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Guard ESP-IDF specific includes for host builds */
+/* Guard ESP-IDF specific includes for host builds. The POSIX/Linux
+ * simulator (IDF linux target) defines ESP_PLATFORM but has no SPI/GPIO
+ * drivers, so it takes the host branch too. */
 #ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #else
