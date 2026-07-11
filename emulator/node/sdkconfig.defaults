@@ -1,0 +1,19 @@
+# Bramble virtual node (IDF linux target) defaults.
+
+CONFIG_IDF_TARGET="linux"
+
+# The emulated device is the Bramble Pager v1.
+CONFIG_BRAMBLE_BOARD_PAGER=y
+
+# Mirror the device defaults the firmware relies on.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+CONFIG_MBEDTLS_HKDF_C=y
+
+# No SPIFFS storage on the simulator: message persistence off (RAM ring only).
+CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=n
+
+# BLE off: bt does not exist on the linux target; ble_server_stub.c is
+# selected automatically when NimBLE is disabled (the default).
