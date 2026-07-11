@@ -84,12 +84,14 @@ export default function App() {
         </div>
         <div className="app-view-tabs">
           <button
+            data-testid="view-tab-mesh"
             className={`app-view-tab ${mainView === 'mesh' ? 'app-view-tab-active' : ''}`}
             onClick={() => setMainView('mesh')}
           >
             Mesh
           </button>
           <button
+            data-testid="view-tab-devices"
             className={`app-view-tab ${mainView === 'devices' ? 'app-view-tab-active' : ''}`}
             onClick={() => setMainView('devices')}
           >

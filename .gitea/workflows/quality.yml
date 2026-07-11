@@ -211,4 +211,55 @@ jobs:
         # content (channel message on screen; DM desync symptom + #138 self-heal).
         run: bash emulator/ci/run_scenarios.sh
 
+  emulator-e2e:
+    name: Emulator browser E2E (non-required)
+    # idf-node runner: same real firmware node binary + gosim as
+    # emulator-scenarios, plus a real UI build and a real headless Chromium
+    # (Task 13: proves the DISPLAY and basic buttons/reset/messaging work
+    # through what a human actually sees, not just headless framebuffer
+    # asserts). continue-on-error while this job bakes in per PLAN.md Task
+    # 13's CI note ("non-required job first, promote after it proves
+    # stable"); drop continue-on-error once it's proven stable in practice.
+    if: github.event_name != 'pull_request'
+    runs-on: idf-node
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Ensure ESP-IDF toolchain
+        run: bash scripts/ci-ensure-idf.sh
+      - name: Build the linux firmware node
+        env:
+          HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
+          # The node is a host binary; a throwaway signing key is fine here.
+          BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
+        run: |
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
+          # shellcheck disable=SC1091
+          source scripts/ci-source-idf.sh
+          cd emulator/node
+          idf.py --preview set-target linux
+          idf.py build
+      - name: Build gosim
+        run: |
+          cd simulator/gosim
+          go build -o bramble-gosim .
+      - name: Build the UI
+        run: |
+          cd simulator/ui
+          npm ci
+          npm run build
+      - name: Run browser E2E suite
+        # Wall-clock budget: under 4 minutes (emulator/e2e/playwright.config.ts's
+        # globalTimeout); observed ~37s locally across 5 consecutive runs
+        # (see emulator/e2e/README.md).
+        run: bash emulator/e2e/run_e2e.sh
+
 # ci-sync-trigger 1772679720

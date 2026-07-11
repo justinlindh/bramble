@@ -96,6 +96,7 @@ export function PlaybackControls({ running, connected, ready, currentTime, ws }:
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
         {/* Play/Pause */}
         <button
+          data-testid="play-pause-btn"
           onClick={handlePlayPause}
           disabled={!isActive}
           title={paused ? 'Play' : 'Pause'}
