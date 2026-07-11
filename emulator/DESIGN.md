@@ -243,3 +243,42 @@ from the real fleet arrives on a virtual pager and renders on its e-paper with
 the refresh flash; a reply composed via clicked buttons reaches the real fleet;
 headless scenario suite (including the screen-assertion and DM desync scenarios)
 green in CI; `ssd1680_engine`/`ssd1680_io` merged and ready for first hardware.
+
+## 15. Phase 1 status (as-built, 2026-07-11)
+
+Phase 1 is COMPLETE and merged to `feature/emulator-v1`. All twelve plan tasks
+plus the browser E2E (task 13) shipped, each through TDD + independent review.
+Gates at completion: 110 host test suites green, gosim `go test` green, UI
+vitest 20/20, the linux node and esp32s3 pager builds green, the headless
+scenario suite and the browser E2E both green (E2E deterministic across 6 runs).
+
+What the emulator proves today: three unmodified-firmware pagers boot on the
+linux target, attach to the gosim ether with real cryptographic identities that
+survive restart, provision a shared network key, and exchange real channel
+messages that render on each other's e-paper, observed pixel-exact through a
+real browser. Buttons reach the firmware; RESET restarts with identity intact.
+
+Deviations from the plan as written, and why:
+- Provisioning + scripted send use a boot-time `EMU_NETWORK_KEY` env seed and
+  scenario-scripted autosend, not the emu-link control-message path section 8
+  originally implied. The env path was sufficient for the headless/CI scenarios
+  and reuses the real `network_key_set_provisioned`. The richer emu-link
+  control-message path (runtime provision/send, needed for fully interactive
+  UI-driven sends) is designed and gate-green but held out of this branch; it is
+  preserved on tag `emulator-task13-control-path` for a follow-on.
+- E-paper white-flash fidelity gap: on a real panel a full refresh drives the
+  BUSY line for ~3s and the controller cannot redraw during it, so the
+  black/white/content flash plays fully. `display_virt.c` does not model BUSY
+  blocking, and the firmware redraws every ~500-1050ms, faster than
+  `EPD_MODEL`'s 1500ms white onset, so the white mid-phase is structurally
+  pre-empted and never paints in the emulator. The E2E asserts black-first and
+  eventual-content (both hard) and documents the white phase as an observed,
+  measured gap. Close it by modeling a BUSY-equivalent block in `display_virt.c`
+  when calibrating against real panels.
+- Bug found and fixed by the E2E (task 13): face-button ws messages were
+  silently dropped server-side (no `Command` btn fields, `sendButton` had no
+  caller). This was invisible to headless testing and is exactly the class of
+  defect the browser-level suite exists to catch.
+
+Phase 2 (QEMU true-VM backend running the exact flashable image) remains a
+documented follow-on per section 12; it is not started.
