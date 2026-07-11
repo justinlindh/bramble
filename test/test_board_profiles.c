@@ -81,6 +81,23 @@ void test_bramble_pager_profile_has_expected_radio_contract(void) {
     TEST_ASSERT_TRUE(cfg->radio_dio2_rf_switch);
 }
 
+void test_bramble_pager_profile_has_epd_display_contract(void) {
+    const bramble_board_config_t* cfg = &board_bramble_pager;
+
+    /* SSD1680 e-paper on the shared radio SPI bus (board_init owns the
+     * bus and g_spi_mutex when BOARD_CAP_SHARED_SPI is set). */
+    TEST_ASSERT_TRUE((cfg->capabilities & BOARD_CAP_DISPLAY_EPAPER) != 0);
+    TEST_ASSERT_TRUE((cfg->capabilities & BOARD_CAP_SHARED_SPI) != 0);
+
+    TEST_ASSERT_EQUAL_INT(250, cfg->display_width);
+    TEST_ASSERT_EQUAL_INT(122, cfg->display_height);
+
+    TEST_ASSERT_EQUAL_INT(4, cfg->epd_display.cs);
+    TEST_ASSERT_EQUAL_INT(5, cfg->epd_display.dc);
+    TEST_ASSERT_EQUAL_INT(6, cfg->epd_display.rst);
+    TEST_ASSERT_EQUAL_INT(7, cfg->epd_display.busy);
+}
+
 void test_bramble_pager_profile_has_expected_peripheral_pins(void) {
     const bramble_board_config_t* cfg = &board_bramble_pager;
 
@@ -167,6 +184,11 @@ void test_virtual_pager_profile_matches_bramble_pager_pins(void) {
 
     TEST_ASSERT_EQUAL_INT(real->display_width, virt->display_width);
     TEST_ASSERT_EQUAL_INT(real->display_height, virt->display_height);
+
+    TEST_ASSERT_EQUAL_INT(real->epd_display.cs, virt->epd_display.cs);
+    TEST_ASSERT_EQUAL_INT(real->epd_display.dc, virt->epd_display.dc);
+    TEST_ASSERT_EQUAL_INT(real->epd_display.rst, virt->epd_display.rst);
+    TEST_ASSERT_EQUAL_INT(real->epd_display.busy, virt->epd_display.busy);
 }
 
 int main(void) {
@@ -176,6 +198,7 @@ int main(void) {
     RUN_TEST(test_heltec_v4_profile_has_deterministic_optional_peripheral_defaults);
     RUN_TEST(test_heltec_v3_profile_does_not_use_dio2_rf_switch);
     RUN_TEST(test_bramble_pager_profile_identity_and_caps);
+    RUN_TEST(test_bramble_pager_profile_has_epd_display_contract);
     RUN_TEST(test_bramble_pager_profile_has_expected_radio_contract);
     RUN_TEST(test_bramble_pager_profile_has_expected_peripheral_pins);
     RUN_TEST(test_virtual_pager_profile_has_bramble_pager_caps_plus_virtual_marker);

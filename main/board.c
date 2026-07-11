@@ -81,6 +81,8 @@ int board_init(void) {
          * On shared SPI buses, floating CS pins cause peripherals to
          * receive each other's traffic — corrupting display GRAM, etc.
          * (Learned from Bramble's earlyInitVariant pattern.) */
+        /* .cs sits at offset 0 in every display-pin union variant, so
+         * spi_display.cs also reads the e-paper CS on epd_display boards. */
         const int cs_pins[] = {
             cfg->radio.cs,
             cfg->spi_display.cs,

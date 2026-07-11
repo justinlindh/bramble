@@ -3,10 +3,11 @@
 # component exists so the IDF build can link them. Device builds never see
 # this directory (only emulator/node/CMakeLists.txt adds it).
 #
-# radio_null.c is gone (radio_virt owns radio.h) and periph_null.c no longer
-# stubs button/battery (button_virt/battery_virt own those). display_null.c
-# remains until Task 5 lands; periph_null keeps only the wifi/OTA stubs.
+# All spike null drivers are gone except the wifi/OTA stubs in periph_null.c:
+# radio_virt owns radio.h, display_virt owns display.h, button_virt/
+# battery_virt/gps_virt own their components. esp_timer_posix.c fills the
+# IDF-linux esp_timer gap.
 idf_component_register(
-    SRCS "../display_null.c" "../periph_null.c" "../esp_timer_posix.c"
-    REQUIRES display wifi ota esp_timer freertos esp_system
+    SRCS "../periph_null.c" "../esp_timer_posix.c"
+    REQUIRES wifi ota esp_timer freertos esp_system
 )
