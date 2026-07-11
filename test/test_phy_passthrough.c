@@ -57,6 +57,7 @@ void setUp(void) {
     /* Every test starts from a disabled gate: the module is default-off, and
      * disable() is the deterministic reset (no init entry point, no NVS). */
     phy_passthrough_disable();
+    phy_passthrough_consume_auto_expired(); /* drain any latch from a prior test */
     phy_passthrough_set_emit(capture_emit);
 }
 void tearDown(void) {}
@@ -125,6 +126,27 @@ void test_ttl_expiry_deactivates(void) {
     /* Re-enabling restores the window. */
     TEST_ASSERT_EQUAL_INT(PHY_PT_OK, phy_passthrough_enable(30, false, false));
     TEST_ASSERT_TRUE(phy_passthrough_is_active());
+}
+
+/* The auto-expire (live->off) transition is silent inside the module (no logging
+ * dependency), so it latches a one-shot flag for a logging caller to drain. The
+ * flag fires exactly once per expiry: true on the first drain after the TTL
+ * elapses, false thereafter, and a manual disable does NOT set it. */
+void test_ttl_expiry_signals_auto_expired_once(void) {
+    TEST_ASSERT_EQUAL_INT(PHY_PT_OK, phy_passthrough_enable(30, false, false));
+    TEST_ASSERT_FALSE(phy_passthrough_consume_auto_expired()); /* not expired yet */
+
+    advance_sec(31); /* window elapsed */
+    TEST_ASSERT_FALSE(phy_passthrough_is_active()); /* folds expiry into disable */
+
+    TEST_ASSERT_TRUE(phy_passthrough_consume_auto_expired());  /* fires once */
+    TEST_ASSERT_FALSE(phy_passthrough_consume_auto_expired()); /* and only once */
+}
+
+void test_manual_disable_does_not_signal_auto_expired(void) {
+    phy_passthrough_enable(600, false, false);
+    phy_passthrough_disable();
+    TEST_ASSERT_FALSE(phy_passthrough_consume_auto_expired());
 }
 
 void test_ttl_clamped_to_max(void) {
@@ -231,6 +253,8 @@ int main(void) {
     RUN_TEST(test_default_off);
     RUN_TEST(test_enable_activates_default_ttl);
     RUN_TEST(test_ttl_expiry_deactivates);
+    RUN_TEST(test_ttl_expiry_signals_auto_expired_once);
+    RUN_TEST(test_manual_disable_does_not_signal_auto_expired);
     RUN_TEST(test_ttl_clamped_to_max);
     RUN_TEST(test_remaining_counts_down);
     RUN_TEST(test_identity_refuses);
