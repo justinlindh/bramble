@@ -232,6 +232,53 @@ void test_trackball_settings_row_navigation_when_not_editing(void) {
     TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_LOCATION, state.settings_item_cursor);
 }
 
+void test_settings_gps_row_skipped_when_unavailable(void) {
+    /* gps_available defaults false: row cycling must never land on the GPS row. */
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = false;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_CONN_MODE;
+
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_OLED_ROTATION, state.settings_item_cursor);
+    ui_handle_button(&state, BTN_DOWN, 2000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_LOCATION, state.settings_item_cursor);
+    /* Next wraps back to CONN_MODE, hopping over the hidden GPS row. */
+    ui_handle_button(&state, BTN_DOWN, 3000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_CONN_MODE, state.settings_item_cursor);
+}
+
+void test_settings_gps_row_reachable_when_available(void) {
+    ui_set_gps_available(&state, true);
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = false;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_LOCATION;
+
+    /* From Location, next lands on GPS, then wraps to CONN_MODE. */
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_GPS, state.settings_item_cursor);
+    ui_handle_button(&state, BTN_DOWN, 2000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_CONN_MODE, state.settings_item_cursor);
+    /* And backward from CONN_MODE reaches GPS. */
+    ui_handle_button(&state, BTN_UP, 3000);
+    TEST_ASSERT_EQUAL(UI_SETTINGS_ITEM_GPS, state.settings_item_cursor);
+}
+
+void test_settings_gps_edit_toggles_off_and_on(void) {
+    ui_set_gps_available(&state, true);
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = true;
+    state.settings_item_cursor = UI_SETTINGS_ITEM_GPS;
+    state.settings_cursor = 0;
+
+    /* Two options (Off / On): down advances, then wraps back. */
+    ui_handle_button(&state, BTN_DOWN, 1000);
+    TEST_ASSERT_EQUAL(1, state.settings_cursor);
+    ui_handle_button(&state, BTN_DOWN, 2000);
+    TEST_ASSERT_EQUAL(0, state.settings_cursor);
+    ui_handle_button(&state, BTN_UP, 3000);
+    TEST_ASSERT_EQUAL(1, state.settings_cursor);
+}
+
 void test_trackball_select_on_settings_enters_edit_for_selected_row(void) {
     state.current_screen = SCREEN_SETTINGS;
     state.settings_editing = false;
@@ -639,6 +686,9 @@ int main(void) {
     RUN_TEST(test_conn_mode_resolve_boot_keeps_supported_modes);
     RUN_TEST(test_conn_mode_resolve_boot_normalizes_legacy_both);
     RUN_TEST(test_trackball_settings_row_navigation_when_not_editing);
+    RUN_TEST(test_settings_gps_row_skipped_when_unavailable);
+    RUN_TEST(test_settings_gps_row_reachable_when_available);
+    RUN_TEST(test_settings_gps_edit_toggles_off_and_on);
     RUN_TEST(test_trackball_select_on_settings_enters_edit_for_selected_row);
     RUN_TEST(test_trackball_settings_edit_navigation_connectivity_row);
     RUN_TEST(test_trackball_settings_edit_navigation_oled_row);

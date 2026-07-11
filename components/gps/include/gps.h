@@ -51,6 +51,20 @@ bool gps_get_position(bramble_position_t* out);
 void gps_get_stats(gps_stats_t* out);
 
 /**
+ * Enable or disable GPS at runtime.
+ *
+ * Enabling powers the GNSS on and (re)starts parsing, reusing the fix callback
+ * registered by a prior gps_init(); disabling cuts GNSS power. This is the same
+ * physical seam as gps_init()/gps_deinit() (the pager's GPIO38 P-FET gate, the
+ * emulator's gpsgate message), exposed for the Settings toggle. A prior
+ * gps_init() must have run so the callback is known.
+ *
+ * @param enabled true to power GNSS on, false to cut power
+ * @return 0 on success, -1 if the board has no GPS
+ */
+int gps_set_enabled(bool enabled);
+
+/**
  * Shutdown GPS and free resources.
  */
 void gps_deinit(void);
