@@ -91,10 +91,14 @@ describe('PagerDevice e-paper', () => {
     );
     expect(fakeCtx.putImageData).not.toHaveBeenCalled();
 
-    // an fb event bumps fbSeq with content -> canvas updates
+    // an fb event bumps fbSeq with content -> canvas updates. A partial frame
+    // with busy 0 latches content immediately; a full frame plays the
+    // inversion flicker first and lands content a few hundred ms later (that
+    // timing is covered by epaperModel.test.ts), so a partial is the right
+    // case for "content paints on arrival".
     rerender(
       <PagerDevice
-        device={makeDevice({ fb: zeroFrameBase64(), fbKind: 'full', fbBusyMs: 0, fbSeq: 1 })}
+        device={makeDevice({ fb: zeroFrameBase64(), fbKind: 'partial', fbBusyMs: 0, fbSeq: 1 })}
         muted
         onButton={onButton}
       />,

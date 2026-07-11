@@ -31,6 +31,12 @@ export interface EpdModel {
   // Inversion-flash colors played, in order, at the start of a full refresh.
   // Content is drawn as the final frame after these.
   flashColors: FlashColor[];
+  // How long each inversion color is held (ms). A real panel clears ghosting
+  // with a rapid black/white flicker over a few hundred ms, independent of the
+  // (much longer) controller busy window; the flash plays at this fixed step
+  // and content latches right after, so it reads as a refresh flicker rather
+  // than the screen blanking to solid black for seconds.
+  flashStepMs: number;
   // Typical panel busy windows (ms). The live busy_ms from the engine overrides
   // these per frame; they are here so callers have a sane default and tests /
   // previews have representative timings.
@@ -43,7 +49,8 @@ export interface EpdModel {
 export const EPD_MODEL: EpdModel = {
   ghostPerFrame: 0.06,
   ghostMax: 0.3,
-  flashColors: ['black', 'white'],
+  flashColors: ['black', 'white', 'black', 'white'],
+  flashStepMs: 130,
   defaultPartialBusyMs: 300,
   defaultFullBusyMs: 2600,
 };
@@ -84,15 +91,20 @@ export function applyFrame(
   const busy = Math.max(0, busyMs);
 
   if (kind === 'full') {
-    // Inversion flash spread evenly across the busy window, content at the end.
-    const flashes = model.flashColors;
-    const steps = flashes.length; // flashes occupy [0, busy); content lands at busy
-    const frames: CanvasFrame[] = flashes.map((color, i) => ({
-      at: steps === 0 ? 0 : (busy * i) / steps,
+    // A real panel clears ghosting with a rapid inversion flicker (a few quick
+    // black/white cycles over a few hundred ms) and then resolves the content;
+    // it does not sit on a solid fill for the whole multi-second busy window.
+    // Play the inversions back to back at the fixed flash step and latch
+    // content immediately after. busyMs (the controller's total refresh time)
+    // is deliberately not stretched across the flash: holding black for
+    // seconds looks like the screen blanking out, not an e-paper refresh.
+    const step = model.flashStepMs;
+    const frames: CanvasFrame[] = model.flashColors.map((color, i) => ({
+      at: i * step,
       paint: color,
       ghost: 0,
     }));
-    frames.push({ at: busy, paint: 'content', ghost: 0 });
+    frames.push({ at: model.flashColors.length * step, paint: 'content', ghost: 0 });
     return { frames, ghost: 0 };
   }
 
