@@ -161,9 +161,19 @@ LORA_LEN    = 79;          // keep this length of the top inner wall flat / rib-
 UFL_LORA    = mb(26, 17.5);   // -> [26,32.5] u.FL landing (routing clearance)
 
 // ---- WROOM antenna overhang pocket (left wall, x=0) ----
+// The WROOM antenna tab protrudes 3.0mm past the board edge (U401 tip at board
+// x=97.0, measured from the routed layout), riding ON the PCB top plane: the
+// tab therefore lives in the FRONT cover's wall zone (z_part..), and the back
+// shell only needs the relief for seating margin. The pocket (2.8) is deeper
+// than the wall (2.0), so both shells bulge outward locally over the window:
+// without the bulge the relief is a through slot, not a pocket.
 WROOM_POCKET_LEN = 28;     // along Y
-WROOM_POCKET_DEP = 2.8;    // extra relief into the left wall inner face
+WROOM_POCKET_DEP = 3.4;    // relief depth past the inner wall face (tip clr 0.8mm)
 WROOM_POCKET_YC  = 25;     // model Y center of the pocket
+WROOM_BULGE_SKIN = 1.2;    // printed skin kept outside the relief
+WROOM_OVERHANG   = 3.0;    // antenna tip past board edge (layout-measured)
+WROOM_BULGE_Y0   = WROOM_POCKET_YC - WROOM_POCKET_LEN/2 - 2;  // window + shoulders
+WROOM_BULGE_LEN  = WROOM_POCKET_LEN + 4;
 
 // ---- GPS active-antenna pocket (front cover, top-right) ----
 // The patch is a 12x12x4mm active ceramic GPS antenna. The pocket's left retaining
@@ -238,6 +248,9 @@ echo(str("CAVITY height (floor->ceiling) = ", cavity_h, " mm ; stack = ", stack_
 echo(str("WINDOW = ", win_w, " x ", win_h, " mm ; active = ", ACTIVE_W, " x ", ACTIVE_H,
          " ; cover overlap min = ", cover_min, " mm"));
 echo(str("GPS pocket-to-module clearance = ", gps_pocket_clr, " mm"));
+echo(str("WROOM antenna tip-to-pocket clearance = ",
+         (WROOM_POCKET_DEP + (0 - int_min[0])) - WROOM_OVERHANG,
+         " mm ; bulge skin = ", WROOM_BULGE_SKIN, " mm (must both be > 0)"));
 echo(str("LoRa u.FL under-panel clearance (PCB top -> module underside) = ", ufl_clr, " mm"));
 assert(z_front_out <= 19, "external thickness exceeds 19mm target");
 assert(cavity_h + eps >= stack_h, "internal height < component stack");
@@ -273,7 +286,15 @@ module back_shell() {
         union() {
             // ---- Outer tub: solid block, hollowed to leave floor + 4 walls ----
             difference() {
-                rbox(ext_min, ext_max, 0, z_part, R_OUT);
+                union() {
+                    rbox(ext_min, ext_max, 0, z_part, R_OUT);
+                    // WROOM bulge: local outward thickening so the relief keeps
+                    // a closed skin (pocket back face sits past the outer face)
+                    translate([int_min[0] - WROOM_POCKET_DEP - WROOM_BULGE_SKIN,
+                               WROOM_BULGE_Y0, 0])
+                        cube([WROOM_POCKET_DEP + WROOM_BULGE_SKIN + (int_min[0] - ext_min[0]),
+                              WROOM_BULGE_LEN, z_part]);
+                }
                 // interior cavity (keep the floor below z_floor_top)
                 rbox(int_min, int_max, z_floor_top, z_part + eps, R_IN);
                 // WROOM antenna overhang relief: deepen the left inner wall locally
@@ -370,9 +391,18 @@ module front_cover() {
                 union() {
                     rbox(ext_min, ext_max, z_part, z_front_out, R_OUT);
                     if (DBG_GPS) gps_bump();     // local raised boss over the GPS antenna
+                    // WROOM bulge continues across the seam (same footprint as tub)
+                    translate([int_min[0] - WROOM_POCKET_DEP - WROOM_BULGE_SKIN,
+                               WROOM_BULGE_Y0, z_part])
+                        cube([WROOM_POCKET_DEP + WROOM_BULGE_SKIN + (int_min[0] - ext_min[0]),
+                              WROOM_BULGE_LEN, z_front_out - z_part]);
                 }
                 // hollow: remove the interior below the ceiling (leaves side walls)
                 rbox(int_min, int_max, z_part - eps, z_ceil, R_IN);
+                // WROOM antenna tab relief: the tab rides on the PCB top plane, so
+                // its overhang lives in THIS shell's wall zone, not the tub's
+                translate([int_min[0] - WROOM_POCKET_DEP, WROOM_POCKET_YC - WROOM_POCKET_LEN/2, z_part - eps])
+                    cube([WROOM_POCKET_DEP + eps, WROOM_POCKET_LEN, z_ceil - z_part + eps]);
             }
 
             // ---- Alignment lip that plugs down into the tub ----
