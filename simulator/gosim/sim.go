@@ -261,6 +261,20 @@ func (s *Sim) handleCommand(cmd Command) {
 	switch cmd.Type {
 	case "load", "start":
 		s.cmdLoad(cmd)
+		// Firmware/external nodes are real-time processes: they boot and
+		// transmit on the wall clock the moment they attach, and "pause" has
+		// no meaning for them. Delivery only runs while StateRunning, so a
+		// firmware scenario left in StateLoaded silently drops every real-time
+		// transmission until a human presses Play, with no UI cue that Play is
+		// required (this read as "devices show but messages never get sent").
+		// Auto-start on the interactive load path so a loaded firmware
+		// scenario just works. This is deliberately NOT inside cmdLoad, which
+		// RunHeadless also calls and which contractually must leave the sim in
+		// StateLoaded; the headless path does its own state management. Pure
+		// virtual-time scenarios leave s.realtime false and still start paused.
+		if s.realtime {
+			s.cmdPlay()
+		}
 	case "play":
 		s.cmdPlay()
 	case "pause":

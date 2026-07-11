@@ -31,6 +31,20 @@ export async function loadScenario(page: Page, name: string): Promise<void> {
   }
 }
 
+// loadScenarioNoPlay loads a scenario exactly like a first-time user: open the
+// app, pick a scenario, click Load, and then do NOTHING. It never touches the
+// Play/Pause button. A firmware (real-time) scenario auto-starts on load
+// server-side, so delivery must happen with no manual Play at all. This is the
+// faithful "does it just work when I load it" flow, kept separate from
+// loadScenario (which clicks Play, mirroring the manual step a human takes for
+// virtual-time harness scenarios).
+export async function loadScenarioNoPlay(page: Page, name: string): Promise<void> {
+  const select = page.getByTestId('scenario-select');
+  await select.locator(`option[value="${name}"]`).waitFor({ state: 'attached', timeout: 10_000 });
+  await select.selectOption(name);
+  await page.getByTestId('scenario-load-btn').click();
+}
+
 export type FaceButtonId = 'up' | 'down' | 'select' | 'reset';
 
 // clickButton presses and releases a face button on the given node's card
