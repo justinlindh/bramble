@@ -63,7 +63,27 @@ const initialState: SimState = {
   selectedNodeId: null,
   linkQuality: new Map(),
   devices: new Map(),
+  firmwareOrder: [],
 };
+
+// resolveDeviceId maps a console/log node tag onto the device key it belongs to.
+// Framebuffer/indicator streams are tagged with the firmware hello id, but the
+// supervisor's stdout console is tagged with the process label "<label>-<i>".
+// Since firmware instances attach in declaration order, the i-th firmware hello
+// id in firmwareOrder is process "<label>-i", so a trailing "-<i>" routes there.
+export function resolveDeviceId(
+  node: string,
+  devices: Map<string, DeviceState>,
+  firmwareOrder: string[],
+): string {
+  if (devices.has(node)) return node;
+  const m = node.match(/-(\d+)$/);
+  if (m) {
+    const idx = Number(m[1]);
+    if (idx >= 0 && idx < firmwareOrder.length) return firmwareOrder[idx];
+  }
+  return node;
+}
 
 function simReducer(state: SimState, action: SimAction): SimState {
   switch (action.type) {
@@ -88,7 +108,32 @@ function simReducer(state: SimState, action: SimAction): SimState {
     case 'ADD_NODE': {
       const nodes = new Map(state.nodes);
       nodes.set(action.node.id, action.node);
-      return { ...state, nodes, currentTime: Math.max(state.currentTime, action.node.lastSeen) };
+      const base = { ...state, nodes, currentTime: Math.max(state.currentTime, action.node.lastSeen) };
+      if (action.node.kind !== 'firmware') return base;
+
+      // Firmware node: record its attach order and make sure a device card
+      // exists (so the pager shows before its first frame). Then absorb any
+      // phantom console-only device whose process label now maps to this id.
+      const firmwareOrder = state.firmwareOrder.includes(action.node.id)
+        ? state.firmwareOrder
+        : [...state.firmwareOrder, action.node.id];
+      const myIndex = firmwareOrder.indexOf(action.node.id);
+      const devices = new Map(state.devices);
+      const dev = { ...getOrCreateDevice(devices, action.node.id, action.node.addr) };
+      dev.addr = action.node.addr ?? dev.addr;
+      devices.set(action.node.id, dev);
+      // Absorb a phantom console-only device (process label "<label>-<myIndex>")
+      // that buffered console lines before this node's join was known.
+      for (const [key, phantom] of devices) {
+        if (key === action.node.id) continue;
+        const m = key.match(/-(\d+)$/);
+        if (m && Number(m[1]) === myIndex && phantom.fbSeq === 0 && phantom.console.length > 0) {
+          dev.console = [...phantom.console, ...dev.console].slice(-MAX_CONSOLE);
+          devices.set(action.node.id, dev);
+          devices.delete(key);
+        }
+      }
+      return { ...base, devices, firmwareOrder };
     }
 
     case 'UPDATE_NODE': {
@@ -328,9 +373,10 @@ function simReducer(state: SimState, action: SimAction): SimState {
 
     case 'DEVICE_CONSOLE': {
       const devices = new Map(state.devices);
-      const d = { ...getOrCreateDevice(devices, action.node) };
+      const target = resolveDeviceId(action.node, devices, state.firmwareOrder);
+      const d = { ...getOrCreateDevice(devices, target) };
       d.console = [...d.console, action.line].slice(-MAX_CONSOLE);
-      devices.set(action.node, d);
+      devices.set(target, d);
       return { ...state, devices };
     }
 
