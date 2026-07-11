@@ -28,6 +28,12 @@ static uint8_t s_ram[SSD1680_RAM_SIZE];
 static bool s_dirty;          /* any real pixel change since last refresh */
 static uint32_t s_refreshes;  /* emitted refreshes; 0 = first still pending */
 
+/* Snapshot of the fb at the last FULL refresh: the ghost baseline. Ghosting
+ * accumulates from every partial since the last full clear, so the
+ * change-fraction heuristic measures cumulative divergence from this
+ * image, not from the previous flush. */
+static uint8_t s_shown[SSD1680_FB_SIZE];
+
 /* Op scratch: longest stream is the full refresh (15 ops). */
 static ssd1680_op_t s_ops[16];
 
@@ -85,6 +91,7 @@ void ssd1680_engine_init(void) {
     memset(s_fb, 0, sizeof(s_fb));
     s_dirty = false;
     s_refreshes = 0; /* forces the first flush to emit a FULL refresh */
+    memset(s_shown, 0, sizeof(s_shown));
 }
 
 void ssd1680_engine_pixel(int x, int y, bool on) {
@@ -161,6 +168,21 @@ ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t **ops, size_t *n_ops,
 
     bool full = (s_refreshes % SSD1680_FULL_EVERY_N_FLUSHES) == 0;
 
+    /* Change-fraction promotion: when a large share of the framebuffer
+     * diverges from the last FULL image (a message scroll or screen/menu
+     * change in one flush, or many partials drifting far cumulatively), a
+     * partial would carry heavy ghosting across the whole area, so promote
+     * to a full refresh now. Small in-place updates stay partial. */
+    if (!full) {
+        size_t changed = 0;
+        for (size_t b = 0; b < SSD1680_FB_SIZE; b++) {
+            if (s_fb[b] != s_shown[b])
+                changed++;
+        }
+        if (changed * 100 >= (size_t)SSD1680_FULL_CHANGE_PCT * SSD1680_FB_SIZE)
+            full = true;
+    }
+
     build_ram_stream();
 
     /* GDEY0213B74 p.31 typical operating sequence. The io layer HW-resets
@@ -197,5 +219,7 @@ ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t **ops, size_t *n_ops,
 
     s_refreshes++;
     s_dirty = false;
+    if (full)
+        memcpy(s_shown, s_fb, SSD1680_FB_SIZE); /* new ghost baseline */
     return full ? SSD1680_REFRESH_FULL : SSD1680_REFRESH_PARTIAL;
 }
