@@ -45,7 +45,10 @@ func runFakeNode() {
 	os.Stdout.Sync()
 
 	if broker != "" {
-		if c, err := net.Dial("unix", broker); err == nil {
+		// EMU_BROKER carries a "unix:" scheme (the real node's contract); the
+		// fake node parses it the same way before dialing.
+		dialAddr := strings.TrimPrefix(broker, "unix:")
+		if c, err := net.Dial("unix", dialAddr); err == nil {
 			node := filepath.Base(nodeDir)
 			b, _ := json.Marshal(map[string]any{"t": "hello", "node": node, "version": EmuLinkVersion})
 			c.Write(append(b, '\n'))

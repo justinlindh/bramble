@@ -31,6 +31,8 @@ int emu_link_connect(const char *node_id, const char *caps_csv) {
     return -1;
 }
 
+void emu_link_set_fw_version(const char *ver) { (void)ver; }
+
 int emu_link_on(const char *type, emu_link_handler_t h, void *ctx) {
     (void)type;
     (void)h;
@@ -95,6 +97,11 @@ static pthread_t s_reader_thread;
 static bool s_reader_running = false;
 
 static emu_link_handler_slot_t s_handlers[EMU_LINK_MAX_HANDLERS];
+
+/* Firmware version reported in hello's "fw" field. Guarded by s_send_mu (read
+ * while building hello under emu_link_attach, written by emu_link_set_fw_version
+ * before connect). Defaults to the compile-time placeholder. */
+static char s_fw_version[64] = EMU_LINK_FW_VERSION;
 
 /* --- small helpers -------------------------------------------------- */
 
@@ -324,7 +331,11 @@ static int emu_link_attach(int fd, const char *node_id, const char *caps_csv) {
     cJSON_AddStringToObject(hello, "t", "hello");
     cJSON_AddStringToObject(hello, "node", node_id ? node_id : "");
     cJSON_AddNumberToObject(hello, "version", EMU_LINK_PROTOCOL_VERSION);
-    cJSON_AddStringToObject(hello, "fw", EMU_LINK_FW_VERSION);
+    char fw[sizeof(s_fw_version)];
+    pthread_mutex_lock(&s_send_mu);
+    memcpy(fw, s_fw_version, sizeof(fw));
+    pthread_mutex_unlock(&s_send_mu);
+    cJSON_AddStringToObject(hello, "fw", fw);
     cJSON_AddStringToObject(hello, "caps", caps_csv ? caps_csv : "");
     if (send_locked(hello) != 0) {
         teardown();
@@ -361,6 +372,15 @@ int emu_link_connect(const char *node_id, const char *caps_csv) {
         return -1;
 
     return emu_link_attach(fd, node_id, caps_csv);
+}
+
+void emu_link_set_fw_version(const char *ver) {
+    if (!ver)
+        return;
+    pthread_mutex_lock(&s_send_mu);
+    strncpy(s_fw_version, ver, sizeof(s_fw_version) - 1);
+    s_fw_version[sizeof(s_fw_version) - 1] = '\0';
+    pthread_mutex_unlock(&s_send_mu);
 }
 
 int emu_link_on(const char *type, emu_link_handler_t h, void *ctx) {

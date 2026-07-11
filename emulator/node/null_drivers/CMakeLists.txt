@@ -8,6 +8,6 @@
 # battery_virt/gps_virt own their components. esp_timer_posix.c fills the
 # IDF-linux esp_timer gap.
 idf_component_register(
-    SRCS "../periph_null.c" "../esp_timer_posix.c"
-    REQUIRES wifi ota esp_timer freertos esp_system
+    SRCS "../periph_null.c" "../esp_timer_posix.c" "../emu_flash_persist.c"
+    REQUIRES wifi ota esp_timer freertos esp_system esp_partition
 )

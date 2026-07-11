@@ -6,7 +6,7 @@
   "firmware_nodes": [
     {
       "type": "firmware",
-      "binary": "emulator/node/build/bramble-node",
+      "binary": "emulator/node/build/bramble-node.elf",
       "count": 3,
       "positions": [[0, 0], [100, 0], [50, 80]],
       "label": "pager"
