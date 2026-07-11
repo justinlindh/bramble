@@ -46,6 +46,15 @@
 #include "gps.h"
 #include "cJSON.h"
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+/* Emulator (IDF linux target) only: the emu-link broker client and the
+ * per-node NVS-flash persistence hook. Both are host-only; the device build
+ * compiles neither this include nor the calls gated on it below. */
+#include "emu_link.h"
+/* Provided by the emulator node's null_drivers component (emu_flash_persist.c). */
+void emu_node_flash_persist_init(void);
+#endif
+
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
 #include "audio.h"
@@ -854,6 +863,14 @@ void app_main(void) {
         return;
     }
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator: bind NVS-backed flash to a per-node file ($NODE_DIR/flash.bin)
+     * so identity survives a process restart (the supervisor's reset button).
+     * Must run before NVS init. A no-op when NODE_DIR is unset (standalone
+     * runs keep the ephemeral-temp-flash behavior). */
+    emu_node_flash_persist_init();
+#endif
+
     /* NVS init */
     ESP_LOGI(TAG, "=== BOOT STAGE: nvs init ===");
     esp_err_t ret;
@@ -956,6 +973,25 @@ void app_main(void) {
     my_addr = g_identity.address;
     ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")", my_addr,
              g_identity.pubkey_hash);
+
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator: connect to the gosim broker and send the hello now that the
+     * real node address is known. Ordered before display_init (so the
+     * boot-screen fb reaches the broker) and mesh_task_start (so the radio's
+     * virtual driver has its link up). EMU_BROKER unset stays a clean
+     * no-broker boot (useful standalone). The hello node id matches the
+     * "Node address" log format above. */
+    {
+        char emu_node_id[9];
+        snprintf(emu_node_id, sizeof(emu_node_id), "%08" PRIX32, my_addr);
+        emu_link_set_fw_version(esp_app_get_description()->version);
+        if (emu_link_connect(emu_node_id, "radio,display,buttons,gps,battery") == 0) {
+            ESP_LOGI(TAG, "emu-link: attached to broker as %s", emu_node_id);
+        } else {
+            ESP_LOGI(TAG, "emu-link: no broker (EMU_BROKER unset or unreachable)");
+        }
+    }
+#endif
 
     /* Trust-anchor campaign: load the provisioned fleet anchor pubkey (P0) and
      * this node's own endorsement cert (P1) into module memory. Both are

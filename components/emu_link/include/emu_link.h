@@ -33,6 +33,12 @@ typedef void (*emu_link_handler_t)(const cJSON *msg, void *ctx);
  * on a bad or missing EMU_BROKER. */
 int emu_link_connect(const char *node_id, const char *caps_csv);
 
+/* Sets the firmware version string reported in the hello message's "fw"
+ * field. Must be called before emu_link_connect (the value is captured when
+ * hello is sent). ver is copied; a NULL ver is ignored. Without a call the
+ * default compile-time EMU_LINK_FW_VERSION ("unknown") is used. */
+void emu_link_set_fw_version(const char *ver);
+
 /* Registers h as the handler for inbound messages whose "t" field equals
  * type. One handler per type: a second registration for the same type
  * replaces the first. Returns 0 on success, negative if type or h is NULL,

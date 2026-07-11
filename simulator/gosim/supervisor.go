@@ -177,7 +177,10 @@ func (s *Supervisor) Stop() {
 // plus the always-set NODE_DIR and EMU_BROKER, plus any group-specific extras.
 func buildNodeEnv(brokerAddr, nodeDir string, extra map[string]string) []string {
 	env := append([]string(nil), os.Environ()...)
-	env = append(env, "NODE_DIR="+nodeDir, "EMU_BROKER="+brokerAddr)
+	// EMU_BROKER carries a scheme ("unix:/path"), the contract the node's
+	// emu_link client parses (emu_link.h, DESIGN.md section 8). The broker
+	// always listens on a unix socket, so the scheme is always unix.
+	env = append(env, "NODE_DIR="+nodeDir, "EMU_BROKER=unix:"+brokerAddr)
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}
