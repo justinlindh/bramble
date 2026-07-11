@@ -5726,6 +5726,20 @@ static void mesh_load_network_key(void) {
     }
 }
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+/* Emulator only: the address of this node's first known neighbor, or 0 if it has
+ * none yet. A scenario's scripted sender (emu_autosend.c) uses it to DM a peer
+ * whose self-minted address it cannot know ahead of time; it learns the peer
+ * from beacons exactly as the real UI would before composing a direct message. */
+uint32_t emu_mesh_first_neighbor(void) {
+    mesh_shared_state_t st;
+    mesh_get_state(&st);
+    if (st.neighbors.count > 0)
+        return st.neighbors.entries[0].addr;
+    return 0;
+}
+#endif
+
 void mesh_rederive_beacon_key(void) {
     /* SEC-H2: derive the beacon HMAC subkey from the current network key with
      * domain-separation label "bramble-beacon-v2". Called at init AND after a
