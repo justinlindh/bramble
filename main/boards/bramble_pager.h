@@ -19,7 +19,11 @@
  *     opposite of UC8151). Arrives with BOARD_CAP_DISPLAY_EPAPER + a display
  *     pin struct variant in a later PR.
  *   Alert outputs: buzzer=15, vibra=16, LED=48.
- *   HMI buttons: UP=21, DOWN=47 (BOOT/SELECT is button_gpio=0 below).
+ *   HMI buttons: DOWN=21 (RTC-capable, deep-sleep wake), UP=47 (BOOT/SELECT is
+ *     button_gpio=0 below). Swapped in the rev B pre-fab pass: GPIO47 has no RTC
+ *     alias, so the primary scroll/wake button (DOWN, middle front plunger SW403;
+ *     BOOT is leftmost, UP rightmost) sits on
+ *     GPIO21 instead. UP cannot wake from deep sleep; accepted trade.
  */
 static const bramble_board_config_t board_bramble_pager = {
     .name = "Bramble Pager v1",

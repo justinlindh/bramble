@@ -5,13 +5,13 @@
       "Application": "Pcbnew",
       "Version": "10.0.4"
     },
-    "CreationDate": "2026-07-11T02:41:07-07:00"
+    "CreationDate": "2026-07-11T05:23:01-07:00"
   },
   "GeneralSpecs": {
     "ProjectId": {
       "Name": "pager",
       "GUID": "70616765-722e-46b6-9963-61645f706362",
-      "Revision": "rev?"
+      "Revision": "B"
     },
     "Size": {
       "X": 96.1,
