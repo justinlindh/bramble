@@ -2,9 +2,11 @@ import { useEffect, useReducer, useRef, useCallback } from 'react';
 import type {
   SimState, SimAction, SimNode, Metrics, RawSimEvent, PacketAnimation,
   NodeStats, DeliveryPathAnimation, DeliveryRecord, BrokenLink, LinkQuality,
+  DeviceState,
 } from '../types';
 
 const MAX_EVENTS = 100;
+const MAX_CONSOLE = 200;
 const MAX_DELIVERY_RECORDS = 200;
 const PACKET_ANIM_DURATION_MS = 500;
 const DELIVERY_PATH_DURATION_MS = 3000;
@@ -21,6 +23,20 @@ function getOrCreateNodeStats(map: Map<string, NodeStats>, nodeId: string): Node
     map.set(nodeId, s);
   }
   return s;
+}
+
+function getOrCreateDevice(map: Map<string, DeviceState>, node: string, addr?: string): DeviceState {
+  let d = map.get(node);
+  if (!d) {
+    d = {
+      node, addr,
+      fb: null, fbKind: 'full', fbBusyMs: 0, fbSeq: 0,
+      led: false, buzzerHz: 0, vibra: false, vibraSeq: 0,
+      console: [],
+    };
+    map.set(node, d);
+  }
+  return d;
 }
 
 const RSSI_EMA_ALPHA = 0.3; // exponential moving average smoothing factor
@@ -46,6 +62,7 @@ const initialState: SimState = {
   brokenLinks: new Map(),
   selectedNodeId: null,
   linkQuality: new Map(),
+  devices: new Map(),
 };
 
 function simReducer(state: SimState, action: SimAction): SimState {
@@ -284,6 +301,39 @@ function simReducer(state: SimState, action: SimAction): SimState {
       return { ...state, linkQuality };
     }
 
+    case 'DEVICE_FB': {
+      const devices = new Map(state.devices);
+      const d = { ...getOrCreateDevice(devices, action.node, action.addr) };
+      d.fb = action.fb;
+      d.fbKind = action.kind;
+      d.fbBusyMs = action.busyMs;
+      d.fbSeq = d.fbSeq + 1;
+      if (action.addr) d.addr = action.addr;
+      devices.set(action.node, d);
+      return { ...state, devices };
+    }
+
+    case 'DEVICE_IND': {
+      const devices = new Map(state.devices);
+      const d = { ...getOrCreateDevice(devices, action.node, action.addr) };
+      // A rising edge on vibra bumps the shake sequence.
+      if (action.vibra && !d.vibra) d.vibraSeq = d.vibraSeq + 1;
+      d.led = action.led;
+      d.buzzerHz = action.buzzerHz;
+      d.vibra = action.vibra;
+      if (action.addr) d.addr = action.addr;
+      devices.set(action.node, d);
+      return { ...state, devices };
+    }
+
+    case 'DEVICE_CONSOLE': {
+      const devices = new Map(state.devices);
+      const d = { ...getOrCreateDevice(devices, action.node) };
+      d.console = [...d.console, action.line].slice(-MAX_CONSOLE);
+      devices.set(action.node, d);
+      return { ...state, devices };
+    }
+
     default:
       return state;
   }
@@ -303,10 +353,16 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
 
   const { type, timestamp_us: rawTs, ...rest } = raw;
   const timestamp_us = typeof rawTs === 'number' ? rawTs : 0;
-  actions.push({
-    type: 'ADD_EVENT',
-    event: { type, timestamp_us, details: rest },
-  });
+
+  // Per-device streams (framebuffer / indicator / console) are high-frequency
+  // and drive the device view, not the shared event log.
+  const deviceStreamTypes = new Set(['device_fb', 'device_ind', 'device_gpsgate', 'console']);
+  if (!deviceStreamTypes.has(type)) {
+    actions.push({
+      type: 'ADD_EVENT',
+      event: { type, timestamp_us, details: rest },
+    });
+  }
 
   const setupTypes = new Set(['sim_reset', 'sim_ready', 'node_joined', 'config']);
   if (timestamp_us > 0 && !setupTypes.has(type)) {
@@ -330,6 +386,7 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
         y: (raw.y as number) ?? 0,
         active: true,
         lastSeen: timestamp_us,
+        kind: raw.kind as string | undefined,
       };
       actions.push({ type: 'ADD_NODE', node });
       break;
@@ -494,6 +551,43 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
       }
       break;
     }
+    case 'device_fb': {
+      const node = raw.node as string | undefined;
+      const fb = raw.fb as string | undefined;
+      if (node && fb) {
+        actions.push({
+          type: 'DEVICE_FB',
+          node,
+          addr: raw.addr as string | undefined,
+          kind: (raw.kind as 'partial' | 'full') ?? 'full',
+          fb,
+          busyMs: (raw.busy_ms as number) ?? 0,
+        });
+      }
+      break;
+    }
+    case 'device_ind': {
+      const node = raw.node as string | undefined;
+      if (node) {
+        actions.push({
+          type: 'DEVICE_IND',
+          node,
+          addr: raw.addr as string | undefined,
+          led: Boolean(raw.led),
+          buzzerHz: (raw.buzzer_hz as number) ?? 0,
+          vibra: Boolean(raw.vibra),
+        });
+      }
+      break;
+    }
+    case 'console': {
+      const node = raw.node as string | undefined;
+      const line = raw.line as string | undefined;
+      if (node && typeof line === 'string') {
+        actions.push({ type: 'DEVICE_CONSOLE', node, line });
+      }
+      break;
+    }
   }
 
   return actions;
@@ -507,6 +601,16 @@ export function useSimulation() {
 
   const selectNode = useCallback((nodeId: string | null) => {
     dispatch({ type: 'SELECT_NODE', nodeId });
+  }, []);
+
+  // Send a face-button edge to a firmware node over the broker websocket. The
+  // broker's btn envelope is { type: 'btn', node, id, edge } (server wiring:
+  // gosim extnode.go sendButton / Task 9 gateway). id: up|down|select|reset.
+  const sendButton = useCallback((node: string, id: string, edge: 'down' | 'up') => {
+    const sock = wsRef.current;
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      sock.send(JSON.stringify({ type: 'btn', node, id, edge }));
+    }
   }, []);
 
   // Periodically expire old animations
@@ -568,5 +672,5 @@ export function useSimulation() {
     };
   }, []);
 
-  return { state, ws: wsRef, selectNode };
+  return { state, ws: wsRef, selectNode, sendButton };
 }
