@@ -2,7 +2,7 @@
 # Unified Bramble build/flash helper (serial flashing only; no OTA)
 #
 # Preferred usage:
-#   bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
+#   bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus|bramble-pager] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 set -euo pipefail
 
@@ -22,13 +22,13 @@ is_port() { [[ "$1" == /dev/* ]]; }
 print_usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus] [flash|monitor|build] [PORT] [extra idf.py args...]
+  bash scripts/flash.sh [local] [heltec-v3|heltec-v4|tdeck-plus|bramble-pager] [flash|monitor|build] [PORT] [extra idf.py args...]
 
 Notes:
   - MODE defaults to: local
   - BOARD defaults to: heltec-v3
   - ACTION defaults to: flash
-  - Default PORT: /dev/ttyACM0 for tdeck-plus, /dev/ttyUSB0 otherwise
+  - Default PORT: /dev/ttyACM0 for tdeck-plus and bramble-pager (native USB), /dev/ttyUSB0 otherwise
   - Extra args are passed to `idf.py flash` (example: --erase-nvs)
 EOF
 }
@@ -68,7 +68,7 @@ if [[ $# -gt 0 ]]; then
 fi
 
 if [[ -z "$PORT" ]]; then
-  if [[ "$BOARD" == "tdeck-plus" ]]; then
+  if [[ "$BOARD" == "tdeck-plus" || "$BOARD" == "bramble-pager" ]]; then
     PORT="/dev/ttyACM0"
   else
     PORT="/dev/ttyUSB0"

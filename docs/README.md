@@ -20,6 +20,7 @@ This index separates **operator/developer reference docs** from **historical pla
 
 - Board pin maps live in code: `main/boards/*.h` (source of truth)
 - [BUILDING.md](BUILDING.md): board-aware build/flash/monitor
+- [../hardware/pager/v1/](../hardware/pager/v1/): Bramble Pager v1 custom PCB design tree (spec, schematic, PCB, BOM, enclosure, errata)
 - Historical bring-up notes (pinmap research, GNSS bring-up, display debugging) are in [archive/](archive/)
 
 ## Operations / runbooks

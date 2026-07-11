@@ -8,6 +8,14 @@ Heltec-V3 pin assignment legal on an ESP32-S3-WROOM-1, adds an SSD1680 e-paper d
 and carries an ATGM336H GNSS receiver. Board is ~96x50mm landscape, 2-layer 1.6mm,
 built for JLCPCB economic PCBA. This directory is the source of truth for the design.
 
+**Status:** design complete and merged to `main` (schematic, PCB, BOM, and enclosure done;
+firmware board profile `main/boards/bramble_pager.h` landed). Boards are **not yet ordered**:
+the pre-fab gates in [`ERRATA.md`](ERRATA.md) (FPC 1:1 fold mockup, bench-verified 0x9D
+DIO2 RF-switch flag, final DRC 0/0/0) must close first. See [`REVIEW-2026-07-10.md`](REVIEW-2026-07-10.md)
+for the independent pre-fab review and [`SOURCING.md`](SOURCING.md) for the hand-purchased
+(non-JLCPCB) parts. Production outputs (gerbers, BOM, positions) are under
+[`kicad/production/`](kicad/production/).
+
 The full requirement set, pin map, block-by-block rationale, and firmware deltas live in
 `DESIGN.md`. This README covers the workflow: where truth lives, how to validate, what
 must never regress, and how to bring a first article up.
@@ -38,7 +46,10 @@ hardware/pager/v1/
 ├── COMPONENTS.md        # per-component catalogue (derived)
 ├── NET_TOPOLOGY.md      # net-by-net wiring prose (derived)
 ├── ERRATA.md            # errata + pre-fab open items
-├── case/                # OpenSCAD enclosure
+├── REVIEW-2026-07-10.md # independent pre-fab hardware review
+├── SOURCING.md          # hand-purchased (non-JLCPCB) parts + live sources
+├── mockup-fpc-1to1.pdf  # 1:1 FPC fold mockup (print gate before ordering)
+├── case/                # OpenSCAD enclosure + exported STLs
 └── kicad/
     ├── pager.kicad_pro  # KiCad project
     ├── pager.kicad_sch  # root sheet (hierarchical references only)
@@ -48,6 +59,7 @@ hardware/pager/v1/
     ├── mcu.kicad_sch    # ESP32-S3, buttons, buzzer, vibra, LED, I2C header
     ├── pager.kicad_pcb  # PCB layout
     ├── pager.kicad_dru  # hard DRC backstops (RF, power-rail widths)
+    ├── production/      # fabrication outputs: gerbers, bom.csv, positions
     └── easyeda/         # imported footprints/symbols (dimension-verified)
 ```
 
@@ -91,8 +103,9 @@ Copied from `DESIGN.md`. Regressing any of these is a production defect.
 - RESE resistor is 2.2 ohm 1% 0805 with kelvin sense to panel pin 3.
 - EPD connector netlist is mirrored (connector N = panel 25-N); paper-mockup gate
   before gerbers.
-- Parts under the panel deck rect stay <=3.2mm tall; the deck carries the glass 4mm
-  above the PCB. The enclosure module-pocket interference check (SCAD asserts + rendered
+- Parts under the panel deck rect stay <=3.2mm tall; the deck carries the glass 6mm
+  above the PCB (raised from 4mm so the mated LoRa u.FL under the panel clears the module
+  underside). The enclosure module-pocket interference check (SCAD asserts + rendered
   previews) is the physical gate, superseding the old 1mm glass keepout.
 - RF trace: CPW, <5mm, stitched ground, no crossings; u.FL at case-wall edge.
 - WROOM antenna keepout all layers.
@@ -122,13 +135,13 @@ Before gerbers:
 
 At first-article bring-up:
 
-3. **DMM battery polarity check on every cell before first plug.** BATT1 pin 1 = BAT+
+1. **DMM battery polarity check on every cell before first plug.** BATT1 pin 1 = BAT+
    (Adafruit convention). Reversed Chinese cells kill the charger. This is a per-unit
    assembly invariant, not a one-time check.
-4. **TCXO voltage verify.** The module's TCXO is 2.8V nominal; firmware sets the nearest
+2. **TCXO voltage verify.** The module's TCXO is 2.8V nominal; firmware sets the nearest
    SX1262 code, 2.7V. Confirm the radio brings up and TXs cleanly at 2.7V; if not, try
    3.0V. Bench against a known-good Heltec V3 for a reference RSSI.
-5. **NMEA talker-ID check.** The ATGM336H is CASIC/AT6558 (GPS+BDS) and emits `$GN`/`$GB`
+3. **NMEA talker-ID check.** The ATGM336H is CASIC/AT6558 (GPS+BDS) and emits `$GN`/`$GB`
    talker IDs, not just `$GP`. Confirm the firmware NMEA parser accepts them, and that
    `$GPTXT` antenna OPEN/SHORT reporting reads sane against the active GNSS antenna.
 
