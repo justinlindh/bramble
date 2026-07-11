@@ -40,6 +40,11 @@ void alerts_message_received(uint32_t now_ms);
 /* The user acknowledged on the device (any button press): stop the blink. */
 void alerts_confirm(void);
 
+/* True while a message alert is awaiting acknowledgement (LED blinking).
+ * Callers use this to make the FIRST button press after an alert a pure
+ * acknowledge (consumed, no navigation), like a physical pager. */
+bool alerts_unconfirmed(void);
+
 /* Advance the pattern + blink; call from the main loop (50 ms cadence). */
 void alerts_tick(uint32_t now_ms);
 

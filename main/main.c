@@ -1416,11 +1416,16 @@ void app_main(void) {
 #endif
         if (btn != BTN_NONE) {
             ESP_LOGI(TAG, "Button event: %d", btn);
-            ui_handle_button(&ui, btn, now_ms);
-            /* Any button press acknowledges a pending message alert and stops
-             * the notification LED blinking (classic pager confirm). */
-            if (board_has_cap(BOARD_CAP_ALERTS))
+            /* Classic pager acknowledge: while a message alert is pending
+             * (LED blinking), the FIRST button press only acknowledges it,
+             * consumed, so the user does not accidentally navigate away.
+             * The next press acts normally. */
+            if (board_has_cap(BOARD_CAP_ALERTS) && alerts_unconfirmed()) {
                 alerts_confirm();
+                ESP_LOGI(TAG, "Alert acknowledged (press consumed)");
+            } else {
+                ui_handle_button(&ui, btn, now_ms);
+            }
         }
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
