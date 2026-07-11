@@ -33,6 +33,7 @@ typedef int gpio_num_t;
 #define BOARD_CAP_PERIPHERAL_POWER (1 << 9) /* Needs power pin enabled first */
 #define BOARD_CAP_TOUCH (1 << 10)           /* Capacitive touchscreen */
 #define BOARD_CAP_IO_EXPANDER (1 << 11)     /* PCA9535 or similar */
+#define BOARD_CAP_VIRTUAL (1 << 12)         /* Emulated node, no real hardware backs it */
 
 /* Radio oscillator type */
 typedef enum {

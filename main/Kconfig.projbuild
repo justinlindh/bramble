@@ -16,6 +16,9 @@ menu "Bramble Configuration"
         config BRAMBLE_BOARD_PAGER
             bool "Bramble Pager v1 (ESP32-S3 + NiceRF LoRa1262 + SSD1680 e-paper)"
 
+        config BRAMBLE_BOARD_VIRTUAL_PAGER
+            bool "Bramble Virtual Pager (emulator, IDF linux target, mirrors Pager v1)"
+
         config BRAMBLE_BOARD_TTGO_LORA32
             bool "TTGO LoRa32 (SX1276)"
 
