@@ -9,7 +9,7 @@ describe('epaperModel EPD_MODEL table', () => {
   it('exposes the datasheet-seeded tunables', () => {
     expect(EPD_MODEL.ghostPerFrame).toBeCloseTo(0.06);
     expect(EPD_MODEL.ghostMax).toBeCloseTo(0.3);
-    expect(EPD_MODEL.flashColors).toEqual(['black', 'white']);
+    expect(EPD_MODEL.flashColors).toEqual(['black', 'white', 'black', 'white']);
   });
 });
 
@@ -51,11 +51,13 @@ describe('epaperModel partial refresh', () => {
 });
 
 describe('epaperModel full refresh', () => {
-  it('plays the black/white inversion flash then content over busy_ms', () => {
+  it('plays a rapid black/white inversion flicker then content', () => {
     const { frames, ghost } = applyFrame(initialEpaperState(), 'x', 'full', 2600);
-    expect(frames).toHaveLength(3);
-    expect(frames.map((f) => f.paint)).toEqual(['black', 'white', 'content']);
-    expect(frames.map((f) => f.at)).toEqual([0, 1300, 2600]);
+    // Four inversions at the fixed flash step (130ms), content latched right
+    // after -- NOT spread across the 2600ms busy window.
+    expect(frames).toHaveLength(5);
+    expect(frames.map((f) => f.paint)).toEqual(['black', 'white', 'black', 'white', 'content']);
+    expect(frames.map((f) => f.at)).toEqual([0, 130, 260, 390, 520]);
     expect(ghost).toBe(0);
   });
 
@@ -73,8 +75,13 @@ describe('epaperModel full refresh', () => {
     expect(content.ghost).toBe(0);
   });
 
-  it('spaces the flash frames evenly across busy_ms', () => {
-    const { frames } = applyFrame(initialEpaperState(), 'x', 'full', 1200);
-    expect(frames.map((f) => f.at)).toEqual([0, 600, 1200]);
+  it('plays the flash at a fixed step independent of busy_ms', () => {
+    // The visible flicker must not stretch with the busy window: a long busy_ms
+    // was the cause of the screen holding solid black for over a second.
+    const short = applyFrame(initialEpaperState(), 'x', 'full', 500);
+    const long = applyFrame(initialEpaperState(), 'x', 'full', 4000);
+    const expected = [0, 130, 260, 390, 520];
+    expect(short.frames.map((f) => f.at)).toEqual(expected);
+    expect(long.frames.map((f) => f.at)).toEqual(expected);
   });
 });
