@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - No em dashes anywhere in committed file content (repo hook rejects them). Use colons or commas.
-- ESP-IDF is 5.4.0; host/device split is `#ifdef ESP_PLATFORM` (repo convention), never new custom macros.
+- ESP-IDF is 5.4.0; host/device split is `#ifdef ESP_PLATFORM` (repo convention), never new custom macros. Amendment (Task 1 finding, 2026-07-11): the IDF linux target defines ESP_PLATFORM too, so driver-touching device halves gate with `#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)` (IDF's own macro); pure IDF-API device code (NVS, crypto, FreeRTOS) compiles unchanged on linux and runs real device paths. The plain-gcc test harness defines neither symbol and is unaffected.
 - The 103 existing host tests (`test/run_all_tests.sh`) and the existing gosim scenario suite must stay green after every task.
 - Firmware interfaces `components/radio/include/radio.h` and `components/display/include/display.h` must not change signatures; virtual backends implement them as-is.
 - The emulated device is the pager (main/boards/bramble_pager.h). Pins of record: radio CS 8/RST 12/BUSY 13/DIO1 14, EPD CS 4/DC 5/RES 6/BUSY 7 (active HIGH), buttons SELECT 0/UP 21/DOWN 47, buzzer 15, vibra 16, LED 48, GPS TX 35/RX 36/EN 38 (LOW = on), VBAT GPIO1.
