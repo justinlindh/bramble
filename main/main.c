@@ -230,6 +230,30 @@ void conn_mode_set(conn_mode_t mode) {
     }
 }
 
+/* ── GPS enable (NVS-persisted) ─────────────────────────────────────── */
+
+/* Persisted GPS power preference. Default ON so a fresh GPS board behaves as
+ * before; the Settings toggle flips it and gps_set_enabled() applies it live. */
+static bool gps_enabled_get(void) {
+    uint8_t en = 1; /* default: ON */
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, NVS_KEY_GPS_EN, &en);
+        nvs_close(nvs);
+    }
+    return en != 0;
+}
+
+static void gps_enabled_set(bool enabled) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, NVS_KEY_GPS_EN, enabled ? 1 : 0);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "GPS enable saved: %d", enabled ? 1 : 0);
+    }
+}
+
 /* ── Splash screen ──────────────────────────────────────────────────── */
 
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -606,6 +630,19 @@ static void render_screen(ui_state_t* ui) {
                     display_draw_text(2, y, ml);
                     y += LINE_H;
                 }
+            } else if (ui->settings_item_cursor == UI_SETTINGS_ITEM_GPS) {
+                display_draw_text(2, y, "GPS:");
+                y += LINE_H + 4;
+                static const char* gps_names[] = {"Off", "On"};
+                bool cur_gps = gps_enabled_get();
+                for (int i = 0; i < 2; i++) {
+                    char ml[32];
+                    const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char* mark = (i == (cur_gps ? 1 : 0)) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, gps_names[i], mark);
+                    display_draw_text(2, y, ml);
+                    y += LINE_H;
+                }
             } else {
                 /* OLED rotation */
                 display_draw_text(2, y, "OLED Rotation:");
@@ -657,6 +694,13 @@ static void render_screen(ui_state_t* ui) {
                 const char* sel =
                     (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) ? ">" : " ";
                 snprintf(line, sizeof(line), "%sLocation: %s", sel, loc_names[cur_loc]);
+                display_draw_text(2, y, line);
+                y += LINE_H;
+            }
+            /* Row 3: GPS power (only on GPS boards) */
+            if (ui->gps_available) {
+                const char* sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_GPS) ? ">" : " ";
+                snprintf(line, sizeof(line), "%sGPS: %s", sel, gps_enabled_get() ? "On" : "Off");
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -1084,9 +1128,20 @@ void app_main(void) {
 #endif
         if (gps_init(on_gps_fix, &g_location_mgr) == 0) {
             ESP_LOGI(TAG, "GPS initialized (waiting for fix...)");
+            /* Honor the persisted GPS-power preference (default ON). If the
+             * user disabled GPS, cut power now; gps_init registered the fix
+             * callback so a later Settings toggle can bring it back. */
+            if (!gps_enabled_get()) {
+                ESP_LOGI(TAG, "GPS disabled by saved setting; cutting power");
+                gps_set_enabled(false);
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
-            show_boot_status("GPS: ok (no fix yet)");
+                show_boot_status("GPS: off (saved)");
 #endif
+            } else {
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+                show_boot_status("GPS: ok (no fix yet)");
+#endif
+            }
         } else {
             ESP_LOGW(TAG, "GPS init failed or not available");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -1461,6 +1516,15 @@ void app_main(void) {
                     location_share_mode_set(new_loc);
                     static const char* loc_names[] = {"Off", "Coarse", "Exact"};
                     ESP_LOGI(TAG, "Location sharing set to %s", loc_names[new_loc]);
+                }
+                ui.screen_dirty = true;
+            } else if (ui.settings_item_cursor == UI_SETTINGS_ITEM_GPS) {
+                bool new_gps = (ui.settings_cursor == 1);
+                bool old_gps = gps_enabled_get();
+                if (new_gps != old_gps) {
+                    gps_enabled_set(new_gps);
+                    gps_set_enabled(new_gps);
+                    ESP_LOGI(TAG, "GPS %s via settings", new_gps ? "enabled" : "disabled");
                 }
                 ui.screen_dirty = true;
             } else {

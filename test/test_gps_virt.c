@@ -204,6 +204,44 @@ void test_gate_reopen_accepts_nmea(void) {
     TEST_ASSERT_TRUE_MESSAGE(wait_for_fix(2000), "expected a fix once the gate reopened");
 }
 
+/* --- the Settings toggle path: gps_set_enabled(false) cuts the gate and emits
+ *     gpsgate off; gps_set_enabled(true) re-powers it and emits gpsgate on,
+ *     and sentences flow again using the callback from the original init. --- */
+void test_gps_set_enabled_toggles_gate(void) {
+    s_cb_calls = 0;
+    attach_and_drain_hello("pager-gps-6");
+    TEST_ASSERT_EQUAL_INT(0, gps_init(fix_cb, NULL));
+    char gate[256];
+    read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000); /* gpsgate on (init) */
+
+    /* Toggle OFF via the runtime seam. */
+    TEST_ASSERT_EQUAL_INT(0, gps_set_enabled(false));
+    read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000);
+    cJSON *off = cJSON_Parse(gate);
+    TEST_ASSERT_NOT_NULL(off);
+    TEST_ASSERT_EQUAL_STRING("gpsgate", cJSON_GetObjectItem(off, "t")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(off, "on")));
+    cJSON_Delete(off);
+
+    /* Gated off: a sentence is dropped, no fix. */
+    write_nmea(RMC);
+    usleep(200000);
+    TEST_ASSERT_FALSE_MESSAGE(gps_has_fix(), "toggled-off GPS must drop sentences");
+
+    /* Toggle ON again: gpsgate on, and the retained callback resumes fixes. */
+    TEST_ASSERT_EQUAL_INT(0, gps_set_enabled(true));
+    read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000);
+    cJSON *on = cJSON_Parse(gate);
+    TEST_ASSERT_NOT_NULL(on);
+    TEST_ASSERT_EQUAL_STRING("gpsgate", cJSON_GetObjectItem(on, "t")->valuestring);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(on, "on")));
+    cJSON_Delete(on);
+
+    write_nmea(RMC);
+    TEST_ASSERT_TRUE_MESSAGE(wait_for_fix(2000), "expected a fix after re-enabling GPS");
+    TEST_ASSERT_TRUE(s_cb_calls >= 1);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gps_init_emits_gpsgate_on);
@@ -211,5 +249,6 @@ int main(void) {
     RUN_TEST(test_gps_deinit_emits_gpsgate_off);
     RUN_TEST(test_gated_off_drops_nmea);
     RUN_TEST(test_gate_reopen_accepts_nmea);
+    RUN_TEST(test_gps_set_enabled_toggles_gate);
     return UNITY_END();
 }

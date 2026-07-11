@@ -67,11 +67,24 @@ int gps_init(gps_fix_cb_t cb, void *ctx) {
     pthread_mutex_lock(&s_mu);
     s_cb = cb;
     s_cb_ctx = ctx;
+    pthread_mutex_unlock(&s_mu);
+    return gps_set_enabled(true);
+}
+
+int gps_set_enabled(bool enabled) {
+    if (!enabled) {
+        gps_deinit(); /* cuts the gate and emits gpsgate off */
+        return 0;
+    }
+
+    pthread_mutex_lock(&s_mu);
     s_has_fix = false;
     s_gate_on = true; /* power the GNSS on (P-FET low) */
     pthread_mutex_unlock(&s_mu);
 
-    /* Registering the same handler twice is idempotent (emu_link replaces). */
+    /* Registering the same handler twice is idempotent (emu_link replaces).
+     * The callback registered by a prior gps_init() is retained across a
+     * disable, so re-enabling resumes fixes without re-registering. */
     emu_link_on("nmea", nmea_handler, NULL);
     send_gpsgate(true);
     return 0;

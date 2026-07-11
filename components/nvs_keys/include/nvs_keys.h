@@ -34,6 +34,7 @@
 #define NVS_KEY_WS_ORIGINS "ws_origins"
 #define NVS_KEY_CONN_MODE "conn_mode"
 #define NVS_KEY_OLED_ROT "oled_rot"
+#define NVS_KEY_GPS_EN "gps_en"
 
 /* ── NVS_NS_OTA keys ─────────────────────────────────────────────────────── */
 #define NVS_KEY_OTA_ORIGIN "origin"

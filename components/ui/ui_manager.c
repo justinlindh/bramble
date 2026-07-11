@@ -9,6 +9,17 @@ void ui_init(ui_state_t* state) {
     state->screen_dirty = true;
 }
 
+/* Step the settings-row cursor by +1 (next) or -1 (prev), skipping the GPS row
+ * on boards without GPS so it never appears in the cycle there. */
+static ui_settings_item_t settings_item_step(const ui_state_t* state, ui_settings_item_t cur,
+                                             int dir) {
+    ui_settings_item_t next = cur;
+    do {
+        next = (ui_settings_item_t)((next + UI_SETTINGS_ITEM_COUNT + dir) % UI_SETTINGS_ITEM_COUNT);
+    } while (next == UI_SETTINGS_ITEM_GPS && !state->gps_available);
+    return next;
+}
+
 void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
     state->last_activity = now_ms;
 
@@ -26,6 +37,9 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         case UI_SETTINGS_ITEM_LOCATION:
             value_count = LOC_SHARE_COUNT;
             break;
+        case UI_SETTINGS_ITEM_GPS:
+            value_count = 2;
+            break; /* Off / On */
         default:
             value_count = 2;
             break; /* OLED rotation */
@@ -62,13 +76,12 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         case BTN_SHORT_PRESS: /* single-button: cycle through settings items */
         case BTN_DOWN:
             state->settings_item_cursor =
-                (ui_settings_item_t)((state->settings_item_cursor + 1) % UI_SETTINGS_ITEM_COUNT);
+                settings_item_step(state, state->settings_item_cursor, +1);
             state->screen_dirty = true;
             return;
         case BTN_UP:
             state->settings_item_cursor =
-                (ui_settings_item_t)((state->settings_item_cursor + UI_SETTINGS_ITEM_COUNT - 1) %
-                                     UI_SETTINGS_ITEM_COUNT);
+                settings_item_step(state, state->settings_item_cursor, -1);
             state->screen_dirty = true;
             return;
         case BTN_LONG_PRESS:
