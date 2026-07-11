@@ -102,6 +102,14 @@ type extSlot struct {
 	nodeIndex int
 	addr      uint32
 	conn      *extConn
+	// boundID is the emu-link hello id of the node currently (or most recently)
+	// bound to this slot, guarded by Broker.mu. The supervisor tags this slot's
+	// console lines with it so console events carry the node's real address, not
+	// the process label, which is what lets a multi-group scenario route consoles
+	// correctly without the UI's label-suffix heuristic. It survives a restart
+	// (identity persists), so a reset node's boot lines tag to the stable id even
+	// before its next hello re-binds the slot.
+	boundID string
 }
 
 // extConn is a single attached external node: its socket, a buffered outbound
@@ -204,6 +212,18 @@ func (b *Broker) reserveSlot(x, y float32, label, nodeDir string) *extSlot {
 	b.slots = append(b.slots, slot)
 	b.mu.Unlock()
 	return slot
+}
+
+// slotBoundID returns the hello id most recently bound to slot, or "" if no
+// node has attached to it yet. Read under b.mu so it races cleanly with the
+// hello handler that sets it; the supervisor calls it to tag console lines.
+func (b *Broker) slotBoundID(slot *extSlot) string {
+	if slot == nil {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slot.boundID
 }
 
 func (b *Broker) acceptLoop() {
@@ -345,6 +365,7 @@ func (ec *extConn) handleHello(msg *emuInbound) {
 	s.mu.Lock()
 	b.mu.Lock()
 	slot := b.bindSlot(ec)
+	slot.boundID = msg.Node // console tagging reads this under b.mu
 	b.mu.Unlock()
 
 	ec.node = msg.Node
@@ -445,6 +466,16 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 
 	C.sim_radio_broadcast(node, &pkt, &s.nodes, &s.radio, &s.rng, &s.events, &s.metrics,
 		C.uint64_t(now))
+
+	// A deterministic transmit event for headless assertions and the UI: an
+	// external firmware node's PHY frames are opaque to the broker (it never
+	// decodes them), so the C engine emits no message_* event for them the way it
+	// does for sim_node harness traffic. This is the greppable "node X keyed the
+	// channel" signal that a scenario or smoke test keys off.
+	s.emitJSON(map[string]interface{}{
+		"type": "emu_tx", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
+		"len": n, "toa_ms": toaMs,
+	})
 
 	// txdone rides the sim clock after the (deterministic) airtime, so the node
 	// returns to RX at the right moment. The toa VALUE never depends on wall
@@ -604,6 +635,13 @@ func (s *Sim) deliverToExternalIfTarget(evt *C.sim_event_t) bool {
 		RSSI:    int(pkt.rssi),
 		SNR:     int(pkt.snr),
 		Freq:    s.emuFreq,
+	})
+	// Deterministic PHY-delivery event: this external node's radio actually
+	// received a frame (survived the collision/capture model). Headless scenarios
+	// assert channel delivery on this without decoding the opaque payload.
+	s.emitJSON(map[string]interface{}{
+		"type": "emu_rx", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
+		"len": n, "rssi": int(pkt.rssi),
 	})
 	return true
 }

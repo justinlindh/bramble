@@ -156,6 +156,18 @@ void emu_node_flash_persist_init(void) {
             ESP_LOGE(TAG, "flash image creation failed, falling back to ephemeral flash");
             return;
         }
+    } else if ((size_t)st.st_size != (size_t)ESP_PARTITION_DEFAULT_EMULATED_FLASH_SIZE) {
+        /* A wrong-sized image means a prior write was interrupted (truncated) or
+         * the emulated flash size changed. The backend mmaps the file blindly, so
+         * a short image SIGBUSes on first access past its end. Recreate a blank
+         * valid image rather than mapping a corrupt one; a truncated NVS is not
+         * worth salvaging (identity would be unreadable anyway). */
+        ESP_LOGW(TAG, "persistent flash image %s is %lld bytes, expected %zu; recreating blank",
+                 path, (long long)st.st_size, (size_t)ESP_PARTITION_DEFAULT_EMULATED_FLASH_SIZE);
+        if (create_blank_flash(path) != 0) {
+            ESP_LOGE(TAG, "flash image recreation failed, falling back to ephemeral flash");
+            return;
+        }
     } else {
         ESP_LOGI(TAG, "reusing persistent flash image %s (%lld bytes)", path,
                  (long long)st.st_size);

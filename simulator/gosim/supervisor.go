@@ -63,7 +63,14 @@ type superProc struct {
 	cmd     *exec.Cmd
 	stopped bool
 	starts  int
+	boundID string // cached emu-link hello id for console tagging (guarded by mu)
 }
+
+// maxPendingConsole caps the pre-attach console buffer so a node that boots but
+// never sends a hello cannot grow it without bound; past the cap, lines fall
+// back to the process label rather than being buffered. Real nodes attach within
+// their first handful of log lines, so this is only a memory safety valve.
+const maxPendingConsole = 512
 
 // NewSupervisor creates a supervisor for the given firmware groups bound to the
 // broker. Per-node state directories are created under a fresh temp base dir.
@@ -261,8 +268,36 @@ func (p *superProc) runOnce() {
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
+	// Tag each console line with the node's bound emu-link hello id once it has
+	// attached, so console events carry the node's real address (not the process
+	// label) and route correctly even across multiple firmware groups. Lines seen
+	// before the hello are buffered and flushed under that id; if the node never
+	// attaches, they fall back to the process label at exit.
+	var pending []string
 	for sc.Scan() {
-		p.sup.broker.sim.emitConsole(p.label, sc.Text())
+		id := p.consoleID()
+		if id == "" {
+			if len(pending) < maxPendingConsole {
+				pending = append(pending, sc.Text())
+			} else {
+				p.sup.broker.sim.emitConsole(p.label, sc.Text())
+			}
+			continue
+		}
+		for _, pl := range pending {
+			p.sup.broker.sim.emitConsole(id, pl)
+		}
+		pending = nil
+		p.sup.broker.sim.emitConsole(id, sc.Text())
+	}
+	if len(pending) > 0 {
+		id := p.consoleID()
+		if id == "" {
+			id = p.label
+		}
+		for _, pl := range pending {
+			p.sup.broker.sim.emitConsole(id, pl)
+		}
 	}
 	_ = cmd.Wait()
 
@@ -288,4 +323,24 @@ func (p *superProc) startCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.starts
+}
+
+// consoleID returns the emu-link hello id bound to this instance's slot, caching
+// it once resolved so console lines emitted after a restart still tag to the
+// stable identity before the next hello re-binds the slot. It is "" until the
+// first hello attaches (the caller buffers lines until then).
+func (p *superProc) consoleID() string {
+	p.mu.Lock()
+	cached := p.boundID
+	p.mu.Unlock()
+	if cached != "" {
+		return cached
+	}
+	id := p.sup.broker.slotBoundID(p.slot)
+	if id != "" {
+		p.mu.Lock()
+		p.boundID = id
+		p.mu.Unlock()
+	}
+	return id
 }
