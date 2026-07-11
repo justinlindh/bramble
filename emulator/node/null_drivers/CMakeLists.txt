@@ -4,5 +4,5 @@
 # this directory (only emulator/node/CMakeLists.txt adds it).
 idf_component_register(
     SRCS "../radio_null.c" "../display_null.c" "../periph_null.c" "../esp_timer_posix.c"
-    REQUIRES radio display button battery wifi ota ui esp_timer freertos esp_system
+    REQUIRES radio display wifi ota esp_timer freertos esp_system
 )
