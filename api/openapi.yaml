@@ -1368,6 +1368,113 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetBeaconPolicyResponse'
 
+  /rpc/phy.enable:
+    post:
+      operationId: phyEnable
+      summary: Enable PHY passthrough (hardware bridge)
+      description: >
+        Enables the hardware-bridge passthrough mode (DESIGN.md section 10):
+        received frames are forwarded up as bramble.onPhyFrame notifications
+        and phy.tx transmits raw frames. Gated hard: authenticated only,
+        auto-expires after a TTL (default 30 min), never persists across
+        reboot, and refuses while the node holds a live channel identity
+        unless force is set.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttl_s:
+                  type: integer
+                  description: Auto-expire window in seconds (default 1800, 0 selects the default).
+                force:
+                  type: boolean
+                  description: Override the live-channel-identity refusal.
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: >
+            Passthrough status, or a refusal (enabled=false, requires_force=true)
+            when the node holds a live channel identity and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhyStatusResponse'
+
+  /rpc/phy.disable:
+    post:
+      operationId: phyDisable
+      summary: Disable PHY passthrough
+      description: Disables passthrough immediately.
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Passthrough status after disable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhyStatusResponse'
+
+  /rpc/phy.status:
+    post:
+      operationId: phyStatus
+      summary: Get PHY passthrough status
+      description: Returns whether passthrough is active and its remaining TTL.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Passthrough status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhyStatusResponse'
+
+  /rpc/phy.tx:
+    post:
+      operationId: phyTx
+      summary: Transmit a raw frame via PHY passthrough
+      description: >
+        Transmits a raw hex-encoded frame on the real channel. Refused unless
+        passthrough is active. The frame still passes through the tx_gate
+        (airtime budget, listen-before-talk, ToA debit).
+      tags: [action]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [frame]
+              properties:
+                frame:
+                  type: string
+                  description: Raw frame bytes, lowercase hex (2 chars per byte, up to 255 bytes).
+      responses:
+        '400':
+          description: Bad request (invalid params or request body)
+        '200':
+          description: Transmit result (ok=false with error when refused or gated).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OkResponse'
+
 components:
   schemas:
     # ── Primitives / Empty ───────────────────────────────────────────────────
@@ -1390,6 +1497,32 @@ components:
         error:
           type: string
           description: Error message (present only when ok=false).
+
+    PhyStatusResponse:
+      type: object
+      description: PHY passthrough gate state (DESIGN.md section 10).
+      required: [enabled, forced, ttl_s, remaining_s]
+      properties:
+        enabled:
+          type: boolean
+          description: True when passthrough is active (enabled and TTL not expired).
+        forced:
+          type: boolean
+          description: True when enabled with force=true (live-identity override).
+        ttl_s:
+          type: integer
+          description: Configured TTL for the current window, in seconds.
+        remaining_s:
+          type: integer
+          description: Seconds until auto-expire (0 when inactive).
+        requires_force:
+          type: boolean
+          description: >
+            Present and true on a phy.enable refusal, when the node holds a
+            live channel identity and force was not set.
+        error:
+          type: string
+          description: Refusal message (present only on a phy.enable refusal).
 
     # ── Reusable Types ───────────────────────────────────────────────────────
 

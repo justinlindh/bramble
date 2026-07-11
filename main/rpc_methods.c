@@ -7,6 +7,8 @@
 #include "msg_store.h"
 #include "airtime_budget.h"
 #include "radio.h"
+#include "phy_passthrough.h"
+#include "tx_gate.h"
 #include "freq_plan.h"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -2666,8 +2668,146 @@ static int handle_get_beacon_policy(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* ── PHY passthrough (hardware bridge, DESIGN.md section 10) ─────────── */
+
+/* Emit hook registered with phy_passthrough: serialize one received frame as
+ * a bramble.onPhyFrame notification (hex frame + rssi/snr/freq) onto every
+ * notification transport. The WS transport applies the authenticated-only
+ * notification filter (rpc_auth); the serial transport is trusted by physical
+ * access, which is the gateway path. Hex (not base64) matches the rest of the
+ * RPC surface's binary encoding and keeps the firmware free of a base64 dep. */
+static void phy_emit_frame_notify(const uint8_t* data, uint8_t len, const radio_rx_info_t* info,
+                                  uint32_t freq_hz) {
+    static const char hexd[] = "0123456789abcdef";
+    char frame_hex[2 * 255 + 1];
+    for (uint8_t i = 0; i < len; i++) {
+        frame_hex[i * 2] = hexd[(data[i] >> 4) & 0xF];
+        frame_hex[i * 2 + 1] = hexd[data[i] & 0xF];
+    }
+    frame_hex[len * 2] = '\0';
+
+    cJSON* params = cJSON_CreateObject();
+    if (!params) {
+        return;
+    }
+    cJSON_AddStringToObject(params, "frame", frame_hex);
+    cJSON_AddNumberToObject(params, "rssi", info->rssi);
+    cJSON_AddNumberToObject(params, "snr", info->snr);
+    cJSON_AddNumberToObject(params, "freq", (double)freq_hz);
+    rpc_notify("bramble.onPhyFrame", params);
+    cJSON_Delete(params);
+}
+
+/* Whether this node holds a live channel identity (DESIGN.md section 10): a
+ * provisioned network key OR any channel beyond the always-present public
+ * channel (index 0) makes it a real mesh participant, so passthrough refuses
+ * without force. A bare, unprovisioned sacrificial gateway holds neither and
+ * enables cleanly. */
+static bool phy_has_live_identity(void) {
+    return network_key_is_provisioned() || mesh_get_channel_count() > 1;
+}
+
+static void phy_add_status(cJSON* result) {
+    phy_passthrough_status_t st;
+    phy_passthrough_get_status(&st);
+    cJSON_AddBoolToObject(result, "enabled", st.active);
+    cJSON_AddBoolToObject(result, "forced", st.forced);
+    cJSON_AddNumberToObject(result, "ttl_s", st.ttl_s);
+    cJSON_AddNumberToObject(result, "remaining_s", st.remaining_s);
+}
+
+/* phy.enable, params: {"ttl_s"?: number, "force"?: bool}. Authenticated only
+ * (not on rpc_auth's unauth allowlist); over serial the CLI is authenticated
+ * by physical access. */
+static int handle_phy_enable(const cJSON* params, cJSON* result) {
+    uint32_t ttl_s = 0; /* 0 => module default (30 min) */
+    bool force = false;
+    if (params) {
+        const cJSON* ttl_j = cJSON_GetObjectItem(params, "ttl_s");
+        if (cJSON_IsNumber(ttl_j) && ttl_j->valuedouble > 0) {
+            ttl_s = (uint32_t)ttl_j->valuedouble;
+        }
+        force = cJSON_IsTrue(cJSON_GetObjectItem(params, "force"));
+    }
+
+    int rc = phy_passthrough_enable(ttl_s, force, phy_has_live_identity());
+    if (rc == PHY_PT_ERR_IDENTITY) {
+        cJSON_AddBoolToObject(result, "enabled", false);
+        cJSON_AddBoolToObject(result, "requires_force", true);
+        cJSON_AddStringToObject(result, "error",
+                                "node holds a live channel identity; pass force:true to override");
+        return 0;
+    }
+    ESP_LOGW(TAG, "PHY passthrough ENABLED (ttl_s=%" PRIu32 ", force=%d)", ttl_s, (int)force);
+    phy_add_status(result);
+    return 0;
+}
+
+/* phy.disable, no params. */
+static int handle_phy_disable(const cJSON* params, cJSON* result) {
+    (void)params;
+    phy_passthrough_disable();
+    ESP_LOGW(TAG, "PHY passthrough DISABLED");
+    phy_add_status(result);
+    return 0;
+}
+
+/* phy.status, no params. */
+static int handle_phy_status(const cJSON* params, cJSON* result) {
+    (void)params;
+    phy_add_status(result);
+    return 0;
+}
+
+/* phy.tx, params: {"frame": "<hex>"}. Transmits a raw frame on the real
+ * channel. Refuses unless passthrough is active. The frame STILL goes through
+ * tx_gate (budget check -> LBT -> transmit -> ToA debit): airtime accounting
+ * applies to the physical channel even in passthrough, so a bridged gateway
+ * cannot flood the air unbudgeted. */
+static int handle_phy_tx(const cJSON* params, cJSON* result) {
+    if (!phy_passthrough_is_active()) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "passthrough not active");
+        return 0;
+    }
+    const char* hex = params ? cJSON_GetStringValue(cJSON_GetObjectItem(params, "frame")) : NULL;
+    if (!hex) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    size_t hlen = strlen(hex);
+    if (hlen == 0 || (hlen % 2) != 0 || hlen > 2 * 255) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+    uint8_t frame[255];
+    size_t n = hlen / 2;
+    for (size_t i = 0; i < n; i++) {
+        int hi = hex_nibble(hex[i * 2]);
+        int lo = hex_nibble(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+        frame[i] = (uint8_t)((hi << 4) | lo);
+    }
+
+    int rc = tx_gate_send(frame, (uint8_t)n, TX_KIND_FORWARD);
+    if (rc == TX_GATE_OK) {
+        cJSON_AddBoolToObject(result, "ok", true);
+        cJSON_AddNumberToObject(result, "len", (double)n);
+        return 0;
+    }
+    cJSON_AddBoolToObject(result, "ok", false);
+    cJSON_AddStringToObject(result, "error",
+                            rc == TX_GATE_ERR_BUDGET ? "airtime budget denied" : "radio error");
+    return 0;
+}
+
 void rpc_methods_init(bramble_identity_t* identity) {
     s_identity = identity;
+
+    /* PHY passthrough (hardware bridge) forwards received frames through this
+     * notification hook; the gate itself is disabled at boot (module state, no
+     * NVS, so it never survives a reboot). */
+    phy_passthrough_set_emit(phy_emit_frame_notify);
 
     /* Query methods */
     rpc_register("bramble.getStatus", handle_get_status);
@@ -2737,6 +2877,13 @@ void rpc_methods_init(bramble_identity_t* identity) {
     /* Beacon policy methods */
     rpc_register("bramble.setBeaconPolicy", handle_set_beacon_policy);
     rpc_register("bramble.getBeaconPolicy", handle_get_beacon_policy);
+
+    /* PHY passthrough (hardware bridge, DESIGN.md section 10). Registered
+     * normally, so they are authenticated-only (not on the unauth allowlist). */
+    rpc_register("phy.enable", handle_phy_enable);
+    rpc_register("phy.disable", handle_phy_disable);
+    rpc_register("phy.status", handle_phy_status);
+    rpc_register("phy.tx", handle_phy_tx);
 
     ESP_LOGI(TAG, "RPC methods registered");
 }
