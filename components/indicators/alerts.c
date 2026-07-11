@@ -16,6 +16,7 @@
 #define ALERT_DONE_MS (BEEP2_OFF_MS > ALERT_VIBRA_MS ? BEEP2_OFF_MS : ALERT_VIBRA_MS)
 
 static bool s_active;
+static bool s_unconfirmed;
 static uint32_t s_t0;
 static bool s_buzzer_on;
 static bool s_vibra_on;
@@ -23,6 +24,7 @@ static bool s_led_on;
 
 void alerts_init(void) {
     s_active = false;
+    s_unconfirmed = false;
     s_buzzer_on = false;
     s_vibra_on = false;
     s_led_on = false;
@@ -32,6 +34,7 @@ void alerts_message_received(uint32_t now_ms) {
     /* Restart the pattern from the top; a burst of messages reads as one
      * continuous alert rather than queueing N patterns back to back. */
     s_active = true;
+    s_unconfirmed = true;
     s_t0 = now_ms;
     if (!s_buzzer_on) {
         indicator_buzzer(ALERT_BUZZER_HZ);
@@ -43,14 +46,24 @@ void alerts_message_received(uint32_t now_ms) {
     }
 }
 
-void alerts_set_unread(bool any_unread) {
-    if (any_unread != s_led_on) {
-        indicator_set_led(any_unread);
-        s_led_on = any_unread;
+void alerts_confirm(void) {
+    s_unconfirmed = false;
+    if (s_led_on) {
+        indicator_set_led(false);
+        s_led_on = false;
     }
 }
 
 void alerts_tick(uint32_t now_ms) {
+    /* Unconfirmed blink: a short LED pulse every ALERT_LED_PERIOD_MS, phased
+     * from the trigger moment, until alerts_confirm(). Independent of the
+     * transient beep/vibra pattern below. */
+    bool want_led = s_unconfirmed && ((now_ms - s_t0) % ALERT_LED_PERIOD_MS) < ALERT_LED_ON_MS;
+    if (want_led != s_led_on) {
+        indicator_set_led(want_led);
+        s_led_on = want_led;
+    }
+
     if (!s_active)
         return;
     uint32_t at = now_ms - s_t0;
