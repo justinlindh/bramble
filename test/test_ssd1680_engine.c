@@ -312,11 +312,14 @@ void test_ram_mapping_rotation_and_polarity(void) {
     TEST_ASSERT_EQUAL_HEX8(0x7F, bw->data[249 * 16 + 0]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, bw->data[15]);
 
-    /* All black: every RAM byte 0x00 except the 6 pad bits per row. */
+    /* All black: every RAM byte 0x00 except the 6 pad bits per row.
+     * Changing the whole framebuffer trips the change-fraction heuristic,
+     * so this flush is promoted to FULL (the RAM layout asserted below is
+     * identical either way). */
     for (int y = 0; y < SSD1680_HEIGHT; y++)
         for (int x = 0; x < SSD1680_WIDTH; x++)
             ssd1680_engine_pixel(x, y, true);
-    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_PARTIAL, flush(&ops, &n, &busy));
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
     bw = find_op(ops, n, 0x24);
     for (int row = 0; row < 250; row++) {
         for (int b = 0; b < 15; b++)
@@ -450,6 +453,59 @@ void test_deep_sleep_terminates_every_stream(void) {
     TEST_ASSERT_EQUAL_HEX8(0x20, ops[n - 2].cmd);
 }
 
+/* ââ change-fraction promotion ââ */
+
+/* A large change since the last shown image (message scroll, screen or
+ * menu switch) must promote the flush to FULL immediately, not wait for
+ * the every-N cadence. */
+void test_big_change_promotes_to_full(void) {
+    const ssd1680_op_t* ops;
+    size_t n;
+    uint32_t busy;
+    flush(&ops, &n, &busy); /* first: FULL, shown = blank */
+
+    /* Small update: one pixel, well under the threshold -> PARTIAL. */
+    ssd1680_engine_pixel(3, 3, true);
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_PARTIAL, flush(&ops, &n, &busy));
+
+    /* Screen change: paint the top half black (~50% of bytes differ from
+     * the shown image) -> promoted to FULL with the full busy window. */
+    for (int y = 0; y < SSD1680_HEIGHT / 2; y++)
+        for (int x = 0; x < SSD1680_WIDTH; x++)
+            ssd1680_engine_pixel(x, y, true);
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
+    TEST_ASSERT_EQUAL_UINT32(SSD1680_BUSY_MS_FULL, busy);
+
+    /* The promotion consumed the change: the next small update is PARTIAL
+     * again (the shown shadow was updated at the full refresh). */
+    ssd1680_engine_pixel(0, SSD1680_HEIGHT - 1, true);
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_PARTIAL, flush(&ops, &n, &busy));
+}
+
+/* The threshold boundary: just under SSD1680_FULL_CHANGE_PCT stays
+ * partial; crossing it promotes. One fb byte covers 8 sources on one
+ * gate, so painting whole gate rows moves the fraction in 16-byte steps
+ * (16 of 4000 bytes per row). */
+void test_change_fraction_threshold_boundary(void) {
+    const ssd1680_op_t* ops;
+    size_t n;
+    uint32_t busy;
+    flush(&ops, &n, &busy); /* first: FULL */
+
+    /* Paint rows until just UNDER the threshold: each logical row y dirties
+     * 32 bytes of the 3904-byte fb (0.82%); 23 rows = ~18.9% < 20%. */
+    for (int y = 0; y < 23; y++)
+        for (int x = 0; x < SSD1680_WIDTH; x++)
+            ssd1680_engine_pixel(x, y, true);
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_PARTIAL, flush(&ops, &n, &busy));
+
+    /* Two more rows (25 total = ~20.5%) crosses the 20% threshold -> FULL. */
+    for (int y = 23; y < 25; y++)
+        for (int x = 0; x < SSD1680_WIDTH; x++)
+            ssd1680_engine_pixel(x, y, true);
+    TEST_ASSERT_EQUAL_INT(SSD1680_REFRESH_FULL, flush(&ops, &n, &busy));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_fb_geometry_row_major_msb_first);
@@ -459,6 +515,8 @@ int main(void) {
     RUN_TEST(test_full_flush_writes_both_ram_planes);
     RUN_TEST(test_ram_mapping_rotation_and_polarity);
     RUN_TEST(test_partial_flush_uses_display_mode_2);
+    RUN_TEST(test_big_change_promotes_to_full);
+    RUN_TEST(test_change_fraction_threshold_boundary);
     RUN_TEST(test_refresh_policy_every_10th_flush_full);
     RUN_TEST(test_clean_flush_is_none_and_does_not_advance_policy);
     RUN_TEST(test_deep_sleep_terminates_every_stream);

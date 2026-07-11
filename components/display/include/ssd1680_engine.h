@@ -58,6 +58,12 @@
 #define SSD1680_FULL_EVERY_N_FLUSHES 10
 #define SSD1680_BUSY_MS_PARTIAL 500u
 #define SSD1680_BUSY_MS_FULL 3000u
+/* Promote a flush to FULL when at least this percentage of framebuffer
+ * bytes changed since the last emitted refresh. Catches the ghost-heavy
+ * cases (message scroll, screen/menu change) the moment they happen
+ * instead of waiting for the every-N cadence; small in-place updates
+ * (badge, appended line) stay partial. */
+#define SSD1680_FULL_CHANGE_PCT 20
 
 /* SSD1680 command vocabulary used by the engine (GDEY0213B74 p.31,
  * typical operating sequence). */
