@@ -28,6 +28,12 @@ import (
 // loaded scenario (set by the --no-collisions CLI flag).
 var disableCollisionModel bool
 
+// emuListenPath is the emu-link unix socket path (set by the --emu-listen CLI
+// flag). When non-empty, the broker is started for every loaded scenario so
+// external firmware nodes can attach even if the scenario itself declares
+// none; empty means the broker starts only for scenarios with firmware nodes.
+var emuListenPath string
+
 // SimState represents the simulation state machine.
 type SimState int
 
@@ -113,6 +119,36 @@ type Sim struct {
 	// flood.go). flood is nil in reactive mode.
 	routingMode string
 	flood       *floodSim
+
+	// Emulator (Task 7): external full-firmware nodes attached over the
+	// emu-link protocol (extnode.go). realtime is set true whenever the
+	// loaded scenario declares firmware nodes or --emu-listen is given; it
+	// gates the wall-clock headless loop (runRealtimeHeadless). Pure harness
+	// scenarios leave all of these zero/nil and keep the untouched
+	// virtual-time drain path. extConns maps a live external node's radio
+	// address to its connection so EVT_RECEIVE_PACKET delivery can be routed
+	// out to the node process instead of into the C firmware. Every field
+	// here is read/written only under s.mu, exactly like the C state above.
+	realtime             bool
+	emuListen            string
+	broker               *Broker
+	supervisor           *Supervisor
+	extConns             map[uint32]*extConn
+	pendingBrokerActions []brokerAction
+	// emuFreq is the ether's single-channel carrier (Hz), learned from the
+	// most recent tx's freq and echoed on every rx. The phase-1 model is
+	// single-channel, so a received frame's frequency is the channel's.
+	emuFreq int
+}
+
+// brokerAction is a deferred broker-side side effect (e.g. sending txdone
+// after a transmission's deterministic time-on-air elapses) scheduled on the
+// simulation clock. It fires in fireBrokerActions when simTime reaches dueUs,
+// so the timing rides the same clock the event loop uses (wall clock in
+// real-time mode) while the airtime VALUE that set dueUs stays deterministic.
+type brokerAction struct {
+	dueUs uint64
+	fn    func()
 }
 
 // NewSim creates a new simulation engine.
@@ -127,6 +163,8 @@ func NewSim(scenarioDir string, broadcast func([]byte), headless bool) (*Sim, er
 		scenarioDir:            scenarioDir,
 		headless:               headless,
 		broadcastTelemetryMode: "full",
+		emuListen:              emuListenPath,
+		extConns:               make(map[uint32]*extConn),
 	}
 
 	// Initialize bridge-level state
@@ -252,10 +290,24 @@ func (s *Sim) advanceSim() {
 		simNow = s.duration
 	}
 
+	s.pump(simNow)
+
+	// Check if simulation complete
+	if s.duration > 0 && simNow >= s.duration {
+		s.complete()
+	}
+}
+
+// pump advances the simulation clock to simNow, dispatches every C event due
+// at or before it, then fires any broker-side deferred actions (Task 7) that
+// have come due. Split out of advanceSim so both the wall-clock loops
+// (advanceSim, runRealtimeHeadless) and the emulator tests drive events the
+// same way. Non-realtime scenarios never schedule broker actions, so the
+// fireBrokerActions call is a no-op for them and their behavior is unchanged.
+func (s *Sim) pump(simNow uint64) {
 	s.simTime = simNow
 	setSimTime(simNow)
 
-	// Process all events up to simNow
 	var evt C.sim_event_t
 	for {
 		peek := eventQueuePeek(&s.events)
@@ -272,10 +324,45 @@ func (s *Sim) advanceSim() {
 		s.dispatchEvent(&evt)
 	}
 
-	// Check if simulation complete
-	if s.duration > 0 && simNow >= s.duration {
-		s.complete()
+	s.fireBrokerActions(simNow)
+}
+
+// fireBrokerActions runs every scheduled broker action whose due time has been
+// reached, in due-time order, and drops it from the pending list. Called under
+// s.mu (via pump); the actions themselves only enqueue bytes onto a
+// connection's buffered send channel, so they never block on I/O while the
+// lock is held.
+func (s *Sim) fireBrokerActions(simNow uint64) {
+	if len(s.pendingBrokerActions) == 0 {
+		return
 	}
+	sort.Slice(s.pendingBrokerActions, func(i, j int) bool {
+		return s.pendingBrokerActions[i].dueUs < s.pendingBrokerActions[j].dueUs
+	})
+	kept := s.pendingBrokerActions[:0]
+	var due []brokerAction
+	for _, a := range s.pendingBrokerActions {
+		if a.dueUs <= simNow {
+			due = append(due, a)
+		} else {
+			kept = append(kept, a)
+		}
+	}
+	// kept aliases the backing array; copy the survivors out before firing so a
+	// fired action that schedules a new one does not corrupt the slice we are
+	// still compacting.
+	survivors := make([]brokerAction, len(kept))
+	copy(survivors, kept)
+	s.pendingBrokerActions = survivors
+	for _, a := range due {
+		a.fn()
+	}
+}
+
+// scheduleBrokerAction registers fn to fire once the simulation clock reaches
+// dueUs. Must be called under s.mu.
+func (s *Sim) scheduleBrokerAction(dueUs uint64, fn func()) {
+	s.pendingBrokerActions = append(s.pendingBrokerActions, brokerAction{dueUs: dueUs, fn: fn})
 }
 
 func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
@@ -285,6 +372,14 @@ func (s *Sim) dispatchEvent(evt *C.sim_event_t) {
 	case C.EVT_TICK_NODE:
 		s.handleTickNode(evt)
 	case C.EVT_RECEIVE_PACKET:
+		// Task 7: a frame addressed to (or, being PHY-broadcast, audible at) an
+		// external firmware node is delivered out over emu-link instead of into
+		// the C firmware. deliverToExternalIfTarget returns true when it owned
+		// the delivery; only harness (sim_node) receivers fall through to the C
+		// path below, so pure-harness scenarios take exactly the old branch.
+		if s.deliverToExternalIfTarget(evt) {
+			return
+		}
 		if s.routingMode == "flood" {
 			s.handleReceivePacketFlood(evt)
 		} else {
@@ -549,6 +644,11 @@ func (s *Sim) cmdLoad(cmd Command) {
 		scenarioPath = fmt.Sprintf("%s/%s.json", s.scenarioDir, scenarioName)
 	}
 
+	// Task 7: tear down any emulator state from a prior load before rebuilding.
+	// Safe to call under s.mu (it stops the supervisor, which never takes s.mu,
+	// and leaves the broker listener up for reuse).
+	s.resetEmulatorForReload()
+
 	// Reset C state
 	nodeArrayInit(&s.nodes)
 	radioConfigInit(&s.radio)
@@ -711,6 +811,16 @@ func (s *Sim) cmdLoad(cmd Command) {
 		"cr":          uint8(s.radio.cr),
 	})
 	s.emitJSON(map[string]interface{}{"type": "sim_ready"})
+
+	// Task 7: if this scenario declares firmware nodes (or --emu-listen opened
+	// the socket), bring up the emu-link broker and the process supervisor and
+	// switch the scenario to real-time (wall-clock) execution. Pure harness
+	// scenarios declare no firmware nodes and leave s.realtime false, so their
+	// virtual-time path is untouched.
+	fwNodes := loadFirmwareNodes(scenarioPath)
+	if len(fwNodes) > 0 || s.emuListen != "" {
+		s.startEmulator(fwNodes)
+	}
 
 	s.lastScenario = scenarioPath
 	log.Printf("loaded scenario: %s (%d nodes, duration %d us)", scenarioPath, count, s.duration)
@@ -1129,6 +1239,14 @@ func confirmedDeliveryRate(confirmed, delivered, dropped, undelivered uint64) fl
 	return float64(confirmed) / float64(total)
 }
 
+// dup2Stdout restores fd 1 from the saved original-stdout fd. Small wrapper so
+// extnode.go's real-time teardown does not need its own syscall import.
+func dup2Stdout(origStdout int) { syscall.Dup2(origStdout, 1) }
+
+// closeFd closes a raw file descriptor (used by the emu-link test harness to
+// release the saved original stdout after restoring it).
+func closeFd(fd int) { syscall.Close(fd) }
+
 // emitJSON marshals and broadcasts a JSON event.
 func (s *Sim) emitJSON(v interface{}) {
 	data, err := json.Marshal(v)
@@ -1215,6 +1333,13 @@ func RunHeadless(scenarioPath string) error {
 
 	if sim.State() != StateLoaded {
 		return fmt.Errorf("failed to load scenario")
+	}
+
+	// Task 7: a scenario with external firmware nodes runs on the wall clock so
+	// the real node processes have time to boot, beacon, and respond. Pure
+	// harness scenarios keep the instant virtual-time drain below untouched.
+	if sim.realtime {
+		return sim.runRealtimeHeadless()
 	}
 
 	// Process all events instantly
