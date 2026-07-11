@@ -5710,6 +5710,14 @@ static int mesh_nonce_write(uint64_t ceiling, void* ctx) {
  * boot state is unambiguous (a status field for Task 3's provisioning UX).
  */
 static void mesh_load_network_key(void) {
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator only: seed the shared network key from EMU_NETWORK_KEY so a gosim
+     * scenario can key up a headless fleet (there is no emu-link provisioning
+     * RPC). No-op when the env var is unset. Implemented in emulator/node and
+     * linked only on the linux target; a device build never sees this. */
+    extern int emu_node_seed_network_key_from_env(void);
+    emu_node_seed_network_key_from_env();
+#endif
     if (network_key_load_from_nvs() == 0) {
         ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");
     } else {

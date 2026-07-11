@@ -205,8 +205,19 @@ static void *reader_main(void *arg) {
         }
 
         ssize_t n = recv(fd, buf + len, EMU_LINK_MAX_LINE - len, 0);
-        if (n <= 0)
-            break; /* broker gone (EOF) or socket error */
+        if (n < 0) {
+            /* The IDF-linux FreeRTOS port drives its tick off a periodic signal
+             * (SIGALRM) that interrupts blocking syscalls, so recv() returns
+             * EINTR routinely on the node; retry rather than treating it as a
+             * dead socket. Without this the reader thread exits on the first
+             * tick and the node never sees txdone/rx (mirrors write_all's EINTR
+             * loop on the send side). */
+            if (errno == EINTR)
+                continue;
+            break; /* real socket error */
+        }
+        if (n == 0)
+            break; /* broker gone (EOF) */
         len += (size_t)n;
 
         size_t start = 0;

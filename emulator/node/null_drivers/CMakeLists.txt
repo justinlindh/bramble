@@ -9,5 +9,6 @@
 # IDF-linux esp_timer gap.
 idf_component_register(
     SRCS "../periph_null.c" "../esp_timer_posix.c" "../emu_flash_persist.c"
-    REQUIRES wifi ota esp_timer freertos esp_system esp_partition
+         "../emu_provision.c" "../emu_autosend.c"
+    REQUIRES wifi ota esp_timer freertos esp_system esp_partition network_key
 )
