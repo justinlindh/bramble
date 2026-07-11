@@ -577,7 +577,7 @@ export function MeshCanvas({
   }, [linkActivity, brokenLinks, linkQuality, now]);
 
   return (
-    <div style={{
+    <div data-testid="mesh-canvas" style={{
       width: '100%',
       height: '100%',
       background: '#0d1117',

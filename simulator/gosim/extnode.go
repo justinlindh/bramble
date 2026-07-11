@@ -226,6 +226,24 @@ func (b *Broker) slotBoundID(slot *extSlot) string {
 	return slot.boundID
 }
 
+// findByNode returns the live connection whose emu-link hello id is node, or
+// nil if none is attached (a stale id from before a reset/reattach, or a
+// scenario reload that tore the connection down). Used to route a UI face-
+// button edge (Command.Type "btn") to the right external firmware process.
+func (b *Broker) findByNode(node string) *extConn {
+	if node == "" {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for c := range b.conns {
+		if c.node == node {
+			return c
+		}
+	}
+	return nil
+}
+
 func (b *Broker) acceptLoop() {
 	for {
 		conn, err := b.ln.Accept()
@@ -366,9 +384,9 @@ func (ec *extConn) handleHello(msg *emuInbound) {
 	b.mu.Lock()
 	slot := b.bindSlot(ec)
 	slot.boundID = msg.Node // console tagging reads this under b.mu
+	ec.node = msg.Node      // findByNode (btn routing) reads this under b.mu too
 	b.mu.Unlock()
 
-	ec.node = msg.Node
 	ec.slot = slot
 	slot.label = firstNonEmpty(slot.label, msg.Node)
 

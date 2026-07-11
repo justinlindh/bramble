@@ -74,6 +74,14 @@ type Command struct {
 	Dest          string  `json:"dest,omitempty"`
 	Radius        float32 `json:"radius,omitempty"`
 	TelemetryMode string  `json:"telemetry_mode,omitempty"`
+	// Node/BtnID/Edge: a face-button edge for an external firmware node's
+	// device card (Task 9 gateway / Task 13 UI, see extnode.go's sendButton).
+	// Node is the emu-link hello id (matches node_joined's "node" field, NOT
+	// NodeID's simulated-node address space used by add/remove/move_node);
+	// BtnID is "up"|"down"|"select"|"reset"; Edge is "down"|"up".
+	Node  string `json:"node,omitempty"`
+	BtnID string `json:"id,omitempty"`
+	Edge  string `json:"edge,omitempty"`
 }
 
 // Sim is the core simulation engine.
@@ -275,6 +283,8 @@ func (s *Sim) handleCommand(cmd Command) {
 		s.cmdInterference(cmd)
 	case "set_broadcast_telemetry_mode":
 		s.cmdSetBroadcastTelemetryMode(cmd)
+	case "btn":
+		s.cmdButton(cmd)
 	default:
 		log.Printf("unknown command: %s", cmd.Type)
 	}
@@ -950,6 +960,27 @@ func (s *Sim) cmdRemoveNode(cmd Command) {
 	})
 
 	anomalyCheckPartition(&s.nodes, float32(s.radio._range))
+}
+
+// cmdButton forwards a face-button edge from a device card (PagerDevice.tsx)
+// to the external firmware process attached under that emu-link hello id.
+// This was previously unwired: extConn.sendButton (extnode.go) had no caller,
+// so a browser click's { type:"btn", node, id, edge } frame reached gosim and
+// fell through handleCommand's default case as an "unknown command" -- the
+// UI's face buttons looked interactive but never reached firmware. Found and
+// fixed by emulator/e2e's functionality spec (Task 13), which drives buttons
+// through the real UI rather than injecting wire frames directly.
+func (s *Sim) cmdButton(cmd Command) {
+	if s.broker == nil {
+		log.Printf("btn: no broker attached (node %q)", cmd.Node)
+		return
+	}
+	ec := s.broker.findByNode(cmd.Node)
+	if ec == nil {
+		log.Printf("btn: no attached node %q for id=%s edge=%s", cmd.Node, cmd.BtnID, cmd.Edge)
+		return
+	}
+	ec.sendButton(cmd.BtnID, cmd.Edge)
 }
 
 func (s *Sim) cmdMoveNode(cmd Command) {

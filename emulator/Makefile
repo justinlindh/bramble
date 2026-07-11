@@ -17,7 +17,7 @@ SCEN_DIR  := $(REPO_ROOT)/simulator/scenarios
 
 PORT ?= 3000
 
-.PHONY: check node broker ui run serve headless clean
+.PHONY: check node broker ui run serve headless e2e clean
 
 ## check: verify the toolchain (idf.py + linux target, go, node/npm, jq; docker optional).
 check:
@@ -61,6 +61,15 @@ headless: node broker
 	@echo "==> running the CI scenario suite"
 	bash "$(EMU_DIR)/ci/run_scenarios.sh"
 
+## e2e: browser-level acceptance suite (Playwright, headless chromium) against
+## the full live stack -- gosim + real firmware node processes + the built UI.
+## Proves the DISPLAY is correct and basic buttons/reset/messaging work
+## through what a human actually sees, not just headless framebuffer asserts
+## (that's `make headless`). See emulator/e2e/README.md.
+e2e: node broker ui
+	@cd "$(UI_DIR)" && npm install
+	@bash "$(EMU_DIR)/e2e/run_e2e.sh"
+
 ## clean: remove build artifacts.
 clean:
 	@echo "==> cleaning build artifacts"
@@ -68,3 +77,4 @@ clean:
 	       "$(NODE_DIR)/managed_components" "$(NODE_DIR)/dependencies.lock"
 	rm -f "$(GOSIM_BIN)"
 	rm -rf "$(UI_DIR)/dist"
+	rm -rf "$(EMU_DIR)/e2e/.run" "$(EMU_DIR)/e2e/node_modules"

@@ -100,7 +100,7 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
   useEffect(() => () => { if (resetTimer.current) clearInterval(resetTimer.current); }, []);
 
   return (
-    <div className="pager-device" style={{ width: faceWidth }}>
+    <div className="pager-device" data-testid={`device-card-${device.node}`} style={{ width: faceWidth }}>
       <div className={`pager-shell${shaking ? ' pager-shake' : ''}`} style={{ width: faceWidth, height: faceHeight, position: 'relative' }}>
         <svg
           viewBox={`0 0 ${EXT_W} ${EXT_H}`}
