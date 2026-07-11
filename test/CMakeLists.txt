@@ -888,6 +888,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -904,6 +905,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -920,6 +922,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -936,6 +939,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1034,6 +1038,7 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1278,6 +1283,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1453,6 +1459,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1692,4 +1699,24 @@ add_executable(test_ssd1680_engine
 )
 target_include_directories(test_ssd1680_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+)
+
+# PHY passthrough gating matrix (Task 9, DESIGN.md section 10). Whitebox test
+# of the pure gate state machine (phy_passthrough.c depends only on esp_timer),
+# plus the real rpc_auth policy so the "enable only via an authenticated RPC"
+# clause is asserted against the exact gate the dispatcher enforces, not a mock.
+# ESP_TIMER_CUSTOM_IMPL lets the test drive the clock for the TTL cases.
+add_executable(test_phy_passthrough
+    test_phy_passthrough.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
+)
+target_include_directories(test_phy_passthrough PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+target_compile_definitions(test_phy_passthrough PRIVATE
+    ESP_TIMER_CUSTOM_IMPL
 )

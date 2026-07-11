@@ -8,6 +8,7 @@ idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
     idf_component_register(
         SRCS "radio_airtime.c" "radio_profiles.c" "radio_virt.c" "tx_gate.c" "tx_gate_esp.c"
+             "phy_passthrough.c"
         INCLUDE_DIRS "include"
         REQUIRES freertos esp_timer board_config esp_system esp_hw_support airtime emu_link json
     )
@@ -15,6 +16,7 @@ if(${target} STREQUAL "linux")
 else()
     idf_component_register(
         SRCS "radio_airtime.c" "radio_profiles.c" "sx1262.c" "radio_esp.c" "tx_gate.c" "tx_gate_esp.c"
+             "phy_passthrough.c"
         INCLUDE_DIRS "include"
         REQUIRES driver esp_driver_spi esp_driver_gpio freertos esp_timer board_config esp_system airtime
     )
