@@ -73,6 +73,14 @@ void phy_passthrough_disable(void);
 /* True iff enabled and the TTL has not elapsed. Cheap; called per RX frame. */
 bool phy_passthrough_is_active(void);
 
+/*
+ * Drain the one-shot auto-expiry latch. Returns true exactly once after the TTL
+ * elapses (the live->off transition folded into is_active), then false until the
+ * next auto-expiry. Lets a logging-capable caller emit that transition once
+ * without giving this module a logging dependency.
+ */
+bool phy_passthrough_consume_auto_expired(void);
+
 /* Fill *out with the current gate state (TTL remaining computed live). */
 void phy_passthrough_get_status(phy_passthrough_status_t* out);
 

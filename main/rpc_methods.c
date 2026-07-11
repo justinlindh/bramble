@@ -2707,9 +2707,20 @@ static bool phy_has_live_identity(void) {
     return network_key_is_provisioned() || mesh_get_channel_count() > 1;
 }
 
+/* Auto-expiry (the TTL-elapsed live->off transition) happens inside the gate
+ * module, which has no logging dependency by design. The module latches that
+ * transition; drain and log it here so every state transition is logged
+ * (DESIGN.md section 10) exactly once, never per poll. */
+static void phy_log_if_auto_expired(void) {
+    if (phy_passthrough_consume_auto_expired()) {
+        ESP_LOGW(TAG, "PHY passthrough AUTO-EXPIRED (TTL elapsed), now DISABLED");
+    }
+}
+
 static void phy_add_status(cJSON* result) {
     phy_passthrough_status_t st;
     phy_passthrough_get_status(&st);
+    phy_log_if_auto_expired();
     cJSON_AddBoolToObject(result, "enabled", st.active);
     cJSON_AddBoolToObject(result, "forced", st.forced);
     cJSON_AddNumberToObject(result, "ttl_s", st.ttl_s);
@@ -2732,13 +2743,20 @@ static int handle_phy_enable(const cJSON* params, cJSON* result) {
 
     int rc = phy_passthrough_enable(ttl_s, force, phy_has_live_identity());
     if (rc == PHY_PT_ERR_IDENTITY) {
+        ESP_LOGW(TAG, "PHY passthrough enable REFUSED: node holds a live channel identity "
+                      "(force required)");
         cJSON_AddBoolToObject(result, "enabled", false);
         cJSON_AddBoolToObject(result, "requires_force", true);
         cJSON_AddStringToObject(result, "error",
                                 "node holds a live channel identity; pass force:true to override");
         return 0;
     }
-    ESP_LOGW(TAG, "PHY passthrough ENABLED (ttl_s=%" PRIu32 ", force=%d)", ttl_s, (int)force);
+    /* Log the effective (normalized/clamped) TTL, not the raw param: a default
+     * enable arrives as ttl_s=0 but the applied window is PHY_PT_DEFAULT_TTL_S. */
+    phy_passthrough_status_t enabled_st;
+    phy_passthrough_get_status(&enabled_st);
+    ESP_LOGW(TAG, "PHY passthrough ENABLED (ttl_s=%" PRIu32 ", force=%d)", enabled_st.ttl_s,
+             (int)force);
     phy_add_status(result);
     return 0;
 }
@@ -2766,6 +2784,9 @@ static int handle_phy_status(const cJSON* params, cJSON* result) {
  * cannot flood the air unbudgeted. */
 static int handle_phy_tx(const cJSON* params, cJSON* result) {
     if (!phy_passthrough_is_active()) {
+        /* is_active() may have just folded a TTL elapse into a disable; log that
+         * live->off transition (once) before refusing the TX. */
+        phy_log_if_auto_expired();
         cJSON_AddBoolToObject(result, "ok", false);
         cJSON_AddStringToObject(result, "error", "passthrough not active");
         return 0;

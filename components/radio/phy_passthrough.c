@@ -23,6 +23,16 @@ static volatile bool s_forced = false;
 static volatile int64_t s_expiry_us = 0;
 static volatile uint32_t s_ttl_s = 0;
 
+/*
+ * One-shot latch for the auto-expiry (live->off) transition. is_active() folds
+ * a TTL elapse into a disable() with no way to log from here (this module has
+ * no logging dependency by design, DESIGN.md section 10). Instead the transition
+ * is latched and drained by a logging-capable caller via
+ * phy_passthrough_consume_auto_expired(), so the expiry is logged exactly once
+ * rather than on every poll.
+ */
+static volatile bool s_auto_expired = false;
+
 static phy_passthrough_emit_fn s_emit = NULL;
 
 void phy_passthrough_set_emit(phy_passthrough_emit_fn fn) { s_emit = fn; }
@@ -58,11 +68,19 @@ bool phy_passthrough_is_active(void) {
     }
     if (esp_timer_get_time() >= s_expiry_us) {
         /* TTL elapsed: fold the auto-expire into a real disable so subsequent
-         * status reads report the window as closed rather than merely stale. */
+         * status reads report the window as closed rather than merely stale.
+         * Latch the transition so a logging caller can emit it once. */
         phy_passthrough_disable();
+        s_auto_expired = true;
         return false;
     }
     return true;
+}
+
+bool phy_passthrough_consume_auto_expired(void) {
+    bool v = s_auto_expired;
+    s_auto_expired = false;
+    return v;
 }
 
 void phy_passthrough_get_status(phy_passthrough_status_t* out) {

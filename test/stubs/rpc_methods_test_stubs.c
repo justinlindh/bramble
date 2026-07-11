@@ -322,13 +322,21 @@ void freq_plan_get_default(uint32_t* f, int8_t* p) {
         *p = 14;
 }
 void radio_get_config(radio_config_t* cfg) { memset(cfg, 0, sizeof(*cfg)); }
-/* PHY passthrough (phy.tx) routes through the tx gate; the host RPC test only
- * needs it to link and report success. */
+/* PHY passthrough (phy.tx) routes through the tx gate. Capture the call so the
+ * handler test can assert phy.tx actually reaches tx_gate with the exact frame
+ * (and, when inactive, that it is NOT reached at all). */
+int g_stub_tx_gate_calls = 0;
+uint8_t g_stub_tx_gate_last_frame[255];
+uint8_t g_stub_tx_gate_last_len = 0;
+int g_stub_tx_gate_return = 0; /* TX_GATE_OK */
 int tx_gate_send(const uint8_t* buf, uint8_t len, int kind) {
-    (void)buf;
-    (void)len;
     (void)kind;
-    return 0; /* TX_GATE_OK */
+    g_stub_tx_gate_calls++;
+    g_stub_tx_gate_last_len = len;
+    if (buf && len) {
+        memcpy(g_stub_tx_gate_last_frame, buf, len);
+    }
+    return g_stub_tx_gate_return;
 }
 int radio_reconfigure(const radio_config_t* cfg) {
     (void)cfg;
