@@ -16,7 +16,7 @@
 // scenario) inherit that group and die with it even if gosim's own SIGTERM
 // handling doesn't proactively reap them.
 
-import { spawn, execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as net from 'node:net';
@@ -110,10 +110,16 @@ export async function bootStack(port: number): Promise<BootedStack> {
   return { port, pid: child.pid, baseURL };
 }
 
-// teardownStack kills the gosim process group (which takes its firmware node
-// children with it) and, as a safety net matching smoke_live.sh /
-// run_scenarios.sh, pkills anything still matching the node binary path in
-// case a child escaped the group.
+// teardownStack kills ONLY the gosim process group this run's bootStack
+// spawned (recorded in PID_FILE), which takes its firmware node children with
+// it (they inherit the group; see the file header). It deliberately does NOT
+// pkill by binary name/path: GOSIM_BIN and NODE_BIN are fixed absolute paths,
+// so a name-wide pkill would kill an unrelated gosim/firmware-node instance
+// running the same binary on a different port (e.g. a live `make run` a
+// developer left up) -- exactly the bug this scoping fixes. A process-group
+// kill by this run's own recorded pid is sufficient: nothing here escapes the
+// group without an explicit setsid, and none of gosim's or the supervisor's
+// exec.Command calls do that (see supervisor.go).
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0); // probe: throws if the process is gone
@@ -144,15 +150,5 @@ export async function teardownStack(): Promise<void> {
       }
     }
     fs.rmSync(PID_FILE, { force: true });
-  }
-  try {
-    execSync(`pkill -f ${JSON.stringify(NODE_BIN)}`, { stdio: 'ignore' });
-  } catch {
-    /* nothing matched, fine */
-  }
-  try {
-    execSync(`pkill -f ${JSON.stringify(GOSIM_BIN)}`, { stdio: 'ignore' });
-  } catch {
-    /* nothing matched, fine */
   }
 }
