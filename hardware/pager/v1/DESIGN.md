@@ -53,8 +53,8 @@ Heltec-V3-matching pins marked `*`.
 | I2C SCL | 18* | |
 | VBAT sense | 1* | ADC1_CH0; 100k/100k divider + 100nF, sensed at BAT+ (before load-share FET) |
 | BOOT/SELECT btn | 0* | to GND, strapping-canonical |
-| UP btn | 21 | to GND, internal pullup |
-| DOWN btn | 47 | to GND, internal pullup |
+| DOWN btn | 21 | to GND, internal pullup; RTC_GPIO21, sole deep-sleep wake button (rev B swap) |
+| UP btn | 47 | to GND, internal pullup; no RTC alias, cannot deep-sleep-wake |
 | Buzzer gate | 15 | AO3400A low-side, LEDC PWM ~2.7kHz |
 | Vibra gate | 16 | AO3400A low-side |
 | Status LED | 48 | 1k series, active high |

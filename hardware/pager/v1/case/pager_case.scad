@@ -113,7 +113,7 @@ BTN_NUB_D    = 3.6;    // plunger nub (slides in BTN_HOLE_D)
 BTN_FLANGE_D = 5.2;    // retention flange under the face (> BTN_HOLE_D)
 BTN_SKIRT_D  = 7.4;    // down-stop skirt OD (lands on bare PCB around the switch)
 BTN_PROUD    = 1.0;    // nub protrusion above the outer face
-btn_pts = [ mb(36,37.5), mb(48,37.5), mb(60,37.5) ];  // BOOT, UP, DOWN
+btn_pts = [ mb(36,37.5), mb(48,37.5), mb(60,37.5) ];  // BOOT, DOWN, UP (rev B: DOWN=SW403 middle, UP=SW404 right)
 
 // ---- Other front-face openings (board coords -> model) ----
 RESET_PT   = mb(79, 46.3);   RESET_D  = 1.2;

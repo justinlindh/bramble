@@ -173,9 +173,12 @@ under the panel-glass keepout (nothing taller than ~1mm under the glass footprin
 `EN` (WROOM pin 3, chip reset) has R401 10k pullup to `+3V3` and C403 1uF to GND for a
 clean power-on reset. SW401 (RESET) shorts `EN` to GND through a case pinhole. `BOOT` is
 GPIO0, the strapping-canonical boot select, pulled to GND by SW402 (front-face plunger).
-UP (`BTN_UP`, GPIO21) and DOWN (`BTN_DOWN`, GPIO47) use internal pullups and their tacts
-short to GND (SW403/SW404). All four TS-1187A tacts are top-push, contacts grouped {1,2}
-vs {3,4} (DESIGN "HMI").
+DOWN (`BTN_DOWN`, GPIO21, SW403 middle front plunger) and UP (`BTN_UP`, GPIO47, SW404
+rightmost plunger; BOOT/SW402 is the leftmost of the three) use internal pullups and their tacts short to GND. DOWN sits on GPIO21
+deliberately: only RTC GPIOs 0-21 can wake the ESP32-S3 from deep sleep and GPIO47 has
+no RTC alias, so the primary scroll/wake button gets the RTC-capable pin (rev B pre-fab
+swap; UP cannot deep-sleep-wake, accepted trade). All four TS-1187A tacts are top-push,
+contacts grouped {1,2} vs {3,4} (DESIGN "HMI").
 
 ## Buzzer / vibra low-side drivers
 

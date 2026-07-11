@@ -42,7 +42,7 @@ and the 3.3V LDO. See `NET_TOPOLOGY.md` for the full power chain.
 | R109 | 100k | 0603 | C25803 | VBAT_SENSE, GND | Battery-sense divider bottom leg. Ratio unchanged if upgraded to 1M/1M. | -- |
 | D101 | SS34 Schottky | SMA | C8678 | VSYS (K), VBUS (A) | Load-share OR diode: passes VBUS to VSYS when USB present so termination is clean. | SMA cathode band = VSYS. |
 | Q101 | AO3401A P-channel MOSFET | SOT-23 | C15127 | VBUS (gate 1), VSYS (source 2), BAT_PLUS (drain 3) | Load-share pass FET. USB present pulls gate high (VBUS): FET off, cell isolated, load runs from VBUS. USB absent: gate low, cell feeds VSYS. | AO3401A SOT-23: 1 G, 2 S, 3 D. |
-| U103 | DW01A cell protection IC | SOT-23-6 | C351410 | DW01_OD (1), GND (2/VSS), DW01_OC (3), DW01A VCC node (VCC), BAT_MINUS (sense) | Overcharge / overdischarge / overcurrent monitor. Drives the FS8205A gates. Kept even with protected cells. | DW01A SOT-23-6 standard pinout. |
+| U103 | DW01A cell protection IC | SOT-23-6 | C351410 | DW01_OD (1), GND (2/CS current sense), DW01_OC (3), TD NC (4), DW01A VCC node (5/VCC), BAT_MINUS (6/VSS) | Overcharge / overdischarge / overcurrent monitor. Drives the FS8205A gates. Kept even with protected cells. | DW01A SOT-23-6 standard pinout. |
 | U104 | FS8205A dual N-MOSFET | SOT-23-6 | C2830320 | BAT_MINUS (S1 1), shared drain (D 2/5), GND (S2 3), DW01_OC (G2 4), DW01_OD (G1 6) | Back-to-back protection FETs between cell- and pack GND. | TECH PUBLIC datasheet p.1: NONSTANDARD pinout 1=S1 2=D 3=S2 4=G2 5=D 6=G1 (differs from classic Fortune 8205A). Netlist-confirmed: S1=BAT_MINUS, S2=GND, G1=DW01 OD, G2=DW01 OC. |
 | U105 | XC6220B331MR-G LDO | SOT-23-5 | C86534 | VSYS (VIN 1, CE 3), GND (VSS 2), +3V3 (VOUT 5), NC (4) | 3.3V 1A LDO, ~100mV dropout @500mA, 8uA IQ. CE tied to VIN (never floats). Genuine Torex only. | Torex pin assignment p.2: 1 VIN 2 VSS 3 CE 4 NC 5 VOUT. |
 | LED101 | Red LED (CHRG) | 0603 | C2286 | CHRG_LED, GND | Charge-in-progress indicator, from VBUS via R104. | -- |
@@ -111,8 +111,8 @@ LED, and the I2C debug header.
 | R401 | 10k | 0603 | C25804 | +3V3, EN | EN pullup. | -- |
 | SW401 | TS-1187A tact (RESET) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | EN (1/2), GND (3/4) | RESET: shorts EN to GND. Actuated through a case pinhole. | XKB drawing: TOP-push 2.0mm plunger, 0.25mm travel; contacts {1,2}|{3,4}. |
 | SW402 | TS-1187A tact (BOOT) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BOOT (1/2), GND (3/4) | BOOT/SELECT on GPIO0 (strapping-canonical), to GND. Front-face plunger. | Same as SW401. |
-| SW403 | TS-1187A tact (UP) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BTN_UP (1/2), GND (3/4) | UP button on GPIO21, internal pullup. Front-face plunger. | Same as SW401. |
-| SW404 | TS-1187A tact (DOWN) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BTN_DOWN (1/2), GND (3/4) | DOWN button on GPIO47, internal pullup. Front-face plunger. | Same as SW401. |
+| SW403 | TS-1187A tact (DOWN) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BTN_DOWN (1/2), GND (3/4) | DOWN button on GPIO21 (RTC-capable: deep-sleep wake), internal pullup. Front-face plunger. | Same as SW401. |
+| SW404 | TS-1187A tact (UP) | XKB 5.1x5.1x1.5mm top-push SMD | C318884 | BTN_UP (1/2), GND (3/4) | UP button on GPIO47 (no RTC alias: cannot deep-sleep-wake), internal pullup. Front-face plunger. | Same as SW401. |
 | BZ1 | MLT-8530 magnetic buzzer | 8.5x8.5mm SMD | C94599 | +3V3 (1), Q401 drain (2) | Pager alert tone. LEDC PWM ~2.7kHz through the Q401 low-side. | Huaneng p.2/p.4: + and - leads adjacent on one edge, dummies opposite, sound port on the dummy side. |
 | Q401 | AO3400A N-channel MOSFET | SOT-23 | C20917 | BZ gate node (gate 1), GND (source 2), buzzer low side (drain 3) | Buzzer low-side switch from GPIO15. | AO3400A SOT-23: 1 G, 2 S, 3 D. |
 | R402 | 100R | 0603 | C22775 | BUZ_GATE, Q401 gate node | Gate series resistor. | -- |

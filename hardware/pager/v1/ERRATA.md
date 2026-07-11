@@ -85,6 +85,25 @@ and the `DESIGN.md` do-not-regress invariants.
 These are dispositions, not open gates: they are accepted as-is but must be re-checked if
 the layout or the fab's capability changes.
 
+- **Standby battery-drain floor ~25-30uA (accepted, rev B review).** The always-connected
+  200k VBAT_SENSE divider (R108/R109) plus SS34 reverse leakage set the floor. Acceptable
+  for the v1 duty cycle; if deep-sleep battery life becomes a priority, high-side-switch
+  the divider in a later rev.
+
+- **USB-unplug handover sag (accepted, rev B review).** The 100k VBUS pulldown leaves the
+  Q101 power-path FET off for up to ~1s after unplug; the rail rides Q101's body diode
+  with ~0.4V sag meanwhile. Functionally fine; note for brownout-sensitive firmware.
+
+- **DW01A CS series resistor omitted (deferred, rev B review).** The canonical DW01A
+  application adds 1k in series with CS for transient robustness; U103 CS ties directly
+  to GND. Adding it means placing a new 0603 inside the densest cluster on the board
+  (threaded by DW01_OC/OD) and was judged not worth the rework risk; countless commercial
+  packs ship the direct-tie variant. Revisit only if a layout reshuffle opens space.
+
+- **MCU decoupling distance (accepted, rev B review).** C401/C402 sit ~8mm from the
+  module 3V3 pin (pad 2). The WROOM module has internal decoupling; moving the caps into
+  the saturated escape fan was judged not worth the risk.
+
 - **JLCPCB hole-to-copper clearance: margin partially restored to 0.23mm (was relaxed to
   0.2mm).** The stricter default flagged track-to-via-hole violations that were originally
   waived at a 0.2mm board-wide rule (within JLCPCB's 2-layer via capability, so always
