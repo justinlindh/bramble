@@ -161,8 +161,16 @@ export interface SimState {
   selectedNodeId: string | null;
   // RSSI/SNR per-link quality tracking
   linkQuality: Map<string, LinkQuality>;
-  // Per-firmware-node device state for the pager device view
+  // Per-firmware-node device state for the pager device view, keyed by the
+  // node's emu-link hello id (same id the mesh uses).
   devices: Map<string, DeviceState>;
+  // Firmware hello ids in attach order. The gosim supervisor spawns firmware
+  // instances strictly in declaration order (waitAttach per instance), so the
+  // i-th firmware join is process label "<label>-i"; this lets the UI route the
+  // supervisor's stdout console (tagged with the process label) to the device
+  // keyed by its hello id (tagged on fb/ind). See gosim supervisor.go /
+  // extnode.go.
+  firmwareOrder: string[];
 }
 
 // Actions for the reducer
