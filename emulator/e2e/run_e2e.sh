@@ -8,9 +8,12 @@
 # outside the package that owns its devDependencies), makes sure chromium is
 # installed, then runs the suite. globalSetup.ts/globalTeardown.ts (see
 # playwright.config.ts) own booting and killing the actual gosim+firmware
-# stack; this script's trap is a last-resort safety net matching
-# emulator/scripts/smoke_live.sh and emulator/ci/run_scenarios.sh, in case
-# Playwright itself is killed before its own teardown runs.
+# stack; this script's trap is a last-resort safety net in case Playwright
+# itself is killed before its own teardown runs. It is scoped to ONLY the pid
+# this run's globalSetup recorded (emulator/e2e/.run/gosim.pid) -- a
+# process-group kill of that one pid, not a name-wide pkill -- so it never
+# touches an unrelated gosim/firmware-node instance running the same binary
+# on a different port (e.g. a developer's live `make run`).
 #
 # Prerequisites (built by the `make e2e` target's node/broker/ui deps):
 #   emulator/node/build/bramble-node.elf, simulator/gosim/bramble-gosim,
@@ -30,9 +33,28 @@ red()   { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 info()  { printf '  %s\n' "$*"; }
 
+# GOSIM_PID_FILE mirrors lib/stack.ts's PID_FILE: the pid of the gosim THIS
+# run's globalSetup spawned (gosim's own process group leader; firmware node
+# children inherit that group, see stack.ts's header comment). Normal runs
+# never reach this trap with the file still present -- globalTeardown.ts
+# already reaped it and removed the file -- so this only fires as a fallback
+# when Playwright itself got killed first.
+GOSIM_PID_FILE="$E2E_DIR/.run/gosim.pid"
+
 cleanup() {
-    pkill -f "$NODE_BIN" 2>/dev/null || true
-    pkill -f "$GOSIM_BIN" 2>/dev/null || true
+    if [ -f "$GOSIM_PID_FILE" ]; then
+        local pid
+        pid="$(cat "$GOSIM_PID_FILE" 2>/dev/null || true)"
+        if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+            # Negative pid = kill the whole process group (gosim + any
+            # firmware node children), never any unrelated process elsewhere
+            # that merely happens to share the binary path.
+            kill -TERM "-$pid" 2>/dev/null || true
+            sleep 0.2
+            kill -KILL "-$pid" 2>/dev/null || true
+        fi
+        rm -f "$GOSIM_PID_FILE"
+    fi
 }
 trap cleanup EXIT INT TERM
 

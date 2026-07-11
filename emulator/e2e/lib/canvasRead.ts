@@ -52,18 +52,33 @@ export async function readCanvasGrid(page: Page, nodeId: string): Promise<BitGri
   return toGrid(await readCanvasRGBA(page, nodeId));
 }
 
-export type FillClass = 'black' | 'white' | 'mixed';
+export type FillClass = 'black' | 'white' | 'mixed' | 'unpainted';
+
+// A never-painted canvas's backing store is fully-transparent RGBA (0,0,0,0):
+// alpha 0. Any putImageData call the app makes (flash fills and real content
+// alike) always writes fully-opaque pixels (alpha 255), so a small alpha
+// threshold cleanly separates "nothing has been drawn here yet" from a real
+// painted frame, including a genuine black flash fill (#111310, alpha 255)
+// which otherwise reads identically to blank transparent black on the red
+// channel alone.
+const ALPHA_THRESHOLD = 8;
 
 // classifyFill reports whether a frame is a uniform inversion-flash fill
-// (all-black or all-white) or genuine mixed content (ink and paper pixels
-// both present, i.e. real rendered glyphs/UI).
+// (all-black or all-white), genuine mixed content (ink and paper pixels both
+// present, i.e. real rendered glyphs/UI), or 'unpainted' -- the canvas's
+// pristine pre-paint state, which must never be mistaken for a real black
+// flash (see canvasRead.ts module comment / display-correctness.spec.ts).
 export function classifyFill(rgba: number[]): FillClass {
   let sawInk = false;
   let sawPaper = false;
+  let sawPainted = false;
   for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < ALPHA_THRESHOLD) continue; // transparent: not yet painted
+    sawPainted = true;
     if (rgba[i] < INK_THRESHOLD) sawInk = true;
     else sawPaper = true;
     if (sawInk && sawPaper) return 'mixed';
   }
+  if (!sawPainted) return 'unpainted';
   return sawInk ? 'black' : 'white';
 }
