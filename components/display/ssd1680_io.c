@@ -164,17 +164,28 @@ void display_flush(void) {
     if (epd_wait_busy(EPD_BUSY_CMD_TIMEOUT_MS) != 0)
         goto out; /* no panel? skip quietly; bring-up flag, not a crash */
 
-    uint32_t next_wait_ms = EPD_BUSY_CMD_TIMEOUT_MS;
+    bool refreshing = false; /* previous op was master activation */
     for (size_t i = 0; i < n_ops; i++) {
-        /* Never send a command while BUSY is high (p.8 note 5-4). The op
-         * after master activation inherits the refresh duration budget. */
-        if (epd_wait_busy(next_wait_ms) != 0)
+        /* Never send a command while BUSY is high (p.8 note 5-4). */
+        if (refreshing) {
+            /* The panel drives its waveform for busy_ms (seconds on a
+             * full refresh) and does not need the SPI bus meanwhile:
+             * CS is idle, so release g_spi_mutex and let the radio run,
+             * then retake it for the remaining ops (the deep-sleep op). */
+            if (g_spi_mutex)
+                xSemaphoreGive(g_spi_mutex);
+            int rc = epd_wait_busy(busy_ms + EPD_BUSY_REFRESH_MARGIN_MS);
+            if (g_spi_mutex)
+                xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
+            if (rc != 0)
+                goto out;
+            refreshing = false;
+        } else if (epd_wait_busy(EPD_BUSY_CMD_TIMEOUT_MS) != 0) {
             goto out;
+        }
         epd_write_cmd(ops[i].cmd);
         epd_write_data(ops[i].data, ops[i].len);
-        next_wait_ms = (ops[i].cmd == SSD1680_CMD_MASTER_ACTIVATE)
-                           ? busy_ms + EPD_BUSY_REFRESH_MARGIN_MS
-                           : EPD_BUSY_CMD_TIMEOUT_MS;
+        refreshing = (ops[i].cmd == SSD1680_CMD_MASTER_ACTIVATE);
         /* No wait after the final deep-sleep op: BUSY stays high in deep
          * sleep and the panel is done until the next flush. */
     }
