@@ -1,0 +1,21 @@
+{
+  "name": "emulator-3-pagers",
+  "mode": "deterministic",
+  "duration_ms": 120000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node",
+      "count": 3,
+      "positions": [[0, 0], [100, 0], [50, 80]],
+      "label": "pager"
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}
