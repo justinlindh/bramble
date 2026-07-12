@@ -23,7 +23,7 @@ extern "C" {
 
 /* Handler for one inbound message type. msg is owned by emu_link and is
  * only valid for the duration of the call. */
-typedef void (*emu_link_handler_t)(const cJSON *msg, void *ctx);
+typedef void (*emu_link_handler_t)(const cJSON* msg, void* ctx);
 
 /* Connects to the broker named by the EMU_BROKER env var and sends the
  * hello message (node id, firmware version, caps, protocol version 1).
@@ -31,19 +31,19 @@ typedef void (*emu_link_handler_t)(const cJSON *msg, void *ctx);
  * Returns 0 on success, negative on failure: EMU_BROKER unset or malformed,
  * a dial/connect failure, or emu_link is already connected. Never crashes
  * on a bad or missing EMU_BROKER. */
-int emu_link_connect(const char *node_id, const char *caps_csv);
+int emu_link_connect(const char* node_id, const char* caps_csv);
 
 /* Sets the firmware version string reported in the hello message's "fw"
  * field. Must be called before emu_link_connect (the value is captured when
  * hello is sent). ver is copied; a NULL ver is ignored. Without a call the
  * default compile-time EMU_LINK_FW_VERSION ("unknown") is used. */
-void emu_link_set_fw_version(const char *ver);
+void emu_link_set_fw_version(const char* ver);
 
 /* Registers h as the handler for inbound messages whose "t" field equals
  * type. One handler per type: a second registration for the same type
  * replaces the first. Returns 0 on success, negative if type or h is NULL,
  * type is too long, or the handler table is full. */
-int emu_link_on(const char *type, emu_link_handler_t h, void *ctx);
+int emu_link_on(const char* type, emu_link_handler_t h, void* ctx);
 
 /* Sends msg to the broker as one JSON line. Callers set msg's "t" field
  * before calling; emu_link_send takes ownership of msg (it is freed
@@ -51,7 +51,7 @@ int emu_link_on(const char *type, emu_link_handler_t h, void *ctx);
  * on different threads may call it concurrently. Returns 0 on success,
  * negative if msg is NULL, msg has no "t" field, or emu_link is not
  * connected or the write failed. */
-int emu_link_send(cJSON *msg);
+int emu_link_send(cJSON* msg);
 
 /* Disconnects, stops the reader thread, and releases all connection state.
  * Safe to call when not connected. After this returns, emu_link_connect

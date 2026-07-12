@@ -25,8 +25,8 @@ static uint8_t s_fb[SSD1680_FB_SIZE];
 /* Native controller RAM stream rebuilt at each flush: 1 = white. */
 static uint8_t s_ram[SSD1680_RAM_SIZE];
 
-static bool s_dirty;          /* any real pixel change since last refresh */
-static uint32_t s_refreshes;  /* emitted refreshes; 0 = first still pending */
+static bool s_dirty;         /* any real pixel change since last refresh */
+static uint32_t s_refreshes; /* emitted refreshes; 0 = first still pending */
 
 /* Snapshot of the fb at the last FULL refresh: the ghost baseline. Ghosting
  * accumulates from every partial since the last full clear, so the
@@ -97,7 +97,7 @@ void ssd1680_engine_init(void) {
 void ssd1680_engine_pixel(int x, int y, bool on) {
     if (x < 0 || x >= SSD1680_WIDTH || y < 0 || y >= SSD1680_HEIGHT)
         return;
-    uint8_t *byte = &s_fb[y * SSD1680_FB_STRIDE + x / 8];
+    uint8_t* byte = &s_fb[y * SSD1680_FB_STRIDE + x / 8];
     uint8_t mask = (uint8_t)(0x80u >> (x & 7)); /* MSB = leftmost pixel */
     uint8_t before = *byte;
     if (on)
@@ -108,7 +108,7 @@ void ssd1680_engine_pixel(int x, int y, bool on) {
         s_dirty = true;
 }
 
-const uint8_t *ssd1680_engine_fb(void) { return s_fb; }
+const uint8_t* ssd1680_engine_fb(void) { return s_fb; }
 
 /* ── native RAM stream ───────────────────────────────────────────────── */
 
@@ -129,8 +129,8 @@ static void build_ram_stream(void) {
      * (low 6 bits of each row's byte 15) are written white. */
     for (int gy = 0; gy < SSD1680_WIDTH; gy++) {
         int lx = SSD1680_MAP_LX(gy);
-        const uint8_t *lrow_base = s_fb; /* indexed per pixel below */
-        uint8_t *out = &s_ram[gy * SSD1680_RAM_STRIDE];
+        const uint8_t* lrow_base = s_fb; /* indexed per pixel below */
+        uint8_t* out = &s_ram[gy * SSD1680_RAM_STRIDE];
         for (int xb = 0; xb < SSD1680_RAM_STRIDE; xb++) {
             uint8_t b = 0xFF; /* white, covers the pad bits too */
             for (int bit = 0; bit < 8; bit++) {
@@ -140,7 +140,7 @@ static void build_ram_stream(void) {
                 int ly = SSD1680_MAP_LY(sx);
                 uint8_t lmask = (uint8_t)(0x80u >> (lx & 7));
                 if (lrow_base[ly * SSD1680_FB_STRIDE + lx / 8] & lmask)
-                    b &= (uint8_t)~(0x80u >> bit); /* black */
+                    b &= (uint8_t) ~(0x80u >> bit); /* black */
             }
             out[xb] = b;
         }
@@ -149,15 +149,14 @@ static void build_ram_stream(void) {
 
 /* ── flush / command stream ──────────────────────────────────────────── */
 
-static size_t emit(size_t i, uint8_t cmd, const uint8_t *data, size_t len) {
+static size_t emit(size_t i, uint8_t cmd, const uint8_t* data, size_t len) {
     s_ops[i].cmd = cmd;
     s_ops[i].data = data;
     s_ops[i].len = len;
     return i + 1;
 }
 
-ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t **ops, size_t *n_ops,
-                                       uint32_t *busy_ms) {
+ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t** ops, size_t* n_ops, uint32_t* busy_ms) {
     bool first = (s_refreshes == 0);
     if (!first && !s_dirty) {
         *ops = NULL;

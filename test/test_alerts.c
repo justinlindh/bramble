@@ -92,11 +92,7 @@ static void test_buzzer_vibra_schedule(void) {
      *   t=400 vibra off  (pulse done)
      *   t=550 buzzer off (beep 2 done) */
     const call_t expected[] = {
-        {'b', ALERT_BUZZER_HZ}, {'v', 1},
-        {'b', 0},
-        {'b', ALERT_BUZZER_HZ},
-        {'v', 0},
-        {'b', 0},
+        {'b', ALERT_BUZZER_HZ}, {'v', 1}, {'b', 0}, {'b', ALERT_BUZZER_HZ}, {'v', 0}, {'b', 0},
     };
     call_t seq[MAX_CALLS];
     int n = bv_seq(seq);
@@ -145,8 +141,12 @@ static void test_led_blinks_until_confirmed(void) {
     /* Each on is a pulse: an off follows within the period. */
     int on = 0, off = 0;
     for (int i = 0; i < s_ncalls; i++) {
-        if (s_calls[i].what != 'l') continue;
-        if (s_calls[i].value) on++; else off++;
+        if (s_calls[i].what != 'l')
+            continue;
+        if (s_calls[i].value)
+            on++;
+        else
+            off++;
     }
     TEST_ASSERT_TRUE(off >= on - 1);
 }
@@ -159,7 +159,8 @@ static void test_confirm_stops_the_blink(void) {
     /* Last LED transition is an off. */
     int last_led = -1;
     for (int i = 0; i < s_ncalls; i++)
-        if (s_calls[i].what == 'l') last_led = i;
+        if (s_calls[i].what == 'l')
+            last_led = i;
     TEST_ASSERT_TRUE(last_led >= 0);
     TEST_ASSERT_EQUAL_UINT32(0, s_calls[last_led].value);
     /* No further LED activity after confirm. */

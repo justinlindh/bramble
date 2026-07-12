@@ -47,7 +47,7 @@ void tearDown(void) {
     s_exit_hook = NULL;
 }
 
-static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms) {
+static void read_line_timeout(int fd, char* out, size_t out_sz, int deadline_ms) {
     size_t len = 0;
     out[0] = '\0';
     struct timeval start;
@@ -76,7 +76,7 @@ static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms)
     }
 }
 
-static void attach_and_drain_hello(const char *node_id) {
+static void attach_and_drain_hello(const char* node_id) {
     int fds[2];
     TEST_ASSERT_EQUAL_INT(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
     s_broker_fd = fds[0];
@@ -85,12 +85,12 @@ static void attach_and_drain_hello(const char *node_id) {
     read_line_timeout(s_broker_fd, hello, sizeof(hello), 2000);
 }
 
-static void send_btn(const char *id, const char *edge) {
-    cJSON *m = cJSON_CreateObject();
+static void send_btn(const char* id, const char* edge) {
+    cJSON* m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "t", "btn");
     cJSON_AddStringToObject(m, "id", id);
     cJSON_AddStringToObject(m, "edge", edge);
-    char *text = cJSON_PrintUnformatted(m);
+    char* text = cJSON_PrintUnformatted(m);
     cJSON_Delete(m);
     TEST_ASSERT_NOT_NULL(text);
     write_all(s_broker_fd, text, strlen(text));

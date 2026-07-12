@@ -22,8 +22,7 @@
 
 /* A known-good RMC sentence (same one test_gps.c uses): 48 07.038'N /
  * 011 31.000'E => lat 481173000e-7, lon 115166667e-7. */
-static const char *RMC =
-    "$GPRMC,123519,A,4807.038,N,01131.000,E,010.0,084.4,230394,003.1,W*6A";
+static const char* RMC = "$GPRMC,123519,A,4807.038,N,01131.000,E,010.0,084.4,230394,003.1,W*6A";
 
 static int s_broker_fd = -1;
 
@@ -50,7 +49,7 @@ void tearDown(void) {
     pthread_mutex_unlock(&s_mu);
 }
 
-static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms) {
+static void read_line_timeout(int fd, char* out, size_t out_sz, int deadline_ms) {
     size_t len = 0;
     out[0] = '\0';
     struct timeval start;
@@ -88,7 +87,7 @@ static bool wait_for_fix(int deadline_ms) {
     return gps_has_fix();
 }
 
-static void attach_and_drain_hello(const char *node_id) {
+static void attach_and_drain_hello(const char* node_id) {
     int fds[2];
     TEST_ASSERT_EQUAL_INT(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
     s_broker_fd = fds[0];
@@ -97,11 +96,11 @@ static void attach_and_drain_hello(const char *node_id) {
     read_line_timeout(s_broker_fd, hello, sizeof(hello), 2000);
 }
 
-static void write_nmea(const char *sentence) {
-    cJSON *m = cJSON_CreateObject();
+static void write_nmea(const char* sentence) {
+    cJSON* m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "t", "nmea");
     cJSON_AddStringToObject(m, "sentence", sentence);
-    char *text = cJSON_PrintUnformatted(m);
+    char* text = cJSON_PrintUnformatted(m);
     cJSON_Delete(m);
     TEST_ASSERT_NOT_NULL(text);
     write_all(s_broker_fd, text, strlen(text));
@@ -116,7 +115,7 @@ void test_gps_init_emits_gpsgate_on(void) {
 
     char line[256];
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
-    cJSON *m = cJSON_Parse(line);
+    cJSON* m = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(m);
     TEST_ASSERT_EQUAL_STRING("gpsgate", cJSON_GetObjectItem(m, "t")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(m, "on")));
@@ -126,7 +125,7 @@ void test_gps_init_emits_gpsgate_on(void) {
 /* --- a valid sentence while gated on updates the position + fires callback --- */
 static int s_cb_calls = 0;
 static bramble_position_t s_cb_last;
-static void fix_cb(const bramble_position_t *p, void *ctx) {
+static void fix_cb(const bramble_position_t* p, void* ctx) {
     (void)ctx;
     s_cb_calls++;
     s_cb_last = *p;
@@ -160,7 +159,7 @@ void test_gps_deinit_emits_gpsgate_off(void) {
 
     gps_deinit();
     read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000);
-    cJSON *m = cJSON_Parse(gate);
+    cJSON* m = cJSON_Parse(gate);
     TEST_ASSERT_NOT_NULL(m);
     TEST_ASSERT_EQUAL_STRING("gpsgate", cJSON_GetObjectItem(m, "t")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(m, "on")));
@@ -176,7 +175,7 @@ void test_gated_off_drops_nmea(void) {
     char gate[256];
     read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000); /* gpsgate on */
 
-    gps_deinit(); /* gate OFF */
+    gps_deinit();                                             /* gate OFF */
     read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000); /* gpsgate off */
 
     write_nmea(RMC);
@@ -217,7 +216,7 @@ void test_gps_set_enabled_toggles_gate(void) {
     /* Toggle OFF via the runtime seam. */
     TEST_ASSERT_EQUAL_INT(0, gps_set_enabled(false));
     read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000);
-    cJSON *off = cJSON_Parse(gate);
+    cJSON* off = cJSON_Parse(gate);
     TEST_ASSERT_NOT_NULL(off);
     TEST_ASSERT_EQUAL_STRING("gpsgate", cJSON_GetObjectItem(off, "t")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(off, "on")));
@@ -231,7 +230,7 @@ void test_gps_set_enabled_toggles_gate(void) {
     /* Toggle ON again: gpsgate on, and the retained callback resumes fixes. */
     TEST_ASSERT_EQUAL_INT(0, gps_set_enabled(true));
     read_line_timeout(s_broker_fd, gate, sizeof(gate), 2000);
-    cJSON *on = cJSON_Parse(gate);
+    cJSON* on = cJSON_Parse(gate);
     TEST_ASSERT_NOT_NULL(on);
     TEST_ASSERT_EQUAL_STRING("gpsgate", cJSON_GetObjectItem(on, "t")->valuestring);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(on, "on")));

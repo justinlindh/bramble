@@ -40,7 +40,7 @@ static uint8_t s_rx_len;
 static int16_t s_rx_rssi;
 static int8_t s_rx_snr;
 
-static void capture_rx(const uint8_t *data, uint8_t len, const radio_rx_info_t *info) {
+static void capture_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info) {
     memcpy(s_rx_data, data, len);
     s_rx_len = len;
     s_rx_rssi = info->rssi;
@@ -75,7 +75,7 @@ void tearDown(void) {
 
 /* --- helpers (mirrors test_emu_link.c) --------------------------------- */
 
-static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms) {
+static void read_line_timeout(int fd, char* out, size_t out_sz, int deadline_ms) {
     size_t len = 0;
     out[0] = '\0';
     struct timeval start;
@@ -106,7 +106,7 @@ static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms)
     }
 }
 
-static bool wait_for_calls(_Atomic int *counter, int want, int deadline_ms) {
+static bool wait_for_calls(_Atomic int* counter, int want, int deadline_ms) {
     for (int waited = 0; waited < deadline_ms; waited += 5) {
         if (atomic_load(counter) >= want)
             return true;
@@ -118,7 +118,7 @@ static bool wait_for_calls(_Atomic int *counter, int want, int deadline_ms) {
 /* Attaches one socketpair end as the node under test (emu_link's internal
  * double), returns the broker-side fd (stashed for tearDown), then swallows
  * the hello line and radio_init()s the node with the given config. */
-static void attach_and_init(const char *node_id, const radio_config_t *cfg) {
+static void attach_and_init(const char* node_id, const radio_config_t* cfg) {
     int fds[2];
     TEST_ASSERT_EQUAL_INT(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
     s_broker_fd = fds[0];
@@ -128,8 +128,8 @@ static void attach_and_init(const char *node_id, const radio_config_t *cfg) {
     TEST_ASSERT_EQUAL_INT(0, radio_init(cfg));
 }
 
-static void send_line(int fd, cJSON *obj) {
-    char *text = cJSON_PrintUnformatted(obj);
+static void send_line(int fd, cJSON* obj) {
+    char* text = cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
     TEST_ASSERT_NOT_NULL(text);
     TEST_ASSERT_EQUAL_INT(0, write_all(fd, text, strlen(text)));
@@ -148,13 +148,13 @@ static radio_config_t default_cfg(void) {
 /* ---------------------------------------------------------------------- */
 
 typedef struct {
-    const uint8_t *data;
+    const uint8_t* data;
     uint8_t len;
     int rc;
 } tx_arg_t;
 
-static void *tx_worker(void *arg) {
-    tx_arg_t *a = (tx_arg_t *)arg;
+static void* tx_worker(void* arg) {
+    tx_arg_t* a = (tx_arg_t*)arg;
     a->rc = radio_transmit_raw(a->data, a->len);
     return NULL;
 }
@@ -169,9 +169,8 @@ void test_tx_emits_correct_json_and_completes(void) {
     attach_and_init("pager-tx", &cfg);
     radio_set_tx_done_callback(capture_tx_done);
 
-    const uint8_t payload[22] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-                                 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-                                 0x10, 0x11, 0x12, 0x13, 0x14, 0xff};
+    const uint8_t payload[22] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+                                 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0xff};
     tx_arg_t a = {payload, sizeof(payload), -999};
     pthread_t worker;
     TEST_ASSERT_EQUAL_INT(0, pthread_create(&worker, NULL, tx_worker, &a));
@@ -179,7 +178,7 @@ void test_tx_emits_correct_json_and_completes(void) {
     /* Broker reads the tx message. */
     char line[1024];
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
-    cJSON *tx = cJSON_Parse(line);
+    cJSON* tx = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(tx);
     TEST_ASSERT_EQUAL_STRING("tx", cJSON_GetObjectItem(tx, "t")->valuestring);
 
@@ -191,7 +190,7 @@ void test_tx_emits_correct_json_and_completes(void) {
     TEST_ASSERT_FLOAT_WITHIN(0.01, 915.0, cJSON_GetObjectItem(tx, "freq")->valuedouble);
 
     /* Payload round-trips through base64. */
-    const char *b64 = cJSON_GetObjectItem(tx, "payload")->valuestring;
+    const char* b64 = cJSON_GetObjectItem(tx, "payload")->valuestring;
     uint8_t decoded[256];
     size_t dlen = b64_decode(b64, decoded, sizeof(decoded));
     TEST_ASSERT_EQUAL_UINT(sizeof(payload), dlen);
@@ -211,7 +210,7 @@ void test_tx_emits_correct_json_and_completes(void) {
     cJSON_Delete(tx);
 
     /* Broker prices time-on-air; node's tx-done fires and it returns to RX. */
-    cJSON *done = cJSON_CreateObject();
+    cJSON* done = cJSON_CreateObject();
     cJSON_AddStringToObject(done, "t", "txdone");
     cJSON_AddNumberToObject(done, "toa_ms", toa_ms);
     send_line(s_broker_fd, done);
@@ -253,7 +252,7 @@ void test_rx_dispatches_to_callback_with_rssi_snr(void) {
     char b64[16];
     b64_encode(frame, sizeof(frame), b64, sizeof(b64));
 
-    cJSON *rx = cJSON_CreateObject();
+    cJSON* rx = cJSON_CreateObject();
     cJSON_AddStringToObject(rx, "t", "rx");
     cJSON_AddStringToObject(rx, "payload", b64);
     cJSON_AddNumberToObject(rx, "rssi", -87);
@@ -276,7 +275,7 @@ void test_rx_without_callback_is_dropped_not_crash(void) {
     const uint8_t frame[3] = {1, 2, 3};
     char b64[16];
     b64_encode(frame, sizeof(frame), b64, sizeof(b64));
-    cJSON *rx = cJSON_CreateObject();
+    cJSON* rx = cJSON_CreateObject();
     cJSON_AddStringToObject(rx, "t", "rx");
     cJSON_AddStringToObject(rx, "payload", b64);
     send_line(s_broker_fd, rx);
@@ -294,23 +293,23 @@ typedef struct {
     bool reply_busy;
 } cad_broker_t;
 
-static void *cad_broker_thread(void *arg) {
-    cad_broker_t *b = (cad_broker_t *)arg;
+static void* cad_broker_thread(void* arg) {
+    cad_broker_t* b = (cad_broker_t*)arg;
     char line[512];
     read_line_timeout(b->fd, line, sizeof(line), 2000);
-    cJSON *cad = cJSON_Parse(line);
+    cJSON* cad = cJSON_Parse(line);
     if (!cad)
         return NULL;
     /* Verify it is a cad request before answering. */
-    const cJSON *t = cJSON_GetObjectItem(cad, "t");
+    const cJSON* t = cJSON_GetObjectItem(cad, "t");
     bool is_cad = cJSON_IsString(t) && strcmp(t->valuestring, "cad") == 0;
     cJSON_Delete(cad);
     if (!is_cad)
         return NULL;
-    cJSON *res = cJSON_CreateObject();
+    cJSON* res = cJSON_CreateObject();
     cJSON_AddStringToObject(res, "t", "cadres");
     cJSON_AddBoolToObject(res, "busy", b->reply_busy);
-    char *text = cJSON_PrintUnformatted(res);
+    char* text = cJSON_PrintUnformatted(res);
     cJSON_Delete(res);
     write_all(b->fd, text, strlen(text));
     write_all(b->fd, "\n", 1);

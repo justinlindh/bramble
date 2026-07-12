@@ -61,12 +61,12 @@ static void enqueue(ui_button_t e) {
     pthread_mutex_unlock(&s_btn_mu);
 }
 
-static void btn_handler(const cJSON *msg, void *ctx) {
+static void btn_handler(const cJSON* msg, void* ctx) {
     (void)ctx;
-    const cJSON *id = cJSON_GetObjectItem(msg, "id");
+    const cJSON* id = cJSON_GetObjectItem(msg, "id");
     if (!cJSON_IsString(id) || !id->valuestring)
         return;
-    const char *name = id->valuestring;
+    const char* name = id->valuestring;
 
     if (strcmp(name, "reset") == 0) {
         /* Clean exit so the supervisor restarts the node. */
@@ -79,7 +79,7 @@ static void btn_handler(const cJSON *msg, void *ctx) {
 
     /* Dispatch on the press (down) edge only; releases are not events. A
      * missing edge field is treated as a press for forgiving broker input. */
-    const cJSON *edge = cJSON_GetObjectItem(msg, "edge");
+    const cJSON* edge = cJSON_GetObjectItem(msg, "edge");
     if (cJSON_IsString(edge) && edge->valuestring && strcmp(edge->valuestring, "down") != 0)
         return;
 
