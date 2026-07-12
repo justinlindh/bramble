@@ -55,6 +55,28 @@ if [[ $FRESH -eq 1 || ! -f "$FLASH_IMG" || "$BUILD_DIR/bramble.bin" -nt "$FLASH_
     (cd "$BUILD_DIR" && python -m esptool --chip esp32s3 merge_bin \
         --output flash_qemu.bin --fill-flash-size 8MB \
         --flash_mode dio --flash_size 8MB --flash_freq 80m @flash_args)
+
+    # Seed conn_mode=BLE into the freshly merged image's NVS partition so boot
+    # skips the unmodeled WiFi PHY and reaches the main loop (see
+    # nvs-seed-ble.csv). QEMU-image-only: this rewrites the merged flash_qemu.bin
+    # at the nvs offset (0x9000, per partitions.csv), never a real board, and
+    # only on a (re)merge -- runtime NVS writes from prior runs are untouched
+    # because a reused image is not re-merged.
+    NVS_SEED="$BUILD_DIR/nvs_seed_ble.bin"
+    NVS_CSV="$SCRIPT_DIR/nvs-seed-ble.csv"
+    NVS_GEN="${IDF_PATH:-}/components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py"
+    if [[ ! -f "$NVS_SEED" || "$NVS_CSV" -nt "$NVS_SEED" ]]; then
+        if [[ -f "$NVS_GEN" ]]; then
+            python3 "$NVS_GEN" generate "$NVS_CSV" "$NVS_SEED" 0x5000 >/dev/null
+        else
+            echo "warning: nvs_partition_gen.py not found (source the IDF env);" \
+                 "conn_mode=BLE seed NOT applied -- boot will wedge in the WiFi PHY" >&2
+        fi
+    fi
+    if [[ -f "$NVS_SEED" ]]; then
+        echo "seeding conn_mode=BLE into QEMU image NVS (0x9000)..."
+        dd if="$NVS_SEED" of="$FLASH_IMG" bs=1 seek=$((0x9000)) conv=notrunc status=none
+    fi
 fi
 
 # eFuse image with ADC calib version set; without it boot wedges pre-app_main

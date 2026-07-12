@@ -41,17 +41,25 @@
  *     MISO is enabled, push captured bytes back via the IN channel. See the
  *     CS-routing / channel-disambiguation notes below.
  *
- * CS routing (the seam left for P2.4/P2.5). The pager mixes CS styles:
+ * CS routing (implemented in P2.4a, extended by P2.5). The pager mixes CS
+ * styles, and two slaves now share the bus (SX1262 radio + display stub), so
+ * every transfer must go to exactly one:
  *   - Radio (sx1262.c) uses MANUAL software CS: spics_io_num = -1 and the driver
  *     toggles gpio_set_level(GPIO8) by hand; the P2.2 bramble_gpio overlay
- *     already observes GPIO8. So the radio slave's select is derivable from the
- *     GPIO8 level, NOT from this peripheral's CS lines.
+ *     observes GPIO8. So the radio slave's select is derived from the GPIO8
+ *     level read back through bramble_gpio_out_level(), NOT from this
+ *     peripheral's CS lines. When GPIO8 is low the transfer routes to the
+ *     register-accurate SX1262 slave (TYPE_BRAMBLE_SX1262, defined below).
  *   - Display (ssd1680.c) uses HARDWARE CS: spics_io_num = GPIO4, driven by this
- *     peripheral through SPI_MISC_REG.CS0_DIS and the GPIO matrix. We drive the
- *     SSI_GPIO_CS out lines (as hw/ssi/esp32s3_spi.c does) around every transfer
- *     so a real hardware-CS slave can be selected in P2.5. For P2.3 a single
- *     stub slave sits on the bus and answers every ssi_transfer regardless of
- *     CS, which is all that is needed to unwedge boot.
+ *     peripheral through SPI_MISC_REG.CS0_DIS and the GPIO matrix. We still
+ *     drive the SSI_GPIO_CS out lines (as hw/ssi/esp32s3_spi.c does) for a
+ *     future real hardware-CS slave, but for now, whenever GPIO8 is high (radio
+ *     deselected) the transfer routes to the stub display slave. The SX1262
+ *     slave (register-accurate, TYPE_BRAMBLE_SX1262) is defined below.
+ * Both slaves are SSI_CS_LOW; bramble_gpspi2_route drives their SSI_GPIO_CS
+ * inputs from the GPIO8 decision so exactly one answers each ssi_transfer.
+ * P2.5 replaces the stub with a real SSD1680 selected off the hardware CS0
+ * line; the radio routing here is unchanged by that.
  */
 
 #include "qemu/osdep.h"
@@ -65,6 +73,7 @@
 #include "hw/ssi/ssi.h"
 #include "hw/dma/esp_gdma.h"
 #include "hw/xtensa/bramble_gpspi2.h"
+#include "hw/xtensa/bramble_gpio.h"
 #include "hw/misc/esp32s3_reg.h"
 #include "hw/xtensa/esp32s3_intc.h"
 
@@ -138,8 +147,10 @@ struct BrambleSpiStub {
     SSIPeripheral parent_obj;
 };
 
-/* Drain MOSI, return a benign fixed MISO byte. Correct radio/display responses
- * are P2.4 (SX1262) and P2.5 (SSD1680); here we only need transfers to end. */
+/* Drain MOSI, return a benign fixed MISO byte. This is now the DISPLAY path
+ * only: the radio has a register-accurate SX1262 slave (below) and is routed to
+ * it by CS. A correct SSD1680 slave is P2.5; here we only need the e-paper's
+ * transfers to end. */
 static uint32_t bramble_spi_stub_transfer(SSIPeripheral *dev, uint32_t val)
 {
     (void)dev;
@@ -160,6 +171,11 @@ static void bramble_spi_stub_class_init(ObjectClass *klass, void *data)
     SSIPeripheralClass *k = SSI_PERIPHERAL_CLASS(klass);
     k->transfer = bramble_spi_stub_transfer;
     k->realize = bramble_spi_stub_realize;
+    /* CS-gated so it only answers when selected: with the SX1262 now sharing
+     * the bus, an always-on (SSI_CS_NONE) stub would corrupt radio reads by
+     * OR-ing 0x00 into every byte. bramble_gpspi2 drives this slave's CS from
+     * the routing decision (radio deselected -> display selected). */
+    k->cs_polarity = SSI_CS_LOW;
 }
 
 static const TypeInfo bramble_spi_stub_info = {
@@ -167,6 +183,205 @@ static const TypeInfo bramble_spi_stub_info = {
     .parent = TYPE_SSI_PERIPHERAL,
     .instance_size = sizeof(BrambleSpiStub),
     .class_init = bramble_spi_stub_class_init,
+};
+
+/* ---- SX1262 LoRa radio SSI slave (P2.4a) --------------------------------- */
+/*
+ * Register-accurate model of the Semtech SX1262 the pager's radio driver
+ * (components/radio/sx1262.c) talks to over SPI2. It replaces the 0x00 stub for
+ * radio-routed transfers so radio_init's command stream is answered correctly,
+ * register/buffer reads round-trip, and P2.4b can layer emu-link TX/RX + DIO1
+ * IRQ on the state kept here.
+ *
+ * SX1262 SPI framing (datasheet section 13): every transfer is CS-low,
+ * [opcode][params/data...], CS-high. The chip returns a status byte on the
+ * bytes clocked AFTER the opcode; command data follows. A per-transaction byte
+ * cursor (reset by set_cs on CS assert) decodes each opcode the driver issues:
+ *
+ *   WriteRegister 0x0D  [addrH][addrL][data..]      -> latch into reg file
+ *   ReadRegister  0x1D  [addrH][addrL][NOP][data..] -> status then reg file
+ *   WriteBuffer   0x0E  [offset][data..]            -> latch into data buffer
+ *   ReadBuffer    0x1E  [offset][NOP][data..]       -> status then data buffer
+ *   GetStatus     0xC0  [status]                    -> status byte
+ *   GetIrqStatus  0x12  [status][irqH][irqL]        -> pending IRQ flags
+ *   GetRxBufStatus 0x13 / GetPacketStatus 0x14      -> status then zeros
+ *   Set* / config commands                          -> accepted, mode latched
+ *
+ * BUSY (GPIO13) is served low by the P2.2 overlay; DIO1 (RX/TX-done IRQ) is not
+ * asserted here (over-the-air activity is P2.4b).
+ */
+
+/* SX1262 SPI op-codes (mirror components/radio/include/sx1262.h). */
+#define SX1262_CMD_SET_SLEEP        0x84
+#define SX1262_CMD_SET_STANDBY      0x80
+#define SX1262_CMD_SET_FS           0xC1
+#define SX1262_CMD_SET_TX           0x83
+#define SX1262_CMD_SET_RX           0x82
+#define SX1262_CMD_SET_CAD          0xC5
+#define SX1262_CMD_GET_STATUS       0xC0
+#define SX1262_CMD_WRITE_REGISTER   0x0D
+#define SX1262_CMD_READ_REGISTER    0x1D
+#define SX1262_CMD_WRITE_BUFFER     0x0E
+#define SX1262_CMD_READ_BUFFER      0x1E
+#define SX1262_CMD_GET_IRQ_STATUS   0x12
+#define SX1262_CMD_GET_RX_BUFF_STATUS 0x13
+#define SX1262_CMD_GET_PKT_STATUS   0x14
+
+/* Status byte (datasheet 13.5.1): [6:4]=chip mode, [3:1]=command status. */
+#define SX1262_MODE_STDBY_RC        0x2
+#define SX1262_MODE_FS              0x4
+#define SX1262_MODE_RX              0x5
+#define SX1262_MODE_TX              0x6
+#define SX1262_CMD_STATUS_OK        0x2  /* benign non-error; init never checks */
+
+#define SX1262_REGFILE_SIZE         0x1000 /* covers OCP 0x08E7, sync 0x0740 */
+#define SX1262_BUFFER_SIZE          0x100  /* 256-byte TX/RX data buffer */
+
+#define TYPE_BRAMBLE_SX1262 "bramble.sx1262"
+OBJECT_DECLARE_SIMPLE_TYPE(BrambleSx1262State, BRAMBLE_SX1262)
+
+struct BrambleSx1262State {
+    SSIPeripheral parent_obj;
+
+    /* Persistent chip state (survives across transactions). */
+    uint8_t regs[SX1262_REGFILE_SIZE];
+    uint8_t buffer[SX1262_BUFFER_SIZE];
+    uint8_t mode;          /* current chip mode (SX1262_MODE_*) */
+    uint16_t irq_status;   /* pending IRQ flags (0 until P2.4b drives RX/TX) */
+
+    /* Per-transaction cursor, reset on CS assert. */
+    uint32_t byte_idx;     /* bytes seen since CS went low (opcode == 0) */
+    uint8_t opcode;        /* latched at byte 0 */
+    uint16_t reg_addr;     /* running address for Read/WriteRegister */
+    uint8_t buf_offset;    /* running offset for Read/WriteBuffer */
+};
+
+static uint8_t bramble_sx1262_status(BrambleSx1262State *s)
+{
+    return (uint8_t)((s->mode << 4) | (SX1262_CMD_STATUS_OK << 1));
+}
+
+/* CS transition. ssi_cs_default passes the raw line level; SSI_CS_LOW means the
+ * chip is selected while the line is low, so a low level starts a fresh
+ * transaction (reset the byte cursor). */
+static int bramble_sx1262_set_cs(SSIPeripheral *dev, bool level)
+{
+    BrambleSx1262State *s = BRAMBLE_SX1262(dev);
+    if (!level) {
+        s->byte_idx = 0;
+    }
+    return 0;
+}
+
+static uint32_t bramble_sx1262_transfer(SSIPeripheral *dev, uint32_t val)
+{
+    BrambleSx1262State *s = BRAMBLE_SX1262(dev);
+    uint8_t in = val & 0xff;
+    uint32_t idx = s->byte_idx++;
+    uint8_t out = bramble_sx1262_status(s);
+
+    /* Byte 0 is always the opcode; the chip clocks out its status meanwhile. */
+    if (idx == 0) {
+        s->opcode = in;
+        s->reg_addr = 0;
+        s->buf_offset = 0;
+        switch (in) { /* mode-changing commands take effect for status. */
+        case SX1262_CMD_SET_FS:  s->mode = SX1262_MODE_FS; break;
+        case SX1262_CMD_SET_TX:  s->mode = SX1262_MODE_TX; break;
+        case SX1262_CMD_SET_RX:
+        case SX1262_CMD_SET_CAD: s->mode = SX1262_MODE_RX; break;
+        case SX1262_CMD_SET_SLEEP:
+        case SX1262_CMD_SET_STANDBY:
+        default: s->mode = SX1262_MODE_STDBY_RC; break;
+        }
+        return bramble_sx1262_status(s);
+    }
+
+    switch (s->opcode) {
+    case SX1262_CMD_WRITE_REGISTER:
+        if (idx == 1) {
+            s->reg_addr = (uint16_t)in << 8;
+        } else if (idx == 2) {
+            s->reg_addr |= in;
+        } else {
+            s->regs[s->reg_addr % SX1262_REGFILE_SIZE] = in;
+            s->reg_addr++;
+        }
+        break;
+    case SX1262_CMD_READ_REGISTER:
+        if (idx == 1) {
+            s->reg_addr = (uint16_t)in << 8;
+        } else if (idx == 2) {
+            s->reg_addr |= in;
+        } else if (idx == 3) {
+            /* NOP byte: chip returns status. */
+        } else {
+            out = s->regs[s->reg_addr % SX1262_REGFILE_SIZE];
+            s->reg_addr++;
+        }
+        break;
+    case SX1262_CMD_WRITE_BUFFER:
+        if (idx == 1) {
+            s->buf_offset = in;
+        } else {
+            s->buffer[s->buf_offset++] = in;
+        }
+        break;
+    case SX1262_CMD_READ_BUFFER:
+        if (idx == 1) {
+            s->buf_offset = in;
+        } else if (idx == 2) {
+            /* NOP byte: chip returns status. */
+        } else {
+            out = s->buffer[s->buf_offset++];
+        }
+        break;
+    case SX1262_CMD_GET_IRQ_STATUS:
+        if (idx == 2) {
+            out = (s->irq_status >> 8) & 0xff;
+        } else if (idx == 3) {
+            out = s->irq_status & 0xff;
+        }
+        break;
+    case SX1262_CMD_GET_STATUS:
+    case SX1262_CMD_GET_RX_BUFF_STATUS:
+    case SX1262_CMD_GET_PKT_STATUS:
+        /* Byte 1 already returns status; later data bytes read 0 (no packet
+         * pending until P2.4b drives RX). */
+        if (idx >= 2) {
+            out = 0x00;
+        }
+        break;
+    default:
+        /* All Set/config commands: accept the parameter bytes, no readback. */
+        break;
+    }
+    return out;
+}
+
+static void bramble_sx1262_realize(SSIPeripheral *dev, Error **errp)
+{
+    BrambleSx1262State *s = BRAMBLE_SX1262(dev);
+    (void)errp;
+    s->mode = SX1262_MODE_STDBY_RC;
+    s->irq_status = 0;
+    s->byte_idx = 0;
+}
+
+static void bramble_sx1262_class_init(ObjectClass *klass, void *data)
+{
+    SSIPeripheralClass *k = SSI_PERIPHERAL_CLASS(klass);
+    k->realize = bramble_sx1262_realize;
+    k->transfer = bramble_sx1262_transfer;
+    k->set_cs = bramble_sx1262_set_cs;
+    k->cs_polarity = SSI_CS_LOW;
+}
+
+static const TypeInfo bramble_sx1262_info = {
+    .name = TYPE_BRAMBLE_SX1262,
+    .parent = TYPE_SSI_PERIPHERAL,
+    .instance_size = sizeof(BrambleSx1262State),
+    .class_init = bramble_sx1262_class_init,
 };
 
 /* ---- GPSPI2 controller --------------------------------------------------- */
@@ -180,6 +395,12 @@ struct BrambleGpspi2State {
     MemoryRegion iomem;
     SSIBus *spi;
     qemu_irq cs_gpio[GPSPI2_CS_COUNT];
+
+    /* SSI_GPIO_CS inputs of the two bus slaves, driven per-transfer from the
+     * CS-routing decision (bramble_gpspi2_route). radio_cs -> SX1262 slave,
+     * disp_cs -> display stub. */
+    qemu_irq radio_cs;
+    qemu_irq disp_cs;
 
     /* Latched configuration registers the transaction reads. */
     uint32_t addr;
@@ -205,6 +426,45 @@ struct BrambleGpspi2State {
     ESPGdmaState *gdma;
     qemu_irq intr;
 };
+
+/* SPI2 transfer-done is a LEVEL interrupt (esp32s3_intc.h marks the source
+ * "level", and the intmatrix forwards the line straight to the Xtensa external
+ * interrupt). Assert the line whenever an enabled interrupt is raw-pending and
+ * hold it until the guest ISR clears the raw bit via SPI_DMA_INT_CLR.
+ *
+ * This matters because the pager mixes two SPI driver paths: the e-paper polls
+ * SPI_USR (spi_device_polling_transmit) and never enables this interrupt, but
+ * the RADIO (sx1262.c) uses the interrupt-driven spi_device_transmit path and
+ * blocks in spi_device_get_trans_result waiting for this very interrupt. A
+ * momentary pulse (raise then immediately lower, inside the SPI_USR MMIO write)
+ * is sampled by the CPU only after the level has already dropped, so it is lost
+ * and radio_init wedges forever. Driving a real level that stays asserted until
+ * the ISR acknowledges is what lets the interrupt-driven transfer complete. */
+static void bramble_gpspi2_update_irq(BrambleGpspi2State *s)
+{
+    if (s->intr) {
+        qemu_set_irq(s->intr, (s->dma_int_raw & s->dma_int_ena) ? 1 : 0);
+    }
+}
+
+/* Select the bus slave this transfer targets. The radio's manual chip select
+ * is GPIO8 (driven by sx1262.c via gpio_set_level and observed by the P2.2
+ * overlay): GPIO8 low selects the SX1262 slave, otherwise the display stub is
+ * selected. Both slaves are SSI_CS_LOW, so a 0 on their SSI_GPIO_CS input means
+ * selected. `active` gates whether either is selected (deasserted between
+ * transfers so the next assert re-triggers the SX1262's set_cs byte-cursor
+ * reset). */
+static void bramble_gpspi2_route(BrambleGpspi2State *s, int active)
+{
+    if (!active) {
+        qemu_set_irq(s->radio_cs, 1);
+        qemu_set_irq(s->disp_cs, 1);
+        return;
+    }
+    bool radio_sel = (bramble_gpio_out_level(8) == 0);
+    qemu_set_irq(s->radio_cs, radio_sel ? 0 : 1);
+    qemu_set_irq(s->disp_cs, radio_sel ? 1 : 0);
+}
 
 /* Assert (level 0) or deassert (level 1) the enabled CS lines, mirroring
  * hw/ssi/esp32s3_spi.c. A disabled CS (SPI_MISC_REG.CSn_DIS) stays high. */
@@ -243,6 +503,9 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
     uint32_t data_bits = s->ms_dlen & SPI_MS_DATA_BITLEN_MASK;
     uint32_t data_bytes = (do_mosi || do_miso) ? (data_bits + 1) / 8 : 0;
 
+    /* Route to the SX1262 (GPIO8 low) or the display stub before any byte is
+     * shifted, so the selected slave sees this whole transaction. */
+    bramble_gpspi2_route(s, 1);
     bramble_gpspi2_cs_set(s, 1);
 
     if (do_cmd) {
@@ -299,14 +562,14 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
     }
 
     bramble_gpspi2_cs_set(s, 0);
+    bramble_gpspi2_route(s, 0);
 
-    /* Latch transfer-done. The pager polls SPI_USR (which we leave clear) and
-     * never enables this interrupt, but keep the register state faithful. */
+    /* Latch transfer-done and drive the (level) interrupt line. The e-paper
+     * polls SPI_USR and leaves the interrupt disabled, so this is a no-op for
+     * it; the radio enables it and the held level is what wakes its blocked
+     * spi_device_transmit. See bramble_gpspi2_update_irq. */
     s->dma_int_raw |= SPI_TRANS_DONE_INT;
-    if (s->intr && (s->dma_int_ena & SPI_TRANS_DONE_INT)) {
-        qemu_set_irq(s->intr, 1);
-        qemu_set_irq(s->intr, 0);
-    }
+    bramble_gpspi2_update_irq(s);
 }
 
 static uint64_t bramble_gpspi2_read(void *opaque, hwaddr addr, unsigned int size)
@@ -359,9 +622,9 @@ static void bramble_gpspi2_write(void *opaque, hwaddr addr, uint64_t value,
     case R_SPI_MS_DLEN:      s->ms_dlen = v; break;
     case R_SPI_MISC:         s->misc = v; break;
     case R_SPI_DMA_CONF:     s->dma_conf = v; break;
-    case R_SPI_DMA_INT_ENA:  s->dma_int_ena = v; break;
-    case R_SPI_DMA_INT_CLR:  s->dma_int_raw &= ~v; break;
-    case R_SPI_DMA_INT_SET:  s->dma_int_raw |= v; break;
+    case R_SPI_DMA_INT_ENA:  s->dma_int_ena = v; bramble_gpspi2_update_irq(s); break;
+    case R_SPI_DMA_INT_CLR:  s->dma_int_raw &= ~v; bramble_gpspi2_update_irq(s); break;
+    case R_SPI_DMA_INT_SET:  s->dma_int_raw |= v; bramble_gpspi2_update_irq(s); break;
     case R_SPI_SLAVE:        s->slave = v; break;
     case R_SPI_SLAVE1:       s->slave1 = v; break;
     case R_SPI_CLK_GATE:     s->clk_gate = v; break;
@@ -402,6 +665,7 @@ static const TypeInfo bramble_gpspi2_info = {
 static void bramble_gpspi2_register_types(void)
 {
     type_register_static(&bramble_spi_stub_info);
+    type_register_static(&bramble_sx1262_info);
     type_register_static(&bramble_gpspi2_info);
 }
 
@@ -422,15 +686,31 @@ void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
         s->intr = qdev_get_gpio_in(intc, ETS_SPI2_INTR_SOURCE);
     }
 
-    /* Attach the stub slave to the SPI2 bus so ssi_transfer always resolves.
-     * P2.4/P2.5 replace it with register-accurate SX1262 / SSD1680 slaves. */
-    DeviceState *stub = qdev_new(TYPE_BRAMBLE_SPI_STUB);
-    ssi_realize_and_unref(stub, s->spi, &error_fatal);
+    /* Attach both bus slaves and capture their CS inputs for routing. The
+     * radio is the register-accurate SX1262 (P2.4a); the display is still the
+     * stub (P2.5 replaces it with a real SSD1680). bramble_gpspi2_route drives
+     * these SSI_GPIO_CS lines so exactly one answers each transfer. */
+    /* Distinct SSI cs_index values so ssi_peripheral_realize's uniqueness check
+     * passes; actual selection is driven through each slave's SSI_GPIO_CS input
+     * by bramble_gpspi2_route, not this index. */
+    DeviceState *radio = qdev_new(TYPE_BRAMBLE_SX1262);
+    qdev_prop_set_uint8(radio, "cs", 0);
+    ssi_realize_and_unref(radio, s->spi, &error_fatal);
+    s->radio_cs = qdev_get_gpio_in_named(radio, SSI_GPIO_CS, 0);
+
+    DeviceState *disp = qdev_new(TYPE_BRAMBLE_SPI_STUB);
+    qdev_prop_set_uint8(disp, "cs", 1);
+    ssi_realize_and_unref(disp, s->spi, &error_fatal);
+    s->disp_cs = qdev_get_gpio_in_named(disp, SSI_GPIO_CS, 0);
+
+    /* Both slaves idle deselected (CS high). */
+    qemu_set_irq(s->radio_cs, 1);
+    qemu_set_irq(s->disp_cs, 1);
 
     /* Overlay the GPSPI2 window at higher priority than the machine's catch-all
      * IO region (added at priority 0), like bramble_gpio does for GPIO. */
     memory_region_add_subregion_overlap(sys_mem, DR_REG_SPI2_BASE, &s->iomem, 1);
 
-    fprintf(stderr, "bramble-gpspi2: controller + stub slave attached at 0x%x\n",
-            (unsigned)DR_REG_SPI2_BASE);
+    fprintf(stderr, "bramble-gpspi2: controller + SX1262 radio + display stub "
+            "attached at 0x%x\n", (unsigned)DR_REG_SPI2_BASE);
 }

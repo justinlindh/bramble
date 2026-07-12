@@ -1,0 +1,103 @@
+diff --git a/hw/xtensa/esp32s3_intc.c b/hw/xtensa/esp32s3_intc.c
+index 0437230..eff966f 100644
+--- a/hw/xtensa/esp32s3_intc.c
++++ b/hw/xtensa/esp32s3_intc.c
+@@ -26,20 +26,44 @@
+ 
+ #define IRQ_MAP(cpu, input) s->irq_map[cpu][input]
+ 
++/* Drive the CPU interrupt line `out_index` on `cpu_index` to the OR of every
++ * source input currently routed to it. A real interrupt matrix is
++ * combinational: each CPU interrupt reflects the live OR of the sources mapped
++ * to it, so (a) a level asserted before its source is routed still reaches the
++ * CPU once the map selects it, and (b) rerouting a source away from a line (as
++ * esp_intr_disable does, by pointing the source at a disabled interrupt number)
++ * releases that line. The stock model forwarded only on input edges to the
++ * then-current map, so it did neither: the SPI2 trans-done line the
++ * interrupt-driven spi_master relies on latches before esp_intr_alloc runs and
++ * never reached the CPU, and once it did, disabling by rerouting left the old
++ * line stuck asserted (interrupt storm). */
++static void esp32s3_intmatrix_drive(Esp32s3IntMatrixState *s, int cpu_index,
++                                    int out_index)
++{
++    if (s->outputs[cpu_index] == NULL) {
++        return;
++    }
++    int level = 0;
++    for (int src = 0; src < ESP32S3_INT_MATRIX_INPUTS; ++src) {
++        if (IRQ_MAP(cpu_index, src) == out_index && s->input_level[src]) {
++            level = 1;
++            break;
++        }
++    }
++    for (int int_index = 0; int_index < s->cpu[cpu_index]->env.config->nextint; ++int_index) {
++        if (s->cpu[cpu_index]->env.config->extint[int_index] == out_index) {
++            qemu_set_irq(s->outputs[cpu_index][int_index], level);
++            break;
++        }
++    }
++}
++
+ static void esp32s3_intmatrix_irq_handler(void *opaque, int n, int level)
+ {
+     Esp32s3IntMatrixState *s = ESP32S3_INTMATRIX(opaque);
++    s->input_level[n] = level;
+     for (int i = 0; i < ESP32S3_CPU_COUNT; ++i) {
+-        if (s->outputs[i] == NULL) {
+-            continue;
+-        }
+-        int out_index = IRQ_MAP(i, n);
+-        for (int int_index = 0; int_index < s->cpu[i]->env.config->nextint; ++int_index) {
+-            if (s->cpu[i]->env.config->extint[int_index] == out_index) {
+-                qemu_set_irq(s->outputs[i][int_index], level);
+-                break;
+-            }
+-        }
++        esp32s3_intmatrix_drive(s, i, IRQ_MAP(i, n));
+     }
+ }
+ 
+@@ -72,7 +96,15 @@ static void esp32s3_intmatrix_write(void* opaque, hwaddr addr, uint64_t value, u
+     Esp32s3IntMatrixState *s = ESP32S3_INTMATRIX(opaque);
+     uint8_t* map_entry = get_map_entry(s, addr);
+     if (map_entry != NULL) {
++        int source_index = addr / sizeof(uint32_t);
++        int cpu_index = source_index / ESP32S3_INT_MATRIX_INPUTS;
++        uint8_t old_out = *map_entry;
+         *map_entry = value & 0x1f;
++        /* Re-drive both the line the source left and the line it joined, so a
++         * still-asserted level appears on the new target and is released on the
++         * old one (combinational matrix; see esp32s3_intmatrix_drive). */
++        esp32s3_intmatrix_drive(s, cpu_index, old_out);
++        esp32s3_intmatrix_drive(s, cpu_index, *map_entry);
+     }
+ }
+ 
+@@ -86,6 +118,7 @@ static void esp32s3_intmatrix_reset_hold(Object *obj, ResetType type)
+ {
+     Esp32s3IntMatrixState *s = ESP32S3_INTMATRIX(obj);
+     memset(s->irq_map, INTMATRIX_UNINT_VALUE, sizeof(s->irq_map));
++    memset(s->input_level, 0, sizeof(s->input_level));
+     for (int i = 0; i < ESP32S3_CPU_COUNT; ++i) {
+         if (s->outputs[i] == NULL) {
+             continue;
+diff --git a/include/hw/xtensa/esp32s3_intc.h b/include/hw/xtensa/esp32s3_intc.h
+index 5960b9d..6d37e1a 100644
+--- a/include/hw/xtensa/esp32s3_intc.h
++++ b/include/hw/xtensa/esp32s3_intc.h
+@@ -142,6 +142,15 @@ typedef struct Esp32s3IntMatrixState {
+     MemoryRegion iomem;
+     qemu_irq *outputs[ESP32S3_CPU_COUNT];
+     uint8_t irq_map[ESP32S3_CPU_COUNT][ESP32S3_INT_MATRIX_INPUTS];
++    /* Last level seen on each source input. The real matrix is combinational:
++     * an input level asserted before the source is routed to a CPU appears on
++     * that CPU's interrupt the moment the routing map selects it. The stock
++     * model only forwarded on input edges and dropped the level on map writes,
++     * so a peripheral whose (level) interrupt latches before the driver calls
++     * esp_intr_alloc (e.g. the SPI2 trans-done line the interrupt-driven
++     * spi_master relies on) never reached the CPU. Track the level so map
++     * writes can re-forward it. */
++    uint8_t input_level[ESP32S3_INT_MATRIX_INPUTS];
+ 
+     /* properties */
+     XtensaCPU *cpu[ESP32S3_CPU_COUNT];
