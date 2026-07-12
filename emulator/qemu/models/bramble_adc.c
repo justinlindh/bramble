@@ -41,6 +41,7 @@
 #include "qom/object.h"
 #include "exec/address-spaces.h"
 #include "hw/xtensa/bramble_adc.h"
+#include "hw/xtensa/bramble_scaffold.h"
 #include "hw/misc/esp32s3_reg.h"
 
 /* SENS register offsets, relative to DR_REG_SENS_BASE (soc/sens_reg.h). The
@@ -162,15 +163,11 @@ type_init(bramble_adc_register_types)
 void bramble_adc_attach(MemoryRegion *sys_mem)
 {
     Object *obj = object_new(TYPE_BRAMBLE_ADC);
-    object_property_add_child(qdev_get_machine(), "bramble-adc", obj);
-    qdev_realize(DEVICE(obj), NULL, &error_fatal);
-
     BrambleAdcState *s = BRAMBLE_ADC(obj);
 
     /* Overlay the SENS window at higher priority than the machine's catch-all
      * IO region (added at priority 0), like bramble_gpio / bramble_gpspi2. */
-    memory_region_add_subregion_overlap(sys_mem, DR_REG_SENS_BASE, &s->iomem, 1);
-
-    fprintf(stderr, "bramble-adc: SAR ADC oneshot stub attached at 0x%x\n",
-            (unsigned)DR_REG_SENS_BASE);
+    bramble_overlay_attach(obj, "bramble-adc", &s->iomem, sys_mem,
+                           DR_REG_SENS_BASE,
+                           "bramble-adc: SAR ADC oneshot stub");
 }
