@@ -41,25 +41,25 @@
  *     MISO is enabled, push captured bytes back via the IN channel. See the
  *     CS-routing / channel-disambiguation notes below.
  *
- * CS routing (implemented in P2.4a, extended by P2.5). The pager mixes CS
- * styles, and two slaves now share the bus (SX1262 radio + display stub), so
- * every transfer must go to exactly one:
+ * CS routing (implemented in P2.4a, refined by P2.5). The pager mixes CS
+ * styles, and two register-accurate slaves share the bus (SX1262 radio +
+ * SSD1680 display), so every transfer must go to exactly one:
  *   - Radio (sx1262.c) uses MANUAL software CS: spics_io_num = -1 and the driver
  *     toggles gpio_set_level(GPIO8) by hand; the P2.2 bramble_gpio overlay
  *     observes GPIO8. So the radio slave's select is derived from the GPIO8
  *     level read back through bramble_gpio_out_level(), NOT from this
  *     peripheral's CS lines. When GPIO8 is low the transfer routes to the
  *     register-accurate SX1262 slave (TYPE_BRAMBLE_SX1262, defined below).
- *   - Display (ssd1680.c) uses HARDWARE CS: spics_io_num = GPIO4, driven by this
- *     peripheral through SPI_MISC_REG.CS0_DIS and the GPIO matrix. We still
- *     drive the SSI_GPIO_CS out lines (as hw/ssi/esp32s3_spi.c does) for a
- *     future real hardware-CS slave, but for now, whenever GPIO8 is high (radio
- *     deselected) the transfer routes to the stub display slave. The SX1262
- *     slave (register-accurate, TYPE_BRAMBLE_SX1262) is defined below.
+ *   - Display (ssd1680_io.c) uses HARDWARE CS: spics_io_num = GPIO4. The
+ *     display is added first (display_init runs before radio_init), so it is
+ *     SPI device 0 and owns CS0; the IDF spi_master enables it per transaction
+ *     via SPI_MISC_REG.CS0_DIS. P2.5 selects the display POSITIVELY off that
+ *     bit (CS0_DIS clear) rather than the P2.4 stub's "GPIO8 not low"
+ *     simplification: disp_sel = (GPIO8 high) AND (CS0 enabled). The SSD1680
+ *     slave (register-accurate, TYPE_BRAMBLE_SSD1680) is defined below.
  * Both slaves are SSI_CS_LOW; bramble_gpspi2_route drives their SSI_GPIO_CS
- * inputs from the GPIO8 decision so exactly one answers each ssi_transfer.
- * P2.5 replaces the stub with a real SSD1680 selected off the hardware CS0
- * line; the radio routing here is unchanged by that.
+ * inputs from that decision so exactly one answers each ssi_transfer. The radio
+ * routing is unchanged from P2.4.
  */
 
 #include "qemu/osdep.h"
@@ -251,6 +251,26 @@ static int emulink_send_tx(const uint8_t *payload, unsigned len, int freq_mhz,
     return emulink_write(line, strlen(line));
 }
 
+/* Emit an `fb`: the resolved 1bpp logical framebuffer base64-encoded, plus the
+ * refresh kind ("full"/"partial") and busy duration, matching display_virt.c's
+ * message shape exactly so the browser renders the QEMU pager's e-paper
+ * identically to a linux node. No-op if the link is not connected. */
+static int emulink_send_fb(const uint8_t *fb, size_t fb_len, uint32_t seq,
+                           const char *kind, uint32_t busy_ms)
+{
+    if (!fb || fb_len == 0) {
+        return -1;
+    }
+    size_t b64_sz = 4 * ((fb_len + 2) / 3) + 1;
+    g_autofree char *b64 = g_malloc(b64_sz);
+    emulink_b64_encode(fb, fb_len, b64, b64_sz);
+    g_autofree char *line = g_strdup_printf(
+        "{\"t\":\"fb\",\"seq\":%u,\"kind\":\"%s\",\"fb\":\"%s\","
+        "\"busy_ms\":%u}\n",
+        seq, kind, b64, busy_ms);
+    return emulink_write(line, strlen(line));
+}
+
 static int emulink_on(const char *type, emulink_handler_t fn, void *ctx)
 {
     if (!type || !fn || strlen(type) > EMULINK_MAX_TYPE_LEN) {
@@ -382,51 +402,278 @@ void bramble_emulink_attach(void)
             EMULINK_CHARDEV_ID);
 }
 
-/* ---- stub SSI slave ------------------------------------------------------ */
+/* ---- SSD1680 e-paper SSI slave (P2.5) ------------------------------------ */
+/*
+ * Register-accurate model of the Solomon SSD1680 controller driving the pager's
+ * GDEY0213B74 2.13" e-paper (components/display/ssd1680_io.c on top of the
+ * shared ssd1680_engine.c). It replaces the P2.4 0x00 display stub: it decodes
+ * the command/data stream the firmware clocks out, rebuilds the controller's
+ * image RAM, and on Master Activation (0x20) unpacks that RAM into the SAME
+ * 250x122 1bpp logical framebuffer the linux node ships (display_virt.c) and
+ * emits it to the gosim ether as an emu-link `fb` message. The browser device
+ * view then renders the QEMU pager's screen pixel-identical to a linux node.
+ *
+ * Command vs data is the D/C# line (GPIO5): ssd1680_io.c drives it low before a
+ * command byte and high before data bytes, one spi transaction each, so we read
+ * bramble_gpio_out_level(5) per clocked byte. Because a command and its data
+ * arrive in SEPARATE CS transactions, the decode state (current command + its
+ * data index) PERSISTS across CS deassert/reassert; unlike the SX1262 there is
+ * no per-CS cursor reset, so this slave defines no set_cs.
+ *
+ * RAM addressing mirrors ssd1680_engine.c's data-entry-mode 0x03 sweep exactly,
+ * so the captured RAM is byte-identical to the engine's s_ram: X in bytes
+ * (0x44 window, 0x4E counter), gate rows (0x45 window, 0x4F counter), the write
+ * cursor advancing X-within-row then row. The engine always writes the full
+ * window from the origin in one linear sweep, so this reconstructs s_ram
+ * bit-for-bit.
+ *
+ * The unpack (bramble_ssd1680_render_fb) is the exact inverse of the engine's
+ * build_ram_stream rotation + polarity mapping: RAM bit 1 = white, so a cleared
+ * bit is black ink; native source sx maps to logical ly = 121 - sx, native gate
+ * gy maps to logical lx = gy. The result is byte-identical to
+ * ssd1680_engine_fb(), so the `fb` payload matches the linux node's for
+ * identical UI content. Only the BW plane (0x24) is rendered; the RED plane
+ * (0x26, the Mode-2 diff base) is captured for completeness but does not affect
+ * the visible mono image. seq/kind/busy_ms follow display_virt.c: seq starts at
+ * 1, kind from the 0x22 Display-Update-Control-2 byte (0xF7 = full, 0xFF =
+ * partial), busy_ms 3000 full / 500 partial (ssd1680_engine.h constants).
+ */
 
-#define TYPE_BRAMBLE_SPI_STUB "bramble.spi-stub"
-OBJECT_DECLARE_SIMPLE_TYPE(BrambleSpiStub, BRAMBLE_SPI_STUB)
+/* Geometry + RAM layout mirror ssd1680_engine.h (not includable from the QEMU
+ * tree); keep in sync with that header. */
+#define SSD1680_FB_W        250
+#define SSD1680_FB_H        122
+#define SSD1680_FB_STRIDE   32
+#define SSD1680_FB_SIZE     (SSD1680_FB_STRIDE * SSD1680_FB_H)  /* 3904 */
+#define SSD1680_RAM_STRIDE  16
+#define SSD1680_RAM_SIZE    (SSD1680_RAM_STRIDE * SSD1680_FB_W) /* 4000 */
 
-struct BrambleSpiStub {
+/* busy_ms seeds (ssd1680_engine.h SSD1680_BUSY_MS_*). */
+#define SSD1680_BUSY_MS_FULL     3000u
+#define SSD1680_BUSY_MS_PARTIAL  500u
+
+/* D/C# line = GPIO5 (main/boards/bramble_pager.h epd_display.dc). */
+#define SSD1680_DC_GPIO     5
+
+/* SSD1680 commands the firmware sends (ssd1680_engine.h SSD1680_CMD_*). */
+#define SSD1680_CMD_DRIVER_OUTPUT   0x01
+#define SSD1680_CMD_DEEP_SLEEP      0x10
+#define SSD1680_CMD_DATA_ENTRY      0x11
+#define SSD1680_CMD_SW_RESET        0x12
+#define SSD1680_CMD_TEMP_SENSOR     0x18
+#define SSD1680_CMD_MASTER_ACTIVATE 0x20
+#define SSD1680_CMD_UPDATE_CTRL1    0x21
+#define SSD1680_CMD_UPDATE_CTRL2    0x22
+#define SSD1680_CMD_WRITE_RAM_BW    0x24
+#define SSD1680_CMD_WRITE_RAM_RED   0x26
+#define SSD1680_CMD_BORDER          0x3C
+#define SSD1680_CMD_RAM_X_WINDOW    0x44
+#define SSD1680_CMD_RAM_Y_WINDOW    0x45
+#define SSD1680_CMD_RAM_X_COUNTER   0x4E
+#define SSD1680_CMD_RAM_Y_COUNTER   0x4F
+
+/* Display Update Control 2 (0x22) payloads (ssd1680_engine.c d_duc2_*). */
+#define SSD1680_DUC2_FULL     0xF7
+#define SSD1680_DUC2_PARTIAL  0xFF
+
+#define TYPE_BRAMBLE_SSD1680 "bramble.ssd1680"
+OBJECT_DECLARE_SIMPLE_TYPE(BrambleSsd1680State, BRAMBLE_SSD1680)
+
+struct BrambleSsd1680State {
     SSIPeripheral parent_obj;
+
+    /* Controller image RAM, rebuilt by WRITE_RAM (0x24 BW / 0x26 RED). Only BW
+     * is rendered; RED is the Mode-2 diff base, captured for completeness. */
+    uint8_t bw_ram[SSD1680_RAM_SIZE];
+    uint8_t red_ram[SSD1680_RAM_SIZE];
+
+    /* RAM window (bytes for X, gate rows for Y) and address counter, set by
+     * 0x44/0x45 and 0x4E/0x4F; the write cursor is seeded from the counter. */
+    uint8_t x_start, x_end;    /* X window, byte units (0x44) */
+    uint16_t y_start, y_end;   /* Y window, gate rows (0x45) */
+    uint8_t cur_xb;            /* X address counter, byte units (0x4E) */
+    uint16_t cur_gate;         /* Y address counter, gate row (0x4F) */
+    uint8_t wr_xb;             /* live write cursor X, seeded from cur_xb */
+    uint16_t wr_gate;          /* live write cursor gate, seeded from cur_gate */
+
+    /* Command decode state, PERSISTS across CS cycles (a command and its data
+     * arrive in separate transactions). */
+    uint8_t cmd;               /* current command byte (D/C# low) */
+    uint32_t data_idx;         /* data-byte index within the current command */
+    uint8_t duc2;              /* latched Display Update Control 2 (0x22) */
+
+    uint32_t seq;              /* emu-link `fb` seq, first frame = 1 */
+
+    /* Render scratch: the unpacked logical framebuffer shipped in `fb`. */
+    uint8_t fb[SSD1680_FB_SIZE];
 };
 
-/* Drain MOSI, return a benign fixed MISO byte. This is now the DISPLAY path
- * only: the radio has a register-accurate SX1262 slave (below) and is routed to
- * it by CS. A correct SSD1680 slave is P2.5; here we only need the e-paper's
- * transfers to end. */
-static uint32_t bramble_spi_stub_transfer(SSIPeripheral *dev, uint32_t val)
+/* Store one WRITE_RAM data byte at the live write cursor and advance it in
+ * data-entry-mode 0x03 order (X byte within the window, then gate row), the
+ * same sweep ssd1680_engine.c emits. Out-of-range writes are dropped. */
+static void bramble_ssd1680_ram_write(BrambleSsd1680State *s, uint8_t *ram,
+                                      uint8_t byte)
 {
-    (void)dev;
-    (void)val;
+    uint32_t off = (uint32_t)s->wr_gate * SSD1680_RAM_STRIDE + s->wr_xb;
+    if (off < SSD1680_RAM_SIZE) {
+        ram[off] = byte;
+    }
+    if (s->wr_xb >= s->x_end) {
+        s->wr_xb = s->x_start;
+        s->wr_gate++;
+    } else {
+        s->wr_xb++;
+    }
+}
+
+/* Unpack the BW image RAM into the 250x122 1bpp logical framebuffer, the exact
+ * inverse of ssd1680_engine.c build_ram_stream: native gate gy = logical lx,
+ * native source sx = logical ly (121 - sx); RAM polarity 1 = white, so a CLEARED
+ * RAM bit is black ink. Produces bytes identical to ssd1680_engine_fb(). */
+static void bramble_ssd1680_render_fb(BrambleSsd1680State *s)
+{
+    memset(s->fb, 0, sizeof(s->fb));
+    for (int gy = 0; gy < SSD1680_FB_W; gy++) {   /* gate row = logical x */
+        int lx = gy;
+        for (int xb = 0; xb < SSD1680_RAM_STRIDE; xb++) {
+            uint8_t ram = s->bw_ram[gy * SSD1680_RAM_STRIDE + xb];
+            for (int bit = 0; bit < 8; bit++) {
+                int sx = xb * 8 + bit;            /* source line */
+                if (sx >= SSD1680_FB_H) {
+                    break;                        /* pad sources 122..127 */
+                }
+                int ly = SSD1680_FB_H - 1 - sx;   /* logical y */
+                if ((ram & (0x80u >> bit)) == 0) { /* RAM 0 = black ink */
+                    s->fb[ly * SSD1680_FB_STRIDE + lx / 8] |=
+                        (uint8_t)(0x80u >> (lx & 7));
+                }
+            }
+        }
+    }
+}
+
+static uint32_t bramble_ssd1680_transfer(SSIPeripheral *dev, uint32_t val)
+{
+    BrambleSsd1680State *s = BRAMBLE_SSD1680(dev);
+    uint8_t byte = val & 0xff;
+
+    /* D/C# low = command, high = data (ssd1680_io.c drives GPIO5 before each
+     * transaction). The display never reads back, so MISO is always 0. */
+    if (bramble_gpio_out_level(SSD1680_DC_GPIO) == 0) {
+        s->cmd = byte;
+        s->data_idx = 0;
+        switch (byte) {
+        case SSD1680_CMD_WRITE_RAM_BW:
+        case SSD1680_CMD_WRITE_RAM_RED:
+            /* Seed the write cursor from the address counter (0x4E/0x4F set
+             * just before): the engine writes the full window from origin. */
+            s->wr_xb = s->cur_xb;
+            s->wr_gate = s->cur_gate;
+            break;
+        case SSD1680_CMD_MASTER_ACTIVATE:
+            /* Drive the panel: unpack RAM -> logical fb and ship it. */
+            bramble_ssd1680_render_fb(s);
+            emulink_send_fb(s->fb, sizeof(s->fb), ++s->seq,
+                            s->duc2 == SSD1680_DUC2_FULL ? "full" : "partial",
+                            s->duc2 == SSD1680_DUC2_FULL
+                                ? SSD1680_BUSY_MS_FULL
+                                : SSD1680_BUSY_MS_PARTIAL);
+            break;
+        default:
+            break;
+        }
+        return 0x00;
+    }
+
+    /* Data byte for the current command. */
+    uint32_t idx = s->data_idx++;
+    switch (s->cmd) {
+    case SSD1680_CMD_RAM_X_WINDOW:    /* [x_start][x_end], byte units */
+        if (idx == 0) {
+            s->x_start = byte;
+        } else if (idx == 1) {
+            s->x_end = byte;
+        }
+        break;
+    case SSD1680_CMD_RAM_Y_WINDOW:    /* [startL][startH][endL][endH], gates */
+        if (idx == 0) {
+            s->y_start = byte;
+        } else if (idx == 1) {
+            s->y_start |= (uint16_t)byte << 8;
+        } else if (idx == 2) {
+            s->y_end = byte;
+        } else if (idx == 3) {
+            s->y_end |= (uint16_t)byte << 8;
+        }
+        break;
+    case SSD1680_CMD_RAM_X_COUNTER:   /* [x], byte units */
+        if (idx == 0) {
+            s->cur_xb = byte;
+        }
+        break;
+    case SSD1680_CMD_RAM_Y_COUNTER:   /* [gateL][gateH] */
+        if (idx == 0) {
+            s->cur_gate = byte;
+        } else if (idx == 1) {
+            s->cur_gate |= (uint16_t)byte << 8;
+        }
+        break;
+    case SSD1680_CMD_WRITE_RAM_BW:
+        bramble_ssd1680_ram_write(s, s->bw_ram, byte);
+        break;
+    case SSD1680_CMD_WRITE_RAM_RED:
+        bramble_ssd1680_ram_write(s, s->red_ram, byte);
+        break;
+    case SSD1680_CMD_UPDATE_CTRL2:    /* [duc2]: latch the full/partial kind */
+        if (idx == 0) {
+            s->duc2 = byte;
+        }
+        break;
+    default:
+        /* 0x01, 0x11, 0x18, 0x21, 0x3C, 0x10, ...: accepted, no state. */
+        break;
+    }
     return 0x00;
 }
 
-/* ssi_peripheral_realize() calls ssc->realize unconditionally (no NULL guard),
- * so even a behaviourless stub must provide one. */
-static void bramble_spi_stub_realize(SSIPeripheral *dev, Error **errp)
+static void bramble_ssd1680_realize(SSIPeripheral *dev, Error **errp)
 {
-    (void)dev;
+    BrambleSsd1680State *s = BRAMBLE_SSD1680(dev);
     (void)errp;
+    /* Panel powers up with white RAM (1 = white); default the window to the
+     * whole panel so a render before the first 0x44/0x45 stays in-bounds. */
+    memset(s->bw_ram, 0xFF, sizeof(s->bw_ram));
+    memset(s->red_ram, 0xFF, sizeof(s->red_ram));
+    s->x_start = 0x00;
+    s->x_end = SSD1680_RAM_STRIDE - 1;
+    s->y_start = 0;
+    s->y_end = SSD1680_FB_W - 1;
+    s->cur_xb = 0;
+    s->cur_gate = 0;
+    s->wr_xb = 0;
+    s->wr_gate = 0;
+    s->data_idx = 0;
+    s->duc2 = SSD1680_DUC2_FULL;
+    s->seq = 0;
 }
 
-static void bramble_spi_stub_class_init(ObjectClass *klass, void *data)
+static void bramble_ssd1680_class_init(ObjectClass *klass, void *data)
 {
     SSIPeripheralClass *k = SSI_PERIPHERAL_CLASS(klass);
-    k->transfer = bramble_spi_stub_transfer;
-    k->realize = bramble_spi_stub_realize;
-    /* CS-gated so it only answers when selected: with the SX1262 now sharing
-     * the bus, an always-on (SSI_CS_NONE) stub would corrupt radio reads by
-     * OR-ing 0x00 into every byte. bramble_gpspi2 drives this slave's CS from
-     * the routing decision (radio deselected -> display selected). */
+    k->realize = bramble_ssd1680_realize;
+    k->transfer = bramble_ssd1680_transfer;
+    /* CS-gated: bramble_gpspi2_route drives this slave's SSI_GPIO_CS from the
+     * hardware-CS0 decision so it only answers display transactions. No set_cs:
+     * unlike the SX1262 a command and its data span separate CS cycles and the
+     * decode state must persist across them. */
     k->cs_polarity = SSI_CS_LOW;
 }
 
-static const TypeInfo bramble_spi_stub_info = {
-    .name = TYPE_BRAMBLE_SPI_STUB,
+static const TypeInfo bramble_ssd1680_info = {
+    .name = TYPE_BRAMBLE_SSD1680,
     .parent = TYPE_SSI_PERIPHERAL,
-    .instance_size = sizeof(BrambleSpiStub),
-    .class_init = bramble_spi_stub_class_init,
+    .instance_size = sizeof(BrambleSsd1680State),
+    .class_init = bramble_ssd1680_class_init,
 };
 
 /* ---- SX1262 LoRa radio SSI slave (P2.4a) --------------------------------- */
@@ -1008,7 +1255,7 @@ struct BrambleGpspi2State {
 
     /* SSI_GPIO_CS inputs of the two bus slaves, driven per-transfer from the
      * CS-routing decision (bramble_gpspi2_route). radio_cs -> SX1262 slave,
-     * disp_cs -> display stub. */
+     * disp_cs -> SSD1680 display slave. */
     qemu_irq radio_cs;
     qemu_irq disp_cs;
 
@@ -1057,13 +1304,15 @@ static void bramble_gpspi2_update_irq(BrambleGpspi2State *s)
     }
 }
 
-/* Select the bus slave this transfer targets. The radio's manual chip select
- * is GPIO8 (driven by sx1262.c via gpio_set_level and observed by the P2.2
- * overlay): GPIO8 low selects the SX1262 slave, otherwise the display stub is
- * selected. Both slaves are SSI_CS_LOW, so a 0 on their SSI_GPIO_CS input means
- * selected. `active` gates whether either is selected (deasserted between
- * transfers so the next assert re-triggers the SX1262's set_cs byte-cursor
- * reset). */
+/* Select the bus slave this transfer targets. The radio's manual chip select is
+ * GPIO8 (driven by sx1262.c via gpio_set_level and observed by the P2.2
+ * overlay): GPIO8 low selects the SX1262 slave. The display uses hardware CS0
+ * (it is SPI device 0, added by display_init before radio_init), which the IDF
+ * spi_master enables per transaction via SPI_MISC_REG.CS0_DIS; it is selected
+ * POSITIVELY when CS0 is enabled and the radio's soft CS is not asserting. Both
+ * slaves are SSI_CS_LOW, so a 0 on their SSI_GPIO_CS input means selected.
+ * `active` gates whether either is selected (deasserted between transfers so the
+ * next assert re-triggers the SX1262's set_cs byte-cursor reset). */
 static void bramble_gpspi2_route(BrambleGpspi2State *s, int active)
 {
     if (!active) {
@@ -1072,8 +1321,9 @@ static void bramble_gpspi2_route(BrambleGpspi2State *s, int active)
         return;
     }
     bool radio_sel = (bramble_gpio_out_level(8) == 0);
+    bool disp_sel = !radio_sel && !(s->misc & SPI_MISC_CS0_DIS);
     qemu_set_irq(s->radio_cs, radio_sel ? 0 : 1);
-    qemu_set_irq(s->disp_cs, radio_sel ? 1 : 0);
+    qemu_set_irq(s->disp_cs, disp_sel ? 0 : 1);
 }
 
 /* Assert (level 0) or deassert (level 1) the enabled CS lines, mirroring
@@ -1274,7 +1524,7 @@ static const TypeInfo bramble_gpspi2_info = {
 
 static void bramble_gpspi2_register_types(void)
 {
-    type_register_static(&bramble_spi_stub_info);
+    type_register_static(&bramble_ssd1680_info);
     type_register_static(&bramble_sx1262_info);
     type_register_static(&bramble_gpspi2_info);
 }
@@ -1296,10 +1546,10 @@ void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
         s->intr = qdev_get_gpio_in(intc, ETS_SPI2_INTR_SOURCE);
     }
 
-    /* Attach both bus slaves and capture their CS inputs for routing. The
-     * radio is the register-accurate SX1262 (P2.4a); the display is still the
-     * stub (P2.5 replaces it with a real SSD1680). bramble_gpspi2_route drives
-     * these SSI_GPIO_CS lines so exactly one answers each transfer. */
+    /* Attach both bus slaves and capture their CS inputs for routing. Both are
+     * register-accurate: the radio is the SX1262 (P2.4a) and the display is the
+     * SSD1680 (P2.5). bramble_gpspi2_route drives these SSI_GPIO_CS lines so
+     * exactly one answers each transfer. */
     /* Distinct SSI cs_index values so ssi_peripheral_realize's uniqueness check
      * passes; actual selection is driven through each slave's SSI_GPIO_CS input
      * by bramble_gpspi2_route, not this index. */
@@ -1308,7 +1558,7 @@ void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
     ssi_realize_and_unref(radio, s->spi, &error_fatal);
     s->radio_cs = qdev_get_gpio_in_named(radio, SSI_GPIO_CS, 0);
 
-    DeviceState *disp = qdev_new(TYPE_BRAMBLE_SPI_STUB);
+    DeviceState *disp = qdev_new(TYPE_BRAMBLE_SSD1680);
     qdev_prop_set_uint8(disp, "cs", 1);
     ssi_realize_and_unref(disp, s->spi, &error_fatal);
     s->disp_cs = qdev_get_gpio_in_named(disp, SSI_GPIO_CS, 0);
@@ -1321,6 +1571,6 @@ void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
      * IO region (added at priority 0), like bramble_gpio does for GPIO. */
     memory_region_add_subregion_overlap(sys_mem, DR_REG_SPI2_BASE, &s->iomem, 1);
 
-    fprintf(stderr, "bramble-gpspi2: controller + SX1262 radio + display stub "
-            "attached at 0x%x\n", (unsigned)DR_REG_SPI2_BASE);
+    fprintf(stderr, "bramble-gpspi2: controller + SX1262 radio + SSD1680 "
+            "display attached at 0x%x\n", (unsigned)DR_REG_SPI2_BASE);
 }
