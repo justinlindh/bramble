@@ -67,6 +67,12 @@
 #define R_GPIO_STATUS1      0x0050
 #define R_GPIO_STATUS1_W1TS 0x0054
 #define R_GPIO_STATUS1_W1TC 0x0058
+/* Per-CPU routed interrupt status (pins 0..31 / 32..48). The ESP-IDF GPIO ISR
+ * (gpio_intr_service -> gpio_hal_get_intr_status) reads THESE, not GPIO_STATUS,
+ * to decide which pins to dispatch, then clears them via STATUS_W1TC. We route
+ * every latched interrupt to the CPU, so they mirror GPIO_STATUS. */
+#define R_GPIO_PCPU_INT     0x005C
+#define R_GPIO_PCPU_INT1    0x0068
 
 /* esp32s3 flash-boot strap value, matching esp32s3_gpio.c's default. */
 #define BRAMBLE_STRAP_MODE_FLASH_BOOT 0x4
@@ -199,6 +205,11 @@ static uint64_t bramble_gpio_read(void *opaque, hwaddr addr, unsigned int size)
     case R_GPIO_IN1:      return s->in[1];
     case R_GPIO_STATUS:   return s->status[0];
     case R_GPIO_STATUS1:  return s->status[1];
+    /* CPU-routed interrupt status the ISR polls: mirror the latched status so a
+     * real edge is actually dispatched and cleared (otherwise the level line
+     * driven off status stays asserted and the ISR livelocks re-reading 0). */
+    case R_GPIO_PCPU_INT:  return s->status[0];
+    case R_GPIO_PCPU_INT1: return s->status[1];
     default:              return 0;
     }
 }
