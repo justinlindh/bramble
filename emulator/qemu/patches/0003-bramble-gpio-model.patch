@@ -1,0 +1,42 @@
+diff --git a/hw/xtensa/esp32s3.c b/hw/xtensa/esp32s3.c
+index a797bc7..3b24485 100644
+--- a/hw/xtensa/esp32s3.c
++++ b/hw/xtensa/esp32s3.c
+@@ -70,6 +70,7 @@
+ 
+ #include "hw/misc/esp32c3_jtag.h"
+ #include "hw/display/esp_rgb.h"
++#include "hw/xtensa/bramble_gpio.h"
+ 
+ #define TYPE_ESP32S3_SOC "xtensa.esp32s3"
+ #define ESP32S3_SOC(obj) OBJECT_CHECK(Esp32s3SocState, (obj), TYPE_ESP32S3_SOC)
+@@ -884,6 +885,15 @@ static void esp32s3_machine_init(MachineState *machine)
+     /* Need MMU initialized prior to ELF loading,
+      * so that ELF gets loaded into virtual addresses
+      */
++
++    /* Bramble GPIO observer/injector (P2.2). Overlays the GPIO window to log
++     * output-pin transitions and inject button input. Wired here (not from a
++     * separate model file) because the SoC state (ss) and its interrupt matrix
++     * are in scope only at this machine-init site: Esp32s3SocState is private
++     * to esp32s3.c. Placed apart from the P2.2-infra scaffold call so the two
++     * patches re-apply idempotently. */
++    bramble_gpio_attach(get_system_memory(), DEVICE(&ss->intmatrix));
++
+     cpu_reset(CPU(&ss->cpu[0]));
+ 
+     const char *load_elf_filename = NULL;
+diff --git a/hw/xtensa/meson.build b/hw/xtensa/meson.build
+index 3037000..fe0437c 100644
+--- a/hw/xtensa/meson.build
++++ b/hw/xtensa/meson.build
+@@ -8,6 +8,9 @@ xtensa_ss.add(when: 'CONFIG_XTENSA_SIM', if_true: files('sim.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_VIRT', if_true: files('virt.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_XTFPGA', if_true: files('xtfpga.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32', if_true: files('esp32.c', 'esp32_intc.c'))
++# Bramble GPIO observer/injector (P2.2); separate add() so it stays clear of
++# the bramble_scaffold.c line the P2.2-infra patch owns (idempotent re-apply).
++xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files('bramble_gpio.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files(
+   'esp32s3_clk.c',
+   'esp32s3_intc.c',
