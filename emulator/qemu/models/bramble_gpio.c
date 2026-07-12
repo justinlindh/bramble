@@ -140,6 +140,15 @@ struct BrambleGpioState {
  * read a driven output level without duplicating GPIO state. */
 static BrambleGpioState *s_bramble_gpio;
 
+/* Optional observer fired on every decoded OUT-pin level transition (see the
+ * header). The indicator bridge registers it to forward LED/vibra levels. */
+static bramble_gpio_out_observer_fn s_out_observer;
+
+void bramble_gpio_set_out_observer(bramble_gpio_out_observer_fn fn)
+{
+    s_out_observer = fn;
+}
+
 /* Current driven level of an output pin (0..48), as the OUT registers hold it.
  * Returns 0 if the overlay is not attached. Used by bramble_gpspi2 to route
  * SPI transfers by the radio's manual CS on GPIO8. */
@@ -189,6 +198,9 @@ static void bramble_gpio_set_out(BrambleGpioState *s, int bank, uint32_t val)
         int level = (val >> bit) & 1;
         fprintf(stderr, "bramble-gpio: OUT gpio=%d(%s) level=%d\n",
                 pin, bramble_out_name(pin), level);
+        if (s_out_observer) {
+            s_out_observer(pin, level != 0);
+        }
     }
 }
 

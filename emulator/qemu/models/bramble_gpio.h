@@ -38,4 +38,16 @@ bool bramble_gpio_out_level(int pin);
  */
 void bramble_gpio_set_input(int pin, bool level);
 
+/*
+ * Register a single observer invoked on every OUTPUT-pin level transition the
+ * overlay decodes (the same transitions logged as "bramble-gpio: OUT ..."), so
+ * a sibling model can react to an output pin without polling. The indicator
+ * bridge (bramble_gpspi2.c) uses this to forward the pager's LED (GPIO48) and
+ * vibra (GPIO16) levels into the emu-link `ind` message. At most one observer;
+ * the last registration wins, and NULL clears it. No-op transitions (a write
+ * that does not change a pin's level) do not fire it.
+ */
+typedef void (*bramble_gpio_out_observer_fn)(int pin, bool level);
+void bramble_gpio_set_out_observer(bramble_gpio_out_observer_fn fn);
+
 #endif
