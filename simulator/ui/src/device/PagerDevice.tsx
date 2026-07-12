@@ -26,6 +26,17 @@ export interface PagerDeviceProps {
 
 const RESET_HOLD_MS = 800;
 
+// Buzzer sound port: a 3x3 grille of dots. Geometry is derived solely from the
+// constant BUZZER face model, so the layout is fully static - compute it once at
+// module load rather than rebuilding all nine circles on every render.
+const BUZZER_GRILLE = [-1, 0, 1].flatMap((gx) =>
+  [-1, 0, 1].map((gy) => ({
+    key: `bz-${gx}-${gy}`,
+    cx: BUZZER.x + gx * 1.1,
+    cy: BUZZER.y + gy * 1.1,
+  })),
+);
+
 export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }: PagerDeviceProps) {
   const faceHeight = (faceWidth * EXT_H) / EXT_W;
 
@@ -184,9 +195,9 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
             fill={device.led ? '#8CFF74' : '#243026'} stroke="#0c0d0f" strokeWidth={0.2} />
 
           {/* Buzzer sound port (3x3 grille) */}
-          {[-1, 0, 1].map((gx) => [-1, 0, 1].map((gy) => (
-            <circle key={`bz-${gx}-${gy}`} cx={BUZZER.x + gx * 1.1} cy={BUZZER.y + gy * 1.1} r={BUZZER.r} fill="#15171a" />
-          )))}
+          {BUZZER_GRILLE.map((d) => (
+            <circle key={d.key} cx={d.cx} cy={d.cy} r={BUZZER.r} fill="#15171a" />
+          ))}
 
           {/* Face buttons */}
           {BUTTONS.map((b) => (
