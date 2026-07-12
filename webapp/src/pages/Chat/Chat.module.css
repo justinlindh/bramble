@@ -68,6 +68,66 @@
   cursor: pointer;
 }
 
+.verifyBtn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--text-muted);
+  padding: 3px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+.verifyBtn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--text-primary);
+}
+
+.verifyGlyphOk {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--success);
+  vertical-align: middle;
+}
+
+.verifyGlyphWarn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--danger);
+  vertical-align: middle;
+}
+
+.keyChangedBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg));
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.keyChangedBarBtn {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.keyChangedBarBtn:hover {
+  opacity: 0.88;
+}
+
 .routeBtn {
   margin-left: auto;
   background: none;

@@ -86,6 +86,15 @@ typedef struct {
     char compose_buf[COMPOSE_BUF_SIZE];
     int compose_len;
     bool compose_active; /* true when in compose mode with cursor */
+
+    /* Nodes screen: per-peer selection + SAS-verify sub-modes (text UI). */
+    bool nodes_selecting;       /* cursor-selection mode active on SCREEN_NODES */
+    int nodes_cursor;           /* selected neighbor index into the non-zero list */
+    int node_total;             /* snapshot of selectable neighbor count (main loop feeds it) */
+    bool node_detail_open;      /* viewing the selected peer's SAS detail */
+    bool node_verify_armed;     /* first confirm press seen; next confirm commits */
+    bool node_verify_confirmed; /* set on commit; main.c applies mesh_set_peer_verified then clears
+                                 */
 } ui_state_t;
 
 void ui_init(ui_state_t* state);
@@ -101,6 +110,10 @@ void ui_set_gps_available(ui_state_t* state, bool available);
 /* Snapshot of msg_store_count(), fed by the main loop so the button
  * handler can clamp scrollback without a msg_store dependency. */
 void ui_set_message_total(ui_state_t* state, int total);
+
+/* Snapshot of the selectable neighbor count, fed by the main loop so the button
+ * handler can clamp/wrap the nodes cursor without a mesh dependency. */
+void ui_set_node_total(ui_state_t* state, int total);
 
 /* Connectivity mode — NVS-persisted, applied on next boot.
  * Implemented in main/main.c; declared here so any UI component can call them. */

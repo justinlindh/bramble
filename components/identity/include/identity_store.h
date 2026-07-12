@@ -2,6 +2,7 @@
 #define BRAMBLE_IDENTITY_STORE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "packet.h" /* bramble_identity_attestation_t */
@@ -31,8 +32,11 @@
  *     attestation refreshes its entry (attestations are replayed on a
  *     cadence by design), so live bindings stay; only bindings nothing
  *     has confirmed lately get displaced. A CONFLICT does not refresh.
- *   - RAM only this phase (residual): pins reset on reboot and TOFU
- *     re-establishes; NVS persistence is Phase 4+ material.
+ *   - The RAM store is authoritative; the binding + its verified bit and
+ *     SAS-at-verification also persist to NVS (identity_store_serialize /
+ *     _deserialize, driven by mesh_task.c) so a "verified once, stays
+ *     verified" model survives reboot. The LRU bookkeeping (pinned_at_ms /
+ *     last_confirmed_ms) is not persisted and legitimately resets on reboot.
  *
  * Phase 4 (address rebind): the node address derives from the Ed25519
  * identity key, and identity_store_handle_attestation additionally
@@ -103,6 +107,23 @@ typedef struct {
     uint8_t x25519_pub[32];
     uint32_t pinned_at_ms;      /* when the binding was first stored */
     uint32_t last_confirmed_ms; /* last identical re-attestation (LRU key) */
+    /* SAS verification state (DM forward-secrecy + SAS). The bit and the
+     * SAS-at-verification-time persist to NVS with the pin (see
+     * identity_store_serialize) so a "verified once, stays verified" model
+     * survives reboot. Because the verified state keys on the pinned identity
+     * key, ratchet steps, epoch bumps, desync-heal, and reboot never force
+     * re-verification; only a pin key change (a CONFLICT / rebind) clears it. */
+    bool verified;        /* SAS confirmed out of band, survives reboot via NVS */
+    char verified_sas[8]; /* the 7-digit identity SAS at verification time + NUL */
+    /* RAM-only, NOT serialized: a genuine identity-key change was seen and not
+     * yet re-verified. Set by identity_store_mark_key_changed (Task 7's
+     * verified_cleared branch in mesh_task.c, the ONE genuine key-change site),
+     * cleared by identity_store_set_verified (re-verifying dismisses the
+     * warning). Deliberately excluded from serialize/deserialize: the
+     * security-critical persisted state is the verified bit; the key-change
+     * warning framing matters most during the live session, and losing it
+     * across reboot avoids re-versioning the blob. */
+    bool key_changed;
 } identity_pin_t;
 
 typedef struct {
@@ -277,5 +298,59 @@ bool identity_store_quorum_eligible(const identity_store_t* s, uint32_t address,
 
 /* Number of used entries (diagnostics). */
 int identity_store_count(const identity_store_t* s);
+
+/*
+ * SAS verification state (DM forward-secrecy + SAS). The verified bit lives on
+ * the TOFU pin, not on the DM session, so it is stable across ratchet steps,
+ * epoch bumps, desync-heal, and reboot; only a pin key change invalidates it.
+ *
+ * set_verified records the bit AND the SAS string the users compared out of
+ * band (identity_store_serialize persists both); returns false if no pin exists
+ * for address (verification must follow a pin). clear_verified drops the bit
+ * (Task 7 calls it on a DM_VERIFY_ERR_PIN_MISMATCH key-change red flag) and
+ * returns false if there is no pin. is_verified is the query surface for the UX
+ * and the session snapshot.
+ */
+bool identity_store_set_verified(identity_store_t* s, uint32_t address, const char sas[8]);
+bool identity_store_clear_verified(identity_store_t* s, uint32_t address);
+bool identity_store_is_verified(const identity_store_t* s, uint32_t address);
+
+/*
+ * RAM-only key-change flag (see identity_pin_t.key_changed). Marks the peer's
+ * pin as having seen a genuine identity-key change; returns false if there is
+ * no pin for address. Callers must set this ONLY at the genuine key-change
+ * site (a pin CONFLICT/rebind that also invalidated a verified DM session),
+ * never from a deliberate user un-verify (identity_store_clear_verified is
+ * also that path and does not touch key_changed). identity_store_key_changed
+ * is the query surface for the UX; false if no pin or the flag is clear.
+ */
+bool identity_store_mark_key_changed(identity_store_t* s, uint32_t address);
+bool identity_store_key_changed(const identity_store_t* s, uint32_t address);
+
+/*
+ * Pure (NVS-free) serialize/deserialize of the pin table so verification and
+ * TOFU bindings survive reboot. The firmware caller (mesh_task.c) owns the
+ * nvs_open/nvs_set_blob/nvs_commit around these, mirroring identity.c: the
+ * IN-MEMORY store is authoritative, so a store-write failure never loses the
+ * live pins. Only the durable fields are written (address, both pubkeys, the
+ * verified bit, and the SAS); pinned_at_ms / last_confirmed_ms are LRU
+ * bookkeeping that legitimately resets on reboot.
+ *
+ * serialize writes a 1-byte format version, a 1-byte used-entry count, then one
+ * fixed record per used entry; returns the byte count written, or -1 if buf is
+ * too small. deserialize FIRST re-initializes the pin table (so a caller may
+ * pass a fresh/zeroed store) while PRESERVING any anchor already provisioned on
+ * it, then rebuilds every record; returns 0 on success, -1 on a wrong version
+ * byte or a truncated buffer (leaving the store initialized and empty).
+ */
+#define IDENTITY_STORE_BLOB_VERSION 1u
+/* address(4) || ed25519_pub(32) || x25519_pub(32) || verified(1) || sas(8) */
+#define IDENTITY_STORE_RECORD_SIZE (4 + 32 + 32 + 1 + 8)
+/* version(1) || count(1) || CAPACITY records */
+#define IDENTITY_STORE_BLOB_MAX (2 + IDENTITY_STORE_CAPACITY * IDENTITY_STORE_RECORD_SIZE)
+
+int identity_store_serialize(const identity_store_t* s, uint8_t* buf, size_t buf_len);
+int identity_store_deserialize(identity_store_t* s, const uint8_t* buf, size_t len,
+                               uint32_t now_ms);
 
 #endif /* BRAMBLE_IDENTITY_STORE_H */

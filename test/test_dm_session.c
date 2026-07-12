@@ -653,6 +653,29 @@ void test_pin_disagrees_non_active_false(void) {
     TEST_ASSERT_FALSE(dm_pin_disagrees(&s, pinned));
 }
 
+/*
+ * dm_verified_should_clear (Task 7) is the pure decision the mesh_task pin-
+ * mismatch handler applies alongside dm_pin_disagrees: only a VERIFIED
+ * session whose pin genuinely disagrees needs its verified bit cleared.
+ * Nothing to clear on an already-unverified session, and no clear when the
+ * pin still matches (the healthy case).
+ */
+void test_verified_cleared_on_pin_disagreement(void) {
+    dm_session_t s;
+    memset(&s, 0, sizeof(s));
+    s.state = DM_STATE_ACTIVE;
+    s.verified = 1;
+    memset(s.peer_id_pub, 0x11, 32);
+    uint8_t new_pin[32];
+    memset(new_pin, 0x22, 32); /* key changed */
+    TEST_ASSERT_TRUE(dm_verified_should_clear(&s, new_pin));
+    uint8_t same_pin[32];
+    memset(same_pin, 0x11, 32);
+    TEST_ASSERT_FALSE(dm_verified_should_clear(&s, same_pin)); /* same key: keep verified */
+    s.verified = 0;
+    TEST_ASSERT_FALSE(dm_verified_should_clear(&s, new_pin)); /* nothing to clear */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_quad_dh_both_sides_agree);
@@ -684,5 +707,6 @@ int main(void) {
     RUN_TEST(test_pin_disagrees_differing_key_true);
     RUN_TEST(test_pin_disagrees_matching_key_false);
     RUN_TEST(test_pin_disagrees_non_active_false);
+    RUN_TEST(test_verified_cleared_on_pin_disagreement);
     return UNITY_END();
 }

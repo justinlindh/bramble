@@ -1,5 +1,6 @@
 #include "scr_chat_messages.h"
 #include "scr_chat_list.h"
+#include "scr_sas_verify.h"
 #include "theme/bramble_theme.h"
 #include "msg_store.h"
 #include "chat_target.h"
@@ -20,13 +21,20 @@ static lv_obj_t* s_compose_ta = NULL;
 static lv_obj_t* s_title = NULL;
 static uint32_t s_selected_packet_id = 0;
 
+/* Key-change interstitial (DM forward-secrecy + SAS, Task 8): which DM this
+ * interstitial's buttons act on. Set right before it is shown, read only from
+ * its own click callbacks. */
+static bramble_layout_t* s_interstitial_layout = NULL;
+static uint32_t s_interstitial_peer_addr = 0;
+
 /* Render bound: newest matching messages built per pass. Keeps LVGL
  * object count sane on deep stores. */
 #define CHAT_RENDER_MAX 60
 
 static void render_messages_for_target(bool scroll_to_bottom);
+static void open_with_target(bramble_layout_t* layout, chat_target_t target, int clear_channel_idx);
 
-/* Use extern for mesh_send — it's in main, not a component */
+/* Use extern for mesh_send: it's in main, not a component */
 extern int mesh_send_broadcast(const uint8_t* data, size_t len);
 extern uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* data,
                                   size_t len);
@@ -34,6 +42,8 @@ extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 extern const char* mesh_get_peer_name(uint32_t addr);
+extern bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified,
+                                       bool* key_changed);
 
 static void update_title(void) {
     if (!s_title)
@@ -73,6 +83,35 @@ static void channel_cycle_click_cb(lv_event_t* e) {
     s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
     update_title();
     render_messages_for_target(true);
+}
+
+/* DM header verify glyph (DM forward-secrecy + SAS, Task 8): three states
+ * driven by mesh_get_peer_verification, matching the pager UX spec. No pin at
+ * all reads the same as unverified: there is nothing to distinguish for the
+ * user until a pin exists. */
+static void dm_verify_status(uint32_t peer_addr, const char** text_out, lv_color_t* color_out) {
+    char sas[8];
+    bool verified = false;
+    bool key_changed = false;
+    bool have_pin = mesh_get_peer_verification(peer_addr, sas, &verified, &key_changed);
+
+    if (have_pin && key_changed) {
+        *text_out = LV_SYMBOL_WARNING " Key changed";
+        *color_out = BR_COLOR_DANGER;
+    } else if (have_pin && verified) {
+        *text_out = LV_SYMBOL_OK " Verified";
+        *color_out = BR_COLOR_PRIMARY;
+    } else {
+        *text_out = LV_SYMBOL_CLOSE " Unverified";
+        *color_out = BR_COLOR_TEXT_SEC;
+    }
+}
+
+static void verify_click_cb(lv_event_t* e) {
+    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+    if (!layout || s_target.kind != CHAT_TARGET_DM)
+        return;
+    scr_sas_verify_open(layout, s_target.peer_addr);
 }
 
 static void back_click_cb(lv_event_t* e) {
@@ -522,22 +561,43 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     if (g)
         lv_group_add_obj(g, back_btn);
 
-    lv_obj_t* target_btn = lv_btn_create(header);
-    lv_obj_set_size(target_btn, 108, 22);
-    lv_obj_align(target_btn, LV_ALIGN_RIGHT_MID, -4, 0);
-    lv_obj_set_style_bg_color(target_btn, BR_COLOR_SURFACE, 0);
-    lv_obj_set_style_border_color(target_btn, BR_COLOR_BORDER, 0);
-    lv_obj_set_style_border_width(target_btn, 1, 0);
-    lv_obj_t* tgt_lbl = lv_label_create(target_btn);
-    lv_label_set_text(tgt_lbl, LV_SYMBOL_REFRESH " channel");
-    lv_obj_set_style_text_font(tgt_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(tgt_lbl, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_center(tgt_lbl);
-    lv_obj_add_event_cb(target_btn, channel_cycle_click_cb, LV_EVENT_CLICKED, NULL);
     if (s_target.kind == CHAT_TARGET_DM) {
-        lv_obj_add_flag(target_btn, LV_OBJ_FLAG_HIDDEN);
-    } else if (g) {
-        lv_group_add_obj(g, target_btn);
+        /* Verify glyph + entry point takes the channel-cycle button's slot:
+         * a DM has no channel to cycle. */
+        lv_obj_t* verify_btn = lv_btn_create(header);
+        lv_obj_set_size(verify_btn, 108, 22);
+        lv_obj_align(verify_btn, LV_ALIGN_RIGHT_MID, -4, 0);
+        lv_obj_set_style_bg_color(verify_btn, BR_COLOR_SURFACE, 0);
+        lv_obj_set_style_border_color(verify_btn, BR_COLOR_BORDER, 0);
+        lv_obj_set_style_border_width(verify_btn, 1, 0);
+
+        const char* status_text;
+        lv_color_t status_color;
+        dm_verify_status(s_target.peer_addr, &status_text, &status_color);
+
+        lv_obj_t* verify_lbl = lv_label_create(verify_btn);
+        lv_label_set_text(verify_lbl, status_text);
+        lv_obj_set_style_text_font(verify_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(verify_lbl, status_color, 0);
+        lv_obj_center(verify_lbl);
+        lv_obj_add_event_cb(verify_btn, verify_click_cb, LV_EVENT_CLICKED, layout);
+        if (g)
+            lv_group_add_obj(g, verify_btn);
+    } else {
+        lv_obj_t* target_btn = lv_btn_create(header);
+        lv_obj_set_size(target_btn, 108, 22);
+        lv_obj_align(target_btn, LV_ALIGN_RIGHT_MID, -4, 0);
+        lv_obj_set_style_bg_color(target_btn, BR_COLOR_SURFACE, 0);
+        lv_obj_set_style_border_color(target_btn, BR_COLOR_BORDER, 0);
+        lv_obj_set_style_border_width(target_btn, 1, 0);
+        lv_obj_t* tgt_lbl = lv_label_create(target_btn);
+        lv_label_set_text(tgt_lbl, LV_SYMBOL_REFRESH " channel");
+        lv_obj_set_style_text_font(tgt_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(tgt_lbl, BR_COLOR_TEXT_SEC, 0);
+        lv_obj_center(tgt_lbl);
+        lv_obj_add_event_cb(target_btn, channel_cycle_click_cb, LV_EVENT_CLICKED, NULL);
+        if (g)
+            lv_group_add_obj(g, target_btn);
     }
 
     s_title = lv_label_create(header);
@@ -600,6 +660,82 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
         lv_group_add_obj(g, send_btn);
 }
 
+/* Key-change interstitial (DM forward-secrecy + SAS, Task 8): a genuine
+ * identity-key change on this peer was seen and not yet re-verified. Shown
+ * before messages on DM open in place of the normal DM view; "Verify Now"
+ * goes straight to the SAS screen, "Continue" opens the DM anyway (reading
+ * old messages from a since-rotated key is not itself dangerous, only
+ * trusting new ones without re-verifying is). */
+static void interstitial_verify_click_cb(lv_event_t* e) {
+    (void)e;
+    if (!s_interstitial_layout)
+        return;
+    scr_sas_verify_open(s_interstitial_layout, s_interstitial_peer_addr);
+}
+
+static void interstitial_continue_click_cb(lv_event_t* e) {
+    (void)e;
+    if (!s_interstitial_layout)
+        return;
+    open_with_target(s_interstitial_layout, chat_target_dm(s_interstitial_peer_addr), -1);
+}
+
+static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer_addr) {
+    s_interstitial_layout = layout;
+    s_interstitial_peer_addr = peer_addr;
+
+    layout_set_tab_bar_hidden(layout, true);
+    lv_obj_clean(layout->content_area);
+    lv_obj_set_size(layout->content_area, 320, 240 - BR_STATUS_BAR_H);
+
+    lv_obj_t* card = lv_obj_create(layout->content_area);
+    lv_obj_set_size(card, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_style_pad_all(card, BR_PADDING, 0);
+    lv_obj_set_style_pad_row(card, 8, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t* warn_lbl = lv_label_create(card);
+    lv_label_set_text(warn_lbl, LV_SYMBOL_WARNING " Key Changed");
+    lv_obj_set_style_text_font(warn_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(warn_lbl, BR_COLOR_DANGER, 0);
+
+    lv_obj_t* msg_lbl = lv_label_create(card);
+    lv_label_set_text(msg_lbl, "This contact's key changed. Re-verify.");
+    lv_obj_set_width(msg_lbl, lv_pct(100));
+    lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(msg_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(msg_lbl, BR_COLOR_TEXT_SEC, 0);
+
+    lv_obj_t* verify_btn = lv_btn_create(card);
+    lv_obj_set_size(verify_btn, 180, BR_TAP_TARGET_MIN);
+    lv_obj_set_style_bg_color(verify_btn, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_radius(verify_btn, BR_RADIUS, 0);
+    lv_obj_t* verify_lbl = lv_label_create(verify_btn);
+    lv_label_set_text(verify_lbl, "Verify Now");
+    lv_obj_center(verify_lbl);
+    lv_obj_add_event_cb(verify_btn, interstitial_verify_click_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t* continue_btn = lv_btn_create(card);
+    lv_obj_set_size(continue_btn, 180, BR_TAP_TARGET_MIN);
+    lv_obj_set_style_bg_color(continue_btn, BR_COLOR_SURFACE_2, 0);
+    lv_obj_set_style_radius(continue_btn, BR_RADIUS, 0);
+    lv_obj_t* continue_lbl = lv_label_create(continue_btn);
+    lv_label_set_text(continue_lbl, "Continue");
+    lv_obj_center(continue_lbl);
+    lv_obj_add_event_cb(continue_btn, interstitial_continue_click_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_group_t* g = lv_group_get_default();
+    if (g) {
+        lv_group_add_obj(g, verify_btn);
+        lv_group_add_obj(g, continue_btn);
+        lv_group_focus_obj(verify_btn);
+    }
+}
+
 void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx) {
     chat_target_t target =
         (channel_idx > 0)
@@ -610,6 +746,15 @@ void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx) {
 
 void scr_chat_messages_open_dm(bramble_layout_t* layout, uint32_t peer_addr) {
     chat_unread_clear_for_dm(peer_addr);
+
+    char sas[8];
+    bool verified = false;
+    bool key_changed = false;
+    if (mesh_get_peer_verification(peer_addr, sas, &verified, &key_changed) && key_changed) {
+        show_key_change_interstitial(layout, peer_addr);
+        return;
+    }
+
     open_with_target(layout, chat_target_dm(peer_addr), -1);
 }
 

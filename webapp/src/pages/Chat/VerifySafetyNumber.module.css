@@ -1,0 +1,141 @@
+.panel {
+  flex: 1;
+  padding: 1rem 1.25rem;
+  overflow-y: auto;
+}
+
+.backBtn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.875rem;
+  padding: 0;
+  margin-bottom: 1rem;
+  display: block;
+}
+.backBtn:hover { text-decoration: underline; }
+
+.title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 2px;
+  color: var(--text-primary);
+}
+
+.subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin: 0 0 1rem;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 1rem;
+}
+
+.sasCode {
+  font-family: var(--font-mono);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+.status {
+  margin-bottom: 1rem;
+}
+
+.statusVerified {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--success);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.statusUnverified {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.verifyBtn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.verifyBtn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.1);
+}
+.verifyBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.qrBtn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.qrBtn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--text-primary);
+}
+
+.error {
+  color: var(--danger);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.keyChangedBanner {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg));
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+}
+
+.keyChangedIcon {
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
+.keyChangedTitle {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin: 0 0 2px;
+}
+
+.keyChangedText {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  line-height: 1.45;
+  margin: 0;
+}

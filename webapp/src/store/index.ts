@@ -14,6 +14,7 @@ import type {
   Transport,
   ProbeResult,
   PeerLocation,
+  PeerVerification,
   TrafficDebugStatus,
   TrafficEvent,
   ConnectionCapabilities,
@@ -121,6 +122,7 @@ interface Actions {
   setDevices: (d: SavedDevice[]) => void;
   setPeerLocations: (locs: PeerLocation[]) => void;
   setMapFocusAddr: (addr: number | null) => void;
+  setPeerVerification: (addr: number, v: PeerVerification) => void;
   loadCachedMessages: (msgs: Message[]) => void;
   peerNames: Map<number, string>;
   setPeerName: (addr: number, name: string) => void;
@@ -161,6 +163,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   devices: [],
   peerLocations: [],
   mapFocusAddr: null,
+  peerVerifications: new Map(),
   trafficDebugStatus: null,
   trafficEvents: [],
   networkKeyStatus: null,
@@ -355,6 +358,7 @@ export const useStore = create<AppState & Actions>((set) => ({
     probeCollecting: false,
     peerLocations: [],
     mapFocusAddr: null,
+    peerVerifications: new Map(),
     networkKeyStatus: null,
     anchorStatus: null,
   }),
@@ -365,6 +369,12 @@ export const useStore = create<AppState & Actions>((set) => ({
 
   setPeerLocations: (locs) => set({ peerLocations: locs }),
   setMapFocusAddr: (addr) => set({ mapFocusAddr: addr }),
+
+  setPeerVerification: (addr, v) => set(state => {
+    const next = new Map(state.peerVerifications);
+    next.set(addr, v);
+    return { peerVerifications: next };
+  }),
 
   loadCachedMessages: (msgs: Message[]) =>
     set(state => {

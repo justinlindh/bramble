@@ -50,9 +50,9 @@ static int ct_le32(const uint8_t a[32], const uint8_t b[32]) {
  * for DH2, so both parties already compute the same value in the same slot
  * without any role-dependent naming.
  */
-static int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
-                          const uint8_t peer_id_pub[32], const uint8_t peer_eph_pub[32],
-                          uint8_t ikm_out[128]) {
+int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
+                   const uint8_t peer_id_pub[32], const uint8_t peer_eph_pub[32],
+                   uint8_t ikm_out[128]) {
     if (crypto_x25519_dh(my_eph_priv, peer_eph_pub, ikm_out + 0) != 0)
         return -1;
     if (crypto_x25519_dh(my_id_priv, peer_id_pub, ikm_out + 32) != 0)
@@ -107,6 +107,281 @@ static int dm_session_key_from_ikm(const uint8_t ikm[128], uint32_t addr_a, uint
                               session_key_out, 32);
 }
 
+/*
+ * The ratchet chains use the design's HKDF(salt=<key>, ikm="", info=<label>)
+ * form (spec A.4). "ikm=empty" must still be passed as a valid non-NULL
+ * pointer with length 0: the OpenSSL host wrapper's EVP_PKEY_CTX_set1_hkdf_key
+ * rejects a NULL key pointer outright, and the mbedtls device path likewise
+ * wants a non-NULL buffer, so a zero-length read of this byte (never actually
+ * dereferenced) is the portable spelling of an empty IKM.
+ */
+static const uint8_t dm_ratchet_empty_ikm[1] = {0};
+
+/* Derives the send/recv chain-key pair from a root key: two HKDF calls with
+ * fixed labels, both using the same non-NULL empty IKM as every other
+ * ratchet derivation above. Shared by dm_ratchet_init (RK_0) and
+ * dm_session_epoch_bump (RK_{e+1}) so both paths are byte-identical. */
+static int dm_derive_chain_pair(const uint8_t rk[32], uint8_t ck_lohi_out[32],
+                                uint8_t ck_hilo_out[32]) {
+    const char* lohi = "bramble-dm-chain-lohi";
+    const char* hilo = "bramble-dm-chain-hilo";
+    if (crypto_hkdf_sha256(rk, 32, dm_ratchet_empty_ikm, 0, (const uint8_t*)lohi, strlen(lohi),
+                           ck_lohi_out, 32) != 0)
+        return -1;
+    if (crypto_hkdf_sha256(rk, 32, dm_ratchet_empty_ikm, 0, (const uint8_t*)hilo, strlen(hilo),
+                           ck_hilo_out, 32) != 0)
+        return -1;
+    return 0;
+}
+
+int dm_ratchet_init(const uint8_t ikm[128], uint32_t addr_a, uint32_t addr_b, uint8_t rk_out[32],
+                    uint8_t ck_lohi_out[32], uint8_t ck_hilo_out[32]) {
+    /* RK_0 IS the legacy epoch-0 session key: migration continuity (spec A.6). */
+    if (dm_session_key_from_ikm(ikm, addr_a, addr_b, 0, rk_out) != 0)
+        return -1;
+    return dm_derive_chain_pair(rk_out, ck_lohi_out, ck_hilo_out);
+}
+
+void dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],
+                     uint8_t ck_next_out[32]) {
+    uint8_t mk_info[16];
+    const char* mk_label = "bramble-dm-mk";
+    size_t ll = strlen(mk_label);
+    memcpy(mk_info, mk_label, ll);
+    mk_info[ll] = (uint8_t)(index_n >> 8);
+    mk_info[ll + 1] = (uint8_t)(index_n & 0xFF);
+    (void)crypto_hkdf_sha256(ck_in, 32, dm_ratchet_empty_ikm, 0, mk_info, ll + 2, mk_out, 32);
+    const char* ck_label = "bramble-dm-ck";
+    (void)crypto_hkdf_sha256(ck_in, 32, dm_ratchet_empty_ikm, 0, (const uint8_t*)ck_label,
+                             strlen(ck_label), ck_next_out, 32);
+}
+
+int dm_ratchet_dh(const uint8_t rk_e[32], const uint8_t dh[32], uint32_t addr_a, uint32_t addr_b,
+                  uint16_t new_epoch, uint8_t rk_next_out[32]) {
+    uint8_t info[10];
+    dm_build_info(addr_a, addr_b, new_epoch, info);
+    return crypto_hkdf_sha256(rk_e, 32, dh, 32, info, sizeof(info), rk_next_out, 32);
+}
+
+/* Installs a derived chain-key pair into a session's send/recv chains: which
+ * chain goes where depends on self_is_lo (lo sends lohi, receives hilo), and
+ * both chains reset to index 0 and get stamped with epoch's low byte. Shared
+ * by dm_session_ratchet_init_state and dm_session_epoch_bump. */
+static void dm_ratchet_install_chains(dm_ratchet_t* r, const uint8_t ck_lohi[32],
+                                      const uint8_t ck_hilo[32], int self_is_lo, uint16_t epoch) {
+    memcpy(r->send.ck, self_is_lo ? ck_lohi : ck_hilo, 32);
+    memcpy(r->recv.ck, self_is_lo ? ck_hilo : ck_lohi, 32);
+    r->send.index = 0;
+    r->recv.index = 0;
+    r->send.epoch = (uint8_t)(epoch & 0xFF);
+    r->recv.epoch = (uint8_t)(epoch & 0xFF);
+    r->send.valid = 1;
+    r->recv.valid = 1;
+}
+
+void dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
+                                   uint32_t addr_peer) {
+    uint32_t addr_a = addr_self < addr_peer ? addr_self : addr_peer;
+    uint32_t addr_b = addr_self < addr_peer ? addr_peer : addr_self;
+    uint8_t ck_lohi[32], ck_hilo[32];
+    dm_ratchet_init(ikm, addr_a, addr_b, s->ratchet.rk, ck_lohi, ck_hilo);
+    int self_is_lo = (addr_self == addr_a); /* lo sends lohi, receives hilo */
+    dm_ratchet_install_chains(&s->ratchet, ck_lohi, ck_hilo, self_is_lo, s->ke_epoch);
+    memset(s->ratchet.skip, 0, sizeof(s->ratchet.skip));
+    memset(&s->ratchet.prev_recv, 0, sizeof(s->ratchet.prev_recv));
+    memset(s->ratchet.prev_skip, 0, sizeof(s->ratchet.prev_skip));
+    s->ratchet.new_epoch_msgs = 0;
+    /* Retain the legacy static session_key as RK_0 provenance only; the ratchet
+     * chains are authoritative for every message now. */
+    memcpy(s->session_key, s->ratchet.rk, 32);
+    memset(ck_lohi, 0, 32);
+    memset(ck_hilo, 0, 32);
+}
+
+void dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
+                           uint32_t addr_peer, uint16_t new_epoch) {
+    uint32_t addr_a = addr_self < addr_peer ? addr_self : addr_peer;
+    uint32_t addr_b = addr_self < addr_peer ? addr_peer : addr_self;
+    /* Retain the current receive chain + skip cache as the previous epoch for
+     * the grace window (in-flight old-epoch frames still decrypt). */
+    s->ratchet.prev_recv = s->ratchet.recv;
+    memcpy(s->ratchet.prev_skip, s->ratchet.skip, sizeof(s->ratchet.prev_skip));
+    s->ratchet.new_epoch_msgs = 0;
+    /* Roll the root forward: RK_{e+1} = HKDF(salt=RK_e, ikm=new_dh, info@epoch).
+     * Chaining from the CURRENT root plus a fresh DH is the Double Ratchet root
+     * KDF and is what makes a pre-bump root compromise recoverable (PCS). */
+    uint8_t rk_next[32];
+    dm_ratchet_dh(s->ratchet.rk, new_dh, addr_a, addr_b, new_epoch, rk_next);
+    memcpy(s->ratchet.rk, rk_next, 32);
+    uint8_t ck_lohi[32], ck_hilo[32];
+    dm_derive_chain_pair(s->ratchet.rk, ck_lohi, ck_hilo);
+    int self_is_lo = (addr_self == addr_a);
+    dm_ratchet_install_chains(&s->ratchet, ck_lohi, ck_hilo, self_is_lo, new_epoch);
+    s->ke_epoch = new_epoch;
+    memset(s->ratchet.skip, 0, sizeof(s->ratchet.skip));
+    memcpy(s->session_key, s->ratchet.rk, 32); /* provenance mirror, as in init_state */
+    memset(rk_next, 0, 32);
+    memset(ck_lohi, 0, 32);
+    memset(ck_hilo, 0, 32);
+}
+
+int dm_session_ratchet_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                               const uint8_t* pt, size_t pt_len, const uint8_t nonce[12],
+                               uint8_t* framed_ct_out, uint8_t* tag_out, size_t* framed_len_out) {
+    if (!s->ratchet.send.valid)
+        return -1;
+    if (pt_len > 255)
+        return -1;
+    uint8_t mk[32], ck_next[32];
+    dm_ratchet_step(s->ratchet.send.ck, s->ratchet.send.index, mk, ck_next);
+
+    /* Cleartext ratchet header: epoch || msg_index (big-endian). */
+    uint8_t hdr[DM_RATCHET_HEADER_SIZE];
+    hdr[0] = s->ratchet.send.epoch;
+    hdr[1] = (uint8_t)(s->ratchet.send.index >> 8);
+    hdr[2] = (uint8_t)(s->ratchet.send.index & 0xFF);
+
+    /* AAD = base packet AAD || the 3 cleartext header bytes. The header is
+     * authenticated (an attacker cannot flip epoch/index without failing the
+     * GCM tag) but NOT encrypted. */
+    uint8_t aad[HEADER_SIZE + 4 + DM_RATCHET_HEADER_SIZE];
+    if (bramble_build_aead_aad(h, src_addr, aad, HEADER_SIZE + 4) != ESP_OK)
+        return -1;
+    memcpy(aad + HEADER_SIZE + 4, hdr, DM_RATCHET_HEADER_SIZE);
+
+    /* Encrypt ONLY the payload; the header stays in the clear at the front of
+     * the frame, ahead of the ciphertext. */
+    int rc = crypto_aes256gcm_encrypt(mk, nonce, pt, pt_len, aad, sizeof(aad),
+                                      framed_ct_out + DM_RATCHET_HEADER_SIZE, tag_out);
+    if (rc == 0) {
+        memcpy(framed_ct_out, hdr, DM_RATCHET_HEADER_SIZE);
+        memcpy(s->ratchet.send.ck, ck_next, 32); /* advance; old ck overwritten */
+        s->ratchet.send.index++;
+        *framed_len_out = DM_RATCHET_HEADER_SIZE + pt_len;
+    }
+    memset(mk, 0, sizeof(mk));
+    memset(ck_next, 0, sizeof(ck_next));
+    return rc;
+}
+
+/* Walk one receive chain (chain/skip pair) to the KNOWN cleartext index and do a
+ * single decrypt. DM_DECRYPT_OK on success (updates chain + skip); DM_DECRYPT_FAIL
+ * if the one derived key does not authenticate (forged / wrong-epoch frame, chain
+ * left untouched); DM_DECRYPT_TOO_FAR if index is beyond [next .. next+DM_MAX_SKIP]
+ * or is an already-consumed straggler not in the skip cache. */
+static int dm_recv_walk(dm_chain_t* chain, dm_skip_entry_t* skip, uint16_t index,
+                        const uint8_t* aad, size_t aad_len, const uint8_t nonce[12],
+                        const uint8_t* ct, size_t ct_len, const uint8_t* tag, uint8_t* pt_out,
+                        size_t* pt_len_out) {
+    /* 1) straggler behind the cursor: only the skip cache can hold its key. */
+    if (index < chain->index) {
+        for (int i = 0; i < DM_MAX_SKIP; i++) {
+            if (skip[i].used && skip[i].index == index) {
+                if (crypto_aes256gcm_decrypt(skip[i].mk, nonce, ct, ct_len, aad, aad_len, tag,
+                                             pt_out) != 0)
+                    return DM_DECRYPT_FAIL;
+                *pt_len_out = ct_len;
+                memset(&skip[i], 0, sizeof(skip[i])); /* single-use: evict */
+                return DM_DECRYPT_OK;
+            }
+        }
+        return DM_DECRYPT_TOO_FAR; /* not cached: replay/forgery or already consumed */
+    }
+    /* 2) too far ahead: refuse without deriving (bounded work / DoS bound). */
+    if (index > (uint16_t)(chain->index + DM_MAX_SKIP))
+        return DM_DECRYPT_TOO_FAR;
+    /* 3) derive keys [next .. index]; only commit chain/skip on a successful tag. */
+    uint8_t ck[32];
+    memcpy(ck, chain->ck, 32);
+    dm_skip_entry_t pending[DM_MAX_SKIP];
+    int npending = 0;
+    memset(pending, 0, sizeof(pending));
+    uint8_t mk[32], ck_next[32];
+    for (uint16_t walk = chain->index; walk < index; walk++) {
+        dm_ratchet_step(ck, walk, mk, ck_next);
+        if (npending < DM_MAX_SKIP) {
+            pending[npending].index = walk;
+            memcpy(pending[npending].mk, mk, 32);
+            pending[npending].used = 1;
+            npending++;
+        }
+        memcpy(ck, ck_next, 32);
+    }
+    dm_ratchet_step(ck, index, mk, ck_next); /* the target message key */
+    int rc = crypto_aes256gcm_decrypt(mk, nonce, ct, ct_len, aad, aad_len, tag, pt_out);
+    if (rc == 0) {
+        for (int p = 0; p < npending; p++) { /* cache the skipped keys */
+            int slot = pending[p].index % DM_MAX_SKIP;
+            skip[slot] = pending[p];
+            skip[slot].used = 1;
+        }
+        memcpy(chain->ck, ck_next, 32);
+        chain->index = (uint16_t)(index + 1);
+        *pt_len_out = ct_len;
+    }
+    memset(ck, 0, 32);
+    memset(mk, 0, 32);
+    memset(ck_next, 0, 32);
+    memset(pending, 0, sizeof(pending));
+    return rc == 0 ? DM_DECRYPT_OK : DM_DECRYPT_FAIL;
+}
+
+int dm_session_ratchet_decrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                               const uint8_t nonce[12], const uint8_t* framed_ct,
+                               size_t framed_ct_len, const uint8_t* tag, uint8_t* pt_out,
+                               size_t* pt_len_out) {
+    if (!s->ratchet.recv.valid)
+        return DM_DECRYPT_FAIL;
+    if (framed_ct_len < DM_RATCHET_HEADER_SIZE)
+        return DM_DECRYPT_FAIL;
+    /* Read the cleartext ratchet header: epoch (framed_ct[0]) || msg_index (BE). */
+    uint16_t index = (uint16_t)((framed_ct[1] << 8) | framed_ct[2]);
+    const uint8_t* ct = framed_ct + DM_RATCHET_HEADER_SIZE;
+    size_t ct_len = framed_ct_len - DM_RATCHET_HEADER_SIZE;
+    /* AAD = base packet AAD || the 3 cleartext header bytes (authenticated). */
+    uint8_t aad[HEADER_SIZE + 4 + DM_RATCHET_HEADER_SIZE];
+    if (bramble_build_aead_aad(h, src_addr, aad, HEADER_SIZE + 4) != ESP_OK)
+        return DM_DECRYPT_FAIL;
+    memcpy(aad + HEADER_SIZE + 4, framed_ct, DM_RATCHET_HEADER_SIZE);
+    int rc = dm_recv_walk(&s->ratchet.recv, s->ratchet.skip, index, aad, sizeof(aad), nonce, ct,
+                          ct_len, tag, pt_out, pt_len_out);
+    if (rc == DM_DECRYPT_OK) {
+        /* A frame authenticated on the CURRENT epoch. Count it toward the grace
+         * expiry and, once DM_EPOCH_GRACE_MSGS have been seen, WIPE the previous
+         * epoch's retained receive chain + skip cache. This wipe is deferred
+         * until AFTER the new chain is established and the grace is spent, which
+         * is the ordering that delivers post-compromise secrecy (an attacker who
+         * captured the old root can no longer derive any live key). */
+        if (s->ratchet.prev_recv.valid) {
+            if (s->ratchet.new_epoch_msgs < 0xFFFF)
+                s->ratchet.new_epoch_msgs++;
+            if (s->ratchet.new_epoch_msgs >= DM_EPOCH_GRACE_MSGS) {
+                memset(&s->ratchet.prev_recv, 0, sizeof(s->ratchet.prev_recv));
+                memset(s->ratchet.prev_skip, 0, sizeof(s->ratchet.prev_skip));
+            }
+        }
+        return DM_DECRYPT_OK;
+    }
+    /* Current-epoch miss (the derived key did not authenticate, or the index is
+     * out of range on the current chain). During the DH-ratchet grace window,
+     * retry against the retained previous-epoch chain: an in-flight OLD-epoch
+     * frame carries the old epoch byte in its authenticated AAD and only the old
+     * chain's keys can decrypt it. GCM authentication makes this retry safe (a
+     * current-epoch frame can never falsely authenticate under an old key). */
+    if (s->ratchet.prev_recv.valid) {
+        size_t prev_pt_len = 0;
+        int prc = dm_recv_walk(&s->ratchet.prev_recv, s->ratchet.prev_skip, index, aad, sizeof(aad),
+                               nonce, ct, ct_len, tag, pt_out, &prev_pt_len);
+        if (prc == DM_DECRYPT_OK) {
+            *pt_len_out = prev_pt_len;
+            return DM_DECRYPT_OK;
+        }
+    }
+    /* No epoch could decrypt it: return the current-epoch disposition so the mesh
+     * caller maps DM_DECRYPT_TOO_FAR / DM_DECRYPT_FAIL to the desync-heal path. */
+    return rc;
+}
+
 int dm_derive_session_key(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
                           const uint8_t peer_id_pub[32], const uint8_t peer_eph_pub[32],
                           uint32_t addr_a, uint32_t addr_b, uint16_t ke_epoch,
@@ -117,16 +392,48 @@ int dm_derive_session_key(const uint8_t my_id_priv[32], const uint8_t my_eph_pri
     return dm_session_key_from_ikm(ikm, addr_a, addr_b, ke_epoch, session_key_out);
 }
 
+/* Renders 4 HKDF output bytes as 7 human-comparable decimal digits. Shared
+ * by dm_derive_sas and dm_derive_identity_sas. */
+static void dm_sas_render(const uint8_t okm[4], char sas_out[8]) {
+    uint32_t v =
+        ((uint32_t)okm[0] << 24) | ((uint32_t)okm[1] << 16) | ((uint32_t)okm[2] << 8) | okm[3];
+    snprintf(sas_out, 8, "%07u", (unsigned)(v % 10000000u));
+}
+
 int dm_derive_sas(const uint8_t session_ikm[128], char sas_out[8]) {
     const char* salt = "bramble-sas";
     uint8_t okm[4];
     if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), session_ikm, 128, NULL, 0, okm,
                            sizeof(okm)) != 0)
         return -1;
-    /* Render as 7 decimal digits, human-comparable. */
-    uint32_t v =
-        ((uint32_t)okm[0] << 24) | ((uint32_t)okm[1] << 16) | ((uint32_t)okm[2] << 8) | okm[3];
-    snprintf(sas_out, 8, "%07u", (unsigned)(v % 10000000u));
+    dm_sas_render(okm, sas_out);
+    return 0;
+}
+
+/*
+ * Identity-bound SAS: HKDF(salt="bramble-sas-id", ikm="", info=id_lo||id_hi,
+ * L=4), rendered as 7 decimal digits (spec B.1). The two X25519 identity keys
+ * are placed in addr_lo/addr_hi order so both peers derive the same value
+ * regardless of who calls with which argument first, exactly like dm_build_info
+ * canonicalizes addresses. Empty IKM is passed as dm_ratchet_empty_ikm (a
+ * non-NULL pointer, length 0): the OpenSSL host HKDF wrapper rejects a NULL key
+ * pointer outright, so NULL would fail to derive (see the dm_ratchet chain
+ * note above). The SAS is a fingerprint of PUBLIC keys, not a secret, so the
+ * plain memcmp ordering below leaks nothing sensitive.
+ */
+int dm_derive_identity_sas(const uint8_t id_x25519_a[32], const uint8_t id_x25519_b[32],
+                           uint32_t addr_a, uint32_t addr_b, char sas_out[8]) {
+    const uint8_t* lo = addr_a < addr_b ? id_x25519_a : id_x25519_b;
+    const uint8_t* hi = addr_a < addr_b ? id_x25519_b : id_x25519_a;
+    uint8_t info[64];
+    memcpy(info, lo, 32);
+    memcpy(info + 32, hi, 32);
+    const char* salt = "bramble-sas-id";
+    uint8_t okm[4];
+    if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), dm_ratchet_empty_ikm, 0, info,
+                           sizeof(info), okm, sizeof(okm)) != 0)
+        return -1;
+    dm_sas_render(okm, sas_out);
     return 0;
 }
 
@@ -420,6 +727,9 @@ bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr) {
     dm_session_t* s = dm_lookup(t, peer_addr);
     if (!s)
         return false;
+    /* The sizeof(*s) memset also zeroes the embedded dm_ratchet_t (root, both
+     * chains, skip caches, and the retained previous-epoch state), so forward
+     * secrecy on teardown covers every ratchet key, not just session_key. */
     memset(s, 0, sizeof(*s)); /* state -> DM_STATE_NONE, key + peer_id_pub wiped */
     return true;
 }
@@ -428,6 +738,10 @@ bool dm_pin_disagrees(const dm_session_t* s, const uint8_t pinned_x25519[32]) {
     /* Only an ESTABLISHED session is authoritative to compare against; a
      * public-key compare (peer_id_pub is not secret), so memcmp is fine. */
     return s->state == DM_STATE_ACTIVE && memcmp(s->peer_id_pub, pinned_x25519, 32) != 0;
+}
+
+bool dm_verified_should_clear(const dm_session_t* s, const uint8_t pinned_x25519[32]) {
+    return s->verified && dm_pin_disagrees(s, pinned_x25519);
 }
 
 dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {

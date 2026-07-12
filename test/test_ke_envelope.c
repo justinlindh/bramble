@@ -98,30 +98,44 @@ void test_ke_envelope_round_trip_to_session(void) {
                       dm_verify_resp(&resp, &a, a_eph.private_key, a_eph.public_key, 0, NULL, ka));
     TEST_ASSERT_EQUAL_MEMORY(ka, kb, 32);
 
-    /* Establish both sides' session_t and round-trip a chat payload under
-     * the session key (never the channel key: FLAG_CHANNEL absent). */
+    /* Establish both sides' session_t ratchet state from the handshake IKM and
+     * round-trip a chat payload through the SAME ratchet wrappers mesh_task.c
+     * uses (never the channel key: FLAG_CHANNEL absent). This proves the
+     * envelope-to-ratchet path end to end: the quad-DH IKM both sides compute
+     * from the handshake seeds RK_0 and the directional chains. */
+    uint8_t ikm[128];
+    TEST_ASSERT_EQUAL(
+        0, dm_compute_ikm(a.private_key, a_eph.private_key, b.public_key, b_eph.public_key, ikm));
+
     dm_session_t sess_a = {0};
-    memcpy(sess_a.session_key, ka, 32);
     sess_a.peer_addr = b.address;
     sess_a.state = DM_STATE_ACTIVE;
+    dm_session_ratchet_init_state(&sess_a, ikm, a.address, b.address);
 
     dm_session_t sess_b = {0};
-    memcpy(sess_b.session_key, kb, 32);
     sess_b.peer_addr = a.address;
     sess_b.state = DM_STATE_ACTIVE;
+    dm_session_ratchet_init_state(&sess_b, ikm, b.address, a.address);
+
+    /* RK_0 is bit-identical to the handshake session key (migration continuity). */
+    TEST_ASSERT_EQUAL_MEMORY(ka, sess_a.ratchet.rk, 32);
+    TEST_ASSERT_EQUAL_MEMORY(kb, sess_b.ratchet.rk, 32);
 
     bramble_header_t hdr2 = make_data_header(b.address, FLAG_ENCRYPT);
     const uint8_t chat_pt[] = "hello over the session";
     uint8_t nonce2[12];
     memset(nonce2, 0x22, sizeof(nonce2));
-    uint8_t ct2[sizeof(chat_pt)];
+    uint8_t ct2[DM_RATCHET_HEADER_SIZE + sizeof(chat_pt)];
     uint8_t tag2[16];
-    TEST_ASSERT_EQUAL(0, dm_session_encrypt(&sess_a, &hdr2, a.address, chat_pt, sizeof(chat_pt),
-                                            nonce2, ct2, tag2));
+    size_t flen2 = 0;
+    TEST_ASSERT_EQUAL(0, dm_session_ratchet_encrypt(&sess_a, &hdr2, a.address, chat_pt,
+                                                    sizeof(chat_pt), nonce2, ct2, tag2, &flen2));
 
     uint8_t pt2[sizeof(chat_pt)] = {0};
-    TEST_ASSERT_EQUAL(
-        0, dm_session_decrypt(&sess_b, &hdr2, a.address, nonce2, ct2, sizeof(ct2), tag2, pt2));
+    size_t plen2 = 0;
+    TEST_ASSERT_EQUAL(DM_DECRYPT_OK, dm_session_ratchet_decrypt(&sess_b, &hdr2, a.address, nonce2,
+                                                                ct2, flen2, tag2, pt2, &plen2));
+    TEST_ASSERT_EQUAL(sizeof(chat_pt), plen2);
     TEST_ASSERT_EQUAL_MEMORY(chat_pt, pt2, sizeof(chat_pt));
 }
 

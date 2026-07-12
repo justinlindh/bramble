@@ -60,5 +60,11 @@
 #define ID_KEY_ENDORSE_NA "endorse_na"
 #define ID_KEY_ENDORSE_SIG "endorse_sig"
 
+/* Serialized verified TOFU pin table (DM forward-secrecy + SAS): the pin
+ * bindings plus each pin's verified bit and SAS-at-verification, so a
+ * "verified once, stays verified" model survives reboot. See
+ * identity_store_serialize. Name must be <= 15 chars. */
+#define ID_KEY_PIN_STORE "pin_store"
+
 /* ── NVS_NS_NETKEY keys ──────────────────────────────────────────────────── */
 #define NVS_KEY_NETKEY "key"

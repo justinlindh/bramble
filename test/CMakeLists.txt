@@ -72,6 +72,65 @@ target_include_directories(test_dm_session PRIVATE
 )
 target_link_libraries(test_dm_session ssl crypto)
 
+# Symmetric ratchet key schedule (Task 1): RK_0/CK_0 KAT vectors, per-message
+# chain advance, the mandatory no-(key,nonce)-reuse gate, and the DH-ratchet
+# root advance. #includes crypto_host.c + dm_session.c directly (same pattern
+# as test_dm_session above).
+add_executable(test_dm_ratchet
+    test_dm_ratchet.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
+target_include_directories(test_dm_ratchet PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_dm_ratchet ssl crypto)
+
+# Receiver skip / out-of-order window keyed by the cleartext ratchet index, with
+# the DM_MAX_SKIP DoS bound and single-use skip cache (Task 3). Same #include-the-
+# source pattern as test_dm_ratchet above.
+add_executable(test_dm_ratchet_skip
+    test_dm_ratchet_skip.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
+target_include_directories(test_dm_ratchet_skip PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_dm_ratchet_skip ssl crypto)
+
+# DH ratchet on ke_epoch (Task 4): epoch-transition grace window (in-flight
+# old-epoch frames still decrypt), root advance / two-sided convergence, and the
+# post-grace previous-epoch wipe that delivers PCS. Same #include-the-source
+# pattern as test_dm_ratchet above.
+add_executable(test_dm_ratchet_epoch
+    test_dm_ratchet_epoch.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
+target_include_directories(test_dm_ratchet_epoch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_dm_ratchet_epoch ssl crypto)
+
+# Identity-bound SAS (safety number, Task 5): the 7-digit SAS commits to the two
+# pinned X25519 identity keys in addr_lo/addr_hi order, so it is stable across
+# ratchet steps, epoch bumps, desync-heal, and reboot, and differs under a MitM
+# key substitution. Same #include-the-source pattern as test_dm_ratchet above.
+add_executable(test_dm_sas_identity
+    test_dm_sas_identity.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/packet.c
+)
+target_include_directories(test_dm_sas_identity PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dm_session/include
+)
+target_link_libraries(test_dm_sas_identity ssl crypto)
+
 # KE-in-DATA envelope: handshake transport under the channel key + the
 # resulting session round-tripping a chat payload (Task 1.4).
 add_executable(test_ke_envelope
@@ -771,6 +830,25 @@ target_include_directories(test_identity_store PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
 target_link_libraries(test_identity_store ssl crypto)
+
+# Verified-pin-store PERSISTENCE (DM forward-secrecy + SAS, Task 6): the pure,
+# NVS-free serialize/deserialize round-trip that carries the pin table, the
+# verified bit, and the SAS-at-verification across a reboot. Same
+# #include-the-source pattern as test_identity_store above.
+add_executable(test_identity_store_persist
+    test_identity_store_persist.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
+)
+target_include_directories(test_identity_store_persist PRIVATE
+    stubs
+    ${OPENSSL_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+target_link_libraries(test_identity_store_persist ssl crypto)
 
 # Integration test (3-node routing)
 add_executable(test_integration
@@ -1729,4 +1807,17 @@ target_include_directories(test_phy_passthrough PRIVATE
 )
 target_compile_definitions(test_phy_passthrough PRIVATE
     ESP_TIMER_CUSTOM_IMPL
+)
+
+# SAS grouping helper (pager SAS verification UX, Task 8): the pure
+# "1234567" -> "123 4567" formatter. The screen that uses it (scr_sas_verify.c)
+# is LVGL and not host-linkable; same include-the-source pattern as
+# test_chat_message_ui.
+add_executable(test_sas_format
+    test_sas_format.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/sas_format.c
+)
+target_include_directories(test_sas_format PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
 )

@@ -166,6 +166,21 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
 }
 void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
+bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
+    (void)addr;
+    if (sas_out)
+        sas_out[0] = '\0';
+    if (verified)
+        *verified = false;
+    if (key_changed)
+        *key_changed = false;
+    return false;
+}
+bool mesh_set_peer_verified(uint32_t addr, bool verified) {
+    (void)addr;
+    (void)verified;
+    return false;
+}
 void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* sig_failures,
                                  uint32_t* addr_mismatches, uint32_t* unendorsed,
                                  uint32_t* expired) {

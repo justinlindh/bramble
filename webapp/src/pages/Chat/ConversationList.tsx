@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Conversation } from '../../types/bramble';
-import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock } from '../../components/Icons';
-import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
+import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } from '../../components/Icons';
+import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { addChannel } from '../../store/actions';
 import { useStore } from '../../store/index';
 import styles from './ConversationList.module.css';
@@ -59,6 +59,9 @@ export function parseDmHexAddress(input: string): number | null {
 function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolean; onSelect: (id: string) => void }) {
   const addr = conv.peerAddr ?? parseInt(conv.id.slice(3), 10);
   const { displayName, fullHex, status } = usePeerInfo(addr);
+  // Lazy-loaded once per peer so the badge can show without opening the DM first.
+  const verification = usePeerVerification(addr);
+
   return (
     <button
       className={`${styles.item} ${active ? styles.active : ''}`}
@@ -67,6 +70,15 @@ function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolea
     >
       <span className={styles.icon}><IconUser size={16} /></span>
       <span className={styles.label}>{displayName}</span>
+      {verification?.keyChanged ? (
+        <span className={styles.verifiedBadgeWarn} title="Safety number changed">
+          <IconWarning size={12} />
+        </span>
+      ) : verification?.verified ? (
+        <span className={styles.verifiedBadgeOk} title="Verified">
+          <IconLock size={12} />
+        </span>
+      ) : null}
       <span
         className={styles.statusDot}
         style={{ background: STATUS_COLORS[status] }}

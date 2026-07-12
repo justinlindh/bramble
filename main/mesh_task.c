@@ -46,6 +46,7 @@
 #include "esp_heap_caps.h"
 #include "cJSON.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 #include "esp_random.h"
@@ -99,7 +100,12 @@ static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitte
 #define NEIGHBOR_PURGE_INTERVAL 60000 /* purge expired neighbors every 60s */
 #define RX_QUEUE_DEPTH 16
 #define MESH_EVENT_QUEUE_DEPTH 8
-#define MESH_TASK_STACK 8192
+/* handle_data runs on this task and now calls dm_session_ratchet_decrypt, whose
+ * dm_recv_walk holds a bounded skip buffer (pending[DM_MAX_SKIP], ~0.58 KB at
+ * DM_MAX_SKIP=16) on the stack on top of handle_data's own relay_buf[256] +
+ * plaintext[256]. Raised from 8192 to 10240 for comfortable headroom (Task 4;
+ * Task 3 stack-headroom concern); the DM_MAX_SKIP 32->16 cut leaves extra margin. */
+#define MESH_TASK_STACK 10240
 #define MESH_TASK_PRIORITY 5
 
 #define RECEIPT_QUEUE_CAPACITY 8
@@ -152,8 +158,14 @@ static replay_table_t s_control_replay; /* ws 1.3b: control-plane (RREP/RERR/ACK
                                            separate from the data-plane s_replay above */
 /* Per-node identity Phase 3 (Part C): this node's verified TOFU pin table
  * (address -> Ed25519/X25519 pubs), fed by handle_identity_attestation
- * below. RAM only; pins reset on reboot and TOFU re-establishes. */
+ * below. Persisted to NVS (DM forward-secrecy + SAS): new pins and verified
+ * bits survive reboot via mesh_pin_store_save/_load. */
 static identity_store_t s_identity_pins;
+/* Pin-store NVS persistence (defined near the other NVS helpers). save() is
+ * called whenever a NEW pin is added or a verified bit changes; load() runs
+ * once at boot after the anchor is provisioned. */
+static void mesh_pin_store_save(void);
+static void mesh_pin_store_load(void);
 static replay_deferred_t s_deferred; /* tier-2: deferred acceptance for delayed CHAT (Task 0.6) */
 /* RREQ origination gate. Forwarded RREQs are gated separately, by the global
  * s_rreq_fwd_rl budget below (ws 1.3d, SEC-M4); see SECURITY-MODEL.md for the
@@ -174,8 +186,8 @@ static SemaphoreHandle_t s_delivery_event_mutex;
 static SemaphoreHandle_t s_nonce_mutex;
 /*
  * DM session table (SEC-C2, Task 1.4). Guards every dm_lookup/dm_alloc,
- * every session state transition, and every read of session_key for
- * dm_session_encrypt/decrypt. Reachable from the mesh RX task
+ * every session state transition, and every read of the ratchet state for
+ * dm_session_ratchet_encrypt/decrypt. Reachable from the mesh RX task
  * (handle_ke_envelope, handle_data's session-decrypt path),
  * handshake_worker_task (the DH compute + state update), and the TX-side
  * callers of mesh_send_message/mesh_send_channel (RPC/httpd, LVGL UI, CLI
@@ -189,7 +201,7 @@ static SemaphoreHandle_t s_nonce_mutex;
  * then reaches for s_dm_mutex, so the two can never deadlock on each other.
  */
 static SemaphoreHandle_t s_dm_mutex;
-static dm_table_t s_dm_table;
+static dm_table_t* s_dm_table;
 static QueueHandle_t s_rx_queue;
 static QueueHandle_t s_mesh_event_queue;
 static mesh_shared_state_t s_shared;
@@ -325,6 +337,11 @@ typedef struct {
      * store cross-thread. have_pin false = no pin known (TOFU-grade). */
     bool have_pin;
     uint8_t pinned_x25519[32];
+    /* Proactive DH-ratchet rekey (Task 4): when initiate is true and this is
+     * nonzero, the worker sends a REKEY INIT with key_id = rekey_epoch (the
+     * dm_build_init rekey path, peer_id_pub known) rather than a first-contact
+     * INIT. Zero = the desync-heal / first-contact path (key_id 0). */
+    uint16_t rekey_epoch;
 } dm_handshake_work_item_t;
 static QueueHandle_t s_handshake_work_q;
 
@@ -649,25 +666,31 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
         };
         bramble_header_serialize(&header, pkt, HEADER_SIZE);
 
-        /* dm_session_encrypt has no framing of its own, so pad out to
-         * L_LOC_INNER + CHANNEL_MSG_OVERHEAD bytes: the extra padding
-         * makes up for the channel path's built-in overhead below, so
-         * both paths land on the exact same total ciphertext length
-         * (M11). */
+        /* A directed LOCATION share is a session payload exactly like a chat DM
+         * (SEC-C1) and rides the SAME per-message ratchet: dm_session_ratchet_
+         * encrypt prepends the 3-byte cleartext ratchet header (epoch||index)
+         * ahead of the ciphertext, so the framed output is DM_RATCHET_HEADER_SIZE
+         * bytes longer than the plaintext. Pad the plaintext out to L_LOC_INNER +
+         * CHANNEL_MSG_OVERHEAD so every tier lands on one fixed session-path size
+         * (M11 tier-hiding); the directed vs channel path is already
+         * distinguishable from the cleartext FLAG_CHANNEL bit, so the 3-byte
+         * ratchet header is not new metadata. */
         uint8_t session_inner[L_LOC_INNER + CHANNEL_MSG_OVERHEAD] = {0};
         memcpy(session_inner, inner, L_LOC_INNER);
-        uint8_t ciphertext[sizeof(session_inner)];
+        uint8_t ciphertext[DM_RATCHET_HEADER_SIZE + sizeof(session_inner)];
+        size_t framed_len = 0;
 
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t* sess = dm_lookup(&s_dm_table, dest_addr);
+        dm_session_t* sess = dm_lookup(s_dm_table, dest_addr);
         int enc_ret = -1;
         if (sess && sess->state == DM_STATE_ACTIVE) {
             xSemaphoreTake(s_nonce_mutex, portMAX_DELAY);
             int nonce_ret = nonce_counter_next(nonce);
             xSemaphoreGive(s_nonce_mutex);
             if (nonce_ret == 0) {
-                enc_ret = dm_session_encrypt(sess, &header, s_identity->address, session_inner,
-                                             sizeof(session_inner), nonce, ciphertext, tag);
+                enc_ret = dm_session_ratchet_encrypt(sess, &header, s_identity->address,
+                                                     session_inner, sizeof(session_inner), nonce,
+                                                     ciphertext, tag, &framed_len);
                 if (enc_ret == 0)
                     sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
             }
@@ -693,12 +716,11 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
             return 0;
         }
         memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
-        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext,
-               sizeof(ciphertext));
-        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + sizeof(ciphertext), tag,
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, framed_len);
+        memcpy(pkt + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + framed_len, tag,
                BRAMBLE_TAG_SIZE);
-        size_t wire_len = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE +
-                          sizeof(ciphertext) + BRAMBLE_TAG_SIZE;
+        size_t wire_len =
+            BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + framed_len + BRAMBLE_TAG_SIZE;
 
         int rc = mesh_tx(pkt, (uint8_t)wire_len, TX_KIND_DATA);
         if (rc == TX_GATE_OK) {
@@ -958,17 +980,22 @@ static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8
                                         &pos, &channel_index);
     } else {
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t* sess = dm_lookup(&s_dm_table, src_addr);
+        dm_session_t* sess = dm_lookup(s_dm_table, src_addr);
         if (sess && sess->state == DM_STATE_ACTIVE) {
-            /* Canonical session-path size (Task 2.1, M11): the encoder
-             * always pads to exactly L_LOC_INNER + CHANNEL_MSG_OVERHEAD
-             * bytes to match the channel path's total ciphertext length.
-             * Reject anything else outright rather than risk decrypting
-             * into an undersized buffer. */
+            /* Canonical session-path size (Task 2.1, M11): the encoder always
+             * pads the plaintext to exactly L_LOC_INNER + CHANNEL_MSG_OVERHEAD
+             * bytes; the ratchet then prepends its DM_RATCHET_HEADER_SIZE
+             * cleartext header, so the on-wire ciphertext is exactly that much
+             * longer. Reject anything else outright rather than risk decrypting
+             * into an undersized buffer. dm_session_ratchet_decrypt reads the
+             * cleartext epoch||index header (part of ciphertext here) and writes
+             * only the payload into plaintext. */
             uint8_t plaintext[L_LOC_INNER + CHANNEL_MSG_OVERHEAD];
-            if (ct_len == sizeof(plaintext) &&
-                dm_session_decrypt(sess, &header, src_addr, nonce, ciphertext, ct_len, tag,
-                                   plaintext) == 0) {
+            size_t loc_pt_len = 0;
+            if (ct_len == DM_RATCHET_HEADER_SIZE + sizeof(plaintext) &&
+                dm_session_ratchet_decrypt(sess, &header, src_addr, nonce, ciphertext, ct_len, tag,
+                                           plaintext, &loc_pt_len) == DM_DECRYPT_OK &&
+                loc_pt_len == sizeof(plaintext)) {
                 ok = location_parse_inner(plaintext, sizeof(plaintext), &tier, &pos);
                 sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
             }
@@ -2269,6 +2296,58 @@ static void maybe_trigger_dm_rehandshake(uint32_t peer) {
              peer);
 }
 
+/* Proactive DH-ratchet rekey schedule (Task 4, post-compromise recovery). A
+ * session bumps to the next ke_epoch after DM_EPOCH_REKEY_MSGS messages sent OR
+ * DM_EPOCH_REKEY_INTERVAL_MS elapsed on the current epoch, whichever comes
+ * first. These bound the PCS latency (a device compromise heals within one
+ * schedule tick) and trade it against rekey airtime; they are tuning constants,
+ * NOT security boundaries, and are flagged for the review gate. Kept
+ * conservative so steady-state DM traffic and short-lived test sessions do not
+ * churn handshakes. */
+#define DM_EPOCH_REKEY_MSGS 256u
+#define DM_EPOCH_REKEY_INTERVAL_MS (30u * 60u * 1000u)
+
+/* Scans the session table and, for any ACTIVE ratcheting session that is due
+ * (and whose peer is a current neighbor), schedules ONE proactive rekey INIT via
+ * the handshake worker. Only the lower-addressed party initiates, so the two
+ * peers do not both fire a rekey and duel; a lost rekey simply leaves both on
+ * the current epoch (never a dead session). Rate-limited by the same per-peer
+ * guard as the desync-heal, so a scheduled rekey and a self-heal cannot combine
+ * into an airtime DoS. Runs on the mesh task (the s_dm_table owner). */
+static void maybe_schedule_dm_epoch_rekey(uint32_t t) {
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        uint32_t peer = 0;
+        uint16_t next_epoch = 0;
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t* s = &s_dm_table->s[i];
+        if (s->state == DM_STATE_ACTIVE && s->ratchet.send.valid && s->ke_epoch < 0xFFFF &&
+            s_identity->address < s->peer_addr) {
+            bool due = (s->msg_count >= DM_EPOCH_REKEY_MSGS) ||
+                       ((uint32_t)(t - s->established_ms) >= DM_EPOCH_REKEY_INTERVAL_MS);
+            if (due) {
+                peer = s->peer_addr;
+                next_epoch = (uint16_t)(s->ke_epoch + 1);
+            }
+        }
+        xSemaphoreGive(s_dm_mutex);
+        if (peer == 0)
+            continue;
+        if (!neighbor_lookup(&s_neighbors, peer))
+            continue; /* only rekey with a currently-reachable peer */
+        if (!dm_rehandshake_rate_ok(peer, t))
+            continue;
+        dm_handshake_work_item_t item;
+        memset(&item, 0, sizeof(item));
+        item.src_addr = peer;
+        item.channel_idx = s_default_channel_idx;
+        item.initiate = true;
+        item.rekey_epoch = next_epoch;
+        if (xQueueSend(s_handshake_work_q, &item, 0) == pdTRUE) {
+            ESP_LOGI(TAG, "DM proactive rekey for %08" PRIX32 " -> epoch %u", peer, next_epoch);
+        }
+    }
+}
+
 static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
     /* Data packet layout (wire v4): header(12) + src_addr(4) + prev_hop(4) +
      * nonce(12) + ciphertext(N) + tag(16). prev_hop is relay-mutable/
@@ -2444,21 +2523,35 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         }
     } else {
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t* sess = dm_lookup(&s_dm_table, src_addr);
-        int ok = 0;
+        dm_session_t* sess = dm_lookup(s_dm_table, src_addr);
+        int drc = DM_DECRYPT_FAIL; /* no active session -> treat as a desync */
+        size_t dm_pt_len = 0;
         if (sess && sess->state == DM_STATE_ACTIVE) {
-            ok = (dm_session_decrypt(sess, &rx_hdr, src_addr, nonce, ciphertext, ct_len, tag,
-                                     plaintext) == 0);
-            if (ok)
+            /* Ratchet decrypt: reads the cleartext epoch||index header (front of
+             * ciphertext), derives exactly that one message key (caching skipped
+             * keys, bounded by DM_MAX_SKIP), and does a single GCM decrypt. */
+            drc = dm_session_ratchet_decrypt(sess, &rx_hdr, src_addr, nonce, ciphertext, ct_len,
+                                             tag, plaintext, &dm_pt_len);
+            if (drc == DM_DECRYPT_OK)
                 sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
         }
         xSemaphoreGive(s_dm_mutex);
-        if (!ok) {
+        if (drc == DM_DECRYPT_REPLAY) {
+            /* An already-seen index: drop silently, never heal or deliver. (The
+             * ratchet never returns this today; the authoritative replay defense
+             * is the per-sender nonce window below. Handled for completeness so a
+             * future replay signal cannot masquerade as a desync.) */
+            ESP_LOGD(TAG, "DM replay drop from %08" PRIX32, src_addr);
+            return;
+        }
+        if (drc != DM_DECRYPT_OK) {
             ESP_LOGW(TAG, "Failed session decrypt from %08" PRIX32, src_addr);
-            /* Our DM session with this peer has desynced (no session, or a stale
-             * key it no longer holds). Silently returning here is what made DMs
-             * fail permanently after one side rebooted; instead, kick a
-             * rate-limited re-handshake so the session self-heals. */
+            /* Our DM session with this peer has desynced (no session, a stale key
+             * it no longer holds, or a ratchet index beyond the skip bound,
+             * DM_DECRYPT_TOO_FAR). Silently returning here is what made DMs fail
+             * permanently after one side rebooted; instead, kick a rate-limited
+             * re-handshake so the session self-heals (the ratchet adds no new
+             * recovery mechanism, it degrades into this existing one). */
             maybe_trigger_dm_rehandshake(src_addr);
             return;
         }
@@ -2474,7 +2567,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         info.app_type = APP_TYPE_CHAT;
         info.src_addr = src_addr;
         info.data = plaintext;
-        info.data_len = ct_len;
+        info.data_len = dm_pt_len;
     }
 
     /* SEC-M1: authenticated replay protection, keyed on the nonce counter
@@ -3523,6 +3616,10 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
     case IDENTITY_PIN_NEW:
         ESP_LOGI(TAG, "Identity pinned: %08" PRIX32 " (%d pinned)", att.src_addr,
                  identity_store_count(&s_identity_pins));
+        /* Persist the new binding so it (and any later verified bit on it)
+         * survives reboot. A REFRESHED re-attestation only bumps the RAM LRU,
+         * so it is deliberately NOT persisted. */
+        mesh_pin_store_save();
         break;
     case IDENTITY_PIN_CONFLICT:
         /* Impersonation detected: a network-key holder attested this
@@ -3590,10 +3687,20 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
         const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, att.src_addr);
         if (pinned) {
             bool torn_down = false;
+            /* Task 7: this is the ONE event where the identity key genuinely
+             * changed (a CONFLICT re-binds the pin, or a first pin lands under
+             * a key an already-verified session did not expect), so it is also
+             * the one place the verified bit is cleared, not just the session
+             * torn down. dm_verified_should_clear folds "was this session
+             * actually verified" into the decision, so a never-verified
+             * session's teardown does not spuriously touch the pin. */
+            bool verified_cleared = false;
             xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-            dm_session_t* sess = dm_lookup(&s_dm_table, att.src_addr);
+            dm_session_t* sess = dm_lookup(s_dm_table, att.src_addr);
             if (sess && dm_pin_disagrees(sess, pinned->x25519_pub)) {
-                dm_session_teardown(&s_dm_table, att.src_addr);
+                if (dm_verified_should_clear(sess, pinned->x25519_pub))
+                    verified_cleared = true;
+                dm_session_teardown(s_dm_table, att.src_addr);
                 torn_down = true;
             }
             xSemaphoreGive(s_dm_mutex);
@@ -3602,6 +3709,27 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                          "DM session torn down: pinned identity for %08" PRIX32
                          " disagrees with the TOFU session key",
                          att.src_addr);
+            if (verified_cleared) {
+                /* Clear the persisted verified bit (the identity SAS the user
+                 * compared out of band no longer matches this peer's actual
+                 * key) and persist immediately, same save path as a new pin. */
+                identity_store_clear_verified(&s_identity_pins, att.src_addr);
+                /* RAM-only warning flag (Task 7.5): this IS the genuine
+                 * key-change site, unlike a deliberate user un-verify
+                 * (identity_store_clear_verified alone, Task 9), so it is the
+                 * one place that sets key_changed. No extra save: it never
+                 * persists. */
+                identity_store_mark_key_changed(&s_identity_pins, att.src_addr);
+                mesh_pin_store_save();
+                /* Re-verify-needed signal: Tasks 8-9 own the UI surface (chat
+                 * banner / device list badge) for this; mesh_get_peer_verification
+                 * (Task 7.5) is now that sink's data source, this greppable log
+                 * line stays as a diagnostics trail. */
+                ESP_LOGW(TAG,
+                         "DM RE-VERIFY NEEDED: %08" PRIX32
+                         "'s identity key changed, prior SAS verification revoked",
+                         att.src_addr);
+            }
         }
     }
 
@@ -4273,6 +4401,11 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                 s_queued_msgs[i].used = false;
             }
         }
+
+        /* Proactive DH-ratchet rekey: bump long-lived / high-volume DM sessions
+         * to the next epoch on the purge cadence (Task 4 post-compromise
+         * recovery). Cheap table scan, rate-limited per peer. */
+        maybe_schedule_dm_epoch_rekey(t);
     }
 
     /* Drain due jittered RREQ forwards every loop iteration (10ms cadence) */
@@ -4682,7 +4815,7 @@ static uint32_t send_data_packet(uint32_t dest_addr, const uint8_t* payload, siz
 
 /*
  * SEC-C2 / Task 1.4: sends a chat payload under an ESTABLISHED session key
- * (dm_session_encrypt), FLAG_ENCRYPT WITHOUT FLAG_CHANNEL. This is the DM
+ * (dm_session_ratchet_encrypt), FLAG_ENCRYPT WITHOUT FLAG_CHANNEL. This is the DM
  * PAYLOAD path; it never falls back to the channel key. Caller MUST already
  * hold s_dm_mutex (this function reads/writes *sess, which lives inside
  * s_dm_table) and must have already checked sess->state == DM_STATE_ACTIVE.
@@ -4699,8 +4832,12 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
     uint8_t nonce[BRAMBLE_NONCE_SIZE];
     uint8_t tag[BRAMBLE_TAG_SIZE];
 
-    size_t total =
-        BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + payload_len + BRAMBLE_TAG_SIZE;
+    /* The ratchet frames each DM as (3-byte cleartext header || ciphertext), so
+     * the on-wire ciphertext is DM_RATCHET_HEADER_SIZE bytes longer than the chat
+     * payload; account for it in the size gate (mesh_send_dm's FRAG_MAX_PLAINTEXT
+     * cap already leaves room). */
+    size_t total = BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE + BRAMBLE_NONCE_SIZE + DM_RATCHET_HEADER_SIZE +
+                   payload_len + BRAMBLE_TAG_SIZE;
     if (total > 255) {
         ESP_LOGE(TAG, "DM packet too large: %u bytes", (unsigned)total);
         return 0;
@@ -4727,8 +4864,9 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
         return 0;
     }
 
-    if (dm_session_encrypt(sess, &header, s_identity->address, payload, payload_len, nonce,
-                           ciphertext, tag) != 0) {
+    size_t framed_len = 0;
+    if (dm_session_ratchet_encrypt(sess, &header, s_identity->address, payload, payload_len, nonce,
+                                   ciphertext, tag, &framed_len) != 0) {
         ESP_LOGE(TAG, "Session encrypt failed for %08" PRIX32, dest_addr);
         return 0;
     }
@@ -4744,8 +4882,8 @@ static uint32_t send_dm_packet(uint32_t dest_addr, const uint8_t* payload, size_
         return 0;
     }
     memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET, nonce, BRAMBLE_NONCE_SIZE);
-    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, payload_len);
-    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + payload_len, tag,
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE, ciphertext, framed_len);
+    memcpy(buf + BRAMBLE_DATA_NONCE_OFFSET + BRAMBLE_NONCE_SIZE + framed_len, tag,
            BRAMBLE_TAG_SIZE);
 
     int ret = mesh_tx(buf, (uint8_t)total, TX_KIND_DATA);
@@ -4945,7 +5083,7 @@ static void flush_session_queue(uint32_t dest_addr) {
         }
 
         xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-        dm_session_t* sess = dm_lookup(&s_dm_table, dest_addr);
+        dm_session_t* sess = dm_lookup(s_dm_table, dest_addr);
         uint32_t pkt_id = 0;
         if (sess && sess->state == DM_STATE_ACTIVE) {
             pkt_id = send_dm_packet(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len, sess);
@@ -4974,13 +5112,36 @@ static void flush_session_queue(uint32_t dest_addr) {
  * to rekey against here. Proactive rekey of an already-ACTIVE session is a
  * different trigger, out of this task's wiring scope.
  */
-static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx) {
+/*
+ * Sends a DM handshake INIT. rekey_epoch == 0 is the first-contact / desync-heal
+ * path (key_id 0, no peer identity in the tag). rekey_epoch > 0 is a proactive
+ * DH-ratchet rekey (Task 4): it reuses the SAME INIT/RESP machinery with
+ * key_id = rekey_epoch and the cached peer X25519 identity (the dm_build_init
+ * rekey path), so both sides land on the new epoch's root. A rekey requires an
+ * ACTIVE session (for the cached peer_id_pub); if it has vanished, fall back to
+ * a first-contact INIT rather than stranding the peer.
+ */
+static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t rekey_epoch) {
     bramble_identity_t my_eph;
     crypto_generate_identity(&my_eph);
 
+    uint8_t peer_id_pub[32] = {0}; /* only read when have_peer_id (guards cppcheck uninitvar) */
+    int have_peer_id = 0;
+    if (rekey_epoch > 0) {
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        dm_session_t* sess = dm_lookup(s_dm_table, dest_addr);
+        if (sess && sess->state == DM_STATE_ACTIVE) {
+            memcpy(peer_id_pub, sess->peer_id_pub, 32);
+            have_peer_id = 1;
+        }
+        xSemaphoreGive(s_dm_mutex);
+        if (!have_peer_id)
+            rekey_epoch = 0; /* no cached peer key: degrade to first contact */
+    }
+
     bramble_key_exchange_t init;
-    if (dm_build_init(s_identity, my_eph.public_key, my_eph.private_key, dest_addr, 0, NULL,
-                      &init) != 0) {
+    if (dm_build_init(s_identity, my_eph.public_key, my_eph.private_key, dest_addr, rekey_epoch,
+                      have_peer_id ? peer_id_pub : NULL, &init) != 0) {
         ESP_LOGE(TAG, "dm_build_init failed for %08" PRIX32, dest_addr);
         return;
     }
@@ -5009,7 +5170,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
     }
 
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t* sess = dm_lookup(&s_dm_table, dest_addr);
+    dm_session_t* sess = dm_lookup(s_dm_table, dest_addr);
     if (sess && sess->state == DM_STATE_ACTIVE) {
         uint32_t pkt_id = send_dm_packet(dest_addr, data, len, sess);
         xSemaphoreGive(s_dm_mutex);
@@ -5023,7 +5184,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
     bool handshake_in_progress = sess && sess->state == DM_STATE_HANDSHAKING;
     dm_session_t* hs = sess;
     if (!hs) {
-        hs = dm_alloc(&s_dm_table, dest_addr, now_ms());
+        hs = dm_alloc(s_dm_table, dest_addr, now_ms());
         if (hs)
             hs->state = DM_STATE_HANDSHAKING;
     }
@@ -5042,7 +5203,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
     }
 
     if (!handshake_in_progress) {
-        initiate_dm_handshake(dest_addr, channel_idx);
+        initiate_dm_handshake(dest_addr, channel_idx, 0);
     }
 
     /* Still store in msg_store so UI shows it as pending, same convention
@@ -5062,7 +5223,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
 static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_key_exchange_t* init,
                             const uint8_t* pinned_x25519_or_null) {
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t* existing = dm_lookup(&s_dm_table, src_addr);
+    dm_session_t* existing = dm_lookup(s_dm_table, src_addr);
     int have_peer_id = dm_session_has_peer_id(existing);
     /* Zero-init: peer_id_pub is only read (passed below) when have_peer_id is
      * set, and it is filled here in exactly that case, so no uninitialized
@@ -5104,7 +5265,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
          * usable by whoever can complete the DH, i.e. the real peer). */
         if (have_peer_id && pinned_x25519_or_null && dm_rehandshake_rate_ok(src_addr, now_ms())) {
             xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-            dm_session_teardown(&s_dm_table, src_addr);
+            dm_session_teardown(s_dm_table, src_addr);
             xSemaphoreGive(s_dm_mutex);
             ESP_LOGI(TAG,
                      "DM session desync: pinned peer %08" PRIX32 " re-initiated; tore down stale"
@@ -5130,22 +5291,53 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
         return;
     }
 
+    /* Recompute the 128-byte handshake IKM to seed the ratchet chains: the same
+     * quad-DH schedule dm_build_resp used internally, so RK_0 (ikm epoch 0) is
+     * bit-identical to session_key. ikm[0:32] is the fresh ephemeral-ephemeral
+     * DH, which is the new_dh a rekey folds into the root. */
+    uint8_t ikm[128];
+    int ikm_ok = dm_compute_ikm(s_identity->private_key, my_eph.private_key, init->long_term_pubkey,
+                                init->ephemeral_pubkey, ikm);
+
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t* sess = dm_alloc(&s_dm_table, src_addr, now_ms());
+    dm_session_t* sess = dm_alloc(s_dm_table, src_addr, now_ms());
     if (sess) {
-        memcpy(sess->session_key, session_key, 32);
+        /* Rekey (DH ratchet) iff we already hold an ACTIVE ratcheting session
+         * for this peer and the INIT names a higher epoch: chain the existing
+         * root forward with the fresh DH (dm_session_epoch_bump), keeping the old
+         * recv chain for the grace window. Otherwise (first contact or a
+         * desync-heal re-handshake, ke_epoch resets to 0) install a fresh
+         * ratchet from the new IKM. */
+        int is_rekey = (ikm_ok == 0 && sess->state == DM_STATE_ACTIVE && sess->ratchet.recv.valid &&
+                        ke_epoch > sess->ke_epoch);
         memcpy(sess->peer_id_pub, init->long_term_pubkey, 32);
         sess->established_ms = now_ms();
         sess->msg_count = 0;
-        sess->ke_epoch = ke_epoch;
         sess->state = DM_STATE_ACTIVE;
-        sess->verified = 0; /* SAS confirmation is a separate UX step, not wired here */
+        /* Source verified from the persisted pin, not a hardcoded reset: the
+         * verified bit keys on the pinned identity key (identity_store.h), so
+         * a previously-verified peer re-establishes as verified across
+         * reboot / desync-heal / epoch bump alike (Task 7). */
+        sess->verified = identity_store_is_verified(&s_identity_pins, src_addr) ? 1 : 0;
+        if (is_rekey) {
+            dm_session_epoch_bump(sess, ikm, s_identity->address, src_addr, ke_epoch);
+        } else {
+            memcpy(sess->session_key, session_key, 32);
+            sess->ke_epoch = ke_epoch;
+            if (ikm_ok == 0)
+                dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr);
+        }
     }
     xSemaphoreGive(s_dm_mutex);
+    memset(ikm, 0, sizeof(ikm));
 
     if (!sess) {
         ESP_LOGW(TAG, "Handshaking cap reached, cannot establish session with %08" PRIX32,
                  src_addr);
+        return;
+    }
+    if (ikm_ok != 0) {
+        ESP_LOGE(TAG, "IKM recompute failed for %08" PRIX32 ", ratchet not seeded", src_addr);
         return;
     }
 
@@ -5186,24 +5378,46 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
         return;
     }
 
+    /* Same IKM recompute as process_ke_init, from the initiator's viewpoint: our
+     * pending ephemeral + the responder's. ikm[0:32] is the fresh eph-eph DH (the
+     * rekey new_dh); RK_0 equals session_key at epoch 0. Both sides compute the
+     * identical IKM, so the ratchet chains agree. */
+    uint8_t ikm[128];
+    int ikm_ok = dm_compute_ikm(s_identity->private_key, pe->eph_priv, resp->long_term_pubkey,
+                                resp->ephemeral_pubkey, ikm);
+
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t* sess = dm_lookup(&s_dm_table, src_addr);
+    dm_session_t* sess = dm_lookup(s_dm_table, src_addr);
     if (sess) {
-        memcpy(sess->session_key, session_key, 32);
+        int is_rekey = (ikm_ok == 0 && sess->state == DM_STATE_ACTIVE && sess->ratchet.recv.valid &&
+                        ke_epoch > sess->ke_epoch);
         memcpy(sess->peer_id_pub, resp->long_term_pubkey, 32);
         sess->established_ms = now_ms();
         sess->msg_count = 0;
-        sess->ke_epoch = ke_epoch;
         sess->state = DM_STATE_ACTIVE;
-        sess->verified = 0;
+        /* Same rationale as process_ke_init: source from the persisted pin. */
+        sess->verified = identity_store_is_verified(&s_identity_pins, src_addr) ? 1 : 0;
+        if (is_rekey) {
+            dm_session_epoch_bump(sess, ikm, s_identity->address, src_addr, ke_epoch);
+        } else {
+            memcpy(sess->session_key, session_key, 32);
+            sess->ke_epoch = ke_epoch;
+            if (ikm_ok == 0)
+                dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr);
+        }
     }
     xSemaphoreGive(s_dm_mutex);
+    memset(ikm, 0, sizeof(ikm));
 
     pending_eph_clear(src_addr);
 
     if (!sess) {
         ESP_LOGW(TAG, "Session slot for %08" PRIX32 " vanished before RESP could complete it",
                  src_addr);
+        return;
+    }
+    if (ikm_ok != 0) {
+        ESP_LOGE(TAG, "IKM recompute failed for %08" PRIX32 ", ratchet not seeded", src_addr);
         return;
     }
 
@@ -5221,9 +5435,11 @@ static void handshake_worker_task(void* arg) {
             continue;
         }
         if (item.initiate) {
-            /* DM self-heal: our session with this peer desynced (we could not
-             * decrypt its DM), so re-initiate a fresh handshake off the RX task. */
-            initiate_dm_handshake(item.src_addr, item.channel_idx);
+            /* DM self-heal (rekey_epoch 0): our session with this peer desynced
+             * (we could not decrypt its DM), so re-initiate a fresh handshake off
+             * the RX task. rekey_epoch > 0: a scheduled proactive DH-ratchet
+             * rekey to the next epoch. Both reuse the same INIT/RESP machinery. */
+            initiate_dm_handshake(item.src_addr, item.channel_idx, item.rekey_epoch);
             continue;
         }
         const uint8_t* pinned = item.have_pin ? item.pinned_x25519 : NULL;
@@ -5701,6 +5917,55 @@ static int mesh_nonce_write(uint64_t ceiling, void* ctx) {
     return err == ESP_OK ? 0 : -1;
 }
 
+/* Verified TOFU pin-store persistence (DM forward-secrecy + SAS): serialize the
+ * whole pin table (bindings + verified bit + SAS-at-verification) into one blob
+ * under NVS_NS_IDENTITY and commit it. Mirrors identity.c's design note: the
+ * IN-MEMORY s_identity_pins is authoritative, so a write failure is logged and
+ * swallowed, never un-pinning the live table. Runs on the mesh task, the only
+ * mutator of s_identity_pins, so the serialize sees a consistent snapshot. */
+static void mesh_pin_store_save(void) {
+    uint8_t buf[IDENTITY_STORE_BLOB_MAX];
+    int n = identity_store_serialize(&s_identity_pins, buf, sizeof(buf));
+    if (n < 0) {
+        ESP_LOGW(TAG, "pin-store serialize failed (buf too small); live pins kept");
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_IDENTITY, NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGW(TAG, "pin-store NVS open failed; live pins kept");
+        return;
+    }
+    esp_err_t err = nvs_set_blob(h, ID_KEY_PIN_STORE, buf, (size_t)n);
+    if (err == ESP_OK)
+        err = nvs_commit(h);
+    nvs_close(h);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "pin-store NVS write failed (%s); live pins kept", esp_err_to_name(err));
+}
+
+/* Boot-time load of the persisted pin table into s_identity_pins. Called AFTER
+ * identity_store_init and AFTER the anchor is provisioned (identity_store_
+ * deserialize preserves the anchor while it rebuilds the pin table). A missing
+ * blob (fresh device) is not an error: the store simply stays empty and TOFU
+ * re-establishes. A corrupt/wrong-version blob is rejected by deserialize,
+ * which leaves the store initialized and empty. */
+static void mesh_pin_store_load(void) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_IDENTITY, NVS_READONLY, &h) != ESP_OK)
+        return; /* namespace not created yet: fresh device, empty store */
+    uint8_t buf[IDENTITY_STORE_BLOB_MAX];
+    size_t len = sizeof(buf);
+    esp_err_t err = nvs_get_blob(h, ID_KEY_PIN_STORE, buf, &len);
+    nvs_close(h);
+    if (err != ESP_OK)
+        return; /* no persisted pins yet */
+    if (identity_store_deserialize(&s_identity_pins, buf, len, now_ms()) != 0) {
+        ESP_LOGW(TAG, "persisted pin-store rejected (corrupt/old format); starting empty");
+        return;
+    }
+    ESP_LOGI(TAG, "Loaded %d persisted identity pin(s)", identity_store_count(&s_identity_pins));
+}
+
 /*
  * Mandatory-provisioning (Task 2): consolidate boot-time key load onto the
  * network_key component (single source of truth for the NVS namespace/key and
@@ -5826,7 +6091,21 @@ void mesh_task_start(bramble_identity_t* identity) {
     /* DM session table (SEC-C2). Same "created before any task that can
      * reach the guarded state starts" rule as s_nonce_mutex above. */
     s_dm_mutex = xSemaphoreCreateMutex();
-    dm_table_init(&s_dm_table);
+    /* Try PSRAM first (keeps ~40KB off scarce internal DRAM), fall back to
+     * internal RAM on a board without PSRAM. Same pattern as s_delivery_event_ring
+     * below; assert() is unsafe here since it compiles out in release builds. */
+    s_dm_table = heap_caps_calloc(1, sizeof(dm_table_t), MALLOC_CAP_SPIRAM);
+    if (!s_dm_table) {
+        ESP_LOGW(TAG, "No PSRAM for DM session table, using internal RAM (%u bytes)",
+                 (unsigned)sizeof(dm_table_t));
+        s_dm_table = calloc(1, sizeof(dm_table_t));
+    }
+    if (!s_dm_table) {
+        ESP_LOGE(TAG, "Failed to allocate DM session table (%u bytes)",
+                 (unsigned)sizeof(dm_table_t));
+        return;
+    }
+    dm_table_init(s_dm_table);
     memset(s_hs_dedup, 0, sizeof(s_hs_dedup));
     memset(s_pending_eph, 0, sizeof(s_pending_eph));
     s_handshake_work_q = xQueueCreate(HANDSHAKE_WORK_QUEUE_LEN, sizeof(dm_handshake_work_item_t));
@@ -5862,6 +6141,12 @@ void mesh_task_start(bramble_identity_t* identity) {
             identity_store_set_anchor(&s_identity_pins, anchor_pub);
         }
     }
+    /* Restore the persisted verified TOFU pin table (DM forward-secrecy + SAS)
+     * AFTER the anchor is provisioned above: identity_store_deserialize rebuilds
+     * the pin bindings + verified bits while preserving the anchor, so a
+     * "verified once, stays verified" model survives reboot. Must follow
+     * set_anchor (which drops pins on a change) so restored pins are not wiped. */
+    mesh_pin_store_load();
     replay_deferred_init(&s_deferred);
     rreq_rate_init(&s_rreq_rl);
     rreq_fwd_init(&s_rreq_fwd_rl, now_ms());
@@ -6544,6 +6829,92 @@ void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* 
         *unendorsed = s_identity_pins.unendorsed;
     if (expired)
         *expired = s_identity_pins.expired;
+}
+
+/* Snapshots this node's identity, looks up the peer's pin, and derives the
+ * identity SAS. Returns the pin (or NULL if unpinned); sas_out valid only
+ * when it returns non-NULL and derivation succeeded (*ok). Shared by
+ * mesh_get_peer_verification and mesh_set_peer_verified so both derive the
+ * identity SAS the same way, via the same mesh_get_identity snapshot. */
+static const identity_pin_t* derive_peer_sas(uint32_t addr, char sas_out[8], bool* ok) {
+    *ok = false;
+    uint32_t self_addr;
+    uint8_t self_pub[32];
+    if (mesh_get_identity(&self_addr, self_pub) != 0)
+        return NULL;
+
+    /* Lock-free read of s_identity_pins, matching mesh_get_identity_pin_stats:
+     * the mesh task is the only mutator, and a momentarily stale snapshot is
+     * fine for this UX surface. */
+    const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, addr);
+    if (!pinned)
+        return NULL;
+
+    *ok = dm_derive_identity_sas(self_pub, pinned->x25519_pub, self_addr, addr, sas_out) == 0;
+    return pinned;
+}
+
+bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
+    if (!s_identity || !sas_out || !verified || !key_changed)
+        return false;
+
+    bool ok;
+    const identity_pin_t* pinned = derive_peer_sas(addr, sas_out, &ok);
+    if (!pinned || !ok)
+        return false;
+
+    *verified = pinned->verified;
+    *key_changed = pinned->key_changed;
+    return true;
+}
+
+bool mesh_get_peer_verify_flags(uint32_t addr, bool* verified, bool* key_changed) {
+    if (!verified || !key_changed)
+        return false;
+
+    /* Lock-free read of s_identity_pins, matching mesh_get_peer_verification:
+     * the mesh task is the only mutator, and a momentarily stale snapshot is
+     * fine for this UX surface. No dm_derive_identity_sas here (no SAS is
+     * consumed by callers of this accessor). */
+    const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, addr);
+    if (!pinned) {
+        *verified = false;
+        *key_changed = false;
+        return false;
+    }
+
+    *verified = pinned->verified;
+    *key_changed = pinned->key_changed;
+    return true;
+}
+
+bool mesh_set_peer_verified(uint32_t addr, bool verified) {
+    if (!s_identity)
+        return false;
+
+    if (verified) {
+        /* Derive the same identity SAS as mesh_get_peer_verification to
+         * record with the pin. */
+        char sas[8];
+        bool ok;
+        const identity_pin_t* pinned = derive_peer_sas(addr, sas, &ok);
+        if (!pinned || !ok)
+            return false;
+
+        /* set_verified also clears key_changed: re-verifying dismisses the
+         * warning (it is NOT the genuine key-change site). */
+        identity_store_set_verified(&s_identity_pins, addr, sas);
+    } else {
+        /* A deliberate user un-verify is not a key change; do not call
+         * identity_store_mark_key_changed here. Still requires a pin to
+         * exist (matches the prior behavior: unpinned addr -> false). */
+        const identity_pin_t* pinned = identity_store_lookup(&s_identity_pins, addr);
+        if (!pinned)
+            return false;
+        identity_store_clear_verified(&s_identity_pins, addr);
+    }
+    mesh_pin_store_save();
+    return true;
 }
 
 /* Trust-anchor campaign (P2): refresh the live pin store's anchor after a
