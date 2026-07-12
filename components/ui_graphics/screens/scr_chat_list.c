@@ -171,23 +171,23 @@ void scr_chat_list_create(bramble_layout_t* layout) {
     int msg_count = msg_store_count();
     /* Newest-first so active conversations rank above stale ones */
     for (int i = msg_count - 1; i >= 0 && dm_count < DM_PEERS_MAX; i--) {
-        const stored_msg_t* m = msg_store_get(i);
-        if (!m)
+        stored_msg_t m;
+        if (!msg_store_get_copy(i, &m))
             continue;
-        if (m->direction != MSG_DIR_INCOMING && m->direction != MSG_DIR_OUTGOING)
+        if (m.direction != MSG_DIR_INCOMING && m.direction != MSG_DIR_OUTGOING)
             continue;
-        if (m->channel_index >= 0)
+        if (m.channel_index >= 0)
             continue; /* channel traffic; not a DM conversation */
 
         bool exists = false;
         for (int j = 0; j < dm_count; j++) {
-            if (dm_peers[j] == m->peer_addr) {
+            if (dm_peers[j] == m.peer_addr) {
                 exists = true;
                 break;
             }
         }
         if (!exists)
-            dm_peers[dm_count++] = m->peer_addr;
+            dm_peers[dm_count++] = m.peer_addr;
     }
 
     for (int i = 0; i < dm_count; i++) {

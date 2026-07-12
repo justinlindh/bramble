@@ -12,10 +12,20 @@
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 static stored_msg_t* s_msgs = NULL;
+/* The mesh task (core 1) writes the ring while the UI task (core 0) reads it.
+ * A spinlock gives cross-core mutual exclusion around the short ring mutations
+ * and the get-and-copy path so the UI never observes a half-written slot. */
+static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+#define MSG_LOCK() portENTER_CRITICAL(&s_lock)
+#define MSG_UNLOCK() portEXIT_CRITICAL(&s_lock)
 #else
 static stored_msg_t s_msgs_storage[MSG_STORE_MAX];
 static stored_msg_t* s_msgs = s_msgs_storage;
+/* Host build is single-threaded test code; no locking needed. */
+#define MSG_LOCK() ((void)0)
+#define MSG_UNLOCK() ((void)0)
 #endif
 
 static void msg_store_ensure_alloc(void) {
@@ -64,7 +74,16 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
     msg_store_ensure_alloc();
     if (!s_msgs)
         return;
+    if (text_len >= MSG_TEXT_MAX) {
+        text_len = MSG_TEXT_MAX - 1;
+    }
+
+    /* Hold the lock across the whole slot write so a concurrent UI reader
+     * copies either the old slot or the fully-written new one, never a torn
+     * mix. SPIFFS persistence below runs after the unlock (writers are
+     * single-task, so m stays stable for it). */
     stored_msg_t* m = &s_msgs[s_head];
+    MSG_LOCK();
     memset(m, 0, sizeof(*m));
     m->peer_addr = peer_addr;
     m->direction = dir;
@@ -75,9 +94,6 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
     m->snr = snr;
     m->channel_index = channel_index;
 
-    if (text_len >= MSG_TEXT_MAX) {
-        text_len = MSG_TEXT_MAX - 1;
-    }
     memcpy(m->text, text, text_len);
     m->text[text_len] = '\0';
     m->text_len = (uint16_t)text_len;
@@ -89,6 +105,7 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
     if (dir == MSG_DIR_INCOMING || dir == MSG_DIR_BROADCAST_IN) {
         s_total_incoming++;
     }
+    MSG_UNLOCK();
 
 #ifdef CONFIG_BRAMBLE_MSG_PERSIST_ENABLED
     /* Persist to SPIFFS */
@@ -117,11 +134,13 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
                                         uint8_t route_hop_count, const uint32_t* route_hops) {
     if (packet_id == 0)
         return false;
+    bool found = false;
+    MSG_LOCK();
     int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
     /* Search newest first for faster match */
     for (int i = s_count - 1; i >= 0; i--) {
         int idx = (start + i) % MSG_STORE_MAX;
-        if (s_msgs[idx].packet_id == packet_id) {
+        if (s_msgs && s_msgs[idx].packet_id == packet_id) {
             s_msgs[idx].status = status;
             if (route_hops && route_hop_count > 0) {
                 uint8_t bounded =
@@ -131,17 +150,24 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
                     s_msgs[idx].route_hops[h] = route_hops[h];
                 }
             }
-            return true;
+            found = true;
+            break;
         }
     }
-    return false;
+    MSG_UNLOCK();
+    return found;
 }
 
 bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
     return msg_store_update_status_with_route(packet_id, status, 0, NULL);
 }
 
-int msg_store_count(void) { return s_count; }
+int msg_store_count(void) {
+    MSG_LOCK();
+    int c = s_count;
+    MSG_UNLOCK();
+    return c;
+}
 
 uint32_t msg_store_total_incoming(void) { return s_total_incoming; }
 
@@ -154,9 +180,26 @@ const stored_msg_t* msg_store_get(int index) {
     return &s_msgs[actual];
 }
 
+bool msg_store_get_copy(int index, stored_msg_t* out) {
+    if (!out)
+        return false;
+    bool ok = false;
+    MSG_LOCK();
+    if (s_msgs && index >= 0 && index < s_count) {
+        int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+        int actual = (start + index) % MSG_STORE_MAX;
+        *out = s_msgs[actual];
+        ok = true;
+    }
+    MSG_UNLOCK();
+    return ok;
+}
+
 void msg_store_clear(void) {
+    MSG_LOCK();
     s_head = 0;
     s_count = 0;
+    MSG_UNLOCK();
 }
 
 void msg_store_init_with_persistence(void) {

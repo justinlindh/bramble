@@ -1,7 +1,13 @@
 /**
  * Keyboard driver for T-Deck Plus
  * ESP32-C3 sub-MCU keyboard at I2C address 0x55
- * Interrupt-driven with circular buffer
+ *
+ * Pure polling: keyboard_poll() is called on the UI task and both produces
+ * (buffer_push) and consumes (buffer_pop) key events on that one task, so the
+ * circular buffer needs no locking today. If the GPIO46 data-ready line is
+ * ever wired to an ISR that calls buffer_push(), key_head/key_tail become a
+ * cross-context producer/consumer pair and their non-atomic ++ must then be
+ * guarded (see trackball.c for the spinlock pattern).
  */
 
 #include "include/keyboard.h"

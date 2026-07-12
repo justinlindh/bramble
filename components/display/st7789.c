@@ -72,7 +72,10 @@ static void st7789_write_cmd(uint8_t cmd) {
         .length = 8,
         .tx_buffer = &cmd,
     };
-    spi_device_transmit(spi, &t);
+    esp_err_t ret = spi_device_transmit(spi, &t);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI cmd 0x%02X transmit failed: %s", cmd, esp_err_to_name(ret));
+    }
 }
 
 static void st7789_write_data(const uint8_t* data, size_t len) {
@@ -83,7 +86,10 @@ static void st7789_write_data(const uint8_t* data, size_t len) {
         .length = len * 8,
         .tx_buffer = data,
     };
-    spi_device_transmit(spi, &t);
+    esp_err_t ret = spi_device_transmit(spi, &t);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI data transmit (%zu bytes) failed: %s", len, esp_err_to_name(ret));
+    }
 }
 
 static void st7789_write_byte(uint8_t val) { st7789_write_data(&val, 1); }
@@ -452,7 +458,16 @@ void display_flush(void) {
 void display_power(bool on) {
     if (!initialized)
         return;
+    /* DISPOFF/DISPON share the SPI bus with the SX1262 radio. Take the bus
+     * mutex so this single-command transaction cannot interleave into the
+     * radio's mutex-protected sequence (or an in-flight flush) and wedge it.
+     * No caller of display_power() holds g_spi_mutex, so this cannot
+     * self-deadlock. */
+    if (g_spi_mutex)
+        xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
     st7789_write_cmd(on ? ST7789_DISPON : ST7789_DISPOFF);
+    if (g_spi_mutex)
+        xSemaphoreGive(g_spi_mutex);
 }
 
 void display_set_backlight(uint8_t level) {
@@ -475,7 +490,12 @@ void display_set_contrast(uint8_t val) {
 void display_invert(bool invert) {
     if (!initialized)
         return;
+    /* Shares the SPI bus with the radio; guard like display_power(). */
+    if (g_spi_mutex)
+        xSemaphoreTake(g_spi_mutex, portMAX_DELAY);
     st7789_write_cmd(invert ? 0x21 : 0x20); /* INVON / INVOFF */
+    if (g_spi_mutex)
+        xSemaphoreGive(g_spi_mutex);
 }
 
 void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf) {
@@ -526,7 +546,11 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf) {
             .length = chunk * 8,
             .tx_buffer = dma_buf,
         };
-        spi_device_transmit(spi, &t);
+        esp_err_t ret = spi_device_transmit(spi, &t);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "SPI area flush error at offset %zu: %s", sent, esp_err_to_name(ret));
+            break;
+        }
     }
 
     if (g_spi_mutex)
