@@ -75,6 +75,7 @@
 #include "hw/dma/esp_gdma.h"
 #include "hw/xtensa/bramble_gpspi2.h"
 #include "hw/xtensa/bramble_gpio.h"
+#include "hw/xtensa/bramble_scaffold.h"
 #include "hw/misc/esp32s3_reg.h"
 #include "hw/xtensa/esp32s3_intc.h"
 #include "chardev/char.h"
@@ -82,6 +83,7 @@
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qobject.h"
+#include "qemu/base64.h"
 
 /* GPSPI2 register offsets (soc/spi_reg.h, esp32s3: REG_SPI_BASE(2) window).
  * NB: this is the GENERAL-PURPOSE SPI register map, distinct from the flash
@@ -126,9 +128,8 @@
 /* SPI_MS_DLEN_REG: data length in bits, minus 1, in [17:0]. */
 #define SPI_MS_DATA_BITLEN_MASK    0x0003FFFFu
 
-/* SPI_MISC_REG chip-select disables (active-low CS lines). */
+/* SPI_MISC_REG chip-select disable (active-low CS0 line). */
 #define SPI_MISC_CS0_DIS   (1u << 0)
-#define SPI_MISC_CS1_DIS   (1u << 1)
 
 /* SPI_DMA_CONF_REG data-path enables. */
 #define SPI_DMA_TX_ENA     (1u << 28)
@@ -141,8 +142,11 @@
 #define GPSPI2_BUF_WORDS   16
 #define GPSPI2_BUF_BYTES   (GPSPI2_BUF_WORDS * 4)
 
-/* Chip-select out lines exposed to attached slaves (CS0..CS1 used on S3). */
-#define GPSPI2_CS_COUNT    2
+/* Largest real SPI2 data transfer the pager issues: the 240-byte e-paper
+ * framebuffer GDMA chunk (see the header note). A user transaction up to this
+ * size shifts through stack buffers with no per-transaction allocation; a
+ * larger one (never observed) falls back to the heap. */
+#define GPSPI2_MAX_XFER    240
 
 /* ---- emu-link bridge (P2.4b) --------------------------------------------- */
 /*
@@ -198,33 +202,6 @@ static bool s_emulink_open;
 static GString *s_emulink_rxbuf;
 static EmulinkHandler s_emulink_handlers[EMULINK_MAX_HANDLERS];
 
-/* base64 encode (RFC 4648, padded); decode lives with the SX1262 slave. */
-static const char EMULINK_B64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static void emulink_b64_encode(const uint8_t *in, size_t n, char *out,
-                               size_t out_sz)
-{
-    size_t o = 0;
-    for (size_t i = 0; i < n; i += 3) {
-        if (o + 4 >= out_sz) {
-            break;
-        }
-        uint32_t v = (uint32_t)in[i] << 16;
-        if (i + 1 < n) {
-            v |= (uint32_t)in[i + 1] << 8;
-        }
-        if (i + 2 < n) {
-            v |= (uint32_t)in[i + 2];
-        }
-        out[o++] = EMULINK_B64[(v >> 18) & 0x3F];
-        out[o++] = EMULINK_B64[(v >> 12) & 0x3F];
-        out[o++] = (i + 1 < n) ? EMULINK_B64[(v >> 6) & 0x3F] : '=';
-        out[o++] = (i + 2 < n) ? EMULINK_B64[v & 0x3F] : '=';
-    }
-    out[o] = '\0';
-}
-
 static int emulink_write(const char *s, size_t len)
 {
     if (!s_emulink_have_chr || !s_emulink_open) {
@@ -242,8 +219,7 @@ static int emulink_send_tx(const uint8_t *payload, unsigned len, int freq_mhz,
     if (!payload || len == 0) {
         return -1;
     }
-    char b64[352]; /* 4*ceil(255/3)+1 = 341, rounded up */
-    emulink_b64_encode(payload, len, b64, sizeof(b64));
+    g_autofree char *b64 = g_base64_encode(payload, len);
     g_autofree char *line = g_strdup_printf(
         "{\"t\":\"tx\",\"payload\":\"%s\",\"freq\":%d,\"sf\":%d,\"bw\":%d,"
         "\"cr\":%d,\"power\":%d}\n",
@@ -261,9 +237,7 @@ static int emulink_send_fb(const uint8_t *fb, size_t fb_len, uint32_t seq,
     if (!fb || fb_len == 0) {
         return -1;
     }
-    size_t b64_sz = 4 * ((fb_len + 2) / 3) + 1;
-    g_autofree char *b64 = g_malloc(b64_sz);
-    emulink_b64_encode(fb, fb_len, b64, b64_sz);
+    g_autofree char *b64 = g_base64_encode(fb, fb_len);
     g_autofree char *line = g_strdup_printf(
         "{\"t\":\"fb\",\"seq\":%u,\"kind\":\"%s\",\"fb\":\"%s\","
         "\"busy_ms\":%u}\n",
@@ -390,8 +364,7 @@ static void emulink_send_hello(void)
         "{\"t\":\"hello\",\"node\":\"%s\",\"version\":%d,\"fw\":\"qemu\","
         "\"caps\":\"radio,display,buttons,gps,battery\"}\n",
         node, EMULINK_PROTOCOL_VERSION);
-    (void)qemu_chr_fe_write_all(&s_emulink_chr, (const uint8_t *)hello,
-                                strlen(hello));
+    (void)emulink_write(hello, strlen(hello));
     fprintf(stderr, "bramble-emulink: hello sent as node=%s\n", node);
 }
 
@@ -661,15 +634,10 @@ static const TypeInfo bramble_ledc_info = {
 static void bramble_ledc_attach(MemoryRegion *sys_mem)
 {
     Object *obj = object_new(TYPE_BRAMBLE_LEDC);
-    object_property_add_child(qdev_get_machine(), "bramble-ledc", obj);
-    qdev_realize(DEVICE(obj), NULL, &error_fatal);
-
     BrambleLedcState *s = BRAMBLE_LEDC(obj);
-    memory_region_add_subregion_overlap(sys_mem, DR_REG_LEDC_BASE,
-                                         &s->iomem, 1);
-
-    fprintf(stderr, "bramble-ledc: buzzer tone overlay attached at 0x%x\n",
-            (unsigned)DR_REG_LEDC_BASE);
+    bramble_overlay_attach(obj, "bramble-ledc", &s->iomem, sys_mem,
+                           DR_REG_LEDC_BASE,
+                           "bramble-ledc: buzzer tone overlay");
 }
 
 /* ---- SSD1680 e-paper SSI slave (P2.5) ------------------------------------ */
@@ -1002,6 +970,11 @@ static const TypeInfo bramble_ssd1680_info = {
  * overlay's input accessor (P2.4b). */
 #define SX1262_DIO1_GPIO            14
 
+/* Radio manual software chip-select = GPIO8 (sx1262.c sets spics_io_num = -1 and
+ * toggles gpio_set_level(8) by hand); GPIO8 low selects the SX1262 in the
+ * controller's CS routing (bramble_gpspi2_route). */
+#define SX1262_CS_GPIO              8
+
 /* Status byte (datasheet 13.5.1): [6:4]=chip mode, [3:1]=command status. */
 #define SX1262_MODE_STDBY_RC        0x2
 #define SX1262_MODE_FS              0x4
@@ -1078,51 +1051,6 @@ struct BrambleSx1262State {
     uint8_t buf_offset;    /* running offset for Read/WriteBuffer */
     uint16_t clr_mask;     /* accumulator for the 2-byte ClrIrqStatus value */
 };
-
-/* base64 decode (RFC 4648) for inbound `rx` payloads; hand-rolled like
- * radio_virt.c's, no external dep. Returns decoded byte count (<= out_sz). */
-static int sx1262_b64_val(char c)
-{
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
-
-static size_t sx1262_b64_decode(const char *in, uint8_t *out, size_t out_sz)
-{
-    size_t o = 0;
-    int quad[4];
-    int qi = 0;
-    for (const char *p = in; *p; p++) {
-        if (*p == '=') {
-            break;
-        }
-        int v = sx1262_b64_val(*p);
-        if (v < 0) {
-            continue;
-        }
-        quad[qi++] = v;
-        if (qi == 4) {
-            if (o + 3 > out_sz) {
-                return o;
-            }
-            out[o++] = (uint8_t)((quad[0] << 2) | (quad[1] >> 4));
-            out[o++] = (uint8_t)(((quad[1] & 0xF) << 4) | (quad[2] >> 2));
-            out[o++] = (uint8_t)(((quad[2] & 0x3) << 6) | quad[3]);
-            qi = 0;
-        }
-    }
-    if (qi >= 2 && o < out_sz) {
-        out[o++] = (uint8_t)((quad[0] << 2) | (quad[1] >> 4));
-    }
-    if (qi >= 3 && o < out_sz) {
-        out[o++] = (uint8_t)(((quad[1] & 0xF) << 4) | (quad[2] >> 2));
-    }
-    return o;
-}
 
 static uint8_t bramble_sx1262_status(BrambleSx1262State *s)
 {
@@ -1257,9 +1185,9 @@ static void bramble_sx1262_on_rx(QDict *msg, void *ctx)
     if (!payload) {
         return;
     }
-    uint8_t tmp[255];
-    size_t n = sx1262_b64_decode(payload, tmp, sizeof(tmp));
-    if (n == 0 || n > sizeof(tmp)) {
+    size_t n = 0;
+    g_autofree uint8_t *decoded = qbase64_decode(payload, -1, &n, NULL);
+    if (!decoded || n == 0 || n > sizeof(s->rx_fifo[0].data)) {
         return; /* radio frames are never empty and cap at 255 bytes */
     }
 
@@ -1285,7 +1213,7 @@ static void bramble_sx1262_on_rx(QDict *msg, void *ctx)
     }
     int tail = (s->rx_fifo_head + s->rx_fifo_count) % SX1262_RX_FIFO_DEPTH;
     Sx1262RxFrame *f = &s->rx_fifo[tail];
-    memcpy(f->data, tmp, n);
+    memcpy(f->data, decoded, n);
     f->len = (uint8_t)n;
     f->rssi_raw = (uint8_t)rssi_raw;
     f->snr_raw = (int8_t)snr_raw;
@@ -1521,7 +1449,6 @@ struct BrambleGpspi2State {
 
     MemoryRegion iomem;
     SSIBus *spi;
-    qemu_irq cs_gpio[GPSPI2_CS_COUNT];
 
     /* SSI_GPIO_CS inputs of the two bus slaves, driven per-transfer from the
      * CS-routing decision (bramble_gpspi2_route). radio_cs -> SX1262 slave,
@@ -1590,20 +1517,10 @@ static void bramble_gpspi2_route(BrambleGpspi2State *s, int active)
         qemu_set_irq(s->disp_cs, 1);
         return;
     }
-    bool radio_sel = (bramble_gpio_out_level(8) == 0);
+    bool radio_sel = (bramble_gpio_out_level(SX1262_CS_GPIO) == 0);
     bool disp_sel = !radio_sel && !(s->misc & SPI_MISC_CS0_DIS);
     qemu_set_irq(s->radio_cs, radio_sel ? 0 : 1);
     qemu_set_irq(s->disp_cs, disp_sel ? 0 : 1);
-}
-
-/* Assert (level 0) or deassert (level 1) the enabled CS lines, mirroring
- * hw/ssi/esp32s3_spi.c. A disabled CS (SPI_MISC_REG.CSn_DIS) stays high. */
-static void bramble_gpspi2_cs_set(BrambleGpspi2State *s, int active)
-{
-    int cs0_dis = s->misc & SPI_MISC_CS0_DIS;
-    int cs1_dis = s->misc & SPI_MISC_CS1_DIS;
-    qemu_set_irq(s->cs_gpio[0], (!cs0_dis && active) ? 0 : 1);
-    qemu_set_irq(s->cs_gpio[1], (!cs1_dis && active) ? 0 : 1);
 }
 
 /* Shift `nbytes` low bytes of `value` out, LSB-first, discarding MISO. Used for
@@ -1636,7 +1553,6 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
     /* Route to the SX1262 (GPIO8 low) or the display stub before any byte is
      * shifted, so the selected slave sees this whole transaction. */
     bramble_gpspi2_route(s, 1);
-    bramble_gpspi2_cs_set(s, 1);
 
     if (do_cmd) {
         uint32_t cmd_val = s->user2 & SPI_USER2_CMD_VALUE_MASK;
@@ -1649,8 +1565,23 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
     }
 
     if (data_bytes) {
-        g_autofree uint8_t *txbuf = g_malloc0(data_bytes);
-        g_autofree uint8_t *rxbuf = g_malloc0(data_bytes);
+        /* Shift through stack buffers for the common case; spill to the heap
+         * only for an oversized transfer the pager never issues. Neither buffer
+         * is pre-zeroed (the old g_malloc0 was fully wasted on the hot path):
+         * rxbuf is completely written by the shift loop, and txbuf is filled
+         * below - with an explicit tail-zero on the CPU path past the 64-byte
+         * W-buffer, and on a missed DMA fetch, to preserve the g_malloc0
+         * semantics the register-accurate slaves may depend on. */
+        uint8_t txstack[GPSPI2_MAX_XFER];
+        uint8_t rxstack[GPSPI2_MAX_XFER];
+        g_autofree uint8_t *txheap = NULL;
+        g_autofree uint8_t *rxheap = NULL;
+        uint8_t *txbuf = txstack;
+        uint8_t *rxbuf = rxstack;
+        if (data_bytes > GPSPI2_MAX_XFER) {
+            txbuf = txheap = g_malloc(data_bytes);
+            rxbuf = rxheap = g_malloc(data_bytes);
+        }
 
         if (do_mosi) {
             if (dma_tx && s->gdma) {
@@ -1659,14 +1590,22 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
                                                  ESP_GDMA_OUT_IDX, &chan) ||
                     !esp_gdma_read_channel(s->gdma, chan, txbuf, data_bytes)) {
                     /* Best-effort: a stub slave discards MOSI, so a missed DMA
-                     * fetch does not wedge boot. Correct framebuffer bytes are
-                     * a P2.5 concern (see channel-disambiguation note below). */
+                     * fetch does not wedge boot. Zero-fill to match the old
+                     * g_malloc0 (a register-accurate slave then sees zeros, not
+                     * stale stack bytes). Correct framebuffer bytes are a P2.5
+                     * concern (see channel-disambiguation note below). */
+                    memset(txbuf, 0, data_bytes);
                     qemu_log_mask(LOG_UNIMP,
                         "bramble-gpspi2: SPI2 GDMA OUT fetch failed (%u bytes)\n",
                         data_bytes);
                 }
             } else {
-                memcpy(txbuf, s->data_reg, MIN(data_bytes, GPSPI2_BUF_BYTES));
+                uint32_t ncpu = MIN(data_bytes, GPSPI2_BUF_BYTES);
+                memcpy(txbuf, s->data_reg, ncpu);
+                if (data_bytes > ncpu) {
+                    /* CPU W-buffer past 64 bytes reads back as 0. */
+                    memset(txbuf + ncpu, 0, data_bytes - ncpu);
+                }
             }
         }
 
@@ -1691,7 +1630,6 @@ static void bramble_gpspi2_transfer(BrambleGpspi2State *s)
         }
     }
 
-    bramble_gpspi2_cs_set(s, 0);
     bramble_gpspi2_route(s, 0);
 
     /* Latch transfer-done and drive the (level) interrupt line. The e-paper
@@ -1781,8 +1719,6 @@ static void bramble_gpspi2_instance_init(Object *obj)
                           TYPE_BRAMBLE_GPSPI2, 0x1000);
 
     s->spi = ssi_create_bus(DEVICE(s), "spi");
-    qdev_init_gpio_out_named(DEVICE(s), &s->cs_gpio[0], SSI_GPIO_CS,
-                             GPSPI2_CS_COUNT);
 }
 
 static const TypeInfo bramble_gpspi2_info = {
@@ -1806,10 +1742,15 @@ void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
                            DeviceState *intc)
 {
     Object *obj = object_new(TYPE_BRAMBLE_GPSPI2);
-    object_property_add_child(qdev_get_machine(), "bramble-gpspi2", obj);
-    qdev_realize(DEVICE(obj), NULL, &error_fatal);
-
     BrambleGpspi2State *s = BRAMBLE_GPSPI2(obj);
+
+    /* Overlay the GPSPI2 window at higher priority than the machine's catch-all
+     * IO region (added at priority 0), like bramble_gpio does for GPIO. */
+    bramble_overlay_attach(obj, "bramble-gpspi2", &s->iomem, sys_mem,
+                           DR_REG_SPI2_BASE,
+                           "bramble-gpspi2: controller + SX1262 radio + "
+                           "SSD1680 display");
+
     if (gdma) {
         s->gdma = ESP_GDMA(gdma);
     }
@@ -1837,11 +1778,4 @@ void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
     /* Both slaves idle deselected (CS high). */
     qemu_set_irq(s->radio_cs, 1);
     qemu_set_irq(s->disp_cs, 1);
-
-    /* Overlay the GPSPI2 window at higher priority than the machine's catch-all
-     * IO region (added at priority 0), like bramble_gpio does for GPIO. */
-    memory_region_add_subregion_overlap(sys_mem, DR_REG_SPI2_BASE, &s->iomem, 1);
-
-    fprintf(stderr, "bramble-gpspi2: controller + SX1262 radio + SSD1680 "
-            "display attached at 0x%x\n", (unsigned)DR_REG_SPI2_BASE);
 }

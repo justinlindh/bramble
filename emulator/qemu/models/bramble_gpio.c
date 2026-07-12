@@ -41,6 +41,7 @@
 #include "qom/object.h"
 #include "exec/address-spaces.h"
 #include "hw/xtensa/bramble_gpio.h"
+#include "hw/xtensa/bramble_scaffold.h"
 #include "hw/misc/esp32s3_reg.h"
 #include "hw/xtensa/esp32s3_intc.h"
 
@@ -186,6 +187,21 @@ static void bramble_gpio_update_intr(BrambleGpioState *s)
     }
 }
 
+/* One-time opt-in for the verbose per-transition OUT log. Off by default: it
+ * fires on every CS (GPIO8) and D/C (GPIO5) toggle around each SPI op, which is
+ * hot. Set BRAMBLE_GPIO_LOG=1 to restore it for debugging. The OUT observer
+ * (indicator bridge) runs off the decode path below, NOT this log, so gating
+ * the print leaves LED/vibra `ind` events unchanged. */
+static bool bramble_gpio_log_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("BRAMBLE_GPIO_LOG");
+        cached = (v && *v) ? 1 : 0;
+    }
+    return cached;
+}
+
 /* Apply a new OUT-bank value, logging every level transition. */
 static void bramble_gpio_set_out(BrambleGpioState *s, int bank, uint32_t val)
 {
@@ -196,8 +212,10 @@ static void bramble_gpio_set_out(BrambleGpioState *s, int bank, uint32_t val)
         changed &= changed - 1;
         int pin = bank * 32 + bit;
         int level = (val >> bit) & 1;
-        fprintf(stderr, "bramble-gpio: OUT gpio=%d(%s) level=%d\n",
-                pin, bramble_out_name(pin), level);
+        if (bramble_gpio_log_enabled()) {
+            fprintf(stderr, "bramble-gpio: OUT gpio=%d(%s) level=%d\n",
+                    pin, bramble_out_name(pin), level);
+        }
         if (s_out_observer) {
             s_out_observer(pin, level != 0);
         }
@@ -265,14 +283,15 @@ static const MemoryRegionOps bramble_gpio_ops = {
     .valid.max_access_size = 4,
 };
 
-/* Drive one button's pin to its pressed/released input level and, on a press
- * (falling) edge, latch GPIO_STATUS and pulse the interrupt-matrix source. */
-static void bramble_gpio_inject(BrambleGpioState *s, const BrambleButton *b,
-                                bool pressed)
+/* Set input pin `pin`'s served level in the in[] bitmap and return its previous
+ * level (0/1). The bank/bit decode + conditional set/clear is the core shared by
+ * the button injector (falling-edge latch) and the sibling-model input driver
+ * (rising-edge latch); each caller applies its own edge policy on the old level
+ * returned here. Caller guarantees pin is in range. */
+static int bramble_gpio_set_in_bit(BrambleGpioState *s, int pin, int level)
 {
-    int bank = b->pin / 32;
-    int bit = b->pin % 32;
-    int level = pressed ? 0 : 1; /* active low */
+    int bank = pin / 32;
+    int bit = pin % 32;
     int old = (s->in[bank] >> bit) & 1;
 
     if (level) {
@@ -280,6 +299,17 @@ static void bramble_gpio_inject(BrambleGpioState *s, const BrambleButton *b,
     } else {
         s->in[bank] &= ~(1u << bit);
     }
+    return old;
+}
+
+/* Drive one button's pin to its pressed/released input level and, on a press
+ * (falling) edge, latch GPIO_STATUS and pulse the interrupt-matrix source. */
+static void bramble_gpio_inject(BrambleGpioState *s, const BrambleButton *b,
+                                bool pressed)
+{
+    int level = pressed ? 0 : 1; /* active low */
+    int old = bramble_gpio_set_in_bit(s, b->pin, level);
+
     fprintf(stderr, "bramble-gpio: BTN %s %s IN gpio=%d level=%d\n",
             b->name, pressed ? "press" : "release", b->pin, level);
 
@@ -287,7 +317,7 @@ static void bramble_gpio_inject(BrambleGpioState *s, const BrambleButton *b,
         /* Falling edge: what a real button press raises. Latch status and hold
          * the interrupt level until the firmware's gpio_isr clears the bit
          * (see bramble_gpio_update_intr). */
-        s->status[bank] |= (1u << bit);
+        s->status[b->pin / 32] |= (1u << (b->pin % 32));
         bramble_gpio_update_intr(s);
         fprintf(stderr,
                 "bramble-gpio: INTR raised gpio=%d (ETS_GPIO_INTR_SOURCE)\n",
@@ -309,19 +339,11 @@ void bramble_gpio_set_input(int pin, bool level)
         return;
     }
     BrambleGpioState *s = s_bramble_gpio;
-    int bank = pin / 32;
-    int bit = pin % 32;
-    int old = (s->in[bank] >> bit) & 1;
-
-    if (level) {
-        s->in[bank] |= (1u << bit);
-    } else {
-        s->in[bank] &= ~(1u << bit);
-    }
+    int old = bramble_gpio_set_in_bit(s, pin, level ? 1 : 0);
 
     if (old == 0 && level) {
         /* Rising edge: latch status and hold the interrupt level. */
-        s->status[bank] |= (1u << bit);
+        s->status[pin / 32] |= (1u << (pin % 32));
         bramble_gpio_update_intr(s);
     }
 }
@@ -400,22 +422,18 @@ type_init(bramble_gpio_register_types)
 void bramble_gpio_attach(MemoryRegion *sys_mem, DeviceState *intc)
 {
     Object *obj = object_new(TYPE_BRAMBLE_GPIO);
-    /* Give it a canonical path (/machine/bramble-gpio) so QMP qom-set can
-     * reach the button-injection properties. */
-    object_property_add_child(qdev_get_machine(), "bramble-gpio", obj);
-    qdev_realize(DEVICE(obj), NULL, &error_fatal);
-
     BrambleGpioState *s = BRAMBLE_GPIO(obj);
+
+    /* Canonical path (/machine/bramble-gpio) so QMP qom-set can reach the
+     * button-injection properties; overlay the GPIO window at higher priority
+     * than the stock esp32s3 GPIO model (added at priority 0), so our decode
+     * services every access. */
+    bramble_overlay_attach(obj, "bramble-gpio", &s->iomem, sys_mem,
+                           DR_REG_GPIO_BASE,
+                           "bramble-gpio: observer/injector");
+
     s_bramble_gpio = s;
     if (intc) {
         s->intr = qdev_get_gpio_in(intc, ETS_GPIO_INTR_SOURCE);
     }
-
-    /* Overlay the GPIO window at higher priority than the stock esp32s3 GPIO
-     * model (added at priority 0), so our decode services every access. */
-    memory_region_add_subregion_overlap(sys_mem, DR_REG_GPIO_BASE,
-                                         &s->iomem, 1);
-
-    fprintf(stderr, "bramble-gpio: observer/injector attached at 0x%x\n",
-            (unsigned)DR_REG_GPIO_BASE);
 }
