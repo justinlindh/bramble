@@ -101,8 +101,20 @@ uint32_t msg_store_total_incoming(void);
 /**
  * Get message at index (0 = oldest).  Returns NULL if out of range.
  * Returned pointer is valid until next msg_store_add.
+ *
+ * NOTE: not concurrency-safe. The returned pointer aliases the live ring, so
+ * a concurrent writer (mesh task) can overwrite the slot while the caller
+ * reads it. Prefer msg_store_get_copy() from the UI task.
  */
 const stored_msg_t* msg_store_get(int index);
+
+/**
+ * Copy the message at index (0 = oldest) into caller-owned storage under the
+ * store lock. Returns true on success, false if out of range or unallocated.
+ * The copy is a stable snapshot: safe to read across LVGL calls even while the
+ * mesh task keeps writing the ring. This is the concurrency-safe reader.
+ */
+bool msg_store_get_copy(int index, stored_msg_t* out);
 
 /**
  * Clear all stored messages.
