@@ -245,11 +245,10 @@ func (p *superProc) supervise() {
 		// nor stops retrying.
 		backoff := 50 * time.Millisecond
 		if time.Since(start) < time.Second {
+			// min(fastFails, 5) caps the shift at 50<<5 = 1600ms, so the
+			// backoff is already bounded below 2s; that is the whole cap.
 			fastFails++
 			backoff = time.Duration(50<<min(fastFails, 5)) * time.Millisecond
-			if backoff > 2*time.Second {
-				backoff = 2 * time.Second
-			}
 		} else {
 			fastFails = 0
 		}
@@ -304,9 +303,14 @@ func (p *superProc) runOnce() {
 	// before the hello are buffered and flushed under that id; if the node never
 	// attaches, they fall back to the process label at exit.
 	var pending []string
+	consoleID := ""
 	for sc.Scan() {
-		id := p.consoleID()
-		if id == "" {
+		// consoleID() takes the mutex; once the bound id is known it is stable
+		// for this run, so resolve it once and stop locking per line.
+		if consoleID == "" {
+			consoleID = p.consoleID()
+		}
+		if consoleID == "" {
 			if len(pending) < maxPendingConsole {
 				pending = append(pending, sc.Text())
 			} else {
@@ -314,20 +318,20 @@ func (p *superProc) runOnce() {
 			}
 			continue
 		}
-		for _, pl := range pending {
-			p.sup.broker.sim.emitConsole(id, pl)
+		if len(pending) > 0 {
+			p.flushPending(consoleID, pending)
+			pending = nil
 		}
-		pending = nil
-		p.sup.broker.sim.emitConsole(id, sc.Text())
+		p.sup.broker.sim.emitConsole(consoleID, sc.Text())
 	}
 	if len(pending) > 0 {
+		// Never attached: re-check once for a late bind, else fall back to the
+		// process label.
 		id := p.consoleID()
 		if id == "" {
 			id = p.label
 		}
-		for _, pl := range pending {
-			p.sup.broker.sim.emitConsole(id, pl)
-		}
+		p.flushPending(id, pending)
 	}
 	_ = cmd.Wait()
 
@@ -336,18 +340,29 @@ func (p *superProc) runOnce() {
 	p.mu.Unlock()
 }
 
+// flushPending emits each buffered pre-attach console line under id, in order,
+// then the caller clears the buffer. Shared by the in-loop flush (on the line
+// where the node's id first resolves) and the post-loop drain (a node that
+// exited before attaching).
+func (p *superProc) flushPending(id string, pending []string) {
+	for _, pl := range pending {
+		p.sup.broker.sim.emitConsole(id, pl)
+	}
+}
+
 // buildCmd assembles the *exec.Cmd for one launch, dispatching on node type.
 // A linux node is its binary run directly; a QEMU node is qemu-system-xtensa
 // driving the pager image (buildQemuCmd). The environment is set here; the
 // caller wires stdout/stderr.
 func (p *superProc) buildCmd() (*exec.Cmd, error) {
-	var cmd *exec.Cmd
+	var (
+		cmd *exec.Cmd
+		err error
+	)
 	if p.nodeType == "qemu" {
-		c, err := p.buildQemuCmd()
-		if err != nil {
+		if cmd, err = p.buildQemuCmd(); err != nil {
 			return nil, err
 		}
-		cmd = c
 	} else {
 		cmd = exec.Command(p.binary)
 	}
