@@ -1,0 +1,17 @@
+# NVS seed for the QEMU pager image: force connectivity mode to BLE.
+#
+# Boot on the QEMU esp32s3 machine cannot bring up the WiFi PHY (RF calibration
+# is unmodeled and wedges phy_init). conn_mode=BLE makes app_main skip wifi_init
+# entirely; the BLE path then runs against the ble_server stub (BT is compiled
+# out of the QEMU variant), so the firmware reaches its live main loop.
+#
+# This is IMAGE PROVISIONING, identical to configuring conn_mode on a real
+# device over RPC. run-qemu.sh writes the generated blob only into the QEMU
+# flash image (build-qemu/flash_qemu.bin) at the nvs partition offset (0x9000,
+# see partitions.csv); it never touches a real board.
+#
+# namespace `bramble`, key `conn_mode`, u8 = 1 (CONN_MODE_BLE; see
+# components/ui/include/ui.h). Generated with esp-idf nvs_partition_gen.py.
+key,type,encoding,value
+bramble,namespace,,
+conn_mode,data,u8,1

@@ -21,4 +21,12 @@
  */
 void bramble_gpio_attach(MemoryRegion *sys_mem, DeviceState *intc);
 
+/*
+ * Current driven level (0/1) of GPIO output pin `pin` (0..48), read from the
+ * overlay's OUT registers. Lets bramble_gpspi2 route SPI transfers by the
+ * radio's manual chip-select on GPIO8 without duplicating GPIO state. Returns
+ * false if the overlay is not attached or the pin is out of range.
+ */
+bool bramble_gpio_out_level(int pin);
+
 #endif

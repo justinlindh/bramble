@@ -45,3 +45,25 @@ they do not carry the model source files themselves (those are copied, see
   realization run, both clear of the `0001`/`0003` context lines, so all four
   patches reverse-check as already-applied on an idempotent re-run. See
   `../models/bramble_gpspi2.c`.
+- `0005-bramble-adc-model.patch` (P2.3b): wires `bramble_adc.c` into the ESP32S3
+  source set (its meson add() sits at the very head of the file, sharing only
+  the `xtensa_ss = ss.source_set()` context line) and calls
+  `bramble_adc_attach()` from `esp32s3_machine_init()`. The SENS/SAR window the
+  oneshot ADC uses is unmodeled, so `battery_read_mv()` spins on the never-set
+  `meas1_done_sar` bit; the model overlays that window and latches a conversion
+  result. See `../models/bramble_adc.c`.
+- `0006-intmatrix-level-forward.patch` (P2.4a): patches the STOCK esp32s3
+  interrupt matrix (`hw/xtensa/esp32s3_intc.{c,h}`, not a model file) to be
+  combinational. The stock matrix only forwarded a source's level to a CPU on an
+  input EDGE and dropped it on a routing-map write, so a peripheral whose level
+  interrupt latches before the driver routes it (via `esp_intr_alloc`) never
+  reached the CPU, and rerouting a source away from a line (as `esp_intr_disable`
+  does) left the old line stuck asserted. This blocked the SX1262 radio, whose
+  driver uses the interrupt-driven `spi_device_transmit` and relies on the
+  latched SPI2 trans-done line: `radio_init` wedged in `spi_device_get_trans_result`.
+  The patch tracks per-source input levels and re-drives each CPU interrupt as
+  the OR of the sources routed to it on both input edges and map writes, letting
+  the radio's transfers complete and boot reach the main loop. This is the only
+  patch that touches stock QEMU device code rather than wiring in a model. It
+  applies to files no other bramble patch touches, so it is independent of the
+  meson/machine-init hunk placement above.

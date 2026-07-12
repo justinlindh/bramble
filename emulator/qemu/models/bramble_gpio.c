@@ -130,6 +130,21 @@ struct BrambleGpioState {
     qemu_irq intr;
 };
 
+/* Singleton, set at attach: lets sibling models (bramble_gpspi2's CS routing)
+ * read a driven output level without duplicating GPIO state. */
+static BrambleGpioState *s_bramble_gpio;
+
+/* Current driven level of an output pin (0..48), as the OUT registers hold it.
+ * Returns 0 if the overlay is not attached. Used by bramble_gpspi2 to route
+ * SPI transfers by the radio's manual CS on GPIO8. */
+bool bramble_gpio_out_level(int pin)
+{
+    if (!s_bramble_gpio || pin < 0 || pin > 48) {
+        return false;
+    }
+    return (s_bramble_gpio->out[pin / 32] >> (pin % 32)) & 1;
+}
+
 static const char *bramble_out_name(int pin)
 {
     for (size_t i = 0; i < ARRAY_SIZE(bramble_out_names); i++) {
@@ -319,6 +334,7 @@ void bramble_gpio_attach(MemoryRegion *sys_mem, DeviceState *intc)
     qdev_realize(DEVICE(obj), NULL, &error_fatal);
 
     BrambleGpioState *s = BRAMBLE_GPIO(obj);
+    s_bramble_gpio = s;
     if (intc) {
         s->intr = qdev_get_gpio_in(intc, ETS_GPIO_INTR_SOURCE);
     }
