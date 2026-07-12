@@ -12,13 +12,20 @@
 #   ./run-qemu.sh --fresh    discard flash state (NVS identity) from prior runs
 #
 # Env:
-#   QEMU_XTENSA   path to qemu-system-xtensa (default: first hit in PATH)
+#   QEMU_XTENSA   path to qemu-system-xtensa (default: the from-source build
+#                 at $QEMU_SRC/build/qemu-system-xtensa if present, else
+#                 first hit in PATH; see bootstrap-qemu.sh)
+#   QEMU_SRC      from-source QEMU tree (default: ~/src/qemu-esp)
 #   BUILD_DIR     firmware build dir (default: <repo>/build-qemu)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$REPO_ROOT/build-qemu}"
+QEMU_SRC="${QEMU_SRC:-$HOME/src/qemu-esp}"
+if [[ -z "${QEMU_XTENSA:-}" && -x "$QEMU_SRC/build/qemu-system-xtensa" ]]; then
+    QEMU_XTENSA="$QEMU_SRC/build/qemu-system-xtensa"
+fi
 QEMU_XTENSA="${QEMU_XTENSA:-$(command -v qemu-system-xtensa || true)}"
 
 GDB_ARGS=()

@@ -1,0 +1,36 @@
+diff --git a/hw/xtensa/esp32s3.c b/hw/xtensa/esp32s3.c
+index 4a24a04..a797bc7 100644
+--- a/hw/xtensa/esp32s3.c
++++ b/hw/xtensa/esp32s3.c
+@@ -64,6 +64,7 @@
+ #include "hw/misc/esp32s3_xts_aes.h"
+ #include "hw/misc/esp32s3_pms.h"
+ #include "hw/net/can/esp32s3_twai.h"
++#include "hw/xtensa/bramble_scaffold.h"
+ 
+ #include "cpu_esp32s3.h"
+ 
+@@ -875,6 +876,11 @@ static void esp32s3_machine_init(MachineState *machine)
+     
+     esp32s3_machine_init_sd(ss);
+ 
++    /* Bramble device-model injection scaffold (P2.2-infra). Proves the
++     * clone -> inject -> patch -> build round trip that the P2.2-P2.5
++     * device models (GPIO, GPSPI2, SX1262, SSD1680) will build on. */
++    bramble_scaffold_init();
++
+     /* Need MMU initialized prior to ELF loading,
+      * so that ELF gets loaded into virtual addresses
+      */
+diff --git a/hw/xtensa/meson.build b/hw/xtensa/meson.build
+index c1deccb..3037000 100644
+--- a/hw/xtensa/meson.build
++++ b/hw/xtensa/meson.build
+@@ -12,6 +12,7 @@ xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files(
+   'esp32s3_clk.c',
+   'esp32s3_intc.c',
+   'esp32s3.c',
++  'bramble_scaffold.c',
+ ))
+ 
+ hw_arch += {'xtensa': xtensa_ss}
