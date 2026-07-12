@@ -69,7 +69,17 @@ trap cleanup EXIT INT TERM
 ln -sfn "$UI_DIR/node_modules" "$E2E_DIR/node_modules"
 
 info "installing/verifying chromium (playwright)..."
-( cd "$UI_DIR" && npx playwright install chromium )
+if [ -n "${CI:-}" ]; then
+    # CI runners ship the chromium browser binary but not its system libraries
+    # (libnspr4/libnss3/...), so a plain `install` leaves chrome-headless-shell
+    # unable to load libnspr4.so and every test fails at browserType.launch.
+    # --with-deps also apt-installs those libs; it needs root, which the CI
+    # container has. Skipped locally, where developers already have the libs and
+    # do not want an apt-get side effect.
+    ( cd "$UI_DIR" && npx playwright install --with-deps chromium )
+else
+    ( cd "$UI_DIR" && npx playwright install chromium )
+fi
 
 E2E_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 export E2E_PORT
