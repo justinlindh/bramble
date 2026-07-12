@@ -26,4 +26,17 @@
 void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
                            DeviceState *intc);
 
+/*
+ * Wire the emu-link bridge to the chardev named "emulink" (the gosim supervisor
+ * adds it with `-chardev socket,id=emulink,path=<broker>`), so the SX1262 model
+ * exchanges LoRa frames with the gosim ether and the QEMU pager meshes with the
+ * linux pagers (P2.4b). A no-op if no such chardev exists (standalone
+ * run-qemu.sh boot), so a plain boot is unaffected. Called once from
+ * esp32s3_machine_init. The bridge itself lives in bramble_gpspi2.c because
+ * hw/xtensa/meson.build is saturated by the earlier bramble patches (see that
+ * file's emu-link section comment); it shares the TU with its only client, the
+ * SX1262 slave.
+ */
+void bramble_emulink_attach(void);
+
 #endif

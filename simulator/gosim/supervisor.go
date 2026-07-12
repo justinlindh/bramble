@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -52,12 +54,13 @@ type Supervisor struct {
 // superProc is one supervised instance: its slot, its binary and environment,
 // and the currently running command (guarded so Stop can kill it).
 type superProc struct {
-	sup     *Supervisor
-	slot    *extSlot
-	binary  string
-	nodeDir string
-	env     []string
-	label   string
+	sup      *Supervisor
+	slot     *extSlot
+	nodeType string // "" / "firmware" = linux node; "qemu" = QEMU VM (P2.4b)
+	binary   string
+	nodeDir  string
+	env      []string
+	label    string
 
 	mu      sync.Mutex
 	cmd     *exec.Cmd
@@ -125,12 +128,13 @@ func (s *Supervisor) run() {
 			slot := s.broker.reserveSlot(x, y, nodeLabel, nodeDir)
 
 			p := &superProc{
-				sup:     s,
-				slot:    slot,
-				binary:  g.Binary,
-				nodeDir: nodeDir,
-				label:   nodeLabel,
-				env:     buildNodeEnv(s.broker.Addr(), nodeDir, g.Env),
+				sup:      s,
+				slot:     slot,
+				nodeType: g.Type,
+				binary:   g.Binary,
+				nodeDir:  nodeDir,
+				label:    nodeLabel,
+				env:      buildNodeEnv(s.broker.Addr(), nodeDir, nodeLabel, g.Env),
 			}
 			s.mu.Lock()
 			if s.stopped {
@@ -181,17 +185,38 @@ func (s *Supervisor) Stop() {
 }
 
 // buildNodeEnv assembles the child process environment: the parent environment
-// plus the always-set NODE_DIR and EMU_BROKER, plus any group-specific extras.
-func buildNodeEnv(brokerAddr, nodeDir string, extra map[string]string) []string {
+// plus the always-set NODE_DIR, EMU_BROKER, and BRAMBLE_EMU_NODE, plus any
+// group-specific extras.
+func buildNodeEnv(brokerAddr, nodeDir, nodeLabel string, extra map[string]string) []string {
 	env := append([]string(nil), os.Environ()...)
 	// EMU_BROKER carries a scheme ("unix:/path"), the contract the node's
 	// emu_link client parses (emu_link.h, DESIGN.md section 8). The broker
 	// always listens on a unix socket, so the scheme is always unix.
-	env = append(env, "NODE_DIR="+nodeDir, "EMU_BROKER=unix:"+brokerAddr)
+	//
+	// BRAMBLE_EMU_NODE is the hello id the node reports. A linux node derives
+	// its id from its crypto identity and ignores this; a QEMU node's bridge
+	// (bramble_gpspi2.c) has no in-VM identity to read, so it reports this env
+	// value as its hello node id (broker slot binding is by position, so it
+	// only affects UI / console tagging).
+	env = append(env, "NODE_DIR="+nodeDir, "EMU_BROKER=unix:"+brokerAddr,
+		"BRAMBLE_EMU_NODE="+nodeLabel)
 	for k, v := range extra {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+// envLookup returns the value of key in an environment slice ("KEY=value"
+// entries), or def if absent. Used to read QEMU_* overrides a scenario passed
+// through a group's env map.
+func envLookup(env []string, key, def string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- { // last wins, like the real environ
+		if strings.HasPrefix(env[i], prefix) {
+			return env[i][len(prefix):]
+		}
+	}
+	return def
 }
 
 // supervise runs the process, capturing its stdout as the node console, and
@@ -236,11 +261,16 @@ func (p *superProc) supervise() {
 	}
 }
 
-// runOnce launches the binary once and blocks until it exits, forwarding each
-// stdout line to the node console.
+// runOnce launches the node once and blocks until it exits, forwarding each
+// stdout line to the node console. The command is built per node type: a linux
+// node is the binary run directly; a QEMU node is qemu-system-xtensa driving
+// the pager image with the emu-link chardev wired (buildQemuCmd).
 func (p *superProc) runOnce() {
-	cmd := exec.Command(p.binary)
-	cmd.Env = p.env
+	cmd, err := p.buildCmd()
+	if err != nil {
+		log.Printf("supervisor: %s build command: %v", p.label, err)
+		return
+	}
 	// The child's working directory is left as the launcher's, so a scenario's
 	// relative binary path (e.g. "emulator/node/build/bramble-node") resolves
 	// against where gosim was started; per-node state lives under NODE_DIR, not
@@ -304,6 +334,112 @@ func (p *superProc) runOnce() {
 	p.mu.Lock()
 	p.cmd = nil
 	p.mu.Unlock()
+}
+
+// buildCmd assembles the *exec.Cmd for one launch, dispatching on node type.
+// A linux node is its binary run directly; a QEMU node is qemu-system-xtensa
+// driving the pager image (buildQemuCmd). The environment is set here; the
+// caller wires stdout/stderr.
+func (p *superProc) buildCmd() (*exec.Cmd, error) {
+	var cmd *exec.Cmd
+	if p.nodeType == "qemu" {
+		c, err := p.buildQemuCmd()
+		if err != nil {
+			return nil, err
+		}
+		cmd = c
+	} else {
+		cmd = exec.Command(p.binary)
+	}
+	cmd.Env = p.env
+	return cmd, nil
+}
+
+// buildQemuCmd builds the qemu-system-xtensa invocation for a QEMU pager node:
+// the esp32s3 machine driving a per-node copy of the merged flash + eFuse images
+// (so each VM has its own persistent NVS identity, like a linux node's NODE_DIR),
+// with the emu-link chardev wired so the in-VM bridge (bramble_gpspi2.c) dials
+// the broker. The base images are the ones emulator/qemu/run-qemu.sh assembles
+// (build-qemu/flash_qemu.bin + efuse_qemu.bin); the scenario's "binary" field
+// carries the flash image path and QEMU_EFUSE (or a sibling efuse_qemu.bin) the
+// eFuse image. The guest UART0 rides -nographic onto stdout, so the existing
+// console capture keeps working.
+func (p *superProc) buildQemuCmd() (*exec.Cmd, error) {
+	qemuBin := qemuBinary(p.env)
+	if qemuBin == "" {
+		return nil, fmt.Errorf("qemu-system-xtensa not found (set QEMU_XTENSA)")
+	}
+	flashBase := p.binary
+	if flashBase == "" {
+		return nil, fmt.Errorf("qemu node: empty flash image path (scenario 'binary')")
+	}
+	efuseBase := envLookup(p.env, "QEMU_EFUSE",
+		filepath.Join(filepath.Dir(flashBase), "efuse_qemu.bin"))
+
+	// Per-node image copies: own NVS identity + flash writeback, and a reset
+	// (restart) reuses the same NVS so identity persists, exactly like a linux
+	// node's NODE_DIR. Copy only if missing.
+	flash := filepath.Join(p.nodeDir, "flash.bin")
+	efuse := filepath.Join(p.nodeDir, "efuse.bin")
+	if err := copyFileIfMissing(flashBase, flash); err != nil {
+		return nil, fmt.Errorf("qemu node: flash image %q: %w", flashBase, err)
+	}
+	if err := copyFileIfMissing(efuseBase, efuse); err != nil {
+		return nil, fmt.Errorf("qemu node: efuse image %q: %w", efuseBase, err)
+	}
+
+	broker := p.sup.broker.Addr()
+	args := []string{
+		"-machine", "esp32s3", "-nographic",
+		"-drive", "file=" + flash + ",if=mtd,format=raw",
+		"-drive", "file=" + efuse + ",if=none,format=raw,id=efuse",
+		"-global", "driver=nvram.esp32s3.efuse,property=drive,value=efuse",
+		// emu-link transport: QEMU dials the broker's unix listener as a client
+		// (server=off); reconnect retries if the socket races broker startup.
+		"-chardev", "socket,id=emulink,path=" + broker + ",server=off,reconnect=1",
+	}
+	return exec.Command(qemuBin, args...), nil
+}
+
+// qemuBinary resolves qemu-system-xtensa: an explicit QEMU_XTENSA, else the
+// from-source build under ~/src/qemu-esp (bootstrap-qemu.sh's default), else the
+// PATH. Returns "" if none is found.
+func qemuBinary(env []string) string {
+	if q := envLookup(env, "QEMU_XTENSA", ""); q != "" {
+		return q
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		cand := filepath.Join(home, "src", "qemu-esp", "build", "qemu-system-xtensa")
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			return cand
+		}
+	}
+	if p, err := exec.LookPath("qemu-system-xtensa"); err == nil {
+		return p
+	}
+	return ""
+}
+
+// copyFileIfMissing copies src to dst unless dst already exists (so a restart
+// preserves a QEMU node's NVS). Returns any I/O error.
+func copyFileIfMissing(src, dst string) error {
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // stop marks the instance stopped and kills any running process.
