@@ -58,11 +58,42 @@ void test_ring_keeps_newest_window_at_capacity(void) {
     TEST_ASSERT_EQUAL_STRING(expect, msg_store_get(msg_store_count() - 1)->text);
 }
 
+void test_get_copy_snapshots_message_and_bounds_check(void) {
+    msg_store_init();
+
+    stored_msg_t out;
+    /* Empty store: any index is out of range. */
+    TEST_ASSERT_FALSE(msg_store_get_copy(0, &out));
+    TEST_ASSERT_FALSE(msg_store_get_copy(-1, &out));
+    /* NULL destination is rejected, not dereferenced. */
+    TEST_ASSERT_FALSE(msg_store_get_copy(0, NULL));
+
+    msg_store_add_ex2(0xABCD, MSG_DIR_INCOMING, "hello", 5, -60, 9, 42, MSG_STATUS_NONE, 4);
+
+    TEST_ASSERT_TRUE(msg_store_get_copy(0, &out));
+    TEST_ASSERT_EQUAL_STRING("hello", out.text);
+    TEST_ASSERT_EQUAL_UINT32(0xABCD, out.peer_addr);
+    TEST_ASSERT_EQUAL(4, out.channel_index);
+    TEST_ASSERT_EQUAL_UINT32(42, out.packet_id);
+    TEST_ASSERT_EQUAL(5, out.text_len);
+
+    /* One past the end is rejected. */
+    TEST_ASSERT_FALSE(msg_store_get_copy(msg_store_count(), &out));
+
+    /* The copy is independent: a later add that evicts the slot must not
+     * mutate the caller's snapshot. */
+    for (int i = 0; i < MSG_STORE_MAX + 2; i++) {
+        msg_store_add(0x1, MSG_DIR_INCOMING, "x", 1, 0, 0);
+    }
+    TEST_ASSERT_EQUAL_STRING("hello", out.text);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_msg_store_default_channel_index_is_minus_one);
     RUN_TEST(test_msg_store_add_ex2_persists_channel_index);
     RUN_TEST(test_total_incoming_is_monotonic_and_ignores_outgoing);
     RUN_TEST(test_ring_keeps_newest_window_at_capacity);
+    RUN_TEST(test_get_copy_snapshots_message_and_bounds_check);
     return UNITY_END();
 }

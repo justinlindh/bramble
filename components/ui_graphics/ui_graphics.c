@@ -32,8 +32,9 @@ static void process_new_message_unread(uint32_t arrivals) {
     int start = count - to_process;
 
     for (int i = start; i < count; i++) {
-        const stored_msg_t* msg = msg_store_get(i);
-        chat_unread_mark_for_message(msg);
+        stored_msg_t msg;
+        if (msg_store_get_copy(i, &msg))
+            chat_unread_mark_for_message(&msg);
     }
 }
 
@@ -73,6 +74,14 @@ static void status_refresh_timer_cb(lv_timer_t* timer) {
     }
 }
 
+/* Drive the sleep manager's blocking display power-down on the UI task. The
+ * inactivity esp_timer only raises a flag; the actual SPI work happens here so
+ * it never stalls the esp_timer service task (and the 1 ms lv_tick). */
+static void sleep_process_timer_cb(lv_timer_t* timer) {
+    (void)timer;
+    sleep_manager_process();
+}
+
 static void tab_refresh_timer_cb(lv_timer_t* timer) {
     (void)timer;
     /* Intentionally empty — data screens show a snapshot; user switches
@@ -107,6 +116,7 @@ static void splash_timer_cb(lv_timer_t* timer) {
     /* Create periodic refresh timers */
     lv_timer_create(status_refresh_timer_cb, 2000, NULL); /* Status bar: 2s */
     lv_timer_create(tab_refresh_timer_cb, 5000, NULL);    /* Tab content: 5s */
+    lv_timer_create(sleep_process_timer_cb, 500, NULL);   /* Sleep drive: 0.5s */
 
     /* Initialize sleep manager for automatic display power saving */
     sleep_manager_init();
