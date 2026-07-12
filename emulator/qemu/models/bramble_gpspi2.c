@@ -70,12 +70,18 @@
 #include "hw/qdev-core.h"
 #include "qom/object.h"
 #include "exec/address-spaces.h"
+#include "qemu/cutils.h"
 #include "hw/ssi/ssi.h"
 #include "hw/dma/esp_gdma.h"
 #include "hw/xtensa/bramble_gpspi2.h"
 #include "hw/xtensa/bramble_gpio.h"
 #include "hw/misc/esp32s3_reg.h"
 #include "hw/xtensa/esp32s3_intc.h"
+#include "chardev/char.h"
+#include "chardev/char-fe.h"
+#include "qapi/qmp/qjson.h"
+#include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qobject.h"
 
 /* GPSPI2 register offsets (soc/spi_reg.h, esp32s3: REG_SPI_BASE(2) window).
  * NB: this is the GENERAL-PURPOSE SPI register map, distinct from the flash
@@ -137,6 +143,244 @@
 
 /* Chip-select out lines exposed to attached slaves (CS0..CS1 used on S3). */
 #define GPSPI2_CS_COUNT    2
+
+/* ---- emu-link bridge (P2.4b) --------------------------------------------- */
+/*
+ * The QEMU pager's single emu-link connection to the gosim ether, shared by the
+ * device models (only the SX1262 uses it today). The QEMU node is an emu-link
+ * client exactly like the linux node (components/emu_link/emu_link.c): JSON, one
+ * object per line, over a socket. Here the socket is a QEMU chardev ("emulink")
+ * the gosim supervisor wires with
+ *   -chardev socket,id=emulink,path=<broker.sock>,server=off
+ * so QEMU dials the broker's unix listener the way the linux node dials
+ * EMU_BROKER. The broker is one-hello-per-node, so there is exactly one link.
+ *
+ * On socket open (CHR_EVENT_OPENED) it sends hello{node,version:1,fw,caps};
+ * inbound lines are split on '\n', parsed with QEMU's qjson, and dispatched by
+ * their "t" field to handlers device models register (emulink_on); the SX1262
+ * model calls emulink_send_tx() to key the channel. node id comes from the
+ * BRAMBLE_EMU_NODE env var the supervisor sets per instance (default
+ * "qemu-pager"); the broker binds a node to a reserved SLOT by position, not by
+ * this id, so it only affects UI / console tagging.
+ *
+ * This lives in bramble_gpspi2.c rather than its own translation unit because
+ * hw/xtensa/meson.build is saturated: the P2.2-P2.3b patches already pack it
+ * with three separated single-line add()s whose 3-line context windows leave no
+ * gap for a fourth without breaking a neighbour's idempotent reverse-check
+ * (bootstrap-qemu.sh). Folding the bridge into the already-compiled TU that owns
+ * its only client (the SX1262 slave) sidesteps that entirely; the sole public
+ * entry point, bramble_emulink_attach(), is declared in bramble_gpspi2.h.
+ *
+ * Threading: the chardev receive/event callbacks run on the QEMU main loop with
+ * the BQL held, and the SX1262 SPI transfers that call emulink_send_tx run on
+ * the vCPU thread under the BQL, so the BQL serializes the two and the shared
+ * state needs no extra lock. qemu_chr_fe_write_all is documented thread-safe.
+ */
+
+#define EMULINK_PROTOCOL_VERSION 1
+#define EMULINK_CHARDEV_ID       "emulink"
+#define EMULINK_MAX_HANDLERS     8
+#define EMULINK_MAX_TYPE_LEN     15
+#define EMULINK_MAX_LINE         65536
+
+typedef void (*emulink_handler_t)(QDict *msg, void *ctx);
+
+typedef struct {
+    bool used;
+    char type[EMULINK_MAX_TYPE_LEN + 1];
+    emulink_handler_t fn;
+    void *ctx;
+} EmulinkHandler;
+
+static CharBackend s_emulink_chr;
+static bool s_emulink_have_chr;
+static bool s_emulink_open;
+static GString *s_emulink_rxbuf;
+static EmulinkHandler s_emulink_handlers[EMULINK_MAX_HANDLERS];
+
+/* base64 encode (RFC 4648, padded); decode lives with the SX1262 slave. */
+static const char EMULINK_B64[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void emulink_b64_encode(const uint8_t *in, size_t n, char *out,
+                               size_t out_sz)
+{
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        if (o + 4 >= out_sz) {
+            break;
+        }
+        uint32_t v = (uint32_t)in[i] << 16;
+        if (i + 1 < n) {
+            v |= (uint32_t)in[i + 1] << 8;
+        }
+        if (i + 2 < n) {
+            v |= (uint32_t)in[i + 2];
+        }
+        out[o++] = EMULINK_B64[(v >> 18) & 0x3F];
+        out[o++] = EMULINK_B64[(v >> 12) & 0x3F];
+        out[o++] = (i + 1 < n) ? EMULINK_B64[(v >> 6) & 0x3F] : '=';
+        out[o++] = (i + 2 < n) ? EMULINK_B64[v & 0x3F] : '=';
+    }
+    out[o] = '\0';
+}
+
+static int emulink_write(const char *s, size_t len)
+{
+    if (!s_emulink_have_chr || !s_emulink_open) {
+        return -1;
+    }
+    return qemu_chr_fe_write_all(&s_emulink_chr, (const uint8_t *)s, (int)len);
+}
+
+/* Emit a `tx`: PHY bytes base64-encoded, plus the latched modulation params
+ * (freq MHz, sf, bw Hz, cr, power dBm). No-op if the link is not connected, so
+ * a standalone boot's radio simply never gets txdone and times out. */
+static int emulink_send_tx(const uint8_t *payload, unsigned len, int freq_mhz,
+                           int sf, int bw_hz, int cr, int power)
+{
+    if (!payload || len == 0) {
+        return -1;
+    }
+    char b64[352]; /* 4*ceil(255/3)+1 = 341, rounded up */
+    emulink_b64_encode(payload, len, b64, sizeof(b64));
+    g_autofree char *line = g_strdup_printf(
+        "{\"t\":\"tx\",\"payload\":\"%s\",\"freq\":%d,\"sf\":%d,\"bw\":%d,"
+        "\"cr\":%d,\"power\":%d}\n",
+        b64, freq_mhz, sf, bw_hz, cr, power);
+    return emulink_write(line, strlen(line));
+}
+
+static int emulink_on(const char *type, emulink_handler_t fn, void *ctx)
+{
+    if (!type || !fn || strlen(type) > EMULINK_MAX_TYPE_LEN) {
+        return -1;
+    }
+    int free_slot = -1;
+    for (int i = 0; i < EMULINK_MAX_HANDLERS; i++) {
+        if (s_emulink_handlers[i].used &&
+            strcmp(s_emulink_handlers[i].type, type) == 0) {
+            s_emulink_handlers[i].fn = fn;
+            s_emulink_handlers[i].ctx = ctx;
+            return 0;
+        }
+        if (!s_emulink_handlers[i].used && free_slot < 0) {
+            free_slot = i;
+        }
+    }
+    if (free_slot < 0) {
+        return -1;
+    }
+    s_emulink_handlers[free_slot].used = true;
+    pstrcpy(s_emulink_handlers[free_slot].type,
+            sizeof(s_emulink_handlers[free_slot].type), type);
+    s_emulink_handlers[free_slot].fn = fn;
+    s_emulink_handlers[free_slot].ctx = ctx;
+    return 0;
+}
+
+static void emulink_send_hello(void)
+{
+    const char *node = getenv("BRAMBLE_EMU_NODE");
+    if (!node || !*node) {
+        node = "qemu-pager";
+    }
+    g_autofree char *hello = g_strdup_printf(
+        "{\"t\":\"hello\",\"node\":\"%s\",\"version\":%d,\"fw\":\"qemu\","
+        "\"caps\":\"radio,display,buttons,gps,battery\"}\n",
+        node, EMULINK_PROTOCOL_VERSION);
+    (void)qemu_chr_fe_write_all(&s_emulink_chr, (const uint8_t *)hello,
+                                strlen(hello));
+    fprintf(stderr, "bramble-emulink: hello sent as node=%s\n", node);
+}
+
+static void emulink_dispatch_line(const char *line)
+{
+    if (!*line) {
+        return;
+    }
+    QObject *obj = qobject_from_json(line, NULL);
+    if (!obj) {
+        return; /* malformed: ignore (forward compat) */
+    }
+    QDict *msg = qobject_to(QDict, obj);
+    if (msg) {
+        const char *t = qdict_get_try_str(msg, "t");
+        if (t) {
+            for (int i = 0; i < EMULINK_MAX_HANDLERS; i++) {
+                if (s_emulink_handlers[i].used &&
+                    strcmp(s_emulink_handlers[i].type, t) == 0) {
+                    s_emulink_handlers[i].fn(msg, s_emulink_handlers[i].ctx);
+                    break;
+                }
+            }
+        }
+    }
+    qobject_unref(obj);
+}
+
+static int emulink_can_receive(void *opaque)
+{
+    (void)opaque;
+    return EMULINK_MAX_LINE;
+}
+
+static void emulink_receive(void *opaque, const uint8_t *buf, int size)
+{
+    (void)opaque;
+    for (int i = 0; i < size; i++) {
+        char c = (char)buf[i];
+        if (c == '\n') {
+            emulink_dispatch_line(s_emulink_rxbuf->str);
+            g_string_truncate(s_emulink_rxbuf, 0);
+        } else {
+            if (s_emulink_rxbuf->len >= EMULINK_MAX_LINE) {
+                g_string_truncate(s_emulink_rxbuf, 0); /* oversized: resync */
+            }
+            g_string_append_c(s_emulink_rxbuf, c);
+        }
+    }
+}
+
+static void emulink_event(void *opaque, QEMUChrEvent event)
+{
+    (void)opaque;
+    switch (event) {
+    case CHR_EVENT_OPENED:
+        s_emulink_open = true;
+        g_string_truncate(s_emulink_rxbuf, 0);
+        emulink_send_hello();
+        break;
+    case CHR_EVENT_CLOSED:
+        s_emulink_open = false;
+        break;
+    default:
+        break;
+    }
+}
+
+void bramble_emulink_attach(void)
+{
+    Chardev *chr = qemu_chr_find(EMULINK_CHARDEV_ID);
+    if (!chr) {
+        fprintf(stderr, "bramble-emulink: no '%s' chardev; ether bridge idle\n",
+                EMULINK_CHARDEV_ID);
+        return;
+    }
+    if (!qemu_chr_fe_init(&s_emulink_chr, chr, &error_abort)) {
+        fprintf(stderr, "bramble-emulink: chardev init failed\n");
+        return;
+    }
+    s_emulink_have_chr = true;
+    s_emulink_rxbuf = g_string_new(NULL);
+    /* set_open=true replays a CHR_EVENT_OPENED if the socket connected during
+     * option parse (server=off dials immediately), so hello is not missed. */
+    qemu_chr_fe_set_handlers(&s_emulink_chr, emulink_can_receive,
+                             emulink_receive, emulink_event, NULL, NULL, NULL,
+                             true);
+    fprintf(stderr, "bramble-emulink: bridge attached to '%s' chardev\n",
+            EMULINK_CHARDEV_ID);
+}
 
 /* ---- stub SSI slave ------------------------------------------------------ */
 
@@ -226,6 +470,20 @@ static const TypeInfo bramble_spi_stub_info = {
 #define SX1262_CMD_GET_IRQ_STATUS   0x12
 #define SX1262_CMD_GET_RX_BUFF_STATUS 0x13
 #define SX1262_CMD_GET_PKT_STATUS   0x14
+#define SX1262_CMD_CLR_IRQ_STATUS   0x02
+#define SX1262_CMD_SET_RF_FREQ      0x86
+#define SX1262_CMD_SET_MOD_PARAMS   0x8B
+#define SX1262_CMD_SET_PKT_PARAMS   0x8C
+#define SX1262_CMD_SET_TX_PARAMS    0x8E
+
+/* IRQ-status bits the radio driver reads via GetIrqStatus (mirror sx1262.h). */
+#define SX1262_IRQ_TX_DONE          (1u << 0)
+#define SX1262_IRQ_RX_DONE          (1u << 1)
+
+/* DIO1 = GPIO14 (main/boards/bramble_pager.h): the radio driver installs a
+ * posedge ISR here; the SX1262 model raises it on TxDone/RxDone via the GPIO
+ * overlay's input accessor (P2.4b). */
+#define SX1262_DIO1_GPIO            14
 
 /* Status byte (datasheet 13.5.1): [6:4]=chip mode, [3:1]=command status. */
 #define SX1262_MODE_STDBY_RC        0x2
@@ -247,14 +505,77 @@ struct BrambleSx1262State {
     uint8_t regs[SX1262_REGFILE_SIZE];
     uint8_t buffer[SX1262_BUFFER_SIZE];
     uint8_t mode;          /* current chip mode (SX1262_MODE_*) */
-    uint16_t irq_status;   /* pending IRQ flags (0 until P2.4b drives RX/TX) */
+    uint16_t irq_status;   /* pending IRQ flags (driven by emu-link txdone/rx) */
+
+    /* PHY params latched from the driver's config commands, emitted with each
+     * `tx` so the broker/UI see the transmit parameters (P2.4b). */
+    int tx_freq_mhz;       /* SetRfFrequency (0x86), decoded to MHz */
+    int tx_sf;             /* SetModulationParams (0x8B) spreading factor */
+    int tx_bw_hz;          /* SetModulationParams bandwidth, Hz */
+    int tx_cr;             /* SetModulationParams coding rate */
+    int tx_power;          /* SetTxParams (0x8E) power, dBm */
+    uint8_t tx_len;        /* SetPacketParams (0x8C) payload length */
+    uint32_t freq_raw;     /* accumulator for the 4-byte SetRfFrequency value */
+
+    /* RX state populated by the emu-link `rx` handler and read back by the
+     * driver via GetRxBufferStatus (0x13) / GetPacketStatus (0x14). */
+    uint8_t rx_len;
+    uint8_t rx_offset;
+    uint8_t rssi_raw;      /* GetPacketStatus byte 0: rssi = -raw/2 */
+    int8_t snr_raw;        /* GetPacketStatus byte 1: snr = raw/4 */
 
     /* Per-transaction cursor, reset on CS assert. */
     uint32_t byte_idx;     /* bytes seen since CS went low (opcode == 0) */
     uint8_t opcode;        /* latched at byte 0 */
     uint16_t reg_addr;     /* running address for Read/WriteRegister */
     uint8_t buf_offset;    /* running offset for Read/WriteBuffer */
+    uint16_t clr_mask;     /* accumulator for the 2-byte ClrIrqStatus value */
 };
+
+/* base64 decode (RFC 4648) for inbound `rx` payloads; hand-rolled like
+ * radio_virt.c's, no external dep. Returns decoded byte count (<= out_sz). */
+static int sx1262_b64_val(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static size_t sx1262_b64_decode(const char *in, uint8_t *out, size_t out_sz)
+{
+    size_t o = 0;
+    int quad[4];
+    int qi = 0;
+    for (const char *p = in; *p; p++) {
+        if (*p == '=') {
+            break;
+        }
+        int v = sx1262_b64_val(*p);
+        if (v < 0) {
+            continue;
+        }
+        quad[qi++] = v;
+        if (qi == 4) {
+            if (o + 3 > out_sz) {
+                return o;
+            }
+            out[o++] = (uint8_t)((quad[0] << 2) | (quad[1] >> 4));
+            out[o++] = (uint8_t)(((quad[1] & 0xF) << 4) | (quad[2] >> 2));
+            out[o++] = (uint8_t)(((quad[2] & 0x3) << 6) | quad[3]);
+            qi = 0;
+        }
+    }
+    if (qi >= 2 && o < out_sz) {
+        out[o++] = (uint8_t)((quad[0] << 2) | (quad[1] >> 4));
+    }
+    if (qi >= 3 && o < out_sz) {
+        out[o++] = (uint8_t)(((quad[1] & 0xF) << 4) | (quad[2] >> 2));
+    }
+    return o;
+}
 
 static uint8_t bramble_sx1262_status(BrambleSx1262State *s)
 {
@@ -273,6 +594,53 @@ static int bramble_sx1262_set_cs(SSIPeripheral *dev, bool level)
     return 0;
 }
 
+/* Broker `txdone`{toa_ms}: the airtime the broker priced has elapsed on the sim
+ * clock. Latch TX_DONE and raise DIO1 so the driver's posedge ISR wakes the
+ * radio task, which reads GetIrqStatus (TX_DONE) and unblocks radio_transmit_raw
+ * (radio_esp.c). Runs on the QEMU main loop under the BQL. */
+static void bramble_sx1262_on_txdone(QDict *msg, void *ctx)
+{
+    (void)msg;
+    BrambleSx1262State *s = ctx;
+    s->irq_status |= SX1262_IRQ_TX_DONE;
+    bramble_gpio_set_input(SX1262_DIO1_GPIO, true);
+}
+
+/* Broker `rx`{payload,rssi,snr,freq}: a frame survived the ether's
+ * collision/capture model. Stage it into the RX buffer, latch RX_DONE, record
+ * the packet-status metadata, and raise DIO1. The driver's ISR then reads
+ * GetIrqStatus (RX_DONE), GetRxBufferStatus (len/offset), ReadBuffer, and
+ * GetPacketStatus (rssi/snr), exactly like the real chip. */
+static void bramble_sx1262_on_rx(QDict *msg, void *ctx)
+{
+    BrambleSx1262State *s = ctx;
+    const char *payload = qdict_get_try_str(msg, "payload");
+    if (!payload) {
+        return;
+    }
+    size_t n = sx1262_b64_decode(payload, s->buffer, SX1262_BUFFER_SIZE);
+    if (n == 0 || n > 255) {
+        return; /* radio frames are never empty and cap at 255 bytes */
+    }
+    s->rx_len = (uint8_t)n;
+    s->rx_offset = 0;
+
+    int rssi = (int)qdict_get_try_int(msg, "rssi", -100);
+    int snr = (int)qdict_get_try_int(msg, "snr", 0);
+    /* GetPacketStatus readback encoding (sx1262.c): rssi = -raw/2, snr = raw/4. */
+    int rssi_raw = -2 * rssi;
+    if (rssi_raw < 0) rssi_raw = 0;
+    if (rssi_raw > 255) rssi_raw = 255;
+    int snr_raw = 4 * snr;
+    if (snr_raw < -128) snr_raw = -128;
+    if (snr_raw > 127) snr_raw = 127;
+    s->rssi_raw = (uint8_t)rssi_raw;
+    s->snr_raw = (int8_t)snr_raw;
+
+    s->irq_status |= SX1262_IRQ_RX_DONE;
+    bramble_gpio_set_input(SX1262_DIO1_GPIO, true);
+}
+
 static uint32_t bramble_sx1262_transfer(SSIPeripheral *dev, uint32_t val)
 {
     BrambleSx1262State *s = BRAMBLE_SX1262(dev);
@@ -287,7 +655,20 @@ static uint32_t bramble_sx1262_transfer(SSIPeripheral *dev, uint32_t val)
         s->buf_offset = 0;
         switch (in) { /* mode-changing commands take effect for status. */
         case SX1262_CMD_SET_FS:  s->mode = SX1262_MODE_FS; break;
-        case SX1262_CMD_SET_TX:  s->mode = SX1262_MODE_TX; break;
+        case SX1262_CMD_SET_TX:
+            s->mode = SX1262_MODE_TX;
+            /* The driver has already written the frame (WriteBuffer @0) and
+             * latched the length/PHY params in the preceding transactions;
+             * SetTx is the "key the channel" trigger. Emit it onto the ether.
+             * The broker prices airtime and replies `txdone`, which raises
+             * DIO1 (bramble_sx1262_on_txdone). If no broker is wired the send
+             * no-ops and radio_transmit_raw falls through to its timeout. */
+            if (s->tx_len > 0) {
+                emulink_send_tx(s->buffer, s->tx_len, s->tx_freq_mhz,
+                                        s->tx_sf, s->tx_bw_hz, s->tx_cr,
+                                        s->tx_power);
+            }
+            break;
         case SX1262_CMD_SET_RX:
         case SX1262_CMD_SET_CAD: s->mode = SX1262_MODE_RX; break;
         case SX1262_CMD_SET_SLEEP:
@@ -343,17 +724,77 @@ static uint32_t bramble_sx1262_transfer(SSIPeripheral *dev, uint32_t val)
             out = s->irq_status & 0xff;
         }
         break;
-    case SX1262_CMD_GET_STATUS:
+    case SX1262_CMD_CLR_IRQ_STATUS:
+        /* [maskH][maskL]: clear the masked IRQ bits and, once the driver has
+         * acknowledged, drop DIO1 so the next TxDone/RxDone is a fresh edge. */
+        if (idx == 1) {
+            s->clr_mask = (uint16_t)in << 8;
+        } else if (idx == 2) {
+            s->clr_mask |= in;
+            s->irq_status &= ~s->clr_mask;
+            bramble_gpio_set_input(SX1262_DIO1_GPIO, false);
+        }
+        break;
     case SX1262_CMD_GET_RX_BUFF_STATUS:
+        /* status, then payload length, then rx start offset. */
+        if (idx == 2) {
+            out = s->rx_len;
+        } else if (idx == 3) {
+            out = s->rx_offset;
+        }
+        break;
     case SX1262_CMD_GET_PKT_STATUS:
-        /* Byte 1 already returns status; later data bytes read 0 (no packet
-         * pending until P2.4b drives RX). */
-        if (idx >= 2) {
-            out = 0x00;
+        /* status, then rssi_raw, snr_raw, signal_rssi. */
+        if (idx == 2) {
+            out = s->rssi_raw;
+        } else if (idx == 3) {
+            out = (uint8_t)s->snr_raw;
+        } else if (idx >= 4) {
+            out = s->rssi_raw;
+        }
+        break;
+    case SX1262_CMD_GET_STATUS:
+        /* Byte 1 already returned status; later bytes read 0. */
+        break;
+    case SX1262_CMD_SET_RF_FREQ:
+        /* 4 big-endian bytes of freq_raw; decode to MHz on the last one.
+         * freq_hz = freq_raw * 32e6 / 2^25. */
+        if (idx == 1) {
+            s->freq_raw = (uint32_t)in << 24;
+        } else if (idx == 2) {
+            s->freq_raw |= (uint32_t)in << 16;
+        } else if (idx == 3) {
+            s->freq_raw |= (uint32_t)in << 8;
+        } else if (idx == 4) {
+            s->freq_raw |= in;
+            s->tx_freq_mhz =
+                (int)(((double)s->freq_raw * 32.0 / 33554432.0) + 0.5);
+        }
+        break;
+    case SX1262_CMD_SET_MOD_PARAMS:
+        /* [sf][bw_param][cr][ldro]. */
+        if (idx == 1) {
+            s->tx_sf = in;
+        } else if (idx == 2) {
+            s->tx_bw_hz = (in == 0x05) ? 250000 : (in == 0x06) ? 500000 : 125000;
+        } else if (idx == 3) {
+            s->tx_cr = in;
+        }
+        break;
+    case SX1262_CMD_SET_PKT_PARAMS:
+        /* [preH][preL][hdr][payload_len][crc][iq]: latch the TX length. */
+        if (idx == 4) {
+            s->tx_len = in;
+        }
+        break;
+    case SX1262_CMD_SET_TX_PARAMS:
+        /* [power][ramp_time]. */
+        if (idx == 1) {
+            s->tx_power = (int8_t)in;
         }
         break;
     default:
-        /* All Set/config commands: accept the parameter bytes, no readback. */
+        /* All other Set/config commands: accept the parameter bytes. */
         break;
     }
     return out;
@@ -366,6 +807,21 @@ static void bramble_sx1262_realize(SSIPeripheral *dev, Error **errp)
     s->mode = SX1262_MODE_STDBY_RC;
     s->irq_status = 0;
     s->byte_idx = 0;
+
+    /* Sensible PHY defaults in case SetTx precedes a full config (it never does
+     * on the real driver, which configures freq/mod/packet params first). */
+    s->tx_freq_mhz = 915;
+    s->tx_sf = 7;
+    s->tx_bw_hz = 125000;
+    s->tx_cr = 1;
+    s->tx_power = 22;
+
+    /* Register for the broker's over-the-air events. The handler table is
+     * static and independent of chardev attach order (bramble_emulink.c), so
+     * registering here at realize is safe even though the chardev is wired
+     * later at machine init. */
+    emulink_on("txdone", bramble_sx1262_on_txdone, s);
+    emulink_on("rx", bramble_sx1262_on_rx, s);
 }
 
 static void bramble_sx1262_class_init(ObjectClass *klass, void *data)

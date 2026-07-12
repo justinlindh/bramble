@@ -29,4 +29,13 @@ void bramble_gpio_attach(MemoryRegion *sys_mem, DeviceState *intc);
  */
 bool bramble_gpio_out_level(int pin);
 
+/*
+ * Drive INPUT pin `pin` (0..48) to `level` from a sibling device model,
+ * latching GPIO_STATUS and raising ETS_GPIO_INTR_SOURCE on a rising (posedge)
+ * edge. The SX1262 model (bramble_gpspi2.c) uses this to assert DIO1 (GPIO14)
+ * for TxDone/RxDone; drive it back to 0 after the driver clears the IRQ to
+ * re-arm the next edge. No-op if the overlay is not attached.
+ */
+void bramble_gpio_set_input(int pin, bool level);
+
 #endif

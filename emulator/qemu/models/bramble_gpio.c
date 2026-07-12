@@ -155,6 +155,22 @@ static const char *bramble_out_name(int pin)
     return "gpio";
 }
 
+/* Drive the interrupt-matrix GPIO source to the OR of every latched, pending
+ * GPIO_STATUS bit. A real GPIO interrupt is a LEVEL held while any enabled
+ * status bit is set: the ESP-IDF gpio_isr reads GPIO_STATUS, dispatches to
+ * per-pin handlers, then clears the bits (STATUS_W1TC), which is what releases
+ * the line. Modelling it as a held level (not a one-shot pulse) is what lets
+ * the P2.4a interrupt-matrix level-forward fix actually deliver DIO1 edges: a
+ * pulse raised and lowered inside one callback is sampled by the CPU only after
+ * it has already dropped and is lost, exactly the class of bug that fix
+ * addressed for the SPI2 line. */
+static void bramble_gpio_update_intr(BrambleGpioState *s)
+{
+    if (s->intr) {
+        qemu_set_irq(s->intr, (s->status[0] | s->status[1]) ? 1 : 0);
+    }
+}
+
 /* Apply a new OUT-bank value, logging every level transition. */
 static void bramble_gpio_set_out(BrambleGpioState *s, int bank, uint32_t val)
 {
@@ -205,12 +221,15 @@ static void bramble_gpio_write(void *opaque, hwaddr addr, uint64_t value,
     case R_GPIO_ENABLE1:      s->enable[1] = v; break;
     case R_GPIO_ENABLE1_W1TS: s->enable[1] |= v; break;
     case R_GPIO_ENABLE1_W1TC: s->enable[1] &= ~v; break;
-    case R_GPIO_STATUS:       s->status[0] = v; break;
-    case R_GPIO_STATUS_W1TS:  s->status[0] |= v; break;
-    case R_GPIO_STATUS_W1TC:  s->status[0] &= ~v; break;
-    case R_GPIO_STATUS1:      s->status[1] = v; break;
-    case R_GPIO_STATUS1_W1TS: s->status[1] |= v; break;
-    case R_GPIO_STATUS1_W1TC: s->status[1] &= ~v; break;
+    /* Every GPIO_STATUS mutation re-evaluates the (level) interrupt line, so
+     * the ESP-IDF gpio_isr's clear-on-handle (STATUS_W1TC) releases it and the
+     * next edge re-asserts cleanly. */
+    case R_GPIO_STATUS:       s->status[0] = v; bramble_gpio_update_intr(s); break;
+    case R_GPIO_STATUS_W1TS:  s->status[0] |= v; bramble_gpio_update_intr(s); break;
+    case R_GPIO_STATUS_W1TC:  s->status[0] &= ~v; bramble_gpio_update_intr(s); break;
+    case R_GPIO_STATUS1:      s->status[1] = v; bramble_gpio_update_intr(s); break;
+    case R_GPIO_STATUS1_W1TS: s->status[1] |= v; bramble_gpio_update_intr(s); break;
+    case R_GPIO_STATUS1_W1TC: s->status[1] &= ~v; bramble_gpio_update_intr(s); break;
     default:                  break;
     }
 }
@@ -242,15 +261,45 @@ static void bramble_gpio_inject(BrambleGpioState *s, const BrambleButton *b,
             b->name, pressed ? "press" : "release", b->pin, level);
 
     if (old == 1 && level == 0) {
-        /* Falling edge: what a real button press raises. */
+        /* Falling edge: what a real button press raises. Latch status and hold
+         * the interrupt level until the firmware's gpio_isr clears the bit
+         * (see bramble_gpio_update_intr). */
         s->status[bank] |= (1u << bit);
-        if (s->intr) {
-            qemu_set_irq(s->intr, 1);
-            qemu_set_irq(s->intr, 0);
-        }
+        bramble_gpio_update_intr(s);
         fprintf(stderr,
                 "bramble-gpio: INTR raised gpio=%d (ETS_GPIO_INTR_SOURCE)\n",
                 b->pin);
+    }
+}
+
+/* Drive an input pin (0..48) to `level` from a sibling device model, latching
+ * GPIO_STATUS and asserting the interrupt on a RISING edge (posedge, as the
+ * radio's DIO1 is configured: radio_esp.c installs a GPIO_INTR_POSEDGE ISR on
+ * GPIO14). The SX1262 model calls this to raise TxDone/RxDone: a 0->1 edge
+ * fires the DIO1 ISR, which reads GetIrqStatus over SPI; driving it back to 0
+ * after the driver clears the IRQ re-arms the next edge. Falling edges only
+ * update the served input level (no status latch), so the deassert never
+ * re-triggers. No-op if the overlay is not attached. */
+void bramble_gpio_set_input(int pin, bool level)
+{
+    if (!s_bramble_gpio || pin < 0 || pin > 48) {
+        return;
+    }
+    BrambleGpioState *s = s_bramble_gpio;
+    int bank = pin / 32;
+    int bit = pin % 32;
+    int old = (s->in[bank] >> bit) & 1;
+
+    if (level) {
+        s->in[bank] |= (1u << bit);
+    } else {
+        s->in[bank] &= ~(1u << bit);
+    }
+
+    if (old == 0 && level) {
+        /* Rising edge: latch status and hold the interrupt level. */
+        s->status[bank] |= (1u << bit);
+        bramble_gpio_update_intr(s);
     }
 }
 
