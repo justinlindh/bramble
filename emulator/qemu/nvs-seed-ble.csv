@@ -1,0 +1,29 @@
+# NVS seed for the QEMU pager image: force connectivity mode to BLE.
+#
+# Boot on the QEMU esp32s3 machine cannot bring up the WiFi PHY (RF calibration
+# is unmodeled and wedges phy_init). conn_mode=BLE makes app_main skip wifi_init
+# entirely; the BLE path then runs against the ble_server stub (BT is compiled
+# out of the QEMU variant), so the firmware reaches its live main loop.
+#
+# This is IMAGE PROVISIONING, identical to configuring conn_mode on a real
+# device over RPC. run-qemu.sh writes the generated blob only into the QEMU
+# flash image (build-qemu/flash_qemu.bin) at the nvs partition offset (0x9000,
+# see partitions.csv); it never touches a real board.
+#
+# namespace `bramble`, key `conn_mode`, u8 = 1 (CONN_MODE_BLE; see
+# components/ui/include/ui.h). Generated with esp-idf nvs_partition_gen.py.
+#
+# Second: the shared mesh network key, so the QEMU pager boots PROVISIONED and
+# actually beacons/meshes (an unprovisioned node is inert: no key, no traffic;
+# network_key.c / mesh_task.c mesh_load_network_key). This is the QEMU-image
+# equivalent of the linux node's EMU_NETWORK_KEY env seed (emulator/node/
+# emu_provision.c): the same 32-byte key both sides share so they are on one
+# mesh. namespace `bramble_netkey`, key `key`, 32-byte blob (NVS_NS_NETKEY /
+# NVS_KEY_NETKEY, components/nvs_keys/include/nvs_keys.h). The value MUST match
+# the EMU_NETWORK_KEY the mesh scenario hands its linux pagers
+# (simulator/scenarios/emulator-qemu-mesh.json).
+key,type,encoding,value
+bramble,namespace,,
+conn_mode,data,u8,1
+bramble_netkey,namespace,,
+key,data,hex2bin,0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20

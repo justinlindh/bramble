@@ -1,0 +1,18 @@
+diff --git a/hw/xtensa/esp32s3.c b/hw/xtensa/esp32s3.c
+--- a/hw/xtensa/esp32s3.c
++++ b/hw/xtensa/esp32s3.c
+@@ -859,5 +859,14 @@ static void esp32s3_machine_init(MachineState *machine)
+         memory_region_add_subregion_overlap(sys_mem, DR_REG_AES_XTS_BASE, mr, 0);
+     }
+
++    /* Bramble emu-link bridge (P2.4b). Wires the "emulink" chardev (the gosim
++     * supervisor adds it with -chardev socket,id=emulink,path=<broker>) so the
++     * SX1262 model exchanges LoRa frames with the ether and the QEMU pager
++     * meshes with the linux pagers. A no-op if no such chardev is present
++     * (standalone run-qemu.sh). Declared in bramble_gpspi2.h (already included
++     * by the P2.3 patch); placed here, clear of the other bramble attach sites
++     * (gpspi2/adc below, scaffold/gpio near cpu_reset), for idempotent re-apply. */
++    bramble_emulink_attach();
++
+     /* RGB display realization */
+     {

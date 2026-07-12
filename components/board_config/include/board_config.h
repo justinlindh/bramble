@@ -4,8 +4,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Guard ESP-IDF specific includes for host builds */
+/* Guard ESP-IDF specific includes for host builds. The POSIX/Linux
+ * simulator (IDF linux target) defines ESP_PLATFORM but has no SPI/GPIO
+ * drivers, so it takes the host branch too. */
 #ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #else
@@ -28,6 +33,9 @@ typedef int gpio_num_t;
 #define BOARD_CAP_PERIPHERAL_POWER (1 << 9) /* Needs power pin enabled first */
 #define BOARD_CAP_TOUCH (1 << 10)           /* Capacitive touchscreen */
 #define BOARD_CAP_IO_EXPANDER (1 << 11)     /* PCA9535 or similar */
+#define BOARD_CAP_VIRTUAL (1 << 12)         /* Emulated node, no real hardware backs it */
+#define BOARD_CAP_DISPLAY_EPAPER (1 << 13)  /* SSD1680 e-paper (Bramble Pager) */
+#define BOARD_CAP_ALERTS (1 << 14)          /* buzzer/vibra/LED alert outputs (Bramble Pager) */
 
 /* Radio oscillator type */
 typedef enum {
@@ -62,6 +70,16 @@ typedef struct {
     int dc;
     int backlight;
 } board_display_spi_pins_t;
+
+/* Display pin config (SPI e-paper, SSD1680): shares the radio SPI bus.
+ * rst is RES#, active low. busy is active HIGH (high = do not send
+ * commands), the opposite of UC8151-class panels. */
+typedef struct {
+    int cs;
+    int dc;
+    int rst;
+    int busy;
+} board_display_epd_pins_t;
 
 /* Display pin config (I2C displays) */
 typedef struct {
@@ -137,6 +155,7 @@ typedef struct {
     union {
         board_display_spi_pins_t spi_display;
         board_display_i2c_pins_t i2c_display;
+        board_display_epd_pins_t epd_display;
     };
 
     /* Button */

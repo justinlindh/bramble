@@ -1,0 +1,23 @@
+# Bramble Pager v1 QEMU variant
+# Layer with: sdkconfig.defaults;sdkconfig.defaults.bramble_pager;sdkconfig.defaults.qemu
+#
+# The QEMU esp32s3 machine supports neither Secure Boot nor flash encryption,
+# and has no USB Serial/JTAG device model. This variant relaxes exactly that
+# envelope and nothing else: same code paths, same partition table, same
+# binary layout as the pager image, minus the signature block and with the
+# console on UART0 so QEMU's stdio serial shows boot output.
+
+# --- Signing OFF (base defaults enable Secure Boot V2 app signatures) ---
+# CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT is not set
+# CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME is not set
+# CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT is not set
+# CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES is not set
+
+# --- Flash encryption OFF (not enabled by the pager layers; pinned here so a
+# --- future sdkconfig.defaults.secure layering cannot silently re-enable it) ---
+# CONFIG_SECURE_FLASH_ENC_ENABLED is not set
+
+# --- Console on UART0 (pager uses USB Serial/JTAG, absent in QEMU) ---
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

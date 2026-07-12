@@ -21,6 +21,24 @@ export interface SimNode {
   y: number;
   active: boolean;
   lastSeen: number; // timestamp_us
+  kind?: string;    // "firmware" for emulated pager nodes (device view)
+}
+
+// Per-firmware-node device state feeding the pager device view. Populated from
+// the broker's "device_fb" / "device_ind" / "console" events (see gosim
+// extnode.go handleFB/handleInd/emitConsole).
+export interface DeviceState {
+  node: string;      // hello id (matches SimNode.id)
+  addr?: string;     // "0x........"
+  fb: string | null; // latest base64 1bpp framebuffer
+  fbKind: 'partial' | 'full';
+  fbBusyMs: number;  // engine-reported panel busy window
+  fbSeq: number;     // increments per received frame (drives the Epaper)
+  led: boolean;      // notification LED
+  buzzerHz: number;  // 0 = silent
+  vibra: boolean;    // motor on
+  vibraSeq: number;  // increments on each vibra pulse (drives the shake)
+  console: string[]; // rolling firmware console lines
 }
 
 // Link between two nodes (for future use)
@@ -143,6 +161,16 @@ export interface SimState {
   selectedNodeId: string | null;
   // RSSI/SNR per-link quality tracking
   linkQuality: Map<string, LinkQuality>;
+  // Per-firmware-node device state for the pager device view, keyed by the
+  // node's emu-link hello id (same id the mesh uses).
+  devices: Map<string, DeviceState>;
+  // Firmware hello ids in attach order. The gosim supervisor spawns firmware
+  // instances strictly in declaration order (waitAttach per instance), so the
+  // i-th firmware join is process label "<label>-i"; this lets the UI route the
+  // supervisor's stdout console (tagged with the process label) to the device
+  // keyed by its hello id (tagged on fb/ind). See gosim supervisor.go /
+  // extnode.go.
+  firmwareOrder: string[];
 }
 
 // Actions for the reducer
@@ -171,4 +199,7 @@ export type SimAction =
   | { type: 'TRACK_MESSAGE_DELIVERED'; to: string }
   | { type: 'SELECT_NODE'; nodeId: string | null }
   | { type: 'EXPIRE_BROKEN_LINKS'; now: number }
-  | { type: 'TRACK_LINK_RSSI'; from: string; to: string; rssi: number; snr: number };
+  | { type: 'TRACK_LINK_RSSI'; from: string; to: string; rssi: number; snr: number }
+  | { type: 'DEVICE_FB'; node: string; addr?: string; kind: 'partial' | 'full'; fb: string; busyMs: number }
+  | { type: 'DEVICE_IND'; node: string; addr?: string; led: boolean; buzzerHz: number; vibra: boolean }
+  | { type: 'DEVICE_CONSOLE'; node: string; line: string };

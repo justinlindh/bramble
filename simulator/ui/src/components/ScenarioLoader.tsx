@@ -107,6 +107,7 @@ export function ScenarioLoader({ onLoad }: ScenarioLoaderProps) {
       />
 
       <select
+        data-testid="scenario-select"
         value={selected}
         onChange={e => setSelected(e.target.value)}
         style={{
@@ -120,6 +121,7 @@ export function ScenarioLoader({ onLoad }: ScenarioLoaderProps) {
       </select>
 
       <button
+        data-testid="scenario-load-btn"
         onClick={handleLoad}
         disabled={loading || !selected}
         style={{

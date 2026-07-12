@@ -1,0 +1,221 @@
+/*
+ * Emulator scripted send + reboot for the IDF linux target.
+ *
+ * A headless scenario needs a node to originate a message on cue, but the
+ * emu-link protocol has no compose/send RPC and driving the button UI to type a
+ * message char-by-char is neither deterministic nor practical for CI. This is
+ * the emulator's programmatic stand-in for a compose-and-send: after a delay it
+ * calls the SAME public mesh send API the compose UI, CLI, and RPC all call
+ * (mesh_send_broadcast / mesh_send_message), so the real encrypt / mesh / tx
+ * path is exercised end to end; only the trigger is scripted.
+ *
+ * Driven entirely by environment (a scenario sets these per node via the
+ * firmware-node "env" map):
+ *   EMU_AUTO_SEND            phase-1 message text; unset/blank => never sends
+ *   EMU_AUTO_SEND_TO         DM target for BOTH phases:
+ *                              "neighbor" => the first learned neighbor's addr
+ *                              a hex addr => that node
+ *                              unset      => channel broadcast
+ *   EMU_AUTO_SEND_DELAY_MS   delay before phase 1 (default 12000). Must clear
+ *                            UI_MESSAGE_IDLE_THRESHOLD_MS (10s) on the receiver
+ *                            so an inbound message auto-opens its Messages
+ *                            screen, which is what a screen assertion sees.
+ *   EMU_AUTO_SEND_REPEAT     phase-1 sends (default 3), for delivery headroom
+ *   EMU_AUTO_SEND_INTERVAL_MS  gap between phase-1 repeats (default 4000)
+ *   EMU_AUTO_SEND2           optional phase-2 message text (distinct string)
+ *   EMU_AUTO_SEND2_DELAY_MS  additional delay after phase 1 before phase 2
+ *   EMU_AUTO_SEND2_REPEAT / EMU_AUTO_SEND2_INTERVAL_MS  phase-2 cadence
+ *
+ * Phase 2 exists for the DM-desync scenario: phase 1 establishes a DM session,
+ * the receiver reboots (losing its half), and phase 2's repeats drive the
+ * post-#138 heal (the first triggers the re-handshake and is lost by design; a
+ * later one decrypts and renders).
+ *
+ * Reboot (EMU_REBOOT_AT_MS): the node exits at that time; the gosim supervisor's
+ * restart-on-exit brings it back with the same NVS identity but cleared RAM
+ * (its DM sessions), which is exactly the one-sided-session precondition.
+ *
+ * Host-only: built only by emulator/node (null_drivers) on the linux target and
+ * started from app_main under a CONFIG_IDF_TARGET_LINUX guard; a real esp32s3
+ * build never compiles or links it.
+ */
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+/* Public mesh API (main/mesh_task.h) plus the emulator neighbor helper, all
+ * forward-declared rather than pulling in the main component's headers, mirroring
+ * how emu_flash_persist_init is wired from main.c; the symbols live in libmain.a
+ * and resolve at the final link. */
+extern int mesh_send_broadcast(const uint8_t *data, size_t len);
+extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
+extern uint32_t emu_mesh_first_neighbor(void);
+
+static const char *TAG = "emu_autosend";
+
+/* Reads an unsigned env var, or def if unset/blank/unparseable. */
+static unsigned env_uint(const char *name, unsigned def) {
+    const char *v = getenv(name);
+    if (!v || !*v)
+        return def;
+    char *end = NULL;
+    unsigned long n = strtoul(v, &end, 10);
+    if (end == v)
+        return def;
+    return (unsigned)n;
+}
+
+/* Resolves the DM destination from EMU_AUTO_SEND_TO: 0 means broadcast. For
+ * "neighbor" it retries briefly so a just-started sender waits for its first
+ * beacon exchange rather than falling back to broadcast. */
+static uint32_t resolve_dest(void) {
+    const char *to = getenv("EMU_AUTO_SEND_TO");
+    if (!to || !*to)
+        return 0; /* broadcast */
+    if (strcmp(to, "neighbor") == 0) {
+        for (int i = 0; i < 40; i++) { /* up to ~20s waiting for a neighbor */
+            uint32_t a = emu_mesh_first_neighbor();
+            if (a != 0)
+                return a;
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        ESP_LOGW(TAG, "no neighbor learned; falling back to broadcast");
+        return 0;
+    }
+    return (uint32_t)strtoul(to, NULL, 16);
+}
+
+/* Sends text once, as a DM to dest or a broadcast when dest is 0. */
+static void send_one(const char *text, size_t len, uint32_t dest, const char *tag, unsigned i,
+                     unsigned n) {
+    if (dest != 0) {
+        mesh_send_message(dest, (const uint8_t *)text, len);
+        ESP_LOGI(TAG, "%s DM to %08X (%u/%u): %s", tag, dest, i + 1, n, text);
+    } else {
+        mesh_send_broadcast((const uint8_t *)text, len);
+        ESP_LOGI(TAG, "%s broadcast (%u/%u): %s", tag, i + 1, n, text);
+    }
+}
+
+/* Runs a burst of `repeat` sends of text spaced interval_ms apart. */
+static void send_burst(const char *text, uint32_t dest, unsigned repeat, unsigned interval_ms,
+                       const char *tag) {
+    if (!text || !*text || repeat == 0)
+        return;
+    size_t len = strlen(text);
+    for (unsigned i = 0; i < repeat; i++) {
+        send_one(text, len, dest, tag, i, repeat);
+        if (i + 1 < repeat)
+            vTaskDelay(pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+/* Runs as a FreeRTOS task (not a raw pthread): the mesh send API posts to the
+ * mesh task's queue, which is only safe from a real task context under the
+ * IDF-linux FreeRTOS port. */
+static void autosend_task(void *arg) {
+    (void)arg;
+    const char *text1 = getenv("EMU_AUTO_SEND");
+    if (!text1 || !*text1) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    unsigned delay1 = env_uint("EMU_AUTO_SEND_DELAY_MS", 12000);
+    unsigned repeat1 = env_uint("EMU_AUTO_SEND_REPEAT", 3);
+    unsigned interval1 = env_uint("EMU_AUTO_SEND_INTERVAL_MS", 4000);
+
+    vTaskDelay(pdMS_TO_TICKS(delay1));
+    uint32_t dest = resolve_dest(); /* may block briefly awaiting a neighbor */
+    send_burst(text1, dest, repeat1, interval1, "auto-sent");
+
+    const char *text2 = getenv("EMU_AUTO_SEND2");
+    if (text2 && *text2) {
+        unsigned delay2 = env_uint("EMU_AUTO_SEND2_DELAY_MS", 16000);
+        unsigned repeat2 = env_uint("EMU_AUTO_SEND2_REPEAT", 4);
+        unsigned interval2 = env_uint("EMU_AUTO_SEND2_INTERVAL_MS", 4000);
+        vTaskDelay(pdMS_TO_TICKS(delay2));
+        /* Re-resolve: after a peer reboot its address is unchanged, but this also
+         * recovers if the neighbor was only learned during phase 1. */
+        if (getenv("EMU_AUTO_SEND_TO"))
+            dest = resolve_dest();
+        send_burst(text2, dest, repeat2, interval2, "auto-sent2");
+    }
+
+    vTaskDelete(NULL);
+}
+
+/* Path of the one-shot reboot marker in NODE_DIR, or "" if NODE_DIR is unset.
+ * Its presence means this node already did its scheduled reboot, so the timer is
+ * a no-op on the restarted process (otherwise the node would reboot every boot). */
+static void reboot_marker_path(char *out, size_t out_len) {
+    const char *dir = getenv("NODE_DIR");
+    if (!dir || !*dir) {
+        out[0] = '\0';
+        return;
+    }
+    int w = snprintf(out, out_len, "%s/emu_rebooted", dir);
+    if (w < 0 || (size_t)w >= out_len)
+        out[0] = '\0';
+}
+
+/* Exits the process ONCE at EMU_REBOOT_AT_MS so the supervisor restarts the node
+ * (a reboot: same identity, cleared RAM). The NODE_DIR marker makes it one-shot
+ * so the restarted node stays up. */
+static void reboot_task(void *arg) {
+    (void)arg;
+    unsigned at_ms = env_uint("EMU_REBOOT_AT_MS", 0);
+    if (at_ms == 0) {
+        vTaskDelete(NULL);
+        return;
+    }
+    char marker[PATH_MAX];
+    reboot_marker_path(marker, sizeof(marker));
+    struct stat st;
+    if (marker[0] && stat(marker, &st) == 0) {
+        ESP_LOGI(TAG, "reboot already done (marker present); not rebooting again");
+        vTaskDelete(NULL);
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(at_ms));
+    if (marker[0]) {
+        FILE *f = fopen(marker, "w");
+        if (f)
+            fclose(f);
+    }
+    ESP_LOGI(TAG, "EMU_REBOOT_AT_MS reached; exiting for supervisor restart");
+    exit(0);
+}
+
+/* Starts the scripted-send task if EMU_AUTO_SEND is set, and the reboot timer if
+ * EMU_REBOOT_AT_MS is set. Returns 0 if either was started, -1 if neither. */
+int emu_node_start_autosend(void) {
+    int started = -1;
+    if (getenv("EMU_AUTO_SEND") && *getenv("EMU_AUTO_SEND")) {
+        /* 8 KB stack: the send path runs crypto (channel/DM encrypt + MAC) like
+         * the DM handshake worker, bumped to the same for its stack (PR #133). */
+        if (xTaskCreate(autosend_task, "emu_autosend", 8192, NULL, 5, NULL) == pdPASS) {
+            ESP_LOGI(TAG, "auto-send armed");
+            started = 0;
+        } else {
+            ESP_LOGW(TAG, "could not start auto-send task");
+        }
+    }
+    if (getenv("EMU_REBOOT_AT_MS") && *getenv("EMU_REBOOT_AT_MS")) {
+        if (xTaskCreate(reboot_task, "emu_reboot", 2048, NULL, 5, NULL) == pdPASS) {
+            ESP_LOGI(TAG, "reboot timer armed");
+            started = 0;
+        } else {
+            ESP_LOGW(TAG, "could not start reboot task");
+        }
+    }
+    return started;
+}

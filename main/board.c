@@ -1,6 +1,8 @@
 #include "board_config.h"
 
-#ifdef ESP_PLATFORM
+/* The POSIX/Linux simulator has no SPI/GPIO drivers: rails/bus init below
+ * compiles out there just like on the plain host build. */
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -15,6 +17,8 @@
 #include "boards/heltec_v4.h"
 #elif defined(CONFIG_BRAMBLE_BOARD_PAGER)
 #include "boards/bramble_pager.h"
+#elif defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_PAGER)
+#include "boards/virtual_pager.h"
 #elif defined(CONFIG_BRAMBLE_BOARD_HELTEC_V3) || !defined(CONFIG_BRAMBLE_BOARD_CUSTOM)
 #include "boards/heltec_v3.h"
 #endif
@@ -22,8 +26,10 @@
 #ifdef ESP_PLATFORM
 #include "freertos/semphr.h"
 
+#ifndef CONFIG_IDF_TARGET_LINUX
 static const char* TAG = "board";
 static bool s_initialized = false;
+#endif
 
 /* Shared SPI mutex — created for boards with BOARD_CAP_SHARED_SPI */
 SemaphoreHandle_t g_spi_mutex = NULL;
@@ -36,13 +42,15 @@ const bramble_board_config_t* board_get_config(void) {
     return &board_heltec_v4;
 #elif defined(CONFIG_BRAMBLE_BOARD_PAGER)
     return &board_bramble_pager;
+#elif defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_PAGER)
+    return &board_virtual_pager;
 #else
     return &board_heltec_v3;
 #endif
 }
 
 int board_init(void) {
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
     const bramble_board_config_t* cfg = board_get_config();
     ESP_LOGI(TAG, "Board: %s", cfg->name);
 
@@ -73,6 +81,8 @@ int board_init(void) {
          * On shared SPI buses, floating CS pins cause peripherals to
          * receive each other's traffic — corrupting display GRAM, etc.
          * (Learned from Bramble's earlyInitVariant pattern.) */
+        /* .cs sits at offset 0 in every display-pin union variant, so
+         * spi_display.cs also reads the e-paper CS on epd_display boards. */
         const int cs_pins[] = {
             cfg->radio.cs,
             cfg->spi_display.cs,

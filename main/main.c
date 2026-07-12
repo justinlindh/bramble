@@ -15,7 +15,9 @@
 #include "ui.h"
 #include "crypto.h"
 #include "crypto_entropy.h"
+#ifndef CONFIG_IDF_TARGET_LINUX
 #include "bootloader_random.h"
+#endif
 #include "secure_nvs.h"
 #include "esp_partition.h"
 #include "identity.h"
@@ -27,10 +29,17 @@
 #include "ws_server.h"
 #include "msg_store.h"
 #include "esp_spiffs.h"
+/* mdns is excluded on the POSIX/Linux simulator (see idf_component.yml);
+ * it is only reachable from the WiFi-connected path, which the simulator's
+ * wifi_manager stub never takes. */
+#ifndef CONFIG_IDF_TARGET_LINUX
 #include "mdns.h"
+#endif
 #include "ble_server.h"
 #include "esp_system.h"
 #include "battery.h"
+#include "alerts.h"
+#include "indicators.h"
 #include "board_config.h"
 #include "keyboard.h"
 #include "trackball.h"
@@ -38,6 +47,18 @@
 
 #include "gps.h"
 #include "cJSON.h"
+
+#ifdef CONFIG_IDF_TARGET_LINUX
+/* Emulator (IDF linux target) only: the emu-link broker client and the
+ * per-node NVS-flash persistence hook. Both are host-only; the device build
+ * compiles neither this include nor the calls gated on it below. */
+#include "emu_link.h"
+/* Provided by the emulator node's null_drivers component (emu_flash_persist.c). */
+void emu_node_flash_persist_init(void);
+/* Scripted-send hook (emu_autosend.c): originates a message on cue in a
+ * scenario. No-op unless EMU_AUTO_SEND is set. */
+int emu_node_start_autosend(void);
+#endif
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
@@ -209,6 +230,30 @@ void conn_mode_set(conn_mode_t mode) {
     }
 }
 
+/* ── GPS enable (NVS-persisted) ─────────────────────────────────────── */
+
+/* Persisted GPS power preference. Default ON so a fresh GPS board behaves as
+ * before; the Settings toggle flips it and gps_set_enabled() applies it live. */
+static bool gps_enabled_get(void) {
+    uint8_t en = 1; /* default: ON */
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, NVS_KEY_GPS_EN, &en);
+        nvs_close(nvs);
+    }
+    return en != 0;
+}
+
+static void gps_enabled_set(bool enabled) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, NVS_KEY_GPS_EN, enabled ? 1 : 0);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "GPS enable saved: %d", enabled ? 1 : 0);
+    }
+}
+
 /* ── Splash screen ──────────────────────────────────────────────────── */
 
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -280,7 +325,8 @@ static routing_table_t s_render_routes;
 static void render_unread_badge(const ui_state_t* ui, int right_x) {
     if (ui->unread_count <= 0 || ui->current_screen == SCREEN_MESSAGES)
         return;
-    char b[8];
+    /* Sized for a full int, so -Wformat-truncation holds on every target. */
+    char b[16];
     if (ui->unread_count > 9)
         snprintf(b, sizeof(b), "*9+");
     else
@@ -584,6 +630,19 @@ static void render_screen(ui_state_t* ui) {
                     display_draw_text(2, y, ml);
                     y += LINE_H;
                 }
+            } else if (ui->settings_item_cursor == UI_SETTINGS_ITEM_GPS) {
+                display_draw_text(2, y, "GPS:");
+                y += LINE_H + 4;
+                static const char* gps_names[] = {"Off", "On"};
+                bool cur_gps = gps_enabled_get();
+                for (int i = 0; i < 2; i++) {
+                    char ml[32];
+                    const char* arrow = (i == ui->settings_cursor) ? ">" : " ";
+                    const char* mark = (i == (cur_gps ? 1 : 0)) ? " *" : "";
+                    snprintf(ml, sizeof(ml), "%s %s%s", arrow, gps_names[i], mark);
+                    display_draw_text(2, y, ml);
+                    y += LINE_H;
+                }
             } else {
                 /* OLED rotation */
                 display_draw_text(2, y, "OLED Rotation:");
@@ -635,6 +694,13 @@ static void render_screen(ui_state_t* ui) {
                 const char* sel =
                     (ui->settings_item_cursor == UI_SETTINGS_ITEM_LOCATION) ? ">" : " ";
                 snprintf(line, sizeof(line), "%sLocation: %s", sel, loc_names[cur_loc]);
+                display_draw_text(2, y, line);
+                y += LINE_H;
+            }
+            /* Row 3: GPS power (only on GPS boards) */
+            if (ui->gps_available) {
+                const char* sel = (ui->settings_item_cursor == UI_SETTINGS_ITEM_GPS) ? ">" : " ";
+                snprintf(line, sizeof(line), "%sGPS: %s", sel, gps_enabled_get() ? "On" : "Off");
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
@@ -846,6 +912,14 @@ void app_main(void) {
         return;
     }
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator: bind NVS-backed flash to a per-node file ($NODE_DIR/flash.bin)
+     * so identity survives a process restart (the supervisor's reset button).
+     * Must run before NVS init. A no-op when NODE_DIR is unset (standalone
+     * runs keep the ephemeral-temp-flash behavior). */
+    emu_node_flash_persist_init();
+#endif
+
     /* NVS init */
     ESP_LOGI(TAG, "=== BOOT STAGE: nvs init ===");
     esp_err_t ret;
@@ -926,7 +1000,9 @@ void app_main(void) {
      * generation runs long before that. bootloader_random_enable() turns on the
      * SAR-ADC entropy source; it MUST be disabled again before the first app
      * ADC user (battery_init, ~line 832) which shares the SAR-ADC. */
+#ifndef CONFIG_IDF_TARGET_LINUX
     bootloader_random_enable();
+#endif
     crypto_entropy_set_ready(true);
     ESP_LOGI(TAG, "=== BOOT STAGE: identity_load ===");
     if (identity_load(&g_identity) == 0) {
@@ -947,6 +1023,25 @@ void app_main(void) {
     ESP_LOGI(TAG, "Node address: %08" PRIX32 " (pubkey hash: %08" PRIX32 ")", my_addr,
              g_identity.pubkey_hash);
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator: connect to the gosim broker and send the hello now that the
+     * real node address is known. Ordered before display_init (so the
+     * boot-screen fb reaches the broker) and mesh_task_start (so the radio's
+     * virtual driver has its link up). EMU_BROKER unset stays a clean
+     * no-broker boot (useful standalone). The hello node id matches the
+     * "Node address" log format above. */
+    {
+        char emu_node_id[9];
+        snprintf(emu_node_id, sizeof(emu_node_id), "%08" PRIX32, my_addr);
+        emu_link_set_fw_version(esp_app_get_description()->version);
+        if (emu_link_connect(emu_node_id, "radio,display,buttons,gps,battery") == 0) {
+            ESP_LOGI(TAG, "emu-link: attached to broker as %s", emu_node_id);
+        } else {
+            ESP_LOGI(TAG, "emu-link: no broker (EMU_BROKER unset or unreachable)");
+        }
+    }
+#endif
+
     /* Trust-anchor campaign: load the provisioned fleet anchor pubkey (P0) and
      * this node's own endorsement cert (P1) into module memory. Both are
      * absent by default and neither is ever synthesized; a fresh node stays
@@ -962,8 +1057,14 @@ void app_main(void) {
      * (SAR-ADC is shared) and CLOSE the gate: there is no strong entropy source
      * again until an RF subsystem comes up, so crypto_random() must fail closed
      * in this window rather than emit weak esp_random() bytes. */
+#ifndef CONFIG_IDF_TARGET_LINUX
     bootloader_random_disable();
     crypto_entropy_set_ready(false);
+#else
+    /* POSIX/Linux simulator: esp_random() is getentropy(), a CSPRNG that is
+     * always ready; the weak-entropy window this gate fails closed against
+     * does not exist on the host. */
+#endif
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -1027,9 +1128,20 @@ void app_main(void) {
 #endif
         if (gps_init(on_gps_fix, &g_location_mgr) == 0) {
             ESP_LOGI(TAG, "GPS initialized (waiting for fix...)");
+            /* Honor the persisted GPS-power preference (default ON). If the
+             * user disabled GPS, cut power now; gps_init registered the fix
+             * callback so a later Settings toggle can bring it back. */
+            if (!gps_enabled_get()) {
+                ESP_LOGI(TAG, "GPS disabled by saved setting; cutting power");
+                gps_set_enabled(false);
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
-            show_boot_status("GPS: ok (no fix yet)");
+                show_boot_status("GPS: off (saved)");
 #endif
+            } else {
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+                show_boot_status("GPS: ok (no fix yet)");
+#endif
+            }
         } else {
             ESP_LOGW(TAG, "GPS init failed or not available");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -1048,7 +1160,22 @@ void app_main(void) {
     } else {
         ESP_LOGW(TAG, "SD card init failed or not present");
     }
+#endif
 
+    /* Init alert outputs (buzzer/vibra/LED) for any board that declares the
+     * capability, gated at runtime by BOARD_CAP_ALERTS rather than a single
+     * board macro: indicators.c drives the PAGER's own alert pins (LED=GPIO48,
+     * vibra=GPIO16, buzzer=GPIO15 LEDC), so pinning its init to the T-Deck
+     * board left the pager's indicators uninitialized (s_ready stayed false)
+     * and every alert a silent no-op. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: alerts_init ===");
+    if (board_has_cap(BOARD_CAP_ALERTS)) {
+        indicator_init();
+        alerts_init();
+        ESP_LOGI(TAG, "Alert outputs initialized (buzzer/vibra/LED)");
+    }
+
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
     /* Init audio (T-Deck Plus only) */
     ESP_LOGI(TAG, "=== BOOT STAGE: audio_init ===");
     if (board_has_cap(BOARD_CAP_AUDIO)) {
@@ -1123,6 +1250,7 @@ void app_main(void) {
                 ESP_LOGI(TAG, "=== BOOT STAGE: ws_server_start ===");
                 ws_server_start();
 
+#ifndef CONFIG_IDF_TARGET_LINUX
                 ESP_LOGI(TAG, "=== BOOT STAGE: mdns_init ===");
                 mdns_init();
                 char hostname[32];
@@ -1142,6 +1270,7 @@ void app_main(void) {
                 size_t txt_count = (node_name != NULL && node_name[0] != '\0') ? 2 : 1;
                 mdns_service_add("Bramble", "_bramble", "_tcp", 80, txt, txt_count);
                 ESP_LOGI(TAG, "mDNS: %s._bramble._tcp", hostname);
+#endif /* !CONFIG_IDF_TARGET_LINUX */
             } else {
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
                 show_boot_status("WiFi: AP 192.168.4.1");
@@ -1208,9 +1337,13 @@ void app_main(void) {
         ESP_LOGI(TAG, "BLE disabled by connectivity mode");
     }
 
-    /* Start serial CLI (with JSON-RPC auto-detect) */
+    /* Start serial CLI (with JSON-RPC auto-detect). The POSIX/Linux
+     * simulator has no UART/USB-serial console driver; cli.c is excluded
+     * from that build. */
+#ifndef CONFIG_IDF_TARGET_LINUX
     ESP_LOGI(TAG, "=== BOOT STAGE: cli_init ===");
     cli_init(&g_identity);
+#endif
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
     /* Initialize LVGL graphical UI */
@@ -1265,6 +1398,12 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "=== BOOT STAGE: main loop start ===");
 
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator only: arm the scripted sender (no-op unless EMU_AUTO_SEND is set)
+     * now that the mesh send path is live. */
+    emu_node_start_autosend();
+#endif
+
     while (1) {
         log_heap_diagnostics_periodic();
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -1286,7 +1425,16 @@ void app_main(void) {
 #endif
         if (btn != BTN_NONE) {
             ESP_LOGI(TAG, "Button event: %d", btn);
-            ui_handle_button(&ui, btn, now_ms);
+            /* Classic pager acknowledge: while a message alert is pending
+             * (LED blinking), the FIRST button press only acknowledges it,
+             * consumed, so the user does not accidentally navigate away.
+             * The next press acts normally. */
+            if (board_has_cap(BOARD_CAP_ALERTS) && alerts_unconfirmed()) {
+                alerts_confirm();
+                ESP_LOGI(TAG, "Alert acknowledged (press consumed)");
+            } else {
+                ui_handle_button(&ui, btn, now_ms);
+            }
         }
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
@@ -1332,6 +1480,8 @@ void app_main(void) {
             uint32_t incoming_total = msg_store_total_incoming();
             if (incoming_total != last_incoming_total) {
                 ui_on_message_received(&ui, now_ms);
+                if (board_has_cap(BOARD_CAP_ALERTS))
+                    alerts_message_received(now_ms);
                 last_incoming_total = incoming_total;
             }
             ui_set_message_total(&ui, msg_store_count());
@@ -1382,6 +1532,15 @@ void app_main(void) {
                     ESP_LOGI(TAG, "Location sharing set to %s", loc_names[new_loc]);
                 }
                 ui.screen_dirty = true;
+            } else if (ui.settings_item_cursor == UI_SETTINGS_ITEM_GPS) {
+                bool new_gps = (ui.settings_cursor == 1);
+                bool old_gps = gps_enabled_get();
+                if (new_gps != old_gps) {
+                    gps_enabled_set(new_gps);
+                    gps_set_enabled(new_gps);
+                    ESP_LOGI(TAG, "GPS %s via settings", new_gps ? "enabled" : "disabled");
+                }
+                ui.screen_dirty = true;
             } else {
                 /* OLED rotation */
                 bool new_rot = (ui.settings_cursor == 1);
@@ -1410,10 +1569,22 @@ void app_main(void) {
             ui_mark_drawn(&ui);
         }
 
-        /* Periodic refresh of main screen (uptime counter) */
-        if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % 1000) < 50) {
+        /* Periodic refresh of the main screen's uptime counter. On a fast
+         * display (OLED/LCD) this is a cheap 1 Hz tick. On e-paper it would
+         * flush the panel every second (busy roughly half the time) and force
+         * a ghost-clearing full-refresh flicker every ~10s, wearing the panel
+         * and looking broken, so slow it drastically there: the pager updates
+         * its status screen on real events (messages, neighbors), not a
+         * live-ticking clock. */
+        const uint32_t uptime_refresh_ms = board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
+        if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % uptime_refresh_ms) < 50) {
             render_main_screen(&ui);
         }
+
+        /* Alert outputs: advance the beep/vibra pattern and keep the
+         * notification LED lit while unread messages exist. */
+        if (board_has_cap(BOARD_CAP_ALERTS))
+            alerts_tick(now_ms);
 
         vTaskDelay(pdMS_TO_TICKS(50));
 #endif

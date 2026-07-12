@@ -1,0 +1,7 @@
+services:
+  bramble-emulator:
+    build:
+      context: ..
+      dockerfile: emulator/Dockerfile
+    ports:
+      - "3004:3000"

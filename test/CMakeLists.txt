@@ -888,6 +888,7 @@ add_executable(test_rpc_add_channel_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -904,6 +905,7 @@ add_executable(test_rpc_set_auth_token_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -920,6 +922,7 @@ add_executable(test_rpc_get_config_channel_export
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -936,6 +939,7 @@ add_executable(test_mesh_broadcast_delivery
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1034,6 +1038,7 @@ add_executable(test_rpc_anchor_contract
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1278,6 +1283,7 @@ add_executable(test_rpc_methods_firmware
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1453,6 +1459,7 @@ add_executable(test_host_rpc_methods
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
@@ -1613,4 +1620,113 @@ add_executable(test_probe_reply
 )
 target_include_directories(test_probe_reply PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+)
+
+# emu_link framing/dispatch/send tests (Task 2; whitebox include of emu_link.c)
+add_executable(test_emu_link
+    test_emu_link.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_emu_link PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+)
+target_link_libraries(test_emu_link pthread)
+
+# radio_virt tests (Task 4): the virtual radio over a socketpair fake broker.
+# Whitebox include of emu_link.c + radio_airtime.c + radio_profiles.c +
+# radio_virt.c into one TU (same pattern as test_emu_link.c).
+add_executable(test_radio_virt
+    test_radio_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_radio_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+target_link_libraries(test_radio_virt pthread m)
+# Virtual GPS driver: power-gate (gpsgate on/off) + NMEA-to-fix behavior
+# (Task 6; whitebox include of gps_virt.c + emu_link.c + nmea_parser.c)
+add_executable(test_gps_virt
+    test_gps_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_gps_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+)
+target_link_libraries(test_gps_virt pthread)
+
+# Virtual indicators driver: full-state ind emission per change
+# (Task 6; whitebox include of indicator_virt.c + emu_link.c)
+add_executable(test_indicators
+    test_indicators.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_indicators PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/indicators/include
+)
+target_link_libraries(test_indicators pthread)
+
+# Pager alert pattern: beep/vibra schedule + unread LED
+# (whitebox include of alerts.c against fake indicator_* backends)
+add_executable(test_alerts
+    test_alerts.c
+    unity/unity.c
+)
+target_include_directories(test_alerts PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/indicators/include
+)
+
+# Virtual button driver: btn-edge dispatch + reset-exits-process
+# (Task 6; whitebox include of button_virt.c + emu_link.c)
+add_executable(test_button_virt
+    test_button_virt.c
+    unity/unity.c
+    stubs/cJSON.c
+)
+target_include_directories(test_button_virt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/emu_link/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/button/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ui/include
+)
+target_link_libraries(test_button_virt pthread)
+# SSD1680 e-paper engine tests (Task 5; datasheet-pinned command streams)
+add_executable(test_ssd1680_engine
+    test_ssd1680_engine.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/ssd1680_engine.c
+)
+target_include_directories(test_ssd1680_engine PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+)
+
+# PHY passthrough gating matrix (Task 9, DESIGN.md section 10). Whitebox test
+# of the pure gate state machine (phy_passthrough.c depends only on esp_timer),
+# plus the real rpc_auth policy so the "enable only via an authenticated RPC"
+# clause is asserted against the exact gate the dispatcher enforces, not a mock.
+# ESP_TIMER_CUSTOM_IMPL lets the test drive the clock for the TTL cases.
+add_executable(test_phy_passthrough
+    test_phy_passthrough.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
+)
+target_include_directories(test_phy_passthrough PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+target_compile_definitions(test_phy_passthrough PRIVATE
+    ESP_TIMER_CUSTOM_IMPL
 )

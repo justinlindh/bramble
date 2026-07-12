@@ -23,6 +23,13 @@ func findDir(candidates []string) string {
 }
 
 func main() {
+	// Subcommands come before the server flags. `screen-assert` replays a
+	// headless event log and asserts rendered-screen content (cmd_screen_assert.go),
+	// the OCR-free check the scenario suite gates on.
+	if len(os.Args) > 1 && os.Args[1] == "screen-assert" {
+		os.Exit(runScreenAssert(os.Args[2:]))
+	}
+
 	port := flag.Int("port", 3000, "HTTP server port")
 	uiDir := flag.String("ui", "", "Path to UI static files")
 	scenarioDir := flag.String("scenarios", "", "Path to scenarios")
@@ -30,9 +37,17 @@ func main() {
 	scenario := flag.String("scenario", "", "Scenario file (headless)")
 	noCollisions := flag.Bool("no-collisions", false,
 		"Disable the collision/half-duplex model (ideal parallel channel; for baseline comparisons)")
+	emuListen := flag.String("emu-listen", "",
+		"emu-link unix socket path for external firmware nodes (Task 7); "+
+			"when set, the broker starts for every scenario, not only those declaring firmware nodes")
+	gateway := flag.String("gateway", "",
+		"serial device of a PHY-passthrough gateway node (e.g. /dev/ttyUSB0); bridges the real "+
+			"RF channel into the ether (DESIGN.md section 10). Pair with --emu-listen so the "+
+			"gateway and the virtual nodes share a known broker socket")
 	flag.Parse()
 
 	disableCollisionModel = *noCollisions
+	emuListenPath = *emuListen
 
 	// Auto-detect scenarios dir
 	if *scenarioDir == "" {
@@ -72,6 +87,19 @@ func main() {
 	sim.broadcast = hub.Broadcast
 	sim.Start()
 	defer sim.Stop()
+
+	// PHY passthrough gateway (DESIGN.md section 10): bridge a real serial-
+	// attached node's RF channel into the ether. It dials the broker's emu-link
+	// socket like any other node, so it needs a known path; --emu-listen sets
+	// one, otherwise fall back to this process's default socket.
+	if *gateway != "" {
+		brokerPath := *emuListen
+		if brokerPath == "" {
+			brokerPath = defaultEmuSocketPath()
+		}
+		log.Printf("gateway: bridging %s into the ether at %s", *gateway, brokerPath)
+		go RunGatewaySupervised(*gateway, brokerPath)
+	}
 
 	// Routes
 	mux := http.NewServeMux()

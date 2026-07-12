@@ -1,0 +1,35 @@
+{
+  "name": "qemu-pager-review",
+  "mode": "deterministic",
+  "duration_ms": 600000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [[0, 0]],
+      "label": "linux-pager",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_AUTO_SEND": "PING FROM LINUX",
+        "EMU_AUTO_SEND_DELAY_MS": "45000",
+        "EMU_AUTO_SEND_REPEAT": "60",
+        "EMU_AUTO_SEND_INTERVAL_MS": "8000"
+      }
+    },
+    {
+      "type": "qemu",
+      "binary": "build-qemu/flash_qemu.bin",
+      "count": 1,
+      "positions": [[40, 0]],
+      "label": "qemu-pager"
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}
