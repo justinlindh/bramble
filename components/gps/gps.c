@@ -2,7 +2,9 @@
 #include "nmea_parser.h"
 #include "board_config.h"
 
-#ifdef ESP_PLATFORM
+/* The POSIX/Linux simulator has no UART driver: it compiles the host stub
+ * half below (gps_virt takes over in the emulator later). */
+#if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 #include "esp_log.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
@@ -198,22 +200,16 @@ static void gps_task(void* arg) {
     }
 }
 
-int gps_init(gps_fix_cb_t cb, void* ctx) {
+/* Power the GNSS on, bring up the UART and spawn the parsing task using the
+ * callback stashed by gps_init(). Shared by gps_init() and gps_set_enabled()
+ * so the runtime toggle re-runs the exact same power-on path. */
+static int gps_hw_start(void) {
     const bramble_board_config_t* board = board_get_config();
-
-    /* Check if board has GPS */
-    if (!(board->capabilities & BOARD_CAP_GPS)) {
-        ESP_LOGW(TAG, "Board does not support GPS");
-        return -1;
-    }
 
     if (board->gps.tx < 0 || board->gps.rx < 0) {
         ESP_LOGE(TAG, "GPS pins not configured");
         return -1;
     }
-
-    s_callback = cb;
-    s_callback_ctx = ctx;
 
     /* Heltec V4 GNSS control lines (active-low enable, active-low reset). */
     if (board->short_name && strcmp(board->short_name, "heltec_v4") == 0) {
@@ -292,6 +288,57 @@ int gps_init(gps_fix_cb_t cb, void* ctx) {
     return 0;
 }
 
+/* Drive the pager's GNSS power gate HIGH (P-FET off) without touching the UART
+ * task, for the case where GPS is disabled before it was ever started. */
+static void gps_pager_power_off(void) {
+    const bramble_board_config_t* board = board_get_config();
+    if (board->short_name && strcmp(board->short_name, "bramble_pager") == 0) {
+        const int pin_en = 38;
+        gpio_config_t gnss_ctrl = {
+            .pin_bit_mask = (1ULL << pin_en),
+            .mode = GPIO_MODE_OUTPUT,
+        };
+        gpio_config(&gnss_ctrl);
+        gpio_set_level(pin_en, 1); /* GNSS off */
+    }
+}
+
+int gps_init(gps_fix_cb_t cb, void* ctx) {
+    const bramble_board_config_t* board = board_get_config();
+
+    /* Check if board has GPS */
+    if (!(board->capabilities & BOARD_CAP_GPS)) {
+        ESP_LOGW(TAG, "Board does not support GPS");
+        return -1;
+    }
+
+    s_callback = cb;
+    s_callback_ctx = ctx;
+
+    return gps_hw_start();
+}
+
+int gps_set_enabled(bool enabled) {
+    const bramble_board_config_t* board = board_get_config();
+    if (!(board->capabilities & BOARD_CAP_GPS)) {
+        return -1;
+    }
+
+    if (enabled) {
+        if (s_gps_task) {
+            return 0; /* already running */
+        }
+        return gps_hw_start();
+    }
+
+    if (s_gps_task) {
+        gps_deinit(); /* stops the task and cuts GNSS power */
+    } else {
+        gps_pager_power_off(); /* never started: still ensure the gate is off */
+    }
+    return 0;
+}
+
 bool gps_has_fix(void) { return s_has_fix; }
 
 bool gps_get_position(bramble_position_t* out) {
@@ -337,11 +384,18 @@ void gps_deinit(void) {
     ESP_LOGI(TAG, "GPS deinitialized");
 }
 
-#else
-/* Host build stubs */
+#elif !defined(ESP_PLATFORM)
+/* Plain-gcc test harness (no ESP_PLATFORM, e.g. the RPC contract tests that
+ * link gps.c directly): minimal no-fix stubs. The IDF linux target does NOT
+ * take this branch; there gps_virt.c owns the gps.h implementation (see the
+ * #else below), so gps.c and gps_virt.c never both define these symbols. */
 int gps_init(gps_fix_cb_t cb, void* ctx) {
     (void)cb;
     (void)ctx;
+    return -1;
+}
+int gps_set_enabled(bool enabled) {
+    (void)enabled;
     return -1;
 }
 bool gps_has_fix(void) { return false; }
@@ -357,4 +411,9 @@ void gps_get_stats(gps_stats_t* out) {
     }
 }
 void gps_deinit(void) {}
+#else
+/* IDF linux target (ESP_PLATFORM && CONFIG_IDF_TARGET_LINUX): the virtual
+ * GPS driver in gps_virt.c provides the gps.h implementation. This file
+ * contributes nothing there, so linking gps.c and gps_virt.c together does
+ * not clash. */
 #endif /* ESP_PLATFORM */

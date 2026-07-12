@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
+#include "phy_passthrough.h"
 #include <string.h>
 #include <stdbool.h>
 
@@ -19,6 +20,11 @@ extern int g_stub_send_broadcast_return;
 extern uint32_t g_stub_last_broadcast_id;
 extern bool g_nvs_allow_open;
 extern char g_nvs_node_name[64];
+
+/* phy.tx routes raw frames through the tx gate; the stub captures the call. */
+extern int g_stub_tx_gate_calls;
+extern uint8_t g_stub_tx_gate_last_frame[255];
+extern uint8_t g_stub_tx_gate_last_len;
 
 static bramble_identity_t s_id = {
     .address = 0xAABBCCDD,
@@ -34,6 +40,11 @@ void setUp(void) {
     g_stub_last_broadcast_id = 0xABCDEF01;
     g_nvs_allow_open = true;
     g_nvs_node_name[0] = '\0';
+    /* PHY passthrough is module-global state that persists across tests; force
+     * every case to start from a disabled gate and a clean tx-gate capture. */
+    phy_passthrough_disable();
+    g_stub_tx_gate_calls = 0;
+    g_stub_tx_gate_last_len = 0;
 }
 
 void tearDown(void) {}
@@ -352,6 +363,47 @@ void test_set_node_name_max_length(void) {
     cJSON_Delete(resp);
 }
 
+/* ── phy.tx (the actual RF-TX entrypoint) ─────────────────────────────
+ *
+ * These drive the real handle_phy_tx via the dispatcher and assert the two
+ * security-load-bearing behaviours that the whitebox gate test could not reach
+ * at the handler level: (a) phy.tx is REFUSED and never touches the tx gate when
+ * passthrough is inactive; (b) when active, phy.tx routes the exact frame
+ * through tx_gate_send (not radio_transmit_raw). The stubbed tx_gate_send
+ * captures the call count and last frame.                                   */
+
+void test_phy_tx_refused_when_inactive(void) {
+    /* setUp left passthrough disabled -> inactive. */
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"phy.tx\",\"params\":{\"frame\":\"a1b2c3\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(r, "ok")));
+    /* The refusal must happen BEFORE the radio: tx gate is never reached. */
+    TEST_ASSERT_EQUAL_INT(0, g_stub_tx_gate_calls);
+    cJSON_Delete(resp);
+}
+
+void test_phy_tx_routes_through_tx_gate_when_active(void) {
+    /* Enable passthrough (force so it activates regardless of stubbed identity),
+     * then transmit. The host clock is frozen at 0, so the TTL window is open. */
+    cJSON* en = dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"phy.enable\","
+                                   "\"params\":{\"ttl_s\":600,\"force\":true}}");
+    cJSON_Delete(en);
+
+    cJSON* resp = dispatch_and_parse(
+        "{\"jsonrpc\":\"2.0\",\"id\":32,\"method\":\"phy.tx\",\"params\":{\"frame\":\"a1b2c3\"}}");
+    cJSON* r = get_result(resp);
+    TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")));
+    TEST_ASSERT_EQUAL_INT(3, (int)cJSON_GetObjectItem(r, "len")->valuedouble);
+
+    /* phy.tx reached the tx gate exactly once, with the decoded frame bytes. */
+    TEST_ASSERT_EQUAL_INT(1, g_stub_tx_gate_calls);
+    TEST_ASSERT_EQUAL_UINT8(3, g_stub_tx_gate_last_len);
+    const uint8_t expect[] = {0xa1, 0xb2, 0xc3};
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(expect, g_stub_tx_gate_last_frame, 3);
+    cJSON_Delete(resp);
+}
+
 /* ── main ─────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -389,6 +441,10 @@ int main(void) {
     RUN_TEST(test_set_node_name_missing);
     RUN_TEST(test_set_node_name_valid);
     RUN_TEST(test_set_node_name_max_length);
+
+    /* phy.tx (RF-TX entrypoint gating + tx-gate routing) */
+    RUN_TEST(test_phy_tx_refused_when_inactive);
+    RUN_TEST(test_phy_tx_routes_through_tx_gate_when_active);
 
     return UNITY_END();
 }

@@ -140,3 +140,158 @@
     min-height: 200px;
   }
 }
+
+/* ---- Main view tabs (Mesh / Devices) ---- */
+.app-view-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 16px;
+}
+
+.app-view-tab {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #8b949e;
+  font-size: 11px;
+  font-family: monospace;
+  padding: 5px 14px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.app-view-tab:hover { color: #c9d1d9; }
+
+.app-view-tab-active {
+  color: #e6edf3;
+  background: #1f6feb33;
+  border-color: #1f6feb;
+}
+
+/* ---- Device view ---- */
+.device-view {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  background: #0d1117;
+  padding: 16px;
+}
+
+.device-view-empty {
+  color: #8b949e;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: monospace;
+  font-size: 13px;
+}
+.device-view-empty .muted { color: #6e7681; font-size: 12px; }
+.device-view-empty code { color: #d2a8ff; }
+
+.device-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.device-view-count {
+  color: #8b949e;
+  font-family: monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.device-mute {
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #f0883e;
+  font-size: 12px;
+  font-family: monospace;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.device-mute:not(.muted) { color: #3fb950; border-color: #238636; }
+
+.device-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.pager-device {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pager-shell {
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5));
+  border-radius: 8px;
+}
+
+.epaper-mount { overflow: hidden; }
+.epaper-canvas { image-rendering: pixelated; }
+
+@keyframes pager-shake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  20% { transform: translate(-1.5px, 1px) rotate(-0.4deg); }
+  40% { transform: translate(1.5px, -1px) rotate(0.4deg); }
+  60% { transform: translate(-1px, 1.5px) rotate(-0.3deg); }
+  80% { transform: translate(1px, -1.5px) rotate(0.3deg); }
+}
+.pager-shake { animation: pager-shake 0.12s linear 0s 4; }
+
+.pager-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: monospace;
+  font-size: 11px;
+}
+.pager-name { color: #e6edf3; font-weight: 600; }
+.pager-addr { color: #6e7681; }
+.pager-badge {
+  color: #484f58;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+}
+.pager-badge.on { color: #3fb950; border-color: #238636; background: #23863622; }
+
+.pager-console {
+  margin: 0;
+  width: 100%;
+  max-height: 140px;
+  overflow-y: auto;
+  background: #010409;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 8px;
+  color: #7ee787;
+  font-family: monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Face buttons: no browser focus oval on mouse click; keyboard users still
+ * get a visible focus indicator via :focus-visible. */
+.pager-face-btn:focus {
+  outline: none;
+}
+.pager-face-btn:focus-visible {
+  outline: 2px solid #4a90d9;
+  outline-offset: 2px;
+  border-radius: 50%;
+}

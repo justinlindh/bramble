@@ -1,0 +1,43 @@
+diff --git a/hw/xtensa/esp32s3.c b/hw/xtensa/esp32s3.c
+index 3b24485..62f5817 100644
+--- a/hw/xtensa/esp32s3.c
++++ b/hw/xtensa/esp32s3.c
+@@ -53,6 +53,7 @@
+ #include "hw/nvram/esp32s3_efuse.h"
+ #include "hw/xtensa/esp32s3_clk.h"
+ #include "hw/dma/esp32s3_gdma.h"
++#include "hw/xtensa/bramble_gpspi2.h"
+ #include "hw/misc/esp32s3_sha.h"
+ #include "hw/misc/esp32s3_aes.h"
+ #include "hw/misc/esp32s3_rsa.h"
+@@ -818,6 +819,15 @@ static void esp32s3_machine_init(MachineState *machine)
+         sysbus_connect_irq(SYS_BUS_DEVICE(&ss->aes), 0,
+                            qdev_get_gpio_in(intmatrix_dev, ETS_AES_INTR_SOURCE));
+     }
++    /* Bramble GPSPI2 (SPI2_HOST) controller (P2.3). Overlays the unmodeled
++     * GPSPI2 register window so the pager's e-paper/radio SPI transfers
++     * complete instead of spinning on SPI_USR, unwedging boot past show_splash.
++     * Needs the realized GDMA (ss->gdma, for the framebuffer DMA data path) and
++     * the interrupt matrix, both in scope here; Esp32s3SocState is private to
++     * esp32s3.c so it is wired at this machine-init site, like bramble_gpio.
++     * Placed in the crypto realization run (clear of the P2.2 gpio attach near
++     * cpu_reset) so the two patches re-apply idempotently. */
++    bramble_gpspi2_attach(get_system_memory(), DEVICE(&ss->gdma), intmatrix_dev);
+     /* RSA realization */
+     {
+         sysbus_realize(SYS_BUS_DEVICE(&ss->rsa), &error_fatal);
+diff --git a/hw/xtensa/meson.build b/hw/xtensa/meson.build
+index fe0437c..9ddcec6 100644
+--- a/hw/xtensa/meson.build
++++ b/hw/xtensa/meson.build
+@@ -4,6 +4,10 @@ xtensa_ss.add(files(
+   'pic_cpu.c',
+   'xtensa_memory.c',
+ ))
++# Bramble GPSPI2 (SPI2_HOST) controller model (P2.3). Placed here, apart from
++# the P2.2 gpio add() line and the P2.2-infra scaffold files() block below, so
++# all three patches reverse-check as already-applied on an idempotent re-run.
++xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files('bramble_gpspi2.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_SIM', if_true: files('sim.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_VIRT', if_true: files('virt.c'))
+ xtensa_ss.add(when: 'CONFIG_XTENSA_XTFPGA', if_true: files('xtfpga.c'))

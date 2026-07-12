@@ -12,6 +12,7 @@
 #include "rpc_dispatcher.h"
 #include "radio.h"
 #include "tx_gate.h"
+#include "phy_passthrough.h"
 #include "packet.h"
 #include "crypto.h"
 #include "security.h"
@@ -1089,7 +1090,9 @@ static void mesh_load_channel_psk_flags(void) {
     for (int i = 0; i < s_num_channels; i++) {
         /* Missing metadata defaults to "no PSK lock" for deterministic export semantics. */
         uint8_t has_psk = 0;
-        char key[8];
+        /* Sized for a full int, so -Wformat-truncation holds on every target
+         * (NVS keys allow up to 15 chars). */
+        char key[16];
         snprintf(key, sizeof(key), "psk%d", i);
         if (nvs_get_u8(h, key, &has_psk) != ESP_OK) {
             has_psk = 0;
@@ -1129,6 +1132,22 @@ void mesh_reboot_delayed(int delay_ms) {
 /* ── Radio callbacks (ISR context → queue) ──────────────────────────── */
 
 static void on_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info) {
+    /* PHY passthrough pre-hook (DESIGN.md section 10): when the hardware-bridge
+     * mode is active, forward the raw frame up the RPC/serial link with its
+     * radio metadata BEFORE it is handed to the mesh. This is a tap, not a
+     * diversion: normal mesh processing still runs below. The intended gateway
+     * (a bare, unprovisioned Heltec) is inert to the mesh anyway, so the extra
+     * queue push is harmless; keeping the path additive avoids perturbing the
+     * firmware's own receive handling for anyone who force-enables on a live
+     * node. The carrier is read from the live radio config only while active,
+     * so the common (inactive) case adds a single flag check. */
+    if (phy_passthrough_is_active()) {
+        radio_config_t rcfg;
+        radio_get_config(&rcfg);
+        uint32_t freq_hz = (uint32_t)(rcfg.frequency_mhz * 1000000.0f);
+        phy_passthrough_forward_rx(data, len, info, freq_hz);
+    }
+
     rx_packet_t pkt;
     /* len is uint8_t (max 255), pkt.data is 256 bytes — always fits */
     memcpy(pkt.data, data, len);
@@ -4420,7 +4439,8 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
 static void mesh_task(void* param) {
     (void)param;
 
-    ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task start (core %d) ===", xPortGetCoreID());
+    /* Cast: BaseType_t is int on Xtensa but long on the POSIX port. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task start (core %d) ===", (int)xPortGetCoreID());
 
     /* Subscribe this task to the task watchdog timer.
      * If the main loop stalls (or radio_init hangs), the WDT will trigger
@@ -5690,6 +5710,14 @@ static int mesh_nonce_write(uint64_t ceiling, void* ctx) {
  * boot state is unambiguous (a status field for Task 3's provisioning UX).
  */
 static void mesh_load_network_key(void) {
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* Emulator only: seed the shared network key from EMU_NETWORK_KEY so a gosim
+     * scenario can key up a headless fleet (there is no emu-link provisioning
+     * RPC). No-op when the env var is unset. Implemented in emulator/node and
+     * linked only on the linux target; a device build never sees this. */
+    extern int emu_node_seed_network_key_from_env(void);
+    emu_node_seed_network_key_from_env();
+#endif
     if (network_key_load_from_nvs() == 0) {
         ESP_LOGI(TAG, "Network key loaded from NVS (provisioned)");
     } else {
@@ -5697,6 +5725,20 @@ static void mesh_load_network_key(void) {
                       "(setNetworkKey or generate)");
     }
 }
+
+#ifdef CONFIG_IDF_TARGET_LINUX
+/* Emulator only: the address of this node's first known neighbor, or 0 if it has
+ * none yet. A scenario's scripted sender (emu_autosend.c) uses it to DM a peer
+ * whose self-minted address it cannot know ahead of time; it learns the peer
+ * from beacons exactly as the real UI would before composing a direct message. */
+uint32_t emu_mesh_first_neighbor(void) {
+    mesh_shared_state_t st;
+    mesh_get_state(&st);
+    if (st.neighbors.count > 0)
+        return st.neighbors.entries[0].addr;
+    return 0;
+}
+#endif
 
 void mesh_rederive_beacon_key(void) {
     /* SEC-H2: derive the beacon HMAC subkey from the current network key with
@@ -6007,8 +6049,16 @@ void mesh_task_start(bramble_identity_t* identity) {
     }
 
     /* Pin to CPU1 — leave CPU0 for UI/display */
+#ifdef CONFIG_IDF_TARGET_LINUX
+    /* The POSIX simulation has a single core; pinning to CPU1 trips the
+     * kernel's core-count assert. */
+    xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL,
+                            tskNO_AFFINITY);
+    ESP_LOGI(TAG, "Mesh task created (no core affinity: single-core simulator)");
+#else
     xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_TASK_STACK, NULL, MESH_TASK_PRIORITY, NULL, 1);
     ESP_LOGI(TAG, "Mesh task created (pinned to CPU1)");
+#endif
 }
 
 void mesh_get_state(mesh_shared_state_t* out) {

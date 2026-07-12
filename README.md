@@ -11,6 +11,7 @@ Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-ran
 - [Web Client](#web-client)
 - [Hardware Targets](#hardware-targets)
 - [Simulator](#simulator)
+- [Emulator](#emulator)
 - [Getting Started](#getting-started)
 - [Testing](#testing)
 - [Architecture](#architecture)
@@ -75,6 +76,12 @@ The Bramble Pager v1 is a custom in-house board, not an off-the-shelf dev kit: i
 Bramble ships with a mesh simulator that runs real protocol code against a virtual radio layer and renders topology/traffic in a browser. The radio layer models the shared LoRa medium (real time-on-air, collisions, capture, half-duplex, listen-before-talk), making it the primary proving ground for scale and routing behavior before field deployment.
 
 See [simulator/README.md](simulator/README.md) for setup and scenarios. For measured scale results under the collision model, [docs/results/simulation-2026-07-honest-baseline.md](docs/results/simulation-2026-07-honest-baseline.md) is the current source of truth (it supersedes the June numbers for planning; the earlier collision-free "100% at 200 nodes" figures were retracted as sim artifacts). In short: about 95% delivery at 10 nodes, collapsing to roughly 10-12% at 50-100 nodes and 0% at 200 as a single SF10 channel saturates under control-plane load. Scale is bounded by radio profile, node density, and hop budget; there is no field-tested-at-scale result.
+
+## Emulator
+
+The simulator drives real protocol code through a test harness; the emulator goes one step further and runs the **actual firmware binary**. Each virtual node is `app_main` compiled for ESP-IDF's linux target, booted with a virtual board profile, with the radio, e-paper display, buttons, GPS, and battery replaced by virtual drivers at the existing hardware seams. N virtual Bramble Pagers attach to the gosim ether and are rendered in a browser as the physical device: a faithful SSD1680 e-paper panel, clickable buttons, per-node consoles, and true per-node identities that survive restart. It is the packaging/UX proving ground the simulator is not: what a user actually sees and does on the device.
+
+Quick start: `cd emulator && make run` (local toolchain) or `docker compose up --build` (zero prerequisites), then open the printed URL and load the `emu-channel-delivery` scenario. A gated PHY-passthrough bridge lets a serial-attached real node inject the physical RF channel into the virtual ether. See [emulator/README.md](emulator/README.md) for setup, scenarios, and the headless CI/E2E suites. A QEMU true-VM backend (running the exact flashable image) is a documented phase-2 follow-on, not yet built.
 
 ## Getting Started
 
