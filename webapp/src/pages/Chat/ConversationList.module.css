@@ -70,6 +70,21 @@
   white-space: nowrap;
 }
 
+/* ── Verified badge ───────────────────────────── */
+.verifiedBadgeOk {
+  display: inline-flex;
+  align-items: center;
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.verifiedBadgeWarn {
+  display: inline-flex;
+  align-items: center;
+  color: var(--danger);
+  flex-shrink: 0;
+}
+
 /* ── Unread badge ─────────────────────────────── */
 .statusDot {
   width: 8px;

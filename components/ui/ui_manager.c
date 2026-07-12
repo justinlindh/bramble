@@ -20,7 +20,19 @@ static ui_settings_item_t settings_item_step(const ui_state_t* state, ui_setting
     return next;
 }
 
+/* Reset the nodes screen's selection / SAS-verify sub-mode. Called whenever the
+ * screen leaves SCREEN_NODES (button-driven or timeout-driven) so the flags
+ * never survive a screen change and reappear stale on the next visit. */
+static void reset_nodes_mode(ui_state_t* state) {
+    state->nodes_selecting = false;
+    state->node_detail_open = false;
+    state->node_verify_armed = false;
+    state->node_verify_confirmed = false;
+    state->nodes_cursor = 0;
+}
+
 void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
+    ui_screen_t before = state->current_screen;
     state->last_activity = now_ms;
 
     if (state->current_screen == SCREEN_MESSAGES && state->message_auto_switch_time != 0) {
@@ -118,6 +130,83 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
         }
     }
 
+    /* Nodes screen: enter cursor-selection with a long press; while selecting,
+     * short cycles neighbors and long opens the selected peer's SAS detail. */
+    if (state->current_screen == SCREEN_NODES && state->nodes_selecting) {
+        if (state->node_total > 0 && state->nodes_cursor >= state->node_total) {
+            state->nodes_cursor = 0;
+        }
+        if (state->node_detail_open) {
+            switch (btn) {
+            case BTN_LONG_PRESS:
+            case BTN_SELECT: /* two-step: arm, then commit (fail-safe) */
+                if (state->node_verify_armed) {
+                    state->node_verify_confirmed = true; /* main.c applies + clears */
+                    state->node_verify_armed = false;
+                } else {
+                    state->node_verify_armed = true;
+                }
+                state->screen_dirty = true;
+                return;
+            case BTN_SHORT_PRESS:
+            case BTN_DOWN:
+            case BTN_UP: /* any non-commit press disarms, avoids accidental verify */
+                state->node_verify_armed = false;
+                state->screen_dirty = true;
+                return;
+            case BTN_DOUBLE_PRESS:
+            case BTN_LEFT: /* close detail, back to the list */
+                state->node_detail_open = false;
+                state->node_verify_armed = false;
+                state->screen_dirty = true;
+                return;
+            default:
+                return;
+            }
+        }
+        switch (btn) {
+        case BTN_SHORT_PRESS:
+        case BTN_DOWN:
+            if (state->node_total > 0)
+                state->nodes_cursor = (state->nodes_cursor + 1) % state->node_total;
+            state->screen_dirty = true;
+            return;
+        case BTN_UP:
+            if (state->node_total > 0)
+                state->nodes_cursor =
+                    (state->nodes_cursor + state->node_total - 1) % state->node_total;
+            state->screen_dirty = true;
+            return;
+        case BTN_LONG_PRESS:
+        case BTN_SELECT: /* open the selected peer's SAS detail */
+            if (state->node_total > 0)
+                state->node_detail_open = true;
+            state->node_verify_armed = false;
+            state->screen_dirty = true;
+            return;
+        case BTN_DOUBLE_PRESS:
+        case BTN_LEFT: /* leave selection, back to screen cycling */
+            state->nodes_selecting = false;
+            state->screen_dirty = true;
+            return;
+        default:
+            return;
+        }
+    }
+    if (state->current_screen == SCREEN_NODES && !state->nodes_selecting) {
+        if (btn == BTN_LONG_PRESS || btn == BTN_SELECT) {
+            if (state->node_total > 0) {
+                state->nodes_selecting = true;
+                state->nodes_cursor = 0;
+                state->node_detail_open = false;
+                state->node_verify_armed = false;
+            }
+            state->screen_dirty = true;
+            return;
+        }
+        /* otherwise fall through: SHORT still cycles to the next screen, etc. */
+    }
+
     switch (btn) {
     case BTN_SHORT_PRESS:
     case BTN_RIGHT: /* trackball right = next screen */
@@ -200,11 +289,17 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms) {
             state->msg_scroll = 0;
         }
     }
+
+    if (before == SCREEN_NODES && state->current_screen != SCREEN_NODES) {
+        reset_nodes_mode(state);
+    }
 }
 
 void ui_set_gps_available(ui_state_t* state, bool available) { state->gps_available = available; }
 
 void ui_set_message_total(ui_state_t* state, int total) { state->msg_total = total; }
+
+void ui_set_node_total(ui_state_t* state, int total) { state->node_total = total; }
 
 ui_screen_t ui_get_screen(const ui_state_t* state) { return state->current_screen; }
 
@@ -233,6 +328,7 @@ void ui_on_message_received(ui_state_t* state, uint32_t now_ms) {
 
     uint32_t idle_ms = now_ms - state->last_activity;
     if (idle_ms >= UI_MESSAGE_IDLE_THRESHOLD_MS) {
+        bool was_nodes = state->current_screen == SCREEN_NODES;
         state->prev_screen = state->current_screen;
         state->current_screen = SCREEN_MESSAGES;
         state->screen_enter_time = now_ms;
@@ -240,6 +336,9 @@ void ui_on_message_received(ui_state_t* state, uint32_t now_ms) {
         state->msg_scroll = 0;
         state->message_auto_switch_time = now_ms;
         state->screen_dirty = true;
+        if (was_nodes) {
+            reset_nodes_mode(state);
+        }
     } else {
         if (state->unread_count < 99) {
             state->unread_count++;
@@ -256,6 +355,9 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         state->screen_enter_time = now_ms;
         state->screen_dirty = true;
         state->message_auto_switch_time = 0;
+        if (state->current_screen != SCREEN_NODES) {
+            reset_nodes_mode(state);
+        }
         return;
     }
 
@@ -270,6 +372,7 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
         state->screen_dirty = true;
         state->last_activity = now_ms;
         state->message_auto_switch_time = 0;
+        reset_nodes_mode(state);
     }
 }
 

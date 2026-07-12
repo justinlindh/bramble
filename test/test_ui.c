@@ -658,6 +658,110 @@ void test_format_msg_line_action(void) {
     TEST_ASSERT_EQUAL_STRING("* ally waves", buf);
 }
 
+void test_nodes_selection_enter_cycle_open_detail(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 3);
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 1000);
+    TEST_ASSERT_TRUE(state.nodes_selecting);
+    TEST_ASSERT_EQUAL(0, state.nodes_cursor);
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1100);
+    TEST_ASSERT_EQUAL(1, state.nodes_cursor);
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1200);
+    TEST_ASSERT_EQUAL(2, state.nodes_cursor);
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1300);
+    TEST_ASSERT_EQUAL(0, state.nodes_cursor); /* wraps */
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 1400);
+    TEST_ASSERT_TRUE(state.node_detail_open);
+}
+
+void test_nodes_detail_arm_then_confirm(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 2);
+    state.nodes_selecting = true;
+    state.node_detail_open = true;
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 1000);
+    TEST_ASSERT_TRUE(state.node_verify_armed);
+    TEST_ASSERT_FALSE(state.node_verify_confirmed);
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 1100);
+    TEST_ASSERT_TRUE(state.node_verify_confirmed);
+    TEST_ASSERT_FALSE(state.node_verify_armed);
+}
+
+void test_nodes_detail_short_press_disarms_without_confirming(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 2);
+    state.nodes_selecting = true;
+    state.node_detail_open = true;
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 1000);
+    TEST_ASSERT_TRUE(state.node_verify_armed);
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1100);
+    TEST_ASSERT_FALSE(state.node_verify_armed);
+    TEST_ASSERT_FALSE(state.node_verify_confirmed);
+}
+
+void test_nodes_double_press_in_detail_returns_to_list(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 2);
+    state.nodes_selecting = true;
+    state.node_detail_open = true;
+    state.node_verify_armed = true;
+
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 1000);
+    TEST_ASSERT_FALSE(state.node_detail_open);
+    TEST_ASSERT_FALSE(state.node_verify_armed);
+    TEST_ASSERT_TRUE(state.nodes_selecting);
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
+}
+
+void test_nodes_double_press_in_list_leaves_selection(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 2);
+    state.nodes_selecting = true;
+
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 1000);
+    TEST_ASSERT_FALSE(state.nodes_selecting);
+    TEST_ASSERT_EQUAL(SCREEN_NODES, ui_get_screen(&state));
+}
+
+void test_nodes_entering_selection_with_zero_total_is_noop(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 0);
+
+    ui_handle_button(&state, BTN_LONG_PRESS, 1000);
+    TEST_ASSERT_FALSE(state.nodes_selecting);
+}
+
+void test_nodes_selecting_reset_on_timeout_to_main(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 3);
+    state.nodes_selecting = true;
+    state.node_detail_open = true;
+    state.node_verify_armed = true;
+    state.last_activity = 0;
+
+    ui_check_timeout(&state, UI_INACTIVITY_TIMEOUT_MS + 1);
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+    TEST_ASSERT_FALSE(state.nodes_selecting);
+    TEST_ASSERT_FALSE(state.node_detail_open);
+    TEST_ASSERT_FALSE(state.node_verify_armed);
+}
+
+void test_nodes_short_press_while_not_selecting_still_cycles_screen(void) {
+    state.current_screen = SCREEN_NODES;
+    ui_set_node_total(&state, 3);
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000);
+    TEST_ASSERT_EQUAL(SCREEN_COMPOSE, ui_get_screen(&state));
+    TEST_ASSERT_FALSE(state.nodes_selecting);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -715,5 +819,13 @@ int main(void) {
     RUN_TEST(test_format_msg_line_action);
     RUN_TEST(test_auto_restore_returns_to_previous_screen_after_timeout);
     RUN_TEST(test_user_interaction_on_messages_cancels_auto_restore);
+    RUN_TEST(test_nodes_selection_enter_cycle_open_detail);
+    RUN_TEST(test_nodes_detail_arm_then_confirm);
+    RUN_TEST(test_nodes_detail_short_press_disarms_without_confirming);
+    RUN_TEST(test_nodes_double_press_in_detail_returns_to_list);
+    RUN_TEST(test_nodes_double_press_in_list_leaves_selection);
+    RUN_TEST(test_nodes_entering_selection_with_zero_total_is_noop);
+    RUN_TEST(test_nodes_selecting_reset_on_timeout_to_main);
+    RUN_TEST(test_nodes_short_press_while_not_selecting_still_cycles_screen);
     return UNITY_END();
 }

@@ -253,6 +253,52 @@ static int handle_get_identity(const cJSON* params, cJSON* result) {
     return 0;
 }
 
+/* bramble.getPeerVerification, params: {"address":"HEXADDR"}. Wraps the
+ * mesh accessor (never touches identity_store directly); an unpinned peer is
+ * not an error, it is reported as unverified with an empty SAS. */
+static int handle_get_peer_verification(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    if (!addr_str)
+        return RPC_ERR_INVALID_PARAMS;
+
+    uint32_t addr = (uint32_t)strtoul(addr_str, NULL, 16);
+    char sas[8] = {0};
+    bool verified = false;
+    bool key_changed = false;
+    if (!mesh_get_peer_verification(addr, sas, &verified, &key_changed)) {
+        cJSON_AddStringToObject(result, "sas", "");
+        cJSON_AddBoolToObject(result, "verified", false);
+        cJSON_AddBoolToObject(result, "keyChanged", false);
+        return 0;
+    }
+
+    cJSON_AddStringToObject(result, "sas", sas);
+    cJSON_AddBoolToObject(result, "verified", verified);
+    cJSON_AddBoolToObject(result, "keyChanged", key_changed);
+    return 0;
+}
+
+/* bramble.setPeerVerified, params: {"address":"HEXADDR", "verified":bool}.
+ * Wraps mesh_set_peer_verified, which records the SAS, persists it, and
+ * clears any pending key-change warning on verify. */
+static int handle_set_peer_verified(const cJSON* params, cJSON* result) {
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* addr_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "address"));
+    if (!addr_str)
+        return RPC_ERR_INVALID_PARAMS;
+    cJSON* verified_j = cJSON_GetObjectItem(params, "verified");
+    if (!verified_j || !cJSON_IsBool(verified_j))
+        return RPC_ERR_INVALID_PARAMS;
+
+    uint32_t addr = (uint32_t)strtoul(addr_str, NULL, 16);
+    bool ok = mesh_set_peer_verified(addr, cJSON_IsTrue(verified_j));
+    cJSON_AddBoolToObject(result, "ok", ok);
+    return 0;
+}
+
 /* bramble.getVersion */
 static int handle_get_version(const cJSON* params, cJSON* result) {
     (void)params;
@@ -2835,6 +2881,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.getDiagnostics", handle_get_diagnostics);
     rpc_register("bramble.getWifiStatus", handle_get_wifi_status);
     rpc_register("bramble.getIdentity", handle_get_identity);
+    rpc_register("bramble.getPeerVerification", handle_get_peer_verification);
     rpc_register("bramble.getVersion", handle_get_version);
     rpc_register("bramble.getDeliveryEvents", handle_get_delivery_events);
     rpc_register("bramble.getNeighbors", handle_get_neighbors);
@@ -2852,6 +2899,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.sendProbe", handle_send_probe);
     rpc_register("bramble.setRadio", handle_set_radio);
     rpc_register("bramble.setNodeName", handle_set_node_name);
+    rpc_register("bramble.setPeerVerified", handle_set_peer_verified);
     rpc_register("bramble.setAuthToken", rpc_set_auth_token);
     rpc_register("bramble.getAuthToken", rpc_get_auth_token);
     rpc_register("bramble.setNetworkKey", rpc_set_network_key);

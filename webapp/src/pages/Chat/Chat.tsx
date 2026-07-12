@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useStore } from '../../store/index';
 import { useConversation, useMyAddress } from '../../store/selectors';
-import { IconChat, IconBroadcast, IconHash, IconRoutes } from '../../components/Icons';
-import { usePeerInfo, STATUS_COLORS } from '../../hooks/usePeer';
+import { IconChat, IconBroadcast, IconHash, IconRoutes, IconLock, IconWarning } from '../../components/Icons';
+import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { ConversationList } from './ConversationList';
 import { MessageBubble } from './MessageBubble';
 import { ComposeBar } from './ComposeBar';
 import { ChannelDetailPanel } from './ChannelDetailPanel';
+import { VerifySafetyNumber } from './VerifySafetyNumber';
+import { loadPeerVerification, setPeerVerified } from '../../store/actions';
 import { formatDaySeparatorLabel, shouldInsertDaySeparator } from './chatDateFormatting';
 import styles from './Chat.module.css';
 
@@ -120,16 +122,51 @@ function MessageList({ conversationId }: { conversationId: string }) {
   );
 }
 
+// ─── Verify safety number (SAS) ────────────────────────────────────────────
+
+function VerifySafetyNumberPanel({ addr, onClose }: { addr: number; onClose: () => void }) {
+  const { displayName, fullHex } = usePeerInfo(addr);
+  const verification = useStore(s => s.peerVerifications.get(addr));
+
+  useEffect(() => {
+    loadPeerVerification(addr).catch(() => {});
+  }, [addr]);
+
+  return (
+    <VerifySafetyNumber
+      peerAddress={fullHex.slice(2)}
+      peerName={displayName}
+      sas={verification?.sas ?? ''}
+      verified={verification?.verified ?? false}
+      keyChanged={verification?.keyChanged ?? false}
+      onSetVerified={(peerAddr, v) => setPeerVerified(parseInt(peerAddr, 16), v)}
+      onClose={onClose}
+    />
+  );
+}
+
+function KeyChangedBanner({ onOpenVerify }: { onOpenVerify: () => void }) {
+  return (
+    <div className={styles.keyChangedBar} role="alert">
+      <IconWarning size={14} />
+      <span>Safety number changed for this contact.</span>
+      <button className={styles.keyChangedBarBtn} onClick={onOpenVerify}>Verify now</button>
+    </div>
+  );
+}
+
 // ─── Chat header ──────────────────────────────────────────────────────────────
 
 function DmHeaderInfo({ addr }: { addr: number }) {
   const { displayName, fullHex, status, lastSeen } = usePeerInfo(addr);
+  const verification = usePeerVerification(addr);
   const statusLabel = status === 'online' ? 'Online'
     : status === 'reachable' ? 'Reachable'
     : 'Unknown';
   const statusText = status === 'online' ? 'Online'
     : lastSeen ? `Last seen ${lastSeen}`
     : 'Unknown';
+
   return (
     <>
       <span className={styles.chatTitle}>
@@ -139,6 +176,15 @@ function DmHeaderInfo({ addr }: { addr: number }) {
           title={statusLabel}
         />
         {displayName}
+        {verification?.keyChanged ? (
+          <span className={styles.verifyGlyphWarn} title="Safety number changed">
+            <IconWarning size={13} />
+          </span>
+        ) : verification?.verified ? (
+          <span className={styles.verifyGlyphOk} title="Verified">
+            <IconLock size={13} />
+          </span>
+        ) : null}
       </span>
       <span className={styles.chatSubtitle}>{statusText} · {fullHex}</span>
     </>
@@ -188,6 +234,16 @@ function ChatHeader({ conversationId, onToggleDetail, onToggleSidebar }: { conve
           <span className={styles.chatTitle}>{conv?.label ?? conversationId}</span>
         )}
       </div>
+      {isDm && (
+        <button
+          className={styles.verifyBtn}
+          onClick={(e) => { e.stopPropagation(); onToggleDetail?.(); }}
+          title="Verify safety number"
+          aria-label="Verify safety number"
+        >
+          <IconLock size={14} />
+        </button>
+      )}
       <button
         className={`${styles.routeBtn} ${showRoutes ? styles.routeBtnActive : ''}`}
         onClick={(e) => { e.stopPropagation(); setShowRoutes(!showRoutes); }}
@@ -218,6 +274,9 @@ export function Chat() {
   }, [activeConversationId]);
 
   const isChannel = activeConversationId.startsWith('ch:');
+  const isDm = activeConversationId.startsWith('dm:');
+  const dmAddr = isDm ? parseInt(activeConversationId.slice(3), 10) : 0;
+  const dmVerification = useStore(s => (isDm ? s.peerVerifications.get(dmAddr) : undefined));
 
   return (
     <div className={styles.chat}>
@@ -239,8 +298,13 @@ export function Chat() {
             channelIndex={parseInt(activeConversationId.slice(3), 10)}
             onClose={() => setShowDetail(false)}
           />
+        ) : showDetail && isDm ? (
+          <VerifySafetyNumberPanel addr={dmAddr} onClose={() => setShowDetail(false)} />
         ) : (
           <>
+            {isDm && dmVerification?.keyChanged && (
+              <KeyChangedBanner onOpenVerify={() => setShowDetail(true)} />
+            )}
             <MessageList conversationId={activeConversationId} />
             <ComposeBar conversationId={activeConversationId} />
           </>

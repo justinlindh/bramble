@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { useStore } from '../store/index';
 import { resolvePeerName } from '../store/peerName';
+import { loadPeerVerification } from '../store/actions';
 
 export type PeerStatus = 'online' | 'reachable' | 'unknown';
 
@@ -33,6 +35,19 @@ export function usePeerInfo(addr: number) {
   }
 
   return { name: resolvedName, displayName, shortHex, fullHex, status, lastSeen };
+}
+
+/** Cached SAS-verification state for a peer, lazily loaded once per peer
+ * (does not refresh on every mount; VerifySafetyNumberPanel's always-refresh
+ * variant loads separately since it intentionally reloads on open). */
+export function usePeerVerification(addr: number) {
+  const verification = useStore(s => s.peerVerifications.get(addr));
+
+  useEffect(() => {
+    if (!verification) loadPeerVerification(addr).catch(() => {});
+  }, [addr, verification]);
+
+  return verification;
 }
 
 export const STATUS_COLORS: Record<PeerStatus, string> = {

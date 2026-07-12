@@ -6,6 +6,7 @@
  */
 #include "include/identity_store.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "crypto.h"           /* crypto_ed25519_verify */
@@ -249,4 +250,122 @@ int identity_store_count(const identity_store_t* s) {
             n++;
     }
     return n;
+}
+
+bool identity_store_set_verified(identity_store_t* s, uint32_t address, const char sas[8]) {
+    identity_pin_t* e = find_entry(s, address);
+    if (!e)
+        return false; /* verification must follow a pin */
+    e->verified = true;
+    /* Copy the SAS-at-verification, always NUL-terminated even if the caller
+     * passes a shorter string. */
+    snprintf(e->verified_sas, sizeof(e->verified_sas), "%s", sas);
+    /* Re-verifying acknowledges and dismisses a key-change warning, if any. */
+    e->key_changed = false;
+    return true;
+}
+
+bool identity_store_clear_verified(identity_store_t* s, uint32_t address) {
+    identity_pin_t* e = find_entry(s, address);
+    if (!e)
+        return false;
+    e->verified = false;
+    memset(e->verified_sas, 0, sizeof(e->verified_sas));
+    return true;
+}
+
+bool identity_store_is_verified(const identity_store_t* s, uint32_t address) {
+    const identity_pin_t* e = identity_store_lookup(s, address);
+    return e != NULL && e->verified;
+}
+
+bool identity_store_mark_key_changed(identity_store_t* s, uint32_t address) {
+    identity_pin_t* e = find_entry(s, address);
+    if (!e)
+        return false;
+    e->key_changed = true;
+    return true;
+}
+
+bool identity_store_key_changed(const identity_store_t* s, uint32_t address) {
+    const identity_pin_t* e = identity_store_lookup(s, address);
+    return e != NULL && e->key_changed;
+}
+
+int identity_store_serialize(const identity_store_t* s, uint8_t* buf, size_t buf_len) {
+    int count = identity_store_count(s);
+    size_t need = 2 + (size_t)count * IDENTITY_STORE_RECORD_SIZE;
+    if (buf_len < need)
+        return -1;
+    size_t off = 0;
+    buf[off++] = (uint8_t)IDENTITY_STORE_BLOB_VERSION;
+    buf[off++] = (uint8_t)count;
+    for (int i = 0; i < IDENTITY_STORE_CAPACITY; i++) {
+        const identity_pin_t* e = &s->entries[i];
+        if (!e->used)
+            continue;
+        /* address, big-endian for a determinate on-wire order. */
+        buf[off++] = (uint8_t)(e->address >> 24);
+        buf[off++] = (uint8_t)(e->address >> 16);
+        buf[off++] = (uint8_t)(e->address >> 8);
+        buf[off++] = (uint8_t)(e->address);
+        memcpy(buf + off, e->ed25519_pub, 32);
+        off += 32;
+        memcpy(buf + off, e->x25519_pub, 32);
+        off += 32;
+        buf[off++] = e->verified ? 1 : 0;
+        memcpy(buf + off, e->verified_sas, sizeof(e->verified_sas));
+        off += sizeof(e->verified_sas);
+    }
+    return (int)off;
+}
+
+int identity_store_deserialize(identity_store_t* s, const uint8_t* buf, size_t len,
+                               uint32_t now_ms) {
+    /* Re-initialize the pin table, PRESERVING any anchor already provisioned on
+     * the store (the anchor is a separate axis, provisioned via
+     * identity_store_set_anchor before the boot-time load; the pin TABLE is what
+     * this blob carries). A caller may hand us a fresh/zeroed store, in which
+     * case the snapshot is simply the un-anchored default. */
+    bool had_anchor = s->has_anchor;
+    uint8_t saved_anchor[32];
+    memcpy(saved_anchor, s->anchor_pub, sizeof(saved_anchor));
+    bool grace_closed = s->grace_forced_closed;
+
+    identity_store_init(s, now_ms);
+    s->has_anchor = had_anchor;
+    memcpy(s->anchor_pub, saved_anchor, sizeof(saved_anchor));
+    s->grace_forced_closed = grace_closed;
+
+    if (len < 2)
+        return -1;
+    if (buf[0] != (uint8_t)IDENTITY_STORE_BLOB_VERSION)
+        return -1; /* clean flag day: reject an unknown format outright */
+    size_t off = 2;
+    int count = buf[1];
+    if (count > IDENTITY_STORE_CAPACITY)
+        return -1;
+    if (len < off + (size_t)count * IDENTITY_STORE_RECORD_SIZE)
+        return -1; /* truncated: never over-read */
+
+    for (int i = 0; i < count; i++) {
+        uint32_t address = ((uint32_t)buf[off] << 24) | ((uint32_t)buf[off + 1] << 16) |
+                           ((uint32_t)buf[off + 2] << 8) | (uint32_t)buf[off + 3];
+        off += 4;
+        const uint8_t* ed = buf + off;
+        off += 32;
+        const uint8_t* x = buf + off;
+        off += 32;
+        bool verified = buf[off++] != 0;
+        char sas[8];
+        memcpy(sas, buf + off, sizeof(sas));
+        sas[sizeof(sas) - 1] = '\0'; /* defend against a corrupt unterminated blob */
+        off += 8;
+        /* Restore as a raw TOFU pin (these bindings were already verified when
+         * first accepted; a reload is not a fresh attestation). */
+        identity_store_pin(s, address, ed, x, now_ms);
+        if (verified)
+            identity_store_set_verified(s, address, sas);
+    }
+    return 0;
 }

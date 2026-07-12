@@ -44,6 +44,7 @@
 #include "keyboard.h"
 #include "trackball.h"
 #include "location.h"
+#include "sas_format.h"
 
 #include "gps.h"
 #include "cJSON.h"
@@ -320,6 +321,64 @@ static uint32_t boot_time_ms = 0;
 static mesh_shared_state_t s_render_mesh;
 static routing_table_t s_render_routes;
 
+/* Nodes screen: the addr of the peer currently shown on the SAS detail
+ * sub-screen, set by render_screen() so the main loop's node_verify_confirmed
+ * consumer verifies exactly the peer the user is looking at, immune to list
+ * reordering between the button press and the render. */
+static uint32_t s_nodes_detail_addr;
+static bool s_nodes_detail_valid;
+
+/* Nodes screen "selectable neighbors" = entries with addr != 0, in array
+ * order. node_total, the cursor highlight, and the detail addr all derive
+ * from this pair so they can never disagree about which peer is selected. */
+static int selectable_neighbor_count(const neighbor_table_t* neighbors) {
+    int n = 0;
+    for (int i = 0; i < neighbors->count; i++) {
+        if (neighbors->entries[i].addr != 0)
+            n++;
+    }
+    return n;
+}
+
+static uint32_t selectable_neighbor_addr(const neighbor_table_t* neighbors, int k) {
+    int seen = 0;
+    for (int i = 0; i < neighbors->count; i++) {
+        if (neighbors->entries[i].addr == 0)
+            continue;
+        if (seen == k)
+            return neighbors->entries[i].addr;
+        seen++;
+    }
+    return 0;
+}
+
+/* Per-neighbor SAS-verification glyph for the Nodes list: " *" once verified,
+ * " !" when the identity key changed since the last verify (re-verify
+ * needed), "" otherwise (no pin yet, or pinned-but-unverified). */
+/* Centered "(no neighbors yet)" placeholder for the Nodes list, shared by
+ * the cursor-selection and plain-browse render branches (both show it in
+ * the same empty-list layout). */
+static void render_no_neighbors(int y) {
+    int no_nbr_y = y + ((FOOTER_Y - y - FONT_H) / 2);
+    if (no_nbr_y < y)
+        no_nbr_y = y;
+    const char* no_nbr = "(no neighbors yet)";
+    int no_nbr_x = (DISPLAY_WIDTH - strlen(no_nbr) * FONT_W) / 2;
+    display_draw_text(no_nbr_x, no_nbr_y, no_nbr);
+}
+
+static const char* node_verify_glyph(uint32_t addr) {
+    bool verified = false;
+    bool key_changed = false;
+    if (!mesh_get_peer_verify_flags(addr, &verified, &key_changed))
+        return "";
+    if (key_changed)
+        return " !";
+    if (verified)
+        return " *";
+    return "";
+}
+
 /* "*N" unread badge, drawn right-aligned at the given x limit on every
  * screen except Messages itself. */
 static void render_unread_badge(const ui_state_t* ui, int right_x) {
@@ -552,47 +611,120 @@ static void render_screen(ui_state_t* ui) {
         y += LINE_H;
 
         int cnt = neighbor_count(&s_render_mesh.neighbors);
-        if (cnt == 0) {
-            int no_nbr_y = y + ((FOOTER_Y - y - FONT_H) / 2);
-            if (no_nbr_y < y)
-                no_nbr_y = y;
-            const char* no_nbr = "(no neighbors yet)";
-            int no_nbr_x = (DISPLAY_WIDTH - strlen(no_nbr) * FONT_W) / 2;
-            display_draw_text(no_nbr_x, no_nbr_y, no_nbr);
-        } else {
-            char nl[64];
-            uint32_t now_ms_n = (uint32_t)(esp_timer_get_time() / 1000ULL);
-            for (int i = 0; i < s_render_mesh.neighbors.count && y < FOOTER_Y; i++) {
-                neighbor_entry_t* e = &s_render_mesh.neighbors.entries[i];
-                if (e->addr == 0)
-                    continue;
-                /* Format last-seen age: seconds, minutes, or hours */
-                char age_str[8];
-                uint32_t age_ms = (e->last_heard > 0 && now_ms_n >= e->last_heard)
-                                      ? (now_ms_n - e->last_heard)
-                                      : 0;
-                uint32_t age_s = age_ms / 1000;
-                if (age_s < 60) {
-                    snprintf(age_str, sizeof(age_str), "%lus", (unsigned long)age_s);
-                } else if (age_s < 3600) {
-                    snprintf(age_str, sizeof(age_str), "%lum", (unsigned long)(age_s / 60));
-                } else {
-                    snprintf(age_str, sizeof(age_str), "%luh+", (unsigned long)(age_s / 3600));
-                }
-                /* Prefer the beacon name; fall back to the full address. */
-                if (e->name[0])
-                    snprintf(nl, sizeof(nl), "%.8s %d %s", e->name, e->rssi, age_str);
+        if (ui->node_detail_open) {
+            /* Per-peer SAS detail sub-screen. */
+            int k = ui->nodes_cursor;
+            uint32_t addr = selectable_neighbor_addr(&s_render_mesh.neighbors, k);
+            if (addr == 0) {
+                s_nodes_detail_valid = false;
+                display_draw_text(2, y, "no peer");
+            } else {
+                s_nodes_detail_addr = addr;
+                s_nodes_detail_valid = true;
+
+                neighbor_entry_t* nb = neighbor_lookup(&s_render_mesh.neighbors, addr);
+                char nl[40];
+                if (nb && nb->name[0])
+                    snprintf(nl, sizeof(nl), "%.24s", nb->name);
                 else
-                    snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s", e->addr, e->rssi, age_str);
+                    snprintf(nl, sizeof(nl), "%08" PRIX32, addr);
                 display_draw_text(2, y, nl);
-                y += LINE_H;
+                y += LINE_H + 4;
+
+                char sas[8];
+                bool verified = false;
+                bool key_changed = false;
+                if (!mesh_get_peer_verification(addr, sas, &verified, &key_changed)) {
+                    display_draw_text(2, y, "No secure session yet");
+                } else {
+                    char grouped[9];
+                    sas_format_grouped(sas, grouped);
+                    int sas_x = (DISPLAY_WIDTH - (int)strlen(grouped) * FONT_W * 2) / 2;
+                    if (sas_x < 2)
+                        sas_x = 2;
+                    display_draw_text_large(sas_x, y, grouped);
+                    y += LARGE_FONT_H + 4;
+
+                    if (key_changed)
+                        display_draw_text(2, y, "KEY CHANGED - re-verify");
+                    else if (verified)
+                        display_draw_text(2, y, "VERIFIED");
+                    else
+                        display_draw_text(2, y, "unverified");
+                    y += LINE_H;
+
+                    if (ui->node_verify_armed)
+                        display_draw_text(2, y, "[hold again] confirm");
+                    else
+                        display_draw_text(2, y, "[hold] verify");
+                }
             }
-        }
+            display_draw_text(2, FOOTER_Y, "[2x] back");
+        } else if (ui->nodes_selecting) {
+            /* Cursor-selection list: highlight the k-th selectable neighbor. */
+            s_nodes_detail_valid = false;
+            if (cnt == 0) {
+                render_no_neighbors(y);
+            } else {
+                char nl[64];
+                int k = 0;
+                for (int i = 0; i < s_render_mesh.neighbors.count && y < FOOTER_Y; i++) {
+                    neighbor_entry_t* e = &s_render_mesh.neighbors.entries[i];
+                    if (e->addr == 0)
+                        continue;
+                    const char* cursor = (k == ui->nodes_cursor) ? ">" : " ";
+                    const char* glyph = node_verify_glyph(e->addr);
+                    if (e->name[0])
+                        snprintf(nl, sizeof(nl), "%s%.8s%s", cursor, e->name, glyph);
+                    else
+                        snprintf(nl, sizeof(nl), "%s%08" PRIX32 "%s", cursor, e->addr, glyph);
+                    display_draw_text(2, y, nl);
+                    y += LINE_H;
+                    k++;
+                }
+            }
+            display_draw_text(2, FOOTER_Y, "[short]next [hold]open [2x]back");
+        } else {
+            s_nodes_detail_valid = false;
+            if (cnt == 0) {
+                render_no_neighbors(y);
+            } else {
+                char nl[64];
+                uint32_t now_ms_n = (uint32_t)(esp_timer_get_time() / 1000ULL);
+                for (int i = 0; i < s_render_mesh.neighbors.count && y < FOOTER_Y; i++) {
+                    neighbor_entry_t* e = &s_render_mesh.neighbors.entries[i];
+                    if (e->addr == 0)
+                        continue;
+                    /* Format last-seen age: seconds, minutes, or hours */
+                    char age_str[8];
+                    uint32_t age_ms = (e->last_heard > 0 && now_ms_n >= e->last_heard)
+                                          ? (now_ms_n - e->last_heard)
+                                          : 0;
+                    uint32_t age_s = age_ms / 1000;
+                    if (age_s < 60) {
+                        snprintf(age_str, sizeof(age_str), "%lus", (unsigned long)age_s);
+                    } else if (age_s < 3600) {
+                        snprintf(age_str, sizeof(age_str), "%lum", (unsigned long)(age_s / 60));
+                    } else {
+                        snprintf(age_str, sizeof(age_str), "%luh+", (unsigned long)(age_s / 3600));
+                    }
+                    const char* glyph = node_verify_glyph(e->addr);
+                    /* Prefer the beacon name; fall back to the full address. */
+                    if (e->name[0])
+                        snprintf(nl, sizeof(nl), "%.8s %d %s%s", e->name, e->rssi, age_str, glyph);
+                    else
+                        snprintf(nl, sizeof(nl), "%08" PRIX32 " %d %s%s", e->addr, e->rssi, age_str,
+                                 glyph);
+                    display_draw_text(2, y, nl);
+                    y += LINE_H;
+                }
+            }
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-        display_draw_text(2, FOOTER_Y, "< > navigate  [o] select");
+            display_draw_text(2, FOOTER_Y, "< > navigate  [o] select");
 #else
-        display_draw_text(2, FOOTER_Y, "[press] next screen");
+            display_draw_text(2, FOOTER_Y, "[hold] verify contacts");
 #endif
+        }
         display_flush();
         break;
     }
@@ -1487,6 +1619,19 @@ void app_main(void) {
             ui_set_message_total(&ui, msg_store_count());
         }
 
+        /* Feed the Nodes screen's selectable-neighbor count so ui_handle_button
+         * can clamp/wrap the cursor without a mesh dependency (see
+         * selectable_neighbor_count / selectable_neighbor_addr for the shared
+         * "selectable neighbor" definition the render side also uses). Cursor
+         * clamping only matters on NODES, so skip the mutexed state copy on
+         * every other screen; render_screen re-fetches mesh state for its own
+         * NODES draw, so there is no staleness from gating this. */
+        if (ui_get_screen(&ui) == SCREEN_NODES) {
+            mesh_shared_state_t mesh_now;
+            mesh_get_state(&mesh_now);
+            ui_set_node_total(&ui, selectable_neighbor_count(&mesh_now.neighbors));
+        }
+
         /* Handle settings confirmation */
         if (ui.settings_confirmed) {
             ui.settings_confirmed = false;
@@ -1558,6 +1703,16 @@ void app_main(void) {
                 }
                 ui.screen_dirty = true;
             }
+        }
+
+        /* Handle SAS-verify confirmation. s_nodes_detail_addr/valid are set by
+         * the detail render, so this always applies to exactly the peer the
+         * user was looking at when they confirmed, even if the neighbor list
+         * reordered between the button press and this check. */
+        if (ui.node_verify_confirmed) {
+            ui.node_verify_confirmed = false;
+            if (s_nodes_detail_valid)
+                mesh_set_peer_verified(s_nodes_detail_addr, true);
         }
 
         /* Check inactivity timeout */

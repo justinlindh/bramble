@@ -1593,6 +1593,43 @@ export async function shareLocationOnce(addr: number, tier?: LocationTier): Prom
   assertOk(result, 'Failed to share location');
 }
 
+// ─── Peer verification (SAS) ──────────────────────────────────────────────
+
+/**
+ * Fetch a peer's SAS/verification state and cache it in the store. An
+ * unpinned peer (never DM'd, or DM'd before the identity handshake landed)
+ * is not an error: the firmware returns an empty SAS and verified:false.
+ */
+export async function loadPeerVerification(
+  addr: number,
+): Promise<import('../types/bramble').PeerVerification> {
+  if (!client) throw new Error('Not connected');
+  const result = await client.rpc<{ sas?: string; verified?: boolean; keyChanged?: boolean }>(
+    'bramble.getPeerVerification',
+    { address: formatAddrHex(addr) },
+  );
+  const v: import('../types/bramble').PeerVerification = {
+    sas: result.sas ?? '',
+    verified: !!result.verified,
+    keyChanged: !!result.keyChanged,
+  };
+  useStore.getState().setPeerVerification(addr, v);
+  return v;
+}
+
+/** Mark (or unmark) a peer verified. Refreshes the cached state on success. */
+export async function setPeerVerified(addr: number, verified: boolean): Promise<boolean> {
+  if (!client) throw new Error('Not connected');
+  const result = await client.rpc<{ ok: boolean }>('bramble.setPeerVerified', {
+    address: formatAddrHex(addr),
+    verified,
+  });
+  if (result?.ok) {
+    await loadPeerVerification(addr).catch(() => {});
+  }
+  return !!result?.ok;
+}
+
 function handleLocationUpdate(params: unknown): void {
   const update = normalizePeerLocation(params as any);
   const store = useStore.getState();

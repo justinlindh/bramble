@@ -11,6 +11,53 @@ int dm_derive_session_key(const uint8_t my_id_priv[32], const uint8_t my_eph_pri
 int dm_derive_sas(const uint8_t session_ikm[128], char sas_out[8]);
 
 /*
+ * Identity-bound SAS (safety number). Renders a 7-digit decimal fingerprint of
+ * the two peers' pinned X25519 identity keys, ordered by their owners'
+ * addresses (addr_lo/addr_hi), so both peers compute the same string regardless
+ * of argument order. Unlike dm_derive_sas (which commits to the session IKM and
+ * so changes on every re-handshake), this depends ONLY on the two identity
+ * keys, so it is stable across ratchet steps, epoch bumps, desync-heal, and
+ * reboot. It is public-key material, a fingerprint like a Signal safety number,
+ * not a secret. Returns 0 on success. sas_out is a 7-digit string plus NUL.
+ */
+int dm_derive_identity_sas(const uint8_t id_x25519_a[32], const uint8_t id_x25519_b[32],
+                           uint32_t addr_a, uint32_t addr_b, char sas_out[8]);
+
+/*
+ * Symmetric double-ratchet key schedule (per-message forward secrecy).
+ *
+ * dm_ratchet_init derives the epoch-0 root RK_0 and the two directional chain
+ * keys from the 128-byte handshake IKM. RK_0 is bit-identical to
+ * dm_session_key_from_ikm(ikm, addr_a, addr_b, 0): epoch 0 is migration-
+ * continuous with the pre-ratchet session key (design A.6). The two chains are
+ * domain-separated by the address ordering: CK_0[lo->hi] and CK_0[hi->lo].
+ *
+ * dm_ratchet_step derives the message key mk_n for index n on a chain and the
+ * next chain key CK_{n+1}. mk_n is used once for one AES-256-GCM message, then
+ * wiped; CK_n is wiped once CK_{n+1} exists.
+ *
+ * dm_ratchet_dh advances the root on an epoch bump: RK_{e+1} folds a fresh
+ * X25519 output dh into RK_e (post-compromise recovery at epoch granularity).
+ */
+#define DM_KEY_SIZE 32
+int dm_ratchet_init(const uint8_t ikm[128], uint32_t addr_a, uint32_t addr_b, uint8_t rk_out[32],
+                    uint8_t ck_lohi_out[32], uint8_t ck_hilo_out[32]);
+void dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],
+                     uint8_t ck_next_out[32]);
+int dm_ratchet_dh(const uint8_t rk_e[32], const uint8_t dh[32], uint32_t addr_a, uint32_t addr_b,
+                  uint16_t new_epoch, uint8_t rk_next_out[32]);
+
+/*
+ * Computes the 128-byte quad-DH handshake IKM (the same schedule dm_build_resp/
+ * dm_verify_resp use internally). Exposed non-static so the mesh DH-ratchet
+ * epoch path (Task 4) and the ratchet host tests can seed a session's ratchet
+ * state directly from a handshake IKM. Returns 0 on success.
+ */
+int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
+                   const uint8_t peer_id_pub[32], const uint8_t peer_eph_pub[32],
+                   uint8_t ikm_out[128]);
+
+/*
  * DM handshake (Task 1.3): INIT/RESP message build and authenticated verify.
  * RFC section 1's message flow, PART 1's B1 construction.
  */
@@ -119,6 +166,43 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
 #define DM_STATE_HANDSHAKING 1
 #define DM_STATE_ACTIVE 2
 
+/*
+ * Symmetric-ratchet runtime state embedded in every dm_session_t slot. A send
+ * chain and a receive chain (directionally domain-separated by address order),
+ * plus a bounded skip cache for out-of-order / lost LoRa frames. DM_MAX_SKIP is
+ * both the forward-derive bound and the skip-cache size: it is a loss-tolerance
+ * vs RAM tuning constant, NOT a security boundary (an index beyond
+ * next+DM_MAX_SKIP is refused and degrades to the desync-heal re-handshake).
+ * prev_recv/prev_skip retain the previous epoch's receive chain across a
+ * DH-ratchet grace window (Task 4); unused until then but sized in now so the
+ * struct layout is stable across Tasks 2-4.
+ */
+#define DM_MAX_SKIP 16
+
+typedef struct {
+    uint8_t ck[32]; /* current chain key */
+    uint16_t index; /* next index to send / next expected to receive */
+    uint8_t epoch;  /* low byte of ke_epoch this chain belongs to */
+    uint8_t valid;  /* 0 until dm_session_ratchet_init_state establishes it */
+} dm_chain_t;
+
+typedef struct {
+    uint16_t index;
+    uint8_t mk[32];
+    uint8_t used;
+} dm_skip_entry_t;
+
+typedef struct {
+    uint8_t rk[32];
+    dm_chain_t send;
+    dm_chain_t recv;
+    dm_skip_entry_t skip[DM_MAX_SKIP];
+    /* Previous-epoch receive retention during the DH-ratchet grace (Task 4). */
+    dm_chain_t prev_recv;
+    dm_skip_entry_t prev_skip[DM_MAX_SKIP];
+    uint16_t new_epoch_msgs; /* messages seen on the new epoch; grace expiry */
+} dm_ratchet_t;
+
 typedef struct {
     uint32_t peer_addr;
     uint8_t session_key[32];
@@ -134,6 +218,7 @@ typedef struct {
     uint16_t ke_epoch;
     uint8_t state;
     uint8_t verified;
+    dm_ratchet_t ratchet;
 } dm_session_t;
 
 typedef struct {
@@ -167,6 +252,17 @@ bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr);
  * a mid-handshake worker holds its own assumptions about the slot.
  */
 bool dm_pin_disagrees(const dm_session_t* s, const uint8_t pinned_x25519[32]);
+
+/*
+ * Task 7 decision: whether a genuine pin key change must clear the
+ * session's verified bit, true iff s->verified AND dm_pin_disagrees. A
+ * session that is not verified has nothing to clear; a verified session
+ * whose pin still matches keeps its verified bit (ratchet steps, epoch
+ * bumps, desync-heal, and reboot all keep the same pinned identity key,
+ * so the identity SAS is unchanged and re-verification is not needed).
+ * Only an actual key change (CONFLICT / rebind) is the red flag.
+ */
+bool dm_verified_should_clear(const dm_session_t* s, const uint8_t pinned_x25519[32]);
 
 /*
  * Returns a slot for peer_addr: an existing slot for that peer if one
@@ -207,4 +303,79 @@ int dm_session_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_
 int dm_session_decrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
                        const uint8_t nonce[12], const uint8_t* ct, size_t ct_len,
                        const uint8_t* tag, uint8_t* pt_out);
+
+/*
+ * Establishes the send/receive ratchet chains on a session from a handshake
+ * IKM. addr_self/addr_peer pick which directional chain is the send chain: the
+ * lo party (min address) sends on the lohi chain and receives on hilo, the hi
+ * party vice versa, so both sides agree. Sets both chain indices to 0, stamps
+ * each chain's epoch from s->ke_epoch, and mirrors RK_0 into s->session_key for
+ * provenance. Call after a successful handshake, before the first ratchet op.
+ */
+void dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
+                                   uint32_t addr_peer);
+
+/*
+ * Sender-side ratchet encrypt (per-message forward secrecy). Derives the next
+ * send message key via dm_ratchet_step, advances the send chain, writes the
+ * 3-byte cleartext ratchet header (epoch || msg_index, big-endian) at the front
+ * of framed_ct_out, feeds those 3 bytes into the AEAD AAD (so they are
+ * authenticated but not encrypted), and encrypts ONLY the payload into the
+ * bytes after the header. On success framed_len_out = DM_RATCHET_HEADER_SIZE +
+ * pt_len (cleartext header || ciphertext) and tag_out holds the GCM tag. nonce
+ * stays the node-global monotonic counter; the message key changes per message,
+ * so no (key, nonce) pair ever repeats. Returns 0 on success, -1 otherwise.
+ */
+int dm_session_ratchet_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                               const uint8_t* pt, size_t pt_len, const uint8_t nonce[12],
+                               uint8_t* framed_ct_out, uint8_t* tag_out, size_t* framed_len_out);
+
+/*
+ * Receiver-side ratchet decrypt with a bounded skip / out-of-order window.
+ * framed_ct is the on-wire frame (3-byte cleartext ratchet header || ciphertext);
+ * the receiver reads epoch||index from that header FIRST, so key selection is
+ * known up front and there is NO trial-decryption loop. It derives EXACTLY the
+ * one message key the index names (caching any skipped keys it passes into the
+ * per-direction skip cache), does a SINGLE GCM decrypt with the header in the
+ * AAD, and writes only the payload to pt_out.
+ *
+ * Return codes map to the mesh caller's dispositions:
+ *   DM_DECRYPT_OK        payload decrypted; chain / skip cache updated.
+ *   DM_DECRYPT_FAIL      the one derived key did not authenticate (forged or
+ *                        wrong-epoch frame); chain / skip state left untouched.
+ *   DM_DECRYPT_TOO_FAR   index > next+DM_MAX_SKIP (refused WITHOUT deriving: the
+ *                        DoS bound), or an already-consumed straggler not in the
+ *                        skip cache. The caller degrades this into
+ *                        maybe_trigger_dm_rehandshake (desync heal).
+ *   DM_DECRYPT_REPLAY    reserved for the caller's per-sender nonce-window hit
+ *                        (the authoritative replay defense, consulted BEFORE this
+ *                        layer); this function never returns it. The ratchet
+ *                        index is an ordering aid, not a second replay oracle.
+ */
+#define DM_DECRYPT_OK 0
+#define DM_DECRYPT_FAIL (-1)
+#define DM_DECRYPT_REPLAY (-2)
+#define DM_DECRYPT_TOO_FAR (-3)
+int dm_session_ratchet_decrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
+                               const uint8_t nonce[12], const uint8_t* framed_ct,
+                               size_t framed_ct_len, const uint8_t* tag, uint8_t* pt_out,
+                               size_t* pt_len_out);
+
+/*
+ * DH-ratchet epoch bump (Task 4, post-compromise recovery at epoch
+ * granularity). Rolls the root forward by folding a fresh X25519 output new_dh
+ * into the CURRENT root (dm_ratchet_dh), retains the current receive chain +
+ * skip cache as prev_recv/prev_skip so in-flight OLD-epoch frames still decrypt
+ * during a bounded grace, and resets both directional send/recv chains to index
+ * 0 on new_epoch. Both peers call this with the same new_dh (the fresh
+ * ephemeral-ephemeral DH of the rekey handshake, ikm[0:32]) and new_epoch, so
+ * they converge on the same root. The old root/chains are overwritten here; the
+ * previous epoch's retained recv chain is wiped once DM_EPOCH_GRACE_MSGS
+ * new-epoch messages have been seen (the wipe is what delivers PCS). A lost or
+ * failed rekey leaves both sides on the current epoch (chains untouched), so no
+ * message is ever stranded.
+ */
+#define DM_EPOCH_GRACE_MSGS DM_MAX_SKIP
+void dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
+                           uint32_t addr_peer, uint16_t new_epoch);
 #endif

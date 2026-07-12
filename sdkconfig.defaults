@@ -45,6 +45,12 @@ CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 # and fail closed (esp_ota_end / esp_https_ota_finish). Boot-time enforcement
 # arrives later with hardware Secure Boot V2 (eFuse burn, human-gated); the
 # image format is already compatible.
+# The main task is also the text-UI task on non-LVGL boards (render_screen runs
+# in it), and the SAS verification render path derives an HKDF-based safety
+# number (mbedtls SHA256/HMAC contexts are stack-heavy). The 3584-byte IDF
+# default overflows on real hardware at boot; give every board the same 8192
+# the T-Deck already uses.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
 CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
 CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y

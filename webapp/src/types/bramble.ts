@@ -202,6 +202,18 @@ export interface LocationChannelTarget {
   interval_s: number;
 }
 
+/**
+ * Per-peer SAS + verification state, from bramble.getPeerVerification (DM
+ * forward-secrecy + SAS, Task 9). sas is a 7-digit string, empty when there
+ * is no pin yet (peer never DM'd, not an error). keyChanged is a RAM-only
+ * warning: the peer's identity key changed since the last verify.
+ */
+export interface PeerVerification {
+  sas: string;
+  verified: boolean;
+  keyChanged: boolean;
+}
+
 export interface PeerLocation {
   addr: number;
   name: string;
@@ -388,6 +400,7 @@ export interface AppState {
   devices: SavedDevice[];
   peerLocations: PeerLocation[];
   mapFocusAddr: number | null;
+  peerVerifications: Map<number, PeerVerification>;
   trafficDebugStatus: TrafficDebugStatus | null;
   trafficEvents: TrafficEvent[];
   networkKeyStatus: NetworkKeyStatus | null;

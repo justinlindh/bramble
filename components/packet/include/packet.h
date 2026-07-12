@@ -13,10 +13,12 @@
 #endif
 
 /* Protocol version.
- * was 3; Phase 1 delivery-core flag day: DATA/LOCATION now carry a
- * relay-mutated prev_hop for reverse-route learning (see
- * BRAMBLE_DATA_PREV_HOP_OFFSET below). */
-#define BRAMBLE_VERSION 4
+ * was 4; DM forward-secrecy flag day: DM/LOCATION session payloads now carry a
+ * 3-byte cleartext ratchet header (epoch || msg_index, authenticated via the
+ * AEAD AAD) and are keyed by a per-message ratchet (see DM_RATCHET_HEADER_SIZE
+ * below). Old v4 session frames drop at the RX version gate
+ * (bramble_header_is_supported_version, exact ==) and re-handshake once. */
+#define BRAMBLE_VERSION 5
 
 /* Packet types */
 #define PKT_TYPE_ACK 0x01
@@ -394,6 +396,11 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
 #define BRAMBLE_DATA_NONCE_OFFSET (HEADER_SIZE + 16)
 /* header + src_addr + prev_hop + auth_hmac, i.e. where the AEAD nonce begins */
 #define BRAMBLE_DATA_ENVELOPE_PREFIX_SIZE (HEADER_SIZE + 16)
+
+/* Ratchet header carried in the CLEARTEXT of DM/LOCATION session frames, on the
+ * wire between the nonce and the ciphertext, and authenticated via the AEAD AAD:
+ * epoch(1) || msg_index(2, big-endian). Read before decrypt. */
+#define DM_RATCHET_HEADER_SIZE 3
 
 esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len);
 esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t len);

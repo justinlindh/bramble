@@ -151,7 +151,8 @@ These are accepted as outside what Bramble can or will defend against:
    included: keys derive deterministically from the passphrase and each epoch
    key derives from the previous one
    (`components/channel/channel_key.c`), so a passphrase holder can compute
-   every epoch. There is no forward secrecy.
+   every epoch. Channel keys have no forward secrecy (direct messages do,
+   via the DM ratchet; see the direct-message section).
 5. **Social graph and metadata.** Who talks to whom, when, how often, and how
    much. Cleartext headers carry destination addresses; beacons carry source
    addresses and node names. Largely exposed today (section 4).
@@ -587,10 +588,69 @@ the caller sees `onAck failed reason="no_secure_session"`. The retired
 `docs/bramble-protocol-spec.md` section 4.25. This closes the two gaps
 this document previously listed under "Direct messages are encrypted with
 shared channel keys" and "DMs are encrypted under the well-known public
-PSK". Residual: no out-of-band SAS comparison UX ships yet (section 5), and
-a compromised or malicious mesh member is still an insider by definition,
-same as any symmetric-key system: authenticating a DM to a specific peer
-does not defend against that peer itself misbehaving.
+PSK". Residual: a compromised or malicious mesh member is still an insider
+by definition, same as any symmetric-key system: authenticating a DM to a
+specific peer does not defend against that peer itself misbehaving.
+
+#### Forward secrecy and post-compromise recovery (pending review)
+
+DM sessions now ratchet. Each direction has its own HKDF chain seeded from
+the handshake secret; every message derives a fresh message key from the
+current chain key and then advances the chain, so a key recovered from one
+message does not decrypt earlier or later messages (per-message forward
+secrecy). A 3-byte ratchet header (epoch plus a cleartext message index,
+the standard Double Ratchet layout) travels on the wire and is bound into
+the AEAD as additional authenticated data, so the receiver selects and
+advances keys without trial decryption; a bounded skip window (`DM_MAX_SKIP`)
+absorbs reordering and lost messages and, once exceeded, degrades to the
+existing desync-heal re-handshake rather than failing silently. Post-
+compromise recovery is coarse: a Diffie-Hellman ratchet folds fresh
+entropy into the root key once per key-exchange epoch (`ke_epoch`), not per
+message, so recovery from a state compromise is bounded by the epoch
+cadence, not immediate. The root key at epoch 0 is bit-identical to the
+prior single-key derivation, so existing sessions migrate without a flag
+day beyond the wire-version bump. Nonce uniqueness under the ratchet is
+asserted by a host test (`test_no_key_nonce_reuse`).
+
+#### Out-of-band verification (SAS)
+
+`dm_derive_identity_sas` produces a 7-digit safety number that is a
+fingerprint of the two peers' pinned X25519 *identity* keys, ordered by
+address, so both peers compute the same digits regardless of who initiated,
+and the number is stable across ratchet steps, epoch bumps, desync-heal,
+and reboot (unlike the earlier session-bound `dm_derive_sas`, which changed
+on every handshake). Two people compare the digits over an out-of-band
+channel and mark the contact verified; the verified bit and the compared
+SAS persist per contact and survive reboot. If a contact's pinned identity
+key later changes, the verified bit is cleared automatically and the change
+is surfaced for re-verification (a genuine key change, not a routine
+re-handshake, is the only trigger). The verification UX ships in the web
+client (`webapp`, the richest DM surface, reached over BLE or the local
+transport), in the T-Deck graphical build, and on the e-paper pager itself:
+the pager's text UI grows a per-peer view under the Nodes screen that shows
+the grouped safety number and the verified / key-changed state, and marks a
+contact verified with a two-step fail-safe confirm (arm, then commit) on the
+single button, calling the same setter path as the other surfaces. That the
+two peers compute an identical safety number is gated by a host test
+(`test_identity_sas_order_independent`); the pager-side selection and verify
+logic is a host-tested state machine (`test_ui.c`), with the e-paper
+rendering covered by the board build. A live two-node emulator verification
+E2E that drives the Nodes SAS flow over CDP is a tracked follow-up, not yet
+built.
+
+Residuals to keep in view: post-compromise recovery is epoch-coarse, not
+per-message; the network-key insider is unchanged (the ratchet protects DM
+*content*, not the fact, timing, size, or `src_addr` of a DM); the
+first-contact TOFU window is unchanged (the SAS detects a first-contact
+MitM only if the users actually compare it); the verified bit and identity
+pins are persisted in plaintext NVS, so a device thief who already holds
+the identity keys those pins certify is no worse off; and the skip-cache
+and replay bounds are shaped to cap DoS cost, never to add confidentiality.
+The DM ratchet key schedule, the decoupled DH ratchet and its PCS bound,
+the directional-chain labelling for the role-symmetric handshake, the
+epoch-transition state machine and wipe ordering, the SAS redefinition, and
+nonce discipline under the ratchet are all claimed-pending independent
+cryptographic review, not independently verified.
 
 **Session-table exhaustion DoS, closed (red-team panel fix).** A
 first-contact INIT needs no secret (a self-generated keypair passes
@@ -1370,11 +1430,16 @@ These do not go away when section 4 empties out.
   narrower than the pre-v4 gap (the outsider is confined to victims whose
   valid frame it actually overheard, not an arbitrary silent address), and
   tracked as follow-up hardening (section 3, section 4), not closed here.
-- **DM handshake SAS verification has no UX.** `dm_derive_sas` produces a
-  7-digit short authentication string, but nothing in this batch surfaces
-  it for an out-of-band comparison. A MitM during first-contact handshake
-  is only detectable if the two users compare the code through some channel
-  outside Bramble itself; today, nothing prompts them to.
+- **DM SAS verification now has a UX (pending cryptographic review).** An
+  identity-bound 7-digit safety number is surfaced for out-of-band
+  comparison in the web client and the T-Deck graphical build, with the
+  verified bit and a key-change re-verify prompt persisted per contact (see
+  "Out-of-band verification (SAS)" above). The residual is narrower but real:
+  a first-contact MitM is still only detected if the two users actually
+  compare the number, and the mechanism itself is claimed-pending
+  independent cryptographic review, not verified. The safety number can be
+  compared and confirmed on the e-paper pager itself (Nodes screen), on the
+  T-Deck, or in the web client.
 - **The nonce counter is metadata, not just a cryptographic nonce.**
   Because DATA/LOCATION nonces are now a deterministic counter rather than
   random bits (section 3), an observer who cannot decrypt anything can

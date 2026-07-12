@@ -204,6 +204,35 @@ void mesh_get_identity_pin_stats(uint32_t* pins, uint32_t* conflicts, uint32_t* 
                                  uint32_t* addr_mismatches, uint32_t* unendorsed,
                                  uint32_t* expired);
 
+/**
+ * Per-peer SAS + verification state (DM forward-secrecy + SAS, Task 7.5): the
+ * single accessor the pager UI (Task 8) and webapp RPC (Task 9) both consume.
+ * Fills sas_out with the identity SAS between this node and addr, plus the
+ * peer's persisted verified bit and RAM-only key_changed warning flag.
+ * Returns false (leaving the outputs untouched) if there is no pin for addr
+ * or the SAS derivation fails. sas_out is a 7-digit string plus NUL.
+ */
+bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed);
+
+/**
+ * Cheap verified/key-changed flags for a peer with no SAS derivation (for
+ * list glyphs, which redraw every neighbor on every screen refresh and never
+ * display the SAS itself). Returns false (flags cleared) if there is no pin.
+ */
+bool mesh_get_peer_verify_flags(uint32_t addr, bool* verified, bool* key_changed);
+
+/**
+ * Sets or clears a peer's SAS-verified state and persists it (DM
+ * forward-secrecy + SAS, Task 8): the mesh accessor the pager confirm action
+ * and Task 9's RPC both go through, never identity_store directly. When
+ * verifying, records the current identity SAS with the pin, which also
+ * dismisses a pending key-change warning. When un-verifying, only clears the
+ * verified bit; a deliberate un-verify is not a key change and must not raise
+ * one. Returns false if there is no pin for addr (cannot verify an unpinned
+ * peer).
+ */
+bool mesh_set_peer_verified(uint32_t addr, bool verified);
+
 /*
  * Trust-anchor campaign (P2): push a newly provisioned fleet anchor into the
  * live pin store so a runtime bramble.setAnchor takes effect on the pin gate
