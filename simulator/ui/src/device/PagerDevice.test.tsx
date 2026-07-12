@@ -64,9 +64,9 @@ describe('PagerDevice buttons', () => {
       <PagerDevice device={makeDevice()} muted onButton={onButton} />,
     );
     const sel = getByTestId('btn-select');
-    fireEvent.mouseDown(sel);
+    fireEvent.pointerDown(sel);
     expect(onButton).toHaveBeenCalledWith('select', 'down');
-    fireEvent.mouseUp(sel);
+    fireEvent.pointerUp(sel);
     expect(onButton).toHaveBeenCalledWith('select', 'up');
   });
 
@@ -75,8 +75,8 @@ describe('PagerDevice buttons', () => {
     const { getByTestId } = render(
       <PagerDevice device={makeDevice()} muted onButton={onButton} />,
     );
-    fireEvent.mouseDown(getByTestId('btn-up'));
-    fireEvent.mouseDown(getByTestId('btn-down'));
+    fireEvent.pointerDown(getByTestId('btn-up'));
+    fireEvent.pointerDown(getByTestId('btn-down'));
     expect(onButton).toHaveBeenCalledWith('up', 'down');
     expect(onButton).toHaveBeenCalledWith('down', 'down');
   });
