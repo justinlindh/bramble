@@ -209,13 +209,16 @@ BaseType_t xQueueReceive(QueueHandle_t queue, void* buffer, unsigned int ticks_t
     return pdFALSE;
 }
 
+static void (*g_task_fn)(void*);
+static void* g_task_arg;
+
 int xTaskCreate(void (*task)(void*), const char* name, int stack, void* arg, int pri,
                 TaskHandle_t* out) {
-    (void)task;
     (void)name;
     (void)stack;
-    (void)arg;
     (void)pri;
+    g_task_fn = task;
+    g_task_arg = arg;
     g_task_create_calls++;
     if (out)
         *out = (void*)0x3;
@@ -240,6 +243,8 @@ static void reset_state(void) {
     g_i2s_new_channel_calls = g_i2s_enable_calls = g_i2s_disable_calls = g_i2s_delete_calls = 0;
     g_queue_create_calls = g_queue_delete_calls = g_task_create_calls = g_task_delete_calls = 0;
     g_queue_send_calls = 0;
+    g_task_fn = NULL;
+    g_task_arg = NULL;
 }
 
 void setUp(void) { reset_state(); }
@@ -281,10 +286,21 @@ void test_audio_init_deinit_lifecycle_calls_i2s_and_tasks(void) {
     TEST_ASSERT_EQUAL(1, g_task_create_calls);
 
     audio_deinit();
-    TEST_ASSERT_EQUAL(1, g_task_delete_calls);
+    /* Safe shutdown: deinit does NOT force-delete the task mid-write. It
+     * requests exit and posts a wake sentinel on the queue so the task can
+     * return from i2s_channel_write() on its own, then joins. The task
+     * self-deletes when it next runs. */
+    TEST_ASSERT_EQUAL(0, g_task_delete_calls);
+    TEST_ASSERT_EQUAL(1, g_queue_send_calls); /* the wake sentinel */
     TEST_ASSERT_EQUAL(1, g_queue_delete_calls);
     TEST_ASSERT_EQUAL(1, g_i2s_disable_calls);
     TEST_ASSERT_EQUAL(1, g_i2s_delete_calls);
+
+    /* Model the audio task waking on the sentinel: with exit already
+     * requested it skips the play loop and self-deletes cleanly. */
+    TEST_ASSERT_NOT_NULL(g_task_fn);
+    g_task_fn(g_task_arg);
+    TEST_ASSERT_EQUAL(1, g_task_delete_calls);
 }
 
 int main(void) {

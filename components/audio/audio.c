@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "driver/i2s_std.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -52,6 +53,8 @@ static struct {
     i2s_chan_handle_t tx_chan;
     QueueHandle_t tone_queue;
     TaskHandle_t task_handle;
+    SemaphoreHandle_t done_sem; /* Signaled by audio_task just before it exits */
+    volatile bool exit_requested;
     bool initialized;
     bool muted;
     uint8_t volume; /* 0–100 */
@@ -152,9 +155,13 @@ static void play_silence(uint16_t duration_ms) {
 /* ── Audio task ─────────────────────────────────────────────────────── */
 
 static void audio_task(void* arg) {
+    (void)arg;
     tone_sequence_t seq;
-    while (1) {
+    while (!s_audio.exit_requested) {
         if (xQueueReceive(s_audio.tone_queue, &seq, portMAX_DELAY) == pdTRUE) {
+            /* Wake-only sentinel from audio_deinit carries no notes. */
+            if (s_audio.exit_requested)
+                break;
             for (size_t i = 0; i < seq.count; i++) {
                 const tone_note_t* note = &seq.notes[i];
                 play_beep_internal(note->freq, note->dur);
@@ -164,6 +171,10 @@ static void audio_task(void* arg) {
             }
         }
     }
+    /* Signal the joiner, then self-delete cleanly (never deleted mid-write). */
+    if (s_audio.done_sem)
+        xSemaphoreGive(s_audio.done_sem);
+    vTaskDelete(NULL);
 }
 
 /* ── Public API ─────────────────────────────────────────────────────── */
@@ -238,10 +249,24 @@ int audio_init(void) {
         return -1;
     }
 
+    s_audio.exit_requested = false;
+    s_audio.done_sem = xSemaphoreCreateBinary();
+    if (!s_audio.done_sem) {
+        ESP_LOGE(TAG, "Audio done-sem create failed");
+        vQueueDelete(s_audio.tone_queue);
+        s_audio.tone_queue = NULL;
+        i2s_channel_disable(s_audio.tx_chan);
+        i2s_del_channel(s_audio.tx_chan);
+        return -1;
+    }
+
     BaseType_t ret = xTaskCreate(audio_task, "audio", 4096, NULL, 3, &s_audio.task_handle);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Audio task create failed");
+        vSemaphoreDelete(s_audio.done_sem);
+        s_audio.done_sem = NULL;
         vQueueDelete(s_audio.tone_queue);
+        s_audio.tone_queue = NULL;
         i2s_channel_disable(s_audio.tx_chan);
         i2s_del_channel(s_audio.tx_chan);
         return -1;
@@ -259,9 +284,22 @@ void audio_deinit(void) {
     if (!s_audio.initialized)
         return;
 
+    /* Ask the task to exit and wait for it to leave i2s_channel_write() on its
+     * own, rather than vTaskDelete()-ing it mid-write (which would leak I2S DMA
+     * state and can wedge the channel). Signal, wake it off the queue, join. */
     if (s_audio.task_handle) {
-        vTaskDelete(s_audio.task_handle);
+        s_audio.exit_requested = true;
+        tone_sequence_t wake = {.notes = NULL, .count = 0};
+        xQueueSend(s_audio.tone_queue, &wake, portMAX_DELAY);
+        if (s_audio.done_sem) {
+            /* Bounded join: a single tone is short; do not hang deinit forever. */
+            xSemaphoreTake(s_audio.done_sem, pdMS_TO_TICKS(2000));
+        }
         s_audio.task_handle = NULL;
+    }
+    if (s_audio.done_sem) {
+        vSemaphoreDelete(s_audio.done_sem);
+        s_audio.done_sem = NULL;
     }
     if (s_audio.tone_queue) {
         vQueueDelete(s_audio.tone_queue);

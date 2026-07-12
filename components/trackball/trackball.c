@@ -10,13 +10,17 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include <string.h>
 
 static const char* TAG = "trackball";
 static const bramble_board_config_t* s_board = NULL;
 static bool initialized = false;
 
-/* Event counters (incremented by ISRs) */
+/* Event counters (incremented by ISRs, decremented by trackball_poll).
+ * `volatile int` does NOT make ++/-- atomic, so ISR and poll are serialized
+ * with a spinlock to avoid a lost increment (a dropped detent/select). */
+static portMUX_TYPE s_tb_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile int count_up = 0;
 static volatile int count_down = 0;
 static volatile int count_left = 0;
@@ -25,15 +29,35 @@ static volatile int count_center = 0;
 
 /* ── ISR Handlers ───────────────────────────────────────────────────── */
 
-static void IRAM_ATTR trackball_up_isr(void* arg) { count_up++; }
+static void IRAM_ATTR trackball_up_isr(void* arg) {
+    portENTER_CRITICAL_ISR(&s_tb_lock);
+    count_up++;
+    portEXIT_CRITICAL_ISR(&s_tb_lock);
+}
 
-static void IRAM_ATTR trackball_down_isr(void* arg) { count_down++; }
+static void IRAM_ATTR trackball_down_isr(void* arg) {
+    portENTER_CRITICAL_ISR(&s_tb_lock);
+    count_down++;
+    portEXIT_CRITICAL_ISR(&s_tb_lock);
+}
 
-static void IRAM_ATTR trackball_left_isr(void* arg) { count_left++; }
+static void IRAM_ATTR trackball_left_isr(void* arg) {
+    portENTER_CRITICAL_ISR(&s_tb_lock);
+    count_left++;
+    portEXIT_CRITICAL_ISR(&s_tb_lock);
+}
 
-static void IRAM_ATTR trackball_right_isr(void* arg) { count_right++; }
+static void IRAM_ATTR trackball_right_isr(void* arg) {
+    portENTER_CRITICAL_ISR(&s_tb_lock);
+    count_right++;
+    portEXIT_CRITICAL_ISR(&s_tb_lock);
+}
 
-static void IRAM_ATTR trackball_center_isr(void* arg) { count_center++; }
+static void IRAM_ATTR trackball_center_isr(void* arg) {
+    portENTER_CRITICAL_ISR(&s_tb_lock);
+    count_center++;
+    portEXIT_CRITICAL_ISR(&s_tb_lock);
+}
 
 /* ── Public API ─────────────────────────────────────────────────────── */
 
@@ -85,29 +109,30 @@ ui_button_t trackball_poll(void) {
     if (!initialized)
         return BTN_NONE;
 
-    /* Priority: center > up > down > left > right */
+    /* Priority: center > up > down > left > right.
+     * Decrement under the spinlock so an ISR increment cannot be lost in the
+     * read-modify-write. */
+    ui_button_t btn = BTN_NONE;
+    portENTER_CRITICAL(&s_tb_lock);
     if (count_center > 0) {
         count_center--;
-        return BTN_SELECT;
-    }
-    if (count_up > 0) {
+        btn = BTN_SELECT;
+    } else if (count_up > 0) {
         count_up--;
-        return BTN_UP;
-    }
-    if (count_down > 0) {
+        btn = BTN_UP;
+    } else if (count_down > 0) {
         count_down--;
-        return BTN_DOWN;
-    }
-    if (count_left > 0) {
+        btn = BTN_DOWN;
+    } else if (count_left > 0) {
         count_left--;
-        return BTN_LEFT;
-    }
-    if (count_right > 0) {
+        btn = BTN_LEFT;
+    } else if (count_right > 0) {
         count_right--;
-        return BTN_RIGHT;
+        btn = BTN_RIGHT;
     }
+    portEXIT_CRITICAL(&s_tb_lock);
 
-    return BTN_NONE;
+    return btn;
 }
 
 #else /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
