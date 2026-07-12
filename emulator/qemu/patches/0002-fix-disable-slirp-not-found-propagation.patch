@@ -1,0 +1,25 @@
+diff --git a/meson.build b/meson.build
+index 7f28871..8b8b09c 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1227,9 +1227,17 @@ if not get_option('slirp').auto() or have_system
+     slirp_cflags += ['-DLIBSLIRP_STATIC'] 
+   endif
+ 
+-  slirp = declare_dependency(dependencies: [slirp_dep],
+-                          compile_args: slirp_cflags,
+-                          version: slirp_dep.version())
++  # declare_dependency() always reports found() == true regardless of
++  # whether slirp_dep itself was found, so guard it explicitly: without
++  # this, -Dslirp=disabled still pulls net/slirp.c into the build on any
++  # have_system target and fails at compile time with a missing
++  # libslirp.h instead of actually disabling the backend (bramble:
++  # P2.2-infra, see emulator/qemu/patches/README.md).
++  if slirp_dep.found()
++    slirp = declare_dependency(dependencies: [slirp_dep],
++                            compile_args: slirp_cflags,
++                            version: slirp_dep.version())
++  endif
+ 
+   # slirp < 4.7 is incompatible with CFI support in QEMU.  This is because
+   # it passes function pointers within libslirp as callbacks for timers.
