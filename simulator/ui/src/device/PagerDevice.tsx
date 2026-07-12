@@ -105,6 +105,7 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
     });
   }, []);
   const beginReset = useCallback(() => {
+    if (resetTimer.current) { clearInterval(resetTimer.current); resetTimer.current = null; }
     setResetHint(false);
     resetStart.current = Date.now();
     resetTimer.current = setInterval(() => {
@@ -122,9 +123,16 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
   useEffect(() => {
     // Release anywhere ends a reset hold (replaces the old mouseleave cancel,
     // which aborted the hold on a one-pixel drift off the tiny pinhole).
+    // Release (or cancel) anywhere ends a reset hold. Pointer events cover
+    // mouse AND touch with one path; touch also fires pointercancel if the
+    // browser reclaims the gesture, which must end the hold too.
     const up = () => clearReset();
-    window.addEventListener('mouseup', up);
-    return () => window.removeEventListener('mouseup', up);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
   }, [clearReset]);
 
   return (
@@ -189,10 +197,10 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
               role="button"
               tabIndex={0}
               aria-label={`${b.label} button`}
-              style={{ cursor: 'pointer' }}
-              onMouseDown={() => press(b.id)}
-              onMouseUp={() => release(b.id)}
-              onMouseLeave={() => release(b.id)}
+              style={{ cursor: 'pointer', touchAction: 'none' }}
+              onPointerDown={() => press(b.id)}
+              onPointerUp={() => release(b.id)}
+              onPointerLeave={() => release(b.id)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); press(b.id); } }}
               onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); release(b.id); } }}
             >
@@ -217,9 +225,9 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
             role="button"
             tabIndex={0}
             aria-label="reset (hold 0.8s)"
-            style={{ cursor: 'pointer' }}
-            onMouseDown={beginReset}
-            onMouseUp={clearReset}
+            style={{ cursor: 'pointer', touchAction: 'none' }}
+            onPointerDown={beginReset}
+            onPointerUp={clearReset}
           >
             {/* Generous invisible hit area; the visible pinhole is tiny and a
                 one-pixel drift must not cancel the hold (no mouseleave cancel:
