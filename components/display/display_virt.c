@@ -28,8 +28,7 @@ static uint32_t s_seq = 0; /* monotonically increasing, first frame = 1 */
 
 /* ── base64 (standard alphabet, padded) ──────────────────────────────── */
 
-static const char b64_tab[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char b64_tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 #define FB_B64_LEN (((SSD1680_FB_SIZE + 2) / 3) * 4)
 static char s_b64[FB_B64_LEN + 1];
@@ -91,8 +90,7 @@ void display_flush(void) {
         return;
     cJSON_AddStringToObject(msg, "t", "fb");
     cJSON_AddNumberToObject(msg, "seq", (double)++s_seq);
-    cJSON_AddStringToObject(msg, "kind",
-                            kind == SSD1680_REFRESH_FULL ? "full" : "partial");
+    cJSON_AddStringToObject(msg, "kind", kind == SSD1680_REFRESH_FULL ? "full" : "partial");
     cJSON_AddStringToObject(msg, "fb", s_b64);
     cJSON_AddNumberToObject(msg, "busy_ms", (double)busy_ms);
     /* emu_link_send takes ownership of msg on all paths and drops the

@@ -136,7 +136,7 @@ void test_ttl_expiry_signals_auto_expired_once(void) {
     TEST_ASSERT_EQUAL_INT(PHY_PT_OK, phy_passthrough_enable(30, false, false));
     TEST_ASSERT_FALSE(phy_passthrough_consume_auto_expired()); /* not expired yet */
 
-    advance_sec(31); /* window elapsed */
+    advance_sec(31);                                /* window elapsed */
     TEST_ASSERT_FALSE(phy_passthrough_is_active()); /* folds expiry into disable */
 
     TEST_ASSERT_TRUE(phy_passthrough_consume_auto_expired());  /* fires once */

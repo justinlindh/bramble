@@ -1576,8 +1576,7 @@ void app_main(void) {
          * and looking broken, so slow it drastically there: the pager updates
          * its status screen on real events (messages, neighbors), not a
          * live-ticking clock. */
-        const uint32_t uptime_refresh_ms =
-            board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
+        const uint32_t uptime_refresh_ms = board_has_cap(BOARD_CAP_DISPLAY_EPAPER) ? 60000u : 1000u;
         if (ui_get_screen(&ui) == SCREEN_MAIN && (now_ms % uptime_refresh_ms) < 50) {
             render_main_screen(&ui);
         }

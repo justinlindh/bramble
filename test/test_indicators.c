@@ -38,7 +38,7 @@ void tearDown(void) {
     pthread_mutex_unlock(&s_ind_mu);
 }
 
-static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms) {
+static void read_line_timeout(int fd, char* out, size_t out_sz, int deadline_ms) {
     size_t len = 0;
     out[0] = '\0';
     struct timeval start;
@@ -67,7 +67,7 @@ static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms)
     }
 }
 
-static void attach_and_drain_hello(const char *node_id) {
+static void attach_and_drain_hello(const char* node_id) {
     int fds[2];
     TEST_ASSERT_EQUAL_INT(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
     s_broker_fd = fds[0];
@@ -77,10 +77,10 @@ static void attach_and_drain_hello(const char *node_id) {
 }
 
 /* Reads the next `ind` line and returns its parsed object (caller frees). */
-static cJSON *read_ind(void) {
+static cJSON* read_ind(void) {
     char line[256];
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
-    cJSON *m = cJSON_Parse(line);
+    cJSON* m = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL_MESSAGE(m, "expected an ind message");
     TEST_ASSERT_EQUAL_STRING("ind", cJSON_GetObjectItem(m, "t")->valuestring);
     return m;
@@ -90,7 +90,7 @@ void test_set_led_emits_full_state(void) {
     attach_and_drain_hello("pager-ind-1");
 
     indicator_set_led(true);
-    cJSON *m = read_ind();
+    cJSON* m = read_ind();
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(m, "led")));
     TEST_ASSERT_EQUAL_INT(0, cJSON_GetObjectItem(m, "buzzer_hz")->valueint);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(m, "vibra")));
@@ -101,7 +101,7 @@ void test_buzzer_emits_full_state(void) {
     attach_and_drain_hello("pager-ind-2");
 
     indicator_buzzer(2731);
-    cJSON *m = read_ind();
+    cJSON* m = read_ind();
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(m, "led")));
     TEST_ASSERT_EQUAL_INT(2731, cJSON_GetObjectItem(m, "buzzer_hz")->valueint);
     TEST_ASSERT_TRUE(cJSON_IsFalse(cJSON_GetObjectItem(m, "vibra")));
@@ -118,7 +118,7 @@ void test_state_accumulates_across_setters(void) {
     cJSON_Delete(read_ind());
     indicator_buzzer(1000);
 
-    cJSON *m = read_ind();
+    cJSON* m = read_ind();
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(m, "led")));
     TEST_ASSERT_EQUAL_INT(1000, cJSON_GetObjectItem(m, "buzzer_hz")->valueint);
     TEST_ASSERT_TRUE(cJSON_IsTrue(cJSON_GetObjectItem(m, "vibra")));

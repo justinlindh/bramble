@@ -43,7 +43,7 @@
 
 static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
 static gps_fix_cb_t s_cb = NULL;
-static void *s_cb_ctx = NULL;
+static void* s_cb_ctx = NULL;
 static bramble_position_t s_pos = {0};
 static nmea_position_t s_np = {0}; /* running accumulator across sentences */
 static bool s_has_fix = false;
@@ -52,10 +52,10 @@ static uint8_t s_sats_used = 0;
 static uint8_t s_sats_in_view = 0;
 static bool s_antenna_warning = false;
 
-static void nmea_handler(const cJSON *msg, void *ctx);
+static void nmea_handler(const cJSON* msg, void* ctx);
 
 static void send_gpsgate(bool on) {
-    cJSON *m = cJSON_CreateObject();
+    cJSON* m = cJSON_CreateObject();
     if (!m)
         return;
     cJSON_AddStringToObject(m, "t", "gpsgate");
@@ -63,7 +63,7 @@ static void send_gpsgate(bool on) {
     emu_link_send(m); /* takes ownership on all paths */
 }
 
-int gps_init(gps_fix_cb_t cb, void *ctx) {
+int gps_init(gps_fix_cb_t cb, void* ctx) {
     pthread_mutex_lock(&s_mu);
     s_cb = cb;
     s_cb_ctx = ctx;
@@ -90,9 +90,9 @@ int gps_set_enabled(bool enabled) {
     return 0;
 }
 
-static void nmea_handler(const cJSON *msg, void *ctx) {
+static void nmea_handler(const cJSON* msg, void* ctx) {
     (void)ctx;
-    const cJSON *s = cJSON_GetObjectItem(msg, "sentence");
+    const cJSON* s = cJSON_GetObjectItem(msg, "sentence");
     if (!cJSON_IsString(s) || !s->valuestring)
         return;
 
@@ -137,7 +137,7 @@ static void nmea_handler(const cJSON *msg, void *ctx) {
     }
 
     gps_fix_cb_t cb = NULL;
-    void *cb_ctx = NULL;
+    void* cb_ctx = NULL;
     bramble_position_t out;
 
     pthread_mutex_lock(&s_mu);
@@ -173,7 +173,7 @@ bool gps_has_fix(void) {
     return f;
 }
 
-bool gps_get_position(bramble_position_t *out) {
+bool gps_get_position(bramble_position_t* out) {
     if (!out)
         return false;
     bool ok;
@@ -185,7 +185,7 @@ bool gps_get_position(bramble_position_t *out) {
     return ok;
 }
 
-void gps_get_stats(gps_stats_t *out) {
+void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;
     pthread_mutex_lock(&s_mu);

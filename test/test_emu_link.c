@@ -26,9 +26,7 @@
  * (or of a real listener for the connect()-level tests). */
 static int s_broker_fd = -1;
 
-void setUp(void) {
-    s_broker_fd = -1;
-}
+void setUp(void) { s_broker_fd = -1; }
 
 void tearDown(void) {
     emu_link_close();
@@ -44,7 +42,7 @@ void tearDown(void) {
 
 /* Reads from fd until a '\n' is seen or deadline_ms elapses, returning the
  * line (without the newline) in out, or an empty string on timeout/EOF. */
-static void read_line_timeout(int fd, char *out, size_t out_sz, int deadline_ms) {
+static void read_line_timeout(int fd, char* out, size_t out_sz, int deadline_ms) {
     size_t len = 0;
     out[0] = '\0';
     struct timeval start;
@@ -84,20 +82,20 @@ typedef struct {
     int last_int_field;
 } capture_t;
 
-static void capture_handler(const cJSON *msg, void *ctx) {
-    capture_t *c = (capture_t *)ctx;
+static void capture_handler(const cJSON* msg, void* ctx) {
+    capture_t* c = (capture_t*)ctx;
     atomic_fetch_add(&c->calls, 1);
-    const cJSON *t = cJSON_GetObjectItem(msg, "t");
+    const cJSON* t = cJSON_GetObjectItem(msg, "t");
     if (cJSON_IsString(t)) {
         strncpy(c->last_type, t->valuestring, sizeof(c->last_type) - 1);
         c->last_type[sizeof(c->last_type) - 1] = '\0';
     }
-    const cJSON *v = cJSON_GetObjectItem(msg, "v");
+    const cJSON* v = cJSON_GetObjectItem(msg, "v");
     if (cJSON_IsNumber(v))
         c->last_int_field = v->valueint;
 }
 
-static bool wait_for_calls(_Atomic int *counter, int want, int deadline_ms) {
+static bool wait_for_calls(_Atomic int* counter, int want, int deadline_ms) {
     for (int waited = 0; waited < deadline_ms; waited += 5) {
         if (atomic_load(counter) >= want)
             return true;
@@ -109,7 +107,7 @@ static bool wait_for_calls(_Atomic int *counter, int want, int deadline_ms) {
 /* Opens a connected pair and attaches one end as the node under test via the
  * internal helper, returning the broker-side fd (also stashed in
  * s_broker_fd so tearDown cleans it up). */
-static void attach_pair(const char *node_id, const char *caps) {
+static void attach_pair(const char* node_id, const char* caps) {
     int fds[2];
     TEST_ASSERT_EQUAL_INT(0, socketpair(AF_UNIX, SOCK_STREAM, 0, fds));
     s_broker_fd = fds[0];
@@ -125,7 +123,7 @@ void test_hello_sent_on_attach(void) {
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
     TEST_ASSERT_TRUE(strlen(line) > 0);
 
-    cJSON *hello = cJSON_Parse(line);
+    cJSON* hello = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(hello);
     TEST_ASSERT_EQUAL_STRING("hello", cJSON_GetObjectItem(hello, "t")->valuestring);
     TEST_ASSERT_EQUAL_STRING("pager-1", cJSON_GetObjectItem(hello, "node")->valuestring);
@@ -140,7 +138,7 @@ void test_hello_caps_null_becomes_empty(void) {
 
     char line[512];
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
-    cJSON *hello = cJSON_Parse(line);
+    cJSON* hello = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(hello);
     TEST_ASSERT_EQUAL_STRING("", cJSON_GetObjectItem(hello, "caps")->valuestring);
     cJSON_Delete(hello);
@@ -156,7 +154,7 @@ void test_framing_object_split_across_multiple_reads(void) {
     capture_t cap = {0};
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("rx", capture_handler, &cap));
 
-    const char *line = "{\"t\":\"rx\",\"v\":42}\n";
+    const char* line = "{\"t\":\"rx\",\"v\":42}\n";
     size_t total = strlen(line);
     size_t split = 6; /* mid-object */
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, line, split));
@@ -177,7 +175,7 @@ void test_framing_multiple_objects_in_one_read(void) {
     capture_t cap = {0};
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("btn", capture_handler, &cap));
 
-    const char *both = "{\"t\":\"btn\",\"v\":1}\n{\"t\":\"btn\",\"v\":2}\n";
+    const char* both = "{\"t\":\"btn\",\"v\":1}\n{\"t\":\"btn\",\"v\":2}\n";
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, both, strlen(both)));
 
     TEST_ASSERT_TRUE(wait_for_calls(&cap.calls, 2, 2000));
@@ -196,14 +194,14 @@ void test_oversized_line_dropped_then_resyncs(void) {
     /* A line longer than EMU_LINK_MAX_LINE with no newline: the reader must
      * not crash or hang, and must recover once real framing resumes. */
     size_t junk_len = EMU_LINK_MAX_LINE + 4096;
-    char *junk = (char *)malloc(junk_len);
+    char* junk = (char*)malloc(junk_len);
     TEST_ASSERT_NOT_NULL(junk);
     memset(junk, 'a', junk_len);
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, junk, junk_len));
     free(junk);
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, "\n", 1));
 
-    const char *good = "{\"t\":\"rx\",\"v\":7}\n";
+    const char* good = "{\"t\":\"rx\",\"v\":7}\n";
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, good, strlen(good)));
 
     TEST_ASSERT_TRUE(wait_for_calls(&cap.calls, 1, 3000));
@@ -222,7 +220,7 @@ void test_handler_dispatch_by_type(void) {
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("rx", capture_handler, &rx_cap));
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("btn", capture_handler, &btn_cap));
 
-    const char *msg = "{\"t\":\"btn\",\"v\":9}\n";
+    const char* msg = "{\"t\":\"btn\",\"v\":9}\n";
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, msg, strlen(msg)));
 
     TEST_ASSERT_TRUE(wait_for_calls(&btn_cap.calls, 1, 2000));
@@ -239,7 +237,7 @@ void test_unknown_type_silently_ignored(void) {
     capture_t rx_cap = {0};
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("rx", capture_handler, &rx_cap));
 
-    const char *msgs = "{\"t\":\"someFutureType\",\"v\":1}\n{\"t\":\"rx\",\"v\":5}\n";
+    const char* msgs = "{\"t\":\"someFutureType\",\"v\":1}\n{\"t\":\"rx\",\"v\":5}\n";
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, msgs, strlen(msgs)));
 
     TEST_ASSERT_TRUE(wait_for_calls(&rx_cap.calls, 1, 2000));
@@ -257,7 +255,7 @@ void test_handler_registration_replaces_for_same_type(void) {
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("rx", capture_handler, &first));
     TEST_ASSERT_EQUAL_INT(0, emu_link_on("rx", capture_handler, &second));
 
-    const char *msg = "{\"t\":\"rx\",\"v\":3}\n";
+    const char* msg = "{\"t\":\"rx\",\"v\":3}\n";
     TEST_ASSERT_EQUAL_INT(0, write_all(s_broker_fd, msg, strlen(msg)));
 
     TEST_ASSERT_TRUE(wait_for_calls(&second.calls, 1, 2000));
@@ -276,17 +274,15 @@ void test_on_rejects_null_type_or_handler(void) {
 /* --- send ---------------------------------------------------------------*/
 
 void test_send_requires_t_field(void) {
-    cJSON *no_t = cJSON_CreateObject();
+    cJSON* no_t = cJSON_CreateObject();
     cJSON_AddNumberToObject(no_t, "v", 1);
     TEST_ASSERT_TRUE(emu_link_send(no_t) != 0); /* takes ownership even on failure */
 }
 
-void test_send_null_is_rejected_not_crashed(void) {
-    TEST_ASSERT_TRUE(emu_link_send(NULL) != 0);
-}
+void test_send_null_is_rejected_not_crashed(void) { TEST_ASSERT_TRUE(emu_link_send(NULL) != 0); }
 
 void test_send_without_connection_fails_cleanly(void) {
-    cJSON *msg = cJSON_CreateObject();
+    cJSON* msg = cJSON_CreateObject();
     cJSON_AddStringToObject(msg, "t", "log");
     TEST_ASSERT_TRUE(emu_link_send(msg) != 0);
 }
@@ -296,14 +292,14 @@ void test_send_delivers_line_with_type(void) {
     char discard[512];
     read_line_timeout(s_broker_fd, discard, sizeof(discard), 2000); /* hello */
 
-    cJSON *msg = cJSON_CreateObject();
+    cJSON* msg = cJSON_CreateObject();
     cJSON_AddStringToObject(msg, "t", "log");
     cJSON_AddStringToObject(msg, "line", "booted");
     TEST_ASSERT_EQUAL_INT(0, emu_link_send(msg));
 
     char line[512];
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
-    cJSON *got = cJSON_Parse(line);
+    cJSON* got = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(got);
     TEST_ASSERT_EQUAL_STRING("log", cJSON_GetObjectItem(got, "t")->valuestring);
     TEST_ASSERT_EQUAL_STRING("booted", cJSON_GetObjectItem(got, "line")->valuestring);
@@ -316,10 +312,10 @@ void test_send_delivers_line_with_type(void) {
 #define SENDS_PER_THREAD 50
 #define SEND_TOTAL (SEND_THREADS * SENDS_PER_THREAD)
 
-static void *sender_thread(void *arg) {
+static void* sender_thread(void* arg) {
     int id = (int)(intptr_t)arg;
     for (int i = 0; i < SENDS_PER_THREAD; i++) {
-        cJSON *msg = cJSON_CreateObject();
+        cJSON* msg = cJSON_CreateObject();
         cJSON_AddStringToObject(msg, "t", "log");
         cJSON_AddNumberToObject(msg, "thread", id);
         cJSON_AddNumberToObject(msg, "seq", i);
@@ -341,21 +337,21 @@ typedef struct {
     int corrupt;
 } drain_result_t;
 
-static void *drain_thread(void *arg) {
-    drain_result_t *r = (drain_result_t *)arg;
+static void* drain_thread(void* arg) {
+    drain_result_t* r = (drain_result_t*)arg;
     while (r->total_seen < r->expect) {
         char line[512];
         read_line_timeout(r->fd, line, sizeof(line), 5000);
         if (strlen(line) == 0)
             break; /* timeout: caller's count check will catch the shortfall */
-        cJSON *msg = cJSON_Parse(line);
+        cJSON* msg = cJSON_Parse(line);
         if (!msg) {
             r->corrupt++;
             continue;
         }
-        const cJSON *t = cJSON_GetObjectItem(msg, "t");
-        const cJSON *tid_j = cJSON_GetObjectItem(msg, "thread");
-        const cJSON *seq_j = cJSON_GetObjectItem(msg, "seq");
+        const cJSON* t = cJSON_GetObjectItem(msg, "t");
+        const cJSON* tid_j = cJSON_GetObjectItem(msg, "thread");
+        const cJSON* seq_j = cJSON_GetObjectItem(msg, "seq");
         if (!cJSON_IsString(t) || strcmp(t->valuestring, "log") != 0 || !cJSON_IsNumber(tid_j) ||
             !cJSON_IsNumber(seq_j)) {
             r->corrupt++;
@@ -390,7 +386,8 @@ void test_concurrent_sends_are_thread_safe(void) {
 
     pthread_t threads[SEND_THREADS];
     for (int i = 0; i < SEND_THREADS; i++)
-        TEST_ASSERT_EQUAL_INT(0, pthread_create(&threads[i], NULL, sender_thread, (void *)(intptr_t)i));
+        TEST_ASSERT_EQUAL_INT(0,
+                              pthread_create(&threads[i], NULL, sender_thread, (void*)(intptr_t)i));
     for (int i = 0; i < SEND_THREADS; i++)
         pthread_join(threads[i], NULL);
     pthread_join(drainer, NULL);
@@ -402,7 +399,8 @@ void test_concurrent_sends_are_thread_safe(void) {
     TEST_ASSERT_EQUAL_INT(SEND_TOTAL, result.total_seen);
     for (int t = 0; t < SEND_THREADS; t++)
         for (int s = 0; s < SENDS_PER_THREAD; s++)
-            TEST_ASSERT_EQUAL_INT_MESSAGE(1, result.seen[t][s], "missing or duplicated (thread, seq)");
+            TEST_ASSERT_EQUAL_INT_MESSAGE(1, result.seen[t][s],
+                                          "missing or duplicated (thread, seq)");
 }
 
 /* --- broker disconnect -------------------------------------------------*/
@@ -417,7 +415,7 @@ void test_broker_disconnect_mid_run_does_not_crash(void) {
     usleep(50000); /* let the reader thread observe EOF */
 
     /* Sends after the peer is gone must fail cleanly, not crash. */
-    cJSON *msg = cJSON_CreateObject();
+    cJSON* msg = cJSON_CreateObject();
     cJSON_AddStringToObject(msg, "t", "log");
     emu_link_send(msg); /* rc unspecified once the peer is gone; must not crash */
 
@@ -451,11 +449,11 @@ void test_connect_null_node_id_rejected(void) {
 static int s_listen_fd = -1;
 static char s_sock_path[128];
 
-static void *accept_one(void *arg) {
+static void* accept_one(void* arg) {
     (void)arg;
     struct sockaddr_un peer;
     socklen_t len = sizeof(peer);
-    int fd = accept(s_listen_fd, (struct sockaddr *)&peer, &len);
+    int fd = accept(s_listen_fd, (struct sockaddr*)&peer, &len);
     s_broker_fd = fd;
     return NULL;
 }
@@ -471,7 +469,7 @@ void test_connect_real_unix_socket_end_to_end(void) {
 
     s_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     TEST_ASSERT_TRUE(s_listen_fd >= 0);
-    TEST_ASSERT_EQUAL_INT(0, bind(s_listen_fd, (struct sockaddr *)&addr, sizeof(addr)));
+    TEST_ASSERT_EQUAL_INT(0, bind(s_listen_fd, (struct sockaddr*)&addr, sizeof(addr)));
     TEST_ASSERT_EQUAL_INT(0, listen(s_listen_fd, 1));
 
     pthread_t accepter;
@@ -487,7 +485,7 @@ void test_connect_real_unix_socket_end_to_end(void) {
 
     char line[512];
     read_line_timeout(s_broker_fd, line, sizeof(line), 2000);
-    cJSON *hello = cJSON_Parse(line);
+    cJSON* hello = cJSON_Parse(line);
     TEST_ASSERT_NOT_NULL(hello);
     TEST_ASSERT_EQUAL_STRING("hello", cJSON_GetObjectItem(hello, "t")->valuestring);
     TEST_ASSERT_EQUAL_STRING("real-node", cJSON_GetObjectItem(hello, "node")->valuestring);

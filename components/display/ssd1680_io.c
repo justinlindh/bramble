@@ -82,8 +82,7 @@ static esp_err_t epd_write_cmd(uint8_t cmd) {
     t.tx_data[0] = cmd;
     esp_err_t err = spi_device_polling_transmit(s_spi, &t);
     if (err != ESP_OK)
-        ESP_LOGE(TAG, "cmd 0x%02x transmit failed: %s", cmd,
-                 esp_err_to_name(err));
+        ESP_LOGE(TAG, "cmd 0x%02x transmit failed: %s", cmd, esp_err_to_name(err));
     return err;
 }
 
@@ -106,8 +105,7 @@ static esp_err_t epd_write_data(uint8_t cmd, const uint8_t* data, size_t len) {
         }
         esp_err_t err = spi_device_polling_transmit(s_spi, &t);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "cmd 0x%02x data transmit failed: %s", cmd,
-                     esp_err_to_name(err));
+            ESP_LOGE(TAG, "cmd 0x%02x data transmit failed: %s", cmd, esp_err_to_name(err));
             return err;
         }
         data += chunk;
@@ -128,8 +126,7 @@ int display_init(void) {
 
     /* D/C and RES# outputs; BUSY input. CS belongs to the SPI driver. */
     gpio_config_t out_conf = {
-        .pin_bit_mask = (1ULL << s_board->epd_display.dc) |
-                        (1ULL << s_board->epd_display.rst),
+        .pin_bit_mask = (1ULL << s_board->epd_display.dc) | (1ULL << s_board->epd_display.rst),
         .mode = GPIO_MODE_OUTPUT,
     };
     esp_err_t gerr = gpio_config(&out_conf);
@@ -171,8 +168,8 @@ int display_init(void) {
      * init sequence (p.31) and is forced FULL. Boot stays fast and a
      * missing panel costs nothing until the first flush. */
     ESP_LOGI(TAG, "SSD1680 250x122 e-paper ready (CS=%d DC=%d RST=%d BUSY=%d)",
-             s_board->epd_display.cs, s_board->epd_display.dc,
-             s_board->epd_display.rst, s_board->epd_display.busy);
+             s_board->epd_display.cs, s_board->epd_display.dc, s_board->epd_display.rst,
+             s_board->epd_display.busy);
     return 0;
 }
 
@@ -319,9 +316,7 @@ uint8_t display_get_backlight(void) { return 255; }
 
 void display_set_contrast(uint8_t val) { (void)val; /* not applicable */ }
 
-void display_invert(bool invert) {
-    (void)invert; /* no cheap runtime invert on e-paper */
-}
+void display_invert(bool invert) { (void)invert; /* no cheap runtime invert on e-paper */ }
 
 void display_set_rotated_180(bool rotated) { s_rotated_180 = rotated; }
 

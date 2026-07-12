@@ -35,7 +35,7 @@ static bool s_vibra = false;
 
 /* Emits the current full state as one `ind` message. Call with s_ind_mu held. */
 static void send_state_locked(void) {
-    cJSON *m = cJSON_CreateObject();
+    cJSON* m = cJSON_CreateObject();
     if (!m)
         return;
     cJSON_AddStringToObject(m, "t", "ind");

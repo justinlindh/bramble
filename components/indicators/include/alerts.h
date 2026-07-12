@@ -27,7 +27,7 @@ extern "C" {
 #define ALERT_BEEP_ON_MS 200u
 #define ALERT_BEEP_GAP_MS 150u
 #define ALERT_VIBRA_MS 400u
-#define ALERT_LED_ON_MS 200u     /* blink pulse width */
+#define ALERT_LED_ON_MS 200u      /* blink pulse width */
 #define ALERT_LED_PERIOD_MS 2000u /* blink period while unconfirmed */
 
 /* Reset internal state (idle, LED dark). Does not touch the outputs. */

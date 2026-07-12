@@ -27,8 +27,8 @@
 static const bramble_board_config_t board_bramble_pager = {
     .name = "Bramble Pager v1",
     .short_name = "bramble_pager",
-    .capabilities = BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS | BOARD_CAP_DISPLAY_EPAPER | BOARD_CAP_ALERTS |
-                    BOARD_CAP_SHARED_SPI,
+    .capabilities = BOARD_CAP_BATTERY_ADC | BOARD_CAP_GPS | BOARD_CAP_DISPLAY_EPAPER |
+                    BOARD_CAP_ALERTS | BOARD_CAP_SHARED_SPI,
 
     .peripheral_power_pin = -1,
 

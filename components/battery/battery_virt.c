@@ -31,9 +31,9 @@
 
 static _Atomic uint32_t s_mv = BATTERY_VIRT_DEFAULT_MV;
 
-static void batt_handler(const cJSON *msg, void *ctx) {
+static void batt_handler(const cJSON* msg, void* ctx) {
     (void)ctx;
-    const cJSON *mv = cJSON_GetObjectItem(msg, "mv");
+    const cJSON* mv = cJSON_GetObjectItem(msg, "mv");
     if (cJSON_IsNumber(mv) && mv->valueint >= 0)
         atomic_store(&s_mv, (uint32_t)mv->valueint);
 }

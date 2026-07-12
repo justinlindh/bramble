@@ -93,7 +93,7 @@ typedef enum {
  * data points into engine-owned storage, valid until the next flush. */
 typedef struct {
     uint8_t cmd;
-    const uint8_t *data;
+    const uint8_t* data;
     size_t len;
 } ssd1680_op_t;
 
@@ -117,10 +117,9 @@ void ssd1680_engine_pixel(int x, int y, bool on);
  * valid until the next flush call. NONE flushes do not advance the
  * full-refresh cadence.
  */
-ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t **ops, size_t *n_ops,
-                                       uint32_t *busy_ms);
+ssd1680_refresh_t ssd1680_engine_flush(const ssd1680_op_t** ops, size_t* n_ops, uint32_t* busy_ms);
 
 /* Logical framebuffer, SSD1680_FB_SIZE bytes (see layout note above). */
-const uint8_t *ssd1680_engine_fb(void);
+const uint8_t* ssd1680_engine_fb(void);
 
 #endif /* BRAMBLE_SSD1680_ENGINE_H */

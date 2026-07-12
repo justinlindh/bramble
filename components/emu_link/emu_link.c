@@ -25,22 +25,22 @@
  * convention used by components/gps/gps.c. */
 #if defined(ESP_PLATFORM) && !defined(CONFIG_IDF_TARGET_LINUX)
 
-int emu_link_connect(const char *node_id, const char *caps_csv) {
+int emu_link_connect(const char* node_id, const char* caps_csv) {
     (void)node_id;
     (void)caps_csv;
     return -1;
 }
 
-void emu_link_set_fw_version(const char *ver) { (void)ver; }
+void emu_link_set_fw_version(const char* ver) { (void)ver; }
 
-int emu_link_on(const char *type, emu_link_handler_t h, void *ctx) {
+int emu_link_on(const char* type, emu_link_handler_t h, void* ctx) {
     (void)type;
     (void)h;
     (void)ctx;
     return -1;
 }
 
-int emu_link_send(cJSON *msg) {
+int emu_link_send(cJSON* msg) {
     if (msg)
         cJSON_Delete(msg);
     return -1;
@@ -82,7 +82,7 @@ typedef struct {
     bool used;
     char type[EMU_LINK_MAX_TYPE_LEN + 1];
     emu_link_handler_t fn;
-    void *ctx;
+    void* ctx;
 } emu_link_handler_slot_t;
 
 /* s_send_mu guards s_fd (connection identity) and serializes writes to it.
@@ -109,8 +109,8 @@ static char s_fw_version[64] = EMU_LINK_FW_VERSION;
  * Uses send()+MSG_NOSIGNAL (not write()) so a broker that has hung up
  * doesn't raise SIGPIPE and kill the process. Returns 0 on success, -1 on
  * any I/O error. */
-static int write_all(int fd, const void *buf, size_t len) {
-    const uint8_t *p = (const uint8_t *)buf;
+static int write_all(int fd, const void* buf, size_t len) {
+    const uint8_t* p = (const uint8_t*)buf;
     while (len > 0) {
         ssize_t n = send(fd, p, len, MSG_NOSIGNAL);
         if (n < 0) {
@@ -128,14 +128,14 @@ static int write_all(int fd, const void *buf, size_t len) {
 
 /* Serializes msg to one JSON line and writes it to the current connection
  * under s_send_mu. Always takes ownership of msg. */
-static int send_locked(cJSON *msg) {
+static int send_locked(cJSON* msg) {
     if (!msg)
         return -1;
     if (!cJSON_HasObjectItem(msg, "t")) {
         cJSON_Delete(msg);
         return -1;
     }
-    char *text = cJSON_PrintUnformatted(msg);
+    char* text = cJSON_PrintUnformatted(msg);
     cJSON_Delete(msg);
     if (!text)
         return -1;
@@ -156,19 +156,19 @@ static int send_locked(cJSON *msg) {
 /* Parses one NUL-terminated line and dispatches it to its registered
  * handler, if any. Unknown types and malformed JSON are silently ignored
  * (DESIGN.md section 8: forward compatibility). */
-static void dispatch_line(char *line) {
-    cJSON *msg = cJSON_Parse(line);
+static void dispatch_line(char* line) {
+    cJSON* msg = cJSON_Parse(line);
     if (!msg)
         return;
 
-    const cJSON *t = cJSON_GetObjectItem(msg, "t");
+    const cJSON* t = cJSON_GetObjectItem(msg, "t");
     if (!cJSON_IsString(t) || !t->valuestring) {
         cJSON_Delete(msg);
         return;
     }
 
     emu_link_handler_t fn = NULL;
-    void *ctx = NULL;
+    void* ctx = NULL;
     pthread_mutex_lock(&s_handlers_mu);
     for (int i = 0; i < EMU_LINK_MAX_HANDLERS; i++) {
         if (s_handlers[i].used && strcmp(s_handlers[i].type, t->valuestring) == 0) {
@@ -190,9 +190,9 @@ static void dispatch_line(char *line) {
  * this loop's use of the descriptor; the loop only stops via EOF/error on
  * the socket (emu_link_close shuts it down to induce that) or the process
  * exiting. */
-static void *reader_main(void *arg) {
+static void* reader_main(void* arg) {
     int fd = (int)(intptr_t)arg;
-    uint8_t *buf = (uint8_t *)malloc(EMU_LINK_MAX_LINE);
+    uint8_t* buf = (uint8_t*)malloc(EMU_LINK_MAX_LINE);
     if (!buf)
         return NULL;
     size_t len = 0;
@@ -224,7 +224,7 @@ static void *reader_main(void *arg) {
         for (size_t i = 0; i < len; i++) {
             if (buf[i] == '\n') {
                 buf[i] = '\0';
-                dispatch_line((char *)buf + start);
+                dispatch_line((char*)buf + start);
                 start = i + 1;
             }
         }
@@ -246,7 +246,7 @@ static void teardown(void);
 
 /* Dials a unix-domain stream socket at path. Returns a connected fd, or -1
  * on any failure (never crashes on a bad path). */
-static int dial_unix(const char *path) {
+static int dial_unix(const char* path) {
     if (!path || !*path)
         return -1;
 
@@ -260,7 +260,7 @@ static int dial_unix(const char *path) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0)
         return -1;
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         close(fd);
         return -1;
     }
@@ -269,11 +269,11 @@ static int dial_unix(const char *path) {
 
 /* Dials a TCP stream socket at "host:port". Returns a connected fd, or -1
  * on any failure. */
-static int dial_tcp(const char *hostport) {
+static int dial_tcp(const char* hostport) {
     if (!hostport || !*hostport)
         return -1;
 
-    const char *colon = strrchr(hostport, ':');
+    const char* colon = strrchr(hostport, ':');
     if (!colon || colon == hostport || !colon[1])
         return -1;
 
@@ -283,19 +283,19 @@ static int dial_tcp(const char *hostport) {
         return -1;
     memcpy(host, hostport, hlen);
     host[hlen] = '\0';
-    const char *port = colon + 1;
+    const char* port = colon + 1;
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    struct addrinfo *res = NULL;
+    struct addrinfo* res = NULL;
     if (getaddrinfo(host, port, &hints, &res) != 0 || !res)
         return -1;
 
     int fd = -1;
-    for (struct addrinfo *rp = res; rp; rp = rp->ai_next) {
+    for (struct addrinfo* rp = res; rp; rp = rp->ai_next) {
         fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (fd < 0)
             continue;
@@ -315,7 +315,7 @@ static int dial_tcp(const char *hostport) {
  * dispatch without a real broker process. Atomic from the caller's point
  * of view: returns 0 with the connection fully up (reader thread running,
  * hello sent), or negative with the fd closed and nothing left running. */
-static int emu_link_attach(int fd, const char *node_id, const char *caps_csv) {
+static int emu_link_attach(int fd, const char* node_id, const char* caps_csv) {
     pthread_mutex_lock(&s_send_mu);
     if (s_fd != -1) {
         pthread_mutex_unlock(&s_send_mu);
@@ -325,7 +325,7 @@ static int emu_link_attach(int fd, const char *node_id, const char *caps_csv) {
     s_fd = fd;
     pthread_mutex_unlock(&s_send_mu);
 
-    if (pthread_create(&s_reader_thread, NULL, reader_main, (void *)(intptr_t)fd) != 0) {
+    if (pthread_create(&s_reader_thread, NULL, reader_main, (void*)(intptr_t)fd) != 0) {
         pthread_mutex_lock(&s_send_mu);
         s_fd = -1;
         pthread_mutex_unlock(&s_send_mu);
@@ -334,7 +334,7 @@ static int emu_link_attach(int fd, const char *node_id, const char *caps_csv) {
     }
     s_reader_running = true;
 
-    cJSON *hello = cJSON_CreateObject();
+    cJSON* hello = cJSON_CreateObject();
     if (!hello) {
         teardown();
         return -1;
@@ -357,7 +357,7 @@ static int emu_link_attach(int fd, const char *node_id, const char *caps_csv) {
 
 /* --- public API -------------------------------------------------------*/
 
-int emu_link_connect(const char *node_id, const char *caps_csv) {
+int emu_link_connect(const char* node_id, const char* caps_csv) {
     if (!node_id)
         return -1;
 
@@ -367,7 +367,7 @@ int emu_link_connect(const char *node_id, const char *caps_csv) {
     if (already)
         return -1;
 
-    const char *env = getenv("EMU_BROKER");
+    const char* env = getenv("EMU_BROKER");
     if (!env || !*env)
         return -1;
 
@@ -385,7 +385,7 @@ int emu_link_connect(const char *node_id, const char *caps_csv) {
     return emu_link_attach(fd, node_id, caps_csv);
 }
 
-void emu_link_set_fw_version(const char *ver) {
+void emu_link_set_fw_version(const char* ver) {
     if (!ver)
         return;
     pthread_mutex_lock(&s_send_mu);
@@ -394,7 +394,7 @@ void emu_link_set_fw_version(const char *ver) {
     pthread_mutex_unlock(&s_send_mu);
 }
 
-int emu_link_on(const char *type, emu_link_handler_t h, void *ctx) {
+int emu_link_on(const char* type, emu_link_handler_t h, void* ctx) {
     if (!type || !h)
         return -1;
     size_t tlen = strlen(type);
@@ -426,7 +426,7 @@ int emu_link_on(const char *type, emu_link_handler_t h, void *ctx) {
     return rc;
 }
 
-int emu_link_send(cJSON *msg) { return send_locked(msg); }
+int emu_link_send(cJSON* msg) { return send_locked(msg); }
 
 /* Shared teardown for emu_link_close and emu_link_attach's failure path:
  * clears s_fd, unblocks and joins the reader thread if one is running, and
