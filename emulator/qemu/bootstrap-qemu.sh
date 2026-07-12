@@ -43,10 +43,13 @@ if [[ "$CURRENT_TAG" != "$QEMU_TAG" ]]; then
 fi
 
 # --- inject model sources ---
-# .c files land next to esp32s3.c (hw/xtensa/), .h files land where its
-# sibling headers live (include/hw/xtensa/). See models/README.md. Only
-# copies when content differs, so a no-op re-run does not touch mtimes and
-# trigger a spurious ninja rebuild.
+# .c files and the bramble-owned meson.build land in hw/xtensa/bramble/ (the
+# subdir the one meson patch reaches with subdir('bramble')); .h files land
+# where the esp32s3 machine's sibling headers live (include/hw/xtensa/). See
+# models/README.md. Only copies when content differs, so a no-op re-run does not
+# touch mtimes and trigger a spurious ninja rebuild.
+BRAMBLE_DIR="hw/xtensa/bramble"
+mkdir -p "$BRAMBLE_DIR"
 log "injecting model sources from $MODELS_DIR"
 shopt -s nullglob
 inject() {
@@ -54,8 +57,9 @@ inject() {
     cmp -s "$src" "$dst" 2>/dev/null || cp "$src" "$dst" || die "failed to inject $(basename "$src")"
 }
 for f in "$MODELS_DIR"/*.c; do
-    inject "$f" "hw/xtensa/$(basename "$f")"
+    inject "$f" "$BRAMBLE_DIR/$(basename "$f")"
 done
+inject "$MODELS_DIR/meson.build" "$BRAMBLE_DIR/meson.build"
 for f in "$MODELS_DIR"/*.h; do
     inject "$f" "include/hw/xtensa/$(basename "$f")"
 done

@@ -1,6 +1,6 @@
 /*
  * Bramble GPSPI2 (SPI2_HOST) controller model (P2.3).
- * See hw/xtensa/bramble_gpspi2.c.
+ * See hw/xtensa/bramble/bramble_gpspi2.c.
  */
 
 #ifndef HW_XTENSA_BRAMBLE_GPSPI2_H
@@ -10,11 +10,11 @@
 #include "exec/memory.h"
 
 /*
- * Attach the Bramble GPSPI2 controller (plus a stub SSI slave) to the running
- * esp32s3 machine. Called from esp32s3_machine_init() where the SoC state
- * pointer is in scope (Esp32s3SocState is private to hw/xtensa/esp32s3.c, so we
- * wire in at the machine-init site rather than exporting SoC internals, exactly
- * like bramble_gpio_attach; see PHASE2.md P2.3).
+ * Attach the Bramble GPSPI2 controller and its two register-accurate SSI slaves
+ * (the SX1262 radio and the SSD1680 display) to the running esp32s3 machine.
+ * Called from bramble_attach(), where the SoC state pointer is in scope
+ * (Esp32s3SocState is private to hw/xtensa/esp32s3.c, so we wire in at the
+ * machine-init site rather than exporting SoC internals; see PHASE2.md P2.3).
  *
  *   sys_mem  the system address space the GPSPI2 register window lives in.
  *   gdma     the esp32s3 GDMA device, so the peripheral's DMA data path can
@@ -25,18 +25,5 @@
  */
 void bramble_gpspi2_attach(MemoryRegion *sys_mem, DeviceState *gdma,
                            DeviceState *intc);
-
-/*
- * Wire the emu-link bridge to the chardev named "emulink" (the gosim supervisor
- * adds it with `-chardev socket,id=emulink,path=<broker>`), so the SX1262 model
- * exchanges LoRa frames with the gosim ether and the QEMU pager meshes with the
- * linux pagers (P2.4b). A no-op if no such chardev exists (standalone
- * run-qemu.sh boot), so a plain boot is unaffected. Called once from
- * esp32s3_machine_init. The bridge itself lives in bramble_gpspi2.c because
- * hw/xtensa/meson.build is saturated by the earlier bramble patches (see that
- * file's emu-link section comment); it shares the TU with its only client, the
- * SX1262 slave.
- */
-void bramble_emulink_attach(void);
 
 #endif

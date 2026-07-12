@@ -1,0 +1,31 @@
+diff --git a/hw/xtensa/esp32s3.c b/hw/xtensa/esp32s3.c
+index 4a24a04..5ec794e 100644
+--- a/hw/xtensa/esp32s3.c
++++ b/hw/xtensa/esp32s3.c
+@@ -69,6 +69,7 @@
+ 
+ #include "hw/misc/esp32c3_jtag.h"
+ #include "hw/display/esp_rgb.h"
++#include "hw/xtensa/bramble_attach.h"
+ 
+ #define TYPE_ESP32S3_SOC "xtensa.esp32s3"
+ #define ESP32S3_SOC(obj) OBJECT_CHECK(Esp32s3SocState, (obj), TYPE_ESP32S3_SOC)
+@@ -878,6 +879,18 @@ static void esp32s3_machine_init(MachineState *machine)
+     /* Need MMU initialized prior to ELF loading,
+      * so that ELF gets loaded into virtual addresses
+      */
++
++    /* Bramble Phase 2 emulator device models. A single fan-out call attaches
++     * every bramble overlay/model (GPIO, GPSPI2 controller + SX1262/SSD1680 SSI
++     * slaves, SAR ADC, LEDC indicators, emu-link bridge) to the running machine.
++     * Placed here, at the end of machine init, so the GDMA and interrupt matrix
++     * the models need are already realized. Esp32s3SocState is private to
++     * esp32s3.c, so the handles those models need are threaded through
++     * bramble_attach's parameters rather than exported. See
++     * hw/xtensa/bramble/bramble_attach.c. */
++    bramble_attach(get_system_memory(), DEVICE(&ss->gdma),
++                   DEVICE(&ss->intmatrix));
++
+     cpu_reset(CPU(&ss->cpu[0]));
+ 
+     const char *load_elf_filename = NULL;
