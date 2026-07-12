@@ -1356,7 +1356,7 @@ void app_main(void) {
     esp_timer_create(&tick_args, &tick_timer);
     esp_timer_start_periodic(tick_timer, 1000);
 
-    /* Create LVGL task on core 1 (core 0 runs mesh).
+    /* Create LVGL task on core 0 (core 1 runs mesh).
      *
      * IMPORTANT constraints:
      * 1. Stack MUST be in internal RAM — LVGL callbacks (Settings screen)
