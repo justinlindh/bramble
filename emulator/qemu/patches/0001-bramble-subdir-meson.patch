@@ -1,0 +1,15 @@
+diff --git a/hw/xtensa/meson.build b/hw/xtensa/meson.build
+index c1deccb..ab21205 100644
+--- a/hw/xtensa/meson.build
++++ b/hw/xtensa/meson.build
+@@ -14,4 +14,10 @@ xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files(
+   'esp32s3.c',
+ ))
+ 
++# Bramble Phase 2 emulator device models. All bramble sources live in the
++# bramble/ subdir with their own meson.build (bramble-owned, copied into the
++# tree by emulator/qemu/bootstrap-qemu.sh); this one line reaches them. A new
++# model is a new line in that file we own, never a patch to this stock build.
++subdir('bramble')
++
+ hw_arch += {'xtensa': xtensa_ss}
