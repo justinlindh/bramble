@@ -34,3 +34,14 @@ they do not carry the model source files themselves (those are copied, see
   `../models/bramble_gpio.c`. Its meson entry and machine-init call are placed
   clear of `0001`'s adjacent lines so both patches reverse-check as
   already-applied on an idempotent re-run.
+- `0004-bramble-gpspi2-model.patch` (P2.3): wires `bramble_gpspi2.c` into the
+  ESP32S3 source set and calls `bramble_gpspi2_attach()` from
+  `esp32s3_machine_init()`, passing the realized GDMA (`ss->gdma`, for the
+  framebuffer DMA data path) and the interrupt matrix. The GPSPI2 register
+  window is unmodeled by the stock machine, so the pager's e-paper/radio SPI
+  transfers spin on SPI_USR and boot wedges in `show_splash`; the model overlays
+  that window and completes the transfers, unwedging boot. Its meson entry is
+  placed near the top of the file and the machine-init call inside the crypto
+  realization run, both clear of the `0001`/`0003` context lines, so all four
+  patches reverse-check as already-applied on an idempotent re-run. See
+  `../models/bramble_gpspi2.c`.

@@ -12,7 +12,8 @@ minimal proof that a file dropped here reaches the running VM (a log line at
 machine realize). P2.2-P2.5 land the real models in this same directory:
 
 - P2.2: GPIO model (buttons, GNSS_EN, LED/buzzer/vibra outputs, boot straps)
-- P2.3: GPSPI2 controller model (the spi_master register/DMA surface)
+- P2.3: GPSPI2 controller model (the spi_master register/DMA surface) - landed
+  as `bramble_gpspi2.c` (controller + stub SSI slave); unwedges show_splash
 - P2.4: SX1262 slave model + shim (SSI bus attach, emu-link bridge)
 - P2.5: SSD1680 slave model (BW RAM, Master Activation, BUSY timing)
 
