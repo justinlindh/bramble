@@ -1160,15 +1160,24 @@ void app_main(void) {
     } else {
         ESP_LOGW(TAG, "SD card init failed or not present");
     }
+#endif
 
-    /* Init audio (T-Deck Plus only) */
-    ESP_LOGI(TAG, "=== BOOT STAGE: audio_init ===");
+    /* Init alert outputs (buzzer/vibra/LED) for any board that declares the
+     * capability, gated at runtime by BOARD_CAP_ALERTS rather than a single
+     * board macro: indicators.c drives the PAGER's own alert pins (LED=GPIO48,
+     * vibra=GPIO16, buzzer=GPIO15 LEDC), so pinning its init to the T-Deck
+     * board left the pager's indicators uninitialized (s_ready stayed false)
+     * and every alert a silent no-op. */
+    ESP_LOGI(TAG, "=== BOOT STAGE: alerts_init ===");
     if (board_has_cap(BOARD_CAP_ALERTS)) {
         indicator_init();
         alerts_init();
         ESP_LOGI(TAG, "Alert outputs initialized (buzzer/vibra/LED)");
     }
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+    /* Init audio (T-Deck Plus only) */
+    ESP_LOGI(TAG, "=== BOOT STAGE: audio_init ===");
     if (board_has_cap(BOARD_CAP_AUDIO)) {
         if (audio_init() == 0) {
             ESP_LOGI(TAG, "Audio initialized");
