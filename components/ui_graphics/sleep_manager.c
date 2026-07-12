@@ -9,6 +9,7 @@
 #include "keyboard.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "nvs_keys.h"
@@ -23,21 +24,34 @@ static const char* TAG = "sleep_mgr";
 /* Default values */
 #define DEFAULT_TIMEOUT_SEC 60 /* 1 minute */
 
-/* Sleep state */
+/* Sleep state.
+ *
+ * Threading model: all display-power / backlight mutation and the `asleep`
+ * and saved-backlight fields are owned by the UI task. The esp_timer callback
+ * (`sleep_timer_cb`, runs in the esp_timer service task) does NO blocking SPI:
+ * it only decides the timeout has elapsed and raises `want_sleep`. The UI task
+ * drains that flag in `sleep_manager_process()` and performs the actual panel
+ * power-down. `sleep_manager_activity()` (the wake path) is likewise only ever
+ * called on the UI task. The two scalar fields shared across tasks
+ * (`last_activity_us`, `want_sleep`) are guarded by s_lock. */
+static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+
 static struct {
     bool initialized;
     bool enabled;
-    bool asleep;
+    bool asleep; /* UI-task owned */
+    bool want_sleep;
     uint16_t timeout_sec;
     int64_t last_activity_us;
     esp_timer_handle_t timer;
-    /* Saved backlight levels for wake restore */
+    /* Saved backlight levels for wake restore (UI-task owned) */
     uint8_t saved_kbd_backlight;
     uint8_t saved_disp_backlight;
 } s_sleep = {
     .initialized = false,
     .enabled = true,
     .asleep = false,
+    .want_sleep = false,
     .timeout_sec = DEFAULT_TIMEOUT_SEC,
     .last_activity_us = 0,
     .timer = NULL,
@@ -85,29 +99,24 @@ static void nvs_save_timeout(uint16_t timeout_sec) {
 
 /* ── Timer callback ─────────────────────────────────────────────────── */
 
+/* Runs in the esp_timer service task. MUST NOT do blocking SPI here: a
+ * display_power() over the shared bus would stall every other esp_timer
+ * callback, including the 1 ms lv_tick. So this only detects the timeout and
+ * raises want_sleep; sleep_manager_process() (UI task) does the panel work. */
 static void sleep_timer_cb(void* arg) {
     (void)arg;
-    if (!s_sleep.enabled || s_sleep.asleep)
+    if (!s_sleep.enabled)
         return;
 
     int64_t now = esp_timer_get_time();
-    int64_t elapsed_us = now - s_sleep.last_activity_us;
     int64_t timeout_us = (int64_t)s_sleep.timeout_sec * 1000000;
 
-    if (elapsed_us >= timeout_us) {
-        ESP_LOGI(TAG, "Entering sleep mode (timeout=%us)", s_sleep.timeout_sec);
-
-        /* Save current backlight levels before turning off */
-        s_sleep.saved_kbd_backlight = keyboard_get_backlight_percent();
-        s_sleep.saved_disp_backlight = display_get_backlight();
-
-        /* Turn off display panel and both backlights */
-        display_power(false);
-        display_set_backlight(0);
-        keyboard_set_backlight(0); /* Raw 0-255 value */
-
-        s_sleep.asleep = true;
+    portENTER_CRITICAL(&s_lock);
+    int64_t elapsed_us = now - s_sleep.last_activity_us;
+    if (!s_sleep.asleep && elapsed_us >= timeout_us) {
+        s_sleep.want_sleep = true;
     }
+    portEXIT_CRITICAL(&s_lock);
 }
 
 /* ── Public API ─────────────────────────────────────────────────────── */
@@ -165,11 +174,53 @@ void sleep_manager_deinit(void) {
     ESP_LOGI(TAG, "Sleep manager deinitialized");
 }
 
+/* UI-task side of the sleep transition. Drains the want_sleep flag raised by
+ * the esp_timer callback and, only if the panel is still genuinely idle,
+ * powers it down. Doing the SPI here (not in the timer cb) keeps blocking bus
+ * work off the esp_timer service task. Call periodically from the UI task. */
+void sleep_manager_process(void) {
+    if (!s_sleep.initialized)
+        return;
+
+    bool do_sleep = false;
+    portENTER_CRITICAL(&s_lock);
+    if (s_sleep.want_sleep) {
+        s_sleep.want_sleep = false;
+        /* Atomic re-check: a keypress landing at the timeout boundary updates
+         * last_activity_us; if it did, abandon the pending sleep so we don't
+         * blank the panel right after the user interacted. */
+        int64_t elapsed_us = esp_timer_get_time() - s_sleep.last_activity_us;
+        int64_t timeout_us = (int64_t)s_sleep.timeout_sec * 1000000;
+        if (s_sleep.enabled && !s_sleep.asleep && elapsed_us >= timeout_us) {
+            do_sleep = true;
+            s_sleep.asleep = true;
+        }
+    }
+    portEXIT_CRITICAL(&s_lock);
+
+    if (do_sleep) {
+        ESP_LOGI(TAG, "Entering sleep mode (timeout=%us)", s_sleep.timeout_sec);
+
+        /* Save current backlight levels before turning off */
+        s_sleep.saved_kbd_backlight = keyboard_get_backlight_percent();
+        s_sleep.saved_disp_backlight = display_get_backlight();
+
+        /* Turn off display panel and both backlights */
+        display_power(false);
+        display_set_backlight(0);
+        keyboard_set_backlight(0); /* Raw 0-255 value */
+    }
+}
+
 void sleep_manager_activity(void) {
     if (!s_sleep.initialized)
         return;
 
+    portENTER_CRITICAL(&s_lock);
     s_sleep.last_activity_us = esp_timer_get_time();
+    /* Any activity cancels a sleep the timer may have just requested. */
+    s_sleep.want_sleep = false;
+    portEXIT_CRITICAL(&s_lock);
 
     /* Wake up if asleep */
     if (s_sleep.asleep) {

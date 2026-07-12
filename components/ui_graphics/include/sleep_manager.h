@@ -31,6 +31,14 @@ void sleep_manager_deinit(void);
 void sleep_manager_activity(void);
 
 /**
+ * Drive pending sleep transitions from the UI task.
+ * The inactivity timer only flags that the timeout elapsed; this performs the
+ * actual (blocking, SPI-bound) display power-down, so it must be called from
+ * the UI/LVGL task and never from the timer callback. Call periodically.
+ */
+void sleep_manager_process(void);
+
+/**
  * Check if display is currently in sleep mode.
  * Returns true if asleep, false if awake.
  */

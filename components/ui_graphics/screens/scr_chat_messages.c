@@ -432,14 +432,19 @@ static void render_messages_for_target(bool scroll_to_bottom) {
     int match_idx[CHAT_RENDER_MAX];
     int n_match = 0;
     for (int i = count - 1; i >= 0 && n_match < CHAT_RENDER_MAX; i--) {
-        const stored_msg_t* m = msg_store_get(i);
-        if (m && message_matches_target(m))
+        stored_msg_t m;
+        if (msg_store_get_copy(i, &m) && message_matches_target(&m))
             match_idx[n_match++] = i;
     }
 
     for (int k = n_match - 1; k >= 0; k--) {
-        const stored_msg_t* msg = msg_store_get(match_idx[k]);
-        if (!msg || !message_matches_target(msg))
+        /* Copy under the store lock so the mesh task cannot overwrite this
+         * slot while we build LVGL objects from it. */
+        stored_msg_t local;
+        if (!msg_store_get_copy(match_idx[k], &local))
+            continue;
+        const stored_msg_t* msg = &local;
+        if (!message_matches_target(msg))
             continue;
 
         bool is_mine =
