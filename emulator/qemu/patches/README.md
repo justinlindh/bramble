@@ -25,3 +25,12 @@ they do not carry the model source files themselves (those are copied, see
   disables it, matching the host constraint documented in README.md
   (libslirp is not available as a pkg-config module here; we use chardev
   sockets, not user-mode networking).
+- `0003-bramble-gpio-model.patch` (P2.2): wires `bramble_gpio.c` into the
+  ESP32S3 source set and calls `bramble_gpio_attach()` from
+  `esp32s3_machine_init()`, where the SoC state and its interrupt matrix are
+  in scope (`Esp32s3SocState` is private to `esp32s3.c`, so the model cannot
+  reach them from a separate file). The model overlays the GPIO register
+  window to log output-pin transitions and inject button input; see
+  `../models/bramble_gpio.c`. Its meson entry and machine-init call are placed
+  clear of `0001`'s adjacent lines so both patches reverse-check as
+  already-applied on an idempotent re-run.

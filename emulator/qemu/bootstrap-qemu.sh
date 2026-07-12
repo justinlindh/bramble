@@ -99,6 +99,23 @@ else
     log "build/ already configured, skipping configure"
 fi
 
+# --- pin werror off in the native file (GCC-16 workaround) ---
+# GCC 16 promotes const-discard warnings in this pinned QEMU's stock code
+# (e.g. util/qemu-sockets.c) to errors under -Werror. `configure
+# --disable-werror` records werror=false in cmd_line.txt (so the initial
+# build.ninja is generated with -Werror off), but configure still writes
+# `werror = true` into the generated native file config-meson.cross. That
+# native-file value wins on any later meson *reconfigure* (which ninja
+# triggers automatically whenever a meson.build changes, e.g. when a new
+# device-model patch lands), silently reintroducing -Werror and breaking an
+# otherwise-clean incremental build. Pin it off in the native file so the
+# setting survives regeneration.
+CROSS="$QEMU_SRC/build/config-meson.cross"
+if [[ -f "$CROSS" ]] && grep -q '^werror = true' "$CROSS"; then
+    log "pinning werror=false in config-meson.cross (GCC-16 -Werror workaround)"
+    sed -i 's/^werror = true/werror = false/' "$CROSS"
+fi
+
 # --- build ---
 log "building with ninja (-j$(nproc))"
 (cd build && ninja -j"$(nproc)") || die "ninja build failed"
