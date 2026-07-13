@@ -115,7 +115,9 @@ static void dm_verify_status(uint32_t peer_addr, const char** text_out, lv_color
 }
 
 /* The verify glyph, Back, and the bubbles all live inside content_area, which
- * the screen they open cleans; every one of them defers (see ui_defer). */
+ * the screen they open cleans; the pure transitions register with
+ * ui_zone_add_deferred_click (this one re-checks the DM target itself, so a
+ * non-DM click safely no-ops). */
 static void verify_open_async(void* arg) {
     bramble_layout_t* layout = (bramble_layout_t*)arg;
     if (!layout || s_target.kind != CHAT_TARGET_DM)
@@ -123,34 +125,26 @@ static void verify_open_async(void* arg) {
     scr_sas_verify_open(layout, s_target.peer_addr);
 }
 
-static void verify_click_cb(lv_event_t* e) {
-    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
-    if (!layout || s_target.kind != CHAT_TARGET_DM)
-        return;
-    ui_defer(verify_open_async, layout);
+static void chat_list_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    scr_chat_list_create(layout);
 }
 
 static void back_to_list_async(void* arg) {
     bramble_layout_t* layout = (bramble_layout_t*)arg;
     if (!layout)
         return;
-    /* Restore tab bar */
+    /* Restore tab bar and the content area's normal (tab-bar-visible) size. */
     layout_set_tab_bar_hidden(layout, false);
-    /* Restore content area size */
     lv_obj_set_size(layout->content_area, 320, BR_CONTENT_H);
     lv_obj_set_pos(layout->content_area, 0, BR_STATUS_BAR_H);
-    /* Rebuild chat list */
-    lv_refr_now(lv_display_get_default());
-    /* Nulls the four tracked widget handles, so the thread reads as closed. */
-    lv_obj_clean(layout->content_area);
+    /* Closing the thread: reset the module statics. The rebuild's clean nulls
+     * the four tracked widget handles, so the thread reads as closed. */
     s_active_channel = -1;
     s_target = chat_target_default();
     s_selected_packet_id = 0;
-    scr_chat_list_create(layout);
-}
-
-static void back_click_cb(lv_event_t* e) {
-    ui_defer(back_to_list_async, lv_event_get_user_data(e));
+    lv_refr_now(lv_display_get_default());
+    layout_rebuild_content(layout, chat_list_builder, NULL);
 }
 
 static void send_current_message(void) {
@@ -626,21 +620,14 @@ static void render_messages_for_target(bool scroll_to_bottom) {
     }
 }
 
-static void open_with_target(bramble_layout_t* layout, chat_target_t target,
-                             int clear_channel_idx) {
-    s_target = target;
-    s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
-    s_selected_packet_id = 0;
+/* Builds the chat thread view (header actions, message list, compose+send) into
+ * the freshly cleaned content area. Reads s_target, set by open_with_target
+ * before the rebuild. Runs through layout_rebuild_content, which owns the clean
+ * and the trailing zone reset. */
+static void chat_view_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
 
-    if (clear_channel_idx >= 0) {
-        chat_unread_clear_for_channel(clear_channel_idx);
-    }
-
-    /* Hide tab bar */
-    layout_set_tab_bar_hidden(layout, true);
-
-    /* Expand content area to fill space left by hidden tab bar */
-    lv_obj_clean(layout->content_area);
+    /* Expand content area to fill space left by the hidden tab bar */
     lv_obj_set_size(layout->content_area, 320, 240 - BR_STATUS_BAR_H);
 
     int content_h = 240 - BR_STATUS_BAR_H;
@@ -663,7 +650,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     lv_obj_t* back_lbl = lv_label_create(back_btn);
     lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
     lv_obj_center(back_lbl);
-    lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
+    ui_zone_add_deferred_click(back_btn, back_to_list_async, layout);
 
     /* Header actions (back, channel-switch / verify) are chrome; the message
      * list, compose box, and send button below are content. This view hides the
@@ -692,7 +679,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
         lv_obj_set_style_text_font(verify_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(verify_lbl, status_color, 0);
         lv_obj_center(verify_lbl);
-        lv_obj_add_event_cb(verify_btn, verify_click_cb, LV_EVENT_CLICKED, layout);
+        ui_zone_add_deferred_click(verify_btn, verify_open_async, layout);
         ui_zone_add_chrome(verify_btn, false);
     } else {
         lv_obj_t* target_btn = lv_btn_create(header);
@@ -775,10 +762,25 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     if (g)
         lv_group_add_obj(g, s_send_btn);
 
-    /* Content zone is populated; keep input there with compose focused. */
-    ui_zone_reset_to_content();
+    /* Keep compose focused so the rebuild's zone reset lights it and the
+     * keyboard types into the compose bar immediately. */
     if (s_compose_ta)
         lv_group_focus_obj(s_compose_ta);
+}
+
+static void open_with_target(bramble_layout_t* layout, chat_target_t target,
+                             int clear_channel_idx) {
+    s_target = target;
+    s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
+    s_selected_packet_id = 0;
+
+    if (clear_channel_idx >= 0) {
+        chat_unread_clear_for_channel(clear_channel_idx);
+    }
+
+    /* Hide tab bar; the rebuild cleans the content area and the builder fills it. */
+    layout_set_tab_bar_hidden(layout, true);
+    layout_rebuild_content(layout, chat_view_builder, NULL);
 }
 
 /* Key-change interstitial (DM forward-secrecy + SAS, Task 8): a genuine
@@ -794,13 +796,6 @@ static void interstitial_verify_async(void* arg) {
     scr_sas_verify_open(s_interstitial_layout, s_interstitial_peer_addr);
 }
 
-static void interstitial_verify_click_cb(lv_event_t* e) {
-    (void)e;
-    if (!s_interstitial_layout)
-        return;
-    ui_defer(interstitial_verify_async, NULL);
-}
-
 static void interstitial_continue_async(void* arg) {
     (void)arg;
     if (!s_interstitial_layout)
@@ -808,19 +803,8 @@ static void interstitial_continue_async(void* arg) {
     open_with_target(s_interstitial_layout, chat_target_dm(s_interstitial_peer_addr), -1);
 }
 
-static void interstitial_continue_click_cb(lv_event_t* e) {
-    (void)e;
-    if (!s_interstitial_layout)
-        return;
-    ui_defer(interstitial_continue_async, NULL);
-}
-
-static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer_addr) {
-    s_interstitial_layout = layout;
-    s_interstitial_peer_addr = peer_addr;
-
-    layout_set_tab_bar_hidden(layout, true);
-    lv_obj_clean(layout->content_area);
+static void interstitial_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
     lv_obj_set_size(layout->content_area, 320, 240 - BR_STATUS_BAR_H);
 
     lv_obj_t* card = lv_obj_create(layout->content_area);
@@ -852,7 +836,7 @@ static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer
     lv_obj_t* verify_lbl = lv_label_create(verify_btn);
     lv_label_set_text(verify_lbl, "Verify Now");
     lv_obj_center(verify_lbl);
-    lv_obj_add_event_cb(verify_btn, interstitial_verify_click_cb, LV_EVENT_CLICKED, NULL);
+    ui_zone_add_deferred_click(verify_btn, interstitial_verify_async, NULL);
 
     lv_obj_t* continue_btn = lv_btn_create(card);
     lv_obj_set_size(continue_btn, 180, BR_TAP_TARGET_MIN);
@@ -861,7 +845,7 @@ static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer
     lv_obj_t* continue_lbl = lv_label_create(continue_btn);
     lv_label_set_text(continue_lbl, "Continue");
     lv_obj_center(continue_lbl);
-    lv_obj_add_event_cb(continue_btn, interstitial_continue_click_cb, LV_EVENT_CLICKED, NULL);
+    ui_zone_add_deferred_click(continue_btn, interstitial_continue_async, NULL);
 
     lv_group_t* g = lv_group_get_default();
     if (g) {
@@ -870,9 +854,18 @@ static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer
         lv_group_focus_obj(verify_btn);
     }
 
-    ui_zone_reset_to_content();
+    /* Focus persists into the rebuild's zone reset, which lights it. */
     if (g)
         lv_group_focus_obj(verify_btn);
+}
+
+static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer_addr) {
+    s_interstitial_layout = layout;
+    s_interstitial_peer_addr = peer_addr;
+
+    /* Hide tab bar; the rebuild cleans the content area and the builder fills it. */
+    layout_set_tab_bar_hidden(layout, true);
+    layout_rebuild_content(layout, interstitial_builder, NULL);
 }
 
 void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx) {

@@ -68,13 +68,17 @@ static struct {
     uint32_t now_ms;
 } s_pending_open;
 
+static void node_detail_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    scr_node_detail_open(layout, &s_pending_open.neighbor, s_pending_open.has_loc,
+                         &s_pending_open.loc_entry, s_pending_open.now_ms);
+}
+
 static void node_open_async(void* arg) {
     (void)arg;
     if (!s_pending_open.layout)
         return;
-    lv_obj_clean(layout_get_content(s_pending_open.layout));
-    scr_node_detail_open(s_pending_open.layout, &s_pending_open.neighbor, s_pending_open.has_loc,
-                         &s_pending_open.loc_entry, s_pending_open.now_ms);
+    layout_rebuild_content(s_pending_open.layout, node_detail_builder, NULL);
 }
 
 static void node_open_cb(lv_event_t* e) {
@@ -307,8 +311,7 @@ void scr_nodes_create(bramble_layout_t* layout) {
     lv_timer_t* refresh = lv_timer_create(nodes_refresh_cb, 3000, NULL);
     lv_obj_add_event_cb(list, nodes_list_delete_cb, LV_EVENT_DELETE, refresh);
 
-    /* Reached from layout_set_tab (which resets the zone) but ALSO directly from
-     * the node-detail Back button, so this builder owns the reset too: a screen
-     * always leaves input in its content zone. */
-    ui_zone_reset_to_content();
+    /* No ui_zone_reset_to_content() here: this builder runs only through
+     * layout_rebuild_content (tab dispatch and the node-detail Back button),
+     * which owns the reset. */
 }

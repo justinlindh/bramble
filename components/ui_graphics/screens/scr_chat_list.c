@@ -25,32 +25,21 @@ extern void scr_channel_create_open(bramble_layout_t* layout);
 
 /* Every widget on this screen (header actions and list rows alike) is a child
  * of the content area that each of these destinations cleans, so all four
- * transitions are deferred out of their own CLICKED dispatch. See ui_defer. */
+ * transitions are registered with ui_zone_add_deferred_click and run out of
+ * their own CLICKED dispatch. */
 extern bramble_layout_t* s_layout;
 
 static void compose_open_async(void* arg) { scr_chat_compose_open((bramble_layout_t*)arg); }
-
-static void msg_click_cb(lv_event_t* e) { ui_defer(compose_open_async, lv_event_get_user_data(e)); }
 
 static void channel_create_open_async(void* arg) {
     scr_channel_create_open((bramble_layout_t*)arg);
 }
 
-static void channel_click_cb(lv_event_t* e) {
-    ui_defer(channel_create_open_async, lv_event_get_user_data(e));
-}
-
 static void open_channel_async(void* arg) { scr_chat_messages_open(s_layout, (int)(intptr_t)arg); }
-
-static void msg_item_click_cb(lv_event_t* e) {
-    ui_defer(open_channel_async, lv_event_get_user_data(e));
-}
 
 static void open_dm_async(void* arg) {
     scr_chat_messages_open_dm(s_layout, (uint32_t)(uintptr_t)arg);
 }
-
-static void dm_item_click_cb(lv_event_t* e) { ui_defer(open_dm_async, lv_event_get_user_data(e)); }
 
 void scr_chat_list_create(bramble_layout_t* layout) {
     lv_obj_t* cont = layout_get_content(layout);
@@ -81,7 +70,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
     lv_label_set_text(msg_lbl, LV_SYMBOL_EDIT " Msg");
     lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_12, 0);
     lv_obj_center(msg_lbl);
-    lv_obj_add_event_cb(msg_btn, msg_click_cb, LV_EVENT_CLICKED, layout);
+    ui_zone_add_deferred_click(msg_btn, compose_open_async, layout);
 
     /* Channel button */
     lv_obj_t* ch_btn = lv_btn_create(header);
@@ -93,7 +82,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
     lv_label_set_text(ch_lbl, LV_SYMBOL_PLUS " Ch");
     lv_obj_set_style_text_font(ch_lbl, &lv_font_montserrat_12, 0);
     lv_obj_center(ch_lbl);
-    lv_obj_add_event_cb(ch_btn, channel_click_cb, LV_EVENT_CLICKED, layout);
+    ui_zone_add_deferred_click(ch_btn, channel_create_open_async, layout);
 
     /* Header actions are chrome; the list below is content. Registering them
      * before the nav tabs (layout_chrome_tabs_last, at the end of this builder)
@@ -172,7 +161,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
             lv_obj_center(badge_lbl);
         }
 
-        lv_obj_add_event_cb(card, msg_item_click_cb, LV_EVENT_CLICKED, (void*)(intptr_t)ch);
+        ui_zone_add_deferred_click(card, open_channel_async, (void*)(intptr_t)ch);
     }
 
     /* DM conversations (peer-based) */
@@ -245,8 +234,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
             lv_obj_center(badge_lbl);
         }
 
-        lv_obj_add_event_cb(card, dm_item_click_cb, LV_EVENT_CLICKED,
-                            (void*)(uintptr_t)dm_peers[i]);
+        ui_zone_add_deferred_click(card, open_dm_async, (void*)(uintptr_t)dm_peers[i]);
         if (g)
             lv_group_add_obj(g, card);
     }
@@ -260,12 +248,10 @@ void scr_chat_list_create(bramble_layout_t* layout) {
     /* Header actions ahead of the nav tabs in the chrome ring. */
     layout_chrome_tabs_last(layout);
 
-    /* Every screen builder leaves input in its content zone. This one is
-     * reached not only from layout_set_tab (which resets the zone itself) but
-     * ALSO directly from the chat view's Back button, which is a CHROME widget:
-     * without this reset the zone stayed CHROME while a content row showed the
-     * green cursor, so SELECT fired a nav tab and jumped to another screen. */
-    ui_zone_reset_to_content();
+    /* No ui_zone_reset_to_content() here: this builder only ever runs through
+     * layout_rebuild_content (tab dispatch, and the chat view's Back button),
+     * which owns the reset. That the reset used to live here, and that this was
+     * the ONE builder that forgot it, was bug F2. */
 }
 
 void scr_chat_list_refresh(bramble_layout_t* layout) { layout_set_tab(layout, TAB_CHAT); }

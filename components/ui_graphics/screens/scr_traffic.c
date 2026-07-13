@@ -208,19 +208,19 @@ static void traffic_delete_cb2(lv_event_t* e) {
     s_debug_lbl = NULL;
 }
 
-/* Back lives in the content area scr_stats_create cleans, so the transition is
- * deferred out of its own click (see ui_defer). */
+/* Back lives in the content area scr_stats_create cleans, so the transition runs
+ * out of its own click via ui_zone_add_deferred_click. */
+static void stats_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    scr_stats_create(layout);
+}
+
 static void back_to_stats_async(void* arg) {
     bramble_layout_t* layout = (bramble_layout_t*)arg;
     if (!layout)
         return;
     lv_refr_now(lv_display_get_default());
-    lv_obj_clean(layout->content_area);
-    scr_stats_create(layout);
-}
-
-static void back_click_cb(lv_event_t* e) {
-    ui_defer(back_to_stats_async, lv_event_get_user_data(e));
+    layout_rebuild_content(layout, stats_builder, NULL);
 }
 
 /* -------------------------------------------------------------------------
@@ -260,7 +260,7 @@ void scr_traffic_create(bramble_layout_t* layout) {
     lv_obj_set_style_border_width(back_btn, 0, 0);
     lv_obj_set_style_shadow_width(back_btn, 0, 0);
     lv_obj_set_style_pad_all(back_btn, 2, 0);
-    lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
+    ui_zone_add_deferred_click(back_btn, back_to_stats_async, layout);
 
     lv_timer_t* refresh = lv_timer_create(traffic_refresh_cb, 2000, NULL);
     lv_obj_add_event_cb(header, traffic_delete_cb2, LV_EVENT_DELETE, refresh);
@@ -277,9 +277,10 @@ void scr_traffic_create(bramble_layout_t* layout) {
     ui_zone_add_chrome(back_btn, true);
     layout_chrome_tabs_last(layout);
 
-    /* Event rows are not focusable, so this screen's content zone is empty;
-     * start focus in chrome (back / nav) rather than nowhere. */
-    ui_zone_reset_to_content();
+    /* Event rows are not focusable, so this screen's content zone is empty. The
+     * rebuild's zone reset lands focus in chrome (back / nav) rather than
+     * nowhere; no ui_zone_reset_to_content() here (layout_rebuild_content owns
+     * it, and this builder only ever runs through it). */
 
     /* Title */
     lv_obj_t* title = lv_label_create(header);

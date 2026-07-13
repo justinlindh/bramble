@@ -33,6 +33,42 @@ static void tab_click_cb(lv_event_t* e) {
     layout_set_tab(&s_layout, tab);
 }
 
+void layout_rebuild_content(bramble_layout_t* layout, void (*builder)(bramble_layout_t*, void*),
+                            void* ctx) {
+    if (!layout || !builder)
+        return;
+    lv_obj_clean(layout->content_area);
+    builder(layout, ctx);
+    /* A fresh screen always starts focused in its content zone. Owning this here
+     * (not in each builder) is the point: no builder can forget it. */
+    ui_zone_reset_to_content();
+}
+
+/* Dispatch to the active tab's builder. Runs from layout_rebuild_content after
+ * the content area is cleaned; layout->active_tab is set before the rebuild. */
+static void tab_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    switch (layout->active_tab) {
+    case TAB_CHAT:
+        scr_chat_list_create(layout);
+        break;
+    case TAB_NODES:
+        scr_nodes_create(layout);
+        break;
+    case TAB_MAP:
+        scr_map_create(layout);
+        break;
+    case TAB_STATS:
+        scr_stats_create(layout);
+        break;
+    case TAB_SETTINGS:
+        scr_settings_create(layout);
+        break;
+    case TAB_COUNT:
+        break;
+    }
+}
+
 bramble_layout_t* layout_create(void) {
     lv_obj_t* scr = lv_screen_active();
     s_layout.screen = scr;
@@ -158,9 +194,6 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
         }
     }
 
-    /* Flex/content-size screens can leave pending layout tasks; flush before clean. */
-    lv_refr_now(lv_display_get_default());
-    lv_obj_clean(layout->content_area);
     layout->active_tab = tab;
 
     /* Clear unread badge when switching to Chat tab */
@@ -170,28 +203,10 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
         layout_set_unread(layout, 0);
     }
 
-    switch (tab) {
-    case TAB_CHAT:
-        scr_chat_list_create(layout);
-        break;
-    case TAB_NODES:
-        scr_nodes_create(layout);
-        break;
-    case TAB_MAP:
-        scr_map_create(layout);
-        break;
-    case TAB_STATS:
-        scr_stats_create(layout);
-        break;
-    case TAB_SETTINGS:
-        scr_settings_create(layout);
-        break;
-    case TAB_COUNT:
-        break;
-    }
-
-    /* A fresh screen always starts focused in its content zone. */
-    ui_zone_reset_to_content();
+    /* Flex/content-size screens can leave pending layout tasks; flush before the
+     * rebuild's clean. */
+    lv_refr_now(lv_display_get_default());
+    layout_rebuild_content(layout, tab_builder, NULL);
 }
 
 void layout_update_status(bramble_layout_t* layout) {

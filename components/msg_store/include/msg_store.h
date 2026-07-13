@@ -21,6 +21,15 @@ extern "C" {
 #define MSG_TEXT_MAX 640
 #define MSG_ROUTE_MAX_HOPS 10
 
+/* The channel_index a DM (or any channel-less message) is stored under. A DM is
+ * peer-keyed, not channel-keyed; a negative channel index is the sole marker
+ * that tells a DM apart from channel traffic (both share the INCOMING/OUTGOING
+ * directions). Storing a real channel index (0 is the unicast/broadcast default)
+ * files the DM under that channel and hides it from its own thread: that was
+ * bug F1. msg_store_add_dm() / msg_store_add_channel() own this convention so no
+ * caller has to remember it. */
+#define MSG_STORE_DM_CHANNEL ((int16_t)-1)
+
 typedef enum {
     MSG_DIR_INCOMING = 0,
     MSG_DIR_OUTGOING = 1,
@@ -38,13 +47,13 @@ typedef enum {
 typedef struct {
     uint32_t peer_addr; /* Remote address (sender or recipient) */
     msg_direction_t direction;
-    msg_status_t status;                     /* Delivery status (outgoing only) */
-    uint32_t packet_id;                      /* Packet ID for ACK correlation */
-    uint32_t timestamp_s;                    /* Uptime seconds when stored */
-    int8_t rssi;                             /* RX RSSI (0 for outgoing) */
-    int8_t snr;                              /* RX SNR (0 for outgoing) */
-    int16_t channel_index;                   /* -1 = none/broadcast, >=0 = channel */
-    uint8_t route_hop_count;                 /* 0 = unavailable */
+    msg_status_t status;     /* Delivery status (outgoing only) */
+    uint32_t packet_id;      /* Packet ID for ACK correlation */
+    uint32_t timestamp_s;    /* Uptime seconds when stored */
+    int8_t rssi;             /* RX RSSI (0 for outgoing) */
+    int8_t snr;              /* RX SNR (0 for outgoing) */
+    int16_t channel_index;   /* MSG_STORE_DM_CHANNEL (<0) = DM/none, >=0 = channel */
+    uint8_t route_hop_count; /* 0 = unavailable */
     uint32_t route_hops[MSG_ROUTE_MAX_HOPS]; /* source->...->destination */
     uint16_t text_len;
     char text[MSG_TEXT_MAX];
@@ -62,10 +71,14 @@ typedef struct {
  * A DM arrives on channel_id 0 (the unicast default; only channel_id > 0 is a
  * real channel message), so storing the raw channel_id files every DM under
  * channel 0: invisible in its own thread, and counted against channel 0's
- * unread badge. Received DMs must store -1, matching msg_store_add()'s default.
+ * unread badge. Received DMs must store MSG_STORE_DM_CHANNEL.
+ *
+ * Prefer msg_store_add_dm() / msg_store_add_channel(), which pick the right store
+ * entry from the message kind; this helper remains for the readers that already
+ * classify a received channel_id.
  */
 static inline int16_t msg_store_rx_channel_index(int channel_id) {
-    return (channel_id > 0) ? (int16_t)channel_id : (int16_t)-1;
+    return (channel_id > 0) ? (int16_t)channel_id : MSG_STORE_DM_CHANNEL;
 }
 
 /**
@@ -81,10 +94,27 @@ void msg_store_init(void);
 void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status);
 
-/* Extended API with channel index metadata */
+/* Extended API with channel index metadata. Prefer msg_store_add_dm /
+ * msg_store_add_channel below, which own the DM/channel convention; this stays
+ * as the shared implementation they call. */
 void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                        int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status,
                        int16_t channel_index);
+
+/* Store a direct message (or any channel-less message): forces channel_index =
+ * MSG_STORE_DM_CHANNEL so it can never be misfiled under a channel. THE way to
+ * store a DM. A received broadcast is also channel-less (it is filed by
+ * direction, not channel index) and uses this too. */
+void msg_store_add_dm(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
+                      int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status);
+
+/* Store a channel message. channel_index is non-negative by type (0 is the
+ * broadcast channel, >0 a named channel); a negative index would mean "DM", and
+ * the uint8_t parameter makes that unrepresentable at the call site. THE way to
+ * store channel/broadcast traffic. */
+void msg_store_add_channel(uint32_t peer_addr, msg_direction_t dir, const char* text,
+                           size_t text_len, int8_t rssi, int8_t snr, uint32_t packet_id,
+                           msg_status_t status, uint8_t channel_index);
 
 /* Convenience wrapper (no ACK tracking) */
 void msg_store_add(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,

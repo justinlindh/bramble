@@ -262,11 +262,12 @@ typedef struct {
     size_t len;
     uint32_t timestamp;
     bool used;
-    uint8_t reason;  /* QUEUE_REASON_ROUTE or QUEUE_REASON_SESSION */
-    uint32_t pkt_id; /* tracking id surfaced to the caller/UI; only meaningful for
-                        QUEUE_REASON_SESSION */
-    int16_t
-        channel_idx; /* only meaningful for QUEUE_REASON_SESSION (msg_store bookkeeping on flush) */
+    uint8_t reason;      /* QUEUE_REASON_ROUTE or QUEUE_REASON_SESSION */
+    uint32_t pkt_id;     /* tracking id surfaced to the caller/UI; only meaningful for
+                            QUEUE_REASON_SESSION */
+    int16_t channel_idx; /* transport channel a queued QUEUE_REASON_SESSION DM rode on. Vestigial
+                            for msg_store: a flushed DM is stored channel-less (msg_store_add_dm),
+                            never under this transport channel, so it can never be misfiled. */
 } queued_msg_t;
 static queued_msg_t s_queued_msgs[MAX_QUEUED_MSGS];
 
@@ -2708,9 +2709,16 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message)
                                                   ? MSG_DIR_BROADCAST_IN
                                                   : MSG_DIR_INCOMING;
-                        int16_t channel_index = msg_store_rx_channel_index(info.channel_id);
-                        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr, 0,
-                                          MSG_STATUS_NONE, channel_index);
+                        if (is_channel_message) {
+                            msg_store_add_channel(info.src_addr, dir, text, tlen, rssi, snr, 0,
+                                                  MSG_STATUS_NONE, (uint8_t)info.channel_id);
+                        } else {
+                            /* channel_id 0: a DM or a received broadcast. Both store
+                             * channel-less (MSG_STORE_DM_CHANNEL); the direction, not a
+                             * channel index, files a broadcast into the Broadcast thread. */
+                            msg_store_add_dm(info.src_addr, dir, text, tlen, rssi, snr, 0,
+                                             MSG_STATUS_NONE);
+                        }
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
                         ui_graphics_notify(UI_EVT_MSG_RECEIVED);
@@ -2803,9 +2811,15 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         bool is_channel_message = (info.channel_id > 0);
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message) ? MSG_DIR_BROADCAST_IN
                                                                               : MSG_DIR_INCOMING;
-        int16_t channel_index = msg_store_rx_channel_index(info.channel_id);
-        msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr, 0, MSG_STATUS_NONE,
-                          channel_index);
+        if (is_channel_message) {
+            msg_store_add_channel(info.src_addr, dir, text, tlen, rssi, snr, 0, MSG_STATUS_NONE,
+                                  (uint8_t)info.channel_id);
+        } else {
+            /* channel_id 0: a DM or a received broadcast. Both store channel-less
+             * (MSG_STORE_DM_CHANNEL); the direction, not a channel index, files a
+             * broadcast into the Broadcast thread. */
+            msg_store_add_dm(info.src_addr, dir, text, tlen, rssi, snr, 0, MSG_STATUS_NONE);
+        }
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
         /* Notify UI of new message for unread badge and refresh */
@@ -5093,9 +5107,14 @@ static void flush_session_queue(uint32_t dest_addr) {
         if (pkt_id != 0) {
             ESP_LOGI(TAG, "Flushed queued DM to %08" PRIX32 " (%u bytes)", dest_addr,
                      (unsigned)s_queued_msgs[i].len);
-            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char*)s_queued_msgs[i].data,
-                              s_queued_msgs[i].len, 0, 0, pkt_id, MSG_STATUS_SENT,
-                              s_queued_msgs[i].channel_idx);
+            /* A QUEUE_REASON_SESSION entry is always a DM (only DMs establish a
+             * session), so store it channel-less exactly like the direct-send path
+             * in mesh_send_dm. Previously this stored the transport channel_idx
+             * (0 for the unicast default), which filed the flushed DM under
+             * channel 0 and hid it from its own thread: the F1 misfiling class,
+             * on the flush path, which msg_store_add_dm now makes unrepresentable. */
+            msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)s_queued_msgs[i].data,
+                             s_queued_msgs[i].len, 0, 0, pkt_id, MSG_STATUS_SENT);
         } else {
             ESP_LOGW(TAG, "Failed to flush queued DM to %08" PRIX32, dest_addr);
             rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "session_send_failed", NULL);
@@ -5176,12 +5195,11 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
         xSemaphoreGive(s_dm_mutex);
         if (pkt_id != 0) {
             /* channel_idx only picked the transport channel the session's KE
-             * envelope rode on; the payload is a DM, so it stores no channel
-             * index (see msg_store_rx_channel_index). Storing channel_idx (0
-             * for the unicast default) would file this sent DM under channel 0
-             * and hide it from its own thread, exactly like a received DM. */
-            msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, pkt_id,
-                              MSG_STATUS_SENT, -1);
+             * envelope rode on; the payload is a DM. msg_store_add_dm files it
+             * channel-less, so it can never land under channel 0 (the unicast
+             * default) and hide from its own thread, exactly like a received DM. */
+            msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, pkt_id,
+                             MSG_STATUS_SENT);
         }
         return pkt_id;
     }
@@ -5212,8 +5230,8 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
     }
 
     /* Still store in msg_store so UI shows it as pending, same convention
-     * as the awaiting-route path. */
-    msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0);
+     * as the awaiting-route path. A queued DM is channel-less. */
+    msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0, MSG_STATUS_NONE);
     return pkt_id;
 }
 
@@ -5666,9 +5684,9 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
 
         free(frags);
 
-        /* Store the full message in message store */
-        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
-                          MSG_STATUS_NONE, 0);
+        /* Store the full message in message store (broadcast = channel 0) */
+        msg_store_add_channel(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
+                              MSG_STATUS_NONE, 0);
         return 0;
     }
 
@@ -5678,8 +5696,8 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
         s_last_broadcast_id = pkt_id;
         s_last_broadcast_frag_msg_id = 0;
         recent_broadcast_record(pkt_id);
-        msg_store_add_ex2(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
-                          MSG_STATUS_NONE, 0);
+        msg_store_add_channel(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
+                              MSG_STATUS_NONE, 0);
     }
     return pkt_id ? 0 : -1;
 }
@@ -5754,13 +5772,13 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* d
 
         /* Store the full message in message store */
         if (first_pkt_id != 0) {
-            msg_store_add_ex2(dest_addr,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
-                                                                            : MSG_DIR_OUTGOING,
-                              (const char*)data, len, 0, 0, first_pkt_id,
-                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE
-                                                                            : MSG_STATUS_SENT,
-                              (int16_t)channel_idx);
+            msg_store_add_channel(
+                dest_addr,
+                (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
+                                                              : MSG_DIR_OUTGOING,
+                (const char*)data, len, 0, 0, first_pkt_id,
+                (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE : MSG_STATUS_SENT,
+                (uint8_t)channel_idx);
         }
         return first_pkt_id;
     }
@@ -5773,13 +5791,13 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* d
             s_last_broadcast_frag_msg_id = 0;
             recent_broadcast_record(pkt_id);
         }
-        msg_store_add_ex2(dest_addr,
-                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
-                                                                        : MSG_DIR_OUTGOING,
-                          (const char*)data, len, 0, 0, pkt_id,
-                          (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE
-                                                                        : MSG_STATUS_SENT,
-                          (int16_t)channel_idx);
+        msg_store_add_channel(dest_addr,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_DIR_BROADCAST_OUT
+                                                                            : MSG_DIR_OUTGOING,
+                              (const char*)data, len, 0, 0, pkt_id,
+                              (dest_addr == 0xFFFFFFFF && channel_idx == 0) ? MSG_STATUS_NONE
+                                                                            : MSG_STATUS_SENT,
+                              (uint8_t)channel_idx);
     }
     return pkt_id;
 }
@@ -5877,8 +5895,10 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) 
                 initiate_discovery(dest_addr);
             }
             queue_message(dest_addr, data, len);
-            /* Still store in msg_store so UI shows it as pending */
-            msg_store_add(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0);
+            /* Still store in msg_store so UI shows it as pending (a unicast DM,
+             * stored channel-less). */
+            msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0,
+                             MSG_STATUS_NONE);
             return 1; /* queued — nonzero = success but no packet_id yet */
         }
         /* Have a route — send_data_packet will transmit (next hop gets it) */

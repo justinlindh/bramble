@@ -24,12 +24,16 @@ static uint32_t s_now_ms = 0;
 /* This screen's action buttons live in the content area that each destination
  * cleans, so every one of them defers out of its own click. See ui_defer.
  * (Share My Location rebuilds nothing and stays inline.) */
+static void nodes_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    scr_nodes_create(layout);
+}
+
 static void back_to_nodes_async(void* arg) {
     (void)arg;
     if (!s_layout)
         return;
-    lv_obj_clean(layout_get_content(s_layout));
-    scr_nodes_create(s_layout);
+    layout_rebuild_content(s_layout, nodes_builder, NULL);
 }
 
 static void back_click_cb(lv_event_t* e) {
@@ -122,8 +126,10 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     s_location = location ? *location : (location_cache_entry_t){0};
     s_now_ms = now_ms;
 
+    /* Builder: runs through layout_rebuild_content (from node_open_async and the
+     * Back button), which owns the content-area clean and the trailing zone
+     * reset. */
     lv_obj_t* cont = layout_get_content(layout);
-    lv_obj_clean(cont);
 
     lv_obj_t* card = lv_obj_create(cont);
     lv_obj_set_size(card, lv_pct(100), lv_pct(100));
@@ -197,6 +203,4 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     add_action_btn(actions, "Show on Map", map_click_cb, false);
     add_action_btn(actions, "Share My Location", share_loc_click_cb, false);
     add_action_btn(actions, "Back", back_click_cb, false);
-
-    ui_zone_reset_to_content();
 }
