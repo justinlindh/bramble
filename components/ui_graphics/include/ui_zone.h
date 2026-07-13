@@ -128,4 +128,18 @@ uint32_t ui_zone_translate(ui_button_t btn);
  * nav tabs live in the tab bar, not the content area) may still rebuild inline. */
 void ui_defer(lv_async_cb_t cb, void* arg);
 
+/* Register a CLICKED handler that always runs cb through ui_defer (after LVGL
+ * finishes dispatching the event), so a handler that rebuilds/cleans the screen
+ * can never delete its own widget mid-dispatch. THE way to register any click
+ * that triggers a screen transition or rebuild: it collapses the hand-rolled
+ * "static foo_async(void*) + static foo_click_cb(lv_event_t*) that just
+ * ui_defer's it" pair into a single line. cb receives ctx, exactly what the
+ * hand-rolled ui_defer(foo_async, ctx) would have passed.
+ *
+ * A click that must do real work BEFORE the transition (read a textarea that the
+ * rebuild destroys, toggle a selection, snapshot state a later rebuild would
+ * recycle) keeps a custom handler that does that work synchronously and ends in
+ * ui_defer; this helper is for the pure "defer this transition" case. */
+void ui_zone_add_deferred_click(lv_obj_t* obj, lv_async_cb_t cb, void* ctx);
+
 #endif /* BRAMBLE_UI_ZONE_H */

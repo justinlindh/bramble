@@ -59,6 +59,37 @@ void ui_defer(lv_async_cb_t cb, void* arg) {
     }
 }
 
+/* See ui_zone.h. The trampoline must carry BOTH cb and ctx, so a small
+ * registration struct is allocated once at registration (not per click) and
+ * freed via the widget's own LV_EVENT_DELETE, so it can never outlive or leak
+ * past the widget. */
+typedef struct {
+    lv_async_cb_t cb;
+    void* ctx;
+} deferred_click_t;
+
+static void deferred_click_trampoline(lv_event_t* e) {
+    const deferred_click_t* d = (const deferred_click_t*)lv_event_get_user_data(e);
+    if (d)
+        ui_defer(d->cb, d->ctx);
+}
+
+static void deferred_click_free(lv_event_t* e) { lv_free(lv_event_get_user_data(e)); }
+
+void ui_zone_add_deferred_click(lv_obj_t* obj, lv_async_cb_t cb, void* ctx) {
+    if (!obj || !cb)
+        return;
+    deferred_click_t* d = lv_malloc(sizeof(*d));
+    if (!d) {
+        ESP_LOGE(TAG, "deferred-click registration alloc failed");
+        return;
+    }
+    d->cb = cb;
+    d->ctx = ctx;
+    lv_obj_add_event_cb(obj, deferred_click_trampoline, LV_EVENT_CLICKED, d);
+    lv_obj_add_event_cb(obj, deferred_click_free, LV_EVENT_DELETE, d);
+}
+
 /* See ui_zone.h: LVGL nulls the cache when it deletes the widget. Guarded on
  * identity because a slot can be retargeted (the chrome default follows the
  * active tab), and the widget it used to hold must not clear it on its way

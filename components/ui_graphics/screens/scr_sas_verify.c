@@ -76,27 +76,24 @@ static void add_action_btn(lv_obj_t* parent, const char* text, lv_event_cb_t cb,
     }
 }
 
-void scr_sas_verify_open(bramble_layout_t* layout, uint32_t peer_addr) {
-    if (!layout || peer_addr == 0)
-        return;
-
-    s_layout = layout;
-    s_peer_addr = peer_addr;
+/* Builds the SAS verify screen for s_peer_addr into the freshly cleaned content
+ * area. Runs through layout_rebuild_content, which owns the clean and the zone
+ * reset. scr_sas_verify_open has already proven a pin exists before the rebuild
+ * was started, so this cannot blank the DM screen on a missing pin. */
+static void sas_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    uint32_t peer_addr = s_peer_addr;
 
     char sas[8];
     bool verified = false;
     bool key_changed = false;
-    if (!mesh_get_peer_verification(peer_addr, sas, &verified, &key_changed)) {
-        ESP_LOGW(TAG, "no pin for %08lX; cannot show SAS", (unsigned long)peer_addr);
-        ui_toast_show("No safety number yet");
+    if (!mesh_get_peer_verification(peer_addr, sas, &verified, &key_changed))
         return;
-    }
 
     char grouped[9];
     sas_format_grouped(sas, grouped);
 
     lv_obj_t* cont = layout_get_content(layout);
-    lv_obj_clean(cont);
 
     lv_obj_t* card = lv_obj_create(cont);
     lv_obj_set_size(card, lv_pct(100), lv_pct(100));
@@ -157,6 +154,26 @@ void scr_sas_verify_open(bramble_layout_t* layout, uint32_t peer_addr) {
 
     add_action_btn(actions, "Codes Match", codes_match_click_cb, true);
     add_action_btn(actions, "Back", back_click_cb, false);
+}
 
-    ui_zone_reset_to_content();
+void scr_sas_verify_open(bramble_layout_t* layout, uint32_t peer_addr) {
+    if (!layout || peer_addr == 0)
+        return;
+
+    s_layout = layout;
+    s_peer_addr = peer_addr;
+
+    char sas[8];
+    bool verified = false;
+    bool key_changed = false;
+    /* Guard BEFORE any clean: no pin means keep the current (DM) screen intact
+     * rather than blanking it. layout_rebuild_content cleans first, so this check
+     * cannot move into sas_builder. */
+    if (!mesh_get_peer_verification(peer_addr, sas, &verified, &key_changed)) {
+        ESP_LOGW(TAG, "no pin for %08lX; cannot show SAS", (unsigned long)peer_addr);
+        ui_toast_show("No safety number yet");
+        return;
+    }
+
+    layout_rebuild_content(layout, sas_builder, NULL);
 }

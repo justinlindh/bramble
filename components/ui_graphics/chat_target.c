@@ -15,7 +15,7 @@ static bool is_dm_msg(const stored_msg_t* msg) {
 chat_target_t chat_target_default(void) {
     chat_target_t t = {
         .kind = CHAT_TARGET_BROADCAST,
-        .channel_index = -1,
+        .channel_index = MSG_STORE_DM_CHANNEL, /* channel-less: broadcast matches by direction */
         .peer_addr = 0,
     };
     return t;
@@ -41,7 +41,7 @@ chat_target_t chat_target_normalize(chat_target_kind_t kind, int channel_index, 
 chat_target_t chat_target_dm(uint32_t peer_addr) {
     chat_target_t t = {
         .kind = CHAT_TARGET_DM,
-        .channel_index = -1,
+        .channel_index = MSG_STORE_DM_CHANNEL,
         .peer_addr = peer_addr,
     };
     return t;

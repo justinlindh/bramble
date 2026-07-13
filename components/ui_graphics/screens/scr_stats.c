@@ -241,18 +241,18 @@ static void create_reach_row(lv_obj_t* parent, const char* name, int count, int 
  * Traffic Monitor navigation callback
  * ------------------------------------------------------------------------- */
 /* The button lives in the content area scr_traffic_create cleans, so the
- * transition is deferred out of its own click (see ui_defer). */
+ * transition runs out of its own click via ui_zone_add_deferred_click. */
+static void traffic_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
+    scr_traffic_create(layout);
+}
+
 static void traffic_open_async(void* arg) {
     bramble_layout_t* layout = (bramble_layout_t*)arg;
     if (!layout)
         return;
     lv_refr_now(lv_display_get_default());
-    lv_obj_clean(layout->content_area);
-    scr_traffic_create(layout);
-}
-
-static void traffic_click_cb(lv_event_t* e) {
-    ui_defer(traffic_open_async, lv_event_get_user_data(e));
+    layout_rebuild_content(layout, traffic_builder, NULL);
 }
 
 void scr_stats_create(bramble_layout_t* layout) {
@@ -519,7 +519,7 @@ void scr_stats_create(bramble_layout_t* layout) {
     lv_obj_set_style_border_width(traffic_btn, 0, 0);
     lv_obj_set_style_shadow_width(traffic_btn, 0, 0);
     lv_obj_set_style_pad_all(traffic_btn, 4, 0);
-    lv_obj_add_event_cb(traffic_btn, traffic_click_cb, LV_EVENT_CLICKED, layout);
+    ui_zone_add_deferred_click(traffic_btn, traffic_open_async, layout);
 
     lv_obj_t* traffic_lbl = lv_label_create(traffic_btn);
     lv_label_set_text(traffic_lbl, traffic_lbl_buf);
@@ -531,9 +531,7 @@ void scr_stats_create(bramble_layout_t* layout) {
     if (g)
         lv_group_add_obj(g, traffic_btn);
 
-    /* Reached from layout_set_tab (which resets the zone) but ALSO directly
-     * from the Traffic screen's Back button, which is a CHROME widget: without
-     * this reset the zone would stay CHROME while a content row showed the
-     * cursor, and SELECT would fire a nav tab instead (the F2 trap). */
-    ui_zone_reset_to_content();
+    /* No ui_zone_reset_to_content() here: this builder runs only through
+     * layout_rebuild_content (tab dispatch and the Traffic screen's Back
+     * button), which owns the reset. */
 }

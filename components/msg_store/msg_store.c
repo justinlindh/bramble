@@ -122,7 +122,23 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
 
 void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status) {
-    msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status, -1);
+    msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status,
+                      MSG_STORE_DM_CHANNEL);
+}
+
+void msg_store_add_dm(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
+                      int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status) {
+    msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status,
+                      MSG_STORE_DM_CHANNEL);
+}
+
+void msg_store_add_channel(uint32_t peer_addr, msg_direction_t dir, const char* text,
+                           size_t text_len, int8_t rssi, int8_t snr, uint32_t packet_id,
+                           msg_status_t status, uint8_t channel_index) {
+    /* channel_index is non-negative by type: a negative "DM" index cannot be
+     * expressed here, so channel traffic can never be filed channel-less. */
+    msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status,
+                      (int16_t)channel_index);
 }
 
 void msg_store_add(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,

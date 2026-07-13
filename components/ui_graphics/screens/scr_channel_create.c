@@ -19,8 +19,11 @@ static lv_obj_t* s_psk_ta = NULL;
 static lv_obj_t* s_error_lbl = NULL;
 static bramble_layout_t* s_layout = NULL;
 
-/* Cancel/Create both live in the form inside the content area their
- * destination cleans, so both defer out of their own click. See ui_defer. */
+/* Cancel/Create both live in the form inside the content area their destination
+ * cleans, so both must run out of their own click. Cancel is a pure transition
+ * (ui_zone_add_deferred_click); Create reads the textareas first (which the
+ * rebuild destroys), so it validates synchronously and defers only the
+ * transition. */
 static void back_to_list_async(void* arg) {
     bramble_layout_t* layout = (bramble_layout_t*)arg;
     if (!layout)
@@ -32,10 +35,6 @@ static void back_to_list_async(void* arg) {
      * a SECOND copy on top of the first and registered its header actions in
      * the chrome ring twice. */
     scr_chat_list_refresh(layout);
-}
-
-static void cancel_click_cb(lv_event_t* e) {
-    ui_defer(back_to_list_async, lv_event_get_user_data(e));
 }
 
 static void open_channel_async(void* arg) { scr_chat_messages_open(s_layout, (int)(intptr_t)arg); }
@@ -83,14 +82,10 @@ static void create_click_cb(lv_event_t* e) {
     ui_defer(open_channel_async, (void*)(intptr_t)idx);
 }
 
-void scr_channel_create_open(bramble_layout_t* layout) {
-    s_layout = layout;
-
-    /* Hide tab bar */
-    layout_set_tab_bar_hidden(layout, true);
+static void channel_form_builder(bramble_layout_t* layout, void* ctx) {
+    (void)ctx;
 
     /* Expand content area */
-    lv_obj_clean(layout->content_area);
     lv_obj_set_size(layout->content_area, 320, 240 - BR_STATUS_BAR_H);
 
     int content_h = 240 - BR_STATUS_BAR_H;
@@ -194,7 +189,7 @@ void scr_channel_create_open(bramble_layout_t* layout) {
     lv_label_set_text(cancel_lbl, "Cancel");
     lv_obj_set_style_text_font(cancel_lbl, &lv_font_montserrat_12, 0);
     lv_obj_center(cancel_lbl);
-    lv_obj_add_event_cb(cancel_btn, cancel_click_cb, LV_EVENT_CLICKED, layout);
+    ui_zone_add_deferred_click(cancel_btn, back_to_list_async, layout);
     if (g)
         lv_group_add_obj(g, cancel_btn);
 
@@ -211,7 +206,14 @@ void scr_channel_create_open(bramble_layout_t* layout) {
     if (g)
         lv_group_add_obj(g, create_btn);
 
-    ui_zone_reset_to_content();
+    /* Focus persists into the rebuild's zone reset, which lights it. */
     if (g)
         lv_group_focus_obj(s_name_ta);
+}
+
+void scr_channel_create_open(bramble_layout_t* layout) {
+    s_layout = layout;
+    /* Hide tab bar; the rebuild cleans the content area and the builder fills it. */
+    layout_set_tab_bar_hidden(layout, true);
+    layout_rebuild_content(layout, channel_form_builder, NULL);
 }
