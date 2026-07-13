@@ -4,9 +4,26 @@
 #include "esp_log.h"
 
 static uint32_t last_key = 0;
+static bool release_pending = false;
 
 static void keyboard_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     (void)indev;
+
+    /* LVGL's keypad indev latches a key only on the RELEASED->PRESSED edge, so
+     * every key needs a release between it and the next one. Real typing gets
+     * that for free (the I2C poll is slower than LVGL's read, so idle reads fall
+     * through to the RELEASED branch below), but injected keys (the bench debug
+     * RPC, keyboard_inject_char) drain back-to-back from their ring and would
+     * otherwise present as one continuous press, swallowing every char after the
+     * first. Emit an explicit release tick after each delivered key so a
+     * multi-char inject types in full. Harmless for real keys: the driver already
+     * hands us discrete buffered chars, not a held-key state. */
+    if (release_pending) {
+        release_pending = false;
+        data->state = LV_INDEV_STATE_RELEASED;
+        data->key = last_key;
+        return;
+    }
 
     char ch;
     if (keyboard_poll(&ch)) {
@@ -22,6 +39,7 @@ static void keyboard_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
             last_key = ch;
         }
         data->state = LV_INDEV_STATE_PRESSED;
+        release_pending = true; /* next read emits the release edge for this key */
         /* Signal activity to reset sleep timer / wake display */
         sleep_manager_activity();
     } else {

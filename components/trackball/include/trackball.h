@@ -22,4 +22,13 @@ int trackball_init(void);
  */
 ui_button_t trackball_poll(void);
 
+/**
+ * Inject a synthetic trackball event (bench debug RPC, bramble.injectInput).
+ * Feeds the same event counters the GPIO ISRs increment, so trackball_poll()
+ * drains it through the identical priority logic as a real hall-effect
+ * detent. btn must be one of BTN_UP/DOWN/LEFT/RIGHT/SELECT.
+ * Returns true if queued, false if not initialized or btn is invalid.
+ */
+bool trackball_inject(ui_button_t btn);
+
 #endif /* BRAMBLE_TRACKBALL_H */

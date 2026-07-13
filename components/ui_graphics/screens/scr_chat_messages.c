@@ -329,6 +329,12 @@ static void add_action_line(lv_obj_t* parent, const char* sender, const stored_m
     lv_obj_set_width(lbl, LV_PCT(100));
 }
 
+/* Bubble width caps at 220px; a single-line bubble hugs its content instead
+ * (fix 3). Padding is 6px each side, so the inner text width available
+ * under the cap is 220 - 12. */
+#define CHAT_BUBBLE_MAX_W 220
+#define CHAT_BUBBLE_MAX_INNER_W (CHAT_BUBBLE_MAX_W - 12)
+
 static void add_message_bubble(lv_obj_t* parent, const char* sender, const stored_msg_t* msg,
                                bool is_mine, int age_s) {
     lv_obj_t* row = lv_obj_create(parent);
@@ -340,7 +346,7 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* bubble = lv_obj_create(row);
-    lv_obj_set_width(bubble, 220);
+    lv_obj_set_width(bubble, CHAT_BUBBLE_MAX_W); /* provisional; hug pass below may shrink it */
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(bubble, is_mine ? BR_COLOR_SENT : BR_COLOR_RECV, 0);
     lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
@@ -364,21 +370,22 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         lv_obj_set_style_text_color(name_lbl, BR_COLOR_PRIMARY, 0);
     }
 
-    lv_obj_t* msg_lbl = lv_label_create(bubble);
-    lv_label_set_text(msg_lbl, msg->text);
-    lv_obj_set_style_text_font(msg_lbl, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(msg_lbl, BR_COLOR_TEXT, 0);
-    lv_label_set_long_mode(msg_lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(msg_lbl, LV_PCT(100));
+    /* Message text + trailing meta ("  <age> <badge>") as one spangroup
+     * instead of stacked labels, so a single-line message is one row. LVGL
+     * 9.2 dropped label recolor, so spans are the tool for mixed styling.
+     * Delivery badge is outgoing-only; received bubbles get age-only meta. */
+    char age_buf[8] = "";
+    bool have_age = (age_s >= 0);
+    if (have_age) {
+        chat_format_age((uint32_t)age_s, age_buf, sizeof(age_buf));
+    }
 
-    bool can_show_route = chat_message_has_inline_route_toggle(
-        is_mine, msg->status, msg->route_hop_count, msg->packet_id);
+    char meta_buf[40] = "";
+    lv_color_t meta_color = BR_COLOR_TEXT_SEC;
 
-    /* Delivery status badge — only on outgoing messages */
     if (is_mine) {
         chat_delivery_badge_t badge = chat_message_delivery_badge(msg->status);
         const char* badge_sym = LV_SYMBOL_BULLET;
-        lv_color_t badge_color = BR_COLOR_TEXT_SEC;
 
         if (badge.kind == CHAT_DELIVERY_BADGE_SINGLE_CHECK) {
             badge_sym = LV_SYMBOL_OK;
@@ -389,36 +396,67 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         }
 
         if (badge.color_role == CHAT_DELIVERY_COLOR_DELIVERED) {
-            badge_color = BR_COLOR_PRIMARY;
+            meta_color = BR_COLOR_PRIMARY;
         } else if (badge.color_role == CHAT_DELIVERY_COLOR_FAILED) {
-            badge_color = BR_COLOR_DANGER;
+            meta_color = BR_COLOR_DANGER;
         }
 
-        static char status_buf[24];
-        bool has_route_meta = (msg->route_hop_count > 0);
-        if (has_route_meta) {
-            if (msg->route_hop_count > 1) {
-                snprintf(status_buf, sizeof(status_buf), "%s %u↗", badge_sym,
-                         (unsigned)msg->route_hop_count);
-            } else {
-                /* Single-hop direct route: keep existing badge uncluttered. */
-                snprintf(status_buf, sizeof(status_buf), "%s", badge_sym);
-            }
-            badge_sym = status_buf;
+        char badge_buf[16];
+        if (msg->route_hop_count > 1) {
+            snprintf(badge_buf, sizeof(badge_buf), "%s %u\xe2\x86\x97", badge_sym,
+                     (unsigned)msg->route_hop_count);
+            badge_sym = badge_buf;
         }
+        /* route_hop_count <= 1 (direct or unknown): keep the badge uncluttered. */
 
-        lv_obj_t* status_lbl = lv_label_create(bubble);
-        lv_label_set_text(status_lbl, badge_sym);
-        lv_obj_set_style_text_font(status_lbl, &lv_font_montserrat_12, 0);
-        lv_obj_set_style_text_color(status_lbl, badge_color, 0);
-        lv_obj_set_style_text_align(status_lbl, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_width(status_lbl, LV_PCT(100));
+        if (have_age) {
+            snprintf(meta_buf, sizeof(meta_buf), "  %s %s", age_buf, badge_sym);
+        } else {
+            snprintf(meta_buf, sizeof(meta_buf), "  %s", badge_sym);
+        }
+    } else if (have_age) {
+        snprintf(meta_buf, sizeof(meta_buf), "  %s", age_buf);
+    }
+
+    lv_obj_t* sg = lv_spangroup_create(bubble);
+    lv_obj_set_style_pad_all(sg, 0, 0);
+
+    lv_span_t* text_span = lv_spangroup_new_span(sg);
+    lv_span_set_text(text_span, msg->text);
+    lv_style_t* text_style = lv_span_get_style(text_span);
+    lv_style_set_text_font(text_style, &lv_font_montserrat_14);
+    lv_style_set_text_color(text_style, BR_COLOR_TEXT);
+
+    if (meta_buf[0]) {
+        lv_span_t* meta_span = lv_spangroup_new_span(sg);
+        lv_span_set_text(meta_span, meta_buf);
+        lv_style_t* meta_style = lv_span_get_style(meta_span);
+        lv_style_set_text_font(meta_style, &lv_font_montserrat_10);
+        lv_style_set_text_color(meta_style, meta_color);
+    }
+
+    bool can_show_route = chat_message_has_inline_route_toggle(
+        is_mine, msg->status, msg->route_hop_count, msg->packet_id);
+    bool route_expanded =
+        can_show_route && s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id;
+
+    /* Hug a single line that fits under the cap; wrap (and cap the bubble
+     * width) otherwise. lv_spangroup_get_expand_width measures from font
+     * metrics alone, so it works before a mode or layout pass. A hugged
+     * (LV_SIZE_CONTENT) bubble can't host the route label below, which is
+     * LV_PCT(100) width, so route-expanded bubbles always wrap at the cap. */
+    uint32_t content_w = lv_spangroup_get_expand_width(sg, 0);
+    if (!route_expanded && content_w <= CHAT_BUBBLE_MAX_INNER_W) {
+        lv_spangroup_set_mode(sg, LV_SPAN_MODE_EXPAND);
+        lv_obj_set_width(bubble, LV_SIZE_CONTENT);
+    } else {
+        lv_obj_set_width(sg, CHAT_BUBBLE_MAX_INNER_W);
+        lv_spangroup_set_mode(sg, LV_SPAN_MODE_BREAK);
+        lv_obj_set_width(bubble, CHAT_BUBBLE_MAX_W);
     }
 
     if (can_show_route) {
-        bool expanded = (s_selected_packet_id != 0 && msg->packet_id == s_selected_packet_id);
-
-        if (expanded) {
+        if (route_expanded) {
             char route_buf[200];
             format_route_text(route_buf, sizeof(route_buf), msg->route_hop_count, msg->route_hops);
 
@@ -436,17 +474,6 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
                                 (void*)(uintptr_t)msg->packet_id);
         }
     }
-
-    if (age_s < 0)
-        return; /* restored from a previous boot: age unknowable, hide it */
-    char age_buf[8];
-    chat_format_age((uint32_t)age_s, age_buf, sizeof(age_buf));
-    lv_obj_t* age_lbl = lv_label_create(bubble);
-    lv_label_set_text(age_lbl, age_buf);
-    lv_obj_set_style_text_font(age_lbl, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(age_lbl, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_set_style_text_align(age_lbl, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_width(age_lbl, LV_PCT(100));
 }
 
 static void render_messages_for_target(bool scroll_to_bottom) {
@@ -618,6 +645,9 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     lv_obj_set_style_pad_row(s_msg_list, 4, 0);
     lv_obj_set_scroll_dir(s_msg_list, LV_DIR_VER);                /* Prevent horizontal scroll */
     lv_obj_set_scrollbar_mode(s_msg_list, LV_SCROLLBAR_MODE_OFF); /* Hide stray bars */
+    /* content_area itself is non-scrollable (scr_layout.c), but belt and
+     * suspenders: never chain a scroll past this list's end. */
+    lv_obj_clear_flag(s_msg_list, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
 
     /* Load messages from store */
     render_messages_for_target(true);

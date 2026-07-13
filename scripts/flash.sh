@@ -67,6 +67,29 @@ if [[ $# -gt 0 ]]; then
   EXTRA_ARGS=("$@")
 fi
 
+# Refuse unrecognized positional tokens instead of absorbing them.
+#
+# Every is_* check above is an exact match, so a near-miss like "heltec_v4"
+# (underscore) or "tdeck_plus" matches NOTHING: it is not a board, not an
+# action, not a port. Before this guard it silently fell through to EXTRA_ARGS
+# and left BOTH defaults standing, which are the two most dangerous values in
+# the script: BOARD=heltec-v3 (the flash-encrypted bench node, which a
+# plaintext flash bricks and strips of its NVS identity) and ACTION=flash.
+# "flash.sh local heltec_v4 build" therefore meant "plaintext-flash the
+# encrypted V3", which is never what anyone typed it to mean. Real extra idf.py
+# args are flags (--erase-nvs), so anything not starting with '-' here is a typo.
+for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
+  if [[ "$arg" != -* ]]; then
+    echo "flash.sh: unrecognized argument: '$arg'" >&2
+    echo "Boards: heltec-v3 heltec-v4 tdeck-plus bramble-pager (HYPHENS, not underscores)" >&2
+    echo "Actions: flash monitor build" >&2
+    echo "Extra idf.py args must start with '-'." >&2
+    echo >&2
+    print_usage >&2
+    exit 2
+  fi
+done
+
 if [[ -z "$PORT" ]]; then
   if [[ "$BOARD" == "tdeck-plus" || "$BOARD" == "bramble-pager" ]]; then
     PORT="/dev/ttyACM0"

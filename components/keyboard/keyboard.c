@@ -40,6 +40,16 @@ static char key_buffer[KEY_BUFFER_SIZE];
 static volatile int key_head = 0;
 static volatile int key_tail = 0;
 
+/* Injected key ring (bench debug RPC, see rpc_methods.c bramble.injectInput).
+ * Unlike key_buffer above, this IS a cross-context producer/consumer pair
+ * (an RPC transport task pushes, keyboard_poll() on the UI task pops), so it
+ * needs the spinlock key_buffer's own comment says would be required. */
+static portMUX_TYPE s_inject_lock = portMUX_INITIALIZER_UNLOCKED;
+#define INJECT_BUFFER_SIZE 32
+static char inject_buffer[INJECT_BUFFER_SIZE];
+static volatile int inject_head = 0;
+static volatile int inject_tail = 0;
+
 /* Polling cooldown — avoid hammering I2C on every LVGL tick (~30ms) */
 static int64_t last_poll_us = 0;
 #define POLL_INTERVAL_US 20000 /* 20ms minimum between I2C reads */
@@ -97,6 +107,22 @@ static inline bool buffer_pop(char* out) {
     *out = key_buffer[key_tail];
     key_tail = next_index(key_tail);
     return true;
+}
+
+/* ── Injection Ring Helpers ─────────────────────────────────────────── */
+
+static inline int inject_next_index(int idx) { return (idx + 1) % INJECT_BUFFER_SIZE; }
+
+static bool inject_buffer_pop(char* out) {
+    bool ok = false;
+    portENTER_CRITICAL(&s_inject_lock);
+    if (inject_head != inject_tail) {
+        *out = inject_buffer[inject_tail];
+        inject_tail = inject_next_index(inject_tail);
+        ok = true;
+    }
+    portEXIT_CRITICAL(&s_inject_lock);
+    return ok;
 }
 
 /* ── I2C Read Key ───────────────────────────────────────────────────── */
@@ -188,9 +214,33 @@ int keyboard_init(void) {
     return 0;
 }
 
+bool keyboard_inject_char(char c) {
+    if (!initialized)
+        return false;
+    bool ok = false;
+    portENTER_CRITICAL(&s_inject_lock);
+    int next = inject_next_index(inject_head);
+    if (next != inject_tail) {
+        inject_buffer[inject_head] = c;
+        inject_head = next;
+        ok = true;
+    }
+    portEXIT_CRITICAL(&s_inject_lock);
+    if (!ok) {
+        ESP_LOGW(TAG, "Inject buffer overflow, dropping key");
+    }
+    return ok;
+}
+
 bool keyboard_poll(char* out) {
     if (!initialized || !out)
         return false;
+
+    /* Injected keys (bench debug RPC) drain first, ahead of real hardware,
+     * so they reach LVGL immediately instead of waiting behind the I2C
+     * poll interval below. */
+    if (inject_buffer_pop(out))
+        return true;
 
     /* Rate-limit I2C reads so we don't saturate the bus.
      * LVGL calls this every ~30ms; we read every 20ms max. */
@@ -250,6 +300,11 @@ int keyboard_init(void) { return -1; /* Not supported */ }
 
 bool keyboard_poll(char* out) {
     (void)out;
+    return false;
+}
+
+bool keyboard_inject_char(char c) {
+    (void)c;
     return false;
 }
 
