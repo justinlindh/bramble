@@ -1,6 +1,7 @@
 #include "unity.h"
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
+#include <string.h>
 
 void setUp(void) { rpc_init(); }
 void tearDown(void) {}
@@ -25,6 +26,15 @@ static int mock_handler_error(const cJSON* params, cJSON* result) {
     (void)params;
     (void)result;
     return -1001;
+}
+
+static int mock_handler_big_result(const cJSON* params, cJSON* result) {
+    (void)params;
+    char big[512];
+    memset(big, 'x', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    cJSON_AddStringToObject(result, "blob", big);
+    return 0;
 }
 
 /* Helper: parse response and check jsonrpc field */
@@ -257,8 +267,35 @@ void test_legacy_dispatch_is_full_privilege(void) {
     cJSON_Delete(resp);
 }
 
+/* Regression: a response that does not fit the caller's buffer used to write
+ * NOTHING and return -1, so an oversize reply (a full bramble.getMessages dump)
+ * was indistinguishable from a dead node: the client just timed out. It must
+ * come back as a parseable error that says so. */
+void test_oversize_response_reports_an_error_instead_of_nothing(void) {
+    rpc_register("test.big", mock_handler_big_result);
+
+    /* Too small for the ~550-byte result, but big enough to hold the error that
+     * explains why (a buffer under ~140 bytes cannot even fit that, and then
+     * there is genuinely nothing to say). */
+    char small[256];
+    int len = rpc_dispatch("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"test.big\"}", small,
+                           sizeof(small));
+
+    TEST_ASSERT_GREATER_THAN(0, len);
+    TEST_ASSERT_EQUAL(len, (int)strlen(small));
+
+    cJSON* j = parse_response(small);
+    cJSON* err = cJSON_GetObjectItem(j, "error");
+    TEST_ASSERT_NOT_NULL(err);
+    TEST_ASSERT_EQUAL_STRING("response too large",
+                             cJSON_GetObjectItem(err, "message")->valuestring);
+    TEST_ASSERT_EQUAL(42, cJSON_GetObjectItem(j, "id")->valueint);
+    cJSON_Delete(j);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_oversize_response_reports_an_error_instead_of_nothing);
     RUN_TEST(test_dispatch_valid_request);
     RUN_TEST(test_dispatch_unknown_method);
     RUN_TEST(test_dispatch_malformed_json);

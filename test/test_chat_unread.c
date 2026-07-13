@@ -112,6 +112,22 @@ void test_dm_peer_table_caps_at_eight(void) {
     TEST_ASSERT_EQUAL(0, chat_unread_count_for_dm(0x1008));
 }
 
+/* Regression (nav review F1): a DM received on channel_id 0, stored via the rx
+ * convention, must count against the peer's DM badge, never channel 0's. The
+ * old raw-0 storage bumped the Broadcast (channel 0) badge instead. */
+void test_incoming_dm_from_rx_convention_counts_by_peer_not_channel0(void) {
+    stored_msg_t rx_dm = {
+        .direction = MSG_DIR_INCOMING,
+        .channel_index = msg_store_rx_channel_index(0),
+        .peer_addr = 0xFEC61437,
+    };
+
+    chat_unread_mark_for_message(&rx_dm);
+
+    TEST_ASSERT_EQUAL(1, chat_unread_count_for_dm(0xFEC61437));
+    TEST_ASSERT_EQUAL(0, chat_unread_count_for_channel(0));
+}
+
 void test_reset_clears_dm_counts(void) {
     stored_msg_t m = {.direction = MSG_DIR_INCOMING, .channel_index = -1, .peer_addr = 0xCAFE0001};
     chat_unread_mark_for_message(&m);
@@ -127,6 +143,7 @@ int main(void) {
     RUN_TEST(test_clear_only_target_channel);
     RUN_TEST(test_invalid_channel_is_ignored);
     RUN_TEST(test_incoming_dm_without_channel_counts_by_peer);
+    RUN_TEST(test_incoming_dm_from_rx_convention_counts_by_peer_not_channel0);
     RUN_TEST(test_clear_dm_only_clears_that_peer);
     RUN_TEST(test_dm_peer_table_caps_at_eight);
     RUN_TEST(test_reset_clears_dm_counts);

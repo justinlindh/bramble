@@ -14,4 +14,8 @@ void ui_focus_pop_modal(void);
  * pushed, else the default group. */
 lv_group_t* ui_focus_active_group(void);
 
+/* True while a modal is pushed. The zone navigator falls back to flat
+ * (single-group) trackball navigation in this state. */
+bool ui_focus_modal_active(void);
+
 #endif

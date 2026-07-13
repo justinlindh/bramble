@@ -19,12 +19,14 @@
 #include "esp_vfs_dev.h"
 #include "esp_vfs_usb_serial_jtag.h"
 #include "esp_task_wdt.h"
+#include "esp_heap_caps.h"
 #include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "linenoise/linenoise.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
@@ -291,6 +293,24 @@ static void cli_task(void* param) {
     /* Disable task watchdog for CLI task (linenoise blocks on input) */
     esp_task_wdt_delete(NULL);
 
+    /* JSON-RPC response buffer. The old 2 KB lived on this task's stack and
+     * silently swallowed anything bigger: a full 20-message bramble.getMessages
+     * dump, or a screenshot chunk over ~1.5 KB, produced NO output at all, so
+     * the caller could only see a serial timeout. 16 KB from PSRAM (falling back
+     * to internal RAM on boards without it) covers a full message store, and an
+     * overflow past even that now comes back as an explicit "response too large"
+     * error from rpc_dispatch rather than silence. */
+    const size_t resp_cap = 16 * 1024;
+    char* response = heap_caps_malloc(resp_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!response) {
+        response = malloc(resp_cap);
+    }
+    if (!response) {
+        ESP_LOGE(TAG, "CLI response buffer alloc failed (%u bytes)", (unsigned)resp_cap);
+        vTaskDelete(NULL);
+        return;
+    }
+
     while (1) {
         char* line = linenoise("bramble> ");
         if (line == NULL) {
@@ -310,8 +330,7 @@ static void cli_task(void* param) {
                  * DESIGN: physical USB access is the pairing bootstrap
                  * that retrieves the device auth token (`bramble pair`).
                  * See docs/SECURITY-MODEL.md, device-as-secret posture. */
-                char response[2048];
-                int rpc_len = rpc_dispatch(line, response, sizeof(response));
+                int rpc_len = rpc_dispatch(line, response, resp_cap);
                 if (rpc_len > 0) {
                     printf("%s\n", response);
                     fflush(stdout);

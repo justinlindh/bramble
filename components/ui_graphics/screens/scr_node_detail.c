@@ -2,6 +2,7 @@
 #include "scr_nodes.h"
 #include "scr_chat_messages.h"
 #include "scr_map.h"
+#include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "ui_toast.h"
 #include "node_detail_ui.h"
@@ -20,27 +21,53 @@ static bool s_has_location = false;
 static location_cache_entry_t s_location;
 static uint32_t s_now_ms = 0;
 
-static void back_click_cb(lv_event_t* e) {
-    (void)e;
+/* This screen's action buttons live in the content area that each destination
+ * cleans, so every one of them defers out of its own click. See ui_defer.
+ * (Share My Location rebuilds nothing and stays inline.) */
+static void back_to_nodes_async(void* arg) {
+    (void)arg;
     if (!s_layout)
         return;
     lv_obj_clean(layout_get_content(s_layout));
     scr_nodes_create(s_layout);
 }
 
+static void back_click_cb(lv_event_t* e) {
+    (void)e;
+    if (!s_layout)
+        return;
+    ui_defer(back_to_nodes_async, NULL);
+}
+
+static void open_dm_async(void* arg) {
+    (void)arg;
+    if (!s_layout || s_neighbor.addr == 0)
+        return;
+    scr_chat_messages_open_dm(s_layout, s_neighbor.addr);
+}
+
 static void dm_click_cb(lv_event_t* e) {
     (void)e;
     if (!s_layout || s_neighbor.addr == 0)
         return;
-    scr_chat_messages_open_dm(s_layout, s_neighbor.addr);
+    ui_defer(open_dm_async, NULL);
+}
+
+static void show_on_map_async(void* arg) {
+    (void)arg;
+    if (!s_layout)
+        return;
+    layout_set_tab(s_layout, TAB_MAP);
 }
 
 static void map_click_cb(lv_event_t* e) {
     (void)e;
     if (!s_layout || s_neighbor.addr == 0)
         return;
+    /* Record the peer inline (it is read by the map builder); only the tab
+     * switch, which cleans this button away, is deferred. */
     scr_map_set_focus_peer(s_neighbor.addr);
-    layout_set_tab(s_layout, TAB_MAP);
+    ui_defer(show_on_map_async, NULL);
 }
 
 static void share_loc_click_cb(lv_event_t* e) {
@@ -170,4 +197,6 @@ void scr_node_detail_open(bramble_layout_t* layout, const neighbor_entry_t* neig
     add_action_btn(actions, "Show on Map", map_click_cb, false);
     add_action_btn(actions, "Share My Location", share_loc_click_cb, false);
     add_action_btn(actions, "Back", back_click_cb, false);
+
+    ui_zone_reset_to_content();
 }

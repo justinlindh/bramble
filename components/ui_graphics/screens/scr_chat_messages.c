@@ -1,6 +1,7 @@
 #include "scr_chat_messages.h"
 #include "scr_chat_list.h"
 #include "scr_sas_verify.h"
+#include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "msg_store.h"
 #include "chat_target.h"
@@ -16,8 +17,14 @@
 static const char* TAG = "scr_msg";
 static int s_active_channel = -1;
 static chat_target_t s_target;
+
+/* All four are ui_zone_track'd at creation, so LVGL nulls them the moment the
+ * widget dies with the content area. s_msg_list doubles as the authoritative
+ * "a chat thread is on screen" flag (see scr_chat_messages_open_target): it is
+ * non-NULL exactly while this screen is built. */
 static lv_obj_t* s_msg_list = NULL;
 static lv_obj_t* s_compose_ta = NULL;
+static lv_obj_t* s_send_btn = NULL;
 static lv_obj_t* s_title = NULL;
 static uint32_t s_selected_packet_id = 0;
 
@@ -107,15 +114,26 @@ static void dm_verify_status(uint32_t peer_addr, const char** text_out, lv_color
     }
 }
 
-static void verify_click_cb(lv_event_t* e) {
-    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+/* The verify glyph, Back, and the bubbles all live inside content_area, which
+ * the screen they open cleans; every one of them defers (see ui_defer). */
+static void verify_open_async(void* arg) {
+    bramble_layout_t* layout = (bramble_layout_t*)arg;
     if (!layout || s_target.kind != CHAT_TARGET_DM)
         return;
     scr_sas_verify_open(layout, s_target.peer_addr);
 }
 
-static void back_click_cb(lv_event_t* e) {
+static void verify_click_cb(lv_event_t* e) {
     bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+    if (!layout || s_target.kind != CHAT_TARGET_DM)
+        return;
+    ui_defer(verify_open_async, layout);
+}
+
+static void back_to_list_async(void* arg) {
+    bramble_layout_t* layout = (bramble_layout_t*)arg;
+    if (!layout)
+        return;
     /* Restore tab bar */
     layout_set_tab_bar_hidden(layout, false);
     /* Restore content area size */
@@ -123,15 +141,16 @@ static void back_click_cb(lv_event_t* e) {
     lv_obj_set_pos(layout->content_area, 0, BR_STATUS_BAR_H);
     /* Rebuild chat list */
     lv_refr_now(lv_display_get_default());
+    /* Nulls the four tracked widget handles, so the thread reads as closed. */
     lv_obj_clean(layout->content_area);
     s_active_channel = -1;
     s_target = chat_target_default();
-    s_msg_list = NULL;
-    s_compose_ta = NULL;
-    s_title = NULL;
     s_selected_packet_id = 0;
-    layout->in_dm_view = false;
     scr_chat_list_create(layout);
+}
+
+static void back_click_cb(lv_event_t* e) {
+    ui_defer(back_to_list_async, lv_event_get_user_data(e));
 }
 
 static void send_current_message(void) {
@@ -176,6 +195,11 @@ static void compose_ready_cb(lv_event_t* e) {
     send_current_message();
 }
 
+static void rerender_async(void* arg) {
+    (void)arg;
+    render_messages_for_target(false);
+}
+
 static void msg_bubble_click_cb(lv_event_t* e) {
     uint32_t packet_id = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
     if (packet_id == 0) {
@@ -187,7 +211,9 @@ static void msg_bubble_click_cb(lv_event_t* e) {
     } else {
         s_selected_packet_id = packet_id;
     }
-    render_messages_for_target(false);
+    /* The re-render cleans s_msg_list, which owns this very bubble: defer it
+     * out of the bubble's own CLICKED dispatch. */
+    ui_defer(rerender_async, NULL);
 }
 
 static void format_compact_hop_name(char* out, size_t out_len, uint32_t hop_addr) {
@@ -356,6 +382,13 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(bubble, LV_FLEX_FLOW_COLUMN);
 
+    /* The bubble is this row's focus target for the trackball: navigating the
+     * content zone walks bubbles (chat_sync_content_group adds them), a focus
+     * outline shows which one is selected, and the packet id lets a re-render
+     * restore focus to the same message. */
+    ui_zone_style_content(bubble);
+    lv_obj_set_user_data(bubble, (void*)(uintptr_t)msg->packet_id);
+
     if (is_mine) {
         lv_obj_align(bubble, LV_ALIGN_RIGHT_MID, 0, 0);
     } else {
@@ -476,6 +509,51 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
     }
 }
 
+/* Rebuild the content focus group after the message list is (re)built so the
+ * trackball walks bubbles top-to-bottom, then the compose box, then the send
+ * button. lv_obj_clean recreates every bubble on each render, so the group is
+ * torn down and reassembled each pass; focus is restored to the same widget by
+ * identity (compose/send) or by packet id (a bubble), which keeps a route
+ * toggle or a fresh arrival from yanking the focus ring. */
+static void chat_sync_content_group(void) {
+    lv_group_t* cg = ui_zone_content_group();
+    if (!cg || !s_msg_list)
+        return;
+
+    lv_obj_t* foc = lv_group_get_focused(cg);
+    bool foc_compose = (foc && foc == s_compose_ta);
+    bool foc_send = (foc && foc == s_send_btn);
+    uint32_t foc_pkt =
+        (foc && !foc_compose && !foc_send) ? (uint32_t)(uintptr_t)lv_obj_get_user_data(foc) : 0;
+
+    lv_group_remove_all_objs(cg);
+
+    lv_obj_t* restore = NULL;
+    uint32_t rows = lv_obj_get_child_count(s_msg_list);
+    for (uint32_t i = 0; i < rows; i++) {
+        lv_obj_t* row = lv_obj_get_child(s_msg_list, i);
+        lv_obj_t* target = lv_obj_get_child(row, 0); /* bubble (or action label) */
+        if (!target)
+            continue;
+        lv_group_add_obj(cg, target);
+        if (foc_pkt && (uint32_t)(uintptr_t)lv_obj_get_user_data(target) == foc_pkt)
+            restore = target;
+    }
+
+    if (s_compose_ta)
+        lv_group_add_obj(cg, s_compose_ta);
+    if (s_send_btn)
+        lv_group_add_obj(cg, s_send_btn);
+
+    if (foc_compose && s_compose_ta)
+        restore = s_compose_ta;
+    else if (foc_send && s_send_btn)
+        restore = s_send_btn;
+
+    if (restore)
+        lv_group_focus_obj(restore);
+}
+
 static void render_messages_for_target(bool scroll_to_bottom) {
     if (!s_msg_list)
         return;
@@ -537,6 +615,10 @@ static void render_messages_for_target(bool scroll_to_bottom) {
         }
     }
 
+    /* Refresh the content focus group to match the freshly built bubble set
+     * before re-asserting the scroll position (focus restore can nudge it). */
+    chat_sync_content_group();
+
     if (scroll_to_bottom || was_at_bottom) {
         lv_obj_scroll_to_y(s_msg_list, LV_COORD_MAX, LV_ANIM_OFF);
     } else {
@@ -547,7 +629,6 @@ static void render_messages_for_target(bool scroll_to_bottom) {
 static void open_with_target(bramble_layout_t* layout, chat_target_t target,
                              int clear_channel_idx) {
     s_target = target;
-    layout->in_dm_view = true;
     s_active_channel = (s_target.kind == CHAT_TARGET_CHANNEL) ? s_target.channel_index : 0;
     s_selected_packet_id = 0;
 
@@ -584,9 +665,13 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     lv_obj_center(back_lbl);
     lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
 
+    /* Header actions (back, channel-switch / verify) are chrome; the message
+     * list, compose box, and send button below are content. This view hides the
+     * tab bar, so chrome is exactly these header actions, Back first: a hop out
+     * of content lands on Back. */
+    ui_zone_add_chrome(back_btn, true);
+
     lv_group_t* g = lv_group_get_default();
-    if (g)
-        lv_group_add_obj(g, back_btn);
 
     if (s_target.kind == CHAT_TARGET_DM) {
         /* Verify glyph + entry point takes the channel-cycle button's slot:
@@ -608,8 +693,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
         lv_obj_set_style_text_color(verify_lbl, status_color, 0);
         lv_obj_center(verify_lbl);
         lv_obj_add_event_cb(verify_btn, verify_click_cb, LV_EVENT_CLICKED, layout);
-        if (g)
-            lv_group_add_obj(g, verify_btn);
+        ui_zone_add_chrome(verify_btn, false);
     } else {
         lv_obj_t* target_btn = lv_btn_create(header);
         lv_obj_set_size(target_btn, 108, 22);
@@ -618,16 +702,18 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
         lv_obj_set_style_border_color(target_btn, BR_COLOR_BORDER, 0);
         lv_obj_set_style_border_width(target_btn, 1, 0);
         lv_obj_t* tgt_lbl = lv_label_create(target_btn);
-        lv_label_set_text(tgt_lbl, LV_SYMBOL_REFRESH " channel");
+        /* Shuffle glyph reads as "switch conversation", unlike the old refresh
+         * glyph that looked like a reload; the title already names the active
+         * channel, so the button just needs to signal the switch action. */
+        lv_label_set_text(tgt_lbl, LV_SYMBOL_SHUFFLE " Switch");
         lv_obj_set_style_text_font(tgt_lbl, &lv_font_montserrat_12, 0);
         lv_obj_set_style_text_color(tgt_lbl, BR_COLOR_TEXT_SEC, 0);
         lv_obj_center(tgt_lbl);
         lv_obj_add_event_cb(target_btn, channel_cycle_click_cb, LV_EVENT_CLICKED, NULL);
-        if (g)
-            lv_group_add_obj(g, target_btn);
+        ui_zone_add_chrome(target_btn, false);
     }
 
-    s_title = lv_label_create(header);
+    ui_zone_track(&s_title, lv_label_create(header));
     lv_obj_set_style_text_font(s_title, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_title, BR_COLOR_TEXT, 0);
     lv_obj_align_to(s_title, back_btn, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
@@ -635,7 +721,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
 
     /* Message list area */
     int msg_area_h = content_h - 28 - BR_COMPOSE_BAR_H;
-    s_msg_list = lv_obj_create(layout->content_area);
+    ui_zone_track(&s_msg_list, lv_obj_create(layout->content_area));
     lv_obj_set_size(s_msg_list, 320, msg_area_h);
     lv_obj_set_pos(s_msg_list, 0, 28);
     lv_obj_set_style_bg_opa(s_msg_list, LV_OPA_TRANSP, 0);
@@ -663,7 +749,7 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
     lv_obj_set_style_pad_all(compose_bar, 4, 0);
     lv_obj_clear_flag(compose_bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_compose_ta = lv_textarea_create(compose_bar);
+    ui_zone_track(&s_compose_ta, lv_textarea_create(compose_bar));
     lv_obj_set_size(s_compose_ta, 260, 36);
     lv_obj_set_pos(s_compose_ta, 0, 0);
     lv_textarea_set_placeholder_text(s_compose_ta, "Type message...");
@@ -678,16 +764,21 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
         lv_group_focus_obj(s_compose_ta); /* ensure keyboard types into compose bar immediately */
     }
 
-    lv_obj_t* send_btn = lv_btn_create(compose_bar);
-    lv_obj_set_size(send_btn, 44, 36);
-    lv_obj_set_pos(send_btn, 264, 0);
-    lv_obj_set_style_bg_color(send_btn, BR_COLOR_PRIMARY, 0);
-    lv_obj_t* send_lbl = lv_label_create(send_btn);
+    ui_zone_track(&s_send_btn, lv_btn_create(compose_bar));
+    lv_obj_set_size(s_send_btn, 44, 36);
+    lv_obj_set_pos(s_send_btn, 264, 0);
+    lv_obj_set_style_bg_color(s_send_btn, BR_COLOR_PRIMARY, 0);
+    lv_obj_t* send_lbl = lv_label_create(s_send_btn);
     lv_label_set_text(send_lbl, LV_SYMBOL_OK);
     lv_obj_center(send_lbl);
-    lv_obj_add_event_cb(send_btn, send_click_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_send_btn, send_click_cb, LV_EVENT_CLICKED, NULL);
     if (g)
-        lv_group_add_obj(g, send_btn);
+        lv_group_add_obj(g, s_send_btn);
+
+    /* Content zone is populated; keep input there with compose focused. */
+    ui_zone_reset_to_content();
+    if (s_compose_ta)
+        lv_group_focus_obj(s_compose_ta);
 }
 
 /* Key-change interstitial (DM forward-secrecy + SAS, Task 8): a genuine
@@ -696,18 +787,32 @@ static void open_with_target(bramble_layout_t* layout, chat_target_t target,
  * goes straight to the SAS screen, "Continue" opens the DM anyway (reading
  * old messages from a since-rotated key is not itself dangerous, only
  * trusting new ones without re-verifying is). */
+static void interstitial_verify_async(void* arg) {
+    (void)arg;
+    if (!s_interstitial_layout)
+        return;
+    scr_sas_verify_open(s_interstitial_layout, s_interstitial_peer_addr);
+}
+
 static void interstitial_verify_click_cb(lv_event_t* e) {
     (void)e;
     if (!s_interstitial_layout)
         return;
-    scr_sas_verify_open(s_interstitial_layout, s_interstitial_peer_addr);
+    ui_defer(interstitial_verify_async, NULL);
+}
+
+static void interstitial_continue_async(void* arg) {
+    (void)arg;
+    if (!s_interstitial_layout)
+        return;
+    open_with_target(s_interstitial_layout, chat_target_dm(s_interstitial_peer_addr), -1);
 }
 
 static void interstitial_continue_click_cb(lv_event_t* e) {
     (void)e;
     if (!s_interstitial_layout)
         return;
-    open_with_target(s_interstitial_layout, chat_target_dm(s_interstitial_peer_addr), -1);
+    ui_defer(interstitial_continue_async, NULL);
 }
 
 static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer_addr) {
@@ -764,6 +869,10 @@ static void show_key_change_interstitial(bramble_layout_t* layout, uint32_t peer
         lv_group_add_obj(g, continue_btn);
         lv_group_focus_obj(verify_btn);
     }
+
+    ui_zone_reset_to_content();
+    if (g)
+        lv_group_focus_obj(verify_btn);
 }
 
 void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx) {
@@ -789,3 +898,15 @@ void scr_chat_messages_open_dm(bramble_layout_t* layout, uint32_t peer_addr) {
 }
 
 void scr_chat_messages_on_recv(void) { render_messages_for_target(false); }
+
+bool scr_chat_messages_open_target(chat_target_t* out) {
+    /* s_msg_list exists only while this screen is built, and LVGL nulls it on
+     * teardown, so it answers "is a thread on screen" without any flag to keep
+     * in sync. The nav tab cannot answer it: a DM opened from node detail
+     * leaves active_tab == TAB_NODES. */
+    if (!s_msg_list)
+        return false;
+    if (out)
+        *out = s_target;
+    return true;
+}

@@ -4,6 +4,7 @@
 #include "theme/bramble_theme.h"
 #include "ui_confirm.h"
 #include "ui_focus.h"
+#include "ui_zone.h"
 #include "traffic_debug.h"
 #include "esp_app_desc.h"
 #include "ui_toast.h"
@@ -645,7 +646,11 @@ static void identity_qr_close(void) {
     if (!s_identity_qr_overlay)
         return;
     ui_focus_pop_modal();
-    lv_obj_delete(s_identity_qr_overlay);
+    /* Called from the Close button INSIDE this overlay: a plain lv_obj_delete
+     * would free the widget whose CLICKED event is still dispatching (LVGL 9
+     * forbids it; symptom is a use-after-free reboot). Same pattern as
+     * ui_confirm and the other settings modals. */
+    lv_obj_delete_async(s_identity_qr_overlay);
     s_identity_qr_overlay = NULL;
 }
 
@@ -750,7 +755,9 @@ static void name_edit_close(void) {
     if (!s_name_edit_overlay)
         return;
     ui_focus_pop_modal();
-    lv_obj_delete(s_name_edit_overlay);
+    /* Called from Cancel/Save INSIDE this overlay; defer the delete so the
+     * clicked button survives its own event dispatch (see identity_qr_close). */
+    lv_obj_delete_async(s_name_edit_overlay);
     s_name_edit_overlay = NULL;
     s_name_edit_ta = NULL;
 }
@@ -947,7 +954,7 @@ static void build_radio_config_section(lv_obj_t* cont, lv_group_t* g) {
 
     /* Frequency (read-only display) */
     lv_obj_t* freq_row = create_setting_row(cont, "Frequency");
-    s_radio_freq_label = lv_label_create(freq_row);
+    ui_zone_track(&s_radio_freq_label, lv_label_create(freq_row));
     char freq_buf[24];
     snprintf(freq_buf, sizeof(freq_buf), "%.1f MHz", (double)cfg.frequency_mhz);
     lv_label_set_text(s_radio_freq_label, freq_buf);
@@ -959,7 +966,7 @@ static void build_radio_config_section(lv_obj_t* cont, lv_group_t* g) {
     lv_obj_t* tx_row = create_setting_row(cont, "TX Power");
     lv_obj_set_size(tx_row, 304, 48);
 
-    s_radio_tx_label = lv_label_create(tx_row);
+    ui_zone_track(&s_radio_tx_label, lv_label_create(tx_row));
     char tx_buf[16];
     snprintf(tx_buf, sizeof(tx_buf), "%d dBm", cfg.tx_power);
     lv_label_set_text(s_radio_tx_label, tx_buf);
@@ -967,7 +974,7 @@ static void build_radio_config_section(lv_obj_t* cont, lv_group_t* g) {
     lv_obj_set_style_text_font(s_radio_tx_label, &lv_font_montserrat_12, 0);
     lv_obj_align(s_radio_tx_label, LV_ALIGN_RIGHT_MID, -110, 0);
 
-    s_radio_tx_slider = lv_slider_create(tx_row);
+    ui_zone_track(&s_radio_tx_slider, lv_slider_create(tx_row));
     lv_obj_set_size(s_radio_tx_slider, 100, 10);
     lv_obj_align(s_radio_tx_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(s_radio_tx_slider, 2, 20);
@@ -981,7 +988,7 @@ static void build_radio_config_section(lv_obj_t* cont, lv_group_t* g) {
 
     /* Spreading Factor dropdown */
     lv_obj_t* sf_row = create_setting_row(cont, "Spreading Factor");
-    s_radio_sf_dd = lv_dropdown_create(sf_row);
+    ui_zone_track(&s_radio_sf_dd, lv_dropdown_create(sf_row));
     lv_dropdown_set_options(s_radio_sf_dd, "SF7\nSF8\nSF9\nSF10\nSF11\nSF12");
     lv_obj_set_size(s_radio_sf_dd, 100, 34);
     lv_obj_align(s_radio_sf_dd, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -992,7 +999,7 @@ static void build_radio_config_section(lv_obj_t* cont, lv_group_t* g) {
 
     /* Bandwidth dropdown */
     lv_obj_t* bw_row = create_setting_row(cont, "Bandwidth");
-    s_radio_bw_dd = lv_dropdown_create(bw_row);
+    ui_zone_track(&s_radio_bw_dd, lv_dropdown_create(bw_row));
     lv_dropdown_set_options(s_radio_bw_dd, "125 kHz\n250 kHz\n500 kHz");
     lv_obj_set_size(s_radio_bw_dd, 110, 34);
     lv_obj_align(s_radio_bw_dd, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1007,7 +1014,7 @@ static void build_radio_config_section(lv_obj_t* cont, lv_group_t* g) {
 
     /* Coding Rate dropdown */
     lv_obj_t* cr_row = create_setting_row(cont, "Coding Rate");
-    s_radio_cr_dd = lv_dropdown_create(cr_row);
+    ui_zone_track(&s_radio_cr_dd, lv_dropdown_create(cr_row));
     lv_dropdown_set_options(s_radio_cr_dd, "4/5\n4/6\n4/7\n4/8");
     lv_obj_set_size(s_radio_cr_dd, 100, 34);
     lv_obj_align(s_radio_cr_dd, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1049,7 +1056,13 @@ extern int mesh_get_channel_info(int* default_idx);
 /* Forward declare so callbacks can rebuild the section */
 static void build_channel_manager_section(lv_obj_t* cont, lv_group_t* g);
 
+/* ui_zone_track'd, like every settings widget cached here: the deferred
+ * add/remove/default callbacks below re-enter through this pointer, and a tab
+ * switch (an incoming message forces TAB_CHAT) cleans the content area out from
+ * under it. Tracked, the NULL guard in channel_refresh_list is real; untracked
+ * it just read freed memory that happened to be non-NULL. */
 static lv_obj_t* s_channel_section_cont = NULL;
+/* Not a widget: the long-lived content group, safe to cache raw. */
 static lv_group_t* s_channel_group = NULL;
 
 /* Add channel modal */
@@ -1060,7 +1073,10 @@ static lv_obj_t* s_ch_psk_ta = NULL;
 static void channel_add_close(void) {
     if (s_ch_add_overlay) {
         ui_focus_pop_modal();
-        lv_obj_delete(s_ch_add_overlay);
+        /* Called from Cancel/Save INSIDE this overlay; defer the delete so the
+         * clicked button survives its own event dispatch (see
+         * identity_qr_close). */
+        lv_obj_delete_async(s_ch_add_overlay);
         s_ch_add_overlay = NULL;
         s_ch_name_ta = NULL;
         s_ch_psk_ta = NULL;
@@ -1197,12 +1213,19 @@ static void channel_remove_cb(lv_event_t* e) {
     ui_confirm_show("Remove this channel?", "Remove", do_remove_channel, (void*)(intptr_t)index);
 }
 
+static void channel_refresh_async(void* arg) {
+    (void)arg;
+    channel_refresh_list();
+}
+
 static void channel_set_default_cb(lv_event_t* e) {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
     mesh_set_default_channel(index);
     ESP_LOGI(TAG, "Default channel set to %d", index);
     ui_toast_show("Default channel set");
-    channel_refresh_list();
+    /* The rebuild cleans the channel section that owns this very button, so it
+     * cannot run inline (see ui_defer). */
+    ui_defer(channel_refresh_async, NULL);
 }
 
 static void channel_refresh_list(void) {
@@ -1214,7 +1237,7 @@ static void channel_refresh_list(void) {
 }
 
 static void build_channel_manager_section(lv_obj_t* cont, lv_group_t* g) {
-    s_channel_section_cont = cont;
+    ui_zone_track(&s_channel_section_cont, cont);
     s_channel_group = g;
 
     lv_obj_t* section_lbl = lv_label_create(cont);
@@ -1387,8 +1410,10 @@ static void build_peer_manager_section(lv_obj_t* cont, lv_group_t* g) {
 /* ── Screen entry point ──────────────────────────────────────────────── */
 
 void scr_settings_create(bramble_layout_t* layout) {
-    lv_obj_t* cont = layout_get_content(layout);
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
+    /* Thirty-odd focusable widgets against a 180px viewport: this column MUST
+     * be the scrollable one, or DOWN walks the cursor off the bottom of the
+     * screen and never brings it back. */
+    lv_obj_t* cont = ui_zone_scroll_column(layout_get_content(layout));
     lv_obj_set_style_pad_all(cont, BR_PADDING, 0);
     lv_obj_set_style_pad_row(cont, 4, 0);
 
@@ -1405,7 +1430,7 @@ void scr_settings_create(bramble_layout_t* layout) {
     /* ── Node Name (editable) ── */
     lv_obj_t* name_row = create_setting_row(cont, "Node Name");
     const char* node_name = mesh_get_node_name();
-    s_name_label = lv_label_create(name_row);
+    ui_zone_track(&s_name_label, lv_label_create(name_row));
     lv_label_set_text(s_name_label, node_name ? node_name : "(not set)");
     lv_obj_set_style_text_color(s_name_label, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(s_name_label, &lv_font_montserrat_12, 0);
@@ -1448,7 +1473,7 @@ void scr_settings_create(bramble_layout_t* layout) {
 
     lv_obj_t* vol_row = create_setting_row(cont, LV_SYMBOL_AUDIO " Volume");
     lv_obj_set_size(vol_row, 304, 48);
-    s_volume_slider = lv_slider_create(vol_row);
+    ui_zone_track(&s_volume_slider, lv_slider_create(vol_row));
     lv_obj_set_size(s_volume_slider, 140, 10);
     lv_obj_align(s_volume_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(s_volume_slider, 0, 100);
@@ -1467,7 +1492,7 @@ void scr_settings_create(bramble_layout_t* layout) {
 
     /* ── Silent mode toggle ── */
     lv_obj_t* mute_row = create_setting_row(cont, LV_SYMBOL_MUTE " Silent");
-    s_mute_sw = lv_switch_create(mute_row);
+    ui_zone_track(&s_mute_sw, lv_switch_create(mute_row));
     lv_obj_align(s_mute_sw, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_mute_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
@@ -1502,7 +1527,7 @@ void scr_settings_create(bramble_layout_t* layout) {
     lv_obj_set_size(sleep_timeout_row, 304, 48);
 
     /* Value label showing "XXs" */
-    s_sleep_timeout_label = lv_label_create(sleep_timeout_row);
+    ui_zone_track(&s_sleep_timeout_label, lv_label_create(sleep_timeout_row));
     char timeout_buf[16];
     snprintf(timeout_buf, sizeof(timeout_buf), "%us", cur_sleep_timeout);
     lv_label_set_text(s_sleep_timeout_label, timeout_buf);
@@ -1510,7 +1535,7 @@ void scr_settings_create(bramble_layout_t* layout) {
     lv_obj_set_style_text_font(s_sleep_timeout_label, &lv_font_montserrat_12, 0);
     lv_obj_align(s_sleep_timeout_label, LV_ALIGN_RIGHT_MID, -150, 0);
 
-    s_sleep_timeout_slider = lv_slider_create(sleep_timeout_row);
+    ui_zone_track(&s_sleep_timeout_slider, lv_slider_create(sleep_timeout_row));
     lv_obj_set_size(s_sleep_timeout_slider, 100, 10);
     lv_obj_align(s_sleep_timeout_slider, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_slider_set_range(s_sleep_timeout_slider, 10, 300);
@@ -1544,7 +1569,7 @@ void scr_settings_create(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(loc_section_lbl, BR_COLOR_TEXT, 0);
 
     lv_obj_t* loc_share_row = create_setting_row(cont, "Share Location");
-    s_loc_share_sw = lv_switch_create(loc_share_row);
+    ui_zone_track(&s_loc_share_sw, lv_switch_create(loc_share_row));
     lv_obj_align(s_loc_share_sw, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(s_loc_share_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_loc_share_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
@@ -1556,7 +1581,7 @@ void scr_settings_create(bramble_layout_t* layout) {
         lv_group_add_obj(g, s_loc_share_sw);
 
     lv_obj_t* loc_tier_row = create_setting_row(cont, "Privacy Tier");
-    s_loc_tier_dd = lv_dropdown_create(loc_tier_row);
+    ui_zone_track(&s_loc_tier_dd, lv_dropdown_create(loc_tier_row));
     lv_dropdown_set_options(s_loc_tier_dd, "Coarse\nExact\nPresence");
     lv_obj_set_size(s_loc_tier_dd, 130, 34);
     lv_obj_align(s_loc_tier_dd, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1571,7 +1596,7 @@ void scr_settings_create(bramble_layout_t* layout) {
         lv_group_add_obj(g, s_loc_tier_dd);
 
     lv_obj_t* loc_interval_row = create_setting_row(cont, "Interval");
-    s_loc_interval_dd = lv_dropdown_create(loc_interval_row);
+    ui_zone_track(&s_loc_interval_dd, lv_dropdown_create(loc_interval_row));
     lv_dropdown_set_options(s_loc_interval_dd, "1 min\n5 min\n15 min\n60 min");
     lv_obj_set_size(s_loc_interval_dd, 130, 34);
     lv_obj_align(s_loc_interval_dd, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1583,13 +1608,13 @@ void scr_settings_create(bramble_layout_t* layout) {
         lv_group_add_obj(g, s_loc_interval_dd);
 
     lv_obj_t* loc_source_row = create_setting_row(cont, "Active Source");
-    s_loc_source_lbl = lv_label_create(loc_source_row);
+    ui_zone_track(&s_loc_source_lbl, lv_label_create(loc_source_row));
     lv_obj_set_style_text_color(s_loc_source_lbl, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(s_loc_source_lbl, &lv_font_montserrat_12, 0);
     lv_obj_align(s_loc_source_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
 
     lv_obj_t* loc_last_row = create_setting_row(cont, "Last Share");
-    s_loc_last_share_lbl = lv_label_create(loc_last_row);
+    ui_zone_track(&s_loc_last_share_lbl, lv_label_create(loc_last_row));
     lv_obj_set_style_text_color(s_loc_last_share_lbl, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_font(s_loc_last_share_lbl, &lv_font_montserrat_12, 0);
     lv_obj_align(s_loc_last_share_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -1628,7 +1653,7 @@ void scr_settings_create(bramble_layout_t* layout) {
         lv_obj_t* conn_row = create_setting_row(cont, "Mode");
         lv_obj_set_size(conn_row, 304, 48);
 
-        s_conn_dropdown = lv_dropdown_create(conn_row);
+        ui_zone_track(&s_conn_dropdown, lv_dropdown_create(conn_row));
         lv_dropdown_set_options(s_conn_dropdown, "WiFi only\n"
                                                  "BLE only");
         lv_obj_set_size(s_conn_dropdown, 150, 34);
