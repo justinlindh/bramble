@@ -46,6 +46,10 @@ typedef enum {
 
 typedef struct {
     uint32_t peer_addr; /* Remote address (sender or recipient) */
+    uint32_t uid;       /* Stable local id for one user-submitted message (0 = untracked).
+                           Survives the whole send pipeline (route queue, session queue,
+                           transmit) so every stage UPDATES this row instead of adding
+                           a new one. Never leaves the node; not a wire field. */
     msg_direction_t direction;
     msg_status_t status;     /* Delivery status (outgoing only) */
     uint32_t packet_id;      /* Packet ID for ACK correlation */
@@ -119,6 +123,32 @@ void msg_store_add_channel(uint32_t peer_addr, msg_direction_t dir, const char* 
 /* Convenience wrapper (no ACK tracking) */
 void msg_store_add(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                    int8_t rssi, int8_t snr);
+
+/**
+ * Allocate a stable uid for one user-submitted message. Monotonic, never 0.
+ * Reset only by msg_store_init().
+ */
+uint32_t msg_store_next_uid(void);
+
+/**
+ * Store a DM carrying a stable uid (uid 0 behaves exactly like msg_store_add_dm).
+ * The send pipeline calls this ONCE per user message, at whichever stage first
+ * sees it, and every later stage reconciles that row with
+ * msg_store_update_by_uid() instead of adding another.
+ */
+void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* text,
+                          size_t text_len, int8_t rssi, int8_t snr, uint32_t packet_id,
+                          msg_status_t status, uint32_t uid);
+
+/**
+ * Update the row carrying this uid: sets status, and sets packet_id too when a
+ * nonzero packet_id is passed (0 = leave the stored packet_id alone). This is
+ * how a later pipeline stage (session flush, transmit) stamps the real wire
+ * packet_id onto the row an earlier stage already created, so ACK correlation
+ * (which is still by packet_id) lands on that one row.
+ * Returns true if a row with this uid was found. uid 0 never matches.
+ */
+bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t status);
 
 /**
  * Update delivery status for a message by packet_id.

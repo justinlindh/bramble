@@ -265,6 +265,10 @@ typedef struct {
     uint8_t reason;      /* QUEUE_REASON_ROUTE or QUEUE_REASON_SESSION */
     uint32_t pkt_id;     /* tracking id surfaced to the caller/UI; only meaningful for
                             QUEUE_REASON_SESSION */
+    uint32_t uid;        /* msg_store uid of the ONE row this user message owns. Allocated at the
+                            send entry point and carried through every queue/flush stage, so the
+                            transmit stage UPDATES that row (real packet_id + SENT) instead of
+                            adding a duplicate. */
     int16_t channel_idx; /* transport channel a queued QUEUE_REASON_SESSION DM rode on. Vestigial
                             for msg_store: a flushed DM is stored channel-less (msg_store_add_dm),
                             never under this transport channel, so it can never be misfiled. */
@@ -3130,17 +3134,27 @@ static void process_flood_relay_queue(uint32_t t) {
 
 /* ── End jittered channel-flood relay ───────────────────────────── */
 
+/* uid: 0 = brand new user message (allocate a uid and store its one row);
+ * nonzero = a row for this message already exists, UPDATE it, never add. */
+static uint32_t mesh_send_message_uid(uint32_t dest_addr, const uint8_t* data, size_t len,
+                                      uint32_t uid);
+
 static void flush_queued_messages(uint32_t dest_addr) {
     /* Route-established trigger only. QUEUE_REASON_SESSION entries are
      * flushed separately by flush_session_queue on session establishment;
      * touching them here would re-run mesh_send_message's route+session
-     * decision and double-queue them under a fresh slot. */
+     * decision and double-queue them under a fresh slot.
+     *
+     * The entry's uid rides back into the send path so the re-send reconciles
+     * the pending row this message already owns instead of storing a second
+     * one (the duplicate-bubble bug). */
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (s_queued_msgs[i].used && s_queued_msgs[i].reason == QUEUE_REASON_ROUTE &&
             s_queued_msgs[i].dest_addr == dest_addr) {
             ESP_LOGI(TAG, "Sending queued msg to %08" PRIX32 " (%u bytes)", dest_addr,
                      (unsigned)s_queued_msgs[i].len);
-            mesh_send_message(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len);
+            mesh_send_message_uid(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len,
+                                  s_queued_msgs[i].uid);
             s_queued_msgs[i].used = false;
         }
     }
@@ -4412,6 +4426,9 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                     ESP_LOGW(TAG, "Queued msg for %08" PRIX32 " expired",
                              s_queued_msgs[i].dest_addr);
                 }
+                /* The message owns exactly one msg_store row: retire it as
+                 * FAILED rather than leaving it pending forever. */
+                msg_store_update_by_uid(s_queued_msgs[i].uid, 0, MSG_STATUS_FAILED);
                 s_queued_msgs[i].used = false;
             }
         }
@@ -4446,6 +4463,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                         if (s_queued_msgs[j].used &&
                             s_queued_msgs[j].reason == QUEUE_REASON_ROUTE &&
                             s_queued_msgs[j].dest_addr == pd->dest_addr) {
+                            msg_store_update_by_uid(s_queued_msgs[j].uid, 0, MSG_STATUS_FAILED);
                             s_queued_msgs[j].used = false;
                         }
                     }
@@ -5044,7 +5062,7 @@ static int hs_dedup_check_and_record(uint32_t src_addr, const uint8_t eph_pub[32
  * expires or is evicted, and nothing further if it is flushed successfully.
  */
 static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, size_t len,
-                                      int channel_idx) {
+                                      int channel_idx, uint32_t uid) {
     int free_idx = -1;
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (!s_queued_msgs[i].used) {
@@ -5069,6 +5087,7 @@ static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, s
         ESP_LOGW(TAG, "Message queue full, evicting oldest awaiting-session entry for %08" PRIX32,
                  s_queued_msgs[oldest].dest_addr);
         rerr_fastfail_notify(s_queued_msgs[oldest].pkt_id, "queue_full", NULL);
+        msg_store_update_by_uid(s_queued_msgs[oldest].uid, 0, MSG_STATUS_FAILED);
         free_idx = oldest;
     }
 
@@ -5079,6 +5098,7 @@ static uint32_t queue_session_message(uint32_t dest_addr, const uint8_t* data, s
     s_queued_msgs[free_idx].timestamp = now_ms();
     s_queued_msgs[free_idx].reason = QUEUE_REASON_SESSION;
     s_queued_msgs[free_idx].pkt_id = pkt_id;
+    s_queued_msgs[free_idx].uid = uid;
     s_queued_msgs[free_idx].channel_idx = (int16_t)channel_idx;
     s_queued_msgs[free_idx].used = true;
     ESP_LOGI(TAG, "Queued DM for %08" PRIX32 " (awaiting session)", dest_addr);
@@ -5112,12 +5132,22 @@ static void flush_session_queue(uint32_t dest_addr) {
              * in mesh_send_dm. Previously this stored the transport channel_idx
              * (0 for the unicast default), which filed the flushed DM under
              * channel 0 and hid it from its own thread: the F1 misfiling class,
-             * on the flush path, which msg_store_add_dm now makes unrepresentable. */
-            msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)s_queued_msgs[i].data,
-                             s_queued_msgs[i].len, 0, 0, pkt_id, MSG_STATUS_SENT);
+             * on the flush path, which msg_store_add_dm now makes unrepresentable.
+             *
+             * The row already exists (stored pending when the message was queued),
+             * so stamp the real wire packet_id onto THAT row: the ACK still
+             * correlates by packet_id and now lands on the one row this message
+             * owns. Adding here is the fallback for a row evicted from the ring
+             * meanwhile, never the normal path. */
+            if (!msg_store_update_by_uid(s_queued_msgs[i].uid, pkt_id, MSG_STATUS_SENT)) {
+                msg_store_add_dm_uid(dest_addr, MSG_DIR_OUTGOING,
+                                     (const char*)s_queued_msgs[i].data, s_queued_msgs[i].len, 0, 0,
+                                     pkt_id, MSG_STATUS_SENT, s_queued_msgs[i].uid);
+            }
         } else {
             ESP_LOGW(TAG, "Failed to flush queued DM to %08" PRIX32, dest_addr);
             rerr_fastfail_notify(s_queued_msgs[i].pkt_id, "session_send_failed", NULL);
+            msg_store_update_by_uid(s_queued_msgs[i].uid, 0, MSG_STATUS_FAILED);
         }
         s_queued_msgs[i].used = false;
     }
@@ -5179,12 +5209,14 @@ static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t 
  * send_dm_packet; anything else queues and (if not already handshaking)
  * triggers an INIT, or fails visibly if the handshaking cap is reached.
  */
-static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len) {
+static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len,
+                             uint32_t uid) {
     if (len > FRAG_MAX_PLAINTEXT) {
         /* Fragmentation under a session key is out of this task's scope
          * (DM chat payloads are short); fail visibly rather than silently
          * truncating or falling back to the channel key. */
         ESP_LOGW(TAG, "DM payload too large for the session path: %u bytes", (unsigned)len);
+        msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
         return 0;
     }
 
@@ -5197,9 +5229,17 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
             /* channel_idx only picked the transport channel the session's KE
              * envelope rode on; the payload is a DM. msg_store_add_dm files it
              * channel-less, so it can never land under channel 0 (the unicast
-             * default) and hide from its own thread, exactly like a received DM. */
-            msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, pkt_id,
-                             MSG_STATUS_SENT);
+             * default) and hide from its own thread, exactly like a received DM.
+             *
+             * uid == 0 is the direct happy path (this is the first and only
+             * stage to see the message): store its one row. uid != 0 means an
+             * earlier stage already stored the row: update it in place. */
+            if (!msg_store_update_by_uid(uid, pkt_id, MSG_STATUS_SENT)) {
+                msg_store_add_dm_uid(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0,
+                                     pkt_id, MSG_STATUS_SENT, uid ? uid : msg_store_next_uid());
+            }
+        } else {
+            msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
         }
         return pkt_id;
     }
@@ -5217,11 +5257,14 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
         /* M4 DoS defense: handshaking cap reached. Fail the send visibly;
          * never transmit this payload under the channel key instead. */
         ESP_LOGW(TAG, "No session and handshaking cap reached for %08" PRIX32, dest_addr);
+        msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
         return 0;
     }
 
-    uint32_t pkt_id = queue_session_message(dest_addr, data, len, channel_idx);
+    uint32_t row_uid = (uid != 0) ? uid : msg_store_next_uid();
+    uint32_t pkt_id = queue_session_message(dest_addr, data, len, channel_idx, row_uid);
     if (pkt_id == 0) {
+        msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
         return 0;
     }
 
@@ -5229,9 +5272,18 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
         initiate_dm_handshake(dest_addr, channel_idx, 0);
     }
 
-    /* Still store in msg_store so UI shows it as pending, same convention
-     * as the awaiting-route path. A queued DM is channel-less. */
-    msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0, MSG_STATUS_NONE);
+    /* Store the pending row ONLY for a brand new message (uid == 0). When
+     * uid != 0 the awaiting-route stage already stored this message's row, and
+     * flush_session_queue reconciles that same row on transmit: storing again
+     * here is exactly what produced duplicate bubbles. Either way the queue
+     * entry carries row_uid. packet_id stays 0 until the real send, because
+     * queue_session_message's pkt_id is a caller-facing tracking placeholder
+     * that never reaches the wire, so it must not be written into the row an
+     * ACK is matched against. A queued DM is channel-less. */
+    if (uid == 0) {
+        msg_store_add_dm_uid(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0,
+                             MSG_STATUS_NONE, row_uid);
+    }
     return pkt_id;
 }
 
@@ -5702,9 +5754,13 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
     return pkt_id ? 0 : -1;
 }
 
-uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len) {
+/* uid: see mesh_send_message_uid. Only the unicast (DM) path consumes it;
+ * broadcasts have no multi-stage pipeline whose rows could duplicate. */
+static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const uint8_t* data,
+                                      size_t len, uint32_t uid) {
     if (channel_idx < 0 || channel_idx >= s_num_channels) {
         ESP_LOGE(TAG, "Invalid channel index: %d (count=%d)", channel_idx, s_num_channels);
+        msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
         return 0;
     }
 
@@ -5714,7 +5770,7 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* d
      * 0xFFFFFFFF) have no peer to hold a session with and always fall
      * through to the channel-key path below unchanged. */
     if (dest_addr != 0xFFFFFFFFu) {
-        return mesh_send_dm(channel_idx, dest_addr, data, len);
+        return mesh_send_dm(channel_idx, dest_addr, data, len, uid);
     }
 
     /* Check if fragmentation is needed */
@@ -5802,7 +5858,11 @@ uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* d
     return pkt_id;
 }
 
-static int queue_message(uint32_t dest_addr, const uint8_t* data, size_t len) {
+uint32_t mesh_send_channel(int channel_idx, uint32_t dest_addr, const uint8_t* data, size_t len) {
+    return mesh_send_channel_uid(channel_idx, dest_addr, data, len, 0);
+}
+
+static int queue_message(uint32_t dest_addr, const uint8_t* data, size_t len, uint32_t uid) {
     for (int i = 0; i < MAX_QUEUED_MSGS; i++) {
         if (!s_queued_msgs[i].used) {
             s_queued_msgs[i].dest_addr = dest_addr;
@@ -5811,6 +5871,7 @@ static int queue_message(uint32_t dest_addr, const uint8_t* data, size_t len) {
             s_queued_msgs[i].timestamp = now_ms();
             s_queued_msgs[i].reason = QUEUE_REASON_ROUTE;
             s_queued_msgs[i].pkt_id = 0;
+            s_queued_msgs[i].uid = uid;
             s_queued_msgs[i].channel_idx = 0;
             s_queued_msgs[i].used = true;
             ESP_LOGI(TAG, "Queued msg for %08" PRIX32 " (waiting for route)", dest_addr);
@@ -5858,9 +5919,11 @@ static int initiate_discovery(uint32_t dest_addr) {
     return 0;
 }
 
-uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) {
+static uint32_t mesh_send_message_uid(uint32_t dest_addr, const uint8_t* data, size_t len,
+                                      uint32_t uid) {
     if (s_num_channels == 0) {
         ESP_LOGE(TAG, "No channels initialized");
+        msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
         return 0;
     }
 
@@ -5894,11 +5957,20 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) 
             if (!discovery_lookup(&s_pending_disc, dest_addr)) {
                 initiate_discovery(dest_addr);
             }
-            queue_message(dest_addr, data, len);
-            /* Still store in msg_store so UI shows it as pending (a unicast DM,
-             * stored channel-less). */
-            msg_store_add_dm(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0,
-                             MSG_STATUS_NONE);
+            /* One row per user message: store it pending HERE (uid == 0, the
+             * first stage to see it) and carry that uid on the queue entry, so
+             * flush_queued_messages, mesh_send_dm and flush_session_queue all
+             * UPDATE this row instead of each adding their own copy. A unicast
+             * DM is stored channel-less. */
+            uint32_t row_uid = (uid != 0) ? uid : msg_store_next_uid();
+            if (queue_message(dest_addr, data, len, row_uid) != 0) {
+                msg_store_update_by_uid(uid, 0, MSG_STATUS_FAILED);
+                return 0;
+            }
+            if (uid == 0) {
+                msg_store_add_dm_uid(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0,
+                                     MSG_STATUS_NONE, row_uid);
+            }
             return 1; /* queued — nonzero = success but no packet_id yet */
         }
         /* Have a route — send_data_packet will transmit (next hop gets it) */
@@ -5908,7 +5980,11 @@ uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) 
     if (send_idx < 0 || send_idx >= s_num_channels) {
         send_idx = 0;
     }
-    return mesh_send_channel(send_idx, dest_addr, data, len);
+    return mesh_send_channel_uid(send_idx, dest_addr, data, len, uid);
+}
+
+uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len) {
+    return mesh_send_message_uid(dest_addr, data, len, 0);
 }
 
 /* Nonce counter NVS persistence: reserve-ahead ceiling under NVS_NS_NONCE.

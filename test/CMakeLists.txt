@@ -1281,6 +1281,18 @@ target_include_directories(test_msg_store PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
 )
 
+# Send-pipeline identity: one user message == exactly one msg_store row.
+# Mirrors main/mesh_task.c's queue/flush stages (mesh_task.c is ESP-IDF-only)
+# against the real msg_store uid API.
+add_executable(test_msg_pipeline_uid
+    test_msg_pipeline_uid.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/msg_store.c
+)
+target_include_directories(test_msg_pipeline_uid PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+)
+
 # Message store SPIFFS persistence tests
 add_executable(test_msg_store_spiffs
     test_msg_store_spiffs.c
