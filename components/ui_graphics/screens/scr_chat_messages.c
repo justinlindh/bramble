@@ -172,6 +172,14 @@ static void send_current_message(void) {
     if (rc == 0) {
         lv_textarea_set_text(s_compose_ta, "");
         render_messages_for_target(true);
+        /* Put the cursor back in the compose box so the next message can be typed
+         * straight away. Must come AFTER the render: chat_sync_content_group()
+         * rebuilds the content group and deliberately restores focus to whatever
+         * was focused, which on the Send-button path is the button itself. Both
+         * widgets live in the content group, so a plain focus call is enough (no
+         * zone switch). No-op on the Enter path, where compose is already focused. */
+        if (s_compose_ta)
+            lv_group_focus_obj(s_compose_ta);
     } else {
         ESP_LOGW(TAG, "send failed for target kind=%d ch=%d", (int)s_target.kind,
                  (int)s_target.channel_index);
