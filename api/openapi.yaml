@@ -1387,6 +1387,122 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetAudioStatusResponse'
 
+  # ── Bench Debug Methods (screenshot + input injection) ──────────────────────
+
+  /rpc/bramble.screenshot:
+    post:
+      operationId: screenshot
+      summary: Capture the current LVGL screen (T-Deck Plus bench debug)
+      description: >
+        Captures the LVGL UI and returns it in base64 chunks (RGB565, 320x240).
+        capture defaults to true when no offset is given: pass capture=true (or
+        omit offset) to take a fresh snapshot and read chunk 0, then repeat with
+        capture=false and increasing offset to fetch the rest of the same frame.
+        Each response's decoded chunk is capped at 6KB. On boards without a
+        graphical UI, returns {"error":"no graphical ui"} instead of failing.
+        Authenticated.
+      tags: [debug]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                capture:
+                  type: boolean
+                  description: Take a fresh snapshot. Defaults to true when offset is omitted.
+                offset:
+                  type: integer
+                  description: Byte offset into the last captured frame (ignored when capturing).
+                max_len:
+                  type: integer
+                  description: Max decoded chunk length in bytes, capped at 6144.
+      responses:
+        '400':
+          description: Bad request (invalid params, or no frame captured yet)
+        '200':
+          description: Screenshot chunk
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  width:
+                    type: integer
+                  height:
+                    type: integer
+                  format:
+                    type: string
+                    description: Pixel format, currently always "rgb565".
+                  total:
+                    type: integer
+                    description: Total frame size in bytes.
+                  offset:
+                    type: integer
+                    description: Byte offset of this chunk within the frame.
+                  data:
+                    type: string
+                    description: Base64-encoded chunk (self-contained, decode independently).
+                  len:
+                    type: integer
+                    description: Decoded length of this chunk in bytes.
+                  error:
+                    type: string
+                    description: Present instead of the fields above on boards without a graphical UI.
+
+  /rpc/bramble.injectInput:
+    post:
+      operationId: injectInput
+      summary: Inject trackball/keyboard input (T-Deck Plus bench debug)
+      description: >
+        Injects a synthetic trackball or keyboard event through the same ring
+        the real drivers feed, so LVGL group/focus/textarea behavior matches
+        physical input exactly. Touch injection is out of scope. On boards
+        without a graphical UI, returns {"error":"no graphical ui"} instead
+        of failing. Authenticated.
+      tags: [debug]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type]
+              properties:
+                type:
+                  type: string
+                  enum: [trackball, key, text]
+                dir:
+                  type: string
+                  enum: [up, down, left, right, select]
+                  description: Required when type is "trackball".
+                char:
+                  type: string
+                  description: Single character. Required when type is "key".
+                text:
+                  type: string
+                  description: String queued one character at a time. Required when type is "text".
+                enter:
+                  type: boolean
+                  description: When type is "text", queue a trailing newline after the text.
+      responses:
+        '400':
+          description: Bad request (invalid params)
+        '200':
+          description: Input queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  queued:
+                    type: integer
+                    description: Number of events/characters successfully queued.
+                  error:
+                    type: string
+                    description: Present instead of ok/queued on boards without a graphical UI.
+
   # ── Beacon Policy ──────────────────────────────────────────────────────────
 
   /rpc/bramble.setBeaconPolicy:

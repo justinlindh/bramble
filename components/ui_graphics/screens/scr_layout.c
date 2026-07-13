@@ -86,6 +86,13 @@ bramble_layout_t* layout_create(void) {
     lv_obj_set_style_radius(s_layout.content_area, 0, 0);
     lv_obj_set_style_border_width(s_layout.content_area, 0, 0);
     lv_obj_set_style_pad_all(s_layout.content_area, 0, 0);
+    /* content_area is a fixed canvas: every screen positions header/list/
+     * compose-bar children by absolute coordinates and owns its own scrolling
+     * child (message list, form, etc). LVGL objects are scrollable by
+     * default, so without this a child's scroll-chain (e.g. the chat
+     * message list reaching its end) drags content_area itself and carries
+     * "fixed" elements like the compose bar off screen. */
+    lv_obj_clear_flag(s_layout.content_area, LV_OBJ_FLAG_SCROLLABLE);
 
     /* === Tab Bar (bottom 40px) === */
     s_layout.tab_bar = lv_obj_create(scr);

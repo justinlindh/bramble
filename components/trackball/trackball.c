@@ -135,6 +135,39 @@ ui_button_t trackball_poll(void) {
     return btn;
 }
 
+bool trackball_inject(ui_button_t btn) {
+    if (!initialized)
+        return false;
+
+    /* Feed the same counters the ISRs feed, under the same spinlock, so an
+     * injected event is indistinguishable from a real one by the time
+     * trackball_poll() drains it. */
+    portENTER_CRITICAL(&s_tb_lock);
+    bool ok = true;
+    switch (btn) {
+    case BTN_UP:
+        count_up++;
+        break;
+    case BTN_DOWN:
+        count_down++;
+        break;
+    case BTN_LEFT:
+        count_left++;
+        break;
+    case BTN_RIGHT:
+        count_right++;
+        break;
+    case BTN_SELECT:
+        count_center++;
+        break;
+    default:
+        ok = false;
+        break;
+    }
+    portEXIT_CRITICAL(&s_tb_lock);
+    return ok;
+}
+
 #else /* !CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
 /* Stub implementations for non-T-Deck boards */
@@ -142,5 +175,10 @@ ui_button_t trackball_poll(void) {
 int trackball_init(void) { return -1; /* Not supported */ }
 
 ui_button_t trackball_poll(void) { return BTN_NONE; }
+
+bool trackball_inject(ui_button_t btn) {
+    (void)btn;
+    return false;
+}
 
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */

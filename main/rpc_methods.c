@@ -2484,6 +2484,199 @@ static int handle_get_audio_status(const cJSON* params, cJSON* result) {
 }
 #endif /* CONFIG_BRAMBLE_BOARD_TDECK_PLUS */
 
+/* Bench debug methods: remote screenshot + input injection.
+ * Registered on every board (the RPC contract and heltec builds stay
+ * uniform); the implementation is gated on CONFIG_BRAMBLE_UI_GRAPHICAL
+ * (T-Deck Plus only), and boards without a graphical UI get a clean soft
+ * error in the result instead of a hard RPC failure. */
+
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+#include "ui_graphics.h"
+#include "trackball.h"
+#include "keyboard.h"
+#include "ui.h"
+#endif
+
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+/* Standard base64 alphabet, padded. Self-contained (no mbedtls dep), same
+ * approach as display_virt.c's fb_to_b64, but chunk-oriented: each call
+ * encodes an independent, self-contained base64 string (its own padding),
+ * so a caller can decode chunks one at a time and concatenate the raw
+ * bytes without needing to track bit alignment across chunks. */
+static const char s_b64_tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void b64_encode_chunk(const uint8_t* in, size_t len, char* out) {
+    while (len >= 3) {
+        uint32_t v = ((uint32_t)in[0] << 16) | ((uint32_t)in[1] << 8) | in[2];
+        *out++ = s_b64_tab[(v >> 18) & 0x3F];
+        *out++ = s_b64_tab[(v >> 12) & 0x3F];
+        *out++ = s_b64_tab[(v >> 6) & 0x3F];
+        *out++ = s_b64_tab[v & 0x3F];
+        in += 3;
+        len -= 3;
+    }
+    if (len == 1) {
+        uint32_t v = (uint32_t)in[0] << 16;
+        *out++ = s_b64_tab[(v >> 18) & 0x3F];
+        *out++ = s_b64_tab[(v >> 12) & 0x3F];
+        *out++ = '=';
+        *out++ = '=';
+    } else if (len == 2) {
+        uint32_t v = ((uint32_t)in[0] << 16) | ((uint32_t)in[1] << 8);
+        *out++ = s_b64_tab[(v >> 18) & 0x3F];
+        *out++ = s_b64_tab[(v >> 12) & 0x3F];
+        *out++ = s_b64_tab[(v >> 6) & 0x3F];
+        *out++ = '=';
+    }
+    *out = '\0';
+}
+#endif /* CONFIG_BRAMBLE_UI_GRAPHICAL */
+
+/* Serial line-buffer safety cap: each response's DECODED chunk is capped at
+ * 6KB regardless of the caller's requested max_len. */
+#define SCREENSHOT_CHUNK_CAP 6144
+
+/* bramble.screenshot, params: {"capture":bool, "offset":int, "max_len":int}.
+ * capture defaults true when no offset is given (first call); when true the
+ * offset param is ignored and a fresh frame is captured and served from 0.
+ * When false, serves the next chunk of the LAST captured frame at "offset"
+ * (no re-capture), so a full frame is: capture, then repeated offset reads. */
+static int handle_screenshot(const cJSON* params, cJSON* result) {
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+    (void)params;
+    cJSON_AddStringToObject(result, "error", "no graphical ui");
+    return 0;
+#else
+    bool has_offset = params && cJSON_HasObjectItem(params, "offset");
+    cJSON* capture_j = params ? cJSON_GetObjectItem(params, "capture") : NULL;
+    bool capture = capture_j ? cJSON_IsTrue(capture_j) : !has_offset;
+
+    int offset = 0;
+    if (has_offset && !capture) {
+        cJSON* offset_j = cJSON_GetObjectItem(params, "offset");
+        if (!cJSON_IsNumber(offset_j) || offset_j->valuedouble < 0)
+            return RPC_ERR_INVALID_PARAMS;
+        offset = (int)offset_j->valuedouble;
+    }
+
+    int max_len = SCREENSHOT_CHUNK_CAP;
+    cJSON* max_len_j = params ? cJSON_GetObjectItem(params, "max_len") : NULL;
+    if (cJSON_IsNumber(max_len_j) && max_len_j->valuedouble > 0) {
+        max_len = (int)max_len_j->valuedouble;
+        if (max_len > SCREENSHOT_CHUNK_CAP)
+            max_len = SCREENSHOT_CHUNK_CAP;
+    }
+
+    if (capture) {
+        if (!ui_graphics_request_screenshot(3000)) {
+            return RPC_ERR_INTERNAL;
+        }
+        offset = 0;
+    }
+
+    size_t total = 0;
+    const uint8_t* frame = ui_graphics_get_screenshot(&total);
+    if (!frame) {
+        return RPC_ERR_INVALID_PARAMS; /* no frame captured yet */
+    }
+    if ((size_t)offset > total) {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    size_t remaining = total - (size_t)offset;
+    size_t chunk_len = remaining < (size_t)max_len ? remaining : (size_t)max_len;
+
+    char* b64 = malloc(((chunk_len + 2) / 3) * 4 + 1);
+    if (!b64) {
+        return RPC_ERR_INTERNAL;
+    }
+    b64_encode_chunk(frame + offset, chunk_len, b64);
+
+    cJSON_AddNumberToObject(result, "width", UI_SCREENSHOT_WIDTH);
+    cJSON_AddNumberToObject(result, "height", UI_SCREENSHOT_HEIGHT);
+    cJSON_AddStringToObject(result, "format", "rgb565");
+    cJSON_AddNumberToObject(result, "total", (double)total);
+    cJSON_AddNumberToObject(result, "offset", offset);
+    cJSON_AddStringToObject(result, "data", b64);
+    cJSON_AddNumberToObject(result, "len", (double)chunk_len);
+    free(b64);
+    return 0;
+#endif
+}
+
+/* bramble.injectInput, params: one of
+ *   {"type":"trackball","dir":"up"|"down"|"left"|"right"|"select"}
+ *   {"type":"key","char":"a"}
+ *   {"type":"text","text":"hello","enter":bool}
+ * Injects through the same ring the real trackball/keyboard drivers feed
+ * (see trackball_inject/keyboard_inject_char), so LVGL group/focus/textarea
+ * behavior is identical to physical input. Touch is out of scope. */
+static int handle_inject_input(const cJSON* params, cJSON* result) {
+#ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
+    (void)params;
+    cJSON_AddStringToObject(result, "error", "no graphical ui");
+    return 0;
+#else
+    if (!params)
+        return RPC_ERR_INVALID_PARAMS;
+    const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(params, "type"));
+    if (!type)
+        return RPC_ERR_INVALID_PARAMS;
+
+    int queued = 0;
+
+    if (strcmp(type, "trackball") == 0) {
+        const char* dir = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dir"));
+        if (!dir)
+            return RPC_ERR_INVALID_PARAMS;
+
+        ui_button_t btn;
+        if (strcmp(dir, "up") == 0) {
+            btn = BTN_UP;
+        } else if (strcmp(dir, "down") == 0) {
+            btn = BTN_DOWN;
+        } else if (strcmp(dir, "left") == 0) {
+            btn = BTN_LEFT;
+        } else if (strcmp(dir, "right") == 0) {
+            btn = BTN_RIGHT;
+        } else if (strcmp(dir, "select") == 0) {
+            btn = BTN_SELECT;
+        } else {
+            return RPC_ERR_INVALID_PARAMS;
+        }
+
+        if (trackball_inject(btn))
+            queued = 1;
+    } else if (strcmp(type, "key") == 0) {
+        const char* ch = cJSON_GetStringValue(cJSON_GetObjectItem(params, "char"));
+        if (!ch || ch[0] == '\0')
+            return RPC_ERR_INVALID_PARAMS;
+
+        if (keyboard_inject_char(ch[0]))
+            queued = 1;
+    } else if (strcmp(type, "text") == 0) {
+        const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
+        if (!text)
+            return RPC_ERR_INVALID_PARAMS;
+
+        for (const char* p = text; *p != '\0'; p++) {
+            if (keyboard_inject_char(*p))
+                queued++;
+        }
+
+        cJSON* enter_j = cJSON_GetObjectItem(params, "enter");
+        if (cJSON_IsTrue(enter_j) && keyboard_inject_char('\n'))
+            queued++;
+    } else {
+        return RPC_ERR_INVALID_PARAMS;
+    }
+
+    cJSON_AddBoolToObject(result, "ok", true);
+    cJSON_AddNumberToObject(result, "queued", queued);
+    return 0;
+#endif
+}
+
 /* ── Traffic debug RPC methods ─────────────────────────────────────── */
 
 /* bramble.setTrafficDebug — params: {"enabled":bool, "include_tx":bool, "include_rx":bool,
@@ -2937,6 +3130,11 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.setMuted", handle_set_muted);
     rpc_register("bramble.getAudioStatus", handle_get_audio_status);
 #endif
+
+    /* Bench debug methods (screenshot + input injection). Registered on
+     * every board; not on the unauth allowlist. See rpc_auth.h. */
+    rpc_register("bramble.screenshot", handle_screenshot);
+    rpc_register("bramble.injectInput", handle_inject_input);
 
     /* Traffic debug methods */
     rpc_register("bramble.setTrafficDebug", handle_set_traffic_debug);

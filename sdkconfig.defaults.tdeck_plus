@@ -33,6 +33,9 @@ CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_USE_QRCODE=y
 CONFIG_LV_FONT_MONTSERRAT_18=y
 
+# bramble.screenshot RPC (bench debug tooling): lv_snapshot_take_to_buf
+CONFIG_LV_USE_SNAPSHOT=y
+
 # Message persistence defaults (T-Deck has much larger SPIFFS partition)
 CONFIG_BRAMBLE_MSG_STORE_CAP=200
 CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=y

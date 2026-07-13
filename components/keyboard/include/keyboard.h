@@ -27,9 +27,19 @@ i2c_master_bus_handle_t keyboard_get_i2c_bus(void);
 /**
  * Poll for a keypress.
  * Returns true and writes the ASCII character to *out if a key is available.
- * Returns false if no key is pending.
+ * Returns false if no key is pending. Drains injected characters (see
+ * keyboard_inject_char) ahead of real hardware.
  */
 bool keyboard_poll(char* out);
+
+/**
+ * Inject a synthetic keypress (bench debug RPC, bramble.injectInput). Queues
+ * into a small ring that keyboard_poll() drains before touching the real
+ * I2C hardware, so it reaches LVGL through the exact same read path and
+ * group/focus/textarea behaves identically to a physical keypress.
+ * Returns true if queued, false if not initialized or the ring is full.
+ */
+bool keyboard_inject_char(char c);
 
 /**
  * Check if keyboard has data pending.

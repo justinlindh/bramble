@@ -12,6 +12,10 @@
 #include "msg_store.h"
 #include "lvgl.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include <stdlib.h>
 
 static const char* TAG = "ui_gfx";
 bramble_layout_t* s_layout = NULL; /* NOT static — screens need access */
@@ -20,6 +24,20 @@ static lv_display_t* s_display = NULL;
 static uint32_t s_pending_events = 0;
 static uint32_t s_pending_msg_received = 0;
 static int s_unread_count = 0;
+
+/* Bench debug screenshot state. s_shot_buf is allocated lazily on first
+ * request (reused after) so boards/builds that never call the RPC never pay
+ * for it. s_shot_requester_mutex serializes concurrent RPC callers (only
+ * one capture can be in flight); s_shot_done is given by the UI task when a
+ * requested capture completes (success or failure). */
+#define UI_SCREENSHOT_BUF_SIZE (UI_SCREENSHOT_LEN + 256) /* lv_snapshot alignment slack */
+static uint8_t* s_shot_buf = NULL;
+static const uint8_t* s_shot_data = NULL; /* pixel data start within s_shot_buf */
+static size_t s_shot_len = 0;
+static volatile bool s_shot_requested = false;
+static volatile bool s_shot_ok = false;
+static SemaphoreHandle_t s_shot_done = NULL;
+static SemaphoreHandle_t s_shot_requester_mutex = NULL;
 
 static void process_new_message_unread(uint32_t arrivals) {
     int count = msg_store_count();
@@ -142,6 +160,16 @@ int ui_graphics_init(void) {
 
     s_display = disp;
 
+    s_shot_requested = false;
+    s_shot_ok = false;
+    s_shot_done = xSemaphoreCreateBinary();
+    s_shot_requester_mutex = xSemaphoreCreateMutex();
+    if (!s_shot_done || !s_shot_requester_mutex) {
+        /* Non-fatal: the graphical UI still works, only bramble.screenshot
+         * will time out on every call. */
+        ESP_LOGE(TAG, "Failed to create screenshot sync primitives");
+    }
+
     /* Show splash screen */
     scr_splash_create(disp);
 
@@ -152,7 +180,98 @@ int ui_graphics_init(void) {
     return 0;
 }
 
-uint32_t ui_graphics_tick(void) { return lv_timer_handler(); }
+/* Services a pending screenshot request. MUST only run on the LVGL-owning
+ * task (called from ui_graphics_tick below) since lv_snapshot_take_to_buf
+ * walks the live object tree exactly like a render pass would. */
+static void service_screenshot_request(void) {
+    if (!__atomic_exchange_n(&s_shot_requested, false, __ATOMIC_ACQ_REL))
+        return;
+
+    if (!s_shot_buf) {
+        /* Lazy allocate once, reuse after. PSRAM first, internal RAM
+         * fallback, same pattern as mesh_task.c's s_dm_table. */
+        s_shot_buf = heap_caps_calloc(1, UI_SCREENSHOT_BUF_SIZE, MALLOC_CAP_SPIRAM);
+        if (!s_shot_buf) {
+            ESP_LOGW(TAG, "No PSRAM for screenshot buffer, using internal RAM (%u bytes)",
+                     (unsigned)UI_SCREENSHOT_BUF_SIZE);
+            s_shot_buf = calloc(1, UI_SCREENSHOT_BUF_SIZE);
+        }
+        if (!s_shot_buf) {
+            ESP_LOGE(TAG, "Failed to allocate screenshot buffer (%u bytes)",
+                     (unsigned)UI_SCREENSHOT_BUF_SIZE);
+            s_shot_ok = false;
+            xSemaphoreGive(s_shot_done);
+            return;
+        }
+    }
+
+    lv_image_dsc_t dsc;
+    lv_result_t res = lv_snapshot_take_to_buf(lv_screen_active(), LV_COLOR_FORMAT_RGB565, &dsc,
+                                              s_shot_buf, UI_SCREENSHOT_BUF_SIZE);
+    if (res != LV_RESULT_OK || !dsc.data) {
+        ESP_LOGW(TAG, "lv_snapshot_take_to_buf failed (res=%d)", (int)res);
+        s_shot_ok = false;
+        xSemaphoreGive(s_shot_done);
+        return;
+    }
+
+    size_t len = (size_t)dsc.header.h * (size_t)dsc.header.stride;
+    if (dsc.header.w != UI_SCREENSHOT_WIDTH || dsc.header.h != UI_SCREENSHOT_HEIGHT ||
+        len > UI_SCREENSHOT_LEN) {
+        /* Defensive: current LVGL config always yields exactly 320x240
+         * RGB565 with a tight (unpadded) stride, but a future LVGL/config
+         * change (e.g. LV_DRAW_BUF_STRIDE_ALIGN) could silently break the
+         * fixed-size assumption the RPC contract makes. Fail loud rather
+         * than ship a mis-sized or truncated frame. */
+        ESP_LOGE(TAG, "Unexpected snapshot shape %ux%u stride=%u (want %dx%d)",
+                 (unsigned)dsc.header.w, (unsigned)dsc.header.h, (unsigned)dsc.header.stride,
+                 UI_SCREENSHOT_WIDTH, UI_SCREENSHOT_HEIGHT);
+        s_shot_ok = false;
+        xSemaphoreGive(s_shot_done);
+        return;
+    }
+
+    s_shot_data = dsc.data;
+    s_shot_len = len;
+    s_shot_ok = true;
+    xSemaphoreGive(s_shot_done);
+}
+
+uint32_t ui_graphics_tick(void) {
+    uint32_t delay = lv_timer_handler();
+    service_screenshot_request();
+    return delay;
+}
+
+bool ui_graphics_request_screenshot(uint32_t timeout_ms) {
+    if (!s_shot_done || !s_shot_requester_mutex)
+        return false;
+    if (xSemaphoreTake(s_shot_requester_mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE)
+        return false;
+
+    /* Drain any stale "done" signal from a prior timed-out request before
+     * arming a new one. */
+    xSemaphoreTake(s_shot_done, 0);
+    __atomic_store_n(&s_shot_requested, true, __ATOMIC_RELEASE);
+
+    bool ok = false;
+    if (xSemaphoreTake(s_shot_done, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+        ok = s_shot_ok;
+    } else {
+        ESP_LOGW(TAG, "Screenshot request timed out");
+    }
+
+    xSemaphoreGive(s_shot_requester_mutex);
+    return ok;
+}
+
+const uint8_t* ui_graphics_get_screenshot(size_t* out_len) {
+    if (!s_shot_data || !s_shot_ok)
+        return NULL;
+    if (out_len)
+        *out_len = s_shot_len;
+    return s_shot_data;
+}
 
 void ui_graphics_notify(uint32_t event_mask) {
     __atomic_fetch_or(&s_pending_events, event_mask, __ATOMIC_RELEASE);
