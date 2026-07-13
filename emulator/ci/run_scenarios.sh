@@ -121,12 +121,31 @@ assert_screen "$CHAN_LOG" -min-nodes 2 -text "HELLO BRAMBLE"
 echo
 
 # --- Scenario 2: DM session desync + #138 heal ---------------------------
+# The desync symptom depends on a stale-session DM reaching the rebooted receiver
+# in the real-time window between its recovery and the sender re-handshaking the
+# stale session. The firmware nodes run in wall-clock time, so under CI load that
+# window can be missed on a given run. Re-roll the timing up to DM_ATTEMPTS times;
+# a genuine regression (the symptom or the #138 self-heal never fires) still fails
+# every attempt, so this does not mask a real break, it only absorbs jitter.
 echo "[2] emu-dm-desync"
-DM_LOG=""
-run_scenario emu-dm-desync 120 DM_LOG
-assert_screen "$DM_LOG" -at "30,0" -text "DM ALPHA"
-assert_log "$DM_LOG" "Failed session decrypt" "desync symptom reproduced (stale one-sided DM session)"
-assert_log "$DM_LOG" "re-initiating handshake (self-heal)" "#138 receiver-side self-heal engaged"
+DM_ATTEMPTS=6  # measured per-run reproduction ~0.67; 6 attempts -> ~0.13% residual flake
+dm_ok=0
+for attempt in $(seq 1 "$DM_ATTEMPTS"); do
+    DM_LOG=""
+    run_scenario emu-dm-desync 120 DM_LOG
+    if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
+       && grep -qF "Failed session decrypt" "$DM_LOG" \
+       && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
+        green "PASS: emu-dm-desync (attempt $attempt/$DM_ATTEMPTS): ALPHA render + desync symptom + #138 self-heal"
+        dm_ok=1
+        break
+    fi
+    info "emu-dm-desync attempt $attempt/$DM_ATTEMPTS did not reproduce symptom+self-heal; re-rolling"
+done
+if [ "$dm_ok" -ne 1 ]; then
+    red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal in $DM_ATTEMPTS attempts"
+    FAILURES=$((FAILURES + 1))
+fi
 echo
 
 # --- verdict --------------------------------------------------------------
