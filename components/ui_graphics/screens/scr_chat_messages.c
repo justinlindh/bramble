@@ -264,7 +264,7 @@ static bool format_route_compact_full(char* out, size_t out_len, uint8_t hop_cou
         char hop_buf[8];
         format_compact_hop_name(hop_buf, sizeof(hop_buf), hops[i]);
 
-        if (i > 0 && !append_text(out, out_len, char_len, " → ")) {
+        if (i > 0 && !append_text(out, out_len, char_len, " " LV_SYMBOL_RIGHT " ")) {
             return false;
         }
 
@@ -297,7 +297,8 @@ static bool format_route_compact_endpoints(char* out, size_t out_len, uint8_t ho
     char last_buf[8];
     format_compact_hop_name(first_buf, sizeof(first_buf), hops[0]);
     format_compact_hop_name(last_buf, sizeof(last_buf), hops[hop_count - 1]);
-    return snprintf(out, out_len, "%s → … → %s", first_buf, last_buf) > 0;
+    return snprintf(out, out_len, "%s " LV_SYMBOL_RIGHT " ... " LV_SYMBOL_RIGHT " %s", first_buf,
+                    last_buf) > 0;
 }
 
 static void format_route_text(char* out, size_t out_len, uint8_t hop_count, const uint32_t* hops) {
@@ -431,14 +432,22 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         }
 
         if (badge.color_role == CHAT_DELIVERY_COLOR_DELIVERED) {
-            meta_color = BR_COLOR_PRIMARY;
+            /* Not BR_COLOR_PRIMARY: that is the same hex as the outgoing bubble's
+             * own fill, so the delivered double-check drew green-on-green and was
+             * invisible. Bright reads on the accent and makes "delivered" the one
+             * badge that stands out, which is the point of it. */
+            meta_color = BR_COLOR_ON_SENT;
         } else if (badge.color_role == CHAT_DELIVERY_COLOR_FAILED) {
             meta_color = BR_COLOR_DANGER;
         }
 
         char badge_buf[16];
         if (msg->route_hop_count > 1) {
-            snprintf(badge_buf, sizeof(badge_buf), "%s %u\xe2\x86\x97", badge_sym,
+            /* LV_SYMBOL_SHUFFLE, not a bare Unicode arrow: the built-in Montserrat
+             * fonts carry ASCII plus the LV_SYMBOL_* block and nothing else, so a
+             * raw U+2197 drew an empty tofu box on the badge. Only LV_SYMBOL_* is
+             * guaranteed to have a glyph. */
+            snprintf(badge_buf, sizeof(badge_buf), "%s %u" LV_SYMBOL_SHUFFLE, badge_sym,
                      (unsigned)msg->route_hop_count);
             badge_sym = badge_buf;
         }

@@ -12,12 +12,23 @@
 #define BR_COLOR_ACCENT lv_color_hex(0x1F6FEB)    /* --accent-blue */
 #define BR_COLOR_TEXT lv_color_hex(0xE6EDF3)      /* --text */
 #define BR_COLOR_TEXT_SEC lv_color_hex(0x8B949E)  /* --text-muted */
-#define BR_COLOR_SENT lv_color_hex(0x238636)      /* matches primary accent */
-#define BR_COLOR_RECV lv_color_hex(0x21262D)      /* surface-2 for incoming */
-#define BR_COLOR_DANGER lv_color_hex(0xDA3633)    /* --danger */
-#define BR_COLOR_SUCCESS lv_color_hex(0x238636)   /* --accent (green) */
-#define BR_COLOR_WARNING lv_color_hex(0xE3B341)   /* --warning */
-#define BR_COLOR_CRITICAL lv_color_hex(0xBC8CFF)  /* --critical */
+/* Outgoing bubbles are filled with BR_COLOR_SENT, so anything drawn ON one must
+ * not be that same colour or it is invisible. The delivered badge used to be
+ * BR_COLOR_PRIMARY, which IS BR_COLOR_SENT: delivery confirmations rendered
+ * perfectly and could never be seen. Use BR_COLOR_ON_SENT for marks on an
+ * outgoing bubble, and let the compiler refuse the collision. */
+#define BR_HEX_SENT 0x238636
+#define BR_HEX_ON_SENT 0xE6EDF3
+#define BR_COLOR_SENT lv_color_hex(BR_HEX_SENT) /* matches primary accent */
+#define BR_COLOR_ON_SENT lv_color_hex(BR_HEX_ON_SENT)
+_Static_assert(BR_HEX_ON_SENT != BR_HEX_SENT,
+               "a mark on an outgoing bubble must contrast with BR_COLOR_SENT, "
+               "otherwise it renders invisible (this shipped once)");
+#define BR_COLOR_RECV lv_color_hex(0x21262D)     /* surface-2 for incoming */
+#define BR_COLOR_DANGER lv_color_hex(0xDA3633)   /* --danger */
+#define BR_COLOR_SUCCESS lv_color_hex(0x238636)  /* --accent (green) */
+#define BR_COLOR_WARNING lv_color_hex(0xE3B341)  /* --warning */
+#define BR_COLOR_CRITICAL lv_color_hex(0xBC8CFF) /* --critical */
 
 /* Standard dimensions */
 #define BR_STATUS_BAR_H 20

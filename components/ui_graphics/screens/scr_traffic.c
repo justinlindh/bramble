@@ -195,7 +195,8 @@ static void traffic_refresh_cb(lv_timer_t* timer) {
         lv_label_set_text_fmt(s_count_lbl, "%u evts", traffic_debug_get_count(td));
     if (s_debug_lbl) {
         bool on = traffic_debug_is_enabled(td);
-        lv_label_set_text(s_debug_lbl, on ? "\xE2\x97\x8F Debug ON" : "\xE2\x97\x8F Debug OFF");
+        lv_label_set_text(s_debug_lbl,
+                          on ? LV_SYMBOL_BULLET " Debug ON" : LV_SYMBOL_BULLET " Debug OFF");
         lv_obj_set_style_text_color(s_debug_lbl, on ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
     }
 }
@@ -316,10 +317,12 @@ void scr_traffic_create(bramble_layout_t* layout) {
     s_debug_lbl = dbg_lbl;
     lv_obj_set_style_text_font(dbg_lbl, &lv_font_montserrat_12, 0);
     if (debug_on) {
-        lv_label_set_text(dbg_lbl, "● Debug ON");
+        /* LV_SYMBOL_BULLET, not U+25CF: only ASCII and the LV_SYMBOL_* block have
+         * glyphs in the built-in fonts, so a raw black circle drew a tofu box. */
+        lv_label_set_text(dbg_lbl, LV_SYMBOL_BULLET " Debug ON");
         lv_obj_set_style_text_color(dbg_lbl, BR_COLOR_SUCCESS, 0);
     } else {
-        lv_label_set_text(dbg_lbl, "● Debug OFF");
+        lv_label_set_text(dbg_lbl, LV_SYMBOL_BULLET " Debug OFF");
         lv_obj_set_style_text_color(dbg_lbl, BR_COLOR_TEXT_SEC, 0);
     }
 

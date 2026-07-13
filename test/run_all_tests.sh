@@ -3,7 +3,8 @@
 # Fails (exit 1) if the build fails, if any suite fails, or if no suites are found.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$TEST_DIR"
 mkdir -p build
 cd build
 
@@ -52,6 +53,12 @@ fi
 if [ "$FAIL" -ne 0 ]; then
     echo "SOME TESTS FAILED ✗"
     printf '  %s\n' "${FAILED_SUITES[@]}"
+    exit 1
+fi
+
+echo ""
+echo "=== LVGL glyph check ==="
+if ! python3 "$TEST_DIR/check_lvgl_glyphs.py"; then
     exit 1
 fi
 
