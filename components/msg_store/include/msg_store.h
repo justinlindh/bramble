@@ -51,6 +51,24 @@ typedef struct {
 } stored_msg_t;
 
 /**
+ * Channel index to store a received message under.
+ *
+ * A DM is peer-keyed, not channel-keyed. Channel traffic and DMs share the
+ * INCOMING/OUTGOING directions, so channel_index is the only thing that tells
+ * them apart, and both readers key on it being negative for a DM:
+ * chat_target_matches_message() requires channel_index < 0 for the DM thread,
+ * and chat_unread attributes an incoming message to a DM only when it is < 0.
+ *
+ * A DM arrives on channel_id 0 (the unicast default; only channel_id > 0 is a
+ * real channel message), so storing the raw channel_id files every DM under
+ * channel 0: invisible in its own thread, and counted against channel 0's
+ * unread badge. Received DMs must store -1, matching msg_store_add()'s default.
+ */
+static inline int16_t msg_store_rx_channel_index(int channel_id) {
+    return (channel_id > 0) ? (int16_t)channel_id : (int16_t)-1;
+}
+
+/**
  * Initialize the message store.  Call once at startup.
  */
 void msg_store_init(void);

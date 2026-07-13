@@ -178,17 +178,19 @@ prepare_local_env() {
 }
 
 run_local() {
-  local in_dialout=0
-  if groups | grep -q '\bdialout\b'; then
-    in_dialout=1
-  fi
-
+  # Serial access: do not assume a group name (Debian uses dialout, Arch uses
+  # uucp). Test actual write access to the port; only if that fails, wrap in
+  # sg with the group that OWNS the device node.
   run_serial_cmd() {
-    if [[ $in_dialout -eq 1 ]]; then
+    if [[ -z "$PORT" || -w "$PORT" ]]; then
       "$@"
+    elif [[ -e "$PORT" ]]; then
+      local grp
+      grp=$(stat -c %G "$PORT")
+      echo "==> No write access to $PORT, using sg $grp wrapper..."
+      sg "$grp" -c "$*"
     else
-      echo "==> Not in dialout group, using sg wrapper..."
-      sg dialout -c "$*"
+      "$@"
     fi
   }
 

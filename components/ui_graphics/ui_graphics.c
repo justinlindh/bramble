@@ -3,11 +3,13 @@
 #include "lv_port_touch.h"
 #include "lv_port_trackball.h"
 #include "lv_port_keyboard.h"
+#include "ui_zone.h"
 #include "sleep_manager.h"
 #include "theme/bramble_theme.h"
 #include "screens/scr_layout.h"
 #include "screens/scr_splash.h"
 #include "chat_unread.h"
+#include "chat_target.h"
 #include "screens/scr_chat_messages.h"
 #include "msg_store.h"
 #include "lvgl.h"
@@ -39,21 +41,34 @@ static volatile bool s_shot_ok = false;
 static SemaphoreHandle_t s_shot_done = NULL;
 static SemaphoreHandle_t s_shot_requester_mutex = NULL;
 
-static void process_new_message_unread(uint32_t arrivals) {
+/* Mark the new arrivals unread, EXCEPT any belonging to the chat thread that is
+ * currently on screen: the user is looking at those, so counting them unread
+ * would badge a conversation they are already reading. Returns true if at least
+ * one arrival belongs to the open thread, i.e. the open view needs a repaint.
+ * open_target is NULL when no chat thread is open. */
+static bool process_new_message_unread(uint32_t arrivals, const chat_target_t* open_target) {
     int count = msg_store_count();
     if (count <= 0 || arrivals == 0) {
-        return;
+        return false;
     }
 
     /* Process newest N messages, clamped to store depth for ring-buffer safety. */
     int to_process = (arrivals > (uint32_t)count) ? count : (int)arrivals;
     int start = count - to_process;
 
+    bool for_open_chat = false;
     for (int i = start; i < count; i++) {
         stored_msg_t msg;
-        if (msg_store_get_copy(i, &msg))
-            chat_unread_mark_for_message(&msg);
+        if (!msg_store_get_copy(i, &msg))
+            continue;
+        if (open_target &&
+            chat_target_matches_message(*open_target, &msg, (int)msg.channel_index)) {
+            for_open_chat = true;
+            continue;
+        }
+        chat_unread_mark_for_message(&msg);
     }
+    return for_open_chat;
 }
 
 /* Timer callbacks for periodic refresh */
@@ -71,20 +86,36 @@ static void status_refresh_timer_cb(lv_timer_t* timer) {
         /* A message is user-relevant activity: wake the display so the
          * unread badge is actually visible. */
         sleep_manager_activity();
-        process_new_message_unread(msg_received);
+
+        /* Ask the chat screen what is open, not the nav tab: a DM opened from
+         * node detail leaves active_tab == TAB_NODES, and gating the repaint on
+         * TAB_CHAT is why an open thread only showed an arrival after you left
+         * and re-entered it. */
+        chat_target_t open_target;
+        bool chat_open = scr_chat_messages_open_target(&open_target);
+        bool for_open_chat =
+            process_new_message_unread(msg_received, chat_open ? &open_target : NULL);
 
         if (s_layout) {
-            if (s_layout->active_tab == TAB_CHAT) {
-                /* Chat is active — refresh list/bubbles unless user is in a DM view */
-                if (s_layout->in_dm_view) {
+            if (chat_open) {
+                /* A thread is on screen. Repaint it in place when the arrival
+                 * is one of its own; otherwise it belongs to another
+                 * conversation and bumps the tab badge like any background
+                 * message. */
+                if (for_open_chat) {
                     scr_chat_messages_on_recv();
                 } else {
-                    layout_set_tab(s_layout, TAB_CHAT);
+                    s_unread_count++;
+                    layout_set_unread(s_layout, s_unread_count);
                 }
+            } else if (s_layout->active_tab == TAB_CHAT) {
+                /* The chat LIST is on screen: rebuild it so the per-row unread
+                 * badges update, and clear the tab badge, since every
+                 * conversation with an arrival is now visible in the list. */
+                layout_set_tab(s_layout, TAB_CHAT);
                 s_unread_count = 0;
                 layout_set_unread(s_layout, 0);
             } else {
-                /* Chat is not active - increment global chat tab unread */
                 s_unread_count++;
                 layout_set_unread(s_layout, s_unread_count);
             }
@@ -125,6 +156,9 @@ static void splash_timer_cb(lv_timer_t* timer) {
 
     /* Clean the splash content before building main UI */
     lv_obj_clean(lv_screen_active());
+    /* Create the content/chrome focus groups (content becomes the default
+     * group) before any indev is bound to a group. */
+    ui_zone_init();
     lv_port_touch_init();
     lv_port_trackball_init();
     lv_port_keyboard_init();

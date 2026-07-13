@@ -27,6 +27,7 @@ if(CONFIG_BRAMBLE_UI_GRAPHICAL)
         "ui_toast.c"
         "ui_confirm.c"
         "ui_focus.c"
+        "ui_zone.c"
         "assets/img_bramble_logo.c"
     )
 else()

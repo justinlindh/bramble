@@ -1,5 +1,6 @@
 #include "scr_chat_compose.h"
 #include "scr_chat_list.h"
+#include "ui_zone.h"
 #include "ui_shared_state.h"
 #include "theme/bramble_theme.h"
 #include "esp_log.h"
@@ -12,24 +13,36 @@ extern void scr_chat_messages_open_dm(bramble_layout_t* layout, uint32_t peer_ad
 extern int mesh_get_channel_count(void);
 extern const char* mesh_get_channel_name(int index);
 
-static void back_click_cb(lv_event_t* e) {
-    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+/* Back and the target rows all sit in the content area their destination
+ * cleans, so each transition is deferred out of its own click. See ui_defer. */
+extern bramble_layout_t* s_layout;
+
+static void back_to_list_async(void* arg) {
+    bramble_layout_t* layout = (bramble_layout_t*)arg;
+    if (!layout)
+        return;
     /* Show tab bar */
     layout_set_tab_bar_hidden(layout, false);
     /* Return to chat list (layout_set_tab cleans and rebuilds) */
     scr_chat_list_refresh(layout);
 }
 
+static void back_click_cb(lv_event_t* e) {
+    ui_defer(back_to_list_async, lv_event_get_user_data(e));
+}
+
+static void open_channel_async(void* arg) { scr_chat_messages_open(s_layout, (int)(intptr_t)arg); }
+
 static void target_click_cb(lv_event_t* e) {
-    int channel_idx = (int)(intptr_t)lv_event_get_user_data(e);
-    extern bramble_layout_t* s_layout;
-    scr_chat_messages_open(s_layout, channel_idx);
+    ui_defer(open_channel_async, lv_event_get_user_data(e));
+}
+
+static void open_dm_async(void* arg) {
+    scr_chat_messages_open_dm(s_layout, (uint32_t)(uintptr_t)arg);
 }
 
 static void dm_target_click_cb(lv_event_t* e) {
-    uint32_t peer_addr = (uint32_t)(uintptr_t)lv_event_get_user_data(e);
-    extern bramble_layout_t* s_layout;
-    scr_chat_messages_open_dm(s_layout, peer_addr);
+    ui_defer(open_dm_async, lv_event_get_user_data(e));
 }
 
 void scr_chat_compose_open(bramble_layout_t* layout) {
@@ -62,9 +75,11 @@ void scr_chat_compose_open(bramble_layout_t* layout) {
     lv_obj_center(back_lbl);
     lv_obj_add_event_cb(back_btn, back_click_cb, LV_EVENT_CLICKED, layout);
 
+    /* Back is a header action (chrome); the target list is content. The tab bar
+     * is hidden here, so chrome is just Back: a hop out of content lands on it. */
+    ui_zone_add_chrome(back_btn, true);
+
     lv_group_t* g = lv_group_get_default();
-    if (g)
-        lv_group_add_obj(g, back_btn);
 
     lv_obj_t* title = lv_label_create(header);
     lv_label_set_text(title, "New Message");
@@ -164,4 +179,6 @@ void scr_chat_compose_open(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(hint, BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(hint, LV_PCT(100));
+
+    ui_zone_reset_to_content();
 }

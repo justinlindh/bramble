@@ -1,5 +1,6 @@
 #include "scr_channel_create.h"
 #include "scr_chat_list.h"
+#include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "esp_log.h"
 #include <stdio.h>
@@ -10,19 +11,34 @@ static const char* TAG = "scr_ch_create";
 extern void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx);
 extern int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len);
 
+/* All three are ui_zone_track'd at creation: the form dies with the content area
+ * (cancel, create, or a forced tab switch on an incoming message), and the NULL
+ * guards in channel_save_cb must mean "gone", not "freed". */
 static lv_obj_t* s_name_ta = NULL;
 static lv_obj_t* s_psk_ta = NULL;
 static lv_obj_t* s_error_lbl = NULL;
 static bramble_layout_t* s_layout = NULL;
 
-static void cancel_click_cb(lv_event_t* e) {
-    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+/* Cancel/Create both live in the form inside the content area their
+ * destination cleans, so both defer out of their own click. See ui_defer. */
+static void back_to_list_async(void* arg) {
+    bramble_layout_t* layout = (bramble_layout_t*)arg;
+    if (!layout)
+        return;
     /* Show tab bar */
     layout_set_tab_bar_hidden(layout, false);
-    /* Return to chat list */
+    /* Return to chat list. scr_chat_list_refresh already cleans the content
+     * area and rebuilds the list; calling scr_chat_list_create after it built
+     * a SECOND copy on top of the first and registered its header actions in
+     * the chrome ring twice. */
     scr_chat_list_refresh(layout);
-    scr_chat_list_create(layout);
 }
+
+static void cancel_click_cb(lv_event_t* e) {
+    ui_defer(back_to_list_async, lv_event_get_user_data(e));
+}
+
+static void open_channel_async(void* arg) { scr_chat_messages_open(s_layout, (int)(intptr_t)arg); }
 
 static void create_click_cb(lv_event_t* e) {
     (void)e;
@@ -61,8 +77,10 @@ static void create_click_cb(lv_event_t* e) {
 
     ESP_LOGI(TAG, "Created channel '%s' at index %d", name, idx);
 
-    /* Success: open the new channel's message view */
-    scr_chat_messages_open(s_layout, idx);
+    /* Success: open the new channel's message view. Validation above had to run
+     * inline (it reads the textareas, which the rebuild destroys); only the
+     * transition itself is deferred. */
+    ui_defer(open_channel_async, (void*)(intptr_t)idx);
 }
 
 void scr_channel_create_open(bramble_layout_t* layout) {
@@ -113,7 +131,7 @@ void scr_channel_create_open(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(name_lbl, BR_COLOR_TEXT, 0);
 
     /* Name textarea */
-    s_name_ta = lv_textarea_create(form);
+    ui_zone_track(&s_name_ta, lv_textarea_create(form));
     lv_obj_set_width(s_name_ta, LV_PCT(100));
     lv_obj_set_height(s_name_ta, 40);
     lv_textarea_set_one_line(s_name_ta, true);
@@ -135,7 +153,7 @@ void scr_channel_create_open(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(psk_lbl, BR_COLOR_TEXT_SEC, 0);
 
     /* PSK textarea */
-    s_psk_ta = lv_textarea_create(form);
+    ui_zone_track(&s_psk_ta, lv_textarea_create(form));
     lv_obj_set_width(s_psk_ta, LV_PCT(100));
     lv_obj_set_height(s_psk_ta, 40);
     lv_textarea_set_one_line(s_psk_ta, true);
@@ -149,7 +167,7 @@ void scr_channel_create_open(bramble_layout_t* layout) {
         lv_group_add_obj(g, s_psk_ta);
 
     /* Error label (hidden by default) */
-    s_error_lbl = lv_label_create(form);
+    ui_zone_track(&s_error_lbl, lv_label_create(form));
     lv_label_set_text(s_error_lbl, "");
     lv_obj_set_style_text_color(s_error_lbl, lv_color_hex(0xFF5555), 0);
     lv_obj_set_style_text_font(s_error_lbl, &lv_font_montserrat_12, 0);
@@ -192,4 +210,8 @@ void scr_channel_create_open(bramble_layout_t* layout) {
     lv_obj_add_event_cb(create_btn, create_click_cb, LV_EVENT_CLICKED, NULL);
     if (g)
         lv_group_add_obj(g, create_btn);
+
+    ui_zone_reset_to_content();
+    if (g)
+        lv_group_focus_obj(s_name_ta);
 }

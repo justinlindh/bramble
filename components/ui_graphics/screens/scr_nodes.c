@@ -1,5 +1,6 @@
 #include "scr_nodes.h"
 #include "scr_node_detail.h"
+#include "ui_zone.h"
 #include "ui_shared_state.h"
 #include "theme/bramble_theme.h"
 #include "location.h"
@@ -54,6 +55,28 @@ static void format_node_age(char* buf, size_t len, uint32_t age_s) {
         snprintf(buf, len, "%luh", (unsigned long)(age_s / 3600));
 }
 
+/* Drill-down target, snapshotted at click time. The clicked card lives in the
+ * content area that scr_node_detail_open cleans, so the transition is deferred
+ * (see ui_defer); by the time it runs, the live refresh timer may have rebuilt
+ * the list and recycled the card's node_card_ctx_t slot, so nothing may be read
+ * through that pointer afterwards. */
+static struct {
+    bramble_layout_t* layout;
+    neighbor_entry_t neighbor;
+    bool has_loc;
+    location_cache_entry_t loc_entry;
+    uint32_t now_ms;
+} s_pending_open;
+
+static void node_open_async(void* arg) {
+    (void)arg;
+    if (!s_pending_open.layout)
+        return;
+    lv_obj_clean(layout_get_content(s_pending_open.layout));
+    scr_node_detail_open(s_pending_open.layout, &s_pending_open.neighbor, s_pending_open.has_loc,
+                         &s_pending_open.loc_entry, s_pending_open.now_ms);
+}
+
 static void node_open_cb(lv_event_t* e) {
     node_card_ctx_t* ctx = (node_card_ctx_t*)lv_event_get_user_data(e);
     if (!ctx || !ctx->layout)
@@ -73,8 +96,12 @@ static void node_open_cb(lv_event_t* e) {
         }
     }
 
-    lv_obj_clean(layout_get_content(ctx->layout));
-    scr_node_detail_open(ctx->layout, &ctx->neighbor, has_loc, &loc_entry, ctx->now_ms);
+    s_pending_open.layout = ctx->layout;
+    s_pending_open.neighbor = ctx->neighbor;
+    s_pending_open.has_loc = has_loc;
+    s_pending_open.loc_entry = loc_entry;
+    s_pending_open.now_ms = ctx->now_ms;
+    ui_defer(node_open_async, NULL);
 }
 
 static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32_t now_ms,
@@ -279,4 +306,9 @@ void scr_nodes_create(bramble_layout_t* layout) {
      * list (layout_set_tab cleans the content area). */
     lv_timer_t* refresh = lv_timer_create(nodes_refresh_cb, 3000, NULL);
     lv_obj_add_event_cb(list, nodes_list_delete_cb, LV_EVENT_DELETE, refresh);
+
+    /* Reached from layout_set_tab (which resets the zone) but ALSO directly from
+     * the node-detail Back button, so this builder owns the reset too: a screen
+     * always leaves input in its content zone. */
+    ui_zone_reset_to_content();
 }

@@ -1,5 +1,6 @@
 #include "scr_traffic.h"
 #include "scr_stats.h"
+#include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "traffic_debug.h"
 #include "esp_log.h"
@@ -207,11 +208,19 @@ static void traffic_delete_cb2(lv_event_t* e) {
     s_debug_lbl = NULL;
 }
 
-static void back_click_cb(lv_event_t* e) {
-    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+/* Back lives in the content area scr_stats_create cleans, so the transition is
+ * deferred out of its own click (see ui_defer). */
+static void back_to_stats_async(void* arg) {
+    bramble_layout_t* layout = (bramble_layout_t*)arg;
+    if (!layout)
+        return;
     lv_refr_now(lv_display_get_default());
     lv_obj_clean(layout->content_area);
     scr_stats_create(layout);
+}
+
+static void back_click_cb(lv_event_t* e) {
+    ui_defer(back_to_stats_async, lv_event_get_user_data(e));
 }
 
 /* -------------------------------------------------------------------------
@@ -262,9 +271,15 @@ void scr_traffic_create(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(back_lbl, BR_COLOR_TEXT, 0);
     lv_obj_center(back_lbl);
 
-    lv_group_t* g = lv_group_get_default();
-    if (g)
-        lv_group_add_obj(g, back_btn);
+    /* Back is a header action (chrome); the bottom nav stays visible too. It is
+     * registered before layout_chrome_tabs_last runs, so it sits at the head of
+     * the chrome ring and a hop lands on Back, not on the tab strip. */
+    ui_zone_add_chrome(back_btn, true);
+    layout_chrome_tabs_last(layout);
+
+    /* Event rows are not focusable, so this screen's content zone is empty;
+     * start focus in chrome (back / nav) rather than nowhere. */
+    ui_zone_reset_to_content();
 
     /* Title */
     lv_obj_t* title = lv_label_create(header);

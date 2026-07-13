@@ -2708,7 +2708,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message)
                                                   ? MSG_DIR_BROADCAST_IN
                                                   : MSG_DIR_INCOMING;
-                        int16_t channel_index = (int16_t)info.channel_id;
+                        int16_t channel_index = msg_store_rx_channel_index(info.channel_id);
                         msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr, 0,
                                           MSG_STATUS_NONE, channel_index);
 
@@ -2803,7 +2803,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         bool is_channel_message = (info.channel_id > 0);
         msg_direction_t dir = (hdr_dest == 0xFFFFFFFF && !is_channel_message) ? MSG_DIR_BROADCAST_IN
                                                                               : MSG_DIR_INCOMING;
-        int16_t channel_index = (int16_t)info.channel_id;
+        int16_t channel_index = msg_store_rx_channel_index(info.channel_id);
         msg_store_add_ex2(info.src_addr, dir, text, tlen, rssi, snr, 0, MSG_STATUS_NONE,
                           channel_index);
 
@@ -5175,8 +5175,13 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
         uint32_t pkt_id = send_dm_packet(dest_addr, data, len, sess);
         xSemaphoreGive(s_dm_mutex);
         if (pkt_id != 0) {
+            /* channel_idx only picked the transport channel the session's KE
+             * envelope rode on; the payload is a DM, so it stores no channel
+             * index (see msg_store_rx_channel_index). Storing channel_idx (0
+             * for the unicast default) would file this sent DM under channel 0
+             * and hide it from its own thread, exactly like a received DM. */
             msg_store_add_ex2(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, pkt_id,
-                              MSG_STATUS_SENT, (int16_t)channel_idx);
+                              MSG_STATUS_SENT, -1);
         }
         return pkt_id;
     }

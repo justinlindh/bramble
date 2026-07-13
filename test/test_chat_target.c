@@ -73,6 +73,38 @@ void test_dm_target_excludes_channel_messages_from_same_peer(void) {
     TEST_ASSERT_FALSE(chat_target_matches_message(t, &ch_out, 2));
 }
 
+/* Regression (nav review F1): a received DM arrives on channel_id 0 (only
+ * channel_id > 0 is a real channel message). Storing that raw 0 as the
+ * channel_index made every incoming DM fail this filter's `< 0` test, so it
+ * never rendered in its own thread. Lock the rx convention against the filter
+ * that consumes it: the two must agree or DMs go invisible again. */
+void test_rx_channel_index_marks_dms_as_channel_less(void) {
+    TEST_ASSERT_EQUAL(-1, msg_store_rx_channel_index(0)); /* DM: no channel */
+    TEST_ASSERT_EQUAL(1, msg_store_rx_channel_index(1));  /* real channel */
+    TEST_ASSERT_EQUAL(7, msg_store_rx_channel_index(7));
+}
+
+void test_incoming_dm_stored_by_rx_convention_renders_in_dm_thread(void) {
+    chat_target_t t = chat_target_dm(0x12345678);
+
+    /* Exactly what mesh_task stores for a DM received on channel_id 0. */
+    stored_msg_t rx_dm = {
+        .direction = MSG_DIR_INCOMING,
+        .peer_addr = 0x12345678,
+        .channel_index = msg_store_rx_channel_index(0),
+    };
+
+    TEST_ASSERT_TRUE(chat_target_matches_message(t, &rx_dm, rx_dm.channel_index));
+
+    /* And a channel post received on channel 2 still stays out of the thread. */
+    stored_msg_t rx_ch = {
+        .direction = MSG_DIR_INCOMING,
+        .peer_addr = 0x12345678,
+        .channel_index = msg_store_rx_channel_index(2),
+    };
+    TEST_ASSERT_FALSE(chat_target_matches_message(t, &rx_ch, rx_ch.channel_index));
+}
+
 void test_cycle_targets_walks_channels_then_wraps_to_broadcast(void) {
     chat_target_t t = chat_target_default();
 
@@ -104,6 +136,8 @@ int main(void) {
     RUN_TEST(test_channel_target_includes_message_when_channel_matches);
     RUN_TEST(test_dm_target_matches_only_peer_dm);
     RUN_TEST(test_dm_target_excludes_channel_messages_from_same_peer);
+    RUN_TEST(test_rx_channel_index_marks_dms_as_channel_less);
+    RUN_TEST(test_incoming_dm_stored_by_rx_convention_renders_in_dm_thread);
     RUN_TEST(test_cycle_targets_walks_channels_then_wraps_to_broadcast);
     RUN_TEST(test_cycle_from_dm_returns_broadcast);
     return UNITY_END();

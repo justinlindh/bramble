@@ -1,5 +1,6 @@
 #include "scr_stats.h"
 #include "ui_shared_state.h"
+#include "ui_zone.h"
 #include "scr_traffic.h"
 #include "theme/bramble_theme.h"
 #include "routing.h"
@@ -239,16 +240,26 @@ static void create_reach_row(lv_obj_t* parent, const char* name, int count, int 
 /* -------------------------------------------------------------------------
  * Traffic Monitor navigation callback
  * ------------------------------------------------------------------------- */
-static void traffic_click_cb(lv_event_t* e) {
-    bramble_layout_t* layout = (bramble_layout_t*)lv_event_get_user_data(e);
+/* The button lives in the content area scr_traffic_create cleans, so the
+ * transition is deferred out of its own click (see ui_defer). */
+static void traffic_open_async(void* arg) {
+    bramble_layout_t* layout = (bramble_layout_t*)arg;
+    if (!layout)
+        return;
     lv_refr_now(lv_display_get_default());
     lv_obj_clean(layout->content_area);
     scr_traffic_create(layout);
 }
 
+static void traffic_click_cb(lv_event_t* e) {
+    ui_defer(traffic_open_async, lv_event_get_user_data(e));
+}
+
 void scr_stats_create(bramble_layout_t* layout) {
-    lv_obj_t* cont = layout_get_content(layout);
-    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
+    /* Counters, the system block and the peer list overflow the viewport, and
+     * the one focusable widget (Traffic Monitor) sits at the very bottom: it is
+     * only reachable because this column scrolls. */
+    lv_obj_t* cont = ui_zone_scroll_column(layout_get_content(layout));
     lv_obj_set_style_pad_all(cont, BR_PADDING, 0);
     lv_obj_set_style_pad_row(cont, 6, 0);
 
@@ -519,4 +530,10 @@ void scr_stats_create(bramble_layout_t* layout) {
     lv_group_t* g = lv_group_get_default();
     if (g)
         lv_group_add_obj(g, traffic_btn);
+
+    /* Reached from layout_set_tab (which resets the zone) but ALSO directly
+     * from the Traffic screen's Back button, which is a CHROME widget: without
+     * this reset the zone would stay CHROME while a content row showed the
+     * cursor, and SELECT would fire a nav tab instead (the F2 trap). */
+    ui_zone_reset_to_content();
 }

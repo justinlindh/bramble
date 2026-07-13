@@ -1,5 +1,6 @@
 #include "scr_sas_verify.h"
 #include "scr_chat_messages.h"
+#include "ui_zone.h"
 #include "theme/bramble_theme.h"
 #include "ui_confirm.h"
 #include "ui_toast.h"
@@ -21,7 +22,12 @@ extern const char* mesh_get_peer_name(uint32_t addr);
 static bramble_layout_t* s_layout = NULL;
 static uint32_t s_peer_addr = 0;
 
-static void return_to_dm(void) {
+/* Reopening the DM cleans the content area that hosts this screen's own
+ * buttons, so it can never run inline from one of their click handlers: that
+ * deletes the button mid-dispatch and reboots the device (the crash this
+ * screen's Back button was reproducing). See ui_defer. */
+static void return_to_dm_async(void* arg) {
+    (void)arg;
     if (!s_layout || s_peer_addr == 0)
         return;
     scr_chat_messages_open_dm(s_layout, s_peer_addr);
@@ -29,7 +35,7 @@ static void return_to_dm(void) {
 
 static void back_click_cb(lv_event_t* e) {
     (void)e;
-    return_to_dm();
+    ui_defer(return_to_dm_async, NULL);
 }
 
 static void on_verify_confirm(void* user_data) {
@@ -40,9 +46,10 @@ static void on_verify_confirm(void* user_data) {
         return;
     }
     ui_toast_show("Verified");
-    /* Return to the DM, whose header re-derives the glyph from the freshly
-     * set verified bit. */
-    return_to_dm();
+    /* Runs from the confirm dialog's own button handler; return to the DM
+     * (whose header re-derives the glyph from the freshly set verified bit)
+     * only once that dispatch has unwound. */
+    ui_defer(return_to_dm_async, NULL);
 }
 
 static void codes_match_click_cb(lv_event_t* e) {
@@ -150,4 +157,6 @@ void scr_sas_verify_open(bramble_layout_t* layout, uint32_t peer_addr) {
 
     add_action_btn(actions, "Codes Match", codes_match_click_cb, true);
     add_action_btn(actions, "Back", back_click_cb, false);
+
+    ui_zone_reset_to_content();
 }

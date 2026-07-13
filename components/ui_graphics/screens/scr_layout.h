@@ -23,9 +23,6 @@ typedef struct {
 
     /* Unread badge on chat tab */
     lv_obj_t* chat_badge;
-
-    /* True while a DM or message view is open (prevents chat tab refresh) */
-    bool in_dm_view;
 } bramble_layout_t;
 
 bramble_layout_t* layout_create(void);
@@ -37,5 +34,11 @@ lv_obj_t* layout_get_content(bramble_layout_t* layout);
 /* Hide/show the tab bar AND remove/re-add its buttons from the input
  * group, so hidden tabs cannot be focused by keyboard/trackball. */
 void layout_set_tab_bar_hidden(bramble_layout_t* layout, bool hidden);
+
+/* Move the nav tabs to the END of the chrome focus ring. Call at the end of any
+ * builder that registers header actions in the chrome group while the tab bar
+ * is visible, so a content->chrome hop lands on the screen's primary action
+ * instead of walking the whole five-tab strip to reach it. */
+void layout_chrome_tabs_last(bramble_layout_t* layout);
 
 #endif

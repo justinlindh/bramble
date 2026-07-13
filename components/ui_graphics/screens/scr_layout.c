@@ -1,4 +1,5 @@
 #include "scr_layout.h"
+#include "ui_zone.h"
 #include "ui_shared_state.h"
 #include "scr_chat_list.h"
 #include "scr_nodes.h"
@@ -124,9 +125,9 @@ bramble_layout_t* layout_create(void) {
         lv_obj_add_event_cb(btn, tab_click_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
         s_layout.tab_btns[i] = btn;
-        lv_group_t* g = lv_group_get_default();
-        if (g)
-            lv_group_add_obj(g, btn);
+        /* Bottom nav is chrome, not content. Default lands on layout_set_tab,
+         * once the initial active tab is known. */
+        ui_zone_add_chrome(btn, false);
     }
 
     s_layout.active_tab = TAB_CHAT;
@@ -137,7 +138,6 @@ bramble_layout_t* layout_create(void) {
 }
 
 void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
-    layout->in_dm_view = false;
     if (tab >= TAB_COUNT)
         return;
 
@@ -151,6 +151,8 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
         if (i == (int)tab) {
             lv_obj_set_style_bg_color(layout->tab_btns[i], BR_COLOR_PRIMARY, 0);
             lv_obj_set_style_bg_opa(layout->tab_btns[i], LV_OPA_30, 0);
+            /* Where a content->chrome hop lands: the current tab. */
+            ui_zone_set_chrome_default(layout->tab_btns[i]);
         } else {
             lv_obj_set_style_bg_opa(layout->tab_btns[i], LV_OPA_TRANSP, 0);
         }
@@ -187,6 +189,9 @@ void layout_set_tab(bramble_layout_t* layout, bramble_tab_t tab) {
     case TAB_COUNT:
         break;
     }
+
+    /* A fresh screen always starts focused in its content zone. */
+    ui_zone_reset_to_content();
 }
 
 void layout_update_status(bramble_layout_t* layout) {
@@ -276,6 +281,33 @@ void layout_set_unread(bramble_layout_t* layout, int count) {
     }
 }
 
+void layout_chrome_tabs_last(bramble_layout_t* layout) {
+    /* Chrome ring order: the screen's header actions FIRST, the five nav tabs
+     * after them. The tabs join the chrome group once at layout_create, so they
+     * sit at the head of the ring and a screen's header actions land behind all
+     * five: reaching "+Ch" from the Messages list took seven right-presses.
+     * Re-adding a tab moves it to the tail, so calling this after a builder has
+     * registered its header actions puts those actions first, and a
+     * content->chrome hop lands on the screen's primary action with the tabs
+     * still reachable rightward.
+     *
+     * A full-screen view (chat, compose, channel create) hides the tab bar,
+     * which pulls the tabs out of the group entirely; nothing to reorder. */
+    if (!layout || !layout->tab_bar || lv_obj_has_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN))
+        return;
+
+    lv_group_t* g = ui_zone_chrome_group();
+    if (!g)
+        return;
+
+    for (int i = 0; i < TAB_COUNT; i++) {
+        if (layout->tab_btns[i]) {
+            lv_group_remove_obj(layout->tab_btns[i]);
+            lv_group_add_obj(g, layout->tab_btns[i]);
+        }
+    }
+}
+
 lv_obj_t* layout_get_content(bramble_layout_t* layout) { return layout->content_area; }
 
 void layout_set_tab_bar_hidden(bramble_layout_t* layout, bool hidden) {
@@ -285,7 +317,7 @@ void layout_set_tab_bar_hidden(bramble_layout_t* layout, bool hidden) {
     if (hidden == already_hidden)
         return;
 
-    lv_group_t* g = lv_group_get_default();
+    lv_group_t* g = ui_zone_chrome_group();
     if (hidden) {
         lv_obj_add_flag(layout->tab_bar, LV_OBJ_FLAG_HIDDEN);
         for (int i = 0; i < TAB_COUNT; i++) {

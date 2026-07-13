@@ -10,7 +10,11 @@ static void* s_user_data = NULL;
 static void confirm_close(void) {
     if (s_overlay) {
         ui_focus_pop_modal();
-        lv_obj_delete(s_overlay);
+        /* Both callers are CLICKED handlers on buttons INSIDE this overlay, so
+         * a plain lv_obj_delete would free the widget whose event is still
+         * being dispatched (LVGL 9 forbids it; symptom is a use-after-free
+         * reboot). The async delete runs once dispatch has unwound. */
+        lv_obj_delete_async(s_overlay);
         s_overlay = NULL;
     }
 }

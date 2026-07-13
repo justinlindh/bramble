@@ -2,6 +2,7 @@
 #include "rpc_auth.h"
 #include "cJSON.h"
 #include "esp_log.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -243,10 +244,19 @@ int rpc_dispatch_authed(const char* json_in, char* json_out, size_t out_len, boo
         } else {
             size_t len = strlen(out);
             if (len >= out_len) {
-                ESP_LOGW(TAG, "RPC response truncated for method '%s' (%zu >= %zu)",
+                /* The response does not fit. Answer with an error that SAYS so
+                 * (and how big it needed to be) rather than writing nothing:
+                 * dropping it silently makes an oversize reply - a full 20-slot
+                 * bramble.getMessages, say - indistinguishable from a dead node,
+                 * because the client just waits out its timeout. */
+                ESP_LOGW(TAG, "RPC response too large for method '%s' (%zu >= %zu)",
                          method->valuestring, len, out_len);
                 free(out);
-                ret = -1;
+                char details[80];
+                snprintf(details, sizeof(details), "response needs %zu bytes, buffer is %zu", len,
+                         out_len);
+                ret = format_error_with_details(id, RPC_ERR_INTERNAL, "response too large", details,
+                                                json_out, out_len);
             } else {
                 memcpy(json_out, out, len + 1);
                 free(out);
