@@ -2130,6 +2130,11 @@ static void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t sn
     /* Update message store status */
     if (msg_store_update_status_with_route(ack.ack_packet_id, MSG_STATUS_DELIVERED, route_hop_count,
                                            route_hops)) {
+        /* An open thread is showing this message with a pending badge; repaint it
+         * so the confirmation appears without the user leaving and coming back. */
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        ui_graphics_notify(UI_EVT_MSG_STATUS);
+#endif
         record_ack_delivery_event(&ack);
         /* Notify webapp with full relay path from ACK */
         char addr_buf[12];
@@ -2239,6 +2244,31 @@ static void handle_delivery_receipt(const uint8_t* data, uint8_t len, int16_t rs
     if (receipt.header.dest_addr != s_identity->address) {
         forward_delivery_receipt(&receipt);
         return;
+    }
+
+    /* Write the receipt back to msg_store, exactly as handle_ack does for a
+     * unicast ACK. Without this the receipt was verified, replay checked, and
+     * then only emitted as a notification: the stored broadcast row kept its
+     * original status forever, so a broadcast in the chat UI could never show a
+     * delivery mark no matter how many nodes confirmed it. The row is keyed by
+     * the packet_id we transmitted, which is what the receiver echoes back in
+     * orig_packet_id.
+     *
+     * The receipt's relay_path runs receiver -> ... -> us; normalize it to
+     * us -> ... -> receiver so the route reads the same direction as an ACK's. */
+    uint32_t route_hops[MSG_ROUTE_MAX_HOPS] = {0};
+    uint8_t route_hop_count = 0;
+    if (s_identity) {
+        route_hops[route_hop_count++] = s_identity->address;
+    }
+    for (int i = receipt.hop_count - 1; i >= 0 && route_hop_count < MSG_ROUTE_MAX_HOPS; i--) {
+        route_hops[route_hop_count++] = receipt.relay_path[i];
+    }
+    if (msg_store_update_status_with_route(receipt.orig_packet_id, MSG_STATUS_DELIVERED,
+                                           route_hop_count, route_hops)) {
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+        ui_graphics_notify(UI_EVT_MSG_STATUS);
+#endif
     }
 
     mesh_emit_broadcast_delivery_notification(receipt.src_addr, receipt.orig_packet_id, rssi,
@@ -4515,7 +4545,14 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
                     /* Record timeout event - TX fail represents final timeout */
                     traffic_debug_record_tx(&s_traffic_debug, pkt_type, pa->packet_len, pa->tier);
 
-                    msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED);
+                    if (msg_store_update_status(pa->packet_id, MSG_STATUS_FAILED)) {
+                        /* Same repaint as the delivered path: a give-up is a status
+                         * change, and an open thread must stop showing "pending" for
+                         * a message that is never going to arrive. */
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+                        ui_graphics_notify(UI_EVT_MSG_STATUS);
+#endif
+                    }
                     /* Notify webapp of failure */
                     cJSON* params = cJSON_CreateObject();
                     char pkt_buf[12];
@@ -5712,6 +5749,11 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
 
         s_last_broadcast_frag_msg_id = 0;
 
+        /* A receipt for a fragmented broadcast correlates on the FIRST fragment's
+         * packet_id (that is the id recorded in s_last_broadcast_id), so the store
+         * row has to be filed under that same id to be reachable. */
+        uint32_t first_pkt_id = 0;
+
         /* Send each fragment with pacing */
         for (int i = 0; i < num_frags; i++) {
             uint32_t pkt_id =
@@ -5719,6 +5761,7 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
             if (i == 0 && pkt_id != 0) {
                 s_last_broadcast_id = pkt_id;
                 s_last_broadcast_frag_msg_id = msg_id;
+                first_pkt_id = pkt_id;
             }
             if (pkt_id == 0) {
                 ESP_LOGW(TAG, "Fragment %d transmission failed", i);
@@ -5737,8 +5780,8 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
         free(frags);
 
         /* Store the full message in message store (broadcast = channel 0) */
-        msg_store_add_channel(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
-                              MSG_STATUS_NONE, 0);
+        msg_store_add_channel(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0,
+                              first_pkt_id, MSG_STATUS_NONE, 0);
         return 0;
     }
 
@@ -5748,8 +5791,15 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
         s_last_broadcast_id = pkt_id;
         s_last_broadcast_frag_msg_id = 0;
         recent_broadcast_record(pkt_id);
-        msg_store_add_channel(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0, 0,
-                              MSG_STATUS_NONE, 0);
+        /* File the row under the packet_id we just transmitted, not 0. A row with
+         * packet_id 0 is untrackable by construction: a delivery receipt is matched
+         * against the store by the orig_packet_id the receiver echoes back, so a
+         * zero-id row can never be promoted to DELIVERED and the message stays
+         * unconfirmed forever. Status stays NONE here (a broadcast is not "sent to"
+         * anyone in particular) until a receipt arrives, matching the sibling path
+         * in mesh_send_channel. */
+        msg_store_add_channel(0xFFFFFFFF, MSG_DIR_BROADCAST_OUT, (const char*)data, len, 0, 0,
+                              pkt_id, MSG_STATUS_NONE, 0);
     }
     return pkt_id ? 0 : -1;
 }

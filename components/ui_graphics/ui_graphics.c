@@ -121,6 +121,19 @@ static void status_refresh_timer_cb(lv_timer_t* timer) {
             }
         }
     }
+
+    if (events & UI_EVT_MSG_STATUS) {
+        /* A delivery status changed under an open thread: repaint it so the
+         * badge advances from pending to the delivered double check. Deliberately
+         * no unread bookkeeping and no display wake: nothing arrived, one of our
+         * own bubbles just got confirmed, and waking the screen for that would
+         * light the device up every time an ACK trickles in. Repaint only when a
+         * thread is actually on screen; there is nothing to update otherwise. */
+        chat_target_t status_target;
+        if (scr_chat_messages_open_target(&status_target)) {
+            scr_chat_messages_on_recv();
+        }
+    }
 }
 
 /* Drive the sleep manager's blocking display power-down on the UI task. The
