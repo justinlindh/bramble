@@ -47,6 +47,7 @@ static void msg_store_ensure_alloc(void) {
 static int s_head = 0;                /* Next write position */
 static int s_count = 0;               /* Number of stored messages */
 static uint32_t s_total_incoming = 0; /* Monotonic incoming counter, survives ring wrap */
+static uint32_t s_next_uid = 1;       /* Stable per-message id allocator (0 = untracked) */
 
 static uint32_t get_uptime_s(void) {
 #ifdef ESP_PLATFORM
@@ -64,11 +65,21 @@ void msg_store_init(void) {
     s_head = 0;
     s_count = 0;
     s_total_incoming = 0;
+    s_next_uid = 1;
 }
 
-void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
-                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status,
-                       int16_t channel_index) {
+uint32_t msg_store_next_uid(void) {
+    MSG_LOCK();
+    uint32_t uid = s_next_uid++;
+    if (s_next_uid == 0)
+        s_next_uid = 1; /* wrap past the reserved "untracked" value */
+    MSG_UNLOCK();
+    return uid;
+}
+
+static void msg_store_add_full(uint32_t peer_addr, msg_direction_t dir, const char* text,
+                               size_t text_len, int8_t rssi, int8_t snr, uint32_t packet_id,
+                               msg_status_t status, int16_t channel_index, uint32_t uid) {
     /* Lazy retry: a failed boot-time alloc may succeed once the heap
      * settles, instead of dropping messages for the whole session. */
     msg_store_ensure_alloc();
@@ -86,6 +97,7 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
     MSG_LOCK();
     memset(m, 0, sizeof(*m));
     m->peer_addr = peer_addr;
+    m->uid = uid;
     m->direction = dir;
     m->status = status;
     m->packet_id = packet_id;
@@ -120,6 +132,13 @@ void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text
 #endif
 }
 
+void msg_store_add_ex2(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
+                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status,
+                       int16_t channel_index) {
+    msg_store_add_full(peer_addr, dir, text, text_len, rssi, snr, packet_id, status, channel_index,
+                       0);
+}
+
 void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status) {
     msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status,
@@ -128,8 +147,14 @@ void msg_store_add_ex(uint32_t peer_addr, msg_direction_t dir, const char* text,
 
 void msg_store_add_dm(uint32_t peer_addr, msg_direction_t dir, const char* text, size_t text_len,
                       int8_t rssi, int8_t snr, uint32_t packet_id, msg_status_t status) {
-    msg_store_add_ex2(peer_addr, dir, text, text_len, rssi, snr, packet_id, status,
-                      MSG_STORE_DM_CHANNEL);
+    msg_store_add_dm_uid(peer_addr, dir, text, text_len, rssi, snr, packet_id, status, 0);
+}
+
+void msg_store_add_dm_uid(uint32_t peer_addr, msg_direction_t dir, const char* text,
+                          size_t text_len, int8_t rssi, int8_t snr, uint32_t packet_id,
+                          msg_status_t status, uint32_t uid) {
+    msg_store_add_full(peer_addr, dir, text, text_len, rssi, snr, packet_id, status,
+                       MSG_STORE_DM_CHANNEL, uid);
 }
 
 void msg_store_add_channel(uint32_t peer_addr, msg_direction_t dir, const char* text,
@@ -176,6 +201,30 @@ bool msg_store_update_status_with_route(uint32_t packet_id, msg_status_t status,
 
 bool msg_store_update_status(uint32_t packet_id, msg_status_t status) {
     return msg_store_update_status_with_route(packet_id, status, 0, NULL);
+}
+
+bool msg_store_update_by_uid(uint32_t uid, uint32_t packet_id, msg_status_t status) {
+    if (uid == 0)
+        return false;
+    msg_store_ensure_alloc();
+    if (!s_msgs)
+        return false;
+    bool found = false;
+    MSG_LOCK();
+    int start = (s_head - s_count + MSG_STORE_MAX) % MSG_STORE_MAX;
+    /* Search newest first: the row being reconciled is almost always recent */
+    for (int i = s_count - 1; i >= 0; i--) {
+        int idx = (start + i) % MSG_STORE_MAX;
+        if (s_msgs[idx].uid == uid) {
+            if (packet_id != 0)
+                s_msgs[idx].packet_id = packet_id;
+            s_msgs[idx].status = status;
+            found = true;
+            break;
+        }
+    }
+    MSG_UNLOCK();
+    return found;
 }
 
 int msg_store_count(void) {
