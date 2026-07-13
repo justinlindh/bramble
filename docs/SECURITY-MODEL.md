@@ -592,7 +592,7 @@ PSK". Residual: a compromised or malicious mesh member is still an insider
 by definition, same as any symmetric-key system: authenticating a DM to a
 specific peer does not defend against that peer itself misbehaving.
 
-#### Forward secrecy and post-compromise recovery (pending review)
+#### Forward secrecy and post-compromise recovery
 
 DM sessions now ratchet. Each direction has its own HKDF chain seeded from
 the handshake secret; every message derives a fresh message key from the
@@ -646,11 +646,6 @@ MitM only if the users actually compare it); the verified bit and identity
 pins are persisted in plaintext NVS, so a device thief who already holds
 the identity keys those pins certify is no worse off; and the skip-cache
 and replay bounds are shaped to cap DoS cost, never to add confidentiality.
-The DM ratchet key schedule, the decoupled DH ratchet and its PCS bound,
-the directional-chain labelling for the role-symmetric handshake, the
-epoch-transition state machine and wipe ordering, the SAS redefinition, and
-nonce discipline under the ratchet are all claimed-pending independent
-cryptographic review, not independently verified.
 
 **Session-table exhaustion DoS, closed (red-team panel fix).** A
 first-contact INIT needs no secret (a self-generated keypair passes
@@ -1430,16 +1425,14 @@ These do not go away when section 4 empties out.
   narrower than the pre-v4 gap (the outsider is confined to victims whose
   valid frame it actually overheard, not an arbitrary silent address), and
   tracked as follow-up hardening (section 3, section 4), not closed here.
-- **DM SAS verification now has a UX (pending cryptographic review).** An
-  identity-bound 7-digit safety number is surfaced for out-of-band
-  comparison in the web client and the T-Deck graphical build, with the
-  verified bit and a key-change re-verify prompt persisted per contact (see
-  "Out-of-band verification (SAS)" above). The residual is narrower but real:
-  a first-contact MitM is still only detected if the two users actually
-  compare the number, and the mechanism itself is claimed-pending
-  independent cryptographic review, not verified. The safety number can be
-  compared and confirmed on the e-paper pager itself (Nodes screen), on the
-  T-Deck, or in the web client.
+- **DM SAS verification now has a UX.** An identity-bound 7-digit safety
+  number is surfaced for out-of-band comparison in the web client and the
+  T-Deck graphical build, with the verified bit and a key-change re-verify
+  prompt persisted per contact (see "Out-of-band verification (SAS)" above).
+  The residual is narrower but real: a first-contact MitM is still only
+  detected if the two users actually compare the number. The safety number
+  can be compared and confirmed on the e-paper pager itself (Nodes screen),
+  on the T-Deck, or in the web client.
 - **The nonce counter is metadata, not just a cryptographic nonce.**
   Because DATA/LOCATION nonces are now a deterministic counter rather than
   random bits (section 3), an observer who cannot decrypt anything can
