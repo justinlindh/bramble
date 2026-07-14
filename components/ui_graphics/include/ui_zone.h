@@ -32,6 +32,12 @@ typedef enum {
     UI_ZONE_CHROME,
 } ui_zone_t;
 
+/* Opt a content widget in to receiving raw UP/DOWN keys (LV_EVENT_KEY) instead
+ * of group prev/next navigation, the vertical analogue of what a textarea gets
+ * horizontally. The map canvas uses it for trackball zoom. LEFT/RIGHT still hop
+ * to chrome, so a flagged widget can never trap focus. */
+#define UI_ZONE_FLAG_CONSUMES_VERTICAL LV_OBJ_FLAG_USER_1
+
 /* Create the content + chrome groups and register content as the default
  * group. Call once, before the trackball/keyboard indevs are created. */
 void ui_zone_init(void);

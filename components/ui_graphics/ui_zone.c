@@ -288,6 +288,13 @@ static bool consumes_horizontal(lv_obj_t* obj) {
            lv_obj_check_type(obj, &lv_dropdown_class) || lv_obj_check_type(obj, &lv_roller_class);
 }
 
+/* Vertical is opt-in per widget rather than per class: content lists NEED
+ * UP/DOWN for group navigation, so only a widget that explicitly flags itself
+ * (UI_ZONE_FLAG_CONSUMES_VERTICAL) receives them raw. */
+static bool consumes_vertical(lv_obj_t* obj) {
+    return obj && lv_obj_has_flag(obj, UI_ZONE_FLAG_CONSUMES_VERTICAL);
+}
+
 uint32_t ui_zone_translate(ui_button_t btn) {
     lv_obj_t* foc = active_focused();
 
@@ -331,6 +338,12 @@ uint32_t ui_zone_translate(ui_button_t btn) {
     if (s_zone == UI_ZONE_CONTENT) {
         switch (btn) {
         case BTN_UP:
+            /* A widget that opted in to vertical keys (the map canvas: UP/DOWN
+             * step the zoom) gets them raw, same contract as
+             * consumes_horizontal for a textarea's cursor. LEFT/RIGHT still hop
+             * to chrome, so the widget can never trap focus. */
+            if (consumes_vertical(foc))
+                return LV_KEY_UP;
             /* UP off the TOP of the content zone escapes to chrome (landing on
              * the screen's first header action: Back / Msg). Without this, UP at
              * the top of content is a dead key, and an empty chat traps the
@@ -345,6 +358,8 @@ uint32_t ui_zone_translate(ui_button_t btn) {
             }
             return LV_KEY_PREV;
         case BTN_DOWN:
+            if (consumes_vertical(foc))
+                return LV_KEY_DOWN;
             return LV_KEY_NEXT;
         case BTN_LEFT:
             if (consumes_horizontal(foc))
