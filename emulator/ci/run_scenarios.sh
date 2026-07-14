@@ -114,10 +114,31 @@ info "repo: $REPO_ROOT"
 echo
 
 # --- Scenario 1: channel delivery ----------------------------------------
+# The firmware nodes run in wall-clock time inside a 36 s scenario budget, and
+# the receivers must boot, pass their 10 s message-idle threshold, and render
+# on the virtual e-paper within it. On a loaded CI runner that window is
+# sometimes missed (observed: fails roughly 1 run in 3 under parallel-job load,
+# 8/8 green on an idle machine, zero simulated radio loss, so there is no
+# message-loss mode to mask). Re-roll like scenario 2 does: a genuine delivery
+# regression still fails every attempt.
 echo "[1] emu-channel-delivery"
-CHAN_LOG=""
-run_scenario emu-channel-delivery 70 CHAN_LOG
-assert_screen "$CHAN_LOG" -min-nodes 2 -text "HELLO BRAMBLE"
+CHAN_ATTEMPTS=4 # p_fail ~0.33 under CI load -> ~1.2% residual flake
+chan_ok=0
+for attempt in $(seq 1 "$CHAN_ATTEMPTS"); do
+    CHAN_LOG=""
+    run_scenario emu-channel-delivery 70 CHAN_LOG
+    if "$GOSIM_BIN" screen-assert -log "$CHAN_LOG" -min-nodes 2 -text "HELLO BRAMBLE" \
+        >/dev/null 2>&1; then
+        green "PASS: emu-channel-delivery (attempt $attempt/$CHAN_ATTEMPTS): rendered on both receivers"
+        chan_ok=1
+        break
+    fi
+    info "attempt $attempt/$CHAN_ATTEMPTS missed the render window; re-rolling..."
+done
+if [ "$chan_ok" -ne 1 ]; then
+    red "FAIL: emu-channel-delivery: not rendered on >= 2 nodes in any of $CHAN_ATTEMPTS attempts"
+    FAILURES=$((FAILURES + 1))
+fi
 echo
 
 # --- Scenario 2: DM session desync + #138 heal ---------------------------
