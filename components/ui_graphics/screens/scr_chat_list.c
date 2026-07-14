@@ -41,6 +41,31 @@ static void open_dm_async(void* arg) {
     scr_chat_messages_open_dm(s_layout, (uint32_t)(uintptr_t)arg);
 }
 
+/* Accent-colored count pill anchored to a row's right edge. Mirrors the Chat
+ * tab badge (layout_set_unread): same 12px font and the same 99 ceiling, so a
+ * runaway count never overflows the fixed-width pill. A count <= 0 draws
+ * nothing, so callers can pass the raw getter result unconditionally. */
+static void row_add_unread_badge(lv_obj_t* card, int count) {
+    if (count <= 0)
+        return;
+
+    lv_obj_t* badge = lv_obj_create(card);
+    lv_obj_set_size(badge, 26, 18);
+    lv_obj_align(badge, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(badge, BR_COLOR_PRIMARY, 0);
+    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(badge, 9, 0);
+    lv_obj_set_style_border_width(badge, 0, 0);
+    lv_obj_set_style_pad_all(badge, 0, 0);
+    lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* badge_lbl = lv_label_create(badge);
+    lv_label_set_text_fmt(badge_lbl, "%d", count > 99 ? 99 : count);
+    lv_obj_set_style_text_font(badge_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(badge_lbl, lv_color_white(), 0);
+    lv_obj_center(badge_lbl);
+}
+
 void scr_chat_list_create(bramble_layout_t* layout) {
     lv_obj_t* cont = layout_get_content(layout);
 
@@ -142,24 +167,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
         lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-        int unread = chat_unread_count_for_channel(ch);
-        if (unread > 0) {
-            lv_obj_t* badge = lv_obj_create(card);
-            lv_obj_set_size(badge, 26, 18);
-            lv_obj_align(badge, LV_ALIGN_RIGHT_MID, 0, 0);
-            lv_obj_set_style_bg_color(badge, BR_COLOR_PRIMARY, 0);
-            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-            lv_obj_set_style_radius(badge, 9, 0);
-            lv_obj_set_style_border_width(badge, 0, 0);
-            lv_obj_set_style_pad_all(badge, 0, 0);
-            lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-
-            lv_obj_t* badge_lbl = lv_label_create(badge);
-            lv_label_set_text_fmt(badge_lbl, "%d", unread);
-            lv_obj_set_style_text_font(badge_lbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(badge_lbl, lv_color_white(), 0);
-            lv_obj_center(badge_lbl);
-        }
+        row_add_unread_badge(card, chat_unread_count_for_channel(ch));
 
         ui_zone_add_deferred_click(card, open_channel_async, (void*)(intptr_t)ch);
     }
@@ -215,24 +223,7 @@ void scr_chat_list_create(bramble_layout_t* layout) {
         lv_obj_set_style_text_color(lbl, BR_COLOR_TEXT, 0);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
-        int dm_unread = chat_unread_count_for_dm(dm_peers[i]);
-        if (dm_unread > 0) {
-            lv_obj_t* badge = lv_obj_create(card);
-            lv_obj_set_size(badge, 26, 18);
-            lv_obj_align(badge, LV_ALIGN_RIGHT_MID, 0, 0);
-            lv_obj_set_style_bg_color(badge, BR_COLOR_PRIMARY, 0);
-            lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
-            lv_obj_set_style_radius(badge, 9, 0);
-            lv_obj_set_style_border_width(badge, 0, 0);
-            lv_obj_set_style_pad_all(badge, 0, 0);
-            lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
-
-            lv_obj_t* badge_lbl = lv_label_create(badge);
-            lv_label_set_text_fmt(badge_lbl, "%d", dm_unread);
-            lv_obj_set_style_text_font(badge_lbl, &lv_font_montserrat_12, 0);
-            lv_obj_set_style_text_color(badge_lbl, lv_color_white(), 0);
-            lv_obj_center(badge_lbl);
-        }
+        row_add_unread_badge(card, chat_unread_count_for_dm(dm_peers[i]));
 
         ui_zone_add_deferred_click(card, open_dm_async, (void*)(uintptr_t)dm_peers[i]);
         if (g)

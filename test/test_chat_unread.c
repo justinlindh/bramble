@@ -100,16 +100,17 @@ void test_clear_dm_only_clears_that_peer(void) {
     TEST_ASSERT_EQUAL(1, chat_unread_count_for_dm(0xBBBB0002));
 }
 
-void test_dm_peer_table_caps_at_eight(void) {
-    for (uint32_t i = 0; i < 10; i++) {
+void test_dm_peer_table_caps_at_twelve(void) {
+    for (uint32_t i = 0; i < 14; i++) {
         stored_msg_t m = {
             .direction = MSG_DIR_INCOMING, .channel_index = -1, .peer_addr = 0x1000 + i};
         chat_unread_mark_for_message(&m);
     }
-    /* First eight tracked, rest dropped */
+    /* Storage matches the Messages list's DM row capacity (12): the first
+     * twelve peers are tracked, the rest dropped. */
     TEST_ASSERT_EQUAL(1, chat_unread_count_for_dm(0x1000));
-    TEST_ASSERT_EQUAL(1, chat_unread_count_for_dm(0x1007));
-    TEST_ASSERT_EQUAL(0, chat_unread_count_for_dm(0x1008));
+    TEST_ASSERT_EQUAL(1, chat_unread_count_for_dm(0x100B));
+    TEST_ASSERT_EQUAL(0, chat_unread_count_for_dm(0x100C));
 }
 
 /* Regression (nav review F1): a DM received on channel_id 0, stored via the rx
@@ -145,7 +146,7 @@ int main(void) {
     RUN_TEST(test_incoming_dm_without_channel_counts_by_peer);
     RUN_TEST(test_incoming_dm_from_rx_convention_counts_by_peer_not_channel0);
     RUN_TEST(test_clear_dm_only_clears_that_peer);
-    RUN_TEST(test_dm_peer_table_caps_at_eight);
+    RUN_TEST(test_dm_peer_table_caps_at_twelve);
     RUN_TEST(test_reset_clears_dm_counts);
     return UNITY_END();
 }

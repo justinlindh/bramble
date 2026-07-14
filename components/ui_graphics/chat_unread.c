@@ -3,7 +3,10 @@
 #include <string.h>
 
 #define CHAT_UNREAD_MAX_CHANNELS 32
-#define CHAT_UNREAD_MAX_DMS 8
+/* Must be >= the Messages list's DM_PEERS_MAX (scr_chat_list.c): the list
+ * renders up to that many DM rows, and a peer with no tracked slot here can
+ * never show its per-row unread badge. */
+#define CHAT_UNREAD_MAX_DMS 12
 
 static int s_unread_counts[CHAT_UNREAD_MAX_CHANNELS];
 
