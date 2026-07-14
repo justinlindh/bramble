@@ -17,6 +17,10 @@ static lv_obj_t* s_radio_sf_dd = NULL;
 static lv_obj_t* s_radio_bw_dd = NULL;
 static lv_obj_t* s_radio_cr_dd = NULL;
 static lv_obj_t* s_radio_freq_label = NULL;
+static lv_obj_t* s_radio_apply_btn = NULL;
+static bool s_radio_dirty = false;
+
+static void radio_set_dirty(bool dirty);
 
 static void radio_load_nvs_config(radio_config_t* cfg) {
     /* Start with current live config */
@@ -77,6 +81,27 @@ static void radio_save_and_apply(void) {
     ESP_LOGI(TAG, "Radio config saved: SF%u BW%lu TX%d CR4/%u", cfg.sf, (unsigned long)cfg.bw_hz,
              cfg.tx_power, cfg.coding_rate);
     ui_toast_show("Radio settings applied");
+    radio_set_dirty(false); /* committed: disarm Apply until the next edit */
+}
+
+/* Apply is armed only by a real user edit. A page you only LOOKED at must be
+ * impossible to commit: radio params are mesh-wide compatibility knobs, and an
+ * accidental SELECT on an always-armed Apply is how a bench unit silently
+ * dropped its TX power. */
+static void radio_set_dirty(bool dirty) {
+    s_radio_dirty = dirty;
+    if (!s_radio_apply_btn)
+        return;
+    if (dirty) {
+        lv_obj_remove_state(s_radio_apply_btn, LV_STATE_DISABLED);
+    } else {
+        lv_obj_add_state(s_radio_apply_btn, LV_STATE_DISABLED);
+    }
+}
+
+static void radio_mark_dirty_cb(lv_event_t* e) {
+    (void)e;
+    radio_set_dirty(true);
 }
 
 static void radio_tx_changed_cb(lv_event_t* e) {
@@ -87,10 +112,13 @@ static void radio_tx_changed_cb(lv_event_t* e) {
         snprintf(buf, sizeof(buf), "%d dBm", val);
         lv_label_set_text(s_radio_tx_label, buf);
     }
+    radio_set_dirty(true);
 }
 
 static void radio_apply_cb(lv_event_t* e) {
     (void)e;
+    if (!s_radio_dirty)
+        return; /* disabled-state click or stale event: nothing to commit */
     radio_save_and_apply();
 }
 
@@ -143,7 +171,11 @@ void settings_radio_builder(bramble_layout_t* layout, void* ctx) {
     ui_zone_track(&s_radio_tx_slider, lv_slider_create(tx_row));
     lv_obj_set_size(s_radio_tx_slider, 100, 10);
     lv_obj_align(s_radio_tx_slider, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_slider_set_range(s_radio_tx_slider, 2, 20);
+    /* SX1262 tops out at +22 dBm and the fleet ships at 22. The old 2..20
+     * range silently CLAMPED a stored 22 down to 20 at page build, so pressing
+     * Apply with zero user edits downgraded TX power (this happened on the
+     * bench: a stray trackball nudge plus a blind Apply persisted 19 dBm). */
+    lv_slider_set_range(s_radio_tx_slider, 2, 22);
     lv_slider_set_value(s_radio_tx_slider, cfg.tx_power, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_radio_tx_slider, BR_COLOR_SURFACE_2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_radio_tx_slider, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
@@ -160,6 +192,7 @@ void settings_radio_builder(bramble_layout_t* layout, void* ctx) {
     lv_obj_align(s_radio_sf_dd, LV_ALIGN_RIGHT_MID, 0, 0);
     if (cfg.sf >= 7 && cfg.sf <= 12)
         lv_dropdown_set_selected(s_radio_sf_dd, cfg.sf - 7);
+    lv_obj_add_event_cb(s_radio_sf_dd, radio_mark_dirty_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g)
         lv_group_add_obj(g, s_radio_sf_dd);
 
@@ -175,6 +208,7 @@ void settings_radio_builder(bramble_layout_t* layout, void* ctx) {
     else if (cfg.bw_hz == 500000)
         bw_idx = 2;
     lv_dropdown_set_selected(s_radio_bw_dd, bw_idx);
+    lv_obj_add_event_cb(s_radio_bw_dd, radio_mark_dirty_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g)
         lv_group_add_obj(g, s_radio_bw_dd);
 
@@ -186,19 +220,25 @@ void settings_radio_builder(bramble_layout_t* layout, void* ctx) {
     lv_obj_align(s_radio_cr_dd, LV_ALIGN_RIGHT_MID, 0, 0);
     if (cfg.coding_rate >= 5 && cfg.coding_rate <= 8)
         lv_dropdown_set_selected(s_radio_cr_dd, cfg.coding_rate - 5);
+    lv_obj_add_event_cb(s_radio_cr_dd, radio_mark_dirty_cb, LV_EVENT_VALUE_CHANGED, NULL);
     if (g)
         lv_group_add_obj(g, s_radio_cr_dd);
 
-    /* Apply button */
+    /* Apply button: disarmed until an edit, muted while disarmed so the state
+     * is visible from across the room. */
     lv_obj_t* apply_btn = lv_btn_create(cont);
+    ui_zone_track(&s_radio_apply_btn, apply_btn);
     lv_obj_set_size(apply_btn, 304, BR_TAP_TARGET_MIN);
     lv_obj_set_style_bg_color(apply_btn, BR_COLOR_PRIMARY, 0);
+    lv_obj_set_style_bg_color(apply_btn, BR_COLOR_SURFACE_2, LV_STATE_DISABLED);
     lv_obj_set_style_radius(apply_btn, BR_RADIUS, 0);
     lv_obj_t* apply_lbl = lv_label_create(apply_btn);
     lv_label_set_text(apply_lbl, LV_SYMBOL_OK " Apply Radio Settings");
     lv_obj_set_style_text_font(apply_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(apply_lbl, BR_COLOR_TEXT_SEC, LV_STATE_DISABLED);
     lv_obj_center(apply_lbl);
     lv_obj_add_event_cb(apply_btn, radio_apply_cb, LV_EVENT_CLICKED, NULL);
     if (g)
         lv_group_add_obj(g, apply_btn);
+    radio_set_dirty(false); /* fresh page: nothing to commit */
 }
