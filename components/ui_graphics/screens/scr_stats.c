@@ -1,6 +1,7 @@
 #include "scr_stats.h"
 #include "ui_shared_state.h"
 #include "ui_zone.h"
+#include "ui_toast.h"
 #include "scr_traffic.h"
 #include "theme/bramble_theme.h"
 #include "routing.h"
@@ -235,6 +236,20 @@ static void create_reach_row(lv_obj_t* parent, const char* name, int count, int 
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(bar, 3, LV_PART_INDICATOR);
     lv_bar_set_value(bar, pct, LV_ANIM_OFF);
+}
+
+/* -------------------------------------------------------------------------
+ * Traffic debug toggle (moved here from Settings: it controls the Traffic
+ * Monitor row directly below, so it lives next to what it gates).
+ * ------------------------------------------------------------------------- */
+static void traffic_debug_changed_cb(lv_event_t* e) {
+    lv_obj_t* sw = lv_event_get_target(e);
+    bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    traffic_debug_t* td = mesh_get_traffic_debug();
+    if (td) {
+        traffic_debug_enable(td, on);
+        ui_toast_show(on ? "Traffic debug on" : "Traffic debug off");
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -502,6 +517,36 @@ void scr_stats_create(bramble_layout_t* layout) {
     bool td_on = td ? traffic_debug_is_enabled(td) : false;
     uint16_t td_cnt = td ? traffic_debug_get_count(td) : 0;
 
+    lv_group_t* g = lv_group_get_default();
+
+    /* Traffic debug toggle: gates the capture the Traffic Monitor below reads. */
+    lv_obj_t* td_row = lv_obj_create(cont);
+    lv_obj_set_size(td_row, 296, 28);
+    lv_obj_set_style_bg_color(td_row, BR_COLOR_SURFACE, 0);
+    lv_obj_set_style_bg_opa(td_row, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(td_row, BR_RADIUS, 0);
+    lv_obj_set_style_border_width(td_row, 0, 0);
+    lv_obj_set_style_pad_all(td_row, 4, 0);
+    lv_obj_clear_flag(td_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* td_lbl = lv_label_create(td_row);
+    lv_label_set_text(td_lbl, "Traffic Debug");
+    lv_obj_set_style_text_font(td_lbl, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(td_lbl, BR_COLOR_TEXT, 0);
+    lv_obj_align(td_lbl, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t* td_sw = lv_switch_create(td_row);
+    lv_obj_set_size(td_sw, 40, 20);
+    lv_obj_align(td_sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(td_sw, BR_COLOR_SURFACE_2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(td_sw, BR_COLOR_PRIMARY, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(td_sw, BR_COLOR_TEXT, LV_PART_KNOB);
+    if (td_on)
+        lv_obj_add_state(td_sw, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(td_sw, traffic_debug_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    if (g)
+        lv_group_add_obj(g, td_sw);
+
     char traffic_lbl_buf[40];
     if (td_on) {
         snprintf(traffic_lbl_buf, sizeof(traffic_lbl_buf),
@@ -527,7 +572,6 @@ void scr_stats_create(bramble_layout_t* layout) {
     lv_obj_set_style_text_color(traffic_lbl, BR_COLOR_TEXT, 0);
     lv_obj_center(traffic_lbl);
 
-    lv_group_t* g = lv_group_get_default();
     if (g)
         lv_group_add_obj(g, traffic_btn);
 
