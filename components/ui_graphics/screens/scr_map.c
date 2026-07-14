@@ -187,7 +187,20 @@ static void map_key_cb(lv_event_t* e) {
     ui_defer(map_rebuild_async, NULL);
 }
 
-static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, const char* label) {
+/* Centers of markers we have already given a text label. A later marker that
+ * lands within COLLIDE_PX of one of these stacks its label below instead of
+ * beside, so nearby dots do not overprint each other's names. Rebuilt every
+ * pass (the map tree is torn down and recreated), so no state dangles. */
+typedef struct {
+    int x;
+    int y;
+} label_anchor_t;
+#define COLLIDE_PX 14
+/* One "You" plus up to LOCATION_MAX_CONTACTS peers can be labeled. */
+#define MAX_LABEL_ANCHORS (LOCATION_MAX_CONTACTS + 1)
+
+static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, const char* label,
+                          label_anchor_t* placed, int* placed_count) {
     if (x < 5 || x >= 275 || y < 5 || y >= 135) {
         return false; /* Off-screen or too close to edge */
     }
@@ -207,6 +220,42 @@ static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, cons
 
     /* Draw label */
     if (label) {
+        /* Does this marker crowd one that is already labeled? */
+        bool below = false;
+        if (placed) {
+            for (int i = 0; i < *placed_count; i++) {
+                int dx = placed[i].x - x;
+                int dy = placed[i].y - y;
+                if (dx * dx + dy * dy < COLLIDE_PX * COLLIDE_PX) {
+                    below = true;
+                    break;
+                }
+            }
+        }
+
+        /* Label box width: text plus the 2 px pad on each side. */
+        lv_point_t sz;
+        lv_text_get_size(&sz, label, &lv_font_montserrat_12, 0, 0, LV_COORD_MAX, 0);
+        int box_w = (int)sz.x + 4;
+
+        int lbl_x, lbl_y;
+        if (below) {
+            /* Stack under the dot to clear the neighbor's beside-label. */
+            lbl_x = x - box_w / 2;
+            lbl_y = y + 8;
+        } else {
+            lbl_x = x + 8;
+            lbl_y = y - 6;
+        }
+        /* Edge flip: if the text would run past the right edge, render it to
+         * the left of the marker instead of clipping. */
+        if (lbl_x + box_w > 275) {
+            lbl_x = x - 8 - box_w;
+        }
+        if (lbl_x < 0) {
+            lbl_x = 0;
+        }
+
         lv_obj_t* lbl = lv_label_create(parent);
         lv_label_set_text(lbl, label);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
@@ -214,7 +263,13 @@ static bool create_marker(lv_obj_t* parent, int x, int y, lv_color_t color, cons
         lv_obj_set_style_bg_color(lbl, BR_COLOR_BG, 0);
         lv_obj_set_style_bg_opa(lbl, LV_OPA_70, 0);
         lv_obj_set_style_pad_all(lbl, 2, 0);
-        lv_obj_set_pos(lbl, x + 8, y - 6);
+        lv_obj_set_pos(lbl, lbl_x, lbl_y);
+
+        if (placed && *placed_count < MAX_LABEL_ANCHORS) {
+            placed[*placed_count].x = x;
+            placed[*placed_count].y = y;
+            (*placed_count)++;
+        }
     }
     return true;
 }
@@ -389,8 +444,18 @@ void scr_map_create(bramble_layout_t* layout) {
         lv_obj_set_style_line_rounded(hdg, true, 0);
     }
 
+    /* Label placement bookkeeping: "You" is placed first so peers that crowd
+     * the center stack their names below it instead of overprinting. */
+    label_anchor_t label_anchors[MAX_LABEL_ANCHORS];
+    int label_anchor_count = 0;
+
+    /* At wide zooms every dot's name would collide into mush; show only the
+     * focused peer's name (and always "You"), other peers keep just a dot. */
+    bool wide_zoom = zoom_km >= 10.0;
+
     /* Draw self position (blue marker) at the window center */
-    create_marker(map_cont, 144, 74, lv_color_hex(0x0066FF), "You");
+    create_marker(map_cont, 144, 74, lv_color_hex(0x0066FF), "You", label_anchors,
+                  &label_anchor_count);
 
     /* Draw peer positions from cache */
     int peer_count = 0;
@@ -431,7 +496,11 @@ void scr_map_create(bramble_layout_t* layout) {
 
         lv_color_t marker_color =
             (entry->peer_addr == s_focus_peer_addr) ? BR_COLOR_ACCENT : lv_color_hex(0x00CC00);
-        bool drawn = create_marker(map_cont, px + 4, py + 4, marker_color, label);
+        /* Wide-zoom pruning: drop the text for everyone but the focused peer. */
+        const char* draw_label =
+            (wide_zoom && entry->peer_addr != s_focus_peer_addr) ? NULL : label;
+        bool drawn = create_marker(map_cont, px + 4, py + 4, marker_color, draw_label,
+                                   label_anchors, &label_anchor_count);
         /* The peer HAS a location (valid cached pos) even if it fell off the
          * visible window; the warning below is only for peers we cannot place
          * at all, not for off-map ones. */
