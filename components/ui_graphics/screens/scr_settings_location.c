@@ -449,9 +449,16 @@ void settings_location_summary(char* buf, size_t n) {
         tier = "exact";
     else if (st.tier == LOCATION_UI_TIER_PRESENCE)
         tier = "presence";
-    if (s_loc_contact_count > 0) {
-        snprintf(buf, n, "%d peer%s, %s", s_loc_contact_count, s_loc_contact_count == 1 ? "" : "s",
-                 tier);
+    /* Count only ENABLED targets: the NVS blob keeps a record for every peer
+     * that ever had a toggle, so counting raw records reported "16 peers" on a
+     * bench with two peers, both switched off. */
+    int enabled = 0;
+    for (int i = 0; i < s_loc_contact_count; i++) {
+        if (s_loc_contacts[i].enabled)
+            enabled++;
+    }
+    if (enabled > 0) {
+        snprintf(buf, n, "%d peer%s, %s", enabled, enabled == 1 ? "" : "s", tier);
     } else {
         snprintf(buf, n, "On, %s", tier);
     }

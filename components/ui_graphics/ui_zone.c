@@ -129,7 +129,21 @@ void ui_zone_init(void) {
 lv_group_t* ui_zone_content_group(void) { return s_content; }
 lv_group_t* ui_zone_chrome_group(void) { return s_chrome; }
 ui_zone_t ui_zone_current(void) { return s_zone; }
-void ui_zone_set_chrome_default(lv_obj_t* obj) { ui_zone_track(&s_chrome_default, obj); }
+void ui_zone_set_chrome_default(lv_obj_t* obj) {
+    ui_zone_track(&s_chrome_default, obj);
+    /* Declaring a default is a statement about where the NEXT content->chrome
+     * hop lands. The chrome group retains whatever widget the user focused on
+     * a PREVIOUS screen (the tab they pressed to get here), and activate()
+     * lets existing focus win, so without this refocus the Back button a
+     * subpage installs is unreachable: the hop lands on a stale tab and
+     * SELECT yanks the user to another screen entirely (reproduced on the
+     * bench: LEFT from Traffic content landed on the Nodes tab). Refocus now,
+     * unless the user is actively navigating chrome, where stealing the
+     * cursor out from under them would be worse than a stale landing. */
+    if (obj && s_zone != UI_ZONE_CHROME && lv_obj_get_group(obj) == s_chrome) {
+        lv_group_focus_obj(obj);
+    }
+}
 
 void ui_zone_style_chrome(lv_obj_t* obj) {
     if (!obj)
