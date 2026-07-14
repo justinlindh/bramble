@@ -432,26 +432,21 @@ static void add_message_bubble(lv_obj_t* parent, const char* sender, const store
         }
 
         if (badge.color_role == CHAT_DELIVERY_COLOR_DELIVERED) {
-            /* Not BR_COLOR_PRIMARY: that is the same hex as the outgoing bubble's
-             * own fill, so the delivered double-check drew green-on-green and was
-             * invisible. Bright reads on the accent and makes "delivered" the one
-             * badge that stands out, which is the point of it. */
-            meta_color = BR_COLOR_ON_SENT;
+            /* Success-green, same green as everywhere else success is signalled.
+             * The bubble fill is now blue (BR_COLOR_SENT), so green-on-blue is
+             * both visible and semantically consistent. This used to be forced
+             * to BR_COLOR_ON_SENT because the bubble was green and green-on-green
+             * was invisible; splitting SENT off from the brand green fixed the
+             * root cause. */
+            meta_color = BR_COLOR_SUCCESS;
         } else if (badge.color_role == CHAT_DELIVERY_COLOR_FAILED) {
             meta_color = BR_COLOR_DANGER;
         }
 
-        char badge_buf[16];
-        if (msg->route_hop_count > 1) {
-            /* LV_SYMBOL_SHUFFLE, not a bare Unicode arrow: the built-in Montserrat
-             * fonts carry ASCII plus the LV_SYMBOL_* block and nothing else, so a
-             * raw U+2197 drew an empty tofu box on the badge. Only LV_SYMBOL_* is
-             * guaranteed to have a glyph. */
-            snprintf(badge_buf, sizeof(badge_buf), "%s %u" LV_SYMBOL_SHUFFLE, badge_sym,
-                     (unsigned)msg->route_hop_count);
-            badge_sym = badge_buf;
-        }
-        /* route_hop_count <= 1 (direct or unknown): keep the badge uncluttered. */
+        /* The multi-hop route is not appended to the meta here: a delivered
+         * multi-hop bubble exposes it on demand via the SELECT route toggle
+         * (chat_message_has_inline_route_toggle), so the always-on meta stays
+         * uncluttered. */
 
         if (have_age) {
             snprintf(meta_buf, sizeof(meta_buf), "  %s %s", age_buf, badge_sym);
