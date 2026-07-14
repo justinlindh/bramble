@@ -55,3 +55,8 @@ keys/*
 # session scratch (never commit)
 .superpowers/
 .claude/worktrees/
+
+# KiCad editor state and lock files (per-machine, never shared)
+*.kicad_prl
+*.lck
+~*.lck
