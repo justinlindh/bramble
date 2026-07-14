@@ -257,6 +257,12 @@ static void gps_enabled_set(bool enabled) {
     }
 }
 
+/* Read-only view of the persisted GPS power preference, so the T-Deck status
+ * bar can dim its GPS icon when GPS is switched off in Settings. Self-declared
+ * to satisfy -Wmissing-prototypes for this cross-module accessor. */
+bool bramble_gps_enabled(void);
+bool bramble_gps_enabled(void) { return gps_enabled_get(); }
+
 /* ── Splash screen ──────────────────────────────────────────────────── */
 
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL

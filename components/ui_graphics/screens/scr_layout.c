@@ -21,6 +21,7 @@ static bramble_layout_t s_layout;
 
 extern const char* mesh_get_node_name(void);
 extern bool mesh_get_network_time_ms(int64_t* out_ms);
+extern bool bramble_gps_enabled(void); /* persisted GPS power preference (main.c) */
 
 static const char* tab_labels[TAB_COUNT] = {LV_SYMBOL_ENVELOPE " Chat", LV_SYMBOL_WIFI " Nodes",
                                             LV_SYMBOL_GPS " Map", LV_SYMBOL_BARS " Stats",
@@ -99,8 +100,10 @@ bramble_layout_t* layout_create(void) {
     lv_obj_set_style_text_font(s_layout.lbl_signal, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_layout.lbl_signal, BR_COLOR_TEXT, 0);
 
+    /* GPS is an icon, not a text label: its color carries the state (see
+     * layout_update_status), matching the WiFi/battery icon grammar. */
     s_layout.lbl_gps = lv_label_create(s_layout.status_bar);
-    lv_label_set_text(s_layout.lbl_gps, "GPS");
+    lv_label_set_text(s_layout.lbl_gps, LV_SYMBOL_GPS);
     lv_obj_set_style_text_font(s_layout.lbl_gps, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(s_layout.lbl_gps, BR_COLOR_TEXT_SEC, 0);
 
@@ -234,9 +237,16 @@ void layout_update_status(bramble_layout_t* layout) {
     snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %d", state->neighbors.count);
     lv_label_set_text(layout->lbl_signal, buf);
 
-    /* Clock: network time when timesync has converged (UTC) */
+    /* Clock (UTC). GPS UTC is ground truth and shows the moment a lone node
+     * gets a fix (no mesh needed); network time via timesync is the fallback
+     * for GPS-less nodes once the mesh clock converges. --:-- only when both
+     * are unknown. */
+    uint8_t gps_h, gps_m;
     int64_t net_ms;
-    if (mesh_get_network_time_ms(&net_ms)) {
+    if (board_has_cap(BOARD_CAP_GPS) && gps_get_utc_hm(&gps_h, &gps_m)) {
+        snprintf(buf, sizeof(buf), "%02u:%02u", gps_h, gps_m);
+        lv_label_set_text(layout->lbl_time, buf);
+    } else if (mesh_get_network_time_ms(&net_ms)) {
         time_t tt = (time_t)(net_ms / 1000);
         struct tm tm_utc;
         gmtime_r(&tt, &tm_utc);
@@ -246,11 +256,14 @@ void layout_update_status(bramble_layout_t* layout) {
         lv_label_set_text(layout->lbl_time, "--:--");
     }
 
-    /* GPS: live fix state; hidden entirely on GPS-less boards */
-    if (board_has_cap(BOARD_CAP_GPS)) {
+    /* GPS icon color carries the state:
+     *   - absent (no board cap) or powered off in Settings -> hidden
+     *   - fix                                              -> success green
+     *   - searching (powered, no fix yet)                 -> muted */
+    if (board_has_cap(BOARD_CAP_GPS) && bramble_gps_enabled()) {
         lv_obj_clear_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_text_color(layout->lbl_gps,
-                                    gps_has_fix() ? BR_COLOR_PRIMARY : BR_COLOR_TEXT_SEC, 0);
+                                    gps_has_fix() ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
     } else {
         lv_obj_add_flag(layout->lbl_gps, LV_OBJ_FLAG_HIDDEN);
     }

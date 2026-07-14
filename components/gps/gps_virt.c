@@ -51,6 +51,9 @@ static bool s_gate_on = false; /* GPS power gate: false = powered off */
 static uint8_t s_sats_used = 0;
 static uint8_t s_sats_in_view = 0;
 static bool s_antenna_warning = false;
+static uint8_t s_utc_hour = 0;
+static uint8_t s_utc_min = 0;
+static bool s_utc_valid = false;
 
 static void nmea_handler(const cJSON* msg, void* ctx);
 
@@ -156,6 +159,11 @@ static void nmea_handler(const cJSON* msg, void* ctx) {
         s_pos.timestamp = (uint32_t)time(NULL);
         s_pos.valid = np.valid;
         s_has_fix = true;
+        if (np.utc_valid) {
+            s_utc_hour = np.utc_hour;
+            s_utc_min = np.utc_min;
+            s_utc_valid = true;
+        }
         cb = s_cb;
         cb_ctx = s_cb_ctx;
         out = s_pos;
@@ -185,6 +193,20 @@ bool gps_get_position(bramble_position_t* out) {
     return ok;
 }
 
+bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
+    bool ok;
+    pthread_mutex_lock(&s_mu);
+    ok = s_has_fix && s_utc_valid;
+    if (ok) {
+        if (hour)
+            *hour = s_utc_hour;
+        if (min)
+            *min = s_utc_min;
+    }
+    pthread_mutex_unlock(&s_mu);
+    return ok;
+}
+
 void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;
@@ -202,6 +224,7 @@ void gps_deinit(void) {
     s_sats_used = 0;
     s_sats_in_view = 0;
     s_antenna_warning = false;
+    s_utc_valid = false;
     memset(&s_np, 0, sizeof(s_np));
     pthread_mutex_unlock(&s_mu);
     send_gpsgate(false);
