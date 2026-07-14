@@ -1045,6 +1045,41 @@ static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8
     mesh_emit_location_event("received", src_addr, tier, t, rssi, snr, 0);
 }
 
+/* Resolve this node's own position: live GPS first, manual NVS coords as the
+ * fallback for GPS-less boards. This is THE self-position source; the policy
+ * tick below and mesh_get_location_state both use it. It exists because the
+ * codebase grew two location_manager_t instances: main.c's g_location_mgr
+ * received every GPS fix and nothing ever read it, while the s_location_mgr
+ * that the T-Deck map reads had no writer for my_position at all, so the map
+ * showed "waiting for position fix" forever against a 3 m GPS fix. */
+static bool mesh_resolve_self_position(bramble_position_t* out) {
+    bramble_position_t gps_pos;
+    if (gps_get_position(&gps_pos) && gps_pos.valid) {
+        *out = gps_pos;
+        return true;
+    }
+
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NS_LOCATION, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    int32_t lat_e6 = 0;
+    int32_t lon_e6 = 0;
+    bool has_manual = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
+                      (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
+                      !(lat_e6 == 0 && lon_e6 == 0);
+    nvs_close(nvs);
+    if (!has_manual) {
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->latitude_e7 = lat_e6 * 10;
+    out->longitude_e7 = lon_e6 * 10;
+    out->valid = true;
+    return true;
+}
+
 static void mesh_location_policy_tick(uint32_t t) {
     const uint32_t tick_ms = 1000;
     if ((t - s_location_last_policy_tick_ms) < tick_ms) {
@@ -1059,31 +1094,10 @@ static void mesh_location_policy_tick(uint32_t t) {
 
     location_policy_t policy;
     location_policy_load_or_defaults(nvs, &policy);
-
-    int32_t lat_e6 = 0;
-    int32_t lon_e6 = 0;
-    bool has_manual_source = (nvs_get_i32(nvs, "lat_e6", &lat_e6) == ESP_OK) &&
-                             (nvs_get_i32(nvs, "lon_e6", &lon_e6) == ESP_OK) &&
-                             !(lat_e6 == 0 && lon_e6 == 0);
     nvs_close(nvs);
 
     bramble_position_t source_pos = {0};
-    bool has_source = false;
-
-    bramble_position_t gps_pos;
-    if (gps_get_position(&gps_pos) && gps_pos.valid) {
-        source_pos = gps_pos;
-        has_source = true;
-    } else if (has_manual_source) {
-        source_pos.latitude_e7 = lat_e6 * 10;
-        source_pos.longitude_e7 = lon_e6 * 10;
-        source_pos.altitude_m = 0;
-        source_pos.accuracy_m = 0;
-        source_pos.speed_kmh = 0;
-        source_pos.heading_deg2 = 0;
-        source_pos.valid = true;
-        has_source = true;
-    }
+    bool has_source = mesh_resolve_self_position(&source_pos);
 
     bool has_targets = location_policy_has_targets();
 
@@ -6513,6 +6527,16 @@ void mesh_get_location_state(location_manager_t* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     *out = s_location_mgr;
     xSemaphoreGive(s_state_mutex);
+    /* s_location_mgr only accumulates PEER positions from the mesh; nothing
+     * feeds its my_position (GPS fixes historically went to a separate manager
+     * in main.c that nobody read). Resolve self-position from the live source
+     * on the way out, same GPS-then-manual-NVS logic the location-share TX
+     * path uses, so the map sees exactly what the mesh would transmit. Outside
+     * the mutex on purpose: gps_get_position has its own lock and NVS reads
+     * must not run under s_state_mutex. */
+    if (!mesh_resolve_self_position(&out->my_position)) {
+        out->my_position.valid = false;
+    }
 }
 
 int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len) {

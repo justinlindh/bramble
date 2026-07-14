@@ -87,7 +87,6 @@ static const char* TAG = "bramble";
 
 /* ── Location manager ───────────────────────────────────────────────── */
 
-static location_manager_t g_location_mgr;
 static bool s_last_gps_fix = false;
 static bool s_has_last_wifi_status = false;
 static wifi_status_t s_last_wifi_status = {0};
@@ -183,12 +182,15 @@ static void log_heap_diagnostics_periodic(void) {
 }
 
 static void on_gps_fix(const bramble_position_t* pos, void* ctx) {
-    location_manager_t* mgr = (location_manager_t*)ctx;
-    location_set_position(mgr, pos);
+    /* No position bookkeeping here: this callback used to copy every fix into a
+     * local location_manager_t that nothing ever read, while the manager the UI
+     * reads (mesh_task's) starved. Consumers now pull self-position straight
+     * from gps_get_position via mesh_resolve_self_position; this callback only
+     * handles event emission. */
+    (void)ctx;
     if (pos && pos->valid) {
         s_last_gps_fix = true;
-        /* Throttle RPC notifications + log to avoid ~60/min of GPS chatter.
-         * Internal position tracking (location_set_position above) stays real-time. */
+        /* Throttle RPC notifications + log to avoid ~60/min of GPS chatter. */
         static uint64_t s_last_gps_notify_us = 0;
         uint64_t now_us = (uint64_t)esp_timer_get_time();
         if (s_last_gps_notify_us == 0 || (now_us - s_last_gps_notify_us) >= 5000000ULL) {
@@ -1248,17 +1250,13 @@ void app_main(void) {
     battery_init();
     ESP_LOGI(TAG, "Battery: %" PRIu32 " mV (%u%%)", battery_read_mv(), battery_read_pct());
 
-    /* Init location manager */
-    ESP_LOGI(TAG, "=== BOOT STAGE: location_init ===");
-    location_init(&g_location_mgr);
-
     /* Init GPS on boards that advertise GPS capability */
     if (board_has_cap(BOARD_CAP_GPS)) {
         ESP_LOGI(TAG, "=== BOOT STAGE: gps_init ===");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("GPS: searching...");
 #endif
-        if (gps_init(on_gps_fix, &g_location_mgr) == 0) {
+        if (gps_init(on_gps_fix, NULL) == 0) {
             ESP_LOGI(TAG, "GPS initialized (waiting for fix...)");
             /* Honor the persisted GPS-power preference (default ON). If the
              * user disabled GPS, cut power now; gps_init registered the fix
