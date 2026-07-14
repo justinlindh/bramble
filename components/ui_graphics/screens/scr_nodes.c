@@ -7,9 +7,15 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char* TAG = "scr_nodes";
+
+/* A peer heard longer ago than this reads as "stale": its row is dimmed so
+ * live nodes stand out. Distinct from NEIGHBOR_EXPIRY_MS (10 min), the point
+ * at which routing actually evicts the entry. */
+#define NODE_STALE_AGE_S 300
 
 extern void mesh_get_location_state(location_manager_t* out);
 
@@ -18,6 +24,7 @@ typedef struct {
     bramble_layout_t* layout;
     neighbor_entry_t neighbor;
     uint32_t now_ms;
+    lv_obj_t* name_lbl;
     lv_obj_t* info_lbl;
     lv_obj_t* bar;
     lv_obj_t* dot;
@@ -53,6 +60,32 @@ static void format_node_age(char* buf, size_t len, uint32_t age_s) {
         snprintf(buf, len, "%lum", (unsigned long)(age_s / 60));
     else
         snprintf(buf, len, "%luh", (unsigned long)(age_s / 3600));
+}
+
+/* Fade a row that has gone stale: dim the name and mute the signal bar and
+ * online dot so live and stale peers are distinguishable at a glance. Applied
+ * both on card creation and on every in-place age tick, so a peer that crosses
+ * the threshold while the list is stable dims without a full rebuild. */
+static void apply_node_recency_style(lv_obj_t* name_lbl, lv_obj_t* bar, lv_obj_t* dot, bool stale) {
+    lv_obj_set_style_text_color(name_lbl, stale ? BR_COLOR_TEXT_SEC : BR_COLOR_TEXT, 0);
+    lv_obj_set_style_bg_color(bar, stale ? BR_COLOR_TEXT_SEC : BR_COLOR_SUCCESS, LV_PART_INDICATOR);
+    lv_obj_set_style_opa(bar, stale ? LV_OPA_40 : LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(dot, stale ? BR_COLOR_TEXT_SEC : BR_COLOR_SUCCESS, 0);
+    lv_obj_set_style_opa(dot, stale ? LV_OPA_40 : LV_OPA_COVER, 0);
+}
+
+/* Order peers most-recently-heard first (largest last_heard). Ties break by
+ * address so the order is a total, deterministic ordering: a stable sort keeps
+ * a row in the same relative slot across rebuilds unless its recency actually
+ * changed, which keeps focus from jumping around. */
+static int cmp_node_recency(const void* a, const void* b) {
+    const neighbor_entry_t* na = *(const neighbor_entry_t* const*)a;
+    const neighbor_entry_t* nb = *(const neighbor_entry_t* const*)b;
+    if (na->last_heard != nb->last_heard)
+        return (na->last_heard < nb->last_heard) ? 1 : -1;
+    if (na->addr != nb->addr)
+        return (na->addr < nb->addr) ? -1 : 1;
+    return 0;
 }
 
 /* Drill-down target, snapshotted at click time. The clicked card lives in the
@@ -148,7 +181,6 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
         lv_label_set_text(name_lbl, addr_buf);
     }
     lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(name_lbl, BR_COLOR_TEXT, 0);
     lv_obj_set_width(name_lbl, LV_PCT(68));
     lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(name_lbl, 0, 0);
@@ -172,7 +204,6 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_obj_set_size(bar, 40, 8);
     lv_obj_align(bar, LV_ALIGN_TOP_RIGHT, -40, 4);
     lv_obj_set_style_bg_color(bar, BR_COLOR_SURFACE_2, 0);
-    lv_obj_set_style_bg_color(bar, BR_COLOR_SUCCESS, LV_PART_INDICATOR);
     int pct = (n->rssi + 120) * 100 / 70;
     if (pct < 0)
         pct = 0;
@@ -181,16 +212,18 @@ static void create_node_card(lv_obj_t* parent, const neighbor_entry_t* n, uint32
     lv_bar_set_value(bar, pct, LV_ANIM_OFF);
 
     /* Online dot */
-    bool online = age_s < 600;
     lv_obj_t* dot = lv_obj_create(card);
     lv_obj_set_size(dot, 8, 8);
     lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, 0, 6);
     lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(dot, online ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(dot, 0, 0);
 
+    /* Recency styling for name, bar and dot: fresh peers pop, stale ones fade. */
+    apply_node_recency_style(name_lbl, bar, dot, age_s >= NODE_STALE_AGE_S);
+
     if (ctx) {
+        ctx->name_lbl = name_lbl;
         ctx->info_lbl = info_lbl;
         ctx->bar = bar;
         ctx->dot = dot;
@@ -232,8 +265,7 @@ static void nodes_refresh_cb(lv_timer_t* timer) {
             if (pct > 100)
                 pct = 100;
             lv_bar_set_value(ctx->bar, pct, LV_ANIM_OFF);
-            lv_obj_set_style_bg_color(ctx->dot,
-                                      (age_s < 600) ? BR_COLOR_SUCCESS : BR_COLOR_TEXT_SEC, 0);
+            apply_node_recency_style(ctx->name_lbl, ctx->bar, ctx->dot, age_s >= NODE_STALE_AGE_S);
             break;
         }
     }
@@ -261,11 +293,22 @@ static void populate_node_list(void) {
         return;
     }
 
+    /* Gather live entries, then order most-recently-heard first so the list
+     * answers "who is alive" at a glance. Sorting happens here, on every
+     * rebuild; the in-place age tick leaves order alone (a rebuild fires on any
+     * membership change), so the sort never fights the live refresh. */
+    const neighbor_entry_t* sorted[MAX_NEIGHBORS];
+    int n_sorted = 0;
     for (int i = 0; i < count && i < MAX_NEIGHBORS; i++) {
         const neighbor_entry_t* n = &state->neighbors.entries[i];
         if (n->addr == 0)
             continue;
-        create_node_card(s_node_list, n, now_ms, s_node_layout);
+        sorted[n_sorted++] = n;
+    }
+    qsort(sorted, n_sorted, sizeof(sorted[0]), cmp_node_recency);
+
+    for (int i = 0; i < n_sorted; i++) {
+        create_node_card(s_node_list, sorted[i], now_ms, s_node_layout);
     }
 }
 
