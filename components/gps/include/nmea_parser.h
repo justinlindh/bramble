@@ -15,6 +15,9 @@ typedef struct {
     uint32_t timestamp;
     bool valid;
     uint8_t sats_used; /* GGA: satellites used in fix, set even when no fix (0 if unknown) */
+    uint8_t utc_hour;  /* GGA/RMC UTC hour 0-23, valid only when utc_valid */
+    uint8_t utc_min;   /* GGA/RMC UTC minute 0-59, valid only when utc_valid */
+    bool utc_valid;    /* true when the UTC time-of-day field was parsed */
 } nmea_position_t;
 
 /**

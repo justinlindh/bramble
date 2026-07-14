@@ -217,6 +217,22 @@ bool nmea_parse_gga(char* sentence, nmea_position_t* pos) {
         return false;
     }
 
+    /* UTC time-of-day from field 1 ("hhmmss" or "hhmmss.sss"). Only HH:MM is
+     * needed for the status-bar clock, and a valid fix guarantees this field is
+     * present. The caller persists this only alongside a valid fix. */
+    pos->utc_valid = false;
+    if (field_count > 1 && !field_empty(fields[1]) && isdigit((unsigned char)fields[1][0]) &&
+        isdigit((unsigned char)fields[1][1]) && isdigit((unsigned char)fields[1][2]) &&
+        isdigit((unsigned char)fields[1][3])) {
+        int hh = (fields[1][0] - '0') * 10 + (fields[1][1] - '0');
+        int mm = (fields[1][2] - '0') * 10 + (fields[1][3] - '0');
+        if (hh < 24 && mm < 60) {
+            pos->utc_hour = (uint8_t)hh;
+            pos->utc_min = (uint8_t)mm;
+            pos->utc_valid = true;
+        }
+    }
+
     /* Satellites-used is reported even without a fix (useful for a "searching,
      * N sats" status), so capture it before the fix-quality gate below. */
     if (field_count > 7 && !field_empty(fields[7])) {

@@ -34,6 +34,9 @@ static uint32_t s_raw_log_lines = 0;
 static uint8_t s_sats_used = 0;
 static uint8_t s_sats_in_view = 0;
 static uint32_t s_antenna_warning_until_ms = 0; /* 0 = no active warning */
+static uint8_t s_utc_hour = 0;
+static uint8_t s_utc_min = 0;
+static bool s_utc_valid = false; /* true once a fix has yielded a UTC time */
 
 static bool gps_probe_nmea_at_baud(int baud, uint32_t probe_ms) {
     ESP_ERROR_CHECK(uart_set_baudrate(GPS_UART_NUM, baud));
@@ -122,9 +125,13 @@ static void gps_task(void* arg) {
                         s_raw_log_lines++;
                     }
 
-                    /* Parse NMEA sentence */
-                    nmea_position_t nmea_pos;
-                    memcpy(&nmea_pos, &s_current_pos, sizeof(nmea_position_t));
+                    /* Parse NMEA sentence. Seed only the shared position prefix
+                     * from the last fix (so a sentence carrying just some fields
+                     * merges rather than clobbers); nmea_position_t extends
+                     * bramble_position_t with the same-layout prefix plus
+                     * GPS-only fields (sats_used, utc_*) that stay zeroed here. */
+                    nmea_position_t nmea_pos = {0};
+                    memcpy(&nmea_pos, &s_current_pos, sizeof(s_current_pos));
 
                     bool parsed = false;
                     if (strncmp(line_buf, "$GPRMC", 6) == 0 ||
@@ -175,6 +182,13 @@ static void gps_task(void* arg) {
                         bool was_fixed = s_has_fix;
                         memcpy(&s_current_pos, &new_pos, sizeof(bramble_position_t));
                         s_has_fix = true;
+
+                        /* Ground-truth UTC time-of-day rides along with the fix. */
+                        if (nmea_pos.utc_valid) {
+                            s_utc_hour = nmea_pos.utc_hour;
+                            s_utc_min = nmea_pos.utc_min;
+                            s_utc_valid = true;
+                        }
 
                         /* Log first fix */
                         if (!was_fixed) {
@@ -348,6 +362,16 @@ bool gps_get_position(bramble_position_t* out) {
     return true;
 }
 
+bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
+    if (!s_has_fix || !s_utc_valid)
+        return false;
+    if (hour)
+        *hour = s_utc_hour;
+    if (min)
+        *min = s_utc_min;
+    return true;
+}
+
 void gps_get_stats(gps_stats_t* out) {
     if (!out)
         return;
@@ -368,6 +392,7 @@ void gps_deinit(void) {
     s_sats_used = 0;
     s_sats_in_view = 0;
     s_antenna_warning_until_ms = 0;
+    s_utc_valid = false;
 
     /* Bramble Pager: cut GNSS power on stop (drive the P-FET gate HIGH = off). */
     const bramble_board_config_t* board = board_get_config();
@@ -401,6 +426,11 @@ int gps_set_enabled(bool enabled) {
 bool gps_has_fix(void) { return false; }
 bool gps_get_position(bramble_position_t* out) {
     (void)out;
+    return false;
+}
+bool gps_get_utc_hm(uint8_t* hour, uint8_t* min) {
+    (void)hour;
+    (void)min;
     return false;
 }
 void gps_get_stats(gps_stats_t* out) {

@@ -44,6 +44,15 @@ bool gps_has_fix(void);
 bool gps_get_position(bramble_position_t* out);
 
 /**
+ * Get the last known UTC wall-clock time-of-day from GPS (ground-truth UTC,
+ * available the moment a node acquires a fix, no mesh timesync needed).
+ * @param hour: filled with UTC hour 0-23 (may be NULL)
+ * @param min: filled with UTC minute 0-59 (may be NULL)
+ * @return true if a valid UTC time from a current fix is available
+ */
+bool gps_get_utc_hm(uint8_t* hour, uint8_t* min);
+
+/**
  * Get current satellite counts and antenna health.
  * Always fills out, even when no position fix is available.
  * @param out: pointer to stats structure to fill
