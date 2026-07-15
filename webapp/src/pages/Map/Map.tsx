@@ -104,6 +104,7 @@ export function Map() {
   const lastFitPeerKeyRef = useRef<string | null>(null);
 
   const config = useStore(s => s.config);
+  const connected = useStore(s => s.connectionState === 'connected');
   const peerLocations = useStore(s => s.peerLocations);
   const status = useStore(s => s.status);
   const peerNames = useStore(s => s.peerNames);
@@ -303,6 +304,17 @@ export function Map() {
   }, [mapFocusAddr, peerLocations, selfPos, selfAddr]);
 
   const hasPeers = peerLocations.length > 0;
+
+  // Config hasn't arrived since connect yet: distinguish "still loading" from
+  // "loaded, nothing to show" so a slow ESP32 link doesn't look like GPS is
+  // simply off.
+  if (connected && config === null) {
+    return (
+      <div className={styles.wrapper}>
+        <div className={styles.empty}>Loading map…</div>
+      </div>
+    );
+  }
 
   if (!gpsEnabled && !hasPeers) {
     return (

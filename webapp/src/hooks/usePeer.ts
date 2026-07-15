@@ -12,7 +12,7 @@ export function usePeerInfo(addr: number) {
   const resolvedName = useStore((s) =>
     resolvePeerName(addr, s.peerNames, s.peerLocations),
   );
-  const neighbor = useStore(s => s.neighbors.find(n => n.addr === addr));
+  const neighbor = useStore(s => s.neighbors?.find(n => n.addr === addr));
   const route = useStore(s => s.routes.find(r => r.dest === addr));
 
   let status: PeerStatus = 'unknown';

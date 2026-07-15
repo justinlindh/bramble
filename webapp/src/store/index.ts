@@ -150,7 +150,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   status: null,
   airtime: null,
   airtimePolicy: null,
-  neighbors: [],
+  neighbors: undefined,
   routes: [],
   messages: [],
   conversations: new Map(),
@@ -348,7 +348,7 @@ export const useStore = create<AppState & Actions>((set) => ({
   resetNodeData: () => set({
     messages: [],
     conversations: new Map(),
-    neighbors: [],
+    neighbors: undefined,
     routes: [],
     peerNames: new Map(),
     config: null as any,

@@ -67,7 +67,12 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
       onClick={() => setExpanded((e) => !e)}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === 'Enter' && setExpanded((v) => !v)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setExpanded((v) => !v);
+        }
+      }}
       aria-expanded={expanded}
     >
       {/* ── Header row ── */}

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TrafficMonitor } from './TrafficMonitor';
 
@@ -130,5 +130,43 @@ describe('TrafficMonitor polling', () => {
 
     expect(mockLoadTrafficDebugStatus).not.toHaveBeenCalled();
     expect(mockLoadTrafficEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe('TrafficMonitor loading vs disabled state', () => {
+  const originalTrafficDebugStatus = storeState.trafficDebugStatus;
+
+  beforeEach(() => {
+    localStorage.clear();
+    mockLoadTrafficDebugStatus.mockReset();
+    mockLoadTrafficEvents.mockReset();
+    storeState.connectionState = 'connected';
+    storeState.trafficEvents = [];
+  });
+
+  afterEach(() => {
+    storeState.trafficDebugStatus = originalTrafficDebugStatus;
+  });
+
+  it('renders a loading affordance when trafficDebugStatus has never been fetched since connect', () => {
+    storeState.trafficDebugStatus = null;
+    render(<TrafficMonitor />);
+
+    expect(screen.getByText('Loading traffic monitor…')).toBeInTheDocument();
+    expect(screen.queryByText(/Traffic debug is disabled/)).not.toBeInTheDocument();
+  });
+
+  it('renders the disabled message once status has been fetched and debug is off', () => {
+    storeState.trafficDebugStatus = {
+      config: { enabled: false, includeTx: true, includeRx: true, sampleRate: 100 },
+      ringSize: 256,
+      ringUsed: 0,
+      droppedCount: 0,
+      lastSeq: 0,
+    };
+    render(<TrafficMonitor />);
+
+    expect(screen.queryByText('Loading traffic monitor…')).not.toBeInTheDocument();
+    expect(screen.getByText('Traffic debug is disabled. Enable it in Config to view monitor data.')).toBeInTheDocument();
   });
 });

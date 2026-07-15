@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { Conversation } from '../../types/bramble';
 import { ConversationList, buildChannelItems, filterDmConversations } from './ConversationList';
 
@@ -82,5 +82,43 @@ describe('ConversationList channel rendering', () => {
     expect(screen.getByText('beta')).toBeInTheDocument();
     expect(screen.getByLabelText('PSK protected')).toBeInTheDocument();
     expect(screen.getAllByLabelText('PSK protected')).toHaveLength(1);
+  });
+});
+
+describe('ConversationList dialog a11y', () => {
+  it('New Direct Message dialog exposes dialog role/aria-modal and closes on Escape', () => {
+    render(
+      <ConversationList
+        conversations={new Map<string, Conversation>()}
+        activeId="broadcast"
+        onSelect={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('New direct message'));
+
+    const dialog = screen.getByRole('dialog', { name: 'New Direct Message' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'New Direct Message' })).not.toBeInTheDocument();
+  });
+
+  it('Create Channel dialog exposes dialog role/aria-modal and closes on Escape', () => {
+    render(
+      <ConversationList
+        conversations={new Map<string, Conversation>()}
+        activeId="broadcast"
+        onSelect={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('New channel'));
+
+    const dialog = screen.getByRole('dialog', { name: 'Create Channel' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Create Channel' })).not.toBeInTheDocument();
   });
 });

@@ -139,7 +139,7 @@ export function NetworkReach() {
     for (const r of probeResult?.responses ?? []) responseMap.set(r.responderAddr, r);
 
     const known = new Set<number>();
-    for (const n of neighbors) {
+    for (const n of neighbors ?? []) {
       if (selfAddr !== undefined && n.addr === selfAddr) continue;
       known.add(n.addr);
     }

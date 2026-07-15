@@ -27,8 +27,8 @@ export function getEmptyHint(convId: string): string {
     : 'Send a message to start this conversation.';
 }
 
-function EmptyMessages({ convId }: { convId: string }) {
-  const hint = getEmptyHint(convId);
+function EmptyMessages({ convId, loading }: { convId: string; loading?: boolean }) {
+  const hint = loading ? 'Loading messages…' : getEmptyHint(convId);
 
   return (
     <div className={styles.emptyPane}>
@@ -43,6 +43,12 @@ function EmptyMessages({ convId }: { convId: string }) {
 function MessageList({ conversationId }: { conversationId: string }) {
   const { messages } = useConversation(conversationId);
   const myAddr = useMyAddress();
+  // `status` loads in the same initial connect-time batch as message history;
+  // while it is still null we can't yet tell "no messages" from "haven't
+  // fetched yet" apart, so show a loading affordance instead of the
+  // per-conversation empty hint.
+  const connectionState = useStore(s => s.connectionState);
+  const status = useStore(s => s.status);
   const listRef = useRef<HTMLDivElement>(null);
   const [nearBottom, setNearBottom] = useState(true);
   const [showJump, setShowJump] = useState(false);
@@ -84,7 +90,8 @@ function MessageList({ conversationId }: { conversationId: string }) {
   }, [messages.length, messages[messages.length - 1]?.status, nearBottom]);
 
   if (messages.length === 0) {
-    return <EmptyMessages convId={conversationId} />;
+    const loading = connectionState === 'connected' && status === null;
+    return <EmptyMessages convId={conversationId} loading={loading} />;
   }
 
   return (
@@ -273,6 +280,17 @@ export function Chat() {
     setShowDetail(false);
   }, [activeConversationId]);
 
+  // Escape closes the mobile conversation sidebar, matching the backdrop
+  // click and the hamburger toggle button as alternate dismissal paths.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSidebarOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [sidebarOpen]);
+
   const isChannel = activeConversationId.startsWith('ch:');
   const isDm = activeConversationId.startsWith('dm:');
   const dmAddr = isDm ? parseInt(activeConversationId.slice(3), 10) : 0;
@@ -280,7 +298,11 @@ export function Chat() {
 
   return (
     <div className={styles.chat}>
-      <div className={`${styles.sidebarBackdrop} ${sidebarOpen ? styles.sidebarBackdropOpen : ''}`} onClick={() => setSidebarOpen(false)} />
+      <div
+        className={`${styles.sidebarBackdrop} ${sidebarOpen ? styles.sidebarBackdropOpen : ''}`}
+        onClick={() => setSidebarOpen(false)}
+        role="presentation"
+      />
       <div className={`${styles.sidebarWrap} ${sidebarOpen ? styles.sidebarOpen : ''}`}>
         <ConversationList
           conversations={conversations}
