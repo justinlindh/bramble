@@ -52,6 +52,20 @@ jobs:
       - name: Run typecheck
         run: npm run typecheck --prefix webapp
 
+  typecheck-electron:
+    name: Required electron typecheck
+    runs-on: linux
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run electron typecheck
+        run: npm run typecheck:electron --prefix webapp
+
   required-unit-tests:
     name: Required unit tests
     runs-on: linux

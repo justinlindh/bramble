@@ -47,10 +47,10 @@ function createWindow(): void {
   });
 
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
-    if (permission === 'serial' || permission === 'bluetooth') {
-      return true;
-    }
-    return false;
+    // Electron's PermissionCheckHandler union omits 'bluetooth' even though the
+    // runtime accepts it; cast to string so both branches typecheck uniformly.
+    const p = permission as string;
+    return p === 'serial' || p === 'bluetooth';
   });
 
   // No auto-picking: both handlers forward the candidates to an in-app
