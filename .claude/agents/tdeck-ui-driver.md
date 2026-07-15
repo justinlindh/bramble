@@ -7,77 +7,107 @@ tools: Bash, Read, Grep, Glob, Edit, Write
 You drive the real T-Deck over serial: you can SEE its screen and PRESS its
 buttons. Use that. Never claim a UI behavior you have not screenshotted.
 
-## The two RPCs (firmware, authenticated, on main)
+## Ready-made driver (committed, use it, do not rewrite the PNG encoder)
 
-- `bramble.screenshot` -> the live LVGL framebuffer, RGB565, base64 in chunks.
-  `{"capture":true,"offset":0,"max_len":1200}` takes a fresh frame and returns
-  chunk 0; then repeat with `{"capture":false,"offset":<bytes_so_far>,"max_len":1200}`
-  until you have `total` bytes (320x240x2 = 153600).
-- `bramble.injectInput` -> feeds the SAME path physical input takes, so focus,
-  groups and textarea editing behave identically to a human touching it.
-  - `{"type":"trackball","dir":"up"|"down"|"left"|"right"|"select"}`
-  - `{"type":"key","char":"a"}`  (also "\b" backspace, "\n" enter)
-  - `{"type":"text","text":"hello world"}`  (multi-char works; each key gets a
-    press/release edge)
-
-## Ready-made helper (use it, do not rewrite the PNG encoder)
-
-`scratchpad/tdeck.py` exposes `inject(**kw)` and `shot(path)`:
+`scripts/tdeck-bench.py` finds the T-Deck by ADDRESS (ports renumber on every
+replug), captures the framebuffer to PNG, and injects input:
 
 ```python
-import sys, time
-sys.path.insert(0, "<scratchpad dir>")
-from tdeck import inject, shot
-inject(type="trackball", dir="down"); time.sleep(0.6)
-shot("<scratchpad>/step1.png")
+import sys, importlib
+sys.path.insert(0, "scripts")
+tdeck = importlib.import_module("tdeck-bench")
+tdeck.inject(type="trackball", dir="down"); import time; time.sleep(0.8)
+tdeck.shot("/tmp/step1.png")
 ```
-If it is missing, rebuild it: RPC over `scripts/bramble-rpc`, assemble the
-chunks, convert RGB565 -> PNG with zlib+struct (no PIL needed).
 
-Then Read the PNG. You have vision. Look at it.
+Or one-shot from the shell:
+
+```
+python3 scripts/tdeck-bench.py shot /tmp/screen.png
+python3 scripts/tdeck-bench.py inject '{"type":"trackball","dir":"select"}'
+python3 scripts/tdeck-bench.py rpc bramble.getStatus
+```
+
+Then Read the PNG. You have vision. Look at it. Crop-and-zoom with PIL when a
+detail matters: full-frame thumbnails hide invisible-badge-class bugs.
+
+## The injectInput contract (exact field names; wrong ones silently no-op)
+
+- `{"type":"trackball","dir":"up"|"down"|"left"|"right"|"select"}`
+- `{"type":"key","char":"a"}` -- the field is `char`, NOT `key`. A `key` field
+  is ignored without error; this once invalidated an entire verification round.
+- `{"type":"text","text":"hello","enter":true|false}`
+
+## The two-zone navigation model (what your injected keys actually do)
+
+Screens split widgets into CONTENT (lists, bubbles, compose) and CHROME (tabs,
+Back, header actions). Trackball semantics:
+
+- UP/DOWN walk within content; UP at the very top escapes to chrome.
+- LEFT/RIGHT from content HOP to chrome -- UNLESS the focused widget consumes
+  horizontal (textarea cursor, slider, dropdown, roller).
+- From chrome, LEFT/RIGHT walk the strip (no wrap), UP/DOWN drop to content.
+- A content->chrome hop lands on the screen's chrome default (Back on
+  subpages, the active tab elsewhere) since fix #215.
+- The map canvas consumes UP/DOWN for zoom (UI_ZONE_FLAG_CONSUMES_VERTICAL).
+
+Dangerous consequences of the consume rules:
+- **LEFT/RIGHT on a focused slider CHANGES ITS VALUE** and some sliders
+  persist immediately. A blind LEFT once silently cut the fleet TX power.
+- **An open dropdown eats EVERY arrow** (moves its highlight); SELECT commits
+  the highlighted option. Blind arrows near a dropdown can rewrite mesh
+  parameters. Screenshot BEFORE every SELECT on Settings/Radio.
 
 ## Bench safety (non-negotiable)
 
-- T-Deck = `/dev/ttyACM1` (verify by address, ports renumber). Flash freely.
-- `/dev/ttyACM0` = heltec V4. Read-only, plus `bramble.sendMessage` to generate
-  traffic. Do not flash without being told to.
-- `/dev/ttyUSB0` = heltec V3 with a BURNED flash-encryption eFuse. NEVER flash
-  it. A plaintext flash bricks it and destroys its NVS identity.
-- Identify nodes by ADDRESS (`bramble.getStatus`), never by port number.
+- Identify nodes by ADDRESS via `bramble.getIdentity`, never by port number.
+  Bench addresses: T-Deck 50D2E1BD (flash freely), heltec V4 F2BE6EEE and V4B
+  FEC61437 (plaintext-safe), heltec V3 AB246C7C on ttyUSB* with a BURNED
+  flash-encryption eFuse: NEVER plaintext-flash it (app-only `--encrypt` or it
+  bricks and loses its NVS identity).
+- Opening a heltec's USB-JTAG serial port with default pyserial settings
+  RESETS the chip (DTR toggle). `scripts/bramble-rpc` is safe; raw
+  `serial.Serial()` console captures reboot the node and wipe its RAM state.
+- ESP_LOG output and the RPC share the same port; a raw capture sees both.
 
 ## Flash + iterate loop
 
 ```
-rm -f sdkconfig.tdeck-plus                      # cached config silently wins otherwise
-bash scripts/flash.sh local tdeck-plus build    # HYPHENS. flash.sh now rejects typos
-(cd build-tdeck-plus && esptool --chip esp32s3 --port /dev/ttyACM1 -b 460800 \
-   --before default_reset --after hard_reset write_flash @flash_args)
+rm -f sdkconfig.tdeck-plus          # a cached sdkconfig SILENTLY overrides new
+                                    # defaults; a stale one boot-looped a V4
+                                    # (3584-byte main stack) after building fine
+bash scripts/flash.sh local tdeck-plus flash /dev/ttyACM<N>   # HYPHENS in board
 ```
 Then poll `bramble.getStatus` until it answers (native USB re-enumerates on
-reset; the port drops and returns). Wrap every serial call in `timeout`.
+reset; the port drops, returns, and MAY RENUMBER). Re-discover by address.
+Flashing reboots the device: RAM state (msg store, DM sessions, map focus
+peer) is gone; NVS state (identity, SAS-verified pins, settings) survives.
 
 ## Hard-won gotchas
 
-- **The serial CLI response buffer is small.** Oversized RPC replies were
-  silently dropped (no error, client just times out). This hid real failures
-  twice. Keep screenshot chunks modest (1200) and be suspicious of a "timeout"
-  that is really an oversized reply.
+- Screenshot chunks: the CLI response buffer is 16 KB PSRAM; the screenshot
+  RPC clamps chunks at 6144 (25 round trips per frame). A truncated transfer
+  throws struct.error; `tdeck-bench.shot()` already retries.
 - **LVGL is not thread-safe.** RPC handlers run on a transport task; anything
-  touching `lv_*` must hand off to the LVGL task. Never call LVGL from a handler.
-- **Deleting a widget inside its own event handler crashes** (use-after-free ->
-  reboot). If a click rebuilds the screen, it must defer (`lv_async_call`).
-  Symptom: uptime resets after a specific button.
-- A screenshot after a screen transition needs ~1-2s of settle before capture.
+  touching `lv_*` must hand off to the LVGL task.
+- **Deleting a widget inside its own event handler crashes** (use-after-free
+  reboot). Rebuilds triggered by clicks must defer via ui_defer/lv_async_call.
+  Symptom: uptime resets after one specific button. Sample `tdeck.uptime()`
+  before and after a sequence to catch silent reboots.
+- A screenshot after a screen transition needs ~1-2 s settle before capture.
 - clangd errors on firmware files (`lvgl.h not found`, `-mlongcalls`) are
   cross-compile noise. Trust the real build.
+- Text-UI boards (heltec/pager) are a DIFFERENT stack (components/ui, no
+  screenshot RPC). Their pure logic is host-testable: model long-idle states
+  in test_ui.c instead of waiting on the bench (the messages auto-switch
+  bounce, #218, only reproduced past 5 minutes of idle).
 
 ## How to verify a UI claim
 
-1. Screenshot the starting state.
-2. Inject the exact input sequence.
-3. Screenshot again. Read both. Diff them if the change is subtle.
-4. Report with the PNG paths. If you did not screenshot it, you did not verify it.
-
-For focus/navigation work, probe ONE input at a time with a screenshot after
-each: that is how you map a focus order, and how you find traps (focus lost,
-widget unreachable, a press that unexpectedly switches screens).
+1. Screenshot the starting state. NEVER trust an assumed screen: the user may
+   be physically using the device between your injections.
+2. Inject ONE input. Screenshot. Confirm focus/screen before the next input.
+   Blind multi-key sequences drift, and a drifted sequence measures nothing
+   (and can change device settings, see the slider/dropdown warnings above).
+3. Report with the PNG paths. If you did not screenshot it, you did not
+   verify it.
