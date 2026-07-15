@@ -39,7 +39,7 @@ Compared to Meshtastic and MeshCore-style systems, Bramble leans on privacy and 
 - **Privacy-first routing.** Route-request sources are pseudonymized per query, so forwarded route requests do not carry the originator's address.
 - **Airtime budgeting:** every transmission goes through one budget-gated TX path (`components/radio/tx_gate.c`) with real time-on-air costing, per-tier token buckets, and regional duty-cycle caps enforced where the frequency plan requires them (for example EU 868 at 1%).
 - **3-tier reliability model:** Broadcast (fire-and-forget), Normal (acknowledged, 3 retries with backoff), and Critical (8 retries plus delivery receipts carrying the relay path).
-- **Cryptographic node identity:** X25519-derived 4-byte addresses provide stable identity primitives. Note there is no per-node signature or trust anchor, so Sybil/impersonation across the fleet is not closed.
+- **Cryptographic node identity + optional fleet trust anchor.** Each node has an Ed25519 identity whose 4-byte address is the hash of its own public key (`SHA-256(ed25519_pub)[0:4]`), so an address cannot be claimed without the matching key: address impersonation is a preimage search, not a TOFU race. Nodes flood self-signed identity attestations that peers verify and TOFU-pin, refusing and counting any later conflicting key for a pinned address. An optional per-fleet trust anchor (an operator-held Ed25519 key that endorses each member's identity with a cert) closes Sybil identity minting on an anchored mesh, because an anchored node only pins peers carrying a cert its anchor signed. Residuals stated in the same breath: a compromised endorsed insider stays a valid member (endorsement is admission control, not behavioral trust), the anchor seed is the fleet's trust root and its custody is the whole scheme, and an un-anchored mesh keeps unforgeable but free-to-mint identities ([docs/trust-anchor.md](docs/trust-anchor.md), [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)).
 - **Store-and-forward mailbox:** offline nodes receive queued messages when they rejoin the mesh.
 - **Location sharing with privacy tiers:** presence, zone (coarse ~1km), or exact; per-peer control over what you share and with whom. Location payloads are now AES-256-GCM encrypted end to end and padded to a fixed size so the ciphertext does not leak which tier was chosen; timing and the fact that a node shares location remain observable ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)).
 - **Browser-based flashing:** flash firmware to new devices directly from the web, no toolchain required.
@@ -96,6 +96,8 @@ bash scripts/flash.sh local heltec-v3 flash /dev/ttyUSB0
 ```
 
 Use `tdeck-plus` instead of `heltec-v3` for T-Deck Plus builds.
+
+**First-time setup.** A freshly flashed node boots unprovisioned and inert: it has no network key, so it will not mesh (it neither emits nor accepts authenticated control-plane traffic) until you provision one, and the web client shows a prominent UNPROVISIONED banner until then. Follow [docs/getting-started.md](docs/getting-started.md) to connect the web client, provision a network key, optionally enroll the node under a trust anchor, and send your first message.
 
 ## Testing
 
