@@ -39,6 +39,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./test/setup.ts'],
     globals: true,
+    // Mocks (vi.fn/vi.spyOn) are restored to their original implementation
+    // after every test. Without this, a mock set up in one test file can
+    // keep answering calls made by a later, unrelated test.
+    restoreMocks: true,
     exclude: ['**/node_modules/**', '**/test/integration/**', '**/web-flasher/**'],
   },
   build: {

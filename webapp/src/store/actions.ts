@@ -5,6 +5,7 @@ import { deliveryEventStore, type DeliveryEventRecord } from './deliveryEventSto
 import { fetchConnectionCapabilities } from '../lib/connectionMode';
 import { listDevices, forgetDevice, renameDevice, upsertDevice, setDeviceToken } from '../lib/deviceBook';
 import { formatAddrHex } from '../utils/address';
+import { parseAddr } from '../lib/addr';
 import { isAndroidShell } from '../utils/platform';
 import { friendlyError } from '../lib/errors';
 import type {
@@ -583,8 +584,8 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   const now = Date.now();
   const newFromFirmware: Message[] = [];
   for (const m of result.messages ?? []) {
-    const fromAddr = typeof m.from === 'string' ? parseInt(m.from, 16) : (m.from ?? 0);
-    const toAddr = typeof m.to === 'string' ? parseInt(m.to, 16) : (m.to ?? 0);
+    const fromAddr = parseAddr(m.from);
+    const toAddr = parseAddr(m.to);
     const dir = (m as any).direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
     const rawChannel = (m as any).channelIndex ?? (m as any).channel;
@@ -1155,7 +1156,7 @@ export function handleAck(params: unknown): void {
   /* Normalize relayPath: firmware sends addr as hex string, webapp needs number */
   const rawPath = p.relayPath as Array<{ addr: string | number; rssi: number }> | undefined;
   const relayPath: RelayHop[] | undefined = rawPath?.map(hop => ({
-    addr: typeof hop.addr === 'string' ? parseInt(hop.addr, 16) : hop.addr,
+    addr: parseAddr(hop.addr),
     rssi: hop.rssi ?? 0,
   }));
 
@@ -1186,8 +1187,8 @@ export function handleAck(params: unknown): void {
 
 export function normalizeIncomingRealtimeMessage(params: unknown) {
   const p = params as any;
-  const fromAddr = typeof p.from === 'string' ? parseInt(p.from, 16) : (p.from ?? 0);
-  const toAddr = typeof p.to === 'string' ? parseInt(p.to, 16) : (p.to ?? 0);
+  const fromAddr = parseAddr(p.from);
+  const toAddr = parseAddr(p.to);
   const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
   const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
   const isBroadcast = channelIndex === undefined && (p.broadcast === true || toAddr === 0xFFFFFFFF);
@@ -1878,6 +1879,19 @@ function handleTrafficEvent(params: unknown): void {
 }
 
 export function __resetBroadcastTelemetryForTests(): void {
+  packetIdToMsgId.clear();
+  broadcastIdToMsgId.clear();
+  pendingBroadcastTelemetry.clear();
+  clearAllSentStatusTimers();
+}
+
+// Test isolation: actions.ts holds several module-level singletons (the
+// transport client, the packet/broadcast correlation maps, the pending
+// sent-status timers). Nothing resets them between test files, so state can
+// leak across suites once restoreMocks/afterEach hygiene is in place. Call
+// this from test/setup.ts's afterEach.
+export function __resetActionsForTests(): void {
+  client = null;
   packetIdToMsgId.clear();
   broadcastIdToMsgId.clear();
   pendingBroadcastTelemetry.clear();
