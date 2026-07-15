@@ -90,8 +90,8 @@ Provisioning is the step that takes a node from inert to meshing. Open
   `bramble://net/v1?k=...` string (or the bare 64 hex chars) and submit. This
   calls `bramble.setNetworkKey` on the connected node.
 
-After provisioning, the Network Key section refreshes to
-`Provisioned (fingerprint XXXXXXXX)`. Confirm every node in the fleet reports
+After provisioning, the Network Key section refreshes to show it is
+Provisioned, with the fingerprint of the newly set key. Confirm every node in the fleet reports
 the **same** fingerprint as the founder; compare fingerprints over a channel
 you trust, the same way you would compare any shared secret. A node still
 reporting `Unprovisioned` is not part of the authenticated control plane. The

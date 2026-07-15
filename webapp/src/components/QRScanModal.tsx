@@ -97,7 +97,7 @@ export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRS
         };
         rafRef.current = requestAnimationFrame(scan);
       } catch (e) {
-        setCameraError(friendlyErrorFrom(e) || 'Camera not available.');
+        setCameraError(friendlyErrorFrom(e));
         setMode('text');
       }
     };

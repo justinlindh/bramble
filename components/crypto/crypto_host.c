@@ -7,8 +7,11 @@
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 #include <openssl/kdf.h>
+#include <openssl/crypto.h>
 
 int crypto_random(uint8_t* buf, size_t len) { return RAND_bytes(buf, (int)len) == 1 ? 0 : -1; }
+
+void crypto_secure_wipe(void* buf, size_t len) { OPENSSL_cleanse(buf, len); }
 
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash) {
     SHA256(data, data_len, hash);

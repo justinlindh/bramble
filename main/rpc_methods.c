@@ -646,6 +646,33 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
 }
 
 /* bramble.setRadio — stub: params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
+/* Commits pending nvs_set_* writes (only if every prior one succeeded) and
+ * closes the handle. Returns the resulting esp_err_t. Shared by the RPC
+ * handlers below that accumulate esp_err_t across a chain of nvs_set_*
+ * calls before persisting. */
+static esp_err_t rpc_nvs_commit_close(nvs_handle_t nvs, esp_err_t err) {
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err;
+}
+
+/* Logs an NVS persist failure and, when set_result is true, reports it to the
+ * client as {"ok":false,"error":client_msg}. Returns rpc_rc so callers can
+ * `return rpc_report_persist_failure(...)` directly. Centralizes the log and
+ * report shape repeated across the RPC handlers that persist to NVS. */
+static int rpc_report_persist_failure(cJSON* result, const char* tag, const char* what,
+                                      esp_err_t err, bool set_result, const char* client_msg,
+                                      int rpc_rc) {
+    ESP_LOGE(tag, "%s: %d", what, err);
+    if (set_result) {
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", client_msg);
+    }
+    return rpc_rc;
+}
+
 static int handle_set_radio(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
@@ -713,18 +740,14 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
             err = nvs_set_i8(nvs, "tx_power", cfg.tx_power);
         if (err == ESP_OK)
             err = nvs_set_u8(nvs, "cr", cfg.coding_rate);
-        if (err == ESP_OK)
-            err = nvs_commit(nvs);
-        nvs_close(nvs);
+        err = rpc_nvs_commit_close(nvs, err);
     }
 
     if (err != ESP_OK) {
         /* Radio was already reconfigured live above; only persistence
          * failed, so the change is real until the next reboot. */
-        ESP_LOGE(TAG, "radio config persist failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "failed to persist; setting lost on reboot");
-        return 0;
+        return rpc_report_persist_failure(result, TAG, "radio config persist failed", err, true,
+                                          "failed to persist; setting lost on reboot", 0);
     }
 
     ESP_LOGI(TAG, "Radio reconfigured: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm", cfg.frequency_mhz,
@@ -822,13 +845,11 @@ static int rpc_set_auth_token(const cJSON* params, cJSON* result) {
         if (err == ESP_OK)
             err = nvs_set_str(h, NVS_KEY_AUTH_TOKEN, val);
     }
-    if (err == ESP_OK)
-        err = nvs_commit(h);
-    nvs_close(h);
+    err = rpc_nvs_commit_close(h, err);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "auth token persist failed: %d", err);
-        return RPC_ERR_INTERNAL;
+        return rpc_report_persist_failure(result, TAG, "auth token persist failed", err, false,
+                                          NULL, RPC_ERR_INTERNAL);
     }
 
     ws_server_load_token(); /* reload immediately */
@@ -1298,16 +1319,12 @@ static int handle_set_mailbox(const cJSON* params, cJSON* result) {
     esp_err_t err = nvs_open(NVS_NS_MAILBOX, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         err = nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
-        if (err == ESP_OK)
-            err = nvs_commit(nvs);
-        nvs_close(nvs);
+        err = rpc_nvs_commit_close(nvs, err);
     }
 
     if (err != ESP_OK) {
-        ESP_LOGE("rpc", "mailbox persist failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "nvs write failed");
-        return 0;
+        return rpc_report_persist_failure(result, "rpc", "mailbox persist failed", err, true,
+                                          "nvs write failed", 0);
     }
 
     bool en = cJSON_IsTrue(enabled);
@@ -1333,16 +1350,12 @@ static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
     esp_err_t err = nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         err = nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
-        if (err == ESP_OK)
-            err = nvs_commit(nvs);
-        nvs_close(nvs);
+        err = rpc_nvs_commit_close(nvs, err);
     }
 
     if (err != ESP_OK) {
-        ESP_LOGE("rpc", "flood transport persist failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "nvs write failed");
-        return 0;
+        return rpc_report_persist_failure(result, "rpc", "flood transport persist failed", err,
+                                          true, "nvs write failed", 0);
     }
 
     bool en = cJSON_IsTrue(enabled);
@@ -1376,18 +1389,14 @@ static int handle_set_flood_hop_limit(const cJSON* params, cJSON* result) {
     esp_err_t err = nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         err = nvs_set_u8(nvs, "hop_limit", applied);
-        if (err == ESP_OK)
-            err = nvs_commit(nvs);
-        nvs_close(nvs);
+        err = rpc_nvs_commit_close(nvs, err);
     }
 
     if (err != ESP_OK) {
         /* Hop limit is already applied live above; only persistence
          * failed, so the change is real until the next reboot. */
-        ESP_LOGE("rpc", "flood hop limit persist failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "failed to persist; setting lost on reboot");
-        return 0;
+        return rpc_report_persist_failure(result, "rpc", "flood hop limit persist failed", err,
+                                          true, "failed to persist; setting lost on reboot", 0);
     }
 
     ESP_LOGI("rpc", "Flood hop limit set to %u", (unsigned)applied);
@@ -1637,15 +1646,11 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
     if (lon && cJSON_IsNumber(lon) && err == ESP_OK)
         err = nvs_set_i32(nvs, "lon_e6", (int32_t)(lon->valuedouble * 1e6));
 
-    if (err == ESP_OK)
-        err = nvs_commit(nvs);
-    nvs_close(nvs);
+    err = rpc_nvs_commit_close(nvs, err);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "location config persist failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "nvs write failed");
-        return 0;
+        return rpc_report_persist_failure(result, TAG, "location config persist failed", err, true,
+                                          "nvs write failed", 0);
     }
 
     cJSON_AddBoolToObject(result, "ok", true);
@@ -1686,15 +1691,11 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
     rpc_location_write_rule_string(rule_buf, sizeof(rule_buf), &rule);
     snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
     err = nvs_set_str(nvs, key, rule_buf);
-    if (err == ESP_OK)
-        err = nvs_commit(nvs);
-    nvs_close(nvs);
+    err = rpc_nvs_commit_close(nvs, err);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "location contact persist failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "nvs write failed");
-        return 0;
+        return rpc_report_persist_failure(result, TAG, "location contact persist failed", err, true,
+                                          "nvs write failed", 0);
     }
 
     cJSON_AddBoolToObject(result, "ok", true);
@@ -1721,15 +1722,11 @@ static int handle_remove_location_contact(const cJSON* params, cJSON* result) {
     err = nvs_erase_key(nvs, key);
     if (err == ESP_ERR_NVS_NOT_FOUND)
         err = ESP_OK; /* nothing to remove is not a failure */
-    if (err == ESP_OK)
-        err = nvs_commit(nvs);
-    nvs_close(nvs);
+    err = rpc_nvs_commit_close(nvs, err);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "location contact remove failed: %d", err);
-        cJSON_AddBoolToObject(result, "ok", false);
-        cJSON_AddStringToObject(result, "error", "nvs write failed");
-        return 0;
+        return rpc_report_persist_failure(result, TAG, "location contact remove failed", err, true,
+                                          "nvs write failed", 0);
     }
 
     cJSON_AddBoolToObject(result, "ok", true);

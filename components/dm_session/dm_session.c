@@ -78,10 +78,10 @@ out:
     /* Wipe the cross-term DH scratch on every exit; on failure also wipe the
      * partially-populated ikm_out (ikm_out[0:64] holds DH outputs by the time
      * any later step can fail). */
-    memset(cross_a, 0, sizeof(cross_a));
-    memset(cross_b, 0, sizeof(cross_b));
+    crypto_secure_wipe(cross_a, sizeof(cross_a));
+    crypto_secure_wipe(cross_b, sizeof(cross_b));
     if (rc != 0)
-        memset(ikm_out, 0, 128);
+        crypto_secure_wipe(ikm_out, 128);
     return rc;
 }
 
@@ -205,8 +205,8 @@ void dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint
     /* Retain the legacy static session_key as RK_0 provenance only; the ratchet
      * chains are authoritative for every message now. */
     memcpy(s->session_key, s->ratchet.rk, 32);
-    memset(ck_lohi, 0, 32);
-    memset(ck_hilo, 0, 32);
+    crypto_secure_wipe(ck_lohi, 32);
+    crypto_secure_wipe(ck_hilo, 32);
 }
 
 void dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
@@ -231,9 +231,9 @@ void dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t a
     s->ke_epoch = new_epoch;
     memset(s->ratchet.skip, 0, sizeof(s->ratchet.skip));
     memcpy(s->session_key, s->ratchet.rk, 32); /* provenance mirror, as in init_state */
-    memset(rk_next, 0, 32);
-    memset(ck_lohi, 0, 32);
-    memset(ck_hilo, 0, 32);
+    crypto_secure_wipe(rk_next, 32);
+    crypto_secure_wipe(ck_lohi, 32);
+    crypto_secure_wipe(ck_hilo, 32);
 }
 
 int dm_session_ratchet_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
@@ -270,8 +270,8 @@ int dm_session_ratchet_encrypt(dm_session_t* s, const bramble_header_t* h, uint3
         s->ratchet.send.index++;
         *framed_len_out = DM_RATCHET_HEADER_SIZE + pt_len;
     }
-    memset(mk, 0, sizeof(mk));
-    memset(ck_next, 0, sizeof(ck_next));
+    crypto_secure_wipe(mk, sizeof(mk));
+    crypto_secure_wipe(ck_next, sizeof(ck_next));
     return rc;
 }
 
@@ -330,10 +330,10 @@ static int dm_recv_walk(dm_chain_t* chain, dm_skip_entry_t* skip, uint16_t index
         chain->index = (uint16_t)(index + 1);
         *pt_len_out = ct_len;
     }
-    memset(ck, 0, 32);
-    memset(mk, 0, 32);
-    memset(ck_next, 0, 32);
-    memset(pending, 0, sizeof(pending));
+    crypto_secure_wipe(ck, 32);
+    crypto_secure_wipe(mk, 32);
+    crypto_secure_wipe(ck_next, 32);
+    crypto_secure_wipe(pending, sizeof(pending));
     return rc == 0 ? DM_DECRYPT_OK : DM_DECRYPT_FAIL;
 }
 
@@ -362,13 +362,16 @@ int dm_session_ratchet_decrypt(dm_session_t* s, const bramble_header_t* h, uint3
          * epoch's retained receive chain + skip cache. This wipe is deferred
          * until AFTER the new chain is established and the grace is spent, which
          * is the ordering that delivers post-compromise secrecy (an attacker who
-         * captured the old root can no longer derive any live key). */
+         * captured the old root can no longer derive any live key). Secure-wipe,
+         * not memset: after the clear only prev_recv.valid is ever re-read, so
+         * the chain-key and cached-message-key BYTES are dead stores the
+         * compiler could otherwise elide, defeating the whole PCS purpose. */
         if (s->ratchet.prev_recv.valid) {
             if (s->ratchet.new_epoch_msgs < 0xFFFF)
                 s->ratchet.new_epoch_msgs++;
             if (s->ratchet.new_epoch_msgs >= DM_EPOCH_GRACE_MSGS) {
-                memset(&s->ratchet.prev_recv, 0, sizeof(s->ratchet.prev_recv));
-                memset(s->ratchet.prev_skip, 0, sizeof(s->ratchet.prev_skip));
+                crypto_secure_wipe(&s->ratchet.prev_recv, sizeof(s->ratchet.prev_recv));
+                crypto_secure_wipe(s->ratchet.prev_skip, sizeof(s->ratchet.prev_skip));
             }
         }
         return DM_DECRYPT_OK;
@@ -401,7 +404,7 @@ int dm_derive_session_key(const uint8_t my_id_priv[32], const uint8_t my_eph_pri
     if (dm_compute_ikm(my_id_priv, my_eph_priv, peer_id_pub, peer_eph_pub, ikm) != 0)
         return -1;
     int rc = dm_session_key_from_ikm(ikm, addr_a, addr_b, ke_epoch, session_key_out);
-    memset(ikm, 0, sizeof(ikm));
+    crypto_secure_wipe(ikm, sizeof(ikm));
     return rc;
 }
 
@@ -508,8 +511,8 @@ out:
     /* Wipe the HKDF-derived MAC subkey and the full MAC on every exit past
      * their population: only full_mac[0:16] ever leaves this function (as
      * tag_out); the key and the MAC tail are secret scratch. */
-    memset(key, 0, sizeof(key));
-    memset(full_mac, 0, sizeof(full_mac));
+    crypto_secure_wipe(key, sizeof(key));
+    crypto_secure_wipe(full_mac, sizeof(full_mac));
     return rc;
 }
 
@@ -569,9 +572,9 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
 out:
     /* Wipe the DH outputs and IKM on every exit past the DH steps (transcript
      * holds only public fields and needs no wipe). */
-    memset(dh2, 0, sizeof(dh2));
-    memset(dh3, 0, sizeof(dh3));
-    memset(ikm, 0, sizeof(ikm));
+    crypto_secure_wipe(dh2, sizeof(dh2));
+    crypto_secure_wipe(dh3, sizeof(dh3));
+    crypto_secure_wipe(ikm, sizeof(ikm));
     return rc;
 }
 
@@ -642,9 +645,9 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
     rc = ct_eq(expect_tag, msg->auth_tag, 16) ? 0 : -1;
 out:
     /* Wipe the DH outputs and IKM on every exit past the DH steps. */
-    memset(dh2, 0, sizeof(dh2));
-    memset(dh3, 0, sizeof(dh3));
-    memset(ikm, 0, sizeof(ikm));
+    crypto_secure_wipe(dh2, sizeof(dh2));
+    crypto_secure_wipe(dh3, sizeof(dh3));
+    crypto_secure_wipe(ikm, sizeof(ikm));
     return rc;
 }
 
@@ -691,7 +694,7 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
                           ke_epoch, transcript, sizeof(transcript), out->auth_tag);
 out:
     /* Wipe the IKM on every exit past a successful dm_compute_ikm. */
-    memset(ikm, 0, sizeof(ikm));
+    crypto_secure_wipe(ikm, sizeof(ikm));
     return rc;
 }
 
@@ -755,8 +758,8 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
 out:
     /* Wipe the IKM and the local session-key copy on every exit past a
      * successful dm_compute_ikm (local_key after it is copied out on success). */
-    memset(ikm, 0, sizeof(ikm));
-    memset(local_key, 0, sizeof(local_key));
+    crypto_secure_wipe(ikm, sizeof(ikm));
+    crypto_secure_wipe(local_key, sizeof(local_key));
     return rc;
 }
 
@@ -775,10 +778,13 @@ bool dm_session_teardown(dm_table_t* t, uint32_t peer_addr) {
     dm_session_t* s = dm_lookup(t, peer_addr);
     if (!s)
         return false;
-    /* The sizeof(*s) memset also zeroes the embedded dm_ratchet_t (root, both
+    /* The whole-struct wipe also zeroes the embedded dm_ratchet_t (root, both
      * chains, skip caches, and the retained previous-epoch state), so forward
-     * secrecy on teardown covers every ratchet key, not just session_key. */
-    memset(s, 0, sizeof(*s)); /* state -> DM_STATE_NONE, key + peer_id_pub wiped */
+     * secrecy on teardown covers every ratchet key, not just session_key.
+     * Secure-wipe, not memset: the caller reads nothing back but s->state
+     * afterward (it goes to DM_STATE_NONE), so every key byte is a dead store
+     * the compiler could elide, which would defeat forward secrecy. */
+    crypto_secure_wipe(s, sizeof(*s)); /* state -> DM_STATE_NONE, key + peer_id_pub wiped */
     return true;
 }
 
@@ -845,7 +851,12 @@ dm_session_t* dm_alloc(dm_table_t* t, uint32_t peer_addr, uint32_t now_ms) {
     if (victim < 0)
         return NULL; /* table full, nothing evictable */
 
-    memset(&t->s[victim], 0, sizeof(t->s[victim]));
+    /* Secure-wipe, not memset: unlike the free-slot path above (a DM_STATE_NONE
+     * slot was already wiped when it entered NONE and holds no live secret),
+     * the victim is a live HANDSHAKING / UNVERIFIED-ACTIVE session whose ratchet
+     * keys must be destroyed. Only peer_addr/timestamps are written back after,
+     * so the key bytes are dead stores the compiler could otherwise elide. */
+    crypto_secure_wipe(&t->s[victim], sizeof(t->s[victim]));
     t->s[victim].peer_addr = peer_addr;
     t->s[victim].established_ms = now_ms;
     t->s[victim].last_active_ms = now_ms;

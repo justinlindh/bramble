@@ -97,6 +97,8 @@ int crypto_random(uint8_t* buf, size_t len) {
     return crypto_entropy_fill(buf, len, esp_random);
 }
 
+void crypto_secure_wipe(void* buf, size_t len) { mbedtls_platform_zeroize(buf, len); }
+
 int crypto_x25519_dh(const uint8_t* private_key, const uint8_t* peer_public_key,
                      uint8_t* shared_secret) {
     int ret = -1;

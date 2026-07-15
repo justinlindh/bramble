@@ -63,6 +63,15 @@ uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uin
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash);
 int crypto_random(uint8_t* buf, size_t len);
 
+/* Compiler-barrier wipe for secret scratch: zero len bytes at buf in a way the
+ * optimizer may NOT elide as a dead store, unlike plain memset (which the
+ * standard lets the compiler drop when the buffer is not read again before it
+ * dies, exactly the case for handshake locals wiped at function exit). Use it
+ * for key material and DH outputs, not for ordinary struct zero-inits. Backed
+ * by mbedtls_platform_zeroize on device (crypto_esp.c) and OPENSSL_cleanse on
+ * host (crypto_host.c). */
+void crypto_secure_wipe(void* buf, size_t len);
+
 /* Ed25519 sign/verify/keypair. Keygen draws its 32-byte seed from
  * crypto_random(), so on device it sits behind the SEC-L1 fail-closed
  * entropy gate (crypto_entropy_fill); returns nonzero and writes no key
