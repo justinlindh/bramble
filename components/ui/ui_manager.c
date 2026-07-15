@@ -364,7 +364,13 @@ void ui_check_timeout(ui_state_t* state, uint32_t now_ms) {
     uint32_t inactivity_limit = (state->current_screen == SCREEN_MESSAGES)
                                     ? UI_MESSAGES_INACTIVITY_TIMEOUT_MS
                                     : UI_INACTIVITY_TIMEOUT_MS;
-    if (state->current_screen != SCREEN_MAIN &&
+    /* An auto-switched Messages view is governed by its own 30 s restore
+     * above, never by the general inactivity revert: the auto-switch does not
+     * touch last_activity (no human did anything), so on a device idle longer
+     * than the inactivity limit the revert fired on the SAME 50 ms tick as
+     * the switch and yanked the screen back before a single render. Incoming
+     * messages looked like they never opened the Messages screen at all. */
+    if (state->current_screen != SCREEN_MAIN && state->message_auto_switch_time == 0 &&
         (now_ms - state->last_activity) >= inactivity_limit) {
         state->prev_screen = state->current_screen;
         state->current_screen = SCREEN_MAIN;
