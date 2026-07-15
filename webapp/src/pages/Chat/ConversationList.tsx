@@ -120,7 +120,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   const peerLocations = useStore(s => s.peerLocations);
 
   const knownPeerAddrs = new Set<number>();
-  for (const n of neighbors) knownPeerAddrs.add(n.addr);
+  for (const n of neighbors ?? []) knownPeerAddrs.add(n.addr);
   for (const r of routes) {
     if (r.dest !== BROADCAST_ADDR) knownPeerAddrs.add(r.dest);
     if (r.nextHop !== BROADCAST_ADDR) knownPeerAddrs.add(r.nextHop);
@@ -255,7 +255,23 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
       {/* ── New DM Dialog ─────────────────────────── */}
       {showDmDialog && (
-        <div className={styles.dialogBackdrop} onClick={() => setShowDmDialog(false)}>
+        <div
+          className={styles.dialogBackdrop}
+          onClick={() => setShowDmDialog(false)}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              // Stop the NATIVE event too (React's synthetic stopPropagation
+              // does both): the mobile sidebar's Escape listener lives on
+              // window, and Escape must dismiss only this topmost overlay,
+              // not also the sidebar underneath it.
+              e.stopPropagation();
+              setShowDmDialog(false);
+            }
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="New Direct Message"
+        >
           <div className={styles.dialog} onClick={e => e.stopPropagation()}>
             <h3 className={styles.dialogTitle}>New Direct Message</h3>
             {knownPeers.length > 0 && (
@@ -290,7 +306,20 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
       {/* ── New Channel Dialog ────────────────────── */}
       {showChannelDialog && (
-        <div className={styles.dialogBackdrop} onClick={() => setShowChannelDialog(false)}>
+        <div
+          className={styles.dialogBackdrop}
+          onClick={() => setShowChannelDialog(false)}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              // Same topmost-overlay rule as the DM dialog above.
+              e.stopPropagation();
+              setShowChannelDialog(false);
+            }
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create Channel"
+        >
           <div className={styles.dialog} onClick={e => e.stopPropagation()}>
             <h3 className={styles.dialogTitle}>Create Channel</h3>
             <p className={styles.dialogDesc}>Enter channel details:</p>

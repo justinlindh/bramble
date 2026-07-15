@@ -55,13 +55,13 @@ export function Config() {
       {/* ── Peer Manager ── */}
       <section className={styles.section}>
         <h2><IconPeers size={18} /> Peers</h2>
-        <PeerManager neighbors={neighbors} routes={routes} />
+        <PeerManager neighbors={neighbors ?? []} routes={routes} />
       </section>
 
       {/* ── Location ── */}
       <section className={styles.section}>
         <h2><IconLocation size={18} /> Location</h2>
-        <LocationSection location={config.location} neighbors={neighbors} channels={config.channels} gpsAvailable={status?.gpsAvailable} />
+        <LocationSection location={config.location} neighbors={neighbors ?? []} channels={config.channels} gpsAvailable={status?.gpsAvailable} />
       </section>
 
       {/* ── Network Key ── */}

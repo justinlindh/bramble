@@ -182,7 +182,21 @@ export function TrafficMonitor() {
 
   if (!isConnected) return null;
 
-  if (!trafficDebugStatus || !trafficDebugStatus.config.enabled) {
+  // Not yet fetched since connect: distinguish "still loading" from the
+  // "loaded, and it's actually disabled" case below so a slow ESP32 link
+  // doesn't read as disabled.
+  if (trafficDebugStatus === null) {
+    return (
+      <section className={styles.card}>
+        <div className={styles.header}>
+          <h3 className={styles.title}>Traffic Monitor</h3>
+        </div>
+        <p className={styles.muted}>Loading traffic monitor…</p>
+      </section>
+    );
+  }
+
+  if (!trafficDebugStatus.config.enabled) {
     return (
       <section className={styles.card}>
         <div className={styles.header}>

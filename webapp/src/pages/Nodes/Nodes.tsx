@@ -18,7 +18,10 @@ export function Nodes() {
   const peerLocations = useStore((s) => s.peerLocations);
   const peerNames = useStore((s) => s.peerNames);
   const connected = useStore((s) => s.connectionState === 'connected');
-  const knownPeers = buildKnownPeers(neighbors, routes, peerLocations);
+  // undefined = never fetched since connect; [] = fetched, no neighbors found.
+  const neighborsLoading = connected && neighbors === undefined;
+  const neighborList = neighbors ?? [];
+  const knownPeers = buildKnownPeers(neighborList, routes, peerLocations);
 
   // Auto-refresh: neighbors every 5s, routes every 10s, peer locations every 10s
   usePoll(loadNeighbors, 5000);
@@ -30,13 +33,15 @@ export function Nodes() {
       {/* ── Neighbor cards ── */}
       <header className={styles.sectionHeader}>
         <h2><IconNodes size={18} /> Neighbors</h2>
-        <span className={styles.count}>{neighbors.length}</span>
+        <span className={styles.count}>{neighborList.length}</span>
         {!connected && (
           <span className={styles.offlinePill}>offline</span>
         )}
       </header>
 
-      {neighbors.length === 0 ? (
+      {neighborsLoading ? (
+        <p className={styles.empty}>Loading neighbors…</p>
+      ) : neighborList.length === 0 ? (
         <p className={styles.empty}>
           {connected
             ? 'No direct radio neighbors discovered yet.'
@@ -44,7 +49,7 @@ export function Nodes() {
         </p>
       ) : (
         <div className={styles.cardGrid}>
-          {neighbors.map((n) => (
+          {neighborList.map((n) => (
             <NeighborCard key={n.addr} neighbor={n} peerLocation={peerLocations.find(l => l.addr === n.addr)} onOpenDM={openDM} onShowOnMap={showOnMap} />
           ))}
         </div>

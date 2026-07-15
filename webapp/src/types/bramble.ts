@@ -389,7 +389,8 @@ export interface AppState {
   status: NodeStatus | null;
   airtime: AirtimeStatus | null;
   airtimePolicy: AirtimePolicy | null;
-  neighbors: Neighbor[];
+  // undefined = never fetched since connect (distinct from [] = fetched, none found)
+  neighbors: Neighbor[] | undefined;
   routes: Route[];
   messages: Message[];
   conversations: Map<string, Conversation>;
