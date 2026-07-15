@@ -4,6 +4,7 @@ This index separates **operator/developer reference docs** from **historical pla
 
 ## Start here
 
+- [getting-started.md](getting-started.md): first-node walkthrough from flashing to your first confirmed message (provisioning, unprovisioned banner, optional trust anchor)
 - [../README.md](../README.md): project overview and quick start
 - [BUILDING.md](BUILDING.md): build/flash/monitor workflows (board-aware)
 - [bramble-testing.md](bramble-testing.md): test matrix and what to run
@@ -12,6 +13,7 @@ This index separates **operator/developer reference docs** from **historical pla
 - [SECURITY-MODEL.md](SECURITY-MODEL.md): threat model, verified protections, and known gaps
 - [auth.md](auth.md): RPC authentication, pairing, and the browser origin allowlist
 - [network-key-provisioning.md](network-key-provisioning.md): generating, distributing, and verifying the control-plane network key across a fleet
+- [trust-anchor.md](trust-anchor.md): optional per-fleet trust anchor: enrollment ceremony, endorsed-only pinning, and what Sybil scarcity it does and does not close
 - [api/rpc.md](api/rpc.md): RPC method reference and wire-format notes
 - [COMPARISON.md](COMPARISON.md): comparison with Meshtastic and MeshCore
 - [results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md): current measured scale results (supersedes [results/simulation-2026-06.md](results/simulation-2026-06.md))
