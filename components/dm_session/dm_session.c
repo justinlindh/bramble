@@ -53,17 +53,19 @@ static int ct_le32(const uint8_t a[32], const uint8_t b[32]) {
 int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
                    const uint8_t peer_id_pub[32], const uint8_t peer_eph_pub[32],
                    uint8_t ikm_out[128]) {
-    if (crypto_x25519_dh(my_eph_priv, peer_eph_pub, ikm_out + 0) != 0)
-        return -1;
-    if (crypto_x25519_dh(my_id_priv, peer_id_pub, ikm_out + 32) != 0)
-        return -1;
+    int rc = -1;
+    uint8_t cross_a[32] = {0}; /* my_eph x peer_id */
+    uint8_t cross_b[32] = {0}; /* my_id  x peer_eph */
 
-    uint8_t cross_a[32]; /* my_eph x peer_id */
-    uint8_t cross_b[32]; /* my_id  x peer_eph */
+    if (crypto_x25519_dh(my_eph_priv, peer_eph_pub, ikm_out + 0) != 0)
+        goto out;
+    if (crypto_x25519_dh(my_id_priv, peer_id_pub, ikm_out + 32) != 0)
+        goto out;
+
     if (crypto_x25519_dh(my_eph_priv, peer_id_pub, cross_a) != 0)
-        return -1;
+        goto out;
     if (crypto_x25519_dh(my_id_priv, peer_eph_pub, cross_b) != 0)
-        return -1;
+        goto out;
 
     /* Canonical ordering: min-first, both compare and placement branchless. */
     uint32_t le_mask = 0u - (uint32_t)ct_le32(cross_a, cross_b); /* all-ones if cross_a<=cross_b */
@@ -71,7 +73,16 @@ int dm_compute_ikm(const uint8_t my_id_priv[32], const uint8_t my_eph_priv[32],
         ikm_out[64 + i] = (uint8_t)((cross_a[i] & le_mask) | (cross_b[i] & ~le_mask));
         ikm_out[96 + i] = (uint8_t)((cross_b[i] & le_mask) | (cross_a[i] & ~le_mask));
     }
-    return 0;
+    rc = 0;
+out:
+    /* Wipe the cross-term DH scratch on every exit; on failure also wipe the
+     * partially-populated ikm_out (ikm_out[0:64] holds DH outputs by the time
+     * any later step can fail). */
+    memset(cross_a, 0, sizeof(cross_a));
+    memset(cross_b, 0, sizeof(cross_b));
+    if (rc != 0)
+        memset(ikm_out, 0, 128);
+    return rc;
 }
 
 /* Shared by dm_derive_session_key, the K_ke_init tag, and the K_confirm
@@ -389,7 +400,9 @@ int dm_derive_session_key(const uint8_t my_id_priv[32], const uint8_t my_eph_pri
     uint8_t ikm[128];
     if (dm_compute_ikm(my_id_priv, my_eph_priv, peer_id_pub, peer_eph_pub, ikm) != 0)
         return -1;
-    return dm_session_key_from_ikm(ikm, addr_a, addr_b, ke_epoch, session_key_out);
+    int rc = dm_session_key_from_ikm(ikm, addr_a, addr_b, ke_epoch, session_key_out);
+    memset(ikm, 0, sizeof(ikm));
+    return rc;
 }
 
 /* Renders 4 HKDF output bytes as 7 human-comparable decimal digits. Shared
@@ -479,17 +492,25 @@ static int dm_derive_ke_tag(const char* label, const uint8_t* ikm, size_t ikm_le
     memcpy(hkdf_info, label, label_len);
     memcpy(hkdf_info + label_len, info, sizeof(info));
 
-    uint8_t key[32];
+    int rc = -1;
+    uint8_t key[32] = {0};
+    uint8_t full_mac[32] = {0};
     const char* salt = "bramble-dm-v2";
     if (crypto_hkdf_sha256((const uint8_t*)salt, strlen(salt), ikm, ikm_len, hkdf_info,
                            label_len + sizeof(info), key, sizeof(key)) != 0)
-        return -1;
+        goto out;
 
-    uint8_t full_mac[32];
     if (crypto_hmac_sha256(key, sizeof(key), transcript, transcript_len, full_mac) != 0)
-        return -1;
+        goto out;
     memcpy(tag_out, full_mac, 16);
-    return 0;
+    rc = 0;
+out:
+    /* Wipe the HKDF-derived MAC subkey and the full MAC on every exit past
+     * their population: only full_mac[0:16] ever leaves this function (as
+     * tag_out); the key and the MAC tail are secret scratch. */
+    memset(key, 0, sizeof(key));
+    memset(full_mac, 0, sizeof(full_mac));
+    return rc;
 }
 
 int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
@@ -519,13 +540,14 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
      * pairing, not Task 1.1's role-agnostic sorted cross-term (that sort
      * exists only because the FINAL session key mixes both parties'
      * ephemerals symmetrically after both exist; here only one does). */
-    uint8_t dh2[32], dh3[32];
+    int rc = -1;
+    uint8_t dh2[32] = {0}, dh3[32] = {0};
+    uint8_t ikm[64] = {0};
     if (crypto_x25519_dh(my_id->private_key, peer_id_pub_or_null, dh2) != 0)
-        return -1;
+        goto out;
     if (crypto_x25519_dh(my_eph_priv, peer_id_pub_or_null, dh3) != 0)
-        return -1;
+        goto out;
 
-    uint8_t ikm[64];
     memcpy(ikm, dh2, 32);
     memcpy(ikm + 32, dh3, 32);
 
@@ -542,8 +564,15 @@ int dm_build_init(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     memcpy(transcript + 8, my_eph_pub, 32);
     memcpy(transcript + 40, my_id->public_key, 32);
 
-    return dm_derive_ke_tag("bramble-ke-init", ikm, sizeof(ikm), my_id->address, peer_addr,
-                            ke_epoch, transcript, sizeof(transcript), out->auth_tag);
+    rc = dm_derive_ke_tag("bramble-ke-init", ikm, sizeof(ikm), my_id->address, peer_addr, ke_epoch,
+                          transcript, sizeof(transcript), out->auth_tag);
+out:
+    /* Wipe the DH outputs and IKM on every exit past the DH steps (transcript
+     * holds only public fields and needs no wipe). */
+    memset(dh2, 0, sizeof(dh2));
+    memset(dh3, 0, sizeof(dh3));
+    memset(ikm, 0, sizeof(ikm));
+    return rc;
 }
 
 int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* my_id,
@@ -578,17 +607,18 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
     uint32_t addr_resp = my_id->address;
     uint16_t ke_epoch = (uint16_t)msg->key_id;
 
-    uint8_t dh2[32], dh3[32];
+    int rc = -1;
+    uint8_t dh2[32] = {0}, dh3[32] = {0};
+    uint8_t ikm[64] = {0};
     if (crypto_x25519_dh(my_id->private_key, peer_id_pub, dh2) != 0)
-        return -1;
+        goto out;
     /* My identity bound to the initiator's ephemeral (msg->ephemeral_pubkey).
      * By X25519 symmetry this equals the initiator's own
      * X25519(their eph_priv, my id_pub) computed in dm_build_init; the
      * verifier needs no ephemeral of its own for this term. */
     if (crypto_x25519_dh(my_id->private_key, msg->ephemeral_pubkey, dh3) != 0)
-        return -1;
+        goto out;
 
-    uint8_t ikm[64];
     memcpy(ikm, dh2, 32);
     memcpy(ikm + 32, dh3, 32);
 
@@ -607,9 +637,15 @@ int dm_verify_init(const bramble_key_exchange_t* msg, const bramble_identity_t* 
     uint8_t expect_tag[16];
     if (dm_derive_ke_tag("bramble-ke-init", ikm, sizeof(ikm), addr_init, addr_resp, ke_epoch,
                          transcript, sizeof(transcript), expect_tag) != 0)
-        return -1;
+        goto out;
 
-    return ct_eq(expect_tag, msg->auth_tag, 16) ? 0 : -1;
+    rc = ct_eq(expect_tag, msg->auth_tag, 16) ? 0 : -1;
+out:
+    /* Wipe the DH outputs and IKM on every exit past the DH steps. */
+    memset(dh2, 0, sizeof(dh2));
+    memset(dh3, 0, sizeof(dh3));
+    memset(ikm, 0, sizeof(ikm));
+    return rc;
 }
 
 int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
@@ -622,13 +658,14 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     out->key_id = (uint8_t)(ke_epoch & 0xFF);
     out->ke_type = KE_TYPE_RESP;
 
+    int rc = -1;
     uint8_t ikm[128];
     if (dm_compute_ikm(my_id->private_key, my_eph_priv, init->long_term_pubkey,
                        init->ephemeral_pubkey, ikm) != 0)
-        return -1;
+        return -1; /* dm_compute_ikm already wiped ikm on failure */
     if (dm_session_key_from_ikm(ikm, my_id->address, init->src_addr, ke_epoch, session_key_out) !=
         0)
-        return -1;
+        goto out;
 
     /* transcript_2 = addr_init || addr_resp || eph_init || id_init ||
      * eph_resp || id_resp: the RFC states "over the full transcript, both
@@ -650,8 +687,12 @@ int dm_build_resp(const bramble_identity_t* my_id, const uint8_t my_eph_pub[32],
     memcpy(transcript + 72, my_eph_pub, 32);
     memcpy(transcript + 104, my_id->public_key, 32);
 
-    return dm_derive_ke_tag("bramble-ke-confirm", ikm, sizeof(ikm), init->src_addr, my_id->address,
-                            ke_epoch, transcript, sizeof(transcript), out->auth_tag);
+    rc = dm_derive_ke_tag("bramble-ke-confirm", ikm, sizeof(ikm), init->src_addr, my_id->address,
+                          ke_epoch, transcript, sizeof(transcript), out->auth_tag);
+out:
+    /* Wipe the IKM on every exit past a successful dm_compute_ikm. */
+    memset(ikm, 0, sizeof(ikm));
+    return rc;
 }
 
 int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t* my_id,
@@ -671,10 +712,12 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
         memcmp(resp->long_term_pubkey, pinned_peer_x25519_or_null, 32) != 0)
         return DM_VERIFY_ERR_PIN_MISMATCH;
 
+    int rc = -1;
+    uint8_t local_key[32] = {0};
     uint8_t ikm[128];
     if (dm_compute_ikm(my_id->private_key, my_eph_priv, resp->long_term_pubkey,
                        resp->ephemeral_pubkey, ikm) != 0)
-        return -1;
+        return -1; /* dm_compute_ikm already wiped ikm on failure */
 
     /* Compute into a local buffer, not the caller's session_key_out, until
      * the confirm tag verifies: a caller that ignores the return value
@@ -682,9 +725,8 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
      * either way (this is the verifier's own computation from its own
      * private key), but a discipline of "the output is only valid on
      * success" is worth keeping regardless. */
-    uint8_t local_key[32];
     if (dm_session_key_from_ikm(ikm, my_id->address, resp->src_addr, ke_epoch, local_key) != 0)
-        return -1;
+        goto out;
 
     uint8_t transcript[4 + 4 + 32 + 32 + 32 + 32];
     transcript[0] = (uint8_t)(my_id->address >> 24);
@@ -703,13 +745,19 @@ int dm_verify_resp(const bramble_key_exchange_t* resp, const bramble_identity_t*
     uint8_t expect_tag[16];
     if (dm_derive_ke_tag("bramble-ke-confirm", ikm, sizeof(ikm), my_id->address, resp->src_addr,
                          ke_epoch, transcript, sizeof(transcript), expect_tag) != 0)
-        return -1;
+        goto out;
 
     if (!ct_eq(expect_tag, resp->auth_tag, 16))
-        return -1;
+        goto out;
 
     memcpy(session_key_out, local_key, 32);
-    return 0;
+    rc = 0;
+out:
+    /* Wipe the IKM and the local session-key copy on every exit past a
+     * successful dm_compute_ikm (local_key after it is copied out on success). */
+    memset(ikm, 0, sizeof(ikm));
+    memset(local_key, 0, sizeof(local_key));
+    return rc;
 }
 
 void dm_table_init(dm_table_t* t) { memset(t, 0, sizeof(*t)); }
