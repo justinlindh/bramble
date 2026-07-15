@@ -81,20 +81,32 @@ static void nvs_load_prefs(void) {
 
 static void nvs_save_enabled(bool enabled) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_open failed for sleep enabled: %d", err);
         return;
-    nvs_set_u8(h, NVS_KEY_SLEEP_EN, (uint8_t)enabled);
-    nvs_commit(h);
+    }
+    err = nvs_set_u8(h, NVS_KEY_SLEEP_EN, (uint8_t)enabled);
+    if (err == ESP_OK)
+        err = nvs_commit(h);
     nvs_close(h);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "failed to persist sleep enabled: %d", err);
 }
 
 static void nvs_save_timeout(uint16_t timeout_sec) {
     nvs_handle_t h;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK)
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_open failed for sleep timeout: %d", err);
         return;
-    nvs_set_u16(h, NVS_KEY_SLEEP_TOUT, timeout_sec);
-    nvs_commit(h);
+    }
+    err = nvs_set_u16(h, NVS_KEY_SLEEP_TOUT, timeout_sec);
+    if (err == ESP_OK)
+        err = nvs_commit(h);
     nvs_close(h);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "failed to persist sleep timeout: %d", err);
 }
 
 /* ── Timer callback ─────────────────────────────────────────────────── */

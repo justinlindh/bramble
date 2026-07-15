@@ -291,6 +291,27 @@ void test_set_mailbox_enabled_false_calls_mesh_and_returns_ok(void) {
     cJSON_Delete(resp);
 }
 
+void test_set_mailbox_nvs_open_failure_reports_error_and_skips_apply(void) {
+    /* T2: a failing NVS persist must not be reported to the caller as
+     * success, and the runtime setting must not silently apply while
+     * persistence failed (that would desync device state from what the
+     * client was told). */
+    g_stub_mailbox_enabled = false;
+    g_nvs_allow_open = false;
+    cJSON* resp =
+        dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":501,\"method\":\"bramble.setMailbox\","
+                           "\"params\":{\"enabled\":true}}");
+    cJSON* r = assert_result(resp);
+    TEST_ASSERT_FALSE_MESSAGE(cJSON_IsTrue(cJSON_GetObjectItem(r, "ok")),
+                              "ok should be false when NVS persist fails");
+    TEST_ASSERT_NOT_NULL_MESSAGE(cJSON_GetObjectItem(r, "error"),
+                                 "failure response should include an error field");
+    TEST_ASSERT_FALSE_MESSAGE(g_stub_mailbox_enabled,
+                              "mesh_set_mailbox should not be called when persist fails");
+    cJSON_Delete(resp);
+    g_nvs_allow_open = true;
+}
+
 void test_set_mailbox_missing_enabled_returns_invalid_params(void) {
     cJSON* resp =
         dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"bramble.setMailbox\","
@@ -580,6 +601,7 @@ int main(void) {
     /* setMailbox */
     RUN_TEST(test_set_mailbox_enabled_true_calls_mesh_and_returns_ok);
     RUN_TEST(test_set_mailbox_enabled_false_calls_mesh_and_returns_ok);
+    RUN_TEST(test_set_mailbox_nvs_open_failure_reports_error_and_skips_apply);
     RUN_TEST(test_set_mailbox_missing_enabled_returns_invalid_params);
     RUN_TEST(test_set_mailbox_string_enabled_returns_invalid_params);
     RUN_TEST(test_get_config_reflects_mailbox_enabled_after_set_mailbox_true);

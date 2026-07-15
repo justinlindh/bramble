@@ -704,13 +704,27 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
     esp_err_t err = nvs_open(NVS_NS_RADIO, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
         /* Store as integers to avoid float NVS issues */
-        nvs_set_u32(nvs, "freq_khz", (uint32_t)(cfg.frequency_mhz * 1000));
-        nvs_set_u8(nvs, "sf", cfg.sf);
-        nvs_set_u32(nvs, "bw_hz", cfg.bw_hz);
-        nvs_set_i8(nvs, "tx_power", cfg.tx_power);
-        nvs_set_u8(nvs, "cr", cfg.coding_rate);
-        nvs_commit(nvs);
+        err = nvs_set_u32(nvs, "freq_khz", (uint32_t)(cfg.frequency_mhz * 1000));
+        if (err == ESP_OK)
+            err = nvs_set_u8(nvs, "sf", cfg.sf);
+        if (err == ESP_OK)
+            err = nvs_set_u32(nvs, "bw_hz", cfg.bw_hz);
+        if (err == ESP_OK)
+            err = nvs_set_i8(nvs, "tx_power", cfg.tx_power);
+        if (err == ESP_OK)
+            err = nvs_set_u8(nvs, "cr", cfg.coding_rate);
+        if (err == ESP_OK)
+            err = nvs_commit(nvs);
         nvs_close(nvs);
+    }
+
+    if (err != ESP_OK) {
+        /* Radio was already reconfigured live above; only persistence
+         * failed, so the change is real until the next reboot. */
+        ESP_LOGE(TAG, "radio config persist failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "failed to persist; setting lost on reboot");
+        return 0;
     }
 
     ESP_LOGI(TAG, "Radio reconfigured: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm", cfg.frequency_mhz,
@@ -784,7 +798,9 @@ static int rpc_set_auth_token(const cJSON* params, cJSON* result) {
     }
 
     nvs_handle_t h;
-    if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK) {
+    esp_err_t err = nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed: %d", err);
         return RPC_ERR_INTERNAL;
     }
     if (val[0] == '\0') {
@@ -792,16 +808,28 @@ static int rpc_set_auth_token(const cJSON* params, cJSON* result) {
          * first-boot generator does not re-create a token on next boot.
          * Reaching this handler already required auth, so only a token
          * holder (or serial/physical access) can open the device up. */
-        nvs_set_u8(h, NVS_KEY_AUTH_OFF, 1);
-        nvs_erase_key(h, NVS_KEY_AUTH_TOKEN);
-        ESP_LOGW(TAG, "RPC auth explicitly disabled via setAuthToken; device is open access");
+        err = nvs_set_u8(h, NVS_KEY_AUTH_OFF, 1);
+        if (err == ESP_OK) {
+            err = nvs_erase_key(h, NVS_KEY_AUTH_TOKEN);
+            if (err == ESP_ERR_NVS_NOT_FOUND)
+                err = ESP_OK; /* no existing token to erase is not a failure */
+        }
+        if (err == ESP_OK)
+            ESP_LOGW(TAG, "RPC auth explicitly disabled via setAuthToken; device is open access");
     } else {
         /* Set token and clear the opt-out flag */
-        nvs_set_u8(h, NVS_KEY_AUTH_OFF, 0);
-        nvs_set_str(h, NVS_KEY_AUTH_TOKEN, val);
+        err = nvs_set_u8(h, NVS_KEY_AUTH_OFF, 0);
+        if (err == ESP_OK)
+            err = nvs_set_str(h, NVS_KEY_AUTH_TOKEN, val);
     }
-    nvs_commit(h);
+    if (err == ESP_OK)
+        err = nvs_commit(h);
     nvs_close(h);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "auth token persist failed: %d", err);
+        return RPC_ERR_INTERNAL;
+    }
 
     ws_server_load_token(); /* reload immediately */
     cJSON_AddBoolToObject(result, "ok", true);
@@ -1267,10 +1295,19 @@ static int handle_set_mailbox(const cJSON* params, cJSON* result) {
 
     /* Persist to NVS */
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_MAILBOX, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
-        nvs_commit(nvs);
+    esp_err_t err = nvs_open(NVS_NS_MAILBOX, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
+        if (err == ESP_OK)
+            err = nvs_commit(nvs);
         nvs_close(nvs);
+    }
+
+    if (err != ESP_OK) {
+        ESP_LOGE("rpc", "mailbox persist failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "nvs write failed");
+        return 0;
     }
 
     bool en = cJSON_IsTrue(enabled);
@@ -1293,10 +1330,19 @@ static int handle_set_flood_transport(const cJSON* params, cJSON* result) {
 
     /* Persist to NVS */
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
-        nvs_commit(nvs);
+    esp_err_t err = nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs, "enabled", cJSON_IsTrue(enabled) ? 1 : 0);
+        if (err == ESP_OK)
+            err = nvs_commit(nvs);
         nvs_close(nvs);
+    }
+
+    if (err != ESP_OK) {
+        ESP_LOGE("rpc", "flood transport persist failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "nvs write failed");
+        return 0;
     }
 
     bool en = cJSON_IsTrue(enabled);
@@ -1327,10 +1373,21 @@ static int handle_set_flood_hop_limit(const cJSON* params, cJSON* result) {
 
     /* Persist the clamped value to NVS. */
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "hop_limit", applied);
-        nvs_commit(nvs);
+    esp_err_t err = nvs_open(NVS_NS_FLOOD, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs, "hop_limit", applied);
+        if (err == ESP_OK)
+            err = nvs_commit(nvs);
         nvs_close(nvs);
+    }
+
+    if (err != ESP_OK) {
+        /* Hop limit is already applied live above; only persistence
+         * failed, so the change is real until the next reboot. */
+        ESP_LOGE("rpc", "flood hop limit persist failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "failed to persist; setting lost on reboot");
+        return 0;
     }
 
     ESP_LOGI("rpc", "Flood hop limit set to %u", (unsigned)applied);
@@ -1386,10 +1443,14 @@ static esp_err_t location_policy_load_or_init(nvs_handle_t nvs, location_policy_
     }
 
     if (write_back) {
-        nvs_set_u8(nvs, "enabled", policy->enabled ? 1 : 0);
-        nvs_set_u16(nvs, "interval_s", policy->interval_s);
-        nvs_set_str(nvs, "def_tier", location_tier_to_string(policy->default_tier));
-        return nvs_commit(nvs);
+        err = nvs_set_u8(nvs, "enabled", policy->enabled ? 1 : 0);
+        if (err == ESP_OK)
+            err = nvs_set_u16(nvs, "interval_s", policy->interval_s);
+        if (err == ESP_OK)
+            err = nvs_set_str(nvs, "def_tier", location_tier_to_string(policy->default_tier));
+        if (err == ESP_OK)
+            err = nvs_commit(nvs);
+        return err;
     }
 
     return ESP_OK;
@@ -1477,15 +1538,20 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
         policy.default_tier = location_tier_from_string(default_tier->valuestring);
     }
 
+    esp_err_t err = ESP_OK;
     cJSON* source = cJSON_GetObjectItem(params, "source");
     if (source && cJSON_IsString(source)) {
-        nvs_set_str(nvs, LOCATION_SOURCE_KEY, rpc_location_source_normalize(source->valuestring));
+        err = nvs_set_str(nvs, LOCATION_SOURCE_KEY,
+                          rpc_location_source_normalize(source->valuestring));
     }
 
     location_policy_normalize(&policy);
-    nvs_set_u8(nvs, "enabled", policy.enabled ? 1 : 0);
-    nvs_set_u16(nvs, "interval_s", policy.interval_s);
-    nvs_set_str(nvs, "def_tier", location_tier_to_string(policy.default_tier));
+    if (err == ESP_OK)
+        err = nvs_set_u8(nvs, "enabled", policy.enabled ? 1 : 0);
+    if (err == ESP_OK)
+        err = nvs_set_u16(nvs, "interval_s", policy.interval_s);
+    if (err == ESP_OK)
+        err = nvs_set_str(nvs, "def_tier", location_tier_to_string(policy.default_tier));
 
     cJSON* contact_rules = cJSON_GetObjectItem(params, "contact_rules");
     if (contact_rules && cJSON_IsArray(contact_rules)) {
@@ -1520,7 +1586,8 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             char val[48];
             snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", address->valuestring);
             rpc_location_write_rule_string(val, sizeof(val), &rule);
-            nvs_set_str(nvs, key, val);
+            if (err == ESP_OK)
+                err = nvs_set_str(nvs, key, val);
         }
     }
 
@@ -1557,20 +1624,29 @@ static int handle_set_location_config(const cJSON* params, cJSON* result) {
             char val[48];
             snprintf(key, sizeof(key), LOCATION_CHANNEL_RULE_PREFIX "%02d", channel->valueint);
             rpc_location_write_rule_string(val, sizeof(val), &rule);
-            nvs_set_str(nvs, key, val);
+            if (err == ESP_OK)
+                err = nvs_set_str(nvs, key, val);
         }
     }
 
     /* Accept manual coordinates (no GPS hardware on Heltec V3) */
     cJSON* lat = cJSON_GetObjectItem(params, "lat");
     cJSON* lon = cJSON_GetObjectItem(params, "lon");
-    if (lat && cJSON_IsNumber(lat))
-        nvs_set_i32(nvs, "lat_e6", (int32_t)(lat->valuedouble * 1e6));
-    if (lon && cJSON_IsNumber(lon))
-        nvs_set_i32(nvs, "lon_e6", (int32_t)(lon->valuedouble * 1e6));
+    if (lat && cJSON_IsNumber(lat) && err == ESP_OK)
+        err = nvs_set_i32(nvs, "lat_e6", (int32_t)(lat->valuedouble * 1e6));
+    if (lon && cJSON_IsNumber(lon) && err == ESP_OK)
+        err = nvs_set_i32(nvs, "lon_e6", (int32_t)(lon->valuedouble * 1e6));
 
-    nvs_commit(nvs);
+    if (err == ESP_OK)
+        err = nvs_commit(nvs);
     nvs_close(nvs);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "location config persist failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "nvs write failed");
+        return 0;
+    }
 
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
@@ -1585,7 +1661,9 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
         return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
+    esp_err_t err = nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed: %d", err);
         cJSON_AddBoolToObject(result, "ok", false);
         return 0;
     }
@@ -1607,10 +1685,17 @@ static int handle_set_location_contact(const cJSON* params, cJSON* result) {
     char rule_buf[48];
     rpc_location_write_rule_string(rule_buf, sizeof(rule_buf), &rule);
     snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
-    nvs_set_str(nvs, key, rule_buf);
-
-    nvs_commit(nvs);
+    err = nvs_set_str(nvs, key, rule_buf);
+    if (err == ESP_OK)
+        err = nvs_commit(nvs);
     nvs_close(nvs);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "location contact persist failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "nvs write failed");
+        return 0;
+    }
 
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;
@@ -1624,16 +1709,28 @@ static int handle_remove_location_contact(const cJSON* params, cJSON* result) {
         return RPC_ERR_INVALID_PARAMS;
 
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs) != ESP_OK) {
+    esp_err_t err = nvs_open(NVS_NS_LOCATION, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open failed: %d", err);
         cJSON_AddBoolToObject(result, "ok", false);
         return 0;
     }
 
     char key[20];
     snprintf(key, sizeof(key), LOCATION_CONTACT_RULE_PREFIX "%.8s", addr_str);
-    nvs_erase_key(nvs, key);
-    nvs_commit(nvs);
+    err = nvs_erase_key(nvs, key);
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+        err = ESP_OK; /* nothing to remove is not a failure */
+    if (err == ESP_OK)
+        err = nvs_commit(nvs);
     nvs_close(nvs);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "location contact remove failed: %d", err);
+        cJSON_AddBoolToObject(result, "ok", false);
+        cJSON_AddStringToObject(result, "error", "nvs write failed");
+        return 0;
+    }
 
     cJSON_AddBoolToObject(result, "ok", true);
     return 0;

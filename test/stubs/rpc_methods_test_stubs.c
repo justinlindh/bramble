@@ -499,6 +499,14 @@ esp_err_t nvs_open(const char* ns, int mode, nvs_handle_t* out) {
         *out = 4;
         return ESP_OK;
     }
+    if (strcmp(ns, "bramble_flood") == 0) {
+        *out = 5;
+        return ESP_OK;
+    }
+    if (strcmp(ns, "bramble_radio") == 0) {
+        *out = 6;
+        return ESP_OK;
+    }
     return ESP_FAIL;
 }
 void nvs_close(nvs_handle_t h) { (void)h; }
