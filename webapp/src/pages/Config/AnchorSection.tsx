@@ -17,6 +17,7 @@ import {
 import { setAnchor, getIdentity, setEndorsement, loadAnchorStatus } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './AnchorSection.module.css';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -124,7 +125,7 @@ export function AnchorSection() {
       await loadAnchorStatus();
       setStatusError(null);
     } catch (e) {
-      setStatusError((e as Error).message);
+      setStatusError(friendlyErrorFrom(e));
     }
   };
 
@@ -150,7 +151,7 @@ export function AnchorSection() {
       // anywhere until the operator confirms the backup below.
       setPendingAnchor(clientAnchorFromSeed(seedHex));
     } catch (e) {
-      setGenerateError((e as Error).message);
+      setGenerateError(friendlyErrorFrom(e));
     }
   };
 
@@ -193,7 +194,7 @@ export function AnchorSection() {
       setClientAnchor(anchor);
       setImportInput('');
     } catch (e) {
-      setImportError((e as Error).message);
+      setImportError(friendlyErrorFrom(e));
     }
   };
 
@@ -221,7 +222,7 @@ export function AnchorSection() {
         setProvisionError('Device rejected the anchor.');
       }
     } catch (e) {
-      setProvisionError((e as Error).message);
+      setProvisionError(friendlyErrorFrom(e));
     } finally {
       setProvisioning(false);
     }
@@ -249,7 +250,7 @@ export function AnchorSection() {
         setEnrollError('Device rejected the endorsement cert.');
       }
     } catch (e) {
-      setEnrollError((e as Error).message);
+      setEnrollError(friendlyErrorFrom(e));
     } finally {
       setEnrolling(false);
     }
@@ -269,7 +270,7 @@ export function AnchorSection() {
       const { notAfterHex, sigHex } = signEndorsement(clientAnchor.seedHex, pub, PERMANENT_NOT_AFTER);
       setRemoteCert({ uri: encodeCertShare(notAfterHex, sigHex), fp: anchorFingerprint(pub) });
     } catch (e) {
-      setRemoteError((e as Error).message);
+      setRemoteError(friendlyErrorFrom(e));
     }
   };
 
@@ -280,7 +281,7 @@ export function AnchorSection() {
       const identity = await getIdentity();
       setIdentityShare(encodeIdentityShare(identity.ed25519_pub));
     } catch (e) {
-      setIdentityError((e as Error).message);
+      setIdentityError(friendlyErrorFrom(e));
     }
   };
 
@@ -304,7 +305,7 @@ export function AnchorSection() {
         setApplyError('Device rejected the cert (wrong anchor, or not for this node).');
       }
     } catch (e) {
-      setApplyError((e as Error).message);
+      setApplyError(friendlyErrorFrom(e));
     } finally {
       setApplying(false);
     }

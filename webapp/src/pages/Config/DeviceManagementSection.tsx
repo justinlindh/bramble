@@ -5,6 +5,7 @@ import {
   getOtaOrigin, setOtaOrigin, resetOtaOrigin, startOtaUpdate,
   type OtaOriginInfo,
 } from '../../store/actions';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './DeviceManagementSection.module.css';
 
 // Issue #95: the web client had no UI for the device auth token, the WS Origin
@@ -41,7 +42,7 @@ export function DeviceManagementSection() {
       setOta(t);
       setLoaded(true);
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }
@@ -59,7 +60,7 @@ export function DeviceManagementSection() {
         : 'Authentication disabled. Anyone on the network can connect.');
       setNewToken('');
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }
@@ -74,7 +75,7 @@ export function DeviceManagementSection() {
       setOrigins(next);
       setNewOrigin('');
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }
@@ -88,7 +89,7 @@ export function DeviceManagementSection() {
       await setAllowedOrigins(next);
       setOrigins(next);
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }
@@ -106,7 +107,7 @@ export function DeviceManagementSection() {
       await refreshOta();
       setOtaNotice('Update origin saved.');
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }
@@ -119,7 +120,7 @@ export function DeviceManagementSection() {
       await resetOtaOrigin();
       await refreshOta();
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }
@@ -134,7 +135,7 @@ export function DeviceManagementSection() {
       if (!r.ok) { setError(r.error ?? 'Update could not start.'); return; }
       setOtaNotice(r.note ?? 'Update started.');
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setLoading(false);
     }

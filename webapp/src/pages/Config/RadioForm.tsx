@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { RadioConfig } from "../../types/bramble";
 import { saveRadio } from "../../store/actions";
+import { friendlyErrorFrom } from "../../lib/errors";
 import styles from "./RadioForm.module.css";
 
 interface RadioFormProps {
@@ -69,7 +70,7 @@ export function RadioForm({ radio }: RadioFormProps) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError((err as Error).message);
+      setError(friendlyErrorFrom(err));
     } finally {
       setSaving(false);
     }

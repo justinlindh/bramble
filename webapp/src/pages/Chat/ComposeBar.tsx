@@ -5,6 +5,7 @@ import { sendMessage, shareLocationOnce } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { IconCritical, IconBroadcast, IconSend } from '../../components/Icons';
 import { showToast } from '../../components/Toast';
+import { friendlyErrorFrom } from '../../lib/errors';
 import { ShareLocationToggle } from './ShareLocationButton';
 import type { LocationAttach } from './ShareLocationButton';
 import styles from './ComposeBar.module.css';
@@ -100,11 +101,11 @@ export function ComposeBar({ conversationId }: ComposeBarProps) {
       if (locAttach !== 'off' && dest !== 0xFFFFFFFF) {
         const locTier = locAttach === 'exact' ? 'full' : 'coarse';
         shareLocationOnce(dest, locTier as import('../../types/bramble').LocationTier).catch((err) => {
-          showToast(`Location attach failed: ${(err as Error).message ?? 'unknown error'}`, 'error', 4000);
+          showToast(`Location attach failed: ${friendlyErrorFrom(err)}`, 'error', 4000);
         });
       }
     } catch (e) {
-      showToast((e as Error).message ?? 'Send failed', 'error', 5000);
+      showToast(friendlyErrorFrom(e), 'error', 5000);
       // restore original text so user can retry (preserve /me prefix, not encoded form)
       setText(trimmed);
     } finally {

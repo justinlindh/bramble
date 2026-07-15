@@ -5,6 +5,7 @@ import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { QRScanModal } from '../../components/QRScanModal';
 import type { ScanResult } from '../../components/QRScanModal';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './NetworkKeySection.module.css';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -41,7 +42,7 @@ export function NetworkKeySection() {
       await loadNetworkKeyStatus();
       setStatusError(null);
     } catch (e) {
-      setStatusError((e as Error).message);
+      setStatusError(friendlyErrorFrom(e));
     }
   };
 
@@ -65,7 +66,7 @@ export function NetworkKeySection() {
       setHexCopied(false);
       await refreshStatus();
     } catch (e) {
-      setGenerateError((e as Error).message);
+      setGenerateError(friendlyErrorFrom(e));
     } finally {
       setGenerating(false);
     }
@@ -107,7 +108,7 @@ export function NetworkKeySection() {
         setProvisionError('Device rejected the key.');
       }
     } catch (e) {
-      setProvisionError((e as Error).message);
+      setProvisionError(friendlyErrorFrom(e));
     } finally {
       setProvisioning(false);
     }
