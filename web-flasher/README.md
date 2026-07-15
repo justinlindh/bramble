@@ -44,3 +44,13 @@ Only complete releases are shown. A release is considered complete only if it co
 ## Browser requirements
 
 Web Serial API is required. Supported in Chrome and Edge (desktop). Not supported in Firefox or Safari.
+
+## Running the tests
+
+The `*.test.js` files use node:test and run in CI (the web-flasher-tests job). Locally:
+
+```bash
+node --test web-flasher/
+```
+
+Use Node 20 (the CI version). Node 25 fails on a bare directory argument with MODULE_NOT_FOUND; pass explicit file paths there instead.

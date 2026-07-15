@@ -11,6 +11,7 @@ on:
       - 'ci/**'
     paths:
       - 'webapp/**'
+      - 'web-flasher/**'
       - '.gitea/workflows/webapp-quality.yml'
       - '.actionlint.yaml'
 
@@ -65,6 +66,18 @@ jobs:
         run: npm ci --prefix webapp
       - name: Run electron typecheck
         run: npm run typecheck:electron --prefix webapp
+
+  web-flasher-tests:
+    name: web-flasher tests
+    runs-on: linux
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run web-flasher node:test suite
+        run: node --test web-flasher/
 
   required-unit-tests:
     name: Required unit tests

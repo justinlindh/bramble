@@ -34,7 +34,9 @@ The **protocol version** defines the JSON-RPC API contract between firmware and 
 - **Runtime:** firmware returns it via `bramble.getVersion` → `protocol_version`
 - **Independent** from firmware version; they evolve separately
 
-Current state: the method surface is synced and CI-enforced, but the version strings are not yet aligned. The spec declares `0.6.0` (`api/openapi.yaml` `info.version`) while the firmware constant reports `0.5.0` (`BRAMBLE_PROTOCOL_VERSION` in `main/rpc_methods.c`). The two are due a coordinated bump; the contract check enforces method names, not the version string.
+**As of 2026-07-15:** the method surface is synced and CI-enforced, but the version strings are not aligned and the drift is expected to persist for a while. The spec declares `0.6.0` (`api/openapi.yaml` `info.version`) while the firmware constant reports `0.5.0` (`BRAMBLE_PROTOCOL_VERSION` in `main/rpc_methods.c`). The firmware string cannot be bumped to `0.6.0` on its own: `bramble-go` (the Go SDK) hardcodes `MaxProtocolVersion = "0.5.0"` (`version.go`), and any bramble-go client would refuse a `0.6.0` firmware as out of range. Bumping the firmware string is therefore blocked on a coordinated bramble-go release that raises the ceiling first, not just a firmware-side edit. The contract check (`scripts/check-rpc-contract.sh`) enforces method names between spec and firmware; it does not touch the version string.
+
+Wire versions (the mesh packet format, currently at wire version 4, `BRAMBLE_VERSION`) are a separate, orthogonal counter from the protocol version string above; a wire-version bump changes packet layout on the air and does not require a protocol-version bump, and vice versa.
 
 ### Semver Rules
 
@@ -78,6 +80,9 @@ Independent semver. Each release documents which bramble-go version it depends o
 | v0.2.1     | 0.1.0-0.2.1      | v0.2.0-dev     |
 | v0.4.2     | 0.1.0-0.5.0      | v0.4.1-dev     |
 | v0.5.0     | 0.1.0-0.5.0      | v0.5.0-dev     |
+| v0.12.0    | 0.1.0-0.5.0      | firmware `protocol_version 0.5.0` (current; no firmware release tags exist yet, see Firmware Versioning below) |
+
+`bramble-go` has released through v0.12.0 (adding trust-anchor client methods and API polish) without moving `MaxProtocolVersion` past `0.5.0`; the spec's `0.6.0` is not reachable by any released SDK today.
 
 ## Adding a New RPC Method
 
