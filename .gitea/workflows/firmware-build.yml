@@ -71,7 +71,7 @@ jobs:
       - name: Verify artifact signatures against the committed release public key
         run: |
           source scripts/ci-source-idf.sh
-          for board in heltec-v3 tdeck-plus heltec-v4; do
+          for board in heltec-v3 tdeck-plus heltec-v4 bramble-pager; do
             echo "Verifying signature: $board"
             espsecure.py verify_signature --version 2 \
               --keyfile keys/ota-release-pub.pem \
@@ -94,7 +94,7 @@ jobs:
           fi
           chmod +x scripts/ci-publish-ota.sh
 
-          for board in heltec-v3 tdeck-plus heltec-v4; do
+          for board in heltec-v3 tdeck-plus heltec-v4 bramble-pager; do
             echo "Publishing board: $board"
             BOARD="$board" \
             BOOTLOADER="build-artifacts/firmware-ci/$board/bootloader.bin" \
@@ -113,7 +113,7 @@ jobs:
           jq -e \
             --arg version "$VERSION" \
             --arg channel "$CHANNEL" \
-            --argjson boards '["heltec-v3","tdeck-plus","heltec-v4"]' \
+            --argjson boards '["heltec-v3","tdeck-plus","heltec-v4","bramble-pager"]' \
             '
             def matches_board_artifact($board; $name):
               ((.file // "") | endswith("/" + $board + "/" + $name)) or
@@ -129,7 +129,7 @@ jobs:
             and ([$boards[] | . as $b | $release | has_required_for_board($b)] | all)
             ' /tmp/ota-index.json >/dev/null
 
-          echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4"
+          echo "Verified complete published release in index: channel=$CHANNEL version=$VERSION boards=heltec-v3,tdeck-plus,heltec-v4,bramble-pager"
 
       - name: Create or update Gitea Release (firmware tags)
         if: startsWith(github.ref, 'refs/tags/firmware-v')

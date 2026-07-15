@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/build-artifacts/firmware-ci}"
 
-BOARDS=(heltec-v3 tdeck-plus heltec-v4)
+BOARDS=(heltec-v3 tdeck-plus heltec-v4 bramble-pager)
 
 log() {
   echo "[ci-build-firmware] $*"
@@ -28,6 +28,7 @@ board_defaults() {
     heltec-v3) echo "sdkconfig.defaults" ;;
     tdeck-plus) echo "sdkconfig.defaults;sdkconfig.defaults.tdeck_plus" ;;
     heltec-v4) echo "sdkconfig.defaults;sdkconfig.defaults.heltec_v4" ;;
+    bramble-pager) echo "sdkconfig.defaults;sdkconfig.defaults.bramble_pager" ;;
     *) die "Unsupported board: $1" ;;
   esac
 }
