@@ -42,6 +42,13 @@ curl -sS -H "Authorization: token $PAT" \
   "https://git.idiotica.org/api/v1/repos/dumbot/bramble/commits/<sha>/status"
 # -> .state = pending | success | failure ; .statuses[] has each check + target_url
 ```
+**GATE THE MERGE ON THE POLLED STATE.** Never chain `<poll output> && merge` in
+one command: a watcher that prints `failure` still exits 0, and the merge fires
+anyway (this landed a red PR once; the red was an infra flake, but only luck made
+it benign). Branch protection does NOT backstop you: `enable_status_check` is
+false on this repo, so Gitea will happily merge a red PR. Read the state, then
+merge in a separate command only if it is `success`.
+
 Merge (main's history is squash-merged, one commit per PR titled `... (#N)`):
 ```sh
 curl -sS -X POST -H "Authorization: token $PAT" -H "Content-Type: application/json" \
