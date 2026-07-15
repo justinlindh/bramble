@@ -65,7 +65,7 @@ describe('Escape overlay stacking (sidebar + dialog)', () => {
     expect(sidebarBackdrop().className).toMatch(/sidebarBackdropOpen/);
 
     fireEvent.click(screen.getByLabelText('New direct message'));
-    const dialog = screen.getByRole('dialog', { name: 'New Direct Message' });
+    expect(screen.getByRole('dialog', { name: 'New Direct Message' })).toBeInTheDocument();
 
     // Fire on the autofocused input inside the dialog, like a real keypress:
     // the event must bubble to the dialog handler and STOP there.
@@ -73,7 +73,6 @@ describe('Escape overlay stacking (sidebar + dialog)', () => {
 
     expect(screen.queryByRole('dialog', { name: 'New Direct Message' })).not.toBeInTheDocument();
     expect(sidebarBackdrop().className).toMatch(/sidebarBackdropOpen/);
-    void dialog;
 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(sidebarBackdrop().className).not.toMatch(/sidebarBackdropOpen/);

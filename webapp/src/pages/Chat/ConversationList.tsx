@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
@@ -89,6 +89,35 @@ function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolea
         <span className={styles.badge}>{conv.unreadCount}</span>
       )}
     </button>
+  );
+}
+
+// Shared backdrop for the ConversationList dialogs below: dialog role/aria-modal,
+// backdrop click closes, Escape closes and stops there (see the propagation note
+// inside the handler) so it never also closes an overlay underneath it.
+function EscapeDialog({ ariaLabel, onClose, children }: { ariaLabel: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div
+      className={styles.dialogBackdrop}
+      onClick={onClose}
+      onKeyDown={e => {
+        if (e.key === 'Escape') {
+          // Stop the NATIVE event too (React's synthetic stopPropagation
+          // does both): the mobile sidebar's Escape listener lives on
+          // window, and Escape must dismiss only this topmost overlay,
+          // not also the sidebar underneath it.
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel}
+    >
+      <div className={styles.dialog} onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -255,107 +284,74 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
       {/* ── New DM Dialog ─────────────────────────── */}
       {showDmDialog && (
-        <div
-          className={styles.dialogBackdrop}
-          onClick={() => setShowDmDialog(false)}
-          onKeyDown={e => {
-            if (e.key === 'Escape') {
-              // Stop the NATIVE event too (React's synthetic stopPropagation
-              // does both): the mobile sidebar's Escape listener lives on
-              // window, and Escape must dismiss only this topmost overlay,
-              // not also the sidebar underneath it.
-              e.stopPropagation();
-              setShowDmDialog(false);
-            }
-          }}
-          role="dialog"
-          aria-modal="true"
-          aria-label="New Direct Message"
-        >
-          <div className={styles.dialog} onClick={e => e.stopPropagation()}>
-            <h3 className={styles.dialogTitle}>New Direct Message</h3>
-            {knownPeers.length > 0 && (
-              <>
-                <p className={styles.dialogDesc}>Known peers</p>
-                <div className={styles.knownPeerList}>
-                  {knownPeers.map(addr => (
-                    <KnownPeerItem key={addr} addr={addr} onOpen={openDmByAddr} />
-                  ))}
-                </div>
-              </>
-            )}
-            <p className={styles.dialogDesc}>Or enter a node hex address:</p>
-            <input
-              className={styles.dialogInput}
-              value={dmAddr}
-              onChange={e => { setDmAddr(e.target.value); setDmError(''); }}
-              placeholder="0xABCD1234"
-              onKeyDown={e => e.key === 'Enter' && handleOpenDm()}
-              autoFocus
-            />
-            {dmError && <p className={styles.dialogError}>{dmError}</p>}
-            <div className={styles.dialogBtns}>
-              <button className={styles.dialogOpen} onClick={handleOpenDm}>Open</button>
-              <button className={styles.dialogCancel} onClick={() => setShowDmDialog(false)}>
-                Cancel
-              </button>
-            </div>
+        <EscapeDialog ariaLabel="New Direct Message" onClose={() => setShowDmDialog(false)}>
+          <h3 className={styles.dialogTitle}>New Direct Message</h3>
+          {knownPeers.length > 0 && (
+            <>
+              <p className={styles.dialogDesc}>Known peers</p>
+              <div className={styles.knownPeerList}>
+                {knownPeers.map(addr => (
+                  <KnownPeerItem key={addr} addr={addr} onOpen={openDmByAddr} />
+                ))}
+              </div>
+            </>
+          )}
+          <p className={styles.dialogDesc}>Or enter a node hex address:</p>
+          <input
+            className={styles.dialogInput}
+            value={dmAddr}
+            onChange={e => { setDmAddr(e.target.value); setDmError(''); }}
+            placeholder="0xABCD1234"
+            onKeyDown={e => e.key === 'Enter' && handleOpenDm()}
+            autoFocus
+          />
+          {dmError && <p className={styles.dialogError}>{dmError}</p>}
+          <div className={styles.dialogBtns}>
+            <button className={styles.dialogOpen} onClick={handleOpenDm}>Open</button>
+            <button className={styles.dialogCancel} onClick={() => setShowDmDialog(false)}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </EscapeDialog>
       )}
 
       {/* ── New Channel Dialog ────────────────────── */}
       {showChannelDialog && (
-        <div
-          className={styles.dialogBackdrop}
-          onClick={() => setShowChannelDialog(false)}
-          onKeyDown={e => {
-            if (e.key === 'Escape') {
-              // Same topmost-overlay rule as the DM dialog above.
-              e.stopPropagation();
-              setShowChannelDialog(false);
-            }
-          }}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Create Channel"
-        >
-          <div className={styles.dialog} onClick={e => e.stopPropagation()}>
-            <h3 className={styles.dialogTitle}>Create Channel</h3>
-            <p className={styles.dialogDesc}>Enter channel details:</p>
-            <input
-              className={styles.dialogInput}
-              value={channelName}
-              onChange={e => { setChannelName(e.target.value); setChannelError(''); }}
-              placeholder="Channel name"
-              maxLength={16}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleCreateChannel()}
-              autoFocus
-            />
-            <input
-              className={styles.dialogInput}
-              type="password"
-              value={channelPsk}
-              onChange={e => { setChannelPsk(e.target.value); setChannelError(''); }}
-              placeholder="PSK (optional)"
-              onKeyDown={e => e.key === 'Enter' && handleCreateChannel()}
-              autoComplete="new-password"
-            />
-            {channelError && <p className={styles.dialogError}>{channelError}</p>}
-            <div className={styles.dialogBtns}>
-              <button
-                className={styles.dialogOpen}
-                onClick={handleCreateChannel}
-                disabled={isCreating || !channelName.trim()}
-              >
-                {isCreating ? 'Creating…' : 'Create'}
-              </button>
-              <button className={styles.dialogCancel} onClick={() => setShowChannelDialog(false)}>
-                Cancel
-              </button>
-            </div>
+        <EscapeDialog ariaLabel="Create Channel" onClose={() => setShowChannelDialog(false)}>
+          <h3 className={styles.dialogTitle}>Create Channel</h3>
+          <p className={styles.dialogDesc}>Enter channel details:</p>
+          <input
+            className={styles.dialogInput}
+            value={channelName}
+            onChange={e => { setChannelName(e.target.value); setChannelError(''); }}
+            placeholder="Channel name"
+            maxLength={16}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleCreateChannel()}
+            autoFocus
+          />
+          <input
+            className={styles.dialogInput}
+            type="password"
+            value={channelPsk}
+            onChange={e => { setChannelPsk(e.target.value); setChannelError(''); }}
+            placeholder="PSK (optional)"
+            onKeyDown={e => e.key === 'Enter' && handleCreateChannel()}
+            autoComplete="new-password"
+          />
+          {channelError && <p className={styles.dialogError}>{channelError}</p>}
+          <div className={styles.dialogBtns}>
+            <button
+              className={styles.dialogOpen}
+              onClick={handleCreateChannel}
+              disabled={isCreating || !channelName.trim()}
+            >
+              {isCreating ? 'Creating…' : 'Create'}
+            </button>
+            <button className={styles.dialogCancel} onClick={() => setShowChannelDialog(false)}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </EscapeDialog>
       )}
     </aside>
   );

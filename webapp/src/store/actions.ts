@@ -7,7 +7,7 @@ import { listDevices, forgetDevice, renameDevice, upsertDevice, setDeviceToken }
 import { formatAddrHex } from '../utils/address';
 import { parseAddr } from '../lib/addr';
 import { isAndroidShell } from '../utils/platform';
-import { friendlyError } from '../lib/errors';
+import { friendlyErrorFrom } from '../lib/errors';
 import type {
   TransportType,
   BrambleConfig,
@@ -387,7 +387,7 @@ export async function connect(
     client = null;
     store.setTransport(null);
     // Show the overlay so the user can retry: 'disconnected' shows connect UI.
-    store.setConnectionState('disconnected', friendlyError((e as Error).message));
+    store.setConnectionState('disconnected', friendlyErrorFrom(e));
   }
 }
 
