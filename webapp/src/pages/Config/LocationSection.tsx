@@ -12,6 +12,7 @@ import { setLocationConfig } from '../../store/actions';
 import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './LocationSection.module.css';
 
 interface LocationSectionProps {
@@ -138,7 +139,7 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
         channel_targets: channelTargets,
       });
     } catch (e) {
-      setError((e as Error).message);
+      setError(friendlyErrorFrom(e));
     } finally {
       setSaving(false);
     }

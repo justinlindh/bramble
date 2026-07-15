@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { isBrambleShare, parseChannelShare, parseNodeShare } from '../utils/channelShare';
 import type { ChannelShareData, NodeShareData } from '../utils/channelShare';
 import { parseNetworkKeyShare } from '../utils/networkKeyShare';
+import { friendlyErrorFrom } from '../lib/errors';
 import styles from './QRScanModal.module.css';
 
 export type ScanResult =
@@ -96,7 +97,7 @@ export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRS
         };
         rafRef.current = requestAnimationFrame(scan);
       } catch (e) {
-        setCameraError((e as Error).message || 'Camera not available.');
+        setCameraError(friendlyErrorFrom(e) || 'Camera not available.');
         setMode('text');
       }
     };

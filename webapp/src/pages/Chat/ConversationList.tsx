@@ -4,6 +4,7 @@ import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } fr
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { addChannel } from '../../store/actions';
 import { useStore } from '../../store/index';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './ConversationList.module.css';
 
 interface ConversationListProps {
@@ -175,7 +176,7 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
       setChannelPsk('');
       setChannelError('');
     } catch (err) {
-      setChannelError((err as Error).message);
+      setChannelError(friendlyErrorFrom(err));
     } finally {
       setIsCreating(false);
     }

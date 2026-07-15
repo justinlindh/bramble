@@ -10,6 +10,7 @@ import { QRScanModal } from '../../components/QRScanModal';
 import { IconLock } from '../../components/Icons';
 import type { ScanResult } from '../../components/QRScanModal';
 import { encodeChannelShare } from '../../utils/channelShare';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './ChannelManager.module.css';
 
 interface ChannelManagerProps {
@@ -99,7 +100,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
       setNewName('');
       setNewPsk('');
     } catch (err) {
-      setError((err as Error).message);
+      setError(friendlyErrorFrom(err));
     } finally {
       setAdding(false);
     }
@@ -115,7 +116,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
         try {
           await removeChannel(index);
         } catch (err) {
-          setError((err as Error).message);
+          setError(friendlyErrorFrom(err));
         }
       },
     });
@@ -131,7 +132,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
         try {
           await setDefaultChannel(index);
         } catch (err) {
-          setError((err as Error).message);
+          setError(friendlyErrorFrom(err));
         }
       },
     });
@@ -171,7 +172,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
       setImportSuccess(`Channel "${name}" added!`);
       setTimeout(() => setImportSuccess(''), 3000);
     } catch (err) {
-      setError((err as Error).message);
+      setError(friendlyErrorFrom(err));
     }
   };
 

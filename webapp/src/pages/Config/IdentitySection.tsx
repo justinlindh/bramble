@@ -5,6 +5,7 @@ import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { encodeNodeShare } from '../../utils/channelShare';
 import { IconKey, IconNodes } from '../../components/Icons';
+import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './IdentitySection.module.css';
 
 interface IdentitySectionProps {
@@ -33,7 +34,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
-      setError((err as Error).message);
+      setError(friendlyErrorFrom(err));
     } finally {
       setSaving(false);
     }
@@ -57,7 +58,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError('Export failed: ' + (err as Error).message);
+      setError('Export failed: ' + friendlyErrorFrom(err));
     }
   };
 
@@ -118,7 +119,7 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
               try {
                 await setMailbox(e.target.checked);
               } catch (err) {
-                setError((err as Error).message);
+                setError(friendlyErrorFrom(err));
               }
             }}
           />
