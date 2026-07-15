@@ -412,6 +412,30 @@ void test_incoming_message_idle_auto_switches_to_messages(void) {
     TEST_ASSERT_TRUE(state.message_auto_switch_time > 0);
 }
 
+void test_auto_switched_messages_survives_long_idle_tick(void) {
+    /* A pager that has sat untouched far past every inactivity limit: the
+     * common real-world state (a heltec on a desk for hours). */
+    state.current_screen = SCREEN_MAIN;
+    state.last_activity = 1000;
+
+    ui_on_message_received(&state, 3600000); /* deeply idle: auto-switch fires */
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+
+    /* The very next 50 ms main-loop tick runs the inactivity check. The
+     * auto-switched view is governed by its own 30 s auto-restore; the general
+     * inactivity revert must not bounce it back to MAIN before a human (or a
+     * single render) can see it. This is exactly how "the screen never shows
+     * messages" shipped: the switch happened and was reverted on the same
+     * tick whenever the device had been idle longer than the Messages
+     * inactivity limit. */
+    ui_check_timeout(&state, 3600050);
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+
+    /* The timed restore still returns to the previous screen afterwards. */
+    ui_check_timeout(&state, 3600000 + UI_MESSAGE_AUTO_RESTORE_TIMEOUT_MS + 100);
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, state.current_screen);
+}
+
 void test_incoming_message_while_active_increments_unread_without_switch(void) {
     state.current_screen = SCREEN_NODES;
     state.last_activity = 5000;
@@ -827,5 +851,6 @@ int main(void) {
     RUN_TEST(test_nodes_entering_selection_with_zero_total_is_noop);
     RUN_TEST(test_nodes_selecting_reset_on_timeout_to_main);
     RUN_TEST(test_nodes_short_press_while_not_selecting_still_cycles_screen);
+    RUN_TEST(test_auto_switched_messages_survives_long_idle_tick);
     return UNITY_END();
 }
