@@ -29,11 +29,24 @@ and this project follows [Conventional Commits](https://www.conventionalcommits.
 - Android WebView shell hooks: embedded-shell capability detection, native message notifications with deep links, and an in-page mock node for embedded shells.
 - GPS: own position reported from live GPS in `bramble.getPeerLocations`, GPS status screen on the OLED UI, and antenna-warning suppression while a fix is valid.
 - Mesh: desynced DM sessions heal via re-handshake instead of dropping messages forever; broadcast-receipt slot window scales with mesh size.
+- Per-node Ed25519 identity with attestation and trust-on-first-use (TOFU) pinning.
+- Mandatory network-key provisioning: an unprovisioned node is inert and fails closed instead of falling back to a public PSK.
+- Optional fleet trust anchor with endorsement certificates, closing Sybil identity minting on anchored meshes.
+- DM forward secrecy ratchet with identity-bound SAS (safety number) verification, consistent across the webapp, T-Deck, and pager UIs.
+- Dual-substrate routing: opt-in hop-limited flood transport for unicast DATA, with flooded-ACK sender confirmation.
+- Bramble Pager v1 hardware design merged, with firmware/board support and a CI build.
+- T-Deck Plus LVGL UI wave: chat, nodes, map, stats, and settings screens.
+- DM handshake scratch secrets are zeroized after use instead of lingering in `dm_session`.
+- RPC handlers report NVS persist failures instead of claiming success on a failed write.
+- Raw transport/RPC errors are mapped to friendly text at every rendered surface.
+- Loading affordances for live pages and dialog accessibility for modals and backdrops.
+- Electron's `electron/` sources are typechecked as a required CI gate.
+- First-node getting-started guide.
 
 ### Changed
 
 - All transmissions now route through one budget-gated TX path (`components/radio/tx_gate.c`) with real airtime costing; regional duty-cycle caps from the frequency plan are enforced where required (EU868 1%), and the raw radio transmit call is no longer reachable outside the radio component.
-- `api/openapi.yaml` is synced to the firmware RPC registry (57 methods) and enforced in CI by `scripts/check-rpc-contract.sh`.
+- `api/openapi.yaml` is synced to the firmware RPC registry and enforced in CI by `scripts/check-rpc-contract.sh`.
 
 ## [2026-03-01]
 
