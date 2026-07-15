@@ -10,6 +10,7 @@
     "dev": "vite",
     "lint": "npm run typecheck",
     "typecheck": "tsc --noEmit",
+    "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "start": "node server/unified-server.mjs",

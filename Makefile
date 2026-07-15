@@ -4,7 +4,7 @@ SHELL := /usr/bin/env bash
 .PHONY: help ci check-fast ci-quality ci-firmware-quality ci-webapp-quality \
 	ci-quality-host-tests ci-quality-shellcheck ci-quality-actionlint ci-quality-ruff ci-quality-clang-format ci-quality-cppcheck ci-quality-board-build \
 	ci-fw-clang-format ci-fw-shellcheck ci-fw-actionlint \
-	ci-web-lint ci-web-typecheck ci-web-unit ci-web-build ci-web-smoke
+	ci-web-lint ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
 
 setup-hooks:
 	git config core.hooksPath githooks
@@ -63,7 +63,7 @@ help:
 	@echo "  make package-all        # linux + android"
 
 # Fast pre-commit gate: typecheck + unit tests only (no build/lint/smoke)
-check-fast: ci-web-typecheck ci-web-unit
+check-fast: ci-web-typecheck ci-web-typecheck-electron ci-web-unit
 
 ci: ci-quality ci-firmware-quality ci-webapp-quality
 
@@ -118,13 +118,16 @@ ci-fw-actionlint:
 		go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .gitea/workflows/firmware-quality.yml; \
 	fi
 
-ci-webapp-quality: ci-web-lint ci-web-typecheck ci-web-unit ci-web-build ci-web-smoke
+ci-webapp-quality: ci-web-lint ci-web-typecheck ci-web-typecheck-electron ci-web-unit ci-web-build ci-web-smoke
 
 ci-web-lint:
 	npm run lint --prefix webapp
 
 ci-web-typecheck:
 	npm run typecheck --prefix webapp
+
+ci-web-typecheck-electron:
+	npm run typecheck:electron --prefix webapp
 
 ci-web-unit:
 	npm run test:unit --prefix webapp
