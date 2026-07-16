@@ -63,4 +63,25 @@ describe('DevicePickerModal', () => {
     fireEvent.click(screen.getByText('Cancel'));
     expect(cancelDevicePicker).toHaveBeenCalled();
   });
+
+  it('exposes dialog role/aria-modal and Escape dismisses via the bridge cancel path', () => {
+    const { push, cancelDevicePicker } = setupBridge();
+    render(<DevicePickerModal />);
+    push({ kind: 'serial', devices: [{ id: 'p1', label: '/dev/ttyACM0' }] });
+
+    const dialog = screen.getByRole('dialog', { name: 'Select a serial device' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+
+    fireEvent.keyDown(screen.getByText('/dev/ttyACM0'), { key: 'Escape' });
+    expect(cancelDevicePicker).toHaveBeenCalled();
+  });
+
+  it('backdrop click also dismisses via the bridge cancel path', () => {
+    const { push, cancelDevicePicker } = setupBridge();
+    render(<DevicePickerModal />);
+    push({ kind: 'serial', devices: [{ id: 'p1', label: '/dev/ttyACM0' }] });
+
+    fireEvent.click(screen.getByRole('dialog', { name: 'Select a serial device' }));
+    expect(cancelDevicePicker).toHaveBeenCalled();
+  });
 });

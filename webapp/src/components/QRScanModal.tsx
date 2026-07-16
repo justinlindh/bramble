@@ -3,6 +3,7 @@ import { isBrambleShare, parseChannelShare, parseNodeShare } from '../utils/chan
 import type { ChannelShareData, NodeShareData } from '../utils/channelShare';
 import { parseNetworkKeyShare } from '../utils/networkKeyShare';
 import { friendlyErrorFrom } from '../lib/errors';
+import { EscapeDialog } from './EscapeDialog';
 import styles from './QRScanModal.module.css';
 
 export type ScanResult =
@@ -25,6 +26,28 @@ declare class BarcodeDetector {
 
 const hasBarcodeDetector =
   typeof window !== 'undefined' && 'BarcodeDetector' in window;
+
+// getUserMedia failures are DOMExceptions whose `name` identifies the
+// failure mode. friendlyErrorFrom's ERROR_MAP is connection-flavored (BLE /
+// serial / WiFi transport errors), so a camera NotFoundError would render as
+// "No device found. Make sure your node is powered on and in range." which
+// is the wrong domain entirely. Map the camera-specific names here, locally,
+// instead of polluting the shared connection ERROR_MAP; anything else falls
+// through to the shared copy.
+function friendlyCameraError(e: unknown): string {
+  const name = e instanceof DOMException ? e.name : (e as { name?: unknown } | null)?.name;
+  switch (name) {
+    case 'NotAllowedError':
+      return 'Camera access was denied. Allow camera access for this site in your browser settings, then try again.';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'No camera found on this device.';
+    case 'NotReadableError':
+      return 'Could not access the camera. It may be in use by another app.';
+    default:
+      return friendlyErrorFrom(e);
+  }
+}
 
 export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRScanModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -97,8 +120,12 @@ export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRS
         };
         rafRef.current = requestAnimationFrame(scan);
       } catch (e) {
-        setCameraError(friendlyErrorFrom(e));
-        setMode('text');
+        // Stay in camera mode so the error actually renders (it's shown by
+        // the mode === 'camera' branch below, in place of the video); the
+        // user can still tap "Paste String" to fall back manually. Forcing
+        // mode to 'text' here used to hide the error the same render it was
+        // set, since that branch is gated on mode === 'camera'.
+        setCameraError(friendlyCameraError(e));
       }
     };
 
@@ -112,11 +139,6 @@ export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRS
     };
   }, [mode, handleString]);
 
-  // ── Backdrop click ────────────────────────────────────────────────────────
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setParseError('');
@@ -124,82 +146,85 @@ export function QRScanModal({ onResult, onClose, title = 'Import Channel' }: QRS
   };
 
   return (
-    <div className={styles.backdrop} onClick={handleBackdropClick} role="dialog" aria-modal aria-label={title}>
-      <div className={styles.modal}>
-        <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
-        <h3 className={styles.title}>{title}</h3>
+    <EscapeDialog
+      ariaLabel={title}
+      onClose={onClose}
+      backdropClassName={styles.backdrop}
+      dialogClassName={styles.modal}
+    >
+      <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
+      <h3 className={styles.title}>{title}</h3>
 
-        {/* Tab switcher */}
-        <div className={styles.tabs}>
-          {hasBarcodeDetector && (
-            <button
-              className={`${styles.tab} ${mode === 'camera' ? styles.tabActive : ''}`}
-              onClick={() => { setParseError(''); setMode('camera'); }}
-            >
-              📷 Scan QR
-            </button>
-          )}
+      {/* Tab switcher */}
+      <div className={styles.tabs}>
+        {hasBarcodeDetector && (
           <button
-            className={`${styles.tab} ${mode === 'text' ? styles.tabActive : ''}`}
-            onClick={() => { setParseError(''); setMode('text'); }}
+            className={`${styles.tab} ${mode === 'camera' ? styles.tabActive : ''}`}
+            onClick={() => { setParseError(''); setMode('camera'); }}
           >
-            ✏️ Paste String
+            📷 Scan QR
           </button>
-        </div>
-
-        {/* Camera view */}
-        {mode === 'camera' && (
-          <div className={styles.cameraWrap}>
-            {cameraError ? (
-              <p className={styles.cameraError}>{cameraError}</p>
-            ) : (
-              <>
-                <video
-                  ref={videoRef}
-                  className={styles.video}
-                  playsInline
-                  muted
-                  aria-label="Camera preview"
-                />
-                {scanning && (
-                  <div className={styles.scanOverlay} aria-hidden>
-                    <div className={styles.scanCorner} />
-                  </div>
-                )}
-                <p className={styles.scanHint}>Point at a Bramble QR code</p>
-              </>
-            )}
-          </div>
         )}
-
-        {/* Text paste view */}
-        {mode === 'text' && (
-          <form className={styles.textForm} onSubmit={handleTextSubmit}>
-            <textarea
-              className={styles.textArea}
-              placeholder="Paste a Bramble share string here…&#10;(bramble://ch/v1?...)"
-              value={textInput}
-              onChange={(e) => { setTextInput(e.target.value); setParseError(''); }}
-              rows={4}
-              autoFocus
-              aria-label="Share string input"
-              spellCheck={false}
-            />
-            {parseError && <span className={styles.error}>{parseError}</span>}
-            <button
-              className={styles.importBtn}
-              type="submit"
-              disabled={!textInput.trim()}
-            >
-              Import
-            </button>
-          </form>
-        )}
-
-        {mode === 'camera' && parseError && (
-          <span className={styles.error}>{parseError}</span>
-        )}
+        <button
+          className={`${styles.tab} ${mode === 'text' ? styles.tabActive : ''}`}
+          onClick={() => { setParseError(''); setMode('text'); }}
+        >
+          ✏️ Paste String
+        </button>
       </div>
-    </div>
+
+      {/* Camera view */}
+      {mode === 'camera' && (
+        <div className={styles.cameraWrap}>
+          {cameraError ? (
+            <p className={styles.cameraError}>{cameraError}</p>
+          ) : (
+            <>
+              <video
+                ref={videoRef}
+                className={styles.video}
+                playsInline
+                muted
+                aria-label="Camera preview"
+              />
+              {scanning && (
+                <div className={styles.scanOverlay} aria-hidden>
+                  <div className={styles.scanCorner} />
+                </div>
+              )}
+              <p className={styles.scanHint}>Point at a Bramble QR code</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Text paste view */}
+      {mode === 'text' && (
+        <form className={styles.textForm} onSubmit={handleTextSubmit}>
+          <textarea
+            className={styles.textArea}
+            placeholder="Paste a Bramble share string here…&#10;(bramble://ch/v1?...)"
+            value={textInput}
+            onChange={(e) => { setTextInput(e.target.value); setParseError(''); }}
+            rows={4}
+            autoFocus
+            aria-label="Share string input"
+            spellCheck={false}
+          />
+          {parseError && <span className={styles.error}>{parseError}</span>}
+          <button
+            className={styles.importBtn}
+            type="submit"
+            disabled={!textInput.trim()}
+          >
+            Import
+          </button>
+        </form>
+      )}
+
+      {mode === 'camera' && parseError && (
+        <span className={styles.error}>{parseError}</span>
+      )}
+    </EscapeDialog>
   );
 }

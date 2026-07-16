@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { Conversation } from '../../types/bramble';
 import { IconBroadcast, IconHash, IconUser, IconPlus, IconLock, IconWarning } from '../../components/Icons';
 import { usePeerInfo, usePeerVerification, STATUS_COLORS } from '../../hooks/usePeer';
 import { addChannel } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { EscapeDialog } from '../../components/EscapeDialog';
 import styles from './ConversationList.module.css';
 
 interface ConversationListProps {
@@ -89,35 +90,6 @@ function DmItem({ conv, active, onSelect }: { conv: Conversation; active: boolea
         <span className={styles.badge}>{conv.unreadCount}</span>
       )}
     </button>
-  );
-}
-
-// Shared backdrop for the ConversationList dialogs below: dialog role/aria-modal,
-// backdrop click closes, Escape closes and stops there (see the propagation note
-// inside the handler) so it never also closes an overlay underneath it.
-function EscapeDialog({ ariaLabel, onClose, children }: { ariaLabel: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div
-      className={styles.dialogBackdrop}
-      onClick={onClose}
-      onKeyDown={e => {
-        if (e.key === 'Escape') {
-          // Stop the NATIVE event too (React's synthetic stopPropagation
-          // does both): the mobile sidebar's Escape listener lives on
-          // window, and Escape must dismiss only this topmost overlay,
-          // not also the sidebar underneath it.
-          e.stopPropagation();
-          onClose();
-        }
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-label={ariaLabel}
-    >
-      <div className={styles.dialog} onClick={e => e.stopPropagation()}>
-        {children}
-      </div>
-    </div>
   );
 }
 
@@ -284,7 +256,12 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
       {/* ── New DM Dialog ─────────────────────────── */}
       {showDmDialog && (
-        <EscapeDialog ariaLabel="New Direct Message" onClose={() => setShowDmDialog(false)}>
+        <EscapeDialog
+          ariaLabel="New Direct Message"
+          onClose={() => setShowDmDialog(false)}
+          backdropClassName={styles.dialogBackdrop}
+          dialogClassName={styles.dialog}
+        >
           <h3 className={styles.dialogTitle}>New Direct Message</h3>
           {knownPeers.length > 0 && (
             <>
@@ -317,7 +294,12 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
 
       {/* ── New Channel Dialog ────────────────────── */}
       {showChannelDialog && (
-        <EscapeDialog ariaLabel="Create Channel" onClose={() => setShowChannelDialog(false)}>
+        <EscapeDialog
+          ariaLabel="Create Channel"
+          onClose={() => setShowChannelDialog(false)}
+          backdropClassName={styles.dialogBackdrop}
+          dialogClassName={styles.dialog}
+        >
           <h3 className={styles.dialogTitle}>Create Channel</h3>
           <p className={styles.dialogDesc}>Enter channel details:</p>
           <input

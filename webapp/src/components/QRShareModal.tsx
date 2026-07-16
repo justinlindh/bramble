@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { EscapeDialog } from './EscapeDialog';
 import styles from './QRShareModal.module.css';
 
 interface QRShareModalProps {
@@ -64,49 +65,47 @@ export function QRShareModal({
     }
   };
 
-  // Close on backdrop click
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
-  };
-
   return (
-    <div className={styles.backdrop} onClick={handleBackdropClick} role="dialog" aria-modal aria-label={title}>
-      <div className={styles.modal}>
-        <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
+    <EscapeDialog
+      ariaLabel={title}
+      onClose={onClose}
+      backdropClassName={styles.backdrop}
+      dialogClassName={styles.modal}
+    >
+      <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
 
-        <h3 className={styles.title}>{title}</h3>
-        {description && <p className={styles.description}>{description}</p>}
+      <h3 className={styles.title}>{title}</h3>
+      {description && <p className={styles.description}>{description}</p>}
 
-        {/* QR code */}
-        <div className={styles.qrWrap}>
-          <canvas ref={canvasRef} className={styles.qrCanvas} />
-        </div>
-
-        {/* Copyable string */}
-        <div className={styles.stringRow}>
-          <input
-            id="qr-share-string"
-            className={styles.stringInput}
-            type="text"
-            readOnly
-            value={shareString}
-            onFocus={(e) => e.target.select()}
-            aria-label="Share string"
-          />
-          <button className={styles.copyBtn} onClick={handleCopy}>
-            {copied ? '✓ Copied!' : 'Copy'}
-          </button>
-        </div>
-
-        <p className={styles.hint}>
-          Scan the QR code or share the text string to add this on another device.
-        </p>
-        {copyError && (
-          <p className={styles.hint} role="status" aria-live="polite">
-            {copyError}
-          </p>
-        )}
+      {/* QR code */}
+      <div className={styles.qrWrap}>
+        <canvas ref={canvasRef} className={styles.qrCanvas} />
       </div>
-    </div>
+
+      {/* Copyable string */}
+      <div className={styles.stringRow}>
+        <input
+          id="qr-share-string"
+          className={styles.stringInput}
+          type="text"
+          readOnly
+          value={shareString}
+          onFocus={(e) => e.target.select()}
+          aria-label="Share string"
+        />
+        <button className={styles.copyBtn} onClick={handleCopy}>
+          {copied ? '✓ Copied!' : 'Copy'}
+        </button>
+      </div>
+
+      <p className={styles.hint}>
+        Scan the QR code or share the text string to add this on another device.
+      </p>
+      {copyError && (
+        <p className={styles.hint} role="status" aria-live="polite">
+          {copyError}
+        </p>
+      )}
+    </EscapeDialog>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DevicePickerRequest } from '../types/desktop';
+import { EscapeDialog } from './EscapeDialog';
 import styles from './DevicePickerModal.module.css';
 
 /**
@@ -24,32 +25,35 @@ export function DevicePickerModal() {
   const scanning = request.kind === 'bluetooth';
 
   return (
-    <div className={styles.backdrop}>
-      <div className={styles.modal} role="dialog" aria-label={title}>
-        <div className={styles.title}>{title}</div>
-        {scanning && <div className={styles.hint}>Scanning for nearby Bramble nodes…</div>}
-        <div className={styles.list}>
-          {request.devices.length === 0 && (
-            <div className={styles.empty}>No devices found yet</div>
-          )}
-          {request.devices.map(d => (
-            <button
-              key={d.id}
-              className={styles.device}
-              onClick={() => window.brambleDesktop?.selectDevice(d.id)}
-            >
-              <span className={styles.deviceLabel}>{d.label}</span>
-              {d.detail && <span className={styles.deviceDetail}>{d.detail}</span>}
-            </button>
-          ))}
-        </div>
-        <button
-          className={styles.cancelBtn}
-          onClick={() => window.brambleDesktop?.cancelDevicePicker()}
-        >
-          Cancel
-        </button>
+    <EscapeDialog
+      ariaLabel={title}
+      onClose={() => window.brambleDesktop?.cancelDevicePicker()}
+      backdropClassName={styles.backdrop}
+      dialogClassName={styles.modal}
+    >
+      <div className={styles.title}>{title}</div>
+      {scanning && <div className={styles.hint}>Scanning for nearby Bramble nodes…</div>}
+      <div className={styles.list}>
+        {request.devices.length === 0 && (
+          <div className={styles.empty}>No devices found yet</div>
+        )}
+        {request.devices.map(d => (
+          <button
+            key={d.id}
+            className={styles.device}
+            onClick={() => window.brambleDesktop?.selectDevice(d.id)}
+          >
+            <span className={styles.deviceLabel}>{d.label}</span>
+            {d.detail && <span className={styles.deviceDetail}>{d.detail}</span>}
+          </button>
+        ))}
       </div>
-    </div>
+      <button
+        className={styles.cancelBtn}
+        onClick={() => window.brambleDesktop?.cancelDevicePicker()}
+      >
+        Cancel
+      </button>
+    </EscapeDialog>
   );
 }
