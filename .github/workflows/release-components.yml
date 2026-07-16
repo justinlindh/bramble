@@ -1,0 +1,108 @@
+# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
+name: Release Components
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release-protocol:
+    runs-on: [self-hosted, linux, bramble-host]
+    concurrency:
+      group: release-protocol
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install release dependencies
+        run: |
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
+            conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release (protocol)
+        env:
+          # GITEA_SYNC_TOKEN: to be provisioned on GitHub; carries the Gitea
+          # PAT the semantic-release-gitea plugin needs to write releases
+          # back to the frozen Gitea mirror repo. Phase 2 rewrites this to a
+          # GitHub-native release flow.
+          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+        run: npx semantic-release --extends ./.releaserc.protocol.cjs
+
+  release-webapp:
+    runs-on: [self-hosted, linux, bramble-host]
+    concurrency:
+      group: release-webapp
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install release dependencies
+        run: |
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
+            conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release (webapp)
+        env:
+          # GITEA_SYNC_TOKEN: see release-protocol above.
+          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+        run: npx semantic-release --extends ./.releaserc.webapp.cjs
+
+  release-firmware:
+    # Run firmware tagging intentionally (manual dispatch) so stable OTA releases
+    # are not created on every push to main.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, bramble-host]
+    concurrency:
+      group: release-firmware
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install release dependencies
+        run: |
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @saithodev/semantic-release-gitea \
+            conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release (firmware)
+        env:
+          # GITEA_SYNC_TOKEN: see release-protocol above.
+          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+        run: npx semantic-release --extends ./.releaserc.firmware.cjs

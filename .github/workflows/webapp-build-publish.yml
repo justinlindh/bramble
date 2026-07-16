@@ -1,0 +1,198 @@
+# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
+name: Web Client Build Publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-test-publish:
+    runs-on: [self-hosted, linux, bramble-host]
+    container:
+      image: ghcr.io/catthehacker/ubuntu:full-22.04
+      options: --user 0:0 --group-add 959
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify docker daemon access
+        shell: bash
+        run: |
+          set -euo pipefail
+          id
+          ls -ln /var/run/docker.sock
+          docker version
+
+      - name: Build and test webapp
+        run: |
+          rm -rf webapp/public/web-flasher
+          mkdir -p webapp/public/web-flasher
+          cp -a web-flasher/. webapp/public/web-flasher/
+          cd webapp
+          npm ci
+          npm test
+          npm run build
+
+      - name: Resolve image tags
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=()
+
+          immutable_sha_tag="sha-${GITHUB_SHA}"
+
+          if [ "${GITHUB_REF_TYPE}" = "branch" ] && [ "${GITHUB_REF_NAME}" = "main" ]; then
+            tags+=("main")
+            tags+=("${immutable_sha_tag}")
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            version="${GITHUB_REF_NAME}"
+            tags+=("${version}")
+            tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+\.[0-9]+)\.[0-9]+$/\1/')")
+            tags+=("$(printf '%s' "${version}" | sed -E 's/^(v[0-9]+)\.[0-9]+\.[0-9]+$/\1/')")
+            tags+=("${immutable_sha_tag}")
+          fi
+
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No publishable tags for ref ${GITHUB_REF}; exiting."
+            exit 1
+          fi
+
+          printf 'tags=%s\n' "$(IFS=,; echo "${tags[*]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Login to registry
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PAT: ${{ secrets.REGISTRY_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$REGISTRY_PAT" | docker login registry.idiotica.org -u "$REGISTRY_USERNAME" --password-stdin
+
+      - name: Resolve app version
+        id: appver
+        shell: bash
+        run: |
+          pkg_ver="$(node -p "require('./webapp/package.json').version")"
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          echo "version=${pkg_ver}+${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push web-client image
+        env:
+          IMAGE_REPO: registry.idiotica.org/dumbot/bramble-web-client
+          IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
+          DOCKERFILE_PATH: webapp/Dockerfile
+          BUILD_CONTEXT: webapp
+          APP_VERSION: ${{ steps.appver.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Registry-backed build cache persists npm/build layers across CI runs.
+          CACHE_REF="${IMAGE_REPO}:buildcache"
+
+          # Create a clean docker-container buildx builder each run.
+          # Required for multi-platform buildx builds.
+          docker buildx rm bramble-webapp-builder >/dev/null 2>&1 || true
+          docker buildx create --name bramble-webapp-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+          tag_args=()
+          IFS=',' read -r -a tags <<< "$IMAGE_TAGS"
+          for tag in "${tags[@]}"; do
+            tag_args+=("-t" "${IMAGE_REPO}:${tag}")
+          done
+
+          docker buildx build \
+            --builder bramble-webapp-builder \
+            --platform linux/amd64,linux/arm64 \
+            --cache-from "type=registry,ref=${CACHE_REF}" \
+            --cache-to "type=registry,ref=${CACHE_REF},mode=max" \
+            --build-arg APP_VERSION="${APP_VERSION}" \
+            -f "${DOCKERFILE_PATH}" \
+            "${BUILD_CONTEXT}" \
+            "${tag_args[@]}" \
+            --push
+
+      - name: Trigger host deploy workflow (with local fallback)
+        env:
+          # GITEA_SYNC_TOKEN: to be provisioned on GitHub; carries the Gitea
+          # PAT used to dispatch the deploy workflow on the Gitea instance.
+          # Phase 2 rewrites this deploy trigger for the GitHub-primary setup.
+          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
+          GITEA_API_BASE: ${{ vars.GITEA_API_BASE }}
+          DEPLOY_REPO_OWNER: ${{ vars.DEPLOY_REPO_OWNER }}
+          DEPLOY_REPO_NAME: ${{ vars.DEPLOY_REPO_NAME }}
+          DEPLOY_WORKFLOW_ID: ${{ vars.DEPLOY_WORKFLOW_ID }}
+          IMAGE_REF: registry.idiotica.org/dumbot/bramble-web-client:sha-${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_base="${GITEA_API_BASE:-http://172.17.0.1:3001}"
+          owner="${DEPLOY_REPO_OWNER:-justinlindh}"
+          repo="${DEPLOY_REPO_NAME:-dockers}"
+          workflow_id="${DEPLOY_WORKFLOW_ID:-deploy-bramble-web-client.yml}"
+          payload="$(cat <<JSON
+          {
+            "ref": "refs/heads/master",
+            "inputs": {
+              "image_ref": "${IMAGE_REF}",
+              "dry_run": "false",
+              "check_only": "false"
+            }
+          }
+          JSON
+          )"
+
+          http_code="$(
+            curl -sS -o /tmp/deploy-dispatch-response.json -w "%{http_code}" -X POST \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${api_base}/api/v1/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches" \
+              -d "${payload}" || true
+          )"
+
+          if [ "${http_code}" = "204" ]; then
+            echo "Remote deploy workflow dispatch accepted (${owner}/${repo}:${workflow_id})."
+            exit 0
+          fi
+
+          echo "Remote deploy dispatch failed with HTTP ${http_code}; falling back to local docker redeploy."
+
+          mode="$(docker inspect bramble-web-client --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^MODE=/{print $2; exit}')"
+          allowed_subnets="$(docker inspect bramble-web-client --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | awk -F= '/^ALLOWED_SUBNETS=/{sub(/^ALLOWED_SUBNETS=/,""); print; exit}')"
+          mode="${mode:-hosted}"
+          allowed_subnets="${allowed_subnets:-}"
+
+          docker pull "${IMAGE_REF}"
+          docker rm -f bramble-web-client >/dev/null 2>&1 || true
+          docker run -d \
+            --name bramble-web-client \
+            --restart unless-stopped \
+            -p 8085:8085 \
+            -e MODE="${mode}" \
+            -e ALLOWED_SUBNETS="${allowed_subnets}" \
+            "${IMAGE_REF}"
+
+          ok=0
+          for _ in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Running}}' bramble-web-client 2>/dev/null || true)" != "true" ]; then
+              sleep 2
+              continue
+            fi
+
+            if docker run --rm --network host curlimages/curl:8.12.1 \
+              -fsS http://127.0.0.1:8085/api/healthz >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          [ "${ok}" -eq 1 ]
+
+          echo "Local fallback deploy completed and health check passed."
