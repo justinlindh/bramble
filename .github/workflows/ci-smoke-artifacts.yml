@@ -4,13 +4,16 @@ name: CI Smoke Artifacts
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash
 
 jobs:
   smoke:
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     steps:
       - name: Checkout

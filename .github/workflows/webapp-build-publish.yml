@@ -4,13 +4,16 @@ name: Web Client Build Publish
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash
 
 jobs:
   build-test-publish:
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container:
       image: ghcr.io/catthehacker/ubuntu:full-22.04
       options: --user 0:0 --group-add 959

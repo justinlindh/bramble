@@ -13,9 +13,12 @@ on:
       - 'ci/**'
       - 'docs/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -24,7 +27,7 @@ defaults:
 jobs:
   changes:
     name: Detect changed areas
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     outputs:
@@ -128,7 +131,7 @@ jobs:
     name: Host tests
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 20
     steps:
@@ -146,7 +149,7 @@ jobs:
     name: ShellCheck
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
@@ -170,7 +173,7 @@ jobs:
     name: RPC contract (spec vs firmware registry)
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     steps:
@@ -182,7 +185,7 @@ jobs:
     name: Actionlint
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
@@ -198,7 +201,7 @@ jobs:
     name: Ruff
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
@@ -219,7 +222,7 @@ jobs:
       needs.changes.outputs.firmware == 'true' ||
       needs.changes.outputs.simulator == 'true' ||
       needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
@@ -233,7 +236,7 @@ jobs:
     name: cppcheck
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
@@ -281,7 +284,7 @@ jobs:
       needs.changes.outputs.firmware == 'true' ||
       needs.changes.outputs.simulator == 'true' ||
       needs.changes.outputs.workflows == 'true'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:

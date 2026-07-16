@@ -4,17 +4,20 @@ name: Release Components
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash
 
 jobs:
   release-protocol:
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     concurrency:
       group: release-protocol
-      cancel-in-progress: false
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,11 +49,11 @@ jobs:
         run: npx semantic-release --extends ./.releaserc.protocol.cjs
 
   release-webapp:
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     concurrency:
       group: release-webapp
-      cancel-in-progress: false
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -82,11 +85,11 @@ jobs:
     # Run firmware tagging intentionally (manual dispatch) so stable OTA releases
     # are not created on every push to main.
     if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container: localhost:5000/bramble/runner-full:22.04-go126
     concurrency:
       group: release-firmware
-      cancel-in-progress: false
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

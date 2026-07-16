@@ -13,13 +13,16 @@ on:
       - 'v*'
       - 'webapp-v*'
 
+permissions:
+  contents: read
+
 defaults:
   run:
     shell: bash
 
 jobs:
   desktop-linux-windows:
-    runs-on: [self-hosted, linux, bramble-host]
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     container:
       # electron-builder's own image: node + wine for NSIS cross-builds.
       image: electronuserland/builder:wine

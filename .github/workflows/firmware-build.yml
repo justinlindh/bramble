@@ -4,9 +4,12 @@ name: Firmware Build
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: firmware-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
