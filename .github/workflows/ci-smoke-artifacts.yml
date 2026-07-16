@@ -1,0 +1,31 @@
+# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
+name: CI Smoke Artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  smoke:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create smoke artifact
+        run: |
+          mkdir -p out
+          echo "smoke-run $(date -u +%Y-%m-%dT%H:%M:%SZ)" > out/smoke.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-smoke-artifact
+          path: out/smoke.txt

@@ -1,0 +1,23 @@
+# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
+name: Firmware Publish OTA (Legacy Disabled)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish-ota-legacy-disabled:
+    if: ${{ vars.ENABLE_LEGACY_OTA == 'true' }}
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    steps:
+      - name: Legacy path disabled
+        run: |
+          echo "Legacy OTA publish workflow is disabled."
+          echo "Use .github/workflows/firmware-build.yml endpoint-driven publish step."

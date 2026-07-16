@@ -1,0 +1,68 @@
+name: Desktop Build
+
+# Packages the Electron desktop app. Linux (AppImage, deb) and Windows (NSIS)
+# cross-build on the Linux runner inside electronuserland/builder:wine.
+# macOS is NOT built here: electron-builder can only produce mac targets on
+# macOS hardware, which this CI does not have. Build the dmg on a Mac with
+# `npm run package:mac` (config in webapp/electron-builder.yml is complete).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+      - 'webapp-v*'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  desktop-linux-windows:
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container:
+      # electron-builder's own image: node + wine for NSIS cross-builds.
+      image: electronuserland/builder:wine
+      options: --user 0:0
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build renderer and electron bundles
+        run: |
+          set -euo pipefail
+          cd webapp
+          npm ci
+          npm run build:electron
+
+      - name: Package Linux and Windows installers
+        env:
+          # Installers are unsigned for now; suppress signing lookups.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Headless wine: skip the mono/gecko first-run installers, which
+          # hang forever without a display (observed locally).
+          WINEDLLOVERRIDES: "mscoree,mshtml="
+          WINEDEBUG: "-all"
+        run: |
+          set -euo pipefail
+          cd webapp
+          npx electron-builder --linux --win --config electron-builder.yml
+
+      - name: List artifacts
+        run: ls -lh webapp/release/ | grep -v -e '^total' -e 'unpacked' || true
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: bramble-desktop
+          path: |
+            webapp/release/*.AppImage
+            webapp/release/*.deb
+            webapp/release/*.exe
+          retention-days: 30

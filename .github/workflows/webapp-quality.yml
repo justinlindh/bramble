@@ -1,0 +1,260 @@
+name: Webapp Quality
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+      - 'feat/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'ci/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webapp-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI: true
+  npm_config_fund: false
+  npm_config_audit: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  changes:
+    name: Detect changed areas
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 5
+    outputs:
+      webapp: ${{ steps.detect.outputs.webapp }}
+      web_flasher: ${{ steps.detect.outputs.web_flasher }}
+      workflows: ${{ steps.detect.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute changed areas
+        id: detect
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+
+          resolve_diff_range() {
+            if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_BASE_REF:-}" ]]; then
+              git fetch --no-tags origin "${GITHUB_BASE_REF}" >/dev/null 2>&1
+              if git rev-parse --verify "origin/${GITHUB_BASE_REF}" >/dev/null 2>&1; then
+                echo "origin/${GITHUB_BASE_REF}...HEAD"
+                return 0
+              fi
+            fi
+
+            if [[ "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
+              if [[ -n "${BEFORE_SHA:-}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+                if git cat-file -e "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
+                  echo "${BEFORE_SHA}..HEAD"
+                  return 0
+                fi
+              fi
+            fi
+
+            # New-branch push (before SHA all zeros), workflow_dispatch, or an
+            # unresolved base: fall back to diffing against main.
+            git fetch --no-tags origin main >/dev/null 2>&1
+            if git rev-parse --verify origin/main >/dev/null 2>&1; then
+              merge_base="$(git merge-base origin/main HEAD 2>/dev/null)"
+              if [[ -n "${merge_base:-}" ]]; then
+                echo "${merge_base}...HEAD"
+                return 0
+              fi
+              echo "origin/main...HEAD"
+              return 0
+            fi
+
+            return 1
+          }
+
+          unknown=0
+          diff_range="$(resolve_diff_range)" || unknown=1
+
+          changed_files=""
+          if [[ "${unknown}" == "0" ]]; then
+            changed_files="$(git diff --name-only "${diff_range}" 2>/dev/null)" || unknown=1
+          fi
+
+          if [[ "${unknown}" == "1" ]]; then
+            echo "::warning::could not resolve a diff range for this event; defaulting all areas to changed"
+          fi
+
+          area_changed() {
+            if [[ "${unknown}" == "1" ]]; then
+              echo true
+              return
+            fi
+            if printf '%s\n' "${changed_files}" | grep -Eq "$1"; then
+              echo true
+            else
+              echo false
+            fi
+          }
+
+          webapp=$(area_changed '^webapp/')
+          web_flasher=$(area_changed '^web-flasher/')
+          # Broad on purpose, matching the other two quality workflows: any
+          # workflow edit forces every job so a changed definition is always
+          # exercised.
+          workflows=$(area_changed '^\.github/workflows/|^\.actionlint\.yaml$')
+
+          {
+            echo "webapp=${webapp}"
+            echo "web_flasher=${web_flasher}"
+            echo "workflows=${workflows}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved diff range: ${diff_range:-<unresolved>}"
+          echo "webapp=${webapp} web_flasher=${web_flasher} workflows=${workflows}"
+
+  required-lint:
+    name: Required lint
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run lint
+        run: npm run lint --prefix webapp
+
+  required-typecheck:
+    name: Required typecheck
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run typecheck
+        run: npm run typecheck --prefix webapp
+
+  typecheck-electron:
+    name: Required electron typecheck
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run electron typecheck
+        run: npm run typecheck:electron --prefix webapp
+
+  web-flasher-tests:
+    name: web-flasher tests
+    needs: changes
+    if: needs.changes.outputs.web_flasher == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run web-flasher node:test suite
+        run: node --test web-flasher/
+
+  required-unit-tests:
+    name: Required unit tests
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Run unit tests
+        run: npm run test:unit --prefix webapp
+
+  required-build:
+    name: Required webapp build
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Build webapp
+        run: npm run build --prefix webapp
+
+  required-e2e-smoke:
+    name: Required e2e smoke
+    needs: changes
+    if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies (lockfile-safe)
+        run: npm ci --prefix webapp
+      - name: Build webapp for smoke run
+        run: npm run build --prefix webapp
+      - name: Run smoke checks (includes startup + health wait)
+        env:
+          SMOKE_MAX_WAIT_SECONDS: '90'
+          SMOKE_START_RUNTIME: '1'
+        run: npm run test:e2e:smoke --prefix webapp
+      - name: Capture runtime logs on failure
+        if: failure()
+        run: |
+          mkdir -p webapp/e2e-artifacts
+          cp -f webapp/e2e-smoke-server.log webapp/e2e-artifacts/server.log || true
+      - name: Upload smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-e2e-smoke-failure-artifacts
+          if-no-files-found: warn
+          path: |
+            webapp/e2e-artifacts/**
+            webapp/test-results/**
+            webapp/playwright-report/**
+            webapp/e2e-screenshots/**
