@@ -20,7 +20,7 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: [self-hosted, linux, bramble-host]
-    container: bramble/runner-full:22.04-go126
+    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     outputs:
       firmware: ${{ steps.detect.outputs.firmware }}
@@ -117,7 +117,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
-    container: bramble/runner-full:22.04-go126
+    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
-    container: bramble/runner-full:22.04-go126
+    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -145,7 +145,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
-    container: bramble/runner-full:22.04-go126
+    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

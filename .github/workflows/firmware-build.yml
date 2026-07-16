@@ -11,7 +11,7 @@ concurrency:
 jobs:
   firmware-build:
     runs-on: [self-hosted, idf-node]
-    container: bramble/idf-node:v5.4.1
+    container: localhost:5000/bramble/idf-node:v5.4.1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
