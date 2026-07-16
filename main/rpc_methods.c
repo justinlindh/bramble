@@ -2244,7 +2244,15 @@ static int handle_set_broadcast_telemetry_mode(const cJSON* params, cJSON* resul
 
 /* ── Registration ───────────────────────────────────────────────────── */
 
-/* OTA task: runs in background after RPC response */
+/* OTA task: runs in background after RPC response.
+ * Stack sizing: esp_ota_end runs the full image verification on this task's
+ * stack, including mbedtls RSA-3072 PSS signature checks
+ * (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT). 8192 bytes overflows
+ * there and corrupts adjacent heap (same failure class as the 16KB ble_rpc
+ * stack fix); the overflow surfaced as StoreProhibited in esp_ota_end's
+ * LIST_REMOVE after a successful signature verify. */
+#define OTA_TASK_STACK_SIZE 16384
+
 static volatile bool s_ota_in_progress = false;
 
 typedef struct {
@@ -2259,6 +2267,9 @@ static void ota_task(void* arg) {
     free(args->url);
     free(args);
     s_ota_in_progress = false;
+    ESP_LOGI("ota", "ota_task stack high-water mark: %u bytes free of %u",
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+             (unsigned)OTA_TASK_STACK_SIZE);
     if (rc == 0) {
         ESP_LOGI("ota", "OTA complete; rebooting...");
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -2329,7 +2340,7 @@ static int handle_ota_update(const cJSON* params, cJSON* result) {
 
     s_ota_in_progress = true;
 
-    if (xTaskCreate(ota_task, "ota", 8192, args, 3, NULL) != pdPASS) {
+    if (xTaskCreate(ota_task, "ota", OTA_TASK_STACK_SIZE, args, 3, NULL) != pdPASS) {
         s_ota_in_progress = false;
         free(url_copy);
         free(args);

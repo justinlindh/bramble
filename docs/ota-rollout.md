@@ -1,6 +1,6 @@
 # OTA Rollout Guide (Single Node)
 
-Last verified: 2026-06-12
+Last verified: 2026-07-16 (heltec-v4 bench, HTTP dev loop, upgrade + floor-gated downgrade)
 
 Use this runbook to deploy a `bramble.bin` build to one WiFi-connected node
 without USB flashing.
