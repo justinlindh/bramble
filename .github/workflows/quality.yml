@@ -21,6 +21,7 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 5
     outputs:
       firmware: ${{ steps.detect.outputs.firmware }}
@@ -124,6 +125,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -141,6 +143,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -164,6 +167,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -175,6 +179,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -190,6 +195,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -210,6 +216,7 @@ jobs:
       needs.changes.outputs.simulator == 'true' ||
       needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -223,6 +230,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -246,6 +254,7 @@ jobs:
       github.event_name != 'pull_request' &&
       (needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true')
     runs-on: [self-hosted, idf-node]
+    container: bramble/idf-node:v5.4.1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -269,6 +278,7 @@ jobs:
       needs.changes.outputs.simulator == 'true' ||
       needs.changes.outputs.workflows == 'true'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -304,6 +314,7 @@ jobs:
        needs.changes.outputs.emulator == 'true' ||
        needs.changes.outputs.workflows == 'true')
     runs-on: [self-hosted, idf-node]
+    container: bramble/idf-node:v5.4.1
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -352,6 +363,7 @@ jobs:
        needs.changes.outputs.emulator == 'true' ||
        needs.changes.outputs.workflows == 'true')
     runs-on: [self-hosted, idf-node]
+    container: bramble/idf-node:v5.4.1
     timeout-minutes: 15
     continue-on-error: true
     steps:

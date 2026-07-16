@@ -7,6 +7,7 @@ on:
 jobs:
   release-protocol:
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     concurrency:
       group: release-protocol
       cancel-in-progress: false
@@ -42,6 +43,7 @@ jobs:
 
   release-webapp:
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     concurrency:
       group: release-webapp
       cancel-in-progress: false
@@ -77,6 +79,7 @@ jobs:
     # are not created on every push to main.
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     concurrency:
       group: release-firmware
       cancel-in-progress: false

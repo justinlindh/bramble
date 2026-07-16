@@ -8,6 +8,7 @@ jobs:
   publish-ota-legacy-disabled:
     if: ${{ vars.ENABLE_LEGACY_OTA == 'true' }}
     runs-on: [self-hosted, linux, bramble-host]
+    container: bramble/runner-full:22.04-go126
     steps:
       - name: Legacy path disabled
         run: |
