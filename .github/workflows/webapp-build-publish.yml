@@ -4,6 +4,10 @@ name: Web Client Build Publish
 on:
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-test-publish:
     runs-on: [self-hosted, linux, bramble-host]

@@ -16,6 +16,10 @@ concurrency:
   group: firmware-quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   changes:
     name: Detect changed areas

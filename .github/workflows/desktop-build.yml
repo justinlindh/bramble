@@ -13,6 +13,10 @@ on:
       - 'v*'
       - 'webapp-v*'
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   desktop-linux-windows:
     runs-on: [self-hosted, linux, bramble-host]

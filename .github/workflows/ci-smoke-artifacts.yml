@@ -4,6 +4,10 @@ name: CI Smoke Artifacts
 on:
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   smoke:
     runs-on: [self-hosted, linux, bramble-host]

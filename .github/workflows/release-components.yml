@@ -4,6 +4,10 @@ name: Release Components
 on:
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   release-protocol:
     runs-on: [self-hosted, linux, bramble-host]

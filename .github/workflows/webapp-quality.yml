@@ -19,6 +19,10 @@ env:
   npm_config_fund: false
   npm_config_audit: false
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   changes:
     name: Detect changed areas
