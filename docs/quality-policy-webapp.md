@@ -4,11 +4,16 @@ This document defines the required vs advisory checks for `.gitea/workflows/weba
 
 ## Scope
 
-The `webapp-quality` workflow runs only when these paths change:
+The `webapp-quality` workflow runs on every push to a tracked branch (no
+workflow-level path filter, so every job always reports a context; see
+[ci.md](ci.md) for why). Each job still skips its heavy work unless the diff
+touches its area:
 
-- `webapp/**`
-- `.gitea/workflows/webapp-quality.yml`
-- `.actionlint.yaml`
+- `webapp/**` changes: all jobs except `web-flasher tests` run.
+- `web-flasher/**` changes: `web-flasher tests` runs.
+- Any `.gitea/workflows/**` or `.actionlint.yaml` change: every job runs,
+  regardless of area, so a changed workflow definition always gets
+  exercised.
 
 ## Required vs advisory mapping
 

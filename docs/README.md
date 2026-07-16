@@ -30,6 +30,7 @@ This index separates **operator/developer reference docs** from **historical pla
 - [ota-rollout.md](ota-rollout.md)
 - [design/ota-signing.md](design/ota-signing.md): signed OTA trust model, key infrastructure, and rotation
 - [runbooks/ota-publish-endpoint-runbook.md](runbooks/ota-publish-endpoint-runbook.md)
+- [ci.md](ci.md): why the PR-gating workflows always trigger and skip per job instead of using workflow-level path filters, the context naming contract, and each job's skip condition
 
 ## Webapp docs
 
