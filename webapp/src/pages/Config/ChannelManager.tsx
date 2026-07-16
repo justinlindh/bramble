@@ -7,6 +7,7 @@ import {
 } from '../../store/actions';
 import { QRShareModal } from '../../components/QRShareModal';
 import { QRScanModal } from '../../components/QRScanModal';
+import { EscapeDialog } from '../../components/EscapeDialog';
 import { IconLock } from '../../components/Icons';
 import type { ScanResult } from '../../components/QRScanModal';
 import { encodeChannelShare } from '../../utils/channelShare';
@@ -32,35 +33,35 @@ function PskPromptModal({
     e.preventDefault();
     onConfirm(psk.trim());
   };
-  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget) onClose();
-  };
   return (
-    <div className={styles.backdrop} onClick={handleBackdropClick} role="dialog" aria-modal>
-      <div className={styles.promptModal}>
-        <button className={styles.promptClose} onClick={onClose} aria-label="Close">✕</button>
-        <h3 className={styles.promptTitle}>Share "{channelName}"</h3>
-        <p className={styles.promptDesc}>
-          This channel has a PSK. Enter it to include in the share QR so others
-          can join. Leave blank to share without the key.
-        </p>
-        <form className={styles.promptForm} onSubmit={handleSubmit}>
-          <input
-            type="password"
-            className={styles.promptInput}
-            placeholder="PSK (leave blank to omit)"
-            value={psk}
-            onChange={(e) => setPsk(e.target.value)}
-            autoFocus
-            autoComplete="off"
-            aria-label="Channel PSK for sharing"
-          />
-          <button type="submit" className={styles.promptBtn}>
-            Generate QR
-          </button>
-        </form>
-      </div>
-    </div>
+    <EscapeDialog
+      ariaLabel={`Share "${channelName}"`}
+      onClose={onClose}
+      backdropClassName={styles.backdrop}
+      dialogClassName={styles.promptModal}
+    >
+      <button className={styles.promptClose} onClick={onClose} aria-label="Close">✕</button>
+      <h3 className={styles.promptTitle}>Share "{channelName}"</h3>
+      <p className={styles.promptDesc}>
+        This channel has a PSK. Enter it to include in the share QR so others
+        can join. Leave blank to share without the key.
+      </p>
+      <form className={styles.promptForm} onSubmit={handleSubmit}>
+        <input
+          type="password"
+          className={styles.promptInput}
+          placeholder="PSK (leave blank to omit)"
+          value={psk}
+          onChange={(e) => setPsk(e.target.value)}
+          autoFocus
+          autoComplete="off"
+          aria-label="Channel PSK for sharing"
+        />
+        <button type="submit" className={styles.promptBtn}>
+          Generate QR
+        </button>
+      </form>
+    </EscapeDialog>
   );
 }
 
@@ -311,26 +312,29 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
 
       {/* ── In-app confirmation dialog ── */}
       {confirmAction && (
-        <div className={styles.backdrop} onClick={() => setConfirmAction(null)} role="dialog" aria-modal>
-          <div className={styles.promptModal}>
-            <p className={styles.promptTitle}>{confirmAction.label}</p>
-            <div className={styles.confirmActions}>
-              <button
-                className={styles.confirmBtn}
-                onClick={confirmAction.onConfirm}
-                autoFocus
-              >
-                Confirm
-              </button>
-              <button
-                className={styles.cancelBtn}
-                onClick={() => setConfirmAction(null)}
-              >
-                Cancel
-              </button>
-            </div>
+        <EscapeDialog
+          ariaLabel={confirmAction.label}
+          onClose={() => setConfirmAction(null)}
+          backdropClassName={styles.backdrop}
+          dialogClassName={styles.promptModal}
+        >
+          <p className={styles.promptTitle}>{confirmAction.label}</p>
+          <div className={styles.confirmActions}>
+            <button
+              className={styles.confirmBtn}
+              onClick={confirmAction.onConfirm}
+              autoFocus
+            >
+              Confirm
+            </button>
+            <button
+              className={styles.cancelBtn}
+              onClick={() => setConfirmAction(null)}
+            >
+              Cancel
+            </button>
           </div>
-        </div>
+        </EscapeDialog>
       )}
     </div>
   );
