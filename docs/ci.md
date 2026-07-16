@@ -197,3 +197,5 @@ When adding a job to one of these three workflows:
    areas` step, and document it in the table above.
 4. Do not add a new workflow-level `paths:` filter. It reintroduces the
    exact deadlock this restructure removes.
+
+Server-side enforcement went live on 2026-07-16: branch protection requires the 23 push-event contexts listed above (every job plus each workflow's change-detection job, excluding the explicitly non-required emulator browser E2E). This paragraph doubles as the enforcement probe: it merged through a docs-only PR whose heavy jobs all reported skipped.
