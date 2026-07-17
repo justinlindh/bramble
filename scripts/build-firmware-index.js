@@ -2,7 +2,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const otaRoot = process.argv[2] || process.env.OTA_ROOT || '/home/user/src/dockers/ota';
+const otaRoot = process.argv[2] || process.env.OTA_ROOT;
+if (!otaRoot) {
+  console.error('Usage: build-firmware-index.js <ota-root> [out-file]  (or set OTA_ROOT)');
+  process.exit(1);
+}
 const outFile = process.argv[3] || path.join(otaRoot, 'index.json');
 
 function exists(p){ try { fs.accessSync(p); return true; } catch { return false; } }
