@@ -41,6 +41,12 @@ webapp/dist/
 webapp/.vite/
 webapp/e2e-screenshots/
 webapp/public/web-flasher/
+webapp/mock/node_modules/
+
+# internal-only doc trees (not published; see MEMORY/plans workflow instead)
+docs/archive/
+docs/superpowers/
+docs/plans/
 
 # Local helper state
 .flash-targets.json
