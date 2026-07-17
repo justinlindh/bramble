@@ -69,4 +69,88 @@ describe('MockTransport (in-page mock for embedded shells)', () => {
     expect(transport.connected).toBe(false);
     await expect(transport.sendRPC('bramble.getConfig')).rejects.toThrow(/Not connected/);
   });
+
+  describe('OTA journey simulation', () => {
+    it('otaGetOrigin/otaSetOrigin manage the mock OTA origin state', async () => {
+      const transport = new MockTransport();
+      await transport.connect();
+
+      // The mock's OTA origin is same-origin (<page origin>/ota/) so
+      // fetchOtaIndex can actually resolve it in the browser/dev-server;
+      // jsdom's default test origin is http://localhost:3000.
+      const initial = await transport.sendRPC<any>('bramble.otaGetOrigin');
+      expect(initial).toMatchObject({
+        ok: true,
+        origin: 'http://localhost:3000/ota/',
+        default_origin: 'http://localhost:3000/ota/',
+        overridden: false,
+        version_floor: '0.4.0',
+        running_version: '0.4.0',
+      });
+
+      const set = await transport.sendRPC<any>('bramble.otaSetOrigin', { origin: 'https://custom.example/ota/' });
+      expect(set).toMatchObject({ ok: true, origin: 'https://custom.example/ota/', overridden: true });
+
+      const afterSet = await transport.sendRPC<any>('bramble.otaGetOrigin');
+      expect(afterSet.origin).toBe('https://custom.example/ota/');
+      expect(afterSet.overridden).toBe(true);
+
+      const reset = await transport.sendRPC<any>('bramble.otaSetOrigin', { reset: true });
+      expect(reset).toMatchObject({ ok: true, overridden: false });
+      const afterReset = await transport.sendRPC<any>('bramble.otaGetOrigin');
+      expect(afterReset.origin).toBe('http://localhost:3000/ota/');
+      expect(afterReset.overridden).toBe(false);
+    });
+
+    it('otaUpdate on a failing path emits downloading ticks then a failed state', async () => {
+      const transport = new MockTransport();
+      await transport.connect();
+
+      const events: any[] = [];
+      transport.onNotification((method, params) => {
+        if (method === 'bramble.onOtaEvent') events.push(params);
+      });
+
+      const start = await transport.sendRPC<any>('bramble.otaUpdate', { path: 'stable/vfail/heltec-v4/bramble.bin' });
+      expect(start.ok).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      const states = events.map((e) => e.state);
+      expect(states).toEqual(['downloading', 'downloading', 'failed']);
+      expect(events[1].percent).toBe(40);
+      expect(events[2].error).toBe('mock: simulated failure');
+
+      const status = await transport.sendRPC<any>('bramble.otaStatus');
+      expect(status.state).toBe('failed');
+      expect(status.last_error).toBe('mock: simulated failure');
+    });
+
+    it('simulates a full OTA event stream ending in rebooting, flips running_version to 0.5.0', async () => {
+      const transport = new MockTransport();
+      await transport.connect();
+
+      const events: any[] = [];
+      transport.onNotification((method, params) => {
+        if (method === 'bramble.onOtaEvent') events.push(params);
+      });
+
+      const start = await transport.sendRPC<any>('bramble.otaUpdate', { path: 'stable/v0.5.0/heltec-v4/bramble.bin' });
+      expect(start.ok).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(200);
+
+      const states = events.map((e) => e.state);
+      expect(states[0]).toBe('downloading');
+      expect(states).toContain('verifying');
+      expect(states[states.length - 1]).toBe('rebooting');
+
+      const status = await transport.sendRPC<any>('bramble.otaStatus');
+      expect(status.state).toBe('rebooting');
+      expect(status.running_version).toBe('0.5.0');
+
+      const origin = await transport.sendRPC<any>('bramble.otaGetOrigin');
+      expect(origin.running_version).toBe('0.5.0');
+    });
+  });
 });

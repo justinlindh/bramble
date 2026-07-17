@@ -1,0 +1,68 @@
+{
+  "releases": [
+    {
+      "version": "v0.5.0",
+      "published_at": "2026-07-15T00:00:00Z",
+      "channel": "stable",
+      "artifacts": [
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.5.0/heltec-v3/bootloader.bin",
+          "sha256": "61c23d729b1984b29f377129c49d63256203f0c3be56c65ccb3ab378e4145b70",
+          "size": 21584
+        },
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.5.0/heltec-v3/partition-table.bin",
+          "sha256": "e0f38171bceedd85542d1524dec6538af3dbb6617c127b916b1a6c08c4a4bde2",
+          "size": 3072
+        },
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.5.0/heltec-v3/bramble.bin",
+          "sha256": "71b250b31b68125c99ac377af890f731417652877aedd0c859e53a6c6f78b296",
+          "size": 1114112,
+          "notes": "Mock release for the no-hardware demo"
+        },
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.5.0/heltec-v3/bramble-0.5.0.bin",
+          "sha256": "71b250b31b68125c99ac377af890f731417652877aedd0c859e53a6c6f78b296",
+          "size": 1114112,
+          "notes": "Mock release for the no-hardware demo"
+        }
+      ]
+    },
+    {
+      "version": "v0.4.0",
+      "published_at": "2026-05-01T00:00:00Z",
+      "channel": "stable",
+      "artifacts": [
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.4.0/heltec-v3/bootloader.bin",
+          "sha256": "07cc2228c0f1ca2db9c7d9b5d9c54b88c07794ba142b5306f15c7b788477a510",
+          "size": 21456
+        },
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.4.0/heltec-v3/partition-table.bin",
+          "sha256": "4489aa062915543861bd078626c8474d7c9eed2007e303c1437d91b9ca6d4a56",
+          "size": 3072
+        },
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.4.0/heltec-v3/bramble.bin",
+          "sha256": "0c10094ade9adb47ef29ca8c4484f2fdd400ec6766ca1dcf60f19ef33eb0be81",
+          "size": 1105920
+        },
+        {
+          "board": "heltec-v3",
+          "file": "/ota/stable/v0.4.0/heltec-v3/bramble-0.4.0.bin",
+          "sha256": "0c10094ade9adb47ef29ca8c4484f2fdd400ec6766ca1dcf60f19ef33eb0be81",
+          "size": 1105920
+        }
+      ]
+    }
+  ]
+}

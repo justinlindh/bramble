@@ -30,7 +30,25 @@ export type BrambleDesktopApi = {
    * the picker (saved-device reconnect). Pass null to disarm.
    */
   autoSelectNextDevice(expected: { id?: string; name?: string } | null): void;
+  /**
+   * Fetches an OTA release-index URL from the Electron main process via
+   * net.fetch, which is not subject to the renderer's CORS policy. Never
+   * rejects on a non-2xx response; the caller maps status/body itself.
+   */
+  fetchOtaIndex(url: string): Promise<OtaIndexFetchResult>;
 };
+
+/** Result of an OTA release-index fetch performed in the main process. */
+export type OtaIndexFetchResult = {
+  ok: boolean;
+  status: number;
+  body: string;
+};
+
+/** IPC channel name for the OTA release-index fetch (main-process net.fetch). */
+export const OTA_CHANNELS = {
+  fetchIndex: 'ota:fetchIndex',
+} as const;
 
 /** IPC channel names shared by the Electron main process and preload. */
 export const DISCOVERY_CHANNELS = {

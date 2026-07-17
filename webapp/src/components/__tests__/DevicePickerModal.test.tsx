@@ -22,6 +22,7 @@ function setupBridge() {
     selectDevice,
     cancelDevicePicker,
     autoSelectNextDevice: vi.fn(),
+    fetchOtaIndex: vi.fn(),
   };
   return { push: (req: DevicePickerRequest) => act(() => listener?.(req)), selectDevice, cancelDevicePicker };
 }

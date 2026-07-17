@@ -21,6 +21,7 @@
 #include "battery.h"
 #include "ota.h"
 #include "ota_origin.h"
+#include "ota_progress.h"
 #include "ota_rollback.h"
 #include "ota_url.h"
 #include "freertos/FreeRTOS.h"
@@ -2271,6 +2272,7 @@ static void ota_task(void* arg) {
              (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
              (unsigned)OTA_TASK_STACK_SIZE);
     if (rc == 0) {
+        ota_progress_set_state(OTA_PROG_REBOOTING);
         ESP_LOGI("ota", "OTA complete; rebooting...");
         vTaskDelay(pdMS_TO_TICKS(2000));
         esp_restart();
@@ -2340,6 +2342,12 @@ static int handle_ota_update(const cJSON* params, cJSON* result) {
 
     s_ota_in_progress = true;
 
+    /* A stale terminal snapshot from the previous attempt must not be
+     * observable once a new update is accepted; otherwise a poller that
+     * reads bramble.otaStatus before the task's first progress report
+     * sees the old attempt's outcome (e.g. "failed") instead of this one. */
+    ota_progress_report(OTA_PROG_IDLE, 0, 0);
+
     if (xTaskCreate(ota_task, "ota", OTA_TASK_STACK_SIZE, args, 3, NULL) != pdPASS) {
         s_ota_in_progress = false;
         free(url_copy);
@@ -2371,6 +2379,53 @@ static int handle_ota_get_origin(const cJSON* params, cJSON* result) {
     }
     cJSON_AddStringToObject(result, "running_version", ota_get_app_version());
     return 0;
+}
+
+/* bramble.otaStatus: live progress of the background OTA task */
+static int handle_ota_status(const cJSON* params, cJSON* result) {
+    (void)params;
+    ota_progress_snapshot_t snap;
+    ota_progress_get(&snap);
+
+    cJSON_AddStringToObject(result, "state", ota_progress_state_str(snap.state));
+    cJSON_AddNumberToObject(result, "bytes", snap.bytes);
+    cJSON_AddNumberToObject(result, "total", snap.total);
+    int percent = ota_progress_percent(&snap);
+    cJSON_AddNumberToObject(result, "percent", percent);
+
+    const char* last_error = ota_get_last_error();
+    if (last_error && last_error[0]) {
+        cJSON_AddStringToObject(result, "last_error", last_error);
+    }
+    cJSON_AddStringToObject(result, "running_version", ota_get_app_version());
+
+    char floor_str[48] = {0};
+    if (ota_rollback_get_floor(floor_str, sizeof(floor_str))) {
+        cJSON_AddStringToObject(result, "version_floor", floor_str);
+    }
+    return 0;
+}
+
+/* Pushed as bramble.onOtaEvent on every OTA progress callback (state
+ * transitions plus every >= 5 percentage points of download progress). */
+static void ota_progress_notify_cb(const ota_progress_snapshot_t* snap) {
+    cJSON* params = cJSON_CreateObject();
+    if (!params) {
+        return;
+    }
+    cJSON_AddStringToObject(params, "state", ota_progress_state_str(snap->state));
+    cJSON_AddNumberToObject(params, "bytes", snap->bytes);
+    cJSON_AddNumberToObject(params, "total", snap->total);
+    int percent = ota_progress_percent(snap);
+    cJSON_AddNumberToObject(params, "percent", percent);
+    if (snap->state == OTA_PROG_FAILED) {
+        const char* err = ota_get_last_error();
+        if (err && err[0]) {
+            cJSON_AddStringToObject(params, "error", err);
+        }
+    }
+    rpc_notify("bramble.onOtaEvent", params);
+    cJSON_Delete(params);
 }
 
 /* bramble.otaSetOrigin: override (or reset) the allowlisted OTA origin */
@@ -3222,6 +3277,7 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("bramble.otaUpdate", handle_ota_update);
     rpc_register("bramble.otaGetOrigin", handle_ota_get_origin);
     rpc_register("bramble.otaSetOrigin", handle_ota_set_origin);
+    rpc_register("bramble.otaStatus", handle_ota_status);
     rpc_register("bramble.getBattery", handle_get_battery);
     rpc_register("bramble.setBacklight", handle_set_backlight);
     rpc_register("bramble.sleep", handle_sleep);
@@ -3256,6 +3312,8 @@ void rpc_methods_init(bramble_identity_t* identity) {
     rpc_register("phy.disable", handle_phy_disable);
     rpc_register("phy.status", handle_phy_status);
     rpc_register("phy.tx", handle_phy_tx);
+
+    ota_progress_set_callback(ota_progress_notify_cb);
 
     ESP_LOGI(TAG, "RPC methods registered");
 }

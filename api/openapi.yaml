@@ -1175,6 +1175,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/OtaSetOriginResponse'
 
+  /rpc/bramble.otaStatus:
+    post:
+      operationId: otaStatus
+      summary: Live progress of the background OTA task
+      description: >
+        Live progress of the background OTA task; poll after otaUpdate or
+        subscribe to bramble.onOtaEvent.
+      tags: [query]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyParams'
+      responses:
+        '200':
+          description: Current OTA progress snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtaStatusResponse'
+
   # ── Hardware / Power ───────────────────────────────────────────────────────
 
   /rpc/bramble.getBattery:
@@ -3264,6 +3285,34 @@ components:
         error:
           type: string
           description: Error message when ok=false.
+
+    OtaStatusResponse:
+      type: object
+      description: Response from bramble.otaStatus.
+      required: [state, bytes, total, percent, running_version]
+      properties:
+        state:
+          type: string
+          enum: [idle, downloading, verifying, rebooting, failed]
+          description: Current phase of the background OTA task.
+        bytes:
+          type: integer
+          description: Bytes downloaded so far in the current attempt.
+        total:
+          type: integer
+          description: Total expected bytes for the current attempt, or 0 if unknown.
+        percent:
+          type: integer
+          description: Download percent complete; 0 when total is 0.
+        last_error:
+          type: string
+          description: Failure reason from the previous OTA attempt, if any.
+        running_version:
+          type: string
+          description: Version of the running firmware.
+        version_floor:
+          type: string
+          description: Anti-rollback floor version, when one is recorded.
 
     # ── Hardware / Power ──────────────────────────────────────────────────────
 

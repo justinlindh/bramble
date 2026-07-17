@@ -2,10 +2,11 @@ import { useState } from 'react';
 import {
   getAuthToken, setAuthToken,
   getAllowedOrigins, setAllowedOrigins,
-  getOtaOrigin, setOtaOrigin, resetOtaOrigin, startOtaUpdate,
+  getOtaOrigin, setOtaOrigin, resetOtaOrigin,
   type OtaOriginInfo,
 } from '../../store/actions';
 import { friendlyErrorFrom } from '../../lib/errors';
+import { FirmwareUpdateCard } from './FirmwareUpdateCard';
 import styles from './DeviceManagementSection.module.css';
 
 // Issue #95: the web client had no UI for the device auth token, the WS Origin
@@ -29,8 +30,11 @@ export function DeviceManagementSection() {
 
   // OTA
   const [ota, setOta] = useState<OtaOriginInfo | null>(null);
-  const [otaPath, setOtaPath] = useState('');
   const [otaNotice, setOtaNotice] = useState<string | null>(null);
+  // Draft origin for the input, kept separate from the SAVED ota.origin so the
+  // card (which loads its index and relativizes paths against ota.origin) never
+  // sees an unsaved keystroke-in-progress origin (finding 6).
+  const [originDraft, setOriginDraft] = useState('');
 
   const loadAll = async () => {
     setLoading(true);
@@ -40,6 +44,7 @@ export function DeviceManagementSection() {
       setAuthEnabled(a.enabled);
       setOrigins(o);
       setOta(t);
+      setOriginDraft(t.origin);
       setLoaded(true);
     } catch (e) {
       setError(friendlyErrorFrom(e));
@@ -95,14 +100,18 @@ export function DeviceManagementSection() {
     }
   };
 
-  const refreshOta = async () => setOta(await getOtaOrigin());
+  const refreshOta = async () => {
+    const t = await getOtaOrigin();
+    setOta(t);
+    setOriginDraft(t.origin);
+  };
 
   const handleSetOtaOrigin = async () => {
     setLoading(true);
     setOtaNotice(null);
     setError(null);
     try {
-      const r = await setOtaOrigin(ota?.origin ?? '');
+      const r = await setOtaOrigin(originDraft);
       if (!r.ok) { setError(r.error ?? 'Could not set update origin.'); return; }
       await refreshOta();
       setOtaNotice('Update origin saved.');
@@ -119,21 +128,6 @@ export function DeviceManagementSection() {
     try {
       await resetOtaOrigin();
       await refreshOta();
-    } catch (e) {
-      setError(friendlyErrorFrom(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleStartOta = async () => {
-    setLoading(true);
-    setOtaNotice(null);
-    setError(null);
-    try {
-      const r = await startOtaUpdate(otaPath.trim());
-      if (!r.ok) { setError(r.error ?? 'Update could not start.'); return; }
-      setOtaNotice(r.note ?? 'Update started.');
     } catch (e) {
       setError(friendlyErrorFrom(e));
     } finally {
@@ -233,8 +227,8 @@ export function DeviceManagementSection() {
             <input
               className={styles.input}
               type="text"
-              value={ota.origin}
-              onChange={(e) => setOta({ ...ota, origin: e.target.value })}
+              value={originDraft}
+              onChange={(e) => setOriginDraft(e.target.value)}
               autoComplete="off"
             />
           </div>
@@ -246,22 +240,12 @@ export function DeviceManagementSection() {
               </button>
             )}
           </div>
-          <div className={styles.row}>
-            <span className={styles.label}>Artifact path</span>
-            <input
-              className={styles.input}
-              type="text"
-              value={otaPath}
-              placeholder="stable/v1.4.0/heltec-v3/bramble.bin"
-              onChange={(e) => setOtaPath(e.target.value)}
-              autoComplete="off"
-            />
-            <button className={styles.dangerBtn} onClick={handleStartOta} disabled={loading || !otaPath.trim()}>
-              Start update
-            </button>
-          </div>
-          <p className={styles.muted}>The node reboots on a successful update.</p>
           {otaNotice && <p className={styles.notice}>{otaNotice}</p>}
+          <FirmwareUpdateCard
+            ota={ota}
+            onOtaChanged={refreshOta}
+            onInstallStart={() => { setError(null); setOtaNotice(null); }}
+          />
         </div>
       )}
     </div>

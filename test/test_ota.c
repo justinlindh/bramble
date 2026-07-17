@@ -62,6 +62,14 @@ esp_err_t esp_https_ota_abort(esp_https_ota_handle_t handle) {
     g_abort_calls++;
     return ESP_OK;
 }
+int esp_https_ota_get_image_size(esp_https_ota_handle_t handle) {
+    (void)handle;
+    return 0; /* Task 1 progress reporting; not asserted by these tests */
+}
+int esp_https_ota_get_image_len_read(esp_https_ota_handle_t handle) {
+    (void)handle;
+    return 0; /* Task 1 progress reporting; not asserted by these tests */
+}
 
 /* ── Anti-rollback gate stub (ota_rollback.c is device-only) ───────── */
 

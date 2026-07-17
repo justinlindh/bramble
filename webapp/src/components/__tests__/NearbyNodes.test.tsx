@@ -24,6 +24,7 @@ beforeEach(() => {
     selectDevice: vi.fn(),
     cancelDevicePicker: vi.fn(),
     autoSelectNextDevice: vi.fn(),
+    fetchOtaIndex: vi.fn(),
   };
   useStore.setState({ devices: [] });
   localStorage.clear();

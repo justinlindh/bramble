@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, net, session, shell } from 'electron';
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { startDiscovery, stopDiscovery } from './discovery';
-import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, type PickerDevice } from '../src/types/desktop';
+import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, OTA_CHANNELS, type OtaIndexFetchResult, type PickerDevice } from '../src/types/desktop';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -161,6 +161,18 @@ app.whenReady().then(() => {
     });
   });
   ipcMain.on(DISCOVERY_CHANNELS.stop, () => stopDiscovery());
+
+  // Runs the OTA release-index fetch in the main process so it is not
+  // subject to the renderer's CORS policy: a packaged desktop build loads
+  // from file:// and the OTA server may not send Access-Control-Allow-Origin.
+  ipcMain.handle(OTA_CHANNELS.fetchIndex, async (_event, url: unknown): Promise<OtaIndexFetchResult> => {
+    if (typeof url !== 'string' || !(url.startsWith('http://') || url.startsWith('https://'))) {
+      throw new Error(`Refusing to fetch a non-http(s) OTA index URL: ${String(url)}`);
+    }
+    const resp = await net.fetch(url);
+    const body = await resp.text();
+    return { ok: resp.ok, status: resp.status, body };
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

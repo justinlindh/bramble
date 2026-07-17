@@ -10,6 +10,7 @@
 #include "rpc_dispatcher.h"
 #include "rpc_methods.h"
 #include "phy_passthrough.h"
+#include "ota_progress.h"
 #include <string.h>
 #include <stdbool.h>
 
@@ -247,7 +248,19 @@ void test_ota_update_traversal_path_rejected(void) {
 
 void test_ota_update_resolves_against_origin_and_already_in_progress(void) {
     /* After a successful OTA start (xTaskCreate stub doesn't run the task),
-     * s_ota_in_progress stays true, so a second call should be rejected. */
+     * s_ota_in_progress stays true, so a second call should be rejected.
+     * This is also the only test in this binary that can observe a
+     * successful otaUpdate call (s_ota_in_progress never resets afterward
+     * since the stub never runs ota_task), so the stale-progress-reset
+     * assertion below piggybacks on it rather than adding a second
+     * standalone successful-call test. */
+
+    /* Simulate a previous attempt that ended in OTA_PROG_FAILED. A poller
+     * reading bramble.otaStatus right after the call below is accepted
+     * (before the task's first "downloading" report) must not see that
+     * stale terminal state. */
+    ota_progress_report(OTA_PROG_FAILED, 10, 100);
+
     cJSON* resp1 =
         dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"bramble.otaUpdate\","
                            "\"params\":{\"path\":\"stable/v1.4.0/heltec-v3/bramble.bin\","
@@ -258,6 +271,10 @@ void test_ota_update_resolves_against_origin_and_already_in_progress(void) {
     TEST_ASSERT_EQUAL_STRING("https://bramblemesh.org/ota/stable/v1.4.0/heltec-v3/bramble.bin",
                              cJSON_GetObjectItem(r1, "url")->valuestring);
     cJSON_Delete(resp1);
+
+    ota_progress_snapshot_t snap;
+    ota_progress_get(&snap);
+    TEST_ASSERT_EQUAL(OTA_PROG_IDLE, snap.state);
 
     /* Second: should fail with "already in progress" */
     cJSON* resp2 =

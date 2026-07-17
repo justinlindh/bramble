@@ -23,5 +23,7 @@ esp_err_t esp_https_ota_perform(esp_https_ota_handle_t handle);
 bool esp_https_ota_is_complete_data_received(esp_https_ota_handle_t handle);
 esp_err_t esp_https_ota_finish(esp_https_ota_handle_t handle);
 esp_err_t esp_https_ota_abort(esp_https_ota_handle_t handle);
+int esp_https_ota_get_image_size(esp_https_ota_handle_t handle);
+int esp_https_ota_get_image_len_read(esp_https_ota_handle_t handle);
 
 #endif

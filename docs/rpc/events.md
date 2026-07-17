@@ -537,3 +537,43 @@ Real-time packet telemetry event for traffic debug stream.
   }
 }
 ```
+
+---
+
+## `bramble.onOtaEvent`
+
+**Description**  
+Emitted during a background OTA update started by bramble.otaUpdate.
+
+**Trigger conditions**
+- OTA progress state transitions (`idle` -> `downloading` -> `verifying` -> `rebooting`, or `downloading`/`verifying` -> `failed`).
+- Every >= 5 percentage points of download progress.
+
+**Params**
+
+| Field | Type | Present when | Description |
+|---|---|---|---|
+| `state` | string | always | OTA state: `"idle"`, `"downloading"`, `"verifying"`, `"rebooting"`, or `"failed"`. |
+| `bytes` | integer | always | Bytes downloaded so far. |
+| `total` | integer | always | Total bytes expected for the update image. |
+| `percent` | integer | always | Download progress, `0-100` (`0` when `total` is unknown). |
+| `error` | string | failed | Failure text, same as `last_error` from `bramble.otaStatus`. |
+
+**Semantics notes**
+- `rebooting` is terminal for success: the node restarts about 2 seconds later and the connection drops.
+- `failed` is terminal for failure; the same text is available as `last_error` via bramble.otaStatus.
+
+**JSON-RPC example**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "bramble.onOtaEvent",
+  "params": {
+    "state": "downloading",
+    "bytes": 524288,
+    "total": 1708032,
+    "percent": 30
+  }
+}
+```

@@ -13,6 +13,7 @@
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "ota_progress.h"
 #include "ota_rollback.h"
 
 static const char* TAG = "ota";
@@ -73,7 +74,11 @@ static int ota_https_start(const char* url, bool allow_downgrade) {
         return -1;
     }
 
+    int image_size = esp_https_ota_get_image_size(handle);
+    ota_progress_report(OTA_PROG_DOWNLOADING, 0, image_size);
     while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+        ota_progress_report(OTA_PROG_DOWNLOADING, esp_https_ota_get_image_len_read(handle),
+                            image_size);
     }
     if (err != ESP_OK) {
         set_last_error("HTTPS OTA download failed: %s", esp_err_to_name(err));
@@ -90,6 +95,7 @@ static int ota_https_start(const char* url, bool allow_downgrade) {
      * RSA-3072 signature block (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT)
      * against the public key embedded in the RUNNING app's signature block.
      * Unsigned or wrongly-signed images fail closed here. */
+    ota_progress_set_state(OTA_PROG_VERIFYING);
     err = esp_https_ota_finish(handle);
     if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
         set_last_error("OTA rejected: image signature verification failed "
@@ -157,6 +163,7 @@ static int ota_http_start(const char* url, bool allow_downgrade) {
 
     char buf[4096];
     int total = 0;
+    ota_progress_report(OTA_PROG_DOWNLOADING, 0, content_len);
     while (true) {
         int read_len = esp_http_client_read(client, buf, sizeof(buf));
         if (read_len > 0) {
@@ -169,6 +176,7 @@ static int ota_http_start(const char* url, bool allow_downgrade) {
                 return -1;
             }
             total += read_len;
+            ota_progress_report(OTA_PROG_DOWNLOADING, total, content_len);
             if (content_len > 0 && total >= content_len) {
                 break;
             }
@@ -219,6 +227,7 @@ static int ota_http_start(const char* url, bool allow_downgrade) {
     /* esp_ota_end validates the image, including the appended signature block
      * (CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT). Even on the HTTP dev
      * path there is no signature bypass. */
+    ota_progress_report(OTA_PROG_VERIFYING, total, content_len);
     err = esp_ota_end(ota_handle);
     if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
         set_last_error("OTA rejected: image signature verification failed "
@@ -260,6 +269,7 @@ int ota_wifi_start(const char* url, bool allow_downgrade) {
     }
 
     if (rc != 0) {
+        ota_progress_set_state(OTA_PROG_FAILED);
         return -1;
     }
 

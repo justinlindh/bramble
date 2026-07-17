@@ -24,6 +24,26 @@ Two things changed with signed OTA (see `docs/design/ota-signing.md`):
   token)
 - Choose target board: `heltec-v3`, `heltec-v4`, or `tdeck-plus`
 
+## A0) Webapp rollout (recommended)
+
+For most upgrades, skip the JSON-RPC recipes below and use the webapp: open
+Config, then Device Management, then Firmware Update. Pick the version from
+the list (release notes, if published, show alongside each entry), watch the
+progress indicator while the node downloads and installs the image, and wait
+for the node to reboot; the UI confirms the new running version once it
+reconnects.
+
+CORS caveat: when the webapp runs in a BROWSER from a different origin than
+the OTA server (for example, the webapp on `https://app.example` fetching an
+index from `https://ota.example`), the release-index fetch (`index.json`)
+happens in the page, so the OTA origin server must send an
+`Access-Control-Allow-Origin` header (the webapp's origin, or `*`) on
+`index.json`, or the browser blocks the fetch. The packaged Electron desktop
+app routes that fetch through its main process (`net.fetch`) instead of the
+renderer, so it is not subject to CORS and works regardless of the OTA
+server's headers. The Android app lives in a separate repository
+(`bramble-android`) and is not covered by this document.
+
 ## A) Production rollout (official origin)
 
 The default origin is `https://bramblemesh.org/ota/`. CI publishes signed

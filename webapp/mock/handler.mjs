@@ -95,9 +95,67 @@ function authRequired() { return authToken.length > 0; }
 
 // Allowed-origins and OTA origin allowlist (issue #96, mirrors PR #83 / #85).
 let allowedOrigins = [];
-const OTA_DEFAULT_ORIGIN = 'https://bramblemesh.org/ota/';
+// The mock's OTA origin must be fetchable by fetchOtaIndex, which does a real
+// fetch() against it. 'https://mock.local/ota/' resolves nowhere, so the
+// index.json GET always failed and the version picker never rendered in the
+// no-hardware journey. Use the page origin instead (same-origin, so vite
+// serves webapp/public/ota/index.json there in dev and dist builds alike);
+// the localhost fallback only matters for non-browser test environments
+// where `location` is undefined.
+const OTA_DEFAULT_ORIGIN = (typeof location !== 'undefined' && location.origin
+  ? location.origin
+  : 'http://localhost:5173') + '/ota/';
 let otaOrigin = OTA_DEFAULT_ORIGIN;
 let otaOverridden = false;
+
+// OTA journey simulation (Bramble webapp OTA UX plan, Task 9): drives the
+// Firmware Update card end to end without hardware. Both the browser dev
+// server (mock/server.mjs -> handleConnection) and the in-page MockTransport
+// used by embedded shells share this module, so simulating the event stream
+// here (rather than in MockTransport.ts, which has no dispatch of its own
+// and just forwards to handleConnection) covers both entry points.
+const OTA_MOCK_TOTAL_BYTES = 1048576; // 1 MiB, arbitrary mock artifact size
+let otaVersionFloor = '0.4.0';
+let otaRunningVersion = '0.4.0';
+let otaSnapshot = { state: 'idle', bytes: 0, total: 0, percent: 0 };
+
+function otaEmit(partial) {
+  otaSnapshot = { ...otaSnapshot, error: undefined, ...partial };
+  notify('bramble.onOtaEvent', { ...otaSnapshot });
+}
+
+// Plays a flat list of onOtaEvent snapshots, one per 10ms tick, in order.
+// Stays setTimeout-based (rather than a single interval or promise chain of
+// arbitrary shape) so the existing fake-timer tests, which call
+// vi.advanceTimersByTimeAsync to flush the whole sequence, keep working.
+async function playOta(steps) {
+  for (const s of steps) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    otaEmit(s);
+  }
+}
+
+const OTA_FAIL_STEPS = [
+  { state: 'downloading', bytes: 0, total: OTA_MOCK_TOTAL_BYTES, percent: 0 },
+  {
+    state: 'downloading',
+    bytes: Math.round(OTA_MOCK_TOTAL_BYTES * 0.4),
+    total: OTA_MOCK_TOTAL_BYTES,
+    percent: 40,
+  },
+  { state: 'failed', percent: 40, error: 'mock: simulated failure' },
+];
+
+const OTA_SUCCESS_STEPS = [
+  ...[0, 25, 50, 75, 100].map((percent) => ({
+    state: 'downloading',
+    bytes: Math.round(OTA_MOCK_TOTAL_BYTES * percent / 100),
+    total: OTA_MOCK_TOTAL_BYTES,
+    percent,
+  })),
+  { state: 'verifying' },
+  { state: 'rebooting' },
+];
 
 // Traffic debug (issue #96, BUG-6): persisted toggle plus synthesized events.
 const trafficDebug = {
@@ -622,8 +680,8 @@ export const handlers = {
       origin: otaOrigin,
       default_origin: OTA_DEFAULT_ORIGIN,
       overridden: otaOverridden,
-      version_floor: '1.0.0',
-      running_version: '0.4.2-dev',
+      version_floor: otaVersionFloor,
+      running_version: otaRunningVersion,
     };
   },
 
@@ -646,11 +704,34 @@ export const handlers = {
     if (!path || /^[a-z]+:\/\//i.test(path) || path.includes('..')) {
       return { ok: false, error: 'invalid artifact path' };
     }
+
+    if (path.includes('fail')) {
+      // Simulated failure: two downloading ticks then a failed state.
+      void playOta(OTA_FAIL_STEPS);
+    } else {
+      // Deliberately no disconnect/reconnect simulation here: the
+      // rebooting -> reconnected transition is covered by the otaFlow unit
+      // tests against a real transport disconnect.
+      void playOta(OTA_SUCCESS_STEPS).then(() => {
+        otaRunningVersion = '0.5.0';
+      });
+    }
+
     return {
       ok: true,
       note: 'OTA update started (mock); the node would reboot on success',
       url: otaOrigin.replace(/\/?$/, '/') + path,
       partition: 'ota_1',
+    };
+  },
+
+  'bramble.otaStatus'(_params) {
+    const { error, ...rest } = otaSnapshot;
+    return {
+      ...rest,
+      last_error: error,
+      running_version: otaRunningVersion,
+      version_floor: otaVersionFloor,
     };
   },
 

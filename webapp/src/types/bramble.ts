@@ -163,6 +163,7 @@ export interface NodeStatus {
   gpsAvailable?: boolean;   // hardware has GPS module
   batteryMv?: number;       // battery voltage in millivolts
   batteryPct?: number;      // battery percentage 0-100
+  hardware?: string;        // hardware profile (e.g. "heltec_v4")
 }
 
 // ─── Location ──────────────────────────────────────────────────────────

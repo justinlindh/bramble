@@ -35,16 +35,18 @@ for (const channel of channels) {
         const metaPath = `${fpath}.meta.json`;
         let sha256 = '';
         let size = fs.statSync(fpath).size;
+        let meta = {};
         if (exists(metaPath)) {
-          const m = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-          sha256 = m.sha256 || '';
-          size = m.size || size;
+          meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          sha256 = meta.sha256 || '';
+          size = meta.size || size;
         }
         artifacts.push({
           board,
           file: `/ota/${channel}/${version}/${board}/${file}`,
           sha256,
           size,
+          ...(meta.notes ? { notes: String(meta.notes) } : {}),
         });
       }
     }

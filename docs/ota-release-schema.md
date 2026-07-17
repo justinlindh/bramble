@@ -38,7 +38,9 @@ Last verified: 2026-03-01
 - `size` (positive integer)
 
 ## Optional per artifact
-- `notes`
+- `notes`: free-text string; when present, the webapp firmware version picker
+  surfaces it next to the version so operators see release-specific context
+  before choosing an artifact.
 
 ## Filename policy (canonical + semver-tagged)
 For each uploaded artifact, publisher writes both:

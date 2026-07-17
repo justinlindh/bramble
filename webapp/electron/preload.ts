@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { electronAPI } from '@electron-toolkit/preload';
-import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, type BrambleDesktopApi, type DevicePickerRequest, type DiscoveredNode } from '../src/types/desktop';
+import { DEVICE_PICKER_CHANNELS, DISCOVERY_CHANNELS, OTA_CHANNELS, type BrambleDesktopApi, type DevicePickerRequest, type DiscoveredNode, type OtaIndexFetchResult } from '../src/types/desktop';
 
 const brambleDesktop: BrambleDesktopApi = {
   startDiscovery: (): void => { ipcRenderer.send(DISCOVERY_CHANNELS.start); },
@@ -20,6 +20,7 @@ const brambleDesktop: BrambleDesktopApi = {
   autoSelectNextDevice: (expected: { id?: string; name?: string } | null): void => {
     ipcRenderer.send(DEVICE_PICKER_CHANNELS.autoSelect, expected);
   },
+  fetchOtaIndex: (url: string): Promise<OtaIndexFetchResult> => ipcRenderer.invoke(OTA_CHANNELS.fetchIndex, url),
 };
 
 if (process.contextIsolated) {
