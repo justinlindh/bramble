@@ -51,7 +51,7 @@ describe('incoming message native notification', () => {
     await deliver({ from: 'DEADBEEF', to: 'AA11', text: 'ping', msgId: 'm1' });
     expect(onMessage).toHaveBeenCalledTimes(1);
     const payload = JSON.parse(onMessage.mock.calls[0][0]);
-    expect(payload).toMatchObject({ conversationId: 'dm:4072566510', sender: 'Node A', conversationTitle: 'Node A', text: 'ping' });
+    expect(payload).toMatchObject({ conversationId: 'dm:3735928559', sender: 'Node A', conversationTitle: 'Node A', text: 'ping' });
   });
 
   it('does not notify for a message from this node', async () => {
@@ -60,13 +60,13 @@ describe('incoming message native notification', () => {
   });
 
   it('does not notify for the conversation currently open and visible', async () => {
-    useStore.setState({ activeConversationId: 'dm:4072566510' } as any);
+    useStore.setState({ activeConversationId: 'dm:3735928559' } as any);
     await deliver({ from: 'DEADBEEF', to: 'AA11', text: 'looking at this', msgId: 'm3' });
     expect(onMessage).not.toHaveBeenCalled();
   });
 
   it('notifies for the open conversation when the app is not visible', async () => {
-    useStore.setState({ activeConversationId: 'dm:4072566510' } as any);
+    useStore.setState({ activeConversationId: 'dm:3735928559' } as any);
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
     await deliver({ from: 'DEADBEEF', to: 'AA11', text: 'backgrounded', msgId: 'm4' });
     expect(onMessage).toHaveBeenCalledTimes(1);

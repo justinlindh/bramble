@@ -7,7 +7,7 @@ import (
 )
 
 // TestPhase1ChannelFloodReachesFarNode is the system-level proof for Phase 1
-// delivery-core plan Task 5 (internal-planning/plans/2026-07-04-phase1-delivery-
+// delivery-core plan Task 5 (the internal design plan 2026-07-04-phase1-delivery-
 // core-plan.md): a broadcast/channel DATA message must mesh past direct
 // radio neighbors, reaching a node >=3 hops from the sender.
 //

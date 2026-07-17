@@ -135,7 +135,7 @@ jobs:
           # Phase 2 replaces this whole step with a GitHub-native release.
           GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
           GITEA_REPO: ${{ github.repository }}
-          GITEA_URL: ${{ github.server_url }}
+          RELEASE_FORGE_URL: ${{ github.server_url }}
           RELEASE_TAG: ${{ github.ref_name }}
           RELEASE_NAME: Firmware ${{ steps.version.outputs.version }}
           RELEASE_BODY_FILE: /tmp/firmware-release-notes.md

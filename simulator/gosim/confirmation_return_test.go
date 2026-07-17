@@ -10,7 +10,7 @@ import (
 
 // TestPhase1ConfirmationReachesOriginatorAcrossMultiHopLine is the
 // system-level proof for Phase 1 delivery-core plan Task 4
-// (internal-planning/plans/2026-07-04-phase1-delivery-core-plan.md).
+// the internal design plan.
 //
 // gosim used to install a route to every beacon sender (the old
 // _handle_beacon in bridge.c), which firmware's own handle_beacon

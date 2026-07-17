@@ -1,7 +1,7 @@
-if (!process.env.GITEA_URL) {
-  throw new Error('GITEA_URL is required (set it in the release environment)');
+if (!process.env.RELEASE_FORGE_URL) {
+  throw new Error('RELEASE_FORGE_URL is required (set it in the release environment)');
 }
-const giteaUrl = process.env.GITEA_URL;
+const giteaUrl = process.env.RELEASE_FORGE_URL;
 
 module.exports = {
   branches: ['main'],

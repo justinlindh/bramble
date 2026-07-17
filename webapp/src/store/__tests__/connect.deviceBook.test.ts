@@ -98,11 +98,11 @@ describe('device save on connect', () => {
   });
 
   it('saveConnectedDevice upserts by hex address and stores the token per remember', () => {
-    saveConnectedDevice({ addr: 0xDEADBEEF, name: 'V4', ip: '192.0.2.0', token: 'tok', remember: true, transport: 'wifi' });
+    saveConnectedDevice({ addr: 0xDEADBEEF, name: 'V4', ip: '198.51.100.146', token: 'tok', remember: true, transport: 'wifi' });
     const d = listDevices();
     expect(d).toHaveLength(1);
     expect(d[0].address).toBe('DEADBEEF');
-    expect(d[0].lastIp).toBe('192.0.2.0');
+    expect(d[0].lastIp).toBe('198.51.100.146');
     expect(getDeviceToken('DEADBEEF')).toBe('tok');
     expect(localStorage.getItem('bramble.deviceToken.DEADBEEF')).toBe('tok'); // remembered
   });
@@ -139,7 +139,7 @@ describe('connect() device-book guards', () => {
       ip: '10.0.0.9',
       token: 'tok',
       remember: true,
-      expectAddressHex: 'DEADBEEF',
+      expectAddressHex: 'CAFEBABE',
     });
     expect(useStore.getState().connectionState).toBe('error');
     expect(listDevices()).toHaveLength(0);

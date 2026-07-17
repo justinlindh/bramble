@@ -12,7 +12,7 @@ beforeEach(() => {
 
 describe('DeviceList', () => {
   it('renders saved devices and one-click connect passes the stored token + expectAddressHex', () => {
-    upsertDevice({ address: 'DEADBEEF', name: 'V4', lastIp: '192.0.2.0', transport: 'wifi', remember: true, nowMs: 1 });
+    upsertDevice({ address: 'DEADBEEF', name: 'V4', lastIp: '198.51.100.146', transport: 'wifi', remember: true, nowMs: 1 });
     setDeviceToken('DEADBEEF', 'tok', true);
     actions.refreshDevices();
     const spy = vi.spyOn(actions, 'connect').mockResolvedValue();
@@ -20,7 +20,7 @@ describe('DeviceList', () => {
     expect(screen.getByText('V4')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /connect to V4/i }));
     expect(spy).toHaveBeenCalledWith('wifi', expect.objectContaining({
-      token: 'tok', ip: '192.0.2.0', expectAddressHex: 'DEADBEEF', remember: true,
+      token: 'tok', ip: '198.51.100.146', expectAddressHex: 'DEADBEEF', remember: true,
     }));
   });
   it('forget removes the device from the list', () => {

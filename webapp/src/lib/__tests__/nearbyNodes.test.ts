@@ -4,11 +4,11 @@ import type { SavedDevice } from '../deviceBook';
 import type { DiscoveredNode } from '../../types/desktop';
 
 const saved = (address: string, name: string): SavedDevice => ({
-  address, name, lastIp: '192.0.2.0', transport: 'wifi', remember: true, lastConnectedAt: 1,
+  address, name, lastIp: '192.0.2.9', transport: 'wifi', remember: true, lastConnectedAt: 1,
 });
 
 const disc = (over: Partial<DiscoveredNode>): DiscoveredNode => ({
-  hostname: 'bramble-6eee', ip: '192.0.2.0', ...over,
+  hostname: 'bramble-beef', ip: '192.0.2.21', ...over,
 });
 
 describe('mergeNearby', () => {
@@ -31,7 +31,7 @@ describe('mergeNearby', () => {
 
   it('falls back to hostname when there is no name at all', () => {
     const [n] = mergeNearby([disc({})], []);
-    expect(n.displayName).toBe('bramble-6eee');
+    expect(n.displayName).toBe('bramble-beef');
   });
 
   it('suffix-matches old firmware (no TXT) against a single book entry', () => {
@@ -44,10 +44,10 @@ describe('mergeNearby', () => {
   it('does not suffix-match when the suffix is ambiguous', () => {
     const [n] = mergeNearby(
       [disc({})],
-      [saved('DEADBEEF', 'Node A'), saved('AAAA6EEE', 'Node B')],
+      [saved('DEADBEEF', 'Node A'), saved('AAAABEEF', 'Node B')],
     );
     expect(n.probableSaved).toBeUndefined();
-    expect(n.displayName).toBe('bramble-6eee');
+    expect(n.displayName).toBe('bramble-beef');
   });
 
   it('never suffix-matches when TXT addr is present (exact info wins)', () => {
@@ -60,7 +60,7 @@ describe('mergeNearby', () => {
     const nodes = mergeNearby(
       [
         disc({ hostname: 'bramble-0001', ip: '10.0.0.1', name: 'Zeta' }),
-        disc({ hostname: 'bramble-6eee', ip: '10.0.0.2' }),
+        disc({ hostname: 'bramble-beef', ip: '10.0.0.2' }),
         disc({ hostname: 'bramble-0002', ip: '10.0.0.3', addrHex: 'AAAA0002' }),
       ],
       [saved('DEADBEEF', 'Node A'), saved('AAAA0002', 'Node B')],

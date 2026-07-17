@@ -325,7 +325,7 @@ export function ConnectionOverlay() {
                 className={styles.wifiField}
                 value={bleName}
                 onChange={e => setBleName(e.target.value)}
-                placeholder="e.g. Node A node"
+                placeholder="e.g. Living room node"
                 onKeyDown={e => e.key === 'Enter' && handleConnect()}
               />
             </div>
@@ -404,7 +404,7 @@ export function ConnectionOverlay() {
                 className={styles.wifiField}
                 value={wifiName}
                 onChange={e => setWifiName(e.target.value)}
-                placeholder="e.g. Node A node"
+                placeholder="e.g. Living room node"
                 onKeyDown={e => e.key === 'Enter' && handleConnect()}
               />
             </div>

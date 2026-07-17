@@ -12,9 +12,9 @@ TAG="${RELEASE_TAG:-${GITHUB_REF_NAME:-}}"
 NAME="${RELEASE_NAME:-$TAG}"
 BODY_FILE="${RELEASE_BODY_FILE:-}"
 BODY="${RELEASE_BODY:-}"
-GITEA_URL="${GITEA_URL:-${GITHUB_SERVER_URL:-}}"
-: "${GITEA_URL:?GITEA_URL or GITHUB_SERVER_URL is required}"
-API_BASE="${GITEA_URL%/}/api/v1/repos/${REPO}"
+RELEASE_FORGE_URL="${RELEASE_FORGE_URL:-${GITHUB_SERVER_URL:-}}"
+: "${RELEASE_FORGE_URL:?RELEASE_FORGE_URL or GITHUB_SERVER_URL is required}"
+API_BASE="${RELEASE_FORGE_URL%/}/api/v1/repos/${REPO}"
 
 if [[ -n "$BODY_FILE" ]]; then
   BODY="$(cat "$BODY_FILE")"
@@ -84,5 +84,5 @@ if [[ -n "${ASSET_GLOBS:-}" ]]; then
   done <<< "$ASSET_GLOBS"
 fi
 
-release_url="${GITEA_URL%/}/${REPO}/releases/tag/${TAG}"
+release_url="${RELEASE_FORGE_URL%/}/${REPO}/releases/tag/${TAG}"
 echo "Release URL: $release_url"

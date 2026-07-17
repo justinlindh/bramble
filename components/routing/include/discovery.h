@@ -91,7 +91,7 @@ int rrep_verify(const bramble_rrep_t* r);
  * Phase 2 "save reactive routing": intermediate-node RREP (classic AODV
  * shortcut, RFC 3561 6.6.2). Every RREQ flooding the whole mesh to find its
  * destination is reactive routing's dominant airtime cost at scale
- * (internal-planning plans/2026-07-04-phase2-scale-framework.md). If a relay
+ * (see the 2026-07-04 phase-2 scale-framework design notes). If a relay
  * that receives an RREQ already holds a route to the destination, it can
  * answer on the destination's behalf instead of only forwarding the flood
  * further, short-circuiting discovery for the whole subtree beyond it.

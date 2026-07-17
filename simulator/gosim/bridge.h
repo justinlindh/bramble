@@ -265,7 +265,7 @@ void bridge_init(void);
  * intermediate_rrep_route_usable). Firmware (main/mesh_task.c's
  * handle_rreq) always has this on; gosim exposes a runtime on/off switch
  * purely so a scenario can A/B the SAME topology/traffic with and without
- * the feature for measurement (see internal-planning plans/2026-07-04
+ * the feature for measurement (see the internal design plan 2026-07-04
  * phase2-scale-framework.md's before/after requirement), without needing
  * two firmware builds. Defaults to true (the shipped firmware behavior);
  * gosim/sim.go resets this explicitly on every run (see the scenario's

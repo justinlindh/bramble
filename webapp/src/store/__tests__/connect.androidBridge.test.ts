@@ -94,10 +94,10 @@ describe('android native bridge notification on connect', () => {
     const updateConnection = vi.fn();
     window.brambleAndroidNative = { updateConnection };
 
-    await connect('wifi', { url: 'ws://192.0.2.0/ws', token: 'sekrit', ip: '192.0.2.0' });
+    await connect('wifi', { url: 'ws://192.0.2.21/ws', token: 'sekrit', ip: '192.0.2.21' });
 
     expect(useStore.getState().connectionState).toBe('connected');
-    expect(updateConnection).toHaveBeenCalledWith('ws://192.0.2.0/ws', 'sekrit');
+    expect(updateConnection).toHaveBeenCalledWith('ws://192.0.2.21/ws', 'sekrit');
   });
 
   it('passes an empty token when none is set', async () => {
@@ -105,9 +105,9 @@ describe('android native bridge notification on connect', () => {
     const updateConnection = vi.fn();
     window.brambleAndroidNative = { updateConnection };
 
-    await connect('wifi', { url: 'ws://192.0.2.0/ws', ip: '192.0.2.0' });
+    await connect('wifi', { url: 'ws://192.0.2.21/ws', ip: '192.0.2.21' });
 
-    expect(updateConnection).toHaveBeenCalledWith('ws://192.0.2.0/ws', '');
+    expect(updateConnection).toHaveBeenCalledWith('ws://192.0.2.21/ws', '');
   });
 
   it('does not touch the bridge outside the Android shell', async () => {
@@ -115,7 +115,7 @@ describe('android native bridge notification on connect', () => {
     const updateConnection = vi.fn();
     window.brambleAndroidNative = { updateConnection };
 
-    await connect('wifi', { url: 'ws://192.0.2.0/ws', token: 'sekrit', ip: '192.0.2.0' });
+    await connect('wifi', { url: 'ws://192.0.2.21/ws', token: 'sekrit', ip: '192.0.2.21' });
 
     expect(useStore.getState().connectionState).toBe('connected');
     expect(updateConnection).not.toHaveBeenCalled();

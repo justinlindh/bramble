@@ -40,7 +40,7 @@ package-all: package-linux package-android ## Everything installable (win exclud
 flash-fleet: ## Flash every connected bench node (auto-applies the V3 --encrypt rule)
 	bash scripts/flash-fleet.sh build
 
-# Mirrors are manual-refresh; Gitea stays canonical. internal-planning is exempt.
+# Mirrors are manual-refresh; Gitea stays canonical.
 MIRROR_REPOS ?= bramble bramble-android bramble-go bramble-cli bramblemesh.org-site
 mirror-github: ## Force-push all family repos to their private GitHub mirrors
 	@for r in $(MIRROR_REPOS); do \

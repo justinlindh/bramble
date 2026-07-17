@@ -10,8 +10,8 @@ import { connect } from '../../store/actions';
 
 let discoveryCb: ((nodes: DiscoveredNode[]) => void) | null = null;
 
-const garage: SavedDevice = {
-  address: 'DEADBEEF', name: 'Node A', lastIp: '192.0.2.0',
+const nodeA: SavedDevice = {
+  address: 'DEADBEEF', name: 'Node A', lastIp: '192.0.2.9',
   transport: 'wifi', remember: true, lastConnectedAt: 1,
 };
 
@@ -50,17 +50,17 @@ describe('NearbyNodes', () => {
   });
 
   it('one-click connects a saved node with token, current IP, and DHCP guard', () => {
-    useStore.setState({ devices: [garage] });
+    useStore.setState({ devices: [nodeA] });
     localStorage.setItem('bramble.deviceToken.DEADBEEF', 'sekrit');
     render(<NearbyNodes onPickUnknown={vi.fn()} />);
     act(() => discoveryCb!([
-      { addrHex: 'DEADBEEF', name: 'Node A (fw)', hostname: 'bramble-6eee', ip: '192.0.2.0' },
+      { addrHex: 'DEADBEEF', name: 'Node A (fw)', hostname: 'bramble-beef', ip: '192.0.2.21' },
     ]));
-    fireEvent.click(screen.getByRole('button', { name: /connect to garage/i }));
+    fireEvent.click(screen.getByRole('button', { name: /connect to node a/i }));
     expect(connect).toHaveBeenCalledWith('wifi', expect.objectContaining({
-      url: 'ws://192.0.2.0/ws',
+      url: 'ws://192.0.2.21/ws',
       token: 'sekrit',
-      ip: '192.0.2.0',
+      ip: '192.0.2.21',
       remember: true,
       name: 'Node A',
       expectAddressHex: 'DEADBEEF',
@@ -71,12 +71,12 @@ describe('NearbyNodes', () => {
     const onPickUnknown = vi.fn();
     render(<NearbyNodes onPickUnknown={onPickUnknown} />);
     act(() => discoveryCb!([
-      { addrHex: '11112222', name: 'Node B', hostname: 'bramble-2222', ip: '192.0.2.0' },
+      { addrHex: '11112222', name: 'Node B', hostname: 'bramble-2222', ip: '192.0.2.30' },
     ]));
-    fireEvent.click(screen.getByRole('button', { name: /connect to attic/i }));
+    fireEvent.click(screen.getByRole('button', { name: /connect to node b/i }));
     expect(connect).not.toHaveBeenCalled();
     expect(onPickUnknown).toHaveBeenCalledWith(expect.objectContaining({
-      ip: '192.0.2.0', txtName: 'Node B',
+      ip: '192.0.2.30', txtName: 'Node B',
     }));
   });
 

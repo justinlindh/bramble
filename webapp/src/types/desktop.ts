@@ -7,7 +7,7 @@ export type DiscoveredNode = {
   addrHex?: string;
   /** Node name from mDNS TXT `name` (newer firmware only). */
   name?: string;
-  /** mDNS hostname without .local, e.g. "bramble-6eee". */
+  /** mDNS hostname without .local, e.g. "bramble-beef". */
   hostname: string;
   /** IPv4 address to connect to (the WS endpoint is always ws://<ip>/ws). */
   ip: string;
