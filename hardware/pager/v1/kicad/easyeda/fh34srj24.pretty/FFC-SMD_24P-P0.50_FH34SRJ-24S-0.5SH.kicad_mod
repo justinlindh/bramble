@@ -62,7 +62,7 @@
 	(fp_line (start -6.76 0.76) (end -6.76 1.73) (layer F.CrtYd) (width 0.05))
 	(fp_line (start -6.76 1.73) (end -6.74 1.75) (layer F.CrtYd) (width 0.05))
 	(fp_line (start -6.74 1.75) (end 6.75 1.75) (layer F.CrtYd) (width 0.05))
-	(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/fh34srj24.3dshapes/FFC-SMD_24P-P0.50_FH34SRJ-24S-0.5SH.wrl"
+	(model "${KIPRJMOD}/easyeda/fh34srj24.3dshapes/FFC-SMD_24P-P0.50_FH34SRJ-24S-0.5SH.wrl"
 		(offset (xyz 0.000 0.000 0.000))
 		(scale (xyz 1 1 1))
 		(rotate (xyz 0 0 0))

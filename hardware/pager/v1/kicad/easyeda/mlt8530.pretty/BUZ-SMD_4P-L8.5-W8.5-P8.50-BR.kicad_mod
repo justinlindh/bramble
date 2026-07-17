@@ -29,7 +29,7 @@
 	(fp_line (start -4.25 -4.25) (end 4.25 -4.25) (layer F.CrtYd) (width 0.05))
 	(fp_line (start 4.25 -4.25) (end 4.25 4.25) (layer F.CrtYd) (width 0.05))
 	(fp_line (start 4.25 4.25) (end -4.25 4.25) (layer F.CrtYd) (width 0.05))
-	(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/mlt8530.3dshapes/BUZ-SMD_4P-L8.5-W8.5-H3.0.wrl"
+	(model "${KIPRJMOD}/easyeda/mlt8530.3dshapes/BUZ-SMD_4P-L8.5-W8.5-H3.0.wrl"
 		(offset (xyz 0.000 0.000 0.000))
 		(scale (xyz 1 1 1))
 		(rotate (xyz 0 0 0))

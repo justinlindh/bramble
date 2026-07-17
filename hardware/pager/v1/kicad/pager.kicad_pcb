@@ -6267,7 +6267,7 @@
 			(uuid "6ac5fc9d-38d3-4be9-b105-c8159a3acd9e")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
+		(model "${KIPRJMOD}/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -7938,7 +7938,7 @@
 			(uuid "e7fda4b2-af15-4bb2-8734-068da3222159")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/fnr4030.3dshapes/IND-SMD_L4.0-W4.0-H2.6_FNR40XXS.wrl"
+		(model "${KIPRJMOD}/easyeda/fnr4030.3dshapes/IND-SMD_L4.0-W4.0-H2.6_FNR40XXS.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -10352,7 +10352,7 @@
 			(uuid "99b10459-9d01-4507-a600-23888030ed84")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/mlt8530.3dshapes/BUZ-SMD_4P-L8.5-W8.5-H3.0.wrl"
+		(model "${KIPRJMOD}/easyeda/mlt8530.3dshapes/BUZ-SMD_4P-L8.5-W8.5-H3.0.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -12032,7 +12032,7 @@
 			(uuid "88974c23-fc2f-446b-b1e9-262c9ae3c99c")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
+		(model "${KIPRJMOD}/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -13222,7 +13222,7 @@
 			(uuid "143b4942-8d44-402b-ab1b-87710c03d7e0")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
+		(model "${KIPRJMOD}/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14202,7 +14202,7 @@
 			(uuid "6f89f6e9-0e4e-4728-ae23-016faf82f9d5")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/tp4056.3dshapes/ESOP-8_L4.9-W3.9-H1.6-LS6.0-P1.27.wrl"
+		(model "${KIPRJMOD}/easyeda/tp4056.3dshapes/ESOP-8_L4.9-W3.9-H1.6-LS6.0-P1.27.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -14749,7 +14749,7 @@
 			(uuid "e9bc87ba-e69c-4384-81dc-7f2e995fc7ab")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
+		(model "${KIPRJMOD}/easyeda/ts1187a.3dshapes/SW-SMD_4P-L5.1-W5.1-P3.70-LS6.5-TL_H1.5.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -15589,7 +15589,7 @@
 			(uuid "6939f309-2fe0-411f-813d-e31402b7dfdf")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/fs8205a.3dshapes/SOT-23-6_L2.9-W1.6-H1.5-LS2.8-P0.95.wrl"
+		(model "${KIPRJMOD}/easyeda/fs8205a.3dshapes/SOT-23-6_L2.9-W1.6-H1.5-LS2.8-P0.95.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -18762,7 +18762,7 @@
 			(uuid "341018dd-af75-4039-85fd-e9da1869aa6c")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/fh34srj24.3dshapes/FFC-SMD_24P-P0.50_FH34SRJ-24S-0.5SH.wrl"
+		(model "${KIPRJMOD}/easyeda/fh34srj24.3dshapes/FFC-SMD_24P-P0.50_FH34SRJ-24S-0.5SH.wrl"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -22522,7 +22522,7 @@
 			(uuid "1cbbd5e1-a15e-466f-beaa-fcfe9a825d7b")
 		)
 		(embedded_fonts no)
-		(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/nicerf_lora1262.3dshapes/WIRELM-SMD_16P-L16.0-W16.0-P2.00_LORA-CC68-915MHZ-TCXO.wrl"
+		(model "${KIPRJMOD}/easyeda/nicerf_lora1262.3dshapes/WIRELM-SMD_16P-L16.0-W16.0-P2.00_LORA-CC68-915MHZ-TCXO.wrl"
 			(offset
 				(xyz 0 0 0)
 			)

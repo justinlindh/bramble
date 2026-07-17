@@ -67,7 +67,7 @@
 	(fp_line (start -8.00 -8.00) (end 8.00 -8.00) (layer F.CrtYd) (width 0.05))
 	(fp_line (start 8.00 -8.00) (end 8.00 8.00) (layer F.CrtYd) (width 0.05))
 	(fp_line (start 8.00 8.00) (end -8.00 8.00) (layer F.CrtYd) (width 0.05))
-	(model "/home/user/src/bramble/hardware/pager/v1/kicad/easyeda/nicerf_lora1262.3dshapes/WIRELM-SMD_16P-L16.0-W16.0-P2.00_LORA-CC68-915MHZ-TCXO.wrl"
+	(model "${KIPRJMOD}/easyeda/nicerf_lora1262.3dshapes/WIRELM-SMD_16P-L16.0-W16.0-P2.00_LORA-CC68-915MHZ-TCXO.wrl"
 		(offset (xyz 0.000 0.000 0.000))
 		(scale (xyz 1 1 1))
 		(rotate (xyz 0 0 0))
