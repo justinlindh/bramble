@@ -127,6 +127,17 @@ jobs:
           echo "Resolved diff range: ${diff_range:-<unresolved>}"
           echo "firmware=${firmware} simulator=${simulator} emulator=${emulator} workflows=${workflows} docs=${docs}"
 
+  no-internal-refs:
+    name: No internal refs
+    needs: changes
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container: localhost:5000/bramble/runner-full:22.04-go126
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tracked tree for internal infra references
+        run: bash scripts/lint/check-no-internal-refs.sh
+
   host-tests:
     name: Host tests
     needs: changes
