@@ -16,6 +16,16 @@ test('index.html loads flasher as module and defines esptool-js importmap', () =
   assert.doesNotMatch(html, /<script\s+src="https:\/\/unpkg\.com\/esptool-js@0\.5\.7\/bundle\.js"><\/script>/);
 });
 
+test('every board erases otadata at 0xe000 so a reflashed device boots the new app in ota_0', () => {
+  const js = read('flasher.js');
+  const boardsSrc = js.slice(js.indexOf('const BOARDS'), js.indexOf('(function ()'));
+  const partitionLists = boardsSrc.match(/partitions:\s*\[[\s\S]*?\]/g) || [];
+  assert.equal(partitionLists.length, 3, 'expected partition lists for all three boards');
+  for (const list of partitionLists) {
+    assert.match(list, /offset:\s*0xe000,\s*blank:\s*0x2000/);
+  }
+});
+
 test('flasher.js imports ESPLoader and Transport directly and does not use global esptool', () => {
   const js = read('flasher.js');
   assert.match(js, /^import\s+\{\s*ESPLoader\s*,\s*Transport\s*\}\s+from\s+['"]esptool-js['"];/m);

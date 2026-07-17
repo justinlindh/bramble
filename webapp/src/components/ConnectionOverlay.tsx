@@ -447,6 +447,18 @@ export function ConnectionOverlay() {
         </button>
 
         <p className={styles.hint}>{hints[transportType]}</p>
+
+        {/* The flasher is a hosted sibling page (webapp/public/web-flasher/),
+            so the relative link only makes sense in a real browser, not in the
+            Electron/Android shells. */}
+        {!isEmbeddedShell() && (
+          <p className={styles.flasherHint}>
+            Brand-new device?{' '}
+            <a className={styles.flasherLink} href="./web-flasher/">
+              Flash Bramble firmware from your browser
+            </a>
+          </p>
+        )}
       </div>
     </div>
   );

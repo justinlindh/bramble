@@ -82,6 +82,7 @@
 
     const resolved = {};
     for (const part of boardConfig.partitions) {
+      if (!part.file) continue; // synthesized regions (blank otadata) need no artifact
       const match = boardArtifacts.find(a => artifactNameFromPath(a.file) === part.file);
       if (!match) {
         throw new Error(`Release ${release.version} missing ${part.file} for selected board`);

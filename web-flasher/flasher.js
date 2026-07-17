@@ -14,6 +14,11 @@ const BOARDS = {
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
+            // otadata is written as erased bytes (the content of ota_data_initial.bin)
+            // so a previously used device boots the fresh app in ota_0 instead of a
+            // stale image left in ota_1. All bramble partition tables place otadata
+            // at 0xe000, size 0x2000.
+            { name: 'ota-data',         offset: 0xe000,  blank: 0x2000 },
             { name: 'firmware',         offset: 0x10000, file: 'bramble.bin' }
         ]
     },
@@ -25,6 +30,11 @@ const BOARDS = {
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
+            // otadata is written as erased bytes (the content of ota_data_initial.bin)
+            // so a previously used device boots the fresh app in ota_0 instead of a
+            // stale image left in ota_1. All bramble partition tables place otadata
+            // at 0xe000, size 0x2000.
+            { name: 'ota-data',         offset: 0xe000,  blank: 0x2000 },
             { name: 'firmware',         offset: 0x10000, file: 'bramble.bin' }
         ]
     },
@@ -36,6 +46,11 @@ const BOARDS = {
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
+            // otadata is written as erased bytes (the content of ota_data_initial.bin)
+            // so a previously used device boots the fresh app in ota_0 instead of a
+            // stale image left in ota_1. All bramble partition tables place otadata
+            // at 0xe000, size 0x2000.
+            { name: 'ota-data',         offset: 0xe000,  blank: 0x2000 },
             { name: 'firmware',         offset: 0x10000, file: 'bramble.bin' }
         ]
     }
@@ -450,9 +465,13 @@ const BOARDS = {
             const artifactsByFile = window.BrambleReleaseIndex
                 .resolveArtifactsForBoardRelease(board, selectedRelease, boardCfg);
 
-            // Fetch all partition binaries
+            // Fetch all partition binaries; blank regions are synthesized locally
             const fileArray = [];
             for (const part of boardCfg.partitions) {
+                if (part.blank) {
+                    fileArray.push({ data: '\xff'.repeat(part.blank), address: part.offset });
+                    continue;
+                }
                 const artifact = artifactsByFile[part.file];
                 const url = artifact.file;
                 setStatus(`Fetching ${part.name} (${part.file})…`);
