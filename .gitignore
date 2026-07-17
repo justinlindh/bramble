@@ -66,3 +66,7 @@ keys/*
 *.kicad_prl
 *.lck
 ~*.lck
+
+# Internal AI-assistant ops docs, kept local/private (not shipped public)
+/CLAUDE.md
+/.claude/
