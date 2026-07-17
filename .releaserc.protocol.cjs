@@ -1,4 +1,7 @@
-const giteaUrl = process.env.GITEA_URL || 'https://github.com';
+if (!process.env.GITEA_URL) {
+  throw new Error('GITEA_URL is required (set it in the release environment)');
+}
+const giteaUrl = process.env.GITEA_URL;
 
 module.exports = {
   branches: ['main'],

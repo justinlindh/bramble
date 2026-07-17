@@ -44,6 +44,7 @@ jobs:
           # PAT the semantic-release-gitea plugin needs to write releases
           # back to the frozen Gitea mirror repo. Phase 2 rewrites this to a
           # GitHub-native release flow.
+          GITEA_URL: ${{ vars.GITEA_URL }}
           GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.protocol.cjs
@@ -77,6 +78,7 @@ jobs:
       - name: Run semantic-release (webapp)
         env:
           # GITEA_SYNC_TOKEN: see release-protocol above.
+          GITEA_URL: ${{ vars.GITEA_URL }}
           GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.webapp.cjs
@@ -113,6 +115,7 @@ jobs:
       - name: Run semantic-release (firmware)
         env:
           # GITEA_SYNC_TOKEN: see release-protocol above.
+          GITEA_URL: ${{ vars.GITEA_URL }}
           GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.firmware.cjs

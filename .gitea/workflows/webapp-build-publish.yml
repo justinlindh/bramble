@@ -18,6 +18,9 @@ jobs:
     container:
       image: ghcr.io/catthehacker/ubuntu:full-22.04
       options: --user 0:0 --group-add 959
+    env:
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'registry.example.com' }}
+      REGISTRY_IMAGE_REPO: ${{ vars.REGISTRY_IMAGE_REPO || 'registry.example.com/bramble/bramble-web-client' }}
     defaults:
       run:
         shell: bash
@@ -79,7 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "$REGISTRY_PAT" | docker login ghcr.io/example -u "$REGISTRY_USERNAME" --password-stdin
+          echo "$REGISTRY_PAT" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Resolve app version
         id: appver
@@ -91,7 +94,7 @@ jobs:
 
       - name: Build and push web-client image
         env:
-          IMAGE_REPO: ghcr.io/example/justinlindh/bramble-web-client
+          IMAGE_REPO: ${{ env.REGISTRY_IMAGE_REPO }}
           IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
           DOCKERFILE_PATH: webapp/Dockerfile
           BUILD_CONTEXT: webapp
@@ -133,7 +136,7 @@ jobs:
           DEPLOY_REPO_OWNER: ${{ vars.DEPLOY_REPO_OWNER }}
           DEPLOY_REPO_NAME: ${{ vars.DEPLOY_REPO_NAME }}
           DEPLOY_WORKFLOW_ID: ${{ vars.DEPLOY_WORKFLOW_ID }}
-          IMAGE_REF: ghcr.io/example/justinlindh/bramble-web-client:sha-${{ github.sha }}
+          IMAGE_REF: ${{ env.REGISTRY_IMAGE_REPO }}:sha-${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail

@@ -33,6 +33,7 @@ jobs:
 
       - name: Run semantic-release (protocol)
         env:
+          GITEA_URL: ${{ vars.GITEA_URL }}
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.protocol.cjs
@@ -64,6 +65,7 @@ jobs:
 
       - name: Run semantic-release (webapp)
         env:
+          GITEA_URL: ${{ vars.GITEA_URL }}
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.webapp.cjs
@@ -98,6 +100,7 @@ jobs:
 
       - name: Run semantic-release (firmware)
         env:
+          GITEA_URL: ${{ vars.GITEA_URL }}
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: npx semantic-release --extends ./.releaserc.firmware.cjs
