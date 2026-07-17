@@ -92,7 +92,7 @@ describe('relativizeArtifactPath', () => {
       'https://bramblemesh.org/ota/')).toBe('stable/v1.4.0/heltec-v4/bramble.bin');
   });
   it('passes through already-relative files', () => {
-    expect(relativizeArtifactPath('bramble.bin', 'http://192.0.2.199:8088/')).toBe('bramble.bin');
+    expect(relativizeArtifactPath('bramble.bin', 'http://192.0.2.10:8088/')).toBe('bramble.bin');
   });
   it('returns null when the file is outside the origin', () => {
     expect(relativizeArtifactPath('/elsewhere/bramble.bin', 'https://bramblemesh.org/ota/')).toBeNull();
