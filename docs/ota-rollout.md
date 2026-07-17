@@ -16,7 +16,7 @@ Two things changed with signed OTA (see `docs/design/ota-signing.md`):
 
 ## Prerequisites
 
-- Node reachable over JSON-RPC WebSocket (example: `ws://192.0.2.0/ws`)
+- Node reachable over JSON-RPC WebSocket (example: `ws://192.0.2.179/ws`)
 - RPC auth token for the node (all OTA methods are authenticated)
 - A JSON-RPC client. `bramble-cli`'s `ota --url` predates the path-based
   contract (tracked as bramble-cli#36); until that lands, drive the RPCs
@@ -55,7 +55,7 @@ Trigger the update with the artifact path relative to the origin:
 
 ```bash
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.4.0/heltec-v3/bramble.bin"}}' \
-  | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+  | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
 ```
 
 Expected: `ok=true` with the resolved URL echoed back, then device
@@ -86,21 +86,21 @@ it once with `scripts/flash.sh`; the build signs with
 
    ```bash
    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaSetOrigin","params":{"origin":"http://203.0.113.34:8088/"}}' \
-     | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+     | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
    ```
 
 4. Trigger the update:
 
    ```bash
    printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"bramble.otaUpdate","params":{"path":"bramble.bin"}}' \
-     | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+     | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
    ```
 
 5. When done iterating, restore the official origin:
 
    ```bash
    printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"bramble.otaSetOrigin","params":{"reset":true}}' \
-     | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+     | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
    ```
 
 `bramble.otaGetOrigin` shows the effective origin, whether it is overridden,
@@ -113,7 +113,7 @@ highest version it has booted). For a deliberate downgrade:
 
 ```bash
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"bramble.otaUpdate","params":{"path":"stable/v1.3.9/heltec-v3/bramble.bin","allow_downgrade":true}}' \
-  | websocat -n1 "ws://192.0.2.0/ws?token=$TOKEN"
+  | websocat -n1 "ws://192.0.2.179/ws?token=$TOKEN"
 ```
 
 This also lowers the floor to the downgraded version.
@@ -124,14 +124,14 @@ After reboot, verify the node reconnects and responds:
 
 ```bash
 cd ~/src/bramble-cli
-./bramble --transport ws://192.0.2.0/ws ping
-./bramble --transport ws://192.0.2.0/ws status --json
+./bramble --transport ws://192.0.2.179/ws ping
+./bramble --transport ws://192.0.2.179/ws status --json
 ```
 
 Optional post-checks:
 
 ```bash
-./bramble --transport ws://192.0.2.0/ws monitor --topic gps --follow --since 2m
+./bramble --transport ws://192.0.2.179/ws monitor --topic gps --follow --since 2m
 ```
 
 ## Troubleshooting and rollback

@@ -108,10 +108,10 @@ Non-browser clients (CLI, SDKs) send no Origin header and are unaffected.
 ### CLI
 
 ```bash
-bramble --token <token> -t ws://192.0.2.0/ws status
+bramble --token <token> -t ws://192.0.2.100/ws status
 # or
 export BRAMBLE_TOKEN=<token>
-bramble -t ws://192.0.2.0/ws status
+bramble -t ws://192.0.2.100/ws status
 ```
 
 ### Web App
@@ -125,7 +125,7 @@ query parameter is the supported authentication mechanism, not a
 deprecated one:
 
 ```
-ws://192.0.2.0/ws?token=<token>
+ws://192.0.2.100/ws?token=<token>
 ```
 
 Non-browser clients should use the `Authorization` header instead, since
@@ -137,7 +137,7 @@ Use the `Authorization: Bearer` header:
 
 ```bash
 # Example with websocat
-websocat ws://192.0.2.0/ws -H "Authorization: Bearer <token>"
+websocat ws://192.0.2.100/ws -H "Authorization: Bearer <token>"
 ```
 
 ```python

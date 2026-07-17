@@ -5,7 +5,7 @@
  * to plain ws:// connections on Bramble hardware devices.
  *
  * URL format: /proxy/<device-ip>
- * Example:    ws://localhost:3006/proxy/192.0.2.0
+ * Example:    ws://localhost:3006/proxy/192.0.2.21
  *
  * The browser connects here; this service opens ws://<device-ip>/ws
  * and pipes frames bidirectionally. When either side closes, both close.

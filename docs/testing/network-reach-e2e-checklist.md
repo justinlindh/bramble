@@ -11,7 +11,7 @@ Validate that 3-round sweep aggregation improves consistency while staying bound
 ## Test plan
 
 ### A) Baseline consistency (before/after)
-1. Pick origin node (example: `63929F02` / `192.0.2.0`) in a 3-node mesh.
+1. Pick origin node (example: `63929F02` / `192.0.2.21`) in a 3-node mesh.
 2. Run N probes (recommend N=10+), capturing trace output (`scripts/probe-trace.py`).
 3. Compute per-run responder count and responder set.
 4. Repeat with sweep mode enabled.

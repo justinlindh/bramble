@@ -4,7 +4,7 @@
 
 set -e
 
-DEVICE="${1:-192.0.2.0}"
+DEVICE="${1:-192.0.2.64}"
 DURATION="${2:-300}"  # default 5 minutes
 OUTPUT="${3:-traffic-capture-$(date +%Y%m%d-%H%M%S).jsonl}"
 

@@ -2,13 +2,13 @@
   "network_nodes": [
     {
       "name": "Node 1",
-      "host": "192.0.2.0",
+      "host": "192.0.2.21",
       "board": "heltec-v3",
       "ota_url": "https://example.com/firmware/heltec-v3/latest.bin"
     },
     {
       "name": "TDeck Kitchen",
-      "host": "192.0.2.0",
+      "host": "192.0.2.42",
       "board": "tdeck-plus",
       "ota_url": "https://example.com/firmware/tdeck-plus/latest.bin"
     }

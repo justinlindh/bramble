@@ -40,7 +40,7 @@ The [web client](../webapp/README.md) is where you provision and operate a
 node. It connects three ways:
 
 - **WiFi (WebSocket).** Enter the node's address (for example
-  `ws://192.0.2.0/ws`) and its auth token in the WiFi connection dialog.
+  `ws://192.0.2.100/ws`) and its auth token in the WiFi connection dialog.
 - **USB (serial).** A direct serial connection. Serial needs no auth token by
   design: physical access to the device is the trust bootstrap.
 - **BLE.** Bluetooth to a nearby node; the app remembers the per-device token

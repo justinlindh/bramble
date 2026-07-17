@@ -486,7 +486,7 @@ Wi-Fi connectivity state change event.
     "mode": "sta",
     "connected": true,
     "ssid": "MyNetwork",
-    "ip": "192.0.2.0",
+    "ip": "192.0.2.42",
     "rssi": -65
   }
 }

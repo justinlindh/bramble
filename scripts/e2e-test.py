@@ -7,7 +7,7 @@ Requires 2 nodes for messaging/neighbor tests.
 
 Usage:
   # WebSocket (default)
-  python3 scripts/e2e-test.py ws://192.0.2.0/ws ws://192.0.2.0/ws
+  python3 scripts/e2e-test.py ws://192.0.2.64/ws ws://192.0.2.21/ws
 
   # BLE (by MAC address)
   python3 scripts/e2e-test.py ble:AA:BB:CC:DD:EE:FF ble:AA:BB:CC:DD:EE:11
@@ -16,7 +16,7 @@ Usage:
   python3 scripts/e2e-test.py serial:/dev/ttyUSB0 serial:/dev/ttyUSB1
 
   # Mixed
-  python3 scripts/e2e-test.py ws://192.0.2.0/ws ble:AA:BB:CC:DD:EE:FF
+  python3 scripts/e2e-test.py ws://192.0.2.64/ws ble:AA:BB:CC:DD:EE:FF
 """
 
 import asyncio
@@ -615,7 +615,7 @@ Transport formats:
   serial:/dev/ttyUSBN  Serial/UART
 
 Examples:
-  %(prog)s ws://192.0.2.0/ws ws://192.0.2.0/ws
+  %(prog)s ws://192.0.2.64/ws ws://192.0.2.21/ws
   %(prog)s ble:AA:BB:CC:DD:EE:FF ble:AA:BB:CC:DD:EE:11
   %(prog)s serial:/dev/ttyUSB0 serial:/dev/ttyUSB1
         """,
