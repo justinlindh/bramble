@@ -21,9 +21,10 @@ CLI (one-shot checks):
     python3 scripts/tdeck-bench.py rpc bramble.getStatus
 
 Port selection: TDECK_PORT env var wins; otherwise every /dev/ttyACM* is probed
-with getIdentity and the node whose address matches TDECK_ADDR (default
-C0FFEE00, the bench T-Deck) is used. Ports RENUMBER whenever anything replugs,
-so never hardcode one.
+with getIdentity. If TDECK_ADDR is set, the node whose address matches it is
+used; otherwise the first node whose hardware looks like a T-Deck is used.
+Ports RENUMBER whenever anything replugs, so never hardcode one; set
+TDECK_PORT or TDECK_ADDR for your own bench instead.
 
 The injectInput contract (a wrong field name silently no-ops -- this burned a
 whole verification round once):
@@ -42,9 +43,12 @@ import sys
 import time
 import zlib
 
-RPC_PY = os.path.expanduser("~/.local/share/pipx/venvs/esptool/bin/python")
+# Interpreter used to run bramble-rpc: it just needs pyserial installed. Set
+# TDECK_RPC_PYTHON if your default python3 doesn't have it, e.g. it lives in
+# a pipx-managed virtualenv on your machine.
+RPC_PY = os.environ.get("TDECK_RPC_PYTHON", "python3")
 RPC_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bramble-rpc")
-TDECK_ADDR = os.environ.get("TDECK_ADDR", "C0FFEE00")
+TDECK_ADDR = os.environ.get("TDECK_ADDR")
 
 _port = None
 
@@ -59,7 +63,13 @@ def _rpc_on(port, method, params=None, timeout=60):
 
 
 def port():
-    """The T-Deck's serial port, found by ADDRESS (ports renumber on replug)."""
+    """The T-Deck's serial port, found by ADDRESS (ports renumber on replug).
+
+    Resolution order: TDECK_PORT env var wins outright. Otherwise every
+    /dev/ttyACM* is probed with getIdentity; if TDECK_ADDR is set, the node
+    whose address matches it is used, else the first node reporting
+    hardware "tdeck_plus" is used.
+    """
     global _port
     if _port:
         return _port
@@ -69,12 +79,21 @@ def port():
         return _port
     for p in sorted(glob.glob("/dev/ttyACM*")):
         ident = _rpc_on(p, "bramble.getIdentity", timeout=25)
-        if ident.get("address") == TDECK_ADDR:
+        if TDECK_ADDR:
+            if ident.get("address") == TDECK_ADDR:
+                _port = p
+                return _port
+        elif ident.get("hardware") == "tdeck_plus":
             _port = p
             return _port
+    if TDECK_ADDR:
+        raise RuntimeError(
+            f"no /dev/ttyACM* answered getIdentity with address {TDECK_ADDR}; "
+            "is the T-Deck plugged in? (set TDECK_PORT to override)"
+        )
     raise RuntimeError(
-        f"no /dev/ttyACM* answered getIdentity with address {TDECK_ADDR}; "
-        "is the T-Deck plugged in? (set TDECK_PORT to override)"
+        "no /dev/ttyACM* answered getIdentity as a T-Deck (hardware tdeck_plus); "
+        "set TDECK_PORT to a specific port or TDECK_ADDR to a specific node address"
     )
 
 
