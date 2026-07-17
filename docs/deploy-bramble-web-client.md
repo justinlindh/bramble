@@ -4,7 +4,7 @@ The unified runtime web client image is published by CI from `.gitea/workflows/w
 
 ## Registry image name
 
-- `ghcr.io/example/justinlindh/bramble-web-client`
+- `${REGISTRY_IMAGE_REPO}` (set via the `REGISTRY_IMAGE_REPO` repo variable in CI; defaults to `registry.example.com/bramble/bramble-web-client` when unset)
 
 ## Tag rules
 

@@ -84,13 +84,13 @@ If release list is stale, hard refresh and re-check `/ota/index.json` directly.
 
 ### B) Stop publisher service
 ```bash
-cd /home/user/src/dockers
+# On the OTA host, in the docker compose directory for the ota-publisher stack:
 docker compose stop ota-publisher
 ```
 
 ### C) Restore previous index
 ```bash
-cd /home/user/src/dockers/ota
+# On the OTA host, in the ota-publisher's OTA data directory:
 cp index.json index.json.bad.$(date +%Y%m%d-%H%M%S)
 cp <known-good-index-backup>.json index.json
 ```

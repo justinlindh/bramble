@@ -1,7 +1,6 @@
 # Broadcast Delivery Receipt Airtime Analysis (Bramble)
 
-Date: 2026-03-02  
-Author: OpenClaw subagent
+Date: 2026-03-02
 
 ## Executive Summary
 
