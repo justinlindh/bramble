@@ -51,6 +51,9 @@ for board in "${BOARDS[@]}"; do
 
   # Read the target chip from the build's own flasher_args.json rather than
   # hardcoding it; offsets and flash settings come from the build's flash_args.
+  # Bare "python" (not python3) is deliberate here and below: it resolves to
+  # the shim inside the ESP-IDF venv sourced above, matching how idf.py
+  # invokes esptool.
   chip="$(python -c "import json,sys; print(json.load(open('$build_dir/flasher_args.json'))['extra_esptool_args']['chip'])")"
 
   out="$OUTDIR/bramble_${VERSION}_${board}_factory.bin"
