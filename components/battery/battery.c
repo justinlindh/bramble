@@ -103,32 +103,7 @@ uint32_t battery_read_mv(void) {
     return (uint32_t)(voltage_mv * s_board->battery.divider_factor);
 }
 
-uint8_t battery_mv_to_pct(uint32_t mv) {
-    /* LiPo discharge curve approximation:
-     * 4200 mV = 100%, 4060 mV = 90%, 3900 mV = 70%,
-     * 3800 mV = 50%, 3700 mV = 30%, 3600 mV = 15%,
-     * 3300 mV = 0% (cutoff) */
-    if (mv >= 4200)
-        return 100;
-    if (mv <= 3300)
-        return 0;
-
-    /* Piecewise linear approximation */
-    static const struct {
-        uint32_t mv;
-        uint8_t pct;
-    } curve[] = {
-        {4200, 100}, {4060, 90}, {3900, 70}, {3800, 50}, {3700, 30}, {3600, 15}, {3300, 0},
-    };
-    for (int i = 0; i < 6; i++) {
-        if (mv >= curve[i + 1].mv) {
-            uint32_t range_mv = curve[i].mv - curve[i + 1].mv;
-            uint8_t range_pct = curve[i].pct - curve[i + 1].pct;
-            return curve[i + 1].pct + (uint8_t)((mv - curve[i + 1].mv) * range_pct / range_mv);
-        }
-    }
-    return 0;
-}
+/* battery_mv_to_pct lives in battery_pct.c, shared with the virtual driver. */
 
 uint8_t battery_read_pct(void) {
     uint32_t mv = battery_read_mv();
