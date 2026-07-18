@@ -3,6 +3,7 @@ import { useStore } from '../../store/index';
 import { sendProbe } from '../../store/actions';
 import { IconProbe } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
+import { formatAddrShort } from '../../utils/address';
 import type { ProbeResponse, ProbeResult } from '../../types/bramble';
 import styles from './NetworkReach.module.css';
 
@@ -43,13 +44,9 @@ function formatAgeMinutes(ageMs: number): string {
   return `Results from ${mins} minute${mins === 1 ? '' : 's'} ago`;
 }
 
-function shortAddr(addr: number): string {
-  return '0x' + (addr >>> 0).toString(16).toUpperCase().slice(-4);
-}
-
 function formatPath(r: ProbeResponse): string {
   if (r.hopCount <= 1 || !r.relayPath?.length) return 'direct';
-  return r.relayPath.map((a: number) => '→ ' + shortAddr(a)).join(' ');
+  return r.relayPath.map((a: number) => '→ ' + formatAddrShort(a)).join(' ');
 }
 
 function hopClass(hops: number): string {
@@ -102,7 +99,7 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
               <div className={styles.nodeCell}>
                 <AddressLabel addr={responderAddr} name={name} short={!name} />
                 {name && (
-                  <span className={styles.nodeSub}>{shortAddr(responderAddr)}</span>
+                  <span className={styles.nodeSub}>{formatAddrShort(responderAddr)}</span>
                 )}
               </div>
             </td>

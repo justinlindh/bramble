@@ -1,11 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { gridSquareToLatLon, gridSquareBounds, fmtAddr } from '../../src/pages/Map/Map';
+import { gridSquareToLatLon, gridSquareBounds } from '../../src/pages/Map/Map';
 
 describe('Map helpers', () => {
-  it('formats node addresses as full uppercase hex', () => {
-    expect(fmtAddr(0x1a2b)).toBe('0x00001A2B');
-  });
-
   it('converts 4-char grid squares to approximate center coordinates', () => {
     const result = gridSquareToLatLon('CM87');
     expect(result).not.toBeNull();

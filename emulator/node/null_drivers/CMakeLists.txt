@@ -9,6 +9,17 @@
 # IDF-linux esp_timer gap.
 idf_component_register(
     SRCS "../periph_null.c" "../esp_timer_posix.c" "../emu_flash_persist.c"
-         "../emu_provision.c" "../emu_autosend.c"
+         "../emu_provision.c" "../emu_autosend.c" "../emu_task_flatten.c"
     REQUIRES wifi ota esp_timer freertos esp_system esp_partition network_key
 )
+
+# Priority flattening (emu_task_flatten.c): route every task-creation call in
+# the final executable, including IDF-internal ones, through the clamping
+# wrappers. See that file's header for why unequal task priorities freeze the
+# linux-port node under load. INTERFACE so the option lands on the app link.
+target_link_options(${COMPONENT_LIB} INTERFACE
+    "-Wl,--wrap=xTaskCreate"
+    "-Wl,--wrap=xTaskCreatePinnedToCore"
+    "-Wl,--wrap=xTaskCreateStatic"
+    "-Wl,--wrap=xTaskCreateStaticPinnedToCore"
+    "-Wl,--wrap=vTaskPrioritySet")
