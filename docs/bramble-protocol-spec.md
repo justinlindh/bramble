@@ -33,17 +33,18 @@
 
 Bramble is a ground-up LoRa mesh networking protocol designed for reliable, private communication across large mesh networks (50–200+ nodes, up to 8 hops). It targets ESP32-based LoRa hardware and prioritizes privacy, intelligent routing, and tiered reliability over simplicity.
 
-### 1.2 Why Not Meshtastic?
+### 1.2 Design Context
 
-Meshtastic pioneered consumer LoRa mesh networking, but its protocol has fundamental architectural limitations that cannot be fixed incrementally:
+Meshtastic pioneered consumer LoRa mesh networking and remains the reference
+point for the space; its managed flooding is simple, robust, and battle-tested
+at real-world scale. Bramble explores a different point in the design space:
+reactive route discovery instead of flooding for directed traffic,
+authenticated and end-to-end-encrypted traffic throughout, and per-node
+airtime budgeting. Each choice trades simplicity for those properties, and
+section 1.3 states what that trade is intended to buy.
 
-| Problem | Meshtastic | Bramble |
-|---|---|---|
-| **Routing** | Naive flooding — every node rebroadcasts every packet. O(N) airtime per message. Network saturates at ~30 nodes. | Reactive AODV-style routing with cached routes. O(path_length) airtime per message after route discovery. |
-| **Reliability** | "Best effort" with optional ACKs but no retry intelligence, no flow control, no congestion awareness. | Three-tier reliability model with exponential backoff, sliding window flow control, and congestion-aware scheduling. |
-| **Privacy** | All nodes in a channel share one PSK. Any channel member can impersonate any other. Relay nodes see all content. | Per-node X25519 key exchange for DMs. Relay nodes route ciphertext they cannot decrypt. Privacy-preserving route discovery. |
-| **Scalability** | Flooding creates O(N²) total transmissions per message. Beacon storms. Channel congestion above ~30 nodes. | Reactive routing keeps DM airtime at O(path_length) rather than O(N); token-bucket airtime budgets pace every transmission. Honest scale is bounded by radio profile, node density, and hop budget: a single shared channel still saturates under load at large node counts (see [docs/results/](results/)). Not a demonstrated 200-node property, and no multi-node field test has been run. |
-| **Airtime management** | None. Nodes transmit whenever they want. One chatty node can monopolize the channel. | Token-bucket airtime budget per node with priority queuing and congestion backoff. |
+For a maintained, sourced comparison with Meshtastic and MeshCore (including
+where Bramble is behind), see [docs/COMPARISON.md](COMPARISON.md).
 
 ### 1.3 Design Goals
 
@@ -67,7 +68,7 @@ Every design decision passes through a privacy filter:
 
 ### 2.2 Reliability Through Intelligence
 
-Rather than "blast and pray" flooding, Bramble builds routing knowledge passively and uses it actively:
+Rather than relying on flooding alone, Bramble builds routing knowledge passively and uses it actively:
 - **Delivery receipts include relay paths**, so senders passively learn network topology.
 - **Neighbor quality metrics** (RSSI, SNR, success rate) inform route selection.
 - **Congestion signals propagate** so senders back off before the network saturates.
@@ -2019,7 +2020,7 @@ Meshcore, and scoped strictly to this transport:
   framing is: at **high load** Bramble's flood **reach** is comparable to
   Meshtastic's (both pay the same O(nodes) airtime), but Bramble **honestly
   reports the delivery failure** through the confirmed-delivery metric where
-  Meshtastic is fire-and-forget and simply hides it; at **low-to-moderate load**
+  Meshtastic's fire-and-forget model does not surface delivery failure to the sender; at **low-to-moderate load**
   Bramble's confirmed delivery is a **genuine, distinct advantage** Meshtastic
   has no equivalent of.
 - *vs Meshcore.* Meshcore ships per-node keys, end-to-end encryption, and
