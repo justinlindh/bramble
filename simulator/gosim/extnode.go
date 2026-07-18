@@ -76,16 +76,6 @@ type btnMsg struct {
 	Edge string `json:"edge"` // "down" | "up"
 }
 
-type nmeaMsg struct {
-	T        string `json:"t"`
-	Sentence string `json:"sentence"`
-}
-
-type battMsg struct {
-	T  string `json:"t"`
-	MV int    `json:"mv"`
-}
-
 type timeMsg struct {
 	T       string `json:"t"`
 	EpochMs int64  `json:"epoch_ms"`
@@ -569,22 +559,6 @@ func (ec *extConn) sendJSON(v interface{}) {
 // The frontend and gateway (Task 9) drive these; a "reset" edge is how the UI
 // reboots a node (the firmware exits, the supervisor restarts it).
 func (ec *extConn) sendButton(id, edge string) { ec.sendJSON(btnMsg{T: "btn", ID: id, Edge: edge}) }
-
-// sendNMEA feeds one synthesized GPS sentence to the node (respecting its
-// gpsgate state; the position source is scenario-driven in a later task).
-func (ec *extConn) sendNMEA(sentence string) { ec.sendJSON(nmeaMsg{T: "nmea", Sentence: sentence}) }
-
-// sendBatt feeds a scenario-scripted battery voltage (millivolts) to the node.
-func (ec *extConn) sendBatt(mv int) { ec.sendJSON(battMsg{T: "batt", MV: mv}) }
-
-// ConnForAddr returns the live external-node connection for a radio address, or
-// nil. Callers (frontend button injection, gateway) use it to reach a node.
-// Takes s.mu, so it must not be called while already holding it.
-func (b *Broker) ConnForAddr(addr uint32) *extConn {
-	b.sim.mu.Lock()
-	defer b.sim.mu.Unlock()
-	return b.sim.extConns[addr]
-}
 
 // close tears the connection down once, dropping it from the broker registry
 // and the sim's external-node map, and marking its slot free for a reconnect.
