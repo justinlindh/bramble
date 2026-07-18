@@ -4,8 +4,8 @@ A technical comparison of three LoRa mesh networking approaches.
 
 > **Last verified against upstream sources: 2026-07-08** (Meshtastic firmware
 > 2.7.26 Beta, 2026-06-24; MeshCore firmware v1.16.0, 2026-06-06). Comparison
-> docs rot fast; both competitor projects ship monthly. Re-verify before
-> relying on competitor claims here. Key sources are listed at the bottom.
+> docs rot fast; all three projects ship regularly. Re-verify before
+> relying on the claims here. Key sources are listed at the bottom.
 
 ---
 
@@ -173,7 +173,7 @@ the trust anchor below.
 
 ### Trust anchor delta (2026-07)
 
-The trust-anchor campaign (2026-07) adds the piece neither competitor has:
+The trust-anchor campaign (2026-07) adds a piece neither of the other projects has:
 per-node cryptographic identity WITH explicit, fleet-wide membership
 control. Meshtastic has no membership control at all. MeshCore has
 per-node keys and a per-peer contact-list / ACL model, but trust is decided
@@ -248,7 +248,7 @@ Only repeaters and room servers forward, so a 100-device mesh with 20 repeaters 
 
 Reactive DM traffic scales as O(path_length) after route discovery: one transmission per hop, plus the initial RREQ flood amortized across subsequent messages. Discovery uses an expanding ring (hop limit 4 first, 8 on retries); routes up to 8 hops deep are usable end-to-end. The token-bucket airtime budget caps each node's transmission time with per-tier sub-budgets, so no single node can monopolize the channel. Channel messages flood (hop-limited, multi-hop), and the opt-in flood transport (`s_flood_transport`, default off) can route DMs the same way when enabled, trading airtime for reach.
 
-**Validation status:** scale behavior has not been validated in a real-world deployment; no multi-node field test has been run. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT) and is the source of truth. The honest July baseline ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md), which supersedes the June numbers for planning): about 95% message delivery at 10 nodes, collapsing to ~12% at 50, ~10% at 100, and 0% at 200. A single SF10 channel saturates under control-plane load (RREQ discovery storms amplifying a beacon floor) well before traffic flows, and the 200-node grid also spans 11 to 17 hops, beyond the 8-hop route ceiling. The earlier collision-free "100% at 200 nodes" numbers were retracted as sim artifacts. The design's scaling argument is a goal under active investigation, not a demonstrated property. Both competitors have real-world scale evidence Bramble lacks.
+**Validation status:** scale behavior has not been validated in a real-world deployment; no multi-node field test has been run. The simulator runs the real protocol code over a collision-model radio layer (real time-on-air, collisions, capture, half-duplex, LBT) and is the source of truth. The honest July baseline ([results/simulation-2026-07-honest-baseline.md](results/simulation-2026-07-honest-baseline.md), which supersedes the June numbers for planning): about 95% message delivery at 10 nodes, collapsing to ~12% at 50, ~10% at 100, and 0% at 200. A single SF10 channel saturates under control-plane load (RREQ discovery storms amplifying a beacon floor) well before traffic flows, and the 200-node grid also spans 11 to 17 hops, beyond the 8-hop route ceiling. The earlier collision-free "100% at 200 nodes" numbers were retracted as sim artifacts. The design's scaling argument is a goal under active investigation, not a demonstrated property. Both Meshtastic and MeshCore have real-world scale evidence Bramble lacks.
 
 ---
 
@@ -305,7 +305,7 @@ Reactive DM traffic scales as O(path_length) after route discovery: one transmis
 
 2. **Reactive routing complexity.** AODV-style routing is well-understood in theory but tricky in practice over lossy LoRa links. Route discovery adds latency to the first message. Route maintenance (broken links, stale routes) adds implementation complexity. Meshtastic's managed flooding "just works", and MeshCore's source-routing keeps per-node state minimal (the sender carries the path).
 
-3. **Hardware breadth.** ESP32-S3 only (3 boards). No nRF52 (which has the best battery life in the LoRa ecosystem, and which both competitors support with OTA). No Linux. Meshtastic runs on six architectures; MeshCore ships 80+ binaries.
+3. **Hardware breadth.** ESP32-S3 only (3 boards). No nRF52 (which has the best battery life in the LoRa ecosystem, and which Meshtastic and MeshCore both support with OTA). No Linux. Meshtastic runs on six architectures; MeshCore ships 80+ binaries.
 
 4. **Small ecosystem.** Web app, desktop app, Go SDK, and CLI exist, but no mobile apps, no MQTT bridge, no community contributors. Building an ecosystem from one developer is a significant challenge.
 

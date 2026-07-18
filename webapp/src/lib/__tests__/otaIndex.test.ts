@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   appArtifactForBoard, compareVersions, fetchOtaIndex, findUpdate, hardwareToBoard,
   relativizeArtifactPath, releasesForBoard, type OtaRelease,
 } from '../otaIndex';
+import type { OtaIndexFetchResult } from '../../types/desktop';
 
 const releases: OtaRelease[] = [
   { version: 'v1.4.0', publishedAt: '2026-07-01T00:00:00Z', artifacts: [
@@ -275,13 +276,13 @@ describe('fetchOtaIndex', () => {
 describe('fetchOtaIndex (Electron path)', () => {
   const origin = 'https://bramblemesh.org/ota/';
   let fetchMock: ReturnType<typeof vi.fn>;
-  let desktopFetchMock: ReturnType<typeof vi.fn>;
+  let desktopFetchMock: Mock<(url: string) => Promise<OtaIndexFetchResult>>;
 
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('isElectron', true);
-    desktopFetchMock = vi.fn();
+    desktopFetchMock = vi.fn<(url: string) => Promise<OtaIndexFetchResult>>();
     window.brambleDesktop = {
       startDiscovery: vi.fn(),
       stopDiscovery: vi.fn(),

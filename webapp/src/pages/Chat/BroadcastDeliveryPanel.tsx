@@ -1,12 +1,9 @@
 import type { BroadcastDeliveryRecipient } from '../../types/bramble';
+import { formatAddr0x } from '../../utils/address';
 import styles from './BroadcastDeliveryPanel.module.css';
 
 interface BroadcastDeliveryPanelProps {
   recipients?: BroadcastDeliveryRecipient[];
-}
-
-function formatAddr(addr: number): string {
-  return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
 }
 
 export function BroadcastDeliveryPanel({ recipients }: BroadcastDeliveryPanelProps) {
@@ -32,7 +29,7 @@ export function BroadcastDeliveryPanel({ recipients }: BroadcastDeliveryPanelPro
           <ul className={styles.list}>
             {items.map((recipient) => (
               <li key={recipient.addr} className={styles.row}>
-                <span>{formatAddr(recipient.addr)}</span>
+                <span>{formatAddr0x(recipient.addr)}</span>
                 <span className={
                   recipient.status === 'delivered'
                     ? styles.deliveredText

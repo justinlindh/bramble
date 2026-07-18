@@ -65,7 +65,7 @@ A desktop app (Linux, Windows, macOS) is also available, built from the same web
 | Board | MCU | Display | Input | Radio | Audio | Status |
 |------|-----|---------|-------|-------|-------|--------|
 | Heltec WiFi LoRa 32 V3 | ESP32-S3 | 0.96" SSD1306 OLED (128x64) | Buttons | SX1262 | N/A | Running target |
-| Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Running target (active bring-up) |
+| Heltec WiFi LoRa 32 V4 | ESP32-S3 | OLED + optional L76K GNSS | Buttons | SX1262 | N/A | Running target |
 | LilyGo T-Deck Plus | ESP32-S3 | ST7789 320x240 LCD with LVGL v9 UI | GT911 capacitive touch + I2C keyboard | SX1262 with TCXO (DIO3 1.8V, DC-DC) | I2S with NVS-persisted volume | Running target with full GUI |
 | Bramble Pager v1 (custom PCB) | ESP32-S3-WROOM-1 | 2.13" GDEY0213B74 e-paper (SSD1680, 250x122) | Buttons | SX1262 with TCXO and DIO2 RF switch (DC-DC) | Buzzer + vibra alerts | Design complete, boards not yet ordered |
 
@@ -148,7 +148,7 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 ## Status
 
-Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4 bring-up). The protocol stack is implemented end-to-end, and every change must pass the full host test suite as a required CI gate (`test/run_all_tests.sh`, which fails if any suite fails or none are found). Development is ongoing.
+Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4). The protocol stack is implemented end-to-end, and every change must pass the full host test suite as a required CI gate (`test/run_all_tests.sh`, which fails if any suite fails or none are found). Development is ongoing.
 
 ## License
 
