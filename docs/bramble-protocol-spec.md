@@ -1688,6 +1688,8 @@ function handle_forwarding_failure(dest_addr, next_hop, failed_packet):
             initiate_route_discovery(dest_addr, failed_packet)
 ```
 
+> **Firmware reality.** Local repair via an alternate path is design-only: no `find_alternate` exists anywhere in the firmware, and none can, because the routing table stores exactly one route entry per destination (`route_install` in `components/routing/routing.c` replaces the existing entry in place). What ships is the first half of the pseudocode only: `forward_record_failure` (`components/routing/forwarding.c`) marks the route `ROUTE_BROKEN` after 3 failures and a RERR is sent, then delivery to that destination waits on a fresh route discovery. A dead `route_find_alternate` primitive that once suggested otherwise was removed in PR #37. Supporting multiple candidate routes per destination is a future routing-table redesign, tracked separately.
+
 #### RERR Propagation
 
 ```
@@ -1753,6 +1755,8 @@ Each route entry transitions through these states:
        │                                ▼
        └──────────────────────── Re-enter DISCOVERING
 ```
+
+> **Firmware reality.** The "Local repair found" edge out of BROKEN is design-only (see the note in §6.4): the shipped firmware has no alternate-route lookup, so a BROKEN route always takes the "No alternate" path back through DISCOVERING.
 
 ### 6.6 Data Forwarding
 
@@ -2162,6 +2166,8 @@ function retry_tick():  // Called every 500ms
         enqueue_tx(entry.packet_data, entry.packet_len, priority_from_tier(entry.tier))
         schedule_retry(entry)
 ```
+
+> **Firmware reality.** The Critical-tier alternate-route retry (`routing_table.find_alternate` above) is design-only and unimplemented, for the same reason as §6.4: the routing table holds one route per destination, so there is no alternate to switch to. Critical-tier retries re-enqueue on the same route until the attempt budget is exhausted; recovery from a genuinely broken route is RERR plus rediscovery.
 
 ### 7.4 Retry Timing Summary
 
