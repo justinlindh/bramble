@@ -6,11 +6,6 @@ on:
   push:
     branches:
       - main
-      - 'fix/**'
-      - 'feat/**'
-      - 'feature/**'
-      - 'chore/**'
-      - 'ci/**'
 
 permissions:
   contents: read
@@ -24,135 +19,53 @@ defaults:
     shell: bash
 
 jobs:
-  changes:
+  detect:
     name: Detect changed areas
+    uses: ./.github/workflows/_detect-changes.yml
+
+  static-checks:
+    name: Static checks
+    needs: detect
+    # No `if:` on purpose: this single-pod bundle is THE universal gate. It runs
+    # on every trigger (including docs-only PRs, where it is the ONLY job that
+    # executes) so a required context always reports. The individual checks are
+    # cheap and pass trivially when their scope did not change. Each check is its
+    # own step so a failure attributes to the exact tool in the UI.
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 5
-    outputs:
-      firmware: ${{ steps.detect.outputs.firmware }}
-      workflows: ${{ steps.detect.outputs.workflows }}
-      docs: ${{ steps.detect.outputs.docs }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Compute changed areas
-        id: detect
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
+      - name: Assert required tools are pre-baked on the runner
         run: |
-          set -uo pipefail
-
-          resolve_diff_range() {
-            if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_BASE_REF:-}" ]]; then
-              git fetch --no-tags origin "${GITHUB_BASE_REF}" >/dev/null 2>&1
-              if git rev-parse --verify "origin/${GITHUB_BASE_REF}" >/dev/null 2>&1; then
-                echo "origin/${GITHUB_BASE_REF}...HEAD"
-                return 0
-              fi
-            fi
-
-            if [[ "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
-              if [[ -n "${BEFORE_SHA:-}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
-                if git cat-file -e "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
-                  echo "${BEFORE_SHA}..HEAD"
-                  return 0
-                fi
-              fi
-            fi
-
-            # New-branch push (before SHA all zeros), workflow_dispatch, or an
-            # unresolved base: fall back to diffing against main.
-            git fetch --no-tags origin main >/dev/null 2>&1
-            if git rev-parse --verify origin/main >/dev/null 2>&1; then
-              merge_base="$(git merge-base origin/main HEAD 2>/dev/null)"
-              if [[ -n "${merge_base:-}" ]]; then
-                echo "${merge_base}...HEAD"
-                return 0
-              fi
-              echo "origin/main...HEAD"
-              return 0
-            fi
-
-            return 1
-          }
-
-          unknown=0
-          diff_range="$(resolve_diff_range)" || unknown=1
-
-          changed_files=""
-          if [[ "${unknown}" == "0" ]]; then
-            changed_files="$(git diff --name-only "${diff_range}" 2>/dev/null)" || unknown=1
-          fi
-
-          if [[ "${unknown}" == "1" ]]; then
-            echo "::warning::could not resolve a diff range for this event; defaulting all areas to changed"
-          fi
-
-          area_changed() {
-            if [[ "${unknown}" == "1" ]]; then
-              echo true
-              return
-            fi
-            if printf '%s\n' "${changed_files}" | grep -Eq "$1"; then
-              echo true
-            else
-              echo false
-            fi
-          }
-
-          # firmware must be a superset of every job's real inputs: the strict
-          # clang-format scope scans main/ components/ test/ simulator/ C
-          # sources plus .clang-format; the strict shellcheck scope scans
-          # scripts/lint/*.sh plus .shellcheckrc.
-          firmware=$(area_changed '^(main|components|test|simulator)/|^scripts/lint/|^scripts/[^/]+\.sh$|^\.clang-format$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$')
-          workflows=$(area_changed '^\.github/workflows/|^\.actionlint\.yaml$')
-          docs=$(area_changed '^docs/|^README\.md$')
-
-          {
-            echo "firmware=${firmware}"
-            echo "workflows=${workflows}"
-            echo "docs=${docs}"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} workflows=${workflows} docs=${docs}"
-
-  required-clang-format:
-    name: Required clang-format
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Assert clang-format is pre-baked on the runner
-        run: command -v clang-format >/dev/null || { echo "::error::clang-format missing from runner image"; exit 1; }
-      - name: Run clang-format strict wrapper (full scope)
-        run: bash scripts/lint/run-clang-format-check.sh --strict
-
-  required-shellcheck:
-    name: Required shellcheck
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Assert shellcheck is pre-baked on the runner
-        run: command -v shellcheck >/dev/null || { echo "::error::shellcheck missing from runner image"; exit 1; }
-      - name: Run shellcheck strict wrapper
+          for tool in shellcheck clang-format cppcheck actionlint uv; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool missing from runner image"; exit 1; }
+          done
+      - name: No internal refs
+        run: bash scripts/lint/check-no-internal-refs.sh
+      - name: Required shellcheck (strict wrapper)
         run: bash scripts/lint/run-shellcheck.sh --strict
-
-  required-actionlint:
-    name: Required actionlint
-    needs: changes
-    if: needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Assert actionlint is pre-baked on the runner
-        run: command -v actionlint >/dev/null || { echo "::error::actionlint missing from runner image"; exit 1; }
-      - name: Run actionlint on firmware-quality workflow
-        run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/firmware-quality.yml
+      - name: Ruff (required baseline profile)
+        run: uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
+      - name: Required clang-format (full strict scope)
+        run: bash scripts/lint/run-clang-format-check.sh --strict
+      - name: cppcheck
+        # The scoped suppressions below are cppcheck 2.13 false positives
+        # (the previous runner shipped 2.7, which did not flag them):
+        # unknownMacro fires because lvgl headers are not on the include path
+        # (LV_SYMBOL_RIGHT), and both uninitvar findings are loops that only
+        # read entries below a count that starts at zero.
+        run: |
+          cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches \
+            --suppress=unknownMacro:components/ui_graphics/screens/scr_chat_messages.c \
+            --suppress=uninitvar:components/ui_graphics/screens/scr_map.c \
+            --suppress=uninitvar:components/ui_graphics/screens/scr_nodes.c \
+            main components
+      - name: RPC contract (spec vs firmware registry)
+        run: bash scripts/check-rpc-contract.sh
+      - name: Actionlint (PR-gating workflows)
+        run: |
+          actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml \
+            .github/workflows/_detect-changes.yml \
+            .github/workflows/quality.yml \
+            .github/workflows/firmware-quality.yml \
+            .github/workflows/webapp-quality.yml
