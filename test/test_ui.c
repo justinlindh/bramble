@@ -90,13 +90,6 @@ void test_long_press_dirty_no_change(void) {
     TEST_ASSERT_TRUE(ui_needs_redraw(&state));
 }
 
-void test_format_main_line1(void) {
-    ui_main_data_t data = {.my_addr = 0xAABBCCDD, .battery_pct = 87};
-    char buf[32];
-    ui_format_main_line1(&data, buf, sizeof(buf));
-    TEST_ASSERT_EQUAL_STRING("AABBCCDD  87%", buf);
-}
-
 void test_format_uptime_seconds(void) {
     char buf[32];
     ui_format_uptime(45, buf, sizeof(buf));
@@ -122,9 +115,9 @@ void test_format_uptime_days(void) {
 }
 
 void test_format_buffer_too_small(void) {
-    ui_main_data_t data = {.my_addr = 0xAABBCCDD, .battery_pct = 87};
     char buf[5];
-    int ret = ui_format_main_line1(&data, buf, sizeof(buf));
+    // "1d 4h" is 5 chars; a 5-byte buffer forces snprintf to truncate.
+    int ret = ui_format_uptime(100800, buf, sizeof(buf));
     // snprintf truncates safely, ret indicates what would have been written
     TEST_ASSERT_GREATER_THAN(4, ret);
     // buf should be null-terminated and not overflow
@@ -795,7 +788,6 @@ int main(void) {
     RUN_TEST(test_messages_screen_gets_long_inactivity_timeout);
     RUN_TEST(test_screen_dirty_on_transition);
     RUN_TEST(test_long_press_dirty_no_change);
-    RUN_TEST(test_format_main_line1);
     RUN_TEST(test_format_uptime_seconds);
     RUN_TEST(test_format_uptime_minutes);
     RUN_TEST(test_format_uptime_hours);

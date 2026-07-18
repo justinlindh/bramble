@@ -46,14 +46,6 @@ typedef enum {
 } ui_settings_item_t;
 
 typedef struct {
-    uint32_t my_addr;
-    uint8_t battery_pct;
-    uint8_t neighbor_count;
-    uint32_t uptime_sec;
-    uint8_t tx_queue_depth;
-} ui_main_data_t;
-
-typedef struct {
     int total_messages;
     int scroll_pos;
 } ui_messages_data_t;
@@ -147,9 +139,6 @@ typedef struct {
 int ui_format_msg_line(const ui_msg_line_t* m, char* buf, size_t buf_len);
 
 // Display formatters
-int ui_format_main_line1(const ui_main_data_t* data, char* buf, size_t buf_len);
-int ui_format_main_line2(const ui_main_data_t* data, char* buf, size_t buf_len);
-int ui_format_main_line3(const ui_main_data_t* data, char* buf, size_t buf_len);
 int ui_format_uptime(uint32_t uptime_sec, char* buf, size_t buf_len);
 
 /* Normalize persisted connectivity mode at boot.
