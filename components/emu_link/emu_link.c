@@ -92,6 +92,33 @@ typedef struct {
 static pthread_mutex_t s_send_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t s_handlers_mu = PTHREAD_MUTEX_INITIALIZER;
 
+/* send_mu_lock: task-safe acquisition of s_send_mu on the node.
+ *
+ * Every emu_link_send caller is a FreeRTOS task (virtual drivers: display fb
+ * flushes, radio tx/cad, indicators, gps gate), and on the IDF linux port
+ * only ONE task pthread executes at a time: the scheduler suspends the rest.
+ * A plain pthread_mutex_lock here can therefore freeze the entire scheduler:
+ * task A gets preempted while holding s_send_mu mid-write (an fb line is
+ * multi-KB and a slow broker stretches the hold), task B then blocks on the
+ * futex while being the scheduler's chosen running task, and with strict
+ * priority scheduling the suspended holder is never scheduled again: the
+ * whole node wedges, alive but silent (observed on CI pods as "mute" nodes
+ * whose UI and mesh both stop while the process lives). Blocking a task in a
+ * foreign futex is invisible to FreeRTOS, so it cannot context-switch away.
+ * The fix is to wait WITH the scheduler instead of against it: trylock, and
+ * yield a tick between attempts so the holder gets scheduled and releases.
+ * The plain-gcc harness has no scheduler and keeps the direct lock. */
+#if defined(ESP_PLATFORM)
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+static void send_mu_lock(void) {
+    while (pthread_mutex_trylock(&s_send_mu) != 0)
+        vTaskDelay(1);
+}
+#else
+static void send_mu_lock(void) { pthread_mutex_lock(&s_send_mu); }
+#endif
+
 static int s_fd = -1;
 static pthread_t s_reader_thread;
 static bool s_reader_running = false;
@@ -142,7 +169,7 @@ static int send_locked(cJSON* msg) {
 
     size_t len = strlen(text);
     int rc = -1;
-    pthread_mutex_lock(&s_send_mu);
+    send_mu_lock();
     if (s_fd != -1) {
         rc = write_all(s_fd, text, len);
         if (rc == 0)
@@ -316,7 +343,7 @@ static int dial_tcp(const char* hostport) {
  * of view: returns 0 with the connection fully up (reader thread running,
  * hello sent), or negative with the fd closed and nothing left running. */
 static int emu_link_attach(int fd, const char* node_id, const char* caps_csv) {
-    pthread_mutex_lock(&s_send_mu);
+    send_mu_lock();
     if (s_fd != -1) {
         pthread_mutex_unlock(&s_send_mu);
         close(fd);
@@ -326,7 +353,7 @@ static int emu_link_attach(int fd, const char* node_id, const char* caps_csv) {
     pthread_mutex_unlock(&s_send_mu);
 
     if (pthread_create(&s_reader_thread, NULL, reader_main, (void*)(intptr_t)fd) != 0) {
-        pthread_mutex_lock(&s_send_mu);
+        send_mu_lock();
         s_fd = -1;
         pthread_mutex_unlock(&s_send_mu);
         close(fd);
@@ -343,7 +370,7 @@ static int emu_link_attach(int fd, const char* node_id, const char* caps_csv) {
     cJSON_AddStringToObject(hello, "node", node_id ? node_id : "");
     cJSON_AddNumberToObject(hello, "version", EMU_LINK_PROTOCOL_VERSION);
     char fw[sizeof(s_fw_version)];
-    pthread_mutex_lock(&s_send_mu);
+    send_mu_lock();
     memcpy(fw, s_fw_version, sizeof(fw));
     pthread_mutex_unlock(&s_send_mu);
     cJSON_AddStringToObject(hello, "fw", fw);
@@ -361,7 +388,7 @@ int emu_link_connect(const char* node_id, const char* caps_csv) {
     if (!node_id)
         return -1;
 
-    pthread_mutex_lock(&s_send_mu);
+    send_mu_lock();
     bool already = (s_fd != -1);
     pthread_mutex_unlock(&s_send_mu);
     if (already)
@@ -388,7 +415,7 @@ int emu_link_connect(const char* node_id, const char* caps_csv) {
 void emu_link_set_fw_version(const char* ver) {
     if (!ver)
         return;
-    pthread_mutex_lock(&s_send_mu);
+    send_mu_lock();
     strncpy(s_fw_version, ver, sizeof(s_fw_version) - 1);
     s_fw_version[sizeof(s_fw_version) - 1] = '\0';
     pthread_mutex_unlock(&s_send_mu);
@@ -432,7 +459,7 @@ int emu_link_send(cJSON* msg) { return send_locked(msg); }
  * clears s_fd, unblocks and joins the reader thread if one is running, and
  * closes the descriptor. Leaves emu_link fully disconnected either way. */
 static void teardown(void) {
-    pthread_mutex_lock(&s_send_mu);
+    send_mu_lock();
     int fd = s_fd;
     s_fd = -1;
     pthread_mutex_unlock(&s_send_mu);
