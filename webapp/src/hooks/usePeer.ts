@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useStore } from '../store/index';
 import { resolvePeerName } from '../store/peerName';
 import { loadPeerVerification } from '../store/actions';
+import { formatAddr0x, formatAddrShort } from '../utils/address';
 
 export type PeerStatus = 'online' | 'reachable' | 'unknown';
 
@@ -22,8 +23,8 @@ export function usePeerInfo(addr: number) {
     status = 'reachable';
   }
 
-  const shortHex = `0x${addr.toString(16).toUpperCase().padStart(8, '0').slice(-4)}`;
-  const fullHex = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+  const shortHex = formatAddrShort(addr);
+  const fullHex = formatAddr0x(addr);
   const displayName = resolvedName ?? shortHex;
 
   let lastSeen: string | null = null;

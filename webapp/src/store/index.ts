@@ -22,6 +22,7 @@ import type {
 } from '../types/bramble';
 import { saveUnreadCounts, loadUnreadCounts } from './unreadStore';
 import type { SavedDevice } from '../lib/deviceBook';
+import { formatAddrHex } from '../utils/address';
 
 const ROUTE_VISIBILITY_KEY = 'bramble_show_routes';
 const ACTIVE_TAB_KEY = 'bramble-active-tab';
@@ -86,7 +87,7 @@ function formatAddr(id: string, peerNames?: Map<number, string>, config?: Brambl
 
 function persistUnreads(conversations: Map<string, any>, config: BrambleConfig | null): void {
   if (!config?.identity?.address) return;
-  const nodeAddr = config.identity.address.toString(16).toUpperCase().padStart(8, '0');
+  const nodeAddr = formatAddrHex(config.identity.address);
   const counts: Record<string, number> = {};
   for (const [id, conv] of conversations) {
     if (conv.unreadCount > 0) {
@@ -374,7 +375,8 @@ export const useStore = create<AppState & Actions>((set) => ({
   loadCachedMessages: (msgs: Message[]) =>
     set(state => {
       // Load persisted unread counts from localStorage
-      const nodeAddr = state.config?.identity?.address?.toString(16).toUpperCase().padStart(8, '0');
+      const addr = state.config?.identity?.address;
+      const nodeAddr = addr != null ? formatAddrHex(addr) : undefined;
       const savedUnreads = loadUnreadCounts(nodeAddr);
 
       // Rebuild conversations from cached messages

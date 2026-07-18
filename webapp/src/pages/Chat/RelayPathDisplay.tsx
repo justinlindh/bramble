@@ -1,15 +1,12 @@
 import React from 'react';
 import type { RelayHop } from '../../types/bramble';
 import { useStore } from '../../store/index';
+import { formatAddr0x, formatAddrShort } from '../../utils/address';
 import styles from './RelayPathDisplay.module.css';
 
 interface RelayPathDisplayProps {
   path: RelayHop[];
   myAddr: number;
-}
-
-function shortAddr(addr: number): string {
-  return '0x' + addr.toString(16).toUpperCase().padStart(8, '0').slice(-4);
 }
 
 function rssiQualityClass(rssi: number): string {
@@ -35,8 +32,8 @@ export function RelayPathDisplay({ path, myAddr }: RelayPathDisplayProps) {
         return (
           <React.Fragment key={`${hop.addr}-${i}`}>
             {i > 0 && <span className={styles.arrow}>→</span>}
-            <span className={cls} title={`0x${hop.addr.toString(16).toUpperCase().padStart(8, '0')}`}>
-              {peerNames.get(hop.addr) || shortAddr(hop.addr)}
+            <span className={cls} title={formatAddr0x(hop.addr)}>
+              {peerNames.get(hop.addr) || formatAddrShort(hop.addr)}
             </span>
             {hop.rssi !== 0 && (
               <span className={`${styles.rssi} ${rssiQualityClass(hop.rssi)}`}>{hop.rssi} dBm</span>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Neighbor, PeerLocation } from '../../types/bramble';
 import { AddressLabel } from '../../components/AddressLabel';
+import { formatAddrShort } from '../../utils/address';
 import { IconClock, IconEnvelope, IconLocation } from '../../components/Icons';
 import { usePeerName } from '../../store/peerName';
 import { useAgeTick, formatAge } from '../../hooks/useAgeTick';
@@ -81,7 +82,7 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
           <AddressLabel addr={neighbor.addr} name={peerName} short={!peerName} />
           {peerName && (
             <span className={styles.addrSub}>
-              0x{neighbor.addr.toString(16).toUpperCase().padStart(8, '0').slice(-4)}
+              {formatAddrShort(neighbor.addr)}
             </span>
           )}
         </span>
