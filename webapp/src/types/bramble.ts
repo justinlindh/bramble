@@ -117,36 +117,6 @@ export interface AirtimeStatus {
   tiers: AirtimeTier[]; // critical, normal, broadcast, receipt
 }
 
-// ─── Adaptive Airtime Policy ────────────────────────────────────────────
-
-export type AirtimePolicyMode = 'disabled' | 'stable' | 'dense' | 'churn';
-
-export interface AirtimePolicyConfig {
-  enabled: boolean;
-  baseIntervalMs: number;       // baseline beacon interval (stable mode)
-  minIntervalMs: number;        // minimum beacon interval (churn mode)
-  maxIntervalMs: number;        // maximum beacon interval (dense mode)
-  denseThreshold: number;       // neighbor count for dense mode
-  churnWindowSec: number;       // time window for churn detection
-  churnThreshold: number;       // join/leave events to trigger churn
-  cooldownSec: number;          // hysteresis between mode transitions
-}
-
-export interface AirtimePolicyStatus {
-  mode: AirtimePolicyMode;
-  currentIntervalMs: number;
-  neighborCount: number;
-  neighborDelta: number;
-  churnEvents: number;
-  lastTransitionMs: number;
-  congestionScore: number;      // 0-100, future feature
-}
-
-export interface AirtimePolicy {
-  config: AirtimePolicyConfig;
-  status: AirtimePolicyStatus;
-}
-
 // ─── Status ────────────────────────────────────────────────────────────
 
 export interface NodeStatus {
@@ -389,7 +359,6 @@ export interface AppState {
   config: BrambleConfig | null;
   status: NodeStatus | null;
   airtime: AirtimeStatus | null;
-  airtimePolicy: AirtimePolicy | null;
   // undefined = never fetched since connect (distinct from [] = fetched, none found)
   neighbors: Neighbor[] | undefined;
   routes: Route[];
