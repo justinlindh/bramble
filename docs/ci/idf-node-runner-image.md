@@ -23,8 +23,9 @@ Runner label mapping should pin `idf-node` to this image tag:
 
 - `idf-node:docker://bramble/idf-node:v5.4.1`
 
-The runner label mapping lives in the self-hosted runner's `config.yaml`, on
-whichever host runs the Gitea Actions runner for this fleet.
+The runner label mapping lives in the self-hosted runner's configuration on
+whichever host runs the CI runner (GitHub Actions is the authoritative CI;
+see [../ci.md](../ci.md)).
 
 > If the pin changes, update this doc and runner config together, then re-verify firmware workflows.
 

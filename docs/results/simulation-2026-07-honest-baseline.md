@@ -70,4 +70,4 @@ The Phase 1 delivery-core plan the internal design plan found that the numbers a
 
 **Caveat on the flood numbers.** gosim's aggregate `delivered`/`dropped`/`message_delivery_rate` metrics cannot credit a broadcast as delivered (the bookkeeping structure they read from is inherently unicast-shaped); every one of the 10 added broadcasts in these runs lands in `undelivered` by construction, even on the 10-node runs where a dedicated gosim scenario (`TestPhase1ChannelFloodReachesFarNode`, a 5-node line) separately proves the flood reaches a node 4 hops from the sender. Read the unicast delivery collapse above from the `delivered`/`dropped` columns of the SAME scripted unicast messages, isolated from the flood traffic layered on top, not from the aggregate rate.
 
-Full measurement detail, methodology, and gosim scenario names: `.superpowers/sdd/task-1-report.md`, `task-4-report.md`, `task-4fix-report.md`, and `task-5-report.md` in this branch.
+Methodology: every number above comes from the gosim scenario runner (`simulator/gosim/`, scenarios in `simulator/gosim/scenarios/`); re-run any scenario JSON with the harness there to reproduce.

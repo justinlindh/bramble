@@ -12,7 +12,7 @@ bash test/run_all_tests.sh
 
 Use this after firmware changes in `components/**`, `main/**`, or protocol logic.
 
-The runner builds every suite registered in `test/CMakeLists.txt` and runs every produced `test_*` binary. It exits non-zero if the build fails, if any suite fails, or if zero suites are found, so a broken build can never report green. The suite count is intentionally not hardcoded anywhere; the set of `add_executable(test_...)` targets in `test/CMakeLists.txt` is the source of truth. The full run is a required CI gate (`.gitea/workflows/quality.yml`).
+The runner builds every suite registered in `test/CMakeLists.txt` and runs every produced `test_*` binary. It exits non-zero if the build fails, if any suite fails, or if zero suites are found, so a broken build can never report green. The suite count is intentionally not hardcoded anywhere; the set of `add_executable(test_...)` targets in `test/CMakeLists.txt` is the source of truth. The full run is a required CI gate (`.github/workflows/quality.yml`).
 
 The same Quality workflow also enforces the RPC spec/firmware contract: `scripts/check-rpc-contract.sh` fails CI on any method-name drift between `api/openapi.yaml` and the registry in `main/rpc_methods.c`.
 
@@ -60,7 +60,7 @@ bash scripts/flash.sh local heltec-v4 build
 bash scripts/flash.sh local tdeck-plus build
 ```
 
-For full flashing + board checks, see [BUILDING.md](BUILDING.md) and [archive/heltec-v4-gnss-bringup.md](archive/heltec-v4-gnss-bringup.md) (historical).
+For full flashing + board checks, see [BUILDING.md](BUILDING.md).
 
 ---
 
@@ -94,5 +94,3 @@ Use this after RPC surface or transport-impacting changes.
 ## Related docs
 
 - [BUILDING.md](BUILDING.md)
-- [testing/network-reach-e2e-checklist.md](testing/network-reach-e2e-checklist.md)
-- [runbooks/ota-publish-endpoint-runbook.md](runbooks/ota-publish-endpoint-runbook.md)

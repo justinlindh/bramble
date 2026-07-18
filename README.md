@@ -126,7 +126,6 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 - [docs/bramble-testing.md](docs/bramble-testing.md): test strategy and coverage
 - [docs/ota-rollout.md](docs/ota-rollout.md): OTA operator workflow
 - [docs/quality-policy.md](docs/quality-policy.md): repo-wide CI gates, promotion criteria, and rollback levers
-- [docs/quality-policy-firmware.md](docs/quality-policy-firmware.md): firmware lint/static-analysis phased rollout and advisory CI mapping
 - [docs/quality-policy-webapp.md](docs/quality-policy-webapp.md): webapp workflow required/advisory mapping, local parity commands, and rollback levers
 - [simulator/README.md](simulator/README.md): simulator usage
 - [docs/webapp/chat.md](docs/webapp/chat.md): web client chat and UX notes

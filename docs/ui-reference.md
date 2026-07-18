@@ -1,6 +1,6 @@
 # Bramble T-Deck Plus UI Reference
 
-> Generated from source analysis of `components/ui_graphics/`; last reconciled with code 2026-07-08.
+> Generated from source analysis of `components/ui_graphics/`; last full reconcile 2026-07-08; color table re-verified against `bramble_theme.h` 2026-07-18.
 > Use this as the canonical reference for UI iteration. Update when screens change.
 
 **Display:** 320×240 px, RGB565 IPS LCD (landscape)  
@@ -42,7 +42,8 @@ Dark theme. All colors defined in `components/ui_graphics/theme/bramble_theme.h`
 | Accent        | `BR_COLOR_ACCENT` | `#1F6FEB` | Battery warning (30% threshold) (blue)      |
 | Text          | `BR_COLOR_TEXT`   | `#E6EDF3` | Primary body text                            |
 | Text Secondary| `BR_COLOR_TEXT_SEC` | `#8B949E` | Subtitles, hints, secondary info, GPS label |
-| Sent Bubble   | `BR_COLOR_SENT`   | `#238636` | Outgoing message bubbles; outgoing row indicators |
+| Sent Bubble   | `BR_COLOR_SENT`   | `#1A4B91` | Outgoing message bubbles; outgoing row indicators (blue) |
+| On-Sent Marks | `BR_COLOR_ON_SENT`| `#E6EDF3` | Muted marks drawn on a sent bubble |
 | Recv Bubble   | `BR_COLOR_RECV`   | `#21262D` | Incoming message bubbles                    |
 | Danger        | `BR_COLOR_DANGER` | `#DA3633` | Error states, low battery (<15%), Reboot button |
 | Success       | `BR_COLOR_SUCCESS`| `#238636` | Online node dot, signal bar fill            |
@@ -289,7 +290,7 @@ Each bubble is a `row` container (304px wide, transparent) containing a `bubble`
 ```
               ┌────────────────────────┐   max-width: 220px
               │ {message text wrapping} │   Montserrat 14, TEXT color
-              └────────────────────────┘   SENT bg (#238636), radius=8
+              └────────────────────────┘   SENT bg (#1A4B91), radius=8
 ```
 
 After loading all messages, list auto-scrolls to bottom (`lv_obj_scroll_to_y(..., LV_COORD_MAX)`).

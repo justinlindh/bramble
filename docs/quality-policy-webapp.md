@@ -1,6 +1,6 @@
 # Webapp Quality Policy
 
-This document defines the required vs advisory checks for `.gitea/workflows/webapp-quality.yml`, plus local parity commands and temporary rollback levers.
+This document defines the required vs advisory checks for `.github/workflows/webapp-quality.yml`, plus local parity commands and temporary rollback levers.
 
 ## Scope
 
@@ -64,7 +64,7 @@ Use rollback only when a required check becomes unstable (tool regression, flaky
 
 ### How to downgrade temporarily
 
-1. Edit `.gitea/workflows/webapp-quality.yml`.
+1. Edit `.github/workflows/webapp-quality.yml`.
 2. For the affected required job, set `continue-on-error: true` and rename the job to indicate advisory status.
 3. Keep all unaffected required jobs blocking.
 4. Open a rollback PR with the mandatory metadata below.

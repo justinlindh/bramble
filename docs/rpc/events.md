@@ -395,6 +395,25 @@ Relay path object fields: `addr` (string).
 
 ---
 
+### Correlation and telemetry-mode guidance
+
+Correlate delivery telemetry with `(broadcast_id, packet_id)` as the primary
+key across firmware, RPC, SDK, CLI, simulator, and web UI surfaces.
+
+Telemetry modes:
+
+- **Minimal (throughput-first)**: lower event volume, memory pressure, and UI
+  churn; coarse success/failure trends only. Prefer for routine operation on
+  airtime- or battery-constrained meshes.
+- **Detailed (debug-first)**: adds per-event diagnostics (`status`,
+  `hop_count`, `delivered_at_ms`) for bring-up, regressions, and field
+  investigations, at higher host-side processing cost. Enable on targeted
+  nodes and time windows only.
+
+For dense meshes or high-rate publishers: bound retained in-memory history by
+`(broadcast_id, packet_id)` and age, aggregate in rolling windows for
+dashboards, and batch interactive UI updates (100 to 250 ms coalescing).
+
 ## `bramble.onGpsEvent`
 
 **Description**  
