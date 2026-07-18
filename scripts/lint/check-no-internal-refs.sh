@@ -18,7 +18,7 @@ fail=0
 report() { printf 'check-no-internal-refs: %s:\n%s\n' "$1" "$2" >&2; fail=1; }
 
 # 1. Internal hostnames, fleet secrets dir, personal absolute paths.
-h="$(git grep -nIE 'example|justinlindh|host|internal-planning|/home/user' -- . ":!${self}" || true)"
+h="$(git grep -nIE 'idiotica|dumbot|openclaw|bramble-meta|/home/justin' -- . ":!${self}" || true)"
 [[ -n "$h" ]] && report "internal infra references" "$h"
 
 # 2. Private 192.168.x.x except the ESP32 SoftAP 192.168.4.x. The proxy
@@ -28,11 +28,11 @@ h="$(git grep -nIE '192\.168\.[0-9]+\.[0-9]+' -- . ":!${self}" ':!webapp/server/
 
 # 3. Real bench-hardware node addresses (Ed25519-derived 4-byte addresses).
 #    Public docs/tests must use fake hex (DEADBEEF, CAFEBABE, ...).
-h="$(git grep -niIE 'DEADBEEF|CAFEBABE|FEEDFACE|D15EA5ED|C0FFEE00' -- . ":!${self}" || true)"
+h="$(git grep -niIE 'F2BE6EEE|AB246C7C|FEC61437|9CA6A0EE|50D2E1BD' -- . ":!${self}" || true)"
 [[ -n "$h" ]] && report "real bench device address" "$h"
 
 # 4. Home room / location labels used as device names in fixtures.
-h="$(git grep -nIE "\b(Node A|Node B)\b" -- . ":!${self}" || true)"
+h="$(git grep -nIE "\b(Garage|Attic)\b" -- . ":!${self}" || true)"
 [[ -n "$h" ]] && report "home room/location label" "$h"
 
 # 5. MAC addresses, except clearly-fake documentation placeholders.
@@ -42,7 +42,7 @@ h="$(git grep -nIE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' -- . ":!${self}" | grep 
 
 # 6b. Home location: neighborhood/city names and precise coordinates from the
 #     maintainer's real area. Public fixtures must use fictional places.
-h="$(git grep -nIE 'Example|Example|Example|Example Canyon|36\\.0043|-115\\.0267' -- . ":!${self}" ':!hardware/' || true)"
+h="$(git grep -nIE 'Inspirada|Henderson|McCullough|Sloan Canyon|36\\.0043|-115\\.0267' -- . ":!${self}" ':!hardware/' || true)"
 [[ -n "$h" ]] && report "home location / neighborhood / coordinates" "$h"
 
 if [[ "$fail" -ne 0 ]]; then
