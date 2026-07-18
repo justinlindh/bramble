@@ -136,7 +136,7 @@ static void gps_task(void* arg) {
                     bool parsed = false;
                     if (strncmp(line_buf, "$GPRMC", 6) == 0 ||
                         strncmp(line_buf, "$GNRMC", 6) == 0) {
-                        /* Make a copy for strtok */
+                        /* Copy: the parser tokenizes the sentence in place. */
                         char sentence_copy[GPS_MAX_LINE_LEN];
                         strncpy(sentence_copy, line_buf, sizeof(sentence_copy) - 1);
                         sentence_copy[sizeof(sentence_copy) - 1] = '\0';
