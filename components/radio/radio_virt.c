@@ -328,10 +328,27 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
 #endif
 
     if (!done) {
-        ESP_LOGE(TAG, "tx timed out waiting for txdone");
+        /* A late txdone is NOT a failed transmission on the virtual radio.
+         * The broker folds the frame into the ether the moment it receives
+         * the tx message (gosim handleTx calls sim_radio_broadcast BEFORE
+         * scheduling the txdone reply), so by the time this wait even
+         * started, the frame had already been delivered to every receiver
+         * in range; txdone only paces the sender. Under CPU-throttled CI the
+         * broker's reply can lag arbitrarily, and treating that latency as a
+         * TX failure caused false "Beacon TX failed" cascades and mesh-layer
+         * retransmit storms for frames that had in fact been delivered
+         * (observed on the CI pods: a receiver serialized behind these
+         * timeouts transmitted 3 frames in 80s and could never complete a DM
+         * handshake). The real SX1262 driver treats a missing TX-done IRQ as
+         * fatal because there the frame really may not have left the chip;
+         * the virtual radio's contract is the opposite, so warn and count
+         * the TX as sent. */
+        ESP_LOGW(TAG, "txdone still pending after %ums; counting TX as sent (virtual ether delivers at tx start)", RADIO_VIRT_TX_TIMEOUT_MS);
         atomic_store(&s_state, RADIO_STATE_IDLE);
+        if (s_tx_done_cb)
+            s_tx_done_cb();
         radio_start_rx();
-        return -1;
+        return 0;
     }
 
     /* Mirror radio_esp.c: TX complete -> fire the caller-thread tx-done

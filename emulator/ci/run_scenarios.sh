@@ -120,7 +120,19 @@ dump_diagnostics() {
     local log="$1" label="$2"
     echo "--- diagnostics: $label ---"
     echo "[attach/join/death events]"
-    grep -E "attached as|node_joined|node_left|supervisor|restart|exited|abort|assert|Segmentation|panic" "$log" | tail -25
+    grep -iE "attached as|node_joined|node_left|supervisor|restart|exited|abort|assert|segmentation|panic|reboot" "$log" | tail -25
+    # For each unexpected node death, print the console lines that led up to
+    # it (frames/metrics/packet noise elided): the death REASON is in the
+    # node's last words, and the log tail alone usually post-dates them.
+    grep -n "exited unexpectedly" "$log" | cut -d: -f1 | while read -r ln; do
+        echo "[pre-death context before log line $ln]"
+        start=$((ln > 400 ? ln - 400 : 1))
+        sed -n "${start},${ln}p" "$log" \
+            | grep -v -e '"type":"device_fb"' -e '"type":"metrics"' \
+                      -e '"type":"packet_sent"' -e '"type":"emu_rx"' \
+                      -e '"type":"emu_tx"' -e '"type":"device_ind"' \
+            | tail -15
+    done
     echo "[device_fb frames per node]"
     grep '"type":"device_fb"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
     echo "[emu_tx per node (did each node key the channel?)]"
