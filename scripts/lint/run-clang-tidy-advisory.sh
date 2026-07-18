@@ -14,11 +14,16 @@ if [[ ! -f "$compile_db" ]]; then
   exit 0
 fi
 
+# Single-star globs, not DIR/**/*.c: git pathspec wildcards already span '/',
+# so 'main/*.c' matches every .c under main/ at any depth, while 'main/**/*.c'
+# requires an intervening directory and silently skips files directly under
+# main/ (all 18, plus 118 top-level test/ sources). Matches the pattern list in
+# run-clang-format-check.sh. Do not "fix" to **.
 mapfile -t files < <(git ls-files \
-  'main/**/*.c' \
-  'components/**/*.c' \
-  'test/**/*.c' \
-  'simulator/**/*.c')
+  'main/*.c' \
+  'components/*.c' \
+  'test/*.c' \
+  'simulator/*.c')
 
 if [[ ${#files[@]} -eq 0 ]]; then
   echo "[clang-tidy] PASS: no tracked C sources in configured scope."
