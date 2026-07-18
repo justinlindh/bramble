@@ -151,7 +151,17 @@ jobs:
           done
           test -f /usr/include/openssl/ssl.h || { echo "::error::libssl-dev missing from runner image"; exit 1; }
       - name: Run host test suite
-        run: bash test/run_all_tests.sh
+        # LeakSanitizer needs ptrace, and the pod runners sit behind
+        # kernel.yama.ptrace_scope=2 (admin-only ptrace), where an added
+        # SYS_PTRACE capability never reaches a non-root process's effective
+        # set on its own. The scale set adds SYS_PTRACE to the container
+        # bounding set; this wrapper re-enters the same uid/gid with the cap
+        # made ambient so every test process inherits it. On hosted runners
+        # (ptrace_scope<=1) the wrapper is a harmless no-op.
+        run: |
+          sudo -nE env "PATH=$PATH" setpriv --reuid="$(id -u)" --regid="$(id -g)" \
+            --init-groups --inh-caps +sys_ptrace --ambient-caps +sys_ptrace \
+            bash test/run_all_tests.sh
 
   shellcheck:
     name: ShellCheck
@@ -242,8 +252,16 @@ jobs:
       - name: Assert cppcheck is pre-baked on the runner
         run: command -v cppcheck >/dev/null || { echo "::error::cppcheck missing from runner image"; exit 1; }
       - name: cppcheck
+        # The scoped suppressions below are cppcheck 2.13 false positives
+        # (the previous runner shipped 2.7, which did not flag them):
+        # unknownMacro fires because lvgl headers are not on the include path
+        # (LV_SYMBOL_RIGHT), and both uninitvar findings are loops that only
+        # read entries below a count that starts at zero.
         run: |
           cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches \
+            --suppress=unknownMacro:components/ui_graphics/screens/scr_chat_messages.c \
+            --suppress=uninitvar:components/ui_graphics/screens/scr_map.c \
+            --suppress=uninitvar:components/ui_graphics/screens/scr_nodes.c \
             main components
 
   board-build-smoke:
