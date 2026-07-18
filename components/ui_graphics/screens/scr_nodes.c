@@ -10,8 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char* TAG = "scr_nodes";
-
 /* A peer heard longer ago than this reads as "stale": its row is dimmed so
  * live nodes stand out. Distinct from NEIGHBOR_EXPIRY_MS (10 min), the point
  * at which routing actually evicts the entry. */
