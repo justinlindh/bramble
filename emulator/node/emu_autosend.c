@@ -65,19 +65,21 @@
  * forward-declared rather than pulling in the main component's headers, mirroring
  * how emu_flash_persist_init is wired from main.c; the symbols live in libmain.a
  * and resolve at the final link. */
-extern int mesh_send_broadcast(const uint8_t *data, size_t len);
-extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
+extern int mesh_send_broadcast(const uint8_t* data, size_t len);
+extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t* data, size_t len);
 extern uint32_t emu_mesh_first_neighbor(void);
 extern int emu_mesh_drop_dm_sessions(void);
+extern int emu_mesh_dm_session_count(void);
+extern uint32_t msg_store_total_incoming(void);
 
-static const char *TAG = "emu_autosend";
+static const char* TAG = "emu_autosend";
 
 /* Reads an unsigned env var, or def if unset/blank/unparseable. */
-static unsigned env_uint(const char *name, unsigned def) {
-    const char *v = getenv(name);
+static unsigned env_uint(const char* name, unsigned def) {
+    const char* v = getenv(name);
     if (!v || !*v)
         return def;
-    char *end = NULL;
+    char* end = NULL;
     unsigned long n = strtoul(v, &end, 10);
     if (end == v)
         return def;
@@ -88,37 +90,49 @@ static unsigned env_uint(const char *name, unsigned def) {
  * "neighbor" it retries briefly so a just-started sender waits for its first
  * beacon exchange rather than falling back to broadcast. */
 static uint32_t resolve_dest(void) {
-    const char *to = getenv("EMU_AUTO_SEND_TO");
+    const char* to = getenv("EMU_AUTO_SEND_TO");
     if (!to || !*to)
         return 0; /* broadcast */
     if (strcmp(to, "neighbor") == 0) {
-        for (int i = 0; i < 40; i++) { /* up to ~20s waiting for a neighbor */
+        /* EVENT-DRIVEN, with a cap far beyond any plausible discovery time.
+         * The old ~20s cap was calibrated in subjective (tick) time, and the
+         * linux port loses ticks under CI pod jitter at different rates per
+         * code path, so a beacon exchange that takes 3 subjective seconds of
+         * mesh-task time can outlast 20 subjective seconds of this task's
+         * waiting (observed on CI: the fallback fired and silently degraded
+         * the DM scenario to a broadcast, collapsing its whole construction).
+         * Waiting longer costs nothing on a healthy run and the scenario's
+         * wall-clock budget still bounds the process. */
+        for (int i = 0; i < 240; i++) {
             uint32_t a = emu_mesh_first_neighbor();
             if (a != 0)
                 return a;
+            if (i > 0 && i % 20 == 0)
+                ESP_LOGW(TAG, "still waiting for a neighbor (%d tries)", i);
             vTaskDelay(pdMS_TO_TICKS(500));
         }
-        ESP_LOGW(TAG, "no neighbor learned; falling back to broadcast");
+        ESP_LOGE(TAG, "no neighbor learned after extended wait; falling back to broadcast "
+                      "(scenario construction is likely broken)");
         return 0;
     }
     return (uint32_t)strtoul(to, NULL, 16);
 }
 
 /* Sends text once, as a DM to dest or a broadcast when dest is 0. */
-static void send_one(const char *text, size_t len, uint32_t dest, const char *tag, unsigned i,
+static void send_one(const char* text, size_t len, uint32_t dest, const char* tag, unsigned i,
                      unsigned n) {
     if (dest != 0) {
-        mesh_send_message(dest, (const uint8_t *)text, len);
+        mesh_send_message(dest, (const uint8_t*)text, len);
         ESP_LOGI(TAG, "%s DM to %08X (%u/%u): %s", tag, dest, i + 1, n, text);
     } else {
-        mesh_send_broadcast((const uint8_t *)text, len);
+        mesh_send_broadcast((const uint8_t*)text, len);
         ESP_LOGI(TAG, "%s broadcast (%u/%u): %s", tag, i + 1, n, text);
     }
 }
 
 /* Runs a burst of `repeat` sends of text spaced interval_ms apart. */
-static void send_burst(const char *text, uint32_t dest, unsigned repeat, unsigned interval_ms,
-                       const char *tag) {
+static void send_burst(const char* text, uint32_t dest, unsigned repeat, unsigned interval_ms,
+                       const char* tag) {
     if (!text || !*text || repeat == 0)
         return;
     size_t len = strlen(text);
@@ -132,9 +146,9 @@ static void send_burst(const char *text, uint32_t dest, unsigned repeat, unsigne
 /* Runs as a FreeRTOS task (not a raw pthread): the mesh send API posts to the
  * mesh task's queue, which is only safe from a real task context under the
  * IDF-linux FreeRTOS port. */
-static void autosend_task(void *arg) {
+static void autosend_task(void* arg) {
     (void)arg;
-    const char *text1 = getenv("EMU_AUTO_SEND");
+    const char* text1 = getenv("EMU_AUTO_SEND");
     if (!text1 || !*text1) {
         vTaskDelete(NULL);
         return;
@@ -148,7 +162,7 @@ static void autosend_task(void *arg) {
     uint32_t dest = resolve_dest(); /* may block briefly awaiting a neighbor */
     send_burst(text1, dest, repeat1, interval1, "auto-sent");
 
-    const char *text2 = getenv("EMU_AUTO_SEND2");
+    const char* text2 = getenv("EMU_AUTO_SEND2");
     if (text2 && *text2) {
         unsigned delay2 = env_uint("EMU_AUTO_SEND2_DELAY_MS", 16000);
         unsigned repeat2 = env_uint("EMU_AUTO_SEND2_REPEAT", 4);
@@ -167,8 +181,8 @@ static void autosend_task(void *arg) {
 /* Path of the one-shot reboot marker in NODE_DIR, or "" if NODE_DIR is unset.
  * Its presence means this node already did its scheduled reboot, so the timer is
  * a no-op on the restarted process (otherwise the node would reboot every boot). */
-static void reboot_marker_path(char *out, size_t out_len) {
-    const char *dir = getenv("NODE_DIR");
+static void reboot_marker_path(char* out, size_t out_len) {
+    const char* dir = getenv("NODE_DIR");
     if (!dir || !*dir) {
         out[0] = '\0';
         return;
@@ -181,7 +195,7 @@ static void reboot_marker_path(char *out, size_t out_len) {
 /* Exits the process ONCE at EMU_REBOOT_AT_MS so the supervisor restarts the node
  * (a reboot: same identity, cleared RAM). The NODE_DIR marker makes it one-shot
  * so the restarted node stays up. */
-static void reboot_task(void *arg) {
+static void reboot_task(void* arg) {
     (void)arg;
     unsigned at_ms = env_uint("EMU_REBOOT_AT_MS", 0);
     if (at_ms == 0) {
@@ -198,7 +212,7 @@ static void reboot_task(void *arg) {
     }
     vTaskDelay(pdMS_TO_TICKS(at_ms));
     if (marker[0]) {
-        FILE *f = fopen(marker, "w");
+        FILE* f = fopen(marker, "w");
         if (f)
             fclose(f);
     }
@@ -211,7 +225,7 @@ static void reboot_task(void *arg) {
  * emu-dm-desync scenario relies on (see the header comment). No NODE_DIR marker
  * is needed the way reboot_task needs one, because the node never restarts, so
  * this task runs at most once per process life. */
-static void drop_session_task(void *arg) {
+static void drop_session_task(void* arg) {
     (void)arg;
     unsigned at_ms = env_uint("EMU_DROP_DM_SESSION_AT_MS", 0);
     if (at_ms == 0) {
@@ -219,8 +233,34 @@ static void drop_session_task(void *arg) {
         return;
     }
     vTaskDelay(pdMS_TO_TICKS(at_ms));
+    /* EVENT-DRIVEN: the drop constructs a one-sided desync, which only
+     * exists if there IS a session to drop. Under CI tick-loss skew the
+     * ALPHA handshake can complete well after this task's subjective at_ms,
+     * and dropping zero sessions silently voids the scenario. Wait for the
+     * session, settle briefly so the in-flight receipt exchange lands (the
+     * purge in emu_mesh_drop_dm_sessions handles whatever remains), then
+     * drop. The cap only guards a genuinely broken run. */
+    /* Gate on the ALPHA actually ARRIVING, not merely on a session record: a
+     * session exists in HANDSHAKING/ACTIVE state as soon as the peer's INIT
+     * is processed, which is BEFORE the queued ALPHA payload is delivered
+     * and rendered; dropping in that gap kills the session out from under
+     * the in-flight ALPHA and the scenario's baseline render never happens
+     * (observed locally). A stored incoming message plus a live session
+     * means the handshake completed AND the payload landed. */
+    for (int i = 0; i < 240; i++) {
+        if (emu_mesh_dm_session_count() > 0 && msg_store_total_incoming() > 0)
+            break;
+        if (i > 0 && i % 20 == 0)
+            ESP_LOGW(TAG, "drop: still waiting for session + delivered DM (%d tries)", i);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+    /* Settle: let the delivery receipt/ACK exchange for the ALPHA finish so
+     * the reboot-faithful purge has less in flight to clean up. */
+    vTaskDelay(pdMS_TO_TICKS(1500));
     int n = emu_mesh_drop_dm_sessions();
     ESP_LOGI(TAG, "EMU_DROP_DM_SESSION_AT_MS reached; dropped %d DM session(s)", n);
+    if (n == 0)
+        ESP_LOGE(TAG, "drop found NO session; the desync construction did not happen");
     vTaskDelete(NULL);
 }
 
