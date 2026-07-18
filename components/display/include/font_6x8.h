@@ -1,6 +1,7 @@
 /**
  * 6x8 ASCII font (printable chars 0x20-0x7E)
- * Shared between SSD1306 and ST7789 display drivers.
+ * Shared across the display drivers (SSD1306, ST7789, SSD1680, and the
+ * host/emulator virtual display).
  */
 
 #ifndef BRAMBLE_FONT_6X8_H
