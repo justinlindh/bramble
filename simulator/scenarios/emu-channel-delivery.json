@@ -1,6 +1,6 @@
 {
   "name": "emu-channel-delivery",
-  "description": "Three provisioned firmware pagers on one ether. The sender (0,0) broadcasts a channel message; both receivers must render it on their e-paper. Asserted by run_scenarios.sh via `screen-assert -min-nodes 2 -text 'HELLO BRAMBLE'`. All three share EMU_NETWORK_KEY so the mesh carries the frame. A receiver only auto-opens its Messages screen (where the text renders) for a message arriving after its own 10s message-idle threshold, measured from ITS boot; boots are staggered and a CPU-starved CI pod can lag a receiver's boot tens of seconds behind the sender's, so the send burst is long (12 sends, 8s apart, sender t=12s..100s) to guarantee sends land after every receiver's threshold no matter the lag. run_scenarios.sh waits event-driven and stops the run the moment both receivers have painted, so the long tail costs nothing on a fast box. duration_ms covers the full burst plus render slack (not the old 36s): in browser/server mode the ether stops relaying at duration even though the node processes stay up, so a short duration walls off the late sends that slow-pod runs (and the browser E2E, which runs this scenario after user-interaction steps that reset the receivers' idle clocks) depend on.",
+  "description": "Three provisioned firmware pagers on one ether. The sender (0,0) broadcasts a channel message; both receivers must render it on their e-paper. Asserted by run_scenarios.sh via `screen-assert -min-nodes 2 -text 'HELLO BRAMBLE'`. All three share EMU_NETWORK_KEY so the mesh carries the frame. A receiver only auto-opens its Messages screen (where the text renders) for a message arriving after its own 10s message-idle threshold, measured from ITS boot; boots are staggered and a CPU-starved CI pod can lag a receiver's boot tens of seconds behind the sender's, so the send burst is long (12 sends, 8s apart, sender t=12s..100s) to guarantee sends land after every receiver's threshold no matter the lag. run_scenarios.sh waits event-driven and stops the run the moment both receivers have painted, so the long tail costs nothing on a fast box. duration_ms covers the full burst plus render slack (not the old 36s): in browser/server mode the ether stops relaying at duration even though the node processes stay up, so a short duration walls off the late sends that slow-pod runs (and the browser E2E, which runs this scenario after user-interaction steps that reset the receivers' idle clocks) depend on. Beacons run at 15s, not the old 3s: a channel broadcast needs no neighbor state on any node, and 3s beacons from three nodes put ~75% baseline utilization on the LBT/CAD-mediated single-channel ether (measured: a healthy 60s run carries ~45s of airtime), which degrades sharply when pod CPU throttling skews the firmware's LBT timing; a starved run was observed transmitting at ~1/5 the configured rate with receivers missing every message frame. 15s beacons (closer to real hardware cadence anyway) drop the baseline to ~13% and give the message frames a quiet channel.",
   "mode": "deterministic",
   "duration_ms": 150000,
   "nodes": [],
@@ -13,7 +13,7 @@
       "label": "sender",
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-        "EMU_BEACON_INTERVAL_MS": "3000",
+        "EMU_BEACON_INTERVAL_MS": "15000",
         "EMU_AUTO_SEND": "HELLO BRAMBLE",
         "EMU_AUTO_SEND_DELAY_MS": "12000",
         "EMU_AUTO_SEND_REPEAT": "12",
@@ -28,7 +28,7 @@
       "label": "rx",
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-        "EMU_BEACON_INTERVAL_MS": "3000"
+        "EMU_BEACON_INTERVAL_MS": "15000"
       }
     }
   ],

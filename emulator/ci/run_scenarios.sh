@@ -123,8 +123,14 @@ dump_diagnostics() {
     grep -E "attached as|node_joined|node_left|supervisor|restart|exited|abort|assert|Segmentation|panic" "$log" | tail -25
     echo "[device_fb frames per node]"
     grep '"type":"device_fb"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
-    echo "[log tail, fb frames elided]"
-    grep -v '"type":"device_fb"' "$log" | tail -40
+    echo "[emu_tx per node (did each node key the channel?)]"
+    grep '"type":"emu_tx"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
+    echo "[emu_tx airtime distribution (toa_ms: beacons are short, message frames ~2100ms)]"
+    grep '"type":"emu_tx"' "$log" | grep -o '"toa_ms":[0-9]*' | sort | uniq -c | head -10
+    echo "[emu_rx per node (did the frames reach each node?)]"
+    grep '"type":"emu_rx"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
+    echo "[log tail, fb frames and periodic metrics elided]"
+    grep -v -e '"type":"device_fb"' -e '"type":"metrics"' "$log" | tail -40
     echo "--- end diagnostics: $label ---"
 }
 
