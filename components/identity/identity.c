@@ -27,7 +27,6 @@ static int id_store_write(const char* key, const uint8_t* buf, size_t len);
 #ifdef ESP_PLATFORM
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "nvs_keys.h"
 #include "esp_random.h"
 #include "esp_log.h"
 
