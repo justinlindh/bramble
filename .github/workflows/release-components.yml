@@ -14,7 +14,6 @@ defaults:
 jobs:
   release-protocol:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     concurrency:
       group: release-protocol
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -51,7 +50,6 @@ jobs:
 
   release-webapp:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     concurrency:
       group: release-webapp
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -88,7 +86,6 @@ jobs:
     # are not created on every push to main.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     concurrency:
       group: release-firmware
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
