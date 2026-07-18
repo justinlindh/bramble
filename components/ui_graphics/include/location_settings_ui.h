@@ -42,18 +42,6 @@ typedef struct {
     uint32_t last_share_epoch_s;
 } location_ui_state_t;
 
-static inline const char* location_ui_tier_label(location_ui_tier_t tier) {
-    switch (tier) {
-    case LOCATION_UI_TIER_FULL:
-        return "Exact";
-    case LOCATION_UI_TIER_PRESENCE:
-        return "Presence";
-    case LOCATION_UI_TIER_COARSE:
-    default:
-        return "Coarse";
-    }
-}
-
 static inline const char* location_ui_source_label(location_ui_source_t source) {
     switch (source) {
     case LOCATION_UI_SOURCE_GPS:
@@ -63,20 +51,6 @@ static inline const char* location_ui_source_label(location_ui_source_t source) 
     case LOCATION_UI_SOURCE_HYBRID:
     default:
         return "Hybrid";
-    }
-}
-
-static inline const char* location_ui_interval_label(uint16_t interval_s) {
-    switch (interval_s) {
-    case LOCATION_UI_INTERVAL_1_MIN:
-        return "1 min";
-    case LOCATION_UI_INTERVAL_15_MIN:
-        return "15 min";
-    case LOCATION_UI_INTERVAL_60_MIN:
-        return "60 min";
-    case LOCATION_UI_INTERVAL_5_MIN:
-    default:
-        return "5 min";
     }
 }
 
