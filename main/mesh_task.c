@@ -4175,6 +4175,31 @@ static void record_churn_event(uint32_t t, uint8_t neighbor_count) {
  * Compute adaptive beacon interval based on current mesh conditions.
  * Returns new interval in milliseconds.
  */
+/* Emulator only: the beacon base interval, overridable via EMU_BEACON_INTERVAL_MS
+ * on the linux target so a headless scenario can beacon far more often than the
+ * production 60s. Neighbor discovery in a short scenario otherwise hinges on a
+ * SINGLE beacon per node landing in the window (the next is 60s out); if those
+ * two lone beacons collide on the half-duplex ether or one is dropped, neither
+ * node ever learns the other and the DM falls back to a broadcast, which is the
+ * historical ~1/3 nondeterminism this rig showed. A few-second interval gives
+ * many independent discovery chances so a neighbor is learned every run.
+ * NEIGHBOR_EXPIRY_MS is 600s, so a short interval never churns the table.
+ * Returns 0 when no override applies (production, or the env unset), so the
+ * caller leaves the real 60s policy -- including any NVS-loaded value -- alone.
+ * The real esp32s3 firmware never even compiles the getenv: the whole body is
+ * behind the linux guard. */
+static uint32_t emu_beacon_interval_override_ms(void) {
+#ifdef CONFIG_IDF_TARGET_LINUX
+    const char* v = getenv("EMU_BEACON_INTERVAL_MS");
+    if (v && *v) {
+        unsigned long n = strtoul(v, NULL, 10);
+        if (n > 0)
+            return (uint32_t)n;
+    }
+#endif
+    return 0;
+}
+
 static uint32_t compute_adaptive_beacon_interval(uint32_t t, uint8_t neighbor_count) {
     uint8_t churn =
         beacon_churn_count(s_churn_history, MAX_CHURN_HISTORY, t, s_beacon_policy.churn_window_ms);
@@ -4702,6 +4727,19 @@ static void mesh_task(void* param) {
     uint32_t last_beacon_ms = 0;
     uint32_t last_purge_ms = 0;
     uint32_t beacon_interval = BEACON_INTERVAL_MS;
+    /* Emulator only: EMU_BEACON_INTERVAL_MS shortens beaconing so a short
+     * headless scenario discovers neighbors reliably. Apply it to BOTH the
+     * initial interval (times the second beacon) and the policy base (which
+     * mesh_periodic_maintenance recomputes every subsequent interval from), so
+     * beacons stay short throughout, not just once. Guarded on a real override
+     * so production and any NVS-loaded policy are untouched. */
+    uint32_t emu_beacon_ms = emu_beacon_interval_override_ms();
+    if (emu_beacon_ms > 0) {
+        beacon_interval = emu_beacon_ms;
+        s_beacon_policy.base_interval_ms = emu_beacon_ms;
+        if (s_beacon_policy.min_interval_ms > emu_beacon_ms)
+            s_beacon_policy.min_interval_ms = emu_beacon_ms;
+    }
 
     /* Add initial jitter before first beacon */
     ESP_LOGI(TAG, "=== BOOT STAGE: beacon jitter delay ===");
@@ -6167,6 +6205,36 @@ uint32_t emu_mesh_first_neighbor(void) {
     if (st.neighbors.count > 0)
         return st.neighbors.entries[0].addr;
     return 0;
+}
+
+/* Emulator only: tear down THIS node's DM sessions, leaving the peer's half
+ * intact and this node still neighboring it. That is exactly the one-sided
+ * "stale session" desync the emu-dm-desync scenario exists to reproduce (issue
+ * #138): historically the scenario rebooted the receiver to clear its RAM-held
+ * sessions, but reboot couples three real-time races into CI (RAM-clear timing,
+ * beacon re-acquisition of the peer, and the sender's stale DM landing inside
+ * that window). Dropping the session in-process instead constructs the desynced
+ * state at an exact scenario-driven instant with the peer never lost as a
+ * neighbor, so the very next session DM from the peer deterministically fails
+ * to decrypt here and fires the #138 self-heal. Returns the number of sessions
+ * torn down. Runs on the emu_autosend task; s_dm_mutex serializes it against the
+ * mesh RX task exactly like every other s_dm_table access. */
+int emu_mesh_drop_dm_sessions(void) {
+    int dropped = 0;
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        uint32_t peer;
+        xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+        peer = (s_dm_table->s[i].state != DM_STATE_NONE) ? s_dm_table->s[i].peer_addr : 0;
+        if (peer != 0)
+            dm_session_teardown(s_dm_table, peer);
+        xSemaphoreGive(s_dm_mutex);
+        if (peer != 0) {
+            ESP_LOGI(TAG, "emu: dropped DM session with %08" PRIX32 " (one-sided desync inject)",
+                     peer);
+            dropped++;
+        }
+    }
+    return dropped;
 }
 #endif
 
