@@ -85,7 +85,6 @@ describe('send-status machine', () => {
       config: null,
       status: null,
       airtime: null,
-      airtimePolicy: null,
       neighbors: [],
       routes: [],
       messages: [],

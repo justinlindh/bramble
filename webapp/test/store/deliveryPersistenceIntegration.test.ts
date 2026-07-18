@@ -42,7 +42,6 @@ describe('delivery persistence hydration + live merge', () => {
       config: null,
       status: null,
       airtime: null,
-      airtimePolicy: null,
       neighbors: [],
       routes: [],
       messages: [],

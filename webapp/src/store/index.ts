@@ -7,7 +7,6 @@ import type {
   BrambleConfig,
   NodeStatus,
   AirtimeStatus,
-  AirtimePolicy,
   ConnectionState,
   RelayHop,
   DeliveryStatus,
@@ -105,7 +104,6 @@ interface Actions {
   setConfig: (c: BrambleConfig) => void;
   setStatus: (s: NodeStatus) => void;
   setAirtime: (a: AirtimeStatus) => void;
-  setAirtimePolicy: (p: AirtimePolicy) => void;
   setNeighbors: (n: Neighbor[]) => void;
   setRoutes: (r: Route[]) => void;
   addMessage: (msg: Message) => void;
@@ -149,7 +147,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   config: null,
   status: null,
   airtime: null,
-  airtimePolicy: null,
   neighbors: undefined,
   routes: [],
   messages: [],
@@ -216,8 +213,6 @@ export const useStore = create<AppState & Actions>((set) => ({
   setStatus: (s) => set({ status: s }),
 
   setAirtime: (a) => set({ airtime: a }),
-
-  setAirtimePolicy: (p) => set({ airtimePolicy: p }),
 
   setNeighbors: (n) => set(state => {
     const names = new Map(state.peerNames);
