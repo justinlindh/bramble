@@ -87,7 +87,7 @@ esp_err_t bramble_build_aead_aad(const bramble_header_t* h, uint32_t src_addr, u
 /* Macro for body offset */
 #define B (HEADER_SIZE)
 
-/* ACK (22 bytes) */
+/* ACK (ACK_BASE_SIZE bytes + 4 per relay-path hop) */
 esp_err_t bramble_ack_serialize(const bramble_ack_t* p, uint8_t* buf, size_t len) {
     uint8_t hops = p->hop_count > ACK_MAX_HOPS ? ACK_MAX_HOPS : p->hop_count;
     size_t need = ACK_BASE_SIZE + hops * 4;
@@ -156,7 +156,7 @@ esp_err_t bramble_ack_deserialize(bramble_ack_t* p, const uint8_t* buf, size_t l
     return ESP_OK;
 }
 
-/* RREQ (26 bytes) */
+/* RREQ (RREQ_SIZE bytes) */
 esp_err_t bramble_rreq_serialize(const bramble_rreq_t* p, uint8_t* buf, size_t len) {
     if (len < RREQ_SIZE)
         return ESP_ERR_INVALID_SIZE;
@@ -246,7 +246,7 @@ esp_err_t bramble_rerr_deserialize(bramble_rerr_t* p, const uint8_t* buf, size_t
     return ESP_OK;
 }
 
-/* BEACON (46 bytes fixed + optional name; was 40, +6 for seq, ws 1.3b) */
+/* BEACON (BEACON_SIZE bytes fixed + optional name) */
 esp_err_t bramble_beacon_serialize(const bramble_beacon_t* p, uint8_t* buf, size_t len) {
     uint8_t nlen = p->name_len > BEACON_NAME_MAX ? BEACON_NAME_MAX : p->name_len;
     size_t need = BEACON_SIZE + (nlen > 0 ? 1 + nlen : 0);
@@ -315,11 +315,19 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t* p, const uint8_t* buf, si
     return ESP_OK;
 }
 
-/* KEY_EXCHANGE (69 bytes) */
+/* KEY_EXCHANGE: the fixed fields occupy 98 bytes (header 12 + src 4 +
+ * ephemeral 32 + long-term 32 + key_id 1 + ke_type 1 + auth_tag 16); the
+ * wire frame is KEY_EXCHANGE_SIZE (101), so the trailing 3 bytes are
+ * reserved. Zero the KEY_EXCHANGE_SIZE wire frame up front so those
+ * reserved bytes are deterministic: send_ke_envelope ships all KEY_EXCHANGE_SIZE bytes, and
+ * without this the reserved tail is uninitialized stack that gets encrypted
+ * and transmitted, disclosing 3 stack bytes to any channel-key holder on
+ * every handshake. */
 esp_err_t bramble_key_exchange_serialize(const bramble_key_exchange_t* p, uint8_t* buf,
                                          size_t len) {
     if (len < KEY_EXCHANGE_SIZE)
         return ESP_ERR_INVALID_SIZE;
+    memset(buf, 0, KEY_EXCHANGE_SIZE);
     esp_err_t r = bramble_header_serialize(&p->header, buf, len);
     if (r != ESP_OK)
         return r;
@@ -347,7 +355,7 @@ esp_err_t bramble_key_exchange_deserialize(bramble_key_exchange_t* p, const uint
     return ESP_OK;
 }
 
-/* DELIVERY_RECEIPT (22-54 bytes) */
+/* DELIVERY_RECEIPT (DELIVERY_RECEIPT_MIN_SIZE bytes + 4 per hop) */
 esp_err_t bramble_delivery_receipt_serialize(const bramble_delivery_receipt_t* p, uint8_t* buf,
                                              size_t len) {
     size_t needed = DELIVERY_RECEIPT_MIN_SIZE + (size_t)p->hop_count * 4;

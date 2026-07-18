@@ -3,20 +3,6 @@
 #include <string.h>
 #include <inttypes.h>
 
-int ui_format_main_line1(const ui_main_data_t* data, char* buf, size_t buf_len) {
-    return snprintf(buf, buf_len, "%08" PRIX32 "  %u%%", data->my_addr, data->battery_pct);
-}
-
-int ui_format_main_line2(const ui_main_data_t* data, char* buf, size_t buf_len) {
-    return snprintf(buf, buf_len, "%u peers  TX:%u", data->neighbor_count, data->tx_queue_depth);
-}
-
-int ui_format_main_line3(const ui_main_data_t* data, char* buf, size_t buf_len) {
-    char uptime[32];
-    ui_format_uptime(data->uptime_sec, uptime, sizeof(uptime));
-    return snprintf(buf, buf_len, "Up: %s", uptime);
-}
-
 int ui_format_msg_line(const ui_msg_line_t* m, char* buf, size_t buf_len) {
     if (!m || !buf || buf_len == 0)
         return 0;

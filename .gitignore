@@ -68,5 +68,4 @@ keys/*
 ~*.lck
 
 # Internal AI-assistant ops docs, kept local/private (not shipped public)
-/CLAUDE.md
 /.claude/

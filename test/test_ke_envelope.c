@@ -167,9 +167,33 @@ void test_session_decrypt_rejects_spoofed_src_addr(void) {
         0, dm_session_decrypt(&sess, &hdr, a.address + 1, nonce, ct, sizeof(ct), tag, out));
 }
 
+/* The serializer writes 98 fixed-field bytes but the wire frame is
+ * KEY_EXCHANGE_SIZE (101), and send_ke_envelope transmits all of it. The
+ * reserved tail must be zero-filled, not left as uninitialized stack, or
+ * every handshake leaks stack bytes to any channel-key holder. Pre-poison
+ * the buffer so a regression (dropping the zero-fill) leaves the poison
+ * behind and fails here. */
+void test_ke_serialize_zeroes_reserved_tail(void) {
+    bramble_key_exchange_t ke;
+    memset(&ke, 0x5A, sizeof(ke));
+    ke.header = make_data_header(0x1234, 0);
+    ke.header.type = PKT_TYPE_KEY_EXCHANGE;
+
+    uint8_t wire[KEY_EXCHANGE_SIZE];
+    memset(wire, 0xEE, sizeof(wire));
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_key_exchange_serialize(&ke, wire, sizeof(wire)));
+
+    /* Fixed fields end at offset 98 (HEADER_SIZE + 4 + 32 + 32 + 1 + 1 + 16);
+     * bytes [98, KEY_EXCHANGE_SIZE) are the reserved tail. */
+    for (size_t i = HEADER_SIZE + 86; i < KEY_EXCHANGE_SIZE; i++) {
+        TEST_ASSERT_EQUAL_UINT8(0, wire[i]);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ke_envelope_round_trip_to_session);
     RUN_TEST(test_session_decrypt_rejects_spoofed_src_addr);
+    RUN_TEST(test_ke_serialize_zeroes_reserved_tail);
     return UNITY_END();
 }
