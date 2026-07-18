@@ -30,7 +30,6 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     outputs:
       webapp: ${{ steps.detect.outputs.webapp }}
@@ -126,7 +125,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -143,7 +141,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -160,7 +157,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -177,7 +173,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_flasher == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -192,7 +187,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -209,7 +203,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -226,7 +219,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.webapp == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
