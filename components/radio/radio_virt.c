@@ -21,12 +21,13 @@
  *
  * Threading: emu_link's reader thread runs the rx/txdone/cadres handlers.
  * radio_transmit_raw and radio_cad_check are called from the sender's thread
- * (through the tx_gate mutex) and block on a condvar the handlers signal, so
- * the tx-done callback fires on the caller's thread exactly as on device
- * (radio_esp.c), while the rx callback fires on the reader thread just as the
- * device's rx callback fires from the radio task. mesh_task's registered
- * consumers (on_rx queue-posts an rx_packet_t, on_tx_done just logs) do only
- * bounded work, so the reader thread never blocks.
+ * (through the tx_gate mutex) and poll a flag the handlers set, so the
+ * tx-done callback fires on the caller's thread exactly as on device
+ * (radio_esp.c). The rx and async cad-done callbacks do NOT fire on the
+ * reader thread: it is a raw pthread and must never enter FreeRTOS, so those
+ * events are deferred through a pthread ring to a FreeRTOS pump task (see
+ * the THREADING CONTRACT comment above the handlers), which then invokes the
+ * registered callbacks from legal task context.
  *
  * Host-only: compiled into the radio component only on the IDF linux target
  * (see CMakeLists.txt) and #included directly by test/test_radio_virt.c. On a
@@ -91,9 +92,36 @@ static radio_tx_done_callback_t s_tx_done_cb;
 static radio_cad_done_callback_t s_cad_done_cb;
 
 static pthread_mutex_t s_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* Task-side acquisition of s_mu on the node: trylock and yield a tick on
+ * contention, NEVER a blocking futex wait. A FreeRTOS task blocked in a
+ * foreign futex desyncs the linux port's current-task tracking (the
+ * suspension signal EINTRs the wait and the task can resume while another
+ * task is considered current), which detonates later FreeRTOS asserts such
+ * as xTaskPriorityDisinherit's holder check when the task next gives a
+ * mutex. s_mu is only ever held for flag reads/writes, so the trylock
+ * virtually always succeeds on the first attempt; the reader thread (no TCB,
+ * nothing to desync) keeps plain pthread_mutex_lock. Plain-gcc harness has
+ * no scheduler and also keeps the plain lock. */
+#if defined(ESP_PLATFORM)
+static void mu_lock_task(void) {
+    while (pthread_mutex_trylock(&s_mu) != 0)
+        vTaskDelay(1);
+}
+#else
+static void mu_lock_task(void) { pthread_mutex_lock(&s_mu); }
+#endif
 static pthread_cond_t s_tx_cv = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t s_cad_cv = PTHREAD_COND_INITIALIZER;
-static bool s_tx_done;
+/* Outstanding-txdone COUNTER, not a bool: a txdone that arrives after its TX
+ * already timed out (and was counted as sent) must not release the NEXT
+ * transmit's wait early. With a bool, a late txdone under sustained broker
+ * lag lets the sender run one-ahead of time-on-air pacing indefinitely
+ * (each TX consumes the PREVIOUS frame's txdone the instant it starts
+ * waiting). The counter makes staleness self-accounting: each send
+ * increments, each txdone decrements, and a waiter waits for zero, so a
+ * stale txdone merely cancels the stale send it belongs to. */
+static int s_txdone_outstanding;
 static bool s_cad_done;
 static bool s_cad_busy;
 static bool s_cad_async; /* an async radio_cad() is awaiting its cadres */
@@ -181,6 +209,101 @@ static void deadline_in_ms(struct timespec* ts, uint32_t ms) {
 /*  emu_link inbound handlers (reader thread)                          */
 /* ------------------------------------------------------------------ */
 
+/* THREADING CONTRACT (the hard-won part): emu_link's reader is a RAW pthread,
+ * not a FreeRTOS task, and on the IDF-linux FreeRTOS port a foreign thread
+ * must never call FreeRTOS APIs. The port keeps global scheduler state
+ * (uxCriticalNesting in port.c) that only registered task pthreads may touch;
+ * an xQueueSend from the reader thread races the scheduler and intermittently
+ * dies on `vPortExitCritical: Assertion uxCriticalNesting >= 0' failed`, or
+ * silently wedges the scheduler (both observed on CI: node processes exiting
+ * with status 1 mid-scenario, and "mute" nodes that received frames but whose
+ * mesh task never ran again). The app's rx callback (mesh_task's on_rx) and
+ * the async cad-done callback both land in FreeRTOS queues, so the reader
+ * thread must NOT invoke them directly. Instead the handlers below push into
+ * a plain pthread-mutex ring (same pattern button_virt uses for the same
+ * reason) and a FreeRTOS pump task drains it and runs the callbacks from
+ * legal task context. txdone/cadres flag signalling stays on the reader
+ * thread: pthread primitives only, no FreeRTOS.
+ *
+ * The plain-gcc test harness (no ESP_PLATFORM) has no scheduler and its
+ * socketpair tests drive dispatch synchronously, so it keeps the direct
+ * call. */
+
+#if defined(ESP_PLATFORM)
+#define RVIRT_EVQ_CAP 64
+typedef struct {
+    uint8_t kind; /* 0 = rx frame, 1 = async cad verdict */
+    uint8_t len;
+    int16_t rssi;
+    int8_t snr;
+    bool cad_busy;
+    uint8_t data[256];
+} rvirt_ev_t;
+
+static pthread_mutex_t s_evq_mu = PTHREAD_MUTEX_INITIALIZER;
+static rvirt_ev_t s_evq[RVIRT_EVQ_CAP];
+static int s_evq_head = 0, s_evq_tail = 0, s_evq_count = 0;
+static unsigned s_evq_dropped = 0; /* logged from the pump task, not here */
+static bool s_pump_started = false;
+
+/* Reader thread: enqueue only (pthread mutex, no FreeRTOS, no logging). A
+ * full ring drops the newest event and counts it; on the virtual ether that
+ * is indistinguishable from RF loss and the mesh's retry machinery owns it. */
+static void rvirt_ev_push(const rvirt_ev_t* ev) {
+    pthread_mutex_lock(&s_evq_mu);
+    if (s_evq_count < RVIRT_EVQ_CAP) {
+        s_evq[s_evq_tail] = *ev;
+        s_evq_tail = (s_evq_tail + 1) % RVIRT_EVQ_CAP;
+        s_evq_count++;
+    } else {
+        s_evq_dropped++;
+    }
+    pthread_mutex_unlock(&s_evq_mu);
+}
+
+/* Pump task: the only place reader-thread events meet FreeRTOS. Polls with
+ * vTaskDelay (a condvar cannot wake a FreeRTOS task on this port, see the
+ * txdone poll note above RADIO_VIRT_TX_POLL_MS). */
+static void rvirt_pump_task(void* arg) {
+    (void)arg;
+    for (;;) {
+        rvirt_ev_t ev;
+        bool have;
+        unsigned dropped;
+        pthread_mutex_lock(&s_evq_mu);
+        have = s_evq_count > 0;
+        if (have) {
+            ev = s_evq[s_evq_head];
+            s_evq_head = (s_evq_head + 1) % RVIRT_EVQ_CAP;
+            s_evq_count--;
+        }
+        dropped = s_evq_dropped;
+        s_evq_dropped = 0;
+        pthread_mutex_unlock(&s_evq_mu);
+
+        if (dropped > 0)
+            ESP_LOGW(TAG, "inbound event ring overflowed; dropped %u event(s)", dropped);
+        if (!have) {
+            vTaskDelay(1);
+            continue;
+        }
+        if (ev.kind == 0) {
+            radio_rx_info_t info = {0};
+            info.len = ev.len;
+            info.rssi = ev.rssi;
+            info.snr = ev.snr;
+            radio_rx_callback_t cb = s_rx_cb;
+            if (cb)
+                cb(ev.data, ev.len, &info);
+        } else {
+            radio_cad_done_callback_t cb = s_cad_done_cb;
+            if (cb)
+                cb(ev.cad_busy);
+        }
+    }
+}
+#endif /* ESP_PLATFORM */
+
 static void on_rx_msg(const cJSON* msg, void* ctx) {
     (void)ctx;
     const cJSON* p = cJSON_GetObjectItem(msg, "payload");
@@ -199,16 +322,28 @@ static void on_rx_msg(const cJSON* msg, void* ctx) {
     info.rssi = cJSON_IsNumber(rssi) ? (int16_t)rssi->valuedouble : 0;
     info.snr = cJSON_IsNumber(snr) ? (int8_t)snr->valuedouble : 0;
 
+#if defined(ESP_PLATFORM)
+    /* Reader thread: defer to the pump task (see the threading contract). */
+    rvirt_ev_t ev = {0};
+    ev.kind = 0;
+    ev.len = (uint8_t)n;
+    ev.rssi = info.rssi;
+    ev.snr = info.snr;
+    memcpy(ev.data, buf, n);
+    rvirt_ev_push(&ev);
+#else
     radio_rx_callback_t cb = s_rx_cb;
     if (cb)
         cb(buf, (uint8_t)n, &info);
+#endif
 }
 
 static void on_txdone_msg(const cJSON* msg, void* ctx) {
     (void)ctx;
     (void)msg; /* toa_ms is the broker's accounting; the node just unblocks */
     pthread_mutex_lock(&s_mu);
-    s_tx_done = true;
+    if (s_txdone_outstanding > 0)
+        s_txdone_outstanding--;
     pthread_cond_signal(&s_tx_cv);
     pthread_mutex_unlock(&s_mu);
 }
@@ -235,12 +370,21 @@ static void on_cadres_msg(const cJSON* msg, void* ctx) {
 
     /* Async radio_cad() path: deliver the verdict to the cad-done callback and
      * return to IDLE. The synchronous radio_cad_check() path never sets
-     * s_cad_async, so it consumes the condvar signal instead. */
+     * s_cad_async, so it consumes the condvar signal instead. On the node the
+     * callback lands in FreeRTOS-managed code, so it must run on the pump
+     * task, not this reader thread (see the threading contract above). */
     if (async) {
         atomic_store(&s_state, RADIO_STATE_IDLE);
+#if defined(ESP_PLATFORM)
+        rvirt_ev_t ev = {0};
+        ev.kind = 1;
+        ev.cad_busy = b;
+        rvirt_ev_push(&ev);
+#else
         radio_cad_done_callback_t cb = s_cad_done_cb;
         if (cb)
             cb(b);
+#endif
     }
 }
 
@@ -254,6 +398,19 @@ int radio_init(const radio_config_t* config) {
     emu_link_on("rx", on_rx_msg, NULL);
     emu_link_on("txdone", on_txdone_msg, NULL);
     emu_link_on("cadres", on_cadres_msg, NULL);
+
+#if defined(ESP_PLATFORM)
+    /* One pump task per process, surviving radio_reconfigure: it is the only
+     * legal FreeRTOS context for the reader thread's rx/cad events (see the
+     * threading contract above the handlers). */
+    if (!s_pump_started) {
+        if (xTaskCreate(rvirt_pump_task, "rvirt_pump", 4096, NULL, 10, NULL) != pdPASS) {
+            ESP_LOGE(TAG, "failed to create rx pump task");
+            return -1;
+        }
+        s_pump_started = true;
+    }
+#endif
 
     atomic_store(&s_state, RADIO_STATE_IDLE);
     ESP_LOGI(TAG, "virtual radio up: %.1f MHz SF%u BW %lu", (double)config->frequency_mhz,
@@ -274,8 +431,8 @@ void radio_get_config(radio_config_t* config) { *config = s_config; }
 int radio_transmit_raw(const uint8_t* data, uint8_t len) {
     atomic_store(&s_state, RADIO_STATE_TX);
 
-    pthread_mutex_lock(&s_mu);
-    s_tx_done = false;
+    mu_lock_task();
+    s_txdone_outstanding++;
     pthread_mutex_unlock(&s_mu);
 
     cJSON* tx = cJSON_CreateObject();
@@ -296,6 +453,10 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
 
     if (emu_link_send(tx) != 0) {
         ESP_LOGW(TAG, "tx send failed (broker down?)");
+        mu_lock_task();
+        if (s_txdone_outstanding > 0)
+            s_txdone_outstanding--; /* no txdone will ever come for this one */
+        pthread_mutex_unlock(&s_mu);
         atomic_store(&s_state, RADIO_STATE_IDLE);
         radio_start_rx();
         return -1;
@@ -307,8 +468,8 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
      * condvar, so the reader thread's flag write is observed promptly (see
      * RADIO_VIRT_TX_POLL_MS). */
     for (uint32_t waited = 0; waited < RADIO_VIRT_TX_TIMEOUT_MS; waited += RADIO_VIRT_TX_POLL_MS) {
-        pthread_mutex_lock(&s_mu);
-        done = s_tx_done;
+        mu_lock_task();
+        done = (s_txdone_outstanding == 0);
         pthread_mutex_unlock(&s_mu);
         if (done)
             break;
@@ -321,17 +482,45 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
     deadline_in_ms(&deadline, RADIO_VIRT_TX_TIMEOUT_MS);
     int wrc = 0;
     pthread_mutex_lock(&s_mu);
-    while (!s_tx_done && wrc == 0)
+    while (s_txdone_outstanding > 0 && wrc == 0)
         wrc = pthread_cond_timedwait(&s_tx_cv, &s_mu, &deadline);
-    done = s_tx_done;
+    done = (s_txdone_outstanding == 0);
     pthread_mutex_unlock(&s_mu);
 #endif
 
     if (!done) {
-        ESP_LOGE(TAG, "tx timed out waiting for txdone");
+        /* A late txdone is NOT a failed transmission on the virtual radio.
+         * The broker folds the frame into the ether the moment it receives
+         * the tx message (gosim handleTx calls sim_radio_broadcast BEFORE
+         * scheduling the txdone reply), so by the time this wait even
+         * started, the frame had already been delivered to every receiver
+         * in range; txdone only paces the sender. Under CPU-throttled CI the
+         * broker's reply can lag arbitrarily, and treating that latency as a
+         * TX failure caused false "Beacon TX failed" cascades and mesh-layer
+         * retransmit storms for frames that had in fact been delivered
+         * (observed on the CI pods: a receiver serialized behind these
+         * timeouts transmitted 3 frames in 80s and could never complete a DM
+         * handshake). The real SX1262 driver treats a missing TX-done IRQ as
+         * fatal because there the frame really may not have left the chip;
+         * the virtual radio's contract is the opposite, so warn and count
+         * the TX as sent.
+         *
+         * s_txdone_outstanding is intentionally NOT decremented here: gosim
+         * always schedules the late txdone eventually (scheduleBrokerAction
+         * in extnode.go), so the counter self-corrects when it lands. Under
+         * sustained broker lag each unresolved timeout carries +1 of debt,
+         * making subsequent sends wait the full timeout until the backlog
+         * drains; that slower-but-correct pacing is expected and absorbed
+         * by the scenario budgets. */
+        ESP_LOGW(TAG,
+                 "txdone still pending after %ums; counting TX as sent (virtual ether delivers at "
+                 "tx start)",
+                 RADIO_VIRT_TX_TIMEOUT_MS);
         atomic_store(&s_state, RADIO_STATE_IDLE);
+        if (s_tx_done_cb)
+            s_tx_done_cb();
         radio_start_rx();
-        return -1;
+        return 0;
     }
 
     /* Mirror radio_esp.c: TX complete -> fire the caller-thread tx-done
@@ -346,7 +535,7 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
 void radio_start_rx(void) { atomic_store(&s_state, RADIO_STATE_RX); }
 
 void radio_cad(void) {
-    pthread_mutex_lock(&s_mu);
+    mu_lock_task();
     s_cad_done = false;
     s_cad_async = true;
     pthread_mutex_unlock(&s_mu);
@@ -354,7 +543,7 @@ void radio_cad(void) {
 
     cJSON* cad = cJSON_CreateObject();
     if (!cad) {
-        pthread_mutex_lock(&s_mu);
+        mu_lock_task();
         s_cad_async = false;
         pthread_mutex_unlock(&s_mu);
         atomic_store(&s_state, RADIO_STATE_IDLE);
@@ -363,7 +552,7 @@ void radio_cad(void) {
     cJSON_AddStringToObject(cad, "t", "cad");
     cJSON_AddNumberToObject(cad, "freq", s_config.frequency_mhz);
     if (emu_link_send(cad) != 0) {
-        pthread_mutex_lock(&s_mu);
+        mu_lock_task();
         s_cad_async = false;
         pthread_mutex_unlock(&s_mu);
         atomic_store(&s_state, RADIO_STATE_IDLE);
@@ -371,7 +560,7 @@ void radio_cad(void) {
 }
 
 bool radio_cad_check(void) {
-    pthread_mutex_lock(&s_mu);
+    mu_lock_task();
     s_cad_done = false;
     s_cad_async = false;
     pthread_mutex_unlock(&s_mu);
@@ -389,15 +578,42 @@ bool radio_cad_check(void) {
         return false;
     }
 
+    bool done = false;
+    bool busy = false;
+#if defined(ESP_PLATFORM)
+    /* Node: poll the flag with vTaskDelay, NEVER a condvar wait. The caller
+     * is a FreeRTOS task, typically holding the tx_gate FreeRTOS mutex, and
+     * blocking a task in a foreign futex desyncs the linux port's
+     * current-task tracking: the port's suspension signal EINTRs the futex
+     * wait, and the task can resume execution while the kernel considers
+     * another task current. The tx_gate mutex give after this call is then
+     * exactly where FreeRTOS's `xTaskPriorityDisinherit: pxTCB ==
+     * pxCurrentTCBs[0]' assertion fires (captured on CI, run 29642008877,
+     * crash-looping a node at radio start). Same rule and pattern as the
+     * txdone poll above; a tick of extra CAD latency is irrelevant here. */
+    for (uint32_t waited = 0; waited < RADIO_VIRT_CAD_TIMEOUT_MS;) {
+        mu_lock_task();
+        done = s_cad_done;
+        busy = s_cad_busy;
+        pthread_mutex_unlock(&s_mu);
+        if (done)
+            break;
+        vTaskDelay(1);
+        uint32_t tick_ms = (uint32_t)portTICK_PERIOD_MS;
+        waited += (tick_ms > 0) ? tick_ms : 1;
+    }
+#else
+    /* Plain-gcc test harness: no scheduler to desync; the condvar is fine. */
     struct timespec deadline;
     deadline_in_ms(&deadline, RADIO_VIRT_CAD_TIMEOUT_MS);
     int wrc = 0;
     pthread_mutex_lock(&s_mu);
     while (!s_cad_done && wrc == 0)
         wrc = pthread_cond_timedwait(&s_cad_cv, &s_mu, &deadline);
-    bool done = s_cad_done;
-    bool busy = s_cad_busy;
+    done = s_cad_done;
+    busy = s_cad_busy;
     pthread_mutex_unlock(&s_mu);
+#endif
 
     /* Timeout fails safe to "clear" so a silent broker never starves TX,
      * matching radio_esp.c's CAD-timeout behavior. */

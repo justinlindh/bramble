@@ -134,7 +134,6 @@ int route_install(routing_table_t* table, uint32_t dest, uint32_t next_hop, uint
 route_entry_t* route_lookup(routing_table_t* table, uint32_t dest_addr);
 void route_maintenance(routing_table_t* table, uint32_t now_ms);
 int route_count(const routing_table_t* table);
-route_entry_t* route_find_alternate(routing_table_t* table, uint32_t dest, uint32_t exclude_hop);
 
 #define RREQ_DEDUP_MAX 128
 #define RREQ_DEDUP_EXPIRY_MS 30000
