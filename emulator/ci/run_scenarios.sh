@@ -11,14 +11,18 @@
 #                         channel message and BOTH receivers RENDER it on their
 #                         e-paper (screen-assert, the highest fidelity level).
 #   emu-dm-desync         a DM session establishes and renders on the receiver;
-#                         the receiver reboots to create the one-sided-session
-#                         desync; the sender's continued DMs make the receiver
-#                         log the decrypt failures (the bug symptom) and fire the
-#                         #138 self-heal re-handshake. Asserts the ALPHA render
-#                         plus both log signatures. (The full heal-and-redeliver
-#                         completes but has real-time wall-clock variance, so CI
-#                         gates on the deterministic symptom + heal trigger, not
-#                         the final post-heal render. See the scenario file.)
+#                         the receiver then DROPS its session half in-process at a
+#                         fixed instant (EMU_DROP_DM_SESSION_AT_MS) to construct
+#                         the one-sided-session desync deterministically, while
+#                         still neighboring the sender; the sender's continued DMs
+#                         land on a receiver with no session, so it logs the
+#                         decrypt failures (the bug symptom) and fires the #138
+#                         self-heal re-handshake. Asserts the ALPHA render plus
+#                         both log signatures. Deterministic: runs once, no retry.
+#                         (The full heal-and-redeliver completes but has real-time
+#                         wall-clock variance, so CI gates on the symptom + heal
+#                         trigger, not the final post-heal render. See the
+#                         scenario file.)
 #
 # PREREQUISITES:
 #   1. The linux node binary: emulator/node/build/bramble-node.elf
@@ -55,9 +59,9 @@ cleanup() {
         fi
     done
     pkill -f "$NODE_BIN" 2>/dev/null || true
-    # Belt and suspenders for the parallel suites: each scenario runs gosim in
-    # its own backgrounded subshell, so the parent's CHILD_PIDS list does not
-    # see those pids. A name-wide sweep catches any gosim/node left behind.
+    # Belt and suspenders: a name-wide sweep catches any gosim left behind by an
+    # aborted run (gosim's own SIGTERM handler then reaps its nodes), so strays
+    # can never linger and contaminate a later run's real-time timing.
     pkill -f "$GOSIM_BIN" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -117,21 +121,29 @@ echo "=== Bramble emulator scenario suite ==="
 info "repo: $REPO_ROOT"
 echo
 
-# The two scenarios run in PARALLEL. Each run_scenario call spawns its own gosim
-# process, and gosim keys both its emu-link socket path and every firmware node's
-# NODE_DIR state directory to that process's PID (os.Getpid / os.MkdirTemp), while
-# headless mode never binds the UI's TCP port. So two concurrent suites share no
-# port, socket, or on-disk node state and cannot collide. Each suite function
-# returns 0 on PASS and 1 on FAIL; a subshell cannot mutate the parent's FAILURES,
-# so we aggregate the two return codes after both finish.
+# The two scenarios run SEQUENTIALLY, not in parallel. Each spawns real firmware
+# node processes that run in wall-clock time, and running both suites at once put
+# 5 nodes on the host at the same time; on a loaded runner that CPU contention
+# starved the real-time firmware (missed render windows, and worse, missed the
+# single beacon exchange that neighbor discovery depended on), which is a flake
+# source in its own right. The scenarios are isolated (gosim keys its emu-link
+# socket and each node's NODE_DIR to its own PID, and headless never binds a TCP
+# port), so they COULD run concurrently, but determinism on a shared CI runner is
+# worth more than the few tens of seconds parallelism saved. Each suite function
+# returns 0 on PASS and 1 on FAIL; we run them one after the other and fold in
+# each result.
 
 # --- Scenario 1: channel delivery ----------------------------------------
 # The firmware nodes run in wall-clock time inside a 36 s scenario budget, and
 # the receivers must boot, pass their 10 s message-idle threshold, and render
-# on the virtual e-paper within it. On a loaded CI runner that window is
-# sometimes missed. Re-roll like scenario 2 does: a genuine delivery regression
-# still fails every attempt. Fewer runner pods contend now (queue pressure
-# dropped after the pipeline optimization), so the retry budget is trimmed.
+# the broadcast on the virtual e-paper within it. Neighbor discovery is no
+# longer a variable (a broadcast needs no session, and the short emulator beacon
+# interval keeps the mesh warm), but the final e-paper RENDER still has some
+# wall-clock jitter under load: the inbound message has to auto-open the Messages
+# screen and paint before the budget ends. That residual timing sensitivity is
+# not something this delivery test can construct away, so a single low retry
+# budget stays as a jitter absorber. A genuine delivery regression still fails
+# both attempts, so the retry masks jitter, not a real break.
 channel_suite() {
     echo "[1] emu-channel-delivery"
     local CHAN_ATTEMPTS=2
@@ -151,46 +163,36 @@ channel_suite() {
 }
 
 # --- Scenario 2: DM session desync + #138 heal ---------------------------
-# The desync symptom depends on a stale-session DM reaching the rebooted receiver
-# in the real-time window between its recovery and the sender re-handshaking the
-# stale session. The firmware nodes run in wall-clock time, so under CI load that
-# window can be missed on a given run. Re-roll the timing up to DM_ATTEMPTS times;
-# a genuine regression (the symptom or the #138 self-heal never fires) still fails
-# every attempt, so this does not mask a real break, it only absorbs jitter.
+# Deterministic, so it runs ONCE with no retry loop. The receiver drops its DM
+# session half in-process at a fixed time (EMU_DROP_DM_SESSION_AT_MS) while still
+# neighboring the sender, and the sender's DM burst is scheduled to begin AFTER
+# that drop, so the sender's stale-session DM is GUARANTEED to land on a receiver
+# with no session on the very first post-drop send. That removes the reboot-era
+# races (RAM-clear timing, beacon re-acquisition, and the stale DM having to hit
+# a narrow post-reboot window) that made this scenario probabilistic and forced
+# the old re-roll loop. A genuine regression (the symptom or the #138 self-heal
+# never fires) fails the single run, exactly as it should. The 120s budget is
+# only a hang guard; the scenario itself finishes in ~80s of wall clock.
 dm_suite() {
     echo "[2] emu-dm-desync"
-    local DM_ATTEMPTS=3
-    local attempt DM_LOG
-    for attempt in $(seq 1 "$DM_ATTEMPTS"); do
-        DM_LOG=""
-        run_scenario emu-dm-desync 120 DM_LOG
-        if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
-           && grep -qF "Failed session decrypt" "$DM_LOG" \
-           && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
-            green "PASS: emu-dm-desync (attempt $attempt/$DM_ATTEMPTS): ALPHA render + desync symptom + #138 self-heal"
-            return 0
-        fi
-        info "emu-dm-desync attempt $attempt/$DM_ATTEMPTS did not reproduce symptom+self-heal; re-rolling"
-    done
-    red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal in $DM_ATTEMPTS attempts"
+    local DM_LOG=""
+    run_scenario emu-dm-desync 120 DM_LOG
+    if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
+       && grep -qF "Failed session decrypt" "$DM_LOG" \
+       && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
+        green "PASS: emu-dm-desync: ALPHA render + desync symptom + #138 self-heal"
+        return 0
+    fi
+    red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal"
     return 1
 }
 
-# Run both suites concurrently, capturing each one's output so the interleaved
-# logs stay readable, then replay them in order and fold the results in.
-chan_out="$(mktemp -t emu-channel-suite.XXXXXX.log)"
-dm_out="$(mktemp -t emu-dm-suite.XXXXXX.log)"
-channel_suite >"$chan_out" 2>&1 &
-chan_pid=$!
-dm_suite >"$dm_out" 2>&1 &
-dm_pid=$!
-
-wait "$chan_pid"; chan_rc=$?
-wait "$dm_pid"; dm_rc=$?
-
-cat "$chan_out"; echo
-cat "$dm_out"; echo
-rm -f "$chan_out" "$dm_out"
+# Run the two suites one after the other so only one scenario's firmware nodes
+# are on the host at a time (see the isolation note above).
+channel_suite; chan_rc=$?
+echo
+dm_suite; dm_rc=$?
+echo
 
 [ "$chan_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$dm_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))

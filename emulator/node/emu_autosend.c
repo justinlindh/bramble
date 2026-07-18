@@ -27,13 +27,23 @@
  *   EMU_AUTO_SEND2_REPEAT / EMU_AUTO_SEND2_INTERVAL_MS  phase-2 cadence
  *
  * Phase 2 exists for the DM-desync scenario: phase 1 establishes a DM session,
- * the receiver reboots (losing its half), and phase 2's repeats drive the
- * post-#138 heal (the first triggers the re-handshake and is lost by design; a
- * later one decrypts and renders).
+ * the receiver drops its half (EMU_DROP_DM_SESSION_AT_MS), and phase 2's repeats
+ * drive the post-#138 heal (the first lands on a receiver with no session and
+ * fires the re-handshake; a later one decrypts and renders).
+ *
+ * Drop-session (EMU_DROP_DM_SESSION_AT_MS): at that time the node tears down its
+ * own DM sessions in-process (emu_mesh_drop_dm_sessions) while staying up and
+ * still neighboring the peer, so the peer keeps its stale session. That is the
+ * one-sided-session precondition, constructed DETERMINISTICALLY at a fixed
+ * instant. The desync scenario uses this instead of a reboot precisely because
+ * it removes reboot's real-time races (RAM-clear timing, beacon re-acquisition,
+ * and the stale DM having to land inside that window) from CI.
  *
  * Reboot (EMU_REBOOT_AT_MS): the node exits at that time; the gosim supervisor's
  * restart-on-exit brings it back with the same NVS identity but cleared RAM
- * (its DM sessions), which is exactly the one-sided-session precondition.
+ * (its DM sessions). A heavier way to reach the same one-sided-session state,
+ * kept as a general emulator primitive; the desync scenario prefers the
+ * deterministic drop above.
  *
  * Host-only: built only by emulator/node (null_drivers) on the linux target and
  * started from app_main under a CONFIG_IDF_TARGET_LINUX guard; a real esp32s3
@@ -58,6 +68,7 @@
 extern int mesh_send_broadcast(const uint8_t *data, size_t len);
 extern uint32_t mesh_send_message(uint32_t dest_addr, const uint8_t *data, size_t len);
 extern uint32_t emu_mesh_first_neighbor(void);
+extern int emu_mesh_drop_dm_sessions(void);
 
 static const char *TAG = "emu_autosend";
 
@@ -195,8 +206,27 @@ static void reboot_task(void *arg) {
     exit(0);
 }
 
-/* Starts the scripted-send task if EMU_AUTO_SEND is set, and the reboot timer if
- * EMU_REBOOT_AT_MS is set. Returns 0 if either was started, -1 if neither. */
+/* Tears down this node's DM sessions ONCE at EMU_DROP_DM_SESSION_AT_MS, leaving
+ * the peer's stale half in place: the deterministic one-sided-desync inject the
+ * emu-dm-desync scenario relies on (see the header comment). No NODE_DIR marker
+ * is needed the way reboot_task needs one, because the node never restarts, so
+ * this task runs at most once per process life. */
+static void drop_session_task(void *arg) {
+    (void)arg;
+    unsigned at_ms = env_uint("EMU_DROP_DM_SESSION_AT_MS", 0);
+    if (at_ms == 0) {
+        vTaskDelete(NULL);
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(at_ms));
+    int n = emu_mesh_drop_dm_sessions();
+    ESP_LOGI(TAG, "EMU_DROP_DM_SESSION_AT_MS reached; dropped %d DM session(s)", n);
+    vTaskDelete(NULL);
+}
+
+/* Starts the scripted-send task if EMU_AUTO_SEND is set, the reboot timer if
+ * EMU_REBOOT_AT_MS is set, and the session-drop timer if
+ * EMU_DROP_DM_SESSION_AT_MS is set. Returns 0 if any was started, -1 if none. */
 int emu_node_start_autosend(void) {
     int started = -1;
     if (getenv("EMU_AUTO_SEND") && *getenv("EMU_AUTO_SEND")) {
@@ -215,6 +245,14 @@ int emu_node_start_autosend(void) {
             started = 0;
         } else {
             ESP_LOGW(TAG, "could not start reboot task");
+        }
+    }
+    if (getenv("EMU_DROP_DM_SESSION_AT_MS") && *getenv("EMU_DROP_DM_SESSION_AT_MS")) {
+        if (xTaskCreate(drop_session_task, "emu_dropdm", 2048, NULL, 5, NULL) == pdPASS) {
+            ESP_LOGI(TAG, "DM session-drop timer armed");
+            started = 0;
+        } else {
+            ESP_LOGW(TAG, "could not start DM session-drop task");
         }
     }
     return started;
