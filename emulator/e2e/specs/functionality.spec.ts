@@ -150,7 +150,7 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
       // sends can straggle, and a 40s window that opens ~t=15s used to close
       // before the later sends landed, failing runs whose delivery was fine.
       // waitFor is event-driven, so a fast box still exits in seconds.
-      { timeoutMs: 110_000, label: '>=2 distinct nodes rendering "HELLO BRAMBLE" on the wire' },
+      { timeoutMs: 150_000, label: '>=2 distinct nodes rendering "HELLO BRAMBLE" on the wire' },
     );
     expect(hits.size, 'distinct nodes with the message in their wire fb').toBeGreaterThanOrEqual(2);
 

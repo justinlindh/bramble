@@ -307,8 +307,8 @@ channel_suite() {
 # receiver's pending-ack retransmits and awaiting-session queue for the peer,
 # exactly what the reboot it emulates would destroy), which removes the last
 # known construction race. A genuine regression fails the run, exactly as it
-# should. The 120s budget is only a hang guard; the scenario itself finishes
-# in ~80s of wall clock.
+# should. The 180s budget is only a hang guard with tick-loss-skew headroom;
+# the scenario itself finishes in ~90s of wall clock on a healthy box.
 #
 # There is deliberately NO invalidation-rerun here anymore: both POSIX-port
 # node-death causes are fixed, so a mid-run death has no known benign cause
@@ -319,7 +319,7 @@ channel_suite() {
 dm_suite() {
     echo "[2] emu-dm-desync"
     local DM_LOG=""
-    run_scenario emu-dm-desync 120 DM_LOG
+    run_scenario emu-dm-desync 180 DM_LOG
 
     # STRICT death rule first: deaths fail the run regardless of assertions.
     check_no_deaths "$DM_LOG" 2 "emu-dm-desync" || return 1

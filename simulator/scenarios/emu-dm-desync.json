@@ -1,15 +1,20 @@
 {
   "name": "emu-dm-desync",
-  "description": "Reproduces the stale one-sided DM-session bug (issue this rig exists to catch) and exercises the #138 self-heal, DETERMINISTICALLY. A DMs B ('DM ALPHA') and the session establishes (asserted: ALPHA renders on B). At a fixed instant B drops its own session half in-process (EMU_DROP_DM_SESSION_AT_MS) while staying up and still neighboring A, so A keeps its stale session; A's next DMs ('DM BETA', scheduled to begin AFTER the drop) land on a B with no session, so B logs 'Failed session decrypt' (the desync symptom) and then 'DM session desync ... re-initiating handshake (self-heal)' (the #138 receiver-side heal). run_scenarios.sh asserts the ALPHA screen render plus both log signatures. Every run reaches this state on the first attempt: the drop replaces the old reboot, whose RAM-clear/beacon-reacquisition/stale-DM-window races made the symptom probabilistic. Neighbor discovery is made reliable with a short emulator beacon interval (EMU_BEACON_INTERVAL_MS) so the ALPHA DM never falls back to a broadcast. The full heal-and-redeliver still completes (A tears down its stale session on B's re-INIT and a later BETA decrypts); that end-to-end redelivery keeps some real-time variance, so CI gates on the deterministic symptom+heal-trigger rather than the final BETA render.",
+  "description": "Reproduces the stale one-sided DM-session bug (issue this rig exists to catch) and exercises the #138 self-heal, DETERMINISTICALLY. A DMs B ('DM ALPHA') and the session establishes (asserted: ALPHA renders on B). At a fixed instant B drops its own session half in-process (EMU_DROP_DM_SESSION_AT_MS) while staying up and still neighboring A, so A keeps its stale session; A's next DMs ('DM BETA', scheduled to begin AFTER the drop) land on a B with no session, so B logs 'Failed session decrypt' (the desync symptom) and then 'DM session desync ... re-initiating handshake (self-heal)' (the #138 receiver-side heal). run_scenarios.sh asserts the ALPHA screen render plus both log signatures. The construction is event-driven end to end: the sender's 'neighbor' destination waits for discovery (no silent broadcast fallback), and the drop waits for the session to exist before tearing it down, so tick-loss skew on CI pods (subjective firmware time running slower than wall time, at different rates per code path) cannot fire either step early. duration_ms is a wall-clock cap with skew headroom, not a schedule. Every run reaches the constructed state: the drop replaces the old reboot, whose RAM-clear/beacon-reacquisition/stale-DM-window races made the symptom probabilistic. Neighbor discovery is made reliable with a short emulator beacon interval (EMU_BEACON_INTERVAL_MS) so the ALPHA DM never falls back to a broadcast. The full heal-and-redeliver still completes (A tears down its stale session on B's re-INIT and a later BETA decrypts); that end-to-end redelivery keeps some real-time variance, so CI gates on the deterministic symptom+heal-trigger rather than the final BETA render.",
   "mode": "deterministic",
-  "duration_ms": 80000,
+  "duration_ms": 150000,
   "nodes": [],
   "firmware_nodes": [
     {
       "type": "firmware",
       "binary": "emulator/node/build/bramble-node.elf",
       "count": 1,
-      "positions": [[0, 0]],
+      "positions": [
+        [
+          0,
+          0
+        ]
+      ],
       "label": "dm-a",
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
@@ -20,7 +25,7 @@
         "EMU_AUTO_SEND_REPEAT": "2",
         "EMU_AUTO_SEND_INTERVAL_MS": "3000",
         "EMU_AUTO_SEND2": "DM BETA",
-        "EMU_AUTO_SEND2_DELAY_MS": "13000",
+        "EMU_AUTO_SEND2_DELAY_MS": "20000",
         "EMU_AUTO_SEND2_REPEAT": "16",
         "EMU_AUTO_SEND2_INTERVAL_MS": "3000"
       }
@@ -29,7 +34,12 @@
       "type": "firmware",
       "binary": "emulator/node/build/bramble-node.elf",
       "count": 1,
-      "positions": [[30, 0]],
+      "positions": [
+        [
+          30,
+          0
+        ]
+      ],
       "label": "dm-b",
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",

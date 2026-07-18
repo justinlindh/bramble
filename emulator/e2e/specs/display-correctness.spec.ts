@@ -64,7 +64,7 @@ test.describe('display correctness', () => {
       },
       // Covers the scenario's full send schedule (sender t=12s..100s); see
       // the note in functionality.spec.ts's delivery step. Event-driven.
-      { timeoutMs: 110_000, label: `"${CHANNEL_TEXT}" in some node's wire fb` },
+      { timeoutMs: 150_000, label: `"${CHANNEL_TEXT}" in some node's wire fb` },
     );
 
     // Let that node's card exist and the paint schedule for this exact seq

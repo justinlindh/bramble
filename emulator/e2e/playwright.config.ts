@@ -29,8 +29,8 @@ export default defineConfig({
   // must exceed the delivery waits' 110s budget (which covers the scenario's
   // full send schedule on a CPU-contended CI pod); the old 60s/4min pair sat
   // below it and turned pod slowness into spurious failures.
-  timeout: 180_000,
-  globalTimeout: 12 * 60_000,
+  timeout: 240_000,
+  globalTimeout: 15 * 60_000,
   globalSetup: require.resolve('./globalSetup'),
   globalTeardown: require.resolve('./globalTeardown'),
   reporter: [['list']],

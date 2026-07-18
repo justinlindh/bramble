@@ -53,6 +53,7 @@ void emu_link_close(void) {}
 #include <errno.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -219,6 +220,26 @@ static void dispatch_line(char* line) {
  * exiting. */
 static void* reader_main(void* arg) {
     int fd = (int)(intptr_t)arg;
+
+    /* Block EVERY signal in this thread, first thing. This thread is created
+     * from a running FreeRTOS task thread and therefore INHERITS an unblocked
+     * signal mask, which makes it a legal delivery target for the IDF linux
+     * port's process-directed SIGALRM tick. A tick delivered here runs the
+     * port's vPortSystemTickHandler ON THIS RAW THREAD: the handler switches
+     * pxCurrentTCB to the next ready task and then "suspends the current
+     * task" by blocking THIS thread on the current task's event, so the real
+     * current task keeps running with stale kernel state (captured on CI and
+     * in local cores as FreeRTOS's xTaskPriorityDisinherit holder assertion
+     * naming a task that never touched the mutex, and as vPortExitCritical
+     * nesting-underflow aborts), while this thread stops reading the socket
+     * and the node goes radio-mute. The port's suspension contract
+     * (prvSuspendSelf) requires signals blocked in every thread that must
+     * not handle interrupts; a raw pthread must therefore never accept
+     * them. Harmless in the plain-gcc harness, which sends no signals. */
+    sigset_t all;
+    sigfillset(&all);
+    pthread_sigmask(SIG_BLOCK, &all, NULL);
+
     uint8_t* buf = (uint8_t*)malloc(EMU_LINK_MAX_LINE);
     if (!buf)
         return NULL;

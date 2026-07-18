@@ -201,6 +201,27 @@ static SemaphoreHandle_t s_nonce_mutex;
  * then reaches for s_dm_mutex, so the two can never deadlock on each other.
  */
 static SemaphoreHandle_t s_dm_mutex;
+
+/* Give-side holder validation for s_dm_mutex. A FreeRTOS mutex MUST be given
+ * by the task that took it; a cross-task or double give corrupts priority
+ * inheritance bookkeeping and, with asserts enabled (the emulator), later
+ * detonates FreeRTOS's xTaskPriorityDisinherit holder assertion at an
+ * INNOCENT give site, which is exactly what a captured emulator core showed
+ * (dm_hs_worker asserting in process_ke_init's balanced give). On device
+ * builds asserts are compiled out and the same bug would corrupt silently.
+ * This macro names the culprit: it logs file:line the moment any give runs
+ * on a task that is not the recorded holder, then still gives so behavior is
+ * otherwise unchanged. Cheap (one holder read), so it stays on for all
+ * builds. */
+#define DM_MUTEX_GIVE()                                                                            \
+    do {                                                                                           \
+        TaskHandle_t holder__ = xSemaphoreGetMutexHolder(s_dm_mutex);                              \
+        if (holder__ != xTaskGetCurrentTaskHandle()) {                                             \
+            ESP_LOGE(TAG, "DM MUTEX MISUSE at %s:%d: give by '%s' but holder is '%s'", __FILE__,   \
+                     __LINE__, pcTaskGetName(NULL), holder__ ? pcTaskGetName(holder__) : "NONE");  \
+        }                                                                                          \
+        xSemaphoreGive(s_dm_mutex);                                                                \
+    } while (0)
 static dm_table_t* s_dm_table;
 static QueueHandle_t s_rx_queue;
 static QueueHandle_t s_mesh_event_queue;
@@ -700,7 +721,7 @@ uint32_t mesh_send_location_packet(uint32_t dest_addr, const bramble_position_t*
                     sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
             }
         }
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
 
         if (enc_ret != 0) {
             ESP_LOGW(TAG, "No active session for directed location share to %08" PRIX32, dest_addr);
@@ -1005,7 +1026,7 @@ static void handle_location(const uint8_t* data, uint8_t len, int16_t rssi, int8
                 sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
             }
         }
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
     }
 
     if (ok != 0) {
@@ -2378,7 +2399,7 @@ static void maybe_schedule_dm_epoch_rekey(uint32_t t) {
                 next_epoch = (uint16_t)(s->ke_epoch + 1);
             }
         }
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
         if (peer == 0)
             continue;
         if (!neighbor_lookup(&s_neighbors, peer))
@@ -2584,7 +2605,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             if (drc == DM_DECRYPT_OK)
                 sess->last_active_ms = now_ms(); /* Fix 1: real activity, not eviction bait */
         }
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
         if (drc == DM_DECRYPT_REPLAY) {
             /* An already-seen index: drop silently, never heal or deliver. (The
              * ratchet never returns this today; the authoritative replay defense
@@ -3775,7 +3796,7 @@ static void handle_identity_attestation(const uint8_t* data, uint8_t len) {
                 dm_session_teardown(s_dm_table, att.src_addr);
                 torn_down = true;
             }
-            xSemaphoreGive(s_dm_mutex);
+            DM_MUTEX_GIVE();
             if (torn_down)
                 ESP_LOGW(TAG,
                          "DM session torn down: pinned identity for %08" PRIX32
@@ -5211,7 +5232,7 @@ static void flush_session_queue(uint32_t dest_addr) {
         if (sess && sess->state == DM_STATE_ACTIVE) {
             pkt_id = send_dm_packet(dest_addr, s_queued_msgs[i].data, s_queued_msgs[i].len, sess);
         }
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
 
         if (pkt_id != 0) {
             ESP_LOGI(TAG, "Flushed queued DM to %08" PRIX32 " (%u bytes)", dest_addr,
@@ -5272,7 +5293,7 @@ static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t 
             memcpy(peer_id_pub, sess->peer_id_pub, 32);
             have_peer_id = 1;
         }
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
         if (!have_peer_id)
             rekey_epoch = 0; /* no cached peer key: degrade to first contact */
     }
@@ -5313,7 +5334,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
     dm_session_t* sess = dm_lookup(s_dm_table, dest_addr);
     if (sess && sess->state == DM_STATE_ACTIVE) {
         uint32_t pkt_id = send_dm_packet(dest_addr, data, len, sess);
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
         if (pkt_id != 0) {
             /* channel_idx only picked the transport channel the session's KE
              * envelope rode on; the payload is a DM. msg_store_add_dm files it
@@ -5340,7 +5361,7 @@ static uint32_t mesh_send_dm(int channel_idx, uint32_t dest_addr, const uint8_t*
         if (hs)
             hs->state = DM_STATE_HANDSHAKING;
     }
-    xSemaphoreGive(s_dm_mutex);
+    DM_MUTEX_GIVE();
 
     if (!hs) {
         /* M4 DoS defense: handshaking cap reached. Fail the send visibly;
@@ -5396,7 +5417,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     uint8_t peer_id_pub[32] = {0};
     if (have_peer_id)
         memcpy(peer_id_pub, existing->peer_id_pub, 32);
-    xSemaphoreGive(s_dm_mutex);
+    DM_MUTEX_GIVE();
 
     int vrc = dm_verify_init(init, s_identity, have_peer_id, have_peer_id ? peer_id_pub : NULL,
                              pinned_x25519_or_null);
@@ -5430,7 +5451,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
         if (have_peer_id && pinned_x25519_or_null && dm_rehandshake_rate_ok(src_addr, now_ms())) {
             xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
             dm_session_teardown(s_dm_table, src_addr);
-            xSemaphoreGive(s_dm_mutex);
+            DM_MUTEX_GIVE();
             ESP_LOGI(TAG,
                      "DM session desync: pinned peer %08" PRIX32 " re-initiated; tore down stale"
                      " session, re-accepting as first contact (self-heal)",
@@ -5492,7 +5513,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
                 dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr);
         }
     }
-    xSemaphoreGive(s_dm_mutex);
+    DM_MUTEX_GIVE();
     memset(ikm, 0, sizeof(ikm));
 
     if (!sess) {
@@ -5570,7 +5591,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
                 dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr);
         }
     }
-    xSemaphoreGive(s_dm_mutex);
+    DM_MUTEX_GIVE();
     memset(ikm, 0, sizeof(ikm));
 
     pending_eph_clear(src_addr);
@@ -6219,6 +6240,21 @@ uint32_t emu_mesh_first_neighbor(void) {
  * to decrypt here and fires the #138 self-heal. Returns the number of sessions
  * torn down. Runs on the emu_autosend task; s_dm_mutex serializes it against the
  * mesh RX task exactly like every other s_dm_table access. */
+/* Emulator only: how many DM sessions this node currently holds in any
+ * non-NONE state. The drop task (emu_autosend.c) polls it so the desync
+ * inject waits for the session it is about to drop, instead of trusting a
+ * subjective-time schedule that CI tick-loss skew can outrun. */
+int emu_mesh_dm_session_count(void) {
+    int count = 0;
+    xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
+    for (int i = 0; i < DM_MAX_SESSIONS; i++) {
+        if (s_dm_table->s[i].state != DM_STATE_NONE)
+            count++;
+    }
+    DM_MUTEX_GIVE();
+    return count;
+}
+
 int emu_mesh_drop_dm_sessions(void) {
     int dropped = 0;
     for (int i = 0; i < DM_MAX_SESSIONS; i++) {
@@ -6227,7 +6263,7 @@ int emu_mesh_drop_dm_sessions(void) {
         peer = (s_dm_table->s[i].state != DM_STATE_NONE) ? s_dm_table->s[i].peer_addr : 0;
         if (peer != 0)
             dm_session_teardown(s_dm_table, peer);
-        xSemaphoreGive(s_dm_mutex);
+        DM_MUTEX_GIVE();
         if (peer != 0) {
             ESP_LOGI(TAG, "emu: dropped DM session with %08" PRIX32 " (one-sided desync inject)",
                      peer);
