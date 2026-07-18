@@ -134,31 +134,70 @@ echo
 # each result.
 
 # --- Scenario 1: channel delivery ----------------------------------------
-# The firmware nodes run in wall-clock time inside a 36 s scenario budget, and
-# the receivers must boot, pass their 10 s message-idle threshold, and render
-# the broadcast on the virtual e-paper within it. Neighbor discovery is no
-# longer a variable (a broadcast needs no session, and the short emulator beacon
-# interval keeps the mesh warm), but the final e-paper RENDER still has some
-# wall-clock jitter under load: the inbound message has to auto-open the Messages
-# screen and paint before the budget ends. That residual timing sensitivity is
-# not something this delivery test can construct away, so a single low retry
-# budget stays as a jitter absorber. A genuine delivery regression still fails
-# both attempts, so the retry masks jitter, not a real break.
+# The firmware nodes run in wall-clock time and the receivers must boot, pass
+# their 10 s message-idle threshold, and render the broadcast on the virtual
+# e-paper. Neighbor discovery is no longer a variable (a broadcast needs no
+# session, and the short emulator beacon interval keeps the mesh warm); the one
+# residual sensitivity is the final e-paper RENDER, which the CPU-limited CI
+# runner pods (cpu 4 / memory 5Gi, shared with other jobs) stretch well past the
+# scenario's 36 s local duration_ms. The old fix was a fixed 36 s window plus a
+# 2x re-roll, which failed BOTH attempts on constrained pods because the window
+# was systematically too tight, not randomly jittery.
+#
+# This is now an EVENT-DRIVEN wait, not a fixed window with dice-rolls. We widen
+# gosim's real-time cap (EMU_SCENARIO_DURATION_MS) so the nodes stay up long
+# enough for a starved pod to finish the render, and we POLL the growing headless
+# log for the render marker, stopping the instant both receivers have painted.
+# On a fast box it exits in seconds; on a slow pod it waits up to the budget. A
+# genuine delivery regression simply never renders and the wait times out, so one
+# generous attempt replaces the old re-roll loop (no retry scaffolding remains).
+# Both knobs are overridable for local tuning but default high because this
+# script only ever runs as the CI gate.
 channel_suite() {
     echo "[1] emu-channel-delivery"
-    local CHAN_ATTEMPTS=2
-    local attempt CHAN_LOG
-    for attempt in $(seq 1 "$CHAN_ATTEMPTS"); do
-        CHAN_LOG=""
-        run_scenario emu-channel-delivery 70 CHAN_LOG
-        if "$GOSIM_BIN" screen-assert -log "$CHAN_LOG" -min-nodes 2 -text "HELLO BRAMBLE" \
+    local scen="$SCEN_DIR/emu-channel-delivery.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local budget_s="${EMU_CHANNEL_BUDGET_S:-110}"
+    local sim_ms="${EMU_SCENARIO_DURATION_MS:-90000}"
+    local log; log="$(mktemp -t emu-channel.XXXXXX.log)"
+
+    info "running emu-channel-delivery (render budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    local rendered=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if "$GOSIM_BIN" screen-assert -log "$log" -min-nodes 2 -text "HELLO BRAMBLE" \
             >/dev/null 2>&1; then
-            green "PASS: emu-channel-delivery (attempt $attempt/$CHAN_ATTEMPTS): rendered on both receivers"
-            return 0
+            rendered=0
+            break
         fi
-        info "attempt $attempt/$CHAN_ATTEMPTS missed the render window; re-rolling..."
+        # gosim exited (hit its sim cap or the outer timeout) without a render, or
+        # the wall-clock budget elapsed: stop polling and do a final check below.
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        sleep 1
     done
-    red "FAIL: emu-channel-delivery: not rendered on >= 2 nodes in any of $CHAN_ATTEMPTS attempts"
+
+    # Stop the run; it has either rendered or run out of budget.
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    # Final check in case the render landed in the last frames flushed as gosim exited.
+    if [ "$rendered" -ne 0 ] && "$GOSIM_BIN" screen-assert -log "$log" -min-nodes 2 \
+        -text "HELLO BRAMBLE" >/dev/null 2>&1; then
+        rendered=0
+    fi
+
+    if [ "$rendered" -eq 0 ]; then
+        green "PASS: emu-channel-delivery: rendered on both receivers"
+        return 0
+    fi
+    red "FAIL: emu-channel-delivery: not rendered on >= 2 nodes within ${budget_s}s"
     return 1
 }
 
