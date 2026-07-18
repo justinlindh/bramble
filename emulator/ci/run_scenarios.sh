@@ -18,7 +18,8 @@
 #                         land on a receiver with no session, so it logs the
 #                         decrypt failures (the bug symptom) and fires the #138
 #                         self-heal re-handshake. Asserts the ALPHA render plus
-#                         both log signatures. Deterministic: runs once, no retry.
+#                         both log signatures. One run, no retries; any node
+#                         death fails the suite (see check_no_deaths).
 #                         (The full heal-and-redeliver completes but has real-time
 #                         wall-clock variance, so CI gates on the symptom + heal
 #                         trigger, not the final post-heal render. See the
@@ -48,6 +49,13 @@ info()  { printf '  %s\n' "$*"; }
 
 FAILURES=0
 CHILD_PIDS=()
+
+# Scenario logs persist here instead of dying with a mktemp: on CI the
+# workflow uploads this directory as an artifact when the suite fails, so
+# death/crash evidence survives the runner pod. Locally it defaults to a
+# temp dir the developer can inspect after a failure.
+LOG_DIR="${EMU_CI_LOG_DIR:-$(mktemp -d -t emu-scenario-logs.XXXXXX)}"
+mkdir -p "$LOG_DIR"
 
 # shellcheck disable=SC2317  # reached only via the EXIT/INT/TERM trap
 cleanup() {
@@ -82,11 +90,14 @@ run_scenario() {
     local name="$1" budget="$2" __logvar="$3"
     local scen="$SCEN_DIR/$name.json"
     [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
-    local log; log="$(mktemp -t "emu-$name.XXXXXX.log")"
+    local log; log="$LOG_DIR/emu-$name-$(date +%s).log"
     printf -v "$__logvar" '%s' "$log"
 
     info "running $name (budget ${budget}s)..."
-    timeout "$budget" "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
+    # env -u: an exported EMU_SCENARIO_DURATION_MS is channel_suite's knob; it
+    # must not leak into other scenarios and silently cap their sim time.
+    timeout "$budget" env -u EMU_SCENARIO_DURATION_MS \
+        "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
     local pid=$!
     CHILD_PIDS+=("$pid")
     wait "$pid"
@@ -101,6 +112,69 @@ assert_screen() {
         return 0
     fi
     FAILURES=$((FAILURES + 1))
+    return 1
+}
+
+# dump_diagnostics <log> <label> : post-mortem for a failed scenario, printed
+# straight into the CI step log. A scenario's gosim event log lives in a mktemp
+# file the runner throws away, so without this a pod-only failure is invisible
+# and undebuggable from the outside (which is exactly how the render-window
+# failures stayed mysterious). Prints the attach/join records, how many
+# framebuffer frames each node actually emitted, the screen-assert verdict, and
+# the log tail (frames elided; they are base64 blobs).
+dump_diagnostics() {
+    local log="$1" label="$2"
+    echo "--- diagnostics: $label ---"
+    echo "[attach/join/death events]"
+    grep -iE "attached as|node_joined|node_left|supervisor|restart|exited|abort|assert|segmentation|panic|reboot" "$log" | tail -25
+    # For each unexpected node death, print the console lines that led up to
+    # it (frames/metrics/packet noise elided): the death REASON is in the
+    # node's last words, and the log tail alone usually post-dates them.
+    grep -n "exited unexpectedly" "$log" | cut -d: -f1 | while read -r ln; do
+        echo "[pre-death context before log line $ln]"
+        start=$((ln > 400 ? ln - 400 : 1))
+        sed -n "${start},${ln}p" "$log" \
+            | grep -v -e '"type":"device_fb"' -e '"type":"metrics"' \
+                      -e '"type":"packet_sent"' -e '"type":"emu_rx"' \
+                      -e '"type":"emu_tx"' -e '"type":"device_ind"' \
+            | tail -15
+    done
+    echo "[device_fb frames per node]"
+    grep '"type":"device_fb"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
+    echo "[emu_tx per node (did each node key the channel?)]"
+    grep '"type":"emu_tx"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
+    echo "[emu_tx airtime distribution (toa_ms: beacons are short, message frames ~2100ms)]"
+    grep '"type":"emu_tx"' "$log" | grep -o '"toa_ms":[0-9]*' | sort | uniq -c | head -10
+    echo "[emu_rx per node (did the frames reach each node?)]"
+    grep '"type":"emu_rx"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
+    echo "[dm construction markers (drop/purge/symptom/heal), if any]"
+    grep -E "dropped DM session|reboot-faithful drop|EMU_DROP_DM_SESSION_AT_MS reached|Failed session decrypt|re-initiating handshake" "$log" | head -15
+    echo "[log tail, fb frames and periodic metrics elided]"
+    grep -v -e '"type":"device_fb"' -e '"type":"metrics"' "$log" | tail -40
+    echo "--- end diagnostics: $label ---"
+}
+
+# check_no_deaths <log> <expected_joins> <label> : STRICT death rule, applied
+# to EVERY run of every scenario, pass or fail. Both POSIX-port death causes
+# (FreeRTOS entered from the reader thread; tasks futex-blocked while holding
+# FreeRTOS mutexes) are fixed on this branch, so a mid-scenario node death no
+# longer has a known benign cause: any death is treated as a suite FAILURE
+# with a full post-mortem, never absorbed by a retry or a lucky assertion
+# (a crash-and-restart can still render late sends and green the assertion;
+# adversarial review showed a 30% crash regression would pass a rerun-based
+# gate ~91% of the time). Detected two ways: the supervisor's unexpected-exit
+# log line, and more node_joined events than the scenario has nodes (a
+# restart re-attaches and re-joins).
+check_no_deaths() {
+    local log="$1" expected="$2" label="$3"
+    local deaths joins
+    deaths="$(grep -c "exited unexpectedly" "$log")" || true
+    joins="$(grep -c '"type":"node_joined"' "$log")" || true
+    if [ "${deaths:-0}" -eq 0 ] && [ "${joins:-0}" -le "$expected" ]; then
+        return 0
+    fi
+    red "FAIL: $label: node process death mid-scenario ($deaths unexpected exit(s), $joins joins for $expected nodes); deaths are hard failures, see the post-mortem"
+    dump_diagnostics "$log" "$label (node death)"
     return 1
 }
 
@@ -134,49 +208,122 @@ echo
 # each result.
 
 # --- Scenario 1: channel delivery ----------------------------------------
-# The firmware nodes run in wall-clock time inside a 36 s scenario budget, and
-# the receivers must boot, pass their 10 s message-idle threshold, and render
-# the broadcast on the virtual e-paper within it. Neighbor discovery is no
-# longer a variable (a broadcast needs no session, and the short emulator beacon
-# interval keeps the mesh warm), but the final e-paper RENDER still has some
-# wall-clock jitter under load: the inbound message has to auto-open the Messages
-# screen and paint before the budget ends. That residual timing sensitivity is
-# not something this delivery test can construct away, so a single low retry
-# budget stays as a jitter absorber. A genuine delivery regression still fails
-# both attempts, so the retry masks jitter, not a real break.
+# The firmware nodes run in wall-clock time and the receivers must boot, pass
+# their 10 s message-idle threshold, and render the broadcast on the virtual
+# e-paper. Neighbor discovery is no longer a variable (a broadcast needs no
+# session, and the short emulator beacon interval keeps the mesh warm). Two
+# real failure modes were observed on the CPU-limited CI runner pods (cpu 4 /
+# memory 5Gi, shared with other jobs), and both are handled here:
+#
+#   1. The render outruns a fixed window. The old fix was a fixed 36 s window
+#      plus a 2x re-roll, which failed BOTH attempts on constrained pods
+#      because the window was systematically too tight, not randomly jittery.
+#      Now the wait is EVENT-DRIVEN: we widen gosim's real-time cap
+#      (EMU_SCENARIO_DURATION_MS) and POLL the growing headless log for the
+#      render marker, stopping the instant both receivers have painted. A fast
+#      box exits in seconds; a starved pod gets the full budget.
+#   2. The whole send burst lands before a receiver's idle threshold. A
+#      receiver only auto-opens its Messages screen for a message arriving
+#      after its own 10 s message-idle threshold, measured from ITS boot, and
+#      pod contention can lag the staggered receiver boots tens of seconds
+#      behind the sender's clock. A short burst (formerly 3 sends ending at
+#      sender t=20 s) could then land entirely inside the receivers' threshold
+#      window, after which nothing would ever render no matter how long the
+#      wait. The scenario now sends a long burst (12 sends, 8 s apart, to
+#      sender t=100 s) so some sends always postdate every receiver's
+#      threshold; the event-driven early exit keeps the long tail free on a
+#      fast box.
+#
+# A genuine delivery regression simply never renders and the wait times out, so
+# one generous attempt replaces the old re-roll loop (no retry scaffolding
+# remains). Both knobs are overridable for local tuning but default high
+# because this script only ever runs as the CI gate.
 channel_suite() {
     echo "[1] emu-channel-delivery"
-    local CHAN_ATTEMPTS=2
-    local attempt CHAN_LOG
-    for attempt in $(seq 1 "$CHAN_ATTEMPTS"); do
-        CHAN_LOG=""
-        run_scenario emu-channel-delivery 70 CHAN_LOG
-        if "$GOSIM_BIN" screen-assert -log "$CHAN_LOG" -min-nodes 2 -text "HELLO BRAMBLE" \
+    local scen="$SCEN_DIR/emu-channel-delivery.json"
+    [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
+    local budget_s="${EMU_CHANNEL_BUDGET_S:-180}"
+    local sim_ms="${EMU_SCENARIO_DURATION_MS:-150000}"
+    local log; log="$(mktemp -t emu-channel.XXXXXX.log)"
+
+    info "running emu-channel-delivery (render budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
+    EMU_SCENARIO_DURATION_MS="$sim_ms" \
+        timeout "$budget_s" "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
+    local pid=$!
+    CHILD_PIDS+=("$pid")
+
+    local rendered=1 deadline
+    deadline=$(( $(date +%s) + budget_s ))
+    while :; do
+        if "$GOSIM_BIN" screen-assert -log "$log" -min-nodes 2 -text "HELLO BRAMBLE" \
             >/dev/null 2>&1; then
-            green "PASS: emu-channel-delivery (attempt $attempt/$CHAN_ATTEMPTS): rendered on both receivers"
-            return 0
+            rendered=0
+            break
         fi
-        info "attempt $attempt/$CHAN_ATTEMPTS missed the render window; re-rolling..."
+        # gosim exited (hit its sim cap or the outer timeout) without a render, or
+        # the wall-clock budget elapsed: stop polling and do a final check below.
+        kill -0 "$pid" 2>/dev/null || break
+        [ "$(date +%s)" -lt "$deadline" ] || break
+        # 2s between scans: each scan decodes every frame in the growing log,
+        # and on a CPU-capped pod a 1s cadence would take non-trivial CPU away
+        # from the very firmware nodes it is waiting on.
+        sleep 2
     done
-    red "FAIL: emu-channel-delivery: not rendered on >= 2 nodes in any of $CHAN_ATTEMPTS attempts"
+
+    # Stop the run; it has either rendered or run out of budget.
+    kill "$pid" 2>/dev/null || true
+    pkill -P "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    # Final check in case the render landed in the last frames flushed as gosim exited.
+    if [ "$rendered" -ne 0 ] && "$GOSIM_BIN" screen-assert -log "$log" -min-nodes 2 \
+        -text "HELLO BRAMBLE" >/dev/null 2>&1; then
+        rendered=0
+    fi
+
+    # STRICT death rule: even a run that rendered fine fails if a node died
+    # mid-scenario (a restarted receiver can still catch late sends and green
+    # the assertion, hiding a crash regression). See check_no_deaths.
+    check_no_deaths "$log" 3 "emu-channel-delivery" || return 1
+
+    if [ "$rendered" -eq 0 ]; then
+        green "PASS: emu-channel-delivery: rendered on both receivers"
+        return 0
+    fi
+    red "FAIL: emu-channel-delivery: not rendered on >= 2 nodes within ${budget_s}s"
+    # Visible verdict ("rendered on N node(s), want >= 2") plus the post-mortem.
+    "$GOSIM_BIN" screen-assert -log "$log" -min-nodes 2 -text "HELLO BRAMBLE" || true
+    dump_diagnostics "$log" "emu-channel-delivery"
     return 1
 }
 
 # --- Scenario 2: DM session desync + #138 heal ---------------------------
-# Deterministic, so it runs ONCE with no retry loop. The receiver drops its DM
-# session half in-process at a fixed time (EMU_DROP_DM_SESSION_AT_MS) while still
-# neighboring the sender, and the sender's DM burst is scheduled to begin AFTER
-# that drop, so the sender's stale-session DM is GUARANTEED to land on a receiver
-# with no session on the very first post-drop send. That removes the reboot-era
-# races (RAM-clear timing, beacon re-acquisition, and the stale DM having to hit
-# a narrow post-reboot window) that made this scenario probabilistic and forced
-# the old re-roll loop. A genuine regression (the symptom or the #138 self-heal
-# never fires) fails the single run, exactly as it should. The 120s budget is
-# only a hang guard; the scenario itself finishes in ~80s of wall clock.
+# Deterministic construction, ONE run, no retries of any kind. The receiver
+# drops its DM session half in-process at a fixed time
+# (EMU_DROP_DM_SESSION_AT_MS) while still neighboring the sender, and the
+# sender's DM burst is scheduled to begin AFTER that drop, so the sender's
+# stale-session DM is GUARANTEED to land on a receiver with no session on the
+# very first post-drop send. The drop is reboot-faithful (it also purges the
+# receiver's pending-ack retransmits and awaiting-session queue for the peer,
+# exactly what the reboot it emulates would destroy), which removes the last
+# known construction race. A genuine regression fails the run, exactly as it
+# should. The 180s budget is only a hang guard with tick-loss-skew headroom;
+# the scenario itself finishes in ~90s of wall clock on a healthy box.
+#
+# There is deliberately NO invalidation-rerun here anymore: both POSIX-port
+# node-death causes are fixed, so a mid-run death has no known benign cause
+# and is a hard suite failure via check_no_deaths (a rerun would absorb
+# intermittent crash regressions; see the check_no_deaths comment). If a new
+# port bug appears, this gate fails loudly with a post-mortem, which is the
+# correct behavior for a required gate.
 dm_suite() {
     echo "[2] emu-dm-desync"
     local DM_LOG=""
-    run_scenario emu-dm-desync 120 DM_LOG
+    run_scenario emu-dm-desync 180 DM_LOG
+
+    # STRICT death rule first: deaths fail the run regardless of assertions.
+    check_no_deaths "$DM_LOG" 2 "emu-dm-desync" || return 1
+
     if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
        && grep -qF "Failed session decrypt" "$DM_LOG" \
        && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
@@ -184,6 +331,8 @@ dm_suite() {
         return 0
     fi
     red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal"
+    "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" || true
+    dump_diagnostics "$DM_LOG" "emu-dm-desync"
     return 1
 }
 

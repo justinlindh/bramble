@@ -333,11 +333,27 @@ func (p *superProc) runOnce() {
 		}
 		p.flushPending(id, pending)
 	}
-	_ = cmd.Wait()
+	werr := cmd.Wait()
 
 	p.mu.Lock()
 	p.cmd = nil
+	stopped := p.stopped
 	p.mu.Unlock()
+
+	// A node dying mid-scenario used to be invisible (the exit status was
+	// discarded), so a crash-and-restart could only be inferred from a
+	// duplicate attach line, with no evidence of WHY the process died. Log
+	// every unexpected exit with its wait error (which carries the exit code
+	// or signal); teardown kills (p.stopped) stay silent so normal scenario
+	// shutdown does not spray fake death reports. The scenario suite's
+	// failure diagnostics grep for these lines.
+	if !stopped {
+		if werr != nil {
+			log.Printf("supervisor: %s exited unexpectedly: %v (restart-on-exit will bring it back)", p.label, werr)
+		} else {
+			log.Printf("supervisor: %s exited cleanly mid-scenario (code 0); restart-on-exit will bring it back", p.label)
+		}
+	}
 }
 
 // flushPending emits each buffered pre-attach console line under id, in order,

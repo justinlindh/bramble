@@ -4,6 +4,7 @@ import { saveNodeName, setMailbox } from '../../store/actions';
 import { useStore } from '../../store/index';
 import { QRShareModal } from '../../components/QRShareModal';
 import { encodeNodeShare } from '../../utils/channelShare';
+import { formatAddr0x } from '../../utils/address';
 import { IconKey, IconNodes } from '../../components/Icons';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './IdentitySection.module.css';
@@ -44,8 +45,8 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
     try {
       const backup = {
         version: 1,
-        address: `0x${identity.address.toString(16).toUpperCase().padStart(8, '0')}`,
-        pubkeyHash: `0x${identity.pubkeyHash.toString(16).toUpperCase().padStart(8, '0')}`,
+        address: formatAddr0x(identity.address),
+        pubkeyHash: formatAddr0x(identity.pubkeyHash),
         pubkey: identity.pubkeyB64,
         name: identity.name,
         exportedAt: new Date().toISOString(),
@@ -64,8 +65,8 @@ export function IdentitySection({ identity }: IdentitySectionProps) {
 
   const mailboxEnabled = useStore(s => s.config?.mailboxEnabled ?? false);
 
-  const addrHex = `0x${identity.address.toString(16).toUpperCase().padStart(8, '0')}`;
-  const pubkeyHashHex = `0x${identity.pubkeyHash.toString(16).toUpperCase().padStart(8, '0')}`;
+  const addrHex = formatAddr0x(identity.address);
+  const pubkeyHashHex = formatAddr0x(identity.pubkeyHash);
 
   return (
     <>

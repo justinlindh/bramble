@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -744,6 +745,22 @@ func (s *Sim) runRealtimeHeadless() error {
 		}
 		stopOnce.Do(func() { close(s.stopCh) })
 	}()
+
+	// Optional wall-clock cap override for constrained CI. The scenario JSON's
+	// duration_ms is a fine local default, but a CPU-limited runner pod stretches
+	// the real-time render pipeline (message-idle -> auto-open Messages -> e-paper
+	// paint) well past it, so gosim would tear the nodes down before the paint
+	// lands. The emulator suite (emulator/ci/run_scenarios.sh) sets
+	// EMU_SCENARIO_DURATION_MS to widen the cap and then polls the log for the
+	// render marker, stopping early once it appears; unset keeps the scenario's
+	// own duration so a direct gosim run is unchanged.
+	if v := os.Getenv("EMU_SCENARIO_DURATION_MS"); v != "" {
+		if ms, err := strconv.ParseUint(v, 10, 64); err == nil && ms > 0 {
+			s.mu.Lock()
+			s.duration = ms * 1000
+			s.mu.Unlock()
+		}
+	}
 
 	s.mu.Lock()
 	s.cmdPlay()
