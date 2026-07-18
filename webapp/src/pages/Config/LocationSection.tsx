@@ -12,6 +12,7 @@ import { setLocationConfig } from '../../store/actions';
 import { useStore } from '../../store';
 import { IconLocation, IconLocationOff } from '../../components/Icons';
 import { AddressLabel } from '../../components/AddressLabel';
+import { formatAddrHex, formatAddrShort } from '../../utils/address';
 import { friendlyErrorFrom } from '../../lib/errors';
 import styles from './LocationSection.module.css';
 
@@ -43,10 +44,6 @@ const TIER_DESCRIPTIONS: Record<LocationTier, string> = {
 };
 
 const DEFAULT_INTERVAL = 300;
-
-function toHexAddress(addr: number): string {
-  return addr.toString(16).toUpperCase().padStart(8, '0');
-}
 
 function normalizeAddress(raw: string): string | null {
   const cleaned = raw.trim().replace(/^0x/i, '').toUpperCase();
@@ -219,8 +216,8 @@ export function LocationSection({ location, neighbors, channels, gpsAvailable = 
         {neighbors.length > 0 && (
           <div className={styles.quickAdd}>
             {neighbors.map(n => (
-              <button className={styles.quickAddBtn} key={n.addr} onClick={() => setNewContactAddress(toHexAddress(n.addr))}>
-                {peerNames.get(n.addr) || `0x${toHexAddress(n.addr).slice(-4)}`}
+              <button className={styles.quickAddBtn} key={n.addr} onClick={() => setNewContactAddress(formatAddrHex(n.addr))}>
+                {peerNames.get(n.addr) || formatAddrShort(n.addr)}
               </button>
             ))}
           </div>

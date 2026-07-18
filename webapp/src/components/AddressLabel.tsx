@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatAddr0x, formatAddrShort } from '../utils/address';
 import styles from './AddressLabel.module.css';
 
 interface AddressLabelProps {
@@ -8,17 +9,11 @@ interface AddressLabelProps {
   className?: string;
 }
 
-function fmtAddr(addr: number, short: boolean): string {
-  const hex = addr.toString(16).toUpperCase().padStart(8, '0');
-  if (short) return `0x${hex.slice(-4)}`;
-  return `0x${hex}`;
-}
-
 export function AddressLabel({ addr, name, short = false, className }: AddressLabelProps) {
   const [copied, setCopied] = useState(false);
 
-  const fullHex = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
-  const display = name ?? fmtAddr(addr, short);
+  const fullHex = formatAddr0x(addr);
+  const display = name ?? (short ? formatAddrShort(addr) : fullHex);
 
   const [copyFailed, setCopyFailed] = useState(false);
 

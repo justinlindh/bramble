@@ -105,14 +105,14 @@ jobs:
           go test -count=1 ./...
 
   emulator:
-    name: Emulator suite (advisory)
+    name: Emulator suite
     # Merged scenario suite + browser E2E: builds the linux firmware node,
     # gosim, and the UI ONCE, then runs the headless scenarios followed by the
-    # browser E2E. NON-REQUIRED (advisory): it runs on every PR to give signal
-    # but does not gate merges. The scenario step runs its two scenarios in
-    # PARALLEL (separate gosim processes, each keyed to its own PID for socket
-    # path and node-state dir, so no port/state collision) with trimmed retry
-    # budgets. The E2E step is continue-on-error while it bakes.
+    # browser E2E. GATING: this job is a required merge context. The two suite
+    # steps carry continue-on-error ONLY as an error-collection mechanism (a
+    # single run always reports both suites' results even when the first
+    # fails); the terminal "Fail if any suite failed" step turns either
+    # failure into the job's failure, so nothing here is advisory.
     needs: detect
     if: |
       needs.detect.outputs.firmware == 'true' ||
@@ -156,12 +156,40 @@ jobs:
           npm ci
           npm run build
       - name: Run headless scenario suite
-        # Real-time multi-node scenarios; the two run in parallel inside the
-        # script. Gates on delivered/rendered content (channel message on
-        # screen; DM desync symptom + #138 self-heal).
+        # Real-time multi-node scenarios, run sequentially inside the script.
+        # Gates on delivered/rendered content (channel message on screen; DM
+        # desync symptom + #138 self-heal). continue-on-error is error
+        # collection only: the E2E step below still runs and reports, and the
+        # terminal step fails the job on this step's failure.
+        id: scenarios
+        continue-on-error: true
+        env:
+          EMU_CI_LOG_DIR: ${{ runner.temp }}/emu-scenario-logs
         run: bash emulator/ci/run_scenarios.sh
       - name: Run browser E2E suite
-        # Real headless Chromium against a real UI build (Task 13). Advisory
-        # while it bakes: a failure here does not fail the job.
+        # Real headless Chromium against a real UI build (Task 13). Gates via
+        # the terminal step; continue-on-error is error collection only, so a
+        # scenario failure and an E2E failure both surface in one run.
+        id: e2e
         continue-on-error: true
         run: bash emulator/e2e/run_e2e.sh
+      - name: Upload scenario logs on failure
+        # The full gosim event logs (frames, console, deaths) outlive the pod
+        # so a failure's evidence is never lost to a discarded mktemp.
+        if: steps.scenarios.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: emu-scenario-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/emu-scenario-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Fail if any suite failed
+        # The terminal gate for the collect-then-fail pattern above: the two
+        # suite steps never fail the job directly (so both always report), and
+        # this step turns any suite failure into the job failure the required
+        # merge context sees.
+        run: |
+          failed=0
+          [ "${{ steps.scenarios.outcome }}" = "success" ] || { echo "::error::headless scenario suite failed"; failed=1; }
+          [ "${{ steps.e2e.outcome }}" = "success" ] || { echo "::error::browser E2E suite failed"; failed=1; }
+          exit "$failed"

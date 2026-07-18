@@ -24,8 +24,13 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 60_000,
-  globalTimeout: 4 * 60_000, // wall-clock budget: under 4 minutes (per PLAN.md Task 13)
+  // Ceilings, not targets: every wait in the specs is event-driven, so a fast
+  // box still finishes the whole suite in under a minute. The per-test ceiling
+  // must exceed the delivery waits' 110s budget (which covers the scenario's
+  // full send schedule on a CPU-contended CI pod); the old 60s/4min pair sat
+  // below it and turned pod slowness into spurious failures.
+  timeout: 240_000,
+  globalTimeout: 15 * 60_000,
   globalSetup: require.resolve('./globalSetup'),
   globalTeardown: require.resolve('./globalTeardown'),
   reporter: [['list']],

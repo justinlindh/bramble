@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { useStore } from '../index';
 import { normalizeIncomingRealtimeMessage } from '../actions';
 
@@ -17,12 +17,12 @@ vi.mock('../messageDb', () => ({
   messageDb: { saveMessage: vi.fn(async () => {}), open: vi.fn(async () => {}), getMessages: vi.fn(async () => []), saveMessages: vi.fn(async () => {}), updateMessageStatus: vi.fn(async () => {}) },
 }));
 
-let onMessage: ReturnType<typeof vi.fn>;
-let clearConversation: ReturnType<typeof vi.fn>;
+let onMessage: Mock<(payloadJson: string) => void>;
+let clearConversation: Mock<(conversationId: string) => void>;
 
 beforeEach(() => {
-  onMessage = vi.fn();
-  clearConversation = vi.fn();
+  onMessage = vi.fn<(payloadJson: string) => void>();
+  clearConversation = vi.fn<(conversationId: string) => void>();
   vi.stubGlobal('brambleAndroid', true);
   window.brambleAndroidNotify = { onMessage, clearConversation };
   useStore.setState({

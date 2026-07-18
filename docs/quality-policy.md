@@ -1,6 +1,9 @@
 # Quality Gate Policy
 
-This policy defines which CI checks are blocking vs advisory, plus how advisory checks are promoted safely.
+Every CI check gates. There is no advisory tier: a check that runs in CI either
+blocks merges or it is fixed or removed. A check that cannot be made reliable
+does not get demoted to non-blocking signal; it gets redesigned or deleted
+(with the redesign requirement written down where it died).
 
 Since the pipeline optimization, the many tiny static-analysis jobs are bundled
 into a single `Static checks` job (context `Static checks`, in
@@ -20,45 +23,68 @@ the full job topology and the always-report contract.
   - Actionlint over the four gating workflow files
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
 - `gosim integration` (builds and tests the simulator, `quality.yml`)
+- `Emulator suite` (`quality.yml`): the merged emulator scenario suite plus
+  browser E2E. Uses the collect-then-fail pattern (below), so both suites
+  always report and both gate.
 - `Webapp checks` (one pod: lint, typecheck, electron typecheck, unit tests, build, e2e smoke, `webapp-quality.yml`)
 - `web-flasher tests` (`node --test web-flasher/`, `webapp-quality.yml`)
 
-## Advisory checks (non-blocking)
-
-- `Emulator suite (advisory)` (`quality.yml`): the merged emulator scenario suite
-  plus browser E2E. Runs on every PR for signal but is never required, so it does
-  not gate merges. Its browser E2E step is additionally `continue-on-error`.
-
 clang-tidy exists only as a local wrapper
 (`scripts/lint/run-clang-tidy-advisory.sh`) and is not part of any workflow.
+
+## The collect-then-fail pattern (step-level `continue-on-error`)
+
+Job-level or de-facto advisory checks are forbidden, but step-level
+`continue-on-error: true` is allowed as an ERROR-COLLECTION mechanism: when a
+job runs several independent suites, giving each suite step an `id` and
+`continue-on-error: true` lets one run report every suite's result instead of
+stopping at the first failure. The job must then end with a terminal step that
+fails the job when any collected step's `outcome` is not `success`, e.g.:
+
+```yaml
+- name: Fail if any suite failed
+  run: |
+    failed=0
+    [ "${{ steps.scenarios.outcome }}" = "success" ] || failed=1
+    [ "${{ steps.e2e.outcome }}" = "success" ] || failed=1
+    exit "$failed"
+```
+
+`continue-on-error` without such a terminal gate is an advisory check in
+disguise and is not allowed.
 
 ## Non-PR infra-backed required check
 
 - Board build smoke (`bash scripts/flash.sh local heltec-v3 build`) runs on non-PR events (push to `main` and the standard branch prefixes, or manual dispatch) where the `idf-node` runner is available.
 
-## Promotion (ratchet) criteria
+## Adding or fixing checks
 
-Promote advisory checks to required only after all are true:
+A new or newly fixed check must be required-grade before it lands:
 
-1. Baseline is triaged and clean for chosen scope.
-2. At least 10 consecutive PR runs are stable.
+1. Deterministic or event-driven: no fixed wall-clock windows for real-time
+   behavior; wait on the observable event up to a generous budget instead.
+   No retry loops to absorb known flakiness.
+2. Validated where it will run: for anything timing-sensitive, consecutive
+   passing runs on the actual CI runner pods (not a fast local box) before it
+   gates.
 3. Findings are reproducible locally with documented commands.
-4. Maintainer sign-off is recorded in PR/issue.
-5. Rollback lever is documented in the same promotion PR.
+4. Rollback lever is documented in the PR that adds or promotes the check.
 
 ## Rollback levers
 
-When a newly-required check becomes noisy/unreliable, rollback quickly by either:
+When a required check becomes noisy/unreliable, rollback quickly by either:
 
-- restoring `continue-on-error: true`, or
-- shrinking scope back to the prior proven baseline.
+- shrinking scope back to the prior proven baseline (e.g. removing the
+  specific unreliable test while the rest keeps gating), or
+- removing the check entirely, with the redesign it needs written down.
 
-Any rollback PR must include rationale (tool regression, false positives, infra instability, etc.).
+Demoting a check to non-blocking is NOT a rollback lever; the advisory tier
+does not exist. Any rollback PR must include rationale (tool regression, false
+positives, infra instability, etc.).
 
 ## Change management
 
 - No sudden strictness jumps without written rationale.
-- Favor advisory -> stabilize -> enforce progression.
 - Required checks should remain deterministic and fast for normal PR iteration.
 
 ## Local verification commands (firmware)
@@ -69,7 +95,7 @@ bash scripts/lint/run-clang-format-check.sh --strict
 bash scripts/lint/run-shellcheck.sh --strict
 actionlint -color -oneline -config-file .actionlint.yaml .github/workflows/firmware-quality.yml
 
-# Advisory checks (non-blocking behavior)
+# Local-only helpers (not wired into CI)
 bash scripts/lint/run-clang-format-check.sh
 bash scripts/lint/run-shellcheck.sh
 bash scripts/lint/run-markdownlint.sh

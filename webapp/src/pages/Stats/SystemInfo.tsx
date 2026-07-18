@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { NodeStatus, BrambleConfig } from '../../types/bramble';
+import { formatAddr0x } from '../../utils/address';
 import styles from './SystemInfo.module.css';
 
 function formatUptime(seconds: number): string {
@@ -16,10 +17,6 @@ function formatBytes(bytes: number): string {
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
   if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
   return `${bytes} B`;
-}
-
-function formatAddr(addr: number): string {
-  return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
 }
 
 async function copyWithFallback(text: string): Promise<boolean> {
@@ -97,8 +94,8 @@ export function SystemInfo({ status, config }: Props) {
   const heapWarning = status.freeHeapBytes < 20_000;
   const heapDanger = status.freeHeapBytes < 8_000;
 
-  const address = formatAddr(identity.address);
-  const pubkeyHash = formatAddr(identity.pubkeyHash);
+  const address = formatAddr0x(identity.address);
+  const pubkeyHash = formatAddr0x(identity.pubkeyHash);
 
   const rows: Row[] = [
     {

@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -74,16 +75,6 @@ type btnMsg struct {
 	T    string `json:"t"`
 	ID   string `json:"id"`   // "up" | "down" | "select" | "reset"
 	Edge string `json:"edge"` // "down" | "up"
-}
-
-type nmeaMsg struct {
-	T        string `json:"t"`
-	Sentence string `json:"sentence"`
-}
-
-type battMsg struct {
-	T  string `json:"t"`
-	MV int    `json:"mv"`
 }
 
 type timeMsg struct {
@@ -570,22 +561,6 @@ func (ec *extConn) sendJSON(v interface{}) {
 // reboots a node (the firmware exits, the supervisor restarts it).
 func (ec *extConn) sendButton(id, edge string) { ec.sendJSON(btnMsg{T: "btn", ID: id, Edge: edge}) }
 
-// sendNMEA feeds one synthesized GPS sentence to the node (respecting its
-// gpsgate state; the position source is scenario-driven in a later task).
-func (ec *extConn) sendNMEA(sentence string) { ec.sendJSON(nmeaMsg{T: "nmea", Sentence: sentence}) }
-
-// sendBatt feeds a scenario-scripted battery voltage (millivolts) to the node.
-func (ec *extConn) sendBatt(mv int) { ec.sendJSON(battMsg{T: "batt", MV: mv}) }
-
-// ConnForAddr returns the live external-node connection for a radio address, or
-// nil. Callers (frontend button injection, gateway) use it to reach a node.
-// Takes s.mu, so it must not be called while already holding it.
-func (b *Broker) ConnForAddr(addr uint32) *extConn {
-	b.sim.mu.Lock()
-	defer b.sim.mu.Unlock()
-	return b.sim.extConns[addr]
-}
-
 // close tears the connection down once, dropping it from the broker registry
 // and the sim's external-node map, and marking its slot free for a reconnect.
 func (ec *extConn) close() {
@@ -770,6 +745,22 @@ func (s *Sim) runRealtimeHeadless() error {
 		}
 		stopOnce.Do(func() { close(s.stopCh) })
 	}()
+
+	// Optional wall-clock cap override for constrained CI. The scenario JSON's
+	// duration_ms is a fine local default, but a CPU-limited runner pod stretches
+	// the real-time render pipeline (message-idle -> auto-open Messages -> e-paper
+	// paint) well past it, so gosim would tear the nodes down before the paint
+	// lands. The emulator suite (emulator/ci/run_scenarios.sh) sets
+	// EMU_SCENARIO_DURATION_MS to widen the cap and then polls the log for the
+	// render marker, stopping early once it appears; unset keeps the scenario's
+	// own duration so a direct gosim run is unchanged.
+	if v := os.Getenv("EMU_SCENARIO_DURATION_MS"); v != "" {
+		if ms, err := strconv.ParseUint(v, 10, 64); err == nil && ms > 0 {
+			s.mu.Lock()
+			s.duration = ms * 1000
+			s.mu.Unlock()
+		}
+	}
 
 	s.mu.Lock()
 	s.cmdPlay()
