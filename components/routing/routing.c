@@ -238,14 +238,6 @@ void route_maintenance(routing_table_t* table, uint32_t now_ms) {
 
 int route_count(const routing_table_t* table) { return table->count; }
 
-route_entry_t* route_find_alternate(routing_table_t* table, uint32_t dest, uint32_t exclude_hop) {
-    for (int i = 0; i < table->count; i++) {
-        if (table->entries[i].dest_addr == dest && table->entries[i].next_hop != exclude_hop)
-            return &table->entries[i];
-    }
-    return NULL;
-}
-
 /* ── RREQ dedup ── */
 
 void rreq_dedup_init(rreq_dedup_t* cache) { memset(cache, 0, sizeof(*cache)); }
