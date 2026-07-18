@@ -315,11 +315,19 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t* p, const uint8_t* buf, si
     return ESP_OK;
 }
 
-/* KEY_EXCHANGE (KEY_EXCHANGE_SIZE bytes) */
+/* KEY_EXCHANGE: the fixed fields occupy 98 bytes (header 12 + src 4 +
+ * ephemeral 32 + long-term 32 + key_id 1 + ke_type 1 + auth_tag 16); the
+ * wire frame is KEY_EXCHANGE_SIZE (101), so the trailing 3 bytes are
+ * reserved. Zero the whole buffer up front so those reserved bytes are
+ * deterministic: send_ke_envelope ships all KEY_EXCHANGE_SIZE bytes, and
+ * without this the reserved tail is uninitialized stack that gets encrypted
+ * and transmitted, disclosing 3 stack bytes to any channel-key holder on
+ * every handshake. */
 esp_err_t bramble_key_exchange_serialize(const bramble_key_exchange_t* p, uint8_t* buf,
                                          size_t len) {
     if (len < KEY_EXCHANGE_SIZE)
         return ESP_ERR_INVALID_SIZE;
+    memset(buf, 0, KEY_EXCHANGE_SIZE);
     esp_err_t r = bramble_header_serialize(&p->header, buf, len);
     if (r != ESP_OK)
         return r;
