@@ -6231,6 +6231,31 @@ int emu_mesh_drop_dm_sessions(void) {
         if (peer != 0) {
             ESP_LOGI(TAG, "emu: dropped DM session with %08" PRIX32 " (one-sided desync inject)",
                      peer);
+            /* Reboot-faithful drop: the reboot this primitive replaces would
+             * also lose the RAM-held retransmit and awaiting-session state.
+             * Leaving them made the constructed desync racy: an undelivered
+             * delivery receipt for the peer kept retransmitting after the
+             * drop, its expiry requeued it "awaiting session", and THIS node
+             * then initiated a fresh handshake to the peer, replacing the
+             * peer's stale session half before the scenario's stale-session
+             * DM could land and fire the decrypt-failure symptom (observed
+             * as an occasional no-symptom emu-dm-desync run). Purge both,
+             * exactly as a RAM clear would. Cross-task access to these
+             * tables follows the existing discipline of the send paths,
+             * which already run on arbitrary caller tasks. */
+            size_t acks =
+                rerr_ack_failfast_for_dest(&s_pending_acks, peer, "emu_desync_inject", NULL, NULL);
+            int queued = 0;
+            for (int q = 0; q < MAX_QUEUED_MSGS; q++) {
+                if (s_queued_msgs[q].used && s_queued_msgs[q].dest_addr == peer) {
+                    s_queued_msgs[q].used = false;
+                    queued++;
+                }
+            }
+            ESP_LOGI(TAG,
+                     "emu: purged %u pending ack(s) and %d queued msg(s) for %08" PRIX32
+                     " (reboot-faithful drop)",
+                     (unsigned)acks, queued, peer);
             dropped++;
         }
     }

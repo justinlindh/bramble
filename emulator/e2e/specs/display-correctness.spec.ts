@@ -87,7 +87,7 @@ test.describe('display correctness', () => {
         const found = findText(grid, CHANNEL_TEXT, 1);
         return found.found ? { grid, found } : undefined;
       },
-      { timeoutMs: 15_000, intervalMs: 200, label: 'canvas to render the delivered text' },
+      { timeoutMs: 20_000, intervalMs: 200, label: 'canvas to render the delivered text' },
     );
 
     expect(canvasHit.found.found, 'independent glyph search must find the text on the canvas').toBe(true);

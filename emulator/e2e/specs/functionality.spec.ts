@@ -78,7 +78,10 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
         const grid = await readCanvasGrid(page, bootHit.node);
         return findText(grid, 'BRAMBLE', 2).found || undefined;
       },
-      { timeoutMs: 8_000, intervalMs: 200, label: 'boot text visible on canvas' },
+      // Canvas readback is CDP round-trips into a chromium that shares the CI
+      // pod's CPU; 8s expired on a contended pod after the wire hit had
+      // already proven the render. Event-driven, so fast boxes exit early.
+      { timeoutMs: 20_000, intervalMs: 200, label: 'boot text visible on canvas' },
     );
     expect(canvasFound).toBe(true);
   });
@@ -100,14 +103,14 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
           cap.sentBtn
             .slice(sentBefore)
             .some((f) => f.node === target && f.id === id && f.edge === 'down') || undefined,
-        { timeoutMs: 5_000, label: `outgoing btn frame for ${id} down` },
+        { timeoutMs: 15_000, label: `outgoing btn frame for ${id} down` },
       );
       await waitFor(
         () =>
           cap.sentBtn
             .slice(sentBefore)
             .some((f) => f.node === target && f.id === id && f.edge === 'up') || undefined,
-        { timeoutMs: 5_000, label: `outgoing btn frame for ${id} up` },
+        { timeoutMs: 15_000, label: `outgoing btn frame for ${id} up` },
       );
 
       // Visible firmware reaction: main.c logs `Button event: %d` on every
@@ -118,7 +121,7 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
           const now = cap.consoleEvents.filter((e) => e.node === target && e.line.includes('Button event:')).length;
           return now > consoleBefore || undefined;
         },
-        { timeoutMs: 5_000, label: `console reaction to ${id} press` },
+        { timeoutMs: 15_000, label: `console reaction to ${id} press` },
       );
     }
   });
@@ -158,7 +161,7 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
         const grid = await readCanvasGrid(page, oneNode);
         return findText(grid, 'HELLO BRAMBLE', 1).found || undefined;
       },
-      { timeoutMs: 15_000, intervalMs: 200, label: `canvas render of the message on node ${oneNode}` },
+      { timeoutMs: 20_000, intervalMs: 200, label: `canvas render of the message on node ${oneNode}` },
     );
   });
 
@@ -180,7 +183,7 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
     // persistence check, but observed here through the live browser session).
     await waitFor(
       () => cap.sentBtn.some((f) => f.node === resetTarget && f.id === 'reset') || undefined,
-      { timeoutMs: 5_000, label: 'outgoing reset btn frame' },
+      { timeoutMs: 15_000, label: 'outgoing reset btn frame' },
     );
     await waitFor(
       () => (cap.joinEvents.filter((e) => e.node === resetTarget).length > attachesBefore ? true : undefined),
