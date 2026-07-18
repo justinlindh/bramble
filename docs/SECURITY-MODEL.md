@@ -140,9 +140,12 @@ These are accepted as outside what Bramble can or will defend against:
 
 ## 2. Assets, ranked
 
-1. **Identity keys.** The X25519 private key is the root of a node's
-   identity. Theft enables permanent impersonation and unlocks everything
-   derived from it. Highest value, longest lifetime.
+1. **Identity keys.** The Ed25519 signing key is the root of a node's
+   identity: the node address derives from its public key and identity
+   attestations are signed with it, so theft enables permanent
+   impersonation. The companion X25519 key underpins DM session key
+   agreement; its theft compromises DM sessions, not the address
+   identity. Highest value, longest lifetime.
 2. **Message content.** What was said. The core promise of the project.
 3. **Location.** Where a person is or was. Treated at the same severity as
    message content; arguably worse, because it maps to physical safety.
@@ -182,8 +185,10 @@ address field, ciphertext length, and transmission timing.
 
 ### AEAD header binding
 
-The AAD for encrypted DATA packets is the serialized 12-byte header with the
-`hop_limit` byte zeroed (`bramble_header_build_aad` in
+The AAD for encrypted DATA packets begins with the serialized 12-byte
+header with the
+`hop_limit` byte zeroed (the `bramble_header_build_aad` prefix of
+`bramble_build_aead_aad` in
 `components/packet/packet.c`), built identically by the originator
 (`send_data_packet` in `main/mesh_task.c`) and the destination
 (`handle_data`). A forwarder or injector cannot splice a captured ciphertext
@@ -219,9 +224,9 @@ reserve-ahead ceiling: a counter value is never issued unless the ceiling
 covering it has already been durably written, so a crash can never reveal a
 counter value NVS does not already know about, and a persistent write
 failure stops issuing nonces entirely (fail-closed: drop beats reuse). A
-single mutex around the one `nonce_counter_next` call site
-(`main/mesh_task.c`) serializes the RPC, UI, and mesh-task producers that
-can all reach it concurrently. The uniqueness argument is structural, not
+single mutex (`s_nonce_mutex` in `main/mesh_task.c`) taken around every
+`nonce_counter_next` call site serializes the RPC, UI, and mesh-task
+producers that can all reach the counter concurrently. The uniqueness argument is structural, not
 probabilistic: uniqueness holds as long as the persisted ceiling invariant
 holds, rather than as a birthday-bound argument over 96 random bits the
 way an RNG-per-message scheme would. The simulator bridge still
@@ -282,9 +287,10 @@ against observers who hear the RREQ after at least one forward.
 
 ### Beacon authentication (SEC-H2, outsider forgery closed under mandatory provisioning)
 
-Beacons carry a 16-byte truncated HMAC-SHA256 computed over the 32 fixed
-beacon fields (header, source address, pubkey hash, telemetry, flags, and
-network time) plus the optional node name, which is serialized *after*
+Beacons carry a 16-byte truncated HMAC-SHA256 computed over the fixed
+beacon fields (header, source address, pubkey hash, telemetry, flags,
+network time, and the 48-bit freshness seq: everything on the wire before
+`auth_hmac`) plus the optional node name, which is serialized *after*
 `auth_hmac` on the wire (`bramble_beacon_serialize` in
 `components/packet/packet.c`; `beacon_compute_hmac` in
 `components/routing/beacon.c` concatenates the fixed prefix with the
@@ -351,10 +357,12 @@ from the hardware RNG and persists it in NVS
 (`identity_ensure_ws_auth_token` in `components/identity/identity.c`; the
 generation call sites run only after Wi-Fi or BT RF init, when
 `esp_random` is fully entropic). The WebSocket upgrade accepts
-`Authorization: Bearer <token>`, or `?token=` as the query parameter that
-is the only mechanism available to browser WebSocket clients (header auth
-is preferred for everything else because URLs leak into logs and
-history). The Wi-Fi config POST endpoint is gated by the same token,
+`Authorization: Bearer <token>`; browser WebSocket clients, which cannot
+set headers, instead carry the token in the `Sec-WebSocket-Protocol`
+subprotocol offer (`bramble.v1.auth.<token>`, `ws_auth_extract_token` in
+`main/ws_auth_credential.c`). There is no `?token=` query parameter:
+that path was removed (NEW-SEC-6) because URLs leak into logs, proxies,
+and history. The Wi-Fi config POST endpoint is gated by the same token,
 accepted as a form field so the AP-mode setup portal can submit it, and
 posts that do not prove the token must additionally pass a CSRF check:
 an Origin header gets the full origin policy below, a Referer without an
@@ -481,8 +489,10 @@ What ships:
 - **Verified TOFU pinning with conflict detection.** Each receiver
   Ed25519-verifies the delivered frame against its own embedded key and
   pins the first verified binding per address
-  (`components/identity/identity_store.c`, RAM-only, 32 entries, LRU by
-  re-confirmation). A later attestation for a pinned address under
+  (`components/identity/identity_store.c`, 32 entries, LRU by
+  re-confirmation; bindings and their verified bits persist to NVS via
+  `mesh_pin_store_save`/`_load`, so pins survive reboot). A later
+  attestation for a pinned address under
   different keys is a refused, counted CONFLICT: first seen wins.
 - **Address-key binding.** Because the address
   derives from the Ed25519 key, `identity_store_handle_attestation` also
@@ -512,8 +522,10 @@ and on an **ANCHORED** mesh Sybil scarcity is CLOSED (pinning requires an
 anchor endorsement a Sybil cannot forge; see section 5's NEW-SEC-4 close),
 but on an **un-anchored** mesh identities remain **free to mint** (no cost
 function; quorum gating only raises the bar to "must attest and be pinned"
-outside a bounded per-boot grace); pins are **RAM-only** and reset on reboot,
-re-established by TOFU; DM continuity has a **first-contact window** until the
+outside a bounded per-boot grace); pins and their verified bits persist in
+**plaintext NVS** and are restored at boot, so TOFU re-establishes them
+only on a fresh device or a rejected pin blob; DM continuity has a
+**first-contact window** until the
 peer's attestation is heard and pinned, after which a disagreeing pin tears
 the stale TOFU session down (`dm_session_teardown`); identity keys sit
 in **plaintext NVS** (section 4's physical-capture item); a keyed insider can
@@ -1057,9 +1069,10 @@ same PR that fixes it.
   `sdkconfig` has `CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_NVS_ENCRYPTION`,
   and `CONFIG_SECURE_BOOT` all unset).
 - **The WebSocket transport is plaintext HTTP on port 80**, so an on-path
-  LAN attacker reads all RPC traffic including the bearer token; the
-  `?token=` query parameter that browser clients must use additionally
-  leaks via URL logs and browser history (`main/ws_server.c`).
+  LAN attacker reads all RPC traffic including the bearer token;
+  credentials travel only in headers (an `Authorization` header, or for
+  browser clients a `Sec-WebSocket-Protocol` subprotocol offer), never in
+  the URL (`main/ws_server.c`).
 - **OTA signatures are enforced at update time, not at boot.** Images are
   signed and verified on every OTA write, the update origin is allowlisted,
   and a soft anti-rollback floor rejects downgrades, but without burned
@@ -1078,7 +1091,7 @@ same PR that fixes it.
   inherent and accepted). Unprovisioned, the node is inert and neither
   sends nor accepts beacons, so no flush can be triggered at all.
 - **Beacons broadcast node name, battery percentage, uptime, neighbor count,
-  and mailbox capability in cleartext** (`mesh_send_beacon` in
+  and mailbox capability in cleartext** (`send_beacon` in
   `main/mesh_task.c`).
 - **DATA's `auth_hmac` (wire v4, section 3) has no freshness or replay
   window**, unlike RREP/RERR/ACK/delivery-receipt/beacon's `seq`. A
@@ -1228,7 +1241,10 @@ These do not go away when section 4 empties out.
   zero verified pins corroborate time from any established peer forever,
   so an unattested or Sybil node could dominate the quorum and skew the
   mesh clock indefinitely. The window is bounded to a fresh mesh's
-  first few minutes post-boot (pins are RAM-only, so also post-reboot),
+  first few minutes post-boot (the grace timer is per-boot, but pins
+  persist to NVS, so a rebooting node with enough persisted pins comes
+  back up with the unpinned window effectively already closed; only a
+  genuinely fresh node re-opens it),
   which is enough for a real mesh to bootstrap timesync before any
   attestation is verified but shuts permanently once the grace ends.
   Because every node attests on boot and every 15 minutes, genuine pins
@@ -1368,8 +1384,9 @@ These do not go away when section 4 empties out.
   tracked as follow-up hardening (section 3, section 4), not closed here.
 - **DM SAS verification has a UX; it only helps if used.** An identity-bound 7-digit safety
   number is surfaced for out-of-band comparison in the web client and the
-  T-Deck graphical build, with the verified bit and a key-change re-verify
-  prompt persisted per contact (see "Out-of-band verification (SAS)" above).
+  T-Deck graphical build, with the verified bit persisted per contact and
+  a re-verify prompt raised on a genuine key change (see "Out-of-band
+  verification (SAS)" above).
   The residual is narrower but real: a first-contact MitM is still only
   detected if the two users actually compare the number. The safety number
   can be compared and confirmed on the e-paper pager itself (Nodes screen),
@@ -1419,8 +1436,8 @@ These do not go away when section 4 empties out.
   `label || data` concatenation is not length-prefixed, which would be
   ambiguous for attacker-chosen labels, but every label is a fixed,
   prefix-free internal constant (`"bramble-rrep-v2"`, `"bramble-rerr-v2"`,
-  `"bramble-ack-v2"`, `"bramble-receipt-v2"`, `"bramble-beacon-v2"`,
-  `"bramble-data-v1"`), so this is not reachable. ACK and
+  `"bramble-ack-v2"`, `"bramble-receipt-v2"`, `"bramble-data-v1"`,
+  `"bramble-ident-relay-v1"`), so this is not reachable. ACK and
   delivery-receipt `relay_path` and `hop_count` remain intentionally
   unauthenticated (they are per-hop telemetry, not security-relevant), so a
   malicious relay along the legitimate forwarding path can still tamper with
