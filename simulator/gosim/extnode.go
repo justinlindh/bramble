@@ -123,7 +123,6 @@ type extConn struct {
 
 	node string // hello id
 	addr uint32
-	freq int // last tx carrier, echoed on rx
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -460,7 +459,6 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if msg.Freq != 0 {
-		ec.freq = msg.Freq
 		s.emuFreq = msg.Freq // single-channel ether: remember the carrier for rx
 	}
 	node := C.node_array_find_by_addr(&s.nodes, C.uint32_t(ec.addr))
