@@ -27,7 +27,6 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     outputs:
       firmware: ${{ steps.detect.outputs.firmware }}
@@ -124,7 +123,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -138,7 +136,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -152,13 +149,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install actionlint
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
-          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Assert actionlint is pre-baked on the runner
+        run: command -v actionlint >/dev/null || { echo "::error::actionlint missing from runner image"; exit 1; }
       - name: Run actionlint on firmware-quality workflow
         run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/firmware-quality.yml
