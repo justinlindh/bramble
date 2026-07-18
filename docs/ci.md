@@ -12,7 +12,7 @@ Three workflows gate pull requests, plus one reusable helper they all call:
 | --- | --- |
 | `_detect-changes.yml` | Reusable (`workflow_call`) change-detection. Emits boolean area outputs. Never gates anything; called once per gating workflow. |
 | `firmware-quality.yml` | The single-pod `Static checks` bundle (every cheap lint/static check) plus the change detector. |
-| `quality.yml` | The heavy firmware/emulator compute jobs: host tests, gosim, the board build smoke, and the advisory emulator suite. |
+| `quality.yml` | The heavy firmware/emulator compute jobs: host tests, gosim, the board build smoke, and the emulator suite. |
 | `webapp-quality.yml` | The consolidated webapp job (one `npm ci`, all webapp checks) plus the web-flasher tests. |
 
 Publish-oriented workflows (`firmware-build.yml`, `firmware-publish-ota.yml`,
@@ -168,22 +168,30 @@ pass trivially when their scope did not change.
 | `Host tests` | `firmware` or `workflows` | yes |
 | `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
 | `Board build smoke (heltec-v3)` | not a `pull_request` event, and (`firmware` or `workflows`) | post-merge required (see quality-policy.md) |
-| `Emulator suite (advisory)` | `firmware`, `simulator`, `emulator`, or `workflows` | no (advisory) |
+| `Emulator suite` | `firmware`, `simulator`, `emulator`, or `workflows` | yes |
 
-`Emulator suite (advisory)` merges the former `emulator-scenarios` and
-`emulator-e2e` jobs into one job that builds the linux firmware node, gosim, and
-the UI once, then runs the headless scenario suite followed by the browser E2E.
-It now runs on PRs too (it used to be gated off `pull_request`), giving signal
-on every change while staying non-required so it never blocks a merge. Its two
-scenarios run sequentially inside `emulator/ci/run_scenarios.sh`: they are
-isolated (each gosim process keys its socket path and node-state dir to its own
-PID, so there is no port or state collision), but running both at once put five
-wall-clock firmware nodes on the runner simultaneously and the CPU contention
-starved their real-time windows, which was a flake source. `emu-dm-desync` is
-deterministic (the desynced session state is constructed, not raced) and runs
-once with no retry; `emu-channel-delivery` keeps a 2-attempt budget for its
-residual render-window jitter. The browser E2E step is `continue-on-error`
-while it bakes, so an E2E failure does not fail even the advisory job.
+`Emulator suite` merges the former `emulator-scenarios` and `emulator-e2e`
+jobs into one job that builds the linux firmware node, gosim, and the UI once,
+then runs the headless scenario suite followed by the browser E2E. Both suites
+gate the job via a collect-then-fail pattern: the two suite steps carry
+`continue-on-error: true` purely as an error-collection mechanism (so one run
+always reports both suites' results, even when the first fails), and the
+terminal `Fail if any suite failed` step turns either step's failure into the
+job failure the required context sees. There is no advisory tier: every check
+in the job gates.
+
+The two scenarios run sequentially inside `emulator/ci/run_scenarios.sh`: they
+are isolated (each gosim process keys its socket path and node-state dir to its
+own PID, so there is no port or state collision), but running both at once put
+five wall-clock firmware nodes on the runner simultaneously and the CPU
+contention starved their real-time windows, which was a flake source.
+`emu-dm-desync` is deterministic (the desynced session state is constructed,
+not raced) and runs once with no retry. `emu-channel-delivery` runs once with
+an event-driven render wait: the script widens gosim's real-time cap
+(`EMU_SCENARIO_DURATION_MS`) and polls the growing headless log for the render
+marker, exiting the moment both receivers have painted, so a fast box finishes
+in seconds and a CPU-starved runner pod gets the time it needs; there is no
+retry loop.
 
 `Board build smoke` keeps its `github.event_name != 'pull_request'` guard: the
 ESP-IDF board build is heavy and validates post-merge on pushes to `main`. It
