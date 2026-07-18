@@ -1005,7 +1005,7 @@ properties matter here.
 `auth_hmac` (the DATA reverse-route section above), verified by
 `data_auth_verify` before a relay will rebroadcast it, so only a network-key
 holder's traffic propagates. The flooded ACK is verified twice before relay:
-`ack_verify` (network-key MAC) and the ws-1.3b per-message freshness check
+`ack_verify` (network-key MAC) and the per-message freshness check
 against the control-replay window (the control-plane section above), so a
 forged or replayed ACK is neither relayed nor allowed to confirm anything.
 
