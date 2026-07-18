@@ -101,6 +101,24 @@ every node) so they can send and receive channel traffic; per-node identity
 stays unique. Provisioning uses the real `network_key_set_provisioned` path,
 not a MAC-bypassing shortcut.
 
+## Fidelity caveat: task priorities are flattened
+
+On the linux target every FreeRTOS task runs at ONE priority
+(`emulator/node/emu_task_flatten.c`, linker-wrapped task creation). This is a
+deliberate tradeoff: the IDF linux port runs task pthreads that share glibc's
+internal locks (stdio, malloc), which do not exist on real hardware, and with
+unequal priorities a preempted lock holder plus a higher-priority futex-blocked
+waiter permanently freezes the whole node (observed repeatedly in CI as silent
+"mute node" wedges). Flattening turns that freeze class into bounded stalls.
+
+The consequence, stated loudly: **the emulator cannot surface genuine
+priority-starvation bugs in bramble's task design.** A firmware change that
+would starve a low-priority task on device runs happily here. That bug class
+is hardware-only detection now; validate priority-sensitive changes on bench
+devices. Device builds keep their true priorities. A longer-term alternative
+(FreeRTOS-aware lock shims or a port-level fix) is tracked in the emulator
+reliability follow-up issue.
+
 ## CI-equivalent scenario suite
 
 ```

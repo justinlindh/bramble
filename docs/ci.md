@@ -196,7 +196,10 @@ polls the growing headless log for the render marker, exiting the moment both
 receivers have painted, so a fast box finishes in seconds and a CPU-starved
 runner pod gets the time it needs; there is no retry loop. Failed scenarios
 dump a post-mortem (attach/join/death events, per-node framebuffer counts, log
-tail) so pod-only failures stay debuggable.
+tail) so pod-only failures stay debuggable. Note the emulator's scheduling
+fidelity caveat (emulator/README.md): linux-target task priorities are
+flattened for liveness, so genuine priority-starvation bugs are hardware-only
+detection; this suite cannot catch them.
 
 `Board build smoke` keeps its `github.event_name != 'pull_request'` guard: the
 ESP-IDF board build is heavy and validates post-merge on pushes to `main`. It

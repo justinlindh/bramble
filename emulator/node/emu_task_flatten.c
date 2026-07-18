@@ -18,11 +18,23 @@
  * priorities the preempted holder stays in the round-robin rotation, so the
  * worst case is a bounded stall instead of a permanent freeze.
  *
- * Real-time fidelity cost: a formerly high-priority task (radio, mesh) can
- * now wait up to a time slice behind any other ready task. The emulator
- * already runs on a wall clock with approximate timing, and every scenario
- * assertion is event-driven, so this trade is sound here. Device builds
- * never compile this file and keep their true priorities.
+ * Real-time fidelity cost, STATED LOUDLY: a formerly high-priority task
+ * (radio, mesh) can now wait up to a time slice behind any other ready
+ * task, and, more importantly, THE EMULATOR CANNOT SURFACE GENUINE
+ * PRIORITY-STARVATION BUGS in bramble's task design: a firmware change that
+ * would starve a low-priority task on real hardware runs happily here,
+ * because here every task shares one priority. That bug class is
+ * hardware-only detection now (bench devices), by choice: the priority
+ * semantics the port offered were already unfaithful, since the freeze
+ * class above does not exist on target (no glibc locks there), so this
+ * trades fake fidelity for guaranteed liveness. The same caveat lives in
+ * emulator/README.md. The emulator already runs on a wall clock with
+ * approximate timing and every scenario assertion is event-driven, so the
+ * latency cost is sound here. Device builds never compile this file and
+ * keep their true priorities. The longer-term alternative (FreeRTOS-aware
+ * lock shims, or a port-level fix upstream) is recorded in the follow-up
+ * issue for this bug family; flattening is a chosen tradeoff, not a hidden
+ * one.
  *
  * Mechanism: the emulator link wraps the task-creation APIs (see
  * null_drivers/CMakeLists.txt's --wrap options) and clamps every requested
