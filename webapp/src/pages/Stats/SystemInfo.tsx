@@ -19,7 +19,6 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
-
 async function copyWithFallback(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
