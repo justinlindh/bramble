@@ -5,7 +5,11 @@
 void rreq_rate_init(rreq_rate_limiter_t* rl) { memset(rl, 0, sizeof(*rl)); }
 
 bool rreq_rate_allow(rreq_rate_limiter_t* rl, uint32_t neighbor, uint32_t dest, uint32_t now_ms) {
-    // Look for existing entry
+    int stale = -1;
+    // Look for an existing entry, and along the way remember the first slot
+    // whose cooldown has fully elapsed. Such a slot would itself be allowed
+    // right now, so it can be reused for a new pair without weakening rate
+    // limiting for the pair it held.
     for (int i = 0; i < rl->count; i++) {
         if (rl->entries[i].neighbor_addr == neighbor && rl->entries[i].dest_addr == dest) {
             uint32_t elapsed = now_ms - rl->entries[i].last_rreq_ms;
@@ -15,15 +19,30 @@ bool rreq_rate_allow(rreq_rate_limiter_t* rl, uint32_t neighbor, uint32_t dest, 
             rl->entries[i].last_rreq_ms = now_ms;
             return true;
         }
+        if (stale < 0 && (now_ms - rl->entries[i].last_rreq_ms) >= RREQ_RATE_LIMIT_MS) {
+            stale = i;
+        }
     }
 
-    // New entry
+    // New pair: use a free slot, else reclaim a stale one. Reclaiming matters
+    // because entries are never otherwise removed: without it, an attacker
+    // cycling distinct destinations permanently fills all RREQ_RATE_ENTRIES
+    // slots, after which every later new pair hits the "table full" path and
+    // per-pair rate limiting is silently disabled for good.
+    int slot;
     if (rl->count < RREQ_RATE_ENTRIES) {
-        rl->entries[rl->count].neighbor_addr = neighbor;
-        rl->entries[rl->count].dest_addr = dest;
-        rl->entries[rl->count].last_rreq_ms = now_ms;
-        rl->count++;
+        slot = rl->count++;
+    } else if (stale >= 0) {
+        slot = stale;
+    } else {
+        // Table full of pairs still within their cooldown window. The global
+        // rreq_fwd token bucket remains the aggregate backstop, so fail open
+        // here rather than evicting a live per-pair limiter.
+        return true;
     }
+    rl->entries[slot].neighbor_addr = neighbor;
+    rl->entries[slot].dest_addr = dest;
+    rl->entries[slot].last_rreq_ms = now_ms;
     return true;
 }
 
