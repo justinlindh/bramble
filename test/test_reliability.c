@@ -94,6 +94,46 @@ void test_pending_ack_table_full(void) {
     TEST_ASSERT_GREATER_OR_EQUAL(0, retry);
 }
 
+/* A maximum-size DATA frame (the sender caps total at 255 bytes) must be
+ * stored verbatim: packet_len must equal the bytes actually copied so that
+ * every retransmit consumer reads within packet_data. Under ASAN a stored
+ * length larger than the buffer would surface as an out-of-bounds read here
+ * (mirroring mesh_tx / the simulator bridge reading packet_len bytes back). */
+void test_pending_ack_stores_full_frame_without_overrun(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+
+    uint8_t frame[PENDING_ACK_MAX_FRAME];
+    for (int i = 0; i < PENDING_ACK_MAX_FRAME; i++) {
+        frame[i] = (uint8_t)(i & 0xFF);
+    }
+
+    int idx = pending_ack_add(&table, 0xC0DE, 0x2222, MSG_TIER_CRITICAL, frame,
+                              (uint16_t)sizeof(frame), 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+
+    pending_ack_t* e = &table.entries[idx];
+    TEST_ASSERT_EQUAL_UINT16(PENDING_ACK_MAX_FRAME, e->packet_len);
+    /* Read back exactly packet_len bytes, as the retransmit path does. */
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(frame, e->packet_data, e->packet_len);
+}
+
+/* An over-long length must never make packet_len exceed the buffer: the
+ * recorded length is clamped to what fits, keeping the invariant
+ * packet_len <= sizeof(packet_data) that every consumer relies on. */
+void test_pending_ack_clamps_oversized_length(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+
+    uint8_t frame[PENDING_ACK_MAX_FRAME];
+    memset(frame, 0xAB, sizeof(frame));
+
+    int idx = pending_ack_add(&table, 0xBEEF, 0x3333, MSG_TIER_NORMAL, frame,
+                              (uint16_t)(PENDING_ACK_MAX_FRAME + 40), 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+    TEST_ASSERT_EQUAL_UINT16(PENDING_ACK_MAX_FRAME, table.entries[idx].packet_len);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
@@ -101,5 +141,7 @@ int main(void) {
     RUN_TEST(test_key_exchange_send_path_uses_critical_tier);
     RUN_TEST(test_non_key_exchange_send_path_uses_normal_tier);
     RUN_TEST(test_pending_ack_table_full);
+    RUN_TEST(test_pending_ack_stores_full_frame_without_overrun);
+    RUN_TEST(test_pending_ack_clamps_oversized_length);
     return UNITY_END();
 }
