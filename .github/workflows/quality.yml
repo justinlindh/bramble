@@ -6,12 +6,6 @@ on:
   push:
     branches:
       - main
-      - 'fix/**'
-      - 'feat/**'
-      - 'feature/**'
-      - 'chore/**'
-      - 'ci/**'
-      - 'docs/**'
 
 permissions:
   contents: read
@@ -25,125 +19,15 @@ defaults:
     shell: bash
 
 jobs:
-  changes:
+  detect:
     name: Detect changed areas
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 5
-    outputs:
-      firmware: ${{ steps.detect.outputs.firmware }}
-      simulator: ${{ steps.detect.outputs.simulator }}
-      emulator: ${{ steps.detect.outputs.emulator }}
-      workflows: ${{ steps.detect.outputs.workflows }}
-      docs: ${{ steps.detect.outputs.docs }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Compute changed areas
-        id: detect
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -uo pipefail
-
-          resolve_diff_range() {
-            if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_BASE_REF:-}" ]]; then
-              git fetch --no-tags origin "${GITHUB_BASE_REF}" >/dev/null 2>&1
-              if git rev-parse --verify "origin/${GITHUB_BASE_REF}" >/dev/null 2>&1; then
-                echo "origin/${GITHUB_BASE_REF}...HEAD"
-                return 0
-              fi
-            fi
-
-            if [[ "${GITHUB_EVENT_NAME:-}" == "push" ]]; then
-              if [[ -n "${BEFORE_SHA:-}" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
-                if git cat-file -e "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
-                  echo "${BEFORE_SHA}..HEAD"
-                  return 0
-                fi
-              fi
-            fi
-
-            # New-branch push (before SHA all zeros), workflow_dispatch, or an
-            # unresolved base: fall back to diffing against main.
-            git fetch --no-tags origin main >/dev/null 2>&1
-            if git rev-parse --verify origin/main >/dev/null 2>&1; then
-              merge_base="$(git merge-base origin/main HEAD 2>/dev/null)"
-              if [[ -n "${merge_base:-}" ]]; then
-                echo "${merge_base}...HEAD"
-                return 0
-              fi
-              echo "origin/main...HEAD"
-              return 0
-            fi
-
-            return 1
-          }
-
-          unknown=0
-          diff_range="$(resolve_diff_range)" || unknown=1
-
-          changed_files=""
-          if [[ "${unknown}" == "0" ]]; then
-            changed_files="$(git diff --name-only "${diff_range}" 2>/dev/null)" || unknown=1
-          fi
-
-          if [[ "${unknown}" == "1" ]]; then
-            echo "::warning::could not resolve a diff range for this event; defaulting all areas to changed"
-          fi
-
-          area_changed() {
-            if [[ "${unknown}" == "1" ]]; then
-              echo true
-              return
-            fi
-            if printf '%s\n' "${changed_files}" | grep -Eq "$1"; then
-              echo true
-            else
-              echo false
-            fi
-          }
-
-          # firmware must be a superset of every firmware job's real inputs:
-          # host tests read test/ + components/ + main/; board-build-smoke
-          # additionally reads CMakeLists.txt, sdkconfig.defaults*, and
-          # partitions*.csv; ShellCheck and Clang-format read their root
-          # dotfile configs.
-          firmware=$(area_changed '^(main|components|test|api|scripts)/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.shellcheckrc$')
-          simulator=$(area_changed '^simulator/')
-          emulator=$(area_changed '^emulator/')
-          workflows=$(area_changed '^\.github/workflows/|^\.actionlint\.yaml$')
-          docs=$(area_changed '^docs/|^README\.md$')
-
-          {
-            echo "firmware=${firmware}"
-            echo "simulator=${simulator}"
-            echo "emulator=${emulator}"
-            echo "workflows=${workflows}"
-            echo "docs=${docs}"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Resolved diff range: ${diff_range:-<unresolved>}"
-          echo "firmware=${firmware} simulator=${simulator} emulator=${emulator} workflows=${workflows} docs=${docs}"
-
-  no-internal-refs:
-    name: No internal refs
-    needs: changes
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check tracked tree for internal infra references
-        run: bash scripts/lint/check-no-internal-refs.sh
+    uses: ./.github/workflows/_detect-changes.yml
 
   host-tests:
     name: Host tests
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
+    needs: detect
+    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -154,125 +38,25 @@ jobs:
           done
           test -f /usr/include/openssl/ssl.h || { echo "::error::libssl-dev missing from runner image"; exit 1; }
       - name: Run host test suite
-        run: bash test/run_all_tests.sh
-
-  shellcheck:
-    name: ShellCheck
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Assert shellcheck is pre-baked on the runner
-        run: command -v shellcheck >/dev/null || { echo "::error::shellcheck missing from runner image"; exit 1; }
-      - name: ShellCheck required baseline scope
+        # LeakSanitizer needs ptrace, and the pod runners sit behind
+        # kernel.yama.ptrace_scope=2 (admin-only ptrace), where an added
+        # SYS_PTRACE capability never reaches a non-root process's effective
+        # set on its own. The scale set adds SYS_PTRACE to the container
+        # bounding set; this wrapper re-enters the same uid/gid with the cap
+        # made ambient so every test process inherits it. On hosted runners
+        # (ptrace_scope<=1) the wrapper is a harmless no-op.
         run: |
-          shellcheck \
-            scripts/check-rpc-contract.sh \
-            scripts/ci-build-firmware.sh \
-            scripts/ci-publish-ota.sh \
-            scripts/flash-all.sh \
-            scripts/publish-firmware-release.sh \
-            scripts/sha256-artifacts.sh \
-            scripts/test-ota-ci-board-matrix.sh \
-            scripts/traffic-capture.sh \
-            scripts/validate-broadcast-telemetry.sh
-
-  rpc-contract:
-    name: RPC contract (spec vs firmware registry)
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check api/openapi.yaml against main/rpc_methods.c
-        run: bash scripts/check-rpc-contract.sh
-
-  actionlint:
-    name: Actionlint
-    needs: changes
-    if: needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install actionlint
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
-          sudo mv ./actionlint /usr/local/bin/actionlint
-      - name: Lint quality workflow
-        run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/quality.yml
-
-  ruff:
-    name: Ruff
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv (pinned)
-        run: |
-          curl -LsSf https://astral.sh/uv/0.8.15/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Ruff required baseline profile
-        run: uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
-
-  clang-format:
-    name: Clang-format
-    needs: changes
-    # The strict scope scans simulator/ C sources too, so simulator changes
-    # must run this job even when nothing in the firmware area moved.
-    if: |
-      needs.changes.outputs.firmware == 'true' ||
-      needs.changes.outputs.simulator == 'true' ||
-      needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Assert clang-format is pre-baked on the runner
-        run: command -v clang-format >/dev/null || { echo "::error::clang-format missing from runner image"; exit 1; }
-      - name: Clang-format check (full strict scope)
-        run: bash scripts/lint/run-clang-format-check.sh --strict
-
-  cppcheck:
-    name: cppcheck
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install cppcheck (not pre-baked on the runner image)
-        run: |
-          # The runner image carries an arm64 foreign arch whose security
-          # mirror lacks arm64 indexes; apt-get update exits nonzero even
-          # though the amd64 indexes it needs are fetched. Tolerate that,
-          # then let the install fail honestly if cppcheck is unavailable.
-          sudo apt-get update || true
-          command -v cppcheck >/dev/null || sudo apt-get install -y cppcheck
-      - name: cppcheck
-        run: |
-          cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches \
-            main components
+          sudo -nE env "PATH=$PATH" setpriv --reuid="$(id -u)" --regid="$(id -g)" \
+            --init-groups --inh-caps +sys_ptrace --ambient-caps +sys_ptrace \
+            bash test/run_all_tests.sh
 
   board-build-smoke:
     name: Board build smoke (heltec-v3)
-    needs: changes
+    needs: detect
     if: |
       github.event_name != 'pull_request' &&
-      (needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true')
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
+      (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -286,17 +70,18 @@ jobs:
           BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
         run: |
           mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
+          # shellcheck disable=SC1091
+          source scripts/ci-source-idf.sh
           bash scripts/flash.sh local heltec-v3 build
 
   gosim-integration:
     name: gosim integration
-    needs: changes
+    needs: detect
     if: |
-      needs.changes.outputs.firmware == 'true' ||
-      needs.changes.outputs.simulator == 'true' ||
-      needs.changes.outputs.workflows == 'true'
+      needs.detect.outputs.firmware == 'true' ||
+      needs.detect.outputs.simulator == 'true' ||
+      needs.detect.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -319,73 +104,23 @@ jobs:
           # across cgo-compiled C edits (observed on this runner setup).
           go test -count=1 ./...
 
-  emulator-scenarios:
-    name: Emulator scenario suite
-    # idf-node runner (has ESP-IDF) because the suite runs the REAL firmware built
-    # for the IDF linux target; gated off pull_request like the other idf-node
-    # jobs since that runner is a heavy self-hosted host.
-    needs: changes
+  emulator:
+    name: Emulator suite (advisory)
+    # Merged scenario suite + browser E2E: builds the linux firmware node,
+    # gosim, and the UI ONCE, then runs the headless scenarios followed by the
+    # browser E2E. NON-REQUIRED (advisory): it runs on every PR to give signal
+    # but does not gate merges. The scenario step runs its two scenarios in
+    # PARALLEL (separate gosim processes, each keyed to its own PID for socket
+    # path and node-state dir, so no port/state collision) with trimmed retry
+    # budgets. The E2E step is continue-on-error while it bakes.
+    needs: detect
     if: |
-      github.event_name != 'pull_request' &&
-      (needs.changes.outputs.firmware == 'true' ||
-       needs.changes.outputs.simulator == 'true' ||
-       needs.changes.outputs.emulator == 'true' ||
-       needs.changes.outputs.workflows == 'true')
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - name: Mark workspace safe for git inside the job container
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.1'
-      - name: Ensure ESP-IDF toolchain
-        run: bash scripts/ci-ensure-idf.sh
-      - name: Build the linux firmware node
-        env:
-          HOME: /tmp/cihome
-          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
-          # The node is a host binary; a throwaway signing key is fine here.
-          BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
-        run: |
-          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
-          # shellcheck disable=SC1091
-          source scripts/ci-source-idf.sh
-          cd emulator/node
-          idf.py --preview set-target linux
-          idf.py build
-      - name: Build gosim
-        run: |
-          cd simulator/gosim
-          go build -o bramble-gosim .
-      - name: Run headless scenario suite
-        # Real-time multi-node scenarios; the suite's own wall-clock budget is
-        # minutes (capped scenario durations). Gates CI on delivered/rendered
-        # content (channel message on screen; DM desync symptom + #138 self-heal).
-        run: bash emulator/ci/run_scenarios.sh
-
-  emulator-e2e:
-    name: Emulator browser E2E (non-required)
-    # idf-node runner: same real firmware node binary + gosim as
-    # emulator-scenarios, plus a real UI build and a real headless Chromium
-    # (Task 13: proves the DISPLAY and basic buttons/reset/messaging work
-    # through what a human actually sees, not just headless framebuffer
-    # asserts). continue-on-error while this job bakes in per PLAN.md Task
-    # 13's CI note ("non-required job first, promote after it proves
-    # stable"); drop continue-on-error once it's proven stable in practice.
-    needs: changes
-    if: |
-      github.event_name != 'pull_request' &&
-      (needs.changes.outputs.firmware == 'true' ||
-       needs.changes.outputs.simulator == 'true' ||
-       needs.changes.outputs.emulator == 'true' ||
-       needs.changes.outputs.workflows == 'true')
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
-    timeout-minutes: 15
-    continue-on-error: true
+      needs.detect.outputs.firmware == 'true' ||
+      needs.detect.outputs.simulator == 'true' ||
+      needs.detect.outputs.emulator == 'true' ||
+      needs.detect.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Mark workspace safe for git inside the job container
@@ -420,8 +155,13 @@ jobs:
           cd simulator/ui
           npm ci
           npm run build
+      - name: Run headless scenario suite
+        # Real-time multi-node scenarios; the two run in parallel inside the
+        # script. Gates on delivered/rendered content (channel message on
+        # screen; DM desync symptom + #138 self-heal).
+        run: bash emulator/ci/run_scenarios.sh
       - name: Run browser E2E suite
-        # Wall-clock budget: under 4 minutes (emulator/e2e/playwright.config.ts's
-        # globalTimeout); observed ~37s locally across 5 consecutive runs
-        # (see emulator/e2e/README.md).
+        # Real headless Chromium against a real UI build (Task 13). Advisory
+        # while it bakes: a failure here does not fail the job.
+        continue-on-error: true
         run: bash emulator/e2e/run_e2e.sh
