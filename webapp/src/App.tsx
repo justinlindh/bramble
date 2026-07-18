@@ -3,6 +3,7 @@ import { useStore } from './store/index';
 import { disconnect, loadConnectionCapabilities, loadNeighbors, loadNetworkKeyStatus } from './store/actions';
 import { usePoll } from './hooks/usePoll';
 import { isAndroidShell } from './utils/platform';
+import { formatAddr0x } from './utils/address';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { DevicePickerModal } from './components/DevicePickerModal';
 import { UnprovisionedBanner } from './components/UnprovisionedBanner';
@@ -162,7 +163,7 @@ export default function App() {
     }
     // Fallback to hex address
     if (config.identity.address) {
-      return `0x${config.identity.address.toString(16).toUpperCase().padStart(8, '0')}`;
+      return formatAddr0x(config.identity.address);
     }
     return null;
   };

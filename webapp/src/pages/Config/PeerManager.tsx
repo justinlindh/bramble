@@ -6,6 +6,7 @@ import { useRef, useState, useMemo } from 'react';
 import type { Neighbor, Route } from '../../types/bramble';
 import { useStore } from '../../store/index';
 import { AddressLabel } from '../../components/AddressLabel';
+import { formatAddrHex, formatAddr0x } from '../../utils/address';
 import styles from './PeerManager.module.css';
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
@@ -57,10 +58,6 @@ function loadNotes(): Map<number, string> {
 
 function saveNotes(m: Map<number, string>): void {
   saveStringMap(LS_NOTES_KEY, m);
-}
-
-function toHex(addr: number): string {
-  return addr.toString(16).toUpperCase().padStart(8, '0');
 }
 
 function formatAgo(ms: number): string {
@@ -283,7 +280,7 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     if (addName.trim()) {
       handleSaveName(addr, addName.trim());
     }
-    const hex = `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+    const hex = formatAddr0x(addr);
     const label = addName.trim() || hex;
     setAddSuccess(`Name saved for ${label} — will appear in chat when discovered on mesh.`);
     setAddAddr('');
@@ -296,7 +293,7 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     names.forEach((name, addr) => {
       if (!name) return;
       const note = notes.get(addr)?.trim();
-      contacts[toHex(addr)] = note ? { name, note } : { name };
+      contacts[formatAddrHex(addr)] = note ? { name, note } : { name };
     });
 
     const payload: ContactsExport = {

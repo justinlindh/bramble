@@ -5,12 +5,9 @@ import { usePoll } from '../../hooks/usePoll';
 import { NeighborCard } from './NeighborCard';
 import { RouteTable } from './RouteTable';
 import { IconNodes, IconRoutes } from '../../components/Icons';
+import { formatAddr0x } from '../../utils/address';
 import styles from './Nodes.module.css';
 import { buildKnownPeers } from './knownPeers';
-
-function formatAddr(addr: number): string {
-  return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
-}
 
 export function Nodes() {
   const neighbors = useStore((s) => s.neighbors);
@@ -69,8 +66,8 @@ export function Nodes() {
               return (
                 <li key={peer.addr} className={styles.knownRow}>
                   <div className={styles.knownIdentity}>
-                    <strong>{name || formatAddr(peer.addr)}</strong>
-                    <span className={styles.knownAddr}>{formatAddr(peer.addr)}</span>
+                    <strong>{name || formatAddr0x(peer.addr)}</strong>
+                    <span className={styles.knownAddr}>{formatAddr0x(peer.addr)}</span>
                   </div>
                   <div className={styles.knownSource}>
                     {peer.hasNeighbor ? (

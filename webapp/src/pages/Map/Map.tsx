@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { useStore } from '../../store/index';
 import type { PeerLocation, Route } from '../../types/bramble';
 import { IconRoutes } from '../../components/Icons';
+import { formatAddr0x } from '../../utils/address';
 import styles from './Map.module.css';
 
 // Fix Leaflet default icon paths broken by bundlers
@@ -55,13 +56,8 @@ export function gridSquareBounds(grid: string): L.LatLngBoundsExpression | null 
   ];
 }
 
-/** Format address as full hex */
-export function fmtAddr(addr: number): string {
-  return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
-}
-
 function nodeLabel(addr: number, name?: string): string {
-  const hex = fmtAddr(addr);
+  const hex = formatAddr0x(addr);
   return name ? `${name} (${hex})` : hex;
 }
 
