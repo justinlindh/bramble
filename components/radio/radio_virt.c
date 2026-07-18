@@ -503,7 +503,15 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
          * handshake). The real SX1262 driver treats a missing TX-done IRQ as
          * fatal because there the frame really may not have left the chip;
          * the virtual radio's contract is the opposite, so warn and count
-         * the TX as sent. */
+         * the TX as sent.
+         *
+         * s_txdone_outstanding is intentionally NOT decremented here: gosim
+         * always schedules the late txdone eventually (scheduleBrokerAction
+         * in extnode.go), so the counter self-corrects when it lands. Under
+         * sustained broker lag each unresolved timeout carries +1 of debt,
+         * making subsequent sends wait the full timeout until the backlog
+         * drains; that slower-but-correct pacing is expected and absorbed
+         * by the scenario budgets. */
         ESP_LOGW(TAG,
                  "txdone still pending after %ums; counting TX as sent (virtual ether delivers at "
                  "tx start)",
