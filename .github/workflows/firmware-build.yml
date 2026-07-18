@@ -17,8 +17,7 @@ defaults:
 
 jobs:
   firmware-build:
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

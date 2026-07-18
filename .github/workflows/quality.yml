@@ -28,7 +28,6 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     outputs:
       firmware: ${{ steps.detect.outputs.firmware }}
@@ -131,7 +130,6 @@ jobs:
     name: No internal refs
     needs: changes
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -143,7 +141,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -154,14 +151,23 @@ jobs:
           done
           test -f /usr/include/openssl/ssl.h || { echo "::error::libssl-dev missing from runner image"; exit 1; }
       - name: Run host test suite
-        run: bash test/run_all_tests.sh
+        # LeakSanitizer needs ptrace, and the pod runners sit behind
+        # kernel.yama.ptrace_scope=2 (admin-only ptrace), where an added
+        # SYS_PTRACE capability never reaches a non-root process's effective
+        # set on its own. The scale set adds SYS_PTRACE to the container
+        # bounding set; this wrapper re-enters the same uid/gid with the cap
+        # made ambient so every test process inherits it. On hosted runners
+        # (ptrace_scope<=1) the wrapper is a harmless no-op.
+        run: |
+          sudo -nE env "PATH=$PATH" setpriv --reuid="$(id -u)" --regid="$(id -g)" \
+            --init-groups --inh-caps +sys_ptrace --ambient-caps +sys_ptrace \
+            bash test/run_all_tests.sh
 
   shellcheck:
     name: ShellCheck
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -185,7 +191,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -197,14 +202,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install actionlint
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
-          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Assert actionlint is pre-baked on the runner
+        run: command -v actionlint >/dev/null || { echo "::error::actionlint missing from runner image"; exit 1; }
       - name: Lint quality workflow
         run: actionlint -color -oneline -ignore 'shellcheck reported issue.*SC2317' -config-file .actionlint.yaml .github/workflows/quality.yml
 
@@ -213,14 +215,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv (pinned)
-        run: |
-          curl -LsSf https://astral.sh/uv/0.8.15/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Assert uv is pre-baked on the runner
+        run: command -v uv >/dev/null || { echo "::error::uv missing from runner image"; exit 1; }
       - name: Ruff required baseline profile
         run: uvx --from 'ruff==0.12.10' ruff check scripts --select E9,F63,F7,F82
 
@@ -234,7 +233,6 @@ jobs:
       needs.changes.outputs.simulator == 'true' ||
       needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -248,21 +246,22 @@ jobs:
     needs: changes
     if: needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install cppcheck (not pre-baked on the runner image)
-        run: |
-          # The runner image carries an arm64 foreign arch whose security
-          # mirror lacks arm64 indexes; apt-get update exits nonzero even
-          # though the amd64 indexes it needs are fetched. Tolerate that,
-          # then let the install fail honestly if cppcheck is unavailable.
-          sudo apt-get update || true
-          command -v cppcheck >/dev/null || sudo apt-get install -y cppcheck
+      - name: Assert cppcheck is pre-baked on the runner
+        run: command -v cppcheck >/dev/null || { echo "::error::cppcheck missing from runner image"; exit 1; }
       - name: cppcheck
+        # The scoped suppressions below are cppcheck 2.13 false positives
+        # (the previous runner shipped 2.7, which did not flag them):
+        # unknownMacro fires because lvgl headers are not on the include path
+        # (LV_SYMBOL_RIGHT), and both uninitvar findings are loops that only
+        # read entries below a count that starts at zero.
         run: |
           cppcheck --enable=warning,performance,portability --std=c11 --quiet --error-exitcode=2 --suppress=normalCheckLevelMaxBranches \
+            --suppress=unknownMacro:components/ui_graphics/screens/scr_chat_messages.c \
+            --suppress=uninitvar:components/ui_graphics/screens/scr_map.c \
+            --suppress=uninitvar:components/ui_graphics/screens/scr_nodes.c \
             main components
 
   board-build-smoke:
@@ -271,8 +270,7 @@ jobs:
     if: |
       github.event_name != 'pull_request' &&
       (needs.changes.outputs.firmware == 'true' || needs.changes.outputs.workflows == 'true')
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -286,6 +284,8 @@ jobs:
           BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
         run: |
           mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
+          # shellcheck disable=SC1091
+          source scripts/ci-source-idf.sh
           bash scripts/flash.sh local heltec-v3 build
 
   gosim-integration:
@@ -296,7 +296,6 @@ jobs:
       needs.changes.outputs.simulator == 'true' ||
       needs.changes.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -321,9 +320,9 @@ jobs:
 
   emulator-scenarios:
     name: Emulator scenario suite
-    # idf-node runner (has ESP-IDF) because the suite runs the REAL firmware built
-    # for the IDF linux target; gated off pull_request like the other idf-node
-    # jobs since that runner is a heavy self-hosted host.
+    # Runs the REAL firmware built for the IDF linux target; the runner image
+    # bakes ESP-IDF so it sources the toolchain before building. Gated off
+    # pull_request like the other heavy IDF jobs to keep PR runs light.
     needs: changes
     if: |
       github.event_name != 'pull_request' &&
@@ -331,8 +330,7 @@ jobs:
        needs.changes.outputs.simulator == 'true' ||
        needs.changes.outputs.emulator == 'true' ||
        needs.changes.outputs.workflows == 'true')
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -368,7 +366,7 @@ jobs:
 
   emulator-e2e:
     name: Emulator browser E2E (non-required)
-    # idf-node runner: same real firmware node binary + gosim as
+    # Same real firmware node binary + gosim as
     # emulator-scenarios, plus a real UI build and a real headless Chromium
     # (Task 13: proves the DISPLAY and basic buttons/reset/messaging work
     # through what a human actually sees, not just headless framebuffer
@@ -382,8 +380,7 @@ jobs:
        needs.changes.outputs.simulator == 'true' ||
        needs.changes.outputs.emulator == 'true' ||
        needs.changes.outputs.workflows == 'true')
-    runs-on: [self-hosted, idf-node]
-    container: localhost:5000/bramble/idf-node:v5.4.1
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     continue-on-error: true
     steps:
