@@ -3,10 +3,10 @@
  * outputs. Pins are pager-specific (LED = GPIO48, buzzer = GPIO15 via an LEDC
  * tone, vibra = GPIO16); the host/emulator half lives in indicator_virt.c.
  *
- * NOTE (Task 6): no firmware call sites drive these outputs yet (the pager
- * alert path is unwired so far), so this wrapper is dormant until an alert
- * feature is added. It is provided now so both halves present indicators.h and
- * a future refactor has one seam to route through.
+ * These outputs are driven by the alert path (components/indicators/alerts.c),
+ * which main wires up at boot via indicator_init() / alerts_init() and feeds
+ * from message-received and periodic tick events. Both platform halves present
+ * the same indicators.h so callers route through a single seam.
  */
 
 /* CONFIG_IDF_TARGET_LINUX lives in sdkconfig.h (same convention as

@@ -60,7 +60,9 @@ void timesync_init(timesync_state_t* ts);
  *   1  = accepted AND committed (corroboration threshold met)
  *  -1  = rejected: remote stratum not better than ours
  *  -2  = rejected: proposed shift too large (when already synced)
- *  -3  = rejected: duplicate source within pending window
+ *
+ * A repeat from a source already pending refreshes that entry in place and
+ * is accepted (0 or 1), it is not rejected.
  */
 int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t remote_stratum,
                          uint32_t source_addr, bool source_established, uint32_t local_now_ms);
