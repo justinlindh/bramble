@@ -112,9 +112,15 @@ Current firmware emits `bramble.onBroadcastDelivery` notifications with:
 
 ---
 
-## Complete RPC Method Reference (from `main/rpc_methods.c`)
+## RPC Method Reference (from `main/rpc_methods.c`)
 
-All methods below are registered in firmware via `rpc_register(...)`.
+Methods below are registered in firmware via `rpc_register(...)`. The
+CI-enforced source of truth for the full method list is
+[`api/openapi.yaml`](../../api/openapi.yaml) (checked against the firmware
+registry by `scripts/check-rpc-contract.sh`); this page explains the
+commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
+`bramble.setPeerVerified`, `bramble.otaStatus`, `bramble.injectInput`,
+`bramble.screenshot`.
 
 ### Status / Info
 

@@ -60,7 +60,7 @@ forward secrecy for the network key.
    This calls `bramble.setNetworkKey` on the connected node. It takes
    effect live for RREP, RERR, ACK, and delivery-receipt verification
    immediately, and also re-derives the beacon HMAC key live (no reboot
-   required, as of this batch).
+   required).
 
 4. **Confirm convergence.** After provisioning, the Network Key section
    refreshes and shows `Provisioned (fingerprint XXXXXXXX)`. Repeat this
@@ -87,5 +87,5 @@ distribute the key), the same way you would compare any shared secret.
 The network key is stored as a plaintext NVS entry on each device, the
 same as the RPC auth token and channel PSKs
 (`docs/SECURITY-MODEL.md` known gaps). Flash encryption for this class of
-secret is tracked separately (workstream 1.5) and is not part of this
-provisioning mechanism.
+secret is a separate mechanism (see [security/keys-at-rest.md](security/keys-at-rest.md))
+and is not part of this provisioning flow.

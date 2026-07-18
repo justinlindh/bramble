@@ -127,7 +127,7 @@ npm test
 | LilyGo T-Deck Plus | ESP32-S3 | SX1262 | ✅ Running target with LVGL v9 GUI |
 | Bramble Pager v1 (custom PCB) | ESP32-S3-WROOM-1 | SX1262 (DIO2 RF switch, TCXO) + ATGM336H GNSS | Design complete, boards not yet ordered |
 
-For historical V4 GNSS bring-up notes, see [archive/heltec-v4-gnss-bringup.md](archive/heltec-v4-gnss-bringup.md); GNSS pins now live in `main/boards/heltec_v4.h`.
+GNSS pins live in `main/boards/heltec_v4.h`.
 
 ### Bramble Pager v1 (custom board)
 

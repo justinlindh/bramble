@@ -1,6 +1,6 @@
 # Deploying bramble web client image
 
-The unified runtime web client image is published by CI from `.gitea/workflows/webapp-build-publish.yml`.
+The unified runtime web client image is published by CI from `.github/workflows/webapp-build-publish.yml` (the `.gitea/` copy is a frozen mirror).
 
 ## Registry image name
 

@@ -35,7 +35,8 @@ Defined in `components/ui_graphics/theme/bramble_theme.h`:
 | `BR_COLOR_ACCENT` | `0x1F6FEB` | Secondary accent, links |
 | `BR_COLOR_TEXT` | `0xE6EDF3` | Primary text |
 | `BR_COLOR_TEXT_SEC` | `0x8B949E` | Secondary text, timestamps |
-| `BR_COLOR_SENT` | `0x238636` | Sent message bubbles |
+| `BR_COLOR_SENT` | `0x1A4B91` | Sent message bubbles (blue) |
+| `BR_COLOR_ON_SENT` | `0xE6EDF3` | Muted marks drawn on a sent bubble |
 | `BR_COLOR_RECV` | `0x21262D` | Received message bubbles |
 | `BR_COLOR_DANGER` | `0xDA3633` | Error indicators |
 | `BR_COLOR_SUCCESS` | `0x238636` | Success states (matches primary) |
@@ -57,20 +58,10 @@ Some UI elements use variations of the theme colors for specific states:
    - Active states
    - Primary actions
    - Success indicators
-   - Sent messages
+   (Sent message bubbles are blue, `#1A4B91`, so outgoing messages read
+   distinctly from action/success accents.)
 4. **Blue for links**: Secondary accent (`#1f6feb`) is reserved for hyperlinks and secondary interactive elements
 5. **Semantic colors**: Red for danger/errors, yellow for warnings, purple for critical states
-
-## Migration Notes
-
-### Previous T-Deck Plus Colors (before 2026-02-20)
-The T-Deck Plus previously used a teal/cyan accent:
-- Old Primary: `#0F9B8E` (teal - the "ugly green")
-- Old Background: `#1A1A2E` (purple-tinted)
-- Old Surface: `#16213E` (dark blue)
-- Old Accent: `#F0A500` (orange/yellow)
-
-These colors have been replaced to match the web app's GitHub-inspired theme.
 
 ## Usage Examples
 
@@ -78,7 +69,7 @@ These colors have been replaced to match the web app's GitHub-inspired theme.
 Uses `BR_COLOR_PRIMARY` (#238636) for the active tab background tint
 
 ### Message Bubbles
-- Sent messages: `BR_COLOR_SENT` (#238636 - green)
+- Sent messages: `BR_COLOR_SENT` (#1A4B91 - blue)
 - Received messages: `BR_COLOR_RECV` (#21262D - dark surface)
 
 ### Status Indicators
