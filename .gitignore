@@ -3,6 +3,9 @@ build/
 build-*/
 test/build/
 
+# Release factory images (built in CI, attached to firmware releases)
+/dist/
+
 # Toolchain/object outputs
 *.o
 *.obj

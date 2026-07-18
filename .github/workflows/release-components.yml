@@ -67,11 +67,29 @@ jobs:
           fi
 
       - name: Release firmware
+        id: firmware
         run: |
+          # semantic-release exposes no machine-readable "did it publish?" exit
+          # signal (it exits 0 whether or not a release was cut), so detect a
+          # publish by the firmware-v* tag it creates and pushes in this
+          # checkout. Diff the tag set across the run; a new tag means a real
+          # release. A dry run creates no tag, so this reports published=false.
+          before="$(git tag -l 'firmware-v*' | sort -V)"
           if [ "$DRY" = "true" ]; then
             npx semantic-release --extends ./.releaserc.firmware.cjs --dry-run
           else
             npx semantic-release --extends ./.releaserc.firmware.cjs
+          fi
+          after="$(git tag -l 'firmware-v*' | sort -V)"
+          new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
+          if [ -n "$new" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$new" >> "$GITHUB_OUTPUT"
+            echo "version=${new#firmware-v}" >> "$GITHUB_OUTPUT"
+            echo "Firmware release published: $new"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "No firmware release published this run"
           fi
 
       - name: Release webapp
@@ -89,3 +107,38 @@ jobs:
           else
             npx semantic-release --extends ./.releaserc.sim.cjs
           fi
+
+      # Attach per-board factory images to the firmware release semantic-release
+      # just published. Plain images for INITIAL esptool flashing only: the
+      # build signs each app with a throwaway key
+      # (BRAMBLE_OTA_ALLOW_GENERATED_KEY=1), never the production OTA signing
+      # key, and the OTA update channel is not involved here. Runs last so the
+      # fast per-component releases publish before this multi-board build.
+      - name: Build firmware factory images
+        if: steps.firmware.outputs.published == 'true'
+        # Three sequential ESP-IDF board builds; each already saturates the
+        # runner's cores via ninja. Local timing on 8 CPUs: see PR body.
+        timeout-minutes: 45
+        env:
+          BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
+          # Step outputs flow through env, never inline in run: text
+          # (script-injection hardening; the firmware-vX.Y.Z tag format
+          # constrains them today, env keeps that true if it ever loosens).
+          FW_VERSION: ${{ steps.firmware.outputs.version }}
+        run: |
+          bash scripts/release/build-factory-images.sh "$FW_VERSION"
+
+      # semantic-release created the release for this tag above; the script
+      # attaches the assets idempotently via the REST API (curl, no gh CLI
+      # dependency on the runner).
+      - name: Attach factory images to firmware release
+        if: steps.firmware.outputs.published == 'true'
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FW_TAG: ${{ steps.firmware.outputs.tag }}
+        run: |
+          bash scripts/release/attach-release-assets.sh \
+            "$FW_TAG" \
+            dist/factory/bramble_*_factory.bin \
+            dist/factory/SHA256SUMS
