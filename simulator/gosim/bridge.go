@@ -120,10 +120,6 @@ func eventQueuePeek(q *C.event_queue_t) *C.sim_event_t {
 	return C.event_queue_peek(q)
 }
 
-func eventQueueCount(q *C.event_queue_t) int {
-	return int(C.event_queue_count(q))
-}
-
 // --- Event accessors ---
 
 func getEventType(e *C.sim_event_t) C.event_type_t {
@@ -162,11 +158,6 @@ func radioFrameAirtimeUs(config *C.radio_config_t, frameBytes int) uint32 {
 
 func radioPreambleUs(config *C.radio_config_t) uint64 {
 	return uint64(C.radio_preamble_us(config))
-}
-
-func radioCheckReception(config *C.radio_config_t, rx *C.sim_node_t, evt *C.sim_event_t) int {
-	pkt := C.bridge_get_packet_event(evt)
-	return int(C.radio_check_reception(config, rx, &pkt))
 }
 
 // --- Metrics ---
@@ -368,6 +359,3 @@ func (r *scenarioRunResult) RouteNextHop(nodeID string, destAddr uint32) (uint32
 	}
 	return 0, false
 }
-
-// Ensure imports are used
-var _ = unsafe.Pointer(nil)

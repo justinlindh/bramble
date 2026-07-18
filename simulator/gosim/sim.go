@@ -1024,10 +1024,6 @@ func (s *Sim) cmdSendMessage(cmd Command) {
 }
 
 func (s *Sim) cmdInterference(cmd Command) {
-	cid := C.CString("")
-	_ = cid
-	C.free(unsafe.Pointer(cid))
-
 	evt := C.bridge_make_interference_start(C.uint64_t(s.simTime),
 		C.float(cmd.X), C.float(cmd.Y), C.float(cmd.Radius))
 	eventQueuePush(&s.events, &evt)
