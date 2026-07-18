@@ -1,6 +1,6 @@
 {
   "name": "emu-channel-delivery",
-  "description": "Three provisioned firmware pagers on one ether. The sender (0,0) broadcasts a channel message; both receivers must render it on their e-paper. Asserted by run_scenarios.sh via `screen-assert -min-nodes 2 -text 'HELLO BRAMBLE'`. All three share EMU_NETWORK_KEY so the mesh carries the frame; the sender's EMU_AUTO_SEND fires mesh_send_broadcast after the receivers pass their 10s message-idle threshold, so an inbound message auto-opens their Messages screen where the text renders.",
+  "description": "Three provisioned firmware pagers on one ether. The sender (0,0) broadcasts a channel message; both receivers must render it on their e-paper. Asserted by run_scenarios.sh via `screen-assert -min-nodes 2 -text 'HELLO BRAMBLE'`. All three share EMU_NETWORK_KEY so the mesh carries the frame. A receiver only auto-opens its Messages screen (where the text renders) for a message arriving after its own 10s message-idle threshold, measured from ITS boot; boots are staggered and a CPU-starved CI pod can lag a receiver's boot tens of seconds behind the sender's, so the send burst is long (12 sends, 8s apart, sender t=12s..100s) to guarantee sends land after every receiver's threshold no matter the lag. run_scenarios.sh waits event-driven and stops the run the moment both receivers have painted, so the long tail costs nothing on a fast box.",
   "mode": "deterministic",
   "duration_ms": 36000,
   "nodes": [],
@@ -16,8 +16,8 @@
         "EMU_BEACON_INTERVAL_MS": "3000",
         "EMU_AUTO_SEND": "HELLO BRAMBLE",
         "EMU_AUTO_SEND_DELAY_MS": "12000",
-        "EMU_AUTO_SEND_REPEAT": "3",
-        "EMU_AUTO_SEND_INTERVAL_MS": "4000"
+        "EMU_AUTO_SEND_REPEAT": "12",
+        "EMU_AUTO_SEND_INTERVAL_MS": "8000"
       }
     },
     {

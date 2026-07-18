@@ -86,7 +86,10 @@ run_scenario() {
     printf -v "$__logvar" '%s' "$log"
 
     info "running $name (budget ${budget}s)..."
-    timeout "$budget" "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
+    # env -u: an exported EMU_SCENARIO_DURATION_MS is channel_suite's knob; it
+    # must not leak into other scenarios and silently cap their sim time.
+    timeout "$budget" env -u EMU_SCENARIO_DURATION_MS \
+        "$GOSIM_BIN" -headless -scenario "$scen" >"$log" 2>&1 &
     local pid=$!
     CHILD_PIDS+=("$pid")
     wait "$pid"
@@ -102,6 +105,25 @@ assert_screen() {
     fi
     FAILURES=$((FAILURES + 1))
     return 1
+}
+
+# dump_diagnostics <log> <label> : post-mortem for a failed scenario, printed
+# straight into the CI step log. A scenario's gosim event log lives in a mktemp
+# file the runner throws away, so without this a pod-only failure is invisible
+# and undebuggable from the outside (which is exactly how the render-window
+# failures stayed mysterious). Prints the attach/join records, how many
+# framebuffer frames each node actually emitted, the screen-assert verdict, and
+# the log tail (frames elided; they are base64 blobs).
+dump_diagnostics() {
+    local log="$1" label="$2"
+    echo "--- diagnostics: $label ---"
+    echo "[attach/join events]"
+    grep -E "attached as|node_joined|node_left|supervisor|restart" "$log" | tail -20
+    echo "[device_fb frames per node]"
+    grep '"type":"device_fb"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
+    echo "[log tail, fb frames elided]"
+    grep -v '"type":"device_fb"' "$log" | tail -40
+    echo "--- end diagnostics: $label ---"
 }
 
 # assert_log <log> <needle> <description> : the scenario log must contain needle
@@ -137,28 +159,39 @@ echo
 # The firmware nodes run in wall-clock time and the receivers must boot, pass
 # their 10 s message-idle threshold, and render the broadcast on the virtual
 # e-paper. Neighbor discovery is no longer a variable (a broadcast needs no
-# session, and the short emulator beacon interval keeps the mesh warm); the one
-# residual sensitivity is the final e-paper RENDER, which the CPU-limited CI
-# runner pods (cpu 4 / memory 5Gi, shared with other jobs) stretch well past the
-# scenario's 36 s local duration_ms. The old fix was a fixed 36 s window plus a
-# 2x re-roll, which failed BOTH attempts on constrained pods because the window
-# was systematically too tight, not randomly jittery.
+# session, and the short emulator beacon interval keeps the mesh warm). Two
+# real failure modes were observed on the CPU-limited CI runner pods (cpu 4 /
+# memory 5Gi, shared with other jobs), and both are handled here:
 #
-# This is now an EVENT-DRIVEN wait, not a fixed window with dice-rolls. We widen
-# gosim's real-time cap (EMU_SCENARIO_DURATION_MS) so the nodes stay up long
-# enough for a starved pod to finish the render, and we POLL the growing headless
-# log for the render marker, stopping the instant both receivers have painted.
-# On a fast box it exits in seconds; on a slow pod it waits up to the budget. A
-# genuine delivery regression simply never renders and the wait times out, so one
-# generous attempt replaces the old re-roll loop (no retry scaffolding remains).
-# Both knobs are overridable for local tuning but default high because this
-# script only ever runs as the CI gate.
+#   1. The render outruns a fixed window. The old fix was a fixed 36 s window
+#      plus a 2x re-roll, which failed BOTH attempts on constrained pods
+#      because the window was systematically too tight, not randomly jittery.
+#      Now the wait is EVENT-DRIVEN: we widen gosim's real-time cap
+#      (EMU_SCENARIO_DURATION_MS) and POLL the growing headless log for the
+#      render marker, stopping the instant both receivers have painted. A fast
+#      box exits in seconds; a starved pod gets the full budget.
+#   2. The whole send burst lands before a receiver's idle threshold. A
+#      receiver only auto-opens its Messages screen for a message arriving
+#      after its own 10 s message-idle threshold, measured from ITS boot, and
+#      pod contention can lag the staggered receiver boots tens of seconds
+#      behind the sender's clock. A short burst (formerly 3 sends ending at
+#      sender t=20 s) could then land entirely inside the receivers' threshold
+#      window, after which nothing would ever render no matter how long the
+#      wait. The scenario now sends a long burst (12 sends, 8 s apart, to
+#      sender t=100 s) so some sends always postdate every receiver's
+#      threshold; the event-driven early exit keeps the long tail free on a
+#      fast box.
+#
+# A genuine delivery regression simply never renders and the wait times out, so
+# one generous attempt replaces the old re-roll loop (no retry scaffolding
+# remains). Both knobs are overridable for local tuning but default high
+# because this script only ever runs as the CI gate.
 channel_suite() {
     echo "[1] emu-channel-delivery"
     local scen="$SCEN_DIR/emu-channel-delivery.json"
     [ -f "$scen" ] || { red "scenario missing: $scen"; return 1; }
-    local budget_s="${EMU_CHANNEL_BUDGET_S:-110}"
-    local sim_ms="${EMU_SCENARIO_DURATION_MS:-90000}"
+    local budget_s="${EMU_CHANNEL_BUDGET_S:-180}"
+    local sim_ms="${EMU_SCENARIO_DURATION_MS:-150000}"
     local log; log="$(mktemp -t emu-channel.XXXXXX.log)"
 
     info "running emu-channel-delivery (render budget ${budget_s}s, sim cap $((sim_ms / 1000))s)..."
@@ -179,7 +212,10 @@ channel_suite() {
         # the wall-clock budget elapsed: stop polling and do a final check below.
         kill -0 "$pid" 2>/dev/null || break
         [ "$(date +%s)" -lt "$deadline" ] || break
-        sleep 1
+        # 2s between scans: each scan decodes every frame in the growing log,
+        # and on a CPU-capped pod a 1s cadence would take non-trivial CPU away
+        # from the very firmware nodes it is waiting on.
+        sleep 2
     done
 
     # Stop the run; it has either rendered or run out of budget.
@@ -198,6 +234,9 @@ channel_suite() {
         return 0
     fi
     red "FAIL: emu-channel-delivery: not rendered on >= 2 nodes within ${budget_s}s"
+    # Visible verdict ("rendered on N node(s), want >= 2") plus the post-mortem.
+    "$GOSIM_BIN" screen-assert -log "$log" -min-nodes 2 -text "HELLO BRAMBLE" || true
+    dump_diagnostics "$log" "emu-channel-delivery"
     return 1
 }
 
@@ -223,6 +262,8 @@ dm_suite() {
         return 0
     fi
     red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal"
+    "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" || true
+    dump_diagnostics "$DM_LOG" "emu-dm-desync"
     return 1
 }
 
