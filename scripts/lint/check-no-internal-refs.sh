@@ -28,7 +28,7 @@ h="$(git grep -nIE '192\.168\.[0-9]+\.[0-9]+' -- . ":!${self}" ':!webapp/server/
 
 # 3. Real bench-hardware node addresses (Ed25519-derived 4-byte addresses).
 #    Public docs/tests must use fake hex (DEADBEEF, CAFEBABE, ...).
-h="$(git grep -niIE 'F2BE6EEE|AB246C7C|FEC61437|9CA6A0EE|50D2E1BD' -- . ":!${self}" || true)"
+h="$(git grep -niIE 'F2BE6EEE|AB246C7C|FEC61437|9CA6A0EE|50D2E1BD|4A555354' -- . ":!${self}" || true)"
 [[ -n "$h" ]] && report "real bench device address" "$h"
 
 # 4. Home room / location labels used as device names in fixtures.
