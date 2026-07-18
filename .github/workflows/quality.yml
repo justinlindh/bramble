@@ -163,6 +163,8 @@ jobs:
         # terminal step fails the job on this step's failure.
         id: scenarios
         continue-on-error: true
+        env:
+          EMU_CI_LOG_DIR: ${{ runner.temp }}/emu-scenario-logs
         run: bash emulator/ci/run_scenarios.sh
       - name: Run browser E2E suite
         # Real headless Chromium against a real UI build (Task 13). Gates via
@@ -171,6 +173,16 @@ jobs:
         id: e2e
         continue-on-error: true
         run: bash emulator/e2e/run_e2e.sh
+      - name: Upload scenario logs on failure
+        # The full gosim event logs (frames, console, deaths) outlive the pod
+        # so a failure's evidence is never lost to a discarded mktemp.
+        if: steps.scenarios.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: emu-scenario-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/emu-scenario-logs/
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Fail if any suite failed
         # The terminal gate for the collect-then-fail pattern above: the two
         # suite steps never fail the job directly (so both always report), and

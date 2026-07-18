@@ -186,11 +186,12 @@ own PID, so there is no port or state collision), but running both at once put
 five wall-clock firmware nodes on the runner simultaneously and the CPU
 contention starved their real-time windows, which was a flake source.
 `emu-dm-desync` is deterministic (the desynced session state is constructed,
-not raced) and its assertion gets no retries; the one exception is an
-INVALIDATED run, where a node process died mid-scenario and the supervisor's
-restart destroyed the constructed state (detected exactly via extra
-node_joined events), which is re-run once with the death evidence dumped into
-the step log. `emu-channel-delivery` runs once with an event-driven render
+not raced) and runs exactly once, with no retries of any kind. A node process
+death mid-scenario is a hard suite failure in BOTH scenarios, checked on
+every run including passing ones (a crashed-and-restarted node can still
+satisfy a render assertion, and any rerun would absorb intermittent crash
+regressions); the death evidence dumps into the step log and the scenario
+logs upload as a CI artifact on failure. `emu-channel-delivery` runs once with an event-driven render
 wait: the script widens gosim's real-time cap (`EMU_SCENARIO_DURATION_MS`) and
 polls the growing headless log for the render marker, exiting the moment both
 receivers have painted, so a fast box finishes in seconds and a CPU-starved
