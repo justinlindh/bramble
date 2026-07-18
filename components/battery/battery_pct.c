@@ -1,3 +1,5 @@
+#include <stddef.h>
+
 #include "battery.h"
 
 /*
@@ -22,7 +24,8 @@ uint8_t battery_mv_to_pct(uint32_t mv) {
     } curve[] = {
         {4200, 100}, {4060, 90}, {3900, 70}, {3800, 50}, {3700, 30}, {3600, 15}, {3300, 0},
     };
-    for (int i = 0; i < 6; i++) {
+    const size_t curve_len = sizeof(curve) / sizeof(curve[0]);
+    for (size_t i = 0; i < curve_len - 1; i++) {
         if (mv >= curve[i + 1].mv) {
             uint32_t range_mv = curve[i].mv - curve[i + 1].mv;
             uint8_t range_pct = curve[i].pct - curve[i + 1].pct;
