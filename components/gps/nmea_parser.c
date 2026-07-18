@@ -9,6 +9,42 @@
 /* Helper: check if field is empty */
 static bool field_empty(const char* field) { return !field || field[0] == '\0'; }
 
+/*
+ * Split an NMEA sentence into comma-separated fields IN PLACE, preserving
+ * empty fields. NMEA uses empty fields to mean "no data" (e.g. an RMC with
+ * no speed/track: ",,", or a no-fix GGA with empty lat/lon), and their
+ * position is significant. strtok(",*") collapses runs of delimiters, so it
+ * silently drops empties and shifts every later field left -- making e.g.
+ * RMC speed read from the date field or GGA sats-used read from HDOP. This
+ * scanner instead treats each comma as a field boundary and stops at the '*'
+ * checksum delimiter (whose trailing hex is not a data field).
+ *
+ * Writes NULs over the delimiters, stores up to max_fields field pointers,
+ * and returns the number stored (capped at max_fields), matching the
+ * bounded field_count the callers already reason about.
+ */
+static int nmea_split(char* sentence, char** fields, int max_fields) {
+    int count = 0;
+    if (max_fields <= 0)
+        return 0;
+
+    fields[count++] = sentence;
+    for (char* p = sentence; *p; p++) {
+        if (*p == '*') {
+            *p = '\0';
+            break;
+        }
+        if (*p == ',') {
+            *p = '\0';
+            if (count < max_fields) {
+                fields[count] = p + 1;
+            }
+            count++;
+        }
+    }
+    return count < max_fields ? count : max_fields;
+}
+
 static bool valid_hemisphere(char dir, bool latitude) {
     if (latitude) {
         return dir == 'N' || dir == 'S';
@@ -82,13 +118,7 @@ bool nmea_parse_rmc(char* sentence, nmea_position_t* pos) {
      *         7=speed_knots, 8=track_deg, 9=date, 10=mag_var, 11=E/W, 12=checksum */
 
     char* fields[13];
-    int field_count = 0;
-
-    char* token = strtok(sentence, ",*");
-    while (token && field_count < 13) {
-        fields[field_count++] = token;
-        token = strtok(NULL, ",*");
-    }
+    int field_count = nmea_split(sentence, fields, 13);
 
     /* Need at least sentence type through longitude direction */
     if (field_count < 7)
@@ -150,13 +180,7 @@ bool nmea_parse_gsv(char* sentence, uint8_t* sats_in_view) {
         return false;
 
     char* fields[8];
-    int field_count = 0;
-
-    char* token = strtok(sentence, ",*");
-    while (token && field_count < 8) {
-        fields[field_count++] = token;
-        token = strtok(NULL, ",*");
-    }
+    int field_count = nmea_split(sentence, fields, 8);
 
     if (field_count < 4)
         return false;
@@ -200,13 +224,7 @@ bool nmea_parse_gga(char* sentence, nmea_position_t* pos) {
      *         7=satellites, 8=hdop, 9=altitude, 10=M, 11=geoid, 12=M, ... */
 
     char* fields[15];
-    int field_count = 0;
-
-    char* token = strtok(sentence, ",*");
-    while (token && field_count < 15) {
-        fields[field_count++] = token;
-        token = strtok(NULL, ",*");
-    }
+    int field_count = nmea_split(sentence, fields, 15);
 
     /* Need at least through fix quality */
     if (field_count < 7)

@@ -6,8 +6,6 @@
 #include "esp_log.h"
 #include <stdio.h>
 
-static const char* TAG = "scr_compose";
-
 extern void scr_chat_messages_open(bramble_layout_t* layout, int channel_idx);
 extern void scr_chat_messages_open_dm(bramble_layout_t* layout, uint32_t peer_addr);
 extern int mesh_get_channel_count(void);

@@ -9,6 +9,12 @@
 
 #define MAX_PENDING_ACKS 8
 
+/* A retransmittable frame is the full on-air DATA frame, which the sender
+ * caps at 255 bytes (the uint8_t PHY length limit). The stored copy must be
+ * able to hold a maximum-size frame verbatim, or a retry would transmit a
+ * truncated (and thus auth/decrypt-failing) frame. */
+#define PENDING_ACK_MAX_FRAME 255
+
 typedef struct {
     uint32_t packet_id;
     uint32_t dest_addr;
@@ -17,7 +23,7 @@ typedef struct {
     uint8_t max_attempts;
     uint32_t next_retry_ms;
     uint16_t packet_len;
-    uint8_t packet_data[222];
+    uint8_t packet_data[PENDING_ACK_MAX_FRAME];
     bool active;
 } pending_ack_t;
 
