@@ -14,7 +14,6 @@ defaults:
 jobs:
   smoke:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    container: localhost:5000/bramble/runner-full:22.04-go126
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,205 +1,230 @@
-# CI: always-run workflows, per-job skips
+# CI: always-run workflows, per-job skips, change-based gating
 
-This page explains how the three PR-gating Gitea Actions workflows
-(`quality.yml`, `firmware-quality.yml`, `webapp-quality.yml`) are structured
-so that every job they define always reports a status context, and why that
-structure exists.
+This page explains how the PR-gating GitHub Actions workflows are structured so
+that every required context always reports a status, while only the jobs
+relevant to a change actually execute.
 
-## The problem this solves
+## The workflows
 
-Branch protection's "required status checks" feature blocks a merge until a
-named context reports `success` (or, depending on configuration, `skipped`).
-It cannot distinguish "this check has not run yet" from "this check will
-never run": both look identical from the server's point of view, and both
-permanently block the PR.
+Three workflows gate pull requests, plus one reusable helper they all call:
 
-Before this change, `quality.yml`, `firmware-quality.yml`, and
-`webapp-quality.yml` each had a workflow-level `paths:` filter. When a diff
-did not touch any listed path, Gitea Actions never triggered the workflow at
-all, so none of its jobs ever created a check run. A PR that only touched,
-say, `hardware/` or `CLAUDE.md` would never get a `Host tests` or `Required
-lint` context, and if those contexts were marked required, the PR could
-never merge. That deadlock is what motivated this restructure; it is also
-why these three workflows previously could not be used as the basis for
-required checks at all.
-
-## The fix
-
-1. Remove the workflow-level `paths:` filter from all three workflows. Every
-   push/pull_request event that matches the `on:` branch patterns now
-   triggers the workflow, full stop. The event set (`workflow_dispatch`,
-   `pull_request`, `push` with its branch list) is otherwise unchanged.
-2. Add a cheap first job, `changes` (job name `Detect changed areas`), to
-   each workflow. It checks out full history (`fetch-depth: 0`), computes a
-   diff range against the right base for the triggering event, and emits a
-   handful of boolean outputs describing which areas of the repo the diff
-   touches.
-3. Every other job in the workflow gets `needs: changes` plus an `if:`
-   condition on the relevant output(s). When the condition is false, Gitea
-   Actions still creates the job and its check run, it just skips straight
-   to a `skipped` conclusion without running any steps. The job's identity
-   (and therefore its context string) is unaffected by `if:` at the job
-   level; only workflow-level filters or event non-matches can prevent a job
-   from being created at all, so job-level `if:` is the only mechanism
-   compatible with required checks.
-
-This mirrors a pattern already in use before this change: `quality.yml`'s
-`board-build-smoke` and `emulator-*` jobs have long used
-`if: github.event_name != 'pull_request'` to skip the two self-hosted
-`idf-node` jobs on PR events while still reporting a `skipped` context. This
-restructure generalizes that same mechanism (job-level `if:`, not
-workflow-level `paths:`) to every job, and combines it with diff-derived
-area booleans instead of only the event type.
-
-## The context naming contract
-
-Every job keeps its exact pre-existing `name:`. That name is the check-run
-context string branch protection matches against. Renaming a job breaks any
-required-check rule that names it, so job names are treated as a stable
-public contract from this point forward. The `changes` job itself
-(`Detect changed areas`) is new in all three workflows and is not intended
-to be a required context; it exists purely to feed the other jobs.
-
-## How the diff range is resolved
-
-The `changes` job's `Compute changed areas` step resolves a git diff range
-in this order:
-
-1. `pull_request` events: fetch `origin/<base_ref>` and diff
-   `origin/<base_ref>...HEAD`.
-2. `push` events with a non-zero `before` SHA (the normal case: a fast
-   forward from the branch's previous tip): diff `<before>..HEAD`.
-3. Anything else, including a `push` whose `before` SHA is all zeros (a
-   brand new branch's first push) and `workflow_dispatch`: fetch
-   `origin/main`, take the merge base with `HEAD`, and diff
-   `<merge-base>...HEAD`.
-
-If none of these can be resolved (for example `origin/main` cannot be
-fetched), the job does not fail; it logs a warning and treats every area as
-changed, which is the safe default: when in doubt, run the real checks
-instead of silently skipping them.
-
-## Skip conditions per job
-
-### `quality.yml`
-
-Areas: `firmware` (`main/`, `components/`, `test/`, `api/`, `scripts/`,
-`CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`,
-`.shellcheckrc`), `simulator` (`simulator/`), `emulator` (`emulator/`),
-`workflows` (any file under `.gitea/workflows/`, plus `.actionlint.yaml`),
-`docs` (`docs/`, `README.md`, computed but not currently consumed by any job
-in this file).
-
-| Job | Runs when |
+| Workflow | Role |
 | --- | --- |
-| `Host tests` | `firmware` or `workflows` |
-| `ShellCheck` | `firmware` or `workflows` |
-| `RPC contract (spec vs firmware registry)` | `firmware` or `workflows` |
-| `Actionlint` | `workflows` |
-| `Ruff` | `firmware` or `workflows` |
-| `Clang-format` | `firmware`, `simulator`, or `workflows` (the strict scope scans `simulator/` C sources too) |
-| `cppcheck` | `firmware` or `workflows` |
-| `Board build smoke (heltec-v3)` | not a `pull_request` event, and (`firmware` or `workflows`) |
-| `gosim integration` | `firmware`, `simulator`, or `workflows` |
-| `Emulator scenario suite` | not a `pull_request` event, and (`firmware`, `simulator`, `emulator`, or `workflows`) |
-| `Emulator browser E2E (non-required)` | same as above (also keeps `continue-on-error: true`) |
+| `_detect-changes.yml` | Reusable (`workflow_call`) change-detection. Emits boolean area outputs. Never gates anything; called once per gating workflow. |
+| `firmware-quality.yml` | The single-pod `Static checks` bundle (every cheap lint/static check) plus the change detector. |
+| `quality.yml` | The heavy firmware/emulator compute jobs: host tests, gosim, the board build smoke, and the advisory emulator suite. |
+| `webapp-quality.yml` | The consolidated webapp job (one `npm ci`, all webapp checks) plus the web-flasher tests. |
 
-### `firmware-quality.yml`
+Publish-oriented workflows (`firmware-build.yml`, `firmware-publish-ota.yml`,
+`ci-smoke-artifacts.yml`, `release-components.yml`, `webapp-build-publish.yml`,
+`desktop-build.yml`, `claude.yml`) are out of scope here; they run on
+`workflow_dispatch`, tags, or their own events and do not gate normal PRs.
 
-Areas: `firmware` (`main/`, `components/`, `test/`, `simulator/`,
-`scripts/lint/`, top-level `scripts/*.sh`, `.clang-format`, `.clang-tidy`,
-`.shellcheckrc`, `.markdownlint-cli2.yaml`; `test/` and `simulator/` are
-included because the strict clang-format scope scans their C sources),
-`workflows` (any file under `.gitea/workflows/`, plus `.actionlint.yaml`),
-`docs` (computed, not consumed here).
+## Trigger rules: the PR is the single gate
 
-| Job | Runs when |
+All three gating workflows use the same `on:` block:
+
+```yaml
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+```
+
+`pull_request` fires once per PR (and on every update to the PR head). `push`
+fires only on `main`, i.e. post-merge, which is where the post-merge-only jobs
+(the board build smoke) validate. There is no per-branch `push` trigger, so a
+PR gets exactly one wave of checks instead of two overlapping waves (a
+`pull_request` wave and a `push`-to-`fix/**` wave) that previously each ran to
+completion in separate concurrency groups and doubled the queue. `webapp-quality.yml`
+gained the `pull_request` trigger it previously lacked, so it now gates PRs the
+same way as the other two.
+
+Each workflow sets `concurrency` keyed on the ref with
+`cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, so a new push
+to a PR cancels the superseded PR run but never cancels a `main` run.
+
+## The always-report contract (do not break this)
+
+Branch protection's required-status-checks feature blocks a merge until a named
+context reports success. It cannot tell "this check has not run yet" from "this
+check will never run"; both look identical and both block the PR forever.
+
+The rule that keeps this safe:
+
+> Workflows always TRIGGER. Heavy jobs SKIP via job-level `if:` conditions on
+> the detector's outputs. A skipped required job still produces a passing
+> context, so every required check always reports.
+
+Concretely:
+
+1. No gating workflow has a workflow-level `paths:` filter. Every matching
+   `pull_request` / `push`-to-`main` event triggers the whole workflow. A
+   `paths:` filter would strand a required context forever the moment a diff
+   misses its paths, so it is banned on anything required.
+2. A cheap `detect` job (the reusable `_detect-changes.yml`) runs first and
+   emits area booleans.
+3. Every real job declares `needs: detect` and an `if:` on the relevant
+   `needs.detect.outputs.*` area(s). When the condition is false, Actions still
+   creates the job and its check run and skips straight to a `skipped`
+   conclusion. Job-level `if:` never changes the context string, so the
+   required context still reports.
+
+The single exception is the `Static checks` bundle, which has no `if:` at all
+and therefore runs on every trigger (see below).
+
+## The reusable detector
+
+`_detect-changes.yml` is a `workflow_call` reusable workflow. Each gating
+workflow calls it once as its `detect` job:
+
+```yaml
+jobs:
+  detect:
+    name: Detect changed areas
+    uses: ./.github/workflows/_detect-changes.yml
+```
+
+This replaces the three near-identical copies of the detection script that used
+to live inline in each workflow with one definition. It still runs once per
+caller (three detector pods per PR wave, one per workflow), but the diff-to-area
+mapping now lives in exactly one place.
+
+Its `Compute changed areas` step resolves a git diff range in this order:
+
+1. `pull_request`: fetch `origin/<base_ref>` and diff `origin/<base_ref>...HEAD`.
+2. `push` with a non-zero `before` SHA: diff `<before>..HEAD`.
+3. Anything else (new-branch push with an all-zero `before`, `workflow_dispatch`,
+   or an unresolved base): fetch `origin/main`, take the merge base with `HEAD`,
+   diff `<merge-base>...HEAD`.
+
+If none resolve, it does not fail; it logs a warning and marks every area
+changed. When in doubt, run the real checks rather than silently skip them.
+
+### Areas and their patterns
+
+| Output | Marks changed when the diff touches |
 | --- | --- |
-| `Required clang-format` | `firmware` or `workflows` |
-| `Required shellcheck` | `firmware` or `workflows` |
-| `Required actionlint` | `workflows` |
+| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
+| `simulator` | `simulator/` |
+| `emulator` | `emulator/` |
+| `webapp` | `webapp/` |
+| `web_flasher` | `web-flasher/` |
+| `workflows` | any file under `.github/workflows/`, or `.actionlint.yaml` |
+| `docs` | `docs/`, `README.md` |
 
-### `webapp-quality.yml`
+`firmware` is deliberately a superset of every firmware-area consumer's real
+inputs (host tests, board build, ruff, cppcheck, rpc-contract, and the strict
+clang-format/shellcheck/markdownlint wrappers). `simulator` is a separate output
+because the strict clang-format scope scans simulator C sources too, so a
+simulator-only change must still run clang-format (inside the bundle) and gosim.
 
-Areas: `webapp` (`webapp/`), `web_flasher` (`web-flasher/`), `workflows`
-(any file under `.gitea/workflows/`, plus `.actionlint.yaml`).
+### The safety rule: workflow edits force everything
 
-| Job | Runs when |
-| --- | --- |
-| `Required lint` | `webapp` or `workflows` |
-| `Required typecheck` | `webapp` or `workflows` |
-| `Required electron typecheck` | `webapp` or `workflows` |
-| `web-flasher tests` | `web_flasher` or `workflows` |
-| `Required unit tests` | `webapp` or `workflows` |
-| `Required webapp build` | `webapp` or `workflows` |
-| `Required e2e smoke` | `webapp` or `workflows` |
-
-Note that `webapp-quality.yml` has no `pull_request:` trigger; it relies on
-`push:` events against `fix/**`, `feat/**`, `feature/**`, `chore/**`,
-`ci/**`, and `main`, which fire on every push to a PR's source branch. That
-event set is unchanged by this restructure.
-
-### Why `workflows` always forces every job
-
-All three workflows use the same broad `workflows` pattern: any file under
-`.gitea/workflows/` (or `.actionlint.yaml`) marks the area changed, and the
-area is OR'd into every job's condition. So editing any workflow file runs
-every job in all three workflows. The point is that editing a job's steps
-is itself a change that needs to be exercised; if editing
-`webapp-quality.yml` only ran jobs whose code area also happened to change
-in the same diff, a broken job definition could land unverified. The broad
-pattern deliberately over-triggers (editing `firmware-build.yml` also runs
-the webapp jobs); that costs some runner time on rare workflow-edit PRs and
-in exchange keeps the rule simple and impossible to under-match.
+`workflows` is OR'd into every job's `if:`. So editing any file under
+`.github/workflows/` (or `.actionlint.yaml`) runs every job in all three
+workflows. Editing a job's steps is itself a change that must be exercised; if a
+workflow edit only ran jobs whose code area also happened to change, a broken
+job definition could land unverified. This over-triggers on rare
+workflow-edit PRs on purpose, in exchange for a rule that is impossible to
+under-match.
 
 ### The area superset rule
 
-Every job's area set must be a superset of what its commands actually read.
-When a script widens its scan scope (for example the strict clang-format
-wrapper picking up a new directory), the corresponding area regex or job
-condition must widen with it, or PRs touching only the new scope will
-falsely skip the check. When auditing, read the scripts, not the job names:
-`run-clang-format-check.sh --strict` scans `main/ components/ test/
-simulator/`, `run-shellcheck.sh --strict` scans `scripts/lint/*.sh`,
-cppcheck scans `main components`, the host test suite builds `test/` against
-`components/` and `main/` sources, and the board build additionally reads
+Every job's area set must be a superset of what its commands actually read. When
+a script widens its scan scope, widen the matching area regex or job condition
+with it, or PRs touching only the new scope will falsely skip the check. Audit
+by reading the scripts, not the job names: `run-clang-format-check.sh --strict`
+scans `main/ components/ test/ simulator/`, `run-shellcheck.sh --strict` scans
+`scripts/lint/*.sh`, cppcheck scans `main components`, the host test suite builds
+`test/` against `components/` and `main/`, and the board build additionally reads
 root `CMakeLists.txt`, `sdkconfig.defaults*`, and `partitions*.csv`.
 
-### Known gap: idf-node jobs never run on pull_request
+## Job topology
 
-The three `idf-node` jobs (`Board build smoke (heltec-v3)`,
-`Emulator scenario suite`, `Emulator browser E2E (non-required)`) keep their
-`github.event_name != 'pull_request'` condition, so they never run on
-pull_request events, even for edits to their own job definitions; they
-validate post-merge on pushes to `main` (and on direct branch pushes). This
-is pre-existing and deliberate: the self-hosted `idf-node` runner is a heavy
-single host that PR volume would saturate.
+### `firmware-quality.yml`
+
+| Job (context name) | Runs when | Required? |
+| --- | --- | --- |
+| `Detect changed areas` (via reusable `detect`) | always | no |
+| `Static checks` | always (no `if:`) | yes |
+
+`Static checks` is one pod, one checkout, and a sequence of named steps that each
+preserve a former standalone job's exact command: no-internal-refs, strict
+shellcheck, ruff baseline, strict clang-format, cppcheck, the rpc-contract check,
+and actionlint over the four gating workflow files. Each check is its own step so
+a failure attributes to the exact tool in the UI. It has no `if:` because it is
+THE universal gate: it must run (and report) on every PR, including a docs-only
+PR where it is the only job that executes. The individual checks are cheap and
+pass trivially when their scope did not change.
+
+### `quality.yml`
+
+| Job (context name) | Runs when | Required? |
+| --- | --- | --- |
+| `Detect changed areas` (via reusable `detect`) | always | no |
+| `Host tests` | `firmware` or `workflows` | yes |
+| `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
+| `Board build smoke (heltec-v3)` | not a `pull_request` event, and (`firmware` or `workflows`) | post-merge required (see quality-policy.md) |
+| `Emulator suite (advisory)` | `firmware`, `simulator`, `emulator`, or `workflows` | no (advisory) |
+
+`Emulator suite (advisory)` merges the former `emulator-scenarios` and
+`emulator-e2e` jobs into one job that builds the linux firmware node, gosim, and
+the UI once, then runs the headless scenario suite followed by the browser E2E.
+It now runs on PRs too (it used to be gated off `pull_request`), giving signal
+on every change while staying non-required so it never blocks a merge. Its two
+scenarios run in parallel inside `emulator/ci/run_scenarios.sh` (each gosim
+process keys its socket path and node-state dir to its own PID, so there is no
+port or state collision) with trimmed retry budgets. The browser E2E step is
+`continue-on-error` while it bakes, so an E2E failure does not fail even the
+advisory job.
+
+`Board build smoke` keeps its `github.event_name != 'pull_request'` guard: the
+ESP-IDF board build is heavy and validates post-merge on pushes to `main`. It
+therefore cannot be a PR-required check; it is the one non-PR required check.
+
+### `webapp-quality.yml`
+
+| Job (context name) | Runs when | Required? |
+| --- | --- | --- |
+| `Detect changed areas` (via reusable `detect`) | always | no |
+| `Webapp checks` | `webapp` or `workflows` | yes |
+| `web-flasher tests` | `web_flasher` or `workflows` | yes |
+
+`Webapp checks` is one job with a single `npm ci`, then lint, typecheck, electron
+typecheck, unit tests, build, and the e2e smoke run as sequential steps. The smoke
+run reuses the build produced earlier in the same job, so there is no second
+`npm ci` and no second build. `web-flasher tests` stays separate because it runs
+`node --test web-flasher/` with no webapp install.
 
 ## What a docs-only PR looks like now
 
 A PR that touches only `docs/**` (and nothing under `main/`, `components/`,
 `test/`, `api/`, `scripts/`, `simulator/`, `emulator/`, `webapp/`,
-`web-flasher/`, or `.gitea/workflows/`) still triggers all three workflows.
-The `changes` job runs (fast: no build, just a diff), and every downstream
-job reports `skipped`. Every context branch protection could require from
-these three workflows gets a report either way, so the PR is never stuck
-waiting on a check that was never going to run.
+`web-flasher/`, or `.github/workflows/`) still triggers all three workflows. The
+three `detect` jobs run (fast: a diff, no build), the `Static checks` bundle runs
+(one pod), and every other job reports `skipped`. Every context branch protection
+could require gets a report either way, so the PR is never stuck waiting on a
+check that was never going to run.
 
 ## Adding a new job
 
-When adding a job to one of these three workflows:
-
-1. Add `needs: changes` (and keep any other existing `needs:`).
-2. Add an `if:` referencing the relevant `needs.changes.outputs.*` area(s),
-   OR'd with `workflows` at minimum.
-3. If the job needs an area this page's `changes` job does not yet compute,
-   add a new boolean output and pattern to that job's `Compute changed
-   areas` step, and document it in the table above.
-4. Do not add a new workflow-level `paths:` filter. It reintroduces the
-   exact deadlock this restructure removes.
-
-Server-side enforcement went live on 2026-07-16: branch protection requires the 23 push-event contexts listed above (every job plus each workflow's change-detection job, excluding the explicitly non-required emulator browser E2E). This paragraph doubles as the enforcement probe: it merged through a docs-only PR whose heavy jobs all reported skipped.
+1. Add `needs: detect`.
+2. Add an `if:` referencing the relevant `needs.detect.outputs.*` area(s), OR'd
+   with `workflows` at minimum. (The `Static checks` bundle is the sole
+   deliberate exception: no `if:`, so it always runs and reports.)
+3. If the job needs an area the detector does not yet compute, add a new output
+   and pattern to `_detect-changes.yml` and document it in the table above.
+4. Do not add a workflow-level `paths:` filter. It reintroduces the exact
+   deadlock this structure removes.
 
 ## Dual-tree arrangement: .github is authoritative, .gitea is a frozen mirror
 
-As of the GitHub-primary migration, `.github/workflows/` is the source of truth for CI and runs on a self-hosted GitHub Actions runner (labels `self-hosted, linux, bramble-host` for general jobs, `self-hosted, idf-node` for ESP-IDF jobs); `.gitea/workflows/` is kept as a frozen, unmodified mirror-side copy and is not touched by future workflow edits. The three quality workflows and `desktop-build.yml` ported to `.github/workflows/` unchanged in behavior beyond the runner label mapping and updating the `changes` job's own-path pattern from `.gitea/workflows/` to `.github/workflows/`. The publish-oriented workflows (`release-components.yml`, `firmware-publish-ota.yml`, `ci-smoke-artifacts.yml`, `webapp-build-publish.yml`, and the publish half of `firmware-build.yml`) still carry Gitea API coupling (`GITEA_TOKEN`-style secrets, `api/v1` dispatch calls, Gitea release creation); their `.github` copies are gated to `workflow_dispatch` only until a Phase 2 pass rewrites that coupling for GitHub natively, and each carries a `PHASE-2 PORT PENDING` header comment plus a `GITEA_SYNC_TOKEN` secret reference in place of the old `GITEA_TOKEN` name.
+`.github/workflows/` is the source of truth for CI and runs on the self-hosted
+ARC scale set (runner label from the `RUNNER_LABEL` repo variable).
+`.gitea/workflows/` is a frozen, unmodified mirror-side copy and is not touched
+by workflow edits. The publish-oriented workflows still carry Gitea API coupling
+and are gated to `workflow_dispatch` until a Phase 2 pass rewrites them for
+GitHub natively; each carries a `PHASE-2 PORT PENDING` header.
