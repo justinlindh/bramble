@@ -115,7 +115,7 @@ describe('unified runtime api', () => {
   });
 
   it('returns 403 for /ws-proxy in hosted mode', async () => {
-    const res = await fetch(`${base}/ws-proxy?target=192.0.2.0`);
+    const res = await fetch(`${base}/ws-proxy?target=10.0.0.20`);
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'ws proxy disabled in hosted mode' });
   });
@@ -166,7 +166,7 @@ describe('ws proxy behavior in local mode', () => {
   });
 
   it('returns 426 for valid target without websocket upgrade', async () => {
-    const res = await fetch(`${localBase}/ws-proxy?target=192.0.2.0`);
+    const res = await fetch(`${localBase}/ws-proxy?target=10.0.0.20`);
     expect(res.status).toBe(426);
     expect(await res.json()).toEqual({ error: 'websocket upgrade required' });
   });

@@ -7,7 +7,7 @@ describe('target policy', () => {
   const cfg = { mode: 'local', allowlist: [] };
 
   it('allows RFC1918 IP in local mode', () => {
-    expect(isAllowedTarget('192.0.2.0', cfg)).toBe(true);
+    expect(isAllowedTarget('10.0.0.50', cfg)).toBe(true);
   });
 
   it('rejects public IP', () => {
@@ -24,8 +24,8 @@ describe('target policy', () => {
   });
 
   it('parses host:port and rejects invalid port values', () => {
-    expect(splitTarget('192.0.2.0')).toEqual({ host: '192.0.2.0', port: null });
-    expect(splitTarget('192.0.2.0:3005')).toEqual({ host: '192.0.2.0', port: 3005 });
-    expect(splitTarget('192.0.2.0:70000')).toBeNull();
+    expect(splitTarget('10.0.0.20')).toEqual({ host: '10.0.0.20', port: null });
+    expect(splitTarget('10.0.0.20:3005')).toEqual({ host: '10.0.0.20', port: 3005 });
+    expect(splitTarget('10.0.0.20:70000')).toBeNull();
   });
 });
