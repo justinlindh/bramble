@@ -744,18 +744,18 @@ func (s *Sim) cmdLoad(cmd Command) {
 	// Mandatory-provisioning (Task 2): optional per-node "unprovisioned"
 	// scenario field, read Go-side like flood_transport/intermediate_rrep
 	// (no C-side sim_scenario change). Defaults to provisioned for every node.
-	unprovisioned := loadUnprovisionedNodeIDs(scenarioPath)
+	unprovisioned := loadNodeFlagIDs(scenarioPath, "unprovisioned")
 
 	// Trust-anchor campaign (P2): optional per-node "unendorsed" scenario field,
 	// read the same Go-side way. Defaults to endorsed for every node (the fleet
 	// anchor vouches for all), so existing scenarios still pin under the
 	// endorsed-only gate.
-	unendorsed := loadUnendorsedNodeIDs(scenarioPath)
+	unendorsed := loadNodeFlagIDs(scenarioPath, "unendorsed")
 
 	// Trust-anchor campaign (P2 red-team): optional per-node "unanchored" field.
 	// Defaults to anchored (the harness default); a marked node boots un-anchored
 	// and TOFU-pins until a provision_anchor event hardens it.
-	unanchored := loadUnanchoredNodeIDs(scenarioPath)
+	unanchored := loadNodeFlagIDs(scenarioPath, "unanchored")
 
 	// Broadcast node_joined for each initial node
 	count := nodeCount(&s.nodes)
