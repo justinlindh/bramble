@@ -2,20 +2,34 @@
 
 This policy defines which CI checks are blocking vs advisory, plus how advisory checks are promoted safely.
 
+Since the pipeline optimization, the many tiny static-analysis jobs are bundled
+into a single `Static checks` job (context `Static checks`, in
+`firmware-quality.yml`). Its steps preserve each former job's exact command, so
+the checks below are unchanged; only their packaging changed. See docs/ci.md for
+the full job topology and the always-report contract.
+
 ## Required checks (blocking on PR)
 
-- Host tests (`bash test/run_all_tests.sh`)
-- RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
-- ShellCheck baseline scope (curated low-noise scripts)
-- Actionlint for `.github/workflows/quality.yml`
-- Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
-- clang-format check (full strict scope)
-- cppcheck (`--error-exitcode=2`, blocking)
-- Go simulator integration (`gosim-integration`: builds and tests the simulator)
+- `Static checks` (one pod, `firmware-quality.yml`) runs, as named steps:
+  - No internal refs (`bash scripts/lint/check-no-internal-refs.sh`)
+  - Strict shellcheck (`bash scripts/lint/run-shellcheck.sh --strict`)
+  - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
+  - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`)
+  - cppcheck (`--error-exitcode=2`, blocking)
+  - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
+  - Actionlint over the four gating workflow files
+- `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
+- `gosim integration` (builds and tests the simulator, `quality.yml`)
+- `Webapp checks` (one pod: lint, typecheck, electron typecheck, unit tests, build, e2e smoke, `webapp-quality.yml`)
+- `web-flasher tests` (`node --test web-flasher/`, `webapp-quality.yml`)
 
 ## Advisory checks (non-blocking)
 
-None currently wired into CI. clang-tidy exists only as a local wrapper
+- `Emulator suite (advisory)` (`quality.yml`): the merged emulator scenario suite
+  plus browser E2E. Runs on every PR for signal but is never required, so it does
+  not gate merges. Its browser E2E step is additionally `continue-on-error`.
+
+clang-tidy exists only as a local wrapper
 (`scripts/lint/run-clang-tidy-advisory.sh`) and is not part of any workflow.
 
 ## Non-PR infra-backed required check
