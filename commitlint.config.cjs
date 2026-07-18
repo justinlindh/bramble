@@ -100,6 +100,8 @@ module.exports = {
         'webapp',
         'wifi',
         'ws',
+        'deps',
+        'deps-dev',
       ],
     ],
   },
