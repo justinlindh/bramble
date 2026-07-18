@@ -429,7 +429,7 @@ GPS connectivity state change event.
     "event": "fix_acquired",
     "valid": true,
     "lat": 40.0544,
-    "lon": -115.0523,
+    "lon": -105.0500,
     "alt_m": 570,
     "accuracy_m": 3.2
   }

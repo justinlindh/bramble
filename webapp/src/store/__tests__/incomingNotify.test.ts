@@ -73,10 +73,10 @@ describe('incoming message native notification', () => {
   });
 
   it('titles a channel message with the channel name', async () => {
-    useStore.setState({ config: { identity: { address: 0xaa11 }, channels: [{ index: 0, name: 'Example SAR' }] } as any } as any);
+    useStore.setState({ config: { identity: { address: 0xaa11 }, channels: [{ index: 0, name: 'Mesh Net' }] } as any } as any);
     await deliver({ from: 'DEADBEEF', text: 'net check', channel: 0, msgId: 'm5' });
     const payload = JSON.parse(onMessage.mock.calls[0][0]);
-    expect(payload).toMatchObject({ conversationId: 'ch:0', conversationTitle: 'Example SAR', sender: 'Node A' });
+    expect(payload).toMatchObject({ conversationId: 'ch:0', conversationTitle: 'Mesh Net', sender: 'Node A' });
   });
 
   it('learns the sender name from fromName so an unknown peer never titles as hex', async () => {

@@ -39,6 +39,12 @@ h="$(git grep -nIE "\b(Node A|Node B)\b" -- . ":!${self}" || true)"
 h="$(git grep -nIE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' -- . ":!${self}" | grep -viE 'AA:BB:CC:DD:EE|00:00:00:00:00:00|DE:AD:BE:EF|FF:FF:FF:FF:FF:FF' || true)"
 [[ -n "$h" ]] && report "MAC address (use a documentation placeholder like AA:BB:CC:DD:EE:FF)" "$h"
 
+
+# 6b. Home location: neighborhood/city names and precise coordinates from the
+#     maintainer's real area. Public fixtures must use fictional places.
+h="$(git grep -nIE 'Example|Example|Example|Example Canyon|36\\.0043|-115\\.0267' -- . ":!${self}" ':!hardware/' || true)"
+[[ -n "$h" ]] && report "home location / neighborhood / coordinates" "$h"
+
 if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi

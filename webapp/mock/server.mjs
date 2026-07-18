@@ -2,8 +2,8 @@
  * Bramble Mock Node — WebSocket JSON-RPC 2.0 server
  * Single-file development server. Port 3005.
  *
- * Simulates a realistic 5-node mesh in the Example/Example area of NV.
- * "Our" node (HomeBase) sits in Example. Peers are spread across Example.
+ * Simulates a realistic 5-node mesh in a fictional example town.
+ * The "HomeBase" node anchors the mesh; peers are spread nearby.
  *
  * Implements the same JSON-RPC wire protocol as the real firmware:
  *   Request:      { jsonrpc: "2.0", id: N, method: "bramble.X", params: {...} }

@@ -2,8 +2,8 @@
  * Bramble Mock Node — WebSocket JSON-RPC 2.0 handler module
  * Importable module for embedding in other servers.
  *
- * Simulates a realistic 5-node mesh in the Example/Example area of NV.
- * "Our" node (HomeBase) sits in Example. Peers are spread across Example.
+ * Simulates a realistic 5-node mesh in a fictional example town.
+ * The "HomeBase" node anchors the mesh; peers are spread nearby.
  *
  * Implements the same JSON-RPC wire protocol as the real firmware:
  *   Request:      { jsonrpc: "2.0", id: N, method: "bramble.X", params: {...} }
@@ -32,32 +32,32 @@ const anchorFingerprint = (pubHex) =>
 const isHex = (s, len) => typeof s === 'string' && s.length === len && /^[0-9a-fA-F]+$/.test(s);
 
 // ─── Node identities ─────────────────────────────────────────────────────────
-// Our node — Justin's house in Example, Example NV
-const SELF_ADDR  = 0x1A2B3C4D;  // "JUST"
+// Our node, the mesh home base (fictional example coordinates)
+const SELF_ADDR  = 0x1A2B3C4D;
 const SELF_NAME  = 'HomeBase';
-const SELF_POS   = { lat: 40.0000, lon: -105.0000, alt: 789, accuracy: 3 };
+const SELF_POS   = { lat: 40.0000, lon: -105.0000, alt: 500, accuracy: 3 };
 
-// Peer nodes — realistic Example locations
+// Peer nodes, fictional example locations
 const PEERS = {
   0xAABBCC01: {
-    name: 'Ridge',    // Heltec on Example Hills ridge, great LOS
-    pos: { lat: 40.0062, lon: -105.0053, alt: 856, accuracy: 5 },
+    name: 'Ridge',      // node on a ridge with good line of sight
+    pos: { lat: 40.0062, lon: -105.0053, alt: 620, accuracy: 5 },
     locTier: 'full',
   },
   0xAABBCC02: {
-    name: 'Trailhead',  // Node at Example Canyon trailhead parking
-    pos: { lat: 39.9817, lon: -105.0173, alt: 732, accuracy: 12 },
+    name: 'Trailhead',  // node at a trailhead parking area
+    pos: { lat: 39.9817, lon: -105.0173, alt: 480, accuracy: 12 },
     locTier: 'full',
   },
   0xAABBCC03: {
-    name: 'Downtown',    // Downtown Example, Water Street District
+    name: 'Downtown',   // node in the town center
     pos: null,
-    gridSquare: 'JJ00aa',  // coarse — downtown Example area (~36.04, -105.04)
+    gridSquare: 'JJ00aa',  // coarse town-center grid square
     locTier: 'coarse',
   },
   0xAABBCC04: {
-    name: 'Northside',     // Northside neighborhood, ~8km north
-    pos: { lat: 40.0537, lon: -105.0223, alt: 615, accuracy: 8 },
+    name: 'Northside',  // node in a neighborhood ~8km north
+    pos: { lat: 40.0537, lon: -105.0223, alt: 540, accuracy: 8 },
     locTier: 'full',
   },
   0xAABBCC05: {
@@ -170,7 +170,7 @@ const hex8 = (n) => `0x${(n >>> 0).toString(16).toUpperCase().padStart(8, '0')}`
 // Normalize a dest param to a number. The web client sends the firmware wire
 // format (an 8-char hex string, e.g. "AABBCC03"); older callers may send a
 // number. Without this, route lookups always miss and every DM takes the
-// 95%-success path, leaving the stale-route failure case (Downtown) unreachable
+// 95%-success path, leaving the stale-route failure case (Example) unreachable
 // (issue #96, BUG-5).
 function normalizeDest(dest) {
   if (typeof dest === 'string') {
@@ -183,17 +183,17 @@ function normalizeDest(dest) {
 // Neighbors — direct radio contacts (not all peers are direct neighbors)
 const neighbors = [
   {
-    addr: 0xAABBCC01, name: 'Ridge', // strong direct link (1.8km LOS)
+    addr: 0xAABBCC01, name: 'Example', // strong direct link (1.8km LOS)
     rssi: -68, snr: 9.5, deliveryRate: 245,
     lastHeardMs: 1200, isMailbox: true, airtimeRemaining: 88,
   },
   {
-    addr: 0xAABBCC02, name: 'Trailhead', // moderate link (3.5km, some obstruction)
+    addr: 0xAABBCC02, name: 'Example', // moderate link (3.5km, some obstruction)
     rssi: -87, snr: 4.8, deliveryRate: 195,
     lastHeardMs: 8400, isMailbox: false, airtimeRemaining: 72,
   },
   {
-    addr: 0xAABBCC03, name: 'Downtown', // weak link (5km through buildings)
+    addr: 0xAABBCC03, name: 'Example', // weak link (5km through buildings)
     rssi: -102, snr: 2.1, deliveryRate: 130,
     lastHeardMs: 34000, isMailbox: false, airtimeRemaining: 45,
   },
@@ -209,14 +209,14 @@ const routes = [
   { dest: 0xAABBCC01, nextHop: 0xAABBCC01, hopCount: 1, metric: 68,  state: 'active',      lastUsedMs: 1500  },
   { dest: 0xAABBCC02, nextHop: 0xAABBCC02, hopCount: 1, metric: 112, state: 'active',      lastUsedMs: 9000  },
   { dest: 0xAABBCC03, nextHop: 0xAABBCC03, hopCount: 1, metric: 185, state: 'stale',       lastUsedMs: 45000 },
-  { dest: 0xAABBCC04, nextHop: 0xAABBCC01, hopCount: 2, metric: 142, state: 'active',      lastUsedMs: 5200  },  // via Ridge
+  { dest: 0xAABBCC04, nextHop: 0xAABBCC01, hopCount: 2, metric: 142, state: 'active',      lastUsedMs: 5200  },  // via Example
   { dest: 0xAABBCC05, nextHop: 0xAABBCC05, hopCount: 1, metric: 210, state: 'active',      lastUsedMs: 62000 },
   { dest: 0xBEEF0001, nextHop: 0xAABBCC01, hopCount: 3, metric: 240, state: 'discovering', lastUsedMs: 0     },  // unknown far node
 ];
 
 const channels = [
   { index: 0, name: 'Bramble Common', hasPsk: false, epoch: 1, isDefault: true  },
-  { index: 1, name: 'Example SAR',  hasPsk: true,  epoch: 5, isDefault: false },
+  { index: 1, name: 'Mesh Net',  hasPsk: true,  epoch: 5, isDefault: false },
   { index: 2, name: 'Family',         hasPsk: true,  epoch: 2, isDefault: false },
 ];
 
@@ -487,7 +487,7 @@ export const handlers = {
       }, delayMs);
     }
 
-    // Also simulate 2-hop delivery to Northside (via Ridge) with longer delay
+    // Also simulate 2-hop delivery to Example (via Example) with longer delay
     const anthemAddr = 0xAABBCC04;
     setTimeout(() => {
       notify('bramble.onBroadcastDelivery', {
@@ -815,10 +815,10 @@ setInterval(() => {
 
 // Simulate incoming messages from mesh — realistic traffic
 const MESH_CHATTER = [
-  { from: 0xAABBCC01, texts: ['Ridge node checking in. Strong signal today.', 'Wind picking up on the ridge, antenna holding.', 'Relayed 3 packets this hour.'] },
-  { from: 0xAABBCC02, texts: ['Trailhead here. Hikers passing through.', 'Solar panel at 14.2V, all good.', 'Forwarded a message to Northside via Ridge.'] },
-  { from: 0xAABBCC03, texts: ['Downtown reporting. Downtown is noisy on 915.', 'Switching to SF10 for better range.', 'Anyone seeing interference today?'] },
-  { from: 0xAABBCC04, texts: ['Northside node online. 2 hops to HomeBase confirmed.', 'Battery swap complete, back on air.', 'Can someone relay to Trailhead? Lost direct path.'] },
+  { from: 0xAABBCC01, texts: ['Example node checking in. Strong signal today.', 'Wind picking up on the ridge, antenna holding.', 'Relayed 3 packets this hour.'] },
+  { from: 0xAABBCC02, texts: ['Example here. Hikers passing through.', 'Solar panel at 14.2V, all good.', 'Forwarded a message to Example via Example.'] },
+  { from: 0xAABBCC03, texts: ['Example reporting. Downtown is noisy on 915.', 'Switching to SF10 for better range.', 'Anyone seeing interference today?'] },
+  { from: 0xAABBCC04, texts: ['Example node online. 2 hops to HomeBase confirmed.', 'Battery swap complete, back on air.', 'Can someone relay to Example? Lost direct path.'] },
   { from: 0xAABBCC05, texts: ['Ranger mobile, heading south on 95.', 'Signal fading, might lose you.', 'Back in range. RSSI improved.'] },
 ];
 

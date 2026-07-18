@@ -185,7 +185,7 @@ _Changes captured from `git log --oneline --since=2026-02-01`._
 - wire identity component into main: persistent node address via NVS (acae17c)
 - add freq_plan component: regulatory frequency plans for US/EU/AU (e96fffc)
 - OLED display driver, button input, splash screen + UI main loop (6f6f143)
-- (mock): realistic Example NV mesh with named nodes, proper grid squares, consistent metrics (d3d5280)
+- (mock): realistic example mesh with named nodes, proper grid squares, consistent metrics (d3d5280)
 - (webapp): clickable location badge → map focus, route overlay lines, tighter ComposeBar layout (2af7fc8)
 - (webapp): add IndexedDB message persistence (6ff23e6)
 - (webapp): add QR code sharing for channels and node identity (0c651c3)
