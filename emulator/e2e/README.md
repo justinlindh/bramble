@@ -156,6 +156,9 @@ moved under `b.mu` so the new cross-goroutine lookup is actually safe).
 
 `make e2e` was run 3 consecutive times locally (plus once more via the raw
 `run_e2e.sh` wrapper and once more via the full `make e2e` target,
-5 total), all green, ~37s wall-clock each, well under the 4-minute budget.
+5 total), all green, ~37s wall-clock each. The Playwright ceilings (180s per
+test, 12 minutes global) are ceilings, not targets: every wait is
+event-driven, so fast boxes finish the suite in under a minute while a
+CPU-contended CI pod gets the time the send schedule needs.
 No fixed sleeps gate delivery-dependent assertions; `lib/wsCapture.ts`'s
 `waitFor()` polls with a generous bounded timeout instead.
