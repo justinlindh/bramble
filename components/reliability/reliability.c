@@ -42,9 +42,14 @@ int pending_ack_add(pending_ack_table_t* table, uint32_t packet_id, uint32_t des
             e->tier = tier;
             e->attempt = 0;
             e->max_attempts = tier_max_retries(tier);
-            e->packet_len = len;
-            if (len > 0 && packet) {
-                memcpy(e->packet_data, packet, len > 222 ? 222 : len);
+            /* Clamp to the on-struct buffer so packet_len can never claim more
+             * bytes than packet_data actually holds: the retry path in
+             * mesh_task transmits packet_data for packet_len bytes, and a
+             * length past the buffer end would read out of bounds. */
+            size_t stored = len > sizeof(e->packet_data) ? sizeof(e->packet_data) : len;
+            e->packet_len = (uint16_t)stored;
+            if (stored > 0 && packet) {
+                memcpy(e->packet_data, packet, stored);
             }
             e->next_retry_ms = now_ms + tier_base_delay_ms(tier);
             e->active = true;

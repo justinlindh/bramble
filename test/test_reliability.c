@@ -94,6 +94,28 @@ void test_pending_ack_table_full(void) {
     TEST_ASSERT_GREATER_OR_EQUAL(0, retry);
 }
 
+/*
+ * An input longer than the on-struct packet_data buffer must be stored with a
+ * packet_len that matches the bytes actually copied, never the original length.
+ * The retry path transmits packet_data for packet_len bytes, so a packet_len
+ * past the buffer end would read out of bounds.
+ */
+void test_pending_ack_add_clamps_oversized_packet(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+
+    const size_t cap = sizeof(table.entries[0].packet_data);
+    uint8_t big[512];
+    TEST_ASSERT_TRUE(cap < sizeof(big)); /* the struct buffer must be the smaller of the two */
+    for (size_t i = 0; i < sizeof(big); i++)
+        big[i] = (uint8_t)(i & 0xFF);
+
+    int idx = pending_ack_add(&table, 0x7, 0x2222, MSG_TIER_NORMAL, big, sizeof(big), 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)cap, table.entries[idx].packet_len);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(big, table.entries[idx].packet_data, cap);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
@@ -101,5 +123,6 @@ int main(void) {
     RUN_TEST(test_key_exchange_send_path_uses_critical_tier);
     RUN_TEST(test_non_key_exchange_send_path_uses_normal_tier);
     RUN_TEST(test_pending_ack_table_full);
+    RUN_TEST(test_pending_ack_add_clamps_oversized_packet);
     return UNITY_END();
 }
