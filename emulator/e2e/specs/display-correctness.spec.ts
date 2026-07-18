@@ -62,7 +62,9 @@ test.describe('display correctness', () => {
         }
         return undefined;
       },
-      { timeoutMs: 40_000, label: `"${CHANNEL_TEXT}" in some node's wire fb` },
+      // Covers the scenario's full send schedule (sender t=12s..100s); see
+      // the note in functionality.spec.ts's delivery step. Event-driven.
+      { timeoutMs: 110_000, label: `"${CHANNEL_TEXT}" in some node's wire fb` },
     );
 
     // Let that node's card exist and the paint schedule for this exact seq
@@ -85,7 +87,7 @@ test.describe('display correctness', () => {
         const found = findText(grid, CHANNEL_TEXT, 1);
         return found.found ? { grid, found } : undefined;
       },
-      { timeoutMs: 8_000, intervalMs: 200, label: 'canvas to render the delivered text' },
+      { timeoutMs: 15_000, intervalMs: 200, label: 'canvas to render the delivered text' },
     );
 
     expect(canvasHit.found.found, 'independent glyph search must find the text on the canvas').toBe(true);

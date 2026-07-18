@@ -141,7 +141,13 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
         }
         return rendered.size >= 2 ? rendered : undefined;
       },
-      { timeoutMs: 40_000, label: '>=2 distinct nodes rendering "HELLO BRAMBLE" on the wire' },
+      // The budget covers the scenario's FULL send schedule (12 broadcasts,
+      // sender t=12s..100s), not just the first sends: on a CPU-contended CI
+      // pod (this suite shares the pod with headless chromium) the early
+      // sends can straggle, and a 40s window that opens ~t=15s used to close
+      // before the later sends landed, failing runs whose delivery was fine.
+      // waitFor is event-driven, so a fast box still exits in seconds.
+      { timeoutMs: 110_000, label: '>=2 distinct nodes rendering "HELLO BRAMBLE" on the wire' },
     );
     expect(hits.size, 'distinct nodes with the message in their wire fb').toBeGreaterThanOrEqual(2);
 
@@ -152,7 +158,7 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
         const grid = await readCanvasGrid(page, oneNode);
         return findText(grid, 'HELLO BRAMBLE', 1).found || undefined;
       },
-      { timeoutMs: 8_000, intervalMs: 200, label: `canvas render of the message on node ${oneNode}` },
+      { timeoutMs: 15_000, intervalMs: 200, label: `canvas render of the message on node ${oneNode}` },
     );
   });
 

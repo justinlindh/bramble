@@ -46,7 +46,10 @@ test('a freshly loaded firmware scenario delivers messages with no manual Play',
       }
       return rendered.size >= 2 ? rendered : undefined;
     },
-    { timeoutMs: 45_000, label: '>=2 nodes render "HELLO BRAMBLE" with no Play press' },
+    // Covers the scenario's full send schedule (sender t=12s..100s) so a
+    // CPU-contended pod cannot outrun the window; event-driven, so a fast box
+    // exits as soon as both receivers have rendered (typically ~15s).
+    { timeoutMs: 110_000, label: '>=2 nodes render "HELLO BRAMBLE" with no Play press' },
   );
   expect(
     hits.size,
