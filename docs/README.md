@@ -1,6 +1,6 @@
 # Bramble Documentation Index
 
-This index separates **operator/developer reference docs** from **historical planning artifacts**.
+This index separates **operator/developer reference docs** from **historical planning artifacts** so newcomers can tell current truth from archaeology.
 
 ## Start here
 
