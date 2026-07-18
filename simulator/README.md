@@ -132,7 +132,9 @@ Per-node `env` knobs (host-only, honored only on the linux target):
 | `EMU_AUTO_SEND_TO` | DM target: `neighbor` (first learned neighbor), a hex address, or unset for a channel broadcast. |
 | `EMU_AUTO_SEND_DELAY_MS` / `_REPEAT` / `_INTERVAL_MS` | First-phase send timing (default 12000 / 3 / 4000). The delay must exceed the receiver's 10s message-idle threshold so an inbound message auto-opens its Messages screen. |
 | `EMU_AUTO_SEND2` + `EMU_AUTO_SEND2_DELAY_MS` / `_REPEAT` / `_INTERVAL_MS` | Optional second send phase (distinct text) after the first, for the DM-desync repro. |
-| `EMU_REBOOT_AT_MS` | The node exits once at this time so the supervisor restarts it (same identity, cleared RAM), which is the one-sided-session precondition. One-shot via a `NODE_DIR` marker. |
+| `EMU_BEACON_INTERVAL_MS` | Overrides the beacon interval (production default 60s) so nodes beacon often enough that neighbor discovery is reliable inside a short scenario window, instead of hinging on a single beacon that can collide or drop. Linux target only. |
+| `EMU_DROP_DM_SESSION_AT_MS` | The node tears down its own DM sessions once at this time while staying up and still neighboring the peer, constructing the one-sided-session desync deterministically. What the `emu-dm-desync` scenario uses to avoid reboot's real-time races. |
+| `EMU_REBOOT_AT_MS` | The node exits once at this time so the supervisor restarts it (same identity, cleared RAM). A heavier route to the one-sided-session precondition, kept as a general primitive; the desync scenario prefers `EMU_DROP_DM_SESSION_AT_MS`. One-shot via a `NODE_DIR` marker. |
 
 ### Assertion vocabulary
 

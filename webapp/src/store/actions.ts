@@ -531,12 +531,6 @@ export async function loadAirtime(): Promise<void> {
   useStore.getState().setAirtime(normalizeAirtime(result));
 }
 
-export async function loadAirtimePolicy(): Promise<void> {
-  if (!client) return;
-  const result = await client.rpc<any>('bramble.getAirtimePolicy');
-  useStore.getState().setAirtimePolicy(result);
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeNeighbor(raw: any): Neighbor & { name?: string } {
   return {
@@ -1329,22 +1323,6 @@ export async function setDefaultChannel(index: number): Promise<void> {
   const result = await client.rpc('bramble.setDefaultChannel', { index });
   assertOk(result, 'Failed to set default channel');
   await loadConfig();
-}
-
-export async function setAirtimePolicy(config: {
-  enabled?: boolean;
-  baseIntervalMs?: number;
-  minIntervalMs?: number;
-  maxIntervalMs?: number;
-  denseThreshold?: number;
-  churnWindowSec?: number;
-  churnThreshold?: number;
-  cooldownSec?: number;
-}): Promise<void> {
-  if (!client) throw new Error('Not connected');
-  const result = await client.rpc('bramble.setAirtimePolicy', config);
-  assertOk(result, 'Failed to set airtime policy');
-  await loadAirtimePolicy();
 }
 
 export function openDM(addr: number): void {

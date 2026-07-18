@@ -13,7 +13,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -123,7 +125,6 @@ type extConn struct {
 
 	node string // hello id
 	addr uint32
-	freq int // last tx carrier, echoed on rx
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -460,7 +461,6 @@ func (ec *extConn) handleTx(msg *emuInbound) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if msg.Freq != 0 {
-		ec.freq = msg.Freq
 		s.emuFreq = msg.Freq // single-channel ether: remember the carrier for rx
 	}
 	node := C.node_array_find_by_addr(&s.nodes, C.uint32_t(ec.addr))
@@ -754,6 +754,23 @@ func (s *Sim) startEmulator(fwNodes []firmwareNodeSpec) {
 // the event loop advances against time.Now, until the scenario duration
 // elapses. Returns after tearing the supervisor and broker down.
 func (s *Sim) runRealtimeHeadless() error {
+	// Reap child firmware nodes on SIGINT/SIGTERM. Without this, gosim (which has
+	// no other signal handling) dies immediately on the SIGTERM that `timeout`
+	// sends at a budget expiry, or that run_scenarios.sh's cleanup sends, and its
+	// node processes are orphaned. Orphans keep burning CPU and contaminate later
+	// runs' real-time timing (a real flake source). Closing stopCh routes through
+	// the same shutdownEmulator path as normal completion, which kills every node.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	var stopOnce sync.Once
+	go func() {
+		if _, ok := <-sigCh; !ok {
+			return
+		}
+		stopOnce.Do(func() { close(s.stopCh) })
+	}()
+
 	s.mu.Lock()
 	s.cmdPlay()
 	s.mu.Unlock()

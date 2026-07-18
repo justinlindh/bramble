@@ -4,13 +4,13 @@
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
     idf_component_register(
-        SRCS "battery_virt.c"
+        SRCS "battery_virt.c" "battery_pct.c"
         INCLUDE_DIRS "include"
         REQUIRES board_config emu_link json
     )
 else()
     idf_component_register(
-        SRCS "battery.c"
+        SRCS "battery.c" "battery_pct.c"
         INCLUDE_DIRS "include"
         REQUIRES esp_adc board_config
     )

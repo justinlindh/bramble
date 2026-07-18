@@ -42,9 +42,16 @@ int pending_ack_add(pending_ack_table_t* table, uint32_t packet_id, uint32_t des
             e->tier = tier;
             e->attempt = 0;
             e->max_attempts = tier_max_retries(tier);
-            e->packet_len = len;
-            if (len > 0 && packet) {
-                memcpy(e->packet_data, packet, len > 222 ? 222 : len);
+            /* Clamp the recorded length to what actually fits in packet_data:
+             * packet_len must never exceed the bytes copied, or every
+             * retransmit consumer (mesh_tx, the simulator bridge) reads past
+             * the buffer. Legitimate DATA frames are <= PENDING_ACK_MAX_FRAME
+             * by construction; the clamp is a defensive invariant, not a
+             * silent truncation of valid traffic. */
+            uint16_t stored = len > sizeof(e->packet_data) ? (uint16_t)sizeof(e->packet_data) : len;
+            e->packet_len = stored;
+            if (stored > 0 && packet) {
+                memcpy(e->packet_data, packet, stored);
             }
             e->next_retry_ms = now_ms + tier_base_delay_ms(tier);
             e->active = true;

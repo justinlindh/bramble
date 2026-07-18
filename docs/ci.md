@@ -175,11 +175,15 @@ pass trivially when their scope did not change.
 the UI once, then runs the headless scenario suite followed by the browser E2E.
 It now runs on PRs too (it used to be gated off `pull_request`), giving signal
 on every change while staying non-required so it never blocks a merge. Its two
-scenarios run in parallel inside `emulator/ci/run_scenarios.sh` (each gosim
-process keys its socket path and node-state dir to its own PID, so there is no
-port or state collision) with trimmed retry budgets. The browser E2E step is
-`continue-on-error` while it bakes, so an E2E failure does not fail even the
-advisory job.
+scenarios run sequentially inside `emulator/ci/run_scenarios.sh`: they are
+isolated (each gosim process keys its socket path and node-state dir to its own
+PID, so there is no port or state collision), but running both at once put five
+wall-clock firmware nodes on the runner simultaneously and the CPU contention
+starved their real-time windows, which was a flake source. `emu-dm-desync` is
+deterministic (the desynced session state is constructed, not raced) and runs
+once with no retry; `emu-channel-delivery` keeps a 2-attempt budget for its
+residual render-window jitter. The browser E2E step is `continue-on-error`
+while it bakes, so an E2E failure does not fail even the advisory job.
 
 `Board build smoke` keeps its `github.event_name != 'pull_request'` guard: the
 ESP-IDF board build is heavy and validates post-merge on pushes to `main`. It

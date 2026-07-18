@@ -87,11 +87,42 @@ void test_rreq_fwd_monotonic_flood_bounded_to_refill_rate(void) {
     TEST_ASSERT_EQUAL_INT((int)windows, allowed);
 }
 
+/* A full table must not silently disable per-pair rate limiting. Filling
+ * every slot with distinct destinations (the attack: cycle dests to wedge
+ * the table) then, once those entries' cooldowns elapse, a brand-new pair
+ * must be *recorded* by reclaiming a stale slot -- proven by an immediate
+ * repeat of that new pair being rejected. Before the stale-slot reclaim the
+ * table stayed full forever, so the new pair was allowed without recording
+ * and its immediate repeat was allowed too. */
+void test_rreq_rate_reclaims_stale_slot_when_full(void) {
+    rreq_rate_limiter_t rl;
+    rreq_rate_init(&rl);
+
+    uint32_t t0 = 10000;
+    for (uint32_t d = 0; d < RREQ_RATE_ENTRIES; d++) {
+        TEST_ASSERT_TRUE(rreq_rate_allow(&rl, 0xAA, 0x1000 + d, t0));
+    }
+
+    // Full but every entry still fresh: a new pair is allowed (fail-open
+    // backstop) but must NOT evict a live entry -- an original pair is still
+    // within its cooldown and stays rate-limited.
+    uint32_t t1 = t0 + 1;
+    TEST_ASSERT_TRUE(rreq_rate_allow(&rl, 0xAA, 0x9999, t1));
+    TEST_ASSERT_FALSE(rreq_rate_allow(&rl, 0xAA, 0x1000, t1));
+
+    // Once the originals' cooldown has elapsed, a new pair reclaims a stale
+    // slot and is recorded, so an immediate repeat is rate-limited.
+    uint32_t t2 = t0 + RREQ_RATE_LIMIT_MS;
+    TEST_ASSERT_TRUE(rreq_rate_allow(&rl, 0xBB, 0xDEAD, t2));
+    TEST_ASSERT_FALSE(rreq_rate_allow(&rl, 0xBB, 0xDEAD, t2 + 1));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rreq_rate_first_allowed);
     RUN_TEST(test_rreq_rate_too_fast_rejected);
     RUN_TEST(test_rreq_rate_after_cooldown_allowed);
+    RUN_TEST(test_rreq_rate_reclaims_stale_slot_when_full);
     RUN_TEST(test_sybil_rssi_cluster_detected);
     RUN_TEST(test_rreq_fwd_burst_then_rejected);
     RUN_TEST(test_rreq_fwd_refill_after_interval_allows_one);

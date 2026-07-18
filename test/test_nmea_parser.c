@@ -309,6 +309,43 @@ void test_nmea_parse_rmc_speed_clamp(void) {
     TEST_ASSERT_EQUAL_UINT8(255, pos.speed_kmh);
 }
 
+/* An RMC that omits optional speed and track (empty fields 7 and 8) must not
+ * let those empties collapse and shift later fields into their slots: speed
+ * and heading should read as absent (0), not garbage derived from the date
+ * (230394) or magnetic variation (003.1). */
+void test_nmea_parse_rmc_empty_speed_track_no_shift(void) {
+    char sentence[] = "$GPRMC,123519,A,4807.038,N,01131.000,E,,,230394,003.1,W*6A";
+    nmea_position_t pos = {0};
+
+    bool result = nmea_parse_rmc(sentence, &pos);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_TRUE(pos.valid);
+    /* Position still parses correctly despite the empty speed/track. */
+    TEST_ASSERT_INT32_WITHIN(1000, 481173000, pos.latitude_e7);
+    TEST_ASSERT_INT32_WITHIN(1000, 115166667, pos.longitude_e7);
+    /* Empty -> absent, NOT shifted-in from the date/mag-var fields. */
+    TEST_ASSERT_EQUAL_UINT8(0, pos.speed_kmh);
+    TEST_ASSERT_EQUAL_UINT8(0, pos.heading_deg2);
+}
+
+/* A GGA with an empty satellites-used field (7) must not read the HDOP field
+ * as the satellite count. With correct field alignment sats_used is 0 and the
+ * later altitude field still lands where it belongs. */
+void test_nmea_parse_gga_empty_sats_no_shift(void) {
+    char sentence[] = "$GPGGA,123519,4807.038,N,01131.000,E,1,,2.5,545.4,M,46.9,M,,*47";
+    nmea_position_t pos = {0};
+
+    bool result = nmea_parse_gga(sentence, &pos);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_TRUE(pos.valid);
+    /* Empty sats field -> 0, not atoi("2.5") == 2 from a collapsed shift. */
+    TEST_ASSERT_EQUAL_UINT8(0, pos.sats_used);
+    /* Altitude (field 9) still parses -> proves no left-shift occurred. */
+    TEST_ASSERT_INT16_WITHIN(1, 545, pos.altitude_m);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -329,6 +366,7 @@ int main(void) {
     RUN_TEST(test_nmea_parse_rmc_rejects_short_longitude_field);
     RUN_TEST(test_nmea_parse_rmc_high_speed);
     RUN_TEST(test_nmea_parse_rmc_speed_clamp);
+    RUN_TEST(test_nmea_parse_rmc_empty_speed_track_no_shift);
 
     /* GGA parsing tests */
     RUN_TEST(test_nmea_parse_gga_valid);
@@ -338,6 +376,7 @@ int main(void) {
     RUN_TEST(test_nmea_parse_gga_high_altitude);
     RUN_TEST(test_nmea_parse_gga_sats_used_no_fix);
     RUN_TEST(test_nmea_parse_gga_sats_used_with_fix);
+    RUN_TEST(test_nmea_parse_gga_empty_sats_no_shift);
 
     /* GSV parsing tests */
     RUN_TEST(test_nmea_parse_gsv_valid);

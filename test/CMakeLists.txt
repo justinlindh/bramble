@@ -387,6 +387,15 @@ target_include_directories(test_dedup PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
 )
 
+# Battery percentage curve (shared by the device and virtual drivers)
+add_executable(test_battery
+    test_battery.c
+    unity/unity.c
+)
+target_include_directories(test_battery PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+)
+
 # Radio airtime tests
 add_executable(test_radio_airtime
     test_radio_airtime.c
