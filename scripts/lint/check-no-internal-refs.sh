@@ -42,7 +42,7 @@ h="$(git grep -nIE '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' -- . ":!${self}" | grep 
 
 # 6b. Home location: neighborhood/city names and precise coordinates from the
 #     maintainer's real area. Public fixtures must use fictional places.
-h="$(git grep -nIE 'Inspirada|Henderson|McCullough|Sloan Canyon|36\\.0043|-115\\.0267' -- . ":!${self}" ':!hardware/' || true)"
+h="$(git grep -nIE 'Inspirada|Henderson|McCullough|Sloan Canyon|Anthem|35\.9[0-9]{4}|36\.0[0-9]{3}|-11[45]\.[0-9]{3,}|openstreetmap\.org/\?mlat' -- . ":!${self}" ':!hardware/' || true)"
 [[ -n "$h" ]] && report "home location / neighborhood / coordinates" "$h"
 
 if [[ "$fail" -ne 0 ]]; then
