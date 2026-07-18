@@ -21,12 +21,13 @@
  *
  * Threading: emu_link's reader thread runs the rx/txdone/cadres handlers.
  * radio_transmit_raw and radio_cad_check are called from the sender's thread
- * (through the tx_gate mutex) and block on a condvar the handlers signal, so
- * the tx-done callback fires on the caller's thread exactly as on device
- * (radio_esp.c), while the rx callback fires on the reader thread just as the
- * device's rx callback fires from the radio task. mesh_task's registered
- * consumers (on_rx queue-posts an rx_packet_t, on_tx_done just logs) do only
- * bounded work, so the reader thread never blocks.
+ * (through the tx_gate mutex) and poll a flag the handlers set, so the
+ * tx-done callback fires on the caller's thread exactly as on device
+ * (radio_esp.c). The rx and async cad-done callbacks do NOT fire on the
+ * reader thread: it is a raw pthread and must never enter FreeRTOS, so those
+ * events are deferred through a pthread ring to a FreeRTOS pump task (see
+ * the THREADING CONTRACT comment above the handlers), which then invokes the
+ * registered callbacks from legal task context.
  *
  * Host-only: compiled into the radio component only on the IDF linux target
  * (see CMakeLists.txt) and #included directly by test/test_radio_virt.c. On a
@@ -181,6 +182,101 @@ static void deadline_in_ms(struct timespec* ts, uint32_t ms) {
 /*  emu_link inbound handlers (reader thread)                          */
 /* ------------------------------------------------------------------ */
 
+/* THREADING CONTRACT (the hard-won part): emu_link's reader is a RAW pthread,
+ * not a FreeRTOS task, and on the IDF-linux FreeRTOS port a foreign thread
+ * must never call FreeRTOS APIs. The port keeps global scheduler state
+ * (uxCriticalNesting in port.c) that only registered task pthreads may touch;
+ * an xQueueSend from the reader thread races the scheduler and intermittently
+ * dies on `vPortExitCritical: Assertion uxCriticalNesting >= 0' failed`, or
+ * silently wedges the scheduler (both observed on CI: node processes exiting
+ * with status 1 mid-scenario, and "mute" nodes that received frames but whose
+ * mesh task never ran again). The app's rx callback (mesh_task's on_rx) and
+ * the async cad-done callback both land in FreeRTOS queues, so the reader
+ * thread must NOT invoke them directly. Instead the handlers below push into
+ * a plain pthread-mutex ring (same pattern button_virt uses for the same
+ * reason) and a FreeRTOS pump task drains it and runs the callbacks from
+ * legal task context. txdone/cadres flag signalling stays on the reader
+ * thread: pthread primitives only, no FreeRTOS.
+ *
+ * The plain-gcc test harness (no ESP_PLATFORM) has no scheduler and its
+ * socketpair tests drive dispatch synchronously, so it keeps the direct
+ * call. */
+
+#if defined(ESP_PLATFORM)
+#define RVIRT_EVQ_CAP 64
+typedef struct {
+    uint8_t kind; /* 0 = rx frame, 1 = async cad verdict */
+    uint8_t len;
+    int16_t rssi;
+    int8_t snr;
+    bool cad_busy;
+    uint8_t data[256];
+} rvirt_ev_t;
+
+static pthread_mutex_t s_evq_mu = PTHREAD_MUTEX_INITIALIZER;
+static rvirt_ev_t s_evq[RVIRT_EVQ_CAP];
+static int s_evq_head = 0, s_evq_tail = 0, s_evq_count = 0;
+static unsigned s_evq_dropped = 0; /* logged from the pump task, not here */
+static bool s_pump_started = false;
+
+/* Reader thread: enqueue only (pthread mutex, no FreeRTOS, no logging). A
+ * full ring drops the newest event and counts it; on the virtual ether that
+ * is indistinguishable from RF loss and the mesh's retry machinery owns it. */
+static void rvirt_ev_push(const rvirt_ev_t* ev) {
+    pthread_mutex_lock(&s_evq_mu);
+    if (s_evq_count < RVIRT_EVQ_CAP) {
+        s_evq[s_evq_tail] = *ev;
+        s_evq_tail = (s_evq_tail + 1) % RVIRT_EVQ_CAP;
+        s_evq_count++;
+    } else {
+        s_evq_dropped++;
+    }
+    pthread_mutex_unlock(&s_evq_mu);
+}
+
+/* Pump task: the only place reader-thread events meet FreeRTOS. Polls with
+ * vTaskDelay (a condvar cannot wake a FreeRTOS task on this port, see the
+ * txdone poll note above RADIO_VIRT_TX_POLL_MS). */
+static void rvirt_pump_task(void* arg) {
+    (void)arg;
+    for (;;) {
+        rvirt_ev_t ev;
+        bool have;
+        unsigned dropped;
+        pthread_mutex_lock(&s_evq_mu);
+        have = s_evq_count > 0;
+        if (have) {
+            ev = s_evq[s_evq_head];
+            s_evq_head = (s_evq_head + 1) % RVIRT_EVQ_CAP;
+            s_evq_count--;
+        }
+        dropped = s_evq_dropped;
+        s_evq_dropped = 0;
+        pthread_mutex_unlock(&s_evq_mu);
+
+        if (dropped > 0)
+            ESP_LOGW(TAG, "inbound event ring overflowed; dropped %u event(s)", dropped);
+        if (!have) {
+            vTaskDelay(1);
+            continue;
+        }
+        if (ev.kind == 0) {
+            radio_rx_info_t info = {0};
+            info.len = ev.len;
+            info.rssi = ev.rssi;
+            info.snr = ev.snr;
+            radio_rx_callback_t cb = s_rx_cb;
+            if (cb)
+                cb(ev.data, ev.len, &info);
+        } else {
+            radio_cad_done_callback_t cb = s_cad_done_cb;
+            if (cb)
+                cb(ev.cad_busy);
+        }
+    }
+}
+#endif /* ESP_PLATFORM */
+
 static void on_rx_msg(const cJSON* msg, void* ctx) {
     (void)ctx;
     const cJSON* p = cJSON_GetObjectItem(msg, "payload");
@@ -199,9 +295,20 @@ static void on_rx_msg(const cJSON* msg, void* ctx) {
     info.rssi = cJSON_IsNumber(rssi) ? (int16_t)rssi->valuedouble : 0;
     info.snr = cJSON_IsNumber(snr) ? (int8_t)snr->valuedouble : 0;
 
+#if defined(ESP_PLATFORM)
+    /* Reader thread: defer to the pump task (see the threading contract). */
+    rvirt_ev_t ev = {0};
+    ev.kind = 0;
+    ev.len = (uint8_t)n;
+    ev.rssi = info.rssi;
+    ev.snr = info.snr;
+    memcpy(ev.data, buf, n);
+    rvirt_ev_push(&ev);
+#else
     radio_rx_callback_t cb = s_rx_cb;
     if (cb)
         cb(buf, (uint8_t)n, &info);
+#endif
 }
 
 static void on_txdone_msg(const cJSON* msg, void* ctx) {
@@ -235,12 +342,21 @@ static void on_cadres_msg(const cJSON* msg, void* ctx) {
 
     /* Async radio_cad() path: deliver the verdict to the cad-done callback and
      * return to IDLE. The synchronous radio_cad_check() path never sets
-     * s_cad_async, so it consumes the condvar signal instead. */
+     * s_cad_async, so it consumes the condvar signal instead. On the node the
+     * callback lands in FreeRTOS-managed code, so it must run on the pump
+     * task, not this reader thread (see the threading contract above). */
     if (async) {
         atomic_store(&s_state, RADIO_STATE_IDLE);
+#if defined(ESP_PLATFORM)
+        rvirt_ev_t ev = {0};
+        ev.kind = 1;
+        ev.cad_busy = b;
+        rvirt_ev_push(&ev);
+#else
         radio_cad_done_callback_t cb = s_cad_done_cb;
         if (cb)
             cb(b);
+#endif
     }
 }
 
@@ -254,6 +370,19 @@ int radio_init(const radio_config_t* config) {
     emu_link_on("rx", on_rx_msg, NULL);
     emu_link_on("txdone", on_txdone_msg, NULL);
     emu_link_on("cadres", on_cadres_msg, NULL);
+
+#if defined(ESP_PLATFORM)
+    /* One pump task per process, surviving radio_reconfigure: it is the only
+     * legal FreeRTOS context for the reader thread's rx/cad events (see the
+     * threading contract above the handlers). */
+    if (!s_pump_started) {
+        if (xTaskCreate(rvirt_pump_task, "rvirt_pump", 4096, NULL, 10, NULL) != pdPASS) {
+            ESP_LOGE(TAG, "failed to create rx pump task");
+            return -1;
+        }
+        s_pump_started = true;
+    }
+#endif
 
     atomic_store(&s_state, RADIO_STATE_IDLE);
     ESP_LOGI(TAG, "virtual radio up: %.1f MHz SF%u BW %lu", (double)config->frequency_mhz,
@@ -343,7 +472,10 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
          * fatal because there the frame really may not have left the chip;
          * the virtual radio's contract is the opposite, so warn and count
          * the TX as sent. */
-        ESP_LOGW(TAG, "txdone still pending after %ums; counting TX as sent (virtual ether delivers at tx start)", RADIO_VIRT_TX_TIMEOUT_MS);
+        ESP_LOGW(TAG,
+                 "txdone still pending after %ums; counting TX as sent (virtual ether delivers at "
+                 "tx start)",
+                 RADIO_VIRT_TX_TIMEOUT_MS);
         atomic_store(&s_state, RADIO_STATE_IDLE);
         if (s_tx_done_cb)
             s_tx_done_cb();
