@@ -1,118 +1,91 @@
-# PHASE-2 PORT PENDING: Gitea-coupled publish path, dispatch-only until rewritten
 name: Release Components
 
+# Publishes GitHub Releases for the four independently versioned components
+# (protocol, firmware, webapp, sim). Each component has its own scope-gated
+# .releaserc.<component>.cjs: only conventional commits scoped to that
+# component cut a release for it. GitHub squash-merge commits are expanded
+# into their per-bullet virtual commits first (scripts/release/
+# semantic-release-squash-expander.cjs) so cross-component PRs still version
+# every component their body touches.
+
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (analyze only, no tags or releases)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+# A single serialized group so back-to-back merges queue instead of racing
+# semantic-release into silently skipping a tag. Never cancel an in-flight
+# release run.
+concurrency:
+  group: release-components
+  cancel-in-progress: false
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  release-protocol:
+  release:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    concurrency:
-      group: release-protocol
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # "true" only on a manual dispatch that requested a dry run; empty on push.
+      DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Install release dependencies
         run: |
           npm install --no-save \
-            semantic-release \
-            @semantic-release/commit-analyzer \
-            @semantic-release/release-notes-generator \
-            @saithodev/semantic-release-gitea \
-            conventional-changelog-conventionalcommits
+            semantic-release@24 \
+            @semantic-release/commit-analyzer@13 \
+            @semantic-release/release-notes-generator@14 \
+            @semantic-release/github@11 \
+            conventional-changelog-conventionalcommits@9
 
-      - name: Run semantic-release (protocol)
-        env:
-          # GITEA_SYNC_TOKEN: to be provisioned on GitHub; carries the Gitea
-          # PAT the semantic-release-gitea plugin needs to write releases
-          # back to the frozen Gitea mirror repo. Phase 2 rewrites this to a
-          # GitHub-native release flow.
-          RELEASE_FORGE_URL: ${{ vars.RELEASE_FORGE_URL }}
-          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-        run: npx semantic-release --extends ./.releaserc.protocol.cjs
-
-  release-webapp:
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    concurrency:
-      group: release-webapp
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install release dependencies
+      # Components run sequentially in one job so their tag fetches never race.
+      - name: Release protocol
         run: |
-          npm install --no-save \
-            semantic-release \
-            @semantic-release/commit-analyzer \
-            @semantic-release/release-notes-generator \
-            @saithodev/semantic-release-gitea \
-            conventional-changelog-conventionalcommits
+          if [ "$DRY" = "true" ]; then
+            npx semantic-release --extends ./.releaserc.protocol.cjs --dry-run
+          else
+            npx semantic-release --extends ./.releaserc.protocol.cjs
+          fi
 
-      - name: Run semantic-release (webapp)
-        env:
-          # GITEA_SYNC_TOKEN: see release-protocol above.
-          RELEASE_FORGE_URL: ${{ vars.RELEASE_FORGE_URL }}
-          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-        run: npx semantic-release --extends ./.releaserc.webapp.cjs
-
-  release-firmware:
-    # Run firmware tagging intentionally (manual dispatch) so stable OTA releases
-    # are not created on every push to main.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
-    concurrency:
-      group: release-firmware
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install release dependencies
+      - name: Release firmware
         run: |
-          npm install --no-save \
-            semantic-release \
-            @semantic-release/commit-analyzer \
-            @semantic-release/release-notes-generator \
-            @saithodev/semantic-release-gitea \
-            conventional-changelog-conventionalcommits
+          if [ "$DRY" = "true" ]; then
+            npx semantic-release --extends ./.releaserc.firmware.cjs --dry-run
+          else
+            npx semantic-release --extends ./.releaserc.firmware.cjs
+          fi
 
-      - name: Run semantic-release (firmware)
-        env:
-          # GITEA_SYNC_TOKEN: see release-protocol above.
-          RELEASE_FORGE_URL: ${{ vars.RELEASE_FORGE_URL }}
-          GITEA_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITEA_SYNC_TOKEN }}
-        run: npx semantic-release --extends ./.releaserc.firmware.cjs
+      - name: Release webapp
+        run: |
+          if [ "$DRY" = "true" ]; then
+            npx semantic-release --extends ./.releaserc.webapp.cjs --dry-run
+          else
+            npx semantic-release --extends ./.releaserc.webapp.cjs
+          fi
+
+      - name: Release sim
+        run: |
+          if [ "$DRY" = "true" ]; then
+            npx semantic-release --extends ./.releaserc.sim.cjs --dry-run
+          else
+            npx semantic-release --extends ./.releaserc.sim.cjs
+          fi
