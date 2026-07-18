@@ -18,7 +18,9 @@
 #                         land on a receiver with no session, so it logs the
 #                         decrypt failures (the bug symptom) and fires the #138
 #                         self-heal re-handshake. Asserts the ALPHA render plus
-#                         both log signatures. Deterministic: runs once, no retry.
+#                         both log signatures. Deterministic assertion, no
+#                         retries; a run invalidated by a mid-run node process
+#                         death is re-run once (see dm_suite's comment).
 #                         (The full heal-and-redeliver completes but has real-time
 #                         wall-clock variance, so CI gates on the symptom + heal
 #                         trigger, not the final post-heal render. See the
@@ -117,8 +119,8 @@ assert_screen() {
 dump_diagnostics() {
     local log="$1" label="$2"
     echo "--- diagnostics: $label ---"
-    echo "[attach/join events]"
-    grep -E "attached as|node_joined|node_left|supervisor|restart" "$log" | tail -20
+    echo "[attach/join/death events]"
+    grep -E "attached as|node_joined|node_left|supervisor|restart|exited|abort|assert|Segmentation|panic" "$log" | tail -25
     echo "[device_fb frames per node]"
     grep '"type":"device_fb"' "$log" | grep -o '"node":"[^"]*"' | sort | uniq -c | head -10
     echo "[log tail, fb frames elided]"
@@ -241,29 +243,55 @@ channel_suite() {
 }
 
 # --- Scenario 2: DM session desync + #138 heal ---------------------------
-# Deterministic, so it runs ONCE with no retry loop. The receiver drops its DM
-# session half in-process at a fixed time (EMU_DROP_DM_SESSION_AT_MS) while still
-# neighboring the sender, and the sender's DM burst is scheduled to begin AFTER
-# that drop, so the sender's stale-session DM is GUARANTEED to land on a receiver
-# with no session on the very first post-drop send. That removes the reboot-era
-# races (RAM-clear timing, beacon re-acquisition, and the stale DM having to hit
-# a narrow post-reboot window) that made this scenario probabilistic and forced
-# the old re-roll loop. A genuine regression (the symptom or the #138 self-heal
-# never fires) fails the single run, exactly as it should. The 120s budget is
-# only a hang guard; the scenario itself finishes in ~80s of wall clock.
+# Deterministic construction, so the ASSERTION gets no retries. The receiver
+# drops its DM session half in-process at a fixed time
+# (EMU_DROP_DM_SESSION_AT_MS) while still neighboring the sender, and the
+# sender's DM burst is scheduled to begin AFTER that drop, so the sender's
+# stale-session DM is GUARANTEED to land on a receiver with no session on the
+# very first post-drop send. That removes the reboot-era races (RAM-clear
+# timing, beacon re-acquisition, and the stale DM having to hit a narrow
+# post-reboot window) that made this scenario probabilistic and forced the old
+# re-roll loop. A genuine regression (the symptom or the #138 self-heal never
+# fires) fails a VALID run immediately. The 120s budget is only a hang guard;
+# the scenario itself finishes in ~80s of wall clock.
+#
+# INVALID-RUN rerun (not an assertion retry): the construction has one hard
+# precondition, that both node processes stay up for the whole run. A node
+# process that dies mid-run is restarted by gosim's supervisor with cleared RAM
+# (observed on a pod: the sender died ~17s in, and its restarted self held no
+# stale session, so the desync could not exist and the assertion had nothing to
+# find). That is infrastructure destroying the constructed state, not the bug
+# failing to reproduce, so such a run proves nothing either way. It is detected
+# EXACTLY (more node_joined events than the scenario's two nodes) and the run
+# is repeated once, with the death evidence dumped loudly (the supervisor logs
+# every unexpected exit with its code/signal). Two invalidated runs in a row,
+# or an assertion failure on any valid run, fail the suite. The mid-run death
+# itself is a real reliability bug being tracked separately; this rerun keeps
+# the gate honest about what THIS scenario asserts without masking that bug
+# (the evidence prints on every occurrence).
 dm_suite() {
     echo "[2] emu-dm-desync"
-    local DM_LOG=""
-    run_scenario emu-dm-desync 120 DM_LOG
-    if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
-       && grep -qF "Failed session decrypt" "$DM_LOG" \
-       && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
-        green "PASS: emu-dm-desync: ALPHA render + desync symptom + #138 self-heal"
-        return 0
-    fi
-    red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal"
-    "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" || true
-    dump_diagnostics "$DM_LOG" "emu-dm-desync"
+    local attempt DM_LOG joins
+    for attempt in 1 2; do
+        DM_LOG=""
+        run_scenario emu-dm-desync 120 DM_LOG
+        if "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" >/dev/null 2>&1 \
+           && grep -qF "Failed session decrypt" "$DM_LOG" \
+           && grep -qF "re-initiating handshake (self-heal)" "$DM_LOG"; then
+            green "PASS: emu-dm-desync: ALPHA render + desync symptom + #138 self-heal"
+            return 0
+        fi
+        joins="$(grep -c '"type":"node_joined"' "$DM_LOG")"
+        if [ "$joins" -gt 2 ] && [ "$attempt" -eq 1 ]; then
+            red "INVALID RUN: a node process died and was restarted mid-scenario ($joins joins for 2 nodes), destroying the constructed desync state; re-running once"
+            dump_diagnostics "$DM_LOG" "emu-dm-desync (invalidated run)"
+            continue
+        fi
+        red "FAIL: emu-dm-desync did not reproduce the desync symptom + #138 self-heal"
+        "$GOSIM_BIN" screen-assert -log "$DM_LOG" -at "30,0" -text "DM ALPHA" || true
+        dump_diagnostics "$DM_LOG" "emu-dm-desync"
+        return 1
+    done
     return 1
 }
 
