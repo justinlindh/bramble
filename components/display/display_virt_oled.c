@@ -27,7 +27,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define OLED_STRIDE ((DISPLAY_WIDTH + 7) / 8) /* 16 for 128 px */
+#define OLED_STRIDE ((DISPLAY_WIDTH + 7) / 8)       /* 16 for 128 px */
 #define OLED_FB_SIZE (OLED_STRIDE * DISPLAY_HEIGHT) /* 1024 for 128x64 */
 
 static bool s_initialized = false;
@@ -133,13 +133,9 @@ void display_pixel(int x, int y, bool on) {
         *byte &= (uint8_t)~mask;
 }
 
-void display_clear(void) {
-    memset(s_fb, 0, sizeof(s_fb));
-}
+void display_clear(void) { memset(s_fb, 0, sizeof(s_fb)); }
 
-void display_fill(void) {
-    memset(s_fb, 0xFF, sizeof(s_fb));
-}
+void display_fill(void) { memset(s_fb, 0xFF, sizeof(s_fb)); }
 
 void display_hline(int x, int y, int w) {
     for (int i = 0; i < w; i++)
