@@ -16,8 +16,8 @@
 2. [Layout Constants](#layout-constants)
 3. [Splash Screen](#1-splash-screen)
 4. [Main Layout Shell](#2-main-layout-shell)
-5. [Chat Tab — Message List](#3-chat-tab--message-list)
-6. [Chat — Message Detail View](#4-chat--message-detail-view)
+5. [Chat Tab: Message List](#3-chat-tab-message-list)
+6. [Chat: Message Detail View](#4-chat-message-detail-view)
 7. [Nodes Tab](#5-nodes-tab)
 8. [Map Tab](#6-map-tab)
 9. [Stats Tab](#7-stats-tab)
@@ -99,15 +99,15 @@ Defined in `bramble_theme.h`:
 
 **Elements:**
 - Bramble logo image (`img_bramble_logo`, 100×100, from flash)
-- Title: "BRAMBLE" — Montserrat 18, primary green
-- Subtitle: "LoRa Mesh" — Montserrat 12, secondary gray
-- Version: "v{app_version}" from `esp_app_desc_t` — Montserrat 12, secondary gray, 50% opacity
+- Title: "BRAMBLE", Montserrat 18, primary green
+- Subtitle: "LoRa Mesh", Montserrat 12, secondary gray
+- Version: "v{app_version}" from `esp_app_desc_t`, Montserrat 12, secondary gray, 50% opacity
 
 **Transition:** After 2s, LVGL timer fires `splash_timer_cb`:
-1. `lv_refr_now()` — flush pending layouts (critical: avoids indev timer corruption)
-2. `lv_obj_clean()` — destroy splash
+1. `lv_refr_now()`: flush pending layouts (critical: avoids indev timer corruption)
+2. `lv_obj_clean()`: destroy splash
 3. Initialize touch, trackball, keyboard ports
-4. `layout_create()` — build main shell
+4. `layout_create()`: build main shell
 
 ---
 
@@ -139,9 +139,9 @@ Horizontal flex row, space-between alignment, 2px padding all sides, Montserrat 
 | Position | Label          | Content                                | Color           |
 |----------|----------------|----------------------------------------|-----------------|
 | Left     | Battery        | `{sym} {pct}%` (sym varies by level)  | TEXT (colored by level; thresholds below) |
-| —        | Signal         | `📶 {neighbor_count}`                 | TEXT            |
-| —        | GPS            | `GPS` (static)                         | TEXT_SEC        |
-| —        | Time           | `--:--` (static placeholder)          | TEXT            |
+| -        | Signal         | `📶 {neighbor_count}`                 | TEXT            |
+| -        | GPS            | `GPS` (static)                         | TEXT_SEC        |
+| -        | Time           | `--:--` (static placeholder)          | TEXT            |
 | Right    | Node Name      | `BRAMBLE` (static)                     | PRIMARY (green)  |
 
 Battery icon thresholds:
@@ -154,7 +154,7 @@ Battery icon thresholds:
 
 ### Content Area (y=20, h=180, bg=`BR_COLOR_BG`)
 
-Replaced in-place (via `lv_obj_clean()`) each time a tab is selected. No scroll on the container itself — scroll is handled per-tab.
+Replaced in-place (via `lv_obj_clean()`) each time a tab is selected. No scroll on the container itself; scroll is handled per-tab.
 
 ### Tab Bar (y=200, h=40, bg=`#161B22 (BR_COLOR_SURFACE)`)
 
@@ -182,7 +182,7 @@ Inactive tabs: transparent background.
 
 ---
 
-## 3. Chat Tab — Message List
+## 3. Chat Tab: Message List
 
 **Source:** `screens/scr_chat_list.c`  
 **LVGL trigger:** `scr_chat_list_create()` called from `layout_set_tab(TAB_CHAT)`
@@ -236,7 +236,7 @@ Tapping [+ New] → opens Chat Message Detail View (channel 0).
 
 ---
 
-## 4. Chat — Message Detail View
+## 4. Chat: Message Detail View
 
 **Source:** `screens/scr_chat_messages.c`  
 **LVGL trigger:** `scr_chat_messages_open(layout, channel_idx)`
@@ -302,7 +302,7 @@ After loading all messages, list auto-scrolls to bottom (`lv_obj_scroll_to_y(...
 | Text area      | Left     | 260×36  | Placeholder "Type message...", one-line, BG bg, PRIMARY border when focused |
 | [✓ Send] btn   | Right    | 44×36   | PRIMARY bg, SYMBOL_OK label; sends broadcast, clears textarea |
 
-Keyboard focus is placed on the textarea immediately on open — physical keyboard types directly into the compose field.
+Keyboard focus is placed on the textarea immediately on open; physical keyboard types directly into the compose field.
 
 ---
 
@@ -332,7 +332,7 @@ Keyboard focus is placed on the textarea immediately on open — physical keyboa
 
 ### Title
 
-`"Nodes ({N} peer{s})"` — Montserrat 16, TEXT color, 8px left pad, 4px top pad.
+`"Nodes ({N} peer{s})"`, Montserrat 16, TEXT color, 8px left pad, 4px top pad.
 
 ### Node List
 
@@ -353,7 +353,7 @@ Keyboard focus is placed on the textarea immediately on open — physical keyboa
 | Element     | Details                                                               |
 |-------------|-----------------------------------------------------------------------|
 | Name/addr   | `n->name` if set, else `%08lX` hex addr; Montserrat 14, TEXT         |
-| Info row    | `"{rssi}dBm  SNR:{snr}"` — Montserrat 12, TEXT_SEC                   |
+| Info row    | `"{rssi}dBm  SNR:{snr}"`, Montserrat 12, TEXT_SEC                   |
 | Signal bar  | `lv_bar`, 40×8 px, top-right; value = `(rssi + 120) * 100 / 70`, clamped 0–100; fill = SUCCESS green |
 | Status dot  | 8×8 circle, top-right +0,-6; SUCCESS green if age < 600s (10 min), TEXT_SEC gray if stale |
 
@@ -409,13 +409,13 @@ Three cards: **TX pkts**, **RX pkts**, **peers** (from mesh state snapshot).
 
 ### Radio Status Row
 
-`"Radio: {OK|ERROR}  Last RSSI: {rssi}dBm"` — Montserrat 12:
+`"Radio: {OK|ERROR}  Last RSSI: {rssi}dBm"`, Montserrat 12:
 - `radio_ok=true` → TEXT_SEC gray
 - `radio_ok=false` → DANGER red
 
 ### System Section
 
-- "System" header — Montserrat 12, TEXT_SEC
+- "System" header, Montserrat 12, TEXT_SEC
 - Multi-line label (Montserrat 14, TEXT):
   - `Free heap: {N} KB`
   - `PSRAM free: {N.N} MB`
@@ -478,7 +478,7 @@ Trackball focus: PRIMARY bg at 30% opacity.
 | Silent 🔇   | Switch     | Toggle (right)       | Calls `audio_set_muted()`; dims Volume slider when enabled; reflects NVS-persisted state on load |
 | Board        | Info       | Label (right-mid)    | Shows `board_config->name`, read-only    |
 | *(separator)*| Visual     | 1px line, 30% opacity | ─                                        |
-| Version      | Info       | Label (right-mid)    | Static `"0.9.1-tdeck"` — not from `esp_app_desc_t` here |
+| Version      | Info       | Label (right-mid)    | Static `"0.9.1-tdeck"`: not from `esp_app_desc_t` here |
 | Reboot       | Button     | Full-width (DANGER)  | Calls `esp_restart()` immediately on click |
 
 **Slider styling:** track=`#333344`, indicator=PRIMARY green, knob=TEXT white.  
@@ -526,7 +526,7 @@ Chat List → tap [+ New]  (or tap any message card)
 User types + taps [✓ Send]
   └──▶ send_click_cb()
          ├── mesh_send_broadcast(text, len)
-         └── Clear textarea (message list NOT yet refreshed — TODO)
+         └── Clear textarea (message list NOT yet refreshed - TODO)
 
 User taps [←] Back
   └──▶ back_click_cb()
@@ -580,16 +580,16 @@ The T-Deck Plus has three input mechanisms that all feed into LVGL's input devic
 
 | Area         | Issue / TODO                                                              |
 |--------------|---------------------------------------------------------------------------|
-| Chat         | After sending, message list does NOT refresh — sent message not shown until tab re-enter |
-| Chat         | `scr_chat_messages_on_recv()` is a stub — new messages don't appear if message view is open |
-| Chat         | Channel concept stubbed at idx=0 only — no multi-channel support          |
+| Chat         | After sending, message list does NOT refresh: sent message not shown until tab re-enter |
+| Chat         | `scr_chat_messages_on_recv()` is a stub: new messages don't appear if message view is open |
+| Chat         | Channel concept stubbed at idx=0 only: no multi-channel support          |
 | Chat         | Message preview truncation uses `LV_LABEL_LONG_DOT` with fixed 290px width |
 | Nodes        | Node cards are clickable but no action is defined on click                |
-| Status bar   | GPS label is static text "GPS" — no real GPS integration                  |
-| Status bar   | Time label shows `--:--` — no RTC integration                             |
-| Status bar   | Node name is hardcoded "BRAMBLE" — `identity` component doesn't expose `get_name()` yet |
-| Settings     | Version is hardcoded `"0.9.1-tdeck"` — should read from `esp_app_desc_t` like splash does |
+| Status bar   | GPS label is static text "GPS": no real GPS integration                  |
+| Status bar   | Time label shows `--:--`: no RTC integration                             |
+| Status bar   | Node name is hardcoded "BRAMBLE": `identity` component doesn't expose `get_name()` yet |
+| Settings     | Version is hardcoded `"0.9.1-tdeck"`: should read from `esp_app_desc_t` like splash does |
 | Settings     | Node name is read-only; no edit flow exists                               |
 | Settings     | Backlight slider sets keyboard MCU backlight; display backlight (GPIO42, active-low) not yet controlled here |
-| WiFi         | No WiFi setting — disabled (ESP_ERR_NO_MEM with mesh+BLE loaded)          |
+| WiFi         | No WiFi setting: disabled (ESP_ERR_NO_MEM with mesh+BLE loaded)          |
 | General      | No visual feedback on Reboot button before `esp_restart()` fires          |

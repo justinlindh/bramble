@@ -295,7 +295,7 @@ export function ChannelManager({ channels }: ChannelManagerProps) {
           shareString={shareString}
           description={
             shareChannel.hasPsk
-              ? 'Anyone with this QR or string can join the channel — includes the PSK if you provided it.'
+              ? 'Anyone with this QR or string can join the channel, which includes the PSK if you provided it.'
               : 'Anyone with this QR or string can join this public channel.'
           }
           onClose={() => { setShowShare(false); setShareChannel(null); }}

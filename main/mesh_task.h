@@ -15,7 +15,7 @@
 
 #define BRAMBLE_NODE_NAME_MAX 32
 
-/* Shared mesh state — protected by mutex, read by UI task */
+/* Shared mesh state: protected by mutex, read by UI task */
 typedef struct {
     neighbor_table_t neighbors;
     uint32_t beacon_tx_count;

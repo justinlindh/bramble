@@ -48,10 +48,10 @@ where Bramble is behind), see [docs/COMPARISON.md](COMPARISON.md).
 ### 1.3 Design Goals
 
 1. **50+ node meshes** with 6–8 hop paths, sustained operation
-2. **Privacy by default** — DM content unreadable by relay nodes, metadata-minimized route discovery
-3. **Tiered reliability** — guaranteed delivery for critical messages, fire-and-forget for telemetry
-4. **ESP32 feasibility** — everything fits in ~320KB RAM, ~4MB flash
-5. **No infrastructure required** — no GPS, no internet, no servers. Fully decentralized.
+2. **Privacy by default**: DM content unreadable by relay nodes, metadata-minimized route discovery
+3. **Tiered reliability**: guaranteed delivery for critical messages, fire-and-forget for telemetry
+4. **ESP32 feasibility**: everything fits in ~320KB RAM, ~4MB flash
+5. **No infrastructure required**: no GPS, no internet, no servers. Fully decentralized.
 
 ---
 
@@ -62,7 +62,7 @@ where Bramble is behind), see [docs/COMPARISON.md](COMPARISON.md).
 Every design decision passes through a privacy filter:
 - **DM content** is end-to-end encrypted with per-pair X25519-derived keys. Relay nodes see only opaque ciphertext.
 - **Route discovery** uses ephemeral query IDs. Intermediate nodes cannot correlate a route request to a specific source node. Only the destination can decrypt the source identity.
-- **No global topology map.** Nodes know their neighbors and cached routes — never the full network graph.
+- **No global topology map.** Nodes know their neighbors and cached routes, never the full network graph.
 - **Beacons expose only a node's public key hash**, not a stable human-readable identity.
 
 ### 2.2 Reliability Through Intelligence
@@ -86,7 +86,7 @@ Every data structure has a hard size cap. Every algorithm has bounded memory and
 
 LoRa is slow. At SF10/125kHz, a 200-byte packet takes ~700ms to transmit. Every byte and every transmission must be justified:
 - Route-based forwarding: only nodes on the path transmit (not the entire mesh).
-- Compact binary packet format — no JSON, no protobuf, no padding.
+- Compact binary packet format: no JSON, no protobuf, no padding.
 - Piggybacked ACKs where possible to reduce standalone ACK packets.
 - Adaptive duty cycle management to avoid regulatory and congestion issues.
 
@@ -183,11 +183,11 @@ LBT applies to **all** packet types at the `transmit_packet` layer, providing co
 
 ### 3.4 Broadcast Delivery Receipt Collision Avoidance
 
-When multiple nodes receive a broadcast message, each must send a delivery receipt back to the sender. Without coordination, these receipts collide on the shared LoRa channel — LoRa has no built-in CSMA/CA, so simultaneous transmissions destroy each other.
+When multiple nodes receive a broadcast message, each must send a delivery receipt back to the sender. Without coordination, these receipts collide on the shared LoRa channel; LoRa has no built-in CSMA/CA, so simultaneous transmissions destroy each other.
 
 Bramble uses a three-layer approach to prevent receipt collisions:
 
-**Layer 1 — Slotted response timing:** Each recipient is assigned a deterministic time slot based on a hash of its address and the original packet ID:
+**Layer 1, slotted response timing:** Each recipient is assigned a deterministic time slot based on a hash of its address and the original packet ID:
 
 ```
 SLOT_BUCKETS    = 32
@@ -200,9 +200,9 @@ delay = SLOT_BASE_MS + (slot × SLOT_SPACING_MS) + random(0, 139)
 
 This spreads receipt transmissions across a ~6.4-second window. With 32 buckets and typical mesh sizes (5–20 nodes), birthday-problem collisions are rare.
 
-**Layer 2 — LBT (§3.3):** Each receipt transmission passes through the CAD check, providing a second chance to detect and avoid an in-progress transmission.
+**Layer 2, LBT (§3.3):** Each receipt transmission passes through the CAD check, providing a second chance to detect and avoid an in-progress transmission.
 
-**Layer 3 — Exponential retry backoff:** Each receipt is transmitted up to 3 times with increasing randomized delays between attempts:
+**Layer 3, exponential retry backoff:** Each receipt is transmitted up to 3 times with increasing randomized delays between attempts:
 
 ```
 RECEIPT_RETRY_COUNT = 3
@@ -226,7 +226,7 @@ The combination of wide slot spacing, hardware channel sensing, and aggressive r
 ### 4.1 Design Constraints
 
 - Maximum LoRa payload: 222 bytes (SX1262 with explicit header)
-- Bramble header must be compact — every header byte costs ~4.3ms airtime at SF10/125kHz
+- Bramble header must be compact: every header byte costs ~4.3ms airtime at SF10/125kHz
 - All multi-byte integers are **big-endian** (network byte order)
 - Node addresses are 4 bytes (truncated hash of public key)
 
@@ -257,12 +257,12 @@ Bit 7   Bit 6   Bit 5   Bit 4   Bit 3    Bit 2    Bit 1   Bit 0
 TIER1   TIER0   ACK_REQ RECEIPT CHANNEL  ENCRYP   FRAG1   FRAG0
 ```
 
-- `TIER[1:0]`: Message tier — 00=Broadcast, 01=Normal, 10=Critical, 11=Reserved
+- `TIER[1:0]`: Message tier: 00=Broadcast, 01=Normal, 10=Critical, 11=Reserved
 - `ACK_REQ`: Sender requests ACK from destination
 - `RECEIPT`: Sender requests delivery receipt with relay path
 - `CHANNEL`: 1=channel (group) message, 0=direct message
 - `ENCRYP`: 1=payload encrypted, 0=plaintext (only for beacons/control). An earlier revision repurposed this bit as `HEADER_FLAG_EMERGENCY` for the (since removed, section 4.19) emergency packets; that collision is gone with them, and the bit means encryption only.
-- `FRAG[1:0]`: Fragment indicator — 00=not fragmented, 01=first fragment, 10=middle fragment, 11=last fragment
+- `FRAG[1:0]`: Fragment indicator: 00=not fragmented, 01=first fragment, 10=middle fragment, 11=last fragment
 
 > **Firmware reality (wire v2).** Bits 7:6 are no longer `TIER[1:0]`. Tier moved into the LOCATION ciphertext (§4.25 item 4), freeing those two bits: bit 7 is `FLAG_RESERVED_HIGH` (unused), bit 6 is `FLAG_EMERGENCY` (reserved for a future origin-set, AAD-bound emergency facility, not implemented today). Bits 5 through 0 are unchanged. See §4.25 item 2.
 
@@ -342,7 +342,7 @@ Encrypted payload structure (inside ciphertext):
     Byte 8+:    data            Application payload
 ```
 
-Note: For channel messages, `src_addr` at offset 12 in the wire header is set to `0x00000000`. The `channel_id` is NOT present in the plaintext header — it is inside the encrypted payload. Receivers attempt trial decryption with each of their channel keys (max 16 attempts, ~1ms total on ESP32-S3 with hardware AES acceleration). This prevents non-members from identifying which channel a message belongs to. The actual source address is also encrypted inside the ciphertext alongside the payload.
+Note: For channel messages, `src_addr` at offset 12 in the wire header is set to `0x00000000`. The `channel_id` is NOT present in the plaintext header: it is inside the encrypted payload. Receivers attempt trial decryption with each of their channel keys (max 16 attempts, ~1ms total on ESP32-S3 with hardware AES acceleration). This prevents non-members from identifying which channel a message belongs to. The actual source address is also encrypted inside the ciphertext alongside the payload.
 
 > **Firmware reality (wire v4).** The two layouts above are wire v1 design and no longer describe the wire. There is one DATA/LOCATION envelope layout regardless of unicast vs. channel: `header(12) + src_addr(4) + prev_hop(4) + auth_hmac(8) + nonce(BRAMBLE_NONCE_SIZE) + ciphertext(N) + tag(BRAMBLE_TAG_SIZE)`. Neither a cleartext `next_hop` nor a cleartext `app_type`/`payload_len` pair exists on DATA today: forwarding is broadcast-retransmit keyed on the header's `dest_addr` and a routing-table lookup, not a `next_hop` field carried on DATA itself, and `app_type`/`payload_len` moved inside the encrypted payload along with everything else application-layer. See §4.27 for the full wire v4 change inventory, including the new relay-mutated `prev_hop` field and its `auth_hmac`.
 
@@ -366,7 +366,7 @@ ACKs are routed back along the reverse path. They are small and high-priority. T
 
 ### 4.6 ROUTE_REQUEST Packet
 
-Privacy-preserving route discovery. Intermediate nodes cannot determine who initiated the request — only the destination can decrypt the source identity.
+Privacy-preserving route discovery. Intermediate nodes cannot determine who initiated the request; only the destination can decrypt the source identity.
 
 ```
 Offset  Size  Field                Description
@@ -407,7 +407,7 @@ Total: 34 bytes
 
 **RREQ Flags (encoded in bits of the `flags` byte in the common header):**
 
-- Bit 5 (reserved in common header): `OPEN_SOURCE` — when set, `encrypted_source` contains the plaintext source address (not encrypted). Used for first-contact discovery when the destination's public key is unknown. See §5.4 for details.
+- Bit 5 (reserved in common header): `OPEN_SOURCE`: when set, `encrypted_source` contains the plaintext source address (not encrypted). Used for first-contact discovery when the destination's public key is unknown. See §5.4 for details.
 
 > **Firmware reality (wire v2).** `auth_hmac` is no longer dead or zeroed. It authenticates `query_id || src_addr || hop_count || route_metric` with a network-key HMAC (label `"bramble-rrep-v2"`), excluding `next_hop` and `header.dest_addr` (the two fields `rrep_forward` legitimately rewrites at each relay). The static-DH-shared-secret keying scheme described above was never implemented and does not reflect any shipped version of the code. `RREP_SIZE` is 40 bytes (34 in wire v2; +6 for the origin `seq` added in wire v3). See §4.25 item 7 and §4.26 item 3.
 
@@ -437,7 +437,7 @@ Offset  Size  Field            Description
 ──────  ────  ─────            ───────────
 0       12    header           Common header (packet_type=0x06, dest=0xFFFFFFFF, ENCRYP=0)
 12      4     src_addr         Beacon sender's address
-16      4     node_pubkey_hash First 4 bytes of SHA-256(X25519_public_key) — for key lookup
+16      4     node_pubkey_hash First 4 bytes of SHA-256(X25519_public_key) - for key lookup
 20      2     uptime_min       Node uptime in minutes (0–65535, ~45 days max)
 22      1     battery_pct      Battery percentage (0–100, 0xFF=unknown/plugged in)
 23      1     tx_queue_depth   Current TX queue depth (0–16, congestion signal)
@@ -510,7 +510,7 @@ Total: 22 + (hop_count × 4) bytes (max 54 bytes at 8 hops)
 
 Each relay node appends its own address to the relay_path as it forwards the receipt back toward the original sender. The sender receives the complete path and can update its routing intelligence.
 
-**Relay path restriction:** Delivery receipts with relay paths (the full DELIVERY_RECEIPT packet above) are only generated for **Critical tier** messages. Normal tier messages receive simple ACKs only (§4.5) — no relay path data. The `RECEIPT` flag in the common header flags byte should only be set for Critical tier. This limits exposure of relay path data, which is visible to nodes on the return route. This is an acceptable tradeoff since those nodes already know they are relays for that specific delivery.
+**Relay path restriction:** Delivery receipts with relay paths (the full DELIVERY_RECEIPT packet above) are only generated for **Critical tier** messages. Normal tier messages receive simple ACKs only (§4.5): no relay path data. The `RECEIPT` flag in the common header flags byte should only be set for Critical tier. This limits exposure of relay path data, which is visible to nodes on the return route. This is an acceptable tradeoff since those nodes already know they are relays for that specific delivery.
 
 > **Firmware reality (wire v4).** `DELIVERY_RECEIPT_MIN_SIZE`/`MAX_SIZE` are 36/68 bytes (22/54 in the original design; 30/62 in wire v2; +6 for the origin `seq` added in wire v3). A fixed-offset `auth_hmac[8]` sits immediately before `relay_path`, authenticating `src_addr || orig_packet_id`, so a verifier never has to trust the unauthenticated `hop_count` to locate the tag. Excludes `relay_path`/`hop_count`/`header.hop_limit`, which every relay hop mutates. See §4.25 item 6 and §4.26.
 
@@ -543,7 +543,7 @@ Total: 4 bytes (reduces per-fragment payload by 4 bytes)
 - **Per-fragment auth tag overhead:** 16 bytes × N fragments (vs 16 bytes total for encrypt-then-fragment)
 - **Max per-fragment plaintext:** 154 bytes (168 bytes minus 4 byte frag header, with nonce and auth tag in the DATA wrapper)
 - **Max reassembled plaintext:** 4 fragments × 154 bytes = **616 bytes**. This is a hard protocol limit. Applications requiring more must implement their own chunking.
-- **Each fragment is independently verifiable** — receivers can authenticate and discard forged fragments immediately without buffering the entire message. This prevents reassembly buffer exhaustion attacks.
+- **Each fragment is independently verifiable**: receivers can authenticate and discard forged fragments immediately without buffering the entire message. This prevents reassembly buffer exhaustion attacks.
 - **Clean layering:** The fragment layer splits plaintext, then each fragment passes through normal DATA encryption independently. No special crypto handling at the fragment layer.
 
 Fragment reassembly buffer: max 4 concurrent reassemblies × 4 fragments × 154 bytes = **2,464 bytes**.
@@ -1093,7 +1093,7 @@ function advance_channel_epoch(channel_id):
         length = 32                    // AES-256 key
     )
     
-    // Delete old key — provides backward secrecy
+    // Delete old key - provides backward secrecy
     channel_keys[channel_id] = new_key
     channel_epochs[channel_id] = current_epoch + 1
     channel_msg_counts[channel_id] = 0
@@ -1187,7 +1187,7 @@ function encrypt_source_for_rreq(my_addr, dest_pubkey):
     
     // We need to transmit eph_pub so the destination can decrypt.
     // But that's 32 bytes! Too big for inline.
-    // Solution: Include a hint — the query_id IS derived from the ephemeral.
+    // Solution: Include a hint - the query_id IS derived from the ephemeral.
     // query_id = sha256(eph_pub)[0..3]
     // Destination tries all recent RREQ eph_pubs... No, too expensive.
     
@@ -1210,7 +1210,7 @@ function encrypt_source_for_rreq(my_addr, dest_pubkey):
     //   The eph_pub is NOT transmitted. Instead, on receipt, the destination
     //   cannot decrypt without it. 
     
-    // REVISED APPROACH — use static key:
+    // REVISED APPROACH - use static key:
     // Since we know dest_pubkey, we compute:
     shared_static = x25519(my_private_key, dest_pubkey)
     time_bucket = network_time_seconds / 3600      // Hourly bucket
@@ -1225,7 +1225,7 @@ function encrypt_source_for_rreq(my_addr, dest_pubkey):
     // cannot tell that two RREQs came from the same source.
     // Destination iterates its known peers' static DH secrets (using the
     // received salt) to find which one decrypts to a valid address.
-    // With ~200 peers, this is ~200 SHA-256 operations — <10ms on ESP32.
+    // With ~200 peers, this is ~200 SHA-256 operations - <10ms on ESP32.
 ```
 
 ```
@@ -1241,7 +1241,7 @@ function decrypt_rreq_source(encrypted_source, rreq_salt, current_time):
             if candidate == peer.addr:
                 return peer.addr
     
-    // Unknown node — we can't decrypt. This is fine; we still relay the RREQ.
+    // Unknown node - we can't decrypt. This is fine; we still relay the RREQ.
     // We'll learn their identity if they complete key exchange.
     return UNKNOWN_SOURCE
 ```
@@ -1250,9 +1250,9 @@ function decrypt_rreq_source(encrypted_source, rreq_salt, current_time):
 
 The scheme above requires the RREQ originator to know the destination's public key (for static DH). This creates a bootstrapping problem for first-contact: how does node A discover a route to node B if A has never heard B's beacon and doesn't have B's public key?
 
-**Option A — Encrypted source (default):** Pre-shared contacts mode. The source address is encrypted as described above. This requires the originator to have the destination's public key cached from a prior beacon or out-of-band exchange. This is the recommended mode for established meshes.
+**Option A, encrypted source (default):** Pre-shared contacts mode. The source address is encrypted as described above. This requires the originator to have the destination's public key cached from a prior beacon or out-of-band exchange. This is the recommended mode for established meshes.
 
-**Option B — Open source (fallback):** When `allow_open_rreq = true` (config flag, default: false), and the destination's public key is unknown, the RREQ is sent with the `OPEN_SOURCE` flag bit set (see §4.6) and `encrypted_source` contains the plaintext source address. This enables first-contact discovery at the cost of revealing the source to all relay nodes.
+**Option B, open source (fallback):** When `allow_open_rreq = true` (config flag, default: false), and the destination's public key is unknown, the RREQ is sent with the `OPEN_SOURCE` flag bit set (see §4.6) and `encrypted_source` contains the plaintext source address. This enables first-contact discovery at the cost of revealing the source to all relay nodes.
 
 ```
 function encrypt_source_for_rreq(my_addr, dest_pubkey):
@@ -1330,16 +1330,16 @@ Bramble uses a reactive (on-demand) routing protocol inspired by AODV, with sign
 
 ```c
 struct route_entry {
-    uint32_t dest_addr;       // 4 bytes — destination
-    uint32_t next_hop;        // 4 bytes — next hop toward destination
-    uint8_t  hop_count;       // 1 byte  — hops to destination
-    uint8_t  metric;          // 1 byte  — route quality (255=best, 0=worst)
+    uint32_t dest_addr;       // 4 bytes - destination
+    uint32_t next_hop;        // 4 bytes - next hop toward destination
+    uint8_t  hop_count;       // 1 byte  - hops to destination
+    uint8_t  metric;          // 1 byte  - route quality (255=best, 0=worst)
     uint8_t  flags;           // 1 byte: route state (ACTIVE, STALE, BROKEN)
-    uint8_t  fail_count;      // 1 byte  — consecutive forwarding failures
-    uint32_t last_used;       // 4 bytes — timestamp of last use (epoch seconds)
-    uint32_t last_confirmed;  // 4 bytes — timestamp of last successful delivery
-    uint16_t use_count;       // 2 bytes — times this route has been used
-    uint16_t _padding;        // 2 bytes — alignment
+    uint8_t  fail_count;      // 1 byte  - consecutive forwarding failures
+    uint32_t last_used;       // 4 bytes - timestamp of last use (epoch seconds)
+    uint32_t last_confirmed;  // 4 bytes - timestamp of last successful delivery
+    uint16_t use_count;       // 2 bytes - times this route has been used
+    uint16_t _padding;        // 2 bytes - alignment
 };
 // Size: 24 bytes per entry
 // Max entries: 64
@@ -1350,15 +1350,15 @@ struct route_entry {
 
 ```c
 struct neighbor_entry {
-    uint32_t addr;            // 4 bytes — neighbor address
-    int8_t   rssi;            // 1 byte  — last RSSI
-    int8_t   snr;             // 1 byte  — last SNR
-    uint8_t  success_rate;    // 1 byte  — % of recent transmissions ACK'd (0–100)
-    uint8_t  congestion;      // 1 byte  — last reported congestion level (0–3)
-    uint32_t last_heard;      // 4 bytes — timestamp of last reception from this neighbor
-    uint32_t pubkey_hash;     // 4 bytes — for key lookup
-    uint16_t tx_count;        // 2 bytes — total transmissions to this neighbor
-    uint16_t tx_success;      // 2 bytes — successful transmissions
+    uint32_t addr;            // 4 bytes - neighbor address
+    int8_t   rssi;            // 1 byte  - last RSSI
+    int8_t   snr;             // 1 byte  - last SNR
+    uint8_t  success_rate;    // 1 byte  - % of recent transmissions ACK'd (0–100)
+    uint8_t  congestion;      // 1 byte  - last reported congestion level (0–3)
+    uint32_t last_heard;      // 4 bytes - timestamp of last reception from this neighbor
+    uint32_t pubkey_hash;     // 4 bytes - for key lookup
+    uint16_t tx_count;        // 2 bytes - total transmissions to this neighbor
+    uint16_t tx_success;      // 2 bytes - successful transmissions
 };
 // Size: 20 bytes per entry
 // Max entries: 32
@@ -1369,13 +1369,13 @@ struct neighbor_entry {
 
 ```c
 struct pending_discovery {
-    uint32_t dest_addr;       // 4 bytes — who we're looking for
-    uint32_t query_id;        // 4 bytes — RREQ query_id
-    uint32_t timestamp;       // 4 bytes — when discovery started
-    uint8_t  attempts;        // 1 byte  — RREQ attempts so far (max 3)
+    uint32_t dest_addr;       // 4 bytes - who we're looking for
+    uint32_t query_id;        // 4 bytes - RREQ query_id
+    uint32_t timestamp;       // 4 bytes - when discovery started
+    uint8_t  attempts;        // 1 byte  - RREQ attempts so far (max 3)
     uint8_t  _padding[3];     // 3 bytes
     // Queued packets waiting for this route
-    uint8_t  queued_count;    // 1 byte  — packets queued for this dest
+    uint8_t  queued_count;    // 1 byte  - packets queued for this dest
     uint8_t  _padding2[3];    // 3 bytes
 };
 // Size: 20 bytes per entry (excluding queued packet refs)
@@ -1400,9 +1400,9 @@ struct rreq_seen {
 
 ```c
 struct reverse_route {
-    uint32_t query_id;        // 4 bytes — from RREQ
-    uint32_t prev_hop;        // 4 bytes — node that forwarded us this RREQ
-    uint32_t timestamp;       // 4 bytes — when received
+    uint32_t query_id;        // 4 bytes - from RREQ
+    uint32_t prev_hop;        // 4 bytes - node that forwarded us this RREQ
+    uint32_t timestamp;       // 4 bytes - when received
 };
 // Size: 12 bytes per entry
 // Max entries: 32
@@ -1422,9 +1422,9 @@ function send_data(dest_addr, payload, tier):
         forward_data(route, payload, tier)
         return
     
-    // No active route — initiate discovery
+    // No active route - initiate discovery
     if pending_discoveries.has(dest_addr):
-        // Discovery already in progress — queue the packet
+        // Discovery already in progress - queue the packet
         pending_discoveries.queue_packet(dest_addr, payload, tier)
         return
     
@@ -1544,7 +1544,7 @@ function handle_rreq_at_destination(rreq):
         hmac_data = rrep_header_bytes[0..25]
         auth_hmac = hmac_sha256(shared, hmac_data)[0..7]  // Truncated to 8 bytes
     else:
-        auth_hmac = 0x00000000  // First contact — no shared secret
+        auth_hmac = 0x00000000  // First contact - no shared secret
     
     // Send ROUTE_REPLY back along reverse path
     rrep = build_rrep(
@@ -1593,7 +1593,7 @@ function handle_rrep_at_origin(rrep):
     // Verify RREP authentication
     route_flags = ACTIVE
     if rrep.auth_hmac == 0x00000000:
-        // First-contact: no HMAC — route is unverified until KEY_EXCHANGE
+        // First-contact: no HMAC - route is unverified until KEY_EXCHANGE
         route_flags = UNVERIFIED
     else:
         shared = cached_static_dh[discovery.dest_addr]
@@ -1623,9 +1623,9 @@ function handle_rrep_at_origin(rrep):
 #### Route Timeouts
 
 ```
-ROUTE_ACTIVE_TIMEOUT   = 300 seconds  (5 min — route goes STALE if unused)
-ROUTE_STALE_TIMEOUT    = 600 seconds  (10 min — stale route is deleted)
-ROUTE_HARD_TIMEOUT     = 3600 seconds (1 hr — route deleted even if recently used)
+ROUTE_ACTIVE_TIMEOUT   = 300 seconds  (5 min - route goes STALE if unused)
+ROUTE_STALE_TIMEOUT    = 600 seconds  (10 min - stale route is deleted)
+ROUTE_HARD_TIMEOUT     = 3600 seconds (1 hr - route deleted even if recently used)
 ```
 
 ```
@@ -1807,7 +1807,7 @@ function send_channel_message(channel_id, payload):
 
 ```
 function handle_channel_data_relay(pkt):
-    // Channel ID is inside the ciphertext — relay nodes cannot determine which channel
+    // Channel ID is inside the ciphertext - relay nodes cannot determine which channel
     // this belongs to. Relay unconditionally if CHANNEL flag is set.
     
     if pkt.header.hop_limit <= 1:
@@ -2073,7 +2073,7 @@ function handle_data_at_destination(pkt):
         if route != NULL:
             send_unicast(route.next_hop, ack)
         else:
-            // No reverse route known — attempt to send via prev_transmitter
+            // No reverse route known - attempt to send via prev_transmitter
             send_unicast(pkt.prev_transmitter, ack)
     
     if pkt.flags.RECEIPT:
@@ -2177,7 +2177,7 @@ function retry_tick():  // Called every 500ms
 | 2 | 2–2.5s | 2–2.5s |
 | 3 | 4–5s | 6–7.5s |
 | 4 | 8–10s | 14–17.5s |
-| Give up | — | ~15s total |
+| Give up | - | ~15s total |
 
 **Critical tier:**
 | Attempt | Delay | Cumulative |
@@ -2191,7 +2191,7 @@ function retry_tick():  // Called every 500ms
 | 7 | 96–120s | 189–236.25s |
 | 8 | 192–240s | 381–476.25s |
 | 9 | 384–480s | 765–956.25s |
-| Give up | — | ~12–16 min total |
+| Give up | - | ~12–16 min total |
 
 ### 7.5 Sliding Window Flow Control
 
@@ -2442,12 +2442,12 @@ function handle_time_sync(pkt, rx_timestamp_local_ms):
     
     new_offset = estimated_network_time - (rx_timestamp_local_ms / 1000) + (estimated_delay_ms / 1000)
     
-    // Clamp maximum time shift per sync interval — no single source can shift
+    // Clamp maximum time shift per sync interval - no single source can shift
     // our clock more than 5 seconds per sync
     MAX_SHIFT_S = 5
     current_offset = my_time.local_offset
     if abs(new_offset - current_offset) > MAX_SHIFT_S and my_time.stratum < 15:
-        // Large shift — clamp to ±5 seconds
+        // Large shift - clamp to ±5 seconds
         if new_offset > current_offset:
             new_offset = current_offset + MAX_SHIFT_S
         else:
@@ -2470,7 +2470,7 @@ function handle_time_sync(pkt, rx_timestamp_local_ms):
         alpha = 0.3
         my_time.local_offset = (uint32_t)(alpha * new_offset + (1.0 - alpha) * my_time.local_offset)
     else:
-        // First sync — accept immediately
+        // First sync - accept immediately
         my_time.local_offset = new_offset
     
     my_time.stratum = pkt.stratum + 1
@@ -2564,8 +2564,8 @@ Note: The ±30s window is deliberately large to accommodate:
 | Threat | Protection |
 |--------|-----------|
 | Packet tampering | AES-256-GCM auth tag (16 bytes) on all encrypted packets. Any modification is detected. |
-| Spoofed source address | DM: Source verified implicitly — only the real source has the session key to produce a valid auth tag. Channel: Source encrypted inside ciphertext with channel key — only channel members can verify. |
-| Spoofed beacons | Beacons include a 4-byte truncated HMAC (§4.9) keyed with pairwise DM session key. Beacons from known peers are authenticated; unknown peers' beacons are flagged lower-trust. A malicious beacon from an unknown node can claim false battery/queue/time, but its influence is limited (especially for time sync — see §9.3 corroboration requirements). |
+| Spoofed source address | DM: Source verified implicitly; only the real source has the session key to produce a valid auth tag. Channel: Source encrypted inside ciphertext with channel key; only channel members can verify. |
+| Spoofed beacons | Beacons include a 4-byte truncated HMAC (§4.9) keyed with pairwise DM session key. Beacons from known peers are authenticated; unknown peers' beacons are flagged lower-trust. A malicious beacon from an unknown node can claim false battery/queue/time, but its influence is limited (especially for time sync, see §9.3 corroboration requirements). |
 | Spoofed routing | RREP packets include an 8-byte truncated HMAC (§4.7) keyed with static DH shared secret. Authenticated RREPs are trusted; unauthenticated RREPs (first-contact) create "unverified" routes that are promoted only after KEY_EXCHANGE. Fabricated routes without valid HMAC are rejected. |
 
 #### 10.2.3 Privacy
@@ -2573,10 +2573,10 @@ Note: The ±30s window is deliberately large to accommodate:
 | Threat | Protection | Residual Risk |
 |--------|-----------|---------------|
 | Identify who talks to whom (DM) | RREQ source encrypted. Route-based forwarding reveals path only to nodes on the path. | Relay nodes see traffic patterns (timing, frequency, volume) between next-hop pairs. Local passive attacker can correlate. |
-| Identify channel message sender | Source addr encrypted inside channel ciphertext. Wire shows `0x00000000`. Channel ID also inside ciphertext — non-members cannot determine which channel. | Channel members see the sender. Non-member relay nodes cannot identify sender or channel. |
+| Identify channel message sender | Source addr encrypted inside channel ciphertext. Wire shows `0x00000000`. Channel ID also inside ciphertext: non-members cannot determine which channel. | Channel members see the sender. Non-member relay nodes cannot identify sender or channel. |
 
-**Channel sender privacy note:** Channel membership inherently implies sender visibility to all members. Channel security is only as strong as the least trustworthy member — any member can read all messages, identify all senders, and potentially leak channel content. Users requiring sender anonymity should use DMs. Channels are designed for group communication where mutual trust among members is assumed.
-| Track node movement | Node address is derived from public key — persistent across locations. | An observer who recognizes a node's address can track it. Mitigation: address rotation (future enhancement). |
+**Channel sender privacy note:** Channel membership inherently implies sender visibility to all members. Channel security is only as strong as the least trustworthy member: any member can read all messages, identify all senders, and potentially leak channel content. Users requiring sender anonymity should use DMs. Channels are designed for group communication where mutual trust among members is assumed.
+| Track node movement | Node address is derived from public key: persistent across locations. | An observer who recognizes a node's address can track it. Mitigation: address rotation (future enhancement). |
 | Enumerate network size/topology | No global topology broadcast. Beacons are local (1-hop). | A patient passive attacker can infer topology from traffic patterns over time. |
 
 ### 10.3 Metadata Leakage Analysis
@@ -2605,22 +2605,22 @@ Protection layers:
 3. Timestamp validation (±30 second window)
    → Old packets outside window are rejected
 4. Combined: An attacker must replay within 30 seconds, with a never-seen packet_id,
-   and a valid nonce — effectively impossible.
+   and a valid nonce - effectively impossible.
 ```
 
 ### 10.5 Flood/DoS Mitigation
 
 ```
 Protection layers:
-1. Airtime budget — each node self-limits to 10% duty cycle
+1. Airtime budget - each node self-limits to 10% duty cycle
    → A compromised node can waste its own airtime but not others'
-2. RREQ rate limiting — max 1 RREQ per destination per 30 seconds per neighbor
+2. RREQ rate limiting - max 1 RREQ per destination per 30 seconds per neighbor
    → Prevents RREQ flooding
-3. Beacon rate limiting — beacons from same source more than 1/30s are dropped
+3. Beacon rate limiting - beacons from same source more than 1/30s are dropped
    → Prevents beacon storms
-4. Packet dedup — duplicate packets silently dropped
+4. Packet dedup - duplicate packets silently dropped
    → Amplification attacks are ineffective
-5. TX queue priority — flooding with low-priority packets doesn't affect critical traffic
+5. TX queue priority - flooding with low-priority packets doesn't affect critical traffic
 ```
 
 ```
@@ -2661,7 +2661,7 @@ function neighbor_sybil_check():
     
     for group in groups:
         if len(group) > 3:
-            // Suspicious — 4+ nodes at nearly identical RSSI
+            // Suspicious - 4+ nodes at nearly identical RSSI
             // Flag all but the oldest (highest uptime) as suspicious
             for node in group.sorted_by_uptime()[3:]:
                 neighbor_table.set_suspicious(node.addr, true)
@@ -2694,7 +2694,7 @@ If a node is compromised:
 |--------|-----------|
 | Mailbox buffer flooding | Per-destination cap (8 entries), per-source cap (8 entries) |
 | Spoofed STORE_REQUEST | HMAC authentication with pairwise session key |
-| Content inspection by mailbox | Messages are E2E encrypted — mailbox sees only ciphertext |
+| Content inspection by mailbox | Messages are E2E encrypted: mailbox sees only ciphertext |
 | Mailbox denying service | Sender tries multiple mailbox neighbors; falls back to retry on destination return |
 | Replay of stored messages | Original `packet_id` preserved; destination dedup rejects replays |
 | TTL abuse for storage exhaustion | Mailbox caps TTL to `min(requested, 24h)` |
@@ -2710,14 +2710,14 @@ The emergency component was removed unshipped (section 4.19); there is no emerge
 | Threat | Mitigation |
 |--------|-----------|
 | Location leaked to relay nodes | Location payloads are E2E encrypted inside DM packets |
-| Recipient sharing location with others | Social/trust issue, not protocol-level — same as any private data |
+| Recipient sharing location with others | Social/trust issue, not protocol-level: same as any private data |
 | Stale location data | 1-hour cache TTL; `location_cache_purge()` evicts expired entries |
 | Update flooding | Time-based (5 min default) and distance-based (100m) triggers; low priority in TX queue |
 
 **Privacy tiers rationale:**
-- FULL (17 bytes): Trusted contacts only — hiking partners, emergency contacts
-- COARSE (5 bytes): Casual contacts — "which neighborhood are you in"
-- PRESENCE (1 byte): Acquaintances — "are you online"
+- FULL (17 bytes): Trusted contacts only: hiking partners, emergency contacts
+- COARSE (5 bytes): Casual contacts:  "which neighborhood are you in"
+- PRESENCE (1 byte): Acquaintances:  "are you online"
 
 #### Group DM Security
 
@@ -2733,7 +2733,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 |--------|-----------|
 | Probe flooding | Rate limiting: 3 tokens, 1 refill/minute; cannot sustain more than 3/min |
 | Fake probe responses | Responses tied to observed probe_id; spoofer must have heard actual probe |
-| Network enumeration | Probes are visible to all nodes — inherent design. Use sparingly. |
+| Network enumeration | Probes are visible to all nodes: inherent design. Use sparingly. |
 | Response amplification | ACK jitter (100–2000ms) spreads responses; dedup prevents re-processing |
 
 **Design note:** Broadcast probes are intentionally rare (3/min max). They exist for network health diagnostics, not routine operation.
@@ -2742,7 +2742,7 @@ The network-coding component was removed unshipped (section 4.21); no coded pack
 
 | Threat | Mitigation |
 |--------|-----------|
-| Content confidentiality | **None** — well-known PSK means anyone can decrypt. By design. |
+| Content confidentiality | **None**: well-known PSK means anyone can decrypt. By design. |
 | Spam flooding | Broadcast-tier airtime budget at the TX chokepoint (section 8.2.1). A dedicated public-channel TX/RX rate limiter was removed unshipped. |
 | Impersonation | Source address derives from the node's Ed25519 identity key; an identity attestation claiming an address without the deriving key is rejected by every receiver (section 4.28) |
 
@@ -2947,7 +2947,7 @@ Periodically rotate node addresses to prevent long-term tracking by passive obse
 
 ### 12.3 LoRa Frequency Survey Tooling
 
-Diagnostic mode that scans the ISM band (902–928 MHz) and reports noise floor, interference sources, and signal quality per sub-band. Useful for deployment planning — identifying the best operating frequency for a specific geographic area. Could run as a standalone firmware mode or integrated diagnostic tool.
+Diagnostic mode that scans the ISM band (902–928 MHz) and reports noise floor, interference sources, and signal quality per sub-band. Useful for deployment planning, identifying the best operating frequency for a specific geographic area. Could run as a standalone firmware mode or integrated diagnostic tool.
 
 ### 12.4 Companion Phone App
 
@@ -2959,24 +2959,24 @@ Native mobile application (iOS/Android) for richer interaction beyond Web BLE ca
 
 | Term | Definition |
 |------|-----------|
-| **AODV** | Ad-hoc On-demand Distance Vector — reactive routing protocol that discovers routes only when needed |
-| **CAD** | Channel Activity Detection — LoRa radio feature to detect ongoing transmissions |
-| **CR** | Coding Rate — Forward Error Correction ratio in LoRa (4/5 through 4/8) |
-| **DH** | Diffie-Hellman — key exchange protocol; X25519 is an elliptic curve variant |
-| **E2E** | End-to-End — encryption where only sender and receiver can decrypt |
-| **GCM** | Galois/Counter Mode — authenticated encryption mode for AES |
-| **HKDF** | HMAC-based Key Derivation Function — derives cryptographic keys from shared secrets |
-| **LBT** | Listen Before Talk — checking channel is clear before transmitting |
-| **NVS** | Non-Volatile Storage — ESP32 flash-based key-value store |
-| **OTP** | One-Time Pad — XOR-based encryption (used in compact RREQ source encryption) |
-| **PSK** | Pre-Shared Key — symmetric key distributed out-of-band |
-| **RERR** | Route Error — notification that a route is broken |
-| **RREP** | Route Reply — response to a route discovery request |
-| **RREQ** | Route Request — broadcast query to discover a route to a destination |
-| **SF** | Spreading Factor — LoRa modulation parameter (SF7–SF12); higher = longer range, slower speed |
-| **SNR** | Signal-to-Noise Ratio — quality metric for received signals (dB) |
-| **Stratum** | Time sync hierarchy level — lower = closer to reference clock |
-| **X25519** | Elliptic curve Diffie-Hellman using Curve25519 — fast, secure key exchange |
+| **AODV** | Ad-hoc On-demand Distance Vector: reactive routing protocol that discovers routes only when needed |
+| **CAD** | Channel Activity Detection: LoRa radio feature to detect ongoing transmissions |
+| **CR** | Coding Rate: Forward Error Correction ratio in LoRa (4/5 through 4/8) |
+| **DH** | Diffie-Hellman: key exchange protocol; X25519 is an elliptic curve variant |
+| **E2E** | End-to-End: encryption where only sender and receiver can decrypt |
+| **GCM** | Galois/Counter Mode: authenticated encryption mode for AES |
+| **HKDF** | HMAC-based Key Derivation Function: derives cryptographic keys from shared secrets |
+| **LBT** | Listen Before Talk: checking channel is clear before transmitting |
+| **NVS** | Non-Volatile Storage: ESP32 flash-based key-value store |
+| **OTP** | One-Time Pad: XOR-based encryption (used in compact RREQ source encryption) |
+| **PSK** | Pre-Shared Key: symmetric key distributed out-of-band |
+| **RERR** | Route Error: notification that a route is broken |
+| **RREP** | Route Reply: response to a route discovery request |
+| **RREQ** | Route Request: broadcast query to discover a route to a destination |
+| **SF** | Spreading Factor: LoRa modulation parameter (SF7–SF12); higher = longer range, slower speed |
+| **SNR** | Signal-to-Noise Ratio: quality metric for received signals (dB) |
+| **Stratum** | Time sync hierarchy level: lower = closer to reference clock |
+| **X25519** | Elliptic curve Diffie-Hellman using Curve25519: fast, secure key exchange |
 
 ---
 

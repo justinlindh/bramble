@@ -162,7 +162,7 @@ void test_location_should_send_distance(void) {
     /* Cache peer's last known position (same as ours = where we were when we last sent) */
     location_cache_update(&mgr, 0x20, &pos1, 1000);
 
-    /* Haven't moved much — time not elapsed */
+    /* Haven't moved much; time not elapsed */
     TEST_ASSERT_FALSE(location_should_send(&mgr, 0x20, 1500));
 
     /* Move >100m north (~0.001 degrees lat ~ 111m) */

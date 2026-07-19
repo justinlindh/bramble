@@ -84,7 +84,7 @@ void test_pending_ack_table_full(void) {
         TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
     }
 
-    /* Table is full — next add must fail */
+    /* Table is full: next add must fail */
     int overflow = pending_ack_add(&table, 0xFF, 0x1111, MSG_TIER_NORMAL, data, 1, 1000);
     TEST_ASSERT_EQUAL_INT(-1, overflow);
 

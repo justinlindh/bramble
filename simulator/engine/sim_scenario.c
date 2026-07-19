@@ -385,7 +385,7 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
 /* ── Stochastic scenario loader ───────────────────────────────────────── */
 
 static bool load_stochastic(cJSON* root, scenario_t* scenario) {
-    /* Parse optional node block — may be {count, area} not an array */
+    /* Parse optional node block: may be {count, area} not an array */
     cJSON* nodes_cfg = cJSON_GetObjectItem(root, "nodes");
     cJSON* radio_json = cJSON_GetObjectItem(root, "radio");
     cJSON* chaos_cfg = cJSON_GetObjectItem(root, "chaos");

@@ -116,7 +116,7 @@ export class WebSocketTransport implements Transport {
       });
 
       ws.addEventListener('error', () => {
-        // Error before close — close event will follow and handle reconnect
+        // Error before close: close event will follow and handle reconnect
       });
     });
   }
@@ -206,20 +206,20 @@ export class WebSocketTransport implements Transport {
     this.visibilityHandler = () => {
       if (document.visibilityState !== 'visible') return;
       if (this._connected && this.ws?.readyState === WebSocket.OPEN) {
-        // Connection looks alive — send an immediate ping to verify
+        // Connection looks alive: send an immediate ping to verify
         try {
           this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method: 'bramble.ping' }));
         } catch { /* will trigger close → reconnect */ }
         // If no response within 2s, force close
         setTimeout(() => {
           if (this._connected && Date.now() - this.lastPong > 3000) {
-            console.warn('[WS] Stale after resume — forcing reconnect');
+            console.warn('[WS] Stale after resume: forcing reconnect');
             try { this.ws?.close(); } catch { /* */ }
           }
         }, 2000);
       } else if (this.autoReconnect && !this._connected && !this.reconnectTimer) {
-        // Not connected, no pending reconnect — try immediately
-        console.log('[WS] Tab visible — immediate reconnect');
+        // Not connected, no pending reconnect: try immediately
+        console.log('[WS] Tab visible: immediate reconnect');
         this.reconnectDelay = 500;
         this.scheduleReconnect();
       }
@@ -264,12 +264,12 @@ export class WebSocketTransport implements Transport {
       // Check if we haven't heard anything in a while
       const silence = Date.now() - this.lastPong;
       if (silence > WebSocketTransport.PING_INTERVAL + WebSocketTransport.PONG_TIMEOUT) {
-        console.warn(`[WS] No data in ${(silence / 1000).toFixed(0)}s — closing as dead`);
+        console.warn(`[WS] No data in ${(silence / 1000).toFixed(0)}s: closing as dead`);
         try { this.ws.close(); } catch { /* */ }
         return;
       }
 
-      // Send a lightweight ping RPC — any response resets lastPong
+      // Send a lightweight ping RPC: any response resets lastPong
       try {
         this.ws.send(JSON.stringify({ jsonrpc: '2.0', id: ++this.rpcId, method: 'bramble.ping' }));
         // Set up a timeout to clean up this pending entry
@@ -281,7 +281,7 @@ export class WebSocketTransport implements Transport {
           timer,
         });
       } catch {
-        // send failed — close event will fire
+        // send failed: close event will fire
       }
     }, WebSocketTransport.PING_INTERVAL);
   }

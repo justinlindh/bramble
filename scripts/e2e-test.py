@@ -196,7 +196,7 @@ class TestContext:
         r = TestResult(name, passed, duration_ms, detail, error)
         self.results.append(r)
         icon = "✅" if passed else "❌"
-        print(f"  {icon} {name} ({duration_ms:.0f}ms){f' — {detail}' if detail else ''}{f' ERROR: {error}' if error else ''}")
+        print(f"  {icon} {name} ({duration_ms:.0f}ms){f': {detail}' if detail else ''}{f' ERROR: {error}' if error else ''}")
 
 
 async def timed_rpc(transport, method, params=None, timeout=5.0):
@@ -485,7 +485,7 @@ async def test_send_message(ctx: TestContext):
     except Exception as e:
         ctx.record("sendMessage (DM)", False, 0, error=str(e))
 
-# Note: reboot is intentionally excluded — it would disrupt the test run
+# Note: reboot is intentionally excluded; it would disrupt the test run
 
 
 # ── Test Runner ──────────────────────────────────────────────────────

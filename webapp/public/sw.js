@@ -1,4 +1,4 @@
-// Bramble Service Worker — cache-first for static assets
+// Bramble Service Worker: cache-first for static assets
 const CACHE_NAME = 'bramble-v1';
 const STATIC_ASSETS = ['/', '/index.html', '/bramble-logo.png', '/favicon.svg'];
 

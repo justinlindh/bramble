@@ -16,7 +16,7 @@ static void flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map)
 }
 
 lv_display_t* lv_port_display_init(void) {
-    /* Allocate from PSRAM — display_flush_area() handles the PSRAM→internal
+    /* Allocate from PSRAM: display_flush_area() handles the PSRAM→internal
      * RAM copy needed for DMA-safe SPI transfers on ESP32-S3. */
     void* buf1 = heap_caps_malloc(BUF_SIZE, MALLOC_CAP_SPIRAM);
     void* buf2 = heap_caps_malloc(BUF_SIZE, MALLOC_CAP_SPIRAM);

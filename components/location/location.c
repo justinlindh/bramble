@@ -14,7 +14,7 @@
 
 static double deg_to_rad(double deg) { return deg * M_PI / 180.0; }
 
-/* Equirectangular distance approximation — good enough for short distances */
+/* Equirectangular distance approximation, good enough for short distances */
 static double approx_distance_m(int32_t lat1_e7, int32_t lon1_e7, int32_t lat2_e7,
                                 int32_t lon2_e7) {
     double lat1 = lat1_e7 / 1e7;
@@ -135,7 +135,7 @@ int location_deserialize_full(const uint8_t* buf, size_t len, bramble_position_t
 
 /* Coarse: quantize to ~1km grid by dividing e7 by 10000.
  * Values are stored as int32 packed into 2 bytes each via modular truncation
- * for lat (range ±90000) and lon (range ±180000) — use 4 bytes total.
+ * for lat (range ±90000) and lon (range ±180000), use 4 bytes total.
  * Actually we split into high/low to fit the 5-byte format. */
 int location_serialize_coarse(const bramble_position_t* pos, uint8_t* buf, size_t buf_len) {
     if (buf_len < LOCATION_COARSE_SIZE)

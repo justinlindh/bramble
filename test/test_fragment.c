@@ -149,7 +149,7 @@ void test_reassembly_timeout(void) {
     /* Purge after timeout */
     reassembly_purge(&ctx, 1000 + FRAG_REASSEMBLY_TIMEOUT_MS + 1);
 
-    /* Slot should be freed — try adding frag 1, should start new slot */
+    /* Slot should be freed: try adding frag 1, should start new slot */
     hdr.frag_index = 1;
     int rc = reassembly_add(&ctx, &hdr, data, 10, 32000, 0);
     TEST_ASSERT_EQUAL(0, rc); /* new slot, not complete (missing frag 0) */

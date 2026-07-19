@@ -58,7 +58,7 @@ static inline int wifi_manager_get_ap_password(char* out, size_t out_len) {
     return -1;
 }
 #else
-/* Declarations only — implementations come from the real wifi_manager.c */
+/* Declarations only, implementations come from the real wifi_manager.c */
 int wifi_manager_init(uint32_t node_addr);
 void wifi_manager_get_status(wifi_status_t* status);
 const char* wifi_manager_get_ip(void);

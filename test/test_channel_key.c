@@ -43,7 +43,7 @@ void test_epoch_one_way(void) {
     uint8_t epoch0[32];
     memcpy(epoch0, ch.key, 32);
     channel_advance_epoch(&ch);
-    /* epoch1 key is different from epoch0 — already tested.
+    /* epoch1 key is different from epoch0; already tested.
        We just verify it's not trivially reversible by checking
        HKDF with epoch0 info doesn't give back epoch0 key */
     uint8_t check[32];
@@ -54,7 +54,7 @@ void test_epoch_one_way(void) {
 
 void test_catchup_convergence(void) {
     /* Two channels from same PSK, one advances 5 epochs,
-       other catches up — they converge */
+       other catches up; they converge */
     bramble_channel_t ch1, ch2;
     channel_derive_key("shared", &ch1);
     channel_derive_key("shared", &ch2);

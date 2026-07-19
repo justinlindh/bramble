@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { decodePacketType } from '../../src/store/actions';
 
-describe('decodePacketType — numeric mappings (regression T37)', () => {
+describe('decodePacketType: numeric mappings (regression T37)', () => {
   it('0x01 → ack', () => expect(decodePacketType(0x01)).toBe('ack'));
   it('0x02 → rreq', () => expect(decodePacketType(0x02)).toBe('rreq'));
   it('0x03 → rrep', () => expect(decodePacketType(0x03)).toBe('rrep'));
@@ -24,10 +24,10 @@ describe('decodePacketType — numeric mappings (regression T37)', () => {
   it('0x14 → location', () => expect(decodePacketType(0x14)).toBe('location'));
 });
 
-describe('decodePacketType — edge cases', () => {
+describe('decodePacketType: edge cases', () => {
   it('undefined → unknown', () => expect(decodePacketType(undefined)).toBe('unknown'));
   it('unknown number → unknown', () => expect(decodePacketType(0xFF)).toBe('unknown'));
-  it('string passthrough — returns the string unchanged', () => {
+  it('string passthrough: returns the string unchanged', () => {
     expect(decodePacketType('data')).toBe('data');
     expect(decodePacketType('beacon')).toBe('beacon');
     expect(decodePacketType('custom_type')).toBe('custom_type');

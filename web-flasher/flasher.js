@@ -1,7 +1,7 @@
 import { ESPLoader, Transport } from 'esptool-js';
 import { buildWifiConfigCommands } from './wifi-config.js';
 
-// Bramble Web Flasher — powered by esptool-js (Espressif official)
+// Bramble Web Flasher: powered by esptool-js (Espressif official)
 // UI controller: connects to ESP32-S3 via Web Serial, flashes firmware from OTA releases
 // Wizard flow: Flash → Reset (USB-JTAG only) → Device Setup → Done
 
@@ -10,7 +10,7 @@ const BOARDS = {
         name: 'Heltec WiFi LoRa 32 V3',
         chipType: 'ESP32-S3',
         flashSize: '8MB',
-        usbType: 'uart-bridge',  // CP2102 — DTR/RTS reset works, console on UART
+        usbType: 'uart-bridge',  // CP2102: DTR/RTS reset works, console on UART
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
@@ -26,7 +26,7 @@ const BOARDS = {
         name: 'LILYGO T-Deck Plus',
         chipType: 'ESP32-S3',
         flashSize: '16MB',
-        usbType: 'usb-jtag',    // Native USB-JTAG — no DTR/RTS, console over USB
+        usbType: 'usb-jtag',    // Native USB-JTAG: no DTR/RTS, console over USB
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
@@ -42,7 +42,7 @@ const BOARDS = {
         name: 'Heltec V4',
         chipType: 'ESP32-S3',
         flashSize: '8MB',
-        usbType: 'usb-jtag',    // Native USB-JTAG — no DTR/RTS, console over USB
+        usbType: 'usb-jtag',    // Native USB-JTAG: no DTR/RTS, console over USB
         partitions: [
             { name: 'bootloader',      offset: 0x0000,  file: 'bootloader.bin' },
             { name: 'partition-table',  offset: 0x8000,  file: 'partition-table.bin' },
@@ -181,7 +181,7 @@ const BOARDS = {
             const dt = new Date(r.published_at);
             const ts = Number.isNaN(dt.getTime()) ? 'unknown date' : dt.toLocaleString();
             o.value = String(i);
-            o.textContent = `${r.version} — ${ts}`;
+            o.textContent = `${r.version} (${ts})`;
             releaseSelect.appendChild(o);
         });
         releaseSelect.value = '0';

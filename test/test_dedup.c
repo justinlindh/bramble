@@ -48,7 +48,7 @@ void test_full_buffer_evicts_oldest(void) {
     }
     TEST_ASSERT_EQUAL_INT(DEDUP_MAX_ENTRIES, dedup_count(&buf));
 
-    /* Add one more — should evict oldest (id=1 at t=0) */
+    /* Add one more: should evict oldest (id=1 at t=0) */
     TEST_ASSERT_FALSE(dedup_check_and_add(&buf, 9999, 50000));
     TEST_ASSERT_EQUAL_INT(DEDUP_MAX_ENTRIES, dedup_count(&buf));
 

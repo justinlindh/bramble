@@ -1,5 +1,5 @@
 /**
- * Bramble WS Proxy — WebSocket relay for device connections
+ * Bramble WS Proxy: WebSocket relay for device connections
  *
  * Bridges browser WebSocket connections (possibly behind TLS termination)
  * to plain ws:// connections on Bramble hardware devices.
@@ -24,7 +24,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 
 const PORT = parseInt(process.env.PORT || '3006', 10);
 
-// Only allow RFC1918 + link-local targets — no proxying to the internet
+// Only allow RFC1918 + link-local targets: no proxying to the internet
 const PRIVATE_IP = /^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3})$/;
 
 const DEVICE_CONNECT_TIMEOUT_MS = 5000;
@@ -68,7 +68,7 @@ server.on('upgrade', (req, socket, head) => {
   });
 
   deviceWs.on('open', () => {
-    console.log(`[proxy] device ${targetIp} ready — completing browser upgrade`);
+    console.log(`[proxy] device ${targetIp} ready: completing browser upgrade`);
 
     // NOW accept the browser's WebSocket
     wss.handleUpgrade(req, socket, head, (browserWs) => {
@@ -77,7 +77,7 @@ server.on('upgrade', (req, socket, head) => {
   });
 
   deviceWs.on('error', (err) => {
-    console.error(`[proxy] device ${targetIp} failed: ${err.message} — rejecting browser`);
+    console.error(`[proxy] device ${targetIp} failed: ${err.message}, rejecting browser`);
     socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n');
     socket.destroy();
   });

@@ -160,7 +160,7 @@ void test_epoch_catchup(void) {
     TEST_ASSERT_EQUAL(5, receiver.epoch);
 }
 
-/* Test 6: Constant-time trial — decryption succeeds at every position */
+/* Test 6: Constant-time trial: decryption succeeds at every position */
 void test_constant_time_all_positions(void) {
     for (int target = 0; target < 16; target++) {
         char psk[32];

@@ -3,7 +3,7 @@
 
 #include "lvgl.h"
 
-/* Bramble color palette — dark theme (matches webapp) */
+/* Bramble color palette: dark theme (matches webapp) */
 #define BR_COLOR_BG lv_color_hex(0x0D1117)        /* --bg */
 #define BR_COLOR_SURFACE lv_color_hex(0x161B22)   /* --surface */
 #define BR_COLOR_SURFACE_2 lv_color_hex(0x21262D) /* --surface-2 */

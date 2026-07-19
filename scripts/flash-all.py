@@ -142,7 +142,7 @@ def detect_usb_device(port: str, cfg: dict[str, Any], esptool: str) -> UsbDevice
         if mapped:
             board = norm_board(mapped)
     elif psram_mb is None:
-        # No PSRAM detected — check fallback rules:
+        # No PSRAM detected, check fallback rules:
         # "no_psram" key in usb_detection, or "default" key
         fallback = mapping.get("no_psram") or mapping.get("default")
         if fallback:
@@ -207,13 +207,13 @@ def verify_usb_boot(port: str, timeout_s: int = 30) -> tuple[bool, str]:
                     continue
                 collected.append(line)
                 if BOOT_MARKER in line:
-                    return True, f"boot OK — saw '{BOOT_MARKER}' after {len(collected)} lines"
+                    return True, f"boot OK, saw '{BOOT_MARKER}' after {len(collected)} lines"
                 for panic in PANIC_MARKERS:
                     if panic in line:
                         return False, f"panic detected: {line}"
                 for op in OPERATIONAL_MARKERS:
                     if op in line:
-                        return True, f"boot OK — device operational (saw '{op}' output)"
+                        return True, f"boot OK, device operational (saw '{op}' output)"
     except Exception as e:
         return False, f"serial error on {port}: {e}"
 
@@ -221,7 +221,7 @@ def verify_usb_boot(port: str, timeout_s: int = 30) -> tuple[bool, str]:
     # but just quiet. Count readable (non-garbage) lines as weak evidence.
     readable = [l for l in collected if len(l) > 5 and l.isprintable()]
     if len(readable) >= 3:
-        return True, f"boot likely OK — {len(readable)} readable lines but no marker (device may be idle)"
+        return True, f"boot likely OK: {len(readable)} readable lines but no marker (device may be idle)"
 
     tail = "\n".join(collected[-5:]) if collected else "(no output)"
     return False, f"timeout after {timeout_s}s waiting for boot marker. Last output:\n{tail}"

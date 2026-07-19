@@ -7,7 +7,7 @@
 #include "sdkconfig.h"
 #endif
 
-/* Display dimensions — board-specific */
+/* Display dimensions: board-specific */
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240

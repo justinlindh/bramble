@@ -1,5 +1,5 @@
 /**
- * PeerManager — lists known peers (union of neighbors + route destinations)
+ * PeerManager: lists known peers (union of neighbors + route destinations)
  * with client-side name assignment stored in localStorage.
  */
 import { useRef, useState, useMemo } from 'react';
@@ -183,7 +183,7 @@ function PeerRow({ peer, name, note, onSaveName, onSaveNote }: PeerRowProps) {
           {name ? (
             <span className={styles.peerName}>{name}</span>
           ) : (
-            <span className={styles.noName}>—</span>
+            <span className={styles.noName}>-</span>
           )}
           {note && <span className={styles.peerNote}>{note}</span>}
           {peer.lastHeardMs !== undefined && (
@@ -282,7 +282,7 @@ export function PeerManager({ neighbors, routes }: PeerManagerProps) {
     }
     const hex = formatAddr0x(addr);
     const label = addName.trim() || hex;
-    setAddSuccess(`Name saved for ${label} — will appear in chat when discovered on mesh.`);
+    setAddSuccess(`Name saved for ${label}; will appear in chat when discovered on mesh.`);
     setAddAddr('');
     setAddName('');
     setTimeout(() => setAddSuccess(''), 5000);

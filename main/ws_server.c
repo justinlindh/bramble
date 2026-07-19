@@ -174,7 +174,7 @@ static esp_err_t send_401_http(httpd_req_t* req) {
 /**
  * Reject an already-upgraded WebSocket connection with a close frame.
  * Must be used instead of send_401_http() inside ws_handler(), because
- * ESP-IDF sends 101 Switching Protocols BEFORE invoking the handler —
+ * ESP-IDF sends 101 Switching Protocols BEFORE invoking the handler;
  * sending raw HTTP on an upgraded connection breaks the WS protocol.
  */
 static esp_err_t send_ws_policy_reject(httpd_req_t* req, const char* reason) {
@@ -254,12 +254,12 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
     uint64_t elapsed_us = now_us - s_notify_last_send_us;
 
     if (elapsed_us >= (WS_NOTIFY_MIN_INTERVAL_MS * 1000ULL)) {
-        /* Enough time has passed — reset burst counter */
+        /* Enough time has passed, reset burst counter */
         s_notify_burst_count = 0;
     }
 
     if (s_notify_burst_count >= WS_NOTIFY_BURST_MAX) {
-        /* Over burst limit and within the rate window — drop */
+        /* Over burst limit and within the rate window, drop */
         s_notify_drops++;
         if (now_us - s_notify_last_drop_log_us >= (WS_NOTIFY_DROP_LOG_INTERVAL_MS * 1000ULL)) {
             ESP_LOGW(TAG, "WS notify throttled: %" PRIu32 " dropped in last %.1fs", s_notify_drops,
@@ -283,7 +283,7 @@ static void ws_notify_cb(const char* json, size_t len, void* ctx) {
     for (int i = client_count - 1; i >= 0; i--) {
         esp_err_t err = httpd_ws_send_frame_async(s_server, client_fds[i], &frame);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Notify send failed fd=%d err=%d — removing", client_fds[i], err);
+            ESP_LOGW(TAG, "Notify send failed fd=%d err=%d, removing", client_fds[i], err);
             client_remove(client_fds[i]);
         }
     }
@@ -434,7 +434,7 @@ static esp_err_t ws_handler(httpd_req_t* req) {
         ret = httpd_ws_send_frame(req, &tx_frame);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "ws_send_frame failed: %d", ret);
-            /* If send fails, the client may be gone — remove it */
+            /* If send fails, the client may be gone; remove it */
             int fd = httpd_req_to_sockfd(req);
             client_remove(fd);
         }

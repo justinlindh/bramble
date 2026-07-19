@@ -48,7 +48,7 @@ static int fake_transmit(const uint8_t* payload, uint8_t len) {
     return 0;
 }
 
-/* Simulates mailbox_flush_for() — mirrors mesh_task.c retry-on-failure logic */
+/* Simulates mailbox_flush_for(): mirrors mesh_task.c retry-on-failure logic */
 static int wrapper_flush_for(uint32_t dest_addr) {
     mailbox_entry_t entries[MAILBOX_MAX_PER_DEST];
     int count = mailbox_retrieve(&s_mailbox, dest_addr, entries, MAILBOX_MAX_PER_DEST);
@@ -109,7 +109,7 @@ void test_wrapper_store_duplicate_returns_false(void) {
     s_mailbox_enabled = true;
     uint8_t p[] = "dup";
     TEST_ASSERT_TRUE(wrapper_mailbox_store(1, 100, p, 3, 42, 0));
-    /* Same packet_id — mailbox_store returns -2, wrapper returns false */
+    /* Same packet_id: mailbox_store returns -2, wrapper returns false */
     bool result = wrapper_mailbox_store(2, 200, p, 3, 42, 100);
     TEST_ASSERT_FALSE(result);
     TEST_ASSERT_EQUAL_INT(1, s_mailbox.count);
@@ -167,11 +167,11 @@ void test_wrapper_expire_purges_old_entries(void) {
     wrapper_mailbox_store(2, 200, p, 2, 2, 2000);
     TEST_ASSERT_EQUAL_INT(2, s_mailbox.count);
 
-    /* Expire at exactly t=0 + TTL — first entry should be purged */
+    /* Expire at exactly t=0 + TTL: first entry should be purged */
     wrapper_expire(0 + MAILBOX_TTL_MS);
     TEST_ASSERT_EQUAL_INT(1, s_mailbox.count);
 
-    /* Expire at t=2000 + TTL — second entry should be purged */
+    /* Expire at t=2000 + TTL: second entry should be purged */
     wrapper_expire(2000 + MAILBOX_TTL_MS);
     TEST_ASSERT_EQUAL_INT(0, s_mailbox.count);
 }
@@ -212,7 +212,7 @@ void test_wrapper_flush_for_transmit_failure_preserves_entries(void) {
     TEST_ASSERT_EQUAL_INT(2, s_mailbox.count);
     TEST_ASSERT_EQUAL_INT(2, mailbox_count_for_dest(&s_mailbox, 0xDEAD));
 
-    /* Now allow transmit to succeed — flush should deliver both */
+    /* Now allow transmit to succeed: flush should deliver both */
     s_fake_transmit_fail = false;
     flushed = wrapper_flush_for(0xDEAD);
     TEST_ASSERT_EQUAL_INT(2, flushed);

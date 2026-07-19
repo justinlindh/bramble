@@ -20,7 +20,7 @@ static const char* TAG = "audio";
 #define BUFFER_SAMPLES 1024
 #define QUEUE_DEPTH 4
 
-#define DEFAULT_VOLUME 50 /* Sane default — not screaming loud */
+#define DEFAULT_VOLUME 50 /* Sane default, not screaming loud */
 #define NVS_NAMESPACE NVS_NS_BRAMBLE
 #define NVS_KEY_VOLUME "audio_vol"
 #define NVS_KEY_MUTED "audio_mute"
@@ -57,7 +57,7 @@ static struct {
     volatile bool exit_requested;
     bool initialized;
     bool muted;
-    uint8_t volume; /* 0–100 */
+    uint8_t volume; /* 0 to 100 */
     bool playing;
 } s_audio = {0};
 
@@ -195,7 +195,7 @@ int audio_init(void) {
     /* Restore persisted preferences before anything plays */
     nvs_load_prefs();
 
-    ESP_LOGI(TAG, "Initializing I2S audio (MAX98357A) — volume=%u muted=%d", s_audio.volume,
+    ESP_LOGI(TAG, "Initializing I2S audio (MAX98357A): volume=%u muted=%d", s_audio.volume,
              s_audio.muted);
 
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);

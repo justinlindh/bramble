@@ -2,7 +2,7 @@
 #include "esp_stubs.h"
 
 /*
- * Default NVS stubs — simple no-ops that return ESP_OK / ESP_FAIL.
+ * Default NVS stubs: simple no-ops that return ESP_OK / ESP_FAIL.
  * Tests that need custom NVS behavior (e.g. test_audio) define their own
  * implementations and should NOT link this file's NVS symbols (they include
  * inline stubs and don't link esp_stubs.c, or use weak linkage).

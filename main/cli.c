@@ -1,12 +1,12 @@
 /**
- * Bramble serial CLI — interactive command interface over UART.
+ * Bramble serial CLI: interactive command interface over UART.
  *
  * Commands:
- *   send <addr> <message>  — Send encrypted DM to a node (hex address)
- *   broadcast <message>    — Send on public channel (Bramble Common)
- *   peers                  — List known neighbors
- *   status                 — Show node status
- *   help                   — Show commands
+ *   send <addr> <message>  - Send encrypted DM to a node (hex address)
+ *   broadcast <message>    - Send on public channel (Bramble Common)
+ *   peers                  - List known neighbors
+ *   status                 - Show node status
+ *   help                   - Show commands
  */
 
 #include "cli.h"
@@ -288,7 +288,7 @@ static void cli_task(void* param) {
 
     /* Tell linenoise to handle backspace etc */
     linenoiseSetMultiLine(1);
-    linenoiseSetDumbMode(1); /* No escape codes — works over plain serial */
+    linenoiseSetDumbMode(1); /* No escape codes, works over plain serial */
 
     printf("\n");
     printf("=================================\n");
@@ -325,7 +325,7 @@ static void cli_task(void* param) {
             continue;
         }
         if (strlen(line) > 0) {
-            /* Skip history for JSON-RPC commands — they have unique IDs
+            /* Skip history for JSON-RPC commands: they have unique IDs
              * and would fill the 100-entry history with unreusable entries,
              * each leaking a strdup into PSRAM until rotation. */
             if (line[0] != '{') {
@@ -403,6 +403,6 @@ void cli_init(bramble_identity_t* identity) {
     rpc_register_notify_transport(uart_notify_cb, NULL);
 
     xTaskCreate(cli_task, "cli", 8192, NULL, 1,
-                NULL); /* Priority 1 — same as main_task, won't starve UI */
+                NULL); /* Priority 1: same as main_task, won't starve UI */
     ESP_LOGI(TAG, "CLI initialized");
 }

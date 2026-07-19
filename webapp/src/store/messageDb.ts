@@ -56,7 +56,7 @@ class MessageDb {
         const db = req.result;
         const oldVersion = event.oldVersion;
         if (oldVersion < 1) {
-          // Fresh DB — create store with indexes
+          // Fresh DB: create store with indexes
           const store = db.createObjectStore(this.STORE_NAME, { keyPath: 'id' });
           store.createIndex('by-conversation', 'conversationId', { unique: false });
           store.createIndex('by-timestamp', 'timestampMs', { unique: false });

@@ -30,7 +30,7 @@ void emit_anomaly(FILE* out, uint64_t timestamp_us, const char* type, const char
                   uint32_t dest_addr, const char* details);
 
 /*
- * Typed variants — include pkt_type string ("BEACON","RREQ","RREP","RERR","DATA").
+ * Typed variants: include pkt_type string ("BEACON","RREQ","RREP","RERR","DATA").
  */
 void emit_packet_sent_typed(FILE* out, uint64_t timestamp_us, const char* node_id,
                             uint32_t src_addr, uint32_t dest_addr, uint16_t size, uint8_t pkt_type);

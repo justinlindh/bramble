@@ -1,5 +1,5 @@
 /**
- * Bramble Mock Node — WebSocket JSON-RPC 2.0 handler module
+ * Bramble Mock Node: WebSocket JSON-RPC 2.0 handler module
  * Importable module for embedding in other servers.
  *
  * Simulates a realistic 5-node mesh in a fictional example town.
@@ -180,7 +180,7 @@ function normalizeDest(dest) {
   return (dest ?? 0xFFFFFFFF) >>> 0;
 }
 
-// Neighbors — direct radio contacts (not all peers are direct neighbors)
+// Neighbors: direct radio contacts (not all peers are direct neighbors)
 const neighbors = [
   {
     addr: 0xAABBCC01, name: 'Example', // strong direct link (1.8km LOS)
@@ -204,7 +204,7 @@ const neighbors = [
   },
 ];
 
-// Routes — includes both direct and multi-hop
+// Routes: includes both direct and multi-hop
 const routes = [
   { dest: 0xAABBCC01, nextHop: 0xAABBCC01, hopCount: 1, metric: 68,  state: 'active',      lastUsedMs: 1500  },
   { dest: 0xAABBCC02, nextHop: 0xAABBCC02, hopCount: 1, metric: 112, state: 'active',      lastUsedMs: 9000  },
@@ -460,7 +460,7 @@ export const handlers = {
     console.log(`[mock-node] Broadcast: "${params?.text?.slice(0, 40)}..." (packetId=${packetId})`);
 
     // Simulate broadcast delivery notifications from each reachable peer
-    // Broadcasts reach neighbors directly — simulate realistic delivery timing
+    // Broadcasts reach neighbors directly: simulate realistic delivery timing
     const reachablePeers = neighbors.filter(n => n.rssi > -115); // Only peers with reasonable signal
 
     for (let i = 0; i < reachablePeers.length; i++) {
@@ -813,7 +813,7 @@ setInterval(() => {
   if (clients.size > 0) notify('bramble.onNeighborChange', {});
 }, 15000);
 
-// Simulate incoming messages from mesh — realistic traffic
+// Simulate incoming messages from mesh: realistic traffic
 const MESH_CHATTER = [
   { from: 0xAABBCC01, texts: ['Example node checking in. Strong signal today.', 'Wind picking up on the ridge, antenna holding.', 'Relayed 3 packets this hour.'] },
   { from: 0xAABBCC02, texts: ['Example here. Hikers passing through.', 'Solar panel at 14.2V, all good.', 'Forwarded a message to Example via Example.'] },

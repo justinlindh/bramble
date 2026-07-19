@@ -133,7 +133,7 @@ export function ChannelDetailPanel({ channelIndex, onClose }: ChannelDetailPanel
           shareString={shareString}
           description={
             ch.hasPsk
-              ? 'Anyone with this QR or string can join — includes the PSK if you provided it.'
+              ? 'Anyone with this QR or string can join, which includes the PSK if you provided it.'
               : 'Anyone with this QR or string can join this open channel.'
           }
           onClose={() => setShowShare(false)}

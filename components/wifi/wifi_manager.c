@@ -96,7 +96,7 @@ int wifi_manager_nvs_get_creds(char* ssid, size_t ssid_len, char* password, size
 
     err = nvs_get_str(nvs, NVS_KEY_PASSWORD, password, &pass_len);
     if (err != ESP_OK) {
-        password[0] = '\0'; /* Open network — no password */
+        password[0] = '\0'; /* Open network, no password */
     }
 
     nvs_close(nvs);
@@ -141,9 +141,9 @@ static void sta_event_handler(void* arg, esp_event_base_t event_base, int32_t ev
         const wifi_event_sta_disconnected_t* disc =
             (const wifi_event_sta_disconnected_t*)event_data;
         if (disc) {
-            ESP_LOGW(TAG, "Station disconnected (reason=%d) — reconnecting", disc->reason);
+            ESP_LOGW(TAG, "Station disconnected (reason=%d), reconnecting", disc->reason);
         } else {
-            ESP_LOGW(TAG, "Station disconnected — reconnecting");
+            ESP_LOGW(TAG, "Station disconnected, reconnecting");
         }
 
         /* Invalidate stale IP immediately so status reflects reality. */
@@ -330,11 +330,11 @@ int wifi_manager_init(uint32_t node_addr) {
     char nvs_ssid[33] = {0};
     char nvs_pass[65] = {0};
     if (wifi_manager_nvs_get_creds(nvs_ssid, sizeof(nvs_ssid), nvs_pass, sizeof(nvs_pass)) == 0) {
-        ESP_LOGI(TAG, "Found NVS WiFi credentials — trying station: %s", nvs_ssid);
+        ESP_LOGI(TAG, "Found NVS WiFi credentials, trying station: %s", nvs_ssid);
         if (try_station_mode(nvs_ssid, nvs_pass) == 0) {
             return 0;
         }
-        ESP_LOGW(TAG, "NVS station failed — falling back to AP");
+        ESP_LOGW(TAG, "NVS station failed, falling back to AP");
     }
 
     /* Fall back to Kconfig defaults */
@@ -343,9 +343,9 @@ int wifi_manager_init(uint32_t node_addr) {
         if (try_station_mode(CONFIG_BRAMBLE_WIFI_SSID, CONFIG_BRAMBLE_WIFI_PASSWORD) == 0) {
             return 0;
         }
-        ESP_LOGW(TAG, "Kconfig station failed — falling back to AP");
+        ESP_LOGW(TAG, "Kconfig station failed, falling back to AP");
     } else {
-        ESP_LOGI(TAG, "No WiFi credentials — starting AP mode");
+        ESP_LOGI(TAG, "No WiFi credentials, starting AP mode");
     }
 
     return start_ap_mode(node_addr);

@@ -61,7 +61,7 @@ export async function initMessageStore(nodeAddr?: string): Promise<void> {
       useStore.getState().loadCachedMessages(hydrated);
     }
   } catch {
-    // IndexedDB unavailable (e.g. private browsing) — continue without persistence
+    // IndexedDB unavailable (e.g. private browsing), continue without persistence
   }
 }
 
@@ -215,7 +215,7 @@ export async function connect(
     if ('enableAutoReconnect' in transport && typeof (transport as any).enableAutoReconnect === 'function') {
       (transport as any).enableAutoReconnect({
         onDisconnect: () => {
-          useStore.getState().setConnectionState('error', 'Connection lost — reconnecting…');
+          useStore.getState().setConnectionState('error', 'Connection lost, reconnecting…');
         },
         onReconnect: async () => {
           useStore.getState().setConnectionState('connected');
@@ -263,7 +263,7 @@ export async function connect(
     client.subscribe('bramble.onPeerLocation', (params) => handleLocationUpdate(params));
     client.subscribe('bramble.onTrafficEvent', (params) => handleTrafficEvent(params));
 
-    // Initial data load — all best-effort so a slow RPC doesn't kill the connection
+    // Initial data load: all best-effort so a slow RPC doesn't kill the connection
     const opt = (p: Promise<void>) => p.catch((e) => console.warn('[init]', e.message));
 
     if (type === 'serial') {
@@ -399,7 +399,7 @@ export async function disconnect(): Promise<void> {
   try {
     await client?.rpc('bramble.disconnect');
   } catch {
-    // Ignore — node may not have this method, or already disconnected
+    // Ignore: node may not have this method, or already disconnected
   }
   client?.clearSubscriptions();
   await client?.disconnect();
@@ -507,8 +507,8 @@ export function normalizeAirtime(raw: any): AirtimeStatus {
   // Firmware returns flat fields; webapp expects { tiers: [...] }
   if (raw.tiers) return raw as AirtimeStatus;
 
-  // next_refill_ms is a duration (ms until next refill). 0 means "just refilled"
-  // — treat it as a full interval from now. Default to 1 hour if missing.
+  // next_refill_ms is a duration (ms until next refill). 0 means "just refilled",
+  // treat it as a full interval from now. Default to 1 hour if missing.
   const nextRefillMs = raw.next_refill_ms ?? 3600000;
   const refillAtMs = Date.now() + (nextRefillMs > 0 ? nextRefillMs : REFILL_INTERVAL_MS);
 

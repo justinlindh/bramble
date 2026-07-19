@@ -230,7 +230,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       if (id.startsWith('ch:')) {
         const chIdx = Number(id.slice(3));
         if (!validChannelIndexes.has(chIdx)) {
-          // Channel was deleted — remove stale conversation (BUG-07 fix)
+          // Channel was deleted: remove stale conversation (BUG-07 fix)
           convs.delete(id);
         } else {
           convs.set(id, { ...conv, label: formatAddr(id, names, c) });

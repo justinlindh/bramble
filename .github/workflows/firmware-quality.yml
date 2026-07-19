@@ -42,6 +42,8 @@ jobs:
           done
       - name: No internal refs
         run: bash scripts/lint/check-no-internal-refs.sh
+      - name: No em dash
+        run: bash scripts/lint/check-no-em-dash.sh
       - name: Board matrix covers every shipped board
         # Guards the gating hole this check was added for: if a board is added
         # to scripts/ci-build-firmware.sh (the release path) without being

@@ -104,7 +104,7 @@ bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE]
                            const uint8_t* msg, size_t msg_len,
                            const uint8_t sig[BRAMBLE_ED25519_SIG_SIZE]);
 
-/* Default public channel PSK — well-known, not secret */
+/* Default public channel PSK: well-known, not secret */
 #define BRAMBLE_PUBLIC_CHANNEL_PSK "bramble-default"
 
 #endif

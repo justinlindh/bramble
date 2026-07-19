@@ -501,7 +501,7 @@ static void _handle_beacon(sim_node_t* rx, const uint8_t* buf, uint16_t len, int
     int node_idx = (int)(rx - nodes->nodes);
     bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
 
-    /* Phase 6: Mailbox — check if we have stored messages for the beacon sender */
+    /* Phase 6: Mailbox: check if we have stored messages for the beacon sender */
     if (ext && ext->mailbox.count > 0) {
         mailbox_entry_t pending[MAILBOX_MAX_PER_DEST];
         int n = mailbox_retrieve(&ext->mailbox, beacon.src_addr, pending, MAILBOX_MAX_PER_DEST);
@@ -696,7 +696,7 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         return;
 
     if (receipt.header.dest_addr == rx->addr) {
-        /* This receipt is for us — the original sender */
+        /* This receipt is for us, the original sender */
         bridge_msg_track_complete(msg_track, msg_track_count, receipt.orig_packet_id, now_us,
                                   metrics);
 
@@ -1252,7 +1252,7 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
                           now_us);
         emit_packet_dropped(stdout, now_us, rx->id, "no_route");
 
-        /* Phase 6: Mailbox — store the DATA payload for the offline destination.
+        /* Phase 6: Mailbox: store the DATA payload for the offline destination.
          * This relay node volunteers to hold the message until the dest rejoins. */
         bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
         if (ext && len > HEADER_SIZE) {
@@ -1515,7 +1515,7 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
         metrics->capture_wins++;
     metrics->receptions_ok++;
 
-    /* Dedup check — only for broadcast packets (RREQ flood prevention).
+    /* Dedup check: only for broadcast packets (RREQ flood prevention).
      * Unicast packets (DATA, RREP, DELIVERY_RECEIPT) are forwarded hop-by-hop
      * with the same packet_id, so dedup would incorrectly drop them at relays. */
     if (hdr.type == PKT_TYPE_RREQ) {
@@ -1760,7 +1760,7 @@ void bridge_handle_generate_message(sim_event_t* event, node_array_t* nodes, rad
         return;
     }
 
-    /* Route exists — build and send DATA packet */
+    /* Route exists: build and send DATA packet */
 
     /* Reactive: forward_data overwrites this from the route. Flood transport:
      * originate at the operator-settable flood hop budget. */
@@ -2017,7 +2017,7 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
 
         /* This entry needs retransmission */
         if (pa->attempt >= pa->max_attempts) {
-            /* Exhausted retries — remove and count as failed */
+            /* Exhausted retries: remove and count as failed */
             pa->active = false;
             continue;
         }

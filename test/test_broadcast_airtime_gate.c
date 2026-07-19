@@ -66,7 +66,7 @@ void test_rapid_broadcasts_exhaust_budget_not_arbitrary_limit(void) {
     airtime_budget_init(&ab, 0);
     /* Micro mesh: budget is 400% of 18000ms = 72000ms.
        At 250ms per broadcast, we should get 72000/250 = 288 broadcasts
-       before exhaustion — far more than the old 3-burst limit. */
+       before exhaustion, far more than the old 3-burst limit. */
     int count = 0;
     while (airtime_budget_can_transmit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS)) {
         airtime_budget_debit(&ab, AIRTIME_TIER_BROADCAST, BROADCAST_AIRTIME_MS);
