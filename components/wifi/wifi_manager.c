@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "wifi_ap_password.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -32,7 +33,52 @@ static wifi_status_t s_status = {
     .ip_addr = "",
     .ssid = "",
     .rssi = 0,
+    .ap_password = "",
 };
+
+/* ── AP password ─────────────────────────────────────────────────────── */
+
+/* Secret identity material for the per-device derivation, pushed in by the
+ * app before init. Sized for the Ed25519 secret key the firmware passes. */
+static uint8_t s_ap_secret[64];
+static size_t s_ap_secret_len = 0;
+
+void wifi_manager_set_ap_secret(const uint8_t* secret, size_t secret_len) {
+    if (!secret || secret_len == 0 || secret_len > sizeof(s_ap_secret)) {
+        memset(s_ap_secret, 0, sizeof(s_ap_secret));
+        s_ap_secret_len = 0;
+        return;
+    }
+    memcpy(s_ap_secret, secret, secret_len);
+    s_ap_secret_len = secret_len;
+}
+
+int wifi_manager_get_ap_password(char* out, size_t out_len) {
+    if (!out || out_len < WIFI_AP_PASSWORD_FIELD)
+        return -1;
+    out[0] = '\0';
+
+    /* An explicit build-time override wins, but only if it is a legal PSK.
+     * A too-short or too-long override is a misconfiguration, and silently
+     * falling back to the derived value would hide it. */
+    const char* override_pw = CONFIG_BRAMBLE_WIFI_AP_PASSWORD;
+    size_t override_len = strlen(override_pw);
+    if (override_len > 0) {
+        if (override_len < WIFI_AP_PASSWORD_MIN || override_len > WIFI_AP_PASSWORD_MAX) {
+            ESP_LOGE(TAG, "CONFIG_BRAMBLE_WIFI_AP_PASSWORD is %u chars, WPA2 requires %d to %d",
+                     (unsigned)override_len, WIFI_AP_PASSWORD_MIN, WIFI_AP_PASSWORD_MAX);
+            return -1;
+        }
+        snprintf(out, out_len, "%s", override_pw);
+        return 0;
+    }
+
+    if (s_ap_secret_len == 0) {
+        ESP_LOGE(TAG, "No AP password: identity secret was never provisioned");
+        return -1;
+    }
+    return wifi_ap_password_derive(s_ap_secret, s_ap_secret_len, out, out_len);
+}
 
 /* ── NVS helpers ─────────────────────────────────────────────────────── */
 
@@ -177,6 +223,7 @@ static int try_station_mode(const char* ssid, const char* password) {
 
     if (bits & WIFI_CONNECTED_BIT) {
         strncpy(s_status.ssid, ssid, sizeof(s_status.ssid) - 1);
+        s_status.ap_password[0] = '\0'; /* station mode has no AP password */
         ESP_LOGI(TAG, "Station mode connected: SSID=%s IP=%s", s_status.ssid, s_status.ip_addr);
         return 0;
     }
@@ -204,6 +251,15 @@ static int try_station_mode(const char* ssid, const char* password) {
 /* ── AP mode ─────────────────────────────────────────────────────────── */
 
 static int start_ap_mode(uint32_t node_addr) {
+    /* Resolve the PSK before touching the radio: no password, no AP. Coming
+     * up as an open or fixed-secret network would be worse than not coming
+     * up at all, and the failure is a provisioning bug, not a field state. */
+    char ap_pass[WIFI_AP_PASSWORD_FIELD];
+    if (wifi_manager_get_ap_password(ap_pass, sizeof(ap_pass)) != 0) {
+        ESP_LOGE(TAG, "AP mode not started: no AP password available");
+        return -1;
+    }
+
     esp_netif_t* ap_netif = esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -215,8 +271,7 @@ static int start_ap_mode(uint32_t node_addr) {
 
     wifi_config_t ap_cfg = {0};
     strncpy((char*)ap_cfg.ap.ssid, ap_ssid, sizeof(ap_cfg.ap.ssid) - 1);
-    strncpy((char*)ap_cfg.ap.password, CONFIG_BRAMBLE_WIFI_AP_PASSWORD,
-            sizeof(ap_cfg.ap.password) - 1);
+    strncpy((char*)ap_cfg.ap.password, ap_pass, sizeof(ap_cfg.ap.password) - 1);
     ap_cfg.ap.ssid_len = (uint8_t)strlen(ap_ssid);
     ap_cfg.ap.channel = 1;
     ap_cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
@@ -251,9 +306,13 @@ static int start_ap_mode(uint32_t node_addr) {
 
     strncpy(s_status.ip_addr, "192.168.4.1", sizeof(s_status.ip_addr) - 1);
     strncpy(s_status.ssid, ap_ssid, sizeof(s_status.ssid) - 1);
+    snprintf(s_status.ap_password, sizeof(s_status.ap_password), "%s", ap_pass);
     s_status.mode = BRAMBLE_WIFI_AP;
 
-    ESP_LOGI(TAG, "AP mode: %s (%s)", ap_ssid, s_status.ip_addr);
+    /* Printed deliberately: the serial console is the only way a headless
+     * board can tell its operator the password. Anyone reading this log
+     * already has physical access to the device. */
+    ESP_LOGI(TAG, "AP mode: %s (%s) password: %s", ap_ssid, s_status.ip_addr, s_status.ap_password);
 
     /* Start WebSocket server on AP mode so webapp can connect */
     extern int ws_server_start(void);

@@ -14,6 +14,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs.h"
+#include "wifi_ap_password.h"
 
 /* ---- controllable test doubles ---- */
 
@@ -261,6 +262,16 @@ void setUp(void) {
     s_sta_any_id = 0;
     s_sta_got_ip = 0;
     memset(&s_status, 0, sizeof(s_status));
+    memset(s_ap_secret, 0, sizeof(s_ap_secret));
+    s_ap_secret_len = 0;
+}
+
+/* Synthetic identity secret. Never a real device's key, so no password this
+ * suite computes belongs to any real node. */
+static void fake_secret(uint8_t out[64], uint8_t seed) {
+    for (int i = 0; i < 64; i++) {
+        out[i] = (uint8_t)(seed * 31u + (unsigned)i * 7u + 11u);
+    }
 }
 
 void tearDown(void) {}
@@ -322,6 +333,10 @@ void test_init_falls_back_to_ap_when_station_fails(void) {
     g_nvs_open_err = ESP_FAIL;
     g_wait_bits_result = BIT1;
 
+    uint8_t secret[64];
+    fake_secret(secret, 42);
+    wifi_manager_set_ap_secret(secret, sizeof(secret));
+
     TEST_ASSERT_EQUAL_INT(0, wifi_manager_init(0xEC7A));
     TEST_ASSERT_EQUAL_INT(WIFI_MODE_AP, g_wifi_set_mode);
     TEST_ASSERT_TRUE(g_create_ap_calls > 0);
@@ -332,6 +347,71 @@ void test_init_falls_back_to_ap_when_station_fails(void) {
     TEST_ASSERT_EQUAL_STRING("192.168.4.1", status.ip_addr);
     TEST_ASSERT_EQUAL_STRING("Bramble-EC7A", status.ssid);
     TEST_ASSERT_EQUAL_STRING("192.168.4.1", wifi_manager_get_ip());
+
+    /* The AP came up on the derived password, and the status surface carries
+     * it so the on-device UIs and the serial CLI can show it. */
+    char expect[WIFI_AP_PASSWORD_BUFSZ] = {0};
+    TEST_ASSERT_EQUAL_INT(0,
+                          wifi_ap_password_derive(secret, sizeof(secret), expect, sizeof(expect)));
+    TEST_ASSERT_EQUAL_STRING(expect, status.ap_password);
+    TEST_ASSERT_EQUAL_STRING(expect, (char*)g_last_wifi_cfg.ap.password);
+    TEST_ASSERT_EQUAL_INT(WIFI_AUTH_WPA2_PSK, g_last_wifi_cfg.ap.authmode);
+}
+
+void test_ap_mode_refuses_to_start_without_a_password(void) {
+    /* No secret provisioned and no build-time override: the node must not
+     * fall back to a guessable or open AP, it must not come up at all. */
+    g_nvs_open_err = ESP_FAIL;
+    g_wait_bits_result = BIT1;
+
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_init(0xEC7A));
+
+    wifi_status_t status = {0};
+    wifi_manager_get_status(&status);
+    TEST_ASSERT_NOT_EQUAL(BRAMBLE_WIFI_AP, status.mode);
+    TEST_ASSERT_EQUAL_STRING("", status.ap_password);
+}
+
+void test_ap_password_is_stable_across_reinit(void) {
+    uint8_t secret[64];
+    fake_secret(secret, 7);
+
+    char first[WIFI_AP_PASSWORD_FIELD] = {0};
+    char second[WIFI_AP_PASSWORD_FIELD] = {0};
+
+    wifi_manager_set_ap_secret(secret, sizeof(secret));
+    TEST_ASSERT_EQUAL_INT(0, wifi_manager_get_ap_password(first, sizeof(first)));
+
+    /* Same secret after a "reboot" (re-provision) yields the same password:
+     * a user who wrote it down keeps a working credential. */
+    memset(s_ap_secret, 0, sizeof(s_ap_secret));
+    s_ap_secret_len = 0;
+    wifi_manager_set_ap_secret(secret, sizeof(secret));
+    TEST_ASSERT_EQUAL_INT(0, wifi_manager_get_ap_password(second, sizeof(second)));
+
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    TEST_ASSERT_EQUAL_UINT(WIFI_AP_PASSWORD_LEN, (unsigned)strlen(first));
+}
+
+void test_get_ap_password_fails_closed_with_no_secret(void) {
+    char pw[WIFI_AP_PASSWORD_FIELD];
+    memset(pw, 'x', sizeof(pw));
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_get_ap_password(pw, sizeof(pw)));
+    TEST_ASSERT_EQUAL_STRING("", pw);
+
+    /* An oversized secret is rejected outright rather than silently truncated
+     * to something a shorter key would also produce. */
+    uint8_t huge[sizeof(s_ap_secret) + 1];
+    memset(huge, 0xAB, sizeof(huge));
+    wifi_manager_set_ap_secret(huge, sizeof(huge));
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_get_ap_password(pw, sizeof(pw)));
+
+    /* And a buffer too small for a maximum-length override is refused. */
+    uint8_t secret[64];
+    fake_secret(secret, 2);
+    wifi_manager_set_ap_secret(secret, sizeof(secret));
+    char small[WIFI_AP_PASSWORD_FIELD - 1];
+    TEST_ASSERT_EQUAL_INT(-1, wifi_manager_get_ap_password(small, sizeof(small)));
 }
 
 void test_station_event_transitions_disconnected_and_got_ip(void) {
@@ -363,6 +443,9 @@ int main(void) {
     RUN_TEST(test_nvs_get_creds_treats_missing_password_as_open_network);
     RUN_TEST(test_init_prefers_station_with_saved_creds);
     RUN_TEST(test_init_falls_back_to_ap_when_station_fails);
+    RUN_TEST(test_ap_mode_refuses_to_start_without_a_password);
+    RUN_TEST(test_ap_password_is_stable_across_reinit);
+    RUN_TEST(test_get_ap_password_fails_closed_with_no_secret);
     RUN_TEST(test_station_event_transitions_disconnected_and_got_ip);
     return UNITY_END();
 }

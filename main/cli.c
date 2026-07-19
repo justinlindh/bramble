@@ -164,6 +164,13 @@ static int cmd_wifi(int argc, char** argv) {
         printf("SSID:  %s\n", st.ssid);
         printf("IP:    %s\n", st.ip_addr);
 
+        /* The AP password is per-device and derived, so the serial console is
+         * the discovery path on a board with no display. Only shown while the
+         * AP is actually up, and only over the physically attached console. */
+        if (st.mode == BRAMBLE_WIFI_AP && st.ap_password[0] != '\0') {
+            printf("AP PW: %s\n", st.ap_password);
+        }
+
         /* Show saved NVS creds (SSID only, not password) */
         char nvs_ssid[33] = {0};
         char nvs_pass[65] = {0};

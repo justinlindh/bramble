@@ -3,11 +3,18 @@
 # wifi_manager symbols, all reporting "no wifi".
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
-    idf_component_register(INCLUDE_DIRS "include")
+    # wifi_ap_password.c is pure (crypto only, no esp_wifi), so it builds on
+    # the linux target too and the emulator's null drivers can still resolve
+    # the derivation if they need it.
+    idf_component_register(
+        SRCS "wifi_ap_password.c"
+        INCLUDE_DIRS "include"
+        REQUIRES crypto
+    )
 else()
     idf_component_register(
-        SRCS "wifi_manager.c"
+        SRCS "wifi_manager.c" "wifi_ap_password.c"
         INCLUDE_DIRS "include"
-        REQUIRES nvs_keys esp_wifi esp_event esp_netif nvs_flash
+        REQUIRES nvs_keys esp_wifi esp_event esp_netif nvs_flash crypto
     )
 endif()
