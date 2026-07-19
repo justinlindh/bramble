@@ -4,6 +4,7 @@
 #include "ui_toast.h"
 #include "ui_zone.h"
 #include "ui.h"
+#include "wifi_manager.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "lvgl.h"
@@ -85,6 +86,24 @@ void settings_connectivity_builder(bramble_layout_t* layout, void* ctx) {
                                  "Modes are exclusive");
     lv_obj_set_style_text_font(conn_hint, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(conn_hint, BR_COLOR_TEXT_SEC, 0);
+
+    /* AP-mode credentials. The SoftAP password is derived per device, so
+     * this screen is where a T-Deck user reads it off (issue #78). Shown
+     * only while the AP is actually up: in station mode there is nothing to
+     * join and nothing to display. */
+    {
+        wifi_status_t wst;
+        wifi_manager_get_status(&wst);
+        if (wst.mode == BRAMBLE_WIFI_AP && wst.ap_password[0] != '\0') {
+            lv_obj_t* ap_lbl = lv_label_create(cont);
+            char ap_text[192];
+            snprintf(ap_text, sizeof(ap_text), "Access point: %s\nPassword: %s\nThen open %s",
+                     wst.ssid, wst.ap_password, wst.ip_addr);
+            lv_label_set_text(ap_lbl, ap_text);
+            lv_obj_set_style_text_font(ap_lbl, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(ap_lbl, BR_COLOR_TEXT, 0);
+        }
+    }
 
     /* Apply & Reboot button */
     lv_obj_t* apply_btn = lv_btn_create(cont);

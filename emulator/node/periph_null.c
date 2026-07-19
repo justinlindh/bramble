@@ -47,6 +47,19 @@ int wifi_manager_nvs_set_creds(const char* ssid, const char* password) {
 
 int wifi_manager_nvs_clear_creds(void) { return -1; }
 
+/* The emulator never brings up an AP, so it holds no secret and yields no
+ * password. wifi_ap_password_derive itself is real on the linux target. */
+void wifi_manager_set_ap_secret(const uint8_t* secret, size_t secret_len) {
+    (void)secret;
+    (void)secret_len;
+}
+
+int wifi_manager_get_ap_password(char* out, size_t out_len) {
+    if (out && out_len > 0)
+        out[0] = '\0';
+    return -1;
+}
+
 /* ── ota.h / ota_rollback.h (no esp_https_ota / app_update on host).
  *    The pure ota_url.c / ota_version.c / ota_origin.c still compile. ── */
 

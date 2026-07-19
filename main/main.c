@@ -442,9 +442,20 @@ static void render_main_screen(const ui_state_t* ui) {
     display_draw_text(2, y, line);
     y += LINE_H;
 
-    /* WiFi IP address (if connected), else last RX signal */
+    /* WiFi IP address (if connected), else last RX signal.
+     * In AP mode the IP is the constant 192.168.4.1, which tells the user
+     * nothing they cannot guess, so that line carries the per-device AP
+     * password instead: on a screen-only board this is how the operator
+     * learns it (issue #78). Line budget is unchanged either way. */
+    wifi_status_t wst;
+    wifi_manager_get_status(&wst);
     const char* ip = wifi_manager_get_ip();
-    if (ip && ip[0] != '\0') {
+    if (wst.mode == BRAMBLE_WIFI_AP && wst.ap_password[0] != '\0') {
+        /* Bounded precision: a derived password is exactly
+         * WIFI_AP_PASSWORD_LEN, and a longer fixed override would not fit a
+         * 21-character OLED line anyway (the serial CLI prints it in full). */
+        snprintf(line, sizeof(line), "AP PW: %.*s", WIFI_AP_PASSWORD_LEN, wst.ap_password);
+    } else if (ip && ip[0] != '\0') {
         snprintf(line, sizeof(line), "IP: %s", ip);
     } else if (n > 0) {
         snprintf(line, sizeof(line), "RSSI:%d SNR:%d", s_render_mesh.last_rx_rssi,
@@ -1375,6 +1386,11 @@ void app_main(void) {
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
         show_boot_status("WiFi: starting...");
 #endif
+        /* Seed the per-device SoftAP password derivation before init: AP
+         * mode refuses to start without it (issue #78). The Ed25519 secret
+         * key never leaves this call, only its HKDF image does. */
+        wifi_manager_set_ap_secret(g_identity.ed25519_private_key,
+                                   sizeof(g_identity.ed25519_private_key));
         if (wifi_manager_init(my_addr) == 0) {
             /* RF subsystem up: esp_random() now reseeds from the RF entropy source. */
             crypto_entropy_set_ready(true);
@@ -1415,7 +1431,22 @@ void app_main(void) {
 #endif /* !CONFIG_IDF_TARGET_LINUX */
             } else {
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
-                show_boot_status("WiFi: AP 192.168.4.1");
+                /* AP fallback. The IP is always 192.168.4.1 and the SSID is
+                 * in the client's scan list, so the one thing the operator
+                 * cannot get anywhere else is the password: spend the line
+                 * on that. The stats screen repeats it non-transiently. */
+                {
+                    wifi_status_t ap_st;
+                    wifi_manager_get_status(&ap_st);
+                    char ap_line[22];
+                    if (ap_st.ap_password[0] != '\0') {
+                        snprintf(ap_line, sizeof(ap_line), "AP PW %.*s", WIFI_AP_PASSWORD_LEN,
+                                 ap_st.ap_password);
+                    } else {
+                        snprintf(ap_line, sizeof(ap_line), "WiFi: AP 192.168.4.1");
+                    }
+                    show_boot_status(ap_line);
+                }
 #endif
             }
         } else {

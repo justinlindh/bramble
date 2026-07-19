@@ -448,9 +448,19 @@ opted-out device.
 ### Wi-Fi setup AP
 
 The fallback configuration AP is WPA2-PSK, not open
-(`components/wifi/wifi_manager.c`). The default password is `bramble123`,
-compiled in via Kconfig (`components/wifi/Kconfig`), so it gates against
-drive-by association only, not against anyone who has read the source.
+(`components/wifi/wifi_manager.c`). The password is unique per device: it is
+derived with HKDF-SHA256 from the node's Ed25519 identity private key
+(`components/wifi/wifi_ap_password.c`), which makes it stable across reboots
+and reflashes, one-way with respect to the key it comes from, and not
+recoverable from anything the node broadcasts. It is 12 characters from a
+32-symbol unambiguous alphabet, so roughly 60 bits, and the node discloses it
+only to whoever is physically holding it: on the display in AP mode, and from
+the serial console via `wifi status`. It is never exposed over RPC. Setting
+`CONFIG_BRAMBLE_WIFI_AP_PASSWORD` to a non-empty value overrides the
+derivation with a fixed fleet-wide PSK; that is a build-time constant and
+should be treated as a shared secret. If neither an override nor an identity
+secret is available, AP mode refuses to start rather than coming up on a
+guessable network.
 
 ### OTA image signing and transport security
 

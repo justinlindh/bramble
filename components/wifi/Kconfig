@@ -20,9 +20,21 @@ config BRAMBLE_WIFI_AP_SSID
     depends on BRAMBLE_WIFI_ENABLED
 
 config BRAMBLE_WIFI_AP_PASSWORD
-    string "WiFi AP Password"
-    default "bramble123"
+    string "WiFi AP Password override (empty = derive per device)"
+    default ""
     depends on BRAMBLE_WIFI_ENABLED
+    help
+      Leave this EMPTY (the default) and each node derives its own WPA2
+      password from its identity key: unique per device, stable across
+      reboots and reflashes, and not knowable from anything the node puts
+      on the air. The node shows it on its display in AP mode and prints
+      it from the serial console with "wifi status", which is how the
+      operator learns it.
+
+      Set a non-empty value only to pin one fixed password across a fleet.
+      It must be 8 to 63 characters (the WPA2-PSK bounds) or AP mode
+      refuses to start. It is compiled into the image, so treat it as a
+      shared secret and never commit a real one to a public tree.
 
 config BRAMBLE_WIFI_STA_TIMEOUT_S
     int "Station connect timeout (seconds)"

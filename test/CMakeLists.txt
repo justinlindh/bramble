@@ -1502,11 +1502,27 @@ target_compile_options(test_audio PRIVATE
     -Wno-error=unused-parameter
 )
 
+# Per-device SoftAP password derivation (issue #78)
+add_executable(test_wifi_ap_password
+    test_wifi_ap_password.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/wifi_ap_password.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_wifi_ap_password PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_wifi_ap_password ssl crypto)
+
 # WiFi manager tests (NVS + station/AP state transitions)
 add_executable(test_wifi_manager
     test_wifi_manager.c
     unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/wifi_ap_password.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
 )
+target_link_libraries(test_wifi_manager ssl crypto)
 
 # Button driver tests (debounce, short/long/double press timing)
 add_executable(test_button
@@ -1522,13 +1538,16 @@ target_include_directories(test_button PRIVATE
 target_include_directories(test_wifi_manager PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/wifi/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
 )
+# Empty AP password override, matching the shipped Kconfig default, so the
+# suite exercises the derived-per-device path rather than a fixed constant.
 target_compile_definitions(test_wifi_manager PRIVATE
     CONFIG_BRAMBLE_WIFI_STA_TIMEOUT_S=1
     CONFIG_BRAMBLE_WIFI_SSID=""
     CONFIG_BRAMBLE_WIFI_PASSWORD=""
-    CONFIG_BRAMBLE_WIFI_AP_PASSWORD="testpass"
+    CONFIG_BRAMBLE_WIFI_AP_PASSWORD=""
 )
 target_compile_options(test_wifi_manager PRIVATE
     -Wno-error=unused-parameter
