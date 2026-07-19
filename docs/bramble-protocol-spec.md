@@ -929,7 +929,7 @@ function generate_identity():
     return (x_private, x_public, ed_private, ed_public, node_addr)
 ```
 
-**Flag day (pre-alpha, owner-approved).** Before the Phase 4 rebind the
+**Flag day (owner-approved; no external fleet to break).** Before the Phase 4 rebind the
 address derived from the X25519 public key. A pre-rebind identity store
 (X25519 blobs only) is migrated in place on first post-upgrade boot: the
 X25519 keys are kept, a fresh Ed25519 keypair is generated and persisted,

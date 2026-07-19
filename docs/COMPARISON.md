@@ -29,7 +29,7 @@ MeshCore was started in late 2024 by Scott Powell ("ripplebiz", Ripple Radios, A
 
 Bramble is a from-scratch LoRa mesh protocol and firmware. It targets ESP32-S3 hardware (Heltec V3, T-Deck Plus, Heltec V4) and prioritizes privacy-first design, dual-substrate routing (reactive AODV by default with an opt-in flood transport), authenticated traffic, confirmable delivery, end-to-end DMs, tiered reliability, and airtime management. The project includes firmware, a Go SDK (`bramble-go`), a CLI (`bramble-cli`), and a web companion app with an Electron desktop shell.
 
-**Maturity:** Pre-alpha, solo developer project. Running on 3 boards, with working mesh, RPC, BLE, Wi-Fi, GPS, location sharing, mailbox store-and-forward, and a web companion app. No field deployments and no user base yet.
+**Maturity:** Early but functional, currently a solo-developer project. Running stable on 3 boards, with working mesh, RPC, BLE, Wi-Fi, GPS, location sharing, mailbox store-and-forward, and a web companion app. Not yet field-deployed at scale, and no user base beyond the developer's own bench.
 
 ---
 

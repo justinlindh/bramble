@@ -5,8 +5,9 @@ Guidance for AI assistants (and humans in a hurry) working in this repo.
 ## What this is
 
 Bramble: a from-scratch LoRa mesh protocol and firmware for ESP32-S3, with a
-web/desktop client, Go simulator, and emulator. Pre-alpha, hardware-verified
-on a small bench mesh; scale numbers come from simulation and are published
+web/desktop client, Go simulator, and emulator. Early but functional: the
+stack is implemented end to end, reviewed, host-tested, and running stable on
+a small bench mesh; scale numbers come from simulation and are published
 honestly. Repo map: `components/` + `main/` (ESP-IDF C firmware), `webapp/`
 (TypeScript/React client + Electron), `simulator/gosim/` (Go mesh simulator
 running the real firmware logic), `emulator/` (firmware built for the linux

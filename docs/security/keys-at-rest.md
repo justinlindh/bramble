@@ -47,7 +47,7 @@ the existing NVS contents with that key, the firmware treats this as the
 genuine plaintext-to-encrypted migration: it erases NVS and re-initializes
 it. The device regenerates its identity and channel set and MUST BE
 RE-PAIRED. This is a deliberate, acceptable one-time reset: the fleet is
-first-party and pre-alpha.
+first-party and small, with no external users to disrupt.
 
 A failure at the keys layer itself (missing nvs_keys partition, or a failed
 read/generate of its keys, e.g. a corrupt keys partition) is NOT treated as a
