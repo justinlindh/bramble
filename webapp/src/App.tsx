@@ -43,7 +43,7 @@ const TABS: { id: Tab; icon: ReactNode; label: string }[] = [
 
 function TabContent({ activeTab }: { activeTab: Tab }) {
   return (
-    <ErrorBoundary>
+    <ErrorBoundary name="tab" resetKey={activeTab}>
       {activeTab === 'chat'   && <Chat />}
       {activeTab === 'nodes'  && <Nodes />}
       {activeTab === 'map'    && (
@@ -69,8 +69,13 @@ export default function App() {
 
   // initMessageStore is now called during connect() with the node address
 
-  // Global neighbor poll for presence status (works from any tab)
-  usePoll(isConnected ? loadNeighbors : () => Promise.resolve(), 10_000);
+  // Global neighbor safety net for presence status (works from any tab).
+  // bramble.onNeighborChange pushes every neighbor ADD or refresh, but the
+  // periodic neighbor_purge in the firmware emits no event, so a neighbor that
+  // simply goes quiet would linger forever on a purely event-driven client.
+  // This is the only remaining getNeighbors poll in the app: the Nodes tab used
+  // to run a second one every 5 seconds on top of it.
+  usePoll(isConnected ? loadNeighbors : () => Promise.resolve(), 60_000);
 
   // Global provisioning poll: keeps the UNPROVISIONED (inert) banner live on
   // every tab and makes it vanish the moment a key is set on this node.
@@ -207,8 +212,11 @@ export default function App() {
         )}
       </header>
 
-      {/* Prominent, always-visible warning when this node has no network key */}
-      <UnprovisionedBanner />
+      {/* Prominent, always-visible warning when this node has no network key.
+          Boundaried so a banner throw cannot take the whole shell down. */}
+      <ErrorBoundary name="banner" fallback={null}>
+        <UnprovisionedBanner />
+      </ErrorBoundary>
 
       {/* Body: sidebar (desktop) + content */}
       <div className={styles.body}>
@@ -248,12 +256,24 @@ export default function App() {
         ))}
       </nav>
 
-      {/* Toast notifications */}
-      <ToastContainer />
+      {/* Toast notifications. A toast render throw is cosmetic: swallow it
+          rather than replacing the app with an error panel. */}
+      <ErrorBoundary name="toasts" fallback={null}>
+        <ToastContainer />
+      </ErrorBoundary>
 
-      {/* Connection overlay (shown when disconnected/connecting) */}
-      {showOverlay && <ConnectionOverlay />}
-      <DevicePickerModal />
+      {/* Connection overlay (shown when disconnected/connecting). This is the
+          screen users see when nothing else works, so an unguarded throw here
+          used to mean an unrecoverable white screen. resetKey on the connection
+          state clears the boundary as soon as the state moves on. */}
+      {showOverlay && (
+        <ErrorBoundary name="connection-overlay" resetKey={connectionState}>
+          <ConnectionOverlay />
+        </ErrorBoundary>
+      )}
+      <ErrorBoundary name="device-picker" resetKey={connectionState}>
+        <DevicePickerModal />
+      </ErrorBoundary>
     </div>
   );
 }

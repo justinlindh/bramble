@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useStore } from '../../store/index';
 import { loadNeighbors, loadRoutes, loadPeerLocations, openDM, showOnMap } from '../../store/actions';
 import { resolvePeerName } from '../../store/peerName';
@@ -20,10 +21,23 @@ export function Nodes() {
   const neighborList = neighbors ?? [];
   const knownPeers = buildKnownPeers(neighborList, routes, peerLocations);
 
-  // Auto-refresh: neighbors every 5s, routes every 10s, peer locations every 10s
-  usePoll(loadNeighbors, 5000);
-  usePoll(loadRoutes, 10000);
-  usePoll(loadPeerLocations, 10000);
+  // Refresh policy. Neighbors are NOT polled here: bramble.onNeighborChange
+  // pushes every add or refresh, and App keeps a single 60s safety net for the
+  // silent firmware neighbor_purge. Routes have no push event at all (the
+  // firmware never emits bramble.onRouteUpdate), so they keep a real poll,
+  // slowed to 30s. Peer locations are pushed by bramble.onPeerLocation and
+  // bramble.onGpsEvent, so 60s is only a backstop for cache expiry.
+  // All polls are gated on connection state so a disconnected tab is silent
+  // rather than relying on the `if (!client) return` guard in actions.
+  const noop = () => Promise.resolve();
+  usePoll(connected ? loadRoutes : noop, 30_000);
+  usePoll(connected ? loadPeerLocations : noop, 60_000);
+
+  // One-shot neighbor refresh on entering the tab, so opening Nodes never
+  // shows data up to a full global-poll interval old. Not a poll.
+  useEffect(() => {
+    if (connected) loadNeighbors().catch(() => {});
+  }, [connected]);
 
   return (
     <div className={styles.nodes}>

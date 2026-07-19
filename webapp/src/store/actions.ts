@@ -251,6 +251,10 @@ export async function connect(
     client.subscribe('bramble.onGpsEvent', () => { loadPeerLocations().catch(() => {}); });
     client.subscribe('delivery.update', (params) => handleDeliveryUpdate(params));
     client.subscribe('bramble.onNeighborChange', () => refreshNeighbors());
+    // NOTE: no firmware build emits bramble.onRouteUpdate today (nothing in
+    // main/ or components/ calls rpc_notify with it, and it is absent from
+    // api/openapi.yaml). Kept for forward compatibility, but route freshness
+    // currently depends on the slow poll in the Nodes page, not on this event.
     client.subscribe('bramble.onRouteUpdate', () => loadRoutes());
     client.subscribe('bramble.onAirtimeWarning', () => loadAirtime());
     client.subscribe('bramble.onProbeResult', (params) => handleProbeAck(params));
