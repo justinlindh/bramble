@@ -5517,7 +5517,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     memset(ikm, 0, sizeof(ikm));
 
     if (!sess) {
-        ESP_LOGW(TAG, "Handshaking cap reached, cannot establish session with %08" PRIX32,
+        ESP_LOGW(TAG, "No DM session slot available to establish session with %08" PRIX32,
                  src_addr);
         return;
     }
@@ -5572,7 +5572,15 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
                                 resp->ephemeral_pubkey, ikm);
 
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
-    dm_session_t* sess = dm_lookup(s_dm_table, src_addr);
+    /* dm_alloc, not dm_lookup: a desync self-heal (maybe_trigger_dm_rehandshake ->
+     * initiate_dm_handshake) stores a pending eph but no session slot, unlike the
+     * outgoing-DM path where mesh_send_dm pre-allocs a HANDSHAKING slot. This RESP is
+     * already verified against our own pending INIT (pending_eph_lookup above) and the
+     * attestation pin (dm_verify_resp's PIN_MISMATCH gate), so allocate the slot now and
+     * complete as first contact, mirroring the responder (process_ke_init also dm_allocs).
+     * For the outgoing and rekey paths the slot already exists, so dm_alloc returns it and
+     * their behavior is unchanged. */
+    dm_session_t* sess = dm_alloc(s_dm_table, src_addr, now_ms());
     if (sess) {
         int is_rekey = (ikm_ok == 0 && sess->state == DM_STATE_ACTIVE && sess->ratchet.recv.valid &&
                         ke_epoch > sess->ke_epoch);
@@ -5597,7 +5605,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
     pending_eph_clear(src_addr);
 
     if (!sess) {
-        ESP_LOGW(TAG, "Session slot for %08" PRIX32 " vanished before RESP could complete it",
+        ESP_LOGW(TAG, "No DM session slot available to complete RESP session with %08" PRIX32,
                  src_addr);
         return;
     }
