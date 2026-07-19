@@ -237,33 +237,6 @@ int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len) {
     return rc;
 }
 
-int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len) {
-    spi_mutex_take();
-    int busy_rc = sx1262_wait_busy(2000);
-    if (busy_rc != 0) {
-        spi_mutex_give();
-        return busy_rc;
-    }
-
-    /* cmd + addr_hi + addr_lo + 1 NOP + len data */
-    size_t total = 4 + len;
-    uint8_t tx[total];
-    uint8_t rx[total];
-    memset(tx, 0x00, total);
-    tx[0] = SX1262_CMD_READ_REGISTER;
-    tx[1] = (uint8_t)(addr >> 8);
-    tx[2] = (uint8_t)(addr & 0xFF);
-
-    nss_low();
-    int rc = spi_transfer(tx, rx, total);
-    nss_high();
-    spi_mutex_give();
-
-    if (rc == 0 && data)
-        memcpy(data, rx + 4, len);
-    return rc;
-}
-
 int sx1262_write_buffer(uint8_t offset, const uint8_t* data, size_t len) {
     spi_mutex_take();
     int busy_rc = sx1262_wait_busy(2000);
@@ -315,24 +288,6 @@ int sx1262_read_buffer(uint8_t offset, uint8_t* data, size_t len) {
 /* ------------------------------------------------------------------ */
 /*  Status                                                             */
 /* ------------------------------------------------------------------ */
-
-int sx1262_get_status(uint8_t* status) {
-    uint8_t st;
-    int rc = sx1262_read_command(SX1262_CMD_GET_STATUS, &st, 0);
-    /* Status is actually in the first response byte (index 1) — re-read */
-    int busy_rc = sx1262_wait_busy(2000);
-    if (busy_rc != 0)
-        return busy_rc;
-
-    uint8_t tx[2] = {SX1262_CMD_GET_STATUS, 0x00};
-    uint8_t rx[2] = {0};
-    nss_low();
-    rc = spi_transfer(tx, rx, 2);
-    nss_high();
-    if (rc == 0 && status)
-        *status = rx[1];
-    return rc;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Reset                                                              */

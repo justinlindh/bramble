@@ -70,13 +70,11 @@ void sx1262_hard_reset(void);
 bool sx1262_needs_reinit(void);
 void sx1262_clear_reinit(void);
 int sx1262_wait_busy(uint32_t timeout_ms);
-int sx1262_get_status(uint8_t* status);
 
 /* Low-level SPI */
 int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len);
 int sx1262_read_command(uint8_t cmd, uint8_t* data, size_t len);
 int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len);
-int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len);
 int sx1262_write_buffer(uint8_t offset, const uint8_t* data, size_t len);
 int sx1262_read_buffer(uint8_t offset, uint8_t* data, size_t len);
 
