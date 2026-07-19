@@ -193,20 +193,6 @@ void test_hmac_sha256_rfc4231_case2(void) {
     TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, result, 32);
 }
 
-void test_hmac_sha256_trunc4_consistency(void) {
-    /* Verify truncated HMAC matches first 4 bytes of full HMAC */
-    uint8_t key[20], data[8], full[32];
-    hex_to_bytes("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", key, 20);
-    hex_to_bytes("4869205468657265", data, 8);
-
-    crypto_hmac_sha256(key, 20, data, 8, full);
-    uint32_t trunc = crypto_hmac_sha256_trunc4(key, 20, data, 8);
-
-    uint32_t expected = ((uint32_t)full[0] << 24) | ((uint32_t)full[1] << 16) |
-                        ((uint32_t)full[2] << 8) | (uint32_t)full[3];
-    TEST_ASSERT_EQUAL_HEX32(expected, trunc);
-}
-
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_aes256gcm_nist_vector);
@@ -215,6 +201,5 @@ int main(void) {
     RUN_TEST(test_x25519_keypair_derivation);
     RUN_TEST(test_hmac_sha256_rfc4231_case1);
     RUN_TEST(test_hmac_sha256_rfc4231_case2);
-    RUN_TEST(test_hmac_sha256_trunc4_consistency);
     return UNITY_END();
 }

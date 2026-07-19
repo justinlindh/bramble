@@ -127,14 +127,6 @@ int crypto_hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* data, 
     return 0;
 }
 
-uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uint8_t* data,
-                                   size_t data_len) {
-    uint8_t mac[32];
-    crypto_hmac_sha256(key, key_len, data, data_len, mac);
-    return ((uint32_t)mac[0] << 24) | ((uint32_t)mac[1] << 16) | ((uint32_t)mac[2] << 8) |
-           (uint32_t)mac[3];
-}
-
 int crypto_ed25519_keypair_from_seed(const uint8_t seed[32],
                                      uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE],
                                      uint8_t private_key[BRAMBLE_ED25519_SECKEY_SIZE]) {

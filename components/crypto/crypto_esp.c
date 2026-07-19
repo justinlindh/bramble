@@ -77,14 +77,6 @@ int crypto_hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* data, 
     return mbedtls_md_hmac(md_info, key, key_len, data, data_len, mac);
 }
 
-uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uint8_t* data,
-                                   size_t data_len) {
-    uint8_t mac[32];
-    crypto_hmac_sha256(key, key_len, data, data_len, mac);
-    return ((uint32_t)mac[0] << 24) | ((uint32_t)mac[1] << 16) | ((uint32_t)mac[2] << 8) |
-           (uint32_t)mac[3];
-}
-
 int crypto_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm, size_t ikm_len,
                        const uint8_t* info, size_t info_len, uint8_t* okm, size_t okm_len) {
     const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);

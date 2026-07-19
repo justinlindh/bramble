@@ -42,15 +42,6 @@ void test_aes256gcm_tamper_detected(void) {
                           crypto_aes256gcm_decrypt(key, nonce, ct, sizeof(pt), NULL, 0, tag, dec));
 }
 
-void test_hmac_sha256_trunc4(void) {
-    uint8_t key[] = "testkey";
-    uint8_t data[] = "testdata";
-    uint32_t t1 = crypto_hmac_sha256_trunc4(key, 7, data, 8);
-    uint32_t t2 = crypto_hmac_sha256_trunc4(key, 7, data, 8);
-    TEST_ASSERT_EQUAL_UINT32(t1, t2);
-    TEST_ASSERT_NOT_EQUAL(0, t1); /* extremely unlikely to be zero */
-}
-
 void test_hkdf_sha256_derives_key(void) {
     uint8_t salt[] = "salt";
     uint8_t ikm[] = "input key material";
@@ -72,7 +63,6 @@ int main(void) {
     RUN_TEST(test_derive_address_different_keys);
     RUN_TEST(test_aes256gcm_roundtrip);
     RUN_TEST(test_aes256gcm_tamper_detected);
-    RUN_TEST(test_hmac_sha256_trunc4);
     RUN_TEST(test_hkdf_sha256_derives_key);
     return UNITY_END();
 }
