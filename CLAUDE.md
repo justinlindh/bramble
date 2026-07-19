@@ -61,7 +61,10 @@ target), `test/` (host test suites), `scripts/`, `docs/`, `api/openapi.yaml`
 - RPC contract: `bash scripts/check-rpc-contract.sh` (`api/openapi.yaml`
   must list exactly the methods `main/rpc_methods.c` registers)
 - Firmware builds need ESP-IDF v5.4.1; CI sources it via
-  `scripts/ci-source-idf.sh`. Flash real hardware only through
+  `scripts/ci-source-idf.sh`. The version pin is a single source of truth in
+  `.esp-idf-version` and `scripts/lint/check-idf-version.sh` fails CI if any
+  doc, Dockerfile, or script disagrees with it, so bumping ESP-IDF means
+  editing that file plus every reference the script names. Flash real hardware only through
   `scripts/flash.sh` or `scripts/flash-all.py`, never raw esptool.
 
 ## CI and releases

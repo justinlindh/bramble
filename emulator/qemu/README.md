@@ -19,7 +19,7 @@ wedge is P2.3's entry point.
 Two findings that were NOT in the spec's expected-wedge list:
 
 1. **QEMU version is load-bearing**: esp-develop-9.0.0 (the version ESP-IDF
-   v5.4's `idf_tools.py` installs) crashes the emulator process (double free)
+   v5.4.1's `idf_tools.py` installs) crashes the emulator process (double free)
    on the first hardware-SHA-over-GDMA operation, which identity keygen hits.
    Fixed in esp-develop-9.2.2. **Pin esp-develop-9.2.2-20260417.**
 2. **ADC self-calibration wedges before app_main**: the battery monitor links
@@ -43,7 +43,7 @@ The binary needs `libslirp.so.0`. If the host does not have it, install the
 distro package (`libslirp`), or extract the library anywhere and set
 `LD_LIBRARY_PATH`.
 
-Do NOT use `idf.py qemu` / `idf_tools.py install qemu-xtensa` with IDF v5.4:
+Do NOT use `idf.py qemu` / `idf_tools.py install qemu-xtensa` with IDF v5.4.1:
 it installs 9.0.0, which aborts on SHA-over-GDMA (see above).
 
 ## Build QEMU from source
@@ -91,7 +91,7 @@ still works unchanged).
 
 ## Build the image
 
-From the repo root, with the IDF v5.4 environment exported:
+From the repo root, with the IDF v5.4.1 environment exported:
 
 ```sh
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.bramble_pager;sdkconfig.defaults.qemu" \

@@ -102,7 +102,7 @@ Quick start: `cd emulator && make run` (local toolchain) or `docker compose up -
 
 Full build/flash instructions (including board-specific profiles and USB-port notes) are in [docs/BUILDING.md](docs/BUILDING.md).
 
-Quick start (building from source needs ESP-IDF v5.4; see
+Quick start (building from source needs ESP-IDF v5.4.1; see
 [docs/BUILDING.md](docs/BUILDING.md) to install and activate it):
 
 ```bash

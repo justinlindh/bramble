@@ -69,7 +69,9 @@ cd simulator/gosim
 go build ./...
 ```
 
-**Firmware builds and flashing:** ESP-IDF v5.4.1. See
+**Firmware builds and flashing:** ESP-IDF v5.4.1, the exact tag CI builds
+with. The pin lives in `.esp-idf-version` at the repo root and
+`scripts/lint/check-idf-version.sh` gates every reference against it. See
 [docs/BUILDING.md](docs/BUILDING.md). Flash real hardware only through
 `scripts/flash.sh` or `scripts/flash-all.py`, never raw `esptool`.
 

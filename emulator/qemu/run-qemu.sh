@@ -4,7 +4,7 @@
 # Prerequisites (see README.md):
 #   - build-qemu/ built via the sdkconfig.defaults.qemu layering
 #   - qemu-system-xtensa from espressif/qemu esp-develop-9.2.2 or newer
-#     (9.0.0, the version ESP-IDF v5.4 pins, crashes on SHA-over-GDMA)
+#     (9.0.0, the version ESP-IDF v5.4.1 pins, crashes on SHA-over-GDMA)
 #
 # Usage:
 #   ./run-qemu.sh            boot with UART0 on stdio

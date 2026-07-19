@@ -10,7 +10,7 @@ always carries ADC calibration data, so the self-cal path never runs.
 Setting BLK_VERSION_MAJOR (EFUSE_BLK2, bits 128-129) to 1 ("ADC calib V1")
 makes esp_efuse_rtc_calib_get_ver() return 1; init codes then read as zeros
 from eFuse and the driver derives its default ICodes without touching the ADC.
-Verified against ESP-IDF v5.4 esp32s3 esp_efuse_table.csv.
+Verified against ESP-IDF v5.4.1 esp32s3 esp_efuse_table.csv.
 
 QEMU eFuse file layout: flat little-endian words, BLOCK0 = 6 words,
 BLOCK1 = 6 words, BLOCK2+ = 8 words each. BLK2 bit 128 = BLK2 word 4 =

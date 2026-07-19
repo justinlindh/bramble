@@ -9,7 +9,7 @@ are no-op stubs (`null_drivers/`).
 ## Build and run
 
 ```
-source $IDF_PATH/export.sh          # ESP-IDF 5.4
+source $IDF_PATH/export.sh          # ESP-IDF 5.4.1
 cd emulator/node
 idf.py --preview set-target linux
 idf.py build
