@@ -51,13 +51,39 @@ jobs:
             bash test/run_all_tests.sh
 
   board-build-smoke:
-    name: Board build smoke (heltec-v3)
+    name: Board build smoke (${{ matrix.board }})
+    # One job per supported board target. scripts/ci-build-firmware.sh has
+    # always listed four boards, but only heltec-v3 was ever built by an
+    # automatic run, so a change to components/display or components/ui_graphics
+    # could break the other three with every required context green until
+    # someone manually dispatched a release build. The four targets diverge on
+    # display stack (ST7789/LVGL vs SSD1680 e-paper vs SSD1306), touch,
+    # keyboard, and trackball, so heltec-v3 alone does not represent them.
+    #
+    # This also drops the former `github.event_name != 'pull_request'` guard:
+    # the build now gates PRs, which is the whole point (breakage must surface
+    # before merge, not at release). ccache makes that affordable.
+    #
+    # CONTEXT NAMES: this matrix produces four contexts, "Board build smoke
+    # (heltec-v3)", "(tdeck-plus)", "(heltec-v4)", and "(bramble-pager)". The
+    # heltec-v3 one keeps the exact name the un-matrixed job had, so the
+    # existing required check is preserved; the other three are NEW required
+    # context names and must be added to branch protection.
     needs: detect
-    if: |
-      github.event_name != 'pull_request' &&
-      (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')
+    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
+    strategy:
+      # Every board reports its own result. Cancelling siblings on the first
+      # failure would hide whether a break is one board or all four, which is
+      # exactly the information this matrix exists to produce.
+      fail-fast: false
+      # The self-hosted pool is small and shares pods with the host tests,
+      # gosim, and the emulator suite. Two board builds at a time keeps the
+      # rest of the wave moving; queued jobs do not burn their own timeout.
+      max-parallel: 2
+      matrix:
+        board: [heltec-v3, tdeck-plus, heltec-v4, bramble-pager]
     steps:
       - uses: actions/checkout@v4
       - name: Ensure ESP-IDF toolchain
@@ -75,11 +101,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.ccache.outputs.dir }}
-          key: ccache-heltec-v3-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-${{ github.run_id }}
+          key: ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-heltec-v3-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-
-            ccache-heltec-v3-idf${{ steps.ccache.outputs.idf_version }}-
-      - name: Build heltec-v3 via wrapper
+            ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-
+            ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-
+      - name: Build ${{ matrix.board }} via wrapper
         env:
           HOME: /tmp/cihome
           ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
@@ -89,7 +115,7 @@ jobs:
           mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
           # shellcheck disable=SC1091
           source scripts/ci-source-idf.sh
-          bash scripts/flash.sh local heltec-v3 build
+          bash scripts/flash.sh local "${{ matrix.board }}" build
       - name: ccache statistics
         if: always() && steps.ccache.outputs.available == 'true'
         run: ccache --show-stats

@@ -36,8 +36,8 @@ on:
 ```
 
 `pull_request` fires once per PR (and on every update to the PR head). `push`
-fires only on `main`, i.e. post-merge, which is where the post-merge-only jobs
-(the board build smoke) validate. There is no per-branch `push` trigger, so a
+fires only on `main`, i.e. post-merge. Every gating job now also runs on
+`pull_request`; there are no post-merge-only jobs left. There is no per-branch `push` trigger, so a
 PR gets exactly one wave of checks instead of two overlapping waves (a
 `pull_request` wave and a `push`-to-`fix/**` wave) that previously each ran to
 completion in separate concurrency groups and doubled the queue. `webapp-quality.yml`
@@ -156,9 +156,10 @@ job's scope-gating regression runs on any release-config edit.
 | `Static checks` | always (no `if:`) | yes |
 
 `Static checks` is one pod, one checkout, and a sequence of named steps that each
-preserve a former standalone job's exact command: no-internal-refs, strict
-shellcheck, ruff baseline, strict clang-format, cppcheck, the rpc-contract check,
-and actionlint over the four gating workflow files. Each check is its own step so
+preserve a former standalone job's exact command: no-internal-refs, the
+board-matrix coverage check, strict shellcheck, ruff baseline, strict
+clang-format, cppcheck, the rpc-contract check, and actionlint over the four
+gating workflow files. Each check is its own step so
 a failure attributes to the exact tool in the UI. It has no `if:` because it is
 THE universal gate: it must run (and report) on every PR, including a docs-only
 PR where it is the only job that executes. The individual checks are cheap and
@@ -172,7 +173,10 @@ pass trivially when their scope did not change.
 | `Host tests` | `firmware` or `workflows` | yes |
 | `Release config` | `firmware` or `workflows` | yes |
 | `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
-| `Board build smoke (heltec-v3)` | not a `pull_request` event, and (`firmware` or `workflows`) | post-merge required (see quality-policy.md) |
+| `Board build smoke (heltec-v3)` | `firmware` or `workflows` | yes |
+| `Board build smoke (tdeck-plus)` | `firmware` or `workflows` | yes |
+| `Board build smoke (heltec-v4)` | `firmware` or `workflows` | yes |
+| `Board build smoke (bramble-pager)` | `firmware` or `workflows` | yes |
 | `Emulator suite` | `firmware`, `simulator`, `emulator`, or `workflows` | yes |
 
 `Emulator suite` merges the former `emulator-scenarios` and `emulator-e2e`
@@ -216,9 +220,39 @@ that an in-scope `fix`/`feat`/`perf`/breaking commit cuts the right release
 level while out-of-scope and non-releasing commits do not, so a scope-gating
 regression that would silently stop every binary from publishing fails the PR.
 
-`Board build smoke` keeps its `github.event_name != 'pull_request'` guard: the
-ESP-IDF board build is heavy and validates post-merge on pushes to `main`. It
-therefore cannot be a PR-required check; it is the one non-PR required check.
+`Board build smoke` is a four-way matrix over `heltec-v3`, `tdeck-plus`,
+`heltec-v4`, and `bramble-pager`: the same four targets `scripts/ci-build-firmware.sh`
+builds for a release. It used to build only `heltec-v3` and to carry a
+`github.event_name != 'pull_request'` guard, which meant three of the four
+shipped boards were never built by any automatic run. The targets diverge on
+display stack (ST7789/LVGL vs SSD1680 e-paper vs SSD1306), touch, keyboard, and
+trackball, so a change under `components/display` or `components/ui_graphics`
+could break three of four with every required context reporting green until
+someone manually dispatched a release build.
+
+Both halves of that are now gone: the matrix covers all four boards and the
+`pull_request` guard is dropped, so the board builds gate PRs like every other
+required check. There is no longer a non-PR required check. The strictness
+jump is affordable because ccache landed first (see "Build caching" below);
+without a compiler cache, four cold ESP-IDF builds per PR would not have been.
+
+The matrix sets `fail-fast: false` so every board reports its own result: with
+fail-fast on, the first failure cancels its siblings and hides whether a break
+is one board or all four, which is the exact information the matrix exists to
+produce. `max-parallel: 2` keeps the small self-hosted pool from being fully
+occupied by board builds while the host tests, gosim, and emulator jobs are
+waiting for a pod; a queued job does not burn its own timeout.
+
+Job name templating (`Board build smoke (${{ matrix.board }})`) makes the
+heltec-v3 context string identical to the one the un-matrixed job produced, so
+that required check carries over untouched. The other three are new required
+context names and have to be added to branch protection.
+
+`scripts/lint/check-board-matrix.sh` (a step in the `Static checks` bundle)
+asserts that the matrix board list and the `BOARDS` list in
+`scripts/ci-build-firmware.sh` are identical, so adding a fifth board to the
+release path without adding it to the gate fails the PR rather than quietly
+reopening the hole.
 
 ### `webapp-quality.yml`
 
@@ -257,8 +291,9 @@ check that was never going to run.
 
 ## Build caching: ccache for the ESP-IDF compiles
 
-Two jobs in `quality.yml` run a full ESP-IDF compile: `Board build smoke` and
-the linux firmware node build inside `Emulator suite`. Both enable ESP-IDF's
+Two kinds of job in `quality.yml` run a full ESP-IDF compile: the four
+`Board build smoke` matrix legs and the linux firmware node build inside
+`Emulator suite`. Both enable ESP-IDF's
 native ccache support through `scripts/ci-ccache-env.sh`, which exports
 `IDF_CCACHE_ENABLE=1` (the variable `idf.py` reads to put ccache in front of
 the cross compiler) plus a `CCACHE_DIR` under `RUNNER_TEMP`. The build steps
@@ -279,7 +314,8 @@ its tool downloads are baked into the runner image (`scripts/ci-ensure-idf.sh`
 asserts they are present and never installs at runtime), so caching the tools
 directory would cache something that is already local to every pod.
 
-Cache keys are `ccache-<target>-idf<version>-<sdkconfig hash>-<run id>`, with
+Cache keys are `ccache-<target>-idf<version>-<sdkconfig hash>-<run id>`, where
+`<target>` is the matrix board (so each board keeps its own cache), with
 prefix `restore-keys` falling back to the newest entry for the same ESP-IDF
 version and sdkconfig. The ESP-IDF version is in the key because objects built
 by one toolchain must never be served to another; the sdkconfig hash is in it
