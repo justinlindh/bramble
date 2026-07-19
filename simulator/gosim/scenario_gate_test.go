@@ -371,6 +371,16 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 // length. A tolerance-free assertion like this is the point, since a routing
 // regression that starts picking longer paths still delivers and would sail
 // past any "delivery rate above N" check.
+//
+// SCOPE LIMIT, issue #166: this scenario's JSON also contains a movement phase
+// for node C, and that phase never executes. The engine parses only
+// "move_node" (simulator/engine/sim_scenario.c:270) while this file, along with
+// location-sharing.json and reliability-ack-retry.json, spells the event
+// "node_move". An unrecognized type is skipped silently, so what is gated here
+// is path correctness on a STATIC topology, not across a topology change. Do
+// not read a passing run as evidence that re-routing after a node moves works.
+// When #166 is fixed the movement will start happening, and this test's
+// expectations must be re-derived rather than assumed to still hold.
 func TestScenarioReliabilityPathTrace(t *testing.T) {
 	run := runGatedScenario(t, "reliability-path-trace")
 
