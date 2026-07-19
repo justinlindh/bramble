@@ -2,7 +2,7 @@
 #include "packet.h"
 #include "crypto.h"
 #include <string.h>
-// CSPRNG-based range helper — unpredictable scheduling defeats traffic analysis
+// CSPRNG-based range helper, unpredictable scheduling defeats traffic analysis
 static uint32_t dummy_rand_range(uint32_t min, uint32_t max) {
     if (min >= max)
         return min;
@@ -65,7 +65,7 @@ void dummy_traffic_record_send(dummy_traffic_ctx_t* ctx, uint32_t airtime_ms, ui
 }
 
 int dummy_traffic_build_packet(uint8_t* out, size_t size, uint32_t my_addr) {
-    (void)my_addr; /* Intentionally unused — cover traffic must not leak real address */
+    (void)my_addr; /* Intentionally unused, cover traffic must not leak real address */
     if (size < HEADER_SIZE)
         return -1;
 
@@ -78,7 +78,7 @@ int dummy_traffic_build_packet(uint8_t* out, size_t size, uint32_t my_addr) {
     hdr.version = BRAMBLE_VERSION;
     hdr.type = PKT_TYPE_DATA;
     hdr.flags = FLAG_ENCRYPT; // Looks like encrypted data
-    hdr.hop_limit = 1;        // Don't relay — local cover traffic only
+    hdr.hop_limit = 1;        // Don't relay, local cover traffic only
 
     // Random dest_addr from CSPRNG, avoiding broadcast and null
     uint8_t rnd[8];
@@ -95,7 +95,7 @@ int dummy_traffic_build_packet(uint8_t* out, size_t size, uint32_t my_addr) {
     bramble_header_serialize(&hdr, out, size);
 
     // After header, write random src_addr (like real DATA packets).
-    // MUST NOT embed real my_addr — that would leak identity in cover traffic.
+    // MUST NOT embed real my_addr, that would leak identity in cover traffic.
     // The crypto_random() fill at the top already randomized these bytes,
     // but we re-randomize explicitly after header serialization overwrites them.
     if (size >= HEADER_SIZE + 4) {

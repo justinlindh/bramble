@@ -9,10 +9,10 @@
 
 static const char* TAG = "scr_traffic";
 
-/* traffic_debug instance lives in main/mesh_task.c — access via extern */
+/* traffic_debug instance lives in main/mesh_task.c, access via extern */
 extern traffic_debug_t* mesh_get_traffic_debug(void);
 
-/* Maximum rows to render — keeps memory deterministic and scroll fast */
+/* Maximum rows to render, keeps memory deterministic and scroll fast */
 #define TRAFFIC_DISPLAY_MAX 100
 
 /* -------------------------------------------------------------------------
@@ -113,7 +113,7 @@ static lv_color_t cat_color(traffic_category_t cat) {
 }
 
 /* -------------------------------------------------------------------------
- * Row builder — one traffic event
+ * Row builder: one traffic event
  *
  * Layout (320px content width, 8px side pads → 304px):
  *   Dir  24px | Type  48px | Cat  54px | Size  38px | RSSI  fill
@@ -130,7 +130,7 @@ static void create_event_row(lv_obj_t* parent, const traffic_event_t* evt) {
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, 4, 0);
 
-    /* Dir — TX (green) or RX (blue) */
+    /* Dir: TX (green) or RX (blue) */
     lv_obj_t* dir_lbl = lv_label_create(row);
     lv_obj_set_width(dir_lbl, 24);
     lv_label_set_text(dir_lbl, evt->is_tx ? "TX" : "RX");
@@ -177,7 +177,7 @@ static void create_event_row(lv_obj_t* parent, const traffic_event_t* evt) {
 }
 
 /* -------------------------------------------------------------------------
- * Back button callback — returns to Stats screen
+ * Back button callback, returns to Stats screen
  * ------------------------------------------------------------------------- */
 static lv_obj_t* s_count_lbl = NULL;
 static lv_obj_t* s_debug_lbl = NULL;

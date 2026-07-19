@@ -20,7 +20,7 @@
 #include <stdlib.h>
 
 static const char* TAG = "ui_gfx";
-bramble_layout_t* s_layout = NULL; /* NOT static — screens need access */
+bramble_layout_t* s_layout = NULL; /* NOT static: screens need access */
 
 static lv_display_t* s_display = NULL;
 static uint32_t s_pending_events = 0;
@@ -146,23 +146,23 @@ static void sleep_process_timer_cb(lv_timer_t* timer) {
 
 static void tab_refresh_timer_cb(lv_timer_t* timer) {
     (void)timer;
-    /* Intentionally empty — data screens show a snapshot; user switches
+    /* Intentionally empty, data screens show a snapshot; user switches
      * tabs to refresh.  The old implementation called layout_set_tab()
      * every 5 s, which destroyed scroll position and drill-down views. */
 }
 
 /* Timer callback to transition from splash to main UI */
 static void splash_timer_cb(lv_timer_t* timer) {
-    ESP_LOGI(TAG, "Splash timeout — transitioning to main UI");
+    ESP_LOGI(TAG, "Splash timeout, transitioning to main UI");
 
-    /* Initialize theme — applies to the active screen (still splash).
+    /* Initialize theme: applies to the active screen (still splash).
      * layout_create() will build the main UI on this screen. */
     bramble_theme_init(s_display);
 
     /* Force LVGL to complete all pending layout/render work before cleaning
      * the splash screen. The flex container (LV_SIZE_CONTENT) leaves pending
      * layout tasks in LVGL's queue. If we call lv_obj_clean() while these are
-     * outstanding, the timer linked list can get corrupted — which silently
+     * outstanding, the timer linked list can get corrupted, which silently
      * kills the indev read timer and breaks keyboard/trackball input.
      * lv_refr_now() flushes all pending layouts before we delete anything. */
     lv_refr_now(s_display);
@@ -186,7 +186,7 @@ static void splash_timer_cb(lv_timer_t* timer) {
     /* Initialize sleep manager for automatic display power saving */
     sleep_manager_init();
 
-    /* One-shot timer — delete itself */
+    /* One-shot timer, delete itself */
     lv_timer_delete(timer);
 }
 

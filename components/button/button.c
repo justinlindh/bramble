@@ -67,14 +67,14 @@ ui_button_t button_poll(uint32_t now_ms) {
             return BTN_LONG_PRESS;
         }
 
-        /* Short press — might be first of a double press */
+        /* Short press, might be first of a double press */
         if (waiting_double) {
             /* Second press within gap → double press */
             waiting_double = false;
             return BTN_DOUBLE_PRESS;
         }
 
-        /* First short press — wait for potential second */
+        /* First short press, wait for potential second */
         waiting_double = true;
         last_release_ms = now_ms;
         return BTN_NONE;

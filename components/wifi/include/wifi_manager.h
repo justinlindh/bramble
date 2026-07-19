@@ -25,7 +25,7 @@ void wifi_manager_get_status(wifi_status_t* status);
 /* Get current IP as string. Returns empty string if not connected. */
 const char* wifi_manager_get_ip(void);
 
-/* NVS credential management — survives reflash */
+/* NVS credential management: survives reflash */
 int wifi_manager_nvs_get_creds(char* ssid, size_t ssid_len, char* password, size_t pass_len);
 int wifi_manager_nvs_set_creds(const char* ssid, const char* password);
 int wifi_manager_nvs_clear_creds(void);

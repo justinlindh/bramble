@@ -115,7 +115,7 @@ void ui_set_message_total(ui_state_t* state, int total);
  * handler can clamp/wrap the nodes cursor without a mesh dependency. */
 void ui_set_node_total(ui_state_t* state, int total);
 
-/* Connectivity mode — NVS-persisted, applied on next boot.
+/* Connectivity mode, NVS-persisted, applied on next boot.
  * Implemented in main/main.c; declared here so any UI component can call them. */
 conn_mode_t conn_mode_get(void);
 void conn_mode_set(conn_mode_t mode);

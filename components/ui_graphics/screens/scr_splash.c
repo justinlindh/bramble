@@ -3,7 +3,7 @@
 #include "lvgl.h"
 #include "esp_app_desc.h"
 
-/* External logo asset — stored in flash (.rodata), NOT in RAM */
+/* External logo asset, stored in flash (.rodata), NOT in RAM */
 extern const lv_image_dsc_t img_bramble_logo;
 
 void scr_splash_create(lv_display_t* disp) {
@@ -12,7 +12,7 @@ void scr_splash_create(lv_display_t* disp) {
     lv_obj_set_style_pad_all(scr, 0, 0);
 
     /*
-     * Vertical flex container — centers logo + title + subtitle + version
+     * Vertical flex container, centers logo + title + subtitle + version
      * as a unit. Avoids manual pixel math.
      */
     lv_obj_t* cont = lv_obj_create(scr);
@@ -27,7 +27,7 @@ void scr_splash_create(lv_display_t* disp) {
     lv_obj_set_style_pad_row(cont, 8, 0);
     lv_obj_center(cont);
 
-    /* Logo image — 100×100 */
+    /* Logo image: 100×100 */
     lv_obj_t* logo = lv_image_create(cont);
     lv_image_set_src(logo, &img_bramble_logo);
 
@@ -52,7 +52,7 @@ void scr_splash_create(lv_display_t* disp) {
     lv_label_set_text(version, ver_buf);
     lv_obj_set_style_text_font(version, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(version, BR_COLOR_TEXT_SEC, 0);
-    lv_obj_set_style_text_opa(version, LV_OPA_50, 0); /* dim — secondary info */
+    lv_obj_set_style_text_opa(version, LV_OPA_50, 0); /* dim, secondary info */
 
     lv_screen_load(scr);
 }

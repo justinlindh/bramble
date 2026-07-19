@@ -133,7 +133,7 @@ int channel_msg_decrypt(bramble_channel_t* channels, int num_channels, const uin
                 found_info.data_len = ct_len - CHANNEL_MSG_OVERHEAD;
                 found_info.channel_index = i;
             }
-            /* Do NOT break — continue trying all channels for constant time */
+            /* Do NOT break, continue trying all channels for constant time */
             continue;
         }
 

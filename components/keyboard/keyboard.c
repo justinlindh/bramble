@@ -50,12 +50,12 @@ static char inject_buffer[INJECT_BUFFER_SIZE];
 static volatile int inject_head = 0;
 static volatile int inject_tail = 0;
 
-/* Polling cooldown — avoid hammering I2C on every LVGL tick (~30ms) */
+/* Polling cooldown, avoid hammering I2C on every LVGL tick (~30ms) */
 static int64_t last_poll_us = 0;
 #define POLL_INTERVAL_US 20000 /* 20ms minimum between I2C reads */
 
 /* Backlight persistence */
-#define DEFAULT_BACKLIGHT 80 /* Sane default — not too bright */
+#define DEFAULT_BACKLIGHT 80 /* Sane default, not too bright */
 #define NVS_NAMESPACE NVS_NS_BRAMBLE
 #define NVS_KEY_BACKLIGHT "kb_backlight"
 static uint8_t s_backlight_brightness = DEFAULT_BACKLIGHT;
@@ -134,7 +134,7 @@ static void keyboard_read_key(void) {
     esp_err_t ret = i2c_master_receive(dev_handle, &key, 1, 50);
 
     if (ret != ESP_OK) {
-        /* Suppress repeated noise — only log every ~2 sec */
+        /* Suppress repeated noise, only log every ~2 sec */
         static int64_t last_err_us = 0;
         int64_t now = esp_timer_get_time();
         if (now - last_err_us > 2000000) {

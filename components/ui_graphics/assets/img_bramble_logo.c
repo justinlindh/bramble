@@ -1,9 +1,9 @@
-/* Auto-generated from bramble-logo.png — do not edit manually */
+/* Auto-generated from bramble-logo.png. Do not edit manually. */
 /* Flash-resident: static const keeps this in .rodata (flash, not RAM) */
 
 #include "lvgl.h"
 
-/* 100x100 px — 30000 bytes in flash */
+/* 100x100 px, 30000 bytes in flash */
 static const uint8_t img_bramble_logo_map[] __attribute__((aligned(4))) = {
     /* RGB565 pixel data (20000 bytes, stride=200) */
     0x00,

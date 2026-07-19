@@ -18,7 +18,7 @@ static inline int tier_idx(uint8_t tier) {
 }
 
 /* Adaptive profile by peer count:
- *   <=8:  micro mesh (very relaxed — dev clusters, small deployments)
+ *   <=8:  micro mesh (very relaxed, dev clusters, small deployments)
  *   9..15: small mesh (relaxed)
  *   16..40: baseline
  *   >40: large mesh (conservative broadcast/receipt)
@@ -26,7 +26,7 @@ static inline int tier_idx(uint8_t tier) {
 static uint32_t profile_scale_pct(uint8_t peer_count, int idx) {
     if (peer_count <= 8u) {
         /* Micro mesh: aggressive budgets for reliable delivery in small clusters.
-         * At 5 nodes, collision is the primary delivery failure mode — give
+         * At 5 nodes, collision is the primary delivery failure mode, give
          * enough airtime for retries to succeed. */
         if (idx == AIRTIME_IDX_BROADCAST)
             return 400u;

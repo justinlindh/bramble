@@ -320,11 +320,11 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
              gpio_get_level(board_get_config()->radio.dio1),
              gpio_get_level(board_get_config()->radio.busy));
 
-    /* Reset WDT before the blocking wait — TX can take up to 4s and the
+    /* Reset WDT before the blocking wait, TX can take up to 4s and the
      * caller may have consumed most of the 5s WDT window already. */
     esp_task_wdt_reset();
 
-    /* Wait for TX done (or TX timeout) notification — max 4s FreeRTOS timeout */
+    /* Wait for TX done (or TX timeout) notification, max 4s FreeRTOS timeout */
     uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(4000));
     s_tx_waiter = NULL;
 
@@ -418,7 +418,7 @@ bool radio_check_and_clear_reinit(void) {
     if (!sx1262_needs_reinit())
         return false;
     sx1262_clear_reinit();
-    ESP_LOGW(TAG, "Radio reinit after hard reset — reconfiguring");
+    ESP_LOGW(TAG, "Radio reinit after hard reset, reconfiguring");
     int rc = radio_reconfigure(&s_config);
     if (rc != 0) {
         ESP_LOGE(TAG, "Radio reconfigure failed after hard reset: %d", rc);

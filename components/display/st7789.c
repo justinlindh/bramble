@@ -219,7 +219,7 @@ int display_init(void) {
     gpio_config(&io_conf);
     gpio_set_level(s_board->spi_display.dc, 1);
 
-    /* Backlight via LEDC PWM — raw gpio_set_level is insufficient to
+    /* Backlight via LEDC PWM, raw gpio_set_level is insufficient to
      * reliably activate the T-Deck Plus backlight IC (LilyGo uses LEDC).
      * Timer 0 / Channel 0 / 10 kHz / 8-bit duty */
     if (s_board->spi_display.backlight >= 0) {
@@ -424,7 +424,7 @@ void display_flush(void) {
     st7789_write_cmd(ST7789_RAMWR);
 
     /* Send framebuffer in small chunks via a stack-allocated DMA-safe buffer.
-     * PSRAM is not DMA-accessible on ESP32-S3 — must copy to internal RAM first.
+     * PSRAM is not DMA-accessible on ESP32-S3, must copy to internal RAM first.
      * Use stack variable (not static) to guarantee internal RAM placement,
      * since CONFIG_SPIRAM_USE_MALLOC can place statics in PSRAM. */
     st7789_dc_data();
@@ -524,12 +524,12 @@ void display_flush_area(int x1, int y1, int x2, int y2, const uint16_t* buf) {
     uint8_t ra[4] = {y1 >> 8, y1 & 0xFF, y2 >> 8, y2 & 0xFF};
     st7789_write_data(ra, 4);
 
-    /* Write pixels — must copy through internal RAM because PSRAM is not
+    /* Write pixels, must copy through internal RAM because PSRAM is not
      * DMA-accessible on ESP32-S3 and LVGL buffers live in PSRAM. */
     st7789_write_cmd(0x2C); /* RAMWR */
     const uint8_t* src = (const uint8_t*)buf;
     size_t total = (size_t)w * h * 2;
-    uint8_t dma_buf[512]; /* Stack — guaranteed internal SRAM */
+    uint8_t dma_buf[512]; /* Stack, guaranteed internal SRAM */
 
     st7789_dc_data();
     for (size_t sent = 0; sent < total; sent += sizeof(dma_buf)) {

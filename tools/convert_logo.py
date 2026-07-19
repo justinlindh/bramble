@@ -47,11 +47,11 @@ def write_c_array(rgb565, alpha, width, height, name, out_path):
     """
     stride = width * 2
     with open(out_path, 'w') as f:
-        f.write(f"/* Auto-generated from bramble-logo.png — do not edit manually */\n")
+        f.write(f"/* Auto-generated from bramble-logo.png. Do not edit manually. */\n")
         f.write(f"/* Flash-resident: static const keeps this in .rodata (flash, not RAM) */\n\n")
         f.write(f"#include \"lvgl.h\"\n\n")
 
-        f.write(f"/* {width}x{height} px — {width * height * 3} bytes in flash */\n")
+        f.write(f"/* {width}x{height} px, {width * height * 3} bytes in flash */\n")
         f.write(f"static const uint8_t {name}_map[] __attribute__((aligned(4))) = {{\n")
 
         # Planar: all RGB565 pixel data first

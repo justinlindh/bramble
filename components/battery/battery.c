@@ -62,7 +62,8 @@ void battery_init(void) {
         return;
     }
 
-    /* Calibration — try curve fitting first, fall back to line fitting */
+    /* Calibration: ESP32-S3 offers curve fitting only, so on failure we fall
+     * back to raw (uncalibrated) readings rather than line fitting. */
     adc_cali_curve_fitting_config_t cali_cfg = {
         .unit_id = BATTERY_ADC_UNIT,
         .chan = s_board->battery.adc_channel,
@@ -71,7 +72,7 @@ void battery_init(void) {
     };
     err = adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_cali_handle);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ADC calibration failed (%d) — raw readings only", err);
+        ESP_LOGW(TAG, "ADC calibration failed (%d), raw readings only", err);
         s_cali_handle = NULL;
     }
 

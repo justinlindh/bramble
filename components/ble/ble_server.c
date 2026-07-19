@@ -1,5 +1,5 @@
 /*
- * BLE GATT server using NimBLE — Nordic UART Service (NUS)
+ * BLE GATT server using NimBLE, Nordic UART Service (NUS)
  *
  * The webapp BLETransport.ts connects to NUS and exchanges JSON-RPC
  * over the TX/RX characteristics, same protocol as WebSocket.
@@ -34,7 +34,7 @@
 
 #define TAG "ble"
 
-/* NUS UUIDs — must match webapp BLETransport.ts */
+/* NUS UUIDs, must match webapp BLETransport.ts */
 static const ble_uuid128_t NUS_SERVICE_UUID = BLE_UUID128_INIT(
     0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e);
 
@@ -63,7 +63,7 @@ static uint8_t s_auth_fail_count = 0;
 #define BLE_AUTH_MAX_FAILS 5
 #define BLE_AUTH_THROTTLE_MS 100
 
-/* Deferred RPC processing — can't call notify from GATT access context */
+/* Deferred RPC processing, can't call notify from GATT access context */
 static QueueHandle_t s_rpc_queue = NULL;
 typedef struct {
     char data[BLE_RPC_BUF_SIZE];
@@ -169,7 +169,7 @@ static void ble_notify_transport_cb(const char* json, size_t len, void* ctx) {
 
 /* ── Process incoming data (JSON-RPC lines) ──────────────────────────── */
 
-/* BLE RPC processing task — runs in its own context, safe to call notify */
+/* BLE RPC processing task, runs in its own context, safe to call notify */
 static void ble_rpc_task(void* param) {
     (void)param;
     ble_rpc_msg_t msg;
@@ -424,7 +424,7 @@ static void on_sync(void) {
      *
      * Full RPA (Resolvable Private Address) with periodic rotation requires
      * bonding/IRK infrastructure that isn't implemented yet.  Static random
-     * is a meaningful improvement in the interim — it stops passive MAC-based
+     * is a meaningful improvement in the interim, it stops passive MAC-based
      * tracking by scanners that never connect.
      */
     int rc = ble_hs_util_ensure_addr(1);
