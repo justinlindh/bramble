@@ -1,0 +1,80 @@
+name: PR Template
+
+# Enforce that every section header defined in .github/PULL_REQUEST_TEMPLATE.md
+# is present, with its exact Markdown formatting, in the pull request body. The
+# required headers are read from the template itself, so this gate stays in sync
+# when the template changes. Runs when a PR is opened and re-runs on every
+# description edit and new push, so the required context always reports on the
+# current head.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sections:
+    name: Template sections
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify PR body contains every template section header
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          TEMPLATE: .github/PULL_REQUEST_TEMPLATE.md
+        run: |
+          set -euo pipefail
+
+          if [ ! -f "$TEMPLATE" ]; then
+            echo "No PR template at $TEMPLATE; nothing to enforce."
+            exit 0
+          fi
+
+          # Required section headers are the level-2 Markdown headings in the
+          # template. Trailing whitespace is stripped so comparison is exact.
+          mapfile -t headers < <(grep -E '^##[[:space:]]+' "$TEMPLATE" | sed 's/[[:space:]]*$//')
+
+          if [ "${#headers[@]}" -eq 0 ]; then
+            echo "Template defines no '## ' section headers; nothing to enforce."
+            exit 0
+          fi
+
+          # GitHub stores PR bodies with CRLF line endings. Normalize to LF and
+          # strip trailing whitespace per line so a stray space does not fail an
+          # otherwise-correct header.
+          body="$(printf '%s' "${PR_BODY:-}" | tr -d '\r' | sed 's/[[:space:]]*$//')"
+
+          missing=0
+          for header in "${headers[@]}"; do
+            if printf '%s\n' "$body" | grep -qxF "$header"; then
+              echo "ok: $header"
+            else
+              echo "missing: $header"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            echo
+            echo "The PR description is missing one or more required sections."
+            echo "Every '## ' heading from $TEMPLATE must appear in the body,"
+            echo "verbatim and with its '## ' formatting. Restore the missing"
+            echo "heading(s) and this check will re-run on the edit."
+            exit 1
+          fi
+
+          echo
+          echo "All required template sections are present."
