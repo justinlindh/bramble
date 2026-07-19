@@ -10,6 +10,14 @@
 #   emu-channel-delivery  three provisioned pagers; the sender broadcasts a
 #                         channel message and BOTH receivers RENDER it on their
 #                         e-paper (screen-assert, the highest fidelity level).
+#   emu-gps-fix           one GPS-capable pager; the broker feeds it NMEA
+#                         sentences synthesized from its slot position while
+#                         its GPS gate is on, and the firmware must acquire a
+#                         fix. Exercises the gps_virt reader-to-pump-task
+#                         crossing (asserts the gpsgate telemetry plus the
+#                         firmware's 'GPS position updated' console line at the
+#                         origin latitude). One run, no retries; any node death
+#                         fails the suite.
 #   emu-dm-desync         a DM session establishes and renders on the receiver;
 #                         the receiver then DROPS its session half in-process at a
 #                         fixed instant (EMU_DROP_DM_SESSION_AT_MS) to construct
@@ -336,15 +344,48 @@ dm_suite() {
     return 1
 }
 
-# Run the two suites one after the other so only one scenario's firmware nodes
+# --- Scenario 3: GPS fix ---------------------------------------------------
+# One GPS-capable pager. The firmware runs gps_init at boot and opens its GPS
+# power gate; the broker answers the gpsgate-on message by feeding synthesized
+# NMEA sentences from the node's slot position on the sim clock (nmea.go). The
+# sentences arrive on the emu-link reader thread and cross into gps_virt's
+# sentence ring, where the FreeRTOS pump task parses them and fires the fix
+# callback: this is the exact reader-to-task crossing the deferred-ring fix
+# exists for, so a regression either kills the node (caught by the strict
+# no-deaths rule) or never logs a fix. Deterministic, one run, no retries. The
+# fix latitude is the canonical NMEA origin (48.117), a fixed placeholder
+# coordinate; asserting the exact value proves the whole gate/feed/parse/fix
+# path rather than merely that some log line appeared.
+gps_suite() {
+    echo "[3] emu-gps-fix"
+    local GPS_LOG=""
+    run_scenario emu-gps-fix 90 GPS_LOG
+
+    # STRICT death rule first: a death is the primary regression signal here.
+    check_no_deaths "$GPS_LOG" 1 "emu-gps-fix" || return 1
+
+    if grep -qF '"type":"device_gpsgate"' "$GPS_LOG" \
+       && grep -qF "GPS position updated: lat=48.117" "$GPS_LOG"; then
+        green "PASS: emu-gps-fix: GPS gate opened + fix acquired at origin"
+        return 0
+    fi
+    red "FAIL: emu-gps-fix did not open the GPS gate and acquire a fix"
+    dump_diagnostics "$GPS_LOG" "emu-gps-fix"
+    return 1
+}
+
+# Run the suites one after the other so only one scenario's firmware nodes
 # are on the host at a time (see the isolation note above).
 channel_suite; chan_rc=$?
 echo
 dm_suite; dm_rc=$?
 echo
+gps_suite; gps_rc=$?
+echo
 
 [ "$chan_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 [ "$dm_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
+[ "$gps_rc" -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # --- verdict --------------------------------------------------------------
 if [ "$FAILURES" -eq 0 ]; then

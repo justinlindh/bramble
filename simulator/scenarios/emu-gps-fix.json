@@ -1,0 +1,30 @@
+{
+  "name": "emu-gps-fix",
+  "description": "One firmware pager with GPS. The virtual pager board advertises BOARD_CAP_GPS, so the firmware runs gps_init at boot and the emu-link gpsgate-on message starts the broker's 1 Hz NMEA feed synthesized from the node's slot position (nmea.go, canonical documentation coordinates at slot origin). The sentences cross the emu-link reader thread into gps_virt's sentence ring, and the FreeRTOS pump task parses them and fires the fix callback, so this scenario exercises the exact reader-to-task crossing the gps_virt deferred-ring fix exists for: it fails loudly (node death via the strict no-deaths rule, or no fix line) if the crossing regresses. Asserted by run_scenarios.sh: the device_gpsgate on telemetry, then the firmware's throttled 'GPS position updated' console line carrying the origin latitude (lat=48.117), which proves gate handshake, feed, parse, fix state, and callback end to end. No mesh traffic is needed, so there is no network key and the single node just beacons quietly.",
+  "mode": "deterministic",
+  "duration_ms": 90000,
+  "nodes": [],
+  "firmware_nodes": [
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          0,
+          0
+        ]
+      ],
+      "label": "gps",
+      "env": {
+        "EMU_BEACON_INTERVAL_MS": "15000"
+      }
+    }
+  ],
+  "radio": {
+    "range": 150,
+    "loss_pct": 0,
+    "propagation_speed_ms_per_unit": 0.1
+  },
+  "events": []
+}
