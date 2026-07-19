@@ -158,6 +158,17 @@ typedef struct {
     uint8_t anchor_pub[32];
     uint32_t unendorsed;
     uint32_t expired;
+
+    /* Issue #88 observability, RAM-only and not serialized. `evictions`
+     * counts pins recycled to make room for a new one. `evictions_verified`
+     * counts the subset that were SAS-verified pins, which is the case that
+     * downgrades a human-confirmed binding back to trust-on-first-use and is
+     * therefore worth surfacing rather than doing silently. alloc_entry only
+     * ever touches a verified pin when EVERY pin is verified, so a climbing
+     * evictions_verified means the store is genuinely at capacity, not that
+     * an attestation flood is washing verified pins out. */
+    uint32_t evictions;
+    uint32_t evictions_verified;
     /* Trust-anchor campaign (P3a/P4b): set true when a runtime anchor CHANGE
      * dropped existing pins (a re-hardening of a node that had already
      * accumulated pins). While set, the bootstrap-quorum grace's unpinned

@@ -211,6 +211,71 @@ void test_key_changed_not_persisted(void) {
     TEST_ASSERT_FALSE(identity_store_key_changed(&s2, 0x13579));
 }
 
+/*
+ * Issue #88 (the identity-store half). alloc_entry used to evict purely by
+ * age, so an attestation flood from throwaway addresses silently pushed
+ * SAS-verified pins out and downgraded them back to trust-on-first-use:
+ * exactly the impersonation window the verified bit exists to close.
+ *
+ * The verified pin here is the OLDEST entry in the store, so under the
+ * pre-fix "oldest wins" policy it is the first victim on every single
+ * insertion. It must survive regardless.
+ */
+void test_attestation_flood_cannot_evict_a_verified_pin(void) {
+    identity_store_t s;
+    identity_store_init(&s, 0);
+    uint8_t ed[32], x[32];
+
+    mkkeys(ed, x, 0x11);
+    TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s, 0xCAFE, ed, x, 0));
+    TEST_ASSERT_TRUE(identity_store_set_verified(&s, 0xCAFE, "1112223"));
+
+    /* Fill the rest of the store, then keep flooding well past capacity. */
+    for (uint32_t i = 0; i < IDENTITY_STORE_CAPACITY * 8; i++) {
+        mkkeys(ed, x, (uint8_t)(0x40 + i));
+        identity_store_pin(&s, 0x20000 + i, ed, x, 1000 + i);
+    }
+
+    /* The verified pin is still there, still verified, still bound to the
+     * original keys. */
+    TEST_ASSERT_TRUE(identity_store_is_verified(&s, 0xCAFE));
+    const identity_pin_t* e = identity_store_lookup(&s, 0xCAFE);
+    TEST_ASSERT_NOT_NULL(e);
+    mkkeys(ed, x, 0x11);
+    TEST_ASSERT_EQUAL_MEMORY(ed, e->ed25519_pub, 32);
+    TEST_ASSERT_EQUAL_STRING("1112223", e->verified_sas);
+
+    /* Eviction happened (the store is bounded) but never took a verified
+     * pin, and it is counted rather than silent. */
+    TEST_ASSERT_TRUE(s.evictions > 0);
+    TEST_ASSERT_EQUAL(0, s.evictions_verified);
+}
+
+/* Eviction of a verified pin is not forbidden, just last-resort: when every
+ * entry is verified the store is genuinely full of high-value bindings, one
+ * must go, and the downgrade is counted so it is observable. That case needs
+ * local user action per pin, so an attacker cannot induce it. */
+void test_verified_pin_evicted_only_when_every_pin_is_verified(void) {
+    identity_store_t s;
+    identity_store_init(&s, 0);
+    uint8_t ed[32], x[32];
+
+    for (uint32_t i = 0; i < IDENTITY_STORE_CAPACITY; i++) {
+        mkkeys(ed, x, (uint8_t)(0x80 + i));
+        TEST_ASSERT_EQUAL(IDENTITY_PIN_NEW, identity_store_pin(&s, 0x30000 + i, ed, x, 100 + i));
+        TEST_ASSERT_TRUE(identity_store_set_verified(&s, 0x30000 + i, "9998887"));
+    }
+    TEST_ASSERT_EQUAL(0, s.evictions_verified);
+
+    mkkeys(ed, x, 0x05);
+    identity_store_pin(&s, 0x40000, ed, x, 9000);
+    TEST_ASSERT_EQUAL(1, s.evictions_verified);
+    /* The victim is the least-recently-confirmed verified pin, not an
+     * arbitrary one. */
+    TEST_ASSERT_NULL(identity_store_lookup(&s, 0x30000));
+    TEST_ASSERT_NOT_NULL(identity_store_lookup(&s, 0x40000));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_verified_bit_survives_roundtrip);
@@ -222,5 +287,7 @@ int main(void) {
     RUN_TEST(test_mark_key_changed);
     RUN_TEST(test_set_verified_clears_key_changed);
     RUN_TEST(test_key_changed_not_persisted);
+    RUN_TEST(test_attestation_flood_cannot_evict_a_verified_pin);
+    RUN_TEST(test_verified_pin_evicted_only_when_every_pin_is_verified);
     return UNITY_END();
 }
