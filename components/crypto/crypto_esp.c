@@ -181,24 +181,28 @@ bool crypto_ed25519_verify(const uint8_t public_key[BRAMBLE_ED25519_PUBKEY_SIZE]
 }
 
 int crypto_generate_identity(bramble_identity_t* id) {
-    /* Draw into a scratch buffer first: crypto_random zeroes its destination
-     * in place when the entropy gate is shut, so drawing straight into
-     * id->private_key would clobber a caller's existing identity even on
-     * failure (SEC-L1). Only commit into id once the draw has succeeded. */
-    uint8_t priv[32];
-    if (crypto_random(priv, sizeof(priv)) != 0) {
+    /* Build the whole identity in a local and commit it to *id only once every
+     * step has succeeded, so the "*id is untouched on failure" contract holds
+     * for EVERY failure path, not just the entropy gate. Two callers depend on
+     * it: the DM handshake paths must never put half-built key material on the
+     * wire, and the address-collision path in mesh_task regenerates into the
+     * LIVE s_identity, where a partial write (or a zeroize) would destroy the
+     * running node's identity. Building aside and committing atomically is why
+     * this is not simply a wipe of *id on the error paths. */
+    bramble_identity_t tmp;
+    int ok = 0;
+
+    /* crypto_random zeroes its destination in place when the entropy gate is
+     * shut, so it draws into tmp, never into the caller's struct (SEC-L1). */
+    if (crypto_random(tmp.private_key, sizeof(tmp.private_key)) != 0) {
         /* Entropy gate shut: refuse rather than clamp-and-use a zeroed key. */
+        crypto_secure_wipe(&tmp, sizeof(tmp));
         return -1;
     }
-    memcpy(id->private_key, priv, sizeof(priv));
-    /* Wipe the stack scratch now that the key has been committed to id.
-     * mbedtls_platform_zeroize (not memset) so the compiler cannot optimize
-     * the wipe away as a dead store to a about-to-go-out-of-scope buffer. */
-    mbedtls_platform_zeroize(priv, sizeof(priv));
     // Clamp per X25519 spec
-    id->private_key[0] &= 248;
-    id->private_key[31] &= 127;
-    id->private_key[31] |= 64;
+    tmp.private_key[0] &= 248;
+    tmp.private_key[31] &= 127;
+    tmp.private_key[31] |= 64;
 
     // Compute public key = private_key * basepoint
     mbedtls_ecp_group grp;
@@ -210,29 +214,35 @@ int crypto_generate_identity(bramble_identity_t* id) {
     mbedtls_ecp_point_init(&Q);
 
     mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_CURVE25519);
-    mbedtls_mpi_read_binary_le(&d, id->private_key, 32);
+    mbedtls_mpi_read_binary_le(&d, tmp.private_key, 32);
 
     /* RNG callback required for side-channel blinding on ESP-IDF mbedtls */
-    int ok = (mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, crypto_rng_callback, NULL) == 0) &&
-             (mbedtls_mpi_write_binary_le(&Q.MBEDTLS_PRIVATE(X), id->public_key, 32) == 0);
+    ok = (mbedtls_ecp_mul(&grp, &Q, &d, &grp.G, crypto_rng_callback, NULL) == 0) &&
+         (mbedtls_mpi_write_binary_le(&Q.MBEDTLS_PRIVATE(X), tmp.public_key, 32) == 0);
 
     /* Ed25519 signing identity alongside X25519 (Phase 1). Fail closed: if
      * keygen fails (e.g. entropy gate shut), propagate failure rather than
      * hand back a partial identity. */
-    if (ok && crypto_ed25519_keypair(id->ed25519_public_key, id->ed25519_private_key) != 0)
+    if (ok && crypto_ed25519_keypair(tmp.ed25519_public_key, tmp.ed25519_private_key) != 0)
         ok = 0;
 
     if (ok) {
         /* Phase 4 rebind: the address (and pubkey_hash) derive from the
          * Ed25519 identity key, the key attestations are signed with, so an
          * address claim is only satisfiable by the keyholder. */
-        id->address = crypto_derive_address(id->ed25519_public_key);
-        id->pubkey_hash = crypto_derive_pubkey_hash(id->ed25519_public_key);
+        tmp.address = crypto_derive_address(tmp.ed25519_public_key);
+        tmp.pubkey_hash = crypto_derive_pubkey_hash(tmp.ed25519_public_key);
+        /* The single commit point: nothing reaches *id before this line. */
+        memcpy(id, &tmp, sizeof(tmp));
     }
 
     mbedtls_ecp_group_free(&grp);
     mbedtls_mpi_free(&d);
     mbedtls_ecp_point_free(&Q);
+    /* crypto_secure_wipe (not memset) so the compiler cannot drop the wipe as
+     * a dead store to an about-to-go-out-of-scope local. Runs on success too:
+     * tmp still holds a full copy of the private keys. */
+    crypto_secure_wipe(&tmp, sizeof(tmp));
     return ok ? 0 : -1;
 }
 

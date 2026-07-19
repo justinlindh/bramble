@@ -208,23 +208,32 @@ int crypto_generate_identity(bramble_identity_t* id) {
     if (!ctx)
         return -1;
     int ret = -1;
+    /* Same build-aside-then-commit shape as the ESP backend: *id is untouched
+     * on every failure path, so a partially built identity can never escape
+     * into a caller (and regenerating over a live identity cannot corrupt it). */
+    bramble_identity_t tmp;
     if (EVP_PKEY_keygen_init(ctx) == 1 && EVP_PKEY_keygen(ctx, &pkey) == 1) {
         size_t len = 32;
-        if (EVP_PKEY_get_raw_private_key(pkey, id->private_key, &len) == 1 &&
-            EVP_PKEY_get_raw_public_key(pkey, id->public_key, &len) == 1 &&
+        if (EVP_PKEY_get_raw_private_key(pkey, tmp.private_key, &len) == 1 &&
+            EVP_PKEY_get_raw_public_key(pkey, tmp.public_key, &len) == 1 &&
             /* Ed25519 signing identity alongside X25519; fail closed (no
              * partial identity) if keygen fails. */
-            crypto_ed25519_keypair(id->ed25519_public_key, id->ed25519_private_key) == 0) {
+            crypto_ed25519_keypair(tmp.ed25519_public_key, tmp.ed25519_private_key) == 0) {
             /* Phase 4 rebind: the address (and pubkey_hash) derive from the
              * Ed25519 identity key, the key attestations are signed with,
              * so an address claim is only satisfiable by the keyholder. */
-            id->address = crypto_derive_address(id->ed25519_public_key);
-            id->pubkey_hash = crypto_derive_pubkey_hash(id->ed25519_public_key);
+            tmp.address = crypto_derive_address(tmp.ed25519_public_key);
+            tmp.pubkey_hash = crypto_derive_pubkey_hash(tmp.ed25519_public_key);
+            /* The single commit point: nothing reaches *id before this line. */
+            memcpy(id, &tmp, sizeof(tmp));
             ret = 0;
         }
     }
     EVP_PKEY_free(pkey);
     EVP_PKEY_CTX_free(ctx);
+    /* OPENSSL_cleanse-backed, not memset: tmp holds private key material and
+     * the wipe of a dying local is exactly what a compiler may elide. */
+    crypto_secure_wipe(&tmp, sizeof(tmp));
     return ret;
 }
 

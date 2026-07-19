@@ -31,6 +31,19 @@ typedef struct {
     uint32_t pubkey_hash; /* crypto_derive_pubkey_hash(ed25519_public_key), SHA256[4:8] */
 } bramble_identity_t;
 
+/* Generates a full X25519 + Ed25519 identity. Returns 0 on success, nonzero on
+ * failure (the SEC-L1 entropy gate being shut is one such failure).
+ *
+ * Fail-closed contract, enforced by the function in BOTH backends rather than
+ * by caller discipline: the identity is built in a local and committed to *id
+ * in one memcpy only after every step has succeeded, so on ANY failure *id is
+ * left byte-for-byte untouched. Callers therefore get either a complete,
+ * usable identity or their previous buffer contents, never a half-built one.
+ *
+ * That does NOT make the return value optional. A caller passing an
+ * uninitialized struct still holds uninitialized bytes after a failure, and
+ * using them as a keypair is how the bug this contract documents got shipped:
+ * always check the return before touching id. */
 int crypto_generate_identity(bramble_identity_t* id);
 uint32_t crypto_derive_address(const uint8_t* public_key);
 uint32_t crypto_derive_pubkey_hash(const uint8_t* public_key);

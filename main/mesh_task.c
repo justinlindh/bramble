@@ -5110,7 +5110,9 @@ static dm_pending_eph_t* pending_eph_lookup(uint32_t peer_addr) {
 static void pending_eph_clear(uint32_t peer_addr) {
     for (int i = 0; i < DM_MAX_HANDSHAKING; i++) {
         if (s_pending_eph[i].used && s_pending_eph[i].peer_addr == peer_addr) {
-            memset(&s_pending_eph[i], 0, sizeof(s_pending_eph[i]));
+            /* Holds eph_priv, an ephemeral X25519 private key: secure wipe, not
+             * memset, for the dead-store elision hazard crypto.h documents. */
+            crypto_secure_wipe(&s_pending_eph[i], sizeof(s_pending_eph[i]));
             return;
         }
     }
