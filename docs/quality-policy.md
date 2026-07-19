@@ -30,6 +30,7 @@ the full job topology and the always-report contract.
 - `Emulator suite` (`quality.yml`): the merged emulator scenario suite plus
   browser E2E. Uses the collect-then-fail pattern (below), so both suites
   always report and both gate.
+- `Docker build (webapp)`, `(simulator)`, `(emulator)`, `(firmware-builder)` (`quality.yml`, issue #195): one context per shipped Dockerfile, each `docker buildx build`, never pushed. Same step-level area-gate pattern as `Board build smoke`: `webapp` gates on `webapp`; `simulator` gates on `simulator` or `firmware`; `emulator` gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on `firmware` (which covers `docker/firmware-builder/`). Makes Dependabot's docker-ecosystem bumps self-verifying instead of merging on unrelated green checks with nothing having built the image.
 - `Webapp checks` (one pod: lint, typecheck, electron typecheck, unit tests, build, e2e smoke, `webapp-quality.yml`)
 - `web-flasher tests` (`node --test web-flasher/`, `webapp-quality.yml`)
 

@@ -322,3 +322,94 @@ jobs:
           [ "${{ steps.scenarios.outcome }}" = "success" ] || { echo "::error::headless scenario suite failed"; failed=1; }
           [ "${{ steps.e2e.outcome }}" = "success" ] || { echo "::error::browser E2E suite failed"; failed=1; }
           exit "$failed"
+
+  docker-build:
+    name: Docker build (${{ matrix.image }})
+    # Issue #195: no workflow built any of the four shipped Dockerfiles, so a
+    # base-image bump (e.g. #179's node 22-to-26 jump in emulator/Dockerfile)
+    # could merge with every required context green and nothing having ever
+    # constructed the image. This job builds each Dockerfile (never pushes;
+    # it exists to catch a broken build before merge, not to publish) so
+    # future Dependabot docker bumps are self-verifying.
+    #
+    # THE AREA GATE IS ON THE STEPS, NOT THE JOB, AND MUST STAY THERE: see
+    # Board build smoke's comment above for why a job-level `if:` on a matrix
+    # job strands the expanded contexts. Every leg here always reports its
+    # own real "Docker build (<image>)" context; out of scope, it does no
+    # work and reports success.
+    #
+    # Runs inside the same container + docker.sock combination as the
+    # existing docker build in webapp-build-publish.yml (the one other place
+    # this repo builds a container image), since that is the one proven
+    # working docker-on-this-runner pattern; a bare `runs-on:` job on this
+    # pool has no docker CLI of its own.
+    needs: detect
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    container:
+      image: ghcr.io/catthehacker/ubuntu:full-22.04
+      options: --user 0:0 --group-add 959
+    timeout-minutes: 30
+    strategy:
+      # Every image reports its own result, same reasoning as Board build
+      # smoke: a webapp-only bump breaking the emulator image (or vice versa)
+      # must not hide behind a cancelled sibling.
+      fail-fast: false
+      # Four Dockerfiles on a small self-hosted pool that also runs the board
+      # matrix, gosim, and the emulator suite; two at a time keeps the rest of
+      # the wave moving.
+      max-parallel: 2
+      matrix:
+        include:
+          - image: webapp
+            dockerfile: webapp/Dockerfile
+            context: webapp
+          - image: simulator
+            dockerfile: simulator/Dockerfile
+            context: .
+          - image: emulator
+            dockerfile: emulator/Dockerfile
+            context: .
+          - image: firmware-builder
+            dockerfile: docker/firmware-builder/Dockerfile
+            context: docker/firmware-builder
+    steps:
+      - uses: actions/checkout@v7
+        if: |
+          (matrix.image == 'webapp' && (needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'simulator' && (needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'emulator' && (needs.detect.outputs.emulator == 'true' || needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'firmware-builder' && (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'))
+      - name: Verify docker daemon access
+        if: |
+          (matrix.image == 'webapp' && (needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'simulator' && (needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'emulator' && (needs.detect.outputs.emulator == 'true' || needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'firmware-builder' && (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'))
+        run: |
+          set -euo pipefail
+          docker version
+      - name: Build ${{ matrix.image }} image (verify only, no push)
+        if: |
+          (matrix.image == 'webapp' && (needs.detect.outputs.webapp == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'simulator' && (needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'emulator' && (needs.detect.outputs.emulator == 'true' || needs.detect.outputs.simulator == 'true' || needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true')) ||
+          (matrix.image == 'firmware-builder' && (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'))
+        env:
+          DOCKERFILE_PATH: ${{ matrix.dockerfile }}
+          BUILD_CONTEXT: ${{ matrix.context }}
+        run: |
+          set -euo pipefail
+          builder="bramble-docker-gate-${{ matrix.image }}"
+          docker buildx rm "$builder" >/dev/null 2>&1 || true
+          docker buildx create --name "$builder" --driver docker-container --use
+          docker buildx inspect --bootstrap
+          # GitHub Actions cache backend (type=gha): no registry credentials
+          # needed, and it keys per image via scope so the four builds' caches
+          # never collide. Neither --push nor --load: this job exists to
+          # prove the Dockerfile builds, not to publish or run the image.
+          docker buildx build \
+            --builder "$builder" \
+            --cache-from "type=gha,scope=docker-build-${{ matrix.image }}" \
+            --cache-to "type=gha,scope=docker-build-${{ matrix.image }},mode=max" \
+            -f "$DOCKERFILE_PATH" \
+            "$BUILD_CONTEXT"

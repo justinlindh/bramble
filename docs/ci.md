@@ -118,7 +118,7 @@ changed. When in doubt, run the real checks rather than silently skip them.
 
 | Output | Marks changed when the diff touches |
 | --- | --- |
-| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-format-version`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
+| `firmware` | `main/`, `components/`, `test/`, `api/`, `scripts/`, `docker/firmware-builder/`, `CMakeLists.txt`, `sdkconfig.*`, `partitions*.csv`, `.clang-format`, `.clang-format-version`, `.clang-tidy`, `.shellcheckrc`, `.markdownlint-cli2.yaml` |
 | `simulator` | `simulator/` |
 | `emulator` | `emulator/` |
 | `webapp` | `webapp/` |
@@ -286,6 +286,35 @@ asserts that the matrix board list and the `BOARDS` list in
 `scripts/ci-build-firmware.sh` are identical, so adding a fifth board to the
 release path without adding it to the gate fails the PR rather than quietly
 reopening the hole.
+
+`Docker build (webapp)`, `(simulator)`, `(emulator)`, `(firmware-builder)`
+(issue #195) is a four-way matrix, one leg per Dockerfile the repo ships
+(`webapp/Dockerfile`, `simulator/Dockerfile`, `emulator/Dockerfile`,
+`docker/firmware-builder/Dockerfile`). Before this job, no workflow built any
+of them: a base-image bump (the trigger case, #179's `node` 22-to-26 jump in
+`emulator/Dockerfile`) could merge with every required context green and
+nothing having ever constructed the image, which is worse than no bump at
+all because it carries the appearance of a passing check. Each leg runs
+`docker buildx build` against its own Dockerfile and build context, with
+`--cache-from`/`--cache-to type=gha` scoped per image so the four builds'
+caches never collide; nothing is pushed or loaded, since the job exists to
+catch a broken Dockerfile before merge; a successful build is the entire
+assertion. It runs inside the same container-plus-`docker.sock` combination
+`webapp-build-publish.yml` already uses to build the webapp image, the one
+proven working docker-on-this-runner pattern in the repo, since a bare
+`runs-on:` job on this pool has no docker CLI of its own.
+
+The area gate is on the job's STEPS, not the job, for the same
+matrix-collapse reason as `Board build smoke` above. Each leg's gate is the
+union of areas that Dockerfile's `COPY` instructions actually read: `webapp`
+gates on `webapp`; `simulator` (which also `COPY`s `main/`, `components/`,
+and `test/stubs/` for its cgo build) gates on `simulator` or `firmware`;
+`emulator` (which additionally builds the linux firmware node and gosim)
+gates on `emulator`, `simulator`, or `firmware`; `firmware-builder` gates on
+`firmware`, which now includes `docker/firmware-builder/` itself (see the
+detector's area table above). `workflows` is OR'd into every leg, per the
+usual safety rule. `max-parallel: 2` for the same small-pool reason as the
+board matrix.
 
 ### `webapp-quality.yml`
 
