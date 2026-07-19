@@ -7189,14 +7189,23 @@ static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t 
     uint8_t probe_round = (len >= HEADER_SIZE + 5) ? data[HEADER_SIZE + 4] : 1;
 
     char src_buf[12], me_buf[12];
-    ESP_LOGI(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
+    /* Debug, not info: this fires once per received PROBE, before the ingress
+     * rate limit below has any say. PROBE is unauthenticated and remotely
+     * inducible, so an attacker in radio range could otherwise buy one UART
+     * line per injected frame and starve the serial RPC channel a maintainer
+     * would reach for while diagnosing the flood. Same reasoning as commit
+     * 843db077, which demoted the raw NMEA log for exactly this failure mode
+     * (issue #174). */
+    ESP_LOGD(TAG, "PROBE RX pid=%08" PRIX32 " round=%u src=%s me=%s hop=%u rssi=%d snr=%d",
              header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)), (unsigned)header.hop_limit,
              (int)rssi, (int)snr);
 
     /* Ignore our own probe if it loops back through relays. */
     if (src_addr == s_identity->address) {
-        ESP_LOGI(TAG, "PROBE RX ignored self-originated pid=%08" PRIX32, header.packet_id);
+        /* Also pre-rate-limit and forgeable (src_addr is unauthenticated), so
+         * keep it at debug for the same reason as the line above. */
+        ESP_LOGD(TAG, "PROBE RX ignored self-originated pid=%08" PRIX32, header.packet_id);
         return;
     }
 
