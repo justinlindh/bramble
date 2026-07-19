@@ -7,9 +7,9 @@ vi.mock('../../store/index', () => ({
 }));
 
 vi.mock('../../store/actions', () => ({
-  loadNeighbors: vi.fn(),
-  loadRoutes: vi.fn(),
-  loadPeerLocations: vi.fn(),
+  loadNeighbors: vi.fn(() => Promise.resolve()),
+  loadRoutes: vi.fn(() => Promise.resolve()),
+  loadPeerLocations: vi.fn(() => Promise.resolve()),
   openDM: vi.fn(),
   showOnMap: vi.fn(),
 }));
