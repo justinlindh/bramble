@@ -22,8 +22,7 @@
 9. [Time Synchronization](#9-time-synchronization)
 10. [Security Analysis](#10-security-analysis)
 11. [Resource Budget](#11-resource-budget)
-12. [Implementation Roadmap](#12-implementation-roadmap)
-13. [Future Enhancements](#13-future-enhancements)
+12. [Future Enhancements](#12-future-enhancements)
 
 ---
 
@@ -2851,195 +2850,6 @@ RREQ rate table          64     LRU by timestamp.
 
 ---
 
-## 12. Implementation Roadmap
-
-### Phase 1: Core Protocol (Weeks 1–6)
-
-**Goal:** Two nodes communicating reliably over LoRa with routing.
-
-**Week 1–2: Foundation**
-- ESP-IDF project setup with FreeRTOS task structure
-- SX1262 driver: TX, RX, CAD, RSSI/SNR reading
-- Packet serialization/deserialization for all types (§4)
-- Packet dedup buffer
-- Serial console for debugging
-
-**Week 3–4: Identity & Crypto**
-- X25519 key pair generation and NVS storage (§5.1)
-- AES-256-GCM encrypt/decrypt using ESP32 hardware acceleration (mbedtls)
-- Channel PSK derivation and storage (§5.3)
-- Key exchange protocol: initiate, respond, confirm (§5.2)
-- DM encryption/decryption with session keys
-
-**Week 5–6: Routing & Forwarding**
-- Neighbor table: population from received packets (RSSI, SNR tracking)
-- Beacon generation and processing (§4.9)
-- RREQ/RREP route discovery with privacy-preserving source encryption (§6.3)
-- Routing table: install, lookup, timeout, eviction
-- Data forwarding along routes (§6.6)
-- Route error detection and propagation (§6.4)
-
-**Deliverable:** Two ESP32 nodes can discover each other, exchange keys, and send encrypted DMs via a third relay node. Routes are cached and reused.
-
-### Phase 2: Reliability & Airtime (Weeks 7–10)
-
-**Week 7–8: Reliability Layer**
-- Three-tier message model (§7.1)
-- ACK generation and matching (§7.2)
-- Retry engine with exponential backoff (§7.3)
-- Pending ACK table and timeout management
-- Delivery receipts with relay path building (§7.2)
-- Sliding window flow control (§7.5)
-
-**Week 9–10: Airtime & Scheduling**
-- Token bucket airtime budget (§8.2)
-- Airtime calculation function (§8.3)
-- Priority TX queue with scheduling (§8.5)
-- Congestion detection and response (§8.4)
-- Congestion packet generation and processing
-- Listen-before-talk with CAD (§3.3)
-
-**Deliverable:** Messages reliably delivered across multi-hop paths with congestion awareness. Critical messages survive temporary link outages via retries.
-
-### Phase 3: Time Sync & Security Hardening (Weeks 11–13)
-
-**Week 11–12: Time Synchronization**
-- Beacon-based time sync (§9.2, §9.3)
-- TIME_SYNC packet emission for low-stratum nodes (§9.5)
-- Stratum tracking and source selection
-- Anti-replay timestamp validation (§9.6)
-- Optional GPS time source integration (for T-Beam)
-
-**Week 13: Security Hardening**
-- RREQ rate limiting (§10.5)
-- Sybil detection heuristic (§10.6)
-- Nonce tracking for AES-GCM (prevent reuse)
-- Key rotation triggers (time-based and count-based, §5.5)
-- Packet validation: malformed packet rejection, hop limit enforcement
-
-**Deliverable:** Full protocol operational with time sync, anti-replay, and attack mitigations.
-
-### Phase 4: Fragmentation & Channel Messages (Weeks 14–16)
-
-**Week 14: Fragmentation**
-- Fragment header serialization (§4.14)
-- Fragment transmission: splitting messages >172 bytes
-- Reassembly engine: bitmap tracking, timeout, dedup
-- Integration with reliability layer (retry individual fragments)
-
-**Week 15–16: Channel (Group) Messages**
-- Channel message encryption with PSK (§4.4, §5.3)
-- Controlled flood for channel messages (§6.7)
-- Channel join/leave (local config only, no protocol negotiation)
-- Multi-channel support (up to 16 simultaneous)
-
-**Deliverable:** Full-featured messaging: DMs with E2E encryption, channels with PSK, long messages via fragmentation.
-
-### Phase 5: User Interface (Weeks 17–20)
-
-**Week 17–18: OLED Display & Buttons**
-- Main screen: node info, battery, neighbor count, time
-- Message list screen: recent messages with sender, timestamp
-- Compose screen: canned messages + character input via buttons
-- Settings screen: channel management, TX power, radio profile
-- Node list screen: known peers with signal quality
-
-**Week 19–20: BLE Interface**
-- BLE GATT service for phone companion app communication
-- Message send/receive over BLE
-- Configuration read/write over BLE
-- Node list and routing table inspection
-- Real-time status updates (push notifications)
-
-**Deliverable:** Usable standalone device with OLED UI. Phone connectivity via BLE for richer interaction.
-
-### Phase 6: Web Firmware Flasher (Weeks 21–23)
-
-**Goal:** Browser-based firmware flashing — no IDE, no toolchain, no CLI.
-
-**Week 21: Web Serial API Flasher**
-- Static web app (HTML/JS, no backend) hosted on GitHub Pages or similar
-- Uses Web Serial API to connect to ESP32 via USB
-- Implements ESP32 serial bootloader protocol (esptool.js or custom)
-- Firmware binary hosted alongside the web page (or fetched from GitHub Releases)
-- Flashing flow:
-  1. User connects ESP32 via USB
-  2. Opens web page in Chrome/Edge (Web Serial requires Chromium)
-  3. Clicks "Connect" → selects serial port
-  4. Firmware binary downloaded/cached
-  5. ESP32 put into bootloader mode (automatic via RTS/DTR, or manual button)
-  6. Flash progress bar
-  7. Reboot into new firmware
-
-**Week 22–23: Flasher Polish**
-- Firmware version detection (read current version before flashing)
-- Multi-board support (detect Heltec V3 vs T-Beam via USB VID/PID or user selection)
-- Partition table and bootloader flashing for first-time setup
-- NVS preservation during upgrade (flash only app partitions)
-- Release management: GitHub Actions CI builds firmware, publishes to Releases, web flasher fetches latest
-
-**Deliverable:** Non-technical users can flash Bramble firmware from a web browser with zero toolchain setup. URL: `bramble.example.com/flash`
-
-### Phase 7: Config & Messaging Web App (Weeks 24–28)
-
-**Goal:** Browser-based configuration and messaging interface connected via Web Serial or BLE.
-
-**Week 24–25: Web Serial Configuration App**
-- Single-page web app (Svelte or vanilla JS, minimal bundle)
-- Connects to Bramble device via Web Serial API
-- Serial protocol: JSON-RPC over UART at 115200 baud
-  - `{"method": "get_config", "id": 1}` → `{"result": {...}, "id": 1}`
-  - `{"method": "set_config", "params": {...}, "id": 2}`
-  - `{"method": "send_message", "params": {"dest": "...", "text": "..."}, "id": 3}`
-  - `{"method": "get_messages", "params": {"since": 12345}, "id": 4}`
-  - `{"method": "get_nodes", "id": 5}`
-  - `{"method": "get_routes", "id": 6}`
-- Configuration pages:
-  - Node identity (view public key, address)
-  - Radio settings (profile, TX power, frequency)
-  - Channel management (add/remove/rename channels, set PSK)
-  - Peer management (view known peers, signal quality, routes)
-  - Airtime stats (budget usage, congestion level)
-
-**Week 26–27: Messaging Interface**
-- Chat-style message interface per DM contact and per channel
-- Message compose with send tier selection (Broadcast/Normal/Critical)
-- Delivery status indicators (sent → delivered → read)
-- Relay path display on delivered messages (from delivery receipts)
-- Node map view (if position data available from peers)
-- Real-time updates via serial polling (every 2 seconds) or push (serial interrupt)
-
-**Week 28: Web BLE Alternative & OTA Updates**
-- Web Bluetooth API support as alternative to Web Serial
-- Same JSON-RPC protocol over BLE GATT characteristic
-- Enables phone browser access (Chrome Android supports Web Bluetooth)
-- Connection manager: auto-reconnect, connection status indicator
-- **BLE OTA firmware update** using ESP-IDF BLE OTA support — enables firmware updates from phone/laptop without USB
-- **WiFi OTA** as optional convenience (when WiFi available) — ESP-IDF native HTTP OTA
-- **LoRa OTA explicitly not planned** — airtime cost is prohibitive (256KB firmware ≈ 2.4 hours of continuous airtime at SF10/125kHz, exhausting weeks of airtime budget)
-
-**Deliverable:** Full-featured web app for configuring and using Bramble devices from any Chromium browser. Works via USB (Web Serial) or wireless (Web Bluetooth). BLE OTA enables field firmware updates without physical access. No native app installation required.
-
-### Phase 8: Testing & Optimization (Weeks 29–32)
-
-**Week 29–30: Automated Testing**
-- Unit tests for all packet serialization/deserialization
-- Unit tests for crypto operations (known test vectors)
-- Integration tests: simulated multi-node mesh on a single ESP32 (loopback radio mock)
-- Replay attack test suite
-- Congestion scenario simulation (max queue depth, budget exhaustion)
-
-**Week 31–32: Field Testing & Optimization**
-- 5-node field test: range, reliability, latency measurements
-- 20+ node stress test: routing convergence time, airtime distribution
-- Power consumption profiling: active, idle, deep sleep modes
-- Memory high-water-mark analysis under sustained load
-- Flash wear analysis for NVS writes (key rotation frequency)
-
-**Deliverable:** Validated, optimized firmware ready for broader deployment. Published test results and performance benchmarks.
-
----
-
 ## Appendix A: Cryptographic Primitive Summary
 
 | Primitive | Algorithm | Key Size | Library | ESP32 HW Accel |
@@ -3123,25 +2933,25 @@ channel_epoch_messages = 256               // Messages before forced epoch advan
 
 ---
 
-## 13. Future Enhancements
+## 12. Future Enhancements
 
 The following features are out of scope for the initial implementation but are tracked for future consideration:
 
-### 13.1 Dual-Channel Control/Data Split
+### 12.1 Dual-Channel Control/Data Split
 
 Split control traffic (beacons, RREQ/RREP, ACKs) and data traffic onto separate frequencies. The SX1262 supports frequency switching in ~100µs, making rapid alternation feasible. Control channel would use a fixed frequency with lighter traffic; data channel handles bulk message delivery. This would approximately double effective throughput and reduce control/data contention.
 
-### 13.2 Address Rotation for Location Privacy
+### 12.2 Address Rotation for Location Privacy
 
 Periodically rotate node addresses to prevent long-term tracking by passive observers. Rotation requires coordinating with active DM peers (notify of new address) and re-announcing via beacon. Tradeoffs include increased routing churn and complexity in key-to-address mapping. Design must balance privacy benefit against routing disruption cost.
 
-### 13.3 LoRa Frequency Survey Tooling
+### 12.3 LoRa Frequency Survey Tooling
 
 Diagnostic mode that scans the ISM band (902–928 MHz) and reports noise floor, interference sources, and signal quality per sub-band. Useful for deployment planning — identifying the best operating frequency for a specific geographic area. Could run as a standalone firmware mode or integrated diagnostic tool.
 
-### 13.4 Companion Phone App
+### 12.4 Companion Phone App
 
-Native mobile application (iOS/Android) for richer interaction beyond Web BLE capabilities. Would provide background BLE connectivity, push notifications for incoming messages, persistent message storage, and contact management. Web BLE (Phase 7) serves as the MVP; a native app would offer better reliability and UX for daily use.
+Native mobile application (iOS/Android) for richer interaction beyond Web BLE capabilities. Would provide background BLE connectivity, push notifications for incoming messages, persistent message storage, and contact management. The browser client serves as the MVP; a native app would offer better reliability and UX for daily use.
 
 ---
 
