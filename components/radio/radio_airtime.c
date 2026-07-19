@@ -29,3 +29,31 @@ uint32_t bramble_calculate_airtime_us(uint16_t payload_bytes, uint8_t sf, uint32
 
     return (uint32_t)(t_total * 1e6 + 0.5);
 }
+
+uint32_t bramble_symbol_time_us(uint8_t sf, uint32_t bw_hz) {
+    if (sf < 5)
+        sf = 5;
+    if (sf > 12)
+        sf = 12;
+    if (bw_hz == 0)
+        bw_hz = 125000;
+    /* (2^sf / bw_hz) seconds, expressed in microseconds and rounded up so a
+     * truncated symbol never makes the derived timeout too tight. */
+    uint64_t num = (uint64_t)(1u << sf) * 1000000ull;
+    return (uint32_t)((num + bw_hz - 1) / bw_hz);
+}
+
+uint32_t bramble_cad_timeout_ms(uint8_t sf, uint32_t bw_hz, uint8_t cad_symbol_num_reg) {
+    if (cad_symbol_num_reg > 4)
+        cad_symbol_num_reg = 4; /* SX1262 caps the field at 16 symbols */
+    uint32_t symbols = 1u << cad_symbol_num_reg;
+    uint64_t cad_us = (uint64_t)symbols * bramble_symbol_time_us(sf, bw_hz);
+
+    /* 100% proportional margin: CadDone lands after the sampled symbols plus
+     * the chip's own detection processing, and the caller may be preempted or
+     * queued behind an SPI transfer to a shared-bus display. */
+    uint64_t budget_us = cad_us * 2u;
+    uint32_t budget_ms = (uint32_t)((budget_us + 999u) / 1000u) + BRAMBLE_CAD_OVERHEAD_MS;
+
+    return (budget_ms < BRAMBLE_CAD_TIMEOUT_MIN_MS) ? BRAMBLE_CAD_TIMEOUT_MIN_MS : budget_ms;
+}

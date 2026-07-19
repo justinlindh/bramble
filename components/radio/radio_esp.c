@@ -108,7 +108,7 @@ static int configure_radio(const radio_config_t* cfg) {
     if (rc != 0)
         return rc;
 
-    rc = sx1262_set_cad_params(2, 22, 10, 0x00, 0);
+    rc = sx1262_set_cad_params(BRAMBLE_CAD_SYMBOL_NUM_REG, 22, 10, 0x00, 0);
     return rc;
 }
 
@@ -381,13 +381,20 @@ bool radio_cad_check(void) {
     sx1262_clear_irq_status(0x03FF);
     radio_cad();
 
-    bool got_result = xSemaphoreTake(s_cad_sem, pdMS_TO_TICKS(50));
+    /* Scale the wait with the live radio config. A fixed 50 ms could not
+     * cover a 4-symbol CAD above SF10 at 125 kHz (SF12 alone is 131 ms), so
+     * the take always expired and listen-before-talk silently degraded to
+     * nothing on long-range profiles. */
+    uint32_t timeout_ms =
+        bramble_cad_timeout_ms(s_config.sf, s_config.bw_hz, BRAMBLE_CAD_SYMBOL_NUM_REG);
+    bool got_result = xSemaphoreTake(s_cad_sem, pdMS_TO_TICKS(timeout_ms));
 
     s_cad_done_cb = prev_cb;
     radio_start_rx();
 
     if (!got_result) {
-        ESP_LOGW(TAG, "CAD check timed out");
+        ESP_LOGW(TAG, "CAD check timed out after %u ms (sf=%u bw=%u)", (unsigned)timeout_ms,
+                 (unsigned)s_config.sf, (unsigned)s_config.bw_hz);
         return false;
     }
 

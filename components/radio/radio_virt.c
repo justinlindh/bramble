@@ -73,7 +73,6 @@ static const char* TAG = "radio_virt";
 #endif
 
 #define RADIO_VIRT_TX_TIMEOUT_MS 8000u
-#define RADIO_VIRT_CAD_TIMEOUT_MS 50u
 /* txdone poll interval on the node. The broker's reply is delivered by the
  * emu_link reader thread (a raw pthread); signalling a condvar from it does not
  * reliably wake a blocked FreeRTOS task under the IDF-linux port (the scheduler
@@ -580,6 +579,11 @@ bool radio_cad_check(void) {
 
     bool done = false;
     bool busy = false;
+    /* Derived from the live radio config exactly as radio_esp.c does it, so
+     * the emulator surfaces an SF-dependent CAD stall instead of hiding it
+     * behind a fixed budget. */
+    uint32_t cad_timeout_ms =
+        bramble_cad_timeout_ms(s_config.sf, s_config.bw_hz, BRAMBLE_CAD_SYMBOL_NUM_REG);
 #if defined(ESP_PLATFORM)
     /* Node: poll the flag with vTaskDelay, NEVER a condvar wait. The caller
      * is a FreeRTOS task, typically holding the tx_gate FreeRTOS mutex, and
@@ -591,7 +595,7 @@ bool radio_cad_check(void) {
      * pxCurrentTCBs[0]' assertion fires (captured on CI, run 29642008877,
      * crash-looping a node at radio start). Same rule and pattern as the
      * txdone poll above; a tick of extra CAD latency is irrelevant here. */
-    for (uint32_t waited = 0; waited < RADIO_VIRT_CAD_TIMEOUT_MS;) {
+    for (uint32_t waited = 0; waited < cad_timeout_ms;) {
         mu_lock_task();
         done = s_cad_done;
         busy = s_cad_busy;
@@ -605,7 +609,7 @@ bool radio_cad_check(void) {
 #else
     /* Plain-gcc test harness: no scheduler to desync; the condvar is fine. */
     struct timespec deadline;
-    deadline_in_ms(&deadline, RADIO_VIRT_CAD_TIMEOUT_MS);
+    deadline_in_ms(&deadline, cad_timeout_ms);
     int wrc = 0;
     pthread_mutex_lock(&s_mu);
     while (!s_cad_done && wrc == 0)
