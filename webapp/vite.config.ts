@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { cspPlugin } from './csp.config';
 
 // Target for the dev-server API proxy. Override with VITE_API_PROXY_TARGET if
 // your local unified server runs on a different port.
@@ -7,7 +8,7 @@ const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:
 
 export default defineConfig({
   base: './',
-  plugins: [react()],
+  plugins: [react(), cspPlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || 'dev'),
   },
@@ -47,6 +48,18 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Off by default. Building with sourcemaps emitted roughly 2.5 MB of maps
+    // beside 660 KB of code, and every one of them published the complete
+    // unminified TypeScript client, transport and auth logic included, to
+    // anyone who could reach the hosted build.
+    //
+    // 'hidden' was the other candidate: it still writes the maps but strips
+    // the //# sourceMappingURL comment. That only helps if something uploads
+    // the maps to an error reporter and then deletes them, and Bramble has no
+    // error reporting service, so 'hidden' would have kept shipping the files
+    // while making them marginally harder to find. Opt-in is the honest shape.
+    //
+    // Set SOURCEMAP=1 to get them back for a local debugging session.
+    sourcemap: process.env.SOURCEMAP === '1',
   },
 });

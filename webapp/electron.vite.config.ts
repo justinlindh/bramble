@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
+import { cspPlugin } from './csp.config';
 
 export default defineConfig({
   main: {
@@ -39,7 +40,7 @@ export default defineConfig({
         },
       },
     },
-    plugins: [react()],
+    plugins: [react(), cspPlugin()],
     define: {
       __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || 'dev'),
     },
