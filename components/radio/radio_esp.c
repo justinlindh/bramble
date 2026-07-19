@@ -34,7 +34,13 @@ static radio_tx_done_callback_t s_tx_done_cb;
 static radio_cad_done_callback_t s_cad_done_cb;
 
 static TaskHandle_t s_radio_task;
-static TaskHandle_t s_tx_waiter; /* task waiting for TX done */
+
+/* Task waiting for TX done. Written by the sender, read by radio_task, so it
+ * is atomic rather than plain: both sides claim it with an exchange, which
+ * means exactly one of them wins. radio_task can therefore never notify a
+ * handle the sender has already abandoned, and the sender knows from the
+ * exchange result whether a notification is in flight and must be drained. */
+static _Atomic(TaskHandle_t) s_tx_waiter;
 
 static volatile bool s_cad_result;
 static SemaphoreHandle_t s_cad_sem;
@@ -57,7 +63,7 @@ static uint8_t bw_hz_to_code(uint32_t bw_hz) {
         return 500;
 }
 
-static void set_sync_word(uint8_t sw) {
+static int set_sync_word(uint8_t sw) {
     /* LoRa sync word register 0x0740-0x0741.
        Public (0x34):  0x3444.  Private (0x12): 0x1424 */
     uint8_t regs[2];
@@ -69,7 +75,9 @@ static void set_sync_word(uint8_t sw) {
         regs[0] = 0x14;
         regs[1] = 0x24;
     }
-    sx1262_write_register(0x0740, regs, 2);
+    /* A silently dropped write leaves the node on the wrong sync word and
+     * therefore invisible to the mesh, so the failure has to surface. */
+    return sx1262_write_register(0x0740, regs, 2);
 }
 
 static int configure_radio(const radio_config_t* cfg) {
@@ -99,7 +107,11 @@ static int configure_radio(const radio_config_t* cfg) {
     if (rc != 0)
         return rc;
 
-    set_sync_word(cfg->sync_word);
+    rc = set_sync_word(cfg->sync_word);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "set_sync_word failed (rc=%d)", rc);
+        return rc;
+    }
 
     /* Route TxDone, RxDone, CRC error, Timeout, CAD done/detected to DIO1 */
     uint16_t irq_mask = SX1262_IRQ_TX_DONE | SX1262_IRQ_RX_DONE | SX1262_IRQ_CRC_ERR |
@@ -110,6 +122,31 @@ static int configure_radio(const radio_config_t* cfg) {
 
     rc = sx1262_set_cad_params(BRAMBLE_CAD_SYMBOL_NUM_REG, 22, 10, 0x00, 0);
     return rc;
+}
+
+/* Claim the TX waiter and wake it. Called from radio_task only. */
+static void wake_tx_waiter(void) {
+    TaskHandle_t waiter = atomic_exchange(&s_tx_waiter, (TaskHandle_t)NULL);
+    if (waiter) {
+        xTaskNotifyGive(waiter);
+    }
+}
+
+/* Grace window for a give that radio_task has already committed to but has
+ * not delivered yet. Expressed in ticks, not milliseconds: pdMS_TO_TICKS() of
+ * a few ms rounds down to 0 on a 100 Hz tick, which would make the drain
+ * below non-blocking and let a genuinely in-flight notification slip past. */
+#define TX_DISARM_DRAIN_TICKS 2
+
+/* Disarm the TX waiter from the sender side and make sure no notification
+ * survives into the next transmit. If the exchange returns NULL, radio_task
+ * already claimed the handle and its give may still be in flight, so wait
+ * briefly for it; otherwise a stale notification would make the next
+ * radio_transmit_raw return instantly as success while tx_gate debits airtime
+ * for a frame that was never confirmed on air. */
+static void tx_disarm(void) {
+    TaskHandle_t prev = atomic_exchange(&s_tx_waiter, (TaskHandle_t)NULL);
+    ulTaskNotifyTake(pdTRUE, prev == NULL ? TX_DISARM_DRAIN_TICKS : 0);
 }
 
 static void cad_check_cb(bool detected) {
@@ -148,10 +185,7 @@ static void radio_task(void* arg) {
         if (irq & SX1262_IRQ_TX_DONE) {
             ESP_LOGD(TAG, "TX done");
             atomic_store(&s_state, RADIO_STATE_IDLE);
-            /* Wake the TX waiter */
-            if (s_tx_waiter) {
-                xTaskNotifyGive(s_tx_waiter);
-            }
+            wake_tx_waiter();
         }
 
         if (irq & SX1262_IRQ_RX_DONE) {
@@ -188,10 +222,8 @@ static void radio_task(void* arg) {
         if (irq & SX1262_IRQ_TIMEOUT) {
             ESP_LOGD(TAG, "Timeout");
             atomic_store(&s_state, RADIO_STATE_IDLE);
-            /* If TX timed out, wake waiter */
-            if (s_tx_waiter) {
-                xTaskNotifyGive(s_tx_waiter);
-            }
+            /* If TX timed out, wake the waiter */
+            wake_tx_waiter();
         }
     }
 }
@@ -204,8 +236,13 @@ int radio_reconfigure(const radio_config_t* config) {
     ESP_LOGI(TAG, "Reconfiguring radio: %.1f MHz SF%u BW%" PRIu32 " TX %ddBm",
              config->frequency_mhz, config->sf, config->bw_hz, config->tx_power);
 
-    /* Put radio in standby before reconfiguring (0 = RC oscillator) */
-    radio_standby();
+    /* Put radio in standby before reconfiguring (0 = RC oscillator). A failure
+     * here is not fatal: reconfiguring is exactly the recovery a freshly reset
+     * chip needs, so log and carry on into configure_radio. */
+    int standby_rc = radio_standby();
+    if (standby_rc != 0) {
+        ESP_LOGW(TAG, "standby before reconfigure failed (rc=%d), continuing", standby_rc);
+    }
     vTaskDelay(pdMS_TO_TICKS(10));
 
     memcpy(&s_config, config, sizeof(s_config));
@@ -283,38 +320,73 @@ int radio_init(const radio_config_t* config) {
     gpio_install_isr_service(0);
     gpio_isr_handler_add(board->radio.dio1, dio1_isr_handler, NULL);
 
-    /* Start continuous RX */
+    /* Start continuous RX. A failure is logged rather than failing init: the
+     * task and ISR are already up, so the reinit path can still recover the
+     * chip, whereas bailing here would leave the node with no radio at all. */
     radio_start_rx();
+    if (radio_get_state() != RADIO_STATE_RX) {
+        ESP_LOGE(TAG, "radio_init: could not enter RX, node is not receiving yet");
+    }
 
     ESP_LOGD(TAG, "radio_init complete");
     return 0;
 }
 
+/* Abort an in-progress transmit: disarm the waiter, report the state
+ * honestly, and pick a recovery. After a hard reset the chip sits in
+ * power-on defaults, so issuing more commands (including radio_start_rx)
+ * would just fail against an unconfigured chip; the mesh loop's
+ * radio_check_and_clear_reinit() reconfigures and restarts RX instead. */
+static int tx_abort(const char* what, int rc) {
+    ESP_LOGE(TAG, "TX aborted: %s failed (rc=%d)", what, rc);
+    tx_disarm();
+    atomic_store(&s_state, RADIO_STATE_IDLE);
+    if (rc == SX1262_ERR_RESET) {
+        ESP_LOGW(TAG, "SX1262 was hard reset, deferring recovery to radio reinit");
+    } else {
+        radio_start_rx();
+    }
+    return -1;
+}
+
 int radio_transmit_raw(const uint8_t* data, uint8_t len) {
     ESP_LOGD(TAG, "radio_transmit_raw: %u bytes", len);
 
+    /* Drop anything left over from a previously abandoned TX before arming,
+     * so a late notification can never be read as this frame's TxDone. */
+    ulTaskNotifyTake(pdTRUE, 0);
+
     atomic_store(&s_state, RADIO_STATE_TX);
-    s_tx_waiter = xTaskGetCurrentTaskHandle();
+    atomic_store(&s_tx_waiter, xTaskGetCurrentTaskHandle());
 
     /* Switch to standby */
-    radio_standby();
+    int rc = radio_standby();
+    if (rc != 0) {
+        return tx_abort("set_standby", rc);
+    }
 
-    /* Write payload to buffer */
-    sx1262_write_buffer(0, data, len);
+    /* Write payload to buffer. If this is skipped the chip transmits whatever
+     * is still in the FIFO from the previous frame, so it must be checked. */
+    rc = sx1262_write_buffer(0, data, len);
+    if (rc != 0) {
+        return tx_abort("write_buffer", rc);
+    }
 
     /* Update packet params with actual payload length */
-    sx1262_set_packet_params(s_config.preamble, s_config.explicit_header ? 0 : 1, len,
-                             s_config.crc ? 1 : 0, 0);
+    rc = sx1262_set_packet_params(s_config.preamble, s_config.explicit_header ? 0 : 1, len,
+                                  s_config.crc ? 1 : 0, 0);
+    if (rc != 0) {
+        return tx_abort("set_packet_params", rc);
+    }
 
     /* Clear IRQ and start TX with 3s hardware timeout */
-    sx1262_clear_irq_status(0x03FF);
-    int tx_err = sx1262_set_tx(3000);
-    if (tx_err != 0) {
-        ESP_LOGE(TAG, "sx1262_set_tx failed (BUSY timeout?), aborting TX");
-        s_tx_waiter = NULL;
-        atomic_store(&s_state, RADIO_STATE_IDLE);
-        radio_start_rx();
-        return -1;
+    rc = sx1262_clear_irq_status(0x03FF);
+    if (rc != 0) {
+        return tx_abort("clear_irq_status", rc);
+    }
+    rc = sx1262_set_tx(3000);
+    if (rc != 0) {
+        return tx_abort("set_tx", rc);
     }
     ESP_LOGI(TAG, "TX started: %u bytes, DIO1_GPIO=%d, BUSY_GPIO=%d", len,
              gpio_get_level(board_get_config()->radio.dio1),
@@ -326,9 +398,13 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
 
     /* Wait for TX done (or TX timeout) notification — max 4s FreeRTOS timeout */
     uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(4000));
-    s_tx_waiter = NULL;
 
     if (notified == 0) {
+        /* Disarm before anything else. Draining here is what stops a TxDone
+         * that lands just after the expiry from being consumed by the next
+         * radio_transmit_raw as a phantom success. */
+        tx_disarm();
+
         /* Diagnostic: read back what the radio chip thinks happened */
         uint16_t irq_status = sx1262_get_irq_status();
         int dio1_level = gpio_get_level(board_get_config()->radio.dio1);
@@ -336,10 +412,16 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
                  irq_status, (irq_status & SX1262_IRQ_TX_DONE) ? 1 : 0,
                  (irq_status & SX1262_IRQ_TIMEOUT) ? 1 : 0);
         atomic_store(&s_state, RADIO_STATE_IDLE);
-        radio_standby();
+        /* radio_start_rx() does its own standby with error handling, so no
+         * bare unchecked standby here. */
         radio_start_rx();
         return -1;
     }
+
+    /* radio_task claimed the waiter before notifying, so s_tx_waiter is
+     * already NULL here; store it anyway so the invariant does not depend on
+     * which IRQ path did the wake. */
+    atomic_store(&s_tx_waiter, (TaskHandle_t)NULL);
 
     /* Call TX done callback */
     if (s_tx_done_cb) {
@@ -352,17 +434,48 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
 }
 
 void radio_start_rx(void) {
-    radio_standby();
-    sx1262_clear_irq_status(0x03FF);
-    sx1262_set_rx(0); /* continuous */
+    int rc = radio_standby();
+    if (rc == 0) {
+        rc = sx1262_clear_irq_status(0x03FF);
+    }
+    if (rc == 0) {
+        rc = sx1262_set_rx(0); /* continuous */
+    }
+
+    if (rc != 0) {
+        /* Do not claim RX. Setting the state unconditionally used to make
+         * radio_get_state() report a healthy receiver while the node was a
+         * black hole; IDLE is the honest answer for a chip that is not
+         * listening, and the reinit path is what brings it back. */
+        if (rc == SX1262_ERR_RESET) {
+            ESP_LOGE(TAG, "start_rx: SX1262 was hard reset, awaiting radio reinit");
+        } else {
+            ESP_LOGE(TAG, "start_rx failed (rc=%d), radio is NOT receiving", rc);
+        }
+        atomic_store(&s_state, RADIO_STATE_IDLE);
+        return;
+    }
+
     atomic_store(&s_state, RADIO_STATE_RX);
 }
 
 void radio_cad(void) {
-    radio_standby();
-    sx1262_clear_irq_status(0x03FF);
+    int rc = radio_standby();
+    if (rc == 0) {
+        rc = sx1262_clear_irq_status(0x03FF);
+    }
+    if (rc != 0) {
+        ESP_LOGE(TAG, "radio_cad: standby/clear_irq failed (rc=%d)", rc);
+        atomic_store(&s_state, RADIO_STATE_IDLE);
+        return;
+    }
+
     atomic_store(&s_state, RADIO_STATE_CAD);
-    sx1262_set_cad();
+    rc = sx1262_set_cad();
+    if (rc != 0) {
+        ESP_LOGE(TAG, "radio_cad: set_cad failed (rc=%d)", rc);
+        atomic_store(&s_state, RADIO_STATE_IDLE);
+    }
 }
 
 bool radio_cad_check(void) {
@@ -377,8 +490,12 @@ bool radio_cad_check(void) {
     s_cad_done_cb = cad_check_cb;
     s_cad_result = false;
 
-    radio_standby();
-    sx1262_clear_irq_status(0x03FF);
+    /* radio_cad() already does the standby and IRQ clear, with error handling.
+     * If it cannot arm CAD it leaves the state IDLE and no CAD_DONE arrives,
+     * so the take below expires and this returns false ("channel clear"),
+     * which is the same fail-open the timeout path has always had. Checking
+     * radio_get_state() here instead would race the CAD_DONE IRQ, which can
+     * land before the check on short spreading factors. */
     radio_cad();
 
     /* Scale the wait with the live radio config. A fixed 50 ms could not
@@ -403,8 +520,15 @@ bool radio_cad_check(void) {
 
 void radio_set_tx_power(int8_t power) {
     s_config.tx_power = power;
-    sx1262_set_pa_config(power);
-    sx1262_set_tx_params(power, 0x04);
+    int rc = sx1262_set_pa_config(power);
+    if (rc == 0) {
+        rc = sx1262_set_tx_params(power, 0x04);
+    }
+    if (rc != 0) {
+        /* Not fatal: the radio keeps transmitting at its previous power. Log
+         * it so a node running at the wrong power is visible in the trace. */
+        ESP_LOGE(TAG, "radio_set_tx_power(%d) failed (rc=%d), power unchanged on chip", power, rc);
+    }
 }
 
 radio_state_t radio_get_state(void) { return (radio_state_t)atomic_load(&s_state); }
@@ -417,7 +541,12 @@ void radio_set_cad_done_callback(radio_cad_done_callback_t cb) { s_cad_done_cb =
 
 void radio_sleep(void) {
     radio_standby();
-    sx1262_set_sleep(0x04); /* warm start (retain config) */
+    int rc = sx1262_set_sleep(0x04); /* warm start (retain config) */
+    if (rc != 0) {
+        /* The chip is still awake, so do not report SLEEP. */
+        ESP_LOGE(TAG, "radio_sleep: set_sleep failed (rc=%d), radio still awake", rc);
+        return;
+    }
     atomic_store(&s_state, RADIO_STATE_SLEEP);
 }
 

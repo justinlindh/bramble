@@ -48,6 +48,19 @@
 #define SX1262_IRQ_CAD_DETECTED (1 << 8)
 #define SX1262_IRQ_TIMEOUT (1 << 9)
 
+/* ---------- Error codes ---------- */
+
+/* Generic failure: the command did not reach the chip, or SPI errored. */
+#define SX1262_ERR_FAIL (-1)
+
+/* The BUSY line was stuck long enough that the driver hard-reset the chip.
+ * The command was NOT issued and the SX1262 now sits in power-on defaults:
+ * no TCXO, no calibration, no packet type, no sync word. Callers must abort
+ * the operation in progress rather than retry, and let the reinit path
+ * (sx1262_needs_reinit / radio_check_and_clear_reinit) reconfigure the chip
+ * before any further commands are issued. */
+#define SX1262_ERR_RESET (-2)
+
 /* ---------- Functions ---------- */
 
 /* Lifecycle */

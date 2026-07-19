@@ -67,6 +67,10 @@ static void nss_high(void) {
 void sx1262_hard_reset(void) {
     if (!s_board || s_board->radio.rst < 0) {
         ESP_LOGE(TAG, "Cannot hard reset: no RST pin configured");
+        /* No reset possible, but the chip is wedged. Raise the reinit
+         * flag anyway so the mesh loop attempts a full reconfigure,
+         * which is the only recovery available on such a board. */
+        s_needs_reinit = true;
         return;
     }
     ESP_LOGW(TAG, "Hard-resetting SX1262 via RST pin (GPIO %d)", s_board->radio.rst);
@@ -104,10 +108,15 @@ int sx1262_wait_busy(uint32_t timeout_ms) {
                          s_busy_timeout_count);
                 sx1262_hard_reset();
                 s_busy_timeout_count = 0;
-                /* Return success — caller should retry the command after reset */
-                return 0;
+                /* Distinct code: the command was never issued and the chip
+                 * now sits in power-on defaults (no TCXO, no calibration,
+                 * no packet type). Returning success here made callers clock
+                 * the triggering command into an unconfigured chip. Callers
+                 * must abort instead; sx1262_hard_reset() has already raised
+                 * the reinit flag that radio_check_and_clear_reinit() acts on. */
+                return SX1262_ERR_RESET;
             }
-            return -1;
+            return SX1262_ERR_FAIL;
         }
         /* Feed task WDT every ~1s during long BUSY waits to prevent
          * false WDT triggers when multiple SPI commands chain. */
@@ -159,9 +168,10 @@ int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len) {
 
     /* 2000ms: covers TCXO startup (≤32ms) + calibration overhead on TCXO
      * boards, while still detecting a genuinely stuck BUSY line. */
-    if (sx1262_wait_busy(2000) != 0) {
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
         spi_mutex_give();
-        return -1;
+        return busy_rc;
     }
 
     uint8_t tx[1 + len];
@@ -180,9 +190,10 @@ int sx1262_write_command(uint8_t cmd, const uint8_t* data, size_t len) {
 int sx1262_read_command(uint8_t cmd, uint8_t* data, size_t len) {
     spi_mutex_take();
 
-    if (sx1262_wait_busy(2000) != 0) {
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
         spi_mutex_give();
-        return -1;
+        return busy_rc;
     }
 
     /* cmd + 1 NOP (status) + len data bytes */
@@ -205,9 +216,10 @@ int sx1262_read_command(uint8_t cmd, uint8_t* data, size_t len) {
 
 int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len) {
     spi_mutex_take();
-    if (sx1262_wait_busy(2000) != 0) {
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
         spi_mutex_give();
-        return -1;
+        return busy_rc;
     }
 
     size_t total = 3 + len; /* cmd + addr_hi + addr_lo + data */
@@ -227,9 +239,10 @@ int sx1262_write_register(uint16_t addr, const uint8_t* data, size_t len) {
 
 int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len) {
     spi_mutex_take();
-    if (sx1262_wait_busy(2000) != 0) {
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
         spi_mutex_give();
-        return -1;
+        return busy_rc;
     }
 
     /* cmd + addr_hi + addr_lo + 1 NOP + len data */
@@ -253,9 +266,10 @@ int sx1262_read_register(uint16_t addr, uint8_t* data, size_t len) {
 
 int sx1262_write_buffer(uint8_t offset, const uint8_t* data, size_t len) {
     spi_mutex_take();
-    if (sx1262_wait_busy(2000) != 0) {
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
         spi_mutex_give();
-        return -1;
+        return busy_rc;
     }
 
     size_t total = 2 + len; /* cmd + offset + data */
@@ -274,9 +288,10 @@ int sx1262_write_buffer(uint8_t offset, const uint8_t* data, size_t len) {
 
 int sx1262_read_buffer(uint8_t offset, uint8_t* data, size_t len) {
     spi_mutex_take();
-    if (sx1262_wait_busy(2000) != 0) {
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
         spi_mutex_give();
-        return -1;
+        return busy_rc;
     }
 
     /* cmd + offset + 1 NOP + len data */
@@ -305,8 +320,9 @@ int sx1262_get_status(uint8_t* status) {
     uint8_t st;
     int rc = sx1262_read_command(SX1262_CMD_GET_STATUS, &st, 0);
     /* Status is actually in the first response byte (index 1) — re-read */
-    if (sx1262_wait_busy(2000) != 0)
-        return -1;
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0)
+        return busy_rc;
 
     uint8_t tx[2] = {SX1262_CMD_GET_STATUS, 0x00};
     uint8_t rx[2] = {0};
@@ -570,8 +586,9 @@ int sx1262_calibrate(uint8_t cal_mask) {
      * this wait.  100ms (the default write_command BUSY wait) is not enough.
      * We wait for BUSY before sending the command, then send it, then wait
      * again for the calibration to complete. */
-    if (sx1262_wait_busy(2000) != 0)
-        return -1;
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0)
+        return busy_rc;
 
     uint8_t cmd = SX1262_CMD_CALIBRATE;
     uint8_t tx[2] = {cmd, cal_mask};
