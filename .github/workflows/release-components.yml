@@ -146,7 +146,11 @@ jobs:
       # key, and the OTA update channel is not involved here. Runs last so the
       # fast per-component releases publish before this multi-board build.
       - name: Build firmware factory images
-        if: steps.firmware.outputs.published == 'true'
+        # !cancelled() lifts the implicit success() gate: the webapp and sim
+        # release steps run before this one, and without a status function a
+        # failure in either would skip these image steps even though the
+        # firmware release already published, leaving a bare firmware release.
+        if: ${{ !cancelled() && steps.firmware.outputs.published == 'true' }}
         # Three sequential ESP-IDF board builds; each already saturates the
         # runner's cores via ninja. Local timing on 8 CPUs: see PR body.
         timeout-minutes: 45
@@ -163,7 +167,9 @@ jobs:
       # attaches the assets idempotently via the REST API (curl, no gh CLI
       # dependency on the runner).
       - name: Attach factory images to firmware release
-        if: steps.firmware.outputs.published == 'true'
+        # See the build step: run whenever firmware published, even if an
+        # earlier component's release step failed.
+        if: ${{ !cancelled() && steps.firmware.outputs.published == 'true' }}
         timeout-minutes: 5
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
