@@ -182,9 +182,13 @@ export async function connect(
     // Transport is open and (for network transports) verified; reflect Connected.
     store.setConnectionState('connected');
 
-    // Enable auto-reconnect for WiFi/WebSocket transports
-    if ('enableAutoReconnect' in transport && typeof (transport as any).enableAutoReconnect === 'function') {
-      (transport as any).enableAutoReconnect({
+    // Enable auto-reconnect for WiFi/WebSocket transports. Not every
+    // transport implements it, so it is feature-detected structurally.
+    const reconnectable = transport as typeof transport & {
+      enableAutoReconnect?: (handlers: { onDisconnect: () => void; onReconnect: () => Promise<void> }) => void;
+    };
+    if ('enableAutoReconnect' in transport && typeof reconnectable.enableAutoReconnect === 'function') {
+      reconnectable.enableAutoReconnect({
         onDisconnect: () => {
           useStore.getState().setConnectionState('error', 'Connection lost, reconnecting…');
         },

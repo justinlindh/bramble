@@ -8,7 +8,19 @@ import { deliveryEventStore, type DeliveryEventRecord } from '../deliveryEventSt
 import { formatAddrHex } from '../../utils/address';
 import { parseAddr } from '../../lib/addr';
 import { isAndroidShell } from '../../utils/platform';
-import type { IncomingMessage, RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
+import type { RelayHop, MessageTier, ProbeResponse, Message } from '../../types/bramble';
+import type { RpcSchemas, WirePartial } from '../../types/rpc';
+
+// A message row as the firmware sends it: the contract's Message schema made
+// deep-optional (older firmware omits fields) plus the extras the firmware
+// includes beyond the schema (msgId, tier, channelIndex). `text` stays
+// required: every consumer copies it into a store Message verbatim.
+type FirmwareMessageWire = WirePartial<RpcSchemas['Message']> & {
+  text: string;
+  msgId?: string;
+  channelIndex?: number;
+  tier?: MessageTier;
+};
 
 // ─── Message persistence ─────────────────────────────────────────────────
 
@@ -74,16 +86,16 @@ export interface FirmwareMergeContext {
  * it and `ctx.existing` closes that hole without re-reading global state.
  */
 export function mergeFirmwareMessages(
-  raw: IncomingMessage[],
+  raw: FirmwareMessageWire[],
   ctx: FirmwareMergeContext,
 ): Message[] {
   const accepted: Message[] = [];
   raw.forEach((m, ringIndex) => {
     const fromAddr = parseAddr(m.from);
     const toAddr = parseAddr(m.to);
-    const dir = (m as any).direction;
+    const dir = m.direction;
     const isOutgoing = dir === 'outgoing' || dir === 'broadcast_out';
-    const rawChannel = (m as any).channelIndex ?? (m as any).channel;
+    const rawChannel = m.channelIndex ?? m.channel;
     const channelIndex = rawChannel !== undefined && rawChannel >= 0 ? rawChannel : undefined;
     const isBroadcast =
       dir === 'broadcast_in' ||
@@ -92,7 +104,7 @@ export function mergeFirmwareMessages(
     // Skip self-addressed messages (firmware bug: old messages stored with wrong dest)
     if (!isBroadcast && fromAddr === toAddr && fromAddr === ctx.myAddr) return;
     // Convert uptime-based timestamp to wall clock: now - (uptime - msg_time)
-    const msgUptimeS = (m as any).timestamp_s ?? 0;
+    const msgUptimeS = m.timestamp_s ?? 0;
     const wallMs = ctx.deviceUptime > 0 && msgUptimeS > 0
       ? ctx.now - (ctx.deviceUptime - msgUptimeS) * 1000
       : ctx.now;
@@ -109,7 +121,10 @@ export function mergeFirmwareMessages(
       from: fromAddr,
       to: isBroadcast ? 0xFFFFFFFF : toAddr,
       text: m.text,
-      tier: m.tier,
+      // Firmware rows do not carry a tier; Message declares it required but
+      // this path has always stored undefined for firmware rows, so the cast
+      // preserves that rather than inventing a default.
+      tier: m.tier as MessageTier,
       channelIndex: isBroadcast ? undefined : channelIndex,
       timestampMs: wallMs,
       status: 'delivered',
@@ -134,7 +149,7 @@ export async function loadMessages(sinceId?: number): Promise<void> {
   if (!session.client) return;
   const params: Record<string, unknown> = { limit: 100 };
   if (sinceId !== undefined) params.since_id = sinceId;
-  const result = await session.client.rpc<{ messages: IncomingMessage[] }>(
+  const result = await session.client.rpc<{ messages: FirmwareMessageWire[] }>(
     'bramble.getMessages',
     params,
     10000, // longer timeout: serializing 20 messages can be slow on ESP32
@@ -691,8 +706,16 @@ export function handleAck(params: unknown): void {
   }
 }
 
+// The bramble.onMessage push payload: a firmware message row plus the
+// sender's display name when the firmware's neighbor table knows it. Push
+// notifications are not part of the OpenAPI request/response contract, so the
+// extras beyond the Message schema are declared here.
+type IncomingRealtimeWire = FirmwareMessageWire & {
+  fromName?: string;
+};
+
 export function normalizeIncomingRealtimeMessage(params: unknown) {
-  const p = params as any;
+  const p = params as IncomingRealtimeWire;
   const fromAddr = parseAddr(p.from);
   const toAddr = parseAddr(p.to);
   const rawChannel = p.channelIndex ?? (p.channel as number | undefined);
@@ -705,7 +728,9 @@ export function normalizeIncomingRealtimeMessage(params: unknown) {
     from: fromAddr,
     to: isBroadcast ? 0xFFFFFFFF : toAddr,
     text: p.text,
-    tier: p.tier,
+    // Same as mergeFirmwareMessages: pushes may omit tier and this path has
+    // always stored undefined then, so the cast preserves that.
+    tier: p.tier as MessageTier,
     channelIndex,
     timestampMs: Date.now(),
     status: 'delivered' as const,
@@ -713,7 +738,7 @@ export function normalizeIncomingRealtimeMessage(params: unknown) {
 }
 
 export function handleIncomingMessage(params: unknown): void {
-  const p = params as any;
+  const p = params as IncomingRealtimeWire;
   const msg = normalizeIncomingRealtimeMessage(p);
   const store = useStore.getState();
   // The firmware includes the sender's display name when its neighbor table
@@ -841,8 +866,41 @@ export async function sendProbe(): Promise<void> {
   }, Math.max(1, ackWindow) * 1000 + 150);
 }
 
+// Probe push payloads (bramble.onProbeAck / onProbeComplete). Not in the
+// OpenAPI contract (they are notifications, not RPC responses), so the wire
+// shape is declared here: contract-style snake_case plus the camelCase
+// fallbacks in case a bridge normalizes keys.
+interface ProbeResponderWire {
+  address?: string;
+  responderAddr?: number;
+  seen_rounds?: number;
+  seenRounds?: number;
+  hops?: number;
+  hopCount?: number;
+  rssi?: number;
+  snr?: number;
+  pathLen?: number;
+  latency_ms?: number;
+  latencyMs?: number;
+}
+
+interface ProbeAckWire extends ProbeResponderWire {
+  rounds_total?: number;
+  roundsTotal?: number;
+  probeId?: string | number;
+  probe_id?: string | number;
+}
+
+interface ProbeCompleteWire {
+  probeId?: string | number;
+  probe_id?: string | number;
+  rounds_total?: number;
+  roundsTotal?: number;
+  responders?: ProbeResponderWire[];
+}
+
 export function handleProbeAck(params: unknown): void {
-  const raw = params as any;
+  const raw = params as ProbeAckWire;
   const parsedAddr = typeof raw.address === 'string'
     ? parseInt(raw.address.replace(/^0x/i, ''), 16)
     : (raw.responderAddr ?? 0);
@@ -880,7 +938,7 @@ export function handleProbeAck(params: unknown): void {
 }
 
 export function handleProbeComplete(params: unknown): void {
-  const p = params as any;
+  const p = params as ProbeCompleteWire;
   const probeId = typeof p.probeId === 'string'
     ? parseInt(p.probeId, 16)
     : typeof p.probe_id === 'string'

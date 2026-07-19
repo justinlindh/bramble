@@ -5,15 +5,53 @@ import { session } from './client';
 import { useStore } from '../index';
 import { formatAddrHex } from '../../utils/address';
 import type { BrambleConfig, LocationConfig, LocationTier } from '../../types/bramble';
+import type { RpcSchemas, WirePartial } from '../../types/rpc';
 import { loadPeerLocations } from './telemetry';
+
+// Wire types: the contract schema made deep-optional plus every legacy key
+// spelling this normalizer still reads. See types/rpc.ts for the rationale.
+type ChannelWire = WirePartial<RpcSchemas['Channel']> & {
+  index?: number;
+  channel_name?: string;
+  channelName?: string;
+  has_psk?: boolean;
+  psk_enabled?: boolean;
+  pskEnabled?: boolean;
+  key_epoch?: number;
+  keyEpoch?: number;
+  isDefault?: boolean;
+  default?: boolean;
+  default_channel?: boolean;
+  defaultChannel?: boolean;
+};
+
+type LocationWire = WirePartial<Omit<RpcSchemas['LocationConfig'], 'source'>> & {
+  // Legacy 'auto' predates the contract's 'hybrid' and is normalized to it.
+  source?: RpcSchemas['LocationConfig']['source'] | 'auto';
+  contacts?: Array<{ addr: number; tier: LocationTier; intervalSec?: number; distanceTriggerM?: number }>;
+  defaultIntervalSec?: number;
+  defaultDistanceTriggerM?: number;
+  stationaryBackoff?: LocationConfig['stationaryBackoff'];
+};
+
+type ConfigWire = WirePartial<Omit<RpcSchemas['ConfigResponse'], 'channels' | 'radio' | 'location'>> & {
+  channels?: ChannelWire[];
+  radio?: WirePartial<RpcSchemas['ConfigResponse']['radio']> & {
+    txPowerDbm?: number;
+    bwKhz?: number;
+    cr?: number;
+    freqMhz?: number;
+  };
+  location?: LocationWire;
+  identity?: { address?: number; pubkeyHash?: number; name?: string; pubkeyB64?: string };
+};
 
 /**
  * Normalize firmware config response to match BrambleConfig interface.
  * Firmware returns flat structure; webapp expects nested identity/radio objects.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function normalizeConfig(raw: any): BrambleConfig {
-  const rawLocation = raw.location ?? {};
+export function normalizeConfig(raw: ConfigWire): BrambleConfig {
+  const rawLocation: LocationWire = raw.location ?? {};
   const legacyContacts = (rawLocation.contacts ?? []) as Array<{ addr: number; tier: LocationTier; intervalSec?: number }>;
   const contactRules = (rawLocation.contact_rules ?? legacyContacts.map((c) => ({
     address: formatAddrHex(c.addr),
@@ -36,7 +74,7 @@ export function normalizeConfig(raw: any): BrambleConfig {
       cr: raw.radio?.cr ?? 5,
       freqMhz: raw.radio?.frequency_mhz ?? raw.radio?.freqMhz ?? 915.0,
     },
-    channels: (raw.channels ?? []).map((ch: any) => {
+    channels: (raw.channels ?? []).map((ch) => {
       const candidates = [ch.name, ch.channel_name, ch.channelName];
       const firstNonBlankName = candidates.find((v: unknown) => typeof v === 'string' && v.trim().length > 0) as string | undefined;
       return {
@@ -68,7 +106,7 @@ export function normalizeConfig(raw: any): BrambleConfig {
 
 export async function loadConfig(): Promise<void> {
   if (!session.client) return;
-  const result = await session.client.rpc<any>('bramble.getConfig');
+  const result = await session.client.rpc('bramble.getConfig');
   useStore.getState().setConfig(normalizeConfig(result));
 }
 

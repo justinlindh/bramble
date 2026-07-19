@@ -1,6 +1,7 @@
 // Device management: auth token, allowed origins, and OTA origin/update/status
 // (issue #95).
 import { session } from './client';
+import type { RpcSchemas, WirePartial } from '../../types/rpc';
 
 // ─── Device management (auth token, allowed origins, OTA): issue #95 ───────
 
@@ -8,7 +9,7 @@ export interface AuthTokenInfo { token: string; enabled: boolean; }
 
 export async function getAuthToken(): Promise<AuthTokenInfo> {
   if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc<any>('bramble.getAuthToken');
+  const r = await session.client.rpc('bramble.getAuthToken');
   return { token: r.token ?? '', enabled: !!r.enabled };
 }
 
@@ -19,7 +20,7 @@ export async function setAuthToken(token: string): Promise<void> {
 
 export async function getAllowedOrigins(): Promise<string[]> {
   if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc<any>('bramble.getAllowedOrigins');
+  const r = await session.client.rpc('bramble.getAllowedOrigins');
   return Array.isArray(r.origins) ? r.origins : [];
 }
 
@@ -36,20 +37,30 @@ export interface OtaOriginInfo {
   runningVersion?: string;
 }
 
-// Shared snake/camel mapping for the two RPC-response fields both OTA reads
-// carry (bramble.otaGetOrigin and bramble.otaStatus/onOtaEvent). Defensive
-// camelCase fallbacks in case a bridge normalizes keys before they get here.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function otaVersionFields(r: any): { versionFloor?: string; runningVersion?: string } {
+// The two version fields both OTA reads carry (bramble.otaGetOrigin and
+// bramble.otaStatus/onOtaEvent), in contract spelling plus the camelCase
+// fallbacks in case a bridge normalizes keys before they get here.
+interface OtaVersionWire {
+  version_floor?: string;
+  versionFloor?: string;
+  running_version?: string;
+  runningVersion?: string;
+}
+
+function otaVersionFields(r: OtaVersionWire): { versionFloor?: string; runningVersion?: string } {
   return {
     versionFloor: r.version_floor ?? r.versionFloor,
     runningVersion: r.running_version ?? r.runningVersion,
   };
 }
 
+type OtaGetOriginWire = WirePartial<RpcSchemas['OtaGetOriginResponse']> & OtaVersionWire & {
+  defaultOrigin?: string;
+};
+
 export async function getOtaOrigin(): Promise<OtaOriginInfo> {
   if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc<any>('bramble.otaGetOrigin');
+  const r: OtaGetOriginWire = await session.client.rpc('bramble.otaGetOrigin');
   return {
     origin: r.origin ?? '',
     defaultOrigin: r.default_origin ?? r.defaultOrigin ?? '',
@@ -60,7 +71,7 @@ export async function getOtaOrigin(): Promise<OtaOriginInfo> {
 
 export async function setOtaOrigin(origin: string): Promise<{ ok: boolean; error?: string }> {
   if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc<any>('bramble.otaSetOrigin', { origin });
+  const r = await session.client.rpc('bramble.otaSetOrigin', { origin });
   return { ok: !!r.ok, error: r.error };
 }
 
@@ -71,7 +82,7 @@ export async function resetOtaOrigin(): Promise<void> {
 
 export async function startOtaUpdate(path: string, allowDowngrade = false): Promise<{ ok: boolean; note?: string; url?: string; error?: string; lastError?: string }> {
   if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc<any>('bramble.otaUpdate', { path, allow_downgrade: allowDowngrade });
+  const r = await session.client.rpc('bramble.otaUpdate', { path, allow_downgrade: allowDowngrade });
   return { ok: !!r.ok, note: r.note, url: r.url, error: r.error, lastError: r.last_error };
 }
 
@@ -85,7 +96,11 @@ export interface OtaStatus {
   versionFloor?: string;
 }
 
-function otaStatusFrom(r: any): OtaStatus {
+type OtaStatusWire = WirePartial<RpcSchemas['OtaStatusResponse']> & OtaVersionWire & {
+  error?: string;
+};
+
+function otaStatusFrom(r: OtaStatusWire): OtaStatus {
   return {
     state: r.state ?? 'idle',
     bytes: r.bytes ?? 0,
@@ -98,11 +113,11 @@ function otaStatusFrom(r: any): OtaStatus {
 
 export async function getOtaStatus(): Promise<OtaStatus> {
   if (!session.client) throw new Error('Not connected');
-  const r = await session.client.rpc<any>('bramble.otaStatus');
+  const r = await session.client.rpc('bramble.otaStatus');
   return otaStatusFrom(r);
 }
 
 export function subscribeOtaEvents(cb: (e: OtaStatus) => void): () => void {
   if (!session.client) return () => {};
-  return session.client.subscribe('bramble.onOtaEvent', (params: any) => cb(otaStatusFrom(params ?? {})));
+  return session.client.subscribe('bramble.onOtaEvent', (params) => cb(otaStatusFrom((params ?? {}) as OtaStatusWire)));
 }
