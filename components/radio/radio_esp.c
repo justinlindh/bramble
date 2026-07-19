@@ -132,15 +132,21 @@ static void wake_tx_waiter(void) {
     }
 }
 
+/* Grace window for a give that radio_task has already committed to but has
+ * not delivered yet. Expressed in ticks, not milliseconds: pdMS_TO_TICKS() of
+ * a few ms rounds down to 0 on a 100 Hz tick, which would make the drain
+ * below non-blocking and let a genuinely in-flight notification slip past. */
+#define TX_DISARM_DRAIN_TICKS 2
+
 /* Disarm the TX waiter from the sender side and make sure no notification
  * survives into the next transmit. If the exchange returns NULL, radio_task
- * already claimed the handle and its give may still be in flight, so wait a
- * couple of ticks for it; otherwise a stale notification would make the next
+ * already claimed the handle and its give may still be in flight, so wait
+ * briefly for it; otherwise a stale notification would make the next
  * radio_transmit_raw return instantly as success while tx_gate debits airtime
  * for a frame that was never confirmed on air. */
 static void tx_disarm(void) {
     TaskHandle_t prev = atomic_exchange(&s_tx_waiter, (TaskHandle_t)NULL);
-    ulTaskNotifyTake(pdTRUE, prev == NULL ? pdMS_TO_TICKS(5) : 0);
+    ulTaskNotifyTake(pdTRUE, prev == NULL ? TX_DISARM_DRAIN_TICKS : 0);
 }
 
 static void cad_check_cb(bool detected) {
@@ -406,7 +412,8 @@ int radio_transmit_raw(const uint8_t* data, uint8_t len) {
                  irq_status, (irq_status & SX1262_IRQ_TX_DONE) ? 1 : 0,
                  (irq_status & SX1262_IRQ_TIMEOUT) ? 1 : 0);
         atomic_store(&s_state, RADIO_STATE_IDLE);
-        radio_standby();
+        /* radio_start_rx() does its own standby with error handling, so no
+         * bare unchecked standby here. */
         radio_start_rx();
         return -1;
     }

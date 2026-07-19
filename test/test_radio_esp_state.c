@@ -101,6 +101,16 @@ const bramble_board_config_t* board_get_config(void) { return &s_board_cfg; }
 static const char* s_fail_call;
 static int s_fail_code;
 
+/* When set, the fake behaves like a radio that really transmits: the TxDone
+ * IRQ fires once SetTx has been accepted, and radio_task turns that into a
+ * notification. Modelling it inside sx1262_set_tx is what lets a test drive
+ * radio_transmit_raw all the way through its ulTaskNotifyTake wait. */
+static bool s_simulate_txdone;
+
+/* Defined in radio_esp.c, which is included below. Declared here so the fake
+ * SetTx can invoke exactly the path radio_task uses to wake the sender. */
+static void wake_tx_waiter(void);
+
 /* Call counters for the commands the assertions care about. */
 static int s_calls_set_rx;
 static int s_calls_set_tx;
@@ -110,6 +120,7 @@ static int s_calls_set_packet_params;
 static void fake_reset(void) {
     s_fail_call = NULL;
     s_fail_code = 0;
+    s_simulate_txdone = false;
     s_calls_set_rx = 0;
     s_calls_set_tx = 0;
     s_calls_write_buffer = 0;
@@ -214,7 +225,12 @@ uint16_t sx1262_get_irq_status(void) { return 0; }
 int sx1262_set_tx(uint32_t timeout_ms) {
     (void)timeout_ms;
     s_calls_set_tx++;
-    return fake_rc("set_tx");
+    int rc = fake_rc("set_tx");
+    if (rc == 0 && s_simulate_txdone) {
+        /* Stand in for radio_task handling the TX_DONE IRQ. */
+        wake_tx_waiter();
+    }
+    return rc;
 }
 
 int sx1262_set_rx(uint32_t timeout_ms) {
@@ -287,11 +303,16 @@ static radio_config_t test_config(void) {
     return cfg;
 }
 
+static int s_tx_done_cb_calls;
+static void counting_tx_done_cb(void) { s_tx_done_cb_calls++; }
+
 void setUp(void) {
     fake_reset();
     s_config = test_config();
     atomic_store(&s_state, RADIO_STATE_IDLE);
     atomic_store(&s_tx_waiter, (TaskHandle_t)NULL);
+    s_tx_done_cb_calls = 0;
+    s_tx_done_cb = NULL;
 }
 
 void tearDown(void) {}
@@ -419,6 +440,57 @@ static void test_wake_tx_waiter_is_a_noop_when_the_sender_already_gave_up(void) 
     TEST_ASSERT_EQUAL_UINT32(0, s_notify_count);
 }
 
+/* ---------- the full TX wait, both outcomes (issue #80) ---------- */
+
+/* These drive radio_transmit_raw all the way through its ulTaskNotifyTake,
+ * which the abort-path tests above never reach. The notified == 0 branch is
+ * where the phantom-success bug actually lived. */
+
+static void test_transmit_completes_when_txdone_arrives(void) {
+    radio_set_tx_done_callback(counting_tx_done_cb);
+    s_simulate_txdone = true;
+    uint8_t frame[6] = {1, 2, 3, 4, 5, 6};
+
+    TEST_ASSERT_EQUAL_INT(0, radio_transmit_raw(frame, sizeof(frame)));
+    TEST_ASSERT_EQUAL_INT(1, s_calls_set_tx);
+    TEST_ASSERT_EQUAL_INT(1, s_tx_done_cb_calls);
+    /* Back to listening, and the waiter is released. */
+    TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+    TEST_ASSERT_NULL(atomic_load(&s_tx_waiter));
+    /* The notification was consumed, not left behind for the next frame. */
+    TEST_ASSERT_EQUAL_UINT32(0, s_notify_count);
+}
+
+static void test_transmit_reports_failure_when_txdone_never_arrives(void) {
+    radio_set_tx_done_callback(counting_tx_done_cb);
+    s_simulate_txdone = false; /* SetTx succeeds but the IRQ never fires */
+    uint8_t frame[6] = {1, 2, 3, 4, 5, 6};
+
+    TEST_ASSERT_EQUAL_INT(-1, radio_transmit_raw(frame, sizeof(frame)));
+    TEST_ASSERT_EQUAL_INT(1, s_calls_set_tx);
+    /* An unconfirmed frame must not run the TX-done callback: tx_gate keys
+     * its airtime debit off this return value. */
+    TEST_ASSERT_EQUAL_INT(0, s_tx_done_cb_calls);
+    /* Recovery branch put the radio back into RX. */
+    TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
+    TEST_ASSERT_NULL(atomic_load(&s_tx_waiter));
+}
+
+static void test_late_txdone_is_not_read_as_the_next_transmits_success(void) {
+    /* This is issue #80 exactly: a TxDone that landed just after the previous
+     * transmit's 4 second expiry is sitting in the notification counter with
+     * no owner. Before the fix, the next transmit consumed it and returned
+     * success for a frame that was never confirmed on air, while tx_gate
+     * debited its airtime. */
+    s_notify_count = 1;
+    radio_set_tx_done_callback(counting_tx_done_cb);
+    s_simulate_txdone = false;
+    uint8_t frame[6] = {1, 2, 3, 4, 5, 6};
+
+    TEST_ASSERT_EQUAL_INT(-1, radio_transmit_raw(frame, sizeof(frame)));
+    TEST_ASSERT_EQUAL_INT(0, s_tx_done_cb_calls);
+}
+
 /* ---------- sync word and sleep (issue #83) ---------- */
 
 static void test_reconfigure_fails_when_the_sync_word_write_fails(void) {
@@ -453,6 +525,10 @@ int main(void) {
     RUN_TEST(test_stale_notification_does_not_survive_into_the_next_transmit);
     RUN_TEST(test_wake_tx_waiter_claims_the_handle_exactly_once);
     RUN_TEST(test_wake_tx_waiter_is_a_noop_when_the_sender_already_gave_up);
+
+    RUN_TEST(test_transmit_completes_when_txdone_arrives);
+    RUN_TEST(test_transmit_reports_failure_when_txdone_never_arrives);
+    RUN_TEST(test_late_txdone_is_not_read_as_the_next_transmits_success);
 
     RUN_TEST(test_reconfigure_fails_when_the_sync_word_write_fails);
     RUN_TEST(test_sleep_does_not_claim_sleep_when_the_command_fails);
