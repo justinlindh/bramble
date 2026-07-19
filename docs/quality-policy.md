@@ -15,6 +15,7 @@ the full job topology and the always-report contract.
 
 - `Static checks` (one pod, `firmware-quality.yml`) runs, as named steps:
   - No internal refs (`bash scripts/lint/check-no-internal-refs.sh`)
+  - Board matrix coverage (`bash scripts/lint/check-board-matrix.sh`: the `board-build-smoke` matrix in `quality.yml` must list exactly the boards `scripts/ci-build-firmware.sh` releases)
   - Strict shellcheck (`bash scripts/lint/run-shellcheck.sh --strict`)
   - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
   - Strict clang-format, full scope (`bash scripts/lint/run-clang-format-check.sh --strict`)
@@ -24,6 +25,7 @@ the full job topology and the always-report contract.
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
 - `Release config` (`node scripts/release/semantic-release-squash-expander.test.cjs`, `quality.yml`): the release-rule scope-gating regression, run against the real `.releaserc.<component>.cjs` files, so a config change that would silently stop every component release fails the PR
 - `gosim integration` (builds and tests the simulator, `quality.yml`)
+- `Board build smoke (heltec-v3)`, `(tdeck-plus)`, `(heltec-v4)`, `(bramble-pager)` (`quality.yml`): one context per board, each running `bash scripts/flash.sh local <board> build`. `fail-fast: false`, so every board reports its own result
 - `Emulator suite` (`quality.yml`): the merged emulator scenario suite plus
   browser E2E. Uses the collect-then-fail pattern (below), so both suites
   always report and both gate.
@@ -54,9 +56,23 @@ fails the job when any collected step's `outcome` is not `success`, e.g.:
 `continue-on-error` without such a terminal gate is an advisory check in
 disguise and is not allowed.
 
-## Non-PR infra-backed required check
+## Non-PR infra-backed required checks
 
-- Board build smoke (`bash scripts/flash.sh local heltec-v3 build`) runs on non-PR events (push to `main` and the standard branch prefixes, or manual dispatch) where the `idf-node` runner is available.
+None. The board build smoke used to be the only one: it ran on non-PR events
+only, and it built only `heltec-v3`, so three of the four shipped board targets
+were never built by any automatic run and could break with every required
+context green. It is now a four-board matrix that gates PRs like every other
+required check.
+
+Written rationale for the strictness jump (required by "Change management"
+below): the change trades runner time for the largest gating hole in the
+pipeline. It is affordable because ESP-IDF ccache landed first, so the builds
+are incremental rather than cold, and `max-parallel: 2` caps how much of the
+self-hosted pool the matrix can occupy at once. The rollback lever is to
+restore the `github.event_name != 'pull_request'` guard on the job, which
+returns the four contexts to post-merge validation while keeping all four
+boards covered; shrinking the matrix back to `heltec-v3` is the second, larger
+step and would need `scripts/lint/check-board-matrix.sh` relaxed with it.
 
 ## Adding or fixing checks
 

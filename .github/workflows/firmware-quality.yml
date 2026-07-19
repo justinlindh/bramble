@@ -42,6 +42,12 @@ jobs:
           done
       - name: No internal refs
         run: bash scripts/lint/check-no-internal-refs.sh
+      - name: Board matrix covers every shipped board
+        # Guards the gating hole this check was added for: if a board is added
+        # to scripts/ci-build-firmware.sh (the release path) without being
+        # added to the board-build-smoke matrix in quality.yml, it would ship
+        # with no automatic build ever compiling it.
+        run: bash scripts/lint/check-board-matrix.sh
       - name: Required shellcheck (strict wrapper)
         run: bash scripts/lint/run-shellcheck.sh --strict
       - name: Ruff (required baseline profile)
