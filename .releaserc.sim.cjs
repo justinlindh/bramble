@@ -31,7 +31,17 @@ module.exports = {
         { type: 'feat', scope: 'sim', release: 'minor' },
         { type: 'fix', scope: 'sim', release: 'patch' },
         { type: 'perf', scope: 'sim', release: 'patch' },
-        { scope: '*', release: false }
+        // Suppress the preset default rules for any OTHER scope so an
+        // out-of-scope fix/feat never leaks a sim release. The negated glob
+        // is deliberate: a plain { scope: '*', release: false } would also
+        // match sim-scoped commits, and commit-analyzer treats a matched
+        // release:false as the highest-priority match (its index in the
+        // release-type table is -1), so it would shadow the specific sim
+        // rules above and suppress every sim release. Matching only non-sim
+        // scopes returns `false` for out-of-scope commits (blocking the
+        // default-rule fallback) while leaving in-scope commits to the
+        // specific rules.
+        { scope: '!(sim)', release: false }
       ],
       // Wrapped release-notes-generator options: only list sim-scoped
       // commits so the GitHub release notes stay component-specific.

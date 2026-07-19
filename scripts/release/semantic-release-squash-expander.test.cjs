@@ -226,6 +226,111 @@ if (inGitRepo) {
     });
 }
 
-if (process.exitCode) {
-    process.exit(process.exitCode);
+// ── release-rule scope-gating regression ────────────────────────────
+//
+// Loads each real .releaserc.<component>.cjs and runs its releaseRules
+// through the same squash-expander + @semantic-release/commit-analyzer path
+// the release workflow uses. Guards the bug where a { scope: '*', release:
+// false } catch-all shadowed every in-scope rule (commit-analyzer ranks a
+// matched release:false as the highest-priority match), so no component ever
+// cut a release. Asserts, per component, that an in-scope fix/feat/perf/
+// breaking releases at the right level while an out-of-scope or non-releasing
+// commit does not, and that an in-scope bullet inside a cross-component
+// squash body still releases.
+
+async function runReleaseRuleRegression() {
+    const path = require("path");
+    const REPO_ROOT = path.resolve(__dirname, "..", "..");
+    const COMPONENTS = ["firmware", "webapp", "protocol", "sim"];
+
+    // Loading a real .releaserc pulls in @semantic-release/commit-analyzer and
+    // @semantic-release/release-notes-generator. Those live in the ephemeral
+    // node_modules the release workflow installs, not in a bare dev checkout.
+    // When they are absent, skip loudly rather than fail; CI installs them and
+    // runs the real assertions (see the "Release config" gate in quality.yml).
+    try {
+        require(path.join(REPO_ROOT, ".releaserc.firmware.cjs"));
+    } catch (e) {
+        if (e && e.code === "MODULE_NOT_FOUND") {
+            console.log(
+                "SKIP release-rule scope-gating regression (@semantic-release/* not installed)",
+            );
+            return;
+        }
+        throw e;
+    }
+
+    const expander = require("./semantic-release-squash-expander.cjs");
+
+    async function releaseFor(component, message) {
+        const cfg = require(path.join(REPO_ROOT, `.releaserc.${component}.cjs`));
+        const pluginConfig = cfg.plugins[0][1];
+        return expander.analyzeCommits(pluginConfig, {
+            commits: [{ hash: "regression", message }],
+            logger: { log() {} },
+        });
+    }
+
+    for (const c of COMPONENTS) {
+        // Any other real scope: exercises the out-of-scope and cross-component
+        // paths against a scope that is genuinely not this component's.
+        const other = c === "webapp" ? "firmware" : "webapp";
+        const crossSquash = `feat(${other}): squash subject (#1)\n\n* fix(${c}): real in-scope fix\n\nbody`;
+        const expectations = [
+            [`fix(${c}): in-scope fix`, "patch"],
+            [`feat(${c}): in-scope feat`, "minor"],
+            [`perf(${c}): in-scope perf`, "patch"],
+            [`feat(${c})!: in-scope breaking change`, "major"],
+            [`fix(${other}): out-of-scope fix`, null],
+            ["docs: no scope at all", null],
+            [`chore(${c}): non-releasing type`, null],
+            [crossSquash, "patch"],
+        ];
+        for (const [message, expected] of expectations) {
+            const actual = await releaseFor(c, message);
+            const label = `${c}: ${JSON.stringify(message.split("\n")[0])} => ${JSON.stringify(
+                actual,
+            )} (expect ${JSON.stringify(expected)})`;
+            if (actual === expected) {
+                console.log(`PASS ${label}`);
+            } else {
+                console.error(`FAIL ${label}`);
+                process.exitCode = 1;
+            }
+        }
+    }
+
+    // Pin the KNOWN, PRE-EXISTING multi-scope limitation so a future change to
+    // it is deliberate. The specific rules match scope with plain micromatch
+    // (`scope: 'firmware'`), which compares against the whole scope string, so
+    // a comma-joined scope like `firmware,webapp` matches neither the specific
+    // firmware rule nor the negated `!(firmware)` catch-all and yields no
+    // release. This is unchanged by this fix (the old `scope: '*'` catch-all
+    // behaved identically here) and is orthogonal to the catch-all shadowing
+    // bug; the writerOpts.transform handles multi-scope for release NOTES, but
+    // the release DECISION does not. If multi-scope release decisions are ever
+    // wanted, change the rules deliberately and update this assertion.
+    const multiScope = await releaseFor("firmware", "feat(firmware,webapp): shared change");
+    if (multiScope === null) {
+        console.log('PASS firmware: multi-scope "feat(firmware,webapp)" => null (known limitation)');
+    } else {
+        console.error(
+            `FAIL firmware: multi-scope "feat(firmware,webapp)" => ${JSON.stringify(
+                multiScope,
+            )} (expected null, known limitation)`,
+        );
+        process.exitCode = 1;
+    }
 }
+
+runReleaseRuleRegression()
+    .catch((e) => {
+        console.error("FAIL release-rule scope-gating regression threw");
+        console.error(e);
+        process.exitCode = 1;
+    })
+    .finally(() => {
+        if (process.exitCode) {
+            process.exit(process.exitCode);
+        }
+    });
