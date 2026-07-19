@@ -35,6 +35,9 @@ linux:
 mac:
   target:
     - dmg
+  # Both arch dmgs are built, so make the arch explicit in both filenames
+  # (the default omits it for x64).
+  artifactName: ${productName}-${version}-${arch}.${ext}
   icon: public/bramble-logo.png
   category: public.app-category.utilities
   hardenedRuntime: true
@@ -47,6 +50,9 @@ win:
   icon: public/bramble-logo.png
 
 nsis:
+  # No spaces in the filename (the default is "Bramble Setup x.y.z.exe";
+  # GitHub rewrites spaces in release asset names).
+  artifactName: ${productName}-Setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: true
