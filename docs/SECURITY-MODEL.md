@@ -31,8 +31,15 @@ header is bound to the ciphertext as AEAD associated data. Location packets
 are encrypted end to end (section 3), and routing control traffic
 (RREP, RERR, beacon, ACK, delivery receipt) carries a network-key HMAC
 plus a per-message freshness sequence (section 3): against a
-provisioned fleet, this attacker can neither forge nor replay any of the
-five control-plane message types. Against an unprovisioned fleet there is
+provisioned fleet, this attacker cannot forge any of the five
+control-plane message types, and cannot replay one against a node that has
+been running continuously since it saw the original. Replay across a
+reboot is NOT closed: the replay windows are RAM-only
+(`replay_table_init` at `main/mesh_task.c:6424-6425`, no NVS save or
+restore anywhere in the tree) while sender-side counters persist, so a
+captured batch replayed in ascending counter order after the target
+reboots is accepted as fresh. Tracked as issue #72; see the residuals note
+in section 3. Against an unprovisioned fleet there is
 no HMAC key at all: an unprovisioned node is inert (fail-closed, section
 3), so it emits no authenticated control traffic and rejects every control
 frame before comparing, and there is no public fallback key an outsider
@@ -54,7 +61,11 @@ by omission. Replay is different: the per-signer control freshness window
 verified message, not on who is currently transmitting it, so it also
 rejects an insider re-transmitting a captured, genuinely-valid message
 signed by someone else, exactly like it rejects an outsider doing the
-same. Only forgery, not replay, remains open to this adversary.
+same, for as long as that window survives. It does not survive a reboot:
+the window is RAM-only, so an insider holding captured frames can replay
+them at a rebooted target exactly as an outsider can (issue #72). Forgery
+remains open to this adversary by design, and replay remains open across a
+target reboot until the replay state is persisted.
 
 **Mailbox or relay operator.** Any node forwards packets, and a node with
 mailbox mode enabled stores ciphertext for offline peers. The design intends
@@ -97,7 +108,17 @@ it is not enabled.
   as WS, with a first-write handshake and throttled retries
   (`components/ble/ble_server.c`); pre-handshake JSON-RPC is limited to the
   same identification allowlist, and dispatcher notifications are withheld
-  until the handshake succeeds.
+  until the handshake succeeds. The link itself is unencrypted and
+  unbonded: the NimBLE host is configured with only `reset_cb` and
+  `sync_cb` (`components/ble/ble_server.c:473-474`, no `sm_bonding`,
+  `sm_sc`, `sm_mitm`, or `sm_io_cap`), and the characteristics are plain
+  `BLE_GATT_CHR_F_WRITE` and `BLE_GATT_CHR_F_NOTIFY` with no `_ENC` or
+  `_AUTHEN` variant. So, exactly as with the plaintext-HTTP case above, a
+  passive sniffer in range during any legitimate app connection reads
+  everything, token included, and can then reconnect and drive the full
+  authenticated RPC surface. Tracked as issue #73; the fix is a NimBLE
+  security manager with bonding plus encryption-requiring characteristic
+  flags.
 
 **Compromised OTA source.** An attacker who controls the firmware download
 server, the URL given to the device, or the TLS path. Three controls stack
@@ -688,7 +709,7 @@ learns that a node is running location sharing and roughly how often it
 updates, from packet type and timing alone, even with coordinates hidden
 (section 5).
 
-### Per-sender replay windows for DATA and LOCATION (SEC-M1, closed)
+### Per-sender replay windows for DATA and LOCATION (SEC-M1, closed within a boot; reboot residual open as issue #72)
 
 Received DATA and LOCATION packets are checked against a per-sender sliding
 replay window keyed on `(src_addr, nonce_counter_extract(nonce))`, enforced
@@ -732,6 +753,22 @@ Residuals: a 64-entry sender table and a 128-entry tier-2 LRU evict the
 oldest tracked sender under load, which loses replay history for an
 evicted-then-later-returning sender (needs 64, respectively 128,
 concurrent distinct senders to matter).
+
+The larger residual is reboot. All of this state is RAM-only: both tables
+are initialized empty at boot (`replay_table_init(&s_replay)` and
+`replay_table_init(&s_control_replay)`, `main/mesh_task.c:6424-6425`) and
+nothing in the tree saves or restores them to NVS. A fresh slot accepts
+any counter (`components/replay_window/replay_window.c:49-53`), and the
+tier-1 accept path applies no `sent_at` freshness gate (that check runs
+only on the below-window path, `main/mesh_task.c:2692`), while the
+sender-side counter is persistent (`nonce_counter_next`,
+`main/mesh_task.c:1468-1478`). So an attacker who captured a batch of
+authenticated frames can replay them in ascending counter order after the
+target reboots and have them accepted as fresh. A replayed RERR tears down
+routes; replayed LOCATION and CHAT are privacy and integrity problems; and
+an OTA update is itself a reboot, so the trigger is available to an
+attacker rather than merely incidental. This is an open gap, tracked as
+issue #72, not a closed control.
 
 ### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge and replay closed under a provisioned key, insider forgery and NEW-SEC-4's Sybil-minting residual remain, its bootstrap race closed by the per-boot grace)
 
@@ -821,8 +858,11 @@ narrower beacon/ACK/receipt cases. The freshness field is what the
 `BRAMBLE_VERSION` 2-to-3 wire bump exists for (a flag day: see
 `docs/bramble-protocol-spec.md`).
 
-Provisioning plus this freshness work together close outsider forgery and
-outsider replay for all five message types. They do **not** close
+Provisioning plus this freshness work together close outsider forgery for
+all five message types, and close outsider replay for as long as the
+receiver stays up: the freshness state is RAM-only and does not survive a
+reboot, so replay against a freshly-booted target remains open (issue #72,
+detailed under the per-sender replay windows above). They do **not** close
 SEC-H1, SEC-H2, NEW-SEC-4, or NEW-SEC-8 outright: a network-key insider
 can still forge a message on behalf of any other holder (inherent to a
 shared symmetric key, accepted, see section 5), and NEW-SEC-4's
@@ -1073,6 +1113,25 @@ same PR that fixes it.
   credentials travel only in headers (an `Authorization` header, or for
   browser clients a `Sec-WebSocket-Protocol` subprotocol offer), never in
   the URL (`main/ws_server.c`).
+- **The BLE link is unencrypted and unbonded** (issue #73). The NimBLE host
+  sets only `reset_cb` and `sync_cb` (`components/ble/ble_server.c:473-474`);
+  there is no security-manager configuration (`sm_bonding`, `sm_sc`,
+  `sm_mitm`, `sm_io_cap`) anywhere in `components/ble/`, and the NUS
+  characteristics are plain `BLE_GATT_CHR_F_WRITE` /
+  `BLE_GATT_CHR_F_NOTIFY` with no `_ENC` or `_AUTHEN` variant. The RPC auth
+  token is compared against a raw first-line GATT write, so a passive
+  sniffer in range during a legitimate app connection captures the token
+  and gains the full authenticated RPC surface. Same exposure class as the
+  plaintext-HTTP bullet above.
+- **Replay windows are RAM-only and reset on reboot** (issue #72). Both
+  tables are initialized empty at boot (`main/mesh_task.c:6424-6425`) with
+  no NVS save or restore anywhere in the tree, a fresh slot accepts any
+  counter (`components/replay_window/replay_window.c:49-53`), and the
+  tier-1 accept path has no `sent_at` freshness gate, while the sender-side
+  counter is durable across reboots (`nonce_counter_next`). A captured
+  batch replayed in ascending counter order after the target reboots is
+  therefore accepted as fresh. An OTA update is itself a reboot, so the
+  trigger is attacker-reachable.
 - **OTA signatures are enforced at update time, not at boot.** Images are
   signed and verified on every OTA write, the update origin is allowlisted,
   and a soft anti-rollback floor rejects downgrades, but without burned
