@@ -1,4 +1,5 @@
 #include "unity.h"
+#include <openssl/rand.h>
 #include "../components/crypto/crypto_host.c"
 #include "../components/identity/identity.c"
 
@@ -168,8 +169,88 @@ void test_identity_migration_from_x25519_only_store(void) {
                              BRAMBLE_ED25519_SECKEY_SIZE);
 }
 
+/* --- Fail-closed contract for crypto_generate_identity (issue #71) --------
+ * The header promises *id is left byte-for-byte untouched on ANY failure.
+ * Force the RNG to fail so the function takes an error path, then assert the
+ * caller's buffer really is untouched. Before the fix the X25519 private and
+ * public keys were written into *id before the Ed25519 step could fail, so a
+ * caller that ignored the return value got live-looking key material. */
+/* Fail the Nth and every later RAND draw, delegating earlier ones to the real
+ * RNG. Sweeping N walks the failure point through the function: N == 0 fails
+ * the X25519 keygen (nothing written yet), while a later N lets the X25519 key
+ * succeed and fails the Ed25519 seed draw, which is the partial-write path
+ * where the pre-fix code had already stored real key material in *id. Sweeping
+ * rather than hardcoding an N keeps the test robust to how many RAND calls
+ * OpenSSL makes internally. */
+static const RAND_METHOD* g_real_rand;
+static int g_rand_calls;
+static int g_rand_fail_after;
+
+static int counting_rand_bytes(unsigned char* buf, int num) {
+    if (g_rand_calls++ >= g_rand_fail_after)
+        return 0; /* 0 = failure for a RAND_METHOD */
+    return g_real_rand->bytes(buf, num);
+}
+static int counting_rand_status(void) { return 1; }
+
+void test_generate_identity_leaves_id_untouched_on_rng_failure(void) {
+/* RAND_set_rand_method is deprecated in OpenSSL 3 but is still the only
+ * portable seam for forcing RAND_bytes to fail from a test. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    static RAND_METHOD counting_method = {
+        NULL, counting_rand_bytes, NULL, NULL, counting_rand_bytes, counting_rand_status,
+    };
+    g_real_rand = RAND_get_rand_method();
+
+    int saw_failure = 0;
+    for (int fail_after = 0; fail_after <= 8; fail_after++) {
+        bramble_identity_t id;
+        memset(&id, 0xA5, sizeof(id));
+        bramble_identity_t before;
+        memcpy(&before, &id, sizeof(id));
+
+        g_rand_calls = 0;
+        g_rand_fail_after = fail_after;
+        RAND_set_rand_method(&counting_method);
+        int rc = crypto_generate_identity(&id);
+        RAND_set_rand_method(g_real_rand);
+
+        if (rc != 0) {
+            saw_failure = 1;
+            /* The contract: a failed call leaves the caller's buffer exactly
+             * as it found it, so no key material (whole or partial) escapes. */
+            TEST_ASSERT_EQUAL_MEMORY(&before, &id, sizeof(id));
+        }
+    }
+#pragma GCC diagnostic pop
+
+    /* Guard against the injection silently not working and the loop above
+     * asserting nothing. */
+    TEST_ASSERT_TRUE_MESSAGE(saw_failure, "RNG fault injection never induced a failure");
+}
+
+void test_generate_identity_overwrites_every_field_on_success(void) {
+    /* The commit is a single whole-struct copy, so nothing stale survives a
+     * successful call into the caller's buffer. */
+    bramble_identity_t id;
+    memset(&id, 0xA5, sizeof(id));
+    TEST_ASSERT_EQUAL(0, crypto_generate_identity(&id));
+
+    bramble_identity_t poison;
+    memset(&poison, 0xA5, sizeof(poison));
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(id.private_key, poison.private_key, sizeof(id.private_key)));
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(id.public_key, poison.public_key, sizeof(id.public_key)));
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(id.ed25519_private_key, poison.ed25519_private_key,
+                                    sizeof(id.ed25519_private_key)));
+    TEST_ASSERT_NOT_EQUAL(
+        0, memcmp(id.ed25519_public_key, poison.ed25519_public_key, sizeof(id.ed25519_public_key)));
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_generate_identity_leaves_id_untouched_on_rng_failure);
+    RUN_TEST(test_generate_identity_overwrites_every_field_on_success);
     RUN_TEST(test_collision_same_addr_different_hash);
     RUN_TEST(test_no_collision_same_identity);
     RUN_TEST(test_no_collision_different_addr);

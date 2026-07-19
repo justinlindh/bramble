@@ -5157,7 +5157,9 @@ static dm_pending_eph_t* pending_eph_lookup(uint32_t peer_addr) {
 static void pending_eph_clear(uint32_t peer_addr) {
     for (int i = 0; i < DM_MAX_HANDSHAKING; i++) {
         if (s_pending_eph[i].used && s_pending_eph[i].peer_addr == peer_addr) {
-            memset(&s_pending_eph[i], 0, sizeof(s_pending_eph[i]));
+            /* Holds eph_priv, an ephemeral X25519 private key: secure wipe, not
+             * memset, for the dead-store elision hazard crypto.h documents. */
+            crypto_secure_wipe(&s_pending_eph[i], sizeof(s_pending_eph[i]));
             return;
         }
     }
@@ -5329,7 +5331,15 @@ static void flush_session_queue(uint32_t dest_addr) {
  */
 static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t rekey_epoch) {
     bramble_identity_t my_eph;
-    crypto_generate_identity(&my_eph);
+    /* Fail closed (SEC-L1): crypto_generate_identity returns -1 without touching
+     * the key material when the entropy gate is shut or the curve mult fails.
+     * Using my_eph unchecked would put uninitialized stack on the wire as an
+     * ephemeral public key. No handshake is strictly better than a weak one. */
+    if (crypto_generate_identity(&my_eph) != 0) {
+        ESP_LOGE(TAG, "Ephemeral keygen failed, INIT to %08" PRIX32 " aborted", dest_addr);
+        crypto_secure_wipe(&my_eph, sizeof(my_eph));
+        return;
+    }
 
     uint8_t peer_id_pub[32] = {0}; /* only read when have_peer_id (guards cppcheck uninitvar) */
     int have_peer_id = 0;
@@ -5349,10 +5359,16 @@ static void initiate_dm_handshake(uint32_t dest_addr, int channel_idx, uint16_t 
     if (dm_build_init(s_identity, my_eph.public_key, my_eph.private_key, dest_addr, rekey_epoch,
                       have_peer_id ? peer_id_pub : NULL, &init) != 0) {
         ESP_LOGE(TAG, "dm_build_init failed for %08" PRIX32, dest_addr);
+        crypto_secure_wipe(&my_eph, sizeof(my_eph));
         return;
     }
 
     pending_eph_store(dest_addr, my_eph.private_key, my_eph.public_key);
+    /* pending_eph_store owns the copy the RESP will be verified against; this
+     * stack identity (X25519 private key plus a 64-byte Ed25519 private key) is
+     * dead from here. crypto_secure_wipe, not memset, so the compiler cannot
+     * elide the wipe as a dead store to an about-to-go-out-of-scope object. */
+    crypto_secure_wipe(&my_eph, sizeof(my_eph));
 
     if (send_ke_envelope(dest_addr, channel_idx, &init) == 0) {
         ESP_LOGW(TAG, "Failed to send INIT to %08" PRIX32, dest_addr);
@@ -5512,7 +5528,14 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     }
 
     bramble_identity_t my_eph;
-    crypto_generate_identity(&my_eph);
+    /* Fail closed (SEC-L1), same rationale as initiate_dm_handshake: an
+     * unchecked failure here would answer the INIT with uninitialized stack as
+     * our ephemeral public key. Drop the handshake instead; the peer retries. */
+    if (crypto_generate_identity(&my_eph) != 0) {
+        ESP_LOGE(TAG, "Ephemeral keygen failed, RESP to %08" PRIX32 " aborted", src_addr);
+        crypto_secure_wipe(&my_eph, sizeof(my_eph));
+        return;
+    }
     uint16_t ke_epoch = (uint16_t)init->key_id;
 
     bramble_key_exchange_t resp;
@@ -5520,6 +5543,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     if (dm_build_resp(s_identity, my_eph.public_key, my_eph.private_key, init, ke_epoch, &resp,
                       session_key) != 0) {
         ESP_LOGE(TAG, "dm_build_resp failed for %08" PRIX32, src_addr);
+        crypto_secure_wipe(&my_eph, sizeof(my_eph));
         return;
     }
 
@@ -5530,6 +5554,9 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     uint8_t ikm[128];
     int ikm_ok = dm_compute_ikm(s_identity->private_key, my_eph.private_key, init->long_term_pubkey,
                                 init->ephemeral_pubkey, ikm);
+    /* Last use of the ephemeral private key: wipe before the mutex section so
+     * every path out of the rest of this function leaves no copy on the stack. */
+    crypto_secure_wipe(&my_eph, sizeof(my_eph));
 
     xSemaphoreTake(s_dm_mutex, portMAX_DELAY);
     dm_session_t* sess = dm_alloc(s_dm_table, src_addr, now_ms());
@@ -5566,7 +5593,9 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
         }
     }
     DM_MUTEX_GIVE();
-    memset(ikm, 0, sizeof(ikm));
+    /* crypto_secure_wipe, not memset: the IKM is root-key material and a plain
+     * memset on a soon-dead buffer is elidable as a dead store (crypto.h). */
+    crypto_secure_wipe(ikm, sizeof(ikm));
 
     if (!sess) {
         ESP_LOGW(TAG, "No DM session slot available to establish session with %08" PRIX32,
@@ -5657,7 +5686,8 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
         }
     }
     DM_MUTEX_GIVE();
-    memset(ikm, 0, sizeof(ikm));
+    /* Same dead-store hazard as process_ke_init: wipe, do not memset. */
+    crypto_secure_wipe(ikm, sizeof(ikm));
 
     pending_eph_clear(src_addr);
 
