@@ -1471,6 +1471,37 @@ target_include_directories(test_ws_auth PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
 )
 
+# WebSocket server tests: auth enforcement on every frame, per-connection
+# auth-state isolation, fail-closed paths, framing, lifecycle, and the
+# notification throttle. #includes main/ws_server.c directly so its static
+# handlers and static client table are reachable; the ESP-IDF httpd it sits
+# on is met by the host fake in stubs/ws/. stubs/ws must precede ../main on
+# the include path so its lightweight mesh_task.h shadows the real header,
+# which would otherwise drag the whole mesh stack onto the host.
+add_executable(test_ws_server
+    test_ws_server.c
+    unity/unity.c
+    stubs/cJSON.c
+    stubs/ws/esp_http_server_fake.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_origin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/ws_auth_credential.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+)
+target_include_directories(test_ws_server PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs/ws
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+target_compile_definitions(test_ws_server PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=16
+)
+
 # WS Origin allowlist policy tests (pure decision unit)
 add_executable(test_ws_origin
     test_ws_origin.c
