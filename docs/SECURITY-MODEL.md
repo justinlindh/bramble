@@ -335,9 +335,10 @@ there is *no* public-PSK fallback to derive one from
 `BRAMBLE_PUBLIC_CHANNEL_PSK`). Provisioned, the HMAC proves the sender
 holds the network key, which is real authentication against outsiders, but
 not against another key holder forging a fresh beacon (section 5). Freshness (below)
-closes replay of a captured, genuinely valid beacon, but not forgery by
-another key holder. Do not treat a provisioned beacon HMAC as more than
-that.
+closes replay of a captured, genuinely valid beacon within a boot (the
+window is RAM-only, so replay reopens against a rebooted receiver: issue
+#72), and does not close forgery by another key holder at all. Do not
+treat a provisioned beacon HMAC as more than that.
 
 ### RREQ origination rate limiting
 
@@ -701,7 +702,9 @@ channel-shared and direct-session paths (`mesh_send_location_packet`,
 the authenticated plaintext (byte 0) rather than the cleartext header, and
 every LOCATION ciphertext pads to one canonical size regardless of tier, so
 ciphertext length does not leak which tier was chosen. A per-sender replay
-window (shared with DATA, below) rejects replayed location updates; a
+window (shared with DATA, below) rejects replayed location updates within a
+boot (the window is RAM-only, so replay reopens against a rebooted
+receiver: issue #72, detailed in that section); a
 below-window location update is dropped, never deferred, since location is
 real-time and a stale position accepted late is worse than one dropped.
 Residual: an observer still
@@ -770,7 +773,7 @@ an OTA update is itself a reboot, so the trigger is available to an
 attacker rather than merely incidental. This is an open gap, tracked as
 issue #72, not a closed control.
 
-### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge and replay closed under a provisioned key, insider forgery and NEW-SEC-4's Sybil-minting residual remain, its bootstrap race closed by the per-boot grace)
+### Control-plane authentication: RREP, RERR, ACK, delivery receipt, beacon (SEC-H1, SEC-H2, NEW-SEC-4, NEW-SEC-8; outsider forge closed under a provisioned key, outsider replay closed within a boot with the reboot residual open as issue #72, insider forgery and NEW-SEC-4's Sybil-minting residual remain, its bootstrap race closed by the per-boot grace)
 
 Every routing and reliability control message carries a network-key
 HMAC, verified before the message
@@ -1047,7 +1050,9 @@ properties matter here.
 holder's traffic propagates. The flooded ACK is verified twice before relay:
 `ack_verify` (network-key MAC) and the per-message freshness check
 against the control-replay window (the control-plane section above), so a
-forged or replayed ACK is neither relayed nor allowed to confirm anything.
+forged ACK is neither relayed nor allowed to confirm anything, and neither
+is a replayed one for as long as the receiver has been up since it saw the
+original (the freshness window is RAM-only: issue #72).
 
 **Confirmed delivery without routes.** The flooded ACK gives the original
 sender sender-confirmation with no route table consulted anywhere on the path:
@@ -1210,7 +1215,9 @@ These do not go away when section 4 empties out.
   message types.
 - **Control-plane freshness authenticates the sequence, not the signer's
   honesty.** The per-message freshness on RREP, RERR, beacon, ACK, and
-  delivery receipt (section 3) rejects replay of a captured message, but
+  delivery receipt (section 3) rejects replay of a captured message within
+  a boot (the window is RAM-only, so replay reopens against a rebooted
+  receiver: issue #72, section 4), but
   it does not stop a network-key insider from forging a message with a
   fresh, self-issued sequence (the insider-forgery residual above), and
   freshness does not address NEW-SEC-4 (below): the bootstrap-quorum race
@@ -1503,7 +1510,8 @@ These do not go away when section 4 empties out.
   them in transit, producing a cosmetic hop-trail change in the UI even
   where the core `src_addr`/packet-id/seq binding holds. This is in-flight
   tampering during a single legitimate transit, not replay: the
-  freshness work (section 3) closes replay of the message as a whole. The
+  freshness work (section 3) closes replay of the message as a whole for as
+  long as the receiver stays up (issue #72 for the reboot residual). The
   LOCATION channel-message decode path does not assert `app_type ==
   APP_TYPE_LOCATION` before parsing (defense-in-depth only; it is inside the
   AEAD trust boundary and memory-safe either way).
@@ -1533,7 +1541,8 @@ These do not go away when section 4 empties out.
   - **Keyed-insider residual unchanged.** A network-key holder can still forge a
     flood frame or ACK (every MAC here proves "signed by a holder", not "by a
     specific node"); replay of a captured valid frame is caught by the
-    control-replay window, but insider forgery is inherent to a shared symmetric
+    control-replay window within a boot (RAM-only, issue #72), but
+    insider forgery is inherent to a shared symmetric
     key (the insider-forgery residual above).
 
 ## 6. How to think about Bramble's privacy
