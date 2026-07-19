@@ -2,8 +2,9 @@
 
 A virtual Bramble Pager v1: the real firmware compiled for ESP-IDF's linux
 target, N virtual pagers on a simulated RF ether (gosim), rendered in a
-browser as the physical device. See `DESIGN.md` for the architecture and
-`PLAN.md` for the implementation plan.
+browser as the physical device. See `DESIGN.md` for the architecture. The
+original Phase 1 implementation plan is archived at
+`docs/archive/plans/emulator-plan.md`.
 
 ## Quick start
 

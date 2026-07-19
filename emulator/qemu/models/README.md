@@ -37,5 +37,5 @@ stock-QEMU fixes (see `patches/README.md`).
 - `bramble_emulink.c` / `.h`: the emu-link transport (chardev, hello, JSON
   dispatch, the `tx`/`fb`/raw send helpers) to the gosim ether.
 
-See `emulator/PHASE2.md` for the full spec and `emulator/qemu/README.md` for
-the build/run instructions.
+See `docs/archive/plans/emulator-phase2-qemu-spec.md` for the full spec and
+`emulator/qemu/README.md` for the build/run instructions.

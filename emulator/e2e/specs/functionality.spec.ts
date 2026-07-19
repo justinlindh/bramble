@@ -1,6 +1,7 @@
 // functionality.spec.ts
 //
-// PLAN.md Task 13, deliverable 3: basic FUNCTIONALITY through the real UI --
+// Archived emulator plan (docs/archive/plans/emulator-plan.md) Task 13,
+// deliverable 3: basic FUNCTIONALITY through the real UI --
 // device cards, boot screen, button input, reset persistence, and the
 // headline end-to-end message (real firmware A sends, real firmware B
 // receives and renders, the browser shows it) -- plus the two no-regression

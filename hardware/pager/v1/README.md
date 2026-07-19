@@ -11,7 +11,8 @@ built for JLCPCB economic PCBA. This directory is the source of truth for the de
 **Status:** design complete and merged to `main` (schematic, PCB, BOM, and enclosure done;
 firmware board profile `main/boards/bramble_pager.h` landed). Boards are **not yet ordered**:
 the pre-fab gates in [`ERRATA.md`](ERRATA.md) (FPC 1:1 fold mockup, bench-verified 0x9D
-DIO2 RF-switch flag, final DRC 0/0/0) must close first. See [`REVIEW-2026-07-10.md`](REVIEW-2026-07-10.md)
+DIO2 RF-switch flag, final DRC 0/0/0) must close first. See
+[the archived pre-fab review](../../../docs/archive/plans/pager-v1-review-2026-07-10.md)
 for the independent pre-fab review and [`SOURCING.md`](SOURCING.md) for the hand-purchased
 (non-JLCPCB) parts. Production outputs (gerbers, BOM, positions) are under
 [`kicad/production/`](kicad/production/).
@@ -42,11 +43,9 @@ either disagrees with a `.kicad_sch`, the schematic is right and the doc is a bu
 hardware/pager/v1/
 ├── README.md            # this file
 ├── DESIGN.md            # authoritative spec: requirements, pin map, blocks, invariants
-├── PLAN.md              # implementation plan
 ├── COMPONENTS.md        # per-component catalogue (derived)
 ├── NET_TOPOLOGY.md      # net-by-net wiring prose (derived)
 ├── ERRATA.md            # errata + pre-fab open items
-├── REVIEW-2026-07-10.md # independent pre-fab hardware review
 ├── SOURCING.md          # hand-purchased (non-JLCPCB) parts + live sources
 ├── mockup-fpc-1to1.pdf  # 1:1 FPC fold mockup (print gate before ordering)
 ├── case/                # OpenSCAD enclosure + exported STLs
@@ -62,6 +61,11 @@ hardware/pager/v1/
     ├── production/      # fabrication outputs: gerbers, bom.csv, positions
     └── easyeda/         # imported footprints/symbols (dimension-verified)
 ```
+
+The original implementation plan and the independent pre-fab review are historical
+process artifacts and live under [`docs/archive/plans/`](../../../docs/archive/plans/):
+[`pager-v1-plan.md`](../../../docs/archive/plans/pager-v1-plan.md) and
+[`pager-v1-review-2026-07-10.md`](../../../docs/archive/plans/pager-v1-review-2026-07-10.md).
 
 ## Validation gates
 

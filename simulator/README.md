@@ -180,6 +180,7 @@ All added/moved nodes are full protocol participants (beaconing, routing, forwar
 - Simulator architecture: the "Architecture" section above, plus the inline
   documentation in `gosim/`
 - Component architecture: [`../docs/bramble-architecture.md`](../docs/bramble-architecture.md)
+- Protocol spec: [`../docs/bramble-protocol-spec.md`](../docs/bramble-protocol-spec.md)
 - Anomaly detection: [`../docs/bramble-anomaly-detection.md`](../docs/bramble-anomaly-detection.md)
 - Emulator (real firmware binaries on this same ether):
   [`../emulator/README.md`](../emulator/README.md) and `../emulator/DESIGN.md`
