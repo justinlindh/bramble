@@ -195,8 +195,14 @@ jobs:
 
   webapp-installers-linux-win:
     needs: release
+    # Gate on the webapp_published output, not needs.release.result: the webapp
+    # release step runs before the sim and firmware-image steps, so a failure in
+    # one of those later steps marks the whole release job 'failure' even though
+    # the webapp release already published. Its outputs stay readable regardless,
+    # so keying on the output attaches installers to a real release that would
+    # otherwise be left bare.
     if: >-
-      (needs.release.result == 'success' && needs.release.outputs.webapp_published == 'true') ||
+      needs.release.outputs.webapp_published == 'true' ||
       (needs.release.result == 'skipped' && inputs.webapp_installers_tag != '')
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
@@ -264,8 +270,9 @@ jobs:
 
   webapp-installers-mac:
     needs: release
+    # See webapp-installers-linux-win: gate on the output, not the job result.
     if: >-
-      (needs.release.result == 'success' && needs.release.outputs.webapp_published == 'true') ||
+      needs.release.outputs.webapp_published == 'true' ||
       (needs.release.result == 'skipped' && inputs.webapp_installers_tag != '')
     # Hosted mac runner on purpose (never RUNNER_LABEL: the self-hosted pool
     # is Linux). One arm64 runner packages both dmgs: the app has no native
@@ -333,7 +340,7 @@ jobs:
       needs.webapp-installers-linux-win.result == 'success' &&
       needs.webapp-installers-mac.result == 'success' &&
       !(github.event_name == 'workflow_dispatch' && inputs.dry_run) &&
-      ((needs.release.result == 'success' && needs.release.outputs.webapp_published == 'true') ||
+      (needs.release.outputs.webapp_published == 'true' ||
        (needs.release.result == 'skipped' && inputs.webapp_installers_tag != ''))
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
