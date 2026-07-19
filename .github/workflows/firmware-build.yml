@@ -20,7 +20,7 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -169,7 +169,7 @@ jobs:
 
       - name: Upload firmware artifacts
         if: startsWith(github.server_url, 'https://github.com')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-build-artifacts
           path: |

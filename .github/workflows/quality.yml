@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assert host test deps are pre-baked on the runner
         run: |
           for tool in cmake make gcc g++; do
@@ -95,7 +95,7 @@ jobs:
       matrix:
         board: [heltec-v3, tdeck-plus, heltec-v4, bramble-pager]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
       - name: Ensure ESP-IDF toolchain
         if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
@@ -113,7 +113,7 @@ jobs:
         if: |
           (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true') &&
           steps.ccache.outputs.available == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ steps.ccache.outputs.dir }}
           key: ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-${{ github.run_id }}
@@ -152,8 +152,8 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Install semantic-release analyzer deps
@@ -182,8 +182,8 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26.1'
       - name: Assert cgo build deps are pre-baked on the runner
@@ -220,13 +220,13 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Mark workspace safe for git inside the job container
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26.1'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Ensure ESP-IDF toolchain
@@ -236,7 +236,7 @@ jobs:
         run: bash scripts/ci-ccache-env.sh
       - name: Restore ccache
         if: steps.ccache.outputs.available == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ steps.ccache.outputs.dir }}
           key: ccache-emulator-linux-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('emulator/node/sdkconfig.defaults*', 'emulator/node/CMakeLists.txt') }}-${{ github.run_id }}
@@ -290,7 +290,7 @@ jobs:
         # The full gosim event logs (frames, console, deaths) outlive the pod
         # so a failure's evidence is never lost to a discarded mktemp.
         if: steps.scenarios.outcome != 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: emu-scenario-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/emu-scenario-logs/

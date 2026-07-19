@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Assert required tools are pre-baked on the runner
         run: |
           for tool in shellcheck clang-format cppcheck actionlint uv; do
