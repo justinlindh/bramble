@@ -373,7 +373,23 @@ static int emu_link_attach(int fd, const char* node_id, const char* caps_csv) {
     s_fd = fd;
     pthread_mutex_unlock(&s_send_mu);
 
-    if (pthread_create(&s_reader_thread, NULL, reader_main, (void*)(intptr_t)fd) != 0) {
+    /* Create the reader with ALL signals blocked so it INHERITS a fully-masked
+     * mask from birth. reader_main masks signals as its first act, but it is
+     * spawned from a running FreeRTOS task (unblocked mask), so between thread
+     * start and that first masking call there is a window in which the port's
+     * process-directed SIGALRM tick can be delivered to this raw thread and run
+     * the scheduler on it, corrupting current-task state (the assertion-abort
+     * node deaths documented on reader_main). The window is microseconds but
+     * widens under CPU starvation (a shared CI runner), where the child may not
+     * be scheduled to reach its masking call for a while. Blocking in the parent
+     * and restoring after pthread_create closes the window entirely; the mask in
+     * reader_main is now redundant but kept as defense in depth. */
+    sigset_t all_sigs, prev_sigs;
+    sigfillset(&all_sigs);
+    pthread_sigmask(SIG_BLOCK, &all_sigs, &prev_sigs);
+    int rc = pthread_create(&s_reader_thread, NULL, reader_main, (void*)(intptr_t)fd);
+    pthread_sigmask(SIG_SETMASK, &prev_sigs, NULL);
+    if (rc != 0) {
         send_mu_lock();
         s_fd = -1;
         pthread_mutex_unlock(&s_send_mu);

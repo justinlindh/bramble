@@ -359,7 +359,13 @@ dm_suite() {
 gps_suite() {
     echo "[3] emu-gps-fix"
     local GPS_LOG=""
-    run_scenario emu-gps-fix 90 GPS_LOG
+    # Budget is a hang-guard, not a pacing knob: gosim exits on its own at the
+    # scenario's 90s duration_ms, so on a healthy box this returns in ~90s. The
+    # budget must exceed the WALL-CLOCK time a CPU-starved runner takes to reach
+    # 90s of sim, or timeout SIGTERMs the node mid-run and check_no_deaths reads
+    # that as a false death. 90s (== duration, zero margin) did exactly that on a
+    # slow pod; 180s matches the other suites' 2x margin.
+    run_scenario emu-gps-fix 180 GPS_LOG
 
     # STRICT death rule first: a death is the primary regression signal here.
     check_no_deaths "$GPS_LOG" 1 "emu-gps-fix" || return 1
