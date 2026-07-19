@@ -72,6 +72,10 @@ describe('DEVELOPMENT_CSP', () => {
 
   it('shares every other directive with production (only script-src differs)', () => {
     const prodDirectives = parseDirectives(PRODUCTION_CSP);
+    // Symmetric: the same directive NAMES on both sides, so development
+    // gaining an extra directive production lacks also fails, not just a
+    // value mismatch on a shared name.
+    expect(Object.keys(directives).sort()).toEqual(Object.keys(prodDirectives).sort());
     for (const name of Object.keys(prodDirectives)) {
       if (name === 'script-src') continue;
       expect(directives[name]).toBe(prodDirectives[name]);
