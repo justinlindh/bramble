@@ -69,7 +69,16 @@ jobs:
 
           missing=0
           for header in "${headers[@]}"; do
-            if printf '%s\n' "$body" | grep -qxF "$header"; then
+            # A herestring, not a pipe: under `set -o pipefail`, `grep -qxF`
+            # exiting on its first match sends SIGPIPE to whatever is still
+            # writing the other end of the pipe. When the header matched
+            # early in a long body, that raced a real match against a
+            # "broken pipe" write error, and pipefail surfaced the write
+            # error as the pipeline's exit status even though grep found the
+            # header, turning a real match into a false "missing" (observed
+            # on PR #208). A herestring hands grep its input with no
+            # concurrent writer to sigpipe, so there is nothing to race.
+            if grep -qxF "$header" <<<"$body"; then
               echo "ok: $header"
             else
               echo "missing: $header"
