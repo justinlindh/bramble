@@ -91,8 +91,17 @@ exactly 128x64.
 The Pager is an early, alpha-stage device. Its screens are rendered from the
 real firmware in the emulator (the SSD1680 250x122 e-paper profile), through
 the same screen ring as the Heltec. Images are upscaled 6x from the native
-250x122; the source panel is exactly 250x122. The faint ghosting on some
-screens is genuine e-paper partial-refresh behavior, not a rendering artifact.
+250x122; the source panel is exactly 250x122.
+
+Several captures show heavy ghosting: text from previously displayed screens
+remains overlaid on the current one. On the Settings capture this makes the
+middle rows genuinely hard to read, with "Rotation: Off" rendering over ghosted
+digits from the GPS screen. This is real e-paper partial-refresh behavior
+rather than a capture or rendering artifact, and it is what the device
+currently looks like in that state, which is why the images are published
+as-is. It is a display defect worth fixing rather than a documentation
+problem: the pager screen ring never issues a full-panel refresh to clear
+accumulated ghosting when switching screens.
 
 | Screen | |
 | --- | --- |
