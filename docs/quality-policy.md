@@ -25,7 +25,7 @@ the full job topology and the always-report contract.
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
 - `Release config` (`node scripts/release/semantic-release-squash-expander.test.cjs`, `quality.yml`): the release-rule scope-gating regression, run against the real `.releaserc.<component>.cjs` files, so a config change that would silently stop every component release fails the PR
 - `gosim integration` (builds and tests the simulator, `quality.yml`)
-- `Board build smoke (heltec-v3)`, `(tdeck-plus)`, `(heltec-v4)`, `(bramble-pager)` (`quality.yml`): one context per board, each running `bash scripts/flash.sh local <board> build`. `fail-fast: false`, so every board reports its own result
+- `Board build smoke (heltec-v3)`, `(tdeck-plus)`, `(heltec-v4)`, `(bramble-pager)` (`quality.yml`): one context per board, each running `bash scripts/flash.sh local <board> build`. `fail-fast: false`, so every board reports its own result. The `firmware or workflows` area gate is on the job's steps rather than on the job, because a false job-level `if:` prevents GitHub from expanding the matrix at all and collapses the four contexts into one check run named with the raw literal `Board build smoke (${{ matrix.board }})`. Step-level gating keeps all four contexts reporting on every PR, so they are safe to require
 - `Emulator suite` (`quality.yml`): the merged emulator scenario suite plus
   browser E2E. Uses the collect-then-fail pattern (below), so both suites
   always report and both gate.
@@ -72,7 +72,10 @@ self-hosted pool the matrix can occupy at once. The rollback lever is to
 restore the `github.event_name != 'pull_request'` guard on the job, which
 returns the four contexts to post-merge validation while keeping all four
 boards covered; shrinking the matrix back to `heltec-v3` is the second, larger
-step and would need `scripts/lint/check-board-matrix.sh` relaxed with it.
+step and would need `scripts/lint/check-board-matrix.sh` relaxed with it. Note
+that the rollback lever must be applied to the job's steps, not to the job: a
+job-level `if:` on a matrix job stops the matrix expanding and strands the four
+required contexts.
 
 ## Adding or fixing checks
 

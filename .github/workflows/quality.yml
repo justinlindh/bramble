@@ -68,9 +68,19 @@ jobs:
     # (heltec-v3)", "(tdeck-plus)", "(heltec-v4)", and "(bramble-pager)". The
     # heltec-v3 one keeps the exact name the un-matrixed job had, so the
     # existing required check is preserved; the other three are NEW required
-    # context names and must be added to branch protection.
+    # context names and can be added to branch protection.
+    #
+    # THE AREA GATE IS ON THE STEPS, NOT THE JOB, AND MUST STAY THERE.
+    # A job-level `if:` that evaluates false stops GitHub from ever expanding
+    # the matrix: instead of four check runs it publishes a single one carrying
+    # the raw literal "Board build smoke (${{ matrix.board }})". Required
+    # contexts named after the expanded legs would then never report on a
+    # docs-only, webapp-only, or dependency PR, and branch protection would
+    # wait for them forever. Gating each step instead keeps the matrix
+    # unconditional: every leg always produces its real context, and out of
+    # scope it reports success having done no work. That is what the
+    # always-report contract in docs/ci.md requires.
     needs: detect
-    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
@@ -86,10 +96,13 @@ jobs:
         board: [heltec-v3, tdeck-plus, heltec-v4, bramble-pager]
     steps:
       - uses: actions/checkout@v4
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
       - name: Ensure ESP-IDF toolchain
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
         run: bash scripts/ci-ensure-idf.sh
       - name: Configure ccache
         id: ccache
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
         # Sets IDF_CCACHE_ENABLE (the env switch idf.py reads to put ccache in
         # front of the compiler) and pins CCACHE_DIR outside the workspace and
         # outside the overridden HOME the build step uses. Emits the ESP-IDF
@@ -97,7 +110,9 @@ jobs:
         # reuse objects built by the previous compiler.
         run: bash scripts/ci-ccache-env.sh
       - name: Restore ccache
-        if: steps.ccache.outputs.available == 'true'
+        if: |
+          (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true') &&
+          steps.ccache.outputs.available == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ steps.ccache.outputs.dir }}
@@ -106,6 +121,7 @@ jobs:
             ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-
             ccache-${{ matrix.board }}-idf${{ steps.ccache.outputs.idf_version }}-
       - name: Build ${{ matrix.board }} via wrapper
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
         env:
           HOME: /tmp/cihome
           ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
@@ -117,7 +133,10 @@ jobs:
           source scripts/ci-source-idf.sh
           bash scripts/flash.sh local "${{ matrix.board }}" build
       - name: ccache statistics
-        if: always() && steps.ccache.outputs.available == 'true'
+        if: |
+          always() &&
+          (needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true') &&
+          steps.ccache.outputs.available == 'true'
         run: ccache --show-stats
 
   release-config:
