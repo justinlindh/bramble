@@ -67,7 +67,7 @@
       "dest": "C"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 45000,
       "node": "C",
       "x": 200,
@@ -86,7 +86,7 @@
       "dest": "A"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 70000,
       "node": "C",
       "x": 200,
