@@ -94,6 +94,43 @@ jobs:
         if: always() && steps.ccache.outputs.available == 'true'
         run: ccache --show-stats
 
+  fuzz:
+    name: Parser fuzzing
+    # Bounded libFuzzer campaign over components/packet/packet.c and the
+    # fragment reassembler, the code that parses attacker-controlled LoRa
+    # frames before any AEAD tag or HMAC is verified (issue #76). The seed
+    # corpora are committed, so 30 seconds per target is a real gate rather
+    # than a coin flip: the run starts from valid frames of every wire type
+    # instead of rediscovering the formats from scratch.
+    needs: detect
+    if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert clang with libFuzzer is pre-baked on the runner
+        # Hard failure, never a skip. A missing toolchain that silently
+        # passed the job would be an advisory check in disguise, which
+        # docs/quality-policy.md forbids. run_fuzz.sh repeats this probe so
+        # a local run fails the same way.
+        run: |
+          command -v clang >/dev/null || { echo "::error::clang missing from runner image (needed for libFuzzer)"; exit 1; }
+          clang --version
+      - name: Run bounded fuzzing campaign
+        env:
+          FUZZ_SECONDS: '30'
+        run: bash test/fuzz/run_fuzz.sh
+      - name: Upload crash reproducers on failure
+        # The reproducing input is the entire value of a fuzz finding, and
+        # it lives in a pod that is about to disappear.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test/fuzz/artifacts/
+          retention-days: 14
+          if-no-files-found: ignore
+
   release-config:
     name: Release config
     # The per-component semantic-release configs (.releaserc.<component>.cjs)
