@@ -248,6 +248,13 @@ jobs:
           # hang forever without a display (observed locally).
           WINEDLLOVERRIDES: "mscoree,mshtml="
           WINEDEBUG: "-all"
+          # The container runs as root (--user 0:0), but the Actions runner
+          # injects HOME=/github/home, which the self-hosted runner mounts
+          # owned by a different uid. wine refuses to create its config dir in
+          # a directory it does not own ("not owned by you"), failing the
+          # Windows rcedit step. Point HOME at root's own home so wine and the
+          # electron-builder cache land in a uid-0-owned, writable location.
+          HOME: /root
           VER: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
