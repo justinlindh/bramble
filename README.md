@@ -71,7 +71,7 @@ Bramble includes a web client for live network operation and monitoring. It prov
 ![Stats](docs/images/webapp-stats.png)
 ![Config](docs/images/webapp-config.png)
 
-See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior and usage notes.
+See [docs/webapp/chat.md](docs/webapp/chat.md) for current web client behavior and usage notes. To run it from source, `cd webapp && npm ci && npm run dev`; [webapp/README.md](webapp/README.md) covers the dev workflow, the WiFi-transport backend, and the Electron builds.
 
 A desktop app (Linux, Windows, macOS) is also available, built from the same webapp. It connects directly to nodes on your local network instead of going through a hosted proxy, and can discover nodes on the LAN automatically. See [docs/webapp/desktop.md](docs/webapp/desktop.md).
 

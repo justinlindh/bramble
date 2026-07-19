@@ -54,15 +54,21 @@ What you need depends on what you want to touch.
 (gcc or clang), `make`, and `bash`. The host test suite compiles the protocol
 code natively and needs no ESP-IDF.
 
-**Webapp:** Node.js and npm.
+**Webapp:** Node.js 20 or newer, and npm. That is what CI builds and tests
+with, it is the `engines` floor in `webapp/package.json`, and the repo root
+ships an [`.nvmrc`](.nvmrc) so `nvm use` picks a matching version.
 
 ```bash
 cd webapp
 npm ci
 ```
 
+More detail, including the dev server and the WiFi-transport backend, is in
+[webapp/README.md](webapp/README.md).
+
 **Simulator:** Go and a C toolchain (gosim compiles real firmware C into the Go
-binary via cgo).
+binary via cgo). `simulator/gosim/go.mod` sets the language floor; CI builds
+with a newer patch release, and any Go at or above the `go` directive works.
 
 ```bash
 cd simulator/gosim

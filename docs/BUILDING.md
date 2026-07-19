@@ -2,6 +2,11 @@
 
 This doc is the source of truth for firmware build/flash workflows.
 
+If you do not want to install a toolchain, skip to
+[Building in the container](#building-in-the-container-no-toolchain-install):
+the repo ships the same ESP-IDF image CI uses, and it builds firmware with
+Docker as the only host prerequisite.
+
 ## Recommended workflow (board-aware wrapper)
 
 Use `scripts/flash.sh` for all normal firmware builds and flashes. It applies the correct board defaults, build directory, and SDKCONFIG file.
@@ -100,6 +105,52 @@ Per-board sdkconfig files:
 Main firmware artifact:
 
 - `<board-build-dir>/bramble.bin`
+
+---
+
+## Building in the container (no toolchain install)
+
+`docker/firmware-builder/Dockerfile` is the image Bramble's firmware CI runs
+on. It is a normal container, so you can use it locally and skip installing
+ESP-IDF entirely. Docker is the only host prerequisite.
+
+Build the image once from the root of your checkout:
+
+```bash
+docker build -t bramble/idf-node:v5.4.1 docker/firmware-builder
+```
+
+Then build firmware by mounting your checkout at `/workspace`:
+
+```bash
+docker run --rm \
+  -v "$PWD":/workspace -w /workspace \
+  --user "$(id -u):$(id -g)" \
+  bramble/idf-node:v5.4.1 \
+  bash -lc 'source $IDF_PATH/export.sh >/dev/null && bash scripts/flash.sh local heltec-v3 build'
+```
+
+Swap `heltec-v3` for any board name from the wrapper section above. The
+artifacts land in `build-<board>/` in your checkout exactly as a host build
+would, so `build-heltec-v3/bramble.bin` is ready to flash.
+
+Two things worth knowing:
+
+- **Pass `--user`.** Without it the container runs as root and leaves
+  root-owned `build-<board>/`, `sdkconfig.<board>`, and
+  `keys/ota_signing_key.pem` files in your working tree. The signing key is
+  generated mode `0600`, so a later non-root build cannot read it and fails
+  with "Secure Boot Signing Key keys/ota_signing_key.pem does not exist". If
+  you hit that, delete the root-owned key and build directory and start again
+  with `--user`.
+- **Building is not flashing.** This path covers build only. Flashing needs
+  the serial device passed into the container, which is not covered here; run
+  `bash scripts/flash.sh local <board> flash <port>` on the host against the
+  artifacts the container produced.
+
+The image contents, its version pins, and how it is published for the CI
+runner fleet are documented in
+[ci/idf-node-runner-image.md](ci/idf-node-runner-image.md).
 
 ---
 
