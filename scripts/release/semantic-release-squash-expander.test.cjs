@@ -299,6 +299,28 @@ async function runReleaseRuleRegression() {
             }
         }
     }
+
+    // Pin the KNOWN, PRE-EXISTING multi-scope limitation so a future change to
+    // it is deliberate. The specific rules match scope with plain micromatch
+    // (`scope: 'firmware'`), which compares against the whole scope string, so
+    // a comma-joined scope like `firmware,webapp` matches neither the specific
+    // firmware rule nor the negated `!(firmware)` catch-all and yields no
+    // release. This is unchanged by this fix (the old `scope: '*'` catch-all
+    // behaved identically here) and is orthogonal to the catch-all shadowing
+    // bug; the writerOpts.transform handles multi-scope for release NOTES, but
+    // the release DECISION does not. If multi-scope release decisions are ever
+    // wanted, change the rules deliberately and update this assertion.
+    const multiScope = await releaseFor("firmware", "feat(firmware,webapp): shared change");
+    if (multiScope === null) {
+        console.log('PASS firmware: multi-scope "feat(firmware,webapp)" => null (known limitation)');
+    } else {
+        console.error(
+            `FAIL firmware: multi-scope "feat(firmware,webapp)" => ${JSON.stringify(
+                multiScope,
+            )} (expected null, known limitation)`,
+        );
+        process.exitCode = 1;
+    }
 }
 
 runReleaseRuleRegression()
