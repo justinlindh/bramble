@@ -18,6 +18,15 @@ on:
         required: false
         default: false
         type: boolean
+      webapp_installers_tag:
+        description: >-
+          Existing webapp-vX.Y.Z tag to rebuild desktop installers for.
+          Skips semantic-release entirely and re-attaches the installers to
+          that tag's release (idempotent replace). Combine with dry_run to
+          build the installers without uploading anything.
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -37,7 +46,14 @@ defaults:
 
 jobs:
   release:
+    # Skipped only when a manual dispatch asks to rebuild installers for an
+    # existing webapp tag; the installer jobs below key off that skip.
+    if: github.event_name != 'workflow_dispatch' || inputs.webapp_installers_tag == ''
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    outputs:
+      webapp_published: ${{ steps.webapp.outputs.published }}
+      webapp_tag: ${{ steps.webapp.outputs.tag }}
+      webapp_version: ${{ steps.webapp.outputs.version }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # "true" only on a manual dispatch that requested a dry run; empty on push.
@@ -93,11 +109,26 @@ jobs:
           fi
 
       - name: Release webapp
+        id: webapp
         run: |
+          # Same tag-diff publish detection as the firmware step above; the
+          # desktop-installer jobs below consume these outputs.
+          before="$(git tag -l 'webapp-v*' | sort -V)"
           if [ "$DRY" = "true" ]; then
             npx semantic-release --extends ./.releaserc.webapp.cjs --dry-run
           else
             npx semantic-release --extends ./.releaserc.webapp.cjs
+          fi
+          after="$(git tag -l 'webapp-v*' | sort -V)"
+          new="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | tail -1)"
+          if [ -n "$new" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$new" >> "$GITHUB_OUTPUT"
+            echo "version=${new#webapp-v}" >> "$GITHUB_OUTPUT"
+            echo "Webapp release published: $new"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "No webapp release published this run"
           fi
 
       - name: Release sim
@@ -142,3 +173,202 @@ jobs:
             "$FW_TAG" \
             dist/factory/bramble_*_factory.bin \
             dist/factory/SHA256SUMS
+
+  # ---------------------------------------------------------------------------
+  # Desktop installers for the webapp release. Linux (AppImage, deb, pacman)
+  # and Windows (NSIS) cross-build in electronuserland/builder:wine on the
+  # Linux runner; macOS dmgs need real Apple hardware, so they build on a
+  # GitHub-hosted mac runner. All installers are UNSIGNED: there are no Apple
+  # or Windows code-signing certificates, CSC_IDENTITY_AUTO_DISCOVERY stays
+  # false, and users will see the usual Gatekeeper / SmartScreen warnings.
+  # The OTA firmware signing chain is unrelated to and untouched by these jobs.
+  #
+  # semantic-release does not commit a version bump into webapp/package.json
+  # (.releaserc.webapp.cjs has no npm/git plugin), so every build injects the
+  # released version with -c.extraMetadata.version; installer filenames and
+  # app.getVersion() then match the webapp-vX.Y.Z tag.
+  #
+  # Each job's explicit `if:` REPLACES the implicit success() gate, so every
+  # gate re-checks needs.*.result explicitly. The jobs run either when the
+  # release job just published a webapp release, or when a manual dispatch
+  # named an existing tag via webapp_installers_tag (release job skipped).
+
+  webapp-installers-linux-win:
+    needs: release
+    # Gate on the webapp_published output, not needs.release.result: the webapp
+    # release step runs before the sim and firmware-image steps, so a failure in
+    # one of those later steps marks the whole release job 'failure' even though
+    # the webapp release already published. Its outputs stay readable regardless,
+    # so keying on the output attaches installers to a real release that would
+    # otherwise be left bare.
+    if: >-
+      needs.release.outputs.webapp_published == 'true' ||
+      (needs.release.result == 'skipped' && inputs.webapp_installers_tag != '')
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      # electron-builder's own image: node + wine for NSIS cross-builds.
+      image: electronuserland/builder:wine
+      options: --user 0:0
+    env:
+      WEBAPP_TAG: ${{ inputs.webapp_installers_tag || needs.release.outputs.webapp_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # On a normal release run the tag sits on this push's HEAD, so the
+          # default sha is the tagged commit; a manual rebuild checks out the
+          # requested tag itself.
+          ref: ${{ inputs.webapp_installers_tag || github.sha }}
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          set -euo pipefail
+          case "$WEBAPP_TAG" in
+            webapp-v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Unexpected webapp tag: '$WEBAPP_TAG'" >&2; exit 1 ;;
+          esac
+          echo "version=${WEBAPP_TAG#webapp-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build renderer and electron bundles
+        run: |
+          set -euo pipefail
+          cd webapp
+          npm ci
+          npm run build:electron
+
+      - name: Package Linux and Windows installers
+        env:
+          # Installers are unsigned; suppress signing lookups.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # Headless wine: skip the mono/gecko first-run installers, which
+          # hang forever without a display (observed locally).
+          WINEDLLOVERRIDES: "mscoree,mshtml="
+          WINEDEBUG: "-all"
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd webapp
+          npx electron-builder --linux --win --config electron-builder.yml \
+            -c.extraMetadata.version="$VER"
+          ls -lh release/ | grep -v -e '^total' -e 'unpacked'
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-installers-linux-win
+          path: |
+            webapp/release/*.AppImage
+            webapp/release/*.deb
+            webapp/release/*.pacman
+            webapp/release/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  webapp-installers-mac:
+    needs: release
+    # See webapp-installers-linux-win: gate on the output, not the job result.
+    if: >-
+      needs.release.outputs.webapp_published == 'true' ||
+      (needs.release.result == 'skipped' && inputs.webapp_installers_tag != '')
+    # Hosted mac runner on purpose (never RUNNER_LABEL: the self-hosted pool
+    # is Linux). One arm64 runner packages both dmgs: the app has no native
+    # runtime modules (all runtime deps are pure JS; verified against
+    # webapp/package-lock.json install-script/gypfile markers), so
+    # electron-builder just fetches the per-arch Electron binaries.
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      WEBAPP_TAG: ${{ inputs.webapp_installers_tag || needs.release.outputs.webapp_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.webapp_installers_tag || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          set -euo pipefail
+          case "$WEBAPP_TAG" in
+            webapp-v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Unexpected webapp tag: '$WEBAPP_TAG'" >&2; exit 1 ;;
+          esac
+          echo "version=${WEBAPP_TAG#webapp-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build renderer and electron bundles
+        run: |
+          set -euo pipefail
+          cd webapp
+          npm ci
+          npm run build:electron
+
+      - name: Package macOS dmgs (arm64 + x64, unsigned)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd webapp
+          npx electron-builder --mac --arm64 --x64 --config electron-builder.yml \
+            -c.extraMetadata.version="$VER"
+          ls -lh release/ | grep -v -e '^total' -e 'unpacked'
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp-installers-mac
+          path: webapp/release/*.dmg
+          if-no-files-found: error
+          retention-days: 1
+
+  webapp-installers-publish:
+    needs: [release, webapp-installers-linux-win, webapp-installers-mac]
+    # Both build legs must have succeeded (a partial installer set must never
+    # publish), and a dry-run dispatch builds without uploading.
+    if: >-
+      needs.webapp-installers-linux-win.result == 'success' &&
+      needs.webapp-installers-mac.result == 'success' &&
+      !(github.event_name == 'workflow_dispatch' && inputs.dry_run) &&
+      (needs.release.outputs.webapp_published == 'true' ||
+       (needs.release.result == 'skipped' && inputs.webapp_installers_tag != ''))
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      WEBAPP_TAG: ${{ inputs.webapp_installers_tag || needs.release.outputs.webapp_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.webapp_installers_tag || github.sha }}
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/installers
+          pattern: webapp-installers-*
+          merge-multiple: true
+
+      # semantic-release created the release for this tag; the script attaches
+      # the assets idempotently (replace-by-name), which also makes manual
+      # re-attach runs safe.
+      - name: Attach installers to webapp release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -l dist/installers
+          ( cd dist/installers && sha256sum -- * > SHA256SUMS && cat SHA256SUMS )
+          bash scripts/release/attach-release-assets.sh "$WEBAPP_TAG" dist/installers/*

@@ -30,31 +30,72 @@ if [[ ${#files[@]} -eq 0 ]]; then
   exit 0
 fi
 
+# MAX_FILES limits the scan for a quick spot check; the default scans the
+# whole candidate set.
+if [[ -n "${MAX_FILES:-}" ]] && (( MAX_FILES < ${#files[@]} )); then
+  files=("${files[@]:0:MAX_FILES}")
+fi
+
+tmp_dir="$(mktemp -d)"
 tmp_out="$(mktemp)"
-trap 'rm -f "$tmp_out"' EXIT
+trap 'rm -rf "$tmp_dir"; rm -f "$tmp_out"' EXIT
 
-max_files=20
-scanned=0
-for f in "${files[@]}"; do
-  ((scanned++))
-  if (( scanned > max_files )); then
-    break
-  fi
-  clang-tidy -p "$build_dir" "$f" >>"$tmp_out" 2>&1 || true
+# The IDF build drives gcc, and its compile commands carry gcc-only codegen
+# flags that clang rejects as hard errors on every file, drowning real
+# findings. Scan against a sanitized copy of the compile database with those
+# flags stripped. Needs jq; without it, fall back to the raw database.
+scan_db_dir="$build_dir"
+if command -v jq >/dev/null 2>&1; then
+  mkdir "$tmp_dir/db"
+  jq '[.[] | if has("command") then
+        .command |= gsub(" -(mlongcalls|fno-shrink-wrap|fno-tree-switch-conversion|fstrict-volatile-bitfields) "; " ")
+      else . end]' "$compile_db" >"$tmp_dir/db/compile_commands.json"
+  scan_db_dir="$tmp_dir/db"
+else
+  echo "[clang-tidy] NOTE: jq not found; scanning against the raw compile database (gcc-only flags may add noise)."
+fi
 
-  if grep -q "unknown target triple 'xtensa-esp32s3-unknown-elf'" "$tmp_out"; then
-    echo "[clang-tidy] SKIP: local clang-tidy cannot parse ESP-IDF xtensa compile flags from $compile_db."
-    echo "[clang-tidy] Advisory note: run clang-tidy in an environment with xtensa-capable LLVM or host-target compile commands."
-    exit 0
+# Findings go to stdout; stderr only carries the "N warnings generated" /
+# "Suppressed N warnings" stats boilerplate, which would make every file
+# look like it has findings, so stderr is dropped (probe excepted).
+# Probe with the first file serially: a clang-tidy that cannot parse the
+# ESP-IDF xtensa compile flags at all fails identically on every file, so
+# detect that before fanning out across the full set.
+clang-tidy -p "$scan_db_dir" "${files[0]}" >"$tmp_dir/000000.out" 2>"$tmp_dir/probe.err" || true
+if grep -q "unknown target triple 'xtensa-esp32s3-unknown-elf'" "$tmp_dir/probe.err" "$tmp_dir/000000.out"; then
+  echo "[clang-tidy] SKIP: local clang-tidy cannot parse ESP-IDF xtensa compile flags from $compile_db."
+  echo "[clang-tidy] Advisory note: run clang-tidy in an environment with xtensa-capable LLVM or host-target compile commands."
+  exit 0
+fi
+
+# Scan the rest in parallel, one output file per source keyed by a
+# zero-padded input index so the aggregate stays in input order.
+jobs="$(nproc)"
+export CT_SCAN_DB_DIR="$scan_db_dir" CT_TMP_DIR="$tmp_dir"
+if (( ${#files[@]} > 1 )); then
+  # shellcheck disable=SC2016  # single quotes intended: expansion happens in the child bash, from the exported CT_* env
+  for i in "${!files[@]}"; do
+    (( i == 0 )) && continue
+    printf '%06d %s\0' "$i" "${files[$i]}"
+  done | xargs -0 -P "$jobs" -n 1 bash -c \
+    'idx="${0%% *}"; f="${0#* }"; clang-tidy -p "$CT_SCAN_DB_DIR" "$f" >"$CT_TMP_DIR/$idx.out" 2>/dev/null || true'
+
+fi
+
+with_findings=0
+for out in "$tmp_dir"/*.out; do
+  if [[ -s "$out" ]]; then
+    with_findings=$((with_findings + 1))
+    cat "$out" >>"$tmp_out"
   fi
 done
 
 if [[ -s "$tmp_out" ]]; then
-  echo "[clang-tidy] ADVISORY: findings detected in first $(( scanned < max_files ? scanned : max_files )) files (showing up to 250 lines)."
+  echo "[clang-tidy] ADVISORY: findings in $with_findings of ${#files[@]} scanned files (showing up to 250 lines)."
   sed -n '1,250p' "$tmp_out"
   echo "[clang-tidy] Note: advisory mode, returning success."
   exit 0
 fi
 
-echo "[clang-tidy] PASS: no findings in scanned file subset."
+echo "[clang-tidy] PASS: no findings in ${#files[@]} scanned files."
 exit 0

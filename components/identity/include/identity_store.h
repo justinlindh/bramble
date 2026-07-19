@@ -129,8 +129,9 @@ typedef struct {
 typedef struct {
     identity_pin_t entries[IDENTITY_STORE_CAPACITY];
     /* This node's boot reference (identity_store_init's now_ms). The
-     * bounded bootstrap-quorum grace is measured from here; RAM-only like
-     * the pins, so it resets with them on reboot. */
+     * bounded bootstrap-quorum grace is measured from here. Unlike the
+     * pins, which persist to NVS, boot_ms is per-boot, so the grace
+     * window re-opens on every reboot. */
     uint32_t boot_ms;
     /* Diagnostics counters (impersonation signal): conflicts counts
      * rejected re-bind attempts against a pinned address; sig_failures
