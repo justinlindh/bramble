@@ -779,7 +779,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		// Apply the unprovisioned override AFTER join (join defaults the node
 		// to provisioned). An unprovisioned node is inert for the whole run.
 		if unprovisioned[C.GoString(&node.id[0])] {
-			nodeSetProvisioned(i, false)
+			nodeMarkUnprovisioned(i)
 			s.emitJSON(map[string]interface{}{
 				"type": "node_unprovisioned", "timestamp_us": 0,
 				"node": C.GoString(&node.id[0]),
@@ -791,7 +791,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		// no fleet-anchor cert for the whole run, so anchored receivers never
 		// pin it.
 		if unendorsed[C.GoString(&node.id[0])] {
-			nodeSetEndorsed(i, false)
+			nodeMarkUnendorsed(i)
 			s.emitJSON(map[string]interface{}{
 				"type": "node_unendorsed", "timestamp_us": 0,
 				"node": C.GoString(&node.id[0]),
@@ -802,7 +802,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 		// AFTER join (join anchors the node to the fleet anchor). An unanchored
 		// node TOFU-pins until a provision_anchor event hardens it.
 		if unanchored[C.GoString(&node.id[0])] {
-			nodeSetAnchored(i, false)
+			nodeMarkUnanchored(i)
 			s.emitJSON(map[string]interface{}{
 				"type": "node_unanchored", "timestamp_us": 0,
 				"node": C.GoString(&node.id[0]),
