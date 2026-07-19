@@ -201,9 +201,14 @@ jobs:
     # the webapp release already published. Its outputs stay readable regardless,
     # so keying on the output attaches installers to a real release that would
     # otherwise be left bare.
+    # !cancelled() lifts the implicit success() gate: a webapp_installers_tag
+    # dispatch skips the release job on purpose, and without a status function
+    # here GitHub would skip this dependent job too before ever reading the
+    # condition below.
     if: >-
-      needs.release.outputs.webapp_published == 'true' ||
-      (needs.release.result == 'skipped' && inputs.webapp_installers_tag != '')
+      !cancelled() &&
+      (needs.release.outputs.webapp_published == 'true' ||
+       (needs.release.result == 'skipped' && inputs.webapp_installers_tag != ''))
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
@@ -278,9 +283,14 @@ jobs:
   webapp-installers-mac:
     needs: release
     # See webapp-installers-linux-win: gate on the output, not the job result.
+    # !cancelled() lifts the implicit success() gate: a webapp_installers_tag
+    # dispatch skips the release job on purpose, and without a status function
+    # here GitHub would skip this dependent job too before ever reading the
+    # condition below.
     if: >-
-      needs.release.outputs.webapp_published == 'true' ||
-      (needs.release.result == 'skipped' && inputs.webapp_installers_tag != '')
+      !cancelled() &&
+      (needs.release.outputs.webapp_published == 'true' ||
+       (needs.release.result == 'skipped' && inputs.webapp_installers_tag != ''))
     # Hosted mac runner on purpose (never RUNNER_LABEL: the self-hosted pool
     # is Linux). One arm64 runner packages both dmgs: the app has no native
     # runtime modules (all runtime deps are pure JS; verified against
@@ -343,7 +353,11 @@ jobs:
     needs: [release, webapp-installers-linux-win, webapp-installers-mac]
     # Both build legs must have succeeded (a partial installer set must never
     # publish), and a dry-run dispatch builds without uploading.
+    # !cancelled() lifts the implicit success() gate so this job is evaluated
+    # even though the release job is skipped on a webapp_installers_tag
+    # dispatch; the explicit result checks below still require both build legs.
     if: >-
+      !cancelled() &&
       needs.webapp-installers-linux-win.result == 'success' &&
       needs.webapp-installers-mac.result == 'success' &&
       !(github.event_name == 'workflow_dispatch' && inputs.dry_run) &&
