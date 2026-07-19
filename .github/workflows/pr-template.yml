@@ -34,9 +34,19 @@ jobs:
       - name: Verify PR body contains every template section header
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           TEMPLATE: .github/PULL_REQUEST_TEMPLATE.md
         run: |
           set -euo pipefail
+
+          # Dependabot writes its own machine-generated body (changelog and
+          # commit list) and cannot be made to follow the template. The check
+          # still runs and still reports, so the required context is never
+          # missing; it just has nothing human-authored to enforce against.
+          if [ "${PR_AUTHOR:-}" = "dependabot[bot]" ]; then
+            echo "Author is dependabot[bot]; the template does not apply to generated dependency PRs."
+            exit 0
+          fi
 
           if [ ! -f "$TEMPLATE" ]; then
             echo "No PR template at $TEMPLATE; nothing to enforce."
