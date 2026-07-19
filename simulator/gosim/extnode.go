@@ -558,10 +558,11 @@ func (ec *extConn) handleGpsGate(msg *emuInbound) {
 // scheduleNMEAFeed schedules the next sentence pair for a gated-on node.
 // Must be called under s.mu. The action re-schedules itself for as long as
 // the gate stays on and the generation matches (fireBrokerActions runs
-// actions under s.mu, so the checks and the re-schedule are race-free);
-// sendJSON only enqueues onto the connection's buffered channel and drops
-// when closed, so a departed node ends the chain via the generation check on
-// its next gate message or lets the inert sends fall out harmlessly.
+// actions under s.mu, so the checks and the re-schedule are race-free). The
+// chain ends when the node sends gpsgate off (both set under s.mu in
+// handleGpsGate) or when the connection closes (close() clears gpsOn and
+// bumps gpsGen under s.mu), so a reset or crashed node cannot leave an
+// immortal feed running.
 func (s *Sim) scheduleNMEAFeed(ec *extConn, gen uint64) {
 	s.scheduleBrokerAction(s.simTime+nmeaFeedIntervalUs, func() {
 		if !ec.gpsOn || ec.gpsGen != gen {
@@ -613,6 +614,12 @@ func (ec *extConn) close() {
 		s := b.sim
 
 		s.mu.Lock()
+		// End any in-flight NMEA feed: a node whose GPS gate was on when it
+		// reset or crashed sends no gate-off message, so without this the
+		// self-rescheduling feed action would reschedule forever (and every
+		// such reset would add another immortal chain to pendingBrokerActions).
+		ec.gpsOn = false
+		ec.gpsGen++
 		if ec.addr != 0 && s.extConns[ec.addr] == ec {
 			delete(s.extConns, ec.addr)
 			if node := C.node_array_find_by_addr(&s.nodes, C.uint32_t(ec.addr)); node != nil {

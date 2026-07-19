@@ -170,6 +170,12 @@ int gps_set_enabled(bool enabled) {
     if (!s_pump_started) {
         if (xTaskCreate(gvirt_pump_task, "gvirt_pump", 4096, NULL, 10, NULL) != pdPASS) {
             ESP_LOGE(TAG, "failed to create nmea pump task");
+            /* Unlatch the gate we just set: with no pump the ring would never
+             * drain, so leaving s_gate_on true would strand the driver in a
+             * powered-on state that never produces a fix. */
+            pthread_mutex_lock(&s_mu);
+            s_gate_on = false;
+            pthread_mutex_unlock(&s_mu);
             return -1;
         }
         s_pump_started = true;
@@ -324,6 +330,16 @@ void gps_get_stats(gps_stats_t* out) {
 }
 
 void gps_deinit(void) {
+#if defined(ESP_PLATFORM)
+    /* Discard any sentences still queued from before the power cut. The gate
+     * check now happens at drain time, so without this flush a sentence
+     * enqueued while gated on could be parsed and applied after the next
+     * gate-on, briefly reporting a pre-power-cycle fix. Dropping them here
+     * keeps the original guarantee: no fix until fresh post-power-on data. */
+    pthread_mutex_lock(&s_evq_mu);
+    s_evq_head = s_evq_tail = s_evq_count = 0;
+    pthread_mutex_unlock(&s_evq_mu);
+#endif
     pthread_mutex_lock(&s_mu);
     s_gate_on = false; /* cut GNSS power (P-FET high) */
     s_has_fix = false;
