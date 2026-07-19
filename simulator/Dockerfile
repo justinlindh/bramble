@@ -17,6 +17,10 @@ COPY simulator/gosim/go.mod simulator/gosim/go.sum simulator/gosim/
 RUN --mount=type=cache,target=/go/pkg/mod \
     cd simulator/gosim && go mod download
 COPY components/ components/
+# simulator/engine/sim_node.h includes ../../main/beacon_policy_calc.h, so the
+# firmware main/ tree has to be in the build context too. Without it the cgo
+# build fails at that include and the image cannot be built at all.
+COPY main/ main/
 COPY test/stubs/ test/stubs/
 COPY simulator/engine/ simulator/engine/
 COPY simulator/gosim/ simulator/gosim/
