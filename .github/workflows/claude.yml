@@ -58,12 +58,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          # Full history, not fetch-depth 1. A shallow clone has no merge-base
+          # with origin/main, so the reviewer cannot diff the PR against its
+          # base and ends up reasoning from the truncated `gh pr diff` alone.
+          fetch-depth: 0
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Post inline comments as they are made rather than buffering them
+          # through a classifier that drops most of them. We want one comment
+          # per finding, anchored to the line it is about.
           classify_inline_comments: "false"
-          claude_args: '--allowedTools "Bash(bash test/run_all_tests.sh),Bash(npm run lint),Bash(npm run test:unit),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),mcp__github_inline_comment__create_inline_comment" --append-system-prompt "If the user''s comment is just @claude with no other instructions, review the PR. Use mcp__github_inline_comment__create_inline_comment with confirmed: true to post inline comments on specific lines. Use GitHub suggestion blocks for concrete fixes. Use gh pr comment for a top-level summary. If the user gives specific instructions, follow those instead. House rules: no em dashes anywhere, no AI attribution in commits."'
+          # The allowlist is read-and-verify plus this repo's own gate scripts.
+          #
+          # Deliberately absent, and each for a reason worth keeping:
+          #   git push / gh pr merge / gh api  - can mutate the repo or its
+          #     metadata. gh api in particular is a full write surface.
+          #   make - the Makefile's mirror-github target force-pushes and
+          #     iterates $(HOME)/src/*.
+          #   curl / wget - outbound network.
+          #   python3 / node / awk / sed - these look like analysis tools but
+          #     each is an arbitrary-execution escape hatch that reaches the
+          #     same effect as the entries above. python3 -c can open a socket,
+          #     node -e can child_process.execSync, awk has system(), and GNU
+          #     sed has the e command. Allowing them would have made the rest
+          #     of this list decorative, since a prompt injection inside a
+          #     reviewed diff does not need curl if it has python3. Excluded
+          #     after review caught exactly that hole in an earlier revision.
+          #   git fetch - can fetch from an arbitrary remote URL, and is
+          #     unnecessary now that fetch-depth: 0 already provides the full
+          #     history needed to compute a merge-base.
+          #
+          # The reviewer investigates and runs the suites. It does not mutate
+          # the repo, reach the network, or execute code of its own composition.
+          claude_args: >-
+            --allowedTools
+            "Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(git grep:*),Bash(git status:*),Bash(git ls-files:*),Bash(git rev-parse:*),Bash(git merge-base:*),Bash(git blame:*),Bash(git cat-file:*),Bash(grep:*),Bash(rg:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(sort:*),Bash(uniq:*),Bash(cut:*),Bash(tr:*),Bash(diff:*),Bash(jq:*),Bash(bash test/run_all_tests.sh),Bash(bash scripts/lint/check-no-internal-refs.sh),Bash(bash scripts/lint/run-clang-format-check.sh:*),Bash(bash scripts/lint/run-shellcheck.sh:*),Bash(bash scripts/lint/run-markdownlint.sh:*),Bash(bash scripts/check-rpc-contract.sh),Bash(npm ci:*),Bash(npm run:*),Bash(npx tsc:*),Bash(npx vitest:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(clang-format:*),Bash(actionlint:*),Bash(shellcheck:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(gh run view:*),mcp__github_inline_comment__create_inline_comment"
+            --append-system-prompt
+            "If the comment is just @claude with no other instructions, review the PR. If the user gives specific instructions, follow those instead.
+            HOW TO REPORT A REVIEW. Post one inline comment per finding with mcp__github_inline_comment__create_inline_comment and confirmed: true, anchored to the exact line the finding is about. This is the primary output and it is not optional: a review that puts everything in one roll-up comment is a failed review. If you have six findings across four files, that is six inline comments. Attach a GitHub suggestion block whenever you can express the fix as concrete code. For the closing summary, update your existing tracked comment with mcp__github_comment__update_claude_comment rather than creating a new one, and keep it to what you verified, what you could not verify, and a pointer to the findings; do not restate the findings there in full. Praise and confirmations belong in that summary, not in inline comments.
+            VERIFY, DO NOT SPECULATE. You can run commands. Read the code, run the host suite with bash test/run_all_tests.sh, run the lint scripts under scripts/lint/, run the webapp checks with npx tsc and npx vitest, and run go test for the simulator. Check the PR author's claims against what actually happens rather than taking the PR body at its word. If you assert a line number or a behavior, you must have looked at it. State plainly in the summary which commands you actually ran and which you could not.
+            HOUSE RULES. No em dashes anywhere in anything you write. No AI attribution in commits or PR bodies. Comparisons with Meshtastic and MeshCore stay factual and respectful. This repo documents what is verified and how, so do not let a PR claim a capability it has not demonstrated."
