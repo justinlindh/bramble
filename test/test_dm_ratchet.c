@@ -2,11 +2,45 @@
 #include "dm_session.h"
 #include "packet.h"
 #include "../components/crypto/crypto_host.c"
+
+/*
+ * HKDF fault injection (issue #84 regression coverage). dm_session.c is
+ * #included as source below, so redefining the symbol between the two includes
+ * routes EVERY HKDF call dm_session.c makes through this shim while leaving the
+ * real crypto_host.c implementation intact for everyone else. No test hook
+ * exists in production code as a result.
+ *
+ * hkdf_fail_after(n): let the next n calls succeed, then fail every call after
+ * that. hkdf_fail_off() restores normal behaviour. Armed per test.
+ */
+static int g_hkdf_allow = -1; /* <0 means "never fail" */
+static int test_hkdf_sha256(const uint8_t* salt, size_t salt_len, const uint8_t* ikm,
+                            size_t ikm_len, const uint8_t* info, size_t info_len, uint8_t* okm,
+                            size_t okm_len) {
+    if (g_hkdf_allow >= 0) {
+        if (g_hkdf_allow == 0)
+            return -1; /* the injected failure; okm deliberately left untouched */
+        g_hkdf_allow--;
+    }
+    return crypto_hkdf_sha256(salt, salt_len, ikm, ikm_len, info, info_len, okm, okm_len);
+}
+static void hkdf_fail_after(int n) { g_hkdf_allow = n; }
+static void hkdf_fail_off(void) { g_hkdf_allow = -1; }
+
+#define crypto_hkdf_sha256 test_hkdf_sha256
 #include "../components/dm_session/dm_session.c"
+#undef crypto_hkdf_sha256
 #include <string.h>
 
-void setUp(void) {}
-void tearDown(void) {}
+void setUp(void) { hkdf_fail_off(); }
+void tearDown(void) { hkdf_fail_off(); }
+
+static int all_zero(const uint8_t* p, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (p[i])
+            return 0;
+    return 1;
+}
 
 /* Canonical addresses: lo=0x11111111, hi=0x22222222 (lo < hi already ordered). */
 #define ADDR_LO 0x11111111u
@@ -191,6 +225,244 @@ void test_ratchet_encrypt_advances_key(void) {
     TEST_ASSERT_NOT_EQUAL(0, memcmp(t0, t1, 16)); /* different key -> different tag */
 }
 
+/* Shared setup for the failure tests: a healthy, established ratchet session. */
+static void make_session(dm_session_t* s, bramble_identity_t* a, bramble_identity_t* b) {
+    bramble_identity_t a_eph, b_eph;
+    crypto_generate_identity(a);
+    crypto_generate_identity(b);
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
+    uint8_t ikm[128];
+    TEST_ASSERT_EQUAL(
+        0, dm_compute_ikm(a->private_key, a_eph.private_key, b->public_key, b_eph.public_key, ikm));
+    memset(s, 0, sizeof(*s));
+    s->peer_addr = b->address;
+    s->state = DM_STATE_ACTIVE;
+    TEST_ASSERT_EQUAL(0, dm_session_ratchet_init_state(s, ikm, a->address, b->address));
+}
+
+static void fill_header(bramble_header_t* h, uint32_t dest) {
+    memset(h, 0, sizeof(*h));
+    h->version = BRAMBLE_VERSION;
+    h->type = PKT_TYPE_DATA;
+    h->flags = FLAG_ENCRYPT;
+    h->hop_limit = 8;
+    h->dest_addr = dest;
+    h->packet_id = 0x1234;
+}
+
+/*
+ * Issue #84. dm_ratchet_step used to be void and discard both HKDF results, so
+ * a failed derivation handed the caller back whatever its stack held. Assert it
+ * now reports the failure AND wipes both outputs, so the pre-seeded poison
+ * pattern cannot survive to be used as a key.
+ */
+void test_ratchet_step_reports_hkdf_failure(void) {
+    uint8_t ck[32];
+    memset(ck, 0x11, 32);
+    uint8_t mk[32], ck_next[32];
+    memset(mk, 0xAA, 32); /* stand-in for caller stack garbage */
+    memset(ck_next, 0xAA, 32);
+    hkdf_fail_after(0);
+    TEST_ASSERT_EQUAL(-1, dm_ratchet_step(ck, 0, mk, ck_next));
+    TEST_ASSERT_TRUE(all_zero(mk, 32));
+    TEST_ASSERT_TRUE(all_zero(ck_next, 32));
+
+    /* And the partial case: the message key derives fine, the chain key does
+     * not. Both must still be wiped, never half-committed. */
+    memset(mk, 0xAA, 32);
+    memset(ck_next, 0xAA, 32);
+    hkdf_fail_after(1);
+    TEST_ASSERT_EQUAL(-1, dm_ratchet_step(ck, 0, mk, ck_next));
+    TEST_ASSERT_TRUE(all_zero(mk, 32));
+    TEST_ASSERT_TRUE(all_zero(ck_next, 32));
+}
+
+/*
+ * Issue #84, the core corruption: a failed step inside ratchet_encrypt must not
+ * commit ck_next into the send chain. Snapshot the chain, force the failure,
+ * and assert the send chain key and index are byte-identical afterwards (a
+ * clean retryable no-send), not advanced to a garbage value.
+ */
+void test_encrypt_does_not_commit_corrupt_chain(void) {
+    dm_session_t s;
+    bramble_identity_t a, b;
+    make_session(&s, &a, &b);
+    uint8_t ck_before[32];
+    memcpy(ck_before, s.ratchet.send.ck, 32);
+    uint16_t idx_before = s.ratchet.send.index;
+
+    bramble_header_t h;
+    fill_header(&h, b.address);
+    const uint8_t pt[] = "hi";
+    uint8_t nonce[12];
+    memset(nonce, 0x01, 12);
+    uint8_t ct[DM_RATCHET_HEADER_SIZE + sizeof(pt)];
+    uint8_t tag[16];
+    size_t flen = 0;
+
+    hkdf_fail_after(0);
+    TEST_ASSERT_NOT_EQUAL(
+        0, dm_session_ratchet_encrypt(&s, &h, a.address, pt, sizeof(pt), nonce, ct, tag, &flen));
+    TEST_ASSERT_EQUAL_MEMORY(ck_before, s.ratchet.send.ck, 32);
+    TEST_ASSERT_EQUAL_UINT16(idx_before, s.ratchet.send.index);
+
+    /* The chain is intact, so a retry once HKDF is healthy still works. */
+    hkdf_fail_off();
+    TEST_ASSERT_EQUAL(
+        0, dm_session_ratchet_encrypt(&s, &h, a.address, pt, sizeof(pt), nonce, ct, tag, &flen));
+    TEST_ASSERT_EQUAL_UINT16(idx_before + 1, s.ratchet.send.index);
+}
+
+/*
+ * Issue #84: a failed derivation during initial chain setup must not leave the
+ * session marked valid. The slot is pre-poisoned so that the old behaviour
+ * (install unconditionally, set both valid bits) would be caught: valid would
+ * read 1 with a chain key of 0xAA garbage.
+ */
+void test_init_state_failure_leaves_session_invalid(void) {
+    bramble_identity_t a, b, a_eph, b_eph;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
+    uint8_t ikm[128];
+    TEST_ASSERT_EQUAL(
+        0, dm_compute_ikm(a.private_key, a_eph.private_key, b.public_key, b_eph.public_key, ikm));
+
+    /* n = 0 fails the root derivation, n = 1 fails the chain pair after the
+     * root succeeded (the partially-derived case). Both must fail closed. */
+    for (int n = 0; n <= 1; n++) {
+        dm_session_t s;
+        memset(&s, 0xAA, sizeof(s)); /* poison: nothing here may survive */
+        s.peer_addr = b.address;
+        s.ke_epoch = 0;
+        s.state = DM_STATE_ACTIVE;
+        hkdf_fail_after(n);
+        TEST_ASSERT_EQUAL(-1, dm_session_ratchet_init_state(&s, ikm, a.address, b.address));
+        hkdf_fail_off();
+        TEST_ASSERT_EQUAL_UINT8(0, s.ratchet.send.valid);
+        TEST_ASSERT_EQUAL_UINT8(0, s.ratchet.recv.valid);
+        TEST_ASSERT_TRUE(all_zero(s.ratchet.send.ck, 32));
+        TEST_ASSERT_TRUE(all_zero(s.ratchet.recv.ck, 32));
+        TEST_ASSERT_TRUE(all_zero(s.ratchet.rk, 32));
+        TEST_ASSERT_TRUE(all_zero(s.session_key, 32));
+
+        /* And the invalid session refuses to encrypt: no garbage-keyed frame
+         * ever reaches the air. */
+        bramble_header_t h;
+        fill_header(&h, b.address);
+        const uint8_t pt[] = "hi";
+        uint8_t nonce[12];
+        memset(nonce, 0x01, 12);
+        uint8_t ct[DM_RATCHET_HEADER_SIZE + sizeof(pt)];
+        uint8_t tag[16];
+        size_t flen = 0;
+        TEST_ASSERT_NOT_EQUAL(0, dm_session_ratchet_encrypt(&s, &h, a.address, pt, sizeof(pt),
+                                                            nonce, ct, tag, &flen));
+    }
+}
+
+/*
+ * Issue #84: a failed derivation during an epoch bump must not install a
+ * garbage root or chain pair. It fails closed by wiping the ratchet (see the
+ * rationale on dm_session_epoch_bump: the peer has already moved to the new
+ * epoch, so silently keeping the old chains would be a one-sided desync and
+ * permanent silent loss). Assert both chains end invalid and the session
+ * refuses to encrypt, which is what routes the peer into a re-handshake.
+ */
+void test_epoch_bump_failure_leaves_session_unusable(void) {
+    uint8_t dh[32];
+    memset(dh, 0x5A, 32);
+    for (int n = 0; n <= 1; n++) {
+        dm_session_t s;
+        bramble_identity_t a, b;
+        make_session(&s, &a, &b);
+        TEST_ASSERT_EQUAL_UINT8(1, s.ratchet.send.valid); /* healthy to begin with */
+
+        hkdf_fail_after(n);
+        TEST_ASSERT_EQUAL(-1, dm_session_epoch_bump(&s, dh, a.address, b.address, 1));
+        hkdf_fail_off();
+
+        TEST_ASSERT_EQUAL_UINT8(0, s.ratchet.send.valid);
+        TEST_ASSERT_EQUAL_UINT8(0, s.ratchet.recv.valid);
+        TEST_ASSERT_EQUAL_UINT8(0, s.ratchet.prev_recv.valid);
+        TEST_ASSERT_TRUE(all_zero(s.ratchet.rk, 32));
+        TEST_ASSERT_TRUE(all_zero(s.ratchet.send.ck, 32));
+
+        bramble_header_t h;
+        fill_header(&h, b.address);
+        const uint8_t pt[] = "hi";
+        uint8_t nonce[12];
+        memset(nonce, 0x01, 12);
+        uint8_t ct[DM_RATCHET_HEADER_SIZE + sizeof(pt)];
+        uint8_t tag[16];
+        size_t flen = 0;
+        TEST_ASSERT_NOT_EQUAL(0, dm_session_ratchet_encrypt(&s, &h, a.address, pt, sizeof(pt),
+                                                            nonce, ct, tag, &flen));
+        /* Receives fail too, which is the signal the mesh caller maps to its
+         * rate-limited desync-heal re-handshake. */
+        size_t pt_len = 0;
+        uint8_t out[64];
+        TEST_ASSERT_EQUAL(DM_DECRYPT_FAIL,
+                          dm_session_ratchet_decrypt(&s, &h, b.address, nonce, ct,
+                                                     DM_RATCHET_HEADER_SIZE + sizeof(pt), tag, out,
+                                                     &pt_len));
+    }
+}
+
+/*
+ * Issue #84 receive side: a failed derivation mid-walk must leave the receive
+ * chain key and index untouched and report DM_DECRYPT_FAIL, never advance the
+ * chain to a garbage value.
+ */
+void test_decrypt_does_not_commit_corrupt_chain(void) {
+    dm_session_t sa, sb;
+    bramble_identity_t a, b, a_eph, b_eph;
+    crypto_generate_identity(&a);
+    crypto_generate_identity(&b);
+    crypto_generate_identity(&a_eph);
+    crypto_generate_identity(&b_eph);
+    uint8_t ikm[128];
+    TEST_ASSERT_EQUAL(
+        0, dm_compute_ikm(a.private_key, a_eph.private_key, b.public_key, b_eph.public_key, ikm));
+    memset(&sa, 0, sizeof(sa));
+    memset(&sb, 0, sizeof(sb));
+    sa.state = sb.state = DM_STATE_ACTIVE;
+    TEST_ASSERT_EQUAL(0, dm_session_ratchet_init_state(&sa, ikm, a.address, b.address));
+    TEST_ASSERT_EQUAL(0, dm_session_ratchet_init_state(&sb, ikm, b.address, a.address));
+
+    bramble_header_t h;
+    fill_header(&h, b.address);
+    const uint8_t pt[] = "hello";
+    uint8_t nonce[12];
+    memset(nonce, 0x07, 12);
+    uint8_t ct[DM_RATCHET_HEADER_SIZE + sizeof(pt)];
+    uint8_t tag[16];
+    size_t flen = 0;
+    TEST_ASSERT_EQUAL(
+        0, dm_session_ratchet_encrypt(&sa, &h, a.address, pt, sizeof(pt), nonce, ct, tag, &flen));
+
+    uint8_t ck_before[32];
+    memcpy(ck_before, sb.ratchet.recv.ck, 32);
+    uint16_t idx_before = sb.ratchet.recv.index;
+
+    uint8_t out[64];
+    size_t pt_len = 0;
+    hkdf_fail_after(0);
+    TEST_ASSERT_EQUAL(DM_DECRYPT_FAIL, dm_session_ratchet_decrypt(&sb, &h, a.address, nonce, ct,
+                                                                  flen, tag, out, &pt_len));
+    hkdf_fail_off();
+    TEST_ASSERT_EQUAL_MEMORY(ck_before, sb.ratchet.recv.ck, 32);
+    TEST_ASSERT_EQUAL_UINT16(idx_before, sb.ratchet.recv.index);
+
+    /* Chain intact: the same frame decrypts once HKDF is healthy again. */
+    TEST_ASSERT_EQUAL(DM_DECRYPT_OK, dm_session_ratchet_decrypt(&sb, &h, a.address, nonce, ct, flen,
+                                                                tag, out, &pt_len));
+    TEST_ASSERT_EQUAL(sizeof(pt), pt_len);
+    TEST_ASSERT_EQUAL_MEMORY(pt, out, sizeof(pt));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_rk0_equals_legacy_session_key);
@@ -200,5 +472,10 @@ int main(void) {
     RUN_TEST(test_dh_ratchet_advances_root);
     RUN_TEST(test_ratchet_encrypt_frames_header);
     RUN_TEST(test_ratchet_encrypt_advances_key);
+    RUN_TEST(test_ratchet_step_reports_hkdf_failure);
+    RUN_TEST(test_encrypt_does_not_commit_corrupt_chain);
+    RUN_TEST(test_init_state_failure_leaves_session_invalid);
+    RUN_TEST(test_epoch_bump_failure_leaves_session_unusable);
+    RUN_TEST(test_decrypt_does_not_commit_corrupt_chain);
     return UNITY_END();
 }

@@ -34,7 +34,10 @@ int dm_derive_identity_sas(const uint8_t id_x25519_a[32], const uint8_t id_x2551
  *
  * dm_ratchet_step derives the message key mk_n for index n on a chain and the
  * next chain key CK_{n+1}. mk_n is used once for one AES-256-GCM message, then
- * wiped; CK_n is wiped once CK_{n+1} exists.
+ * wiped; CK_n is wiped once CK_{n+1} exists. Returns 0 on success and -1 if
+ * either HKDF fails, in which case BOTH outputs are wiped: neither is usable
+ * key material and a caller that ignores the status would otherwise encrypt
+ * under, and commit, uninitialized stack bytes.
  *
  * dm_ratchet_dh advances the root on an epoch bump: RK_{e+1} folds a fresh
  * X25519 output dh into RK_e (post-compromise recovery at epoch granularity).
@@ -42,8 +45,8 @@ int dm_derive_identity_sas(const uint8_t id_x25519_a[32], const uint8_t id_x2551
 #define DM_KEY_SIZE 32
 int dm_ratchet_init(const uint8_t ikm[128], uint32_t addr_a, uint32_t addr_b, uint8_t rk_out[32],
                     uint8_t ck_lohi_out[32], uint8_t ck_hilo_out[32]);
-void dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],
-                     uint8_t ck_next_out[32]);
+int dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],
+                    uint8_t ck_next_out[32]);
 int dm_ratchet_dh(const uint8_t rk_e[32], const uint8_t dh[32], uint32_t addr_a, uint32_t addr_b,
                   uint16_t new_epoch, uint8_t rk_next_out[32]);
 
@@ -311,9 +314,17 @@ int dm_session_decrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_
  * party vice versa, so both sides agree. Sets both chain indices to 0, stamps
  * each chain's epoch from s->ke_epoch, and mirrors RK_0 into s->session_key for
  * provenance. Call after a successful handshake, before the first ratchet op.
+ *
+ * Returns 0 on success, -1 if any derivation fails. On -1 the session's whole
+ * ratchet (root, both chains, skip caches, retained previous epoch) and its
+ * session_key mirror are wiped, so both chains report valid == 0 and every
+ * ratchet operation refuses. The caller MUST NOT treat such a session as
+ * established: it holds no keys at all, and the peer must re-handshake. Nothing
+ * is installed unless every derivation succeeded, so this can never leave a
+ * session that looks valid while holding zero or garbage chain keys.
  */
-void dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
-                                   uint32_t addr_peer);
+int dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
+                                  uint32_t addr_peer);
 
 /*
  * Sender-side ratchet encrypt (per-message forward secrecy). Derives the next
@@ -374,8 +385,17 @@ int dm_session_ratchet_decrypt(dm_session_t* s, const bramble_header_t* h, uint3
  * new-epoch messages have been seen (the wipe is what delivers PCS). A lost or
  * failed rekey leaves both sides on the current epoch (chains untouched), so no
  * message is ever stranded.
+ *
+ * Returns 0 on success, -1 if a derivation fails. Nothing is installed unless
+ * both the root roll and the chain-pair derivation succeeded. On -1 the whole
+ * ratchet is WIPED rather than left on the old epoch: the peer has already
+ * committed to new_epoch by this point, so retaining the old chains would be a
+ * one-sided epoch desync that looks perfectly healthy locally while every frame
+ * is undecryptable at the far end forever. A wiped ratchet instead makes sends
+ * fail visibly and makes receives return DM_DECRYPT_FAIL, which the mesh caller
+ * already routes into its rate-limited re-handshake desync heal.
  */
 #define DM_EPOCH_GRACE_MSGS DM_MAX_SKIP
-void dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
-                           uint32_t addr_peer, uint16_t new_epoch);
+int dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
+                          uint32_t addr_peer, uint16_t new_epoch);
 #endif
