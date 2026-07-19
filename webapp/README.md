@@ -64,7 +64,7 @@ npm run dev:electron
 npm run package
 
 # Platform-specific builds
-npm run package:linux   # AppImage + deb
+npm run package:linux   # AppImage + deb + pacman
 npm run package:mac     # dmg
 npm run package:win     # nsis installer
 ```
@@ -75,7 +75,7 @@ Build output goes to `release/`.
 
 | Platform | Installer | Serial | BLE | WebSocket |
 |----------|-----------|--------|-----|-----------|
-| Linux    | AppImage, deb | ✅ | ✅ | ✅ |
+| Linux    | AppImage, deb, pacman | ✅ | ✅ | ✅ |
 | macOS    | dmg       | ✅ | ✅ | ✅ |
 | Windows  | exe (NSIS)| ✅ | ✅ | ✅ |
 
