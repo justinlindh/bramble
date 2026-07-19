@@ -102,6 +102,18 @@ typedef struct {
  * physical panel may hold a stale image. */
 void ssd1680_engine_init(void);
 
+/*
+ * Force the NEXT ssd1680_engine_flush() to be FULL, regardless of the
+ * every-N cadence or the change-fraction heuristic. Also overrides the
+ * "nothing changed" elision: a pending forced refresh emits even if no
+ * pixel changed since the last flush, so a caller can use this to clear
+ * accumulated ghosting on a semantic boundary (e.g. a screen change) that
+ * a byte-diff heuristic would not reliably catch on a sparse, mostly-blank
+ * text UI. Consumed by the next flush call; has no effect if a flush does
+ * not follow (idempotent, safe to call more than once before the flush).
+ */
+void ssd1680_engine_request_full_refresh(void);
+
 /* Set/clear one logical pixel (on = black ink). Out-of-range coordinates
  * are ignored. Marks the frame dirty only on a real bit change. */
 void ssd1680_engine_pixel(int x, int y, bool on);

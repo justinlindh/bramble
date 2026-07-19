@@ -779,6 +779,84 @@ void test_nodes_short_press_while_not_selecting_still_cycles_screen(void) {
     TEST_ASSERT_FALSE(state.nodes_selecting);
 }
 
+/* ── full-refresh policy (bramble#196) ───────────────────────────────── */
+
+void test_full_refresh_not_pending_on_init(void) {
+    /* Boot renders via the engine's own always-full first flush; the
+     * screen-ring policy has nothing to clear yet. */
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+}
+
+void test_full_refresh_pending_every_n_screen_changes(void) {
+    /* MAIN -> MESSAGES -> NODES -> COMPOSE: the 3rd screen change (landing
+     * on COMPOSE/"Stats") crosses UI_FULL_REFRESH_EVERY_N_SCREENS and must
+     * request a full refresh, clearing ghosting from every screen visited
+     * so far before Stats renders. */
+    ui_handle_button(&state, BTN_SHORT_PRESS, 1000); /* -> MESSAGES: change #1 */
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 2000); /* -> NODES: change #2 */
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+
+    ui_handle_button(&state, BTN_SHORT_PRESS, 3000); /* -> COMPOSE: change #3 */
+    TEST_ASSERT_TRUE(ui_take_full_refresh_pending(&state));
+
+    /* Consumed: asking again without another screen change returns false. */
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+}
+
+void test_full_refresh_pending_on_entering_settings(void) {
+    /* Settings is the screen bramble#196 called out by name (most
+     * text-dense, so the worst-hit by ghosting): entering it forces a full
+     * refresh unconditionally, even on the very first screen change. */
+    ui_handle_button(&state, BTN_LEFT, 1000); /* MAIN -> SETTINGS (previous) */
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+    TEST_ASSERT_TRUE(ui_take_full_refresh_pending(&state));
+}
+
+void test_full_refresh_not_pending_on_in_screen_redraw(void) {
+    /* Settings row navigation and edit-mode changes redraw without leaving
+     * SCREEN_SETTINGS: these must not consume the screen-change cadence or
+     * spuriously request a full refresh (the ghosting they can add is a
+     * cursor moving inside already-full-refreshed content, not new pages'
+     * worth of stale ink). */
+    ui_handle_button(&state, BTN_LEFT, 1000); /* MAIN -> SETTINGS, consumes the pending flag */
+    ui_take_full_refresh_pending(&state);
+
+    ui_handle_button(&state, BTN_DOWN, 2000); /* row nav within Settings */
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+
+    ui_handle_button(&state, BTN_SELECT, 3000); /* enter edit mode, still Settings */
+    TEST_ASSERT_EQUAL(SCREEN_SETTINGS, ui_get_screen(&state));
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+}
+
+void test_full_refresh_pending_survives_screen_leaving_settings(void) {
+    /* Leaving Settings is a screen change like any other: it counts toward
+     * the every-N cadence but does not itself force a refresh (only
+     * entering Settings, or hitting the N-count, does). */
+    state.current_screen = SCREEN_SETTINGS;
+    state.settings_editing = false;
+    ui_take_full_refresh_pending(&state); /* clear any incidental state */
+
+    ui_handle_button(&state, BTN_DOUBLE_PRESS, 1000); /* Settings -> MAIN */
+    TEST_ASSERT_EQUAL(SCREEN_MAIN, ui_get_screen(&state));
+    TEST_ASSERT_FALSE(ui_take_full_refresh_pending(&state));
+}
+
+void test_full_refresh_pending_on_idle_auto_switch_to_messages(void) {
+    /* The idle auto-switch to Messages goes through ui_on_message_received,
+     * not ui_handle_button; it must feed the same screen-change cadence. */
+    state.current_screen = SCREEN_NODES;
+    state.last_activity = 1000;
+    state.screens_since_full_refresh = UI_FULL_REFRESH_EVERY_N_SCREENS - 1;
+
+    ui_on_message_received(&state, 12050); /* idle -> auto-switch to MESSAGES */
+    TEST_ASSERT_EQUAL(SCREEN_MESSAGES, state.current_screen);
+    TEST_ASSERT_TRUE(ui_take_full_refresh_pending(&state));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_init_main_screen);
@@ -844,5 +922,11 @@ int main(void) {
     RUN_TEST(test_nodes_selecting_reset_on_timeout_to_main);
     RUN_TEST(test_nodes_short_press_while_not_selecting_still_cycles_screen);
     RUN_TEST(test_auto_switched_messages_survives_long_idle_tick);
+    RUN_TEST(test_full_refresh_not_pending_on_init);
+    RUN_TEST(test_full_refresh_pending_every_n_screen_changes);
+    RUN_TEST(test_full_refresh_pending_on_entering_settings);
+    RUN_TEST(test_full_refresh_not_pending_on_in_screen_redraw);
+    RUN_TEST(test_full_refresh_pending_survives_screen_leaving_settings);
+    RUN_TEST(test_full_refresh_pending_on_idle_auto_switch_to_messages);
     return UNITY_END();
 }
