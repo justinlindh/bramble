@@ -32,7 +32,17 @@ module.exports = {
         { type: 'feat', scope: 'protocol', release: 'minor' },
         { type: 'fix', scope: 'protocol', release: 'patch' },
         { type: 'perf', scope: 'protocol', release: 'patch' },
-        { scope: '*', release: false }
+        // Suppress the preset default rules for any OTHER scope so an
+        // out-of-scope fix/feat never leaks a protocol release. The negated
+        // glob is deliberate: a plain { scope: '*', release: false } would
+        // also match protocol-scoped commits, and commit-analyzer treats a
+        // matched release:false as the highest-priority match (its index in
+        // the release-type table is -1), so it would shadow the specific
+        // protocol rules above and suppress every protocol release. Matching
+        // only non-protocol scopes returns `false` for out-of-scope commits
+        // (blocking the default-rule fallback) while leaving in-scope commits
+        // to the specific rules.
+        { scope: '!(protocol)', release: false }
       ],
       // Wrapped release-notes-generator options: only list protocol-scoped
       // commits so the GitHub release notes stay component-specific.

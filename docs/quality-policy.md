@@ -22,6 +22,7 @@ the full job topology and the always-report contract.
   - RPC contract check (`bash scripts/check-rpc-contract.sh`: `api/openapi.yaml` vs the firmware registry in `main/rpc_methods.c`)
   - Actionlint over the four gating workflow files
 - `Host tests` (`bash test/run_all_tests.sh`, `quality.yml`)
+- `Release config` (`node scripts/release/semantic-release-squash-expander.test.cjs`, `quality.yml`): the release-rule scope-gating regression, run against the real `.releaserc.<component>.cjs` files, so a config change that would silently stop every component release fails the PR
 - `gosim integration` (builds and tests the simulator, `quality.yml`)
 - `Emulator suite` (`quality.yml`): the merged emulator scenario suite plus
   browser E2E. Uses the collect-then-fail pattern (below), so both suites

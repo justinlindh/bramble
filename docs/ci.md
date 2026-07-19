@@ -142,7 +142,9 @@ by reading the scripts, not the job names: `run-clang-format-check.sh --strict`
 scans `main/ components/ test/ simulator/`, `run-shellcheck.sh --strict` scans
 `scripts/lint/*.sh`, cppcheck scans `main components`, the host test suite builds
 `test/` against `components/` and `main/`, and the board build additionally reads
-root `CMakeLists.txt`, `sdkconfig.defaults*`, and `partitions*.csv`.
+root `CMakeLists.txt`, `sdkconfig.defaults*`, and `partitions*.csv`. The firmware
+area also covers `.releaserc.*` (root release configs) so the `Release config`
+job's scope-gating regression runs on any release-config edit.
 
 ## Job topology
 
@@ -168,6 +170,7 @@ pass trivially when their scope did not change.
 | --- | --- | --- |
 | `Detect changed areas` (via reusable `detect`) | always | no |
 | `Host tests` | `firmware` or `workflows` | yes |
+| `Release config` | `firmware` or `workflows` | yes |
 | `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
 | `Board build smoke (heltec-v3)` | not a `pull_request` event, and (`firmware` or `workflows`) | post-merge required (see quality-policy.md) |
 | `Emulator suite` | `firmware`, `simulator`, `emulator`, or `workflows` | yes |
@@ -203,6 +206,15 @@ tail) so pod-only failures stay debuggable. Note the emulator's scheduling
 fidelity caveat (emulator/README.md): linux-target task priorities are
 flattened for liveness, so genuine priority-starvation bugs are hardware-only
 detection; this suite cannot catch them.
+
+`Release config` runs the release-rule scope-gating regression
+(`node scripts/release/semantic-release-squash-expander.test.cjs`) after a small
+`npm install` of the pinned `@semantic-release/commit-analyzer`,
+`release-notes-generator`, and `conventional-changelog-conventionalcommits`. It
+loads the real `.releaserc.<component>.cjs` files and asserts, per component,
+that an in-scope `fix`/`feat`/`perf`/breaking commit cuts the right release
+level while out-of-scope and non-releasing commits do not, so a scope-gating
+regression that would silently stop every binary from publishing fails the PR.
 
 `Board build smoke` keeps its `github.event_name != 'pull_request'` guard: the
 ESP-IDF board build is heavy and validates post-merge on pushes to `main`. It
