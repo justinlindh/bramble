@@ -131,4 +131,12 @@ uint32_t tx_gate_beacon_min_interval(void);
 uint32_t tx_gate_remaining(uint8_t tier);
 void tx_gate_snapshot(airtime_budget_t* out);
 
+/* Serialize a non-transmit radio operation (reconfigure, and by extension any
+ * multi-command SPI sequence that must not interleave with a transmit) against
+ * the transmit path, which holds the same lock for its whole sequence. The
+ * caller holds it across the entire operation. These are WDT-safe: the take
+ * feeds the task watchdog while it spins, matching tx_gate_send (issue #82). */
+void tx_gate_radio_lock(void);
+void tx_gate_radio_unlock(void);
+
 #endif

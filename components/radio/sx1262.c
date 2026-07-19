@@ -488,12 +488,16 @@ int sx1262_get_packet_status(int16_t* rssi, int8_t* snr) {
 }
 
 int sx1262_set_sleep(uint8_t config) {
-    /* No BUSY wait before sleep command */
-    uint8_t data = config;
+    /* No BUSY wait before sleep command, but still serialize the transfer:
+     * this hand-rolled CS path previously bypassed g_spi_mutex entirely, so on
+     * shared-SPI boards a display flush could splice into it and on any board a
+     * concurrent radio command could (issue #82). */
+    spi_mutex_take();
+    uint8_t tx[2] = {SX1262_CMD_SET_SLEEP, config};
     nss_low();
-    uint8_t tx[2] = {SX1262_CMD_SET_SLEEP, data};
     int rc = spi_transfer(tx, NULL, 2);
     nss_high();
+    spi_mutex_give();
     return rc;
 }
 
@@ -541,19 +545,32 @@ int sx1262_calibrate(uint8_t cal_mask) {
      * this wait.  100ms (the default write_command BUSY wait) is not enough.
      * We wait for BUSY before sending the command, then send it, then wait
      * again for the calibration to complete. */
-    int busy_rc = sx1262_wait_busy(2000);
-    if (busy_rc != 0)
-        return busy_rc;
+    /* Hold g_spi_mutex across the whole calibrate sequence (pre-BUSY wait,
+     * transfer, and the long completion BUSY wait). This hand-rolled CS path
+     * previously bypassed the mutex and discarded the transfer return (issue
+     * #82). */
+    spi_mutex_take();
 
-    uint8_t cmd = SX1262_CMD_CALIBRATE;
-    uint8_t tx[2] = {cmd, cal_mask};
+    int busy_rc = sx1262_wait_busy(2000);
+    if (busy_rc != 0) {
+        spi_mutex_give();
+        return busy_rc;
+    }
+
+    uint8_t tx[2] = {SX1262_CMD_CALIBRATE, cal_mask};
     nss_low();
-    spi_transfer(tx, NULL, 2);
+    int rc = spi_transfer(tx, NULL, 2);
     nss_high();
+    if (rc != 0) {
+        spi_mutex_give();
+        return rc;
+    }
 
     /* Wait up to 5000ms for all calibration blocks to complete.
      * RadioLib uses this value; TCXO boards can be slow. */
-    return sx1262_wait_busy(5000);
+    int cal_rc = sx1262_wait_busy(5000);
+    spi_mutex_give();
+    return cal_rc;
 }
 
 int sx1262_calibrate_image(float freq_mhz) {

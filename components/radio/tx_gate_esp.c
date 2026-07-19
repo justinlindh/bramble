@@ -125,3 +125,16 @@ void tx_gate_snapshot(airtime_budget_t* out) {
     memcpy(out, &s_gate.budget, sizeof(*out));
     xSemaphoreGive(s_gate_mutex);
 }
+
+void tx_gate_radio_lock(void) {
+    /* Guard against being called before tx_gate_global_init created the mutex.
+     * Falling through unserialized matches the pre-fix behavior rather than
+     * dereferencing a NULL handle. */
+    if (s_gate_mutex)
+        gate_lock();
+}
+
+void tx_gate_radio_unlock(void) {
+    if (s_gate_mutex)
+        xSemaphoreGive(s_gate_mutex);
+}
