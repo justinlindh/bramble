@@ -564,21 +564,33 @@ function isLikelyDuplicate(existing: Message, candidate: Message): boolean {
   return Math.abs(existing.timestampMs - candidate.timestampMs) < 5000;
 }
 
-export async function loadMessages(sinceId?: number): Promise<void> {
-  if (!client) return;
-  const params: Record<string, unknown> = { limit: 100 };
-  if (sinceId !== undefined) params.since_id = sinceId;
-  const result = await client.rpc<{ messages: IncomingMessage[] }>(
-    'bramble.getMessages',
-    params,
-    10000, // longer timeout — serializing 20 messages can be slow on ESP32
-  );
-  const store = useStore.getState();
-  // Get device uptime to convert uptime-based timestamps to wall clock
-  const deviceUptime = store.status?.uptimeSec ?? 0;
-  const now = Date.now();
-  const newFromFirmware: Message[] = [];
-  for (const m of result.messages ?? []) {
+export interface FirmwareMergeContext {
+  /** Messages already known to the store, deduped against. */
+  existing: Message[];
+  /** Device uptime in seconds, used to convert uptime stamps to wall clock. */
+  deviceUptime: number;
+  /** This node's own address, used to drop self-addressed rows. */
+  myAddr: number;
+  /** Wall-clock reference for the conversion, injected so callers stay deterministic. */
+  now: number;
+}
+
+/**
+ * Normalize a `bramble.getMessages` batch into store messages, dropping any
+ * that duplicate an existing message or an earlier entry in the same batch.
+ *
+ * Pure on purpose: the previous inline version deduped against a single
+ * `useStore.getState()` snapshot taken before the loop while writing through
+ * `addMessage` inside it, so nothing added during a batch was ever visible to
+ * the dedup check. Accumulating into a local array and matching against both
+ * it and `ctx.existing` closes that hole without re-reading global state.
+ */
+export function mergeFirmwareMessages(
+  raw: IncomingMessage[],
+  ctx: FirmwareMergeContext,
+): Message[] {
+  const accepted: Message[] = [];
+  raw.forEach((m, ringIndex) => {
     const fromAddr = parseAddr(m.from);
     const toAddr = parseAddr(m.to);
     const dir = (m as any).direction;
@@ -590,15 +602,21 @@ export async function loadMessages(sinceId?: number): Promise<void> {
       dir === 'broadcast_out' ||
       (channelIndex === undefined && toAddr === 0xFFFFFFFF);
     // Skip self-addressed messages (firmware bug: old messages stored with wrong dest)
-    const myAddr = store.config?.identity?.address ?? 0;
-    if (!isBroadcast && fromAddr === toAddr && fromAddr === myAddr) continue;
+    if (!isBroadcast && fromAddr === toAddr && fromAddr === ctx.myAddr) return;
     // Convert uptime-based timestamp to wall clock: now - (uptime - msg_time)
     const msgUptimeS = (m as any).timestamp_s ?? 0;
-    const wallMs = deviceUptime > 0 && msgUptimeS > 0
-      ? now - (deviceUptime - msgUptimeS) * 1000
-      : now;
+    const wallMs = ctx.deviceUptime > 0 && msgUptimeS > 0
+      ? ctx.now - (ctx.deviceUptime - msgUptimeS) * 1000
+      : ctx.now;
+    /* `timestamp_s` is whole seconds, so a same-second burst from one peer used
+     * to collapse onto a single synthetic id and addMessage silently dropped
+     * all but the first. handle_get_messages walks the ring in order, so the
+     * row's position in the response is the only disambiguator the firmware
+     * payload actually carries: fold it in. Re-fetches shift these indices when
+     * the ring rotates, but isLikelyDuplicate catches those on content. */
+    const fallbackId = `fw-${msgUptimeS || ctx.now}-${fromAddr}-${ringIndex}`;
     const fwMsg: Message = {
-      id: m.msgId ?? `fw-${msgUptimeS || Date.now()}-${fromAddr}`,
+      id: m.msgId ?? fallbackId,
       direction: isOutgoing ? 'outgoing' : 'incoming',
       from: fromAddr,
       to: isBroadcast ? 0xFFFFFFFF : toAddr,
@@ -608,15 +626,35 @@ export async function loadMessages(sinceId?: number): Promise<void> {
       timestampMs: wallMs,
       status: 'delivered',
     };
-    const existing = store.messages.find(ex => isLikelyDuplicate(ex, fwMsg));
-    if (existing) {
-      // Preserve richer cached message (e.g., relay path/status from web-side send path).
-      if (existing.relayPath && !fwMsg.relayPath) continue;
-      continue;
-    }
-    store.addMessage(fwMsg);
-    newFromFirmware.push(fwMsg);
-  }
+    // Dedup against the store *and* everything accepted so far in this batch.
+    const isDuplicate =
+      ctx.existing.some(ex => isLikelyDuplicate(ex, fwMsg)) ||
+      accepted.some(ex => isLikelyDuplicate(ex, fwMsg));
+    // A match means the cached copy is at least as rich (it may carry relay
+    // path or status from the web-side send path), so keep it and drop this one.
+    if (isDuplicate) return;
+    accepted.push(fwMsg);
+  });
+  return accepted;
+}
+
+export async function loadMessages(sinceId?: number): Promise<void> {
+  if (!client) return;
+  const params: Record<string, unknown> = { limit: 100 };
+  if (sinceId !== undefined) params.since_id = sinceId;
+  const result = await client.rpc<{ messages: IncomingMessage[] }>(
+    'bramble.getMessages',
+    params,
+    10000, // longer timeout: serializing 20 messages can be slow on ESP32
+  );
+  const store = useStore.getState();
+  const newFromFirmware = mergeFirmwareMessages(result.messages ?? [], {
+    existing: store.messages,
+    deviceUptime: store.status?.uptimeSec ?? 0,
+    myAddr: store.config?.identity?.address ?? 0,
+    now: Date.now(),
+  });
+  for (const msg of newFromFirmware) store.addMessage(msg);
   // Persist newly fetched messages to IndexedDB so they survive reconnects
   if (newFromFirmware.length > 0) {
     await messageDb.saveMessages(newFromFirmware).catch(() => {});
