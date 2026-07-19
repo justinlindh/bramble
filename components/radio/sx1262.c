@@ -31,7 +31,7 @@ static const bramble_board_config_t* s_board = NULL;
 static int s_busy_timeout_count = 0;
 #define BUSY_STUCK_THRESHOLD 3 /* consecutive timeouts before hard reset */
 
-/* Flag set after hard reset — checked by mesh task to trigger reconfigure */
+/* Flag set after hard reset, checked by mesh task to trigger reconfigure */
 static volatile bool s_needs_reinit = false;
 
 bool sx1262_needs_reinit(void) { return s_needs_reinit; }
@@ -61,7 +61,7 @@ static void nss_high(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Hard reset — recover from stuck BUSY / wedged state machine        */
+/*  Hard reset: recover from stuck BUSY / wedged state machine        */
 /* ------------------------------------------------------------------ */
 
 void sx1262_hard_reset(void) {
@@ -104,7 +104,7 @@ int sx1262_wait_busy(uint32_t timeout_ms) {
             ESP_LOGE(TAG, "BUSY timeout (%" PRIu32 " ms)", timeout_ms);
             s_busy_timeout_count++;
             if (s_busy_timeout_count >= BUSY_STUCK_THRESHOLD) {
-                ESP_LOGE(TAG, "BUSY stuck — %d consecutive timeouts, triggering hard reset",
+                ESP_LOGE(TAG, "BUSY stuck, %d consecutive timeouts, triggering hard reset",
                          s_busy_timeout_count);
                 sx1262_hard_reset();
                 s_busy_timeout_count = 0;
@@ -126,7 +126,7 @@ int sx1262_wait_busy(uint32_t timeout_ms) {
         }
         vTaskDelay(1);
     }
-    /* BUSY went low — reset consecutive timeout counter */
+    /* BUSY went low, reset consecutive timeout counter */
     s_busy_timeout_count = 0;
     return 0;
 }
@@ -149,7 +149,7 @@ static int spi_transfer(const uint8_t* tx, uint8_t* rx, size_t len) {
     return 0;
 }
 
-/* Shared SPI mutex helpers — on boards with BOARD_CAP_SHARED_SPI, we hold
+/* Shared SPI mutex helpers: on boards with BOARD_CAP_SHARED_SPI, we hold
  * g_spi_mutex across the entire BUSY-wait + SPI-transfer sequence.  This
  * prevents display flushes from interleaving between BUSY going LOW and
  * our CS assertion, which can re-trigger BUSY on the SX1262. */
@@ -552,7 +552,7 @@ int sx1262_calibrate(uint8_t cal_mask) {
     nss_high();
 
     /* Wait up to 5000ms for all calibration blocks to complete.
-     * RadioLib uses this value — TCXO boards can be slow. */
+     * RadioLib uses this value; TCXO boards can be slow. */
     return sx1262_wait_busy(5000);
 }
 
@@ -668,7 +668,7 @@ int sx1262_init(void) {
     if (s_board->radio_osc == RADIO_OSC_TCXO_DIO3) {
         ESP_LOGD(TAG, "Configuring TCXO (%.1fV)", s_board->radio_tcxo_voltage);
         /* TCXO startup delay: 32ms covers worst-case startup for oscillators
-         * used on T-Deck Plus and similar boards (5ms was too short — the SX1262
+         * used on T-Deck Plus and similar boards (5ms was too short; the SX1262
          * re-enables DIO3 at every TX/RX transition and must wait this long for
          * the TCXO to stabilize.  Bramble / RadioLib use 1600ms in some
          * configs; 32ms is conservative but not wasteful for 915 MHz LoRa. */

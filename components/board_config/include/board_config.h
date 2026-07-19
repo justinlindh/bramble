@@ -20,7 +20,7 @@ typedef int gpio_num_t;
 #define SPI2_HOST 1
 #endif
 
-/* Capability flags — boards set these to declare what they support */
+/* Capability flags: boards set these to declare what they support */
 #define BOARD_CAP_DISPLAY_SSD1306 (1 << 0)
 #define BOARD_CAP_DISPLAY_ST7789 (1 << 1)
 #define BOARD_CAP_KEYBOARD (1 << 2)

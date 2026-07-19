@@ -94,7 +94,7 @@ typedef enum {
     LOC_SHARE_COUNT = 3
 } loc_share_mode_t;
 
-/* NVS-backed getter/setter — persisted in namespace "bramble", key "loc_share" */
+/* NVS-backed getter/setter: persisted in namespace "bramble", key "loc_share" */
 loc_share_mode_t location_share_mode_get(void);
 void location_share_mode_set(loc_share_mode_t mode);
 

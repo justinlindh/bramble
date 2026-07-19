@@ -120,7 +120,7 @@ int timesync_handle_sync(timesync_state_t* ts, int64_t remote_time_ms, uint8_t r
     /* Purge stale entries before adding */
     purge_stale(ts, local_now_ms);
 
-    /* Check for duplicate source — update existing entry instead of adding */
+    /* Check for duplicate source: update existing entry instead of adding */
     for (int i = 0; i < ts->pending_count; i++) {
         if (ts->pending[i].source_addr == source_addr) {
             ts->pending[i].offset_ms = proposed_offset;

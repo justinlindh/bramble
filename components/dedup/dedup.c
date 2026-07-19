@@ -14,7 +14,7 @@ bool dedup_check_and_add(dedup_buffer_t* buf, uint32_t packet_id, uint32_t now_m
         }
     }
 
-    /* Not found — add it */
+    /* Not found: add it */
     if (buf->count < DEDUP_MAX_ENTRIES) {
         buf->entries[buf->count].packet_id = packet_id;
         buf->entries[buf->count].timestamp_ms = now_ms;

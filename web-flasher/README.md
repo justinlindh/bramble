@@ -4,7 +4,7 @@ Web Serial-based firmware flasher for Bramble boards, powered by [esptool-js](ht
 
 ## Dependencies
 
-- **esptool-js v0.5.7** — loaded via CDN: `https://unpkg.com/esptool-js@0.5.7/bundle.js`
+- **esptool-js v0.5.7**, loaded via CDN: `https://unpkg.com/esptool-js@0.5.7/bundle.js`
   - Exposes a global `esptool` object (`esptool.Transport`, `esptool.ESPLoader`)
   - No build step required; all files are vanilla JS served as static assets
 
@@ -34,9 +34,9 @@ Only complete releases are shown. A release is considered complete only if it co
 
 ## Architecture
 
-- `index.html` — UI shell; loads `release-index.js`, `esptool-js` bundle, then `flasher.js`
-- `release-index.js` — release index normalization/filtering logic (unchanged by flasher migration)
-- `flasher.js` — UI controller; uses `esptool.Transport` + `esptool.ESPLoader` for connect/sync/flash
+- `index.html`: UI shell; loads `release-index.js`, `esptool-js` bundle, then `flasher.js`
+- `release-index.js`: release index normalization/filtering logic (unchanged by flasher migration)
+- `flasher.js`: UI controller; uses `esptool.Transport` + `esptool.ESPLoader` for connect/sync/flash
 
 - `wifi-config.js`: WiFi credential provisioning during flash
 - `style.css`: styling

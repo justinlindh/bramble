@@ -1,5 +1,5 @@
 /**
- * Bramble mesh task — runs on CPU1, handles radio TX/RX and protocol dispatch.
+ * Bramble mesh task: runs on CPU1, handles radio TX/RX and protocol dispatch.
  */
 
 #include "mesh_task.h"
@@ -402,7 +402,7 @@ typedef struct {
 } pending_rreq_fwd_t;
 static pending_rreq_fwd_t s_rreq_fwd_queue[RREQ_FWD_QUEUE_CAPACITY];
 
-/* Reliability — ACK tracking for outgoing unicast messages */
+/* Reliability: ACK tracking for outgoing unicast messages */
 static pending_ack_table_t s_pending_acks;
 
 /* Traffic debug telemetry */
@@ -448,7 +448,7 @@ static uint32_t s_recent_broadcast_ids[RECENT_BROADCAST_RING_SIZE];
 static int s_recent_broadcast_idx = 0;
 static broadcast_telemetry_mode_t s_broadcast_telemetry_mode = BROADCAST_TELEMETRY_RECIPIENT_ONLY;
 
-/* Mailbox — store-and-forward for offline neighbors (backed by components/mailbox) */
+/* Mailbox: store-and-forward for offline neighbors (backed by components/mailbox) */
 static bool s_mailbox_enabled = false;
 #define MAILBOX_BEACON_FLAG 0x01
 static mailbox_t s_mailbox;
@@ -1206,12 +1206,12 @@ void mesh_reboot_delayed(int delay_ms) {
     TimerHandle_t t =
         xTimerCreate("reboot", pdMS_TO_TICKS(delay_ms), pdFALSE, NULL, reboot_timer_cb);
     if (t == NULL) {
-        ESP_LOGE(TAG, "Failed to create reboot timer — rebooting immediately");
+        ESP_LOGE(TAG, "Failed to create reboot timer, rebooting immediately");
         esp_restart();
         return;
     }
     if (xTimerStart(t, pdMS_TO_TICKS(100)) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to start reboot timer — rebooting immediately");
+        ESP_LOGE(TAG, "Failed to start reboot timer, rebooting immediately");
         esp_restart();
     } else {
         ESP_LOGI(TAG, "Reboot scheduled in %d ms", delay_ms);
@@ -1238,7 +1238,7 @@ static void on_rx(const uint8_t* data, uint8_t len, const radio_rx_info_t* info)
     }
 
     rx_packet_t pkt;
-    /* len is uint8_t (max 255), pkt.data is 256 bytes — always fits */
+    /* len is uint8_t (max 255), pkt.data is 256 bytes; always fits */
     memcpy(pkt.data, data, len);
     pkt.len = len;
     pkt.rssi = info->rssi;
@@ -1313,7 +1313,7 @@ static int send_beacon(void) {
     beacon.seq[4] = (uint8_t)(beacon_seq >> 8);
     beacon.seq[5] = (uint8_t)beacon_seq;
 
-    /* HMAC auth — use shared beacon key (derived from public channel PSK) */
+    /* HMAC auth: use shared beacon key (derived from public channel PSK) */
     beacon_compute_hmac(&beacon, s_beacon_key, sizeof(s_beacon_key));
 
     /* Red-team fix: was buf[64], a hand-counted constant that predates the
@@ -1553,9 +1553,9 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
         return;
     }
 
-    /* Check for address collision — different pubkey_hash but same address */
+    /* Check for address collision: different pubkey_hash but same address */
     if (identity_check_collision(s_identity, beacon.src_addr, beacon.pubkey_hash)) {
-        ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 " — regenerating identity!",
+        ESP_LOGE(TAG, "ADDRESS COLLISION with %08" PRIX32 ", regenerating identity!",
                  beacon.src_addr);
         /* Regenerate keypair and persist to NVS */
         if (identity_generate_and_save(s_identity) != 0) {
@@ -1582,7 +1582,7 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
         return;
     }
 
-    /* Update neighbor table — track if this is a new neighbor */
+    /* Update neighbor table: track if this is a new neighbor */
     uint32_t t = now_ms();
     int old_count = neighbor_count(&s_neighbors);
     int idx =
@@ -1598,7 +1598,7 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
         s_neighbors.entries[idx].name[0] = '\0';
     }
 
-    /* Feed timesync from beacon — requires corroboration from multiple sources */
+    /* Feed timesync from beacon: requires corroboration from multiple sources */
     if (beacon.network_time != 0 && beacon.time_confidence != 0xFFFF) {
         /* ws 1.3c: only established neighbors count toward the pre-commit
          * corroboration quorum (NEW-SEC-4 anti-Sybil lever). Computed after
@@ -1644,7 +1644,7 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
         }
     }
 
-    /* Sybil detection — check if multiple neighbors cluster at suspiciously similar RSSI.
+    /* Sybil detection: check if multiple neighbors cluster at suspiciously similar RSSI.
      * Log-only for now; detection algorithm needs field validation before dropping beacons. */
     {
         int nc = neighbor_count(&s_neighbors);
@@ -1656,7 +1656,7 @@ static void handle_beacon(const uint8_t* data, uint8_t len, int16_t rssi, int8_t
             if (sybil_check_rssi_cluster(rssi_vals, nc)) {
                 ESP_LOGW(TAG,
                          "SYBIL WARNING: beacon from %08" PRIX32
-                         " — %d neighbors with suspiciously similar RSSI (latest RSSI:%d)",
+                         ", %d neighbors with suspiciously similar RSSI (latest RSSI:%d)",
                          beacon.src_addr, nc, rssi);
             }
         }
@@ -2105,7 +2105,7 @@ static void handle_ack(const uint8_t* data, uint8_t len, int16_t rssi, int8_t sn
         return;
     }
 
-    /* Not for us — forward it */
+    /* Not for us, forward it */
     if (ack.header.dest_addr != s_identity->address) {
         if (s_flood_transport) {
             /* Flooding F1 Task 2: under s_flood_transport there are no routes,
@@ -2766,10 +2766,10 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             frag_hdr.frag_total = info.data[1];
             frag_hdr.message_id = info.data[2] | ((uint16_t)info.data[3] << 8);
 
-            /* Validate fragment header — indices < total and total within limits */
+            /* Validate fragment header: indices < total and total within limits */
             if (frag_hdr.frag_total > 1 && frag_hdr.frag_index < frag_hdr.frag_total &&
                 frag_hdr.frag_total <= FRAG_MAX_FRAGMENTS) {
-                /* This is a fragment — process through reassembly */
+                /* This is a fragment: process through reassembly */
                 ESP_LOGI(TAG, "RX fragment %u/%u msg_id=%04X from %08" PRIX32,
                          frag_hdr.frag_index + 1, frag_hdr.frag_total, frag_hdr.message_id,
                          info.src_addr);
@@ -2778,7 +2778,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
                     reassembly_add(&s_reassembly, &frag_hdr, info.data + FRAG_HEADER_SIZE,
                                    info.data_len - FRAG_HEADER_SIZE, now_ms(), rx_hdr.packet_id);
                 if (ret == 1) {
-                    /* Reassembly complete — collect the full message.
+                    /* Reassembly complete: collect the full message.
                      * Buffers allocated on heap to avoid ~1.2KB stack pressure
                      * in the mesh task (which has tight stack headroom). */
                     /* Get first-received fragment's packet_id before collect frees slot */
@@ -2906,7 +2906,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
             }
         }
 
-        /* Not a fragment — process as regular single-packet message */
+        /* Not a fragment: process as regular single-packet message */
         char text[256];
         size_t tlen = info.data_len;
         if (tlen >= sizeof(text))
@@ -2919,7 +2919,7 @@ static void handle_data(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         ESP_LOGI(TAG, ">>> %s", text);
         ESP_LOGI(TAG, "*** (ch:%d RSSI:%d SNR:%d) ***", info.channel_id, rssi, snr);
 
-        /* Store in message store — classify broadcast vs channel routing */
+        /* Store in message store: classify broadcast vs channel routing */
         uint32_t hdr_dest;
         memcpy(&hdr_dest, data + 4, 4); /* dest_addr at offset 4 in header */
         bool is_channel_message = (info.channel_id > 0);
@@ -3565,7 +3565,7 @@ static bool mesh_mailbox_store(uint32_t src_addr, uint32_t dest_addr, const uint
         return false;
 
     /* Component payload is capped at MAILBOX_MAX_PAYLOAD (200) bytes.
-     * Raw packets that exceed this limit cannot be buffered — drop with a warning. */
+     * Raw packets that exceed this limit cannot be buffered; drop with a warning. */
     if (raw_len > MAILBOX_MAX_PAYLOAD) {
         ESP_LOGW(TAG, "Mailbox: packet too large to store (%u > %u bytes), dropping for %08" PRIX32,
                  raw_len, (unsigned)MAILBOX_MAX_PAYLOAD, dest_addr);
@@ -3607,7 +3607,7 @@ static void mailbox_flush_for(uint32_t dest_addr) {
          * entry for the next flush; stored mail is never silently lost. */
         int rc = mesh_tx(entries[i].payload, (uint8_t)entries[i].payload_len, TX_KIND_MAILBOX);
         if (rc != 0) {
-            /* Transmit failed (LBT / radio busy) — re-store for retry on next flush */
+            /* Transmit failed (LBT / radio busy), re-store for retry on next flush */
             ESP_LOGW(TAG, "Mailbox: transmit failed (rc=%d) for id=%08" PRIX32 ", re-queuing", rc,
                      entries[i].packet_id);
             mailbox_store(&s_mailbox, entries[i].src_addr, entries[i].dest_addr, entries[i].payload,
@@ -4655,7 +4655,7 @@ static void mesh_periodic_maintenance(uint32_t t, uint32_t* last_beacon_ms,
         }
     }
 
-    /* ACK retry tick — retransmit unacknowledged packets */
+    /* ACK retry tick: retransmit unacknowledged packets */
     static uint32_t last_ack_tick = 0;
     if ((t - last_ack_tick) >= 1000) { /* Check every 1s */
         last_ack_tick = t;
@@ -4791,13 +4791,13 @@ static void mesh_task(void* param) {
     radio_set_rx_callback(on_rx);
     radio_set_tx_done_callback(on_tx_done);
 
-    /* Init radio — this is where hangs have been observed on SX1262.
+    /* Init radio: this is where hangs have been observed on SX1262.
      * The task watchdog will reset the device if radio_init() never returns. */
-    ESP_LOGI(TAG, "=== BOOT STAGE: radio_init (SX1262) — WDT active ===");
+    ESP_LOGI(TAG, "=== BOOT STAGE: radio_init (SX1262), WDT active ===");
     int ret = radio_init(&radio_cfg);
     if (ret != 0) {
         ESP_LOGE(TAG, "Radio init failed: %d", ret);
-        ESP_LOGE(TAG, "Mesh task exiting — no radio");
+        ESP_LOGE(TAG, "Mesh task exiting, no radio");
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_shared.radio_ok = false;
         xSemaphoreGive(s_state_mutex);
@@ -4806,7 +4806,7 @@ static void mesh_task(void* param) {
         return;
     }
 
-    ESP_LOGI(TAG, "=== BOOT STAGE: radio initialized — starting RX ===");
+    ESP_LOGI(TAG, "=== BOOT STAGE: radio initialized, starting RX ===");
     radio_start_rx();
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -4840,7 +4840,7 @@ static void mesh_task(void* param) {
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(initial_delay));
 
-    /* Fresh WDT reset before send_beacon — TX can block up to 4s waiting for
+    /* Fresh WDT reset before send_beacon; TX can block up to 4s waiting for
      * the SX1262 done IRQ.  Without this, jitter_delay + TX can exceed the
      * 5s WDT window and reset the device before the main loop even starts. */
     esp_task_wdt_reset();
@@ -4859,12 +4859,12 @@ static void mesh_task(void* param) {
     while (1) {
         uint32_t t = now_ms();
 
-        /* Reset task watchdog — if this stops being called, WDT resets device */
+        /* Reset task watchdog; if this stops being called, WDT resets device */
         esp_task_wdt_reset();
 
         /* Check if radio was hard-reset and needs reconfiguration */
         if (radio_check_and_clear_reinit()) {
-            ESP_LOGW(TAG, "Radio recovered from stuck BUSY — resuming RX");
+            ESP_LOGW(TAG, "Radio recovered from stuck BUSY, resuming RX");
         }
 
         /* Process received packets */
@@ -5920,7 +5920,7 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
 
     /* Check if fragmentation is needed */
     if (len > FRAG_MAX_PLAINTEXT) {
-        /* Long message — split into fragments */
+        /* Long message: split into fragments */
         uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
         fragment_t* frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
         if (!frags) {
@@ -5975,7 +5975,7 @@ int mesh_send_broadcast(const uint8_t* data, size_t len) {
         return 0;
     }
 
-    /* Short message — fast path (no fragmentation) */
+    /* Short message: fast path (no fragmentation) */
     uint32_t pkt_id = send_data_packet(0xFFFFFFFF, data, len, &s_channels[0], 0x01);
     if (pkt_id != 0) {
         s_last_broadcast_id = pkt_id;
@@ -6015,7 +6015,7 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
 
     /* Check if fragmentation is needed */
     if (len > FRAG_MAX_PLAINTEXT) {
-        /* Long message — split into fragments */
+        /* Long message: split into fragments */
         uint16_t msg_id = (uint16_t)(next_packet_id() & 0xFFFF);
         fragment_t* frags = calloc(FRAG_MAX_FRAGMENTS, sizeof(fragment_t));
         if (!frags) {
@@ -6079,7 +6079,7 @@ static uint32_t mesh_send_channel_uid(int channel_idx, uint32_t dest_addr, const
         return first_pkt_id;
     }
 
-    /* Short message — fast path (no fragmentation) */
+    /* Short message: fast path (no fragmentation) */
     uint32_t pkt_id = send_data_packet(dest_addr, data, len, &s_channels[channel_idx], 0x01);
     if (pkt_id != 0) {
         if (dest_addr == 0xFFFFFFFFu) {
@@ -6190,10 +6190,10 @@ static uint32_t mesh_send_message_uid(uint32_t dest_addr, const uint8_t* data, s
     /* For non-neighbor destinations, check route table */
     neighbor_entry_t* nb = s_flood_transport ? NULL : neighbor_lookup(&s_neighbors, dest_addr);
     if (!s_flood_transport && !nb) {
-        /* Not a direct neighbor — need routing */
+        /* Not a direct neighbor, need routing */
         route_entry_t* route = route_lookup(&s_routes, dest_addr);
         if (!route || route->state == ROUTE_BROKEN || route->state == ROUTE_DISCOVERING) {
-            /* No route — start discovery and queue the message */
+            /* No route: start discovery and queue the message */
             if (!discovery_lookup(&s_pending_disc, dest_addr)) {
                 initiate_discovery(dest_addr);
             }
@@ -6211,9 +6211,9 @@ static uint32_t mesh_send_message_uid(uint32_t dest_addr, const uint8_t* data, s
                 msg_store_add_dm_uid(dest_addr, MSG_DIR_OUTGOING, (const char*)data, len, 0, 0, 0,
                                      MSG_STATUS_NONE, row_uid);
             }
-            return 1; /* queued — nonzero = success but no packet_id yet */
+            return 1; /* queued, nonzero = success but no packet_id yet */
         }
-        /* Have a route — send_data_packet will transmit (next hop gets it) */
+        /* Have a route: send_data_packet will transmit (next hop gets it) */
     }
 
     int send_idx = s_default_channel_idx;
@@ -6580,7 +6580,7 @@ void mesh_task_start(bramble_identity_t* identity) {
         esp_err_t name_err = nvs_get_str(nvs, "node_name", s_node_name, &len);
         if (name_err != ESP_OK) {
             if (name_err == ESP_ERR_NVS_INVALID_LENGTH) {
-                /* Stored string exceeds buffer — read truncated and force null-terminate */
+                /* Stored string exceeds buffer, read truncated and force null-terminate */
                 len = sizeof(s_node_name);
                 nvs_get_str(nvs, "node_name", s_node_name, &len);
                 s_node_name[sizeof(s_node_name) - 1] = '\0';
@@ -6867,7 +6867,7 @@ void mesh_task_start(bramble_identity_t* identity) {
         return;
     }
 
-    /* Pin to CPU1 — leave CPU0 for UI/display */
+    /* Pin to CPU1: leave CPU0 for UI/display */
 #ifdef CONFIG_IDF_TARGET_LINUX
     /* The POSIX simulation has a single core; pinning to CPU1 trips the
      * kernel's core-count assert. */
@@ -6917,7 +6917,7 @@ int mesh_add_channel(const char* name, const uint8_t* psk, size_t psk_len) {
 
     bramble_channel_t* ch = &s_channels[s_num_channels];
     if (psk && psk_len > 0) {
-        /* Use provided PSK — treat as passphrase string */
+        /* Use provided PSK: treat as passphrase string */
         char psk_str[65];
         size_t copy_len = psk_len < sizeof(psk_str) - 1 ? psk_len : sizeof(psk_str) - 1;
         memcpy(psk_str, psk, copy_len);
@@ -7591,7 +7591,7 @@ void mesh_traffic_debug_set_config(bool enabled, bool include_tx, bool include_r
     traffic_debug_enable(&s_traffic_debug, enabled);
     xSemaphoreGive(s_state_mutex);
 
-    /* Persist config to NVS (flash I/O — do NOT hold mesh mutex) */
+    /* Persist config to NVS (flash I/O, do NOT hold mesh mutex) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_u8(nvs, "enabled", enabled ? 1 : 0);
@@ -7613,7 +7613,7 @@ void mesh_traffic_debug_get_config(bool* enabled, bool* include_tx, bool* includ
         *enabled = traffic_debug_is_enabled(&s_traffic_debug);
     xSemaphoreGive(s_state_mutex);
 
-    /* Load other config from NVS (flash I/O — do NOT hold mesh mutex) */
+    /* Load other config from NVS (flash I/O, do NOT hold mesh mutex) */
     nvs_handle_t nvs;
     if (nvs_open(NVS_NS_TELEMETRY_DBG, NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t val = 0;

@@ -41,7 +41,7 @@ function formatRefill(refillAtMs: number): string {
   return `in ${s}s`;
 }
 
-describe('normalizeAirtime — firmware flat format', () => {
+describe('normalizeAirtime: firmware flat format', () => {
   it('maps firmware fields to tier objects', () => {
     const raw = {
       critical_remaining_ms: 36000,
@@ -202,7 +202,7 @@ describe('normalizeAirtime — firmware flat format', () => {
   });
 });
 
-describe('normalizeAirtime — mock/tiers format', () => {
+describe('normalizeAirtime: mock/tiers format', () => {
   it('passes through tiers format unchanged', () => {
     const raw = {
       tiers: [
@@ -213,7 +213,7 @@ describe('normalizeAirtime — mock/tiers format', () => {
     };
 
     const result = normalizeAirtime(raw);
-    expect(result).toBe(raw); // same reference — passthrough
+    expect(result).toBe(raw); // same reference: passthrough
   });
 });
 

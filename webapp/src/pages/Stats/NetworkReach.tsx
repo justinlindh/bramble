@@ -108,14 +108,14 @@ function ResultsTable({ rows }: { rows: ProbeRow[] }) {
                 <span className={`${styles.hopBadge} ${hopClass(response.hopCount)}`}>
                   {response.hopCount}
                 </span>
-              ) : '—'}
+              ) : '-'}
             </td>
             <td style={response ? { color: confidenceColor(response.confidence ?? 1) } : undefined}>
-              {response ? `${Math.round((response.confidence ?? 1) * 100)}%` : '—'}
+              {response ? `${Math.round((response.confidence ?? 1) * 100)}%` : '-'}
             </td>
             <td>{response ? `${response.rssi} dBm` : 'no response'}</td>
-            <td>{response ? response.snr.toFixed(1) : '—'}</td>
-            <td className={styles.pathCell}>{response ? formatPath(response) : '—'}</td>
+            <td>{response ? response.snr.toFixed(1) : '-'}</td>
+            <td className={styles.pathCell}>{response ? formatPath(response) : '-'}</td>
           </tr>
         )})}
       </tbody>
@@ -206,10 +206,10 @@ export function NetworkReach() {
         <IconProbe size={18} className={styles.headerIcon} />
         <span className={styles.title}>Network Reach</span>
         {collecting && (
-          <span className={styles.subtitle}>— Collecting… ({remaining}s remaining)</span>
+          <span className={styles.subtitle}>: Collecting… ({remaining}s remaining)</span>
         )}
         {probeResult && !collecting && (
-          <span className={styles.subtitle}>— Probe #{probeIdShort}</span>
+          <span className={styles.subtitle}>: Probe #{probeIdShort}</span>
         )}
       </div>
 

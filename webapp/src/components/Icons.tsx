@@ -1,5 +1,5 @@
 /**
- * Inline SVG icon components — monochrome, Lucide-style.
+ * Inline SVG icon components: monochrome, Lucide-style.
  * All icons use currentColor for stroke so they inherit text color.
  * ViewBox: 0 0 24 24, stroke-based, strokeWidth=2.
  */
@@ -275,7 +275,7 @@ export function IconEnvelope({ size = 16, className }: IconProps) {
   );
 }
 
-/** 📡 Probe / radar — concentric arcs with center dot */
+/** 📡 Probe / radar: concentric arcs with center dot */
 export function IconProbe({ size = 16, className }: IconProps) {
   return (
     <Svg size={size} className={className}>

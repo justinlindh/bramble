@@ -2,7 +2,7 @@
   "name": "bramble-ws-proxy",
   "version": "1.0.0",
   "type": "module",
-  "description": "WebSocket relay — bridges browser WSS to plain WS device connections",
+  "description": "WebSocket relay: bridges browser WSS to plain WS device connections",
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs"

@@ -102,7 +102,7 @@ export function NeighborCard({ neighbor, peerLocation, onOpenDM, onShowOnMap }: 
       {/* ── Stats row ── */}
       <div className={styles.row}>
         <span title="Packet Delivery Rate">PDR: {pdr}%</span>
-        <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr?.toFixed(1) ?? '—'} dB</span>
+        <span title="Signal-to-Noise Ratio">SNR: {neighbor.snr?.toFixed(1) ?? '-'} dB</span>
         <span title="Last heard"><IconClock size={13} /> {formatAge(neighbor.lastHeardMs)}</span>
         <span
           className={stale ? styles.badgeStale : styles.badgeActive}

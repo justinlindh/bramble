@@ -33,7 +33,7 @@ static const char* TAG = "board";
 static bool s_initialized = false;
 #endif
 
-/* Shared SPI mutex — created for boards with BOARD_CAP_SHARED_SPI */
+/* Shared SPI mutex: created for boards with BOARD_CAP_SHARED_SPI */
 SemaphoreHandle_t g_spi_mutex = NULL;
 #endif
 
@@ -83,7 +83,7 @@ int board_init(void) {
     if (cfg->capabilities & BOARD_CAP_SHARED_SPI) {
         /* CRITICAL: Drive ALL SPI CS pins HIGH before bus init.
          * On shared SPI buses, floating CS pins cause peripherals to
-         * receive each other's traffic — corrupting display GRAM, etc.
+         * receive each other's traffic, corrupting display GRAM, etc.
          * (Learned from Bramble's earlyInitVariant pattern.) */
         /* .cs sits at offset 0 in every display-pin union variant, so
          * spi_display.cs also reads the e-paper CS on epd_display boards. */

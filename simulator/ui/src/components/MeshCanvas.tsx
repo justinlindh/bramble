@@ -26,10 +26,10 @@ const BROKEN_LINK_FADE_MS = 10000;
 // Fair (-85 to -100 dBm): orange
 // Weak (< -100 dBm): red
 function rssiToColor(rssi: number): string {
-  if (rssi > -70) return '#00ff88';      // bright green — strong
-  if (rssi > -85) return '#c8e838';      // yellow-green — good
-  if (rssi > -100) return '#f0883e';     // orange — fair
-  return '#f85149';                       // red — weak
+  if (rssi > -70) return '#00ff88';      // bright green: strong
+  if (rssi > -85) return '#c8e838';      // yellow-green: good
+  if (rssi > -100) return '#f0883e';     // orange: fair
+  return '#f85149';                       // red: weak
 }
 
 // Line width: thicker = stronger signal. Range 1.0–4.5
@@ -490,7 +490,7 @@ export function MeshCanvas({
     return elements;
   });
 
-  // Get link quality info — RSSI-aware
+  // Get link quality info, RSSI-aware
   const getLinkStyle = useCallback((fromId: string, toId: string, inRange: boolean) => {
     const key = makeLinkKey(fromId, toId);
 
@@ -540,7 +540,7 @@ export function MeshCanvas({
       };
     }
 
-    // In range but no recent traffic — show faint RSSI-colored line if we have data
+    // In range but no recent traffic: show faint RSSI-colored line if we have data
     if (inRange) {
       if (lq) {
         return {

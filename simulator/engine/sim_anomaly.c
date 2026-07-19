@@ -198,7 +198,7 @@ void anomaly_check_partition(node_array_t* nodes, float radio_range, uint64_t no
             active[active_count++] = i;
     }
     if (active_count <= 1)
-        return; /* 0 or 1 nodes — nothing to partition */
+        return; /* 0 or 1 nodes: nothing to partition */
 
     /* BFS from first active node */
     bool visited[MAX_NODES] = {false};

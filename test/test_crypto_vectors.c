@@ -139,7 +139,7 @@ void test_x25519_keypair_derivation(void) {
     bramble_identity_t id;
     TEST_ASSERT_EQUAL(0, crypto_generate_identity(&id));
 
-    /* Derive shared secret with our own public key — just verify it doesn't crash
+    /* Derive shared secret with our own public key: just verify it doesn't crash
      * and returns a non-zero result */
     uint8_t shared[32];
     int ret = crypto_x25519_dh(id.private_key, id.public_key, shared);

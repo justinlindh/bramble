@@ -67,7 +67,7 @@ int emu_node_start_autosend(void);
 #endif
 
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-/* lvgl.h not directly included — use ui_graphics API */
+/* lvgl.h not directly included, use ui_graphics API */
 #include "ui_graphics.h"
 #endif
 
@@ -283,7 +283,7 @@ static void show_boot_status(const char* msg) {
     int div_y = title_y + LARGE_FONT_H + 4;
     display_hline(DISPLAY_WIDTH / 8, div_y, DISPLAY_WIDTH * 3 / 4);
 
-    /* Status line below divider — truncate to display width */
+    /* Status line below divider, truncate to display width */
     char buf[22]; /* 128px / 6px-per-char + NUL */
     snprintf(buf, sizeof(buf), "%s", msg);
     display_draw_text(2, div_y + 8, buf);
@@ -324,7 +324,7 @@ static bramble_identity_t g_identity;
 static uint32_t my_addr = 0;
 static uint32_t boot_time_ms = 0;
 
-/* Shared render-time snapshots — only one screen renders at a time,
+/* Shared render-time snapshots: only one screen renders at a time,
  * so a single static instance avoids ~8KB of duplicate BSS. */
 static mesh_shared_state_t s_render_mesh;
 static routing_table_t s_render_routes;
@@ -404,7 +404,7 @@ static void render_unread_badge(const ui_state_t* ui, int right_x) {
 static void render_main_screen(const ui_state_t* ui) {
     display_clear();
 
-    /* Header — name + battery, right-aligned battery */
+    /* Header: name + battery, right-aligned battery */
     {
         uint8_t bpct = battery_read_pct();
         char name[] = "Bramble";
@@ -1065,7 +1065,7 @@ void app_main(void) {
     /* Board-level init: power rails, shared SPI bus */
     ESP_LOGI(TAG, "=== BOOT STAGE: board_init ===");
     if (board_init() != 0) {
-        ESP_LOGE(TAG, "Board init failed — halting");
+        ESP_LOGE(TAG, "Board init failed, halting");
         return;
     }
 
@@ -1243,7 +1243,7 @@ void app_main(void) {
             }
         }
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-        /* LVGL will handle its own rendering — just clear the display */
+        /* LVGL will handle its own rendering, just clear the display */
         ESP_LOGI(TAG, "=== BOOT STAGE: clear display for LVGL ===");
         display_clear();
         display_flush();
@@ -1460,7 +1460,7 @@ void app_main(void) {
     }
 
     /* Start mesh task (radio + beacons on CPU1).
-     * NOTE: radio_init() runs inside mesh_task on CPU1 — if it hangs,
+     * NOTE: radio_init() runs inside mesh_task on CPU1; if it hangs,
      * the task watchdog (CONFIG_ESP_TASK_WDT_TIMEOUT_S) will force a reset. */
     ESP_LOGI(TAG, "=== BOOT STAGE: mesh_task_start ===");
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
@@ -1468,7 +1468,7 @@ void app_main(void) {
 #endif
     mesh_task_start(&g_identity);
 #ifndef CONFIG_BRAMBLE_UI_GRAPHICAL
-    /* Radio init runs async in mesh_task — brief wait then check state */
+    /* Radio init runs async in mesh_task, brief wait then check state */
     vTaskDelay(pdMS_TO_TICKS(800));
     {
         static mesh_shared_state_t boot_mesh;
@@ -1532,7 +1532,7 @@ void app_main(void) {
     /* Create LVGL task on core 0 (core 1 runs mesh).
      *
      * IMPORTANT constraints:
-     * 1. Stack MUST be in internal RAM — LVGL callbacks (Settings screen)
+     * 1. Stack MUST be in internal RAM: LVGL callbacks (Settings screen)
      *    do NVS reads which trigger SPI flash operations. ESP-IDF asserts
      *    the calling task's stack is cache-safe (internal RAM) before
      *    disabling caches. PSRAM stack → assert crash.
@@ -1580,11 +1580,11 @@ void app_main(void) {
     while (1) {
         log_heap_diagnostics_periodic();
 #ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
-        /* LVGL runs in its own task — main loop just keeps watchdog happy */
+        /* LVGL runs in its own task, main loop just keeps watchdog happy */
         poll_connectivity_events();
         vTaskDelay(pdMS_TO_TICKS(1000));
 #else
-        /* Main loop — 50ms tick (20 Hz) */
+        /* Main loop: 50ms tick (20 Hz) */
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
         poll_connectivity_events();
 
@@ -1611,7 +1611,7 @@ void app_main(void) {
         }
 
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
-        /* Keyboard input — only active on compose screen */
+        /* Keyboard input, only active on compose screen */
         char key;
         while (keyboard_poll(&key)) {
             if (ui_get_screen(&ui) == SCREEN_COMPOSE) {
@@ -1632,7 +1632,7 @@ void app_main(void) {
                         ui.compose_buf[ui.compose_len] = '\0';
                     }
                 } else if (key == 27) {
-                    /* Escape — cancel compose */
+                    /* Escape: cancel compose */
                     ui.compose_len = 0;
                     ui.compose_buf[0] = '\0';
                     ui.current_screen = SCREEN_MESSAGES;

@@ -16,7 +16,7 @@ function makeMsg(overrides: Partial<Message> = {}): Message {
   };
 }
 
-describe('Zustand store — message state transitions', () => {
+describe('Zustand store: message state transitions', () => {
   beforeEach(() => {
     // Reset store to initial state
     useStore.setState({

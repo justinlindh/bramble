@@ -10,7 +10,7 @@ void sim_probe_init(void);
 void sim_probe_init_node(int node_id, uint32_t addr);
 void sim_probe_tick(int node_id, uint32_t now_ms);
 
-/* Packet dispatch — call from radio/bridge layer */
+/* Packet dispatch: call from radio/bridge layer */
 void sim_probe_handle_packet(int node_id, const uint8_t* data, uint16_t len, int8_t rssi,
                              uint32_t now_ms);
 

@@ -15,7 +15,7 @@ CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 CONFIG_HTTPD_WS_SUPPORT=y
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
-# BLE — NimBLE stack
+# BLE: NimBLE stack
 # BLE disabled by default across current profiles (WiFi-first)
 # CONFIG_BT_ENABLED is not set
 # CONFIG_BT_NIMBLE_ENABLED is not set
@@ -56,8 +56,8 @@ CONFIG_BRAMBLE_MSG_PERSIST_MAX=120
 CONFIG_BRAMBLE_MSG_PERSIST_ROLLOVER_KEEP_PCT=75
 
 # Default board (overridden by board-specific defaults files)
-# NOTE: Heltec V3 uses CP2102 UART bridge — console stays on UART (default).
-# T-Deck Plus and Heltec V4 use native USB-JTAG — console overridden in their
+# NOTE: Heltec V3 uses CP2102 UART bridge; console stays on UART (default).
+# T-Deck Plus and Heltec V4 use native USB-JTAG; console overridden in their
 # board-specific sdkconfig.defaults.* files.
 CONFIG_BRAMBLE_RPC_MAX_METHODS=64
 

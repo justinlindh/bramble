@@ -150,7 +150,7 @@ void bridge_apply_duty_cycle_cap(sim_node_t* node, uint8_t max_duty_cycle_pct);
 extern uint64_t g_bridge_sim_time_us;
 void bridge_set_sim_time(uint64_t us);
 
-/* Bramble's time source — defined in bridge.c */
+/* Bramble's time source: defined in bridge.c */
 uint32_t sim_get_time_ms(void);
 
 /* ─── Event union accessors (cgo cannot access C unions) ───────────────── */

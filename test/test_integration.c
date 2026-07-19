@@ -80,7 +80,7 @@ void test_three_node_route_discovery(void) {
     bramble_rreq_t rreq_at_b;
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rreq_deserialize(&rreq_at_b, pkt.data, pkt.len));
 
-    /* B checks dedup — first time seeing this query */
+    /* B checks dedup: first time seeing this query */
     TEST_ASSERT_FALSE(rreq_dedup_check_and_add(&nodes[1].rreq_dedup, query_id, now));
 
     /* B stores reverse route (query_id → prev_hop=A) */
@@ -100,7 +100,7 @@ void test_three_node_route_discovery(void) {
     mock_radio_send(&radio, 1, buf2, RREQ_SIZE);
 
     /* A should NOT get it back (dedup would catch it, but also verify radio) */
-    /* Actually A CAN hear B, so it will receive it — dedup handles that */
+    /* Actually A CAN hear B, so it will receive it: dedup handles that */
 
     /* Step 3: C receives RREQ */
     TEST_ASSERT_TRUE(mock_radio_recv(&radio, 2, &pkt));
@@ -109,7 +109,7 @@ void test_three_node_route_discovery(void) {
     TEST_ASSERT_EQUAL(ESP_OK, bramble_rreq_deserialize(&rreq_at_c, pkt.data, pkt.len));
     TEST_ASSERT_EQUAL(ADDR_C, rreq_at_c.header.dest_addr);
 
-    /* C is the destination — builds RREP */
+    /* C is the destination: builds RREP */
     bramble_rrep_t rrep_c = rrep_build_destination(&rreq_at_c, ADDR_C);
     TEST_ASSERT_EQUAL(PKT_TYPE_RREP, rrep_c.header.type);
     TEST_ASSERT_EQUAL(ADDR_C, rrep_c.src_addr);
@@ -148,7 +148,7 @@ void test_three_node_route_discovery(void) {
     mock_radio_send(&radio, 1, rrep_buf2, RREP_SIZE);
 
     /* Step 5: A receives RREP */
-    /* Drain A's queue — it may have the forwarded RREQ first */
+    /* Drain A's queue: it may have the forwarded RREQ first */
     bool got_rrep = false;
     bramble_rrep_t rrep_at_a;
     while (mock_radio_recv(&radio, 0, &pkt)) {
@@ -215,7 +215,7 @@ void test_rerr_breaks_route(void) {
     bramble_rerr_t rerr = rerr_build(ADDR_B, ADDR_C, ADDR_C);
     rerr_handle(&nodes[0].routes, &rerr);
 
-    /* Route should not be broken — RERR says broken_next_hop=C but A's next_hop=B */
+    /* Route should not be broken: RERR says broken_next_hop=C but A's next_hop=B */
     route_entry_t* r = route_lookup(&nodes[0].routes, ADDR_C);
     TEST_ASSERT_EQUAL(ROUTE_ACTIVE, r->state);
 

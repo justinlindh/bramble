@@ -24,7 +24,7 @@
  *   lv_malloc_core, lv_realloc_core, lv_free_core, lv_mem_init, lv_mem_deinit
  */
 
-void lv_mem_init(void) { /* nothing — heap_caps is always ready */
+void lv_mem_init(void) { /* nothing: heap_caps is always ready */
 }
 
 void lv_mem_deinit(void) { /* nothing */

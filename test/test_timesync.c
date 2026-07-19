@@ -10,7 +10,7 @@ void test_single_source_does_not_commit(void) {
     timesync_state_t ts;
     timesync_init(&ts);
 
-    /* One source is not enough — CORROBORATION_REQUIRED = 3 */
+    /* One source is not enough: CORROBORATION_REQUIRED = 3 */
     int rc = timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* accepted, not committed */
     TEST_ASSERT_FALSE(ts.synchronized);
@@ -45,7 +45,7 @@ void test_duplicate_source_does_not_count_as_distinct(void) {
 
     timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
     timesync_handle_sync(&ts, 1120, 1, 0xBBBB, true, 1000);
-    /* Same source as first — should update, not add distinct */
+    /* Same source as first: should update, not add distinct */
     int rc = timesync_handle_sync(&ts, 1090, 1, 0xAAAA, true, 1000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* still only 2 distinct sources */
     TEST_ASSERT_FALSE(ts.synchronized);
@@ -102,7 +102,7 @@ void test_rejects_large_shift_when_synchronized(void) {
     timesync_handle_sync(&ts, 1100, 1, 0xCCCC, true, 1000);
     TEST_ASSERT_TRUE(ts.synchronized);
 
-    /* Propose offset +5000 — shift of ~4900, exceeds MAX_TIME_SHIFT_MS (2000) */
+    /* Propose offset +5000: shift of ~4900, exceeds MAX_TIME_SHIFT_MS (2000) */
     int rc = timesync_handle_sync(&ts, 6000, 0, 0xDDDD, true, 1000);
     TEST_ASSERT_EQUAL_INT(-2, rc);
 }
@@ -117,7 +117,7 @@ void test_stale_entries_expire(void) {
     timesync_handle_sync(&ts, 1100, 1, 0xAAAA, true, 1000);
     timesync_handle_sync(&ts, 1100, 1, 0xBBBB, true, 1000);
 
-    /* Third entry at t=200000 — first two are now >180s old and should be purged */
+    /* Third entry at t=200000: first two are now >180s old and should be purged */
     int rc = timesync_handle_sync(&ts, 200100, 1, 0xCCCC, true, 200000);
     TEST_ASSERT_EQUAL_INT(0, rc); /* only 1 non-expired source (0xCCCC) */
     TEST_ASSERT_FALSE(ts.synchronized);

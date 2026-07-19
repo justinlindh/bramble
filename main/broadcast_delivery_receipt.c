@@ -3,7 +3,7 @@
 #include "packet.h"
 #include "routing_auth.h"
 
-/* Receipt slot timing — controls how delivery receipts from multiple nodes
+/* Receipt slot timing: controls how delivery receipts from multiple nodes
  * spread out in time after receiving the same broadcast.  Wider spacing
  * reduces collision probability when many nodes try to TX receipts
  * simultaneously.  At SF10/125kHz a receipt packet takes ~150-200ms

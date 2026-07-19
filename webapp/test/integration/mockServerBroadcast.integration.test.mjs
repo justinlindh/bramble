@@ -133,7 +133,7 @@ describe('Mock Server bramble.sendBroadcast', () => {
   });
 
   it('should NOT return Method not found error', async () => {
-    // This is the key test — verifying the fix works
+    // This is the key test: verifying the fix works
     const result = await sendRpc(ws, 'bramble.sendBroadcast', { text: 'Verify no method not found error' });
     
     // If we get here without error, the method exists

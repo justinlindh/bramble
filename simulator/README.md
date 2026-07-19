@@ -42,8 +42,8 @@ baseline comparisons.
 
 Two-tier: **Go+C server** → **React UI**
 
-- **Go Server** (`gosim/`) — Simulation engine embedding Bramble C code via cgo, WebSocket hub, HTTP server with REST API and static file serving
-- **React UI** (`ui/`) — SVG mesh canvas, metrics dashboard, event log, playback controls, scenario loader
+- **Go Server** (`gosim/`): Simulation engine embedding Bramble C code via cgo, WebSocket hub, HTTP server with REST API and static file serving
+- **React UI** (`ui/`): SVG mesh canvas, metrics dashboard, event log, playback controls, scenario loader
 
 The Go server includes all Bramble C components at compile time (same pattern as `test/test_integration.c`). No modifications to Bramble source code.
 
@@ -167,9 +167,9 @@ Bundled emulator scenarios: `emulator-3-pagers` (attach/persistence smoke),
 Via the UI or WebSocket (`ws://host:port/ws`):
 - Load/start/restart scenarios
 - Play/pause with speed control (0.5×–100×)
-- **Add nodes** — "+ Node" button, placed near random existing node
-- **Move nodes** — drag with mouse or touch
-- **Delete nodes** — right-click context menu, or drag to trash zone (bottom-right)
+- **Add nodes**: "+ Node" button, placed near random existing node
+- **Move nodes**: drag with mouse or touch
+- **Delete nodes**: right-click context menu, or drag to trash zone (bottom-right)
 - Inject messages between arbitrary nodes
 - Create interference zones
 

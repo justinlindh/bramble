@@ -336,7 +336,7 @@ int battery_read_pct(void) { return 85; }
  * The short_name pointer is at offset 0 in the real struct. */
 static char g_stub_board_mem[512];
 const void* board_get_config(void) {
-    /* Ensure short_name is set (it's a const char* at some offset — we set
+    /* Ensure short_name is set (it's a const char* at some offset: we set
      * offset 0 which the stubs type expects, but real struct may differ).
      * Zero-init means capabilities=0, so board_has_cap returns false. */
     memset(g_stub_board_mem, 0, sizeof(g_stub_board_mem));

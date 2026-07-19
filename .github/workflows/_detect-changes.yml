@@ -125,8 +125,10 @@ jobs:
           # host tests read test/ + components/ + main/; the board build adds
           # CMakeLists.txt, sdkconfig.defaults*, partitions*.csv; the static
           # bundle's ruff scans scripts/, cppcheck scans main/ components/, the
-          # rpc-contract check reads api/ + main/, and the strict clang-format,
-          # shell lint, and markdownlint wrappers read the root dotfile configs.
+          # rpc-contract check reads api/ + main/, and the strict clang-format
+          # and shell lint wrappers read the root dotfile configs. The
+          # .markdownlint-cli2.yaml pattern is retained deliberately: no CI job
+          # reads it today (see issue #160), but over-triggering is safe.
           # simulator/ has its own output because the strict clang-format scope
           # scans simulator C sources too.
           firmware=$(area_changed '^(main|components|test|api|scripts)/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$|^\.releaserc\.')

@@ -67,7 +67,7 @@ CONFIG_LV_USE_BUILTIN_MALLOC=n
 CONFIG_LV_USE_CLIB_MALLOC=n
 CONFIG_LV_USE_CUSTOM_MALLOC=y
 
-# WiFi buffer counts — compromise between internal DRAM savings and stability.
+# WiFi buffer counts: compromise between internal DRAM savings and stability.
 # Original defaults (32/32/10) are too aggressive for T-Deck's tight internal RAM,
 # but 8/8/4 starved the Wi-Fi TX path under sustained mesh notification traffic,
 # causing AP disassociation and WS drops. 16/16/6 is the middle ground.

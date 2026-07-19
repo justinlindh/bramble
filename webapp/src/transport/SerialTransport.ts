@@ -45,7 +45,7 @@ export class SerialTransport implements Transport {
     this.port = await serial.requestPort({ filters: FILTERS });
     await this.port.open({ baudRate });
 
-    // Assert DTR for USB-UART bridges (CP2102 etc.) — needed for data flow.
+    // Assert DTR for USB-UART bridges (CP2102 etc.): needed for data flow.
     // Native USB-JTAG may not support signals; best-effort only.
     try {
       const portWithSignals = this.port as unknown as { setSignals?: (signals: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> };
@@ -90,7 +90,7 @@ export class SerialTransport implements Transport {
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 50));
 
-      // Use monotonic byte counter — immune to processBuffer() mutations
+      // Use monotonic byte counter: immune to processBuffer() mutations
       if (this.rxTotal !== lastRxTotal) {
         lastRxTotal = this.rxTotal;
         silentSinceMs = Date.now();
@@ -114,7 +114,7 @@ export class SerialTransport implements Transport {
       }
     }
 
-    // Timeout — clear buffer and proceed anyway
+    // Timeout: clear buffer and proceed anyway
     this.log('drain-timeout', { ms: Date.now() - startMs, rxTotal: this.rxTotal });
     this.readBuf = '';
   }
@@ -284,7 +284,7 @@ export class SerialTransport implements Transport {
             return;
           }
 
-          // NOW start the timeout — the wire is ours
+          // NOW start the timeout; the wire is ours
           const sentAt = Date.now();
           this.log('rpc-send', { id, method });
 

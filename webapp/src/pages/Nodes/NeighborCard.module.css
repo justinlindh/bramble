@@ -19,7 +19,7 @@
   border-style: dashed;
 }
 
-/* Health color coding — left accent border */
+/* Health color coding: left accent border */
 .good {
   border-left: 3px solid #3fb950;
 }

@@ -356,7 +356,7 @@ static int handle_get_version(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getDeliveryEvents — params: {sinceEventSeq|since_event_seq, limit?} */
+/* bramble.getDeliveryEvents: params: {sinceEventSeq|since_event_seq, limit?} */
 static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
     uint32_t since_seq = 0u;
     uint32_t limit = 256u;
@@ -559,7 +559,7 @@ static int handle_ping(const cJSON* params, cJSON* result) {
 /* True max with fragmentation: 154 * 4 = 616 bytes */
 #define FRAGMENTED_MAX_BYTES (FRAGMENT_PAYLOAD_BYTES * MAX_FRAGMENTS)
 
-/* bramble.sendMessage — params: {"dest":"HEXADDR", "text":"...", "channel"?:N} */
+/* bramble.sendMessage: params: {"dest":"HEXADDR", "text":"...", "channel"?:N} */
 static int handle_send_message(const cJSON* params, cJSON* result) {
     const char* dest_str = cJSON_GetStringValue(cJSON_GetObjectItem(params, "dest"));
     const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
@@ -628,7 +628,7 @@ static int handle_send_message(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.sendBroadcast — params: {"text":"..."} */
+/* bramble.sendBroadcast: params: {"text":"..."} */
 static int handle_send_broadcast(const cJSON* params, cJSON* result) {
     const char* text = cJSON_GetStringValue(cJSON_GetObjectItem(params, "text"));
     if (!text) {
@@ -682,7 +682,7 @@ static int handle_send_broadcast(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.reboot — no params required */
+/* bramble.reboot: no params required */
 static int handle_reboot(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddBoolToObject(result, "ok", true);
@@ -690,7 +690,7 @@ static int handle_reboot(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.sendProbe — stub: params {"dest":"HEXADDR"} */
+/* bramble.sendProbe (stub): params {"dest":"HEXADDR"} */
 static int handle_send_probe(const cJSON* params, cJSON* result) {
     (void)params;
     uint32_t probe_id = mesh_send_probe();
@@ -706,7 +706,7 @@ static int handle_send_probe(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setRadio — stub: params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
+/* bramble.setRadio (stub): params {"sf":9, "bw_hz":125000, "tx_power":17, "freq_mhz":915.0} */
 /* Commits pending nvs_set_* writes (only if every prior one succeeded) and
  * closes the handle. Returns the resulting esp_err_t. Shared by the RPC
  * handlers below that accumulate esp_err_t across a chain of nvs_set_*
@@ -823,7 +823,7 @@ static int handle_set_radio(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setNodeName — params: {"name":"..."} — persists to NVS */
+/* bramble.setNodeName: params: {"name":"..."}, persists to NVS */
 static int handle_set_node_name(const cJSON* params, cJSON* result) {
     const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(params, "name"));
     if (!name || strlen(name) == 0 || strlen(name) > BRAMBLE_NODE_NAME_MAX) {
@@ -1290,7 +1290,7 @@ static int rpc_get_auth_token(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.addChannel — params {"name":"...", "psk":"passphrase"} */
+/* bramble.addChannel: params {"name":"...", "psk":"passphrase"} */
 static int handle_add_channel(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
@@ -1863,7 +1863,7 @@ static int handle_share_location_once(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getMessages — returns stored messages from ring buffer */
+/* bramble.getMessages: returns stored messages from ring buffer */
 static int handle_get_messages(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON* arr = cJSON_AddArrayToObject(result, "messages");
@@ -1919,7 +1919,7 @@ static int handle_get_messages(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getPeerLocations — returns own location + any received peer locations */
+/* bramble.getPeerLocations: returns own location + any received peer locations */
 static int handle_get_peer_locations(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON* peer_locations = cJSON_AddArrayToObject(result, "peerLocations");
@@ -2079,7 +2079,7 @@ static bool rpc_get_persisted_channel_has_psk(int index, bool* has_psk_out) {
     return true;
 }
 
-/* bramble.getConfig — returns node name + radio config + channel list */
+/* bramble.getConfig: returns node name + radio config + channel list */
 static int handle_get_config(const cJSON* params, cJSON* result) {
     (void)params;
 
@@ -2099,7 +2099,7 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     cJSON_AddStringToObject(result, "pubkey_hash",
                             addr_hex(s_identity->pubkey_hash, buf, sizeof(buf)));
 
-    /* Radio config — read actual runtime state */
+    /* Radio config: read actual runtime state */
     radio_config_t rcfg;
     radio_get_config(&rcfg);
     cJSON* radio = cJSON_CreateObject();
@@ -2111,7 +2111,7 @@ static int handle_get_config(const cJSON* params, cJSON* result) {
     cJSON_AddStringToObject(radio, "profile", "custom");
     cJSON_AddItemToObject(result, "radio", radio);
 
-    /* Channel list — read from mesh runtime state */
+    /* Channel list: read from mesh runtime state */
     int default_channel = 0;
     int ch_count = mesh_get_channel_info(&default_channel);
     cJSON* channels = cJSON_CreateArray();
@@ -2526,7 +2526,7 @@ static int handle_ota_set_origin(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.sleep — enter deep sleep with optional wake timer */
+/* bramble.sleep: enter deep sleep with optional wake timer */
 static int handle_sleep(const cJSON* params, cJSON* result) {
     int wake_sec = 0;
     if (params) {
@@ -2554,7 +2554,7 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
         esp_sleep_enable_timer_wakeup((uint64_t)wake_sec * 1000000ULL);
     }
 
-    /* Wake on LoRa DIO1 (board-configured pin) — any incoming packet */
+    /* Wake on LoRa DIO1 (board-configured pin): any incoming packet */
     esp_sleep_enable_ext0_wakeup(board_get_config()->radio.dio1, 1); /* wake on HIGH */
 
     esp_deep_sleep_start();
@@ -2563,7 +2563,7 @@ static int handle_sleep(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getBattery — returns battery voltage and percentage */
+/* bramble.getBattery: returns battery voltage and percentage */
 static int handle_get_battery(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddNumberToObject(result, "voltage_mv", battery_read_mv());
@@ -2571,7 +2571,7 @@ static int handle_get_battery(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setBacklight — control display backlight */
+/* bramble.setBacklight: control display backlight */
 static int handle_set_backlight(const cJSON* params, cJSON* result) {
     const bramble_board_config_t* board = board_get_config();
     if (board->spi_display.backlight < 0) {
@@ -2591,7 +2591,7 @@ static int handle_set_backlight(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getGpsPosition — returns GPS position if available */
+/* bramble.getGpsPosition: returns GPS position if available */
 static int handle_get_gps_position(const cJSON* params, cJSON* result) {
     (void)params;
     if (!board_has_cap(BOARD_CAP_GPS)) {
@@ -2618,7 +2618,7 @@ static int handle_get_gps_position(const cJSON* params, cJSON* result) {
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
 #include "sdcard.h"
 
-/* bramble.getStorageInfo — returns SD card status */
+/* bramble.getStorageInfo: returns SD card status */
 static int handle_get_storage_info(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddBoolToObject(result, "sd_present", sdcard_is_present());
@@ -2629,7 +2629,7 @@ static int handle_get_storage_info(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.playTone — play a predefined alert tone */
+/* bramble.playTone: play a predefined alert tone */
 static int handle_play_tone(const cJSON* params, cJSON* result) {
     (void)result;
     cJSON* tone = cJSON_GetObjectItem(params, "tone");
@@ -2667,7 +2667,7 @@ static int handle_play_tone(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setVolume — set audio volume 0-100 */
+/* bramble.setVolume: set audio volume 0-100 */
 static int handle_set_volume(const cJSON* params, cJSON* result) {
     (void)result;
     cJSON* vol = cJSON_GetObjectItem(params, "volume");
@@ -2682,7 +2682,7 @@ static int handle_set_volume(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setMuted — mute or unmute audio */
+/* bramble.setMuted: mute or unmute audio */
 static int handle_set_muted(const cJSON* params, cJSON* result) {
     (void)result;
     cJSON* muted = cJSON_GetObjectItem(params, "muted");
@@ -2693,7 +2693,7 @@ static int handle_set_muted(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getAudioStatus — get volume, mute, and playback state */
+/* bramble.getAudioStatus: get volume, mute, and playback state */
 static int handle_get_audio_status(const cJSON* params, cJSON* result) {
     (void)params;
     cJSON_AddBoolToObject(result, "available", audio_is_available());
@@ -2899,7 +2899,7 @@ static int handle_inject_input(const cJSON* params, cJSON* result) {
 
 /* ── Traffic debug RPC methods ─────────────────────────────────────── */
 
-/* bramble.setTrafficDebug — params: {"enabled":bool, "include_tx":bool, "include_rx":bool,
+/* bramble.setTrafficDebug: params: {"enabled":bool, "include_tx":bool, "include_rx":bool,
  * "sample_rate":0-100} */
 static int handle_set_traffic_debug(const cJSON* params, cJSON* result) {
     if (!params)
@@ -2939,7 +2939,7 @@ static int handle_set_traffic_debug(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getTrafficDebug — returns current config + buffer state */
+/* bramble.getTrafficDebug: returns current config + buffer state */
 static int handle_get_traffic_debug(const cJSON* params, cJSON* result) {
     (void)params;
 
@@ -2960,7 +2960,7 @@ static int handle_get_traffic_debug(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getTrafficEvents — params: {"since_seq":uint32, "limit":uint16} */
+/* bramble.getTrafficEvents: params: {"since_seq":uint32, "limit":uint16} */
 static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
     traffic_debug_t* td = mesh_get_traffic_debug();
 
@@ -3029,7 +3029,7 @@ static int handle_get_traffic_events(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.setBeaconPolicy — params: {"enabled":bool, "mode":str, "baseIntervalMs":num, ...} */
+/* bramble.setBeaconPolicy: params: {"enabled":bool, "mode":str, "baseIntervalMs":num, ...} */
 static int handle_set_beacon_policy(const cJSON* params, cJSON* result) {
     if (!params)
         return RPC_ERR_INVALID_PARAMS;
@@ -3093,7 +3093,7 @@ static int handle_set_beacon_policy(const cJSON* params, cJSON* result) {
     return 0;
 }
 
-/* bramble.getBeaconPolicy — returns config and status */
+/* bramble.getBeaconPolicy: returns config and status */
 static int handle_get_beacon_policy(const cJSON* params, cJSON* result) {
     (void)params;
 

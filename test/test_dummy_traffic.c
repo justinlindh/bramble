@@ -81,10 +81,10 @@ void test_build_packet_valid_header(void) {
     TEST_ASSERT_NOT_EQUAL(0x00000000, hdr.dest_addr);
     TEST_ASSERT_NOT_EQUAL(0xFFFFFFFF, hdr.dest_addr);
 
-    // S14 fix: src_addr must NOT contain the real address — it should be random
+    // S14 fix: src_addr must NOT contain the real address; it should be random
     uint32_t src;
     memcpy(&src, pkt + HEADER_SIZE, 4);
-    // With CSPRNG the chance of matching 0xAABBCCDD is 1/2^32 — effectively impossible
+    // With CSPRNG the chance of matching 0xAABBCCDD is 1/2^32, effectively impossible
     TEST_ASSERT_NOT_EQUAL_UINT32(0xAABBCCDD, src);
 }
 

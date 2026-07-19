@@ -15,6 +15,7 @@ the full job topology and the always-report contract.
 
 - `Static checks` (one pod, `firmware-quality.yml`) runs, as named steps:
   - No internal refs (`bash scripts/lint/check-no-internal-refs.sh`)
+  - No em dash (`bash scripts/lint/check-no-em-dash.sh`): enforces the CLAUDE.md ban on U+2014 across the tracked tree, excluding only the vendored `node_modules`, `managed_components`, and `simulator/engine/cJSON.c`. There are no first-party exemptions, deliberately
   - Board matrix coverage (`bash scripts/lint/check-board-matrix.sh`: the `board-build-smoke` matrix in `quality.yml` must list exactly the boards `scripts/ci-build-firmware.sh` releases)
   - Strict shellcheck (`bash scripts/lint/run-shellcheck.sh --strict`)
   - Ruff baseline profile (`ruff check scripts --select E9,F63,F7,F82`)
@@ -32,8 +33,16 @@ the full job topology and the always-report contract.
 - `Webapp checks` (one pod: lint, typecheck, electron typecheck, unit tests, build, e2e smoke, `webapp-quality.yml`)
 - `web-flasher tests` (`node --test web-flasher/`, `webapp-quality.yml`)
 
-clang-tidy exists only as a local wrapper
-(`scripts/lint/run-clang-tidy-advisory.sh`) and is not part of any workflow.
+There is no clang-tidy or markdownlint gate. The `run-clang-tidy-advisory.sh`
+and `run-markdownlint.sh` wrappers used to sit in `scripts/lint/` unreferenced
+by any workflow, Makefile target, or script, and both defaulted to reporting
+findings and then exiting 0, which is exactly the advisory tier this policy
+forbids. They were deleted rather than promoted: a real clang-tidy gate needs
+an xtensa-capable toolchain and a firmware build in the static pod, and a real
+markdownlint gate needs a repo-wide markdown formatting sweep first, tracked
+as issue #160. The `.clang-tidy` and `.markdownlint-cli2.yaml` dotfiles stay
+because editors and language servers read them directly; run `markdownlint-cli2`
+or `clang-tidy` by hand if you want the local signal.
 
 ## The collect-then-fail pattern (step-level `continue-on-error`)
 
@@ -115,10 +124,11 @@ bash scripts/lint/run-clang-format-check.sh --strict
 bash scripts/lint/run-shellcheck.sh --strict
 actionlint -color -oneline -config-file .actionlint.yaml .github/workflows/firmware-quality.yml
 
+bash scripts/lint/check-no-internal-refs.sh
+bash scripts/lint/check-no-em-dash.sh
+
 # Local-only helpers (not wired into CI)
 bash scripts/lint/run-clang-format-check.sh
 bash scripts/lint/run-shellcheck.sh
-bash scripts/lint/run-markdownlint.sh
 bash scripts/flash.sh local heltec-v3 build
-bash scripts/lint/run-clang-tidy-advisory.sh build-heltec-v3
 ```

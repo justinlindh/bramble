@@ -1,5 +1,5 @@
 /**
- * Bramble Mock Node — WebSocket JSON-RPC 2.0 server
+ * Bramble Mock Node: WebSocket JSON-RPC 2.0 server
  * Single-file development server. Port 3005.
  *
  * Simulates a realistic 5-node mesh in a fictional example town.

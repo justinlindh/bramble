@@ -18,7 +18,7 @@ static const char* TAG = "gt911";
 static i2c_master_dev_handle_t gt911_dev = NULL;
 static bool initialized = false;
 
-/* GT911 resolution — read during init, used for coordinate mapping */
+/* GT911 resolution: read during init, used for coordinate mapping */
 static uint16_t gt911_x_res = 320;
 static uint16_t gt911_y_res = 240;
 
@@ -63,7 +63,7 @@ int touch_init(void) {
         return -1;
     }
 
-    /* NOTE: Do NOT configure the INT pin — leave it floating.
+    /* NOTE: Do NOT configure the INT pin, leave it floating.
      * The GT911 on T-Deck Plus works in polling mode without INT.
      * Configuring it as input can interfere with touch detection. */
 

@@ -652,7 +652,7 @@ func (s *Sim) handleMetricsTick(evt *C.sim_event_t) {
 			C.anomaly_check_blackhole(&s.anomaly[i].blackhole, C.uint64_t(ts), C.stdout, &node.id[0])
 		}
 	}
-	// Note: metrics ticks are pre-scheduled by scenario_load_file — no rescheduling needed
+	// Note: metrics ticks are pre-scheduled by scenario_load_file, no rescheduling needed
 }
 
 // --- Command handlers ---
@@ -822,7 +822,7 @@ func (s *Sim) cmdLoad(cmd Command) {
 	}
 
 	// Schedule first metrics tick
-	// Note: metrics ticks are pre-scheduled by scenario_load_file — no manual scheduling needed
+	// Note: metrics ticks are pre-scheduled by scenario_load_file, no manual scheduling needed
 
 	// Broadcast config + sim_ready
 	s.emitJSON(map[string]interface{}{

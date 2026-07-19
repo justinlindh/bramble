@@ -1,5 +1,5 @@
 /*
- * all.c — Single compilation unit that includes all C sources for cgo.
+ * all.c: Single compilation unit that includes all C sources for cgo.
  * cgo compiles this as one .o file. bridge.c is compiled separately by cgo.
  */
 

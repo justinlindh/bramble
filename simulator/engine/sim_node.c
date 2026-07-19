@@ -84,7 +84,7 @@ sim_node_t* node_array_get(node_array_t* array, int index) {
 
 void node_activate(sim_node_t* node) {
     node->active = true;
-    /* Clear routing state — simulates fresh boot */
+    /* Clear routing state: simulates fresh boot */
     route_init(&node->routes);
     neighbor_init(&node->neighbors);
     reverse_route_init(&node->reverse_routes);
@@ -137,7 +137,7 @@ void node_move(sim_node_t* node, float x, float y) {
 }
 
 /*
- * node_tick — called every NODE_TICK_INTERVAL_US for each active node.
+ * node_tick: called every NODE_TICK_INTERVAL_US for each active node.
  * Performs: beacon TX, neighbor purge, route maintenance, discovery retry.
  * Produces outbound packets in `result` for the caller to radio-broadcast.
  */
@@ -277,7 +277,7 @@ void node_tick(sim_node_t* node, uint64_t now_us, const radio_config_t* radio,
         }
     }
 
-    /* 5. Pending ACK tick — retransmit or expire */
+    /* 5. Pending ACK tick: retransmit or expire */
     pending_ack_tick(&node->pending_acks, now_ms);
 
     /* 6. Dedup purge */

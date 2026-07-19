@@ -36,7 +36,7 @@ void test_mailbox_per_dest_cap(void) {
     TEST_ASSERT_EQUAL_INT(8, mailbox_count_for_dest(&mb, 100));
     TEST_ASSERT_EQUAL_INT(8, mb.count);
 
-    /* Verify oldest (packet_id=1) was evicted — retrieve all and check */
+    /* Verify oldest (packet_id=1) was evicted: retrieve all and check */
     mailbox_entry_t out[8];
     int n = mailbox_retrieve(&mb, 100, out, 8);
     TEST_ASSERT_EQUAL_INT(8, n);
@@ -78,7 +78,7 @@ void test_mailbox_fifo_eviction(void) {
     }
     TEST_ASSERT_EQUAL_INT(32, mb.count);
 
-    /* Store one more — should evict oldest (packet_id=1, stored_at=0) */
+    /* Store one more: should evict oldest (packet_id=1, stored_at=0) */
     TEST_ASSERT_EQUAL_INT(0, mailbox_store(&mb, 500, 2000, p, 1, 9999, 5000));
     TEST_ASSERT_EQUAL_INT(32, mb.count);
 

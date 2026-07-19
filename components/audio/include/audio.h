@@ -7,13 +7,13 @@
 
 /* Alert tone types */
 typedef enum {
-    AUDIO_TONE_MESSAGE_RX = 0, /* New message received — short double beep */
-    AUDIO_TONE_MESSAGE_TX,     /* Message sent — single rising tone */
-    AUDIO_TONE_PEER_JOIN,      /* New peer discovered — pleasant chime */
-    AUDIO_TONE_PEER_LEAVE,     /* Peer lost — descending tone */
-    AUDIO_TONE_ERROR,          /* Error/warning — harsh buzz */
-    AUDIO_TONE_BOOT,           /* Boot complete — ascending arpeggio */
-    AUDIO_TONE_GPS_FIX,        /* GPS fix acquired — two soft beeps */
+    AUDIO_TONE_MESSAGE_RX = 0, /* New message received: short double beep */
+    AUDIO_TONE_MESSAGE_TX,     /* Message sent: single rising tone */
+    AUDIO_TONE_PEER_JOIN,      /* New peer discovered: pleasant chime */
+    AUDIO_TONE_PEER_LEAVE,     /* Peer lost: descending tone */
+    AUDIO_TONE_ERROR,          /* Error/warning: harsh buzz */
+    AUDIO_TONE_BOOT,           /* Boot complete: ascending arpeggio */
+    AUDIO_TONE_GPS_FIX,        /* GPS fix acquired: two soft beeps */
 } audio_tone_t;
 
 /* Initialize I2S speaker output.
@@ -37,7 +37,7 @@ bool audio_is_playing(void);
 /* Check if audio hardware is available on this board */
 bool audio_is_available(void);
 
-/* Volume: 0–100.  Persisted to NVS immediately. */
+/* Volume: 0 to 100.  Persisted to NVS immediately. */
 void audio_set_volume(uint8_t volume);
 uint8_t audio_get_volume(void);
 

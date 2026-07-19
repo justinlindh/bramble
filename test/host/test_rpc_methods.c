@@ -30,10 +30,10 @@ extern uint16_t g_mesh_channel_epoch[8];
 
 /* ── Extra stubs: symbols not covered by rpc_methods_test_stubs.c ──── */
 
-/* ws_server_get_token — used by bramble.getAuthToken handler */
+/* ws_server_get_token: used by bramble.getAuthToken handler */
 const char* ws_server_get_token(void) { return NULL; }
 
-/* esp_wifi_get_mac / esp_wifi_ap_get_sta_list — called by handle_get_wifi_status */
+/* esp_wifi_get_mac / esp_wifi_ap_get_sta_list: called by handle_get_wifi_status */
 #include "esp_wifi.h"
 esp_err_t esp_wifi_get_mac(int ifx, uint8_t mac[6]) {
     (void)ifx;
@@ -102,7 +102,7 @@ static int assert_error_code(cJSON* resp) {
 }
 
 /* ── bramble.ping ──────────────────────────────────────────────────────
- * Pure read — no side effects, no hardware required.
+ * Pure read: no side effects, no hardware required.
  * ──────────────────────────────────────────────────────────────────── */
 
 void test_ping_returns_pong_true(void) {
@@ -135,7 +135,7 @@ void test_ping_returns_protocol_version_string(void) {
 }
 
 /* ── bramble.getVersion ────────────────────────────────────────────────
- * Pure read — returns firmware/protocol metadata.
+ * Pure read: returns firmware/protocol metadata.
  * ──────────────────────────────────────────────────────────────────── */
 
 void test_get_version_has_firmware_version_field(void) {
@@ -179,7 +179,7 @@ void test_get_version_has_delivery_event_sync_bool(void) {
 }
 
 void test_get_version_no_params_required(void) {
-    /* Omit params entirely — should still succeed */
+    /* Omit params entirely: should still succeed */
     cJSON* resp =
         dispatch_and_parse("{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"bramble.getVersion\"}");
     cJSON* r = assert_result(resp);

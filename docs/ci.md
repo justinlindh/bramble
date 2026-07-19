@@ -128,7 +128,7 @@ changed. When in doubt, run the real checks rather than silently skip them.
 
 `firmware` is deliberately a superset of every firmware-area consumer's real
 inputs (host tests, board build, ruff, cppcheck, rpc-contract, and the strict
-clang-format/shellcheck/markdownlint wrappers). `simulator` is a separate output
+clang-format/shellcheck wrappers). `simulator` is a separate output
 because the strict clang-format scope scans simulator C sources too, so a
 simulator-only change must still run clang-format (inside the bundle) and gosim.
 
