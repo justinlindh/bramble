@@ -69,6 +69,18 @@ function saveActiveTab(tab: string): void {
   }
 }
 
+// Map a message to its conversation bucket id, matching the Zustand store
+// convention: channel -> 'ch:{index}', broadcast (to === 0xffffffff) ->
+// 'broadcast', otherwise a DM keyed by the peer implied by direction.
+// Broadcasts always file under 'broadcast' rather than the sender's DM so they
+// are not double-shown in both views. channelIndex === -1 means "not a channel
+// message", so it falls through to broadcast/DM rather than keying 'ch:-1'.
+function conversationIdForMessage(msg: Message): string {
+  if (msg.channelIndex !== undefined && msg.channelIndex >= 0) return `ch:${msg.channelIndex}`;
+  if (msg.to === 0xffffffff) return 'broadcast';
+  return `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
+}
+
 function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
   if (id === 'broadcast') return 'Broadcast';
   if (id.startsWith('ch:')) {
@@ -232,17 +244,8 @@ export const useStore = create<AppState & Actions>((set) => ({
       // Cap message history at 500
       const msgs = [...state.messages, msg].slice(-500);
 
-      // Determine conversation ID
-      // Broadcasts (to === 0xFFFFFFFF) always file under 'broadcast', not a DM,
-      // to avoid double-showing them in both the broadcast view and sender's DM.
-      // channelIndex === -1 means "not a channel message", not "broadcast".
       const isBroadcast = msg.to === 0xffffffff;
-      const convId =
-        msg.channelIndex !== undefined && msg.channelIndex >= 0
-          ? `ch:${msg.channelIndex}`
-          : isBroadcast
-          ? 'broadcast'
-          : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
+      const convId = conversationIdForMessage(msg);
 
       debugLog('[addMessage] Message:', msg);
       debugLog('[addMessage] Determined convId:', convId, '| isBroadcast:', isBroadcast, '| activeConv:', state.activeConversationId);
@@ -383,12 +386,7 @@ export const useStore = create<AppState & Actions>((set) => ({
       const convs = new Map(state.conversations);
       for (const msg of msgs) {
         const isBroadcast = msg.to === 0xffffffff;
-        const convId =
-          msg.channelIndex !== undefined && msg.channelIndex >= 0
-            ? `ch:${msg.channelIndex}`
-            : isBroadcast
-            ? 'broadcast'
-            : `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
+        const convId = conversationIdForMessage(msg);
         const prev = convs.get(convId);
         const shouldUpdate = !prev || !prev.lastMessageTime || msg.timestampMs > prev.lastMessageTime;
         if (shouldUpdate) {
