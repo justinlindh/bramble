@@ -1,41 +1,56 @@
 /*
- * Virtual e-paper backend for the emulator (IDF linux target).
+ * Virtual SSD1306 OLED backend for the emulator (IDF linux target).
  *
- * Implements display.h on top of the pure SSD1680 engine, exactly like
- * ssd1680_io.c does on the device, but instead of replaying the command
- * stream over SPI it ships the resolved logical framebuffer to the
- * emu-link broker as an "fb" message (emulator/DESIGN.md section 8):
- *   { t:"fb", seq, kind:"partial"|"full", fb:<base64 3904 B>, busy_ms }
- * The frontend, not the firmware, renders e-paper physics; the engine
- * still decides refresh kind and busy duration so the emulated panel
- * behaves like the real one will.
+ * The OLED analogue of display_virt.c. Where display_virt.c drives the pure
+ * SSD1680 e-paper engine and streams its 250x122 logical framebuffer, this
+ * backend owns a plain 128x64 1bpp framebuffer (what a real SSD1306 shows) and
+ * ships it to the emu-link broker as the same "fb" message:
+ *   { t:"fb", seq, kind:"full", w:128, h:64, fb:<base64 1024 B>, busy_ms:0 }
  *
- * fb payload layout: see ssd1680_engine.h (250x122 1bpp row-major,
- * 32 bytes per row, MSB = leftmost pixel, bit set = black ink, 6 pad
- * bits in the LSBs of each row's last byte).
+ * An OLED has no refresh physics: every flush is an immediate, full update, so
+ * kind is always "full" and busy_ms is always 0 (there is no panel-busy
+ * window). The frontend (simulator/ui Oled.tsx) renders the bytes directly.
+ *
+ * fb payload layout (identical bit convention to the e-paper logical fb, only
+ * the geometry differs): 128x64 1bpp, row-major, 16 bytes per row (128 px ->
+ * exactly 16 bytes, no pad bits), MSB of each byte is the leftmost pixel of its
+ * 8-pixel group, bit set = a lit (foreground) pixel. render_screen() in
+ * main/main.c draws into this through display_draw_text() exactly as it does on
+ * the e-paper, so the same text UI lands here byte-for-byte at 128x64.
  */
 #include "display.h"
 #include "font_6x8.h"
-#include "ssd1680_engine.h"
 #include "emu_link.h"
 #include "cJSON.h"
 
+#include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
+
+#define OLED_STRIDE ((DISPLAY_WIDTH + 7) / 8) /* 16 for 128 px */
+#define OLED_FB_SIZE (OLED_STRIDE * DISPLAY_HEIGHT) /* 1024 for 128x64 */
 
 static bool s_initialized = false;
 static bool s_rotated_180 = false;
 static uint32_t s_seq = 0; /* monotonically increasing, first frame = 1 */
 
+/* The logical framebuffer, plus the last frame actually sent, so an unchanged
+ * flush is a no-op (mirrors the e-paper engine's REFRESH_NONE: the frontend is
+ * never handed a duplicate frame). */
+static uint8_t s_fb[OLED_FB_SIZE];
+static uint8_t s_sent_fb[OLED_FB_SIZE];
+static bool s_ever_sent = false;
+
 /* ── base64 (standard alphabet, padded) ──────────────────────────────── */
 
 static const char b64_tab[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-#define FB_B64_LEN (((SSD1680_FB_SIZE + 2) / 3) * 4)
+#define FB_B64_LEN (((OLED_FB_SIZE + 2) / 3) * 4)
 static char s_b64[FB_B64_LEN + 1];
 
 static void fb_to_b64(const uint8_t* in) {
     char* out = s_b64;
-    int len = SSD1680_FB_SIZE;
+    int len = OLED_FB_SIZE;
     while (len >= 3) {
         uint32_t v = (uint32_t)(in[0] << 16) | (uint32_t)(in[1] << 8) | in[2];
         *out++ = b64_tab[(v >> 18) & 0x3F];
@@ -45,7 +60,8 @@ static void fb_to_b64(const uint8_t* in) {
         in += 3;
         len -= 3;
     }
-    if (len == 1) { /* 3904 % 3 == 1: this branch is the live one */
+    /* OLED_FB_SIZE (1024) % 3 == 1: the len==1 tail is the live branch. */
+    if (len == 1) {
         uint32_t v = (uint32_t)(in[0] << 16);
         *out++ = b64_tab[(v >> 18) & 0x3F];
         *out++ = b64_tab[(v >> 12) & 0x3F];
@@ -64,7 +80,9 @@ static void fb_to_b64(const uint8_t* in) {
 /* ── public API ──────────────────────────────────────────────────────── */
 
 int display_init(void) {
-    ssd1680_engine_init();
+    memset(s_fb, 0, sizeof(s_fb));
+    memset(s_sent_fb, 0, sizeof(s_sent_fb));
+    s_ever_sent = false;
     s_seq = 0;
     s_initialized = true;
     return 0;
@@ -74,54 +92,53 @@ void display_flush(void) {
     if (!s_initialized)
         return;
 
-    const ssd1680_op_t* ops;
-    size_t n_ops;
-    uint32_t busy_ms;
-    ssd1680_refresh_t kind = ssd1680_engine_flush(&ops, &n_ops, &busy_ms);
-    if (kind == SSD1680_REFRESH_NONE)
+    /* Unchanged since the last emitted frame: nothing to send. First flush
+     * always sends so the panel shows its boot content. */
+    if (s_ever_sent && memcmp(s_fb, s_sent_fb, OLED_FB_SIZE) == 0)
         return;
-    (void)ops; /* the broker gets the resolved fb, not the SPI stream */
-    (void)n_ops;
 
-    fb_to_b64(ssd1680_engine_fb());
+    fb_to_b64(s_fb);
+    memcpy(s_sent_fb, s_fb, OLED_FB_SIZE);
+    s_ever_sent = true;
 
     cJSON* msg = cJSON_CreateObject();
     if (!msg)
         return;
     cJSON_AddStringToObject(msg, "t", "fb");
     cJSON_AddNumberToObject(msg, "seq", (double)++s_seq);
-    cJSON_AddStringToObject(msg, "kind", kind == SSD1680_REFRESH_FULL ? "full" : "partial");
+    cJSON_AddStringToObject(msg, "kind", "full"); /* OLED: always a full, immediate update */
     cJSON_AddStringToObject(msg, "fb", s_b64);
-    /* Panel geometry travels with the frame so the frontend knows the size
-     * without hardcoding it (the OLED backend sends 128x64 the same way). */
-    cJSON_AddNumberToObject(msg, "w", (double)SSD1680_WIDTH);
-    cJSON_AddNumberToObject(msg, "h", (double)SSD1680_HEIGHT);
-    cJSON_AddNumberToObject(msg, "busy_ms", (double)busy_ms);
+    cJSON_AddNumberToObject(msg, "w", (double)DISPLAY_WIDTH);
+    cJSON_AddNumberToObject(msg, "h", (double)DISPLAY_HEIGHT);
+    cJSON_AddNumberToObject(msg, "busy_ms", 0.0); /* no panel-busy window on an OLED */
     /* emu_link_send takes ownership of msg on all paths and drops the
      * message silently when no broker is attached. */
     emu_link_send(msg);
 }
 
-/* ── framebuffer drawing (engine-backed, mirrors ssd1680_io.c) ───────── */
+/* ── framebuffer drawing (mirrors display_virt.c / ssd1306.c blit) ────── */
 
 void display_pixel(int x, int y, bool on) {
     if (s_rotated_180) {
         x = DISPLAY_WIDTH - 1 - x;
         y = DISPLAY_HEIGHT - 1 - y;
     }
-    ssd1680_engine_pixel(x, y, on); /* engine clips out-of-range */
+    if (x < 0 || x >= DISPLAY_WIDTH || y < 0 || y >= DISPLAY_HEIGHT)
+        return; /* clip out-of-range, same as the engine */
+    uint8_t* byte = &s_fb[y * OLED_STRIDE + (x >> 3)];
+    uint8_t mask = (uint8_t)(0x80 >> (x & 7)); /* MSB = leftmost pixel */
+    if (on)
+        *byte |= mask;
+    else
+        *byte &= (uint8_t)~mask;
 }
 
 void display_clear(void) {
-    for (int y = 0; y < DISPLAY_HEIGHT; y++)
-        for (int x = 0; x < DISPLAY_WIDTH; x++)
-            ssd1680_engine_pixel(x, y, false);
+    memset(s_fb, 0, sizeof(s_fb));
 }
 
 void display_fill(void) {
-    for (int y = 0; y < DISPLAY_HEIGHT; y++)
-        for (int x = 0; x < DISPLAY_WIDTH; x++)
-            ssd1680_engine_pixel(x, y, true);
+    memset(s_fb, 0xFF, sizeof(s_fb));
 }
 
 void display_hline(int x, int y, int w) {
@@ -173,7 +190,7 @@ void display_draw_text_large(int x, int y, const char* text) {
     }
 }
 
-/* ── capability shims (same surface as ssd1680_io.c) ─────────────────── */
+/* ── capability shims (same surface as ssd1306.c) ─────────────────────── */
 
 void display_power(bool on) { (void)on; }
 

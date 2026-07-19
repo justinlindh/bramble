@@ -19,6 +19,9 @@ menu "Bramble Configuration"
         config BRAMBLE_BOARD_VIRTUAL_PAGER
             bool "Bramble Virtual Pager (emulator, IDF linux target, mirrors Pager v1)"
 
+        config BRAMBLE_BOARD_VIRTUAL_HELTEC
+            bool "Bramble Virtual Heltec (emulator, IDF linux target, SSD1306 128x64 OLED)"
+
         config BRAMBLE_BOARD_TTGO_LORA32
             bool "TTGO LoRa32 (SX1276)"
 

@@ -4,7 +4,7 @@ import type { DeviceState } from '../types';
 
 function dev(node: string): DeviceState {
   return {
-    node, fb: null, fbKind: 'full', fbBusyMs: 0, fbSeq: 0,
+    node, fb: null, fbKind: 'full', fbBusyMs: 0, fbSeq: 0, fbWidth: 250, fbHeight: 122,
     led: false, buzzerHz: 0, vibra: false, vibraSeq: 0, console: [],
   };
 }

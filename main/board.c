@@ -19,6 +19,8 @@
 #include "boards/bramble_pager.h"
 #elif defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_PAGER)
 #include "boards/virtual_pager.h"
+#elif defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_HELTEC)
+#include "boards/virtual_heltec.h"
 #elif defined(CONFIG_BRAMBLE_BOARD_HELTEC_V3) || !defined(CONFIG_BRAMBLE_BOARD_CUSTOM)
 #include "boards/heltec_v3.h"
 #endif
@@ -44,6 +46,8 @@ const bramble_board_config_t* board_get_config(void) {
     return &board_bramble_pager;
 #elif defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_PAGER)
     return &board_virtual_pager;
+#elif defined(CONFIG_BRAMBLE_BOARD_VIRTUAL_HELTEC)
+    return &board_virtual_heltec;
 #else
     return &board_heltec_v3;
 #endif

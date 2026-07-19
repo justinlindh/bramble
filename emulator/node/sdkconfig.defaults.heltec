@@ -1,0 +1,31 @@
+# Bramble virtual node (IDF linux target) defaults, Heltec OLED profile.
+#
+# Same as sdkconfig.defaults (the Virtual Pager e-paper profile) in every
+# respect except the board: this one selects the Virtual Heltec profile, so the
+# linux target builds the SSD1306 128x64 OLED virtual backend
+# (components/display/display_virt_oled.c) instead of the e-paper engine. Build
+# it into a separate build dir so both profiles coexist, e.g.:
+#   idf.py -B build-heltec -D SDKCONFIG=sdkconfig.heltec \
+#          -D SDKCONFIG_DEFAULTS=sdkconfig.defaults.heltec \
+#          --preview set-target linux
+#   idf.py -B build-heltec build
+# (or run emulator/scripts/build_node_heltec.sh).
+
+CONFIG_IDF_TARGET="linux"
+
+# The emulated device is a Heltec WiFi LoRa 32 (SSD1306 128x64 OLED), via the
+# virtual board profile (mirrors heltec_v3.h, adds BOARD_CAP_VIRTUAL).
+CONFIG_BRAMBLE_BOARD_VIRTUAL_HELTEC=y
+
+# Mirror the device defaults the firmware relies on.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+CONFIG_MBEDTLS_HKDF_C=y
+
+# No SPIFFS storage on the simulator: message persistence off (RAM ring only).
+CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=n
+
+# BLE off: bt does not exist on the linux target; ble_server_stub.c is
+# selected automatically when NimBLE is disabled (the default).
