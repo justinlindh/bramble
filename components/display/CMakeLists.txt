@@ -1,15 +1,25 @@
 # Display backend selection.
 #
-# The IDF linux target (emulator node) has no I2C/SPI drivers: it builds
-# the pure SSD1680 engine plus display_virt.c, which ships framebuffers to
-# the emu-link broker instead of a panel.
+# The IDF linux target (emulator node) has no I2C/SPI drivers: it ships
+# framebuffers to the emu-link broker instead of driving a panel. Which
+# virtual backend it builds tracks the emulated board's display:
+#   - Virtual Heltec (SSD1306 128x64 OLED): display_virt_oled.c
+#   - Virtual Pager (SSD1680 250x122 e-paper): the pure engine + display_virt.c
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "linux")
-    idf_component_register(
-        SRCS "ssd1680_engine.c" "display_virt.c"
-        INCLUDE_DIRS "include"
-        REQUIRES board_config emu_link json
-    )
+    if(CONFIG_BRAMBLE_BOARD_VIRTUAL_HELTEC)
+        idf_component_register(
+            SRCS "display_virt_oled.c"
+            INCLUDE_DIRS "include"
+            REQUIRES board_config emu_link json
+        )
+    else()
+        idf_component_register(
+            SRCS "ssd1680_engine.c" "display_virt.c"
+            INCLUDE_DIRS "include"
+            REQUIRES board_config emu_link json
+        )
+    endif()
     return()
 endif()
 

@@ -30,7 +30,7 @@ function getOrCreateDevice(map: Map<string, DeviceState>, node: string, addr?: s
   if (!d) {
     d = {
       node, addr,
-      fb: null, fbKind: 'full', fbBusyMs: 0, fbSeq: 0,
+      fb: null, fbKind: 'full', fbBusyMs: 0, fbSeq: 0, fbWidth: 250, fbHeight: 122,
       led: false, buzzerHz: 0, vibra: false, vibraSeq: 0,
       console: [],
     };
@@ -355,6 +355,10 @@ function simReducer(state: SimState, action: SimAction): SimState {
       d.fbKind = action.kind;
       d.fbBusyMs = action.busyMs;
       d.fbSeq = d.fbSeq + 1;
+      if (action.width && action.height) {
+        d.fbWidth = action.width;
+        d.fbHeight = action.height;
+      }
       if (action.addr) d.addr = action.addr;
       devices.set(action.node, d);
       return { ...state, devices };
@@ -610,6 +614,8 @@ function parseEvent(raw: RawSimEvent, nodes: Map<string, SimNode>): SimAction[] 
           kind: (raw.kind as 'partial' | 'full') ?? 'full',
           fb,
           busyMs: (raw.busy_ms as number) ?? 0,
+          width: raw.w as number | undefined,
+          height: raw.h as number | undefined,
         });
       }
       break;

@@ -34,6 +34,8 @@ export interface DeviceState {
   fbKind: 'partial' | 'full';
   fbBusyMs: number;  // engine-reported panel busy window
   fbSeq: number;     // increments per received frame (drives the Epaper)
+  fbWidth: number;   // panel width in px (250 e-paper, 128 OLED); selects the device face
+  fbHeight: number;  // panel height in px (122 e-paper, 64 OLED)
   led: boolean;      // notification LED
   buzzerHz: number;  // 0 = silent
   vibra: boolean;    // motor on
@@ -200,6 +202,6 @@ export type SimAction =
   | { type: 'SELECT_NODE'; nodeId: string | null }
   | { type: 'EXPIRE_BROKEN_LINKS'; now: number }
   | { type: 'TRACK_LINK_RSSI'; from: string; to: string; rssi: number; snr: number }
-  | { type: 'DEVICE_FB'; node: string; addr?: string; kind: 'partial' | 'full'; fb: string; busyMs: number }
+  | { type: 'DEVICE_FB'; node: string; addr?: string; kind: 'partial' | 'full'; fb: string; busyMs: number; width?: number; height?: number }
   | { type: 'DEVICE_IND'; node: string; addr?: string; led: boolean; buzzerHz: number; vibra: boolean }
   | { type: 'DEVICE_CONSOLE'; node: string; line: string };

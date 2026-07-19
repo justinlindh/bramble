@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   unpackFramebuffer,
+  unpackFramebufferSized,
   FB_WIDTH,
   FB_HEIGHT,
   FB_ROW_BYTES,
   FB_BYTES,
+  OLED_WIDTH,
+  OLED_HEIGHT,
 } from './framebuffer';
 
 function b64(bytes: Uint8Array): string {
@@ -41,5 +44,37 @@ describe('unpackFramebuffer', () => {
     const o = (1 * FB_WIDTH + 0) * 4;
     expect(rgba[o]).toBeLessThan(0x40); // inked
     expect(rgba[0]).toBeGreaterThan(0xc0); // (0,0) still paper
+  });
+});
+
+describe('unpackFramebufferSized at OLED geometry (128x64)', () => {
+  const OLED_STRIDE = OLED_WIDTH >> 3; // 16 bytes/row, no pad bits
+  const OLED_BYTES = OLED_STRIDE * OLED_HEIGHT; // 1024
+  const LIT: [number, number, number] = [0xe6, 0xf1, 0xff];
+  const OFF: [number, number, number] = [0x06, 0x0a, 0x10];
+
+  it('rejects an undersized OLED payload', () => {
+    expect(
+      unpackFramebufferSized(b64(new Uint8Array(OLED_BYTES - 1)), OLED_WIDTH, OLED_HEIGHT, LIT, OFF),
+    ).toBeNull();
+  });
+
+  it('produces an RGBA buffer of the OLED panel size', () => {
+    const rgba = unpackFramebufferSized(b64(new Uint8Array(OLED_BYTES)), OLED_WIDTH, OLED_HEIGHT, LIT, OFF);
+    expect(rgba).not.toBeNull();
+    expect(rgba!.length).toBe(OLED_WIDTH * OLED_HEIGHT * 4);
+  });
+
+  it('lights a set bit (foreground) and leaves the rest as the dark substrate', () => {
+    const raw = new Uint8Array(OLED_BYTES);
+    // row 2, column 0 -> byte at 2*stride, MSB set
+    raw[2 * OLED_STRIDE] = 0x80;
+    const rgba = unpackFramebufferSized(b64(raw), OLED_WIDTH, OLED_HEIGHT, LIT, OFF)!;
+    const lit = (2 * OLED_WIDTH + 0) * 4;
+    expect(rgba[lit]).toBe(LIT[0]); // set bit -> lit foreground (bright)
+    expect(rgba[lit + 2]).toBe(LIT[2]);
+    // top-left pixel was never set: dark substrate
+    expect(rgba[0]).toBe(OFF[0]);
+    expect(rgba[2]).toBe(OFF[2]);
   });
 });

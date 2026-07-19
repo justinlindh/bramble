@@ -16,6 +16,12 @@ export const FB_HEIGHT = 122;
 export const FB_ROW_BYTES = 32; // ceil(250 / 8)
 export const FB_BYTES = FB_ROW_BYTES * FB_HEIGHT; // 3904
 
+// SSD1306 OLED geometry (Heltec profile). The wire message carries the panel
+// size per frame (w/h), so these are the canonical values the device view keys
+// off to pick the OLED face over the e-paper one.
+export const OLED_WIDTH = 128;
+export const OLED_HEIGHT = 64;
+
 // Ink/paper as opaque RGBA. Real e-paper is a warm off-white with near-black
 // ink; these read well behind the glass reveal without looking like an LCD.
 const INK: [number, number, number] = [0x1a, 0x1c, 0x18];
@@ -37,25 +43,46 @@ export function unpackFramebuffer(
   b64: string,
   out?: Uint8ClampedArray,
 ): Uint8ClampedArray | null {
+  return unpackFramebufferSized(b64, FB_WIDTH, FB_HEIGHT, INK, PAPER, out);
+}
+
+// unpackFramebufferSized is the geometry-parameterized decoder shared by every
+// panel. The wire layout is identical across panels (row-major 1bpp, MSB =
+// leftmost pixel of its byte group, a set bit = a drawn/foreground pixel); only
+// the panel dimensions and the foreground/background colors differ. The
+// SSD1680 e-paper (250x122, dark ink on warm paper) and the SSD1306 OLED
+// (128x64, light pixels on a dark panel) both flow through here. The row stride
+// is ceil(width/8) bytes; any pad bits past `width` in the last byte of a row
+// are simply never read.
+export function unpackFramebufferSized(
+  b64: string,
+  width: number,
+  height: number,
+  fg: readonly [number, number, number],
+  bg: readonly [number, number, number],
+  out?: Uint8ClampedArray,
+): Uint8ClampedArray | null {
   let bytes: Uint8Array;
   try {
     bytes = decodeBase64(b64);
   } catch {
     return null;
   }
-  if (bytes.length < FB_BYTES) return null;
+  const rowBytes = (width + 7) >> 3;
+  const need = rowBytes * height;
+  if (bytes.length < need) return null;
 
-  const rgba = out && out.length === FB_WIDTH * FB_HEIGHT * 4
+  const rgba = out && out.length === width * height * 4
     ? out
-    : new Uint8ClampedArray(FB_WIDTH * FB_HEIGHT * 4);
+    : new Uint8ClampedArray(width * height * 4);
 
-  for (let y = 0; y < FB_HEIGHT; y++) {
-    const rowBase = y * FB_ROW_BYTES;
-    for (let x = 0; x < FB_WIDTH; x++) {
+  for (let y = 0; y < height; y++) {
+    const rowBase = y * rowBytes;
+    for (let x = 0; x < width; x++) {
       const byte = bytes[rowBase + (x >> 3)];
       const bit = (byte >> (7 - (x & 7))) & 1; // MSB first
-      const [r, g, b] = bit ? INK : PAPER;
-      const o = (y * FB_WIDTH + x) * 4;
+      const [r, g, b] = bit ? fg : bg;
+      const o = (y * width + x) * 4;
       rgba[o] = r;
       rgba[o + 1] = g;
       rgba[o + 2] = b;

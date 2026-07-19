@@ -42,7 +42,9 @@ type emuInbound struct {
 	Power   int    `json:"power"`   // tx: dBm (advisory)
 	Seq     int    `json:"seq"`     // fb: frame sequence
 	Kind    string `json:"kind"`    // fb: "partial" | "full"
-	FB      string `json:"fb"`      // fb: base64 packed 1bpp 250x122 framebuffer (opaque)
+	FB      string `json:"fb"`      // fb: base64 packed 1bpp framebuffer (opaque)
+	FBW     int    `json:"w"`       // fb: panel width in px (250 e-paper, 128 OLED)
+	FBH     int    `json:"h"`       // fb: panel height in px (122 e-paper, 64 OLED)
 	BusyMs  int    `json:"busy_ms"` // fb: engine-computed panel busy duration
 	LED     bool   `json:"led"`     // ind: notification LED state
 	Buzzer  int    `json:"buzzer_hz"`
@@ -525,6 +527,7 @@ func (ec *extConn) handleFB(msg *emuInbound) {
 	s.emitJSON(map[string]interface{}{
 		"type": "device_fb", "node": ec.label(), "addr": fmt.Sprintf("0x%08X", ec.addr),
 		"seq": msg.Seq, "kind": msg.Kind, "fb": msg.FB, "busy_ms": msg.BusyMs,
+		"w": msg.FBW, "h": msg.FBH,
 	})
 }
 

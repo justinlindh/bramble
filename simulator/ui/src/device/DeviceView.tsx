@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DeviceState } from '../types';
 import PagerDevice, { type EdgeButtonId } from './PagerDevice';
+import HeltecDevice from './HeltecDevice';
+import { OLED_WIDTH } from './framebuffer';
 
 export interface DeviceViewProps {
   devices: Map<string, DeviceState>;
@@ -76,13 +78,29 @@ export default function DeviceView({ devices, onButton }: DeviceViewProps) {
 
       <div className="device-grid" ref={gridRef}>
         {list.map((d) => (
-          <PagerDevice
-            key={d.node}
-            device={d}
-            muted={muted}
-            faceWidth={computeFaceWidth(containerWidth, list.length)}
-            onButton={(id, edge) => onButton(d.node, id, edge)}
-          />
+          // Panel geometry selects the device face: an OLED-wide frame is the
+          // SSD1306 (Heltec), anything else is the SSD1680 e-paper pager. A
+          // device is created on node_joined with the e-paper default geometry
+          // (getOrCreateDevice) before its first frame, so a Heltec node shows
+          // the pager face for the brief moment until DEVICE_FB carries the
+          // real 128x64 size, then swaps. Cosmetic only; the panel is blank
+          // until the first frame either way.
+          d.fbWidth === OLED_WIDTH ? (
+            <HeltecDevice
+              key={d.node}
+              device={d}
+              faceWidth={computeFaceWidth(containerWidth, list.length)}
+              onButton={(id, edge) => onButton(d.node, id, edge)}
+            />
+          ) : (
+            <PagerDevice
+              key={d.node}
+              device={d}
+              muted={muted}
+              faceWidth={computeFaceWidth(containerWidth, list.length)}
+              onButton={(id, edge) => onButton(d.node, id, edge)}
+            />
+          )
         ))}
       </div>
     </div>

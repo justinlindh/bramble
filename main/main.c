@@ -844,9 +844,15 @@ static void render_screen(ui_state_t* ui) {
                 display_draw_text(2, y, line);
                 y += LINE_H;
             }
-            /* Device info row */
-            snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
-            display_draw_text(2, y, line);
+            /* Device info row, drawn only when it clears the footer. On the
+             * 128x64 OLED the four setting rows push this line down to
+             * FOOTER_Y once the GPS row is present, so it would overlap the
+             * footer hint; the taller e-paper always has room. The address is
+             * also shown on the main screen. */
+            if (y + FONT_H <= FOOTER_Y) {
+                snprintf(line, sizeof(line), "Addr: %08" PRIX32, my_addr);
+                display_draw_text(2, y, line);
+            }
 #ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
             display_draw_text(2, FOOTER_Y, "[o] edit  < > navigate");
 #else

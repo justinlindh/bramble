@@ -41,6 +41,8 @@ function makeDevice(over: Partial<DeviceState> = {}): DeviceState {
     fbKind: 'full',
     fbBusyMs: 0,
     fbSeq: 0,
+    fbWidth: 250,
+    fbHeight: 122,
     led: false,
     buzzerHz: 0,
     vibra: false,
