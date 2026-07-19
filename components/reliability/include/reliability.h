@@ -9,6 +9,19 @@
 
 #define MAX_PENDING_ACKS 8
 
+/*
+ * A retransmit re-sends the byte-exact original packet, so this buffer must
+ * hold the largest packet that can be registered for ACK. The transmit path
+ * caps an on-air packet at 255 bytes (mesh_tx takes a uint8_t length), which
+ * is BRAMBLE_MAX_PACKET_SIZE in components/packet. reliability is
+ * intentionally free of cross-component dependencies, so the bound is
+ * restated here rather than included; keep it in sync if the packet cap
+ * grows. The previous 222 was smaller than a full DATA packet, so a large
+ * unicast send was truncated on copy while packet_len still recorded the
+ * full length, over-reading past this buffer on retransmit.
+ */
+#define PENDING_ACK_PACKET_CAP 256
+
 typedef struct {
     uint32_t packet_id;
     uint32_t dest_addr;
@@ -17,7 +30,7 @@ typedef struct {
     uint8_t max_attempts;
     uint32_t next_retry_ms;
     uint16_t packet_len;
-    uint8_t packet_data[222];
+    uint8_t packet_data[PENDING_ACK_PACKET_CAP];
     bool active;
 } pending_ack_t;
 

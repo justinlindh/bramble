@@ -42,10 +42,16 @@ int pending_ack_add(pending_ack_table_t* table, uint32_t packet_id, uint32_t des
             e->tier = tier;
             e->attempt = 0;
             e->max_attempts = tier_max_retries(tier);
-            e->packet_len = len;
+            /* packet_len must equal the bytes actually copied: the retransmit
+             * path reads packet_len bytes back out of packet_data, so a stored
+             * length larger than the copy would read past the buffer. */
+            uint16_t copy_len = 0;
             if (len > 0 && packet) {
-                memcpy(e->packet_data, packet, len > 222 ? 222 : len);
+                copy_len =
+                    len > sizeof(e->packet_data) ? (uint16_t)sizeof(e->packet_data) : len;
+                memcpy(e->packet_data, packet, copy_len);
             }
+            e->packet_len = copy_len;
             e->next_retry_ms = now_ms + tier_base_delay_ms(tier);
             e->active = true;
             return i;

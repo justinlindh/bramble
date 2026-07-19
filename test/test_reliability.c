@@ -84,7 +84,7 @@ void test_pending_ack_table_full(void) {
         TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
     }
 
-    /* Table is full — next add must fail */
+    /* Table is full, next add must fail */
     int overflow = pending_ack_add(&table, 0xFF, 0x1111, MSG_TIER_NORMAL, data, 1, 1000);
     TEST_ASSERT_EQUAL_INT(-1, overflow);
 
@@ -94,6 +94,46 @@ void test_pending_ack_table_full(void) {
     TEST_ASSERT_GREATER_OR_EQUAL(0, retry);
 }
 
+/*
+ * A full-size on-air packet (the transmit path caps these at 255 bytes) must
+ * be stored whole, because the retransmit re-sends packet_data[0..packet_len).
+ * Before PENDING_ACK_PACKET_CAP the buffer was 222 bytes: a large unicast send
+ * was truncated on copy while packet_len still held the full length, so the
+ * retransmit read past the buffer. This locks in that packet_len never exceeds
+ * the storage and that a 255-byte packet round-trips byte-for-byte.
+ */
+void test_pending_ack_stores_full_packet(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+
+    uint8_t big[255];
+    for (int i = 0; i < (int)sizeof(big); i++)
+        big[i] = (uint8_t)(i * 7 + 1);
+
+    int idx = pending_ack_add(&table, 0xB1, 0x2222, MSG_TIER_NORMAL, big, sizeof(big), 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+    TEST_ASSERT_EQUAL_UINT16(sizeof(big), table.entries[idx].packet_len);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(big, table.entries[idx].packet_data, sizeof(big));
+}
+
+/* packet_len can never exceed the storage buffer, even if a caller ever passes
+ * an oversized length: the copy is clamped and packet_len tracks the clamp, so
+ * the retransmit read stays in bounds. */
+void test_pending_ack_clamps_oversized_len(void) {
+    pending_ack_table_t table;
+    pending_ack_init(&table);
+
+    static uint8_t huge[PENDING_ACK_PACKET_CAP + 64];
+    for (int i = 0; i < (int)sizeof(huge); i++)
+        huge[i] = (uint8_t)(i & 0xFF);
+
+    int idx = pending_ack_add(&table, 0xB2, 0x3333, MSG_TIER_NORMAL, huge, sizeof(huge), 1000);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, idx);
+    TEST_ASSERT_EQUAL_UINT16(PENDING_ACK_PACKET_CAP, table.entries[idx].packet_len);
+    TEST_ASSERT_TRUE(table.entries[idx].packet_len <= sizeof(table.entries[idx].packet_data));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(huge, table.entries[idx].packet_data, PENDING_ACK_PACKET_CAP);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tier_max_retries);
@@ -101,5 +141,7 @@ int main(void) {
     RUN_TEST(test_key_exchange_send_path_uses_critical_tier);
     RUN_TEST(test_non_key_exchange_send_path_uses_normal_tier);
     RUN_TEST(test_pending_ack_table_full);
+    RUN_TEST(test_pending_ack_stores_full_packet);
+    RUN_TEST(test_pending_ack_clamps_oversized_len);
     return UNITY_END();
 }
