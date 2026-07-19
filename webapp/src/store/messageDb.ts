@@ -152,20 +152,6 @@ class MessageDb {
     });
   }
 
-  async getLastSyncTimestamp(): Promise<number> {
-    if (!this.db) return 0;
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readonly');
-      const index = tx.objectStore(this.STORE_NAME).index('by-timestamp');
-      const req = index.openCursor(null, 'prev');
-      req.onsuccess = () => {
-        const cursor = req.result;
-        resolve(cursor ? (cursor.value as DbMessage).timestampMs : 0);
-      };
-      req.onerror = () => reject(req.error);
-    });
-  }
-
   async updateMessageStatus(id: string, status: DeliveryStatus, relayPath?: RelayHop[]): Promise<void> {
     if (!this.db) return;
     return new Promise((resolve, reject) => {
@@ -195,24 +181,6 @@ class MessageDb {
     });
   }
 
-  async deleteConversation(conversationId: string): Promise<void> {
-    if (!this.db) return;
-    return new Promise((resolve, reject) => {
-      const tx = this.db!.transaction(this.STORE_NAME, 'readwrite');
-      const store = tx.objectStore(this.STORE_NAME);
-      const index = store.index('by-conversation');
-      const req = index.openCursor(IDBKeyRange.only(conversationId));
-      req.onsuccess = () => {
-        const cursor = req.result;
-        if (cursor) {
-          cursor.delete();
-          cursor.continue();
-        }
-      };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  }
 }
 
 export const messageDb = new MessageDb();

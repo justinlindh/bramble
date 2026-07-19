@@ -55,20 +55,6 @@ export function useConversation(id: string): {
   return { conv, messages };
 }
 
-export function useTotalUnread(): number {
-  return useStore(s => {
-    let total = 0;
-    for (const conv of s.conversations.values()) {
-      total += conv.unreadCount;
-    }
-    return total;
-  });
-}
-
-export function useIsConnected(): boolean {
-  return useStore(s => s.connectionState === 'connected');
-}
-
 export function useMyAddress(): number {
   return useStore(s => s.config?.identity.address ?? 0);
 }
