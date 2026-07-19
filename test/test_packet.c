@@ -364,6 +364,108 @@ void test_delivery_receipt_zero_hops(void) {
     TEST_ASSERT_EQUAL(0, out.hop_count);
 }
 
+/* Regression (issue #77): a beacon declaring a name_len longer than the frame
+ * actually carries must leave name_len at 0 and the name buffer untouched.
+ * Before the fix the memcpy was correctly skipped but name_len kept the
+ * attacker's value, so callers read name_len bytes of uninitialized stack. */
+void test_beacon_deserialize_overrunning_name_len_yields_empty_name(void) {
+    /* Fixed prefix + a name-length byte claiming 16 bytes, with only 3
+     * name bytes actually present in the frame. */
+    uint8_t buf[BEACON_SIZE + 1 + 3];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = BRAMBLE_VERSION;
+    buf[1] = PKT_TYPE_BEACON;
+    buf[BEACON_SIZE] = BEACON_NAME_MAX; /* declared name_len: 16 */
+    buf[BEACON_SIZE + 1] = 'A';
+    buf[BEACON_SIZE + 2] = 'B';
+    buf[BEACON_SIZE + 3] = 'C';
+
+    /* Poison the output struct so an unwritten name[] is detectable. */
+    bramble_beacon_t out;
+    memset(&out, 0x5A, sizeof(out));
+
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(0, out.name_len);
+    TEST_ASSERT_EQUAL('\0', out.name[0]);
+    /* The whole buffer is untouched by frame content: no 'A', no 0x5A. */
+    for (size_t i = 0; i < sizeof(out.name); i++) {
+        TEST_ASSERT_EQUAL_HEX8(0x00, (uint8_t)out.name[i]);
+    }
+}
+
+/* Companion: a name that fits is still parsed normally, so the fix above is
+ * a clamp on malformed frames and not a blanket disabling of beacon names. */
+void test_beacon_deserialize_exact_name_still_parsed(void) {
+    uint8_t buf[BEACON_SIZE + 1 + 3];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = BRAMBLE_VERSION;
+    buf[1] = PKT_TYPE_BEACON;
+    buf[BEACON_SIZE] = 3;
+    buf[BEACON_SIZE + 1] = 'A';
+    buf[BEACON_SIZE + 2] = 'B';
+    buf[BEACON_SIZE + 3] = 'C';
+
+    bramble_beacon_t out;
+    memset(&out, 0x5A, sizeof(out));
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(3, out.name_len);
+    TEST_ASSERT_EQUAL_STRING("ABC", out.name);
+}
+
+/* Regression (issue #77): a beacon with a name-length byte but zero name
+ * bytes behind it must also come back empty rather than declaring a length. */
+void test_beacon_deserialize_name_len_with_no_payload(void) {
+    uint8_t buf[BEACON_SIZE + 1];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = BRAMBLE_VERSION;
+    buf[1] = PKT_TYPE_BEACON;
+    buf[BEACON_SIZE] = 8;
+
+    bramble_beacon_t out;
+    memset(&out, 0x5A, sizeof(out));
+    TEST_ASSERT_EQUAL(ESP_OK, bramble_beacon_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(0, out.name_len);
+    TEST_ASSERT_EQUAL('\0', out.name[0]);
+}
+
+/* Regression (issue #77, audit finding): when delivery-receipt deserialization
+ * rejects an over-large hop_count it must not leave that hop_count behind in
+ * the output struct paired with a stale relay_path. */
+void test_delivery_receipt_rejected_hop_count_is_cleared(void) {
+    uint8_t buf[DELIVERY_RECEIPT_MIN_SIZE + DELIVERY_RECEIPT_MAX_HOPS * 4];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = BRAMBLE_VERSION;
+    buf[1] = PKT_TYPE_DELIVERY_RECEIPT;
+    buf[HEADER_SIZE + 8] = DELIVERY_RECEIPT_MAX_HOPS + 1;
+
+    bramble_delivery_receipt_t out;
+    memset(&out, 0x5A, sizeof(out));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
+                      bramble_delivery_receipt_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(0, out.hop_count);
+    for (int i = 0; i < DELIVERY_RECEIPT_MAX_HOPS; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0, out.relay_path[i]);
+    }
+}
+
+/* Same shape, the truncated-frame rejection path. */
+void test_delivery_receipt_truncated_hop_count_is_cleared(void) {
+    uint8_t buf[DELIVERY_RECEIPT_MIN_SIZE];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = BRAMBLE_VERSION;
+    buf[1] = PKT_TYPE_DELIVERY_RECEIPT;
+    buf[HEADER_SIZE + 8] = 4; /* claims 4 hops, frame carries none */
+
+    bramble_delivery_receipt_t out;
+    memset(&out, 0x5A, sizeof(out));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE,
+                      bramble_delivery_receipt_deserialize(&out, buf, sizeof(buf)));
+    TEST_ASSERT_EQUAL(0, out.hop_count);
+    for (int i = 0; i < DELIVERY_RECEIPT_MAX_HOPS; i++) {
+        TEST_ASSERT_EQUAL_HEX32(0, out.relay_path[i]);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_header_roundtrip);
@@ -381,5 +483,10 @@ int main(void) {
     RUN_TEST(test_key_exchange_roundtrip);
     RUN_TEST(test_delivery_receipt_roundtrip);
     RUN_TEST(test_delivery_receipt_zero_hops);
+    RUN_TEST(test_beacon_deserialize_overrunning_name_len_yields_empty_name);
+    RUN_TEST(test_beacon_deserialize_exact_name_still_parsed);
+    RUN_TEST(test_beacon_deserialize_name_len_with_no_payload);
+    RUN_TEST(test_delivery_receipt_rejected_hop_count_is_cleared);
+    RUN_TEST(test_delivery_receipt_truncated_hop_count_is_cleared);
     return UNITY_END();
 }
