@@ -1,8 +1,11 @@
 <!--
 Title format (required): type(scope): subject
   Types: feat, fix, refactor, chore, docs, test, perf, ci
-  Scopes: firmware, webapp, ui, settings, protocol, sim, emulator, rpc,
-          hardware, tooling, docs, ci, security, release
+  Scope (optional): must be a scope-enum value in commitlint.config.cjs,
+  which is authoritative and CI-gated. Common ones: firmware, webapp, ui,
+  settings, protocol, sim, emulator, rpc, hardware, tooling, docs, ci,
+  security, release. If none fit, add the new scope to scope-enum in this
+  same PR rather than inventing one inline, which commitlint rejects.
 The title becomes the squash-commit subject: commitlint validates it and
 semantic-release derives component versions from it (feat(firmware) cuts a
 firmware minor, fix(webapp) a webapp patch, and so on). Choose the scope of
