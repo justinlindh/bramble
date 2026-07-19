@@ -255,6 +255,43 @@ check that was never going to run.
 4. Do not add a workflow-level `paths:` filter. It reintroduces the exact
    deadlock this structure removes.
 
+## Build caching: ccache for the ESP-IDF compiles
+
+Two jobs in `quality.yml` run a full ESP-IDF compile: `Board build smoke` and
+the linux firmware node build inside `Emulator suite`. Both enable ESP-IDF's
+native ccache support through `scripts/ci-ccache-env.sh`, which exports
+`IDF_CCACHE_ENABLE=1` (the variable `idf.py` reads to put ccache in front of
+the cross compiler) plus a `CCACHE_DIR` under `RUNNER_TEMP`. The build steps
+override `HOME` to a scratch path, so ccache's default `~/.ccache` would move
+between steps and never be cacheable; pinning the directory outside both the
+workspace and `HOME` is what makes it survive.
+
+The cache directory itself is persisted with `actions/cache`, not with a
+directory on the runner host. The self-hosted pool is an ARC scale set whose
+runner pods are ephemeral: the pod filesystem is destroyed after each job, and
+a workflow cannot mount a host path or a volume into it. `actions/cache` is
+the only persistence mechanism available to the workflow, and it works from
+self-hosted runners because it talks to the GitHub cache service rather than
+to local disk.
+
+There is deliberately no `actions/cache` entry for `~/.espressif`. ESP-IDF and
+its tool downloads are baked into the runner image (`scripts/ci-ensure-idf.sh`
+asserts they are present and never installs at runtime), so caching the tools
+directory would cache something that is already local to every pod.
+
+Cache keys are `ccache-<target>-idf<version>-<sdkconfig hash>-<run id>`, with
+prefix `restore-keys` falling back to the newest entry for the same ESP-IDF
+version and sdkconfig. The ESP-IDF version is in the key because objects built
+by one toolchain must never be served to another; the sdkconfig hash is in it
+because a config change invalidates most of the build. The run-id suffix makes
+every key unique, which is what lets a run save an updated cache (GitHub cache
+entries are immutable once written) while still restoring the previous one.
+
+ccache is an accelerator, not a gate. If the runner image does not ship
+`ccache`, `scripts/ci-ccache-env.sh` logs a notice, reports `available=false`,
+and the build runs uncached; the cache and stats steps are skipped by that
+output. A missing accelerator must not fail a correctness check.
+
 ## Dual-tree arrangement: .github is authoritative, .gitea is a frozen mirror
 
 `.github/workflows/` is the source of truth for CI and runs on the self-hosted

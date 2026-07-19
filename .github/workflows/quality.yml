@@ -62,6 +62,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
+      - name: Configure ccache
+        id: ccache
+        # Sets IDF_CCACHE_ENABLE (the env switch idf.py reads to put ccache in
+        # front of the compiler) and pins CCACHE_DIR outside the workspace and
+        # outside the overridden HOME the build step uses. Emits the ESP-IDF
+        # version so the cache key can key on it: a toolchain bump must not
+        # reuse objects built by the previous compiler.
+        run: bash scripts/ci-ccache-env.sh
+      - name: Restore ccache
+        if: steps.ccache.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.ccache.outputs.dir }}
+          key: ccache-heltec-v3-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-heltec-v3-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('sdkconfig.defaults*', 'CMakeLists.txt', 'partitions*.csv') }}-
+            ccache-heltec-v3-idf${{ steps.ccache.outputs.idf_version }}-
       - name: Build heltec-v3 via wrapper
         env:
           HOME: /tmp/cihome
@@ -73,6 +90,9 @@ jobs:
           # shellcheck disable=SC1091
           source scripts/ci-source-idf.sh
           bash scripts/flash.sh local heltec-v3 build
+      - name: ccache statistics
+        if: always() && steps.ccache.outputs.available == 'true'
+        run: ccache --show-stats
 
   release-config:
     name: Release config
@@ -166,6 +186,18 @@ jobs:
           node-version: 20
       - name: Ensure ESP-IDF toolchain
         run: bash scripts/ci-ensure-idf.sh
+      - name: Configure ccache
+        id: ccache
+        run: bash scripts/ci-ccache-env.sh
+      - name: Restore ccache
+        if: steps.ccache.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.ccache.outputs.dir }}
+          key: ccache-emulator-linux-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('emulator/node/sdkconfig.defaults*', 'emulator/node/CMakeLists.txt') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-emulator-linux-idf${{ steps.ccache.outputs.idf_version }}-${{ hashFiles('emulator/node/sdkconfig.defaults*', 'emulator/node/CMakeLists.txt') }}-
+            ccache-emulator-linux-idf${{ steps.ccache.outputs.idf_version }}-
       - name: Build the linux firmware node
         env:
           HOME: /tmp/cihome
@@ -179,6 +211,9 @@ jobs:
           cd emulator/node
           idf.py --preview set-target linux
           idf.py build
+      - name: ccache statistics
+        if: always() && steps.ccache.outputs.available == 'true'
+        run: ccache --show-stats
       - name: Build gosim
         run: |
           cd simulator/gosim
