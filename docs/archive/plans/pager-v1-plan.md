@@ -44,7 +44,7 @@ kiutils/text-surgery fallback, Fabrication Toolkit, jlcsearch API, OpenSCAD, ESP
 ```
 hardware/pager/v1/
   DESIGN.md                    (committed spec)
-  PLAN.md                      (this file)
+  docs/archive/plans/pager-v1-plan.md   (this file)
   README.md                    (Task 10: sources of truth, invariants, gates)
   COMPONENTS.md                (Task 10: ref/part/package/LCSC/nets/purpose)
   NET_TOPOLOGY.md              (Task 10: net-by-net prose)

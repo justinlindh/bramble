@@ -62,6 +62,7 @@ keys/*
 !keys/ota-release-pub.pem
 
 # session scratch (never commit)
+.superp
 .superpowers/
 .claude/worktrees/
 

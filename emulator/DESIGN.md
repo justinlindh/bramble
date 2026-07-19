@@ -1,6 +1,7 @@
 # Bramble Emulator: Design (Phase 1, soft device)
 
-Status: approved 2026-07-10 (brainstorm with Justin). Implementation plan: PLAN.md.
+Status: approved 2026-07-10. Implementation plan (archived):
+`docs/archive/plans/emulator-plan.md`.
 Phase 2 (QEMU true-VM backend) gets its own spec when phase 1 exits.
 
 ## 1. Goal

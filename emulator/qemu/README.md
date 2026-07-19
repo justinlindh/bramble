@@ -1,7 +1,8 @@
 # QEMU backend (phase 2)
 
 True-VM backend for the Bramble emulator: the flashable pager image running in
-espressif/qemu's esp32s3 machine. See `emulator/PHASE2.md` for the spec. This
+espressif/qemu's esp32s3 machine. See
+`docs/archive/plans/emulator-phase2-qemu-spec.md` for the spec. This
 directory holds the dev-loop tooling; device models (GPIO, GPSPI2, SX1262,
 SSD1680) arrive in P2.2-P2.5.
 

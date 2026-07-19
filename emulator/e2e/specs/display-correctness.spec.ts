@@ -1,6 +1,7 @@
 // display-correctness.spec.ts
 //
-// PLAN.md Task 13, deliverable 2: proves the DISPLAY is correct, at the
+// Archived emulator plan (docs/archive/plans/emulator-plan.md) Task 13,
+// deliverable 2: proves the DISPLAY is correct, at the
 // browser/canvas level (what a human looking at the app actually sees), not
 // just the headless framebuffer level Task 10's scenario suite already
 // covers.
