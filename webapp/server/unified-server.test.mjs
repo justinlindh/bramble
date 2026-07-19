@@ -13,6 +13,15 @@ let staticServer;
 let staticBase;
 let staticDistDir;
 
+/* Hook timeout raised from vitest's 10s default. These hooks dynamically
+ * import the server module, create temp dirs and bind a listener, which
+ * on a loaded CI runner (the self-hosted pool reports environment setup
+ * in the hundreds of seconds under contention) can exceed 10s without
+ * anything being wrong. The work is bounded, so a longer ceiling fails
+ * on a genuine hang rather than on a busy machine. Not a retry: the hook
+ * still runs exactly once and still fails if the server never binds. */
+const HOOK_TIMEOUT_MS = 60_000;
+
 beforeAll(async () => {
   otaUpstream = new ResponseServer();
   await otaUpstream.start();
@@ -27,7 +36,7 @@ beforeAll(async () => {
 
   const address = server.address();
   base = `http://127.0.0.1:${address.port}`;
-});
+}, HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   if (!server) return;
@@ -45,7 +54,7 @@ afterAll(async () => {
   if (staticDistDir) {
     await rm(staticDistDir, { recursive: true, force: true });
   }
-});
+}, HOOK_TIMEOUT_MS);
 
 class ResponseServer {
   constructor() {
@@ -150,14 +159,14 @@ describe('ws proxy behavior in local mode', () => {
 
     const address = localServer.address();
     localBase = `http://127.0.0.1:${address.port}`;
-  });
+  }, HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     if (!localServer) return;
     await new Promise((resolve, reject) => {
       localServer.close((err) => (err ? reject(err) : resolve()));
     });
-  });
+  }, HOOK_TIMEOUT_MS);
 
   it('returns 403 for invalid target in local mode', async () => {
     const res = await fetch(`${localBase}/ws-proxy?target=8.8.8.8`);
@@ -186,7 +195,7 @@ describe('web flasher static asset caching', () => {
     });
     const address = staticServer.address();
     staticBase = `http://127.0.0.1:${address.port}`;
-  });
+  }, HOOK_TIMEOUT_MS);
 
   it('sets no-store cache-control on /web-flasher assets', async () => {
     const res = await fetch(`${staticBase}/web-flasher/flasher.js`);
