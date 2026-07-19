@@ -12,8 +12,12 @@ type DbMessage = Message & { conversationId: string };
  * If not provided, falls back to the outgoing/incoming direction heuristic.
  */
 function computeConversationId(msg: Message, selfAddr?: number): string {
-  if (msg.to === 0xFFFFFFFF || msg.channelIndex === -1) return 'broadcast';
+  // Order matters and must match conversationTargetForMessage in store/index.ts:
+  // a channel index only wins when it is non-negative. A negative index is the
+  // firmware's "not a channel message" sentinel, so it falls through to
+  // broadcast/DM rather than being treated as a broadcast in its own right.
   if (msg.channelIndex !== undefined && msg.channelIndex >= 0) return `ch:${msg.channelIndex}`;
+  if (msg.to === 0xFFFFFFFF) return 'broadcast';
   // DM: key by the peer's address (not ours)
   if (selfAddr !== undefined) {
     const peerAddr = msg.from === selfAddr ? msg.to : msg.from;

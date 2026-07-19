@@ -69,17 +69,44 @@ function saveActiveTab(tab: string): void {
   }
 }
 
-// Map a message to its conversation bucket id, matching the Zustand store
+// The conversation bucket a message belongs to, plus the peer and channel
+// fields that must agree with it.
+export interface ConversationTarget {
+  id: string;
+  // Set only for DM buckets: the other party's address. Channel and broadcast
+  // buckets have no single peer.
+  peerAddr: number | undefined;
+  // Set only for channel buckets, and always non-negative there.
+  channelIndex: number | undefined;
+}
+
+// Map a message to its conversation bucket, matching the Zustand store
 // convention: channel -> 'ch:{index}', broadcast (to === 0xffffffff) ->
 // 'broadcast', otherwise a DM keyed by the peer implied by direction.
 // Broadcasts always file under 'broadcast' rather than the sender's DM so they
-// are not double-shown in both views. channelIndex === -1 means "not a channel
-// message", so it falls through to broadcast/DM rather than keying 'ch:-1'.
-function conversationIdForMessage(msg: Message): string {
-  if (msg.channelIndex !== undefined && msg.channelIndex >= 0) return `ch:${msg.channelIndex}`;
-  if (msg.to === 0xffffffff) return 'broadcast';
-  return `dm:${msg.direction === 'outgoing' ? msg.to : msg.from}`;
+// are not double-shown in both views.
+//
+// The firmware's on-the-wire sentinel for "not a channel message" is a negative
+// channel index (MSG_STORE_DM_CHANNEL === -1, see components/msg_store). Both
+// webapp decode paths (loadMessages and normalizeIncomingRealtimeMessage in
+// store/actions.ts) already normalize any negative index to undefined, so a
+// Message reaching the store should never carry -1. The >= 0 test here is the
+// belt-and-braces backstop for that, and returning id, peerAddr and
+// channelIndex together is what keeps them from disagreeing: a bucket's kind is
+// decided exactly once, here, instead of being re-derived by each caller.
+function conversationTargetForMessage(msg: Message): ConversationTarget {
+  if (msg.channelIndex !== undefined && msg.channelIndex >= 0) {
+    return { id: `ch:${msg.channelIndex}`, peerAddr: undefined, channelIndex: msg.channelIndex };
+  }
+  if (msg.to === 0xffffffff) {
+    return { id: 'broadcast', peerAddr: undefined, channelIndex: undefined };
+  }
+  const peerAddr = msg.direction === 'outgoing' ? msg.to : msg.from;
+  return { id: `dm:${peerAddr}`, peerAddr, channelIndex: undefined };
 }
+
+// Exported for tests that pin the id/peerAddr/channelIndex agreement.
+export const __conversationTargetForMessage = conversationTargetForMessage;
 
 function formatAddr(id: string, peerNames?: Map<number, string>, config?: BrambleConfig | null): string {
   if (id === 'broadcast') return 'Broadcast';
@@ -245,7 +272,8 @@ export const useStore = create<AppState & Actions>((set) => ({
       const msgs = [...state.messages, msg].slice(-500);
 
       const isBroadcast = msg.to === 0xffffffff;
-      const convId = conversationIdForMessage(msg);
+      const target = conversationTargetForMessage(msg);
+      const convId = target.id;
 
       debugLog('[addMessage] Message:', msg);
       debugLog('[addMessage] Determined convId:', convId, '| isBroadcast:', isBroadcast, '| activeConv:', state.activeConversationId);
@@ -263,13 +291,8 @@ export const useStore = create<AppState & Actions>((set) => ({
       const newConv = {
         id: convId,
         label: formatAddr(convId, state.peerNames, state.config),
-        peerAddr:
-          msg.channelIndex !== undefined || isBroadcast
-            ? undefined
-            : msg.direction === 'outgoing'
-            ? msg.to
-            : msg.from,
-        channelIndex: msg.channelIndex,
+        peerAddr: target.peerAddr,
+        channelIndex: target.channelIndex,
         lastMessage: msg.text.slice(0, 60),
         lastMessageTime: msg.timestampMs,
         unreadCount:
@@ -385,21 +408,16 @@ export const useStore = create<AppState & Actions>((set) => ({
       // Rebuild conversations from cached messages
       const convs = new Map(state.conversations);
       for (const msg of msgs) {
-        const isBroadcast = msg.to === 0xffffffff;
-        const convId = conversationIdForMessage(msg);
+        const target = conversationTargetForMessage(msg);
+        const convId = target.id;
         const prev = convs.get(convId);
         const shouldUpdate = !prev || !prev.lastMessageTime || msg.timestampMs > prev.lastMessageTime;
         if (shouldUpdate) {
           convs.set(convId, {
             id: convId,
             label: formatAddr(convId, state.peerNames, state.config),
-            peerAddr:
-              msg.channelIndex !== undefined || isBroadcast
-                ? undefined
-                : msg.direction === 'outgoing'
-                ? msg.to
-                : msg.from,
-            channelIndex: msg.channelIndex,
+            peerAddr: target.peerAddr,
+            channelIndex: target.channelIndex,
             lastMessage: msg.text.slice(0, 60),
             lastMessageTime: msg.timestampMs,
             unreadCount: savedUnreads[convId] ?? 0,
