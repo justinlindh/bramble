@@ -2,7 +2,9 @@
 #
 # Covers every dependency ecosystem present in the repo: four npm lockfiles
 # (webapp/, webapp/ws-proxy/, webapp/mock/, simulator/ui/), two Go modules
-# (simulator/gosim/, simulator/tests/), and the GitHub Actions workflows.
+# (simulator/gosim/, simulator/tests/), four Dockerfiles (webapp/,
+# docker/firmware-builder/, emulator/, simulator/), and the GitHub Actions
+# workflows.
 #
 # Cadence and grouping are tuned for the CI contract documented in
 # docs/ci.md. Every workflow always triggers on every pull request, heavy
@@ -163,3 +165,94 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # ---------------------------------------------------------------- docker ---
+  # Four Dockerfiles carry pinned FROM base images. A base-image bump can
+  # trigger a heavy rebuild, so these follow the same monthly, staggered,
+  # minor-and-patch-grouped pattern as npm and gomod, with majors left
+  # individual. Note that most of these tags float at major or minor
+  # granularity (node:22-slim, golang:1.25-bookworm, debian:bookworm), so in
+  # practice the grouped bucket mostly catches golang minor moves and the
+  # interesting updates arrive as ungrouped majors, which is the intent.
+  #
+  # Only FROM lines are tracked. emulator/Dockerfile also git-clones ESP-IDF
+  # at ARG IDF_VERSION=v5.4; Dependabot does not see that, so it still needs
+  # to be moved by hand.
+  - package-ecosystem: docker
+    directory: /webapp
+    schedule:
+      interval: monthly
+      time: "08:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      webapp-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # The ESP-IDF base image is deliberately NOT auto-updated. CLAUDE.md states
+  # that firmware builds need ESP-IDF v5.4.1 specifically, scripts/ci-ensure-idf.sh
+  # fails the build and asks for v5.4.1 by name when it is absent, and
+  # docs/ci/idf-node-runner-image.md derives the published runner tag
+  # bramble/idf-node:v5.4.1 from this exact base. An unattended bump would move
+  # the toolchain out from under every firmware build and desync the runner
+  # image tag, and because firmware is only lightly compiled on pull requests
+  # the breakage would surface late and be hard to attribute.
+  #
+  # This ignore is load-bearing, not cruft. Moving ESP-IDF is a deliberate,
+  # human-driven change that has to land together with CLAUDE.md, the runner
+  # image, and the CI scripts above. Do not remove it to "unblock" a bump.
+  - package-ecosystem: docker
+    directory: /docker/firmware-builder
+    schedule:
+      interval: monthly
+      time: "09:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: espressif/idf
+
+  - package-ecosystem: docker
+    directory: /emulator
+    schedule:
+      interval: monthly
+      time: "09:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      emulator-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /simulator
+    schedule:
+      interval: monthly
+      time: "10:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      simulator-docker-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
