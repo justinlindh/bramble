@@ -163,6 +163,27 @@ static bool load_beacon_policy(cJSON* beacon_json, sim_beacon_policy_t* beacon) 
     return true;
 }
 
+/* Event types that appear in checked-in scenarios and are understood as
+ * intent, but that the engine cannot execute yet. Keeping this list explicit
+ * is what lets load_events treat every OTHER unrecognized type as a hard
+ * error: the distinction is "we know about this and have not built it" versus
+ * "this is a typo or a stale spelling", and only the first is survivable.
+ *
+ * send_location: simulator/scenarios/location-sharing.json scripts GPS
+ * position broadcasts. There is no EVT_* for a position update and no bridge
+ * handler on the gosim side, so those events have never had any effect.
+ * Tracked separately; do not add entries here to silence a typo. */
+static bool event_type_is_known_unimplemented(const char* type) {
+    static const char* const unimplemented[] = {
+        "send_location",
+    };
+    for (size_t i = 0; i < sizeof(unimplemented) / sizeof(unimplemented[0]); i++) {
+        if (strcmp(type, unimplemented[i]) == 0)
+            return true;
+    }
+    return false;
+}
+
 static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* nodes,
                         radio_config_t* radio) {
     (void)radio; /* Reserved for future use */
@@ -325,10 +346,34 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                 return false;
             strncpy(event.data.node.node_id, node_id->valuestring, NODE_ID_LEN - 1);
 
-        } else {
-            fprintf(stderr, "Warning: unknown event type '%s' at %llu ms\n", type,
-                    (unsigned long long)(timestamp_us / 1000));
+        } else if (event_type_is_known_unimplemented(type)) {
+            /* Recognized spelling, no engine implementation yet. These are
+             * listed explicitly (see event_type_is_known_unimplemented) so a
+             * scenario that depends on one is loud about it on every run
+             * instead of quietly doing less than it advertises, while still
+             * loading. A misspelled type falls through to the hard failure
+             * below rather than landing here. */
+            fprintf(stderr,
+                    "Scenario incomplete: event type '%s' at %llu ms is recognized but the "
+                    "engine has no implementation, so this event does nothing. The scenario "
+                    "will run without it.\n",
+                    type, (unsigned long long)(timestamp_us / 1000));
             continue;
+
+        } else {
+            /* Hard failure, deliberately. Issues #144 and #166 were both
+             * scenarios whose phases never ran because an unrecognized event
+             * type was skipped with at most a warning nobody read, so the
+             * scenario looked healthy while testing less than its name
+             * claimed. An unloadable scenario is strictly better than an
+             * inert one that passes. */
+            fprintf(stderr,
+                    "Error: unknown event type '%s' at %llu ms. The engine cannot execute this "
+                    "event; fix the scenario's spelling or add support for the type. Known "
+                    "types: send_message, generate_message, send_attestation, provision_anchor, "
+                    "move_node, kill_node, node_leave, interference, join, node_join.\n",
+                    type, (unsigned long long)(timestamp_us / 1000));
+            return false;
         }
 
         event_queue_push(queue, &event);

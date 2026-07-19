@@ -32,7 +32,7 @@
       "alt_m": 15
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 15000,
       "node": "A",
       "x": 50,
@@ -47,7 +47,7 @@
       "alt_m": 12
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 25000,
       "node": "C",
       "x": 150,
@@ -69,7 +69,7 @@
       "payload": "got your location update"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 40000,
       "node": "D",
       "x": 100,
@@ -92,7 +92,7 @@
       "alt_m": 14
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 60000,
       "node": "B",
       "x": 250,

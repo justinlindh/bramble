@@ -70,7 +70,7 @@
       "dest": "A"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 15000,
       "node": "C",
       "x": 200,
@@ -101,7 +101,7 @@
       "dest": "E"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 35000,
       "node": "C",
       "x": 200,
@@ -126,7 +126,7 @@
       "dest": "E"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 60000,
       "node": "B",
       "x": 100,
@@ -145,7 +145,7 @@
       "dest": "E"
     },
     {
-      "type": "node_move",
+      "type": "move_node",
       "at_ms": 80000,
       "node": "B",
       "x": 100,
