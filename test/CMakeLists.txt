@@ -1751,6 +1751,30 @@ target_include_directories(test_emu_link PRIVATE
 )
 target_link_libraries(test_emu_link pthread)
 
+# radio_esp state-reporting tests: whitebox include of radio_esp.c (normally
+# ESP_PLATFORM-only) behind a fake sx1262 layer with per-command failure
+# injection, covering the invariant that radio_get_state() never reports a
+# capability the chip does not have.
+add_executable(test_radio_esp_state
+    test_radio_esp_state.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/radio_airtime.c
+    unity/unity.c
+)
+target_include_directories(test_radio_esp_state PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+)
+target_link_libraries(test_radio_esp_state m)
+# radio_esp.c has never had a host compile before, so it trips two pre-existing
+# warnings that the host build promotes to errors. Both are out of scope here
+# and neither is introduced by this target:
+#   -Woverflow:    bw_hz_to_code() returns 500 from a uint8_t (truncates to 244,
+#                  tracked separately, it changes on-air behaviour to fix).
+#   -Wtype-limits: a uint8_t length is compared against sizeof(buf) == 256.
+target_compile_options(test_radio_esp_state PRIVATE -Wno-overflow -Wno-type-limits)
+
 # radio_virt tests (Task 4): the virtual radio over a socketpair fake broker.
 # Whitebox include of emu_link.c + radio_airtime.c + radio_profiles.c +
 # radio_virt.c into one TU (same pattern as test_emu_link.c).
