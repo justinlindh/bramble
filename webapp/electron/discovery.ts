@@ -1,9 +1,17 @@
-import { Bonjour, type Browser, type Service } from 'bonjour-service';
+import { Bonjour, Browser, Service } from 'bonjour-service';
 import { serviceToNode, upsertNode, removeService } from '../src/lib/discoveryCore';
 import type { DiscoveredNode } from '../src/types/desktop';
 
-let bonjour: Bonjour | null = null;
-let browser: Browser | null = null;
+// bonjour-service 1.4.3 changed its type surface from ES named exports to an
+// `export =` class/namespace merge. The classes are unchanged at runtime, but
+// `Bonjour`, `Browser` and `Service` now resolve as values only, so instance
+// types have to be recovered with InstanceType.
+type BonjourInstance = InstanceType<typeof Bonjour>;
+type BrowserInstance = InstanceType<typeof Browser>;
+type ServiceInstance = InstanceType<typeof Service>;
+
+let bonjour: BonjourInstance | null = null;
+let browser: BrowserInstance | null = null;
 let snapshot: DiscoveredNode[] = [];
 
 /**
@@ -29,13 +37,13 @@ export function startDiscovery(onUpdate: (nodes: DiscoveredNode[]) => void): voi
     onUpdate([]);
     return;
   }
-  browser.on('up', (svc: Service) => {
+  browser.on('up', (svc: ServiceInstance) => {
     const node = serviceToNode(svc);
     if (!node) return;
     snapshot = upsertNode(snapshot, node);
     onUpdate(snapshot);
   });
-  browser.on('down', (svc: Service) => {
+  browser.on('down', (svc: ServiceInstance) => {
     snapshot = removeService(snapshot, svc);
     onUpdate(snapshot);
   });
