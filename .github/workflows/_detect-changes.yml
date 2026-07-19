@@ -131,7 +131,7 @@ jobs:
           # reads it today (see issue #160), but over-triggering is safe.
           # simulator/ has its own output because the strict clang-format scope
           # scans simulator C sources too.
-          firmware=$(area_changed '^(main|components|test|api|scripts)/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$|^\.releaserc\.')
+          firmware=$(area_changed '^(main|components|test|api|scripts)/|^CMakeLists\.txt$|^sdkconfig\.|^partitions[^/]*\.csv$|^\.clang-format$|^\.clang-format-version$|^\.clang-tidy$|^\.shellcheckrc$|^\.markdownlint-cli2\.yaml$|^\.releaserc\.')
           simulator=$(area_changed '^simulator/')
           emulator=$(area_changed '^emulator/')
           webapp=$(area_changed '^webapp/')
