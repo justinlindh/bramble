@@ -36,13 +36,19 @@ bash scripts/flash.sh local heltec-v3 monitor /dev/ttyUSB0
 
 ## Prerequisites
 
-### ESP-IDF v5.4
+### ESP-IDF v5.4.1
+
+Bramble pins the exact ESP-IDF tag CI builds with. The pin lives in
+`.esp-idf-version` at the repo root and is the single source of truth;
+`scripts/lint/check-idf-version.sh` fails CI if any reference drifts from it.
+Note that `v5.4.1` is a tag, not the moving `v5.4` release branch: cloning the
+branch gets you a different tree than CI compiles with.
 
 Clone ESP-IDF wherever you keep source. The examples below use
 `$HOME/esp/esp-idf`; substitute your own location.
 
 ```bash
-git clone --depth 1 -b v5.4 https://github.com/espressif/esp-idf.git "$HOME/esp/esp-idf"
+git clone --depth 1 -b v5.4.1 https://github.com/espressif/esp-idf.git "$HOME/esp/esp-idf"
 cd "$HOME/esp/esp-idf"
 git submodule update --init --recursive --depth 1
 ./install.sh esp32s3

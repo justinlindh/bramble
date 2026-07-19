@@ -48,6 +48,8 @@ jobs:
         # added to the board-build-smoke matrix in quality.yml, it would ship
         # with no automatic build ever compiling it.
         run: bash scripts/lint/check-board-matrix.sh
+      - name: ESP-IDF version pins agree
+        run: bash scripts/lint/check-idf-version.sh
       - name: Required shellcheck (strict wrapper)
         run: bash scripts/lint/run-shellcheck.sh --strict
       - name: Ruff (required baseline profile)

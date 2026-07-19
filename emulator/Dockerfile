@@ -18,13 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config libusb-1.0-0 libbsd-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ARG IDF_VERSION=v5.4
+ARG IDF_VERSION=v5.4.1
 RUN git clone --branch ${IDF_VERSION} --depth 1 --recurse-submodules --shallow-submodules \
         https://github.com/espressif/esp-idf.git /opt/esp-idf
 ENV IDF_PATH=/opt/esp-idf
 # Requests the linux target only. ESP-IDF's installer still pulls the
 # xtensa/riscv32 cross toolchains as part of its "core" tool set even so
-# (no smaller install profile is exposed for this preview target on v5.4);
+# (no smaller install profile is exposed for this preview target on v5.4.1);
 # only the final runtime stage's size matters, and that stage never sees
 # this layer.
 RUN /opt/esp-idf/install.sh linux

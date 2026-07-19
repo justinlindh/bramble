@@ -22,8 +22,8 @@ echo "=== Bramble emulator prerequisite check ==="
 # --- ESP-IDF / idf.py, linux preview target -------------------------------
 if [ ! -f "$IDF_PATH/export.sh" ]; then
     bad "ESP-IDF not found at $IDF_PATH/export.sh"
-    note "set IDF_PATH=/path/to/esp-idf, or clone ESP-IDF 5.4 and install the"
-    note "linux target: git clone -b v5.4 --recurse-submodules \\"
+    note "set IDF_PATH=/path/to/esp-idf, or clone ESP-IDF 5.4.1 and install the"
+    note "linux target: git clone -b v5.4.1 --recurse-submodules \\"
     note "  https://github.com/espressif/esp-idf.git ~/src/esp-idf && \\"
     note "  ~/src/esp-idf/install.sh linux"
 elif ver=$(bash -c "source '$IDF_PATH/export.sh' >/dev/null 2>&1 && idf.py --version" 2>/dev/null); then

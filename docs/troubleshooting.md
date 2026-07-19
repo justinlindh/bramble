@@ -14,7 +14,7 @@ adding it to this file is a welcome pull request.
 
 ### `export.sh: No such file or directory`, or `idf.py: command not found`
 
-`scripts/flash.sh` and the emulator both need an activated ESP-IDF v5.4
+`scripts/flash.sh` and the emulator both need an activated ESP-IDF v5.4.1
 environment. `scripts/flash.sh` searches `$IDF_PATH` first, then
 `~/src/esp-idf`, `~/esp-idf`, `/opt/esp/idf`, and `/opt/esp-idf`. The emulator
 scripts use `$IDF_PATH` and fall back to `~/src/esp-idf`. If your checkout is

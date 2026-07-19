@@ -1,6 +1,6 @@
 /*
  * Spike-only host backends for two IDF APIs that are header-only on the
- * POSIX/Linux simulator (IDF 5.4 provides no linux implementation):
+ * POSIX/Linux simulator (IDF 5.4.1 provides no linux implementation):
  *
  * - esp_timer: implemented on FreeRTOS software timers (the POSIX simulation
  *   provides the timer service task). esp_timer_get_time() is a monotonic
