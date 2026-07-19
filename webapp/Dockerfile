@@ -1,4 +1,4 @@
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 WORKDIR /app
 ARG APP_VERSION=dev
 ENV APP_VERSION=${APP_VERSION}
@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 
-FROM node:22-slim AS runtime
+FROM node:26-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
