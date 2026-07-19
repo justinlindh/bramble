@@ -10,7 +10,29 @@ int identity_save(const bramble_identity_t* id);
 int identity_generate_and_save(bramble_identity_t* id);
 bool identity_check_collision(const bramble_identity_t* my_id, uint32_t beacon_src_addr,
                               uint32_t beacon_pubkey_hash);
+/* RPC auth token.
+ *
+ * identity_ensure_ws_auth_token returns:
+ *   1  a fresh token was minted and persisted (first boot)
+ *   0  an existing token was loaded, or auth is explicitly disabled
+ *      (token_out is empty in the disabled case)
+ *  IDENTITY_TOKEN_ERR_STORE    the token store (NVS) could not read or persist
+ *  IDENTITY_TOKEN_ERR_ENTROPY  the SEC-L1 entropy gate is shut, so no token
+ *                              could be minted; NOTHING was persisted and the
+ *                              call is safe to retry once entropy is ready
+ * On either error token_out is emptied and callers MUST fail closed: an empty
+ * token is not "open access", it is "no credential can match".
+ */
+#define IDENTITY_TOKEN_ERR_STORE (-1)
+#define IDENTITY_TOKEN_ERR_ENTROPY (-2)
+
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len);
+
+/* Mint a fresh 32-hex-char token from crypto_random(), the SEC-L1
+ * entropy-gated source. Platform-independent (host tests cover the
+ * fail-closed path). token_out_len must be >= 33. Returns 0, or
+ * IDENTITY_TOKEN_ERR_ENTROPY with token_out emptied when the gate is shut. */
+int identity_mint_ws_auth_token(char* token_out, size_t token_out_len);
 
 /* --- Trust-anchor endorsement primitive (trust-anchor campaign, P0) --------
  * A fleet has one Ed25519 ANCHOR keypair. The anchor holder (an offline

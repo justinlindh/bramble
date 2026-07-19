@@ -65,7 +65,9 @@ int network_key_load_from_nvs(void);
  * check the return value: on nonzero they must refuse to originate or verify
  * the message rather than trust the sentinel bytes (Task 2 hardening). The
  * per-type label (e.g. "bramble-rrep-v2") domain-separates message types.
- * len is the data length only (not the label); an assert bounds it.
+ * len is the data length only (not the label) and is bounded at RUNTIME (255
+ * bytes of data, 32 bytes of label): an over-long request returns nonzero and
+ * the all-zero sentinel rather than overrunning the internal scratch buffer.
  */
 int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]);
 

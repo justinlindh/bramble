@@ -165,6 +165,73 @@ void test_mac_stable_for_same_label_and_data(void) {
     TEST_ASSERT_EQUAL_MEMORY(mac1, mac2, sizeof(mac1));
 }
 
+/* ── Runtime bounds on the MAC scratch buffer ────────────────────────── */
+
+void test_mac_rejects_oversized_data_at_runtime(void) {
+    /* The bound used to be an assert(), which compiles out under NDEBUG and
+     * left a release build overrunning a stack buffer on the RX path. It is
+     * now a real check: over-long input fails closed like the unprovisioned
+     * case, in release builds too. */
+    uint8_t key[32];
+    crypto_random(key, 32);
+    network_key_set_provisioned(key);
+
+    static uint8_t data[512];
+    memset(data, 0xA5, sizeof(data));
+    uint8_t out[8];
+    memset(out, 0x5A, sizeof(out));
+
+    TEST_ASSERT_NOT_EQUAL(0, network_key_mac("bramble-rrep-v2", data, 256, out));
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL_MEMORY(zero, out, sizeof(out)); /* sentinel, no MAC */
+
+    /* Way over, not just one past the edge. */
+    TEST_ASSERT_NOT_EQUAL(0, network_key_mac("bramble-rrep-v2", data, sizeof(data), out));
+}
+
+void test_mac_accepts_the_maximum_data_length(void) {
+    /* Non-vacuous companion to the rejection test: 255 is IN range, so the
+     * check is not simply refusing everything large. */
+    uint8_t key[32];
+    crypto_random(key, 32);
+    network_key_set_provisioned(key);
+
+    static uint8_t data[255];
+    memset(data, 0x3C, sizeof(data));
+    uint8_t out[8];
+    TEST_ASSERT_EQUAL(0, network_key_mac("bramble-rrep-v2", data, sizeof(data), out));
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(out, zero, sizeof(out)));
+}
+
+void test_mac_rejects_oversized_label_at_runtime(void) {
+    uint8_t key[32];
+    crypto_random(key, 32);
+    network_key_set_provisioned(key);
+
+    /* 40 chars, past the 32-byte label bound. */
+    const char* long_label = "bramble-a-label-far-longer-than-allowed!";
+    TEST_ASSERT_EQUAL_UINT32(40u, (uint32_t)strlen(long_label));
+    const uint8_t data[] = "body";
+    uint8_t out[8];
+    memset(out, 0x5A, sizeof(out));
+    TEST_ASSERT_NOT_EQUAL(0, network_key_mac(long_label, data, sizeof(data), out));
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL_MEMORY(zero, out, sizeof(out));
+}
+
+void test_mac_bound_is_checked_before_key_material_is_touched(void) {
+    /* Unprovisioned AND oversized: still fails closed, and the ordering means
+     * an out-of-range request never loads the key at all. */
+    static uint8_t data[512];
+    memset(data, 0x11, sizeof(data));
+    uint8_t out[8];
+    memset(out, 0x5A, sizeof(out));
+    TEST_ASSERT_NOT_EQUAL(0, network_key_mac("bramble-rrep-v2", data, sizeof(data), out));
+    const uint8_t zero[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_EQUAL_MEMORY(zero, out, sizeof(out));
+}
+
 /* ── NVS persistence round-trip ──────────────────────────────────────── */
 
 void test_load_from_nvs_returns_nonzero_when_nothing_stored(void) {
@@ -215,6 +282,10 @@ int main(void) {
     RUN_TEST(test_fingerprint_stable_key_dependent_and_convergent);
     RUN_TEST(test_domain_separation_different_labels_yield_different_macs);
     RUN_TEST(test_mac_stable_for_same_label_and_data);
+    RUN_TEST(test_mac_rejects_oversized_data_at_runtime);
+    RUN_TEST(test_mac_accepts_the_maximum_data_length);
+    RUN_TEST(test_mac_rejects_oversized_label_at_runtime);
+    RUN_TEST(test_mac_bound_is_checked_before_key_material_is_touched);
     RUN_TEST(test_load_from_nvs_returns_nonzero_when_nothing_stored);
     RUN_TEST(test_nvs_round_trip_restores_key_and_fingerprint);
     RUN_TEST(test_set_provisioned_persists_for_later_load);

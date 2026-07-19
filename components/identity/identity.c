@@ -10,6 +10,32 @@ bool identity_check_collision(const bramble_identity_t* my_id, uint32_t beacon_s
     return my_id->pubkey_hash != beacon_pubkey_hash;
 }
 
+/* Shared by both platforms so host tests can pin the fail-closed behaviour.
+ * 16 bytes from the entropy-gated CSPRNG, hex-encoded to 32 chars. Draws into
+ * a scratch buffer and only touches token_out on success, so a shut gate
+ * cannot leave a caller holding a half-written or all-zero-derived token. */
+int identity_mint_ws_auth_token(char* token_out, size_t token_out_len) {
+    if (!token_out || token_out_len < 33)
+        return IDENTITY_TOKEN_ERR_STORE;
+    uint8_t rnd[16];
+    if (crypto_random(rnd, sizeof(rnd)) != 0) {
+        /* SEC-L1 gate shut: refuse rather than mint a guessable credential.
+         * crypto_random already zeroed rnd; wipe anyway so the pattern holds
+         * if the backend ever changes. */
+        crypto_secure_wipe(rnd, sizeof(rnd));
+        token_out[0] = '\0';
+        return IDENTITY_TOKEN_ERR_ENTROPY;
+    }
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < sizeof(rnd); i++) {
+        token_out[i * 2] = hex[(rnd[i] >> 4) & 0x0F];
+        token_out[i * 2 + 1] = hex[rnd[i] & 0x0F];
+    }
+    token_out[32] = '\0';
+    crypto_secure_wipe(rnd, sizeof(rnd));
+    return 0;
+}
+
 /* Blob store keys. "priv"/"pub" (X25519) predate Phase 1; a store holding
  * only those two is an old identity and gets the Ed25519 migration in
  * identity_load(). */
@@ -27,7 +53,6 @@ static int id_store_write(const char* key, const uint8_t* buf, size_t len);
 #ifdef ESP_PLATFORM
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "esp_random.h"
 #include "esp_log.h"
 
 #define NVS_NAMESPACE NVS_NS_IDENTITY
@@ -53,12 +78,12 @@ static int id_store_write(const char* key, const uint8_t* buf, size_t len) {
 
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     if (!token_out || token_out_len < 33) {
-        return -1;
+        return IDENTITY_TOKEN_ERR_STORE;
     }
 
     nvs_handle_t h;
     if (nvs_open(NVS_NS_BRAMBLE, NVS_READWRITE, &h) != ESP_OK) {
-        return -1;
+        return IDENTITY_TOKEN_ERR_STORE;
     }
 
     /* Explicit opt-out: only an authenticated bramble.setAuthToken call
@@ -79,26 +104,27 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     }
 
     /* First boot: generate a per-device token so WS/BLE RPC is closed by
-     * default. 16 bytes from the hardware RNG, hex-encoded to 32 chars.
+     * default.
      *
-     * ENTROPY ORDER CONTRACT: esp_fill_random() is only fully entropic
-     * once an RF subsystem (Wi-Fi or BT) is running. Every call path into
-     * this function runs after RF bring-up:
+     * ENTROPY ORDER CONTRACT: esp_random() is only fully entropic once an
+     * RF subsystem (Wi-Fi or BT) is running, so the mint goes through
+     * crypto_random() and the SEC-L1 gate rather than calling
+     * esp_fill_random() directly. Every call path into this function runs
+     * after RF bring-up, which is when main.c opens the gate:
      *   - ws_server_start() -> ws_server_load_token(): called after
      *     esp_wifi_start() (wifi_manager AP/GOT_IP paths and app_main's
      *     post-wifi_manager_init call).
      *   - app_main BLE branch: ws_server_load_token() after
      *     ble_server_start() (NimBLE controller running).
      *   - rpc_set_auth_token(): runtime, transports already up.
-     * Do not add a call site that runs before RF init. */
-    uint8_t rnd[16];
-    esp_fill_random(rnd, sizeof(rnd));
-    static const char hex[] = "0123456789ABCDEF";
-    for (size_t i = 0; i < sizeof(rnd); i++) {
-        token_out[i * 2] = hex[(rnd[i] >> 4) & 0x0F];
-        token_out[i * 2 + 1] = hex[rnd[i] & 0x0F];
+     * The gate is now what ENFORCES that ordering instead of a comment: a
+     * call site added before RF init gets IDENTITY_TOKEN_ERR_ENTROPY and
+     * mints nothing, and the caller retries later (ws_server_load_token). */
+    if (identity_mint_ws_auth_token(token_out, token_out_len) != 0) {
+        nvs_close(h);
+        token_out[0] = '\0';
+        return IDENTITY_TOKEN_ERR_ENTROPY;
     }
-    token_out[32] = '\0';
 
     err = nvs_set_str(h, NVS_KEY_AUTH_TOKEN, token_out);
     if (err == ESP_OK) {
@@ -107,10 +133,10 @@ int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
     nvs_close(h);
 
     if (err != ESP_OK) {
-        /* Generation failed: report an error so callers fail CLOSED
+        /* Persist failed: report an error so callers fail CLOSED
          * (no token != open access; see ws_server_load_token). */
         token_out[0] = '\0';
-        return -1;
+        return IDENTITY_TOKEN_ERR_STORE;
     }
 
     /* Log to the serial console on purpose: serial is the trusted pairing
@@ -174,9 +200,10 @@ static int id_store_write(const char* key, const uint8_t* buf, size_t len) {
 }
 
 int identity_ensure_ws_auth_token(char* token_out, size_t token_out_len) {
+    /* Host build has no NVS-backed token store. */
     (void)token_out;
     (void)token_out_len;
-    return -1;
+    return IDENTITY_TOKEN_ERR_STORE;
 }
 
 #endif

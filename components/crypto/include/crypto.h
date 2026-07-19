@@ -71,8 +71,6 @@ int crypto_aes256gcm_decrypt(const uint8_t* key, const uint8_t* nonce, const uin
                              uint8_t* plaintext);
 int crypto_hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* data, size_t data_len,
                        uint8_t* mac);
-uint32_t crypto_hmac_sha256_trunc4(const uint8_t* key, size_t key_len, const uint8_t* data,
-                                   size_t data_len);
 int crypto_sha256(const uint8_t* data, size_t data_len, uint8_t* hash);
 int crypto_random(uint8_t* buf, size_t len);
 

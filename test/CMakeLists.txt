@@ -1669,6 +1669,19 @@ target_include_directories(test_ota_progress PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
 )
 
+# RPC auth-token minting behind the SEC-L1 entropy gate (issue #89). Compiles
+# identity.c against a stubbed crypto_random so the shut-gate branch is
+# reachable on the host (OpenSSL's RAND_bytes has no gate to shut).
+add_executable(test_identity_token
+    test_identity_token.c
+    unity/unity.c
+)
+target_include_directories(test_identity_token PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+)
+
 # Entropy gate tests (SEC-L1)
 add_executable(test_crypto_entropy
     test_crypto_entropy.c

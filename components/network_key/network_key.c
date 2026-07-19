@@ -1,7 +1,6 @@
 #include "include/network_key.h"
 #include "crypto.h"
 #include <string.h>
-#include <assert.h>
 
 static uint8_t s_key[32];
 static int s_provisioned = 0;
@@ -117,8 +116,21 @@ int network_key_load_from_nvs(void) {
 /* Longest label in use today ("bramble-receipt-v2") is 18 bytes; 32 is
  * generous headroom for future per-type labels of the same shape. */
 #define NETWORK_KEY_MAC_MAX_LABEL_LEN 32
+/* Largest MAC'd body. Every caller today passes a compile-time-constant
+ * length well under this, but the check below is a real runtime one: this
+ * runs on the RX path, and assert() compiles out under NDEBUG. */
+#define NETWORK_KEY_MAC_MAX_DATA_LEN 255
 
 int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t out[8]) {
+    /* Bound the scratch buffer BEFORE touching key material, so an
+     * out-of-range request never even loads the key. Fail-closed like the
+     * unprovisioned case: all-zero sentinel out, nonzero return. */
+    size_t label_len = strlen(label);
+    if (len > NETWORK_KEY_MAC_MAX_DATA_LEN || label_len > NETWORK_KEY_MAC_MAX_LABEL_LEN) {
+        memset(out, 0, 8);
+        return -1;
+    }
+
     uint8_t key[32];
     if (network_key_get(key) != 0) {
         /* Fail-closed: unprovisioned. Emit the all-zero sentinel instead of an
@@ -126,16 +138,18 @@ int network_key_mac(const char* label, const uint8_t* data, size_t len, uint8_t 
         memset(out, 0, 8);
         return -1;
     }
-    assert(len <= 255);
-    size_t label_len = strlen(label);
-    assert(label_len <= NETWORK_KEY_MAC_MAX_LABEL_LEN);
-    uint8_t buf[255 + NETWORK_KEY_MAC_MAX_LABEL_LEN];
+
+    uint8_t buf[NETWORK_KEY_MAC_MAX_DATA_LEN + NETWORK_KEY_MAC_MAX_LABEL_LEN];
     memcpy(buf, label, label_len);
     memcpy(buf + label_len, data, len);
 
     uint8_t full_mac[32];
     crypto_hmac_sha256(key, sizeof(key), buf, label_len + len, full_mac);
     memcpy(out, full_mac, 8);
+    /* Do not leave the network key on the RX-path stack. crypto_secure_wipe,
+     * not memset: the compiler is free to elide a memset whose result is
+     * never read (see crypto.h). */
+    crypto_secure_wipe(key, sizeof(key));
     return 0;
 }
 
@@ -149,4 +163,5 @@ void network_key_fingerprint(uint8_t out[4]) {
     uint8_t hash[32];
     crypto_sha256(key, sizeof(key), hash);
     memcpy(out, hash, 4);
+    crypto_secure_wipe(key, sizeof(key));
 }
