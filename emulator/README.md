@@ -101,23 +101,33 @@ every node) so they can send and receive channel traffic; per-node identity
 stays unique. Provisioning uses the real `network_key_set_provisioned` path,
 not a MAC-bypassing shortcut.
 
-## Fidelity caveat: task priorities are flattened
+## Task priorities are real (issue #50)
 
-On the linux target every FreeRTOS task runs at ONE priority
-(`emulator/node/emu_task_flatten.c`, linker-wrapped task creation). This is a
-deliberate tradeoff: the IDF linux port runs task pthreads that share glibc's
-internal locks (stdio, malloc), which do not exist on real hardware, and with
-unequal priorities a preempted lock holder plus a higher-priority futex-blocked
-waiter permanently freezes the whole node (observed repeatedly in CI as silent
-"mute node" wedges). Flattening turns that freeze class into bounded stalls.
+The linux target runs with the firmware's REAL task priorities, the same as
+device builds. An earlier workaround (`emu_task_flatten.c`) flattened every task
+to one priority to dodge an intermittent scheduler-corruption crash that only
+appeared under real priorities; it has been removed now that the crash is
+root-caused and fixed.
 
-The consequence, stated loudly: **the emulator cannot surface genuine
-priority-starvation bugs in bramble's task design.** A firmware change that
-would starve a low-priority task on device runs happily here. That bug class
-is hardware-only detection now; validate priority-sensitive changes on bench
-devices. Device builds keep their true priorities. A longer-term alternative
-(FreeRTOS-aware lock shims or a port-level fix) is tracked in the emulator
-reliability follow-up issue.
+The crash was not a priority bug. The IDF linux port drives its tick as a
+process-directed SIGALRM that must be handled only by the running task thread;
+every other thread must block signals. The emu_link reader pthread masks signals
+as its first act, but it was created (`components/emu_link/emu_link.c`) from a
+running FreeRTOS task without the parent blocking signals first, so it was born
+with an inherited unblocked mask. In the startup window before it reached its
+own masking call, a tick could be delivered to that raw thread and run the port
+scheduler on it, corrupting current-task state and aborting via a
+priority-inheritance assertion. Flattening hid this (with flat priorities there
+is no priority inheritance to assert on); real priorities exposed it. The window
+is microseconds but widens under the CPU starvation of a shared CI runner, which
+is why it read as a rare, load-amplified "mute node" death.
+
+The fix blocks all signals in the parent around `pthread_create` so the reader
+inherits a fully-masked signal set from birth, closing the window. With it, real
+priorities run correctly (full scenario suite green, including under single-core
+CPU starvation), and the emulator now matches device scheduling instead of
+hiding priority-design bugs. Rollback lever: git history has `emu_task_flatten.c`
+if flattening is ever needed again as a scoped workaround.
 
 ## CI-equivalent scenario suite
 
