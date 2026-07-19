@@ -74,6 +74,43 @@ void test_f2_breadcrumb_metric_rule_preserved(void) {
     TEST_ASSERT_EQUAL(200, e->metric);
 }
 
+/* Issue #74 regression: an unauthenticated RREQ must not be able to install a
+ * privileged, unbeatable route. handle_rreq now classes the source route it
+ * learns from an RREQ as ROUTE_SRC_BREADCRUMB (the RREQ carries no HMAC), so
+ * the exact forged shape from the attack analysis -- next_hop = the attacker,
+ * hop_count forged to 0 (the discovery.c wrap this PR also fixes), metric
+ * forged to the maximal 255 -- can neither displace an existing legitimate
+ * DISCOVERED route nor lock out a future one. This is the same trust invariant
+ * the F2 tests cover, asserted with the specific values issue #74 calls out. */
+void test_rreq_forged_route_cannot_poison_discovered(void) {
+    /* A legitimate control-plane (RREP/beacon) route to the victim dest. */
+    route_install(&rt, 0x0D0D0D0D, 0x600D, 4, 80, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
+
+    /* Attacker floods a forged RREQ: handle_rreq would install dest=prev_hop,
+     * next_hop=prev_hop with the forged hop_count(0)/metric(255), now as a
+     * BREADCRUMB. It must be refused against the standing DISCOVERED route. */
+    route_install(&rt, 0x0D0D0D0D, 0xA77ACC, 0, 255, ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, 2000);
+
+    route_entry_t* e = route_lookup(&rt, 0x0D0D0D0D);
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_EQUAL_UINT32(0x600D, e->next_hop);
+    TEST_ASSERT_EQUAL(ROUTE_SRC_DISCOVERED, e->source);
+    TEST_ASSERT_EQUAL(80, e->metric);
+}
+
+/* Dual direction: even if the forged RREQ breadcrumb lands first (no route yet
+ * known), the real DISCOVERED route learned from the signed RREP must reclaim
+ * it despite a worse metric and more hops. Trust class dominates. */
+void test_rreq_forged_route_yields_to_later_discovered(void) {
+    route_install(&rt, 0x0D0D0D0D, 0xA77ACC, 0, 255, ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, 1000);
+    route_install(&rt, 0x0D0D0D0D, 0x600D, 6, 20, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 2000);
+
+    route_entry_t* e = route_lookup(&rt, 0x0D0D0D0D);
+    TEST_ASSERT_NOT_NULL(e);
+    TEST_ASSERT_EQUAL_UINT32(0x600D, e->next_hop);
+    TEST_ASSERT_EQUAL(ROUTE_SRC_DISCOVERED, e->source);
+}
+
 void test_route_maintenance_active_to_stale(void) {
     route_install(&rt, 0xDEAD, 0x0001, 3, 200, ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, 1000);
     route_maintenance(&rt, 1000 + ROUTE_ACTIVE_TIMEOUT_MS);
@@ -190,6 +227,8 @@ int main(void) {
     RUN_TEST(test_f2_discovered_reclaims_over_poison_breadcrumb);
     RUN_TEST(test_f2_breadcrumb_cannot_displace_discovered);
     RUN_TEST(test_f2_breadcrumb_metric_rule_preserved);
+    RUN_TEST(test_rreq_forged_route_cannot_poison_discovered);
+    RUN_TEST(test_rreq_forged_route_yields_to_later_discovered);
     RUN_TEST(test_f2_capacity_eviction_refuses_breadcrumb_when_all_discovered);
     RUN_TEST(test_f2_capacity_eviction_prefers_breadcrumb_victim);
     RUN_TEST(test_route_maintenance_active_to_stale);

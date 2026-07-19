@@ -3281,6 +3281,17 @@ static void flush_queued_messages(uint32_t dest_addr) {
 }
 
 static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t snr) {
+    /* Mandatory-provisioning gate, matching handle_beacon (and every other RX
+     * control handler): an unprovisioned node has no mesh key, cannot sign an
+     * RREP, and has no business flooding or installing routes. Drop before any
+     * effect. Note this is a participation gate, not RREQ authentication: the
+     * RREQ itself carries no HMAC (there is no rreq_verify), so a route learned
+     * from it is only ever an unauthenticated hint (see the ROUTE_SRC_BREADCRUMB
+     * installs below and issue #74). */
+    if (!network_key_is_provisioned()) {
+        return;
+    }
+
     bramble_rreq_t rreq;
     if (bramble_rreq_deserialize(&rreq, data, len) != ESP_OK) {
         ESP_LOGW(TAG, "Invalid RREQ packet");
@@ -3333,10 +3344,22 @@ static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         send_rrep(&rrep);
 
         /* Install route to the source via prev_hop. The link penalty
-         * subtracts from the higher-is-better path metric. */
+         * subtracts from the higher-is-better path metric.
+         *
+         * Trust class is ROUTE_SRC_BREADCRUMB, NOT ROUTE_SRC_DISCOVERED
+         * (issue #74). prev_hop, hop_count and metric all come from an
+         * unauthenticated RREQ (there is no rreq_verify; RREQ has no HMAC
+         * field on the wire), so a keyless attacker can forge them. Classing
+         * this as DISCOVERED, the most-trusted route class, handed that
+         * attacker the strongest route-poisoning primitive in the stack: the
+         * route_install trust rules refuse to let anything displace or evict
+         * a DISCOVERED entry. As a BREADCRUMB it is exactly what it is: an
+         * unauthenticated next-hop hint that a real HMAC-gated DISCOVERED
+         * route (learned via the signed RREP this RREQ triggers) always
+         * reclaims. No wire change: source is internal routing-table state. */
         uint8_t metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, metric, ROUTE_ACTIVE,
-                      ROUTE_SRC_DISCOVERED, now_ms());
+                      ROUTE_SRC_BREADCRUMB, now_ms());
         return;
     }
 
@@ -3388,10 +3411,13 @@ static void handle_rreq(const uint8_t* data, uint8_t len, int16_t rssi, int8_t s
         /* Same as the "RREQ is for us" branch: install a route to the
          * RREQ's ultimate source via prev_hop, since this node is now
          * answering on D's behalf and should be just as reachable from the
-         * source as the real destination would have been. */
+         * source as the real destination would have been. Same trust-class
+         * reasoning too: ROUTE_SRC_BREADCRUMB, not DISCOVERED, because the
+         * prev_hop/hop_count/metric come from an unauthenticated RREQ (issue
+         * #74). */
         uint8_t src_metric = metric_apply_link_penalty(rreq.metric, (int8_t)rssi, snr);
         route_install(&s_routes, rreq.prev_hop, rreq.prev_hop, rreq.hop_count, src_metric,
-                      ROUTE_ACTIVE, ROUTE_SRC_DISCOVERED, now_ms());
+                      ROUTE_ACTIVE, ROUTE_SRC_BREADCRUMB, now_ms());
         return;
     }
 

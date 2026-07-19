@@ -276,6 +276,19 @@ void bridge_set_intermediate_rrep_enabled(bool enabled);
 bool bridge_get_intermediate_rrep_enabled(void);
 
 /*
+ * Issue #74 attack-repro toggle: the trust class _handle_rreq uses for the
+ * route it installs back toward an RREQ source. -1 (default) skips the install
+ * entirely, so scenarios that never set it are unchanged; 0 installs as
+ * ROUTE_SRC_DISCOVERED (the pre-fix vulnerable behavior an attacker exploited
+ * to poison the table with an unbeatable route); 1 installs as
+ * ROUTE_SRC_BREADCRUMB (the shipped fix). Exists only so a gosim test can A/B
+ * the poisoning through the real route_install arbitration; firmware has no
+ * such switch (it always installs as ROUTE_SRC_BREADCRUMB now).
+ */
+void bridge_set_rreq_src_route_trust(int trust);
+int bridge_get_rreq_src_route_trust(void);
+
+/*
  * Flooding F1 Task 1: the unicast flood transport toggle (firmware's
  * s_flood_transport, main/mesh_task.c). Default false (reactive unchanged,
  * matching firmware's NVS default). When true, bridge.c's DATA handling
