@@ -37,6 +37,13 @@ static volatile bool s_needs_reinit = false;
 bool sx1262_needs_reinit(void) { return s_needs_reinit; }
 void sx1262_clear_reinit(void) { s_needs_reinit = false; }
 
+/* Raise the reinit flag without a hard reset. Used by the CAD-timeout policy
+ * (issue #118): after enough consecutive CAD timeouts the radio is treated as
+ * wedged, and the next radio_check_and_clear_reinit() reconfigures it. If the
+ * chip is genuinely stuck, that reconfigure's own BUSY-timeout path escalates
+ * to a hard reset via BUSY_STUCK_THRESHOLD, so this stays a soft request. */
+void sx1262_request_reinit(void) { s_needs_reinit = true; }
+
 /* ------------------------------------------------------------------ */
 /*  Helper: NSS control                                                */
 /* ------------------------------------------------------------------ */

@@ -61,6 +61,10 @@ void setUp(void) {
     s_rx_cb = NULL;
     s_tx_done_cb = NULL;
     s_cad_done_cb = NULL;
+    /* Reset the CAD-timeout policy statics so the consecutive-timeout counter
+     * and reinit flag do not leak across tests (issue #118). */
+    s_cad_timeout_policy.consecutive_timeouts = 0;
+    atomic_store(&s_needs_reinit, false);
 }
 
 void tearDown(void) {
@@ -354,6 +358,65 @@ void test_cad_check_timeout_reports_clear(void) {
     TEST_ASSERT_EQUAL_INT(RADIO_STATE_RX, radio_get_state());
 }
 
+/* A fast config so each forced CAD timeout floors at BRAMBLE_CAD_TIMEOUT_MIN_MS
+ * (50 ms) instead of a long-range SF12 budget. */
+static radio_config_t fast_cad_cfg(void) {
+    radio_config_t cfg = default_cfg();
+    cfg.sf = 7;
+    cfg.bw_hz = 500000;
+    return cfg;
+}
+
+/* Run one radio_cad_check with no broker answer, draining the cad line so the
+ * socketpair buffer never backs up. */
+static bool cad_check_unanswered(void) {
+    bool busy = radio_cad_check();
+    char sink[512];
+    read_line_timeout(s_broker_fd, sink, sizeof(sink), 500); /* the cad line */
+    return busy;
+}
+
+/* Fail-open/closed policy (issue #118): the first
+ * BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD-1 consecutive timeouts fail open and
+ * request no reinit. */
+void test_cad_timeout_fails_open_before_threshold(void) {
+    radio_config_t cfg = fast_cad_cfg();
+    attach_and_init("pager-cad-open", &cfg);
+    for (unsigned i = 0; i < BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD - 1; i++) {
+        TEST_ASSERT_FALSE(cad_check_unanswered()); /* fail open: channel "clear" */
+    }
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit()); /* no reinit requested yet */
+}
+
+/* On the threshold-th consecutive timeout the policy fails closed (reports
+ * busy) and flags the radio for reinit. */
+void test_cad_timeout_fails_closed_and_requests_reinit_at_threshold(void) {
+    radio_config_t cfg = fast_cad_cfg();
+    attach_and_init("pager-cad-closed", &cfg);
+    for (unsigned i = 0; i < BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD - 1; i++) {
+        TEST_ASSERT_FALSE(cad_check_unanswered());
+    }
+    TEST_ASSERT_TRUE(cad_check_unanswered()); /* fail closed: report busy */
+    /* The reinit flag is raised once, then cleared by the check. */
+    TEST_ASSERT_TRUE(radio_check_and_clear_reinit());
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit());
+}
+
+/* A CAD that actually completes resets the streak, so a later lone timeout
+ * fails open again rather than counting toward a stale run. */
+void test_cad_success_resets_timeout_streak(void) {
+    radio_config_t cfg = fast_cad_cfg();
+    attach_and_init("pager-cad-reset", &cfg);
+    for (unsigned i = 0; i < BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD - 1; i++) {
+        TEST_ASSERT_FALSE(cad_check_unanswered());
+    }
+    /* An answered CAD clears the run. */
+    TEST_ASSERT_FALSE(run_cad_check(false));
+    /* The next timeout is therefore a fresh first timeout: fail open, no reinit. */
+    TEST_ASSERT_FALSE(cad_check_unanswered());
+    TEST_ASSERT_FALSE(radio_check_and_clear_reinit());
+}
+
 /* ---------------------------------------------------------------------- */
 /*  State machine: init/start_rx/sleep transitions                         */
 /* ---------------------------------------------------------------------- */
@@ -421,6 +484,9 @@ int main(void) {
     RUN_TEST(test_cad_check_reports_busy_channel);
     RUN_TEST(test_cad_check_reports_clear_channel);
     RUN_TEST(test_cad_check_timeout_reports_clear);
+    RUN_TEST(test_cad_timeout_fails_open_before_threshold);
+    RUN_TEST(test_cad_timeout_fails_closed_and_requests_reinit_at_threshold);
+    RUN_TEST(test_cad_success_resets_timeout_streak);
     RUN_TEST(test_init_ends_in_rx);
     RUN_TEST(test_sleep_then_start_rx);
     RUN_TEST(test_get_config_round_trips);

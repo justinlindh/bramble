@@ -46,6 +46,9 @@ static _Atomic(TaskHandle_t) s_tx_waiter;
 static volatile bool s_cad_result;
 static SemaphoreHandle_t s_cad_sem;
 
+/* Consecutive CAD-timeout run state for the fail-open/closed policy (#118). */
+static cad_timeout_policy_t s_cad_timeout_policy;
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -511,11 +514,29 @@ bool radio_cad_check(void) {
     radio_start_rx();
 
     if (!got_result) {
-        ESP_LOGW(TAG, "CAD check timed out after %u ms (sf=%u bw=%u)", (unsigned)timeout_ms,
-                 (unsigned)s_config.sf, (unsigned)s_config.bw_hz);
+        cad_timeout_action_t action = cad_timeout_policy_on_timeout(&s_cad_timeout_policy);
+        if (action == CAD_TIMEOUT_FAIL_CLOSED) {
+            /* The radio has missed the CAD budget BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD
+             * times running: treat it as wedged. Report busy so tx_gate backs
+             * off instead of transmitting blind without LBT, and flag a reinit
+             * for the next radio_check_and_clear_reinit() to act on. */
+            ESP_LOGE(TAG,
+                     "CAD check timed out after %u ms (sf=%u bw=%u): %u consecutive, failing "
+                     "closed and requesting radio reinit",
+                     (unsigned)timeout_ms, (unsigned)s_config.sf, (unsigned)s_config.bw_hz,
+                     (unsigned)BRAMBLE_CAD_TIMEOUT_REINIT_THRESHOLD);
+            sx1262_request_reinit();
+            return true;
+        }
+        /* Fail open: transmit anyway, as before. A one-off timeout is more
+         * likely a transient missed IRQ than a dead radio. */
+        ESP_LOGW(TAG, "CAD check timed out after %u ms (sf=%u bw=%u), failing open",
+                 (unsigned)timeout_ms, (unsigned)s_config.sf, (unsigned)s_config.bw_hz);
         return false;
     }
 
+    /* A completed CAD (busy or clear) means the radio answered; reset the run. */
+    cad_timeout_policy_on_success(&s_cad_timeout_policy);
     return s_cad_result;
 }
 

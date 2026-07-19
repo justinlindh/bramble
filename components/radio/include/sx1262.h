@@ -85,6 +85,7 @@ int sx1262_reset(void);
 void sx1262_hard_reset(void);
 bool sx1262_needs_reinit(void);
 void sx1262_clear_reinit(void);
+void sx1262_request_reinit(void);
 int sx1262_wait_busy(uint32_t timeout_ms);
 
 /* Low-level SPI */
