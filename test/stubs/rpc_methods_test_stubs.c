@@ -18,45 +18,27 @@ typedef struct {
     const char* short_name;
 } bramble_board_config_t;
 
-typedef struct {
-    uint32_t addr;
-    int8_t rssi;
-    int8_t snr;
-    uint8_t delivery_rate;
-    uint32_t airtime_remaining;
-    uint32_t last_heard;
-    char name[33];
-} neighbor_entry_t;
+/* neighbor_table_t / routing_table_t come from the real routing.h, and
+ * mesh_shared_state_t is laid out exactly as mesh_task.h declares it, rather
+ * than being mirrored with a smaller shape. The mirrored versions used to be
+ * smaller than the real structs, so mesh_get_state()'s memset(o, 0, sizeof(*o))
+ * cleared only the front of the caller's snapshot and left the tail
+ * indeterminate. Sharing the real layout also lets the stub hand back a
+ * populated neighbor table, which the scratch-isolation suite needs. */
+#include "routing.h"
+#include "airtime_budget.h"
 
 typedef struct {
-    int count;
-    neighbor_entry_t entries[16];
-} neighbor_table_t;
-
-typedef struct {
-    bool radio_ok;
     neighbor_table_t neighbors;
     uint32_t beacon_tx_count;
     uint32_t beacon_rx_count;
     uint32_t packets_tx;
     uint32_t packets_rx;
+    bool radio_ok;
+    int16_t last_rx_rssi;
+    int8_t last_rx_snr;
+    airtime_budget_t airtime;
 } mesh_shared_state_t;
-
-typedef struct {
-    uint32_t dest_addr;
-    uint32_t next_hop;
-    uint8_t hop_count;
-    uint16_t metric;
-    uint8_t state;
-    uint32_t use_count;
-} route_entry_t;
-
-#define ROUTE_BROKEN 4
-
-typedef struct {
-    int count;
-    route_entry_t entries[16];
-} routing_table_t;
 
 typedef enum {
     BEACON_POLICY_ALWAYS = 0,
@@ -203,7 +185,27 @@ int mesh_get_channel_security(int i, bool* h, uint16_t* e) {
     return 0;
 }
 
-void mesh_get_state(mesh_shared_state_t* o) { memset(o, 0, sizeof(*o)); }
+/* Scratch-isolation support (see test_rpc_scratch_isolation.c).
+ *
+ * g_stub_mesh_state_fill lets a test decide what mesh_get_state() writes into
+ * the caller's snapshot, and g_stub_mesh_state_after_fill is invoked once the
+ * snapshot is populated but before the handler reads it. A concurrency test
+ * parks one thread in that hook while a second thread runs a full
+ * mesh_get_state(), which is exactly the interleaving that a shared scratch
+ * buffer loses and a per-call buffer survives. Both default to NULL, so every
+ * other suite keeps the plain zeroed snapshot. */
+void (*g_stub_mesh_state_fill)(mesh_shared_state_t* out) = NULL;
+void (*g_stub_mesh_state_after_fill)(void) = NULL;
+
+void mesh_get_state(mesh_shared_state_t* o) {
+    memset(o, 0, sizeof(*o));
+    if (g_stub_mesh_state_fill) {
+        g_stub_mesh_state_fill(o);
+    }
+    if (g_stub_mesh_state_after_fill) {
+        g_stub_mesh_state_after_fill();
+    }
+}
 void mesh_get_routes(routing_table_t* o) { memset(o, 0, sizeof(*o)); }
 bool mesh_get_peer_verification(uint32_t addr, char sas_out[8], bool* verified, bool* key_changed) {
     (void)addr;
@@ -299,9 +301,23 @@ broadcast_telemetry_mode_t mesh_get_broadcast_telemetry_mode(void) {
 }
 bool mesh_supports_delivery_event_sync(void) { return false; }
 
-uint32_t airtime_budget_remaining(void) { return 0; }
-void airtime_budget_refill(uint32_t n) { (void)n; }
-uint32_t airtime_budget_next_refill_ms(void) { return 0; }
+/* Signatures follow airtime_budget.h. They previously took no arguments while
+ * rpc_methods.c called them with two, which only linked because the mismatch
+ * was never visible in one translation unit. */
+uint32_t airtime_budget_remaining(const airtime_budget_t* ab, uint8_t tier) {
+    (void)ab;
+    (void)tier;
+    return 0;
+}
+void airtime_budget_refill(airtime_budget_t* ab, uint32_t now_ms) {
+    (void)ab;
+    (void)now_ms;
+}
+uint32_t airtime_budget_next_refill_ms(const airtime_budget_t* ab, uint32_t now_ms) {
+    (void)ab;
+    (void)now_ms;
+    return 0;
+}
 int battery_read_mv(void) { return 3700; }
 int battery_read_pct(void) { return 85; }
 /* Return a zeroed-out block large enough for the real bramble_board_config_t.
