@@ -239,13 +239,12 @@ void test_generate_identity_overwrites_every_field_on_success(void) {
 
     bramble_identity_t poison;
     memset(&poison, 0xA5, sizeof(poison));
-    TEST_ASSERT_NOT_EQUAL(
-        0, memcmp(id.private_key, poison.private_key, sizeof(id.private_key)));
+    TEST_ASSERT_NOT_EQUAL(0, memcmp(id.private_key, poison.private_key, sizeof(id.private_key)));
     TEST_ASSERT_NOT_EQUAL(0, memcmp(id.public_key, poison.public_key, sizeof(id.public_key)));
     TEST_ASSERT_NOT_EQUAL(0, memcmp(id.ed25519_private_key, poison.ed25519_private_key,
                                     sizeof(id.ed25519_private_key)));
-    TEST_ASSERT_NOT_EQUAL(0, memcmp(id.ed25519_public_key, poison.ed25519_public_key,
-                                    sizeof(id.ed25519_public_key)));
+    TEST_ASSERT_NOT_EQUAL(
+        0, memcmp(id.ed25519_public_key, poison.ed25519_public_key, sizeof(id.ed25519_public_key)));
 }
 
 int main(void) {
