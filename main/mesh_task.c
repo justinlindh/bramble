@@ -5517,7 +5517,7 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
     memset(ikm, 0, sizeof(ikm));
 
     if (!sess) {
-        ESP_LOGW(TAG, "Handshaking cap reached, cannot establish session with %08" PRIX32,
+        ESP_LOGW(TAG, "No DM session slot available to establish session with %08" PRIX32,
                  src_addr);
         return;
     }
@@ -5605,7 +5605,7 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
     pending_eph_clear(src_addr);
 
     if (!sess) {
-        ESP_LOGW(TAG, "Handshaking cap reached, cannot complete RESP session with %08" PRIX32,
+        ESP_LOGW(TAG, "No DM session slot available to complete RESP session with %08" PRIX32,
                  src_addr);
         return;
     }
