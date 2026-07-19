@@ -357,3 +357,5 @@ ARC scale set (runner label from the `RUNNER_LABEL` repo variable).
 by workflow edits. The publish-oriented workflows still carry Gitea API coupling
 and are gated to `workflow_dispatch` until a Phase 2 pass rewrites them for
 GitHub natively; each carries a `PHASE-2 PORT PENDING` header.
+
+<!-- board-matrix expansion probe, temporary -->
