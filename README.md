@@ -13,7 +13,7 @@
   <a href="https://github.com/justinlindh/bramble/actions/workflows/firmware-quality.yml"><img alt="Firmware Quality" src="https://github.com/justinlindh/bramble/actions/workflows/firmware-quality.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/justinlindh/bramble/actions/workflows/webapp-quality.yml"><img alt="Webapp Quality" src="https://github.com/justinlindh/bramble/actions/workflows/webapp-quality.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-  <img alt="Status: pre-alpha" src="https://img.shields.io/badge/status-pre--alpha-orange.svg">
+  <img alt="Hardware: verified" src="https://img.shields.io/badge/hardware-verified-brightgreen.svg">
 </p>
 
 Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-range, infrastructure-free communication. It is designed for resilient field use while reducing metadata exposure; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) documents exactly what is and is not protected.
@@ -43,7 +43,7 @@ The firmware currently runs on real hardware (including T-Deck Plus and Heltec V
 
 ## What Makes Bramble Different
 
-Compared to Meshtastic and MeshCore-style systems, Bramble leans on privacy and on authenticated, confirmable delivery at the protocol level. It is pre-alpha and has not been field-tested at scale; the claims below are what the code on `main` does, with the honest limits stated alongside.
+Compared to Meshtastic and MeshCore-style systems, Bramble leans on privacy and on authenticated, confirmable delivery at the protocol level. It is an early project: functional and hardware-verified on a small bench mesh, but not yet field-tested at scale. The claims below are what the code on `main` does, with the honest limits stated alongside.
 
 - **Dual-substrate routing.** Two forwarding substrates ship, and a runtime toggle (`s_flood_transport`, default off) selects between them. **Reactive AODV is the default:** RREQ/RREP discovery, a cached route table, reverse-route breadcrumbs learned from DATA, intermediate-node RREP, and route-forwarded ACKs. DM airtime is `O(path_length)`, not `O(N)`. **Flooding is the opt-in alternative:** hop-limited (configurable, default 8, range 1..32), deduplicated, airtime-budget-gated unicast/channel floods with a flooded ACK for route-free sender confirmation. Reactive is not going away; the toggle picks one.
 - **Authenticated traffic (wire v4), no insecure bootstrap.** DATA frames and the control plane (RREP, RERR, ACK, delivery receipt, beacon) carry a network-key HMAC that relays verify before acting; a captured frame cannot be forged or replayed by an outsider on a provisioned network. There is no public default key: an unprovisioned node is inert (fail-closed) and refuses to emit or accept any authenticated frame until a real per-fleet key is provisioned (minted on-device or pasted in). Residual: any network-key holder is an insider and can still forge these MACs, narrowed by per-node identity rather than by provisioning ([docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md)).
@@ -163,7 +163,7 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 ## Status
 
-Bramble is **pre-alpha**, but active and running on real hardware today (including T-Deck Plus, Heltec V3, and Heltec V4). The protocol stack is implemented end-to-end, and every change must pass the full host test suite as a required CI gate (`test/run_all_tests.sh`, which fails if any suite fails or none are found). Development is ongoing.
+Bramble is an early but fully functional project: the protocol stack is implemented end to end, reviewed and host-tested, and running stable on real hardware today (T-Deck Plus, Heltec V3, and Heltec V4). Every change must pass the full host test suite as a required CI gate (`test/run_all_tests.sh`, which fails if any suite fails or none are found). It has not yet been field-tested at scale, and development is ongoing.
 
 ## License
 
