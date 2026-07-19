@@ -20,6 +20,26 @@ let pendingPicker: ((deviceId: string) => void) | null = null;
 // picker modal. Cleared on use or when the renderer disarms it.
 let autoSelectExpected: { id?: string; name?: string } | null = null;
 
+// The single allowlist behind both the permission check handler and the
+// permission request handler. Everything the renderer legitimately asks for is
+// here, and anything absent is denied: geolocation, notifications, MIDI,
+// pointer lock, idle detection, and the rest.
+//
+// 'media' is on the list because it is load-bearing, not incidental: the
+// camera QR scanner (src/components/QRScanModal.tsx, used by the network-key
+// and channel import flows) calls navigator.mediaDevices.getUserMedia. Dropping
+// it from the request handler would break scanning on desktop, since the
+// getUserMedia grant runs through the request path, not the check path.
+//
+// 'clipboard-sanitized-write' covers navigator.clipboard.writeText, used to
+// copy addresses, network keys, and anchor backups.
+const ALLOWED_PERMISSIONS = new Set([
+  'serial',
+  'bluetooth',
+  'media',
+  'clipboard-sanitized-write',
+]);
+
 function sendPickerUpdate(kind: 'serial' | 'bluetooth', devices: PickerDevice[]): void {
   mainWindow?.webContents.send(DEVICE_PICKER_CHANNELS.update, { kind, devices });
 }
@@ -46,11 +66,20 @@ function createWindow(): void {
     },
   });
 
-  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
-    // Electron's PermissionCheckHandler union omits 'bluetooth' even though the
-    // runtime accepts it; cast to string so both branches typecheck uniformly.
-    const p = permission as string;
-    return p === 'serial' || p === 'bluetooth';
+  // Electron's PermissionCheckHandler union omits 'bluetooth' even though the
+  // runtime accepts it; cast to string so the lookup typechecks uniformly.
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
+    ALLOWED_PERMISSIONS.has(permission as string)
+  );
+
+  // The check handler only answers navigator.permissions.query() and similar
+  // synchronous probes. Without a request handler, the actual grant path falls
+  // through to Electron's default, which approves whatever it is asked: a
+  // measured Notification.requestPermission() returned 'granted' and
+  // getCurrentPosition() reached the geolocation provider rather than being
+  // refused. Both handlers now answer from the same allowlist.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission as string));
   });
 
   // No auto-picking: both handlers forward the candidates to an in-app
