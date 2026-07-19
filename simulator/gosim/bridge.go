@@ -195,8 +195,11 @@ func anomalyInit(t *C.node_anomaly_tracker_t) {
 	C.anomaly_init(t)
 }
 
-func anomalyCheckPartition(nodes *C.node_array_t, radioRange float32) {
-	C.anomaly_check_partition(nodes, C.float(radioRange), C.uint64_t(0), C.stdout)
+// anomalyCheckPartition runs the reachability sweep at virtual time nowUs.
+// Issue #144: this used to hardcode 0, so mesh_partition was the only
+// anomaly type whose emitted timestamp_us was not the detection time.
+func anomalyCheckPartition(nodes *C.node_array_t, radioRange float32, nowUs uint64) {
+	C.anomaly_check_partition(nodes, C.float(radioRange), C.uint64_t(nowUs), C.stdout)
 }
 
 // --- RNG ---

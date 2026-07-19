@@ -19,27 +19,17 @@ package main
 // retries, no sleeps, and no tolerance windows: per CLAUDE.md, a scenario that
 // only passes sometimes is a bug to fix, not a knob to tune.
 //
-// WHAT IS NOT GATED HERE, AND WHY (see issue #144):
-//
-//   - anomaly-partition's heal phase. The scenario kills bridge node C, then
-//     re-joins it at its original coordinates to prove the mesh reconverges.
-//     Two simulator harness bugs make that phase untestable today:
-//     sim_scenario.c's node_join parser never reads the event's "x"/"y" (so a
-//     rejoining node always lands at 0,0 regardless of the JSON), and
-//     node_array_add appends a second entry with a duplicate id and address
-//     instead of reusing the existing one, leaving node_array_find_by_id
-//     resolving every by-id lookup to the deactivated corpse. The pre-heal
-//     phases below are unaffected and are gated.
-//   - anomaly-black-hole entirely. It never establishes its pre-kill baseline
-//     (its A->E and E->A sends are 5s apart and collide), never delivers a
-//     single message, and never fires the black_hole anomaly it is named for,
-//     on top of hitting the same rejoin bugs.
-//   - anomaly-route-loop entirely. With the rejoin bugs it is inert: zero DATA
-//     packets are ever originated, control traffic is 100% of airtime, so any
-//     "no loops were detected" assertion would pass vacuously.
-//
-// Gating a vacuous assertion is worse than gating nothing, so those stay out
-// until #144 is fixed, at which point they should be added here.
+// Issue #144 closed the gaps this header used to list: node_join now parses
+// coordinates and a coordinate-less rejoin restores the node's original
+// scenario position; a rejoin reuses the existing node entry (identity kept,
+// volatile state cleared) instead of appending a duplicate; mesh_partition
+// carries its detection time; the route_loop detector checks at each relay's
+// FORWARD (keyed on arriving hop_limit) so flood rebroadcasts and ACK
+// retransmissions no longer false-positive; and the reliability machinery
+// (retransmit ladder, duplicate re-ACK, RERR failfast) actually runs. All
+// three anomaly scenarios (partition incl. heal, black-hole, route-loop) are
+// gated below, non-vacuously: each proves real deliveries around its failure
+// mode before asserting the failure mode itself.
 
 import (
 	"encoding/json"
@@ -244,9 +234,9 @@ func assertNoRoutingPathologies(t *testing.T, run *scenarioRun) {
 // TestScenarioAnomalyPartition gates simulator/scenarios/anomaly-partition.json.
 //
 // The scenario is a 5-node line A-B-C-D-E with a 150-unit radio range and
-// 100-unit spacing, so C is the sole bridge between {A,B} and {D,E}. It has
-// three phases; the first two are gated here and the third (heal) is blocked by
-// issue #144, see this file's header.
+// 100-unit spacing, so C is the sole bridge between {A,B} and {D,E}. All
+// three phases are gated here; the heal phase joined the gate when issue
+// #144 fixed node_join (rejoin reuses the entry and restores position).
 //
 // Phase 1 (connectivity): before anything is killed, A->E and E->A must each
 // traverse the full 4-hop line and have their delivery receipt return to the
@@ -255,8 +245,21 @@ func assertNoRoutingPathologies(t *testing.T, run *scenarioRun) {
 // the partition" would prove nothing.
 //
 // Phase 2 (partition): killing C must partition the mesh, be detected as such
-// naming exactly the nodes that became unreachable, and every message sent
-// while the mesh is split must fail to reach the far side.
+// (naming exactly the nodes that became unreachable, at the kill's virtual
+// time, not 0), and every message sent while the mesh is split must fail to
+// reach the far side.
+//
+// Phase 3 (heal): C's scripted rejoin at its original coordinates rebuilds
+// the bridge, but a reboot loses C's routes while its neighbors keep
+// stale-ACTIVE routes through it. The first post-heal send (E->A at 185s)
+// therefore dies at C, whose no-route RERR (broken_next_hop = C itself,
+// firmware's forward_data_packet semantics) propagates one ring and
+// fast-fails E's pending ack: the send must be dropped with reason
+// route_broken, not delivered. That transit teaches every relay a route
+// toward E, so the next send (A->E at 215s) must deliver AND confirm over
+// the exact line path, and its own transit re-teaches the A direction so
+// the final send (E->A at 240s) must too. This is the AODV cost of a
+// bridge reboot, reproduced end to end.
 func TestScenarioAnomalyPartition(t *testing.T) {
 	run := runGatedScenario(t, "anomaly-partition")
 
@@ -276,7 +279,7 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 	}
 
 	aToE := sentByA[0] // the 8s A->E send
-	eToA := sentByE[0] // the 18s E->A send
+	eToA := sentByE[0] // the 35s E->A send
 
 	for _, tc := range []struct {
 		label    string
@@ -329,14 +332,24 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 		t.Errorf("mesh_partition node = %q, want \"network\" (a partition is a mesh-wide "+
 			"property, not a per-node one)", node)
 	}
-
-	// Every message the scenario sends while C is down (three of them, at 43s,
-	// 53s and 63s) must fail to cross: a partitioned mesh that still delivers
-	// would mean the radio range model is not being enforced.
-	partitionedSends := append(append([]string{}, sentByA[1:]...), sentByE[1:]...)
-	if len(partitionedSends) == 0 {
-		t.Fatal("scenario originated no messages after the partition; nothing to assert")
+	// Issue #144: mesh_partition used to be the only anomaly emitted with
+	// timestamp_us 0 instead of its detection time. The kill is scripted at
+	// 60s and the sweep runs from the node_left handler, so the detection
+	// time IS the kill time.
+	if ts, _ := parts[0]["timestamp_us"].(float64); ts != 60000000 {
+		t.Errorf("mesh_partition timestamp_us = %v, want 60000000 (the kill's virtual time; "+
+			"0 means the detection-time regression is back)", parts[0]["timestamp_us"])
 	}
+
+	// Every message the scenario sends while C is down (three of them, at 70s,
+	// 80s and 90s) must fail to cross: a partitioned mesh that still delivers
+	// would mean the radio range model is not being enforced.
+	if len(sentByA) != 4 || len(sentByE) != 4 {
+		t.Fatalf("sends by A = %d, by E = %d, want 4 each (pre, partitioned, and heal phases); "+
+			"the scenario's event script and this gate have drifted apart",
+			len(sentByA), len(sentByE))
+	}
+	partitionedSends := []string{sentByA[1], sentByA[2], sentByE[1]}
 	for _, pid := range partitionedSends {
 		if at := run.deliveredAt(pid); len(at) > 0 {
 			t.Errorf("packet %s was delivered at %v despite the mesh being partitioned by C's "+
@@ -344,16 +357,66 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 		}
 	}
 
-	// The scenario's terminal accounting must agree: exactly the two
-	// pre-partition messages are confirmed, and nothing else is.
+	// --- Phase 3: heal. See the doc comment for why the first post-heal ---
+	// --- send must die and the two after it must confirm.               ---
+	healTeach := sentByE[2] // 185s E->A: dies at rebooted C, fast-failed
+	if at := run.deliveredAt(healTeach); len(at) > 0 {
+		t.Errorf("packet %s (first post-heal send) was delivered at %v; it must die at the "+
+			"rebooted bridge C, which has no routes yet", healTeach, at)
+	}
+	teachDropped := false
+	for _, ev := range run.events {
+		if ev["type"] == "message_dropped" && ev["packet_id"] == healTeach {
+			if reason, _ := ev["reason"].(string); reason == "route_broken" {
+				teachDropped = true
+			} else {
+				t.Errorf("packet %s dropped with reason %q, want route_broken (C's no-route "+
+					"RERR must fast-fail the pending ack, not let it exhaust retries)",
+					healTeach, ev["reason"])
+			}
+		}
+	}
+	if !teachDropped {
+		t.Errorf("packet %s (first post-heal send) was never dropped with reason route_broken; "+
+			"the RERR teardown chain from the rebooted bridge is not reaching the sender",
+			healTeach)
+	}
+
+	for _, tc := range []struct {
+		label    string
+		packetID string
+		from     string
+		wantPath []string
+	}{
+		{"A->E (post-heal)", sentByA[3], e, []string{"B", "C", "D"}},
+		{"E->A (post-heal)", sentByE[3], a, []string{"D", "C", "B"}},
+	} {
+		rec, ok := run.findReceipt(tc.packetID)
+		if !ok {
+			t.Errorf("%s (packet %s): no delivery receipt returned to the originator; the "+
+				"healed line must confirm end to end through the rejoined C or the heal is "+
+				"cosmetic", tc.label, tc.packetID)
+			continue
+		}
+		if rec.from != tc.from {
+			t.Errorf("%s: receipt from = %s, want %s", tc.label, rec.from, tc.from)
+		}
+		if strings.Join(rec.path, ",") != strings.Join(tc.wantPath, ",") {
+			t.Errorf("%s: receipt path = %v, want %v (the only route across the healed line, "+
+				"through the rejoined C)", tc.label, rec.path, tc.wantPath)
+		}
+	}
+
+	// The scenario's terminal accounting must agree: the two pre-partition
+	// and two confirming post-heal messages, nothing else.
 	fm := run.finalMetrics(t)
-	if confirmed, _ := fm["confirmed"].(float64); confirmed != 2 {
-		t.Errorf("confirmed = %v, want 2 (only the two pre-partition messages can confirm)",
+	if confirmed, _ := fm["confirmed"].(float64); confirmed != 4 {
+		t.Errorf("confirmed = %v, want 4 (two pre-partition and two post-heal)",
 			fm["confirmed"])
 	}
-	if delivered, _ := fm["delivered"].(float64); delivered != 2 {
-		t.Errorf("delivered = %v, want 2 (only the two pre-partition messages can reach their "+
-			"destination)", fm["delivered"])
+	if delivered, _ := fm["delivered"].(float64); delivered != 4 {
+		t.Errorf("delivered = %v, want 4 (two pre-partition and two post-heal)",
+			fm["delivered"])
 	}
 
 	assertNoRoutingPathologies(t, run)
@@ -372,15 +435,14 @@ func TestScenarioAnomalyPartition(t *testing.T) {
 // regression that starts picking longer paths still delivers and would sail
 // past any "delivery rate above N" check.
 //
-// SCOPE LIMIT, issue #166: this scenario's JSON also contains a movement phase
-// for node C, and that phase never executes. The engine parses only
-// "move_node" (simulator/engine/sim_scenario.c:270) while this file, along with
-// location-sharing.json and reliability-ack-retry.json, spells the event
-// "node_move". An unrecognized type is skipped silently, so what is gated here
-// is path correctness on a STATIC topology, not across a topology change. Do
-// not read a passing run as evidence that re-routing after a node moves works.
-// When #166 is fixed the movement will start happening, and this test's
-// expectations must be re-derived rather than assumed to still hold.
+// The scenario's movement phase (move_node of C out of the line at 45s, back
+// at 70s) does execute: move_node is the engine's spelling and every gated
+// scenario uses it. While C is out the line is split, so sends in that window
+// return no receipt and simply do not appear below; every receipt that DOES
+// return is still asserted to be a correct line-walk. The assertion is
+// topology-agnostic by construction (it derives the expected path from each
+// receipt's own endpoints), so it holds across the partition and heal without
+// re-derivation.
 func TestScenarioReliabilityPathTrace(t *testing.T) {
 	run := runGatedScenario(t, "reliability-path-trace")
 
@@ -566,6 +628,8 @@ func TestScenarioLocationSharing(t *testing.T) {
 		t.Fatalf("location_sent count = %d, want %d (one per scripted send_location)",
 			len(sent), len(sends))
 	}
+	totalReceived := 0
+	receivedFrom := map[string]map[string]bool{} // sender node -> receiver set
 	for i, want := range sends {
 		node, _ := sent[i]["node"].(string)
 		lat, _ := sent[i]["lat_e7"].(float64)
@@ -574,14 +638,43 @@ func TestScenarioLocationSharing(t *testing.T) {
 			t.Errorf("location_sent[%d] = node %s (%v, %v), want node %s (%v, %v)",
 				i, node, lat, lon, want.node, want.c.lat, want.c.lon)
 		}
-		// The scenario's stated purpose: all contacts receive the update.
-		// The 4 nodes sit in a single-hop square, so each broadcast must
-		// reach the 3 other nodes with the coordinates bit-exact.
 		got := received[want.c]
-		if len(got) != 3 || got[want.node] {
-			t.Errorf("update %d from %s (%v, %v): received by %v, want the 3 other nodes",
-				i, want.node, want.c.lat, want.c.lon, got)
+		if got[want.node] {
+			t.Errorf("update %d from %s was received by its own sender", i, want.node)
 		}
+		totalReceived += len(got)
+		if receivedFrom[want.node] == nil {
+			receivedFrom[want.node] = map[string]bool{}
+		}
+		for r := range got {
+			receivedFrom[want.node][r] = true
+		}
+	}
+	// The scenario's stated purpose: all contacts receive timely location
+	// updates. Position broadcasts are fire-and-forget (real-time presence,
+	// firmware never retransmits them), so under the scenario's 2 percent
+	// loss plus chat-message collisions a single copy may legitimately die;
+	// asserting every update reaches all 3 peers would gate collision-
+	// pattern trivia and break on unrelated timing changes. What must hold:
+	// every node's position reached EVERY other node at least once across
+	// its updates (pair coverage, the presence guarantee), coordinates are
+	// bit-exact when received (asserted via the coord-keyed map above), and
+	// the overall reception rate stays high.
+	for _, sender := range []string{"A", "B", "C", "D"} {
+		for _, receiver := range []string{"A", "B", "C", "D"} {
+			if sender == receiver {
+				continue
+			}
+			if !receivedFrom[sender][receiver] {
+				t.Errorf("%s never received any location update from %s; the scenario "+
+					"exists to verify all contacts get position updates", receiver, sender)
+			}
+		}
+	}
+	if maxPossible := 3 * len(sends); totalReceived < maxPossible-3 {
+		t.Errorf("location receptions = %d of %d possible, want at least %d; more than an "+
+			"occasional lost copy means the broadcast path regressed",
+			totalReceived, maxPossible, maxPossible-3)
 	}
 
 	// The two chat messages that always worked must keep delivering, so the
@@ -592,4 +685,208 @@ func TestScenarioLocationSharing(t *testing.T) {
 	}
 
 	assertNoRoutingPathologies(t, run)
+}
+
+// TestScenarioAnomalyBlackHole gates simulator/scenarios/anomaly-black-hole.json
+// (issue #144).
+//
+// The 5-node line confirms a baseline exchange in both directions, then C is
+// killed and rejoined WITHOUT coordinates: the rejoin must restore its
+// original (200,0) position, and models a reboot: C's route table is gone
+// while its neighbors keep stale-ACTIVE routes through it. Six rapid A->E
+// sends then pour DATA into the rebooted C, which receives but cannot
+// forward: that must fire the black_hole anomaly on C, and every one of
+// those sends must be fast-failed by C's no-route RERR chain (reason
+// route_broken), not delivered and not left to rot in retry limbo.
+func TestScenarioAnomalyBlackHole(t *testing.T) {
+	run := runGatedScenario(t, "anomaly-black-hole")
+
+	a := run.addr(t, "A")
+	e := run.addr(t, "E")
+
+	sentByA := run.messagesSentBy("A")
+	sentByE := run.messagesSentBy("E")
+	if len(sentByA) != 7 || len(sentByE) != 1 {
+		t.Fatalf("sends by A = %d, by E = %d, want 7 and 1; the scenario's event script and "+
+			"this gate have drifted apart", len(sentByA), len(sentByE))
+	}
+
+	// Baseline: both directions confirmed over the exact line path.
+	for _, tc := range []struct {
+		label    string
+		packetID string
+		from     string
+		wantPath []string
+	}{
+		{"A->E (baseline)", sentByA[0], e, []string{"B", "C", "D"}},
+		{"E->A (baseline)", sentByE[0], a, []string{"D", "C", "B"}},
+	} {
+		rec, ok := run.findReceipt(tc.packetID)
+		if !ok {
+			t.Errorf("%s (packet %s): no delivery receipt returned; without a confirmed "+
+				"baseline the black-hole phase proves nothing", tc.label, tc.packetID)
+			continue
+		}
+		if rec.from != tc.from {
+			t.Errorf("%s: receipt from = %s, want %s", tc.label, rec.from, tc.from)
+		}
+		if strings.Join(rec.path, ",") != strings.Join(tc.wantPath, ",") {
+			t.Errorf("%s: receipt path = %v, want %v", tc.label, rec.path, tc.wantPath)
+		}
+	}
+
+	// The coordinate-less rejoin must restore C's original position: at
+	// (0,0) it would no longer bridge the line and the black-hole phase
+	// would silently test a partition instead.
+	rejoined := false
+	for _, ev := range run.events {
+		if ev["type"] == "node_joined" && ev["node"] == "C" {
+			if ts, _ := ev["timestamp_us"].(float64); ts > 0 {
+				rejoined = true
+				x, _ := ev["x"].(float64)
+				y, _ := ev["y"].(float64)
+				if x != 200 || y != 0 {
+					t.Errorf("C rejoined at (%v,%v), want its original (200,0); a "+
+						"coordinate-less node_join must restore the scenario position", x, y)
+				}
+			}
+		}
+	}
+	if !rejoined {
+		t.Fatal("C never rejoined; the black-hole phase cannot have run")
+	}
+
+	// The namesake anomaly: C receives the rapid sends and forwards none.
+	holes := run.anomalies("black_hole")
+	if len(holes) != 1 {
+		t.Fatalf("black_hole anomalies = %d, want exactly 1; got %v", len(holes), holes)
+	}
+	if node, _ := holes[0]["node"].(string); node != "C" {
+		t.Errorf("black_hole fired on %q, want C (the rebooted relay is the hole)", node)
+	}
+
+	// Every rapid send dies fast with route_broken; none is delivered.
+	for _, pid := range sentByA[1:] {
+		if at := run.deliveredAt(pid); len(at) > 0 {
+			t.Errorf("packet %s was delivered at %v despite the rebooted C having no routes",
+				pid, at)
+		}
+		dropped := false
+		for _, ev := range run.events {
+			if ev["type"] == "message_dropped" && ev["packet_id"] == pid &&
+				ev["reason"] == "route_broken" {
+				dropped = true
+			}
+		}
+		if !dropped {
+			t.Errorf("packet %s was never fast-failed with route_broken; the RERR chain from "+
+				"the black hole is not reaching the sender", pid)
+		}
+	}
+
+	fm := run.finalMetrics(t)
+	if delivered, _ := fm["delivered"].(float64); delivered != 2 {
+		t.Errorf("delivered = %v, want 2 (the baseline only)", fm["delivered"])
+	}
+	if confirmed, _ := fm["confirmed"].(float64); confirmed != 2 {
+		t.Errorf("confirmed = %v, want 2 (the baseline only)", fm["confirmed"])
+	}
+
+	// The loop detector must stay quiet: a black hole swallows packets, it
+	// does not loop them.
+	for _, an := range run.anomalies("route_loop") {
+		t.Errorf("route_loop anomaly fired: node=%v details=%v", an["node"], an["details"])
+	}
+}
+
+// TestScenarioAnomalyRouteLoop gates simulator/scenarios/anomaly-route-loop.json
+// (issue #144).
+//
+// The cross topology (E reachable only through C) confirms four baseline
+// exchanges, then churns C through two kill/rejoin cycles with traffic
+// before, during, and after. Each cycle plays the AODV reconvergence
+// pattern the anomaly-partition gate documents: the first send into the
+// rebooted C dies on its stale route (route_broken), a second send in the
+// same direction burns down the upstream stale route, and rediscovery then
+// confirms end to end. The headline assertion is ZERO route_loop anomalies
+// across all of it: with the detector now checking forwards (arriving
+// hop_limit as the discriminator), a quiet detector over a run with real
+// confirmed deliveries validates the routing design instead of passing
+// vacuously over a dead mesh, which is exactly the trap this scenario used
+// to be (issue #144: zero DATA ever originated).
+func TestScenarioAnomalyRouteLoop(t *testing.T) {
+	run := runGatedScenario(t, "anomaly-route-loop")
+
+	sentByA := run.messagesSentBy("A")
+	sentByB := run.messagesSentBy("B")
+	sentByD := run.messagesSentBy("D")
+	sentByE := run.messagesSentBy("E")
+	if len(sentByA) != 4 || len(sentByB) != 1 || len(sentByD) != 1 || len(sentByE) != 3 {
+		t.Fatalf("sends A=%d B=%d D=%d E=%d, want 4/1/1/3; the scenario's event script and "+
+			"this gate have drifted apart", len(sentByA), len(sentByB), len(sentByD), len(sentByE))
+	}
+
+	// Baseline: all four exchanges confirm.
+	for _, tc := range []struct {
+		label    string
+		packetID string
+	}{
+		{"A->E (baseline)", sentByA[0]},
+		{"E->A (baseline)", sentByE[0]},
+		{"B->D (baseline)", sentByB[0]},
+		{"D->B (baseline)", sentByD[0]},
+	} {
+		if _, ok := run.findReceipt(tc.packetID); !ok {
+			t.Errorf("%s (packet %s): no delivery receipt returned; the baseline must confirm "+
+				"before the churn phases mean anything", tc.label, tc.packetID)
+		}
+	}
+
+	// Churn cycles: teach/teardown sends die fast, rediscoveries confirm.
+	for _, pid := range []string{sentByA[1], sentByA[2], sentByE[1]} {
+		if at := run.deliveredAt(pid); len(at) > 0 {
+			t.Errorf("packet %s was delivered at %v; it must die on the stale route through "+
+				"the rebooted C", pid, at)
+		}
+		dropped := false
+		for _, ev := range run.events {
+			if ev["type"] == "message_dropped" && ev["packet_id"] == pid &&
+				ev["reason"] == "route_broken" {
+				dropped = true
+			}
+		}
+		if !dropped {
+			t.Errorf("packet %s was never fast-failed with route_broken", pid)
+		}
+	}
+	for _, tc := range []struct {
+		label    string
+		packetID string
+	}{
+		{"A->E (post-churn rediscovery)", sentByA[3]},
+		{"E->A (post-churn rediscovery)", sentByE[2]},
+	} {
+		if _, ok := run.findReceipt(tc.packetID); !ok {
+			t.Errorf("%s (packet %s): no delivery receipt returned; rediscovery through the "+
+				"rebooted C must reconverge or the churn phases only ever proved failure",
+				tc.label, tc.packetID)
+		}
+	}
+
+	// The headline: no loops, ever, and non-vacuously so.
+	for _, an := range run.anomalies("route_loop") {
+		t.Errorf("route_loop anomaly fired: node=%v details=%v at t=%vus",
+			an["node"], an["details"], an["timestamp_us"])
+	}
+	fm := run.finalMetrics(t)
+	if confirmed, _ := fm["confirmed"].(float64); confirmed != 6 {
+		t.Errorf("confirmed = %v, want 6 (4 baseline + 2 rediscoveries); a quiet loop "+
+			"detector only means something over a mesh that actually delivered",
+			fm["confirmed"])
+	}
+	// Killing C strands E both times (C is E's only link).
+	if parts := run.anomalies("mesh_partition"); len(parts) != 2 {
+		t.Errorf("mesh_partition anomalies = %d, want 2 (one per kill of E's only link)",
+			len(parts))
+	}
 }

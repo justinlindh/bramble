@@ -89,8 +89,8 @@ bool anomaly_check_blackhole(blackhole_tracker_t* t, uint64_t now_us, FILE* emit
 
 /* ── Route loop ──────────────────────────────────────────────────────── */
 
-bool anomaly_check_loop(loop_tracker_t* t, uint32_t packet_id, uint64_t now_us, FILE* emit_out,
-                        const char* node_id) {
+bool anomaly_check_forward_loop(loop_tracker_t* t, uint32_t packet_id, uint8_t hop_limit,
+                                uint64_t now_us, FILE* emit_out, const char* node_id) {
     /* Expire old entries */
     for (int i = 0; i < t->count; i++) {
         if (now_us - t->seen[i].first_seen_us > LOOP_TTL_US) {
@@ -100,19 +100,33 @@ bool anomaly_check_loop(loop_tracker_t* t, uint32_t packet_id, uint64_t now_us, 
         }
     }
 
-    /* Check if we have already seen this packet_id at this node */
+    /* Issue #144: the old detector flagged any packet_id a node SAW twice,
+     * which is normal life on a mesh (flood rebroadcast, a sender's ACK
+     * retransmission, a relay re-forwarding that retransmission). Checked
+     * at FORWARD time instead, with the received hop_limit as the
+     * discriminator: a retransmitted frame retraces the same path and
+     * arrives at each relay with the SAME hop_limit as before, while a
+     * packet trapped in a routing loop comes back around with hop_limit
+     * lower by the loop length. Same id, different hop_limit at the same
+     * relay = the packet transited this node twice in one journey. */
     for (int i = 0; i < t->count; i++) {
         if (t->seen[i].packet_id == packet_id) {
-            char details[128];
-            snprintf(details, sizeof(details), "packet 0x%08X visited this node twice", packet_id);
-            emit_anomaly(emit_out, now_us, "route_loop", node_id, 0, details);
-            return true;
+            if (t->seen[i].hop_limit != hop_limit) {
+                char details[128];
+                snprintf(details, sizeof(details),
+                         "packet 0x%08X transited this node twice (hop_limit %u then %u)",
+                         packet_id, t->seen[i].hop_limit, hop_limit);
+                emit_anomaly(emit_out, now_us, "route_loop", node_id, 0, details);
+                return true;
+            }
+            return false; /* same hop_limit: a retransmission along the same path */
         }
     }
 
-    /* Record this packet */
+    /* Record this forward */
     if (t->count < MAX_LOOP_TRACK) {
         t->seen[t->count].packet_id = packet_id;
+        t->seen[t->count].hop_limit = hop_limit;
         t->seen[t->count].first_seen_us = now_us;
         t->count++;
     } else {
@@ -123,6 +137,7 @@ bool anomaly_check_loop(loop_tracker_t* t, uint32_t packet_id, uint64_t now_us, 
                 oldest = i;
         }
         t->seen[oldest].packet_id = packet_id;
+        t->seen[oldest].hop_limit = hop_limit;
         t->seen[oldest].first_seen_us = now_us;
     }
 

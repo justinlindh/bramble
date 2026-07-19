@@ -1,6 +1,6 @@
 {
   "name": "anomaly-partition",
-  "description": "Mesh partition: Two clusters connected only through node C. Killing C splits the mesh. Should trigger mesh_partition anomaly.",
+  "description": "Mesh partition: two clusters connected only through node C. Killing C splits the mesh and must trigger the mesh_partition anomaly; C's scripted rejoin at its original coordinates heals it. Post-heal, E's send re-seeds reverse routes toward E at every relay (including the rebooted C), after which the A to E direction works again; both post-heal exchanges must deliver and confirm. Phases are spaced so each exchange (including its ACK-retransmit ladder) settles before the next begins.",
   "mode": "deterministic",
   "duration_ms": 273000,
   "nodes": [
@@ -43,49 +43,55 @@
       "dest": "E"
     },
     {
-      "at_ms": 18000,
+      "at_ms": 35000,
       "type": "send_message",
       "src": "E",
       "dest": "A"
     },
     {
-      "at_ms": 33000,
+      "at_ms": 60000,
       "type": "kill_node",
       "node": "C"
     },
     {
-      "at_ms": 43000,
+      "at_ms": 70000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 53000,
+      "at_ms": 80000,
       "type": "send_message",
       "src": "E",
       "dest": "A"
     },
     {
-      "at_ms": 63000,
+      "at_ms": 90000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 123000,
+      "at_ms": 150000,
       "type": "node_join",
       "x": 200,
       "y": 0,
       "node": "C"
     },
     {
-      "at_ms": 158000,
+      "at_ms": 185000,
+      "type": "send_message",
+      "src": "E",
+      "dest": "A"
+    },
+    {
+      "at_ms": 215000,
       "type": "send_message",
       "src": "A",
       "dest": "E"
     },
     {
-      "at_ms": 168000,
+      "at_ms": 240000,
       "type": "send_message",
       "src": "E",
       "dest": "A"

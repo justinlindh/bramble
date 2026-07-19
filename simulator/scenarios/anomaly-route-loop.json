@@ -1,6 +1,6 @@
 {
   "name": "anomaly-route-loop",
-  "description": "Route loop detection test. Bramble's RREP routing prevents loops under normal conditions \u2014 this scenario uses rapid topology changes to attempt creating stale cross-routes. Loops in practice require packet corruption, race conditions, or implementation bugs. The detector serves as a safety net measuring how often hop_limit saves us. NOTE: This scenario may show 0 loops \u2014 that validates the routing design. The detector itself is verified via unit test.",
+  "description": "Route loop detection test. Bramble's RREP routing prevents loops under normal conditions; this scenario uses kill/rejoin churn of the central relay C to attempt creating stale cross-routes while real traffic flows before, between, and after the cycles. Loops in practice require packet corruption, race conditions, or implementation bugs, so zero route_loop anomalies over a run that really delivers is the expected result and validates the routing design; the detector (checked at each relay's forward, keyed on arriving hop_limit) is the safety net this scenario keeps honest. Radio runs SF7/250kHz so frame airtime is far below the RREQ forward-jitter window: B and D are mutually hidden same-hop relays, and at slower rates their jittered rebroadcasts always overlap at the funnel C, jamming every discovery (the #173 failure mode) before any loop question can even be asked.",
   "mode": "deterministic",
   "duration_ms": 273000,
   "nodes": [
@@ -33,7 +33,9 @@
   "radio": {
     "range": 150,
     "loss_pct": 0,
-    "propagation_speed_ms_per_unit": 0.1
+    "propagation_speed_ms_per_unit": 0.1,
+    "sf": 7,
+    "bw_hz": 250000
   },
   "events": [
     {
@@ -43,158 +45,72 @@
       "dest": "E"
     },
     {
-      "at_ms": 13000,
-      "type": "send_message",
-      "src": "E",
-      "dest": "A"
-    },
-    {
-      "at_ms": 18000,
-      "type": "send_message",
-      "src": "B",
-      "dest": "D"
-    },
-    {
-      "at_ms": 23000,
-      "type": "send_message",
-      "src": "D",
-      "dest": "B"
-    },
-    {
       "at_ms": 33000,
-      "type": "kill_node",
-      "node": "C"
-    },
-    {
-      "at_ms": 33100,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
-    },
-    {
-      "at_ms": 33200,
-      "type": "send_message",
-      "src": "B",
-      "dest": "E"
-    },
-    {
-      "at_ms": 33300,
-      "type": "send_message",
-      "src": "D",
-      "dest": "E"
-    },
-    {
-      "at_ms": 34000,
-      "type": "node_join",
-      "node": "C"
-    },
-    {
-      "at_ms": 34100,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
-    },
-    {
-      "at_ms": 34200,
       "type": "send_message",
       "src": "E",
       "dest": "A"
     },
     {
-      "at_ms": 36000,
-      "type": "kill_node",
-      "node": "C"
-    },
-    {
-      "at_ms": 36100,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
-    },
-    {
-      "at_ms": 36200,
-      "type": "send_message",
-      "src": "E",
-      "dest": "A"
-    },
-    {
-      "at_ms": 37000,
-      "type": "node_join",
-      "node": "C"
-    },
-    {
-      "at_ms": 37100,
+      "at_ms": 58000,
       "type": "send_message",
       "src": "B",
       "dest": "D"
-    },
-    {
-      "at_ms": 37200,
-      "type": "send_message",
-      "src": "D",
-      "dest": "B"
-    },
-    {
-      "at_ms": 39000,
-      "type": "kill_node",
-      "node": "C"
-    },
-    {
-      "at_ms": 39100,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
-    },
-    {
-      "at_ms": 40000,
-      "type": "node_join",
-      "node": "C"
-    },
-    {
-      "at_ms": 40100,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
-    },
-    {
-      "at_ms": 41000,
-      "type": "kill_node",
-      "node": "C"
-    },
-    {
-      "at_ms": 41100,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
-    },
-    {
-      "at_ms": 42000,
-      "type": "node_join",
-      "node": "C"
-    },
-    {
-      "at_ms": 73000,
-      "type": "send_message",
-      "src": "A",
-      "dest": "E"
     },
     {
       "at_ms": 83000,
       "type": "send_message",
+      "src": "D",
+      "dest": "B"
+    },
+    {
+      "at_ms": 110000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 111000,
+      "type": "node_join",
+      "node": "C"
+    },
+    {
+      "at_ms": 115000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 130000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 145000,
+      "type": "send_message",
+      "src": "A",
+      "dest": "E"
+    },
+    {
+      "at_ms": 180000,
+      "type": "kill_node",
+      "node": "C"
+    },
+    {
+      "at_ms": 181000,
+      "type": "node_join",
+      "node": "C"
+    },
+    {
+      "at_ms": 185000,
+      "type": "send_message",
       "src": "E",
       "dest": "A"
     },
     {
-      "at_ms": 93000,
+      "at_ms": 205000,
       "type": "send_message",
-      "src": "B",
-      "dest": "D"
-    },
-    {
-      "at_ms": 103000,
-      "type": "send_message",
-      "src": "D",
-      "dest": "B"
+      "src": "E",
+      "dest": "A"
     }
   ]
 }

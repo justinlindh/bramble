@@ -218,6 +218,16 @@ static void relay_path_add_hop(uint32_t packet_id, uint32_t relay_addr) {
     /* Find existing entry */
     for (int i = 0; i < MAX_RELAY_PATHS; i++) {
         if (g_relay_paths[i].active && g_relay_paths[i].packet_id == packet_id) {
+            /* Issue #144: record each relay once. Retransmissions (and the
+             * destination's re-ACK of a duplicate) legitimately push the
+             * same packet_id through the same relays again; appending every
+             * pass turned a clean [D C B] receipt path into [D D C D C ...].
+             * The path is "which nodes carried this packet", not "how many
+             * times"; loops are the forward-loop detector's job. */
+            for (int h = 0; h < g_relay_paths[i].hop_count; h++) {
+                if (g_relay_paths[i].hops[h] == relay_addr)
+                    return;
+            }
             if (g_relay_paths[i].hop_count < MAX_RELAY_HOPS) {
                 g_relay_paths[i].hops[g_relay_paths[i].hop_count++] = relay_addr;
             }
@@ -466,8 +476,16 @@ int bridge_msg_track_add(msg_tracker_t* track, int count, uint32_t packet_id, ui
 }
 
 uint32_t bridge_msg_track_find_src(msg_tracker_t* track, int count, uint32_t packet_id) {
+    /* Matches regardless of `active` (issue #144): active means "awaiting
+     * delivery" and the first arrival clears it, but the destination must
+     * still resolve the originator for DUPLICATE arrivals (the sender's
+     * retransmit after a lost receipt) so it can re-ACK, exactly like
+     * firmware's duplicate-unicast-DATA path re-ACKs to give the sender
+     * another chance to hear the confirmation. Requiring active here made
+     * every duplicate resolve to originator 0, so no receipt was ever
+     * re-sent and a single collided receipt lost the confirmation forever. */
     for (int i = 0; i < count; i++) {
-        if (track[i].active && track[i].packet_id == packet_id) {
+        if (track[i].packet_id == packet_id && track[i].src_addr != 0) {
             return track[i].src_addr;
         }
     }
@@ -711,15 +729,77 @@ static void _handle_rrep(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
     }
 }
 
+/* Notify context for the RERR pending-ack failfast below. */
+typedef struct {
+    const char* node_id;
+    uint32_t broken_dest;
+    uint64_t now_us;
+    metrics_state_t* metrics;
+} rerr_failfast_ctx_t;
+
+static void _rerr_failfast_notify(uint32_t packet_id, const char* reason, void* ctx) {
+    rerr_failfast_ctx_t* c = (rerr_failfast_ctx_t*)ctx;
+    metrics_record_packet_dropped(c->metrics);
+    fprintf(stdout,
+            "{\"type\":\"message_dropped\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"dest\":\"0x%08X\",\"packet_id\":\"0x%08X\""
+            ",\"reason\":\"%s\"}\n",
+            (unsigned long long)c->now_us, c->node_id, c->broken_dest, packet_id, reason);
+    fflush(stdout);
+}
+
 static void _handle_rerr(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
-                         uint32_t now_ms) {
+                         uint32_t now_ms, node_array_t* nodes, radio_config_t* radio,
+                         pcg32_state_t* rng, event_queue_t* events, metrics_state_t* metrics) {
     (void)now_ms;
     bramble_rerr_t rerr;
     if (bramble_rerr_deserialize(&rerr, buf, len) != ESP_OK)
         return;
 
-    rerr_handle(&rx->routes, &rerr);
-    emit_link_broken(stdout, now_us, rx->id, rerr.broken_next_hop);
+    bool route_marked_broken = rerr_handle(&rx->routes, &rerr);
+    if (route_marked_broken) {
+        emit_link_broken(stdout, now_us, rx->id, rerr.broken_next_hop);
+
+        /* Re-originate the teardown one ring further, exactly like
+         * firmware's handle_rerr (main/mesh_task.c): only a node that
+         * actually marked a route broken propagates, so the route-match
+         * chain (not the hop limit) bounds how far a teardown travels. */
+        if (rerr.header.hop_limit > 1) {
+            bramble_rerr_t fwd = rerr_build(rx->addr, rerr.broken_dest, rerr.broken_next_hop);
+            fwd.header.packet_id = pcg32_random(rng);
+
+            outbound_packet_t pkt;
+            memset(&pkt, 0, sizeof(pkt));
+            bramble_rerr_serialize(&fwd, pkt.data, RERR_SIZE);
+            pkt.len = RERR_SIZE;
+            pkt.is_broadcast = true;
+            pkt.dest_addr = 0xFFFFFFFF;
+            pkt.pkt_type = PKT_TYPE_RERR;
+
+            /* tx_gate_kind_tier: TX_KIND_ROUTING -> AIRTIME_TIER_CRITICAL. */
+            budget_gated_send(rx, &pkt, AIRTIME_TIER_CRITICAL, nodes, radio, rng, events, metrics,
+                              now_us);
+        }
+    }
+
+    /* Fail fast every pending ack for the broken destination, even on a
+     * forwarded RERR with no local next-hop match: same loop and ordering
+     * as firmware's handle_rerr calling rerr_ack_failfast_for_dest
+     * (main/rerr_ack_fastfail.c). Not the real function only because it
+     * hard-links msg_store (NVS message status), which the sim does not
+     * model; the table mutation is identical. Without this the sender
+     * burns its whole retransmit ladder into a route the mesh already
+     * reported dead. */
+    {
+        rerr_failfast_ctx_t ctx = {rx->id, rerr.broken_dest, now_us, metrics};
+        for (int i = 0; i < MAX_PENDING_ACKS; i++) {
+            pending_ack_t* pa = &rx->pending_acks.entries[i];
+            if (!pa->active || pa->dest_addr != rerr.broken_dest)
+                continue;
+            _rerr_failfast_notify(pa->packet_id, "route_broken", &ctx);
+            pa->active = false;
+        }
+    }
 }
 
 static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_t len,
@@ -810,6 +890,15 @@ static void _handle_delivery_receipt(sim_node_t* rx, const uint8_t* buf, uint16_
         forward_data(&rx->routes, receipt.header.dest_addr, &hop_limit, now_ms);
     if (!fwd_res.should_send)
         return;
+
+    /* Route-loop check at the forward decision (issue #144), same
+     * discriminator as the DATA forward site: keyed on the receipt frame's
+     * own packet_id and arriving hop_limit. */
+    {
+        int node_idx = (int)(rx - nodes->nodes);
+        anomaly_check_forward_loop(&anomaly[node_idx].loop, receipt.header.packet_id,
+                                   receipt.header.hop_limit, now_us, stdout, rx->id);
+    }
 
     uint8_t fwd_buf[256];
     memcpy(fwd_buf, buf, len);
@@ -985,7 +1074,9 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
     int node_idx = (int)(rx - nodes->nodes);
 
     anomaly_record_rx(&anomaly[node_idx].blackhole, now_us);
-    anomaly_check_loop(&anomaly[node_idx].loop, hdr.packet_id, now_us, stdout, rx->id);
+    /* Route-loop detection moved to the FORWARD sites (issue #144): checking
+     * on receive flagged every flood rebroadcast and ACK retransmission as a
+     * "loop". See anomaly_check_forward_loop in sim_anomaly.h. */
 
     /* Gosim has no wire-embedded src_addr/prev_hop for DATA (its framing
      * already diverges from firmware's, see task-4-report.md): the DATA's
@@ -1206,13 +1297,16 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
             receipt.src_addr = rx->addr;
             receipt.orig_packet_id = hdr.packet_id;
 
-            /* Populate relay path from tracker */
+            /* Populate relay path from tracker. The entry is deliberately
+             * NOT removed here (issue #144): a duplicate arrival (the
+             * sender's retransmit after a lost receipt) re-ACKs through this
+             * same block and must carry the same relay path, not an empty
+             * one. Entries age out by table reuse (MAX_RELAY_PATHS slots). */
             if (rp) {
                 receipt.hop_count = rp->hop_count;
                 for (int i = 0; i < rp->hop_count && i < DELIVERY_RECEIPT_MAX_HOPS; i++) {
                     receipt.relay_path[i] = rp->hops[i];
                 }
-                relay_path_remove(hdr.packet_id);
             } else {
                 receipt.hop_count = 0;
             }
@@ -1274,7 +1368,14 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
     forward_result_t fwd_res = forward_data(&rx->routes, hdr.dest_addr, &hop_limit, now_ms);
 
     if (fwd_res.route_error) {
-        bramble_rerr_t rerr = rerr_build(rx->addr, hdr.dest_addr, fwd_res.next_hop);
+        /* broken_next_hop is this relay's OWN address, matching firmware's
+         * forward_data_packet no-route branch (main/mesh_task.c: send_rerr
+         * (header->dest_addr, s_identity->address)): the report means "do
+         * not route dest through ME". Passing fwd_res.next_hop here (issue
+         * #144) made the no-route case advertise 0, which matched nobody's
+         * routing entry, so upstream relays never tore down their routes
+         * through this node and kept forwarding into the dead spot. */
+        bramble_rerr_t rerr = rerr_build(rx->addr, hdr.dest_addr, rx->addr);
 
         outbound_packet_t pkt;
         memset(&pkt, 0, sizeof(pkt));
@@ -1317,6 +1418,13 @@ static void _handle_data(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint3
 
     if (!fwd_res.should_send)
         return;
+
+    /* Route-loop check at the forward decision (issue #144), keyed on the
+     * hop_limit the packet ARRIVED with (hdr.hop_limit, before the
+     * forward_data decrement): a looped packet returns here reduced by the
+     * loop length, a sender retransmission arrives unchanged. */
+    anomaly_check_forward_loop(&anomaly[node_idx].loop, hdr.packet_id, hdr.hop_limit, now_us,
+                               stdout, rx->id);
 
     /* Track relay path (Phase 1) */
     relay_path_add_hop(hdr.packet_id, rx->addr);
@@ -1625,7 +1733,7 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
                      radio, rng, events, metrics, anomaly);
         break;
     case PKT_TYPE_RERR:
-        _handle_rerr(rx, buf, len, event->timestamp_us, now_ms);
+        _handle_rerr(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng, events, metrics);
         break;
     case PKT_TYPE_DATA:
         _handle_data(rx, buf, len, event->data.packet.src_addr, rssi, event->data.packet.snr,
@@ -2094,8 +2202,12 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         pending_ack_t* pa = &node->pending_acks.entries[i];
         if (!pa->active)
             continue;
-        if (pa->attempt == 0)
-            continue; /* not yet due for retry */
+        /* Due when next_retry_ms has passed, exactly like firmware's mesh_task
+         * ACK retry tick (main/mesh_task.c). The first retransmit fires at
+         * attempt 0 once the base delay set by pending_ack_add elapses; there
+         * is no attempt-0 skip. bridge_handle_retransmit is the sole driver of
+         * this table (the engine's node_tick no longer calls pending_ack_tick),
+         * so it owns both the send and the attempt/backoff advance below. */
         if (pa->next_retry_ms > now_ms)
             continue;
 
@@ -2146,9 +2258,21 @@ void bridge_handle_retransmit(sim_node_t* node, node_array_t* nodes, radio_confi
         sim_radio_broadcast(node, &pkt, nodes, radio, rng, events, metrics, now_us);
         metrics->messages_retried++;
 
-        /* Schedule next retry */
-        pa->next_retry_ms = now_ms + tier_base_delay_ms(pa->tier) * (1 << pa->attempt);
+        /* Exponential backoff with +/-25% jitter (F25), the same order and
+         * formula as firmware's mesh_task ACK retry tick: attempt increments
+         * first, then delay = base << attempt, jittered. Without the jitter
+         * the retransmit wave and the returning delivery receipt stay
+         * phase-locked and collide at the same relay on every attempt of a
+         * multi-hop exchange. Drawn from the seeded sim rng (firmware uses
+         * esp_random), so runs stay deterministic. */
         pa->attempt++;
+        {
+            uint32_t delay = tier_base_delay_ms(pa->tier) << pa->attempt;
+            uint32_t quarter = delay / 4;
+            if (quarter > 0)
+                delay = delay - quarter + (pcg32_random(rng) % (2 * quarter + 1));
+            pa->next_retry_ms = now_ms + delay;
+        }
 
         fprintf(stdout,
                 "{\"type\":\"message_retransmit\",\"timestamp_us\":%llu"
