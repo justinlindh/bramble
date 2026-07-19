@@ -19,25 +19,29 @@ them.
 
 ## Installing
 
-There are no signed release downloads yet. Building from source is the
-supported path for now:
+Prebuilt installers are attached to every webapp release on the GitHub
+releases page (the `webapp-vX.Y.Z` tags), with a `SHA256SUMS` manifest:
+
+| Platform | Installer |
+|----------|-----------|
+| Linux    | AppImage, .deb, .pacman (x64) |
+| macOS    | .dmg (arm64 and x64) |
+| Windows  | .exe (NSIS, x64) |
+
+The installers are not code-signed (there are no Apple or Windows signing
+certificates yet), so macOS Gatekeeper and Windows SmartScreen will warn on
+first launch. Building from source works too:
 
 ```bash
 cd webapp
 npm install
 npm run package         # build for your current platform
-npm run package:linux   # AppImage + deb
+npm run package:linux   # AppImage + deb + pacman
 npm run package:mac     # dmg
 npm run package:win     # NSIS installer (.exe)
 ```
 
-Output lands in `webapp/release/`:
-
-| Platform | Installer |
-|----------|-----------|
-| Linux    | AppImage, .deb |
-| macOS    | .dmg |
-| Windows  | .exe (NSIS) |
+Output lands in `webapp/release/`.
 
 See [webapp/README.md](../../webapp/README.md) for the full dev workflow,
 including `npm run dev:electron` for hot-reload while developing.
