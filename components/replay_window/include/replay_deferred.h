@@ -22,6 +22,11 @@ typedef struct {
 
 typedef struct {
     replay_dslot_t slots[REPLAY_DEFERRED_MAX];
+    /* Issue #88 observability, RAM-only. `evictions` counts records actually
+     * recycled; `evict_denied` counts insertions refused because every record
+     * was still inside DEFERRED_TTL_S and therefore still load-bearing. */
+    uint32_t evictions;
+    uint32_t evict_denied;
 } replay_deferred_t;
 
 void replay_deferred_init(replay_deferred_t* d);

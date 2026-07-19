@@ -26,6 +26,7 @@
 #define NVS_NS_OTA "bramble_ota"            /**< OTA origin + rollback   */
 #define NVS_NS_NONCE "bramble_nonce"        /**< AEAD nonce counter ceiling */
 #define NVS_NS_NETKEY "bramble_netkey"      /**< Control-plane network key (PART 3, staged) */
+#define NVS_NS_REPLAY "bramble_rp"          /**< Per-sender replay high-water marks */
 
 /* ── Frequently-used NVS keys (NVS_NS_BRAMBLE namespace) ────────────────── */
 #define NVS_KEY_NODE_NAME "node_name"
@@ -68,3 +69,10 @@
 
 /* ── NVS_NS_NETKEY keys ──────────────────────────────────────────────────── */
 #define NVS_KEY_NETKEY "key"
+
+/* ── NVS_NS_REPLAY keys ──────────────────────────────────────────────────── */
+/* Serialized per-sender replay high-water marks, one blob per window, so a
+ * reboot does not reopen the replay window (issue #72). See
+ * replay_table_serialize. Names must be <= 15 chars. */
+#define RP_KEY_DATA_WINDOW "data_win"
+#define RP_KEY_CTRL_WINDOW "ctrl_win"

@@ -75,20 +75,52 @@ static identity_pin_t* find_entry(identity_store_t* s, uint32_t address) {
 /* A free slot if one exists, else the least-recently-confirmed entry
  * (LRU eviction victim). Age is computed as now - last_confirmed with
  * uint32 wraparound semantics, the same idiom the rest of the codebase
- * uses for now_ms arithmetic. */
+ * uses for now_ms arithmetic.
+ *
+ * Issue #88: verified pins are NOT interchangeable with unverified ones. A
+ * verified pin encodes a human comparing a SAS out of band; an unverified
+ * one is trust-on-first-use that re-establishes for free on the next
+ * attestation. Evicting purely by age let an attestation flood from
+ * throwaway addresses push SAS-verified pins out and silently downgrade
+ * them back to TOFU, which is the exact impersonation window the verified
+ * bit exists to close.
+ *
+ * So this is a two-pass selection: the oldest UNVERIFIED entry always wins,
+ * and a verified pin is only ever the victim when every single entry is
+ * verified (a real capacity limit, not something an attacker can induce,
+ * since verification requires the local user). Either way the eviction is
+ * counted so it is observable rather than silent. */
 static identity_pin_t* alloc_entry(identity_store_t* s, uint32_t now_ms) {
     identity_pin_t* victim = NULL;
     uint32_t victim_age = 0;
+    identity_pin_t* verified_victim = NULL;
+    uint32_t verified_victim_age = 0;
+
     for (int i = 0; i < IDENTITY_STORE_CAPACITY; i++) {
         if (!s->entries[i].used)
             return &s->entries[i];
         uint32_t age = now_ms - s->entries[i].last_confirmed_ms;
-        if (!victim || age > victim_age) {
+        if (s->entries[i].verified) {
+            if (!verified_victim || age > verified_victim_age) {
+                verified_victim = &s->entries[i];
+                verified_victim_age = age;
+            }
+        } else if (!victim || age > victim_age) {
             victim = &s->entries[i];
             victim_age = age;
         }
     }
-    return victim;
+
+    if (victim) {
+        s->evictions++;
+        return victim;
+    }
+    /* Every pin is verified: the store is genuinely full of high-value
+     * bindings and one must go. Count it separately so the downgrade is
+     * visible. */
+    s->evictions++;
+    s->evictions_verified++;
+    return verified_victim;
 }
 
 identity_pin_result_t identity_store_pin(identity_store_t* s, uint32_t address,
