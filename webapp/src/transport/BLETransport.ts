@@ -35,6 +35,18 @@ const ESTABLISH_LINK_TIMEOUT_MS = 20000;
 // silently (outgoing RPCs stop, incoming notifications keep flowing).
 const WRITE_CHUNK_TIMEOUT_MS = 6000;
 
+// True only for the firmware rejecting our RPC token, the one failure that a
+// retry cannot fix. It must NOT match the platform's GATT security errors:
+// the device requires an encrypted link, so the first write on an unpaired
+// link fails with things like "GATT operation not authorized" or
+// "insufficient authentication" while the OS runs the pairing prompt, and
+// those DO improve on retry. A previous substring match on /auth/ caught them
+// too and turned a normal first-pairing into a hard connect failure.
+function isTokenRejection(e: unknown): boolean {
+  const msg = (e as Error)?.message ?? '';
+  return /authentication required/i.test(msg) && !/timed out/i.test(msg);
+}
+
 export class BLETransport implements Transport {
   private device: BluetoothDevice | null = null;
   private txChar: BluetoothRemoteGATTCharacteristic | null = null;
@@ -139,8 +151,7 @@ export class BLETransport implements Transport {
       await this.establishLink();
       return;
     } catch (e) {
-      if (/auth|unauthorized/i.test((e as Error)?.message ?? '') &&
-          !/timed out/i.test((e as Error)?.message ?? '')) {
+      if (isTokenRejection(e)) {
         throw e; // a real token rejection will not improve on retry
       }
       try {

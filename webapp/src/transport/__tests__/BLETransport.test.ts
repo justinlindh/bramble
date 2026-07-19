@@ -137,6 +137,34 @@ describe('BLETransport auth handshake', () => {
     }
   });
 
+  it('retries the link when the first write fails the platform GATT security check', async () => {
+    // The firmware requires an encrypted link (issue #73), so on an unpaired
+    // device the very first write can fail while the OS runs its pairing
+    // prompt. That message contains "authorized", which a looser substring
+    // match mistook for a token rejection and threw instead of retrying.
+    const { bluetooth, txChar, writes, emitLine } = makeFakeBleStack();
+    vi.stubGlobal('navigator', { bluetooth });
+
+    let firstAttempt = true;
+    txChar.writeValueWithResponse.mockImplementation(async (data: BufferSource) => {
+      if (firstAttempt) {
+        firstAttempt = false;
+        throw new Error('GATT operation not authorized');
+      }
+      writes.push(new Uint8Array(data as ArrayBuffer));
+    });
+
+    const transport = new BLETransport('secret-token');
+    const connectPromise = transport.connect();
+
+    // The retry attempt writes the token again; answer it.
+    await vi.waitFor(() => expect(writesAsText(writes)).toBe('secret-token\n'), { timeout: 5000 });
+    emitLine('{"jsonrpc":"2.0","result":{"ok":true},"id":null}\n');
+
+    await connectPromise;
+    expect(transport.connected).toBe(true);
+  });
+
   it('does not write a handshake when no token is provided', async () => {
     const { bluetooth, writes } = makeFakeBleStack();
     vi.stubGlobal('navigator', { bluetooth });

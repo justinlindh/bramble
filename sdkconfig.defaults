@@ -28,6 +28,28 @@ CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 
+# BLE link security (issue #73). The RPC auth token is the first write on the
+# NUS TX characteristic, so the link has to be encrypted before any of it
+# happens.
+#
+# SM_SC=y  : LE Secure Connections, ECDH P-256. A passive sniffer that records
+#            the whole pairing exchange cannot derive the LTK.
+# SM_LEGACY=n: legacy pairing compiled out. Legacy Just Works uses TK=0 and is
+#            recoverable from a sniffed exchange, so allowing a downgrade to it
+#            would defeat the point. Costs compatibility with pre-BT-4.2 peers
+#            (2014 and earlier); every current phone and desktop OS does SC.
+# SM_SC_DEBUG_KEYS=n: the SC debug key pair is public and makes the exchange
+#            decryptable by anyone. Pinned off explicitly so it cannot be
+#            turned on by accident.
+# MAX_BONDS : one household realistically pairs a phone, a laptop and a
+#            desktop app; 3 (the IDF default) evicts too eagerly. Bond records
+#            live in the shared 20KB nvs partition and run on the order of a
+#            hundred bytes each, so 8 is a rounding error there.
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_SM_LEGACY=n
+CONFIG_BT_NIMBLE_SM_SC_DEBUG_KEYS=n
+CONFIG_BT_NIMBLE_MAX_BONDS=8
+
 # Message persistence defaults (Heltec/local)
 CONFIG_BRAMBLE_MSG_PERSIST_ENABLED=y
 CONFIG_BRAMBLE_MSG_PERSIST_MAX=120

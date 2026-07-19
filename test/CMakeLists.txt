@@ -1758,6 +1758,18 @@ target_include_directories(test_ble_redact PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
 )
 
+# BLE link encryption gate + pairing sdkconfig contract (issue #73)
+add_executable(test_ble_link_sec
+    test_ble_link_sec.c
+    unity/unity.c
+)
+target_include_directories(test_ble_link_sec PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ble/include
+)
+target_compile_definitions(test_ble_link_sec PRIVATE
+    SDKCONFIG_DEFAULTS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../sdkconfig.defaults"
+)
+
 # WS credential parser: header-only auth, no query string (NEW-SEC-6)
 add_executable(test_ws_auth_credential
     test_ws_auth_credential.c
