@@ -17,8 +17,10 @@ Three workflows gate pull requests, plus one reusable helper they all call:
 
 Publish-oriented workflows (`firmware-build.yml`, `firmware-publish-ota.yml`,
 `ci-smoke-artifacts.yml`, `release-components.yml`, `webapp-build-publish.yml`,
-`desktop-build.yml`, `claude.yml`) are out of scope here; they run on
-`workflow_dispatch`, tags, or their own events and do not gate normal PRs.
+`claude.yml`) are out of scope here; they run on `workflow_dispatch`, tags, or
+their own events and do not gate normal PRs. Desktop installers (Linux,
+Windows, macOS) are built and attached to webapp releases by
+`release-components.yml` itself.
 
 ## Trigger rules: the PR is the single gate
 
