@@ -1429,6 +1429,63 @@ target_compile_options(test_rpc_methods_firmware PRIVATE
 )
 target_link_libraries(test_rpc_methods_firmware m ssl crypto)
 
+# RPC handler scratch isolation: concurrent dispatches must not share a
+# snapshot buffer (issue #85). Same source set as test_rpc_methods_firmware,
+# plus pthread to force the interleaving.
+add_executable(test_rpc_scratch_isolation
+    test_rpc_scratch_isolation.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    stubs/cJSON.c
+    stubs/rpc_methods_test_stubs.c
+    stubs/wifi_ws_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_dispatcher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/rpc_auth.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/location.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/gps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/rpc_methods.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/phy_passthrough.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/identity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_url.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main/util.c
+)
+target_include_directories(test_rpc_scratch_isolation PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/rpc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/identity/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/msg_store/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/packet/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/dedup/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/channel/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/freq_plan/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/airtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/board_config/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/display/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/battery/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/gps/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/location/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/nvs_keys/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/traffic_debug/include
+)
+target_compile_definitions(test_rpc_scratch_isolation PRIVATE
+    CONFIG_BRAMBLE_RPC_MAX_METHODS=64
+)
+target_compile_options(test_rpc_scratch_isolation PRIVATE
+    -Wno-error=unused-parameter
+)
+target_link_libraries(test_rpc_scratch_isolation m ssl crypto pthread)
+
 # Chat message UI helper tests
 add_executable(test_chat_message_ui
     test_chat_message_ui.c

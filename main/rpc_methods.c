@@ -91,23 +91,53 @@ typedef struct __attribute__((packed)) {
 
 /* ── Query handlers (pre-existing) ─────────────────────────────────── */
 
+/*
+ * Snapshot scratch policy for the query handlers below.
+ *
+ * rpc_dispatch() has no serialization of its own and is entered concurrently
+ * from three tasks: the WebSocket httpd task, the BLE RPC task and the CLI
+ * task. Any handler scratch that outlives the call frame is therefore shared
+ * mutable state, and two overlapping getNeighbors calls used to stomp the same
+ * ~1.5 KB buffer mid-iteration, so one client got a torn neighbor table.
+ *
+ * These snapshots (mesh_shared_state_t ~1.5 KB, routing_table_t ~1.8 KB) are
+ * per-call heap instead: the buffer is private to the call by construction,
+ * and the RPC path is already heap-bound (cJSON builds and prints every
+ * response on the heap), so one more short-lived allocation
+ * per call is noise next to what the dispatcher already does. A
+ * dispatcher-wide mutex was the alternative and was rejected: it would couple
+ * the latency of three independent transports, and handlers are not uniformly
+ * short (bramble.screenshot blocks up to 3 s waiting on the UI task,
+ * bramble.sleep delays 500 ms and then deep-sleeps without returning, several
+ * setters block on NVS flash writes), so a slow call on one transport would
+ * stall an unrelated getStatus on another.
+ *
+ * Allocation failure returns RPC_ERR_INTERNAL, which is the honest answer: a
+ * node too low on heap to snapshot its own state cannot report that state.
+ */
+
 /* bramble.getStatus */
 static int handle_get_status(const cJSON* params, cJSON* result) {
     (void)params;
     char buf[12];
-    static mesh_shared_state_t st;
-    mesh_get_state(&st);
+    mesh_shared_state_t* st = calloc(1, sizeof(*st));
+    if (!st) {
+        ESP_LOGE(TAG, "getStatus: out of memory for state snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_state(st);
 
     cJSON_AddStringToObject(result, "address", addr_hex(s_identity->address, buf, sizeof(buf)));
     cJSON_AddStringToObject(result, "firmware_version", esp_app_get_description()->version);
     cJSON_AddStringToObject(result, "protocol_version", BRAMBLE_PROTOCOL_VERSION);
     cJSON_AddStringToObject(result, "hardware", bramble_hardware());
-    cJSON_AddBoolToObject(result, "radio_ok", st.radio_ok);
-    cJSON_AddNumberToObject(result, "peers", st.neighbors.count);
-    cJSON_AddNumberToObject(result, "beacon_tx", st.beacon_tx_count);
-    cJSON_AddNumberToObject(result, "beacon_rx", st.beacon_rx_count);
-    cJSON_AddNumberToObject(result, "packets_tx", st.packets_tx);
-    cJSON_AddNumberToObject(result, "packets_rx", st.packets_rx);
+    cJSON_AddBoolToObject(result, "radio_ok", st->radio_ok);
+    cJSON_AddNumberToObject(result, "peers", st->neighbors.count);
+    cJSON_AddNumberToObject(result, "beacon_tx", st->beacon_tx_count);
+    cJSON_AddNumberToObject(result, "beacon_rx", st->beacon_rx_count);
+    cJSON_AddNumberToObject(result, "packets_tx", st->packets_tx);
+    cJSON_AddNumberToObject(result, "packets_rx", st->packets_rx);
+    free(st);
     cJSON_AddNumberToObject(result, "uptime_s", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(result, "free_heap", (double)esp_get_free_heap_size());
     cJSON_AddNumberToObject(result, "battery_mv", battery_read_mv());
@@ -399,14 +429,18 @@ static int handle_get_delivery_events(const cJSON* params, cJSON* result) {
 /* bramble.getNeighbors */
 static int handle_get_neighbors(const cJSON* params, cJSON* result) {
     (void)params;
-    static mesh_shared_state_t st;
-    mesh_get_state(&st);
+    mesh_shared_state_t* st = calloc(1, sizeof(*st));
+    if (!st) {
+        ESP_LOGE(TAG, "getNeighbors: out of memory for state snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_state(st);
 
     cJSON* arr = cJSON_AddArrayToObject(result, "neighbors");
     char buf[12];
 
-    for (int i = 0; i < st.neighbors.count; i++) {
-        const neighbor_entry_t* n = &st.neighbors.entries[i];
+    for (int i = 0; i < st->neighbors.count; i++) {
+        const neighbor_entry_t* n = &st->neighbors.entries[i];
         if (n->addr == 0)
             continue;
 
@@ -425,20 +459,25 @@ static int handle_get_neighbors(const cJSON* params, cJSON* result) {
         }
         cJSON_AddItemToArray(arr, obj);
     }
+    free(st);
     return 0;
 }
 
 /* bramble.getRoutes */
 static int handle_get_routes(const cJSON* params, cJSON* result) {
     (void)params;
-    routing_table_t routes;
-    mesh_get_routes(&routes);
+    routing_table_t* routes = calloc(1, sizeof(*routes));
+    if (!routes) {
+        ESP_LOGE(TAG, "getRoutes: out of memory for routing-table snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_routes(routes);
 
     cJSON* arr = cJSON_AddArrayToObject(result, "routes");
     char buf[12];
     static const char* state_names[] = {"discovering", "unverified", "active", "stale", "broken"};
-    for (int i = 0; i < routes.count; i++) {
-        const route_entry_t* r = &routes.entries[i];
+    for (int i = 0; i < routes->count; i++) {
+        const route_entry_t* r = &routes->entries[i];
         cJSON* obj = cJSON_CreateObject();
         cJSON_AddStringToObject(obj, "dest", addr_hex(r->dest_addr, buf, sizeof(buf)));
         cJSON_AddStringToObject(obj, "next_hop", addr_hex(r->next_hop, buf, sizeof(buf)));
@@ -449,31 +488,37 @@ static int handle_get_routes(const cJSON* params, cJSON* result) {
         cJSON_AddNumberToObject(obj, "use_count", r->use_count);
         cJSON_AddItemToArray(arr, obj);
     }
+    free(routes);
     return 0;
 }
 
 /* bramble.getAirtime */
 static int handle_get_airtime(const cJSON* params, cJSON* result) {
     (void)params;
-    static mesh_shared_state_t st;
-    mesh_get_state(&st);
+    mesh_shared_state_t* st = calloc(1, sizeof(*st));
+    if (!st) {
+        ESP_LOGE(TAG, "getAirtime: out of memory for state snapshot");
+        return RPC_ERR_INTERNAL;
+    }
+    mesh_get_state(st);
     /* Refill before reporting so values are current */
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    airtime_budget_refill(&st.airtime, now_ms);
+    airtime_budget_refill(&st->airtime, now_ms);
     cJSON_AddNumberToObject(result, "critical_remaining_ms",
-                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_CRITICAL));
+                            airtime_budget_remaining(&st->airtime, AIRTIME_TIER_CRITICAL));
     cJSON_AddNumberToObject(result, "normal_remaining_ms",
-                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_NORMAL));
+                            airtime_budget_remaining(&st->airtime, AIRTIME_TIER_NORMAL));
     cJSON_AddNumberToObject(result, "broadcast_remaining_ms",
-                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_BROADCAST));
+                            airtime_budget_remaining(&st->airtime, AIRTIME_TIER_BROADCAST));
     cJSON_AddNumberToObject(result, "receipt_remaining_ms",
-                            airtime_budget_remaining(&st.airtime, AIRTIME_TIER_RECEIPT));
-    cJSON_AddNumberToObject(result, "critical_max_ms", st.airtime.max_ms[AIRTIME_IDX_CRITICAL]);
-    cJSON_AddNumberToObject(result, "normal_max_ms", st.airtime.max_ms[AIRTIME_IDX_NORMAL]);
-    cJSON_AddNumberToObject(result, "broadcast_max_ms", st.airtime.max_ms[AIRTIME_IDX_BROADCAST]);
-    cJSON_AddNumberToObject(result, "receipt_max_ms", st.airtime.max_ms[AIRTIME_IDX_RECEIPT]);
+                            airtime_budget_remaining(&st->airtime, AIRTIME_TIER_RECEIPT));
+    cJSON_AddNumberToObject(result, "critical_max_ms", st->airtime.max_ms[AIRTIME_IDX_CRITICAL]);
+    cJSON_AddNumberToObject(result, "normal_max_ms", st->airtime.max_ms[AIRTIME_IDX_NORMAL]);
+    cJSON_AddNumberToObject(result, "broadcast_max_ms", st->airtime.max_ms[AIRTIME_IDX_BROADCAST]);
+    cJSON_AddNumberToObject(result, "receipt_max_ms", st->airtime.max_ms[AIRTIME_IDX_RECEIPT]);
     cJSON_AddNumberToObject(result, "next_refill_ms",
-                            airtime_budget_next_refill_ms(&st.airtime, now_ms));
+                            airtime_budget_next_refill_ms(&st->airtime, now_ms));
+    free(st);
     return 0;
 }
 
