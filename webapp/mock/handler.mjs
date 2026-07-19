@@ -11,8 +11,8 @@
  *   Notification: { jsonrpc: "2.0", method: "bramble.X", params: {...} }
  */
 
-import { sha256 } from '@noble/hashes/sha2';
-import { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 // ─── Trust-anchor mock state ─────────────────────────────────────────────────
 // This node's Ed25519 identity public key (64 hex). Fixed so getIdentity is
