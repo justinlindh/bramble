@@ -5504,13 +5504,18 @@ static void process_ke_init(uint32_t src_addr, int channel_idx, const bramble_ke
          * a previously-verified peer re-establishes as verified across
          * reboot / desync-heal / epoch bump alike (Task 7). */
         sess->verified = identity_store_is_verified(&s_identity_pins, src_addr) ? 1 : 0;
+        /* A failed ratchet derivation wipes the session's chains and reports
+         * -1; fold it into ikm_ok so it takes the existing "ratchet not seeded"
+         * error path below instead of leaving a session that looks usable. */
         if (is_rekey) {
-            dm_session_epoch_bump(sess, ikm, s_identity->address, src_addr, ke_epoch);
+            if (dm_session_epoch_bump(sess, ikm, s_identity->address, src_addr, ke_epoch) != 0)
+                ikm_ok = -1;
         } else {
             memcpy(sess->session_key, session_key, 32);
             sess->ke_epoch = ke_epoch;
-            if (ikm_ok == 0)
-                dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr);
+            if (ikm_ok == 0 &&
+                dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr) != 0)
+                ikm_ok = -1;
         }
     }
     DM_MUTEX_GIVE();
@@ -5582,13 +5587,18 @@ static void process_ke_resp(uint32_t src_addr, const bramble_key_exchange_t* res
         sess->state = DM_STATE_ACTIVE;
         /* Same rationale as process_ke_init: source from the persisted pin. */
         sess->verified = identity_store_is_verified(&s_identity_pins, src_addr) ? 1 : 0;
+        /* A failed ratchet derivation wipes the session's chains and reports
+         * -1; fold it into ikm_ok so it takes the existing "ratchet not seeded"
+         * error path below instead of leaving a session that looks usable. */
         if (is_rekey) {
-            dm_session_epoch_bump(sess, ikm, s_identity->address, src_addr, ke_epoch);
+            if (dm_session_epoch_bump(sess, ikm, s_identity->address, src_addr, ke_epoch) != 0)
+                ikm_ok = -1;
         } else {
             memcpy(sess->session_key, session_key, 32);
             sess->ke_epoch = ke_epoch;
-            if (ikm_ok == 0)
-                dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr);
+            if (ikm_ok == 0 &&
+                dm_session_ratchet_init_state(sess, ikm, s_identity->address, src_addr) != 0)
+                ikm_ok = -1;
         }
     }
     DM_MUTEX_GIVE();

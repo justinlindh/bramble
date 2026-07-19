@@ -153,18 +153,35 @@ int dm_ratchet_init(const uint8_t ikm[128], uint32_t addr_a, uint32_t addr_b, ui
     return dm_derive_chain_pair(rk_out, ck_lohi_out, ck_hilo_out);
 }
 
-void dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],
-                     uint8_t ck_next_out[32]) {
+/*
+ * Returns 0 on success, -1 if either HKDF fails. On failure BOTH outputs are
+ * wiped rather than left holding whatever the caller's stack had: this used to
+ * be a void function that discarded both return codes, so a failed derivation
+ * handed back uninitialized stack bytes that dm_session_ratchet_encrypt then
+ * used as a message key AND committed as the next chain key, permanently
+ * corrupting the send chain with no way for any caller to notice.
+ */
+int dm_ratchet_step(const uint8_t ck_in[32], uint16_t index_n, uint8_t mk_out[32],
+                    uint8_t ck_next_out[32]) {
     uint8_t mk_info[16];
     const char* mk_label = "bramble-dm-mk";
     size_t ll = strlen(mk_label);
     memcpy(mk_info, mk_label, ll);
     mk_info[ll] = (uint8_t)(index_n >> 8);
     mk_info[ll + 1] = (uint8_t)(index_n & 0xFF);
-    (void)crypto_hkdf_sha256(ck_in, 32, dm_ratchet_empty_ikm, 0, mk_info, ll + 2, mk_out, 32);
     const char* ck_label = "bramble-dm-ck";
-    (void)crypto_hkdf_sha256(ck_in, 32, dm_ratchet_empty_ikm, 0, (const uint8_t*)ck_label,
-                             strlen(ck_label), ck_next_out, 32);
+    if (crypto_hkdf_sha256(ck_in, 32, dm_ratchet_empty_ikm, 0, mk_info, ll + 2, mk_out, 32) != 0)
+        goto fail;
+    if (crypto_hkdf_sha256(ck_in, 32, dm_ratchet_empty_ikm, 0, (const uint8_t*)ck_label,
+                           strlen(ck_label), ck_next_out, 32) != 0)
+        goto fail;
+    return 0;
+fail:
+    /* mk_out may already hold a real message key when only the second HKDF
+     * failed; wipe both so no partially derived key material survives. */
+    crypto_secure_wipe(mk_out, 32);
+    crypto_secure_wipe(ck_next_out, 32);
+    return -1;
 }
 
 int dm_ratchet_dh(const uint8_t rk_e[32], const uint8_t dh[32], uint32_t addr_a, uint32_t addr_b,
@@ -190,12 +207,35 @@ static void dm_ratchet_install_chains(dm_ratchet_t* r, const uint8_t ck_lohi[32]
     r->recv.valid = 1;
 }
 
-void dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
-                                   uint32_t addr_peer) {
+/*
+ * Fails closed by leaving the ratchet WIPED and both chains invalid: derivation
+ * happens into locals and nothing is installed until every step has succeeded,
+ * so a failure here can never produce the shape this used to have (a session
+ * marked send.valid/recv.valid with zero or garbage chain keys, waved through by
+ * the validity guard in dm_session_ratchet_encrypt). The caller must treat -1 as
+ * "this session was never established" and refuse to mark it usable; a session
+ * that silently looked valid but held garbage would encrypt undecryptable
+ * frames forever, which is exactly the one-sided-desync silent message loss this
+ * layer is supposed to avoid.
+ */
+int dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint32_t addr_self,
+                                  uint32_t addr_peer) {
     uint32_t addr_a = addr_self < addr_peer ? addr_self : addr_peer;
     uint32_t addr_b = addr_self < addr_peer ? addr_peer : addr_self;
-    uint8_t ck_lohi[32], ck_hilo[32];
-    dm_ratchet_init(ikm, addr_a, addr_b, s->ratchet.rk, ck_lohi, ck_hilo);
+    uint8_t rk[32], ck_lohi[32], ck_hilo[32];
+    if (dm_ratchet_init(ikm, addr_a, addr_b, rk, ck_lohi, ck_hilo) != 0) {
+        crypto_secure_wipe(rk, sizeof(rk));
+        crypto_secure_wipe(ck_lohi, sizeof(ck_lohi));
+        crypto_secure_wipe(ck_hilo, sizeof(ck_hilo));
+        /* Whole-ratchet wipe: clears rk, both chains (valid -> 0), the skip
+         * caches, and the retained previous epoch, so no stale or partial key
+         * material is reachable and no chain reports itself usable. */
+        crypto_secure_wipe(&s->ratchet, sizeof(s->ratchet));
+        crypto_secure_wipe(s->session_key, sizeof(s->session_key));
+        return -1;
+    }
+    memcpy(s->ratchet.rk, rk, 32);
+    crypto_secure_wipe(rk, sizeof(rk));
     int self_is_lo = (addr_self == addr_a); /* lo sends lohi, receives hilo */
     dm_ratchet_install_chains(&s->ratchet, ck_lohi, ck_hilo, self_is_lo, s->ke_epoch);
     memset(s->ratchet.skip, 0, sizeof(s->ratchet.skip));
@@ -207,33 +247,71 @@ void dm_session_ratchet_init_state(dm_session_t* s, const uint8_t ikm[128], uint
     memcpy(s->session_key, s->ratchet.rk, 32);
     crypto_secure_wipe(ck_lohi, 32);
     crypto_secure_wipe(ck_hilo, 32);
+    return 0;
 }
 
-void dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
-                           uint32_t addr_peer, uint16_t new_epoch) {
+/*
+ * Fails closed by TEARING THE RATCHET DOWN, not by keeping the old epoch.
+ *
+ * Both derivations happen into locals before anything on s is touched, so a
+ * failure cannot install a garbage root or a chain pair the peer will never
+ * agree with. The interesting question is what to do with the surviving old
+ * epoch. Keeping it is tempting (the function's contract says a lost rekey
+ * leaves both sides on the current epoch and strands nothing) but that contract
+ * only holds when the rekey never happened at ALL. By the time this is called
+ * the peer has already committed to new_epoch: silently staying on the old one
+ * is a ONE-SIDED epoch desync, which is the exact shape of the permanent silent
+ * DM loss this repo has already been bitten by, and it would look healthy from
+ * the outside (send.valid set, encrypt succeeding, every frame undecryptable at
+ * the far end forever).
+ *
+ * So on failure the whole ratchet is wiped, which drops both chains to
+ * valid == 0. dm_session_ratchet_encrypt then refuses to send (surfaced by the
+ * mesh caller as an encrypt failure rather than a message that vanishes) and
+ * dm_session_ratchet_decrypt returns DM_DECRYPT_FAIL, which the mesh caller
+ * already maps to its rate-limited re-handshake desync-heal path. Failure is
+ * therefore loud and self-healing rather than quiet and permanent. Returns 0 on
+ * success, -1 on a failed derivation.
+ */
+int dm_session_epoch_bump(dm_session_t* s, const uint8_t new_dh[32], uint32_t addr_self,
+                          uint32_t addr_peer, uint16_t new_epoch) {
     uint32_t addr_a = addr_self < addr_peer ? addr_self : addr_peer;
     uint32_t addr_b = addr_self < addr_peer ? addr_peer : addr_self;
-    /* Retain the current receive chain + skip cache as the previous epoch for
-     * the grace window (in-flight old-epoch frames still decrypt). */
+    /* Roll the root forward: RK_{e+1} = HKDF(salt=RK_e, ikm=new_dh, info@epoch).
+     * Chaining from the CURRENT root plus a fresh DH is the Double Ratchet root
+     * KDF and is what makes a pre-bump root compromise recoverable (PCS).
+     * Derived into locals: s is not modified until both steps have succeeded. */
+    int rc = -1;
+    uint8_t rk_next[32];
+    uint8_t ck_lohi[32], ck_hilo[32];
+    if (dm_ratchet_dh(s->ratchet.rk, new_dh, addr_a, addr_b, new_epoch, rk_next) != 0)
+        goto fail;
+    if (dm_derive_chain_pair(rk_next, ck_lohi, ck_hilo) != 0)
+        goto fail;
+
+    /* Commit. Retain the current receive chain + skip cache as the previous
+     * epoch for the grace window (in-flight old-epoch frames still decrypt). */
     s->ratchet.prev_recv = s->ratchet.recv;
     memcpy(s->ratchet.prev_skip, s->ratchet.skip, sizeof(s->ratchet.prev_skip));
     s->ratchet.new_epoch_msgs = 0;
-    /* Roll the root forward: RK_{e+1} = HKDF(salt=RK_e, ikm=new_dh, info@epoch).
-     * Chaining from the CURRENT root plus a fresh DH is the Double Ratchet root
-     * KDF and is what makes a pre-bump root compromise recoverable (PCS). */
-    uint8_t rk_next[32];
-    dm_ratchet_dh(s->ratchet.rk, new_dh, addr_a, addr_b, new_epoch, rk_next);
     memcpy(s->ratchet.rk, rk_next, 32);
-    uint8_t ck_lohi[32], ck_hilo[32];
-    dm_derive_chain_pair(s->ratchet.rk, ck_lohi, ck_hilo);
     int self_is_lo = (addr_self == addr_a);
     dm_ratchet_install_chains(&s->ratchet, ck_lohi, ck_hilo, self_is_lo, new_epoch);
     s->ke_epoch = new_epoch;
     memset(s->ratchet.skip, 0, sizeof(s->ratchet.skip));
     memcpy(s->session_key, s->ratchet.rk, 32); /* provenance mirror, as in init_state */
+    rc = 0;
+    goto out;
+fail:
+    /* See the header comment: drop to an unusable ratchet so the peer-visible
+     * result is a re-handshake, not silent one-way loss. */
+    crypto_secure_wipe(&s->ratchet, sizeof(s->ratchet));
+    crypto_secure_wipe(s->session_key, sizeof(s->session_key));
+out:
     crypto_secure_wipe(rk_next, 32);
     crypto_secure_wipe(ck_lohi, 32);
     crypto_secure_wipe(ck_hilo, 32);
+    return rc;
 }
 
 int dm_session_ratchet_encrypt(dm_session_t* s, const bramble_header_t* h, uint32_t src_addr,
@@ -244,7 +322,16 @@ int dm_session_ratchet_encrypt(dm_session_t* s, const bramble_header_t* h, uint3
     if (pt_len > 255)
         return -1;
     uint8_t mk[32], ck_next[32];
-    dm_ratchet_step(s->ratchet.send.ck, s->ratchet.send.index, mk, ck_next);
+    /* A failed derivation must never reach the AEAD or the chain commit below.
+     * Bailing here leaves the send chain and index completely untouched, so this
+     * is a clean, retryable no-send: the mesh caller reports an encrypt failure
+     * (the message is not silently dropped) and a later attempt on a healthy
+     * HKDF picks up exactly where this one left off. */
+    if (dm_ratchet_step(s->ratchet.send.ck, s->ratchet.send.index, mk, ck_next) != 0) {
+        crypto_secure_wipe(mk, sizeof(mk));
+        crypto_secure_wipe(ck_next, sizeof(ck_next));
+        return -1;
+    }
 
     /* Cleartext ratchet header: epoch || msg_index (big-endian). */
     uint8_t hdr[DM_RATCHET_HEADER_SIZE];
@@ -308,8 +395,12 @@ static int dm_recv_walk(dm_chain_t* chain, dm_skip_entry_t* skip, uint16_t index
     int npending = 0;
     memset(pending, 0, sizeof(pending));
     uint8_t mk[32], ck_next[32];
-    for (uint16_t walk = chain->index; walk < index; walk++) {
-        dm_ratchet_step(ck, walk, mk, ck_next);
+    int derive_failed = 0;
+    for (uint16_t walk = chain->index; walk < index && !derive_failed; walk++) {
+        if (dm_ratchet_step(ck, walk, mk, ck_next) != 0) {
+            derive_failed = 1;
+            break;
+        }
         if (npending < DM_MAX_SKIP) {
             pending[npending].index = walk;
             memcpy(pending[npending].mk, mk, 32);
@@ -318,8 +409,17 @@ static int dm_recv_walk(dm_chain_t* chain, dm_skip_entry_t* skip, uint16_t index
         }
         memcpy(ck, ck_next, 32);
     }
-    dm_ratchet_step(ck, index, mk, ck_next); /* the target message key */
-    int rc = crypto_aes256gcm_decrypt(mk, nonce, ct, ct_len, aad, aad_len, tag, pt_out);
+    /* the target message key */
+    if (!derive_failed && dm_ratchet_step(ck, index, mk, ck_next) != 0)
+        derive_failed = 1;
+    /* A failed derivation commits NOTHING: the chain key, the chain index, and
+     * the skip cache are all left exactly as they were, so this frame is simply
+     * not decrypted here. Reporting DM_DECRYPT_FAIL routes it into the mesh
+     * caller's existing rate-limited desync-heal re-handshake instead of
+     * corrupting the receive chain into permanent one-way loss. */
+    int rc = derive_failed
+                 ? -1
+                 : crypto_aes256gcm_decrypt(mk, nonce, ct, ct_len, aad, aad_len, tag, pt_out);
     if (rc == 0) {
         for (int p = 0; p < npending; p++) { /* cache the skipped keys */
             int slot = pending[p].index % DM_MAX_SKIP;
