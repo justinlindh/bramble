@@ -6,7 +6,13 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_keys.h"
+#include "ota_rollback_policy.h"
 #include "ota_version.h"
+#include "sdkconfig.h"
+
+#if CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
+#include "esp_efuse.h"
+#endif
 
 static const char* TAG = "ota_rollback";
 
@@ -63,56 +69,82 @@ void ota_rollback_note_boot(void) {
     }
 }
 
-int ota_rollback_gate(const char* new_version, bool allow_downgrade) {
-    ota_semver_t candidate;
-    bool candidate_ok = new_version && ota_version_parse(new_version, &candidate);
-
-    if (!candidate_ok) {
-        if (allow_downgrade) {
-            ESP_LOGW(TAG, "Image version '%s' unparseable; accepted via allow_downgrade",
-                     new_version ? new_version : "(null)");
-            return 0;
-        }
-        ESP_LOGE(TAG, "OTA rejected: image version '%s' is not semver (fail closed)",
-                 new_version ? new_version : "(null)");
-        return -1;
-    }
-
+int ota_rollback_gate(const char* new_version, uint32_t candidate_secure_version,
+                      bool allow_downgrade) {
     char floor_str[OTA_FLOOR_MAX];
-    ota_semver_t floor;
-    if (!read_floor(floor_str, sizeof(floor_str)) || !ota_version_parse(floor_str, &floor)) {
-        return 0; /* no floor recorded yet */
-    }
+    bool have_floor = read_floor(floor_str, sizeof(floor_str));
 
-    if (ota_version_cmp(&candidate, &floor) >= 0) {
-        return 0;
-    }
+    ota_gate_input_t in = {
+        .candidate_version = new_version,
+        .has_soft_floor = have_floor,
+        .soft_floor_version = have_floor ? floor_str : NULL,
+        .allow_downgrade = allow_downgrade,
+        .secure_enforced = false,
+        .candidate_clears_secure_floor = true,
+    };
 
-    if (!allow_downgrade) {
-        ESP_LOGE(TAG,
-                 "OTA rejected: image version %s is below the anti-rollback floor %s "
-                 "(pass allow_downgrade to override)",
-                 new_version, floor_str);
-        return -1;
-    }
+#if CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
+    /* Hardware anti-rollback is compiled in: consult the burned eFuse
+     * secure-version field. esp_efuse_check_secure_version returns true when
+     * the image's secure_version is at or above the stored value, i.e. when
+     * the bootloader would allow the image to run. */
+    in.secure_enforced = true;
+    in.candidate_clears_secure_floor = esp_efuse_check_secure_version(candidate_secure_version);
+#else
+    (void)candidate_secure_version;
+#endif
 
-    /* Deliberate downgrade: lower the floor so the device is not stranded
-     * under the old floor after rebooting into the older firmware.
-     *
-     * Known window, accepted: this runs at gate time, BEFORE signature
-     * verification, against the unverified image descriptor. A failed
-     * downgrade therefore leaves the floor lowered until the next boot of
-     * the (unchanged) running image re-raises it via
-     * ota_rollback_note_boot. Reaching this path at all requires the
-     * device auth token (allow_downgrade rides an authenticated RPC), so
-     * the exposure is a token holder lowering their own floor, which they
-     * can do deliberately anyway. */
-    if (write_floor(new_version) == 0) {
-        ESP_LOGW(TAG, "Deliberate downgrade: floor lowered from %s to %s", floor_str, new_version);
-    } else {
-        ESP_LOGW(TAG, "Downgrade accepted but floor update failed (floor stays %s)", floor_str);
+    ota_gate_decision_t decision = ota_rollback_decide(&in);
+
+    switch (decision) {
+        case OTA_GATE_ACCEPT:
+            return 0;
+
+        case OTA_GATE_ACCEPT_DOWNGRADE:
+            /* Deliberate downgrade within the same secure epoch: lower the soft
+             * floor so the device is not stranded under the old floor after
+             * rebooting into the older firmware.
+             *
+             * Known window, accepted: this runs at gate time, BEFORE signature
+             * verification, against the unverified image descriptor. A failed
+             * downgrade therefore leaves the floor lowered until the next boot
+             * of the (unchanged) running image re-raises it via
+             * ota_rollback_note_boot. Reaching this path at all requires the
+             * device auth token (allow_downgrade rides an authenticated RPC),
+             * so the exposure is a token holder lowering their own floor, which
+             * they can do deliberately anyway. */
+            if (write_floor(new_version) == 0) {
+                ESP_LOGW(TAG, "Deliberate downgrade: floor lowered from %s to %s", floor_str,
+                         new_version);
+            } else {
+                ESP_LOGW(TAG, "Downgrade accepted but floor update failed (floor stays %s)",
+                         floor_str);
+            }
+            return 0;
+
+        case OTA_GATE_REJECT_BELOW_SECURE_FLOOR:
+            /* Not overridable by allow_downgrade: the bootloader would refuse
+             * to boot this image and brick the device. */
+            ESP_LOGE(TAG,
+                     "OTA rejected: image %s (secure_version %lu) is below the eFuse "
+                     "anti-rollback floor; it would fail to boot",
+                     new_version ? new_version : "(null)",
+                     (unsigned long)candidate_secure_version);
+            return -1;
+
+        case OTA_GATE_REJECT_BELOW_SOFT_FLOOR:
+            ESP_LOGE(TAG,
+                     "OTA rejected: image version %s is below the anti-rollback floor %s "
+                     "(pass allow_downgrade to override)",
+                     new_version ? new_version : "(null)", floor_str);
+            return -1;
+
+        case OTA_GATE_REJECT_UNPARSEABLE:
+        default:
+            ESP_LOGE(TAG, "OTA rejected: image version '%s' is not semver (fail closed)",
+                     new_version ? new_version : "(null)");
+            return -1;
     }
-    return 0;
 }
 
 bool ota_rollback_get_floor(char* out, size_t out_len) {

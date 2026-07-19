@@ -1638,6 +1638,17 @@ target_include_directories(test_ota_version PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
 )
 
+# OTA anti-rollback floor reconciliation policy (pure, no ESP deps)
+add_executable(test_ota_rollback_policy
+    test_ota_rollback_policy.c
+    unity/unity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_rollback_policy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_version.c
+)
+target_include_directories(test_ota_rollback_policy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/include
+)
+
 # OTA progress state + throttled callback tests (pure, no ESP deps)
 add_executable(test_ota_progress
     test_ota_progress.c

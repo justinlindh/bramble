@@ -42,6 +42,7 @@ esp_err_t esp_https_ota_begin(const esp_https_ota_config_t* ota_config,
 esp_err_t esp_https_ota_get_img_desc(esp_https_ota_handle_t handle, esp_app_desc_t* out) {
     (void)handle;
     out->version = g_img_desc_version;
+    out->secure_version = 0;
     return g_img_desc_result;
 }
 esp_err_t esp_https_ota_perform(esp_https_ota_handle_t handle) {
@@ -75,12 +76,15 @@ int esp_https_ota_get_image_len_read(esp_https_ota_handle_t handle) {
 
 static int g_gate_result;
 static char g_gate_version[64];
+static uint32_t g_gate_secure_version;
 static bool g_gate_allow_downgrade;
 static int g_gate_calls;
 
-int ota_rollback_gate(const char* new_version, bool allow_downgrade) {
+int ota_rollback_gate(const char* new_version, uint32_t candidate_secure_version,
+                      bool allow_downgrade) {
     g_gate_calls++;
     snprintf(g_gate_version, sizeof(g_gate_version), "%s", new_version ? new_version : "");
+    g_gate_secure_version = candidate_secure_version;
     g_gate_allow_downgrade = allow_downgrade;
     return g_gate_result;
 }

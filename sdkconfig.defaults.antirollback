@@ -1,0 +1,34 @@
+# eFuse anti-rollback overlay (issue #79). APPLY ONLY on a bench/production
+# board via:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.antirollback" build
+#
+# WARNING: this makes the second-stage bootloader enforce a monotonic secure
+# version. After a successful OTA the device burns its eFuse SECURE_VERSION
+# field UP to the running app's secure_version. That burn is IRREVERSIBLE: the
+# device can never again boot an image whose secure_version is lower, on any
+# transport, even a USB reflash. Never add these lines to the shared
+# sdkconfig.defaults or a normal dev flash will permanently constrain itself.
+# This file is inert until a human deliberately builds and flashes with the
+# overlay. See docs/design/ota-antirollback.md for the full model, the
+# secure_version-to-release mapping, and the PENDING bench-validation gate
+# (not yet executed on hardware).
+#
+# The enforcement is split: the bootloader gates at boot, and the OTA accept
+# path (components/ota/ota_rollback.c, guarded by CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK)
+# rejects a sub-floor image early so allow_downgrade can never brick a device.
+#
+# Dry run without burning eFuses: add CONFIG_BOOTLOADER_EFUSE_SECURE_VERSION_EMULATE=y
+# to emulate the secure-version field in a flash partition. Use this on the
+# sacrificial board first (see the bench procedure in the design doc).
+
+CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK=y
+
+# Security epoch baseline. Bump this (and add a row to the mapping table in
+# docs/design/ota-antirollback.md) only in a deliberate PR when a shipped fix
+# must never be rolled back past. semantic-release drives the semver; it does
+# NOT touch this integer.
+CONFIG_BOOTLOADER_APP_SECURE_VERSION=0
+
+# eFuse field width in bits. Each bit is one irreversible epoch bump, so this
+# caps the number of secure_version increments over the device lifetime.
+CONFIG_BOOTLOADER_APP_SEC_VER_SIZE_EFUSE_FIELD=16

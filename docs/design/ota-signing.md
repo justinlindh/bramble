@@ -154,7 +154,9 @@ Residual, accepted until the hardware Secure Boot phase:
 - **Signing key compromise** signs valid malicious images until rotated.
 - **CI compromise** is equivalent to key compromise (the key lives in CI
   secrets).
-- The anti-rollback floor is software state, not an eFuse counter.
+- The anti-rollback floor is software state, not an eFuse counter. The
+  eFuse-backed hardware floor is designed and host-tested but compile-gated off
+  and pending bench validation (`docs/design/ota-antirollback.md`, issue #79).
 
 Hardware Secure Boot V2 plus flash/NVS encryption (ledger SEC-H4) close the
 physical-attacker gap; both are human-gated on bench validation with a
