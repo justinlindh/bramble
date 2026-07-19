@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useStore, __conversationTargetForMessage as targetFor } from '../index';
+import { useStore, __conversationTargetForMessage as targetFor, conversationIdForMessage } from '../index';
 import { normalizeIncomingRealtimeMessage } from '../actions';
 import type { Message } from '../../types/bramble';
 
@@ -106,6 +106,19 @@ describe('conversation target resolution', () => {
       expect(conv).toBeDefined();
       expect(conv!.peerAddr).toBe(c.peerAddr);
       expect(conv!.channelIndex).toBe(c.channelIndex);
+    });
+
+    // The delivery-event correlation and notification paths in store/actions.ts
+    // only need the bucket id, but they must derive it through the same single
+    // classifier as the store. This pins that agreement for ${c.name}; a fourth
+    // hand-rolled copy of the ordering (issue #189) would break exactly here.
+    it(`conversationIdForMessage agrees with the store bucket for ${c.name}`, () => {
+      expect(conversationIdForMessage(c.m)).toBe(c.id);
+      expect(conversationIdForMessage(c.m)).toBe(targetFor(c.m).id);
+
+      resetStore();
+      useStore.getState().addMessage(c.m);
+      expect(useStore.getState().conversations.has(conversationIdForMessage(c.m))).toBe(true);
     });
   }
 
