@@ -1,6 +1,20 @@
-# Bramble
+<p align="center">
+  <img src="assets/bramble-logo.png" alt="Bramble" width="160" height="160">
+</p>
 
-Privacy-first LoRa mesh networking for ESP32-S3, built with ESP-IDF.
+<h1 align="center">Bramble</h1>
+
+<p align="center">
+  Privacy-first LoRa mesh networking for ESP32-S3, built with ESP-IDF.
+</p>
+
+<p align="center">
+  <a href="https://github.com/justinlindh/bramble/actions/workflows/quality.yml"><img alt="Quality" src="https://github.com/justinlindh/bramble/actions/workflows/quality.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/justinlindh/bramble/actions/workflows/firmware-quality.yml"><img alt="Firmware Quality" src="https://github.com/justinlindh/bramble/actions/workflows/firmware-quality.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/justinlindh/bramble/actions/workflows/webapp-quality.yml"><img alt="Webapp Quality" src="https://github.com/justinlindh/bramble/actions/workflows/webapp-quality.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Status: pre-alpha" src="https://img.shields.io/badge/status-pre--alpha-orange.svg">
+</p>
 
 Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-range, infrastructure-free communication. It is designed for resilient field use while reducing metadata exposure; [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) documents exactly what is and is not protected.
 
@@ -141,10 +155,11 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 
 ## CI/CD
 
-- [.gitea/workflows/webapp-quality.yml](.gitea/workflows/webapp-quality.yml) runs webapp required gates (lint/typecheck/unit/build/e2e smoke).
-- [.gitea/workflows/webapp-build-publish.yml](.gitea/workflows/webapp-build-publish.yml) builds/tests/publishes the web client image.
-- [.gitea/workflows/firmware-quality.yml](.gitea/workflows/firmware-quality.yml) runs firmware quality gates: required clang-format/shellcheck/actionlint.
-- Additional workflow definitions live in [.gitea/workflows](.gitea/workflows).
+- [.github/workflows/quality.yml](.github/workflows/quality.yml) runs the umbrella required gates: host tests, static checks, gosim integration, webapp checks, web-flasher tests, and the emulator suite.
+- [.github/workflows/firmware-quality.yml](.github/workflows/firmware-quality.yml) runs firmware quality gates: required clang-format/shellcheck/actionlint.
+- [.github/workflows/webapp-quality.yml](.github/workflows/webapp-quality.yml) runs webapp required gates (lint/typecheck/unit/build/e2e smoke).
+- [.github/workflows/release-components.yml](.github/workflows/release-components.yml) publishes per-component releases and attaches firmware factory images and desktop installers.
+- Additional workflow definitions live in [.github/workflows](.github/workflows).
 
 ## Status
 
