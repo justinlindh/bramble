@@ -256,6 +256,22 @@ jobs:
           cd emulator/node
           idf.py --preview set-target linux
           idf.py build
+      - name: Build the Heltec OLED firmware node
+        # The e2e suite's heltec-oled.spec.ts (added in #62) self-skips unless
+        # emulator/node/build-heltec/bramble-node.elf exists, so without this
+        # step the OLED render path added in #62 ships unexercised by CI.
+        # build_node_heltec.sh builds the Heltec/OLED profile into its own build
+        # dir and sdkconfig, coexisting with the pager build above.
+        env:
+          HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
+          # The node is a host binary; a throwaway signing key is fine here.
+          BRAMBLE_OTA_ALLOW_GENERATED_KEY: "1"
+        run: |
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
+          # shellcheck disable=SC1091
+          source scripts/ci-source-idf.sh
+          bash emulator/scripts/build_node_heltec.sh
       - name: ccache statistics
         if: always() && steps.ccache.outputs.available == 'true'
         run: ccache --show-stats
