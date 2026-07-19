@@ -22,6 +22,7 @@ This index separates **operator/developer reference docs** from **historical pla
 
 ## Hardware & board bring-up
 
+- [device-screens.md](device-screens.md): gallery of the primary screens on all three display classes (T-Deck Plus LVGL, Heltec OLED, Pager e-paper), captured from real hardware and the emulator
 - Board pin maps live in code: `main/boards/*.h` (source of truth)
 - [BUILDING.md](BUILDING.md): board-aware build/flash/monitor
 - [../hardware/pager/v1/](../hardware/pager/v1/): Bramble Pager v1 custom PCB design tree (spec, schematic, PCB, BOM, enclosure, errata)
