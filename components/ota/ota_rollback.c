@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_keys.h"
+#include "ota_rollback_policy.h"
 #include "ota_version.h"
 
 static const char* TAG = "ota_rollback";
@@ -49,11 +50,10 @@ void ota_rollback_note_boot(void) {
     }
 
     char floor_str[OTA_FLOOR_MAX];
-    ota_semver_t floor;
-    if (read_floor(floor_str, sizeof(floor_str)) && ota_version_parse(floor_str, &floor)) {
-        if (ota_version_cmp(&running, &floor) <= 0) {
-            return; /* floor already at or above the running version */
-        }
+    const char* floor = read_floor(floor_str, sizeof(floor_str)) ? floor_str : NULL;
+
+    if (!ota_rollback_should_raise_floor(desc->version, floor)) {
+        return; /* unparseable running version, or floor already at or above it */
     }
 
     if (write_floor(desc->version) == 0) {
@@ -64,36 +64,32 @@ void ota_rollback_note_boot(void) {
 }
 
 int ota_rollback_gate(const char* new_version, bool allow_downgrade) {
-    ota_semver_t candidate;
-    bool candidate_ok = new_version && ota_version_parse(new_version, &candidate);
+    char floor_str[OTA_FLOOR_MAX];
+    const char* floor = read_floor(floor_str, sizeof(floor_str)) ? floor_str : NULL;
 
-    if (!candidate_ok) {
-        if (allow_downgrade) {
-            ESP_LOGW(TAG, "Image version '%s' unparseable; accepted via allow_downgrade",
-                     new_version ? new_version : "(null)");
-            return 0;
-        }
+    switch (ota_rollback_decide(new_version, floor, allow_downgrade)) {
+    case OTA_ROLLBACK_ACCEPT:
+        return 0;
+
+    case OTA_ROLLBACK_ACCEPT_UNPARSEABLE:
+        ESP_LOGW(TAG, "Image version '%s' unparseable; accepted via allow_downgrade",
+                 new_version ? new_version : "(null)");
+        return 0;
+
+    case OTA_ROLLBACK_REJECT_UNPARSEABLE:
         ESP_LOGE(TAG, "OTA rejected: image version '%s' is not semver (fail closed)",
                  new_version ? new_version : "(null)");
         return -1;
-    }
 
-    char floor_str[OTA_FLOOR_MAX];
-    ota_semver_t floor;
-    if (!read_floor(floor_str, sizeof(floor_str)) || !ota_version_parse(floor_str, &floor)) {
-        return 0; /* no floor recorded yet */
-    }
-
-    if (ota_version_cmp(&candidate, &floor) >= 0) {
-        return 0;
-    }
-
-    if (!allow_downgrade) {
+    case OTA_ROLLBACK_REJECT_BELOW_FLOOR:
         ESP_LOGE(TAG,
                  "OTA rejected: image version %s is below the anti-rollback floor %s "
                  "(pass allow_downgrade to override)",
                  new_version, floor_str);
         return -1;
+
+    case OTA_ROLLBACK_ACCEPT_LOWER_FLOOR:
+        break;
     }
 
     /* Deliberate downgrade: lower the floor so the device is not stranded

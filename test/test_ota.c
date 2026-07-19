@@ -8,6 +8,7 @@
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
 #include "ota_rollback.h"
+#include "ota_rollback_policy.h"
 
 /* ── Controllable stubs for the advanced esp_https_ota API ─────────── */
 
@@ -71,7 +72,12 @@ int esp_https_ota_get_image_len_read(esp_https_ota_handle_t handle) {
     return 0; /* Task 1 progress reporting; not asserted by these tests */
 }
 
-/* ── Anti-rollback gate stub (ota_rollback.c is device-only) ───────── */
+/* ── Anti-rollback gate stub ───────────────────────────────────────────
+ *
+ * ota_rollback.c itself is device-only (it reads and writes the NVS floor),
+ * so ota.c's call into the gate is still exercised through this stub. The
+ * decision logic the gate delegates to lives in ota_rollback_policy.c, which
+ * is pure and is linked and tested for real below. */
 
 static int g_gate_result;
 static char g_gate_version[64];
@@ -253,6 +259,148 @@ void test_partition_and_version_helpers(void) {
     TEST_ASSERT_EQUAL_STRING("1.2.3", ota_get_app_version());
 }
 
+/* ── Real anti-rollback policy (ota_rollback_policy.c, linked for real) ──
+ *
+ * These call the same ota_rollback_decide() the device gate calls. Everything
+ * the gate adds on top is NVS I/O; the accept/reject decision is entirely
+ * here, so an off-by-one in the floor comparison is caught here.
+ *
+ * The off-by-one shapes these are written to catch:
+ *   - `>` instead of `>=`: a reinstall of the exact floor version would be
+ *     rejected, bricking the repair path. Caught by the equal-version tests.
+ *   - `>=` instead of `>` on the note_boot side: every boot would rewrite the
+ *     NVS floor. Caught by should_raise_floor_is_false_for_equal_version.
+ *   - swapped comparison arguments: equal still passes, so the strictly-newer
+ *     and strictly-older pairs are what catch the inversion.
+ *   - a one-unit step at the floor in each component (patch, minor, major)
+ *     and across a rollover (1.9.9 vs 2.0.0), where a component-wise
+ *     comparison that stops early goes wrong.
+ *   - the prerelease boundary, where 1.4.0-rc.1 must rank BELOW 1.4.0. */
+
+static void assert_decides(const char* candidate, const char* floor,
+                           ota_rollback_decision_t expected) {
+    char msg[160];
+    snprintf(msg, sizeof(msg), "candidate=%s floor=%s", candidate ? candidate : "(null)",
+             floor ? floor : "(none)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(expected, ota_rollback_decide(candidate, floor, false), msg);
+}
+
+void test_policy_equal_version_is_accepted(void) {
+    /* Reinstalling the exact floor version is a legitimate repair path. A
+     * `>` where the code needs `>=` rejects this. */
+    assert_decides("1.4.0", "1.4.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("0.0.0", "0.0.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("2.10.7", "2.10.7", OTA_ROLLBACK_ACCEPT);
+    /* Same version, different spellings that must still compare equal. */
+    assert_decides("v1.4.0", "1.4.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.4.0+build.9", "1.4.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.4.0-rc.1", "1.4.0-rc.1", OTA_ROLLBACK_ACCEPT);
+}
+
+void test_policy_strictly_newer_is_accepted(void) {
+    assert_decides("1.4.1", "1.4.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.5.0", "1.4.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("2.0.0", "1.4.0", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.4.0", "1.3.99", OTA_ROLLBACK_ACCEPT);
+}
+
+void test_policy_strictly_older_is_rejected(void) {
+    assert_decides("1.3.99", "1.4.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("1.4.0", "1.5.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("1.4.0", "2.0.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("0.9.9", "1.0.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+}
+
+void test_policy_one_step_each_side_of_the_floor(void) {
+    /* One unit below, at, and one unit above the floor, in each component.
+     * A comparison off by one in any component shows up as exactly one of
+     * these three flipping. */
+    assert_decides("1.4.3", "1.4.4", OTA_ROLLBACK_REJECT_BELOW_FLOOR); /* patch -1 */
+    assert_decides("1.4.4", "1.4.4", OTA_ROLLBACK_ACCEPT);             /* patch  0 */
+    assert_decides("1.4.5", "1.4.4", OTA_ROLLBACK_ACCEPT);             /* patch +1 */
+
+    assert_decides("1.3.4", "1.4.4", OTA_ROLLBACK_REJECT_BELOW_FLOOR); /* minor -1 */
+    assert_decides("1.5.4", "1.4.4", OTA_ROLLBACK_ACCEPT);             /* minor +1 */
+
+    assert_decides("0.4.4", "1.4.4", OTA_ROLLBACK_REJECT_BELOW_FLOOR); /* major -1 */
+    assert_decides("2.4.4", "1.4.4", OTA_ROLLBACK_ACCEPT);             /* major +1 */
+
+    /* Across a rollover, where a higher patch number sits on a lower core. */
+    assert_decides("1.9.9", "2.0.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("2.0.0", "1.9.9", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.4.99", "1.5.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("1.5.0", "1.4.99", OTA_ROLLBACK_ACCEPT);
+}
+
+void test_policy_prerelease_ranks_below_its_release(void) {
+    /* 1.4.0-rc.1 precedes 1.4.0: shipping the release candidate over the
+     * release is a downgrade and must be rejected. */
+    assert_decides("1.4.0-rc.1", "1.4.0", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("1.4.0", "1.4.0-rc.1", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.4.0-rc.1", "1.4.0-rc.2", OTA_ROLLBACK_REJECT_BELOW_FLOOR);
+    assert_decides("1.4.0-rc.2", "1.4.0-rc.1", OTA_ROLLBACK_ACCEPT);
+}
+
+void test_policy_accepts_when_no_usable_floor_is_stored(void) {
+    assert_decides("1.4.0", NULL, OTA_ROLLBACK_ACCEPT);
+    assert_decides("0.0.1", NULL, OTA_ROLLBACK_ACCEPT);
+    /* A floor that does not parse means "not set yet", not "reject all". */
+    assert_decides("1.4.0", "", OTA_ROLLBACK_ACCEPT);
+    assert_decides("1.4.0", "garbage", OTA_ROLLBACK_ACCEPT);
+}
+
+void test_policy_unparseable_candidate_fails_closed(void) {
+    assert_decides(NULL, "1.4.0", OTA_ROLLBACK_REJECT_UNPARSEABLE);
+    assert_decides("", "1.4.0", OTA_ROLLBACK_REJECT_UNPARSEABLE);
+    assert_decides("not-a-version", "1.4.0", OTA_ROLLBACK_REJECT_UNPARSEABLE);
+    assert_decides("1.4", "1.4.0", OTA_ROLLBACK_REJECT_UNPARSEABLE);
+    /* Fails closed even with no floor stored at all. */
+    assert_decides("nonsense", NULL, OTA_ROLLBACK_REJECT_UNPARSEABLE);
+}
+
+void test_policy_allow_downgrade_lowers_the_floor_only_when_below_it(void) {
+    /* Below the floor: accepted, and the floor moves down with it. */
+    TEST_ASSERT_EQUAL_INT(OTA_ROLLBACK_ACCEPT_LOWER_FLOOR,
+                          ota_rollback_decide("1.3.9", "1.4.0", true));
+    /* At or above the floor: accepted with the floor left alone. Getting
+     * this wrong rewrites NVS on every ordinary update. */
+    TEST_ASSERT_EQUAL_INT(OTA_ROLLBACK_ACCEPT, ota_rollback_decide("1.4.0", "1.4.0", true));
+    TEST_ASSERT_EQUAL_INT(OTA_ROLLBACK_ACCEPT, ota_rollback_decide("1.4.1", "1.4.0", true));
+    /* Unparseable candidate is accepted under allow_downgrade, but there is
+     * no version to lower the floor to. */
+    TEST_ASSERT_EQUAL_INT(OTA_ROLLBACK_ACCEPT_UNPARSEABLE,
+                          ota_rollback_decide("garbage", "1.4.0", true));
+    TEST_ASSERT_EQUAL_INT(OTA_ROLLBACK_ACCEPT_UNPARSEABLE,
+                          ota_rollback_decide(NULL, "1.4.0", true));
+}
+
+void test_policy_accept_predicate_matches_the_decisions(void) {
+    TEST_ASSERT_TRUE(ota_rollback_decision_accepts(OTA_ROLLBACK_ACCEPT));
+    TEST_ASSERT_TRUE(ota_rollback_decision_accepts(OTA_ROLLBACK_ACCEPT_UNPARSEABLE));
+    TEST_ASSERT_TRUE(ota_rollback_decision_accepts(OTA_ROLLBACK_ACCEPT_LOWER_FLOOR));
+    TEST_ASSERT_FALSE(ota_rollback_decision_accepts(OTA_ROLLBACK_REJECT_UNPARSEABLE));
+    TEST_ASSERT_FALSE(ota_rollback_decision_accepts(OTA_ROLLBACK_REJECT_BELOW_FLOOR));
+}
+
+void test_should_raise_floor_only_for_a_strictly_higher_running_version(void) {
+    /* Equal must NOT raise: a `>=` here rewrites NVS on every single boot. */
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("1.4.0", "1.4.0"));
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("1.4.0", "1.4.1"));
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("1.4.0", "2.0.0"));
+    TEST_ASSERT_TRUE(ota_rollback_should_raise_floor("1.4.1", "1.4.0"));
+    TEST_ASSERT_TRUE(ota_rollback_should_raise_floor("2.0.0", "1.9.9"));
+    /* Release outranks its own prerelease, so booting it raises the floor. */
+    TEST_ASSERT_TRUE(ota_rollback_should_raise_floor("1.4.0", "1.4.0-rc.1"));
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("1.4.0-rc.1", "1.4.0"));
+    /* No usable floor stored: record the running version. */
+    TEST_ASSERT_TRUE(ota_rollback_should_raise_floor("1.4.0", NULL));
+    TEST_ASSERT_TRUE(ota_rollback_should_raise_floor("1.4.0", "garbage"));
+    /* An unparseable running version never touches the floor. */
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("dev-build", "1.4.0"));
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor(NULL, "1.4.0"));
+    TEST_ASSERT_FALSE(ota_rollback_should_raise_floor("dev-build", NULL));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_https_url_routes_to_https_ota_with_hardening_flags);
@@ -265,5 +413,15 @@ int main(void) {
     RUN_TEST(test_unreadable_image_description_aborts);
     RUN_TEST(test_https_failure_propagates_error);
     RUN_TEST(test_partition_and_version_helpers);
+    RUN_TEST(test_policy_equal_version_is_accepted);
+    RUN_TEST(test_policy_strictly_newer_is_accepted);
+    RUN_TEST(test_policy_strictly_older_is_rejected);
+    RUN_TEST(test_policy_one_step_each_side_of_the_floor);
+    RUN_TEST(test_policy_prerelease_ranks_below_its_release);
+    RUN_TEST(test_policy_accepts_when_no_usable_floor_is_stored);
+    RUN_TEST(test_policy_unparseable_candidate_fails_closed);
+    RUN_TEST(test_policy_allow_downgrade_lowers_the_floor_only_when_below_it);
+    RUN_TEST(test_policy_accept_predicate_matches_the_decisions);
+    RUN_TEST(test_should_raise_floor_only_for_a_strictly_higher_running_version);
     return UNITY_END();
 }
