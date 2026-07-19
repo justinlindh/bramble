@@ -88,10 +88,8 @@ static int format_error(cJSON* id, int code, const char* message, char* json_out
     return (int)len;
 }
 
-static __attribute__((unused)) int format_error_with_details(cJSON* id, int code,
-                                                             const char* message,
-                                                             const char* details, char* json_out,
-                                                             size_t out_len) {
+static int format_error_with_details(cJSON* id, int code, const char* message, const char* details,
+                                     char* json_out, size_t out_len) {
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
 

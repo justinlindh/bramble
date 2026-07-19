@@ -13,7 +13,7 @@
 #include "freertos/task.h"
 #include <string.h>
 
-static const char* TAG = "display";
+static const char* TAG = "ssd1306";
 static const bramble_board_config_t* s_board = NULL;
 
 /* ── Framebuffer ─────────────────────────────────────────────────────── */
