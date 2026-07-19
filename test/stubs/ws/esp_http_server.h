@@ -107,14 +107,23 @@ typedef struct {
     size_t stack_size;
 } httpd_config_t;
 
-#define HTTPD_DEFAULT_CONFIG()                                                                     \
-    {                                                                                              \
-        .server_port = 80,                                                                         \
-        .max_open_sockets = 7,                                                                     \
-        .lru_purge_enable = false,                                                                 \
-        .close_fn = NULL,                                                                          \
-        .stack_size = 4096,                                                                        \
-    }
+/* A function rather than the braced-initializer macro the real ESP-IDF header
+ * uses. Two clang-format versions disagree about how to lay out a multi-line
+ * designated-initializer list inside a macro (local 22.x accepts one form, the
+ * CI-pinned version demands another), and the strict format check gates every
+ * PR. Plain statements have no such ambiguity. The call site
+ * `httpd_config_t config = HTTPD_DEFAULT_CONFIG();` is unaffected. */
+static inline httpd_config_t httpd_default_config(void) {
+    httpd_config_t cfg;
+    cfg.server_port = 80;
+    cfg.max_open_sockets = 7;
+    cfg.lru_purge_enable = false;
+    cfg.close_fn = NULL;
+    cfg.stack_size = 4096;
+    return cfg;
+}
+
+#define HTTPD_DEFAULT_CONFIG() httpd_default_config()
 
 /* ── Production surface ──────────────────────────────────────────────── */
 
