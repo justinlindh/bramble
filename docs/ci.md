@@ -59,6 +59,15 @@ The rule that keeps this safe:
 > Workflows always TRIGGER. Heavy jobs SKIP via job-level `if:` conditions on
 > the detector's outputs. A skipped required job still produces a passing
 > context, so every required check always reports.
+>
+> MATRIX JOBS ARE THE EXCEPTION: they must gate on their STEPS, never on the
+> job. A job-level `if:` that evaluates false stops GitHub from expanding the
+> matrix at all, so instead of one context per leg it publishes a single check
+> run carrying the raw literal job name, for example
+> `Board build smoke (${{ matrix.board }})`. The per-leg contexts do not exist
+> on that commit, so requiring them would block every out-of-scope PR forever.
+> Gate each step instead: the matrix always expands, and out of scope each leg
+> reports success having done no work.
 
 Concretely:
 
@@ -247,6 +256,18 @@ Job name templating (`Board build smoke (${{ matrix.board }})`) makes the
 heltec-v3 context string identical to the one the un-matrixed job produced, so
 that required check carries over untouched. The other three are new required
 context names and have to be added to branch protection.
+
+The area gate lives on the job's STEPS, not on the job, and it has to stay
+there. This is the one place in the repo where the usual job-level `if:` is
+wrong. With a job-level `if:` the matrix only expanded when the condition was
+true; when it was false GitHub published a single check run named with the
+unevaluated literal `Board build smoke (${{ matrix.board }})` and the four
+per-board contexts simply did not exist on that commit. Requiring them would
+then have hung every docs-only, webapp-only, and dependency PR forever.
+Gating each step keeps the matrix unconditional, so all four contexts report
+on every PR: they build when `firmware` or `workflows` changed, and otherwise
+succeed immediately having run nothing. Verified by opening a docs-only PR
+against this change and observing all four expanded contexts report success.
 
 `scripts/lint/check-board-matrix.sh` (a step in the `Static checks` bundle)
 asserts that the matrix board list and the `BOARDS` list in
