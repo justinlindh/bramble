@@ -2167,6 +2167,53 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskStackHighWaterMark'
+        backpressure:
+          $ref: '#/components/schemas/BackpressureDiagnostics'
+
+    BackpressureDiagnostics:
+      type: object
+      description: >
+        Airtime backpressure counters. Non-zero values mean the node shed
+        load rather than transmitting: they are the field-diagnosable record
+        of congestion, distinguishing "we deliberately yielded the channel"
+        from "the radio is broken".
+      required: [flood_relay_drops, probe_ingress]
+      properties:
+        flood_relay_drops:
+          type: number
+          description: >
+            Flood rebroadcasts dropped because the jittered relay queue was
+            full. The node was already holding a full queue of pending
+            relays, which is local congestion, so it dropped the copy
+            instead of transmitting it un-jittered.
+        probe_ingress:
+          $ref: '#/components/schemas/ProbeIngressDiagnostics'
+
+    ProbeIngressDiagnostics:
+      type: object
+      description: >
+        Inbound PROBE token-bucket accounting. PROBE is unauthenticated by
+        design, so these buckets bound how much transmission an inbound probe
+        can buy rather than who may send one. The buckets are node-global and
+        never per-sender, because the only sender signal on a PROBE is an
+        unauthenticated address field.
+      required: [accepted, dropped_reply, dropped_forward]
+      properties:
+        accepted:
+          type: number
+          description: Probes that were answered.
+        dropped_reply:
+          type: number
+          description: >
+            Probes refused by the node-wide probe ceiling and left
+            unanswered. A rising count means the node is under probe
+            pressure, from a flood or from an over-eager operator.
+        dropped_forward:
+          type: number
+          description: >
+            Probes answered but not rebroadcast, because the tighter forward
+            bucket was empty. Propagation stopped while local reachability
+            answers kept working.
 
     IdentityResponse:
       type: object

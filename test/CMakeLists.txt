@@ -731,6 +731,33 @@ target_include_directories(test_channel_flood PRIVATE
 )
 target_link_libraries(test_channel_flood ssl crypto)
 
+# Issue #87: flood relay queue backpressure (full queue drops and counts,
+# never falls back to an un-jittered immediate transmit)
+add_executable(test_flood_relay_backpressure
+    test_flood_relay_backpressure.c
+    unity/unity.c
+    stubs/esp_stubs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/network_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/crypto_host.c
+)
+target_include_directories(test_flood_relay_backpressure PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/routing/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/network_key/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/crypto/include
+)
+target_link_libraries(test_flood_relay_backpressure ssl crypto)
+
+# Issue #75: PROBE ingress token buckets (bounded amplification, and the
+# global-not-per-sender property that keeps a forged src_addr from targeting
+# anyone)
+add_executable(test_probe_ingress
+    test_probe_ingress.c
+    unity/unity.c
+)
+target_include_directories(test_probe_ingress PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/security/include
+)
+
 # Fragment tests
 add_executable(test_fragment
     test_fragment.c

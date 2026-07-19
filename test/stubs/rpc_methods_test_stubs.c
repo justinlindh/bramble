@@ -253,6 +253,17 @@ void mesh_set_node_name(const char* n) { (void)n; }
 void mesh_reboot_delayed(uint32_t d) { (void)d; }
 void mesh_rederive_beacon_key(void) {}
 void mesh_trigger_attestation(void) {}
+/* Airtime backpressure counters (issues #75, #87). */
+uint32_t mesh_get_flood_relay_drops(void) { return 0; }
+void mesh_get_probe_ingress_stats(uint32_t* accepted, uint32_t* dropped_reply,
+                                  uint32_t* dropped_forward) {
+    if (accepted)
+        *accepted = 0;
+    if (dropped_reply)
+        *dropped_reply = 0;
+    if (dropped_forward)
+        *dropped_forward = 0;
+}
 bool mesh_get_beacon_status(void) { return true; }
 int mesh_set_beacon_policy(beacon_policy_mode_t m) {
     (void)m;
