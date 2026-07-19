@@ -176,8 +176,10 @@ updates:
   # interesting updates arrive as ungrouped majors, which is the intent.
   #
   # Only FROM lines are tracked. emulator/Dockerfile also git-clones ESP-IDF
-  # at ARG IDF_VERSION=v5.4; Dependabot does not see that, so it still needs
-  # to be moved by hand.
+  # via an IDF_VERSION build arg, which Dependabot cannot see, so that pin
+  # still has to be moved by hand. It is not unguarded, though:
+  # scripts/lint/check-idf-version.sh asserts every ESP-IDF reference in the
+  # tree matches .esp-idf-version, and that check gates every pull request.
   - package-ecosystem: docker
     directory: /webapp
     schedule:
