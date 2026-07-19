@@ -12,6 +12,7 @@
 
 #include "ble_server.h"
 #include "ble_redact.h"
+#include "ble_link_sec.h"
 #include "rpc_dispatcher.h"
 #include "rpc_auth.h"
 #include "ct_strcmp.h"
@@ -33,6 +34,14 @@
 #include <string.h>
 
 #define TAG "ble"
+
+/*
+ * Bond persistence. ESP-IDF ships NimBLE's NVS-backed key store but does not
+ * export its header from the bt component, so upstream's own examples (and
+ * therefore we) forward declare the initializer. Backed by
+ * CONFIG_BT_NIMBLE_NVS_PERSIST=y.
+ */
+void ble_store_config_init(void);
 
 /* NUS UUIDs — must match webapp BLETransport.ts */
 static const ble_uuid128_t NUS_SERVICE_UUID = BLE_UUID128_INIT(
@@ -70,6 +79,16 @@ typedef struct {
     size_t len;
 } ble_rpc_msg_t;
 
+/* True only when the given connection has an encrypted link. A conn handle we
+ * cannot look up counts as unencrypted: fail closed. */
+static bool conn_is_encrypted(uint16_t conn_handle) {
+    struct ble_gap_conn_desc desc;
+    if (ble_gap_conn_find(conn_handle, &desc) != 0) {
+        return false;
+    }
+    return desc.sec_state.encrypted;
+}
+
 static bool ble_authenticate_first_write(const char* line) {
     if (ws_server_auth_disabled()) {
         /* Explicit opt-out only; a missing token fails closed */
@@ -98,6 +117,13 @@ static void ble_notify_cb(const char* json, size_t len, void* ctx) {
     (void)ctx;
     if (s_conn_handle == BLE_HS_CONN_HANDLE_NONE || !s_rx_notify_enabled) {
         ESP_LOGW(TAG, "Cannot notify: conn=%d notify=%d", s_conn_handle, s_rx_notify_enabled);
+        return;
+    }
+
+    /* Never transmit on a cleartext link, not even an auth error reply: a
+     * client that subscribed without pairing gets silence (issue #73). */
+    if (!ble_link_payload_permitted(conn_is_encrypted(s_conn_handle))) {
+        ESP_LOGW(TAG, "Suppressing notify on unencrypted link (conn=%d)", s_conn_handle);
         return;
     }
 
@@ -256,9 +282,18 @@ static void process_ble_data(const uint8_t* data, size_t len) {
 
 static int nus_tx_access(uint16_t conn_handle, uint16_t attr_handle,
                          struct ble_gatt_access_ctxt* ctxt, void* arg) {
-    (void)conn_handle;
     (void)attr_handle;
     (void)arg;
+
+    /* The BLE_GATT_CHR_F_WRITE_ENC flags below already make the ATT server
+     * reject unencrypted writes with "insufficient authentication". This is
+     * the second, independent check: the auth token arrives on this
+     * characteristic, so a permission regression must not be able to leak it
+     * silently (issue #73). */
+    if (!ble_link_payload_permitted(conn_is_encrypted(conn_handle))) {
+        ESP_LOGW(TAG, "Rejecting BLE write on unencrypted link (conn=%d)", conn_handle);
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    }
 
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
@@ -296,13 +331,23 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
                     /* TX: app writes to device */
                     .uuid = &NUS_TX_UUID.u,
                     .access_cb = nus_tx_access,
-                    .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+                    /* _ENC: writes require an encrypted link. The RPC auth
+                     * token is the first write on this characteristic, so
+                     * cleartext is not an option (issue #73). */
+                    .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP |
+                             BLE_GATT_CHR_F_WRITE_ENC,
                 },
                 {
                     /* RX: device notifies app */
                     .uuid = &NUS_RX_UUID.u,
                     .access_cb = nus_rx_access,
                     .val_handle = &s_rx_attr_handle,
+                    /* There is no NOTIFY_ENC flag in NimBLE, and NimBLE
+                     * registers the CCCD with plain read/write permissions
+                     * regardless of the characteristic's flags, so a client
+                     * can always subscribe. The outbound direction is instead
+                     * gated in ble_notify_cb, which refuses to transmit on an
+                     * unencrypted link. */
                     .flags = BLE_GATT_CHR_F_NOTIFY,
                 },
                 {0}, /* sentinel */
@@ -372,6 +417,20 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             /* Request higher MTU for better throughput */
             ble_att_set_preferred_mtu(256);
             ble_gattc_exchange_mtu(s_conn_handle, NULL, NULL);
+
+            /*
+             * Ask the central to encrypt immediately rather than waiting for
+             * it to trip over an "insufficient authentication" error on the
+             * first write. Already-bonded peers re-key from the stored LTK
+             * with no user interaction; new peers get the OS pairing prompt
+             * before any RPC traffic is attempted, which is what keeps the
+             * client's auth handshake from failing its first attempt.
+             * BLE_HS_EALREADY means encryption is already up.
+             */
+            int sec_rc = ble_gap_security_initiate(s_conn_handle);
+            if (sec_rc != 0 && sec_rc != BLE_HS_EALREADY) {
+                ESP_LOGW(TAG, "security_initiate failed: %d", sec_rc);
+            }
         } else {
             ESP_LOGW(TAG, "BLE connect failed: status=%d", event->connect.status);
             start_advertising();
@@ -394,6 +453,46 @@ static int gap_event_handler(struct ble_gap_event* event, void* arg) {
             s_rx_notify_enabled = event->subscribe.cur_notify;
             ESP_LOGI(TAG, "RX notifications %s", s_rx_notify_enabled ? "enabled" : "disabled");
         }
+        break;
+
+    case BLE_GAP_EVENT_ENC_CHANGE: {
+        struct ble_gap_conn_desc desc;
+        if (ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0) {
+            ESP_LOGI(TAG, "Encryption change: status=%d encrypted=%d authenticated=%d bonded=%d",
+                     event->enc_change.status, desc.sec_state.encrypted,
+                     desc.sec_state.authenticated, desc.sec_state.bonded);
+        } else {
+            ESP_LOGW(TAG, "Encryption change: status=%d (conn lookup failed)",
+                     event->enc_change.status);
+        }
+        break;
+    }
+
+    case BLE_GAP_EVENT_REPEAT_PAIRING:
+        /*
+         * The peer wants to pair again while we still hold a bond for it,
+         * which is what happens after the client side forgets the device (an
+         * OS "forget", a browser profile reset, a reinstall). Dropping the
+         * stale bond and letting pairing continue is the difference between
+         * "re-pair and it works" and "re-pair fails forever until the node is
+         * factory reset". The old LTK is useless to us at this point anyway.
+         */
+        {
+            struct ble_gap_conn_desc desc;
+            if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0) {
+                ble_store_util_delete_peer(&desc.peer_id_addr);
+            }
+            ESP_LOGI(TAG, "Repeat pairing: dropped stale bond, continuing");
+            return BLE_GAP_REPEAT_PAIRING_RETRY;
+        }
+
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+        /* NO_INPUT_OUTPUT means Just Works, so the stack should never ask us
+         * for a passkey. If it does, the IO capability configuration and the
+         * board's actual capabilities have diverged: log loudly rather than
+         * silently accepting something we cannot show the user. */
+        ESP_LOGE(TAG, "Unexpected passkey action %d on a Just Works configuration",
+                 event->passkey.params.action);
         break;
 
     case BLE_GAP_EVENT_MTU:
@@ -472,6 +571,41 @@ int ble_server_init(void) {
     /* Configure NimBLE host */
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
+
+    /*
+     * Security manager (issue #73).
+     *
+     * sm_sc=1 selects LE Secure Connections: pairing is an ECDH P-256 key
+     * agreement, so a passive observer that records the entire pairing
+     * exchange still cannot derive the LTK. CONFIG_BT_NIMBLE_SM_LEGACY=n in
+     * the board defaults compiles legacy pairing out, because legacy Just
+     * Works is trivially recoverable from a sniffed exchange and a
+     * downgrade to it would silently undo this whole change.
+     *
+     * sm_io_cap=NO_IO gives Just Works. That is a deliberate choice, not an
+     * oversight: a passkey or numeric-comparison flow needs a display AND a
+     * confirm input on the peripheral, and the supported boards do not all
+     * have both (see docs/ and components/board_config). A flow that works
+     * on one profile and bricks BLE on another is worse than a uniform one.
+     * The residual is that an active MITM present at first-pairing time can
+     * still interpose; the passive sniffer in issue #73 cannot. Follow-up
+     * tracked separately.
+     *
+     * Bonding plus ENC|ID key distribution: the peer keeps the LTK so the
+     * pairing prompt is once per device, and exchanging IRKs is the
+     * groundwork for resolvable private addresses (the RPA gap noted in
+     * on_sync).
+     */
+    ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+    ble_hs_cfg.sm_sc = 1;
+    ble_hs_cfg.sm_mitm = 0;
+    ble_hs_cfg.sm_bonding = 1;
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+    /* Persist bonds in NVS (CONFIG_BT_NIMBLE_NVS_PERSIST=y) so a reboot does
+     * not force every paired client to pair again. */
+    ble_store_config_init();
 
     /* Register GATT services */
     ble_svc_gap_init();
