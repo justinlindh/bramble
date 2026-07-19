@@ -23,7 +23,7 @@ Two ways to get firmware onto a device:
   [BUILDING.md](BUILDING.md). The short version:
 
   ```bash
-  cd ~/src/bramble
+  # from the root of your bramble checkout, with ESP-IDF activated
   bash scripts/flash.sh local heltec-v3 build
   bash scripts/flash.sh local heltec-v3 flash /dev/ttyUSB0
   ```

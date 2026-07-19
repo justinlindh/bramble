@@ -38,19 +38,29 @@ bash scripts/flash.sh local heltec-v3 monitor /dev/ttyUSB0
 
 ### ESP-IDF v5.4
 
+Clone ESP-IDF wherever you keep source. The examples below use
+`$HOME/esp/esp-idf`; substitute your own location.
+
 ```bash
-git clone --depth 1 -b v5.4 https://github.com/espressif/esp-idf.git ~/src/esp-idf
-cd ~/src/esp-idf
+git clone --depth 1 -b v5.4 https://github.com/espressif/esp-idf.git "$HOME/esp/esp-idf"
+cd "$HOME/esp/esp-idf"
 git submodule update --init --recursive --depth 1
 ./install.sh esp32s3
 ```
 
+> `install.sh esp32s3` installs the toolchain for real boards. The
+> [emulator](../emulator/README.md) builds the same firmware for ESP-IDF's
+> **linux** target, which is a separate install: run `./install.sh linux` as
+> well if you plan to use it. Installing both is fine.
+
 ### Activate ESP-IDF in your shell
 
-The wrapper expects `~/src/esp-idf/export.sh` to exist.
+`scripts/flash.sh` locates ESP-IDF by checking `$IDF_PATH` first, then
+`~/src/esp-idf`, `~/esp-idf`, `/opt/esp/idf`, and `/opt/esp-idf`. Setting
+`IDF_PATH` explicitly is the reliable option:
 
 ```bash
-export IDF_PATH=~/src/esp-idf
+export IDF_PATH="$HOME/esp/esp-idf"
 source "$IDF_PATH/export.sh"
 ```
 
@@ -132,3 +142,11 @@ GNSS pins live in `main/boards/heltec_v4.h`.
 ### Bramble Pager v1 (custom board)
 
 The Bramble Pager v1 is an in-house PCB design, not an off-the-shelf dev kit. Its board profile is selected by `CONFIG_BRAMBLE_BOARD_PAGER=y` from `sdkconfig.defaults.bramble_pager`, which also sets 8MB flash and a native USB-Serial-JTAG console (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`): there is no UART bridge chip, so flash and monitor over the native USB-C port (it enumerates as `/dev/ttyACM*`, not `/dev/ttyUSB*`). The pin map is `main/boards/bramble_pager.h`. The full hardware design (spec, schematic, PCB, BOM, enclosure, and the pre-fab bring-up gates) lives in [../hardware/pager/v1/](../hardware/pager/v1/).
+
+---
+
+## Troubleshooting
+
+Serial permissions on Linux, missing toolchains, the `esp32s3` versus `linux`
+target distinction, and port collisions are covered in
+[troubleshooting.md](troubleshooting.md).

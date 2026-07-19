@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose new behavior or an improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If you want to discuss a direction rather than propose a specific change,
+        [Discussions](https://github.com/justinlindh/bramble/discussions) is the
+        better venue.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that you cannot do today? Describe the situation
+        rather than the solution; it often turns out there is a better fix than
+        the one that first comes to mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What you would like Bramble to do instead.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Protocol / routing
+        - Firmware
+        - Security / crypto
+        - Webapp or desktop client
+        - Device UI (T-Deck, pager)
+        - Simulator
+        - Emulator
+        - RPC / SDK
+        - Hardware
+        - Docs and tooling
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints you have considered
+      description: >
+        Optional, but valuable. Bramble runs on constrained hardware over a shared,
+        duty-cycle-limited radio channel, so airtime cost, RAM, flash, and the
+        effect on the security model are usually the deciding factors. If the idea
+        touches the wire format, note that it is a compatibility break.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other approaches you weighed, and why you set them aside.

@@ -33,6 +33,7 @@ Bramble is an encrypted, multi-hop mesh protocol and firmware stack for long-ran
 - [API and SDK](#api-and-sdk)
 - [CI/CD](#cicd)
 - [Status](#status)
+- [Contributing and Community](#contributing-and-community)
 - [License](#license)
 
 ## What is Bramble?
@@ -101,15 +102,26 @@ Quick start: `cd emulator && make run` (local toolchain) or `docker compose up -
 
 Full build/flash instructions (including board-specific profiles and USB-port notes) are in [docs/BUILDING.md](docs/BUILDING.md).
 
-Quick start:
+Quick start (building from source needs ESP-IDF v5.4; see
+[docs/BUILDING.md](docs/BUILDING.md) to install and activate it):
 
 ```bash
-cd ~/src/bramble
+git clone https://github.com/justinlindh/bramble.git
+cd bramble
+
+# activate ESP-IDF in this shell first
+source "$IDF_PATH/export.sh"
+
 bash scripts/flash.sh local heltec-v3 build
 bash scripts/flash.sh local heltec-v3 flash /dev/ttyUSB0
 ```
 
 Use `tdeck-plus` instead of `heltec-v3` for T-Deck Plus builds.
+
+No toolchain, no problem: the [web flasher](https://bramblemesh.org/web-flasher/)
+flashes a device over USB straight from the browser. If a build or flash
+stalls (serial permissions, a missing toolchain, a port collision), see
+[docs/troubleshooting.md](docs/troubleshooting.md).
 
 **First-time setup.** A freshly flashed node boots unprovisioned and inert: it has no network key, so it will not mesh (it neither emits nor accepts authenticated control-plane traffic) until you provision one, and the web client shows a prominent UNPROVISIONED banner until then. Follow [docs/getting-started.md](docs/getting-started.md) to connect the web client, provision a network key, optionally enroll the node under a trust anchor, and send your first message.
 
@@ -131,6 +143,8 @@ For the full component breakdown and interaction diagrams, see [docs/bramble-arc
 ## Documentation
 
 - [docs/README.md](docs/README.md): documentation index (recommended entry point)
+- [CONTRIBUTING.md](CONTRIBUTING.md): contributor setup, quality gates, and conventions
+- [docs/troubleshooting.md](docs/troubleshooting.md): common build, flash, and test stalls
 - [docs/BUILDING.md](docs/BUILDING.md): build, flash, monitor workflows
 - [docs/bramble-architecture.md](docs/bramble-architecture.md): component-level architecture
 - [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md): threat model, verified protections, and known gaps
@@ -164,6 +178,30 @@ Bramble exposes a JSON-RPC 2.0 interface for device control and observability.
 ## Status
 
 Bramble is an early but fully functional project: the protocol stack is implemented end to end, reviewed and host-tested, and running stable on real hardware today (T-Deck Plus, Heltec V3, and Heltec V4). Every change must pass the full host test suite as a required CI gate (`test/run_all_tests.sh`, which fails if any suite fails or none are found). It has not yet been field-tested at scale, and development is ongoing.
+
+## Contributing and Community
+
+Contributions are welcome, and you do not need hardware to make one. The
+webapp, the simulator, the host test suites, and the docs all build and run on
+an ordinary machine.
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**: setup, the quality gates, branch and
+  commit conventions, and what a good pull request looks like. Start there.
+  Note the one step that is easy to miss: run `make setup-hooks` once per
+  clone so the pre-commit checks run on your machine instead of failing in CI.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)**: serial permissions,
+  toolchain targets, port collisions, and the other common first-run stalls.
+- **[Issues](https://github.com/justinlindh/bramble/issues)**: bug reports and
+  feature requests.
+- **[Discussions](https://github.com/justinlindh/bramble/discussions)**:
+  questions, ideas, and show-and-tell.
+- **[SECURITY.md](SECURITY.md)**: how to report a vulnerability privately.
+  Please do not open a public issue for one.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**: what is expected of everyone
+  taking part.
+
+GitHub is canonical for outside contributions. Any other remote you may come
+across is a mirror.
 
 ## License
 

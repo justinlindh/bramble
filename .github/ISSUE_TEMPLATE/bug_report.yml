@@ -1,0 +1,86 @@
+name: Bug report
+description: Something behaves incorrectly in the firmware, webapp, simulator, or emulator.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. For a radio mesh, the board, the build, and the
+        exact reproduction usually are the diagnosis, so the fields below matter.
+
+        Do not report security vulnerabilities here. Use
+        [private reporting](https://github.com/justinlindh/bramble/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        The smallest sequence that shows the problem. If you can reproduce it in
+        the simulator or emulator rather than on hardware, say so: that makes it
+        far easier to fix and to gate against.
+      placeholder: |
+        1. Flash heltec-v3 with ...
+        2. Provision a network key
+        3. Send a Critical-tier DM to a node two hops away
+        4. Sender shows FAILED, receiver shows the message
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did you see this
+      multiple: true
+      options:
+        - Real hardware
+        - Emulator (linux-target firmware)
+        - Simulator (gosim)
+        - Host tests
+        - Webapp in a browser
+        - Desktop app (Electron)
+    validations:
+      required: true
+
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: If on hardware. For example heltec-v3, heltec-v4, tdeck-plus, bramble-pager.
+      placeholder: heltec-v3
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: >
+        Firmware version, webapp version, or the commit you built from
+        (`git rev-parse --short HEAD`).
+      placeholder: 0.5.0, or a commit sha
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or output
+      description: >
+        Serial log, browser console, or test output. Please scrub anything you do
+        not want public: node addresses, auth tokens, network keys, real
+        coordinates, and your LAN addresses.
+      render: text
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Number of nodes, topology, RF conditions, how often it reproduces.

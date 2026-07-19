@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/justinlindh/bramble/discussions
+    about: Ask how something works, propose a direction, or show what you built.
+  - name: Security vulnerability
+    url: https://github.com/justinlindh/bramble/security/advisories/new
+    about: Report privately. Please do not open a public issue for a vulnerability.
+  - name: Contributing guide
+    url: https://github.com/justinlindh/bramble/blob/main/CONTRIBUTING.md
+    about: Setup, the quality gates, branch and commit conventions.

@@ -54,10 +54,23 @@ Individual targets, each a thin wrapper documented inline in `Makefile`:
 | `make clean` | remove build artifacts (node build dir/sdkconfig, gosim binary, UI dist) |
 
 Override the port with `make run PORT=3010` if `3000` is already taken on
-your machine.
+your machine. Note that the local simulator (`simulator/gosim`) also defaults
+to `3000`, so running both at once needs one of them moved. The Docker
+variants do not collide: the simulator publishes 3003 and the emulator 3004.
 
 ESP-IDF location defaults to `~/src/esp-idf`; override with `IDF_PATH=...`
-if yours lives elsewhere (e.g. `make run IDF_PATH=/opt/esp-idf`).
+if yours lives elsewhere (e.g. `make run IDF_PATH=/opt/esp-idf`). The
+emulator needs ESP-IDF's **linux** target
+(`"$IDF_PATH"/install.sh linux`), which is a separate install from the
+`esp32s3` one used for real boards; `make check` will tell you if it is
+missing.
+
+`bash ci/run_scenarios.sh` runs the compiled firmware but does not build it.
+Run `make node` (or `make run`) first, or it reports a missing
+`emulator/node/build/bramble-node.elf`.
+
+More first-run stalls are collected in
+[../docs/troubleshooting.md](../docs/troubleshooting.md).
 
 ## Manual build (what the targets above wrap)
 

@@ -7,6 +7,8 @@ This index separates **operator/developer reference docs** from **historical pla
 - [getting-started.md](getting-started.md): first-node walkthrough from flashing to your first confirmed message (provisioning, unprovisioned banner, optional trust anchor)
 - [../README.md](../README.md): project overview and quick start
 - [BUILDING.md](BUILDING.md): build/flash/monitor workflows (board-aware)
+- [../CONTRIBUTING.md](../CONTRIBUTING.md): contributor setup, quality gates, branch and commit conventions
+- [troubleshooting.md](troubleshooting.md): common build, flash, and test stalls (serial permissions, toolchain targets, port collisions)
 - [bramble-testing.md](bramble-testing.md): test matrix and what to run
 - [bramble-architecture.md](bramble-architecture.md): component architecture
 - [bramble-protocol-spec.md](bramble-protocol-spec.md): protocol behavior and packet semantics
