@@ -62,4 +62,10 @@ if ! python3 "$TEST_DIR/check_lvgl_glyphs.py"; then
     exit 1
 fi
 
+echo ""
+echo "=== Splash logo asset check ==="
+if ! python3 "$TEST_DIR/check_splash_logo.py"; then
+    exit 1
+fi
+
 echo "ALL TESTS PASSED ✓"
