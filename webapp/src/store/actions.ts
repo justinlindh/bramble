@@ -626,13 +626,17 @@ export function mergeFirmwareMessages(
       timestampMs: wallMs,
       status: 'delivered',
     };
-    // Dedup against the store *and* everything accepted so far in this batch.
-    const isDuplicate =
-      ctx.existing.some(ex => isLikelyDuplicate(ex, fwMsg)) ||
-      accepted.some(ex => isLikelyDuplicate(ex, fwMsg));
+    /* Dedup against the store only, never within the batch. isLikelyDuplicate
+     * is a content match, so an intra-batch check would drop a user genuinely
+     * sending "ok" twice a few seconds apart, since both rows ride in one
+     * response. msg_store_get maps index 0..count-1 onto distinct ring slots,
+     * so a single response cannot repeat a stored message anyway and there is
+     * nothing for such a check to catch. The ctx.existing check IS needed: a
+     * re-poll returns the same rows with shifted ring indices, hence different
+     * synthetic ids, and only content matching recognizes them. */
     // A match means the cached copy is at least as rich (it may carry relay
     // path or status from the web-side send path), so keep it and drop this one.
-    if (isDuplicate) return;
+    if (ctx.existing.some(ex => isLikelyDuplicate(ex, fwMsg))) return;
     accepted.push(fwMsg);
   });
   return accepted;

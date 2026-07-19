@@ -72,15 +72,37 @@ describe('mergeFirmwareMessages', () => {
     expect(merged).toHaveLength(0);
   });
 
-  it('dedupes a duplicate that appears twice inside the same batch', () => {
-    // The frozen-snapshot half of the bug: the old loop compared every row
-    // against a pre-loop store snapshot, so an intra-batch repeat was invisible.
+  it('keeps two identical-text rows in one batch, since each is a real message', () => {
+    // A user really can send "ok" twice a few seconds apart. Both rows occupy
+    // distinct ring slots and both come back in one response, so content-based
+    // dedup must NOT be applied within a batch or the repeat is swallowed.
     const merged = mergeFirmwareMessages(
-      [fwRow({ text: 'same text' }), fwRow({ text: 'same text' })],
+      [fwRow({ text: 'ok', timestamp_s: 1000 }), fwRow({ text: 'ok', timestamp_s: 1003 })],
       ctx(),
     );
 
-    expect(merged).toHaveLength(1);
+    expect(merged).toHaveLength(2);
+    expect(merged.map(m => m.text)).toEqual(['ok', 'ok']);
+    expect(new Set(merged.map(m => m.id)).size).toBe(2);
+
+    for (const m of merged) useStore.getState().addMessage(m);
+    expect(useStore.getState().messages).toHaveLength(2);
+  });
+
+  it('does not re-add duplicate-text rows when the same ring is polled twice', () => {
+    // Removing the intra-batch check must not reintroduce cross-poll growth:
+    // the ctx.existing content match is what catches re-fetched rows, whose
+    // ring indices (and therefore synthetic ids) shift as the ring rotates.
+    const ring = [
+      fwRow({ text: 'ok', timestamp_s: 1000 }),
+      fwRow({ text: 'ok', timestamp_s: 1003 }),
+    ];
+
+    const first = mergeFirmwareMessages(ring, ctx());
+    expect(first).toHaveLength(2);
+
+    const second = mergeFirmwareMessages(ring, ctx(first));
+    expect(second).toHaveLength(0);
   });
 
   it('preserves a cached message rather than re-adding it across two polls', () => {
