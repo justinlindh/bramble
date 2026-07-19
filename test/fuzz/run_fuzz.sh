@@ -120,7 +120,7 @@ for target in packet fragment; do
   # under test allocates, so there is nothing here for LSan to find.
   if ! "$BUILD_DIR/fuzz_$target" \
     -max_total_time="$FUZZ_SECONDS" \
-    -max_len=512 \
+    -max_len=1024 \
     -timeout=10 \
     -rss_limit_mb=2048 \
     -print_final_stats=1 \
