@@ -14,6 +14,45 @@ See also:
 - [`docs/COMPARISON.md`](COMPARISON.md): Comparison with Meshtastic and MeshCore
 - [`docs/bramble-anomaly-detection.md`](bramble-anomaly-detection.md): Anomaly detection subsystem
 - [`simulator/README.md`](../simulator/README.md): Network simulator
+- [`emulator/DESIGN.md`](../emulator/DESIGN.md): Emulator and the emu-link broker protocol
+
+---
+
+## System View
+
+Four things build from one set of C sources. The firmware in `components/` plus `main/` is the only implementation of the protocol; the simulator, the emulator, and the host test suites all compile those same component sources rather than reimplementing them, which is why a protocol change cannot pass CI in one place and silently drift in another.
+
+```mermaid
+flowchart TB
+    subgraph device["On device: ESP32-S3 + SX1262"]
+        FW["Bramble firmware<br/>components/ + main/"]
+    end
+
+    PEER["Peer nodes<br/>same firmware"]
+
+    FW <-->|"LoRa: Bramble packets"| PEER
+
+    subgraph clients["Clients: webapp/"]
+        BROWSER["React client<br/>in a browser"]
+        ELECTRON["Electron desktop shell"]
+    end
+
+    BROWSER -->|"JSON-RPC over WebSocket"| FW
+    ELECTRON -->|"JSON-RPC over serial or BLE"| FW
+
+    subgraph hostbuilds["Host builds of the same component sources"]
+        GOSIM["simulator/gosim<br/>modelled ether + broker"]
+        EMUNODE["emulator/ node<br/>firmware, IDF linux target"]
+        TESTS["test/<br/>Unity host suites"]
+    end
+
+    FW -.->|"same sources, cgo bridge"| GOSIM
+    FW -.->|"same sources, virtual drivers"| EMUNODE
+    FW -.->|"same sources"| TESTS
+    EMUNODE <-->|"emu-link JSON lines<br/>components/emu_link"| GOSIM
+```
+
+The three RPC transports are not equivalent in trust: WebSocket and BLE require a token by default, and serial is the unauthenticated pairing bootstrap that issues one. See [auth.md](auth.md) and the JSON-RPC section below.
 
 ---
 
@@ -35,7 +74,13 @@ See also:
 | `packet` | `components/packet/` | Packet framing, serialization, type definitions |
 | `routing` | `components/routing/` | AODV route discovery, forwarding, beacon, route maintenance, route metrics |
 | `channel` | `components/channel/` | Named group channels (key derivation, message encrypt/decrypt, public channel) |
-| `security` | `components/security/` | Session management, key exchange, dummy traffic |
+| `security` | `components/security/` | Legacy session/key-exchange scaffolding and dummy traffic (not the shipping DM path: see `dm_session`) |
+| `dm_session` | `components/dm_session/` | The shipping DM crypto: quad-DH handshake, session table, symmetric double ratchet, SAS |
+| `network_key` | `components/network_key/` | Shared network key provisioning and storage |
+| `nonce_counter` | `components/nonce_counter/` | Monotonic per-node AEAD nonce counter with NVS boundary flush |
+| `replay_window` | `components/replay_window/` | Per-sender authenticated replay window and deferred acceptance |
+| `routing_auth` | `components/routing_auth/` | Network-key MACs on control-plane packets (RREP, RERR, ACK, receipts, beacons) |
+| `indicators` | `components/indicators/` | LED, buzzer, and vibration alert output |
 | `reliability` | `components/reliability/` | ACKs, retransmission, delivery receipts |
 | `fragment` | `components/fragment/` | Message fragmentation and reassembly |
 | `airtime` | `components/airtime/` | Duty cycle tracking and TX priority queue |
@@ -52,7 +97,7 @@ See also:
 | `wifi` | `components/wifi/` | Wi-Fi station/AP mode management |
 | `sdcard` | `components/sdcard/` | SD card storage driver |
 | `bramble_probe` | `components/bramble_probe/` | Network reachability probe sweep |
-| `freq_plan` | `components/freq_plan/` | Regional frequency plan definitions |
+| `freq_plan` | `components/freq_plan/` | Regional regulatory policy table: bands, TX power ceilings, duty-cycle caps |
 | `nvs_keys` | `components/nvs_keys/` | Central NVS namespace/key registry |
 | `rpc` | `components/rpc/` | JSON-RPC dispatcher, method registration, and auth policy (default-on token, unauthenticated allowlist, notification gating) |
 | `traffic_debug` | `components/traffic_debug/` | Runtime TX/RX traffic capture and airtime attribution telemetry |
@@ -66,6 +111,83 @@ See also:
 | `trackball` | `components/trackball/` | T-Deck Plus hall-effect trackball driver |
 | `bramble_touch` | `components/bramble_touch/` | T-Deck Plus touchscreen driver |
 | `button` | `components/button/` | Physical button input handling |
+| `emu_link` | `components/emu_link/` | Host-only emu-link broker client (emulator builds only; no device implementation) |
+
+### Component Groups
+
+Forty-three boxes is a list, not a diagram. Grouped by the layer each component serves, the shape of the stack is easier to hold. Arrows show the direction of dependency, not packet flow.
+
+```mermaid
+flowchart TD
+    subgraph app["Application services"]
+        A1["channel"]
+        A2["location"]
+        A3["mailbox"]
+        A4["msg_store"]
+        A5["bramble_probe"]
+        A6["timesync"]
+    end
+
+    subgraph sec["Identity and crypto"]
+        S1["crypto"]
+        S2["identity"]
+        S3["dm_session"]
+        S4["network_key"]
+        S5["nonce_counter"]
+        S6["replay_window"]
+        S7["security<br/>legacy scaffolding"]
+    end
+
+    subgraph net["Mesh and transport"]
+        N1["routing"]
+        N2["routing_auth"]
+        N3["reliability"]
+        N4["fragment"]
+        N5["dedup"]
+        N6["packet"]
+    end
+
+    subgraph phy["Radio and airtime"]
+        P1["radio<br/>driver + TX gate"]
+        P2["airtime"]
+        P3["freq_plan"]
+    end
+
+    subgraph ctrl["Control surfaces"]
+        C1["rpc"]
+        C2["ui"]
+        C3["ota"]
+        C4["traffic_debug"]
+    end
+
+    subgraph plat["Platform and drivers"]
+        D1["board_config"]
+        D2["display, ui_graphics"]
+        D3["keyboard, trackball,<br/>bramble_touch, button"]
+        D4["gps, battery, audio,<br/>indicators, sdcard"]
+        D5["wifi, ble"]
+        D6["nvs_keys"]
+    end
+
+    HOSTONLY["emu_link<br/>host builds only"]
+
+    ctrl --> app
+    app --> sec
+    app --> net
+    net --> sec
+    net --> phy
+    S3 --> S1
+    S2 --> S1
+    P1 --> P2
+    P1 --> P3
+    P2 --> P3
+    ctrl --> plat
+    app --> plat
+    HOSTONLY -.->|"backs virtual drivers"| plat
+    HOSTONLY -.->|"backs radio_virt"| phy
+```
+
+Components depend on each other only through their `include/` headers, and there are no circular dependencies. `emu_link` is drawn apart because it compiles to a stub on `esp32s3` builds: it exists only for the emulator and host tests.
 
 ---
 
@@ -110,12 +232,15 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 
 | Bits | Mask | Name | Meaning |
 |------|------|------|---------|
-| 7–6 | `0xC0` | `FLAG_TIER` | Reliability tier: 00=broadcast, 01=normal, 10=critical |
+| 7 | `0x80` | `FLAG_RESERVED_HIGH` | Reserved, not used |
+| 6 | `0x40` | `FLAG_EMERGENCY` | Reserved for future use: origin-set, immutable, AAD-bound. No emergency feature ships today |
 | 5 | `0x20` | `FLAG_ACK_REQ` | Sender requests an end-to-end ACK |
 | 4 | `0x10` | `FLAG_RECEIPT` | Sender requests a delivery receipt with relay path |
-| 3 | `0x08` | `FLAG_CHANNEL` | Payload is a channel message (flood routing) |
+| 3 | `0x08` | `FLAG_CHANNEL` | Selects the decrypt mechanism: set means channel-key trial decryption, absent means a pairwise DM session |
 | 2 | `0x04` | `FLAG_ENCRYPT` | Payload is encrypted |
-| 1–0 | `0x03` | `FLAG_FRAG` | Fragment indicator (00=none, 01=first, 10=middle, 11=last) |
+| 1–0 | `0x03` | `FLAG_FRAG_MASK` | Fragment indicator (00=none, 01=first, 10=middle, 11=last) |
+
+There is no `FLAG_TIER`. Bits 7 and 6 were freed in wire v2 when the reliability tier moved into the ciphertext, and they are two separate reserved flags today (`components/packet/include/packet.h`).
 
 ### Packet Types
 
@@ -126,7 +251,7 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x03` | `PKT_TYPE_RREP` | Route Reply | 40 bytes |
 | `0x04` | `PKT_TYPE_RERR` | Route Error (broken link notification) | 38 bytes |
 | `0x05` | `PKT_TYPE_BEACON` | Node status beacon | 54 bytes |
-| `0x06` | `PKT_TYPE_KEY_EXCHANGE` | X25519 key exchange (3-step) | 101 bytes |
+| `0x06` | `PKT_TYPE_KEY_EXCHANGE` | Retired from the wire in v2. DM handshakes ride `DATA` envelopes with `app_type == APP_TYPE_KE`; the constant survives only so legacy references compile | n/a |
 | `0x07` | `PKT_TYPE_DELIVERY_RECEIPT` | Path-tracing delivery receipt | 36–68 bytes |
 | `0x0A` | `PKT_TYPE_DATA` | Encrypted data payload | variable |
 | `0x0B` | `PKT_TYPE_STORE_REQUEST` | Request a mailbox node to store a message | variable |
@@ -138,9 +263,9 @@ All multi-byte fields are **big-endian** (network byte order; `put_be32`/`get_be
 | `0x14` | `PKT_TYPE_LOCATION` | Location sharing packet | variable |
 | `0x15` | `PKT_TYPE_IDENTITY_ATTESTATION` | Signed identity attestation | 230 bytes |
 
-Sizes reflect wire version 4 (`BRAMBLE_VERSION`), where every control-plane packet carries a 48-bit origin sequence for replay protection (ws 1.3b).
+Sizes reflect wire version 5 (`BRAMBLE_VERSION` in `components/packet/include/packet.h`). Every control-plane packet carries a 48-bit origin sequence for replay protection (ws 1.3b). Version 5 was a DM forward-secrecy flag day: DM and `LOCATION` session payloads now carry a 3-byte cleartext ratchet header (`epoch || msg_index`, authenticated through the AEAD AAD) and are keyed per message by the ratchet. The RX version gate is an exact match, so v4 frames are dropped and the peer re-handshakes.
 
-Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, `PROBE_ACK`, and `IDENTITY_ATTESTATION`. The remaining defined types (`KEY_EXCHANGE` and the four mailbox types) are not sent or handled by the firmware today. Type codes `0x08`, `0x09`, `0x0F`, `0x10`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, `EMERGENCY`, `EMERGENCY_CANCEL`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
+Implementation status: the mesh RX dispatcher (`mesh_process_rx_packet` in `main/mesh_task.c`) currently handles `ACK`, `RREQ`, `RREP`, `RERR`, `BEACON`, `DELIVERY_RECEIPT`, `DATA`, `LOCATION`, `PROBE`, `PROBE_ACK`, and `IDENTITY_ATTESTATION`. The four mailbox types are defined but never sent or handled. `KEY_EXCHANGE` (`0x06`) is retired from the wire, but key exchange itself is very much live: it is transported inside `DATA` envelopes (see the `dm_session` section). Type codes `0x08`, `0x09`, `0x0F`, `0x10`, and `0x11` (formerly `CONGESTION`, `TIME_SYNC`, `EMERGENCY`, `EMERGENCY_CANCEL`, and `CODED`) are retired: that machinery was deleted unshipped. Mailbox store-and-forward works without its dedicated packet types: relays store undeliverable `DATA` packets and flush them when the destination's beacon is heard.
 
 ### Beacon Flags
 
@@ -149,6 +274,57 @@ The `bramble_beacon_t.flags` field carries per-feature capability bits:
 | Bit | Name | Meaning |
 |-----|------|---------|
 | 0 | `BEACON_FLAG_MAILBOX` | Node is willing to store messages for offline peers |
+| 1 | `BEACON_FLAG_PROBE_ACK` | Node will answer reachability probes (defined in `components/bramble_probe/include/bramble_probe.h`) |
+
+---
+
+## Packet Path (Receive)
+
+Every inbound frame walks the same funnel in `mesh_process_rx_packet` (`main/mesh_task.c`): cheap structural checks first, then dedup, then per-type dispatch, and only then anything expensive like decryption. The ordering is deliberate, and two properties of it are load-bearing.
+
+First, `DATA` frames are authenticated with the network-key HMAC (`data_auth_verify`) **before** the node learns a reverse route from them or forwards them. A relay never decrypts `DATA`, so the AEAD tag cannot gate the forwarding decision; the HMAC is what stops a keyless attacker from poisoning route tables toward a spoofed victim.
+
+Second, the dedup gate sits before dispatch, so the duplicate branch is the only place a node can count the other relays it overhears. That branch is where flood-rebroadcast suppression and the re-ACK of an already-delivered duplicate happen, and both are themselves gated on the HMAC so a garbage-MAC replay cannot cancel a genuine relay.
+
+```mermaid
+flowchart TD
+    RX["Radio RX<br/>SX1262 IRQ or radio_virt"] --> Q["RX queue"]
+    Q --> LEN{"at least 12 bytes?"}
+    LEN -->|no| DROP1["drop"]
+    LEN -->|yes| HDR{"header deserializes?"}
+    HDR -->|no| DROP1
+    HDR -->|yes| VER{"wire version supported?"}
+    VER -->|no| DROP1
+    VER -->|yes| TD["traffic_debug_record_rx"]
+    TD --> DEDUP{"dedup_check_and_add<br/>seen before?"}
+    DEDUP -->|"yes: duplicate"| SUP["flood-suppression bookkeeping<br/>and re-ACK of delivered dups<br/>both HMAC-gated"]
+    SUP --> DROP1
+    DEDUP -->|"no: new"| DISPATCH{"header.type"}
+
+    DISPATCH -->|"BEACON, ACK, RREQ, RREP,<br/>RERR, RECEIPT, PROBE,<br/>PROBE_ACK, ATTESTATION"| CTRL["per-type control handler<br/>network-key MAC verify<br/>+ control replay window"]
+    DISPATCH -->|"LOCATION"| LOC["handle_location<br/>if dest is self or broadcast"]
+    DISPATCH -->|"DATA"| AUTH{"data_auth_verify<br/>network-key HMAC"}
+
+    AUTH -->|fail| DROP2["drop: no learn,<br/>no forward, no deliver"]
+    AUTH -->|pass| DECIDE["data_rx_decide<br/>forwarding.c"]
+    DECIDE --> BREAD["install reverse-route<br/>breadcrumb via prev_hop"]
+    BREAD --> FORK{"deliver or forward?"}
+    FORK -->|"forward: unicast for someone else"| FWD["route-table next hop,<br/>or jittered flood relay"]
+    FORK -->|"deliver: dest is self or broadcast"| DEC{"FLAG_CHANNEL set?"}
+
+    DEC -->|yes| CHDEC["channel_msg_decrypt<br/>constant-time trial decrypt<br/>over known channel keys"]
+    DEC -->|no| DMDEC["dm_session_ratchet_decrypt<br/>pairwise ratcheted session key"]
+    CHDEC --> REPLAY{"replay_check_and_add<br/>authenticated nonce window"}
+    DMDEC --> REPLAY
+    REPLAY -->|reject| DROP3["drop: replay"]
+    REPLAY -->|accept| APP{"app_type"}
+    APP -->|"APP_TYPE_KE"| KE["handle_ke_envelope<br/>DM handshake"]
+    APP -->|"APP_TYPE_CHAT"| FRAG["fragment reassembly<br/>if fragmented"]
+    FRAG --> DELIVER["msg_store + delivery event<br/>-> UI and RPC notification"]
+    DELIVER --> ACK["send_ack if requested"]
+```
+
+`LOCATION` frames carry their own envelope and are decrypted by `handle_location` rather than the `handle_data` path drawn above, but they use the same AAD construction and the same authenticated replay window.
 
 ---
 
@@ -156,7 +332,7 @@ The `bramble_beacon_t.flags` field carries per-feature capability bits:
 
 ### `crypto`
 
-**Files:** `crypto_esp.c` (hardware AES on ESP32-S3), `crypto_host.c` (mbedTLS for host tests)
+**Files:** `crypto_esp.c` (hardware AES on ESP32-S3), `crypto_host.c` (mbedTLS for host tests), `crypto_entropy.c`
 
 Provides the cryptographic primitives used throughout the stack:
 
@@ -181,11 +357,11 @@ The `bramble_header_t` struct maps directly onto the 12-byte on-wire format. Hig
 
 ### `routing`
 
-**Files:** `beacon.c`, `discovery.c`, `forwarding.c`, `routing.c`
+**Files:** `beacon.c`, `channel_flood.c`, `discovery.c`, `forwarding.c`, `routing.c`
 
 Implements AODV-inspired reactive unicast routing:
 
-1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt and the +5 s retry, 8 on the +15 s retry, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes go stale after 300 s of inactivity and are evicted at 600 s (`ROUTE_ACTIVE_TIMEOUT_MS` / `ROUTE_STALE_TIMEOUT_MS`).
+1. **Route discovery** (`discovery.c`): Broadcasts RREQ with encrypted source address; destination unicasts RREP along reverse path. Expanding-ring search: hop limit 4 on the first attempt (`RREQ_HOP_LIMIT_INITIAL`) and 8 on both retries (`RREQ_HOP_LIMIT_EXPANDED` = `ROUTE_HOP_LIMIT_MAX`), at +5 s and +15 s, each retry under a fresh query_id so dedup on nodes that heard an earlier attempt cannot swallow it. Relays delay RREQ rebroadcasts by a random 50-300 ms so same-hop relays do not collide with each other. Cached routes go stale after 300 s of inactivity and are evicted at 600 s (`ROUTE_ACTIVE_TIMEOUT_MS` / `ROUTE_STALE_TIMEOUT_MS`).
 2. **Forwarding** (`forwarding.c`): Looks up next-hop from route table; decrements `hop_limit`; emits RERR on unknown destination.
 3. **Beacons** (`beacon.c`): Periodic 60s neighbor discovery beacons carrying node status, public key hash, HMAC'd with pairwise session key for known peers.
 4. **Route metric** (`routing.c`): penalty-accumulating link metric (RSSI/SNR), first-arrival selection within a flood, better-metric arbitration between discovery attempts at `route_install`.
@@ -220,9 +396,33 @@ Manages session keys and the 3-step key exchange:
 
 Session key = HKDF(ephemeral-DH ‖ static-DH, "bramble-session"). Keys rotate every 24h or 65,536 messages.
 
-Implementation status: the session/key-exchange machinery is component-level only. `PKT_TYPE_KEY_EXCHANGE` is never sent and never handled on the wire, and direct messages are encrypted with the shared channel key, not pairwise session keys (see SECURITY-MODEL.md).
+Implementation status: **this component is not the shipping DM path.** It is earlier scaffolding, kept for its dummy-traffic code and host tests. `PKT_TYPE_KEY_EXCHANGE` is retired from the wire, and nothing calls this component's session machinery in the live firmware. Direct messages are keyed by `components/dm_session/` instead: a quad-DH handshake carried inside `DATA` envelopes, followed by a symmetric double ratchet. See the `dm_session` section below, and [SECURITY-MODEL.md](SECURITY-MODEL.md) for the authoritative threat model.
 
 **Dummy traffic** (`dummy_traffic.c`): Cover-traffic scheduler (random-length packets at random intervals to defeat volume/timing correlation). Component-level only: nothing in the firmware schedules it today (see SECURITY-MODEL.md); it is the building block for a planned quiet-mode cover-traffic feature.
+
+---
+
+### `dm_session`
+
+**Files:** `dm_session.c`
+
+Owns all direct-message cryptography: the pairwise handshake, the session table, and the per-message double ratchet. This is the component that actually keys DMs today; `security` above is not.
+
+**Handshake.** Two messages, `KE_TYPE_INIT` and `KE_TYPE_RESP`, carried inside `DATA` envelopes with `app_type == APP_TYPE_KE` under the channel key. The channel key is the handshake *transport* only, used because no pairwise session exists yet. `dm_compute_ikm` derives a 128-byte input keying material from a quad-DH over both parties' identity and ephemeral X25519 keys. The responder's `RESP` carries a real key confirmation, `HMAC(K_confirm, transcript_2)[0:16]`. On first contact the initiator's `INIT` proves nothing (its auth tag is zeroed) and the initiator is authenticated later; on rekey with a known peer the `INIT` tag is `HMAC(K_ke_init, transcript_1)[0:16]`.
+
+**Pin continuity.** A node address derives from the Ed25519 identity key, so an X25519 key cannot prove an address by hashing. Instead, when the identity store holds an attestation-verified X25519 pin for a peer, both `dm_verify_init` and `dm_verify_resp` require the presented `long_term_pubkey` to match it byte for byte, failing with `DM_VERIFY_ERR_PIN_MISMATCH`. With no pin, the exchange proceeds TOFU-grade: the first-contact window is unauthenticated until the peer's attestation is heard and pinned. That residual is stated, not hidden.
+
+**Session table.** `DM_MAX_SESSIONS` = 32 slots with state-priority LRU. At most `DM_MAX_HANDSHAKING` = 8 slots may be mid-handshake, which bounds a spoofed-INIT flood. Only a *verified* active session is protected from eviction; an unverified active session is evictable under pressure, LRU-ordered by `last_active_ms`. That asymmetry is deliberate: first-contact INITs reach active/unverified without touching the handshaking cap, so protecting them unconditionally would let forged identities fill the table and permanently block DM establishment.
+
+**Ratchet.** `dm_ratchet_init` derives an epoch-0 root key plus two directional chain keys, domain-separated by address ordering, so the lower-addressed party sends on one chain and receives on the other. `dm_ratchet_step` derives message key `mk_n` and the next chain key; `mk_n` encrypts exactly one AES-256-GCM message and is then wiped. Epoch 0 is bit-identical to the pre-ratchet session key, which is what made the migration continuous.
+
+**Wire framing.** Each ratcheted frame carries a 3-byte cleartext header, `epoch || msg_index` big-endian, ahead of the ciphertext. Those 3 bytes are fed into the AEAD AAD, so they are authenticated but not encrypted. Because the receiver reads the index before decrypting, key selection is known up front: there is exactly one derivation and one GCM decrypt, and no trial-decryption loop.
+
+**Loss tolerance.** A bounded skip cache absorbs out-of-order and lost LoRa frames. `DM_MAX_SKIP` = 16 is both the forward-derive bound and the cache size; it is a loss-tolerance and RAM tuning constant, not a security boundary. An index beyond `next + DM_MAX_SKIP` is refused *without* deriving anything (`DM_DECRYPT_TOO_FAR`, the DoS bound) and the caller degrades to a desync-heal re-handshake. Replay defense is not this layer's job: the authoritative check is the per-sender authenticated nonce window, consulted first. The ratchet index is an ordering aid, not a second replay oracle.
+
+**Epoch bump.** `dm_session_epoch_bump` folds a fresh X25519 output into the current root, giving post-compromise recovery at epoch granularity. The previous epoch's receive chain and skip cache are retained for a grace window of `DM_EPOCH_GRACE_MSGS` = 16 new-epoch messages so in-flight old frames still decrypt; wiping them at the end of that window is what actually delivers the recovery property. A lost or failed rekey leaves both sides on the current epoch, so no message is stranded.
+
+**Safety numbers.** Two distinct SAS derivations exist and they are not interchangeable. `dm_derive_sas` commits to the session IKM and therefore changes on every re-handshake. `dm_derive_identity_sas` renders a stable 7-digit fingerprint of the two peers' pinned X25519 identity keys, ordered by address so both sides compute the same string; it is stable across ratchet steps, epoch bumps, desync heals, and reboots. It is public-key material, a fingerprint like a Signal safety number, not a secret.
 
 ---
 
@@ -264,6 +464,32 @@ Every transmission is admitted and debited by the TX gate in `components/radio/t
 
 ---
 
+### `freq_plan`
+
+**Files:** `freq_plan.c`
+
+The regulatory policy table. It is worth being precise about what this component does and does not do: `freq_plan` holds no state and enforces nothing itself. It is a static table of per-region plans plus pure validation and clamping helpers. Enforcement happens in the components that read it, which is why the duty-cycle story is easy to miss when reading either side alone.
+
+Each `bramble_freq_plan_t` carries a name, the citable regulatory basis, the band start and end, a default frequency, a maximum TX power, a maximum duty cycle percentage, a hard-enforce flag, and default modulation parameters.
+
+| Region | Regulatory basis | Band | Default | Max TX power | Duty cycle | Enforced |
+|--------|------------------|------|---------|--------------|------------|----------|
+| `US915` | FCC Part 15.247 | 902.0–928.0 MHz | 915.0 MHz | 30 dBm | 100% (no limit) | no |
+| `EU868` | ETSI EN 300.220 | 863.0–870.0 MHz | 868.1 MHz | 14 dBm | 1% | yes |
+| `AU915` | ACMA | 915.0–928.0 MHz | 921.0 MHz | 30 dBm | 100% (no limit) | no |
+
+All three regions default to SF9 and 125 kHz bandwidth. The active region is selected at compile time by `CONFIG_BRAMBLE_REGION_*`, defaulting to `US915`.
+
+**How the plan actually binds behavior.** Three consumers turn this table into enforcement:
+
+1. **Duty cycle.** At boot, `main/mesh_task.c` reads the default plan and calls `tx_gate_global_init(plan->max_duty_cycle_pct, plan->duty_cycle_enforced)`, which reaches `airtime_budget_set_duty_cap`. When enforced, every mesh-size profile is scaled proportionally so the node's total TX budget stays inside the cap. This is the path by which an EU868 build gets a 1% ceiling on all four airtime lanes, and it is the reason the airtime budget and the frequency plan cannot be reasoned about independently.
+2. **TX power.** `freq_plan_clamp_power` clamps requested power to the regional maximum, applied both when the radio config is built at startup and when an operator changes power at runtime.
+3. **Frequency validation.** `bramble.setRadio` rejects a frequency outside the plan's band via `freq_plan_valid_freq` before it reaches the radio.
+
+The simulator applies the same cap to every node through `bridge_apply_duty_cycle_cap`, calling the real `airtime_budget_set_duty_cap` rather than a reimplementation of it, so simulated duty-cycle behavior comes from the shipping implementation.
+
+---
+
 ### `dedup`
 
 **Files:** `dedup.c`
@@ -274,7 +500,7 @@ Table of recently seen `(source, packet_id)` pairs (up to 256 entries, 60 s expi
 
 ### `identity`
 
-**Files:** `identity.c`
+**Files:** `identity.c`, `identity_store.c`
 
 Generates and persists the node's identity on first boot (stored in NVS): an Ed25519 signing keypair plus an X25519 keypair for DH. The 4-byte node address is derived as `SHA-256(ed25519_pubkey)[0:4]`. Core API is `identity_load` / `identity_save` / `identity_generate_and_save`, plus attestation, endorsement, and trust-anchor helpers (`identity_endorsement_*`, `identity_anchor_*`).
 
@@ -293,7 +519,7 @@ Stratum-based mesh time synchronization inspired by NTP:
 
 ### `radio`
 
-**Files:** `radio_esp.c`, `sx1262.c`, `radio_airtime.c`, `tx_gate.c`, `tx_gate_esp.c`, `radio_mock.c`
+**Files:** `radio_esp.c`, `sx1262.c`, `radio_airtime.c`, `radio_profiles.c`, `tx_gate.c`, `tx_gate_esp.c`, `radio_mock.c`, `radio_virt.c`, `phy_passthrough.c`
 
 `radio_esp.c` / `sx1262.c`: SX1262 driver (SPI, IRQ handling, CAD). The raw transmit primitive `radio_transmit_raw` is declared only in `radio_internal.h`; nothing outside the component can transmit without going through the TX gate.
 
@@ -323,6 +549,31 @@ Runtime traffic observability and airtime analysis telemetry:
   - `bramble.onTrafficEvent`: real-time WebSocket notifications (live stream)
 
 **Use case:** Measure airtime usage by category (e.g., "beacons consume 40% of broadcast budget"), identify retry storms, tune beacon intervals, and explain broadcast-budget drain in field deployments.
+
+---
+
+### `emu_link` (host builds only)
+
+**Files:** `emu_link.c`
+
+The seam that lets the real firmware run as a virtual node. `emu_link` is a JSON-lines client for the emu-link broker protocol ([`emulator/DESIGN.md`](../emulator/DESIGN.md) section 8). It dials the broker named by the `EMU_BROKER` environment variable (`unix:/path` or `tcp:host:port`), sends a hello on connect, and dispatches inbound messages to per-type handlers from a background reader thread. Sends are thread-safe.
+
+**This component is host-only.** On `esp32s3` builds its `CMakeLists.txt` compiles no implementation at all, and the header's device-side stubs simply return failure. It exists for the IDF linux target (the emulator node) and the plain-gcc test harness, and nothing else.
+
+**API:** `emu_link_connect` (returns negative on an unset or malformed `EMU_BROKER`, a dial failure, or a double connect, and never crashes on a bad value), `emu_link_set_fw_version` (must precede connect), `emu_link_on` (one handler per message type, re-registration replaces), `emu_link_send` (takes ownership of the `cJSON` object on every path, success or failure), and `emu_link_close`.
+
+**Consumers.** The virtual peripheral drivers are its only users, and they are what make the emulated node behave like hardware:
+
+| Driver | Messages |
+|--------|----------|
+| `radio_virt.c` | sends `tx`, `cad`; handles `rx`, `txdone`, `cadres` |
+| `indicator_virt.c` | sends `ind` (LED, buzzer, vibration) |
+| `battery_virt.c` | handles `batt` |
+| `gps` virtual path | handles `nmea` |
+
+The connection itself is owned by the node bootstrap in `main/main.c`, which connects once with the capability list `radio,display,buttons,gps,battery`; individual drivers only register handlers and send.
+
+**A threading contract worth knowing before touching it.** `emu_link`'s reader is a raw pthread, not a FreeRTOS task, so inbound handlers run outside the FreeRTOS scheduler's assumptions. `radio_virt.c` documents the resulting rules at length; read them before adding a handler that signals a FreeRTOS primitive.
 
 **Design notes:**
 - Event emission never blocks the radio critical path (drop events before blocking).
@@ -383,15 +634,17 @@ void mailbox_purge_expired(mailbox_t *mb, now_ms);
 
 ### Private Location Sharing (`components/location/`)
 
-Encrypted per-contact location sharing with three privacy tiers. Location updates are sent as encrypted `PKT_TYPE_DATA` payloads over established pairwise sessions.
+Encrypted per-contact location sharing with three privacy tiers. Location updates are sent as `PKT_TYPE_LOCATION` (`0x14`) packets, not `DATA`. Two encryption paths exist: a directed path keyed by an established pairwise DM session, and a channel-key path for sharing to a channel.
 
 **Privacy tiers:**
 
-| Tier | Constant | Payload | Size |
-|------|----------|---------|------|
+| Tier | Constant | Payload | Serialized size |
+|------|----------|---------|-----------------|
 | Full | `LOCATION_TIER_FULL` (0) | lat, lon, alt, accuracy, speed, heading, timestamp | 17 bytes |
 | Coarse | `LOCATION_TIER_COARSE` (1) | ~1 km grid square (lat/lon quantized to 0.01°) + low-res timestamp | 5 bytes |
 | Presence | `LOCATION_TIER_PRESENCE` (2) | Online/offline status byte only | 1 byte |
+
+**Tier hiding:** the sizes above are what the serializers return, not what goes on the wire. The tier is carried inside the encrypted plaintext (at `LOCATION_INNER_TIER_OFFSET`), and every tier is padded up to one canonical inner size, `L_LOC_INNER` = 18 bytes (a 1-byte tier prefix plus a payload padded to `LOCATION_FULL_SIZE`). The session path pads once more, to `L_LOC_INNER + CHANNEL_MSG_OVERHEAD`. The point is that an observer cannot infer the tier from ciphertext length, and therefore cannot infer how much a sender trusts a given recipient.
 
 **Position format (full, 17 bytes):**
 ```
@@ -432,6 +685,8 @@ int  location_serialize_coarse(pos, buf, buf_len);  /* → 5 bytes */
 ---
 
 ## Changelog
+
+Historical record, not a statement of current capability. Several entries below announce features that were later deleted unshipped (Emergency Beacon, Group DMs, Network Coding, and the `PKT_TYPE_CODED` type). Where this changelog and the body of this document disagree, the body is current and the changelog is history.
 
 ### v0.2: 2026-02-17 (`feature/sim-component-integration`)
 
