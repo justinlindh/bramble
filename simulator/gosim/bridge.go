@@ -79,27 +79,30 @@ func nodeMove(node *C.sim_node_t, x, y float32) {
 	C.node_move(node, C.float(x), C.float(y))
 }
 
-// nodeSetProvisioned drives bridge_node_ext_t.provisioned (mandatory-
-// provisioning Task 2). false makes the node inert (originates nothing
-// authenticated, drops all inbound frames); the rest of the fleet is
-// unaffected.
-func nodeSetProvisioned(idx int, provisioned bool) {
-	C.bridge_node_set_provisioned(C.int(idx), C.bool(provisioned))
+// nodeMarkUnprovisioned clears bridge_node_ext_t.provisioned (mandatory-
+// provisioning Task 2), making the node inert: it originates nothing
+// authenticated and drops all inbound frames. join defaults nodes to
+// provisioned, so the override only ever moves in this direction; the rest of
+// the fleet is unaffected.
+func nodeMarkUnprovisioned(idx int) {
+	C.bridge_node_set_provisioned(C.int(idx), C.bool(false))
 }
 
-// nodeSetEndorsed drives bridge_node_ext_t.endorsed (trust-anchor campaign P2).
-// false makes the node attest with no fleet-anchor cert, so every anchored
+// nodeMarkUnendorsed clears bridge_node_ext_t.endorsed (trust-anchor campaign
+// P2), making the node attest with no fleet-anchor cert, so every anchored
 // receiver refuses to pin it (identity_unendorsed) while still relaying its
-// MAC-valid frame; the rest of the fleet is unaffected.
-func nodeSetEndorsed(idx int, endorsed bool) {
-	C.bridge_node_set_endorsed(C.int(idx), C.bool(endorsed))
+// MAC-valid frame. join defaults nodes to endorsed; the rest of the fleet is
+// unaffected.
+func nodeMarkUnendorsed(idx int) {
+	C.bridge_node_set_endorsed(C.int(idx), C.bool(false))
 }
 
-// nodeSetAnchored drives bridge_node_ext_t.ident_pins.has_anchor (trust-anchor
-// campaign P2 red-team). false boots the node un-anchored (TOFU pinning) until
-// a provision_anchor event hardens it.
-func nodeSetAnchored(idx int, anchored bool) {
-	C.bridge_node_set_anchored(C.int(idx), C.bool(anchored))
+// nodeMarkUnanchored clears bridge_node_ext_t.ident_pins.has_anchor (trust-
+// anchor campaign P2 red-team), booting the node un-anchored (TOFU pinning)
+// until a provision_anchor event hardens it. join anchors nodes to the fleet
+// anchor; the rest of the fleet is unaffected.
+func nodeMarkUnanchored(idx int) {
+	C.bridge_node_set_anchored(C.int(idx), C.bool(false))
 }
 
 // --- Event queue ---
