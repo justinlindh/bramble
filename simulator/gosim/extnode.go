@@ -82,6 +82,11 @@ type timeMsg struct {
 	EpochMs int64  `json:"epoch_ms"`
 }
 
+type nmeaMsg struct {
+	T        string `json:"t"`
+	Sentence string `json:"sentence"`
+}
+
 // extSlot is one external-node position reserved in the ether. The supervisor
 // reserves a slot per firmware-node instance before spawning it (so a restart
 // rebinds to the same position and reuses the same sim_node array entry, which
@@ -116,6 +121,13 @@ type extConn struct {
 
 	node string // hello id
 	addr uint32
+
+	// GPS feed state, guarded by sim.mu. gpsGen invalidates any scheduled
+	// feed action from a previous gate-on interval: the action captures the
+	// generation it was scheduled under and goes inert if it no longer
+	// matches (gate cycled off, or off and on again).
+	gpsOn  bool
+	gpsGen uint64
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -525,13 +537,44 @@ func (ec *extConn) handleInd(msg *emuInbound) {
 	})
 }
 
-// handleGpsGate records the node's GPS power-gate state and reports it. NMEA
-// synthesis from scenario position (feeding nmea messages while gated on) is a
-// later task; the broker tracks the gate here so that work has a hook.
+// handleGpsGate records the node's GPS power-gate state and reports it.
+// While the gate is on, the broker feeds the node RMC+GGA sentences
+// synthesized from its slot position (see nmea.go) on the simulation clock,
+// which is what a powered GNSS module on the UART would do.
 func (ec *extConn) handleGpsGate(msg *emuInbound) {
 	s := ec.broker.sim
+	s.mu.Lock()
+	ec.gpsGen++ // invalidate any feed scheduled under the previous gate state
+	ec.gpsOn = msg.On
+	if msg.On {
+		s.scheduleNMEAFeed(ec, ec.gpsGen)
+	}
+	s.mu.Unlock()
 	s.emitJSON(map[string]interface{}{
 		"type": "device_gpsgate", "node": ec.label(), "on": msg.On,
+	})
+}
+
+// scheduleNMEAFeed schedules the next sentence pair for a gated-on node.
+// Must be called under s.mu. The action re-schedules itself for as long as
+// the gate stays on and the generation matches (fireBrokerActions runs
+// actions under s.mu, so the checks and the re-schedule are race-free). The
+// chain ends when the node sends gpsgate off (both set under s.mu in
+// handleGpsGate) or when the connection closes (close() clears gpsOn and
+// bumps gpsGen under s.mu), so a reset or crashed node cannot leave an
+// immortal feed running.
+func (s *Sim) scheduleNMEAFeed(ec *extConn, gen uint64) {
+	s.scheduleBrokerAction(s.simTime+nmeaFeedIntervalUs, func() {
+		if !ec.gpsOn || ec.gpsGen != gen {
+			return
+		}
+		var x, y float32
+		if ec.slot != nil {
+			x, y = ec.slot.x, ec.slot.y
+		}
+		ec.sendJSON(nmeaMsg{T: "nmea", Sentence: nmeaRMC(x, y, s.simTime)})
+		ec.sendJSON(nmeaMsg{T: "nmea", Sentence: nmeaGGA(x, y, s.simTime)})
+		s.scheduleNMEAFeed(ec, gen)
 	})
 }
 
@@ -571,6 +614,12 @@ func (ec *extConn) close() {
 		s := b.sim
 
 		s.mu.Lock()
+		// End any in-flight NMEA feed: a node whose GPS gate was on when it
+		// reset or crashed sends no gate-off message, so without this the
+		// self-rescheduling feed action would reschedule forever (and every
+		// such reset would add another immortal chain to pendingBrokerActions).
+		ec.gpsOn = false
+		ec.gpsGen++
 		if ec.addr != 0 && s.extConns[ec.addr] == ec {
 			delete(s.extConns, ec.addr)
 			if node := C.node_array_find_by_addr(&s.nodes, C.uint32_t(ec.addr)); node != nil {
