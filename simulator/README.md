@@ -22,7 +22,11 @@ cd ui && npm install && npm run build && cd ..
 # Run
 ./gosim/bramble-gosim --ui ui/dist --scenarios scenarios
 ```
-Open http://localhost:3000
+Open <http://localhost:3000>
+
+The local emulator (`emulator/`) also defaults to port 3000, so pass
+`--port 3011` (or any free port) if you want to run both at once. The Docker
+variants do not collide: this one publishes 3003 and the emulator 3004.
 
 ### Headless Mode
 ```bash
@@ -173,6 +177,9 @@ All added/moved nodes are full protocol participants (beaconing, routing, forwar
 
 ## Design Docs
 
-- Architecture: `docs/archive/plans/2026-02-16-simulator-design.md`
-- Go server design: `docs/archive/plans/2026-02-17-go-simulation-server-design.md`
-- Anomaly detection: `docs/bramble-anomaly-detection.md`
+- Simulator architecture: the "Architecture" section above, plus the inline
+  documentation in `gosim/`
+- Component architecture: [`../docs/bramble-architecture.md`](../docs/bramble-architecture.md)
+- Anomaly detection: [`../docs/bramble-anomaly-detection.md`](../docs/bramble-anomaly-detection.md)
+- Emulator (real firmware binaries on this same ether):
+  [`../emulator/README.md`](../emulator/README.md) and `../emulator/DESIGN.md`
