@@ -406,6 +406,15 @@ target_include_directories(test_radio_airtime PRIVATE
 )
 target_link_libraries(test_radio_airtime m)
 
+# Radio bandwidth -> register-code mapping (regression guard for #149)
+add_executable(test_radio_bw_mapping
+    test_radio_bw_mapping.c
+    unity/unity.c
+)
+target_include_directories(test_radio_bw_mapping PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/radio/include
+)
+
 # Crypto tests
 add_executable(test_crypto
     test_crypto.c

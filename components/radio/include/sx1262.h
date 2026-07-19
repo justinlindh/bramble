@@ -61,6 +61,22 @@
  * before any further commands are issued. */
 #define SX1262_ERR_RESET (-2)
 
+/* Map a LoRa bandwidth in Hz to the SX1262 SetModulationParams register code.
+ * 125 kHz -> 0x04, 250 kHz -> 0x05, 500 kHz -> 0x06. The firmware only offers
+ * these three bandwidths; anything above 250 kHz maps to the 500 kHz code.
+ *
+ * This is the single source of truth for the mapping. It is deliberately a
+ * pure inline in the header so it is host-testable without the SPI driver: the
+ * previous kHz-through-uint8_t path truncated 500 to 244 and silently ran the
+ * radio at 125 kHz (issue #149). */
+static inline uint8_t sx1262_bw_reg_from_hz(uint32_t bw_hz) {
+    if (bw_hz <= 125000)
+        return 0x04;
+    if (bw_hz <= 250000)
+        return 0x05;
+    return 0x06;
+}
+
 /* ---------- Functions ---------- */
 
 /* Lifecycle */
@@ -84,7 +100,7 @@ int sx1262_set_packet_type(uint8_t type);
 int sx1262_set_rf_frequency(float freq_mhz);
 int sx1262_set_pa_config(int8_t power_dbm);
 int sx1262_set_tx_params(int8_t power_dbm, uint8_t ramp_time);
-int sx1262_set_modulation_params(uint8_t sf, uint8_t bw, uint8_t cr, uint8_t ldro);
+int sx1262_set_modulation_params(uint8_t sf, uint32_t bw_hz, uint8_t cr, uint8_t ldro);
 int sx1262_set_packet_params(uint16_t preamble, uint8_t header_type, uint8_t payload_len,
                              uint8_t crc_on, uint8_t invert_iq);
 int sx1262_set_buffer_base_address(uint8_t tx_base, uint8_t rx_base);
