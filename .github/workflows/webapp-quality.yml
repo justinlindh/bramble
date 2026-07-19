@@ -52,6 +52,25 @@ jobs:
         run: npm run typecheck:electron --prefix webapp
       - name: Unit tests
         run: npm run test:unit --prefix webapp
+      - name: Install and smoke-test the mock node server (webapp/mock)
+        # webapp/mock is a standalone package with its own package.json and
+        # package-lock.json, never installed above: the root npm ci only
+        # resolves webapp's own dependency versions. This installs mock's
+        # lockfile in isolation and runs its own smoke script from inside
+        # that directory, so a dependency bump here (e.g. #181's @noble/hashes
+        # major bump) fails this step instead of shipping unexercised.
+        working-directory: webapp/mock
+        run: |
+          npm ci
+          node ci-smoke.mjs
+      - name: Install and smoke-test the ws-proxy relay (webapp/ws-proxy)
+        # Same reasoning as the mock node above: ws-proxy is another
+        # standalone package with its own lockfile that Dependabot updates,
+        # and nothing previously installed or started it either.
+        working-directory: webapp/ws-proxy
+        run: |
+          npm ci
+          bash ci-smoke.sh
       - name: Build webapp
         run: npm run build --prefix webapp
       - name: E2E smoke (reuses the build above)
