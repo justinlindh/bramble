@@ -340,4 +340,20 @@ void mesh_rederive_beacon_key(void);
  * mirrors the attest-on-address/key-change hook. */
 void mesh_trigger_attestation(void);
 
+/* Airtime backpressure counters, surfaced through bramble.getDiagnostics.
+ *
+ * flood relay drops: rebroadcasts discarded because the jittered flood relay
+ * queue was full (issue #87). Non-zero means this node hit local congestion
+ * and yielded the channel. A silently dropped relay is impossible to tell
+ * apart from a radio fault in the field, which is why it is counted.
+ *
+ * probe ingress: how much inbound PROBE traffic the ingress token buckets
+ * refused (issue #75). Split by bucket so a flood is attributable: reply
+ * means the node's probe ceiling was hit and probes went unanswered, forward
+ * means probes were answered but not propagated onward. Neither counter is
+ * per-sender, because the buckets deliberately are not: see security.h. */
+uint32_t mesh_get_flood_relay_drops(void);
+void mesh_get_probe_ingress_stats(uint32_t* accepted, uint32_t* dropped_reply,
+                                  uint32_t* dropped_forward);
+
 #endif

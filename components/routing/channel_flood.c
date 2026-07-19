@@ -2,6 +2,8 @@
 #include "include/discovery.h"
 #include "include/routing.h" /* ROUTE_HOP_LIMIT_MAX (reactive origination budget) */
 
+#include <string.h>
+
 channel_flood_decision_t channel_flood_decide(uint8_t hop_limit, bool is_duplicate,
                                               bool budget_permits, uint32_t random_value) {
     channel_flood_decision_t d = {false, 0, 0};
@@ -51,5 +53,36 @@ bool channel_flood_note_overheard(pending_flood_relay_t* queue, int capacity, ui
         }
         return false;
     }
+    return false;
+}
+
+bool channel_flood_relay_admit(pending_flood_relay_t* queue, int capacity, const uint8_t* buf,
+                               uint8_t len, uint32_t due_at_ms, uint32_t flood_key, uint8_t tx_kind,
+                               uint32_t* drop_counter) {
+    /* No length guard needed: len is uint8_t and pending_flood_relay_t::buf
+     * is BRAMBLE_MAX_PACKET_SIZE (256), so the memcpy below cannot overrun.
+     * Static assert so a future shrink of buf turns into a build error
+     * rather than a silent stack smash. */
+    _Static_assert(BRAMBLE_MAX_PACKET_SIZE >= 256,
+                   "pending_flood_relay_t::buf must hold any uint8_t length");
+
+    for (int i = 0; i < capacity; i++) {
+        if (queue[i].used) {
+            continue;
+        }
+        queue[i].used = true;
+        queue[i].due_at_ms = due_at_ms;
+        memcpy(queue[i].buf, buf, len);
+        queue[i].len = len;
+        queue[i].flood_key = flood_key;
+        queue[i].heard = 0;
+        queue[i].tx_kind = tx_kind;
+        return true;
+    }
+
+    /* Queue full: DROP. There is deliberately no immediate-transmit branch
+     * here; see channel_flood.h for why adding one inverts backpressure. */
+    if (drop_counter)
+        (*drop_counter)++;
     return false;
 }

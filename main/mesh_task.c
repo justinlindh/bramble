@@ -379,6 +379,18 @@ static QueueHandle_t s_handshake_work_q;
  * channel_flood.h (Flooding F1) so they are unit-testable in isolation. */
 static pending_flood_relay_t s_flood_relay_queue[FLOOD_RELAY_QUEUE_CAPACITY];
 
+/* Flood relays dropped because the queue above was full (issue #87). A drop
+ * under congestion that nobody can see is indistinguishable in the field
+ * from a radio problem, so it is counted and surfaced through
+ * bramble.getDiagnostics. */
+static uint32_t s_flood_relay_drops;
+
+/* PROBE ingress backpressure (issue #75). PROBE stays unauthenticated by
+ * design; these buckets only bound how much transmission an inbound probe
+ * can buy. Global, not per-sender, for the same reason SEC-M4's forwarded-
+ * RREQ cap is: see security.h. */
+static probe_ingress_limiter_t s_probe_ingress;
+
 /* Jittered RREQ forward queue (DES-3). Relays delay RREQ rebroadcasts by a
  * random 50-300ms so same-hop relays do not key up at the same instant; the
  * mesh task drains due entries from its main loop (10ms poll cadence). */
@@ -3167,9 +3179,12 @@ static void process_rreq_forward_queue(uint32_t t) {
 /**
  * Queue a broadcast/channel DATA rebroadcast with random jitter, exactly
  * like schedule_rreq_forward: same-hop relays that all decided to flood the
- * same frame should not key up at the same instant. Falls back to immediate
- * transmission when the queue is full (a forward storm makes the jitter
- * moot, and dropping the relay could be the only path further out).
+ * same frame should not key up at the same instant. DROPS the relay when the
+ * queue is full (issue #87): a full queue means this node is already
+ * congested, and the old behaviour of transmitting immediately, without
+ * jitter, inverted backpressure exactly there. Placement, the drop, and the
+ * drop accounting live in channel_flood_relay_admit so they are unit-
+ * testable on the host; see channel_flood.h for the full rationale.
  *
  * buf/len are the ALREADY relay-mutated wire bytes (hop_limit decremented,
  * prev_hop rewritten to this node -- see the caller in handle_data): this
@@ -3189,23 +3204,30 @@ static void process_rreq_forward_queue(uint32_t t) {
  */
 static void schedule_flood_relay(const uint8_t* buf, uint8_t len, uint32_t jitter_ms,
                                  uint32_t flood_key, tx_kind_t tx_kind) {
-    for (int i = 0; i < FLOOD_RELAY_QUEUE_CAPACITY; i++) {
-        if (!s_flood_relay_queue[i].used) {
-            s_flood_relay_queue[i].used = true;
-            s_flood_relay_queue[i].due_at_ms = now_ms() + jitter_ms;
-            memcpy(s_flood_relay_queue[i].buf, buf, len);
-            s_flood_relay_queue[i].len = len;
-            s_flood_relay_queue[i].flood_key = flood_key;
-            s_flood_relay_queue[i].heard = 0;
-            s_flood_relay_queue[i].tx_kind = (uint8_t)tx_kind;
-            ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
-            return;
-        }
+    if (channel_flood_relay_admit(s_flood_relay_queue, FLOOD_RELAY_QUEUE_CAPACITY, buf, len,
+                                  now_ms() + jitter_ms, flood_key, (uint8_t)tx_kind,
+                                  &s_flood_relay_drops)) {
+        ESP_LOGD(TAG, "Channel flood relay jittered %" PRIu32 "ms", jitter_ms);
+        return;
     }
-    ESP_LOGW(TAG, "Flood relay queue full; relaying immediately");
-    if (mesh_tx(buf, len, tx_kind) == TX_GATE_ERR_BUDGET) {
-        ESP_LOGW(TAG, "Immediate flood relay denied by airtime budget");
-    }
+    /* Congested: yield the channel instead of grabbing it. Counted, not
+     * silent, so the field can tell "congestion dropped relays" apart from
+     * "broadcasts mysteriously do not arrive" (bramble.getDiagnostics ->
+     * flood_relay_drops). */
+    ESP_LOGW(TAG, "Flood relay queue full; dropping relay (total drops=%" PRIu32 ")",
+             s_flood_relay_drops);
+}
+
+uint32_t mesh_get_flood_relay_drops(void) { return s_flood_relay_drops; }
+
+void mesh_get_probe_ingress_stats(uint32_t* accepted, uint32_t* dropped_reply,
+                                  uint32_t* dropped_forward) {
+    if (accepted)
+        *accepted = s_probe_ingress.accepted;
+    if (dropped_reply)
+        *dropped_reply = s_probe_ingress.dropped_reply;
+    if (dropped_forward)
+        *dropped_forward = s_probe_ingress.dropped_forward;
 }
 
 /**
@@ -6682,6 +6704,8 @@ void mesh_task_start(bramble_identity_t* identity) {
     memset(s_rreq_fwd_queue, 0, sizeof(s_rreq_fwd_queue)); /* Init jittered RREQ forward queue */
     memset(s_flood_relay_queue, 0,
            sizeof(s_flood_relay_queue)); /* Init jittered channel-flood relay queue (Task 5) */
+    s_flood_relay_drops = 0;
+    probe_ingress_init(&s_probe_ingress, now_ms()); /* PROBE ingress buckets (issue #75) */
     memset(&s_shared, 0, sizeof(s_shared));
     tx_gate_snapshot(&s_shared.airtime);
 
@@ -7176,6 +7200,35 @@ static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t 
         return;
     }
 
+    /* Ingress backpressure (issue #75). PROBE is unauthenticated on purpose:
+     * an unprovisioned node asking "who can hear me" is the feature, so
+     * there is deliberately no MAC check and no provisioning gate here. What
+     * is bounded is the AMPLIFICATION. Accepting a probe costs this node a
+     * three-send reply burst plus a rebroadcast, and dedup keys on a
+     * packet_id an attacker varies freely, so before this the cost ratio of
+     * one injected 16-byte frame to four transmissions per node in earshot
+     * was unbounded. The cap is node-global, NOT keyed on the src_addr above:
+     * that field is unauthenticated, so per-sender keying would be evadable
+     * by rotating it and would hand an attacker a targeted DoS against any
+     * victim whose address it forged. Same call, same reasons, as SEC-M4's
+     * forwarded-RREQ cap; security.h has the full argument.
+     *
+     * Forward eligibility is passed IN rather than inferred: a probe that
+     * arrived hop-exhausted was never going to propagate, so it must not
+     * debit the tighter forward bucket. Probes originate at hop_limit 8, so
+     * every legitimate sweep ends with hop_limit 1 arrivals at the edge of
+     * range; charging those would let ordinary traffic suppress forwarding
+     * for genuinely eligible multi-hop probes. */
+    bool forward_eligible = header.hop_limit > 1;
+    probe_ingress_decision_t ingress =
+        probe_ingress_allow(&s_probe_ingress, forward_eligible, now_ms());
+    if (!ingress.reply) {
+        ESP_LOGW(TAG, "PROBE RX rate limited pid=%08" PRIX32 " src=%s (drops=%" PRIu32 ")",
+                 header.packet_id, addr_hex(src_addr, src_buf, sizeof(src_buf)),
+                 s_probe_ingress.dropped_reply);
+        return;
+    }
+
     /* Send probe ACK back */
     uint8_t buf[20];
     bramble_header_t ack_header = {
@@ -7200,16 +7253,27 @@ static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t 
              header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)));
 
-    /* Forward probe if hop limit allows */
-    if (header.hop_limit > 1) {
-        bramble_header_t fwd = header;
-        fwd.hop_limit--;
-        uint8_t fwd_buf[20];
-        bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
-        memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
-        mesh_tx(fwd_buf, HEADER_SIZE + 4, TX_KIND_PROBE);
-        ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id,
-                 (unsigned)fwd.hop_limit);
+    /* Forward probe if the hop limit allows AND the forward bucket agreed.
+     * The reply above is a bounded local cost; the rebroadcast is what turns
+     * one injected frame into mesh-wide traffic, so it runs out of budget
+     * first and stops propagation while this node keeps answering its
+     * neighbors. A hop-exhausted probe falls out here having spent nothing
+     * from the forward bucket. */
+    if (forward_eligible) {
+        if (!ingress.forward) {
+            ESP_LOGW(TAG,
+                     "PROBE FWD suppressed by ingress budget pid=%08" PRIX32 " (drops=%" PRIu32 ")",
+                     header.packet_id, s_probe_ingress.dropped_forward);
+        } else {
+            bramble_header_t fwd = header;
+            fwd.hop_limit--;
+            uint8_t fwd_buf[20];
+            bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
+            memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
+            mesh_tx(fwd_buf, HEADER_SIZE + 4, TX_KIND_PROBE);
+            ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id,
+                     (unsigned)fwd.hop_limit);
+        }
     }
 }
 

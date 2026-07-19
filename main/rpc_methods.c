@@ -209,6 +209,21 @@ static int handle_get_diagnostics(const cJSON* params, cJSON* result) {
         cJSON_AddItemToArray(tasks, obj);
     }
 
+    /* Airtime backpressure counters. Congestion that is absorbed silently is
+     * congestion nobody can diagnose from the field, so both the flood relay
+     * drops (issue #87) and the PROBE ingress refusals (issue #75) are
+     * readable here. */
+    cJSON* backpressure = cJSON_AddObjectToObject(result, "backpressure");
+    cJSON_AddNumberToObject(backpressure, "flood_relay_drops",
+                            (double)mesh_get_flood_relay_drops());
+
+    uint32_t probe_accepted = 0, probe_drop_reply = 0, probe_drop_fwd = 0;
+    mesh_get_probe_ingress_stats(&probe_accepted, &probe_drop_reply, &probe_drop_fwd);
+    cJSON* probe = cJSON_AddObjectToObject(backpressure, "probe_ingress");
+    cJSON_AddNumberToObject(probe, "accepted", (double)probe_accepted);
+    cJSON_AddNumberToObject(probe, "dropped_reply", (double)probe_drop_reply);
+    cJSON_AddNumberToObject(probe, "dropped_forward", (double)probe_drop_fwd);
+
     if (include_heap_dump) {
         ESP_LOGI(
             TAG,

@@ -180,4 +180,45 @@ typedef struct {
  */
 bool channel_flood_note_overheard(pending_flood_relay_t* queue, int capacity, uint32_t flood_key);
 
+/*
+ * channel_flood_relay_admit: place one jittered flood rebroadcast into the
+ * pending-relay queue, or DROP it when the queue is full (issue #87).
+ *
+ * The dropping is the point. This function used to be inline in
+ * mesh_task.c's schedule_flood_relay, and its full-queue branch transmitted
+ * the frame IMMEDIATELY instead of dropping it. That inverts backpressure at
+ * exactly the moment the mesh can least afford it: the relay queue is only
+ * full when this node already has FLOOD_RELAY_QUEUE_CAPACITY rebroadcasts
+ * pending, which is the definition of local congestion, and the response
+ * was to key up without jitter, immediately, on the congested channel. The
+ * fuller the queue, the more eagerly the node transmitted. A flood that
+ * outran the queue therefore turned every relay into an un-jittered
+ * broadcast storm, with same-hop neighbors all transmitting at once because
+ * the jitter that exists to decorrelate them had been skipped.
+ *
+ * Dropping is correct because a flood relay is best-effort by construction:
+ * the frame reached this node, other neighbors are relaying the same frame
+ * (that is what FLOOD_SUPPRESS_AFTER counts), and end-to-end reliability
+ * lives in the ACK/retry layer, not in this queue. Losing a redundant copy
+ * under congestion costs coverage at the margin; transmitting it costs
+ * everyone airtime precisely when airtime is scarce.
+ *
+ * The drop is COUNTED, not silent. drop_counter (may be NULL) is
+ * incremented on every drop so the condition is visible in the field
+ * through bramble.getDiagnostics rather than being an invisible coverage
+ * hole that only shows up as "some broadcasts don't arrive sometimes".
+ *
+ * buf/len are the ALREADY relay-mutated wire bytes; this function owns
+ * placement and timing, not frame content. due_at_ms is the absolute fire
+ * time (the caller adds its own jitter). flood_key/tx_kind are stored for
+ * the suppression engine and the airtime lane exactly as before.
+ *
+ * Returns true if the relay was queued, false if it was dropped. Pure over
+ * its inputs (no globals, no clock) for the same testability reason
+ * channel_flood_decide is: see test/test_flood_relay_backpressure.c.
+ */
+bool channel_flood_relay_admit(pending_flood_relay_t* queue, int capacity, const uint8_t* buf,
+                               uint8_t len, uint32_t due_at_ms, uint32_t flood_key, uint8_t tx_kind,
+                               uint32_t* drop_counter);
+
 #endif

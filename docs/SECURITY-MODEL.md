@@ -364,6 +364,70 @@ authentication (future work). Under a sustained flood
 the global cap also drops some legitimate forwarded RREQs; this is an
 accepted airtime-vs-reach tradeoff, and discovery already retries.
 
+### PROBE ingress rate limiting
+
+`PROBE` and `PROBE_ACK` are **unauthenticated by design**, and stay that way.
+PROBE is a reachability tool: a node with no provisioning, no channel key and
+no route asks "who can hear me" and gets an answer. Requiring a MAC or a
+provisioning gate on the receive path would delete that use case, so
+`handle_probe` in `main/mesh_task.c` deliberately performs no authentication.
+The consequence, stated plainly, is that anyone in radio range can cause
+nodes to transmit. What is bounded is *how much*.
+
+Before this bound existed, `handle_probe` did one length check and nothing
+else. Each accepted probe queued a three-transmission `PROBE_ACK` reply burst
+and also rebroadcast the probe, and duplicate suppression keys on a
+`packet_id` an attacker varies freely. One injected 16-byte frame therefore
+bought four transmissions from every node in earshot, with no ceiling: an
+unbounded amplification factor available to an unauthenticated attacker. The
+`probe_rate_limit_t` in `components/bramble_probe/bramble_probe.c` is a
+`send_limiter` covering locally originated probes only and never gated
+ingress.
+
+Received probes now pass two global token buckets, `probe_ingress_allow` in
+`components/security/security.c`, called from `handle_probe`. The reply
+bucket (`PROBE_REPLY_BURST` 8, one token per `PROBE_REPLY_REFILL_MS` 5000ms)
+caps answering; the forward bucket (`PROBE_FWD_BURST` 4, one token per
+`PROBE_FWD_REFILL_MS` 10000ms) caps rebroadcasting and is deliberately
+tighter, because answering is a bounded local cost while forwarding is the
+term that multiplies across the mesh. A probe that is not answered is never
+forwarded. Under a flood, propagation therefore stops before local answers
+do, and `tx_gate`'s `TX_KIND_PROBE` lane still has the final say on the
+frames that do go out.
+
+Forward eligibility (`hop_limit > 1`) is passed into `probe_ingress_allow` by
+the caller, and an ineligible probe does not touch the forward bucket at all:
+neither consumed nor counted as a forward drop. Probes originate at a hop
+limit of 8, so every legitimate sweep ends with hop-exhausted arrivals at the
+edge of range. Charging those would spend the scarcer budget on frames that
+could never propagate, which would suppress forwarding for genuinely eligible
+multi-hop probes sooner than intended and would make the `dropped_forward`
+counter rise from harmless last-hop traffic rather than from real congestion.
+
+The caps are node-global, not per-sender, for the same reasons SEC-M4's
+forwarded-RREQ cap is (see above). The only sender signal on a received probe
+is the `src_addr` in the payload, an unauthenticated wire field. Keying a
+bucket on it would be evadable, since an attacker rotates it across
+fabricated values and spreads the flood across per-sender buckets for an
+unchanged aggregate rate, and it would introduce a targeted denial of service
+that does not otherwise exist, since an attacker could set `src_addr` to a
+victim's address, drain that victim's bucket at every honest node in earshot,
+and both silence the victim and frame it as the flooder. A global cap has
+neither property: it refuses probes without regard to who claims to have sent
+them, which is uniform rather than targetable, and it refills on a fixed
+schedule the attacker does not control. Genuine per-sender fairness requires
+authenticating PROBE, which would delete the unprovisioned-reachability use
+case PROBE exists for.
+
+The accepted cost is that a sustained flood also delays legitimate probes at
+nodes in the attacker's radio range. This is the same airtime-versus-reach
+tradeoff SEC-M4 documents, it is bounded to one refill window rather than
+persistent, it needs no operator action to clear, and probing is a manual and
+retryable diagnostic rather than a message-delivery path. The refusals are
+counted and exposed through `bramble.getDiagnostics`
+(`backpressure.probe_ingress`) so a node under probe pressure is diagnosable
+in the field instead of merely slow.
+
 ### Duplicate suppression
 
 Received packets are deduplicated on `packet_id XOR (type << 24)` within a
