@@ -1,0 +1,165 @@
+# Dependabot configuration for Bramble.
+#
+# Covers every dependency ecosystem present in the repo: four npm lockfiles
+# (webapp/, webapp/ws-proxy/, webapp/mock/, simulator/ui/), two Go modules
+# (simulator/gosim/, simulator/tests/), and the GitHub Actions workflows.
+#
+# Cadence and grouping are tuned for the CI contract documented in
+# docs/ci.md. Every workflow always triggers on every pull request, heavy
+# jobs skip per area but their contexts always report, and any change under
+# .github/workflows forces the full matrix. On a small self-hosted runner
+# pool that makes each dependency PR expensive, so:
+#
+#   * Everything runs monthly, not daily or weekly. This is a cadence for
+#     routine version drift only. Dependabot security updates are driven by
+#     advisories rather than by this schedule, so a new CVE still opens a
+#     PR immediately; the monthly setting does not delay security fixes.
+#   * Times are staggered across the month's first day so the ecosystems do
+#     not all queue against the runner pool at once.
+#   * Minor and patch updates are grouped into one PR per directory, so a
+#     month of drift costs one CI run per ecosystem instead of a dozen.
+#     Major updates are deliberately left ungrouped: they need to be read
+#     and validated individually, and burying one inside a group PR is how
+#     a breaking Electron or Vite bump gets rubber-stamped.
+#   * open-pull-requests-limit is held low so a burst of majors cannot
+#     saturate CI.
+#
+# Commit messages use the deps and deps-dev scopes from the scope-enum in
+# commitlint.config.cjs. Both are outside every component scope gated by the
+# .releaserc.*.cjs configs, so a Dependabot merge can never cut a release.
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------- npm ---
+  - package-ecosystem: npm
+    directory: /webapp
+    schedule:
+      interval: monthly
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    groups:
+      webapp-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /webapp/ws-proxy
+    schedule:
+      interval: monthly
+      time: "05:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    groups:
+      ws-proxy-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /webapp/mock
+    schedule:
+      interval: monthly
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    groups:
+      mock-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /simulator/ui
+    schedule:
+      interval: monthly
+      time: "06:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    groups:
+      simulator-ui-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # ----------------------------------------------------------- Go modules ---
+  - package-ecosystem: gomod
+    directory: /simulator/gosim
+    schedule:
+      interval: monthly
+      time: "07:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      gosim-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: gomod
+    directory: /simulator/tests
+    schedule:
+      interval: monthly
+      time: "07:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      simulator-tests-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # -------------------------------------------------------- GitHub Actions ---
+  # Actions updates are the expensive ones: touching .github/workflows forces
+  # every heavy job in the matrix. Group all of them, majors included, into a
+  # single monthly PR so the full matrix runs once rather than once per action.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      time: "08:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"
