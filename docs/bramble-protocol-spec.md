@@ -1335,7 +1335,7 @@ struct route_entry {
     uint32_t next_hop;        // 4 bytes — next hop toward destination
     uint8_t  hop_count;       // 1 byte  — hops to destination
     uint8_t  metric;          // 1 byte  — route quality (255=best, 0=worst)
-    uint8_t  flags;           // 1 byte  — ACTIVE, REPAIRING, STALE
+    uint8_t  flags;           // 1 byte: route state (ACTIVE, STALE, BROKEN)
     uint8_t  fail_count;      // 1 byte  — consecutive forwarding failures
     uint32_t last_used;       // 4 bytes — timestamp of last use (epoch seconds)
     uint32_t last_confirmed;  // 4 bytes — timestamp of last successful delivery
