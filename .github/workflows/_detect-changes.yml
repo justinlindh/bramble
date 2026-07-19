@@ -53,7 +53,7 @@ jobs:
       workflows: ${{ steps.detect.outputs.workflows }}
       docs: ${{ steps.detect.outputs.docs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Compute changed areas
