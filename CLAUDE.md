@@ -18,9 +18,14 @@ target), `test/` (host test suites), `scripts/`, `docs/`, `api/openapi.yaml`
 
 - No em dashes anywhere: code, docs, commits, PR bodies. Use a colon, comma,
   or restructure.
-- Conventional commits: `type(scope): subject`. Scopes in use: firmware,
-  webapp, ui, settings, protocol, sim, emulator, rpc, hardware, tooling,
-  docs, ci, security, release, deps, deps-dev. The PR title becomes the
+- Conventional commits: `type(scope): subject`. The scope must be one of
+  the `scope-enum` values in `commitlint.config.cjs`: that list is
+  authoritative and CI-gated, so treat it as the source of truth rather
+  than this bullet. Pick the closest existing scope (common ones:
+  firmware, webapp, ui, settings, protocol, sim, emulator, rpc, hardware,
+  tooling, docs, ci, security, release, deps, deps-dev); if none fit, add
+  the new scope to `scope-enum` in the same PR rather than inventing one
+  inline, which commitlint will reject. The PR title becomes the
   squash-commit subject; commitlint gates it and semantic-release derives
   component versions from it.
 - No AI attribution: no generated-with footers, no co-author trailers, no
