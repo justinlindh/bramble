@@ -120,8 +120,13 @@ static void gps_task(void* arg) {
                 if (line_pos > 0) {
                     line_buf[line_pos] = '\0';
                     s_rx_lines_total++;
+                    /* Raw NMEA at DEBUG only: at INFO this logs a sentence per
+                     * line for the first 60 lines of every boot, and since
+                     * opening the serial port resets the board, every RPC
+                     * connection reboots it and the burst drowns the JSON-RPC
+                     * reply. Kept (capped) at DEBUG for GPS bring-up. */
                     if (s_raw_log_lines < 60) {
-                        ESP_LOGI(TAG, "NMEA raw: %s", line_buf);
+                        ESP_LOGD(TAG, "NMEA raw: %s", line_buf);
                         s_raw_log_lines++;
                     }
 
