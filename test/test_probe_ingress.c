@@ -37,7 +37,7 @@ void test_probe_flood_reply_burst_is_bounded(void) {
     int replies = 0;
     /* 1000 probes inside a single millisecond: no refill can occur. */
     for (int i = 0; i < 1000; i++) {
-        if (probe_ingress_allow(&rl, 0).reply)
+        if (probe_ingress_allow(&rl, true, 0).reply)
             replies++;
     }
 
@@ -54,7 +54,7 @@ void test_probe_flood_stays_bounded_over_a_long_window(void) {
      * offered. Accepted must track the REFILL rate, not the arrival rate. */
     int replies = 0;
     for (uint32_t t = 0; t < 600000; t += 100) {
-        if (probe_ingress_allow(&rl, t).reply)
+        if (probe_ingress_allow(&rl, true, t).reply)
             replies++;
     }
 
@@ -72,7 +72,7 @@ void test_probe_flood_rebroadcast_is_bounded_harder_than_the_reply(void) {
 
     int replies = 0, forwards = 0;
     for (int i = 0; i < 1000; i++) {
-        probe_ingress_decision_t d = probe_ingress_allow(&rl, 0);
+        probe_ingress_decision_t d = probe_ingress_allow(&rl, true, 0);
         if (d.reply)
             replies++;
         if (d.forward)
@@ -94,7 +94,7 @@ void test_total_transmissions_bought_by_a_flood_are_bounded(void) {
 
     int transmissions = 0;
     for (int i = 0; i < 1000; i++) {
-        probe_ingress_decision_t d = probe_ingress_allow(&rl, 0);
+        probe_ingress_decision_t d = probe_ingress_allow(&rl, true, 0);
         if (d.reply)
             transmissions += 3;
         if (d.forward)
@@ -105,12 +105,99 @@ void test_total_transmissions_bought_by_a_flood_are_bounded(void) {
     TEST_ASSERT_TRUE(transmissions < 4000 / 100);
 }
 
+/* --- Forward eligibility. A probe that arrived hop-exhausted was never
+ * going to propagate, so it must not touch the tighter forward bucket.
+ * Probes originate at hop_limit 8, so every legitimate sweep ends with
+ * hop_limit 1 arrivals at the edge of range: this is ordinary traffic, and
+ * charging it would let normal sweeps crowd out real forwards. --- */
+
+void test_hop_exhausted_probes_do_not_consume_the_forward_budget(void) {
+    /* The regression test for the review finding. A stream of hop-exhausted
+     * probes must leave the forward budget entirely intact for a later
+     * eligible one. Before the fix, probe_ingress_allow charged the forward
+     * bucket on every accepted probe regardless of eligibility, so these
+     * PROBE_FWD_BURST last-hop frames drained it and the eligible probe
+     * below was refused a forward it should have been granted. */
+    probe_ingress_limiter_t rl;
+    probe_ingress_init(&rl, 0);
+
+    for (int i = 0; i < PROBE_FWD_BURST; i++) {
+        probe_ingress_decision_t d = probe_ingress_allow(&rl, false, 0);
+        TEST_ASSERT_TRUE(d.reply);    /* still answered: reachability works */
+        TEST_ASSERT_FALSE(d.forward); /* but never eligible to propagate */
+    }
+
+    /* The forward bucket is untouched, so a genuinely eligible probe still
+     * gets its forward. */
+    TEST_ASSERT_EQUAL_UINT32(PROBE_FWD_BURST, rl.forward.tokens);
+    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, true, 0).forward);
+}
+
+void test_hop_exhausted_probes_are_not_counted_as_forward_drops(void) {
+    /* dropped_forward must mean "congestion suppressed a propagation", not
+     * "a last-hop probe arrived". Otherwise the diagnostic the PR adds is
+     * misleading exactly when an operator leans on it. */
+    probe_ingress_limiter_t rl;
+    probe_ingress_init(&rl, 0);
+
+    for (int i = 0; i < PROBE_REPLY_BURST; i++) {
+        probe_ingress_allow(&rl, false, 0);
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(PROBE_REPLY_BURST, rl.accepted);
+    TEST_ASSERT_EQUAL_UINT32(0, rl.dropped_forward);
+}
+
+void test_a_full_legitimate_sweep_never_starves_the_forward_budget(void) {
+    /* End to end on the realistic traffic shape. A node at the edge of range
+     * fields mostly hop-exhausted probes with the occasional eligible one
+     * mixed in. The eligible ones must all be forwarded, because only they
+     * ever spend forward tokens and there are few of them. */
+    probe_ingress_limiter_t rl;
+    probe_ingress_init(&rl, 0);
+
+    int eligible_forwarded = 0, eligible_offered = 0;
+    for (int i = 0; i < 10; i++) {
+        uint32_t t = (uint32_t)i * PROBE_FWD_REFILL_MS;
+        /* The eligible probe arrives first in the window and claims the
+         * reply token the window earned, then nine last-hop arrivals follow.
+         * Ordering matters only for the reply bucket, which both kinds share
+         * and which is not what this test is about; the point is that the
+         * nine last-hop frames leave the FORWARD budget alone. */
+        eligible_offered++;
+        if (probe_ingress_allow(&rl, true, t).forward)
+            eligible_forwarded++;
+        for (int j = 0; j < 9; j++) {
+            probe_ingress_allow(&rl, false, t);
+        }
+    }
+
+    TEST_ASSERT_EQUAL_INT(eligible_offered, eligible_forwarded);
+    TEST_ASSERT_EQUAL_UINT32(0, rl.dropped_forward);
+}
+
+void test_eligible_probes_still_exhaust_the_forward_budget(void) {
+    /* The eligibility gate must not become an escape hatch: forward-eligible
+     * probes are still capped at PROBE_FWD_BURST, which is the whole point
+     * of the bucket. */
+    probe_ingress_limiter_t rl;
+    probe_ingress_init(&rl, 0);
+
+    int forwards = 0;
+    for (int i = 0; i < 1000; i++) {
+        if (probe_ingress_allow(&rl, true, 0).forward)
+            forwards++;
+    }
+
+    TEST_ASSERT_EQUAL_INT(PROBE_FWD_BURST, forwards);
+}
+
 void test_forward_is_never_granted_without_a_reply(void) {
     probe_ingress_limiter_t rl;
     probe_ingress_init(&rl, 0);
 
     for (int i = 0; i < 500; i++) {
-        probe_ingress_decision_t d = probe_ingress_allow(&rl, i * 37);
+        probe_ingress_decision_t d = probe_ingress_allow(&rl, true, i * 37);
         if (d.forward) {
             TEST_ASSERT_TRUE(d.reply);
         }
@@ -127,7 +214,7 @@ void test_a_normal_probe_sweep_is_never_throttled(void) {
     probe_ingress_init(&rl, 0);
 
     for (int round = 0; round < PROBE_REPLY_BURST; round++) {
-        TEST_ASSERT_TRUE(probe_ingress_allow(&rl, (uint32_t)round * 2000).reply);
+        TEST_ASSERT_TRUE(probe_ingress_allow(&rl, true, (uint32_t)round * 2000).reply);
     }
     TEST_ASSERT_EQUAL_UINT32(0, rl.dropped_reply);
 }
@@ -140,11 +227,11 @@ void test_the_limiter_self_heals_without_operator_action(void) {
     probe_ingress_init(&rl, 0);
 
     for (int i = 0; i < 500; i++) {
-        probe_ingress_allow(&rl, 0);
+        probe_ingress_allow(&rl, true, 0);
     }
-    TEST_ASSERT_FALSE(probe_ingress_allow(&rl, 0).reply);
+    TEST_ASSERT_FALSE(probe_ingress_allow(&rl, true, 0).reply);
 
-    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, PROBE_REPLY_REFILL_MS).reply);
+    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, true, PROBE_REPLY_REFILL_MS).reply);
 }
 
 /* --- The design property: no per-sender keying. A caller cannot express
@@ -163,8 +250,8 @@ void test_the_limiter_takes_no_sender_identity_at_all(void) {
     probe_ingress_init(&attacker_run, 0);
 
     for (int i = 0; i < 100; i++) {
-        probe_ingress_allow(&victim_run, 0);
-        probe_ingress_allow(&attacker_run, 0);
+        probe_ingress_allow(&victim_run, true, 0);
+        probe_ingress_allow(&attacker_run, true, 0);
     }
 
     TEST_ASSERT_EQUAL_UINT32(victim_run.accepted, attacker_run.accepted);
@@ -188,12 +275,12 @@ void test_a_forged_source_flood_cannot_silence_a_legitimate_sender_beyond_refill
 
     /* Attacker empties the ceiling at t=0, forging sources freely. */
     for (int i = 0; i < 10000; i++) {
-        probe_ingress_allow(&rl, 0);
+        probe_ingress_allow(&rl, true, 0);
     }
 
     /* The legitimate sender is served on the very next refill tick, and the
      * attacker gained nothing by aiming at them specifically. */
-    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, PROBE_REPLY_REFILL_MS).reply);
+    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, true, PROBE_REPLY_REFILL_MS).reply);
 }
 
 void test_sustained_forged_flood_still_leaves_a_share_for_a_legitimate_sender(void) {
@@ -208,10 +295,10 @@ void test_sustained_forged_flood_still_leaves_a_share_for_a_legitimate_sender(vo
     for (int window = 0; window < 20; window++) {
         uint32_t t = (uint32_t)window * PROBE_REPLY_REFILL_MS;
         /* Honest sender goes first in the window, then the flood. */
-        if (probe_ingress_allow(&rl, t).reply)
+        if (probe_ingress_allow(&rl, true, t).reply)
             honest_replies++;
         for (int i = 0; i < 100; i++) {
-            probe_ingress_allow(&rl, t);
+            probe_ingress_allow(&rl, true, t);
         }
     }
 
@@ -230,9 +317,9 @@ void test_refill_carries_the_sub_window_remainder(void) {
     rl.reply.tokens = 0;
 
     for (uint32_t t = 0; t < PROBE_REPLY_REFILL_MS; t++) {
-        TEST_ASSERT_FALSE(probe_ingress_allow(&rl, t).reply);
+        TEST_ASSERT_FALSE(probe_ingress_allow(&rl, true, t).reply);
     }
-    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, PROBE_REPLY_REFILL_MS).reply);
+    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, true, PROBE_REPLY_REFILL_MS).reply);
 }
 
 void test_refill_never_exceeds_the_burst_ceiling(void) {
@@ -244,7 +331,7 @@ void test_refill_never_exceeds_the_burst_ceiling(void) {
     uint32_t quiet = 100u * PROBE_REPLY_REFILL_MS;
     int replies = 0;
     for (int i = 0; i < 1000; i++) {
-        if (probe_ingress_allow(&rl, quiet).reply)
+        if (probe_ingress_allow(&rl, true, quiet).reply)
             replies++;
     }
     TEST_ASSERT_EQUAL_INT(PROBE_REPLY_BURST, replies);
@@ -258,7 +345,7 @@ void test_millisecond_clock_rollover_does_not_stall_probe_handling(void) {
     rl.reply.tokens = 0;
 
     uint32_t after_wrap = 0xFFFFFF00u + PROBE_REPLY_REFILL_MS; /* wraps past 0 */
-    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, after_wrap).reply);
+    TEST_ASSERT_TRUE(probe_ingress_allow(&rl, true, after_wrap).reply);
 }
 
 void test_init_starts_both_buckets_full_with_zeroed_counters(void) {
@@ -282,7 +369,7 @@ void test_counters_account_for_every_probe_offered(void) {
     probe_ingress_init(&rl, 0);
 
     for (int i = 0; i < 777; i++) {
-        probe_ingress_allow(&rl, 0);
+        probe_ingress_allow(&rl, true, 0);
     }
 
     TEST_ASSERT_EQUAL_UINT32(777, rl.accepted + rl.dropped_reply);
@@ -294,6 +381,10 @@ int main(void) {
     RUN_TEST(test_probe_flood_stays_bounded_over_a_long_window);
     RUN_TEST(test_probe_flood_rebroadcast_is_bounded_harder_than_the_reply);
     RUN_TEST(test_total_transmissions_bought_by_a_flood_are_bounded);
+    RUN_TEST(test_hop_exhausted_probes_do_not_consume_the_forward_budget);
+    RUN_TEST(test_hop_exhausted_probes_are_not_counted_as_forward_drops);
+    RUN_TEST(test_a_full_legitimate_sweep_never_starves_the_forward_budget);
+    RUN_TEST(test_eligible_probes_still_exhaust_the_forward_budget);
     RUN_TEST(test_forward_is_never_granted_without_a_reply);
     RUN_TEST(test_a_normal_probe_sweep_is_never_throttled);
     RUN_TEST(test_the_limiter_self_heals_without_operator_action);

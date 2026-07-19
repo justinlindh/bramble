@@ -7003,8 +7003,17 @@ static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t 
      * that field is unauthenticated, so per-sender keying would be evadable
      * by rotating it and would hand an attacker a targeted DoS against any
      * victim whose address it forged. Same call, same reasons, as SEC-M4's
-     * forwarded-RREQ cap; security.h has the full argument. */
-    probe_ingress_decision_t ingress = probe_ingress_allow(&s_probe_ingress, now_ms());
+     * forwarded-RREQ cap; security.h has the full argument.
+     *
+     * Forward eligibility is passed IN rather than inferred: a probe that
+     * arrived hop-exhausted was never going to propagate, so it must not
+     * debit the tighter forward bucket. Probes originate at hop_limit 8, so
+     * every legitimate sweep ends with hop_limit 1 arrivals at the edge of
+     * range; charging those would let ordinary traffic suppress forwarding
+     * for genuinely eligible multi-hop probes. */
+    bool forward_eligible = header.hop_limit > 1;
+    probe_ingress_decision_t ingress =
+        probe_ingress_allow(&s_probe_ingress, forward_eligible, now_ms());
     if (!ingress.reply) {
         ESP_LOGW(TAG, "PROBE RX rate limited pid=%08" PRIX32 " src=%s (drops=%" PRIu32 ")",
                  header.packet_id, addr_hex(src_addr, src_buf, sizeof(src_buf)),
@@ -7036,23 +7045,27 @@ static void handle_probe(const uint8_t* data, uint8_t len, int16_t rssi, int8_t 
              header.packet_id, (unsigned)probe_round, addr_hex(src_addr, src_buf, sizeof(src_buf)),
              addr_hex(s_identity->address, me_buf, sizeof(me_buf)));
 
-    /* Forward probe if hop limit allows AND the forward bucket agrees. The
-     * reply above is a bounded local cost; the rebroadcast is what turns one
-     * injected frame into mesh-wide traffic, so it runs out of budget first
-     * and stops propagation while this node keeps answering its neighbors. */
-    if (header.hop_limit > 1 && !ingress.forward) {
-        ESP_LOGW(TAG,
-                 "PROBE FWD suppressed by ingress budget pid=%08" PRIX32 " (drops=%" PRIu32 ")",
-                 header.packet_id, s_probe_ingress.dropped_forward);
-    } else if (header.hop_limit > 1) {
-        bramble_header_t fwd = header;
-        fwd.hop_limit--;
-        uint8_t fwd_buf[20];
-        bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
-        memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
-        mesh_tx(fwd_buf, HEADER_SIZE + 4, TX_KIND_PROBE);
-        ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id,
-                 (unsigned)fwd.hop_limit);
+    /* Forward probe if the hop limit allows AND the forward bucket agreed.
+     * The reply above is a bounded local cost; the rebroadcast is what turns
+     * one injected frame into mesh-wide traffic, so it runs out of budget
+     * first and stops propagation while this node keeps answering its
+     * neighbors. A hop-exhausted probe falls out here having spent nothing
+     * from the forward bucket. */
+    if (forward_eligible) {
+        if (!ingress.forward) {
+            ESP_LOGW(TAG,
+                     "PROBE FWD suppressed by ingress budget pid=%08" PRIX32 " (drops=%" PRIu32 ")",
+                     header.packet_id, s_probe_ingress.dropped_forward);
+        } else {
+            bramble_header_t fwd = header;
+            fwd.hop_limit--;
+            uint8_t fwd_buf[20];
+            bramble_header_serialize(&fwd, fwd_buf, HEADER_SIZE);
+            memcpy(fwd_buf + HEADER_SIZE, data + HEADER_SIZE, 4);
+            mesh_tx(fwd_buf, HEADER_SIZE + 4, TX_KIND_PROBE);
+            ESP_LOGI(TAG, "PROBE FWD pid=%08" PRIX32 " new_hop=%u", header.packet_id,
+                     (unsigned)fwd.hop_limit);
+        }
     }
 }
 

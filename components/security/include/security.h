@@ -127,9 +127,25 @@ void probe_ingress_init(probe_ingress_limiter_t* rl, uint32_t now_ms);
  * answered is never forwarded, because forwarding a probe this node has
  * already decided is beyond its budget only spends the budget elsewhere.
  *
+ * forward_eligible is the caller's answer to "could this probe be forwarded
+ * at all, budget aside", which in practice is `hop_limit > 1`. It is an
+ * explicit input, mirroring how channel_flood_decide takes budget_permits,
+ * so the limiter never has to infer context it cannot see. When it is false
+ * the forward bucket is not touched AT ALL: not consumed, and not counted as
+ * a forward drop. Charging hop-exhausted probes would quietly spend the
+ * scarcer budget on frames that could never propagate, and since probes
+ * originate at a hop limit of 8, every legitimate sweep ends with such
+ * arrivals at the edge of range. That is ordinary traffic. Letting it drain
+ * the forward bucket would suppress forwarding for genuinely eligible
+ * multi-hop probes sooner than intended, which is a version of the
+ * "ordinary traffic degrades service for others" failure the global-bucket
+ * choice exists to avoid, and it would make dropped_forward rise from
+ * harmless last-hop receptions rather than from real congestion.
+ *
  * Takes no source address ON PURPOSE. The parameter would be an
  * unauthenticated wire field and accepting it would invite exactly the
  * per-sender keying rejected above.
  */
-probe_ingress_decision_t probe_ingress_allow(probe_ingress_limiter_t* rl, uint32_t now_ms);
+probe_ingress_decision_t probe_ingress_allow(probe_ingress_limiter_t* rl, bool forward_eligible,
+                                             uint32_t now_ms);
 #endif

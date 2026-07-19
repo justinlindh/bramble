@@ -114,7 +114,8 @@ void probe_ingress_init(probe_ingress_limiter_t* rl, uint32_t now_ms) {
     rl->forward.last_refill_ms = now_ms;
 }
 
-probe_ingress_decision_t probe_ingress_allow(probe_ingress_limiter_t* rl, uint32_t now_ms) {
+probe_ingress_decision_t probe_ingress_allow(probe_ingress_limiter_t* rl, bool forward_eligible,
+                                             uint32_t now_ms) {
     probe_ingress_decision_t d = {false, false};
 
     if (!probe_bucket_take(&rl->reply, PROBE_REPLY_BURST, PROBE_REPLY_REFILL_MS, now_ms)) {
@@ -124,6 +125,17 @@ probe_ingress_decision_t probe_ingress_allow(probe_ingress_limiter_t* rl, uint32
 
     rl->accepted++;
     d.reply = true;
+
+    /* A probe that could never be forwarded does not touch the forward
+     * bucket. Charging it would spend the scarcer budget on frames that
+     * cannot propagate: probes originate at a hop limit of 8 and every sweep
+     * therefore ends with hop-exhausted arrivals at the edge of range, so
+     * this is ordinary traffic, not a corner case. It would also make
+     * dropped_forward rise from harmless last-hop receptions, which is the
+     * opposite of a diagnosable counter. */
+    if (!forward_eligible) {
+        return d;
+    }
 
     /* Forwarding is the amplifying term and carries the tighter budget, so
      * propagation stops before local answers do. */

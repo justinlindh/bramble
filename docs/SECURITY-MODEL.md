@@ -373,6 +373,15 @@ forwarded. Under a flood, propagation therefore stops before local answers
 do, and `tx_gate`'s `TX_KIND_PROBE` lane still has the final say on the
 frames that do go out.
 
+Forward eligibility (`hop_limit > 1`) is passed into `probe_ingress_allow` by
+the caller, and an ineligible probe does not touch the forward bucket at all:
+neither consumed nor counted as a forward drop. Probes originate at a hop
+limit of 8, so every legitimate sweep ends with hop-exhausted arrivals at the
+edge of range. Charging those would spend the scarcer budget on frames that
+could never propagate, which would suppress forwarding for genuinely eligible
+multi-hop probes sooner than intended and would make the `dropped_forward`
+counter rise from harmless last-hop traffic rather than from real congestion.
+
 The caps are node-global, not per-sender, for the same reasons SEC-M4's
 forwarded-RREQ cap is (see above). The only sender signal on a received probe
 is the `src_addr` in the payload, an unauthenticated wire field. Keying a
