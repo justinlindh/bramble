@@ -1462,6 +1462,50 @@ static void _handle_identity_attestation(sim_node_t* rx, const uint8_t* buf, uin
                        rng, events);
 }
 
+/* Location share RX (issue #172): mirrors firmware's PKT_TYPE_LOCATION case
+ * in mesh_process_rx_packet plus handle_location: deliver only when addressed
+ * to this node or broadcast, never relay. The sim frame carries the inner
+ * tier+position bytes in cleartext after a 4-byte src_addr (see the crypto
+ * simplification note on bridge_handle_generate_location); parsing and
+ * caching go through the REAL component functions (location_parse_inner,
+ * location_cache_update) so tier decode and cache semantics cannot drift
+ * from firmware. */
+static void _handle_location(sim_node_t* rx, const uint8_t* buf, uint16_t len, uint64_t now_us,
+                             uint32_t now_ms, node_array_t* nodes) {
+    bramble_header_t hdr;
+    if (bramble_header_deserialize(&hdr, buf, len) != ESP_OK)
+        return;
+    if (hdr.dest_addr != 0xFFFFFFFFu && hdr.dest_addr != rx->addr)
+        return;
+    if (len < HEADER_SIZE + 4 + 1)
+        return;
+    uint32_t src_addr;
+    memcpy(&src_addr, buf + HEADER_SIZE, 4);
+    if (src_addr == rx->addr)
+        return;
+
+    uint8_t tier = 0;
+    bramble_position_t pos;
+    if (location_parse_inner(buf + HEADER_SIZE + 4, (size_t)(len - HEADER_SIZE - 4), &tier,
+                             &pos) != 0)
+        return;
+
+    int node_idx = (int)(rx - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+    location_cache_update(&ext->location, src_addr, &pos, now_ms);
+    g_ext_metrics.location_updates++;
+
+    fprintf(stdout,
+            "{\"type\":\"location_received\",\"timestamp_us\":%llu"
+            ",\"node\":\"%s\",\"src\":\"0x%08X\",\"tier\":%u"
+            ",\"lat_e7\":%d,\"lon_e7\":%d,\"alt_m\":%d}\n",
+            (unsigned long long)now_us, rx->id, src_addr, tier, pos.latitude_e7, pos.longitude_e7,
+            (int)pos.altitude_m);
+    fflush(stdout);
+}
+
 /* ─── Public packet handling wrappers ──────────────────────────────────── */
 
 void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
@@ -1558,6 +1602,9 @@ void bridge_handle_receive_packet(sim_event_t* event, node_array_t* nodes, radio
     case PKT_TYPE_IDENTITY_ATTESTATION:
         _handle_identity_attestation(rx, buf, len, event->timestamp_us, now_ms, nodes, radio, rng,
                                      events);
+        break;
+    case PKT_TYPE_LOCATION:
+        _handle_location(rx, buf, len, event->timestamp_us, now_ms, nodes);
         break;
     default:
         break;
@@ -2191,6 +2238,91 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
                 ",\"ed8\":\"%02X%02X%02X%02X\"}\n",
                 (unsigned long long)event->timestamp_us, src->id, claimed, att.header.packet_id,
                 att.ed25519_pub[0], att.ed25519_pub[1], att.ed25519_pub[2], att.ed25519_pub[3]);
+        fflush(stdout);
+    }
+}
+
+/* ─── Location share origination (issue #172) ──────────────────────────── */
+/*
+ * Fires a scripted EVT_GENERATE_LOCATION: the named node broadcasts a GPS
+ * position update mirroring firmware's mesh_send_location_packet broadcast
+ * path (main/mesh_task.c): inner plaintext = tier byte + position payload
+ * padded to L_LOC_INNER via the REAL location_serialize_for_tier, header
+ * PKT_TYPE_LOCATION / hop_limit 3 / dest 0xFFFFFFFF, sent on the NORMAL
+ * airtime lane (firmware sends location via mesh_tx TX_KIND_DATA, which
+ * tx_gate_kind_tier maps to AIRTIME_TIER_NORMAL). Crypto simplification:
+ * the inner rides cleartext after a 4-byte src_addr instead of
+ * channel_msg_encrypt output, because gosim does not model channel keys;
+ * the tier byte still transits inside the (would-be encrypted) inner,
+ * matching SEC-C1's layout. Tier is FULL so scenarios can assert the exact
+ * coordinates that arrived. The node's own location manager is updated
+ * through the real location_set_position first, like firmware's fix path.
+ */
+void bridge_handle_generate_location(sim_event_t* event, node_array_t* nodes,
+                                     radio_config_t* radio, pcg32_state_t* rng,
+                                     event_queue_t* events, metrics_state_t* metrics) {
+    sim_node_t* src = node_array_find_by_id(nodes, event->data.location.node_id);
+    if (!src || !src->active)
+        return;
+    int node_idx = (int)(src - nodes->nodes);
+    bridge_node_ext_t* ext = bridge_node_ext_get(node_idx);
+    if (!ext)
+        return;
+
+    /* Mandatory-provisioning (Task 2): an unprovisioned node is INERT,
+     * same gate as generate_message/generate_attestation. */
+    if (!ext->provisioned) {
+        fprintf(stdout,
+                "{\"type\":\"unprovisioned_inert\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"frame\":\"location\"}\n",
+                (unsigned long long)event->timestamp_us, src->id);
+        fflush(stdout);
+        return;
+    }
+
+    bramble_position_t pos;
+    memset(&pos, 0, sizeof(pos));
+    pos.latitude_e7 = event->data.location.latitude_e7;
+    pos.longitude_e7 = event->data.location.longitude_e7;
+    pos.altitude_m = event->data.location.altitude_m;
+    pos.accuracy_m = 5;
+    pos.timestamp = (uint32_t)(event->timestamp_us / 1000000ULL);
+    pos.valid = true;
+    location_set_position(&ext->location, &pos);
+
+    uint8_t inner[L_LOC_INNER] = {0};
+    inner[LOCATION_INNER_TIER_OFFSET] = LOCATION_TIER_FULL;
+    if (location_serialize_for_tier(&pos, LOCATION_TIER_FULL, inner + 1, LOCATION_FULL_SIZE) <= 0)
+        return;
+
+    bramble_header_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.version = BRAMBLE_VERSION;
+    hdr.type = PKT_TYPE_LOCATION;
+    hdr.flags = 0;
+    hdr.hop_limit = 3; /* firmware's value; LOCATION is delivered, never relayed */
+    hdr.dest_addr = 0xFFFFFFFF;
+    hdr.packet_id = pcg32_random(rng);
+
+    outbound_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    bramble_header_serialize(&hdr, pkt.data, HEADER_SIZE);
+    memcpy(pkt.data + HEADER_SIZE, &src->addr, 4);
+    memcpy(pkt.data + HEADER_SIZE + 4, inner, sizeof(inner));
+    pkt.len = (uint16_t)(HEADER_SIZE + 4 + sizeof(inner));
+    pkt.is_broadcast = true;
+    pkt.dest_addr = 0xFFFFFFFF;
+    pkt.pkt_type = PKT_TYPE_LOCATION;
+
+    if (budget_gated_send(src, &pkt, AIRTIME_TIER_NORMAL, nodes, radio, rng, events, metrics,
+                          event->timestamp_us)) {
+        src->packets_originated++;
+        fprintf(stdout,
+                "{\"type\":\"location_sent\",\"timestamp_us\":%llu"
+                ",\"node\":\"%s\",\"packet_id\":\"0x%08X\""
+                ",\"lat_e7\":%d,\"lon_e7\":%d,\"alt_m\":%d}\n",
+                (unsigned long long)event->timestamp_us, src->id, hdr.packet_id, pos.latitude_e7,
+                pos.longitude_e7, (int)pos.altitude_m);
         fflush(stdout);
     }
 }

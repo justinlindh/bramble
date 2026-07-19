@@ -515,3 +515,81 @@ func fingerprintRun(run *scenarioRun) string {
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
 }
+
+// TestScenarioLocationSharing gates simulator/scenarios/location-sharing.json
+// (issue #172): every scripted send_location must originate a real
+// PKT_TYPE_LOCATION broadcast, and every other node in this single-hop square
+// must receive and cache it with the exact coordinates the scenario supplied.
+// Before the fix the engine had no implementation for send_location at all, so
+// the scenario ran only its two chat messages while claiming to verify
+// position updates. Simulation result: deterministic under the scenario seed.
+func TestScenarioLocationSharing(t *testing.T) {
+	run := runGatedScenario(t, "location-sharing")
+
+	type coord struct {
+		lat, lon float64
+	}
+	// One entry per scripted send_location, in scenario order.
+	sends := []struct {
+		node string
+		c    coord
+	}{
+		{"A", coord{370049000, -1220194000}},
+		{"B", coord{370051000, -1220180000}},
+		{"A", coord{370053000, -1220190000}},
+		{"C", coord{370045000, -1220175000}},
+		{"D", coord{370040000, -1220200000}},
+		{"A", coord{370056000, -1220185000}},
+		{"B", coord{370060000, -1220170000}},
+		{"A", coord{370058000, -1220183000}},
+	}
+
+	var sent []map[string]interface{}
+	received := map[coord]map[string]bool{} // coord -> set of receiving node ids
+	for _, e := range run.events {
+		switch e["type"] {
+		case "location_sent":
+			sent = append(sent, e)
+		case "location_received":
+			lat, _ := e["lat_e7"].(float64)
+			lon, _ := e["lon_e7"].(float64)
+			node, _ := e["node"].(string)
+			c := coord{lat, lon}
+			if received[c] == nil {
+				received[c] = map[string]bool{}
+			}
+			received[c][node] = true
+		}
+	}
+
+	if len(sent) != len(sends) {
+		t.Fatalf("location_sent count = %d, want %d (one per scripted send_location)",
+			len(sent), len(sends))
+	}
+	for i, want := range sends {
+		node, _ := sent[i]["node"].(string)
+		lat, _ := sent[i]["lat_e7"].(float64)
+		lon, _ := sent[i]["lon_e7"].(float64)
+		if node != want.node || lat != want.c.lat || lon != want.c.lon {
+			t.Errorf("location_sent[%d] = node %s (%v, %v), want node %s (%v, %v)",
+				i, node, lat, lon, want.node, want.c.lat, want.c.lon)
+		}
+		// The scenario's stated purpose: all contacts receive the update.
+		// The 4 nodes sit in a single-hop square, so each broadcast must
+		// reach the 3 other nodes with the coordinates bit-exact.
+		got := received[want.c]
+		if len(got) != 3 || got[want.node] {
+			t.Errorf("update %d from %s (%v, %v): received by %v, want the 3 other nodes",
+				i, want.node, want.c.lat, want.c.lon, got)
+		}
+	}
+
+	// The two chat messages that always worked must keep delivering, so the
+	// location traffic did not crowd them out.
+	fm := run.finalMetrics(t)
+	if delivered, _ := fm["delivered"].(float64); delivered != 2 {
+		t.Errorf("delivered = %v, want 2 (both scripted chat messages)", fm["delivered"])
+	}
+
+	assertNoRoutingPathologies(t, run)
+}

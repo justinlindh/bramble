@@ -244,6 +244,17 @@ func handleGenerateAttestation(event *C.sim_event_t, nodes *C.node_array_t,
 	C.bridge_handle_generate_attestation(event, nodes, radio, rng, events, metrics)
 }
 
+// handleGenerateLocation fires a scripted GPS position broadcast (issue
+// #172, "send_location" scenario event): the named node originates a
+// PKT_TYPE_LOCATION broadcast through the real firmware serialization path
+// in bridge.c, and every in-range receiver caches it via the real
+// location_cache_update.
+func handleGenerateLocation(event *C.sim_event_t, nodes *C.node_array_t,
+	radio *C.radio_config_t, rng *C.pcg32_state_t,
+	events *C.event_queue_t, metrics *C.metrics_state_t) {
+	C.bridge_handle_generate_location(event, nodes, radio, rng, events, metrics)
+}
+
 // --- Scenario-level test harness (Phase 1 Task 1) ---
 //
 // _test.go files in this package avoid "C" directly (see radio_harness.go),
