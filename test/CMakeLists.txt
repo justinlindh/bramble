@@ -1543,6 +1543,8 @@ add_executable(test_ota
     test_ota.c
     unity/unity.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_progress.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_rollback_policy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../components/ota/ota_version.c
 )
 target_include_directories(test_ota PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
