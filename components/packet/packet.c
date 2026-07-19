@@ -300,15 +300,29 @@ esp_err_t bramble_beacon_deserialize(bramble_beacon_t* p, const uint8_t* buf, si
      * inside the HMAC-covered prefix, before auth_hmac. */
     memcpy(p->seq, buf + B + 20, 6);
     memcpy(p->auth_hmac, buf + B + 26, 16);
-    /* Optional name after fixed fields */
+    /* Optional name after fixed fields. name_len is attacker-controlled and
+     * unauthenticated at this layer, so nothing derived from it may survive a
+     * failed bounds check. The pre-fix code skipped the memcpy when the
+     * declared length overran the frame but LEFT p->name_len at the declared
+     * value with name[] unwritten, so callers that read name_len bytes (the
+     * beacon name is copied into the neighbor table) read uninitialized stack.
+     * Same class as the relay_path clamp in bramble_ack_deserialize above.
+     *
+     * Unlike relay_path, an overrunning name is dropped entirely rather than
+     * truncated to what the frame carries: relay_path is a sequence of
+     * independent 4-byte hops where a prefix is still a meaningful (if
+     * shorter) trail, whereas a name is one unit and a truncated one is not a
+     * shorter name, it is a malformed string from a malformed frame. */
+    memset(p->name, 0, sizeof(p->name));
     p->name_len = 0;
-    p->name[0] = '\0';
     if (len > BEACON_SIZE) {
-        p->name_len = buf[BEACON_SIZE];
-        if (p->name_len > BEACON_NAME_MAX)
-            p->name_len = BEACON_NAME_MAX;
-        if (len >= (size_t)(BEACON_SIZE + 1 + p->name_len)) {
-            memcpy(p->name, buf + BEACON_SIZE + 1, p->name_len);
+        uint8_t declared = buf[BEACON_SIZE];
+        if (declared > BEACON_NAME_MAX)
+            declared = BEACON_NAME_MAX;
+        size_t avail = len - (size_t)(BEACON_SIZE + 1);
+        if ((size_t)declared <= avail && declared > 0) {
+            memcpy(p->name, buf + BEACON_SIZE + 1, declared);
+            p->name_len = declared;
         }
         p->name[p->name_len] = '\0';
     }
@@ -397,11 +411,21 @@ esp_err_t bramble_delivery_receipt_deserialize(bramble_delivery_receipt_t* p, co
      * fixed offset, right after auth_hmac. */
     memcpy(p->auth_hmac, buf + B + 10, 8);
     memcpy(p->seq, buf + B + 18, 6);
-    if (p->hop_count > DELIVERY_RECEIPT_MAX_HOPS)
+    /* Zero the trail before any of it is trusted, and reset hop_count on
+     * every rejecting path: this function returns an error rather than
+     * clamping, but leaving an attacker-declared hop_count paired with a
+     * stale relay_path[] behind in *p is the same state-consistency shape
+     * that bit the beacon name, one ignored return value away from a leak. */
+    memset(p->relay_path, 0, sizeof(p->relay_path));
+    if (p->hop_count > DELIVERY_RECEIPT_MAX_HOPS) {
+        p->hop_count = 0;
         return ESP_ERR_INVALID_SIZE;
+    }
     size_t needed = DELIVERY_RECEIPT_MIN_SIZE + (size_t)p->hop_count * 4;
-    if (len < needed)
+    if (len < needed) {
+        p->hop_count = 0;
         return ESP_ERR_INVALID_SIZE;
+    }
     for (uint8_t i = 0; i < p->hop_count; i++) {
         p->relay_path[i] = get_be32(buf + B + 24 + i * 4);
     }

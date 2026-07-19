@@ -285,6 +285,108 @@ void test_first_packet_id_unknown(void) {
     TEST_ASSERT_EQUAL_HEX32(0, first_id);
 }
 
+/* Regression (issue #77): frag_total is attacker-controlled and was recorded
+ * once, never rechecked. A fragment arriving with a larger frag_total could
+ * set a bit outside the slot's real full_mask, permanently poisoning the mask
+ * so the genuine message could never complete and the slot stayed pinned for
+ * the whole 30s timeout. The mismatched fragment must be dropped. */
+void test_reassembly_rejects_frag_total_mismatch(void) {
+    reassembly_ctx_t ctx;
+    reassembly_init(&ctx);
+
+    uint8_t data[10];
+    memset(data, 0x11, sizeof(data));
+
+    /* Genuine sender opens a 2-fragment message. */
+    frag_header_t hdr0 = {.frag_index = 0, .frag_total = 2, .message_id = 77};
+    TEST_ASSERT_EQUAL(0, reassembly_add(&ctx, &hdr0, data, sizeof(data), 1000, 1));
+
+    /* Attacker replays the same message_id claiming 4 fragments, index 3.
+     * That index is in range for the forged total but out of range for the
+     * slot, so it must be rejected outright. */
+    frag_header_t forged = {.frag_index = 3, .frag_total = 4, .message_id = 77};
+    TEST_ASSERT_EQUAL(-1, reassembly_add(&ctx, &forged, data, sizeof(data), 1000, 2));
+
+    /* A smaller forged total is rejected the same way. */
+    frag_header_t forged_small = {.frag_index = 0, .frag_total = 1, .message_id = 77};
+    TEST_ASSERT_EQUAL(-1, reassembly_add(&ctx, &forged_small, data, sizeof(data), 1000, 3));
+
+    /* The genuine second fragment still completes the message. */
+    frag_header_t hdr1 = {.frag_index = 1, .frag_total = 2, .message_id = 77};
+    TEST_ASSERT_EQUAL(1, reassembly_add(&ctx, &hdr1, data, sizeof(data), 1000, 4));
+
+    uint8_t out[64];
+    TEST_ASSERT_EQUAL(20, reassembly_collect(&ctx, 77, out, sizeof(out)));
+}
+
+/* The slot's first-seen total is authoritative: after a mismatched fragment
+ * is dropped, slot->total and received_mask are unchanged. */
+void test_reassembly_frag_total_mismatch_leaves_slot_intact(void) {
+    reassembly_ctx_t ctx;
+    reassembly_init(&ctx);
+
+    uint8_t data[10];
+    memset(data, 0x22, sizeof(data));
+
+    frag_header_t hdr0 = {.frag_index = 0, .frag_total = 3, .message_id = 88};
+    TEST_ASSERT_EQUAL(0, reassembly_add(&ctx, &hdr0, data, sizeof(data), 1000, 1));
+
+    frag_header_t forged = {.frag_index = 1, .frag_total = 2, .message_id = 88};
+    TEST_ASSERT_EQUAL(-1, reassembly_add(&ctx, &forged, data, sizeof(data), 1000, 2));
+
+    TEST_ASSERT_EQUAL(3, ctx.slots[0].total);
+    TEST_ASSERT_EQUAL_HEX8(0x01, ctx.slots[0].received_mask);
+    TEST_ASSERT_TRUE(ctx.slots[0].active);
+}
+
+/* Regression (issue #77, audit finding): collecting a slot that never
+ * completed must fail rather than concatenating fragment slots that were
+ * never written for this message. */
+void test_reassembly_collect_refuses_incomplete_slot(void) {
+    reassembly_ctx_t ctx;
+    reassembly_init(&ctx);
+
+    uint8_t data[10];
+    memset(data, 0x33, sizeof(data));
+
+    frag_header_t hdr0 = {.frag_index = 0, .frag_total = 3, .message_id = 99};
+    TEST_ASSERT_EQUAL(0, reassembly_add(&ctx, &hdr0, data, sizeof(data), 1000, 1));
+
+    uint8_t out[512];
+    TEST_ASSERT_EQUAL(-1, reassembly_collect(&ctx, 99, out, sizeof(out)));
+}
+
+/* Regression (issue #77, audit finding): a slot reused after an abandoned
+ * message must not carry that message's fragment lengths forward. */
+void test_reassembly_slot_reuse_clears_stale_lengths(void) {
+    reassembly_ctx_t ctx;
+    reassembly_init(&ctx);
+
+    uint8_t big[100];
+    memset(big, 0x44, sizeof(big));
+
+    /* Fill slot 0 with a 3-fragment message and abandon it. */
+    for (int i = 0; i < 3; i++) {
+        frag_header_t h = {.frag_index = (uint8_t)i, .frag_total = 3, .message_id = 111};
+        reassembly_add(&ctx, &h, big, sizeof(big), 1000, 1);
+    }
+    reassembly_purge(&ctx, 1000 + FRAG_REASSEMBLY_TIMEOUT_MS + 1);
+    TEST_ASSERT_FALSE(ctx.slots[0].active);
+
+    /* Reuse the slot for a 2-fragment message with shorter fragments. */
+    uint8_t small[10];
+    memset(small, 0x55, sizeof(small));
+    frag_header_t a = {.frag_index = 0, .frag_total = 2, .message_id = 222};
+    frag_header_t b = {.frag_index = 1, .frag_total = 2, .message_id = 222};
+    TEST_ASSERT_EQUAL(0, reassembly_add(&ctx, &a, small, sizeof(small), 60000, 1));
+    TEST_ASSERT_EQUAL(1, reassembly_add(&ctx, &b, small, sizeof(small), 60000, 2));
+
+    /* The stale third length must not leak into the reassembled size. */
+    TEST_ASSERT_EQUAL_HEX32(0, ctx.slots[0].frag_lens[2]);
+    uint8_t out[512];
+    TEST_ASSERT_EQUAL(20, reassembly_collect(&ctx, 222, out, sizeof(out)));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_split_small);
@@ -300,5 +402,9 @@ int main(void) {
     RUN_TEST(test_first_packet_id_in_order);
     RUN_TEST(test_first_packet_id_out_of_order);
     RUN_TEST(test_first_packet_id_unknown);
+    RUN_TEST(test_reassembly_rejects_frag_total_mismatch);
+    RUN_TEST(test_reassembly_frag_total_mismatch_leaves_slot_intact);
+    RUN_TEST(test_reassembly_collect_refuses_incomplete_slot);
+    RUN_TEST(test_reassembly_slot_reuse_clears_stale_lengths);
     return UNITY_END();
 }

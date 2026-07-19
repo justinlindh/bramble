@@ -62,12 +62,38 @@ int reassembly_add(reassembly_ctx_t* ctx, const frag_header_t* hdr, const uint8_
                 slot->total = hdr->frag_total;
                 slot->received_mask = 0;
                 slot->start_time = now_ms;
+                /* Clear the per-fragment lengths left over from whatever
+                 * message last used this slot, so a partially filled slot can
+                 * never contribute stale lengths (and therefore stale
+                 * data[] bytes) to a reassembly. */
+                memset(slot->frag_lens, 0, sizeof(slot->frag_lens));
                 break;
             }
         }
     }
 
     if (!slot)
+        return -1;
+
+    /* frag_total is unauthenticated attacker-controlled input, and it was
+     * previously recorded once and never rechecked. A sender could open a
+     * slot with total=2 and then feed the same message_id a fragment
+     * declaring total=4 with frag_index=3: the index passed the
+     * index < total check against the ATTACKER's total, set bit 3 in a slot
+     * whose full_mask is 0b0011, and permanently poisoned the mask so the
+     * real message could never complete and the slot stayed pinned for the
+     * full 30s timeout.
+     *
+     * The offending fragment is dropped and the first-seen total is kept.
+     * The alternative of tearing down the slot on mismatch is worse: it
+     * would let any node kill an in-flight reassembly it did not start with
+     * a single forged fragment, converting a state bug into a cheap targeted
+     * DoS. Keeping first-seen means an attacker who wins the race to open
+     * the slot still holds it until the timeout, but that is inherent to
+     * having a fixed slot table at all: they could equally just send
+     * fragment 0 of a message they never finish. Bounded slot occupancy is
+     * acceptable; corrupting someone else's in-progress reassembly is not. */
+    if (hdr->frag_total != slot->total)
         return -1;
 
     /* Track the packet_id of the first fragment received */
@@ -95,6 +121,14 @@ int reassembly_collect(reassembly_ctx_t* ctx, uint16_t message_id, uint8_t* out,
     for (int i = 0; i < FRAG_MAX_REASSEMBLIES; i++) {
         if (ctx->slots[i].active && ctx->slots[i].message_id == message_id) {
             reassembly_slot_t* slot = &ctx->slots[i];
+            /* Defence in depth: both callers only collect after
+             * reassembly_add reported completion, but collecting an
+             * incomplete slot would concatenate data[] entries that were
+             * never written for this message. Refuse instead of trusting
+             * the caller's sequencing. */
+            uint8_t full_mask = (uint8_t)((1u << slot->total) - 1u);
+            if (slot->total == 0 || slot->received_mask != full_mask)
+                return -1;
             size_t total_len = 0;
             for (int j = 0; j < slot->total; j++) {
                 total_len += slot->frag_lens[j];
