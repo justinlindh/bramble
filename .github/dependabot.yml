@@ -29,6 +29,20 @@
 # Commit messages use the deps and deps-dev scopes from the scope-enum in
 # commitlint.config.cjs. Both are outside every component scope gated by the
 # .releaserc.*.cjs configs, so a Dependabot merge can never cut a release.
+#
+# Group names are kept short ("patch", "gha") on purpose (issue #190): for a
+# single-package grouped update, Dependabot's generated PR title is
+# "bump X from A to B in DIR in the GROUP group across N directories", and
+# that suffix's length is dictated entirely by the group name, which the
+# directory already makes redundant. A longer descriptive name here
+# (webapp-docker-minor-patch, simulator-tests-minor-patch, ...) pushed real
+# titles past commitlint's 120-char header-max-length; the group name is a
+# label for the Dependabot dashboard, not user-facing prose, so shortening it
+# costs nothing but characters. This alone is not sufficient in every case
+# (a long npm package name/version pair can still exceed 120 chars even with
+# the shortest defensible group name), so commit-msg-lint.yml also carries a
+# narrow, actor-gated commitlint accommodation for dependabot[bot] titles;
+# see commitlint.dependabot.config.cjs.
 
 version: 2
 
@@ -46,7 +60,7 @@ updates:
       prefix-development: chore
       include: scope
     groups:
-      webapp-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -65,7 +79,7 @@ updates:
       prefix-development: chore
       include: scope
     groups:
-      ws-proxy-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -84,7 +98,7 @@ updates:
       prefix-development: chore
       include: scope
     groups:
-      mock-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -103,7 +117,7 @@ updates:
       prefix-development: chore
       include: scope
     groups:
-      simulator-ui-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -122,7 +136,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      gosim-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -140,7 +154,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      simulator-tests-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -162,7 +176,7 @@ updates:
       prefix: ci
       include: scope
     groups:
-      github-actions:
+      gha:
         patterns:
           - "*"
 
@@ -191,7 +205,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      webapp-docker-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -234,7 +248,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      emulator-docker-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:
@@ -252,7 +266,7 @@ updates:
       prefix: chore
       include: scope
     groups:
-      simulator-docker-minor-patch:
+      patch:
         patterns:
           - "*"
         update-types:

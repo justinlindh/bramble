@@ -30,11 +30,36 @@ jobs:
             @commitlint/cli@19 \
             @commitlint/config-conventional@19
 
+      - name: Pick the commitlint config
+        # Dependabot's grouped-update titles are structurally longer than a
+        # human subject (issue #190): the generated suffix
+        # " in the GROUP group across N directories" is Dependabot's own
+        # template, not something a commit author controls. Rather than
+        # relax header-max-length for every contributor, or exempt
+        # dependabot[bot] from commitlint entirely (which would let a
+        # genuinely malformed type or scope through unchecked), select a
+        # config that changes only that one rule, and only for that one
+        # actor. github.event.pull_request.user.login is set by GitHub from
+        # the PR's real author and cannot be spoofed by PR content; this is
+        # the same actor gate .github/workflows/pr-template.yml already uses
+        # for the same bot. See commitlint.dependabot.config.cjs for the
+        # config itself.
+        id: config
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          config="commitlint.config.cjs"
+          if [ "${PR_AUTHOR:-}" = "dependabot[bot]" ]; then
+            config="commitlint.dependabot.config.cjs"
+          fi
+          echo "file=${config}" >> "$GITHUB_OUTPUT"
+
       - name: Lint PR commits
         env:
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: npx commitlint --from "origin/${BASE_REF}" --to "${HEAD_SHA}" --verbose
+          CONFIG: ${{ steps.config.outputs.file }}
+        run: npx commitlint --config "${CONFIG}" --from "origin/${BASE_REF}" --to "${HEAD_SHA}" --verbose
 
       - name: Lint PR title
         # GitHub squash-merges use the PR title as the commit subject, which is
@@ -42,4 +67,5 @@ jobs:
         # from. A clean per-commit history can still land a bad squash subject.
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: printf '%s\n' "$PR_TITLE" | npx commitlint --verbose
+          CONFIG: ${{ steps.config.outputs.file }}
+        run: printf '%s\n' "$PR_TITLE" | npx commitlint --config "${CONFIG}" --verbose
