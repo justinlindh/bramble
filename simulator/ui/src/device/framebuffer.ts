@@ -16,6 +16,12 @@ export const FB_HEIGHT = 122;
 export const FB_ROW_BYTES = 32; // ceil(250 / 8)
 export const FB_BYTES = FB_ROW_BYTES * FB_HEIGHT; // 3904
 
+// SSD1306 OLED geometry (Heltec profile). The wire message carries the panel
+// size per frame (w/h), so these are the canonical values the device view keys
+// off to pick the OLED face over the e-paper one.
+export const OLED_WIDTH = 128;
+export const OLED_HEIGHT = 64;
+
 // Ink/paper as opaque RGBA. Real e-paper is a warm off-white with near-black
 // ink; these read well behind the glass reveal without looking like an LCD.
 const INK: [number, number, number] = [0x1a, 0x1c, 0x18];

@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DeviceState } from '../types';
 import Oled from './Oled';
 import type { EdgeButtonId } from './PagerDevice';
+import { OLED_WIDTH, OLED_HEIGHT } from './framebuffer';
 
 export interface HeltecDeviceProps {
   device: DeviceState;
@@ -39,8 +40,8 @@ const NAV_BUTTONS: { id: 'up' | 'down' | 'select'; label: string }[] = [
 
 export default function HeltecDevice({ device, onButton, faceWidth = 300 }: HeltecDeviceProps) {
   const faceHeight = faceWidth * FACE_ASPECT;
-  const panelW = device.fbWidth || 128;
-  const panelH = device.fbHeight || 64;
+  const panelW = device.fbWidth || OLED_WIDTH;
+  const panelH = device.fbHeight || OLED_HEIGHT;
 
   // ---- face buttons: press/release edges, guarded against unpaired edges ----
   const [pressedBtn, setPressedBtn] = useState<EdgeButtonId | null>(null);
