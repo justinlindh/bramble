@@ -13,6 +13,9 @@
 #if CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK
 #include "esp_efuse.h"
 #endif
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+#include "esp_ota_ops.h"
+#endif
 
 static const char* TAG = "ota_rollback";
 
@@ -43,6 +46,27 @@ static int write_floor(const char* version) {
 }
 
 void ota_rollback_note_boot(void) {
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+    /* CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK selects APP_ROLLBACK_ENABLE: a
+     * freshly OTA'd image boots in pending-verify state and reverts on the
+     * next reboot unless the app confirms it is operable. Reaching this call
+     * (after NVS init, from the main bring-up path) is the current definition
+     * of a successful boot. Confirming is ALSO the moment IDF ratchets the
+     * eFuse secure-version floor up to the running app's secure_version, so
+     * until this call succeeds the bootloader can still fall back to the
+     * previous app. */
+    esp_err_t mark_err = esp_ota_mark_app_valid_cancel_rollback();
+    if (mark_err == ESP_OK) {
+        ESP_LOGI(TAG, "Boot confirmed valid (rollback cancelled, secure version ratchet applied)");
+    } else if (mark_err != ESP_ERR_INVALID_STATE) {
+        /* INVALID_STATE just means the image was not pending verification
+         * (normal boot of an already-confirmed image); anything else is worth
+         * a warning because an unconfirmed image reverts on reboot. */
+        ESP_LOGW(TAG, "esp_ota_mark_app_valid_cancel_rollback failed: %s",
+                 esp_err_to_name(mark_err));
+    }
+#endif
+
     const esp_app_desc_t* desc = esp_app_get_description();
     if (!desc) {
         return;

@@ -20,7 +20,20 @@
 # Dry run without burning eFuses: add CONFIG_BOOTLOADER_EFUSE_SECURE_VERSION_EMULATE=y
 # to emulate the secure-version field in a flash partition. Use this on the
 # sacrificial board first (see the bench procedure in the design doc).
+#
+# Flashing an anti-rollback build through scripts/flash.sh or
+# scripts/flash-all.py additionally requires --enable-antirollback plus a
+# typed "BURN EPOCH <N>" confirmation (scripts/antirollback-guard.sh); the
+# default flash flow refuses these builds outright.
 
+# App rollback (pending-verify) support. ANTI_ROLLBACK "depends on" this (it
+# does not select it), so WITHOUT this line kconfig silently drops the
+# anti-rollback symbols and the overlay builds a normal image; verified the
+# hard way, keep both lines together. Side effect: a freshly OTA'd image boots
+# in ESP_OTA_IMG_PENDING_VERIFY state and reverts on reboot unless the app
+# confirms itself; ota_rollback_note_boot() performs that confirmation, which
+# is also the moment the eFuse floor ratchets.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK=y
 
 # Security epoch baseline. Bump this (and add a row to the mapping table in

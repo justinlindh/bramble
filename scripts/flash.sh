@@ -90,6 +90,22 @@ for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
   fi
 done
 
+# --enable-antirollback is consumed by the anti-rollback guard, never passed
+# to idf.py. Flashing a build with CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK is
+# refused without it (plus a typed confirmation restating the irreversible
+# eFuse burn); see scripts/antirollback-guard.sh and
+# docs/design/ota-antirollback.md.
+ANTIROLLBACK_ARGS=()
+FILTERED_ARGS=()
+for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
+  if [[ "$arg" == "--enable-antirollback" ]]; then
+    ANTIROLLBACK_ARGS=(--enable-antirollback)
+  else
+    FILTERED_ARGS+=("$arg")
+  fi
+done
+EXTRA_ARGS=(${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"})
+
 if [[ -z "$PORT" ]]; then
   if [[ "$BOARD" == "tdeck-plus" || "$BOARD" == "bramble-pager" ]]; then
     PORT="/dev/ttyACM0"
@@ -199,6 +215,8 @@ run_local() {
       echo "==> Building locally..."
       [[ ! -d "$BOARD_BUILD_DIR" ]] && rm -f "$BOARD_SDKCONFIG"
       idf.py "${IDF_BOARD_ARGS[@]}" build
+      # Loud notice (never blocks a build) if this is an anti-rollback build.
+      bash scripts/antirollback-guard.sh --sdkconfig "$BOARD_SDKCONFIG" --action build
       ;;
     monitor)
       echo "==> Monitoring $PORT..."
@@ -208,6 +226,11 @@ run_local() {
       echo "==> Building locally..."
       [[ ! -d "$BOARD_BUILD_DIR" ]] && rm -f "$BOARD_SDKCONFIG"
       idf.py "${IDF_BOARD_ARGS[@]}" build
+      # Anti-rollback consent gate: refuses to flash an anti-rollback build
+      # unless --enable-antirollback was passed AND the operator types the
+      # epoch-specific confirmation. A non-anti-rollback build passes silently.
+      bash scripts/antirollback-guard.sh --sdkconfig "$BOARD_SDKCONFIG" --action flash \
+        --port "$PORT" ${ANTIROLLBACK_ARGS[@]+"${ANTIROLLBACK_ARGS[@]}"}
       echo "==> Flashing to $PORT (serial)..."
       run_serial_cmd idf.py "${IDF_BOARD_ARGS[@]}" -p "$PORT" flash "${EXTRA_ARGS[@]}"
       ;;
