@@ -5,6 +5,9 @@
   "author": "Bramble Mesh <info@bramblemesh.org>",
   "homepage": "https://bramblemesh.org",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "vite",
