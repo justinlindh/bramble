@@ -40,7 +40,7 @@ RUN bash -lc '. /opt/esp-idf/export.sh \
     && idf.py build'
 
 # Stage 2: gosim (Go server embedding Bramble C code via cgo)
-FROM golang:1.25-bookworm AS go-build
+FROM golang:1.26-bookworm AS go-build
 RUN apt-get update && apt-get install -y gcc libc6-dev libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY simulator/gosim/go.mod simulator/gosim/go.sum simulator/gosim/
