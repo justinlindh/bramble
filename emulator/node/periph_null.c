@@ -79,8 +79,10 @@ const char* ota_get_app_version(void) { return "sim"; }
 
 void ota_rollback_note_boot(void) {}
 
-int ota_rollback_gate(const char* new_version, bool allow_downgrade) {
+int ota_rollback_gate(const char* new_version, uint32_t candidate_secure_version,
+                      bool allow_downgrade) {
     (void)new_version;
+    (void)candidate_secure_version;
     (void)allow_downgrade;
     return -1;
 }

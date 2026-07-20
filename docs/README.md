@@ -38,4 +38,3 @@ This index separates **operator/developer reference docs** from **historical pla
 - [webapp/chat.md](webapp/chat.md)
 - [webapp/desktop.md](webapp/desktop.md): Electron desktop app (install, connect, Nearby nodes)
 - [../webapp/README.md](../webapp/README.md): webapp dev/build workflow and packaging
-

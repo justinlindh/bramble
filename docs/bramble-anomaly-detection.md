@@ -7,6 +7,7 @@ The simulator detects four categories of mesh network anomalies. These represent
 **What:** A node receives DATA packets but fails to forward or deliver them. The packets silently disappear.
 
 **When it happens:**
+
 - Node loses its routing table (reboot, memory corruption) but neighbors still route through it
 - Software bug causes a node to drop packets after receiving them
 - Hardware failure where the transmitter stops working but receiver still functions
@@ -22,6 +23,7 @@ The simulator detects four categories of mesh network anomalies. These represent
 **What:** The mesh network splits into disconnected clusters. Nodes in different clusters cannot communicate.
 
 **When it happens:**
+
 - Bridge node (the only link between two groups) dies or moves out of range
 - Physical obstruction blocks RF between clusters
 - Interference zone isolates a region
@@ -35,6 +37,7 @@ The simulator detects four categories of mesh network anomalies. These represent
 **What:** A node floods the network with repeated Route Request packets for the same destination, wasting airtime and battery.
 
 **When it happens:**
+
 - Destination node is dead or unreachable, but the source keeps retrying
 - Network congestion causes RREP packets to be lost, so the source never learns the route
 - Software bug in retry logic
@@ -50,6 +53,7 @@ The simulator detects four categories of mesh network anomalies. These represent
 **What:** A DATA packet visits the same node twice, indicating circular routing. The packet bounces between nodes until hop_limit expires, wasting airtime.
 
 **When it happens:**
+
 - Packet corruption (bit flip) changes a next_hop address, creating an unintended route
 - Race condition: simultaneous topology changes and route discoveries create transiently inconsistent routing tables
 - Implementation bug in RREP route installation
@@ -59,6 +63,7 @@ The simulator detects four categories of mesh network anomalies. These represent
 **Simulator scenario:** `anomaly-route-loop.json`: Rapid kill/rejoin cycles on bridge node C with simultaneous DATA traffic. **Result: 0 loops detected.** This validates that Bramble's RREP-based routing correctly prevents loops under normal conditions.
 
 **Why it exists despite 0 detections:** The detector is a safety net. In ideal simulated conditions, Bramble's routing design prevents loops because:
+
 - RREP routes are installed along the exact reverse path of the RREQ flood
 - Each node installs next_hop as the node that forwarded the RREP to it (not a hop from the RREP payload)
 - hop_limit provides a hard backstop if loops do occur
@@ -70,7 +75,7 @@ In real deployments, packet corruption, RF interference causing partial packet r
 ## Summary Table
 
 | Anomaly | Detection Window | Threshold | Scenario Result |
-|---------|-----------------|-----------|----------------|
+| --------- | ----------------- | ----------- | ---------------- |
 | Black hole | 10s | ≥5 rx, 0 fwd | 2 detections ✅ |
 | Mesh partition | On topology change | BFS disconnected | 1 detection ✅ |
 | Excessive RREQ | 10s per dest | ≥6 retransmits | 11 detections ✅ |

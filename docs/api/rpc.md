@@ -125,73 +125,89 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 ### Status / Info
 
 #### `bramble.getStatus`
+
 - Description: Returns high-level node runtime status.
 - Params: none (`{}`).
 - Response fields: `uptime_s` (number), `neighbors` (number), `routes` (number), `radio_ok` (bool), `battery_pct` (number, when available), `gps` (object, when available).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":1,"method":"bramble.getStatus","params":{}}
 ```
 
 #### `bramble.getDiagnostics`
+
 - Description: Returns heap/task diagnostics.
 - Params: optional `include_tasks` (bool).
 - Response fields: `heap_free` (number), `heap_min` (number), `tasks` (array, optional).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":2,"method":"bramble.getDiagnostics","params":{"include_tasks":true}}
 ```
 
 #### `bramble.getWifiStatus`
+
 - Description: Returns Wi-Fi mode/connectivity state.
 - Params: none.
 - Response fields: `mode` (string), `connected` (bool), `ssid` (string, optional), `ip` (string), `rssi` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":3,"method":"bramble.getWifiStatus","params":{}}
 ```
 
 #### `bramble.getIdentity`
+
 - Description: Returns device identity.
 - Params: none.
 - Response fields: `address` (string), `public_key_hash` (string), `name` (string).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":4,"method":"bramble.getIdentity","params":{}}
 ```
 
 #### `bramble.getVersion`
+
 - Description: Returns firmware/protocol/build metadata.
 - Params: none.
 - Response fields: `firmware` (string), `protocol` (string), `hardware` (string), `supportsDeliveryEventSync` (bool, when enabled).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":5,"method":"bramble.getVersion","params":{}}
 ```
 
 #### `bramble.getBattery`
+
 - Description: Returns battery telemetry.
 - Params: none.
 - Response fields: `pct` (number), `mv` (number, optional), `charging` (bool, optional).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":6,"method":"bramble.getBattery","params":{}}
 ```
 
 #### `bramble.getStorageInfo`
+
 - Description: Returns storage details (board-dependent).
 - Params: none.
 - Response fields: `sd_present` (bool), `sd_total_kb` (number), `sd_free_kb` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":7,"method":"bramble.getStorageInfo","params":{}}
 ```
 
 #### `bramble.getGpsPosition`
+
 - Description: Returns latest GPS fix.
 - Params: none.
 - Response fields: `valid` (bool), `lat` (number), `lon` (number), `alt_m` (number), `accuracy_m` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":8,"method":"bramble.getGpsPosition","params":{}}
 ```
@@ -199,37 +215,45 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 ### Messaging
 
 #### `bramble.sendMessage`
+
 - Description: Sends a unicast message.
 - Params: `to` (string 8-hex addr), `text` (string), optional `channel` (number), `wantAck` (bool).
 - Response fields: `packetId` (string), `status` (string), `fragmented` (bool), `fragments_total` (number, optional), `max_bytes` (number), `actual_bytes` (number), `channel` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":10,"method":"bramble.sendMessage","params":{"to":"A1B2C3D4","text":"hello"}}
 ```
 
 #### `bramble.sendBroadcast`
+
 - Description: Sends a broadcast message.
 - Params: `text` (string), optional `channel` (number, usually public).
 - Response fields: `broadcast_id` (string), `status` ("sent"), `broadcast` (bool), `channel` (number), `fragmented` (bool), `fragments_total` (number, optional), `max_bytes` (number), `actual_bytes` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":11,"method":"bramble.sendBroadcast","params":{"text":"net check"}}
 ```
 
 #### `bramble.getMessages`
+
 - Description: Returns stored message history.
 - Params: optional `limit` (number), `since_id` (number).
 - Response fields: `messages` (array of message objects with `id`, `from`, `text`, `timestamp_ms`, `status`, `broadcast`, `channel`).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":12,"method":"bramble.getMessages","params":{"limit":50}}
 ```
 
 #### `bramble.getDeliveryEvents`
+
 - Description: Returns persisted ACK/broadcast delivery replay events.
 - Params: optional `sinceEventSeq|since_event_seq` (number), `limit` (number).
 - Response fields: `supported` (bool), `next_event_seq` (number), `events` (array).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":13,"method":"bramble.getDeliveryEvents","params":{"since_event_seq":100}}
 ```
@@ -237,46 +261,56 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 ### Network
 
 #### `bramble.getNeighbors`
+
 - Description: Returns current direct neighbors.
 - Params: none.
 - Response fields: `neighbors` (array; includes `address`, `rssi`, `snr`, `last_seen_ms`, `deliveryRate`, `airtimeRemaining`).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":20,"method":"bramble.getNeighbors","params":{}}
 ```
 
 #### `bramble.getRoutes`
+
 - Description: Returns routing table entries.
 - Params: none.
 - Response fields: `routes` (array; `dest`, `next_hop`, `hops`, `metric`, `state`).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":21,"method":"bramble.getRoutes","params":{}}
 ```
 
 #### `bramble.getAirtime`
+
 - Description: Returns airtime budget status.
 - Params: none.
 - Response fields: tier budget objects and totals (remaining/max/refill values).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":22,"method":"bramble.getAirtime","params":{}}
 ```
 
 #### `bramble.ping`
+
 - Description: Lightweight liveness RPC.
 - Params: optional `nonce` (string/number).
 - Response fields: `ok` (bool), optional `nonce` echo.
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":23,"method":"bramble.ping","params":{"nonce":"abc123"}}
 ```
 
 #### `bramble.sendProbe`
+
 - Description: Starts active neighbor probe sweep.
 - Params: optional `rounds` (number), `timeout_ms` (number).
 - Response fields: `probe_id` (string), `status` (string).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":24,"method":"bramble.sendProbe","params":{}}
 ```
@@ -284,55 +318,67 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 ### Configuration
 
 #### `bramble.getConfig`
+
 - Description: Returns full persisted runtime config.
 - Params: none.
 - Response fields: `node_name` (string), `radio` (object), `channels` (array), `default_channel` (number), `mailbox` (bool), `location` (object).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":30,"method":"bramble.getConfig","params":{}}
 ```
 
 #### `bramble.setRadio`
+
 - Description: Updates radio config.
 - Params: `frequency_mhz` (number), `sf` (number), `bw_hz` (number), `coding_rate` (number/string), `tx_power_dbm` (number).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":31,"method":"bramble.setRadio","params":{"frequency_mhz":915.0,"sf":9,"bw_hz":125000,"tx_power_dbm":17}}
 ```
 
 #### `bramble.setNodeName`
+
 - Description: Sets local node display name.
 - Params: `name` (string).
 - Response fields: `ok` (bool), `name` (string).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":32,"method":"bramble.setNodeName","params":{"name":"ridge-01"}}
 ```
 
 #### `bramble.setBacklight`
+
 - Description: Sets display backlight (board-dependent).
 - Params: `level` (number, typically 0-255).
 - Response fields: `ok` (bool), `level` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":33,"method":"bramble.setBacklight","params":{"level":128}}
 ```
 
 #### `bramble.sleep`
+
 - Description: Requests deep/light sleep.
 - Params: optional `seconds` (number), `mode` (string), `wake_gpio` (number).
 - Response fields: `ok` (bool), `sleeping` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":34,"method":"bramble.sleep","params":{"seconds":60}}
 ```
 
 #### `bramble.reboot`
+
 - Description: Reboots the node.
 - Params: none.
 - Response fields: `ok` (bool) before restart.
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":35,"method":"bramble.reboot","params":{}}
 ```
@@ -340,28 +386,34 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 ### Channels
 
 #### `bramble.addChannel`
+
 - Description: Adds a channel entry.
 - Params: `name` (string), optional `psk` (string).
 - Response fields: `ok` (bool), `index` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":40,"method":"bramble.addChannel","params":{"name":"team","psk":"secret"}}
 ```
 
 #### `bramble.removeChannel`
+
 - Description: Removes a channel by index.
 - Params: `index` (number).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":41,"method":"bramble.removeChannel","params":{"index":1}}
 ```
 
 #### `bramble.setDefaultChannel`
+
 - Description: Sets default TX channel index.
 - Params: `index` (number).
 - Response fields: `ok` (bool), `index` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":42,"method":"bramble.setDefaultChannel","params":{"index":0}}
 ```
@@ -369,38 +421,46 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 ### Auth
 
 #### `bramble.setAuthToken`
+
 - Description: Sets or clears the RPC auth bearer token (WS and BLE).
 - Params: `token` (string; minimum 16 bytes; empty to disable auth as a persisted explicit opt-out).
 - Response fields: `ok` (bool).
 - Errors: `-32602` for non-empty tokens shorter than 16 bytes or 128 bytes and longer.
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":50,"method":"bramble.setAuthToken","params":{"token":"my-secret-token-16b"}}
 ```
 
 #### `bramble.getAuthToken`
+
 - Description: Returns currently configured auth token.
 - Params: none.
 - Response fields: `token` (string), `enabled` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":51,"method":"bramble.getAuthToken","params":{}}
 ```
 
 #### `bramble.setAllowedOrigins`
+
 - Description: Replaces the WebSocket `Origin` allowlist applied to tokenless connections (extra origins beyond same-origin, which always passes).
 - Params: `origins` (array of full-origin strings, e.g. `"https://app.example.com"`; empty array clears the list; entries must contain `://` or be the literal `"null"`).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":52,"method":"bramble.setAllowedOrigins","params":{"origins":["https://app.example.com"]}}
 ```
 
 #### `bramble.getAllowedOrigins`
+
 - Description: Returns the configured extra origins.
 - Params: none.
 - Response fields: `origins` (array of strings).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":53,"method":"bramble.getAllowedOrigins","params":{}}
 ```
@@ -410,28 +470,34 @@ commonly used methods. Not yet documented here: `bramble.getPeerVerification`,
 See `docs/network-key-provisioning.md` for the operator flow.
 
 #### `bramble.generateNetworkKey`
+
 - Description: Mints a fresh entropy-gated 32-byte network key on the device, provisions this node with it, and returns the raw key so the operator can copy it to the rest of the fleet. Re-keys an already-provisioned node. Fails closed (provisions nothing) on entropy failure. Authenticated callers only.
 - Params: none.
 - Response fields: `key` (string, 64 hex), `fingerprint` (string, 8 hex).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":54,"method":"bramble.generateNetworkKey","params":{}}
 ```
 
 #### `bramble.setNetworkKey`
+
 - Description: Provisions the per-fleet network key behind the RREP/RERR/ACK/delivery-receipt/beacon control-plane MACs. Persisted to NVS, applied immediately (beacon subkey re-derived live). Write-only secret: never read back. Authenticated callers only.
 - Params: `key` (string, raw 32-byte key as 64 hex characters).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":55,"method":"bramble.setNetworkKey","params":{"key":"<64 hex chars>"}}
 ```
 
 #### `bramble.getNetworkKeyStatus`
+
 - Description: Reports whether a network key is provisioned plus a one-way fingerprint (`SHA256(key)[0:4]`, 8 lowercase hex). Unprovisioned nodes report the all-zero fingerprint `"00000000"` and are inert on the control plane (no public-PSK fallback).
 - Params: none.
 - Response fields: `provisioned` (bool), `fingerprint` (string).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":56,"method":"bramble.getNetworkKeyStatus","params":{}}
 ```
@@ -441,29 +507,35 @@ See `docs/network-key-provisioning.md` for the operator flow.
 See `docs/trust-anchor.md` for the enrollment ceremony.
 
 #### `bramble.setAnchor`
+
 - Description: Provisions the fleet trust anchor's Ed25519 public key. The device only ever holds the anchor public key, never the private key. Persisted to NVS. Authenticated callers only.
 - Params: `anchor_pubkey` (string, 64 hex characters).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":57,"method":"bramble.setAnchor","params":{"anchor_pubkey":"<64 hex chars>"}}
 ```
 
 #### `bramble.setEndorsement`
+
 - Description: Provisions this node's own anchor-signed endorsement certificate. Verified against this node's identity key and the provisioned anchor before persisting; triggers a fresh attestation on success. Authenticated callers only.
 - Params: `not_after` (string), `endorsement_sig` (string).
 - Response fields: `ok` (bool).
 - Errors: `-32602` when no anchor is provisioned, `not_after` is 0, fields are malformed, or the signature does not verify.
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":58,"method":"bramble.setEndorsement","params":{"not_after":"18446744073709551615","endorsement_sig":"<128 hex chars>"}}
 ```
 
 #### `bramble.getAnchorStatus`
+
 - Description: Reports whether a trust anchor is provisioned, the anchor fingerprint (`SHA256(anchor_pub)[0:4]`, present only when anchored), and whether this node holds an endorsement cert.
 - Params: none.
 - Response fields: `anchored` (bool), `anchor_fingerprint` (string, optional), `endorsed` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":59,"method":"bramble.getAnchorStatus","params":{}}
 ```
@@ -471,38 +543,46 @@ See `docs/trust-anchor.md` for the enrollment ceremony.
 ### Location
 
 #### `bramble.setLocationConfig`
+
 - Description: Sets the node's location-sharing policy (enable, default tier, interval, source, manual coordinates). Full contract in the "Location policy RPC contract" section above.
 - Params: see above.
 - Response fields: `ok` (bool).
 
 #### `bramble.getPeerLocations`
+
 - Description: Returns known peer locations (and own position when available). Full response shape in the "Location policy RPC contract" section above.
 - Params: none.
 - Response fields: `peers` (array).
 
 #### `bramble.setLocationContact`
+
 - Description: Sets per-contact location sharing override.
 - Params: `address` (string), optional `enabled` (bool), `tier` (string), `interval_s` (number).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":60,"method":"bramble.setLocationContact","params":{"address":"A1B2C3D4","tier":"coarse","interval_s":300}}
 ```
 
 #### `bramble.removeLocationContact`
+
 - Description: Removes per-contact location rule.
 - Params: `address` (string).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":61,"method":"bramble.removeLocationContact","params":{"address":"A1B2C3D4"}}
 ```
 
 #### `bramble.shareLocationOnce`
+
 - Description: Sends a one-shot location update to a peer.
 - Params: `address` (string), optional `tier` (string).
 - Response fields: `ok` (bool), `queued` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":62,"method":"bramble.shareLocationOnce","params":{"address":"A1B2C3D4"}}
 ```
@@ -510,37 +590,45 @@ See `docs/trust-anchor.md` for the enrollment ceremony.
 ### Audio
 
 #### `bramble.playTone`
+
 - Description: Plays a local tone (board-dependent).
 - Params: `freq_hz` (number), `duration_ms` (number), optional `volume` (number).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":70,"method":"bramble.playTone","params":{"freq_hz":1000,"duration_ms":250}}
 ```
 
 #### `bramble.setVolume`
+
 - Description: Sets output volume (board-dependent).
 - Params: `volume` (number).
 - Response fields: `ok` (bool), `volume` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":71,"method":"bramble.setVolume","params":{"volume":8}}
 ```
 
 #### `bramble.setMuted`
+
 - Description: Toggles local audio mute.
 - Params: `muted` (bool).
 - Response fields: `ok` (bool), `muted` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":72,"method":"bramble.setMuted","params":{"muted":true}}
 ```
 
 #### `bramble.getAudioStatus`
+
 - Description: Returns audio state.
 - Params: none.
 - Response fields: `volume` (number), `muted` (bool), `available` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":73,"method":"bramble.getAudioStatus","params":{}}
 ```
@@ -548,109 +636,133 @@ See `docs/trust-anchor.md` for the enrollment ceremony.
 ### Advanced
 
 #### `bramble.setMailbox`
+
 - Description: Enables/disables mailbox mode.
 - Params: `enabled` (bool).
 - Response fields: `ok` (bool), `enabled` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":80,"method":"bramble.setMailbox","params":{"enabled":true}}
 ```
 
 #### `bramble.setBroadcastTelemetryMode`
+
 - Description: Configures broadcast delivery telemetry sampling.
 - Params: `mode` (string, e.g. `off|sampled|all`), optional `sample_rate` (number).
 - Response fields: `ok` (bool), `mode` (string).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":81,"method":"bramble.setBroadcastTelemetryMode","params":{"mode":"sampled","sample_rate":25}}
 ```
 
 #### `bramble.otaUpdate`
+
 - Description: Starts OTA from an artifact path resolved against the device's allowlisted OTA origin. Raw URLs are rejected. The image must carry a valid signature trusted by the running firmware and pass the anti-rollback floor.
 - Params: `path` (string, relative artifact path), optional `allow_downgrade` (bool).
 - Response fields: `ok` (bool), `note` (string), `url` (string, resolved), `partition` (string), `error` (string when ok=false), `last_error` (string, failure reason from the previous attempt).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":82,"method":"bramble.otaUpdate","params":{"path":"stable/v1.4.0/heltec-v3/bramble.bin"}}
 ```
 
 #### `bramble.otaGetOrigin`
+
 - Description: Reports the allowlisted OTA origin and anti-rollback state.
 - Params: none.
 - Response fields: `ok` (bool), `origin` (string), `default_origin` (string), `overridden` (bool), `version_floor` (string, when recorded), `running_version` (string).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":83,"method":"bramble.otaGetOrigin","params":{}}
 ```
 
 #### `bramble.otaSetOrigin`
+
 - Description: Overrides or resets the allowlisted OTA origin (https base URL; http only on CONFIG_BRAMBLE_OTA_ALLOW_HTTP builds).
 - Params: `origin` (string) or `reset` (bool).
 - Response fields: `ok` (bool), `origin` (string), `overridden` (bool), `error` (string when ok=false).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":84,"method":"bramble.otaSetOrigin","params":{"origin":"https://mirror.example/ota/"}}
 ```
 
 #### `bramble.setTrafficDebug`
+
 - Description: Configures traffic debug capture.
 - Params: `enabled` (bool), optional `include_tx` (bool), `include_rx` (bool), `sample_rate` (0-100).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":83,"method":"bramble.setTrafficDebug","params":{"enabled":true,"include_tx":true,"include_rx":true,"sample_rate":25}}
 ```
 
 #### `bramble.getTrafficDebug`
+
 - Description: Returns traffic debug config and buffer stats.
 - Params: none.
 - Response fields: `enabled` (bool), `include_tx` (bool), `include_rx` (bool), `sample_rate` (number), `capacity` (number), `count` (number), `dropped` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":84,"method":"bramble.getTrafficDebug","params":{}}
 ```
 
 #### `bramble.getTrafficEvents`
+
 - Description: Returns replay window from traffic debug ring buffer.
 - Params: optional `since_seq` (number), `limit` (number).
 - Response fields: `next_seq` (number), `events` (array).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":85,"method":"bramble.getTrafficEvents","params":{"since_seq":0,"limit":100}}
 ```
 
 #### `bramble.setBeaconPolicy`
+
 - Description: Updates periodic beaconing policy.
 - Params: optional `enabled` (bool), `interval_ms` (number), `jitter_pct` (number), `min_neighbors` (number).
 - Response fields: `ok` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":86,"method":"bramble.setBeaconPolicy","params":{"enabled":true,"interval_ms":30000}}
 ```
 
 #### `bramble.getBeaconPolicy`
+
 - Description: Returns effective beacon policy.
 - Params: none.
 - Response fields: `enabled` (bool), `interval_ms` (number), `jitter_pct` (number), `min_neighbors` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":87,"method":"bramble.getBeaconPolicy","params":{}}
 ```
 
 #### `bramble.setFloodTransport`
+
 - Description: Toggles the unicast flood transport: when on, unicast DATA not addressed to this node relays through the multi-hop flood engine instead of the reactive route-lookup forward. Default off. NVS-persisted.
 - Params: `enabled` (bool).
 - Response fields: `ok` (bool), `enabled` (bool).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":88,"method":"bramble.setFloodTransport","params":{"enabled":true}}
 ```
 
 #### `bramble.setFloodHopLimit`
+
 - Description: Sets the hop limit stamped on freshly-originated flood DATA (and its flooded ACK). Clamped to 1..32; the effective value is echoed back and persisted. Default 8. Separate from the reactive routing hop budget.
 - Params: `hops` (number).
 - Response fields: `ok` (bool), `hops` (number).
 - Example:
+
 ```json
 {"jsonrpc":"2.0","id":89,"method":"bramble.setFloodHopLimit","params":{"hops":12}}
 ```

@@ -133,9 +133,13 @@ firmware without the signing key; devices still running pre-signing firmware
 perform no check and remain exposed until they take their first signed OTA.
 A soft
 anti-rollback floor (NVS-stored, `components/ota/ota_rollback.c`) rejects
-downgrades unless a token holder explicitly overrides. Residual: signature
-enforcement happens at OTA time, not at boot, until hardware Secure Boot V2
-is burned (section 4).
+downgrades unless a token holder explicitly overrides. An eFuse-backed hardware
+floor is designed and compile-gated behind `CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK`
+(`components/ota/ota_rollback_policy.c` reconciles the two floors so an
+authorized downgrade can never brick a device below what its bootloader will
+run) but is off in every shipping build and pending bench validation; see
+`docs/design/ota-antirollback.md`. Residual: signature enforcement happens at
+OTA time, not at boot, until hardware Secure Boot V2 is burned (section 4).
 
 ### Out of scope
 
@@ -337,7 +341,7 @@ holds the network key, which is real authentication against outsiders, but
 not against another key holder forging a fresh beacon (section 5). Freshness (below)
 closes replay of a captured, genuinely valid beacon within a boot (the
 window is RAM-only, so replay reopens against a rebooted receiver: issue
-#72), and does not close forgery by another key holder at all. Do not
+\#72), and does not close forgery by another key holder at all. Do not
 treat a provisioned beacon HMAC as more than that.
 
 ### RREQ origination rate limiting
@@ -651,6 +655,7 @@ identity-gated (assessed, left open).** A mailbox node stores a DATA frame
 on behalf of an offline destination when it has no route. Custody
 acceptance is not gated on the source being pinned, and that is a
 deliberate, bounded choice, not an oversight:
+
 - **Opt-in.** Mailbox mode is off by default (`s_mailbox_enabled`, NVS,
   default false); a node stores nothing for anyone unless its operator
   turned it on.
@@ -1238,9 +1243,12 @@ same PR that fixes it.
   eFuses the bootloader will still boot whatever sits in flash. An attacker
   with physical flash access (USB, JTAG) can write unsigned firmware, and
   can erase the NVS rollback floor. Hardware Secure Boot V2 plus eFuse
-  anti-rollback closes this; it is staged behind bench validation on a
-  sacrificial board (human-gated). Consistent with the device-as-secret
-  posture above, physical possession is already treated as compromise.
+  anti-rollback closes this; the eFuse anti-rollback design and its OTA-path
+  reconciliation are implemented and host-tested but compile-gated off by
+  default and staged behind bench validation on a sacrificial board
+  (human-gated); see `docs/design/ota-antirollback.md`. Consistent with the
+  device-as-secret posture above, physical possession is already treated as
+  compromise.
 - **A network-key insider can trigger a mailbox flush for any victim
   address.** A mailbox flush requires a beacon carrying a valid
   network-key HMAC (`handle_beacon` mailbox flush in `main/mesh_task.c`),

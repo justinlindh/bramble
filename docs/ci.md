@@ -165,10 +165,10 @@ job's scope-gating regression runs on any release-config edit.
 | `Static checks` | always (no `if:`) | yes |
 
 `Static checks` is one pod, one checkout, and a sequence of named steps that each
-preserve a former standalone job's exact command: no-internal-refs, the
-board-matrix coverage check, strict shellcheck, ruff baseline, strict
-clang-format, cppcheck, the rpc-contract check, and actionlint over the four
-gating workflow files. Each check is its own step so
+preserve a former standalone job's exact command: no-internal-refs, no-em-dash,
+markdownlint (issue #160), the board-matrix coverage check, strict shellcheck,
+ruff baseline, strict clang-format, cppcheck, the rpc-contract check, and
+actionlint over the four gating workflow files. Each check is its own step so
 a failure attributes to the exact tool in the UI. It has no `if:` because it is
 THE universal gate: it must run (and report) on every PR, including a docs-only
 PR where it is the only job that executes. The individual checks are cheap and
@@ -305,7 +305,7 @@ reopening the hole.
 `Docker build (webapp)`, `(simulator)`, `(emulator)`, `(firmware-builder)`
 (issue #195) is a four-way matrix, one leg per shipped Dockerfile. Before this
 job, no workflow built any of them: a base-image bump (the trigger case,
-#179's `node` 22-to-26 jump) could merge with every required context green and
+\#179's `node` 22-to-26 jump) could merge with every required context green and
 nothing having ever constructed the image, which is worse than no bump at
 all because it carries the appearance of a passing check. Each leg runs
 `docker build` against its own Dockerfile and build context, directly on the

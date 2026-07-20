@@ -89,7 +89,7 @@ These are the numbers the public scaling statements rested on, reproduced at
 commit `d2483b9f` (pre-collision-model main):
 
 | Nodes | Delivery | Avg latency | Total packets |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 10 | 20/20 (100%) | 24 ms | 256 |
 | 50 | 20/20 (100%) | 72 ms | 1,990 |
 | 100 | 20/20 (100%) | 83 ms | 3,776 |
@@ -98,7 +98,7 @@ commit `d2483b9f` (pre-collision-model main):
 ### New model, collisions disabled (`--no-collisions`: real ToA on an ideal infinite channel)
 
 | Nodes | Delivery | Avg latency | Offered load (sum ToA / duration) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 10 | 20/20 (100%) | 0.67 s | 0.23 erlang |
 | 50 | 20/20 (100%) | 2.00 s | 1.73 erlang |
 | 100 | 19/20 (95%) | 2.16 s | 3.34 erlang |
@@ -122,7 +122,7 @@ locked beacon storms repeated identically every interval; that artifact
 dominated the small-mesh numbers (10-node delivery read 25% instead of 65%).
 
 | Nodes | Delivered / attempted | Collision rate per reception | Half-duplex drops | LBT backoffs | Offered load | Collisions |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | 10 (grid) | 13/20 (65%) | 16% | 2 | 13 | 0.18 erlang | 75 |
 | 10 (cluster) | 18/20 (90%) | 11% | 16 | 64 | 0.13 erlang | 110 |
 | 50 | 0/20 (0%) | 35% | 15 | 83 | 1.16 erlang | 1,540 |
@@ -144,7 +144,7 @@ that small real meshes do not work.
 Per-node transmit airtime over the 600 s run (real ToA):
 
 | Nodes | min | p50 | p95 | max |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 10 | 8.7 s | 10.0 s | 13.4 s | 13.4 s |
 | 50 | 10.0 s | 13.8 s | 16.3 s | 17.2 s |
 | 100 | 10.0 s | 13.8 s | 16.3 s | 16.8 s |
@@ -255,7 +255,7 @@ these scenarios directly. Three configurations, same seeds, same scenarios:
   depth (DES-1).
 
 | Scenario | A: published | B: honest old firmware | C: routing fixes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 10-node grid | 13/20 (65%) | 11/20 (55%) | **17/20 (85%)** |
 | 10-node cluster | 18/20 (90%) | 18/20 (90%) | 18/20 (90%) |
 | 50 | 0/20 (0%) | 0/20 (0%) | 1/20 (5%) |

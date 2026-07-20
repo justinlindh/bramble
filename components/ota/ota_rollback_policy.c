@@ -23,6 +23,10 @@ ota_rollback_decision_t ota_rollback_decide(const char* new_version, const char*
     return allow_downgrade ? OTA_ROLLBACK_ACCEPT_LOWER_FLOOR : OTA_ROLLBACK_REJECT_BELOW_FLOOR;
 }
 
+bool ota_rollback_secure_floor_blocks(bool secure_enforced, bool candidate_clears_secure_floor) {
+    return secure_enforced && !candidate_clears_secure_floor;
+}
+
 bool ota_rollback_should_raise_floor(const char* running_version, const char* floor_version) {
     ota_semver_t running;
     if (!running_version || !ota_version_parse(running_version, &running)) {

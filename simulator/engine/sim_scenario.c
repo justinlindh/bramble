@@ -163,26 +163,11 @@ static bool load_beacon_policy(cJSON* beacon_json, sim_beacon_policy_t* beacon) 
     return true;
 }
 
-/* Event types that appear in checked-in scenarios and are understood as
- * intent, but that the engine cannot execute yet. Keeping this list explicit
- * is what lets load_events treat every OTHER unrecognized type as a hard
- * error: the distinction is "we know about this and have not built it" versus
- * "this is a typo or a stale spelling", and only the first is survivable.
- *
- * send_location: simulator/scenarios/location-sharing.json scripts GPS
- * position broadcasts. There is no EVT_* for a position update and no bridge
- * handler on the gosim side, so those events have never had any effect.
- * Tracked separately; do not add entries here to silence a typo. */
-static bool event_type_is_known_unimplemented(const char* type) {
-    static const char* const unimplemented[] = {
-        "send_location",
-    };
-    for (size_t i = 0; i < sizeof(unimplemented) / sizeof(unimplemented[0]); i++) {
-        if (strcmp(type, unimplemented[i]) == 0)
-            return true;
-    }
-    return false;
-}
+/* The known-unimplemented event-type escape hatch is gone (issue #172):
+ * send_location, its only entry, is now a real EVT_GENERATE_LOCATION, so
+ * every recognized spelling is executable and every unrecognized one is a
+ * hard load failure. Do not reintroduce a warn-and-skip list to silence a
+ * typo; an unloadable scenario is strictly better than an inert one. */
 
 static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* nodes,
                         radio_config_t* radio) {
@@ -346,19 +331,25 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                 return false;
             strncpy(event.data.node.node_id, node_id->valuestring, NODE_ID_LEN - 1);
 
-        } else if (event_type_is_known_unimplemented(type)) {
-            /* Recognized spelling, no engine implementation yet. These are
-             * listed explicitly (see event_type_is_known_unimplemented) so a
-             * scenario that depends on one is loud about it on every run
-             * instead of quietly doing less than it advertises, while still
-             * loading. A misspelled type falls through to the hard failure
-             * below rather than landing here. */
-            fprintf(stderr,
-                    "Scenario incomplete: event type '%s' at %llu ms is recognized but the "
-                    "engine has no implementation, so this event does nothing. The scenario "
-                    "will run without it.\n",
-                    type, (unsigned long long)(timestamp_us / 1000));
-            continue;
+        } else if (strcmp(type, "send_location") == 0) {
+            /* Location sharing (issue #172): a scripted GPS position
+             * broadcast. "src" is the originating node; "lat"/"lon" are fix
+             * degrees, "alt_m" optional meters. Degrees are converted to e7
+             * integers here (bramble_position_t convention) because the
+             * event union's float fields cannot hold e7 precision. */
+            event.type = EVT_GENERATE_LOCATION;
+            cJSON* src = cJSON_GetObjectItem(evt_json, "src");
+            cJSON* lat = cJSON_GetObjectItem(evt_json, "lat");
+            cJSON* lon = cJSON_GetObjectItem(evt_json, "lon");
+            cJSON* alt = cJSON_GetObjectItem(evt_json, "alt_m");
+            if (!cJSON_IsString(src) || !cJSON_IsNumber(lat) || !cJSON_IsNumber(lon))
+                return false;
+            if (!node_array_find_by_id(nodes, src->valuestring))
+                return false;
+            strncpy(event.data.location.node_id, src->valuestring, NODE_ID_LEN - 1);
+            event.data.location.latitude_e7 = (int32_t)(lat->valuedouble * 1e7);
+            event.data.location.longitude_e7 = (int32_t)(lon->valuedouble * 1e7);
+            event.data.location.altitude_m = cJSON_IsNumber(alt) ? (int16_t)alt->valuedouble : 0;
 
         } else {
             /* Hard failure, deliberately. Issues #144 and #166 were both
@@ -371,7 +362,8 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
                     "Error: unknown event type '%s' at %llu ms. The engine cannot execute this "
                     "event; fix the scenario's spelling or add support for the type. Known "
                     "types: send_message, generate_message, send_attestation, provision_anchor, "
-                    "move_node, kill_node, node_leave, interference, join, node_join.\n",
+                    "move_node, kill_node, node_leave, interference, join, node_join, "
+                    "send_location.\n",
                     type, (unsigned long long)(timestamp_us / 1000));
             return false;
         }

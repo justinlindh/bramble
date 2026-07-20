@@ -58,6 +58,12 @@ jobs:
         run: bash scripts/lint/check-no-internal-refs.sh
       - name: No em dash
         run: bash scripts/lint/check-no-em-dash.sh
+      - name: Markdownlint
+        # Pinned rather than baked into the runner image (issue #222's
+        # separate scope): the script falls back to a pinned `npx` invocation
+        # (version 0.23.1) when markdownlint-cli2 is not already on PATH, so
+        # this step needs no separate install step of its own.
+        run: bash scripts/lint/run-markdownlint.sh
       - name: Board matrix covers every shipped board
         # Guards the gating hole this check was added for: if a board is added
         # to scripts/ci-build-firmware.sh (the release path) without being

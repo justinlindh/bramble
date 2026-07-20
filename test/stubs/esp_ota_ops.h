@@ -25,6 +25,7 @@ const char* esp_err_to_name(esp_err_t err);
 
 typedef struct {
     const char* version;
+    uint32_t secure_version;
 } esp_app_desc_t;
 
 const esp_app_desc_t* esp_app_get_description(void);

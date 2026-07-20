@@ -150,8 +150,10 @@ If the node becomes unhealthy after OTA:
 1. Re-run OTA with a known-good artifact path (add `allow_downgrade:true` if
    stepping back a version).
 2. If the node is unreachable over WiFi, recover via USB flash:
+
    ```bash
    cd ~/src/bramble
    bash scripts/flash.sh local heltec-v4 flash /dev/ttyACM0
    ```
+
 3. Re-verify with `ping` and `status --json` after recovery.

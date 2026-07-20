@@ -1,15 +1,17 @@
 # Bramble Color Scheme
 
 ## Overview
+
 Bramble uses a unified dark theme across both the web app and T-Deck Plus firmware. The color scheme is inspired by GitHub's dark theme, featuring a dark blue-gray background with green accent colors.
 
 ## Color Palette
 
 ### Web App (CSS Variables)
+
 Defined in `webapp/src/styles/global.css`:
 
 | Variable | Hex Code | Usage |
-|----------|----------|-------|
+| ---------- | ---------- | ------- |
 | `--bg` | `#0d1117` | Main background |
 | `--surface` | `#161b22` | Panels, cards |
 | `--surface-2` | `#21262d` | Secondary surfaces, inputs |
@@ -23,10 +25,11 @@ Defined in `webapp/src/styles/global.css`:
 | `--critical` | `#bc8cff` | Critical alerts |
 
 ### T-Deck Plus Firmware (LVGL)
+
 Defined in `components/ui_graphics/theme/bramble_theme.h`:
 
 | Constant | Hex Code | Usage |
-|----------|----------|-------|
+| ---------- | ---------- | ------- |
 | `BR_COLOR_BG` | `0x0D1117` | Screen background |
 | `BR_COLOR_SURFACE` | `0x161B22` | Cards, panels |
 | `BR_COLOR_SURFACE_2` | `0x21262D` | Secondary surfaces |
@@ -44,6 +47,7 @@ Defined in `components/ui_graphics/theme/bramble_theme.h`:
 | `BR_COLOR_CRITICAL` | `0xBC8CFF` | Critical alerts |
 
 ### Additional UI Colors
+
 Some UI elements use variations of the theme colors for specific states:
 
 | Usage | Hex Code | Description |
@@ -66,17 +70,21 @@ Some UI elements use variations of the theme colors for specific states:
 ## Usage Examples
 
 ### Active Tab Indicator
+
 Uses `BR_COLOR_PRIMARY` (#238636) for the active tab background tint
 
 ### Message Bubbles
+
 - Sent messages: `BR_COLOR_SENT` (#1A4B91 - blue)
 - Received messages: `BR_COLOR_RECV` (#21262D - dark surface)
 
 ### Status Indicators
+
 - Radio OK: `BR_COLOR_SUCCESS` (#238636)
 - Radio ERROR: `BR_COLOR_DANGER` (#DA3633)
 
 ## References
+
 - Web app global styles: `webapp/src/styles/global.css`
 - Firmware theme: `components/ui_graphics/theme/bramble_theme.h`
 - UI documentation: `docs/ui-reference.md`

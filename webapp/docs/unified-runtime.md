@@ -3,6 +3,7 @@
 ## Smoke script
 
 `./scripts/unified-runtime-smoke.sh` checks:
+
 - `/`
 - `/api/healthz`
 - `/api/mode`

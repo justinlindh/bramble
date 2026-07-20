@@ -27,7 +27,7 @@ When two artefacts disagree, the higher entry wins. Never argue with ERC or DRC;
 schematic or the doc.
 
 | Rank | Artefact | Authority |
-|---|---|---|
+| --- | --- | --- |
 | 1 | `kicad/*.kicad_sch` | Canonical electrical netlist. If a doc says a pin is wired to X and the schematic says Y, the schematic is correct. |
 | 2 | `kicad/pager.kicad_pcb` | Canonical physical placement and routing. Authoritative for positions, layers, copper geometry. |
 | 3 | `DESIGN.md` | Requirements, pin map, block rationale, do-not-regress invariants. |
@@ -39,7 +39,7 @@ either disagrees with a `.kicad_sch`, the schematic is right and the doc is a bu
 
 ## File map
 
-```
+```text
 hardware/pager/v1/
 ├── README.md            # this file
 ├── DESIGN.md            # authoritative spec: requirements, pin map, blocks, invariants

@@ -5,11 +5,11 @@ import { cspPlugin } from './csp.config';
 
 export default defineConfig({
   main: {
-    // bonjour-service is bundled (not externalized): the packaged app ships
-    // no node_modules (electron-builder files excludes them), so any dep the
-    // main process needs at runtime must be inlined here. It is pure JS, so
-    // bundling is safe.
-    plugins: [externalizeDepsPlugin({ exclude: ['bonjour-service'] })],
+    // bonjour-service and electron-updater are bundled (not externalized): the
+    // packaged app ships no node_modules (electron-builder files excludes them),
+    // so any dep the main process needs at runtime must be inlined here. Both
+    // are pure JS, so bundling is safe.
+    plugins: [externalizeDepsPlugin({ exclude: ['bonjour-service', 'electron-updater'] })],
     build: {
       outDir: 'out/main',
       rollupOptions: {
