@@ -817,7 +817,7 @@ This section is the wire v4 change inventory for the Phase 1 delivery-core plan.
 
 Self-signed per-node identity attestation (per-node identity campaign,
 Phases 2-4). Broadcast at boot and every 15 minutes
-(`send_identity_attestation` in `main/mesh_task.c`), flooded through the
+(`send_identity_attestation` in `main/mesh_beacon.c`), flooded through the
 shared channel-flood engine, budget-gated on the broadcast airtime tier.
 
 ```text
@@ -1844,7 +1844,7 @@ function forward_data(route, packet):
     enqueue_tx(packet, priority_from_tier(packet.tier))
 ```
 
-> **Firmware reality.** This design matches the shipped path closely, and as of the Phase 1 delivery-core work it is a SINGLE implementation, not two. `main/mesh_task.c`'s `forward_data_packet` now calls `forward_data()` in `components/routing/forwarding.c` (the same host-tested component gosim already calls) for the route-lookup and hop-limit-decrement decision above, keeping only the mailbox-store and RERR side effects in `mesh_task.c`; it previously hand-duplicated this whole decision inline, untested at the shipped call site. There is no longer a parallel, untested copy of the forwarding decision: firmware, the host test suite, and gosim all exercise the same `forward_data()`/`data_rx_decide()` functions in `components/routing/forwarding.c`. See §4.27 for the wire v4 change (`prev_hop`, `auth_hmac`) that also runs through this same receive path.
+> **Firmware reality.** This design matches the shipped path closely, and as of the Phase 1 delivery-core work it is a SINGLE implementation, not two. `main/mesh_routing.c`'s `forward_data_packet` now calls `forward_data()` in `components/routing/forwarding.c` (the same host-tested component gosim already calls) for the route-lookup and hop-limit-decrement decision above, keeping only the mailbox-store and RERR side effects in `mesh_routing.c`; it previously hand-duplicated this whole decision inline, untested at the shipped call site. There is no longer a parallel, untested copy of the forwarding decision: firmware, the host test suite, and gosim all exercise the same `forward_data()`/`data_rx_decide()` functions in `components/routing/forwarding.c`. See §4.27 for the wire v4 change (`prev_hop`, `auth_hmac`) that also runs through this same receive path.
 
 ### 6.7 Channel (Group) Message Routing
 
