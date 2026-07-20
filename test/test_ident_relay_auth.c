@@ -41,7 +41,7 @@ void setUp(void) { bramble_test_provision_net_key(); }
 void tearDown(void) { network_key_clear(); }
 
 /* Fully populated, Ed25519-signed, relay-gate-MACed attestation: the exact
- * frame send_identity_attestation (main/mesh_task.c) originates. */
+ * frame send_identity_attestation (main/mesh_beacon.c) originates. */
 static void make_signed_attestation(bramble_identity_attestation_t* p, uint8_t sk[64]) {
     memset(p, 0, sizeof(*p));
     p->header.version = BRAMBLE_VERSION;
@@ -65,7 +65,7 @@ static void make_signed_attestation(bramble_identity_attestation_t* p, uint8_t s
     TEST_ASSERT_EQUAL(ESP_OK, bramble_identity_attestation_signed_msg(p, msg, sizeof(msg)));
     TEST_ASSERT_EQUAL(0, crypto_ed25519_sign(sk, msg, sizeof(msg), p->sig));
 
-    /* Origin seq (mesh_task.c draws it via control_seq_next); the MAC is
+    /* Origin seq (mesh_beacon.c draws it via control_seq_next); the MAC is
      * computed AFTER the Ed25519 sign because sig is MAC-covered. */
     p->seq[0] = 0x00;
     p->seq[1] = 0x01;

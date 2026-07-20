@@ -248,7 +248,7 @@ target_include_directories(test_ident_relay_auth PRIVATE
 target_link_libraries(test_ident_relay_auth ssl crypto)
 
 # Identity attestation relay gate + delivery order (Phase 3, Part B):
-# mirrors mesh_task.c's handle_identity_attestation with the real
+# mirrors mesh_beacon.c's handle_identity_attestation with the real
 # components in the real order (MAC first, then replay, then dedup, then
 # deliver-regardless, then channel_flood_decide), including the
 # bad-MAC-drop, rewritten-packet-id-replay, and relays-never-Ed-verify

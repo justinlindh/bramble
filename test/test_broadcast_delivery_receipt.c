@@ -145,7 +145,7 @@ void test_build_delivery_receipt_targets_original_sender_with_expected_fields(vo
     TEST_ASSERT_EQUAL_UINT8(1, decoded.hop_count);
     TEST_ASSERT_EQUAL(0xAABBCCDDu, decoded.relay_path[0]);
 
-    /* ws 1.3b: the seq the caller drew (control_seq_next in mesh_task.c)
+    /* ws 1.3b: the seq the caller drew (control_seq_next in mesh_beacon.c)
      * round-trips through the builder onto the wire. 0x0102030405 is a
      * 40-bit literal, so the 48-bit big-endian encoding leads with a zero
      * byte: 0x00, 0x01, 0x02, 0x03, 0x04, 0x05. */
