@@ -1523,8 +1523,8 @@ static void _handle_location(sim_node_t* rx, const uint8_t* buf, uint16_t len, u
 
     uint8_t tier = 0;
     bramble_position_t pos;
-    if (location_parse_inner(buf + HEADER_SIZE + 4, (size_t)(len - HEADER_SIZE - 4), &tier,
-                             &pos) != 0)
+    if (location_parse_inner(buf + HEADER_SIZE + 4, (size_t)(len - HEADER_SIZE - 4), &tier, &pos) !=
+        0)
         return;
 
     int node_idx = (int)(rx - nodes->nodes);
@@ -2295,9 +2295,9 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
  * coordinates that arrived. The node's own location manager is updated
  * through the real location_set_position first, like firmware's fix path.
  */
-void bridge_handle_generate_location(sim_event_t* event, node_array_t* nodes,
-                                     radio_config_t* radio, pcg32_state_t* rng,
-                                     event_queue_t* events, metrics_state_t* metrics) {
+void bridge_handle_generate_location(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                     pcg32_state_t* rng, event_queue_t* events,
+                                     metrics_state_t* metrics) {
     sim_node_t* src = node_array_find_by_id(nodes, event->data.location.node_id);
     if (!src || !src->active)
         return;

@@ -143,9 +143,9 @@ void bridge_handle_generate_attestation(sim_event_t* event, node_array_t* nodes,
  *   emit "location_received"; the frame is delivered, never relayed, exactly
  *   like firmware's handle_location.
  */
-void bridge_handle_generate_location(sim_event_t* event, node_array_t* nodes,
-                                     radio_config_t* radio, pcg32_state_t* rng,
-                                     event_queue_t* events, metrics_state_t* metrics);
+void bridge_handle_generate_location(sim_event_t* event, node_array_t* nodes, radio_config_t* radio,
+                                     pcg32_state_t* rng, event_queue_t* events,
+                                     metrics_state_t* metrics);
 
 /*
  * bridge_apply_duty_cycle_cap:

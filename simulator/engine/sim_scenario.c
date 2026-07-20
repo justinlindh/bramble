@@ -349,8 +349,7 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             strncpy(event.data.location.node_id, src->valuestring, NODE_ID_LEN - 1);
             event.data.location.latitude_e7 = (int32_t)(lat->valuedouble * 1e7);
             event.data.location.longitude_e7 = (int32_t)(lon->valuedouble * 1e7);
-            event.data.location.altitude_m =
-                cJSON_IsNumber(alt) ? (int16_t)alt->valuedouble : 0;
+            event.data.location.altitude_m = cJSON_IsNumber(alt) ? (int16_t)alt->valuedouble : 0;
 
         } else {
             /* Hard failure, deliberately. Issues #144 and #166 were both
