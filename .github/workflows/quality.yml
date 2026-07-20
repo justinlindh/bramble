@@ -140,6 +140,23 @@ jobs:
           # shellcheck disable=SC1091
           source scripts/ci-source-idf.sh
           bash scripts/flash.sh local "${{ matrix.board }}" build
+      - name: Firmware size ratchet (${{ matrix.board }})
+        # Real esp32s3 flash-image and static-DRAM tracking on the board that was
+        # just built. This is PR-time because the board build now gates PRs (four
+        # boards, ccache): scripts/ci/check-firmware-size.sh reads bramble.bin and
+        # `idf.py size` and fails when either grows past ci/size-baseline.json plus
+        # tolerance, so a silent tens-of-KiB flash bloat or a shrinking RAM margin
+        # (this project shipped a stack overflow only hardware caught) surfaces
+        # before merge. Same area gate as the build so it never runs without one.
+        if: needs.detect.outputs.firmware == 'true' || needs.detect.outputs.workflows == 'true'
+        env:
+          HOME: /tmp/cihome
+          ESP_ROM_ELF_DIR: /tmp/esp-rom-elf
+        run: |
+          mkdir -p "$HOME" "$ESP_ROM_ELF_DIR"
+          # shellcheck disable=SC1091
+          source scripts/ci-source-idf.sh
+          bash scripts/ci/check-firmware-size.sh "${{ matrix.board }}"
       - name: ccache statistics
         if: |
           always() &&

@@ -1,0 +1,25 @@
+{
+  "_comment": "Committed flash-image and static-DRAM ceilings (bytes) per board. CI fails a board when its bramble.bin or static DRAM (data + bss) grows more than tolerance_bytes above the ceiling. This file NEVER auto-drifts: a developer updates it deliberately with scripts/ci/update-size-baseline.sh (raising a ceiling when a change legitimately grows the image, with the reason in the PR) and commits it. See docs/quality-policy.md. Seeded from ESP-IDF v5.4 local builds; the runner uses the pinned v5.4.1, so the canonical ceiling is what CI measures: if a first CI run reports different sizes, commit the CI values. tolerance_bytes (8 KiB) absorbs a patch-level toolchain delta while still catching the tens-of-KiB regressions this gate exists to stop.",
+  "boards": {
+    "heltec-v3": {
+      "flash_bytes": 1511424,
+      "static_ram_bytes": 113552,
+      "tolerance_bytes": 8192
+    },
+    "tdeck-plus": {
+      "flash_bytes": 2035712,
+      "static_ram_bytes": 128508,
+      "tolerance_bytes": 8192
+    },
+    "heltec-v4": {
+      "flash_bytes": 1708032,
+      "static_ram_bytes": 126880,
+      "tolerance_bytes": 8192
+    },
+    "bramble-pager": {
+      "flash_bytes": 1511424,
+      "static_ram_bytes": 124368,
+      "tolerance_bytes": 8192
+    }
+  }
+}
