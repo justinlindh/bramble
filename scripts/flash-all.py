@@ -11,7 +11,7 @@ Features:
 - Verify success using bramble.getStatus uptime checks (serial for USB, WS for OTA)
 
 Usage:
-  python3 scripts/flash-all.py [--config .flash-targets.json] [--dry-run]
+  python3 scripts/flash-all.py [--config .flash-targets.json] [--dry-run] [--project-ver 1.5.12]
 """
 
 from __future__ import annotations
@@ -157,9 +157,15 @@ def detect_usb_device(port: str, cfg: dict[str, Any], esptool: str) -> UsbDevice
     return UsbDevice(port=port, board=board, psram_mb=psram_mb, chip=chip, detection_log=out)
 
 
-def build_board(board: str) -> tuple[bool, str]:
+def build_cmd(board: str, project_ver: str | None) -> list[str]:
     cmd = ["bash", str(FLASH_SH), "local", board, "build"]
-    cp = run_cmd(cmd, timeout=1800)
+    if project_ver:
+        cmd.append(f"-DPROJECT_VER={project_ver}")
+    return cmd
+
+
+def build_board(board: str, project_ver: str | None) -> tuple[bool, str]:
+    cp = run_cmd(build_cmd(board, project_ver), timeout=1800)
     return cp.returncode == 0, cp.stdout
 
 
@@ -187,8 +193,18 @@ def board_antirollback(board: str) -> tuple[bool, int]:
     return enabled, epoch
 
 
-def flash_usb(port: str, board: str, antirollback_phrase: str | None = None) -> tuple[bool, str]:
+def flash_cmd(port: str, board: str, project_ver: str | None) -> list[str]:
     cmd = ["bash", str(FLASH_SH), "local", board, "flash", port]
+    # flash.sh's flash action REBUILDS before flashing and pins PROJECT_VER
+    # to 0.0.0-local when the flag is absent, so the version must ride along
+    # here too or the versioned build from the build phase gets restamped.
+    if project_ver:
+        cmd.append(f"-DPROJECT_VER={project_ver}")
+    return cmd
+
+
+def flash_usb(port: str, board: str, project_ver: str | None, antirollback_phrase: str | None = None) -> tuple[bool, str]:
+    cmd = flash_cmd(port, board, project_ver)
     input_text = None
     if antirollback_phrase is not None:
         # The operator already typed the epoch confirmation once, upfront in
@@ -344,6 +360,16 @@ def main() -> int:
     p.add_argument("--ota-only", action="store_true")
     p.add_argument("--max-workers", type=int, default=4)
     p.add_argument(
+        "--project-ver",
+        default=None,
+        help=(
+            "Version string to stamp into the builds (passed to flash.sh as "
+            "-DPROJECT_VER=...). Use the release version (e.g. 1.5.12 when "
+            "flashing the firmware-v1.5.12 tag) so devices report the release "
+            "they run. Without it builds stamp 0.0.0-local."
+        ),
+    )
+    p.add_argument(
         "--enable-antirollback",
         action="store_true",
         help=(
@@ -408,10 +434,10 @@ def main() -> int:
         if not args.enable_antirollback:
             print("NOTE: builds with CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK would be refused at the guard (missing --enable-antirollback).")
         for b in sorted(boards_to_build):
-            print("BUILD:", fmt_cmd(["bash", str(FLASH_SH), "local", b, "build"]))
+            print("BUILD:", fmt_cmd(build_cmd(b, args.project_ver)))
         for d in usb_devices:
             if d.board:
-                print("FLASH:", fmt_cmd(["bash", str(FLASH_SH), "local", d.board, "flash", d.port]))
+                print("FLASH:", fmt_cmd(flash_cmd(d.port, d.board, args.project_ver)))
         for n in net_nodes:
             board = norm_board(n.get("board", ""))
             ota_url = (n.get("ota_url") or (cfg.get("ota", {}).get("urls", {}) or {}).get(board) or cfg.get("ota", {}).get("url"))
@@ -424,7 +450,7 @@ def main() -> int:
     if boards_to_build:
         print("\n=== Building firmware (parallel by board target) ===")
         with ThreadPoolExecutor(max_workers=min(args.max_workers, len(boards_to_build))) as ex:
-            fut_map = {ex.submit(build_board, b): b for b in boards_to_build}
+            fut_map = {ex.submit(build_board, b, args.project_ver): b for b in boards_to_build}
             for fut in as_completed(fut_map):
                 b = fut_map[fut]
                 ok, log = fut.result()
@@ -487,7 +513,7 @@ def main() -> int:
     if usb_candidates:
         print("\n=== Flashing USB devices (parallel) ===")
         with ThreadPoolExecutor(max_workers=min(args.max_workers, len(usb_candidates))) as ex:
-            fut_map = {ex.submit(flash_usb, d.port, d.board, ar_phrase_by_board.get(d.board)): d for d in usb_candidates}
+            fut_map = {ex.submit(flash_usb, d.port, d.board, args.project_ver, ar_phrase_by_board.get(d.board)): d for d in usb_candidates}
             for fut in as_completed(fut_map):
                 d = fut_map[fut]
                 ok, log = fut.result()
@@ -543,9 +569,8 @@ def main() -> int:
     # Show concise build evidence block for wrapper compliance
     print("\n=== Build command evidence (scripts/flash.sh wrapper) ===")
     for b in sorted(boards_to_build):
-        cmd = ["bash", str(FLASH_SH), "local", b, "build"]
         print(f"Board target: {b}")
-        print(f"Build command: {fmt_cmd(cmd)}")
+        print(f"Build command: {fmt_cmd(build_cmd(b, args.project_ver))}")
         excerpt = "\n".join(build_logs.get(b, "").splitlines()[-12:])
         print("Build output excerpt:")
         print(excerpt if excerpt else "(no output captured)")

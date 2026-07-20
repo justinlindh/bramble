@@ -29,7 +29,12 @@ Notes:
   - BOARD defaults to: heltec-v3
   - ACTION defaults to: flash
   - Default PORT: /dev/ttyACM0 for tdeck-plus and bramble-pager (native USB), /dev/ttyUSB0 otherwise
-  - Extra args are passed to `idf.py flash` (example: --erase-nvs)
+  - Extra args starting with -D are idf.py GLOBAL options and reach every
+    idf.py invocation, including the build (example: -DPROJECT_VER=1.5.12
+    to stamp a build with a release version). Other extra args are passed
+    to `idf.py flash` only (example: --erase-nvs)
+  - PROJECT_VER is pinned to 0.0.0-local unless -DPROJECT_VER=... is given,
+    so a stale CMake cache can never stamp an old version silently
 EOF
 }
 
@@ -105,6 +110,36 @@ for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
   fi
 done
 EXTRA_ARGS=(${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"})
+
+# Split the remaining extra args: -D... are idf.py GLOBAL options (cmake cache
+# defines) and must precede the command on EVERY invocation, build included;
+# everything else is a flash-command option and stays after `flash` as before.
+# Historically -D args were silently dropped by the build action, so a
+# -DPROJECT_VER=... never reached cmake and a stale cached version shipped
+# onto devices unnoticed.
+GLOBAL_ARGS=()
+FLASH_CMD_ARGS=()
+for arg in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do
+  if [[ "$arg" == -D* ]]; then
+    GLOBAL_ARGS+=("$arg")
+  else
+    FLASH_CMD_ARGS+=("$arg")
+  fi
+done
+
+# Pin PROJECT_VER on every configure unless the caller sets one. The CMake
+# cache keeps the last -DPROJECT_VER forever, so without this a build dir
+# once configured with a version keeps stamping it into every later build
+# (bench builds shipped a months-old test version this way). Always passing
+# an explicit value makes the stamp deterministic: callers get exactly what
+# they asked for, and plain local builds always get 0.0.0-local.
+have_project_ver=0
+for arg in ${GLOBAL_ARGS[@]+"${GLOBAL_ARGS[@]}"}; do
+  [[ "$arg" == -DPROJECT_VER=* ]] && have_project_ver=1
+done
+if [[ "$have_project_ver" -eq 0 ]]; then
+  GLOBAL_ARGS+=("-DPROJECT_VER=0.0.0-local")
+fi
 
 if [[ -z "$PORT" ]]; then
   if [[ "$BOARD" == "tdeck-plus" || "$BOARD" == "bramble-pager" ]]; then
@@ -214,7 +249,7 @@ run_local() {
     build)
       echo "==> Building locally..."
       [[ ! -d "$BOARD_BUILD_DIR" ]] && rm -f "$BOARD_SDKCONFIG"
-      idf.py "${IDF_BOARD_ARGS[@]}" build
+      idf.py "${IDF_BOARD_ARGS[@]}" "${GLOBAL_ARGS[@]}" build
       # Loud notice (never blocks a build) if this is an anti-rollback build.
       bash scripts/antirollback-guard.sh --sdkconfig "$BOARD_SDKCONFIG" --action build
       ;;
@@ -225,14 +260,15 @@ run_local() {
     flash)
       echo "==> Building locally..."
       [[ ! -d "$BOARD_BUILD_DIR" ]] && rm -f "$BOARD_SDKCONFIG"
-      idf.py "${IDF_BOARD_ARGS[@]}" build
+      idf.py "${IDF_BOARD_ARGS[@]}" "${GLOBAL_ARGS[@]}" build
       # Anti-rollback consent gate: refuses to flash an anti-rollback build
       # unless --enable-antirollback was passed AND the operator types the
       # epoch-specific confirmation. A non-anti-rollback build passes silently.
       bash scripts/antirollback-guard.sh --sdkconfig "$BOARD_SDKCONFIG" --action flash \
         --port "$PORT" ${ANTIROLLBACK_ARGS[@]+"${ANTIROLLBACK_ARGS[@]}"}
       echo "==> Flashing to $PORT (serial)..."
-      run_serial_cmd idf.py "${IDF_BOARD_ARGS[@]}" -p "$PORT" flash "${EXTRA_ARGS[@]}"
+      run_serial_cmd idf.py "${IDF_BOARD_ARGS[@]}" "${GLOBAL_ARGS[@]}" -p "$PORT" flash \
+        ${FLASH_CMD_ARGS[@]+"${FLASH_CMD_ARGS[@]}"}
       ;;
     *)
       print_usage
