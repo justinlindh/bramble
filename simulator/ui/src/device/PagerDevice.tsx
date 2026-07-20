@@ -273,6 +273,7 @@ export default function PagerDevice({ device, muted, onButton, faceWidth = 300 }
           }}
         >
           <Epaper
+            node={device.node}
             fb={device.fb}
             kind={device.fbKind}
             busyMs={device.fbBusyMs}

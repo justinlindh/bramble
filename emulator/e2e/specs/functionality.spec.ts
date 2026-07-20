@@ -18,7 +18,8 @@ import { test, expect } from '@playwright/test';
 import * as path from 'node:path';
 import { decodeFbWire } from '../lib/fbWire';
 import { findText } from '../lib/glyphMatch';
-import { readCanvasGrid, canvasSelector } from '../lib/canvasRead';
+import { readCanvasGrid } from '../lib/canvasRead';
+import { enableCanvasCapture, readPaintHistory } from '../lib/canvasCapture';
 import { attachWsCapture, waitFor, type WsCapture } from '../lib/wsCapture';
 import { loadScenario, clickButton, holdReset } from '../lib/uiActions';
 
@@ -34,6 +35,9 @@ test('mesh map still renders (no regression)', async ({ page }) => {
 
 test('device cards, boot screen, buttons, reset persistence, and message delivery', async ({ page }) => {
   const cap: WsCapture = attachWsCapture(page);
+  // Arm the canvas paint-history recorder BEFORE the app mounts, so Epaper
+  // records the transient boot splash for step (b)'s race-free cross-check.
+  await enableCanvasCapture(page);
   await page.goto('/');
   await page.getByTestId('view-tab-devices').click();
   await loadScenario(page, 'emu-channel-delivery');
@@ -72,29 +76,32 @@ test('device cards, boot screen, buttons, reset persistence, and message deliver
       },
       { timeoutMs: 20_000, label: 'boot screen "BRAMBLE" splash in a wire fb' },
     );
-    // Cross-check it is actually visible on that node's canvas too, not just
-    // in the wire bytes (a stronger pixel-level proof is display-correctness.spec.ts).
+    // Cross-check it was actually painted on that node's canvas too, not just
+    // present in the wire bytes (a stronger pixel-level proof for a PERSISTENT
+    // frame is display-correctness.spec.ts).
+    //
+    // Root cause of issue #170's flake, and why this reads paint HISTORY, not
+    // the live canvas: the boot splash is TRANSIENT. The firmware paints
+    // "BRAMBLE", then overpaints it with the home screen a second or two into
+    // boot (main.c's show_splash/show_boot_status give way to render_screen).
+    // The wire check above still finds it because wsCapture accumulates every
+    // frame, but a LIVE canvas readback only sees the latest paint: once the
+    // home screen lands, "BRAMBLE" is gone from the surface and no amount of
+    // polling brings it back. Under CI CPU contention the boot->home
+    // transition, the WebSocket frame delivery, and the readback loop drift
+    // relative to each other, so the live read loses the splash intermittently
+    // (~1 in 5); widening the budget (20s -> 45s, PR #217) never fixed it
+    // because the frame is absent, not late. Instead Epaper records every
+    // content frame it paints into a per-node history (paintLog.ts, armed by
+    // enableCanvasCapture above); we scan that, so a frame that was genuinely
+    // painted can never be missed regardless of load. Event-driven: the poll
+    // only covers the app's paint schedule catching up to the splash frame.
     const canvasFound = await waitFor(
       async () => {
-        const grid = await readCanvasGrid(page, bootHit.node);
-        return findText(grid, 'BRAMBLE', 2).found || undefined;
+        const frames = await readPaintHistory(page, bootHit.node);
+        return frames.some((grid) => findText(grid, 'BRAMBLE', 2).found) || undefined;
       },
-      // Canvas readback is CDP round-trips into a chromium that shares the CI
-      // pod's CPU with three real firmware processes; this is real, inherent
-      // cost (not a fixed sleep or a backoff), so it scales with runner
-      // contention. Issue #170 measured this wait completing in 16.1-16.5s
-      // against the prior 20s budget (7 local runs, 18% margin, and it had
-      // already produced one red check unrelated to the change under review).
-      // canvasRead.ts's readCanvasGrid now classifies ink/paper inside the
-      // browser and ships one byte per pixel instead of four, cutting the
-      // CDP payload every poll pays for by 4x, but the remaining cost is
-      // still real CPU contention that a budget must cover, not chase away.
-      // 45s gives roughly 2.7x the worst observed baseline (63% margin)
-      // without following the "20s becomes 60s becomes a test nobody
-      // trusts" pattern the issue warned against. Event-driven, so a fast
-      // box still exits in a couple of seconds; this is a ceiling, not a
-      // target.
-      { timeoutMs: 45_000, intervalMs: 200, label: 'boot text visible on canvas' },
+      { timeoutMs: 20_000, intervalMs: 200, label: 'boot text painted on canvas (paint history)' },
     );
     expect(canvasFound).toBe(true);
   });
