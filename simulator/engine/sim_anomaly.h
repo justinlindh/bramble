@@ -39,6 +39,7 @@ typedef struct {
 
 typedef struct {
     uint32_t packet_id;
+    uint8_t hop_limit; /* received hop_limit at this node's first forward */
     uint64_t first_seen_us;
 } loop_seen_t;
 
@@ -85,9 +86,15 @@ void anomaly_record_fwd(blackhole_tracker_t* t, uint64_t now_us);
 bool anomaly_check_blackhole(blackhole_tracker_t* t, uint64_t now_us, FILE* emit_out,
                              const char* node_id);
 
-/* Route loop: call when a DATA packet arrives; returns true if loop detected */
-bool anomaly_check_loop(loop_tracker_t* t, uint32_t packet_id, uint64_t now_us, FILE* emit_out,
-                        const char* node_id);
+/* Route loop (issue #144): call when a node FORWARDS a unicast packet,
+ * passing the hop_limit the packet ARRIVED with. Flags the same packet_id
+ * forwarded again at a different hop_limit: a looped packet comes back
+ * around with hop_limit lower by the loop length, while a legitimate
+ * retransmission retraces the path at the same hop_limit. Receive-side
+ * duplicates (flood rebroadcast, sender retries) never reach this check.
+ * Returns true if a loop was detected. */
+bool anomaly_check_forward_loop(loop_tracker_t* t, uint32_t packet_id, uint8_t hop_limit,
+                                uint64_t now_us, FILE* emit_out, const char* node_id);
 
 /* Excessive RREQ retransmission: call when a node originates/retransmits RREQ */
 bool anomaly_check_rreq_retx(rreq_retx_tracker_t* t, uint32_t dest_addr, uint64_t now_us,

@@ -17,7 +17,7 @@ typedef struct {
 /* Upsert one probe-ACK observation keyed by responder addr: latest hops and
  * latency, best (max) rssi/snr, OR the round bit. New responders append while
  * count < max_results; overflow inserts are dropped. Pure; identical to the
- * pre-extraction upsert in mesh_task.c handle_probe_ack. probe_round is
+ * pre-extraction upsert in mesh_probe.c handle_probe_ack. probe_round is
  * assumed already clamped to [1, PROBE_SWEEP_ROUNDS] by the caller (the live
  * clamp at mesh_task.c is `probe_round < 1 || probe_round > PROBE_SWEEP_ROUNDS`).
  * If PROBE_SWEEP_ROUNDS ever exceeds 8, `1u << (probe_round - 1)` into the

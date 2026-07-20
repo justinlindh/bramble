@@ -330,6 +330,18 @@ static bool load_events(cJSON* events_json, event_queue_t* queue, node_array_t* 
             if (!cJSON_IsString(node_id))
                 return false;
             strncpy(event.data.node.node_id, node_id->valuestring, NODE_ID_LEN - 1);
+            /* Issue #144 Bug 1: the event's x/y used to be silently dropped,
+             * so every rejoin landed at (0,0) regardless of what the
+             * scenario said. Parse them when supplied; when absent,
+             * has_coords=false makes the join restore the node's original
+             * scenario position (handleNodeJoin in sim.go). */
+            cJSON* jx = cJSON_GetObjectItem(evt_json, "x");
+            cJSON* jy = cJSON_GetObjectItem(evt_json, "y");
+            if (cJSON_IsNumber(jx) && cJSON_IsNumber(jy)) {
+                event.data.node.x = (float)jx->valuedouble;
+                event.data.node.y = (float)jy->valuedouble;
+                event.data.node.has_coords = true;
+            }
 
         } else if (strcmp(type, "send_location") == 0) {
             /* Location sharing (issue #172): a scripted GPS position

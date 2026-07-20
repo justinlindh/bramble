@@ -326,12 +326,12 @@ excluded, an attacker could rewrite any captured beacon's display name
 without failing verification, spoofing peer names in the neighbor table
 and UI even under a provisioned key.
 Verification happens on
-receipt (`handle_beacon` in `main/mesh_task.c`) and is constant-time
+receipt (`handle_beacon` in `main/mesh_beacon.c`) and is constant-time
 (`beacon_verify_hmac`, XOR-accumulate, no early exit). When a network key
 is provisioned, the key is a distinct HKDF subkey of it (salt
 `"bramble-beacon-v2"`), not the channel PSK. Unprovisioned, the beacon path
 is inert: the send side zeroes `s_beacon_key` and skips beacon origination
-(`mesh_rederive_beacon_key` / `send_beacon` in `main/mesh_task.c`), and the
+(`mesh_rederive_beacon_key` / `send_beacon` in `main/mesh_beacon.c`), and the
 receive side drops every beacon before it reaches `beacon_verify_hmac`
 (`handle_beacon`), because an unprovisioned node holds no beacon key and
 there is *no* public-PSK fallback to derive one from
@@ -353,7 +353,7 @@ self-inflicted flood, not third-party flood.
 
 Forwarded RREQs (SEC-M4) are bounded separately by a global
 token bucket, `rreq_fwd_allow` in `components/security/security.c`, called
-from `handle_rreq` in `main/mesh_task.c` after the duplicate-suppression
+from `handle_rreq` in `main/mesh_routing.c` after the duplicate-suppression
 check below so only non-duplicate RREQs consume a token. `RREQ_FWD_BURST`
 (16) tokens refill at one per `RREQ_FWD_REFILL_MS` (2000ms), about 30
 sustained forwards per minute plus a burst of 16. The cap is node-global, not
@@ -374,7 +374,7 @@ accepted airtime-vs-reach tradeoff, and discovery already retries.
 PROBE is a reachability tool: a node with no provisioning, no channel key and
 no route asks "who can hear me" and gets an answer. Requiring a MAC or a
 provisioning gate on the receive path would delete that use case, so
-`handle_probe` in `main/mesh_task.c` deliberately performs no authentication.
+`handle_probe` in `main/mesh_probe.c` deliberately performs no authentication.
 The consequence, stated plainly, is that anyone in radio range can cause
 nodes to transmit. What is bounded is *how much*.
 
@@ -578,7 +578,7 @@ What ships:
   also carrying the anchor endorsement cert (`not_after` plus the anchor's
   64-byte signature over this node's Ed25519 key) that lets an anchored
   receiver decide whether to pin it, at boot and on a 15-minute cadence
-  (`send_identity_attestation` in `main/mesh_task.c`), budget-gated like all
+  (`send_identity_attestation` in `main/mesh_beacon.c`), budget-gated like all
   broadcast traffic.
 - **Relay-gated flood.** The frame carries a cheap network-key MAC
   (context `bramble-ident-relay-v1`) plus a 48-bit origin sequence checked
@@ -614,7 +614,7 @@ What ships:
   a pinned identity, the handshake's long-term X25519 key must equal the
   pinned `x25519_pub`; a mismatch refuses the session with a loud
   key-change warning (`dm_verify_init`/`dm_verify_resp` +
-  `handle_ke_envelope`'s pin snapshot in `main/mesh_task.c`). No pin means
+  `handle_ke_envelope`'s pin snapshot in `main/mesh_dm.c`). No pin means
   unchanged TOFU-grade first contact.
 
 Residuals, stated plainly (see also section 5): identities are unforgeable,
@@ -646,7 +646,7 @@ no decision.
 
 Mailbox nodes store the raw forwarded packet, which for channel messages is
 ciphertext; the mailbox never holds plaintext it could not already read
-(`forward_data_packet` to `mesh_mailbox_store` in `main/mesh_task.c`,
+(`forward_data_packet` in `main/mesh_routing.c` to `mesh_mailbox_store` in `main/mesh_mailbox.c`,
 `components/mailbox/mailbox.c`). Entries are RAM-only, capped per
 destination, and expire.
 
@@ -777,7 +777,7 @@ permanently-unevictable sessions, killing all future DM establishment
 
 LOCATION packets are AES-256-GCM encrypted end to end, on both the
 channel-shared and direct-session paths (`mesh_send_location_packet`,
-`handle_location` in `main/mesh_task.c`). The sharing tier travels inside
+`handle_location` in `main/mesh_location.c`). The sharing tier travels inside
 the authenticated plaintext (byte 0) rather than the cleartext header, and
 every LOCATION ciphertext pads to one canonical size regardless of tier, so
 ciphertext length does not leak which tier was chosen. A per-sender replay
@@ -893,7 +893,7 @@ via `bramble.setNetworkKey`, or loaded from NVS at boot; both RPCs are
 gated the same way as `bramble.setAuthToken`. RREP, RERR, ACK, and
 delivery-receipt verification read `network_key_get()` live on every call,
 so a runtime-provisioned key protects them immediately; the RPC handler
-also calls `mesh_rederive_beacon_key` (`main/mesh_task.c`), so beacons pick
+also calls `mesh_rederive_beacon_key` (`main/mesh_beacon.c`), so beacons pick
 up a runtime-provisioned key live too.
 
 **What this does NOT close.** A network-key INSIDER (a legitimate holder of
@@ -1251,7 +1251,7 @@ same PR that fixes it.
   compromise.
 - **A network-key insider can trigger a mailbox flush for any victim
   address.** A mailbox flush requires a beacon carrying a valid
-  network-key HMAC (`handle_beacon` mailbox flush in `main/mesh_task.c`),
+  network-key HMAC (`handle_beacon` mailbox flush in `main/mesh_beacon.c`),
   and beacon freshness (section 3) means a captured valid beacon cannot
   be replayed to trigger one, but a network-key insider can fabricate a
   fresh, correctly-signed beacon for the victim address (section 5,
