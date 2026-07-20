@@ -192,6 +192,7 @@ signal) naming the mismatch and pointing at this file.
 | --- | --- | --- |
 | `Detect changed areas` (via reusable `detect`) | always | no |
 | `Host tests` | `firmware` or `workflows` | yes |
+| `Parser fuzzing` | `firmware` or `workflows` | yes |
 | `Release config` | `firmware` or `workflows` | yes |
 | `gosim integration` | `firmware`, `simulator`, or `workflows` | yes |
 | `Board build smoke (heltec-v3)` | `firmware` or `workflows` | yes |
@@ -199,6 +200,20 @@ signal) naming the mismatch and pointing at this file.
 | `Board build smoke (heltec-v4)` | `firmware` or `workflows` | yes |
 | `Board build smoke (bramble-pager)` | `firmware` or `workflows` | yes |
 | `Emulator suite` | `firmware`, `simulator`, `emulator`, or `workflows` | yes |
+
+`Parser fuzzing` runs `test/fuzz/run_fuzz.sh`, a bounded libFuzzer campaign
+(30 seconds per target, two targets) under ASan and UBSan against the wire-frame
+parsers in `components/packet/packet.c` and the fragment reassembler in
+`components/fragment/fragment.c`. Those parsers run on attacker-controlled LoRa
+bytes before any AEAD tag or HMAC is verified, which is what earns them a
+dedicated gate. The seed corpora are committed under `test/fuzz/corpus/`, so the
+run starts from valid frames of every wire type and the budget is spent on
+mutation rather than on rediscovering the formats. The job needs `clang` with
+the libFuzzer and sanitizer runtimes on the runner image; a first step asserts
+the toolchain is present and fails the job when it is not, because skipping on a
+missing tool would make the check advisory. A finding uploads its reproducing
+input as a CI artifact, and the same input replays locally with
+`test/fuzz/build/fuzz_packet <file>`.
 
 `Emulator suite` merges the former `emulator-scenarios` and `emulator-e2e`
 jobs into one job that builds the linux firmware node, gosim, and the UI once,
