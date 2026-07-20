@@ -21,6 +21,10 @@
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
 
+#ifdef CONFIG_BRAMBLE_BOARD_TDECK_PLUS
+#include "audio.h"
+#endif
+
 static const char* TAG = "mesh";
 
 /* Forward declarations for intra-module static helpers. */

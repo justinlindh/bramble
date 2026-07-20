@@ -21,6 +21,10 @@
 #include "cJSON.h"
 #include "rpc_dispatcher.h"
 
+#ifdef CONFIG_BRAMBLE_UI_GRAPHICAL
+#include "ui_graphics.h"
+#endif
+
 static const char* TAG = "mesh";
 
 enum {
