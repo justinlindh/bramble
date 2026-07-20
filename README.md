@@ -86,6 +86,23 @@ A desktop app (Linux, Windows, macOS) is also available, built from the same web
 
 The Bramble Pager v1 is a custom in-house board, not an off-the-shelf dev kit: its own 96x50mm 2-layer PCB (ESP32-S3-WROOM-1 + SX1262 with a DIO2 RF switch, GDEY0213B74 2.13" e-paper, ATGM336H GPS, buzzer, vibration motor, and status LED), JLCPCB-fabbable, in a 3D-printed case. The authoritative design tree (spec, schematic, PCB, BOM, case, and bring-up gates) is [hardware/pager/v1/](hardware/pager/v1/); build it with the `bramble-pager` board profile.
 
+This is what the firmware paints on each display class, as real framebuffers (T-Deck captured on hardware, the others rendered by the real firmware in the emulator):
+
+<table>
+<tr>
+<td align="center" width="34%"><a href="docs/device-screens.md#t-deck-plus-320x240-color-lvgl"><img src="docs/images/device-screens/tdeck/messages.png" alt="T-Deck Plus home screen" width="320"></a></td>
+<td align="center" width="33%"><a href="docs/device-screens.md#heltec-oled-128x64-monochrome-text-ui"><img src="docs/images/device-screens/heltec-oled/main.png" alt="Heltec OLED home screen" width="256"></a></td>
+<td align="center" width="33%"><a href="docs/device-screens.md#pager-v1-250x122-e-paper-text-ui"><img src="docs/images/device-screens/pager/main.png" alt="Pager home screen" width="256"></a></td>
+</tr>
+<tr>
+<td align="center"><b>T-Deck Plus</b>: LVGL color UI</td>
+<td align="center"><b>Heltec OLED</b>: text UI</td>
+<td align="center"><b>Pager v1</b> (alpha): e-paper text UI</td>
+</tr>
+</table>
+
+Each image links to its device's section in the [device screen gallery](docs/device-screens.md), which shows every screen and documents how each capture was made.
+
 ## Simulator
 
 Bramble ships with a mesh simulator that runs real protocol code against a virtual radio layer and renders topology/traffic in a browser. The radio layer models the shared LoRa medium (real time-on-air, collisions, capture, half-duplex, listen-before-talk), making it the primary proving ground for scale and routing behavior before field deployment.
