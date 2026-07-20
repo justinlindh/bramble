@@ -86,13 +86,14 @@ local box, commit the CI value.
 Each board leg of the `board-build-smoke` matrix (`quality.yml`) ratchets the
 firmware it just built against a committed ceiling in `ci/size-baseline.json`.
 `scripts/ci/check-firmware-size.sh <board>` measures two numbers from
-`idf.py size --format json`: the app flash footprint (`flash_code + flash_rodata
-+ flash_other`) and static DRAM (`data + bss`, the RAM the app reserves before
-the heap). It uses the UNPADDED flash figure, not the `bramble.bin` image size,
-because the image is padded up to 64 KiB ESP32-S3 MMU pages, so its size jumps a
-whole page when a segment crosses a boundary and can differ by 64 KiB between
-ESP-IDF patch versions; the unpadded figure moves precisely with the code and
-data a change adds, and partition fit is already enforced by the ESP-IDF build.
+`idf.py size --format json`: the app flash footprint (`flash_code` plus
+`flash_rodata` plus `flash_other`) and static DRAM (initialized `.data` plus
+`.bss`, the RAM the app reserves before the heap). It uses the UNPADDED flash
+figure, not the `bramble.bin` image size, because the image is padded up to
+64 KiB ESP32-S3 MMU pages, so its size jumps a whole page when a segment crosses
+a boundary and can differ by 64 KiB between ESP-IDF patch versions; the unpadded
+figure moves precisely with the code and data a change adds, and partition fit is
+already enforced by the ESP-IDF build.
 It fails when either metric grows more than `tolerance_bytes` above the ceiling,
 naming exactly what grew and by how much. This runs at PR time because the board
 build itself now gates PRs: this project shipped a main-task stack overflow that
