@@ -24,6 +24,7 @@ void tx_gate_init(tx_gate_t* g, const tx_gate_ops_t* ops, uint8_t max_duty_cycle
     airtime_budget_init(&g->budget, g->ops.now_ms());
     airtime_budget_set_duty_cap(&g->budget, max_duty_cycle_pct, duty_cycle_enforced);
     g->beacon_wire_len = 0u;
+    g->beacon_budget_exempt = false;
 }
 
 /*
@@ -92,13 +93,21 @@ static uint32_t beacon_reserve_ms(tx_gate_t* g, uint8_t tier, tx_kind_t kind) {
     return tx_gate_cost_ms(g, g->beacon_wire_len);
 }
 
+/* True when this send is an emulator-exempt beacon: skips the budget check
+ * AND the debit (see tx_gate_set_beacon_budget_exempt_core), so data lanes
+ * in the same run stay faithfully budgeted. */
+static bool beacon_exempt(const tx_gate_t* g, tx_kind_t kind) {
+    return g->beacon_budget_exempt && kind == TX_KIND_BEACON;
+}
+
 int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t kind) {
     uint8_t tier = tx_gate_kind_tier(kind);
     uint32_t cost_ms = tx_gate_cost_ms(g, len);
+    bool exempt = beacon_exempt(g, kind);
 
     airtime_budget_refill(&g->budget, g->ops.now_ms());
-    if (!airtime_budget_can_transmit(&g->budget, tier,
-                                     cost_ms + beacon_reserve_ms(g, tier, kind))) {
+    if (!exempt && !airtime_budget_can_transmit(&g->budget, tier,
+                                                cost_ms + beacon_reserve_ms(g, tier, kind))) {
         return TX_GATE_ERR_BUDGET;
     }
 
@@ -122,16 +131,23 @@ int tx_gate_transmit(tx_gate_t* g, const uint8_t* buf, uint8_t len, tx_kind_t ki
     if (ret != 0)
         return TX_GATE_ERR_RADIO;
 
-    airtime_budget_debit(&g->budget, tier, cost_ms);
+    if (!exempt)
+        airtime_budget_debit(&g->budget, tier, cost_ms);
     return TX_GATE_OK;
 }
 
 bool tx_gate_can_transmit(tx_gate_t* g, uint8_t wire_len, tx_kind_t kind) {
+    if (beacon_exempt(g, kind))
+        return true;
     uint8_t tier = tx_gate_kind_tier(kind);
     uint32_t cost_ms = tx_gate_cost_ms(g, wire_len);
     airtime_budget_refill(&g->budget, g->ops.now_ms());
     return airtime_budget_can_transmit(&g->budget, tier,
                                        cost_ms + beacon_reserve_ms(g, tier, kind));
+}
+
+void tx_gate_set_beacon_budget_exempt_core(tx_gate_t* g, bool exempt) {
+    g->beacon_budget_exempt = exempt;
 }
 
 void tx_gate_set_mesh_size(tx_gate_t* g, uint8_t peer_count) {
@@ -143,6 +159,8 @@ void tx_gate_set_beacon_profile(tx_gate_t* g, uint8_t beacon_wire_len) {
 }
 
 uint32_t tx_gate_min_beacon_interval_ms(tx_gate_t* g) {
+    if (g->beacon_budget_exempt)
+        return 0u; /* emulator-exempt beacons have no budget floor */
     if (g->beacon_wire_len == 0u)
         return 0u;
     uint32_t cost_ms = tx_gate_cost_ms(g, g->beacon_wire_len);

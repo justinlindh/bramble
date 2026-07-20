@@ -92,14 +92,37 @@ async function capturePngs(page: Page, nodeId: string, name: string): Promise<vo
 // identifies it once rendered. "Bramble" is the Main header; the rest are the
 // literal headers from render_screen() (Compose forks to "Stats" on a
 // non-keyboard board like the Heltec).
-const SCREENS: { name: string; anchor: string }[] = [
+const SCREENS: { name: string; anchor: string; content?: string[] }[] = [
   { name: 'main', anchor: 'Bramble' },
-  { name: 'messages', anchor: 'Messages' },
-  { name: 'nodes', anchor: 'Nodes' },
+  // Alice's own outgoing broadcast is in her store regardless of delivery.
+  { name: 'messages', anchor: 'Messages', content: ['HELLO'] },
+  // Bob is a named neighbor whose beacon Alice has heard.
+  // Either named neighbor proves beacons carried a name onto the panel;
+  // which of the two wins the contended discovery window is not
+  // deterministic under the real collision/half-duplex ether model.
+  { name: 'nodes', anchor: 'Nodes', content: ['Bob', 'Carol'] },
   { name: 'stats', anchor: 'Stats' },
   { name: 'gps', anchor: 'GPS' },
   { name: 'settings', anchor: 'Settings' },
 ];
+
+async function waitForAnyAnchor(page: Page, nodeId: string, anchors: string[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = '';
+  while (Date.now() < deadline) {
+    try {
+      const grid = await readOledGrid(page, nodeId);
+      for (const a of anchors) {
+        if (findText(grid, a, 1).found) return;
+      }
+      lastErr = `none of [${anchors.join(', ')}] on panel yet`;
+    } catch (e) {
+      lastErr = String(e);
+    }
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`waitForAnyAnchor: timed out after ${timeoutMs}ms (${lastErr})`);
+}
 
 async function waitForAnchor(page: Page, nodeId: string, anchor: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -117,6 +140,21 @@ async function waitForAnchor(page: Page, nodeId: string, anchor: string, timeout
   throw new Error(`waitForAnchor: timed out after ${timeoutMs}ms (${lastErr})`);
 }
 
+// Bring the panel to the Main screen from wherever it sits. The text UI's
+// message-auto-switch can park the panel on Messages while traffic is landing;
+// one "up" press steps back one screen (Messages -> Main), and pressing also
+// resets the idle timer so no further auto-switch fires. Main is uniquely
+// identified by its "Bramble" header. Never presses when already on Main.
+async function normalizeToMain(page: Page, nodeId: string): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    const grid = await readOledGrid(page, nodeId);
+    if (findText(grid, 'Bramble', 1).found) return;
+    await clickButton(page, nodeId, 'up');
+    await page.waitForTimeout(400);
+  }
+  throw new Error('normalizeToMain: never reached the Main screen');
+}
+
 test.describe('heltec OLED per-screen capture', () => {
   test.skip(!fs.existsSync(HELTEC_BIN), `Heltec node binary missing: ${HELTEC_BIN} (build it: emulator/scripts/build_node_heltec.sh)`);
 
@@ -131,13 +169,16 @@ test.describe('heltec OLED per-screen capture', () => {
 
     await loadScenario(page, 'emu-heltec-oled');
 
-    // Exactly one device card (single-node scenario). Wait for it to attach and
-    // resolve its node id from the testid.
-    const card = page.locator('[data-testid^="device-card-"]').first();
-    await expect(card).toBeVisible({ timeout: 30_000 });
-    const testId = await card.getAttribute('data-testid');
+    // The scenario has three nodes (Alice + neighbors Bob and Carol); only
+    // Alice runs the OLED profile, so she is the unique card with an
+    // oled-canvas. Resolve her node id from that card's testid.
+    const oledCard = page
+      .locator('[data-testid^="device-card-"]:has(canvas[data-testid="oled-canvas"])')
+      .first();
+    await expect(oledCard).toBeVisible({ timeout: 30_000 });
+    const testId = await oledCard.getAttribute('data-testid');
     const nodeId = (testId ?? '').replace('device-card-', '');
-    expect(nodeId, 'resolved a firmware node id from the device card').not.toBe('');
+    expect(nodeId, 'resolved the OLED node id from the device card').not.toBe('');
 
     // The OLED canvas must exist and have painted the boot Main screen.
     await expect(page.locator(oledSelector(nodeId))).toBeVisible({ timeout: 20_000 });
@@ -146,12 +187,25 @@ test.describe('heltec OLED per-screen capture', () => {
     const dims = await page.$eval(oledSelector(nodeId), (c: HTMLCanvasElement) => ({ w: c.width, h: c.height }));
     expect(dims).toEqual({ w: 128, h: 64 });
 
-    // Walk the ring, gating each capture on the target screen's header.
+    // Let the scenario's traffic land: neighbors beacon and all sends complete
+    // inside the first ~16s, populating Alice's neighbor table and message
+    // store. Settling past the send schedule means no message arrives during
+    // the button-driven walk below, so nothing auto-switches the screen.
+    await page.waitForTimeout(28_000);
+
+    // Start the walk from a known screen: traffic may have auto-switched the
+    // panel to Messages while it settled.
+    await normalizeToMain(page, nodeId);
+
+    // Walk the ring, gating each capture on the target screen's header and, for
+    // the content screens, on the real peer/message text actually being on the
+    // panel (proves the populated scenario reached Alice, not just that the
+    // header drew).
     for (let i = 0; i < SCREENS.length; i++) {
       const s = SCREENS[i];
       if (i > 0) await clickButton(page, nodeId, 'down');
-      // Boot splash + GPS acquisition can lag; a generous, event-driven wait.
       await waitForAnchor(page, nodeId, s.anchor, 30_000);
+      if (s.content) await waitForAnyAnchor(page, nodeId, s.content, 30_000);
       await capturePngs(page, nodeId, s.name);
     }
 

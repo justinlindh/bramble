@@ -1,6 +1,6 @@
 {
   "name": "emu-heltec-oled",
-  "description": "One Virtual Heltec firmware node (SSD1306 128x64 OLED profile, GPS-capable) on the ether. Uses the Heltec/OLED node binary (emulator/node/build-heltec/bramble-node.elf) instead of the e-paper pager, so the emulator streams a 128x64 monochrome framebuffer. A single node keeps screen navigation deterministic for the heltec-oled e2e capture: it never receives a message, so nothing auto-switches its screen out from under the button-driven walk through Main / Messages / Nodes / Stats / GPS / Settings. It still autosends a broadcast (stored in its own message log) so the Messages screen has content, and its GPS gate opens so the broker feeds it a fix for the GPS screen. Build the node binary first: emulator/scripts/build_node_heltec.sh.",
+  "description": "A Virtual Heltec (SSD1306 128x64 OLED) node named Alice on the ether with two named neighbors, Bob and Carol (default e-paper pager binary), all on one net key. Alice is the only OLED node so the heltec-oled e2e capture resolves it by its oled-canvas. The neighbors beacon at de-phased intervals (2.6s and 4.1s against the captured node's 3s: equal intervals phase-lock into repeated collisions at the equidistant captured node, and near-equal ones drift slowly enough to sit inside its own-TX half-duplex deaf window for many consecutive beacons; several hundred ms of relative drift per cycle bounds consecutive losses to one or two) so Alice's Nodes screen shows real peers with names and signal, and all three drive traffic so Alice's Messages screen shows a real conversation: Alice broadcasts HELLO MESH, Bob broadcasts BOB HERE, Carol broadcasts ON MY WAY, and Alice sends a PING TEAM DM to a neighbor. All sends finish inside the first ~16s; the capture spec settles past that before walking the screen ring, and because it presses a button at every step (keeping the UI idle timer below the message-auto-switch threshold) no late arrival yanks the screen mid-walk. Build the OLED node binary first: emulator/scripts/build_node_heltec.sh (the pager binary comes from make -C emulator node).",
   "mode": "deterministic",
   "duration_ms": 240000,
   "nodes": [],
@@ -18,11 +18,58 @@
       "label": "heltec",
       "env": {
         "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-        "EMU_BEACON_INTERVAL_MS": "15000",
-        "EMU_AUTO_SEND": "HELLO OLED",
-        "EMU_AUTO_SEND_DELAY_MS": "3000",
-        "EMU_AUTO_SEND_REPEAT": "20",
-        "EMU_AUTO_SEND_INTERVAL_MS": "6000"
+        "EMU_NODE_NAME": "Alice",
+        "EMU_BEACON_INTERVAL_MS": "3000",
+        "EMU_AUTO_SEND": "HELLO MESH",
+        "EMU_AUTO_SEND_DELAY_MS": "4000",
+        "EMU_AUTO_SEND_REPEAT": "3",
+        "EMU_AUTO_SEND_INTERVAL_MS": "4000",
+        "EMU_AUTO_SEND2": "PING TEAM",
+        "EMU_AUTO_SEND2_TO": "neighbor",
+        "EMU_AUTO_SEND2_DELAY_MS": "15000",
+        "EMU_AUTO_SEND2_REPEAT": "1"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          30,
+          0
+        ]
+      ],
+      "label": "bob",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_NODE_NAME": "Bob",
+        "EMU_BEACON_INTERVAL_MS": "2600",
+        "EMU_AUTO_SEND": "BOB HERE",
+        "EMU_AUTO_SEND_DELAY_MS": "6000",
+        "EMU_AUTO_SEND_REPEAT": "2",
+        "EMU_AUTO_SEND_INTERVAL_MS": "5000"
+      }
+    },
+    {
+      "type": "firmware",
+      "binary": "emulator/node/build/bramble-node.elf",
+      "count": 1,
+      "positions": [
+        [
+          0,
+          30
+        ]
+      ],
+      "label": "carol",
+      "env": {
+        "EMU_NETWORK_KEY": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "EMU_NODE_NAME": "Carol",
+        "EMU_BEACON_INTERVAL_MS": "4100",
+        "EMU_AUTO_SEND": "ON MY WAY",
+        "EMU_AUTO_SEND_DELAY_MS": "9000",
+        "EMU_AUTO_SEND_REPEAT": "2",
+        "EMU_AUTO_SEND_INTERVAL_MS": "4000"
       }
     }
   ],
