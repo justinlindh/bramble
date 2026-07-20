@@ -46,6 +46,27 @@ static _Atomic(TaskHandle_t) s_tx_waiter;
 static volatile bool s_cad_result;
 static SemaphoreHandle_t s_cad_sem;
 
+/* Serializes radio_task's RX-done read sequence (GetRxBufferStatus ->
+ * ReadBuffer -> GetPacketStatus) against radio_reconfigure. It is deliberately
+ * NOT the transmit gate lock (tx_gate_radio_lock): radio_transmit_raw and
+ * radio_cad_check hold that gate while blocked waiting for radio_task to
+ * service the TX-done / CAD-done IRQ, so making radio_task take the gate would
+ * deadlock (radio_task could not drain the IRQ that wakes the waiter that holds
+ * the gate). This dedicated lock is never held by any path that waits on
+ * radio_task, so radio_task can always make progress (issue #225, following up
+ * on the TX-side serialization from #82). */
+static SemaphoreHandle_t s_rx_seq_mutex;
+
+static void rx_seq_lock(void) {
+    if (s_rx_seq_mutex)
+        xSemaphoreTake(s_rx_seq_mutex, portMAX_DELAY);
+}
+
+static void rx_seq_unlock(void) {
+    if (s_rx_seq_mutex)
+        xSemaphoreGive(s_rx_seq_mutex);
+}
+
 /* Consecutive CAD-timeout run state for the fail-open/closed policy (#118). */
 static cad_timeout_policy_t s_cad_timeout_policy;
 
@@ -163,6 +184,38 @@ static void IRAM_ATTR dio1_isr_handler(void* arg) {
         portYIELD_FROM_ISR();
 }
 
+/* Read one received frame under the RX-sequence lock, so a concurrent
+ * radio_reconfigure cannot splice its commands between GetRxBufferStatus,
+ * ReadBuffer and GetPacketStatus and return RSSI/SNR that belong to a different
+ * radio configuration (issue #225). The user callback runs AFTER the lock is
+ * released: it may be slow or re-enter the radio, and holding the sequence lock
+ * across it would needlessly serialize it against reconfigure. */
+static void radio_handle_rx_done(uint8_t* buf, size_t buf_size) {
+    rx_seq_lock();
+
+    uint8_t len = 0, offset = 0;
+    sx1262_get_rx_buffer_status(&len, &offset);
+
+    radio_rx_info_t info = {0};
+    bool have_frame = false;
+    if (len > 0 && len <= buf_size) {
+        sx1262_read_buffer(offset, buf, len);
+        info.len = len;
+        sx1262_get_packet_status(&info.rssi, &info.snr);
+        have_frame = true;
+    }
+
+    rx_seq_unlock();
+
+    if (have_frame) {
+        ESP_LOGD(TAG, "RX: %u bytes, RSSI %d, SNR %d", (unsigned)len, (int)info.rssi,
+                 (int)info.snr);
+        if (s_rx_cb) {
+            s_rx_cb(buf, len, &info);
+        }
+    }
+}
+
 static void radio_task(void* arg) {
     (void)arg;
     uint8_t buf[256];
@@ -185,21 +238,7 @@ static void radio_task(void* arg) {
             if (irq & SX1262_IRQ_CRC_ERR) {
                 ESP_LOGD(TAG, "RX CRC error, discarding");
             } else {
-                uint8_t len = 0, offset = 0;
-                sx1262_get_rx_buffer_status(&len, &offset);
-                if (len > 0 && len <= sizeof(buf)) {
-                    sx1262_read_buffer(offset, buf, len);
-
-                    radio_rx_info_t info = {0};
-                    info.len = len;
-                    sx1262_get_packet_status(&info.rssi, &info.snr);
-
-                    ESP_LOGD(TAG, "RX: %u bytes, RSSI %d, SNR %d", len, info.rssi, info.snr);
-
-                    if (s_rx_cb) {
-                        s_rx_cb(buf, len, &info);
-                    }
-                }
+                radio_handle_rx_done(buf, sizeof(buf));
             }
         }
 
@@ -237,6 +276,12 @@ int radio_reconfigure(const radio_config_t* config) {
      * are serialized on this same lock but reconfigure took no lock at all
      * (issue #82). */
     tx_gate_radio_lock();
+    /* Also exclude radio_task's RX-done read: changing the PA, frequency or
+     * modulation partway through GetRxBufferStatus -> ReadBuffer ->
+     * GetPacketStatus would hand the mesh telemetry for a different config
+     * (issue #225). Ordered strictly inside the gate lock; nothing acquires
+     * these in the opposite order, so there is no deadlock. */
+    rx_seq_lock();
 
     /* Put radio in standby before reconfiguring (0 = RC oscillator). A failure
      * here is not fatal: reconfiguring is exactly the recovery a freshly reset
@@ -252,12 +297,14 @@ int radio_reconfigure(const radio_config_t* config) {
     int rc = configure_radio(config);
     if (rc != 0) {
         ESP_LOGE(TAG, "configure_radio failed during reconfigure");
+        rx_seq_unlock();
         tx_gate_radio_unlock();
         return rc;
     }
 
     /* Resume RX */
     radio_start_rx();
+    rx_seq_unlock();
     tx_gate_radio_unlock();
     ESP_LOGI(TAG, "Radio reconfigured successfully");
     return 0;
@@ -308,6 +355,15 @@ int radio_init(const radio_config_t* config) {
     rc = configure_radio(config);
     if (rc != 0) {
         ESP_LOGE(TAG, "configure_radio failed");
+        return -1;
+    }
+
+    /* Create the RX-sequence lock before the radio task or DIO1 ISR can fire,
+     * so the very first RX-done read is already serialized against a concurrent
+     * reconfigure (issue #225). */
+    s_rx_seq_mutex = xSemaphoreCreateMutex();
+    if (!s_rx_seq_mutex) {
+        ESP_LOGE(TAG, "Failed to create RX sequence mutex");
         return -1;
     }
 
