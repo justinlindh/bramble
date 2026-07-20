@@ -8,14 +8,12 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 // (real actions + a spied transport); here we additionally assert the seed is
 // never handed to any store action.
 const setAnchor = vi.fn<(pub: string) => Promise<boolean>>();
-const getAnchorStatus = vi.fn();
 const getIdentity = vi.fn<() => Promise<{ address: string; pubkey_hash: string; ed25519_pub: string }>>();
 const setEndorsement = vi.fn<(na: string, sig: string) => Promise<boolean>>();
 const loadAnchorStatus = vi.fn<() => Promise<void>>();
 
 vi.mock('../../store/actions', () => ({
   setAnchor: (pub: string) => setAnchor(pub),
-  getAnchorStatus: () => getAnchorStatus(),
   getIdentity: () => getIdentity(),
   setEndorsement: (na: string, sig: string) => setEndorsement(na, sig),
   loadAnchorStatus: () => loadAnchorStatus(),
@@ -209,7 +207,6 @@ describe('AnchorSection custody (component level)', () => {
       ...setAnchor.mock.calls,
       ...setEndorsement.mock.calls,
       ...getIdentity.mock.calls,
-      ...getAnchorStatus.mock.calls,
       ...loadAnchorStatus.mock.calls,
     ]);
     expect(allArgs).not.toContain(seed);
