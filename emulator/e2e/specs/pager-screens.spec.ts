@@ -66,14 +66,85 @@ async function capturePngs(page: Page, nodeId: string, name: string): Promise<vo
 // identifies it once rendered. "Bramble" is the Main header; the rest are the
 // literal headers from render_screen() (Compose forks to "Stats" on a
 // non-keyboard board like the pager).
-const SCREENS: { name: string; anchor: string }[] = [
+const SCREENS: { name: string; anchor: string; content?: string[] }[] = [
   { name: 'main', anchor: 'Bramble' },
-  { name: 'messages', anchor: 'Messages' },
-  { name: 'nodes', anchor: 'Nodes' },
+  { name: 'messages', anchor: 'Messages', content: ['HELLO'] },
+  // Either named neighbor proves beacons carried a name onto the panel;
+  // which of the two wins the contended discovery window is not
+  // deterministic under the real collision/half-duplex ether model.
+  { name: 'nodes', anchor: 'Nodes', content: ['Bob', 'Carol'] },
   { name: 'stats', anchor: 'Stats' },
   { name: 'gps', anchor: 'GPS' },
   { name: 'settings', anchor: 'Settings' },
 ];
+
+// Returns the header currently on the panel, or '(none)'. Checks 'Settings'
+// BEFORE 'GPS': the Settings screen contains the literal row "GPS: On", so a
+// GPS-first search misreads a rendered Settings screen as GPS.
+async function currentHeader(page: Page, nodeId: string): Promise<string> {
+  const grid = await readCanvasGrid(page, nodeId);
+  for (const h of ['Bramble', 'Messages', 'Nodes', 'Stats', 'Settings', 'GPS']) {
+    if (findText(grid, h, 1).found) return h;
+  }
+  return '(none)';
+}
+
+// Bring the panel to Main deterministically before the walk. Two pager-specific
+// behaviors make this necessary (both real device behavior, main.c):
+//  1. Alert acknowledge: the scenario's incoming traffic arms the message
+//     alert (BOARD_CAP_ALERTS), and while it is unconfirmed the FIRST button
+//     press only acknowledges it, consumed, no navigation. Whether it is
+//     still armed at walk time is timing-dependent, so the spec cannot
+//     assume either state.
+//  2. Message auto-switch: traffic may have parked the panel on Messages (the
+//     30s auto-restore may or may not have fired yet by walk time).
+// Strategy: press 'down' until the header CHANGES (at most one press is ever
+// consumed by the alert, so two presses suffice), which both consumes any
+// pending alert and proves navigation works; then walk back up to Main with
+// header-guarded 'up' presses. From the only possible start screens (Main or
+// auto-switched Messages) this path never touches Settings, whose cursor
+// traps up/down (only a double-press exits it).
+async function ackAlertAndReturnToMain(page: Page, nodeId: string): Promise<void> {
+  const start = await currentHeader(page, nodeId);
+  if (start !== 'Bramble' && start !== 'Messages') {
+    throw new Error(`ackAlertAndReturnToMain: unexpected start screen "${start}"`);
+  }
+  let cur = start;
+  for (let i = 0; i < 2 && cur === start; i++) {
+    await clickButton(page, nodeId, 'down');
+    await page.waitForTimeout(800);
+    cur = await currentHeader(page, nodeId);
+  }
+  if (cur === start) {
+    throw new Error(`ackAlertAndReturnToMain: two down presses never left "${start}"`);
+  }
+  for (let i = 0; i < 3 && cur !== 'Bramble'; i++) {
+    await clickButton(page, nodeId, 'up');
+    await page.waitForTimeout(800);
+    cur = await currentHeader(page, nodeId);
+  }
+  if (cur !== 'Bramble') {
+    throw new Error(`ackAlertAndReturnToMain: never reached Main (stuck on "${cur}")`);
+  }
+}
+
+async function waitForAnyAnchor(page: Page, nodeId: string, anchors: string[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = '';
+  while (Date.now() < deadline) {
+    try {
+      const grid = await readCanvasGrid(page, nodeId);
+      for (const a of anchors) {
+        if (findText(grid, a, 1).found) return;
+      }
+      lastErr = `none of [${anchors.join(', ')}] on panel yet`;
+    } catch (e) {
+      lastErr = String(e);
+    }
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`waitForAnyAnchor: timed out after ${timeoutMs}ms (${lastErr})`);
+}
 
 async function waitForAnchor(page: Page, nodeId: string, anchor: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -105,9 +176,12 @@ test.describe('pager e-paper per-screen capture', () => {
 
     await loadScenario(page, 'emu-pager-screens');
 
-    // Exactly one device card (single-node scenario). Wait for it to attach and
-    // resolve its node id from the testid.
-    const card = page.locator('[data-testid^="device-card-"]').first();
+    // Resolve the pager: the only e-paper node in the scenario (its neighbors
+    // are OLED, so only the pager's card carries an epaper-canvas). Pick that
+    // card rather than the first, which may be an OLED neighbor.
+    const card = page
+      .locator('[data-testid^="device-card-"]:has(canvas[data-testid="epaper-canvas"])')
+      .first();
     await expect(card).toBeVisible({ timeout: 30_000 });
     const testId = await card.getAttribute('data-testid');
     const nodeId = (testId ?? '').replace('device-card-', '');
@@ -120,12 +194,25 @@ test.describe('pager e-paper per-screen capture', () => {
     const dims = await page.$eval(canvasSelector(nodeId), (c: HTMLCanvasElement) => ({ w: c.width, h: c.height }));
     expect(dims).toEqual({ w: 250, h: 122 });
 
-    // Walk the ring, gating each capture on the target screen's header.
+    // Let neighbor discovery and the traffic burst settle so the Nodes and
+    // Messages screens have real content before the walk (the neighbors beacon
+    // and send inside the first ~16s). The walk presses a button at every step,
+    // keeping the UI idle timer below the message-auto-switch threshold, so no
+    // late arrival yanks the screen mid-walk.
+    await page.waitForTimeout(28_000);
+
+    // Acknowledge the pending message alert and settle on Main (see the
+    // helper's comment for why the first press never navigates).
+    await ackAlertAndReturnToMain(page, nodeId);
+
+    // Walk the ring, gating each capture on the target screen's header and, for
+    // the content screens, on the real peer/message text being on the panel.
     for (let i = 0; i < SCREENS.length; i++) {
       const s = SCREENS[i];
       if (i > 0) await clickButton(page, nodeId, 'down');
       // Boot splash + GPS acquisition can lag; a generous, event-driven wait.
       await waitForAnchor(page, nodeId, s.anchor, 30_000);
+      if (s.content) await waitForAnyAnchor(page, nodeId, s.content, 30_000);
       await capturePngs(page, nodeId, s.name);
     }
 

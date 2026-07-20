@@ -1820,6 +1820,16 @@ static void mesh_task(void* param) {
         s_beacon_policy.base_interval_ms = emu_beacon_ms;
         if (s_beacon_policy.min_interval_ms > emu_beacon_ms)
             s_beacon_policy.min_interval_ms = emu_beacon_ms;
+        /* The override exists to give a short scenario many discovery
+         * chances, but at these cadences the beacon budget floor
+         * (tx_gate_min_beacon_interval) immediately stretches the interval
+         * back to tens of seconds and the bucket denies what the floor
+         * does not stop, so discovery collapses to the first two or three
+         * beacons. Exempt beacons from the budget for this run; every
+         * other kind stays budgeted, and exempt beacons do not debit the
+         * lane, so data budgeting in the scenario still matches device
+         * behavior. Dead on device builds (the override returns 0 there). */
+        tx_gate_set_beacon_budget_exempt(true);
     }
 
     /* Add initial jitter before first beacon */
