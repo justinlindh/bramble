@@ -268,6 +268,7 @@ downgrade, observe refusal, in that order; do not reorder them, and do not run
 any of this on a daily-driver board.
 
 Phase A: emulated eFuse dry run (no real burn, reversible).
+
 1. **Enable (emulated).** Build with the overlay plus
    `CONFIG_BOOTLOADER_EFUSE_SECURE_VERSION_EMULATE=y` at epoch 0. Flash via
    `scripts/flash.sh ... --enable-antirollback`; confirm the guard demands and
@@ -284,6 +285,7 @@ Phase A: emulated eFuse dry run (no real burn, reversible).
 5. Erase flash to reset the emulated field between iterations.
 
 Phase B: single real burn on the sacrificial board.
+
 1. **Enable (real).** Rebuild without the emulate flag at epoch 0; flash
    through the guard. Confirm boot and that the real secure-version eFuse
    reads 0 (`espefuse.py summary`).
@@ -302,6 +304,7 @@ the verification date and board. Only then does anti-rollback move from
 ## 8. What is verified vs pending
 
 Verified (host, no hardware):
+
 - The soft-floor decision (`ota_rollback_decide`) and floor-raise logic, and
   the hardware-floor helper (`ota_rollback_secure_floor_blocks`) proving the
   non-overridable rejection and the secure-not-enforced pass-through
@@ -317,6 +320,7 @@ Verified (host, no hardware):
   symbols, compiling the eFuse-guarded code paths).
 
 Pending (bench, human-gated):
+
 - The eFuse burn, the bootloader boot-time refusal, the ratchet-on-confirm
   behavior, and the guard's espefuse floor display against a real device.
   These require the overlay and a sacrificial board (section 7) and have not
