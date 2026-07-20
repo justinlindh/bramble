@@ -504,6 +504,14 @@ static void render_main_screen(const ui_state_t* ui) {
 }
 
 static void render_screen(ui_state_t* ui) {
+    /* E-paper ghosting cleanup (bramble#196): the screen ring's full-refresh
+     * policy (ui.h, UI_FULL_REFRESH_EVERY_N_SCREENS) decides WHEN to clear
+     * accumulated ghosting; this is the one place that acts on it, right
+     * before the frame that policy targeted gets drawn. No-op on OLED/LCD
+     * boards (display_request_full_refresh() is a stub there). */
+    if (ui_take_full_refresh_pending(ui))
+        display_request_full_refresh();
+
     switch (ui_get_screen(ui)) {
     case SCREEN_MAIN:
         render_main_screen(ui);

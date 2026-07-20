@@ -64,6 +64,14 @@ typedef struct {
     uint32_t screen_enter_time;
     uint32_t last_activity;
     bool screen_dirty;
+    /* E-paper ghosting cleanup (see UI_FULL_REFRESH_EVERY_N_SCREENS below):
+     * screens_since_full_refresh counts screen changes since the last one
+     * that requested a full refresh; full_refresh_pending is set when that
+     * policy fires and cleared by ui_take_full_refresh_pending(). Boards
+     * without e-paper ignore it (display_request_full_refresh() is a no-op
+     * there), so this costs nothing on OLED/LCD. */
+    int screens_since_full_refresh;
+    bool full_refresh_pending;
     ui_settings_item_t settings_item_cursor; /* selected settings row */
     int settings_cursor;                     /* selected value while editing current row */
     bool settings_editing;                   /* true when in settings edit mode */
@@ -94,6 +102,26 @@ void ui_handle_button(ui_state_t* state, ui_button_t btn, uint32_t now_ms);
 ui_screen_t ui_get_screen(const ui_state_t* state);
 bool ui_needs_redraw(const ui_state_t* state);
 void ui_mark_drawn(ui_state_t* state);
+
+/*
+ * E-paper full-refresh policy (bramble#196: partial-only screen switches
+ * accumulate SSD1680 ghosting until text becomes unreadable). The screen
+ * ring cannot fully rely on the display engine's own byte-diff heuristic:
+ * this is a sparse text UI, so a screen change often flips well under the
+ * heuristic's change-fraction threshold even though it is exactly the
+ * moment ghosting from every prior screen has accumulated. So this policy
+ * requests a full refresh at screen-change boundaries directly, on two
+ * rules: every UI_FULL_REFRESH_EVERY_N_SCREENS screen changes (a ceiling on
+ * how much ghosting any screen can carry), and unconditionally on entering
+ * SCREEN_SETTINGS (the most text-dense screen and the one where a stale
+ * reading is a functional problem, not just cosmetic; see the issue). A
+ * full refresh flashes the panel and takes ~3s (SSD1680_BUSY_MS_FULL), so
+ * this deliberately does not fire on every screen change.
+ */
+#define UI_FULL_REFRESH_EVERY_N_SCREENS 3
+
+/* True if the full-refresh policy fired since the last take; clears it. */
+bool ui_take_full_refresh_pending(ui_state_t* state);
 
 /* Mark SCREEN_GPS as reachable in the screen cycle. Defaults to false (unset by
  * ui_init), so callers on non-GPS boards never need to touch this. */
