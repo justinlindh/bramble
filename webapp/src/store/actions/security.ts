@@ -16,10 +16,7 @@ export async function loadPeerVerification(
   addr: number,
 ): Promise<import('../../types/bramble').PeerVerification> {
   if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc<{ sas?: string; verified?: boolean; keyChanged?: boolean }>(
-    'bramble.getPeerVerification',
-    { address: formatAddrHex(addr) },
-  );
+  const result = await session.client.rpc('bramble.getPeerVerification', { address: formatAddrHex(addr) });
   const v: import('../../types/bramble').PeerVerification = {
     sas: result.sas ?? '',
     verified: !!result.verified,
@@ -32,7 +29,7 @@ export async function loadPeerVerification(
 /** Mark (or unmark) a peer verified. Refreshes the cached state on success. */
 export async function setPeerVerified(addr: number, verified: boolean): Promise<boolean> {
   if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc<{ ok: boolean }>('bramble.setPeerVerified', {
+  const result = await session.client.rpc('bramble.setPeerVerified', {
     address: formatAddrHex(addr),
     verified,
   });
@@ -52,13 +49,13 @@ export async function setPeerVerified(addr: number, verified: boolean): Promise<
  */
 export async function setNetworkKey(keyHex: string): Promise<boolean> {
   if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc<{ ok: boolean; error?: string }>('bramble.setNetworkKey', { key: keyHex });
+  const result = await session.client.rpc('bramble.setNetworkKey', { key: keyHex });
   return !!result?.ok;
 }
 
 export async function getNetworkKeyStatus(): Promise<{ provisioned: boolean; fingerprint: string }> {
   if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc<{ provisioned: boolean; fingerprint: string }>('bramble.getNetworkKeyStatus');
+  return await session.client.rpc('bramble.getNetworkKeyStatus');
 }
 
 /**
@@ -70,7 +67,7 @@ export async function getNetworkKeyStatus(): Promise<{ provisioned: boolean; fin
  */
 export async function generateNetworkKey(): Promise<{ key: string; fingerprint: string }> {
   if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc<{ key: string; fingerprint: string }>('bramble.generateNetworkKey');
+  return await session.client.rpc('bramble.generateNetworkKey');
 }
 
 /**
@@ -79,7 +76,7 @@ export async function generateNetworkKey(): Promise<{ key: string; fingerprint: 
  */
 export async function loadNetworkKeyStatus(): Promise<void> {
   if (!session.client) return;
-  const s = await session.client.rpc<{ provisioned: boolean; fingerprint: string }>('bramble.getNetworkKeyStatus');
+  const s = await session.client.rpc('bramble.getNetworkKeyStatus');
   useStore.getState().setNetworkKeyStatus(s);
 }
 
@@ -93,18 +90,18 @@ export async function loadNetworkKeyStatus(): Promise<void> {
  */
 export async function setAnchor(anchorPubHex: string): Promise<boolean> {
   if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc<{ ok: boolean; error?: string }>('bramble.setAnchor', { anchor_pubkey: anchorPubHex });
+  const result = await session.client.rpc('bramble.setAnchor', { anchor_pubkey: anchorPubHex });
   return !!result?.ok;
 }
 
 export async function getAnchorStatus(): Promise<import('../../types/bramble').AnchorStatus> {
   if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc<import('../../types/bramble').AnchorStatus>('bramble.getAnchorStatus');
+  return await session.client.rpc('bramble.getAnchorStatus');
 }
 
 export async function getIdentity(): Promise<import('../../types/bramble').NodeIdentityWire> {
   if (!session.client) throw new Error('Not connected');
-  return await session.client.rpc<import('../../types/bramble').NodeIdentityWire>('bramble.getIdentity');
+  return await session.client.rpc('bramble.getIdentity');
 }
 
 /**
@@ -115,7 +112,7 @@ export async function getIdentity(): Promise<import('../../types/bramble').NodeI
  */
 export async function setEndorsement(notAfterHex: string, sigHex: string): Promise<boolean> {
   if (!session.client) throw new Error('Not connected');
-  const result = await session.client.rpc<{ ok: boolean; error?: string }>('bramble.setEndorsement', {
+  const result = await session.client.rpc('bramble.setEndorsement', {
     not_after: notAfterHex,
     endorsement_sig: sigHex,
   });
@@ -128,6 +125,6 @@ export async function setEndorsement(notAfterHex: string, sigHex: string): Promi
  */
 export async function loadAnchorStatus(): Promise<void> {
   if (!session.client) return;
-  const s = await session.client.rpc<import('../../types/bramble').AnchorStatus>('bramble.getAnchorStatus');
+  const s = await session.client.rpc('bramble.getAnchorStatus');
   useStore.getState().setAnchorStatus(s);
 }
