@@ -35,6 +35,15 @@ export async function enableCanvasCapture(page: Page): Promise<void> {
 // to the app's ring-buffer cap), oldest first, decoded into the same BitGrid
 // shape fbWire.ts and canvasRead.ts produce, so glyphMatch.findText works on
 // them directly.
+//
+// This ships and scans the WHOLE history each poll (cost linear in frame
+// count), which partly offsets readCanvasGrid's byte-per-pixel CDP saving.
+// That is a deliberate trade of payload size for race-freedom: transferring
+// the full history is what lets a spec find a transient frame that the live
+// canvas has already overpainted, which is the entire point of this module.
+// The boot sequence is ~8 content frames, so the linear factor is negligible;
+// were a caller ever to poll this against a long-running frame stream, cap the
+// scan to recent frames rather than reintroduce the live-canvas race.
 export async function readPaintHistory(page: Page, node: string): Promise<BitGrid[]> {
   const frames = await page.evaluate((n) => {
     const log = (window as unknown as {
