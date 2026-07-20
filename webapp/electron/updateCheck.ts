@@ -5,11 +5,40 @@
 
 import {
   decideUpdate,
+  parseWebappTag,
   pickLatestWebappRelease,
   updateCapability,
   type GithubRelease,
   type UpdateDecision,
 } from './updatePolicy';
+
+/**
+ * Pages through a GitHub releases fetcher until a usable webapp release is in
+ * hand, then stops. The repo's releases list is shared across all components
+ * (firmware-v*, protocol-v*, sim-v*, webapp-v*) and returned newest-first, so
+ * a burst of firmware releases can push the latest webapp-v* tag past a single
+ * page; without paging, a genuinely out-of-date desktop app would silently see
+ * no webapp release and report up-to-date. Because the list is newest-first,
+ * the highest-version webapp release is the first webapp entry encountered, so
+ * once any accumulated page yields one there is nothing newer on a later page.
+ * Bounded by maxPages so a repo with no webapp release cannot page forever.
+ */
+export async function collectReleasesUntilWebapp(
+  fetchPage: (page: number) => Promise<GithubRelease[]>,
+  opts: { maxPages?: number; pageSize?: number } = {},
+): Promise<GithubRelease[]> {
+  const maxPages = opts.maxPages ?? 5;
+  const pageSize = opts.pageSize ?? 100;
+  const all: GithubRelease[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await fetchPage(page);
+    all.push(...batch);
+    if (all.some((r) => !r.draft && !r.prerelease && parseWebappTag(r.tag_name))) break;
+    // A short page is the last page; nothing more to fetch.
+    if (batch.length < pageSize) break;
+  }
+  return all;
+}
 
 /**
  * Everything runUpdateCheck needs from the outside world, injected so the

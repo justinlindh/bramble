@@ -6,7 +6,7 @@
 
 import { app, BrowserWindow, dialog, net, shell } from 'electron';
 import electronUpdater from 'electron-updater';
-import { runUpdateCheck, type UpdaterDeps } from './updateCheck';
+import { collectReleasesUntilWebapp, runUpdateCheck, type UpdaterDeps } from './updateCheck';
 import { GITHUB_OWNER, GITHUB_REPO, type GithubRelease } from './updatePolicy';
 
 // electron-updater's `autoUpdater` is a lazy getter: touching it constructs a
@@ -23,12 +23,14 @@ function getAutoUpdater(): typeof electronUpdater.autoUpdater {
 // launcher is called more than once (e.g. macOS activate re-creating a window).
 let checkStarted = false;
 
-// GitHub asks every API client to send a User-Agent; requests without one are
-// rejected. Fetch a page of recent releases (all components share the repo, so
-// this spans firmware/protocol/sim/webapp tags; pickLatestWebappRelease filters
-// to webapp).
-async function fetchReleases(): Promise<GithubRelease[]> {
-  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=30`;
+const RELEASES_PAGE_SIZE = 100;
+
+// Fetches one page of the repo's releases. GitHub asks every API client to send
+// a User-Agent; requests without one are rejected. The list is shared across
+// components (firmware-v*, protocol-v*, sim-v*, webapp-v*); collectReleasesUntilWebapp
+// pages through it and pickLatestWebappRelease filters to webapp.
+async function fetchReleasesPage(page: number): Promise<GithubRelease[]> {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
   const resp = await net.fetch(url, {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -43,6 +45,10 @@ async function fetchReleases(): Promise<GithubRelease[]> {
     throw new Error('GitHub releases response was not an array');
   }
   return body as GithubRelease[];
+}
+
+function fetchReleases(): Promise<GithubRelease[]> {
+  return collectReleasesUntilWebapp(fetchReleasesPage, { pageSize: RELEASES_PAGE_SIZE });
 }
 
 function buildDeps(window: BrowserWindow | null): UpdaterDeps {

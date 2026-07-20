@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runUpdateCheck, type UpdaterDeps } from '../../electron/updateCheck';
+import { collectReleasesUntilWebapp, runUpdateCheck, type UpdaterDeps } from '../../electron/updateCheck';
 import type { GithubRelease } from '../../electron/updatePolicy';
 
 function makeDeps(overrides: Partial<UpdaterDeps> = {}): UpdaterDeps {
@@ -106,5 +106,63 @@ describe('runUpdateCheck', () => {
     const decision = await runUpdateCheck(deps);
     expect(decision.kind).toBe('manual');
     expect(deps.startInAppUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('collectReleasesUntilWebapp', () => {
+  const rel = (tag: string): GithubRelease => ({ tag_name: tag });
+
+  it('stops after the first page when it already contains a webapp release', async () => {
+    const fetchPage = vi.fn(async (page: number) =>
+      page === 1 ? [rel('firmware-v9.0.0'), rel('webapp-v1.5.0')] : [],
+    );
+    const all = await collectReleasesUntilWebapp(fetchPage, { pageSize: 100 });
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(all.map((r) => r.tag_name)).toContain('webapp-v1.5.0');
+  });
+
+  it('pages past firmware-only pages until a webapp release appears', async () => {
+    const pages: Record<number, GithubRelease[]> = {
+      1: Array.from({ length: 100 }, (_, i) => rel(`firmware-v2.0.${i}`)),
+      2: Array.from({ length: 100 }, (_, i) => rel(`firmware-v1.0.${i}`)),
+      3: [rel('protocol-v3.0.0'), rel('webapp-v1.4.0')],
+    };
+    const fetchPage = vi.fn(async (page: number) => pages[page] ?? []);
+    const all = await collectReleasesUntilWebapp(fetchPage, { pageSize: 100 });
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(all.some((r) => r.tag_name === 'webapp-v1.4.0')).toBe(true);
+  });
+
+  it('stops at a short (last) page even without a webapp release', async () => {
+    const fetchPage = vi.fn(async (page: number) =>
+      page === 1 ? [rel('firmware-v2.0.0'), rel('sim-v1.0.0')] : [],
+    );
+    const all = await collectReleasesUntilWebapp(fetchPage, { pageSize: 100 });
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(all).toHaveLength(2);
+  });
+
+  it('honors the maxPages cap so a webapp-less repo cannot page forever', async () => {
+    const fetchPage = vi.fn(async (_page: number) =>
+      Array.from({ length: 100 }, (_, i) => rel(`firmware-v1.0.${i}`)),
+    );
+    const all = await collectReleasesUntilWebapp(fetchPage, { pageSize: 100, maxPages: 3 });
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(all).toHaveLength(300);
+  });
+
+  it('ignores draft and prerelease webapp entries when deciding to stop', async () => {
+    const pages: Record<number, GithubRelease[]> = {
+      1: [
+        { tag_name: 'webapp-v2.0.0', draft: true },
+        { tag_name: 'webapp-v1.9.0', prerelease: true },
+        ...Array.from({ length: 98 }, (_, i) => rel(`firmware-v1.0.${i}`)),
+      ],
+      2: [rel('webapp-v1.5.0')],
+    };
+    const fetchPage = vi.fn(async (page: number) => pages[page] ?? []);
+    const all = await collectReleasesUntilWebapp(fetchPage, { pageSize: 100 });
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(all.some((r) => r.tag_name === 'webapp-v1.5.0')).toBe(true);
   });
 });
