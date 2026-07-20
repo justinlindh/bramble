@@ -14,18 +14,13 @@ void ui_graphics_clear_unread(void);
 void ui_graphics_tick_1ms(void);
 
 #define UI_EVT_MSG_RECEIVED (1 << 0)
-#define UI_EVT_NODE_UPDATE (1 << 1)
-#define UI_EVT_STATS_UPDATE (1 << 2)
-#define UI_EVT_BATTERY_UPDATE (1 << 3)
-#define UI_EVT_GPS_UPDATE (1 << 4)
-#define UI_EVT_CONN_CHANGE (1 << 5)
 /* An already-stored outgoing message changed delivery status (an ACK or a
  * broadcast delivery receipt landed). Distinct from UI_EVT_MSG_RECEIVED: no new
  * message arrived, so there is nothing to mark unread, but an open thread is now
  * showing a stale badge and has to repaint. Without this the receipt lands, the
  * store says delivered, and the bubble keeps its pending dot until the user
  * leaves the thread or sends again. */
-#define UI_EVT_MSG_STATUS (1 << 6)
+#define UI_EVT_MSG_STATUS (1 << 1)
 
 /* Bench debug: remote screenshot (bramble.screenshot RPC).
  * LVGL is not thread-safe, so the capture itself runs on the UI task,
